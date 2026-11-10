@@ -47,6 +47,7 @@ import {
   agentWorktreeRoot,
   applyAgentBranch,
   branchModeSettings,
+  checkoutSignature,
   commitAgentBranch,
   createAgentBranch,
   discardAgentBranch,
@@ -478,7 +479,7 @@ export function agentRouter({
         error instanceof BranchError ? error.message : 'The agent’s work could not be committed on its branch. See the server log.',
       )
     }
-    if (checkoutBefore && projectChanged(checkoutBefore, projectSnapshot(config)))
+    if (checkoutBefore && (await checkoutSignature(config)) !== checkoutBefore)
       noteCard(
         reply,
         'note-branch-checkout',
@@ -747,7 +748,7 @@ export function agentRouter({
         const snapshot = ownerWrites && commentId && allowCapture && !work ? projectSnapshot(config) : null
         // Branch mode: the checkout should not change. An agent's own tools
         // (its shell) are not sandboxed, so the chat says when it did.
-        const checkoutBefore = work ? projectSnapshot(config) : null
+        const checkoutBefore = work ? await checkoutSignature(config) : null
         let userMessage
         try {
           userMessage = previous

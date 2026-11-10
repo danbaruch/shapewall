@@ -435,6 +435,44 @@ const onCheckout =
   (args, options = {}) =>
     git(['--git-dir', repo.gitDir, '--work-tree', repo.top, ...CHECKOUT_FLAGS, ...args], { cwd: repo.top, timeoutMs: 120000, ...options })
 
+// What git sees in the person's checkout: HEAD plus each changed or
+// untracked (not ignored) file with its size and time. Compared before and
+// after a branch-mode turn to warn when something wrote to the checkout.
+// null when it cannot tell (then no warning).
+export async function checkoutSignature(config) {
+  try {
+    const repo = await checkRepo(config)
+    const status = await onCheckout(repo)([
+      '--no-optional-locks',
+      'status',
+      '--porcelain=v1',
+      '-z',
+      '--untracked-files=all',
+      '--ignore-submodules=all',
+    ]).catch(() => null)
+    if (status === null) return null
+    const parts = status.split('\0')
+    const files = []
+    for (let i = 0; i < parts.length; i++) {
+      const entry = parts[i]
+      if (entry.length < 4) continue
+      files.push(entry.slice(3))
+      if (entry[0] === 'R' || entry[0] === 'C') i++
+    }
+    const stamps = files.sort().map((file) => {
+      try {
+        const stat = fs.lstatSync(path.join(repo.top, file), { bigint: true })
+        return `${file}:${stat.size}:${stat.mtimeNs}`
+      } catch {
+        return `${file}:gone`
+      }
+    })
+    return [repo.head || '', ...stamps].join('\n')
+  } catch {
+    return null
+  }
+}
+
 async function assertClean(run) {
   const status = await run(['status', '--porcelain=v1', '-z', '--untracked-files=no', '--ignore-submodules=all'])
   if (status.replace(/\0/g, '').trim())

@@ -8,7 +8,7 @@
 // turn in agentFocus.js) the button gives way to a status with a way into
 // the chat.
 import { useContext, useState } from 'react'
-import { ChevronDown, Loader2, ShieldQuestion, Sparkles } from 'lucide-react'
+import { ChevronDown, GitBranch, Loader2, ShieldQuestion, Sparkles } from 'lucide-react'
 import { Button } from '../components/ui'
 import { api } from '../lib/api'
 import { useResource } from '../lib/hooks'
@@ -36,6 +36,22 @@ export default function FixWithAgent({ comment, onFix, onOpenChat = null, busy, 
   const [preparing, setPreparing] = useState(false)
   const [failed, setFailed] = useState(null)
   if (!offered) return null
+  // Agent branch mode: the fix waits on its branch; Apply or Discard it in the chat.
+  if (!work && comment.agentStatus === 'branch-ready') {
+    if (!onOpenChat) return null
+    return (
+      <Button
+        size={touch ? 'touch' : 'xs'}
+        variant="default"
+        className={cn('rounded-full pr-3 pl-2.5', className)}
+        onClick={() => onOpenChat(comment)}
+        data-sw-fix-agent-open={comment.id}
+        data-sw-fix-agent-state="branch"
+      >
+        <GitBranch size={13} aria-hidden="true" /> Review branch
+      </Button>
+    )
+  }
   if (work) {
     return (
       <span className={cn('inline-flex min-w-0 items-center gap-1.5', className)} data-sw-fix-agent-state={work}>

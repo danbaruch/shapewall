@@ -303,7 +303,7 @@ export default function RunSummary({ message, owner = false, touch = false, onUn
   const waiting = summary.branch?.state === 'ready'
   const canUndo = Boolean(owner && onUndo && summary.undo?.available && !undone && !waiting)
   const resolved = (summary.resolved || []).map((id) => resolveToken(refs?.index, 'comment', id) || { id, plain: true })
-  const commit = summary.commit
+  const commit = summary.branch?.name ? null : summary.commit
   const short = commit?.sha ? commit.sha.slice(0, 7) : null
   const head =
     files.length || summary.more
