@@ -34,7 +34,9 @@ for a team.
 - [Security model](/docs/security): why captured pages can never run code.
 - [Page checks and performance](/docs/page-checks): reliability, SEO, social images, Lighthouse, accessibility and report comparisons.
 - [Capture warnings and pacing](/docs/capture-warnings): API failures and rate limits alongside usable screenshots.
-- [Local accounts and profile photos](/docs/local-accounts), [manual updates](/docs/updates) and the [hosted operator guide](/docs/hosted).
+- [Local accounts and profile photos](/docs/local-accounts) and [manual updates](/docs/updates).
+- [Hosted operator guide](/docs/hosted) (beta): self-hosted multiplayer. It works and is tested with automated browsers, but it has not
+  yet had a real multi-person team on it or real phone passkeys verified, so run it for people you trust and keep backups.
 
 ## Versions and licenses
 

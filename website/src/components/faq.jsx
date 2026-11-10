@@ -1,4 +1,5 @@
 import { Plus } from 'lucide-react'
+import { BETA_NOTE } from '../launch.js'
 
 export const FAQ = [
   {
@@ -27,7 +28,7 @@ export const FAQ = [
   },
   {
     q: 'Will there be a hosted version?',
-    a: 'You can host it yourself today: shapewall hosted is a team server with passkey sign-in, workspaces and roles. A service run by us, for teams that would rather not run a server, is planned. The local tool stays complete on its own.',
+    a: `You can host it yourself today: shapewall hosted is a team server with passkey sign-in, workspaces and roles. ${BETA_NOTE} A service run by us, for teams that would rather not run a server, is planned. The local tool stays complete on its own.`,
   },
 ]
 

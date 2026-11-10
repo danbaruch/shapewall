@@ -1,10 +1,12 @@
 // The unconnected chat panel on a board opened from the `shapewall serve`
 // link (it holds the settings token): the agent CLIs found on this machine,
-// each with Connect. Connect sends only the agent's id to
-// /api/agent/settings/connect: the server saves its own restricted command
-// for it (src/agent/acp/detect.js) after the same confirmation dialog as any
-// new command, runs the connection test, and puts the settings back when the
-// agent does not start.
+// each with Connect. Connect adds a native agent profile exactly like Settings
+// > Agent "Add" (NativeProfiles.jsx): it sends only the agent's id to
+// /api/agent/settings/profiles/connect, the server saves its own restricted
+// command for it (src/agent/acp/detect.js) after the same confirmation dialog
+// as any new command, makes it the default when nothing is connected yet,
+// runs the connection test, and puts the settings back when the agent does
+// not start.
 //
 // Nothing is installed from here: an agent without its ACP adapter shows the
 // line to run in a terminal, and Check again looks once more.
@@ -68,7 +70,7 @@ export function QuickConnect({ agent, touch, onOpenSettings, onConnected }) {
     setBusy(item.id)
     setFailure(null)
     try {
-      const answer = await api.post('/api/agent/settings/connect', { agentId: item.id, confirm: confirmed })
+      const answer = await api.post('/api/agent/settings/profiles/connect', { agentId: item.id, confirm: confirmed })
       if (answer.confirm) {
         // A new command runs as you: the same dialog as Settings > Agent.
         setConfirm({ item, items: answer.confirm, hash: answer.confirmHash })

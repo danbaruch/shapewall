@@ -1,6 +1,6 @@
 // How this `shapewall` was started, so messages print a command that works
-// for the person reading them. Shapewall is not on npm, so a plain
-// "npx shapewall" only works after `npm link` or a local install.
+// for the person reading them: "npx shapewall" from npm, a GitHub spec for
+// an unreleased build, a local install, a global one or the checkout itself.
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -20,13 +20,13 @@ function npxSpec(root, readFile) {
   } catch {
     /* not there */
   }
-  return 'github:danbaruch/shapewall'
+  return 'shapewall'
 }
 
 const NEUTRAL = {
   how: 'unknown',
   command: 'shapewall',
-  note: 'run it the way you started this command (npx github:danbaruch/shapewall, or shapewall after npm link)',
+  note: 'run it the way you started this command (npx shapewall, or shapewall after a global install)',
 }
 
 // Returns { how, command, note }: how is npx, local, global, direct or
@@ -52,7 +52,7 @@ export function invocation({ argv1 = process.argv[1], root = ROOT, cwd = process
   return { ...NEUTRAL }
 }
 
-// "shapewall doctor" for this invocation, e.g. "npx github:danbaruch/shapewall doctor".
+// "shapewall doctor" for this invocation, e.g. "npx shapewall doctor".
 export function cliCommand(args, options) {
   return `${invocation(options).command}${args ? ` ${args}` : ''}`
 }

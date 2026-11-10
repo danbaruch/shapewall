@@ -84,8 +84,10 @@ async function waitForImages(page, capMs) {
 
 // Browser context options for a viewport: its device (viewportDevice), its
 // layout height (the frame's height unless it sets layoutHeight) and the
-// board's reducedMotion. `size` is the viewport's config entry.
-export function contextOptions(viewportName, size, storageState, { reducedMotion = 'reduce' } = {}) {
+// board's reducedMotion. `size` is the viewport's config entry. The color
+// scheme is fixed (light, the browser default) so captures never follow the
+// machine they run on; the live snapshot is frozen to it (media-scheme.js).
+export function contextOptions(viewportName, size, storageState, { reducedMotion = 'reduce', colorScheme = 'light' } = {}) {
   const device = viewportDevice(viewportName, size)
   return {
     viewport: { width: size.width, height: size.layoutHeight || size.height },
@@ -98,6 +100,7 @@ export function contextOptions(viewportName, size, storageState, { reducedMotion
     // board may opt out ("reducedMotion": "no-preference"), for games that
     // behave differently with it.
     reducedMotion,
+    colorScheme,
   }
 }
 
@@ -121,6 +124,8 @@ function liveSummary(live) {
     imagesDropped: live.stats.imagesDropped,
     fonts: live.stats.fonts,
     fontsDropped: live.stats.fontsDropped,
+    // The scheme the snapshot is frozen to (its prefers-color-scheme rules).
+    ...(live.colorScheme ? { colorScheme: live.colorScheme } : {}),
     // The element map the board places pins from (element-map.js).
     ...(live.elements ? { elements: live.elements } : {}),
   }
@@ -365,6 +370,28 @@ export function setupStates({ browser, board, config, baseUrl, base, viewports, 
   }
 }
 
+// What to tell someone whose Playwright Chromium did not launch: it was never
+// downloaded, or (a bare Linux server, container or WSL) it is there and the
+// system libraries it needs are not.
+export function browserLaunchHelp(error, engine, { exists = fs.existsSync, platform = process.platform } = {}) {
+  let installed = false
+  try {
+    installed = exists(engine.executablePath())
+  } catch {
+    /* no path to check */
+  }
+  if (!installed || /Executable doesn't exist/.test(error?.message || '')) {
+    return `Playwright has no Chromium yet. Run "${cliCommand('doctor --install-browser')}" (it downloads the build this Shapewall needs), or set browser.channel to "chrome" in the config to use an installed Chrome.`
+  }
+  const why = String(error?.message || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)[0]
+  return platform === 'linux'
+    ? `Chromium is installed but does not start${why ? ` (${why.slice(0, 160)})` : ''}. On Linux that usually means missing system libraries: run "npx playwright install-deps chromium" once as root (with sudo), then try again. "${cliCommand('doctor')}" checks it.`
+    : `Chromium is installed but does not start${why ? ` (${why.slice(0, 160)})` : ''}. "${cliCommand('doctor')}" checks it; setting browser.channel to "chrome" in the config uses an installed Chrome instead.`
+}
+
 // `handleSignals: false` for callers that handle SIGTERM/SIGINT themselves
 // and close the browser when they are done (a stoppable checks run).
 export async function launchBrowser(config, { chromium, handleSignals = true } = {}) {
@@ -379,10 +406,7 @@ export async function launchBrowser(config, { chromium, handleSignals = true } =
     return await engine.launch(options)
   } catch (error) {
     if (/Executable doesn't exist|browserType\.launch/.test(error.message) && !executablePath && !channel) {
-      throw new Error(
-        `Playwright has no Chromium yet. Run "${cliCommand('doctor --install-browser')}" (it downloads the build this Shapewall needs), or set browser.channel to "chrome" in the config to use an installed Chrome.`,
-        { cause: error },
-      )
+      throw new Error(browserLaunchHelp(error, engine), { cause: error })
     }
     throw error
   }

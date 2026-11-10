@@ -43,7 +43,7 @@ import {
   keyHostConfirmed,
   publicAgentInfo,
 } from './config.js'
-import { projectKey, saveUserAgentEntry, userAgentEntry, validateUserEntry } from './user-settings.js'
+import { legacyProfile, projectKey, saveUserAgentEntry, userAgentEntry, validateUserEntry } from './user-settings.js'
 import { tokenEquals } from '../tokens.js'
 
 const TEST_TIMEOUT_MS = 15000
@@ -163,9 +163,12 @@ function hostOf(url) {
 // another variable for the same host asks again.
 export function pendingConfirmations(entry, { saved, repo, env }) {
   const confirm = []
-  if (entry.acpCommand && entry.acpCommand !== saved.acpCommand) confirm.push({ kind: 'command', command: entry.acpCommand })
+  // A command already saved for this project (the default connection or a
+  // profile) was confirmed then: moving it between the two asks nothing.
+  const approved = new Set([saved.acpCommand, ...(saved.profiles || []).map((item) => item.acpCommand)].filter(Boolean))
+  if (entry.acpCommand && !approved.has(entry.acpCommand)) confirm.push({ kind: 'command', command: entry.acpCommand })
   for (const profile of entry.profiles || []) {
-    if (!saved.profiles?.some((item) => item.id === profile.id && item.acpCommand === profile.acpCommand)) {
+    if (!approved.has(profile.acpCommand)) {
       if (!confirm.some((item) => item.kind === 'command' && item.command === profile.acpCommand))
         confirm.push({ kind: 'command', command: profile.acpCommand })
     }
@@ -401,6 +404,15 @@ export function settingsRoutes({ config, env, fetchImpl, settings, shared, token
     next()
   })
 
+  const profileList = (entry) => {
+    const legacy = legacyProfile(entry, KNOWN_AGENTS)
+    return [...(legacy ? [{ ...legacy, legacy: true }] : []), ...(entry?.profiles || [])].map(({ acpCommand, ...profile }) => ({
+      ...profile,
+      command: acpCommand,
+      default: entry?.backend === 'acp' && entry.acpCommand === acpCommand,
+    }))
+  }
+
   const view = () => {
     const current = settings()
     const saved = userAgentEntry(config.dir, env)
@@ -409,6 +421,10 @@ export function settingsRoutes({ config, env, fetchImpl, settings, shared, token
       file: current.settingsFile,
       fileProblem: saved.problem,
       saved: saved.entry || {},
+      // Every connected native agent, the one list Settings and the chat
+      // show: the saved profiles, and a default command saved before
+      // profiles (legacy) as one of them.
+      profiles: profileList(saved.entry),
       project: { root: projectKey(config.dir), configFile: config.file || null },
       config: Object.fromEntries(SAVED_KEYS.filter((key) => repo()[key] !== undefined).map((key) => [key, repo()[key]])),
       effective: {
@@ -540,7 +556,11 @@ export function settingsRoutes({ config, env, fetchImpl, settings, shared, token
     // The label and the image toggle belong to the agent connected before.
     const entry = { ...(before.entry || {}) }
     if (profileConnect) {
+      // A default command saved before profiles becomes a profile too, so
+      // the list stays the one place every connected agent is shown.
+      const legacy = legacyProfile(entry, KNOWN_AGENTS)
       entry.profiles = [
+        ...(legacy && legacy.id !== agent.id ? [legacy] : []),
         ...(entry.profiles || []).filter((item) => item.id !== agent.id),
         { id: agent.id, label: agent.label, acpCommand: agent.command },
       ]
@@ -582,7 +602,20 @@ export function settingsRoutes({ config, env, fetchImpl, settings, shared, token
     if (testing) return fail(res, 409, 'test_running', 'A connection test is running.')
     const saved = userAgentEntry(config.dir, env)
     if (saved.problem) return fail(res, 409, 'settings_file_invalid', saved.problem)
-    const entry = { ...(saved.entry || {}), profiles: (saved.entry?.profiles || []).filter((item) => item.id !== req.params.id) }
+    const current = saved.entry || {}
+    const legacy = legacyProfile(current, KNOWN_AGENTS)
+    const removed = (current.profiles || []).find((item) => item.id === req.params.id) || (legacy?.id === req.params.id ? legacy : null)
+    const entry = { ...current, profiles: (current.profiles || []).filter((item) => item.id !== req.params.id) }
+    // Removing the agent new chats use moves them to the next profile, or
+    // leaves the chat unconnected when it was the last one.
+    if (removed && current.backend === 'acp' && current.acpCommand === removed.acpCommand) {
+      const next = entry.profiles.find((item) => item.acpCommand === removed.acpCommand) || entry.profiles[0]
+      if (next) entry.acpCommand = next.acpCommand
+      else {
+        delete entry.acpCommand
+        delete entry.backend
+      }
+    }
     if (saveEntry(req, res, entry)) res.json(view())
   })
 

@@ -32,15 +32,16 @@ reverse-proxy `/umami/` to the Umami instance. Custom events: `get-started`, `li
 Everything launch-dependent on the site reads one module, `src/launch.js`. Before launch (`SHAPEWALL_LAUNCHED=0`, the default) the
 hero badge and the install box say "Private early access", GitHub links read "GitHub (invite only)", there is no install command, no
 Offer in the structured data, and no links to files in the repository. Launched, the pages show
-`npm install --save-dev github:danbaruch/shapewall`, plain GitHub links, Changelog and Security policy links, "Edit on GitHub" on
-the docs, and a free Offer.
+`npm install --save-dev shapewall`, plain GitHub links, Changelog and Security policy links, "Edit on GitHub" on the docs, and a
+free Offer.
 
 To launch:
 
 1. Make the GitHub repository public and turn on private vulnerability reporting (Settings > Code security), which `SECURITY.md`
    relies on.
-2. Check the install a stranger will run, in an empty folder:
-   `npm init -y && npm install --save-dev github:danbaruch/shapewall && npx --no -- shapewall --version`.
+2. Publish the package to npm (`NPM_PUBLISHED` in `src/launch.js` is already `true`, so do not deploy the site before the package
+   is on the registry), then check the install a stranger will run, in an empty folder:
+   `npm init -y && npm install --save-dev shapewall && npx shapewall --version`.
 3. Build and check locally: `SHAPEWALL_LAUNCHED=1 SHAPEWALL_STEALTH=0 npm test` runs every state; then
    `SHAPEWALL_LAUNCHED=1 SHAPEWALL_STEALTH=0 SHAPEWALL_UMAMI_ID=<id> npm run build && npm run preview` to look at it.
 4. Release: `SHAPEWALL_LAUNCHED=1 SHAPEWALL_STEALTH=0 SHAPEWALL_UMAMI_ID=<id> website/deploy/deploy.sh` from the repository root.
@@ -50,9 +51,9 @@ To launch:
 
 To go back: `website/deploy/deploy.sh rollback` swaps to the previous release.
 
-When the package is on the npm registry, set `NPM_PUBLISHED = true` in `src/launch.js`: the marketing pages and the Getting started
-page then install `shapewall` from the registry. Update the install lines in the root `README.md` and `docs/` in the same change
-(search for `github:danbaruch/shapewall`).
+`NPM_PUBLISHED` in `src/launch.js` decides whether the marketing pages and the Getting started page install `shapewall` from the
+registry (`true`) or from GitHub (`false`). The root `README.md` and `docs/` write the registry install, with GitHub as the
+alternative for unreleased builds.
 
 ## Hosting
 

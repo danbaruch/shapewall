@@ -85,7 +85,9 @@ async function checkBrowser(config, { launch = true, chromium = null } = {}) {
       fix:
         channel || executablePath
           ? 'Check the browser install.'
-          : `Run "${installHint()}"; on Linux missing system libraries need "${depsHint()}".`,
+          : process.platform === 'linux'
+            ? `Chromium is downloaded, so this is usually missing system libraries: run "${depsHint()}" once as root (with sudo), then "${cliCommand('doctor')}" again.`
+            : `Run "${installHint()}" again, or set browser.channel to "chrome" to use an installed Chrome.`,
     }
   }
 }

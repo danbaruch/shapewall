@@ -45,7 +45,7 @@ test('init writes a valid config and keeps outputs out of git', async () => {
   const dir = tempDir('cli-init')
   const file = path.join(dir, 'shapewall.config.json')
   fs.writeFileSync(path.join(dir, '.gitignore'), 'node_modules/')
-  const { text } = await run(['init', '--config', file, '--base-url', 'http://localhost:5173'])
+  const { text } = await run(['init', '--config', file, '--base-url', 'http://localhost:5173', '--no-discover'])
   assert.match(text, /Wrote/)
   assert.equal(loadConfig(file).boards[0].baseUrl, 'http://localhost:5173')
   const gitignore = fs.readFileSync(path.join(dir, '.gitignore'), 'utf8')

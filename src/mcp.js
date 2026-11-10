@@ -13,7 +13,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import * as z from 'zod'
 import { getBoard, joinUrl } from './config.js'
-import { feedback, feedbackContext, feedbackItem } from './feedback.js'
+import { feedback, feedbackContext, feedbackItem, untrustedJson } from './feedback.js'
 import { createIssue, githubSettings, linkPull } from './github.js'
 import { listJourneys } from './journeys.js'
 import { cropAround } from './png.js'
@@ -34,6 +34,36 @@ const commentId = z.number().int().positive().describe('Comment id')
 
 const json = (value) => ({ content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] })
 const failure = (message) => ({ content: [{ type: 'text', text: message }], isError: true })
+
+// Comment lists and comments go out with the trust fields first, like
+// `comments --json`: their text is data from reviewers and captured pages.
+const untrusted = (value) => json(untrustedJson(value))
+
+const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+export const SCREENSHOT_MAX = 32 * 1024 * 1024
+
+// A capture's bytes for get_comment, only when it is a regular file (not a
+// symlink a project planted at captures/home.desktop.png), of bounded size
+// and really a PNG. Anything else would hand another file to the model.
+export function readScreenshot(file) {
+  let fd
+  try {
+    fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0))
+  } catch (error) {
+    throw new Error(error.code === 'ELOOP' ? 'The screenshot is not a regular capture file.' : 'Could not read the screenshot.', {
+      cause: error,
+    })
+  }
+  try {
+    const stat = fs.fstatSync(fd)
+    if (!stat.isFile() || stat.size > SCREENSHOT_MAX) throw new Error('The screenshot is not a regular capture file.')
+    const png = fs.readFileSync(fd)
+    if (!png.subarray(0, 8).equals(PNG_MAGIC)) throw new Error('The screenshot is not a PNG.')
+    return png
+  } finally {
+    fs.closeSync(fd)
+  }
+}
 
 // Turns thrown errors into tool errors with their message (no stacks).
 const tool = (handler) => async (args) => {
@@ -167,7 +197,7 @@ export function createMcpServer({
         comments = comments.filter((item) => ids.has(item.page?.id || item.variant?.pageId))
       }
       if (agentStatus) comments = comments.filter((item) => (item.agentStatus || 'none') === agentStatus)
-      return json({ ...report, count: comments.length, comments })
+      return untrusted({ ...report, count: comments.length, comments })
     }),
   )
 
@@ -189,10 +219,10 @@ export function createMcpServer({
     tool(({ board, id, image = 'crop' }) => {
       const target = boardFor(board)
       const item = feedbackItem(feedbackContext(config, target), getComment(config, target.id, id))
-      const result = json({ board: target.id, comment: item })
+      const result = untrusted({ board: target.id, comment: item })
       // files.screenshot comes from resolveFile (allowlisted name inside the board folder) or is null.
       if (image !== 'none' && item.files.screenshot) {
-        const png = fs.readFileSync(item.files.screenshot)
+        const png = readScreenshot(item.files.screenshot)
         let data = png
         let note = `Screenshot ${item.viewport.width}x${item.viewport.height} the comment was made on.`
         if (image === 'crop') {

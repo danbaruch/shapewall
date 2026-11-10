@@ -2,9 +2,10 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { CONFIG_FILE, ConfigError, SITEMAP_LIMIT_MAX, findConfigFile, starterConfig } from '../config.js'
+import { CONFIG_FILE, ConfigError, SITEMAP_LIMIT_MAX, findConfigFile, normalizeConfig, starterConfig, titleFromBaseUrl } from '../config.js'
 import { writeFileAtomic } from '../store.js'
-import { defaultSitemapUrl, formatImport, importSitemap } from '../sitemap.js'
+import { addPagesToRaw, defaultSitemapUrl, formatImport, importSitemap, sitemapPages } from '../sitemap.js'
+import { DISCOVER_DEFAULTS, cutTitle, describeFetchError, discoverPages, pageTitle } from '../discover.js'
 import { cliCommand } from '../invocation.js'
 
 const isHttp = (value) => /^https?:\/\//i.test(String(value))
@@ -34,13 +35,91 @@ function pageLines(pages, max = 30) {
   return lines.join('\n')
 }
 
+const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`
+// The base URL's path (http://localhost:3000/app) is not part of page paths.
+const pagePathKey = (url, basePath) => {
+  let pathname = new URL(url).pathname
+  if (basePath && (pathname === basePath || pathname.startsWith(`${basePath}/`))) pathname = pathname.slice(basePath.length) || '/'
+  return pathname.replace(/\/+$/, '') || '/'
+}
+const boardTitle = (homeTitle, baseUrl) => (homeTitle && cutTitle(homeTitle, 60)) || titleFromBaseUrl(baseUrl) || new URL(baseUrl).host
+
+// The config for "init --base-url" with discovery: the pages of
+// <baseUrl>/sitemap.xml if it has any, else the pages the home page links
+// to (two levels deep), else the home page alone. Prints how they were found.
+// Returns { config, found: 'sitemap' | 'links' | 'none' }.
+async function discoverConfig({ baseUrl, dir, fetch, out }) {
+  out(`Looking for pages on ${baseUrl} ...`)
+  const empty = { ...starterConfig({ baseUrl }), groups: [], pages: [] }
+  const sitemapUrl = defaultSitemapUrl(baseUrl)
+  // Discovery stays quick: no single request may take long.
+  const quick = (url, options = {}) =>
+    fetch(url, { ...options, signal: AbortSignal.any([options.signal, AbortSignal.timeout(DISCOVER_DEFAULTS.requestMs)].filter(Boolean)) })
+  let sitemapNote
+  try {
+    const result = await importSitemap({ raw: empty, dir, source: sitemapUrl, fetch: quick })
+    if (result.pages.length) {
+      const { homeTitle } = await discoverPages(baseUrl, { fetch, maxDepth: 0 })
+      const config = { ...result.raw, title: boardTitle(homeTitle, baseUrl), sitemap: sitemapUrl }
+      out(`Found ${plural(result.pages.length, 'page')} in ${sitemapUrl}:`)
+      out(pageLines(result.pages, 8))
+      return { config, found: 'sitemap' }
+    }
+    sitemapNote = 'no pages on this site'
+  } catch (error) {
+    sitemapNote = describeFetchError(error).replace(`${sitemapUrl}: `, '')
+  }
+
+  const crawl = await discoverPages(baseUrl, { fetch })
+  if (!crawl.pages.length) {
+    out(`Could not open ${baseUrl}: ${crawl.home.error}.`)
+    out('So the config gets just the home page ("/") for now.')
+    const config = { ...empty, title: boardTitle(null, baseUrl), groups: ['Pages'] }
+    config.pages = [{ id: 'home', path: '/', title: 'Home', group: 'Pages' }]
+    return { config, found: 'none' }
+  }
+  const basePath = new URL(baseUrl).pathname.replace(/\/+$/, '')
+  const siteTitle = crawl.homeTitle
+  const titles = new Map(crawl.pages.map((page, index) => [pagePathKey(page.url, basePath), index === 0 ? 'Home' : page.title]))
+  const { pages } = sitemapPages(
+    crawl.pages.map((page) => page.url),
+    { baseUrl, limit: DISCOVER_DEFAULTS.maxPages },
+  )
+  for (const page of pages) {
+    const own = titles.get(page.path.replace(/\/+$/, '') || '/')
+    const title = own === 'Home' ? 'Home' : pageTitle(own, siteTitle)
+    if (title) page.title = title
+  }
+  const config = addPagesToRaw({ ...empty, title: boardTitle(siteTitle, baseUrl) }, pages)
+  normalizeConfig(config, { dir })
+  const stopped = { pages: ` (stopped at ${DISCOVER_DEFAULTS.maxPages})`, time: ` (stopped after ${DISCOVER_DEFAULTS.totalMs / 1000} s)` }
+  out(`No sitemap at ${sitemapUrl} (${sitemapNote}), so Shapewall followed the links on your pages.`)
+  out(`Found ${plural(pages.length, 'page')}${stopped[crawl.stopped] || ''}:`)
+  out(pageLines(pages, 8))
+  if (crawl.failed.length) {
+    const shown = crawl.failed.slice(0, 3).map((item) => `${new URL(item.url).pathname} (${item.reason})`)
+    out(`  left out ${plural(crawl.failed.length, 'link')} that did not open: ${shown.join(', ')}${crawl.failed.length > 3 ? ', ...' : ''}`)
+  }
+  return { config, found: 'links' }
+}
+
 export async function init(flags, out, { fetch }) {
   const file = path.resolve(flags.config || CONFIG_FILE)
   if (fs.existsSync(file) && !flags.force) throw new Error(`${file} already exists (use --force to overwrite)`)
   const baseUrl = flags['base-url'] || 'http://localhost:3000'
   if (!isHttp(baseUrl)) throw new Error(`--base-url: an http(s) URL such as https://example.com (got ${JSON.stringify(baseUrl)})`)
+  const givenBaseUrl = Boolean(flags['base-url'])
   let config = starterConfig({ baseUrl })
   const fromSitemap = flags.sitemap !== undefined
+  let found = null
+  if (givenBaseUrl && !fromSitemap) {
+    if (flags['no-discover']) {
+      // The bare config: the home page only, never example pages the site may not have.
+      config = { ...config, groups: ['Pages'], pages: [{ id: 'home', path: '/', title: 'Home', group: 'Pages' }] }
+    } else {
+      ;({ config, found } = await discoverConfig({ baseUrl, dir: path.dirname(file), fetch, out }))
+    }
+  }
   if (fromSitemap) {
     const given = flags.sitemap === true ? defaultSitemapUrl(baseUrl) : flags.sitemap
     const source = isHttp(given) ? given : path.resolve(String(given))
@@ -67,17 +146,28 @@ export async function init(flags, out, { fetch }) {
     fs.writeFileSync(gitignore, `${current}${current && !current.endsWith('\n') ? '\n' : ''}# Shapewall\n${missing.join('\n')}\n`)
     out(`Added ${missing.join(', ')} to .gitignore`)
   }
-  out(initNextHint({ baseUrl, givenBaseUrl: Boolean(flags['base-url']), fromSitemap, file: path.basename(file) }))
+  out(initNextHint({ baseUrl, givenBaseUrl, fromSitemap, found, file: path.basename(file) }))
 }
 
-// The "Next:" line after init: only the steps still left to do.
-export function initNextHint({ baseUrl, givenBaseUrl, fromSitemap, file = CONFIG_FILE }) {
+// The "Next:" line after init: only the steps still left to do. found is
+// how discovery went ('sitemap', 'links', 'none'), or null without it.
+export function initNextHint({ baseUrl, givenBaseUrl, fromSitemap, found = null, file = CONFIG_FILE }) {
   const run = `run "${cliCommand('capture')}" and then "${cliCommand('serve --open')}"`
   // Links and sitemaps stop at an app's front door, so say so where people start.
   const app = 'App screens behind Start, a guest entry or sign-in need their own pages with actions (docs/config.md, "Capturing an app").'
   if (fromSitemap) return `Next: make sure ${baseUrl} is up, then ${run}.\n${app}`
-  const edit = givenBaseUrl ? `list your pages in ${file}` : `set baseUrl and list your pages in ${file}`
-  return `Next: ${edit} (or add them from a sitemap with "${cliCommand('sitemap <URL>')}"), start your site, then ${run}.\n${app}`
+  if (found === 'sitemap' || found === 'links') return `Next: ${run}.\n${app}`
+  if (found === 'none')
+    return (
+      `Next: start your site, then run "${cliCommand(`init --base-url ${baseUrl} --force`)}" again to find its pages,` +
+      ` or add pages by hand in ${file}. Then ${run}.\n${app}`
+    )
+  if (givenBaseUrl)
+    return `Next: list your pages in ${file} (or add them from a sitemap with "${cliCommand('sitemap <URL>')}"), start your site, then ${run}.\n${app}`
+  return (
+    `Next: start your site and run "${cliCommand('init --base-url <its URL> --force')}" so Shapewall finds its pages` +
+    ` (the pages in ${file} are examples), then ${run}.\n${app}`
+  )
 }
 
 // Adds a sitemap's pages to the config file (the raw JSON, so the rest of

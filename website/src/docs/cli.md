@@ -6,7 +6,7 @@ An option the command does not take is an error, with the closest real one as a 
 `unknown option --onyl for "capture" (did you mean --only?)` instead of capturing every page.
 
 Messages that suggest a command (`doctor`, `init`, a missing browser) write it the way you started Shapewall:
-`npx --no -- shapewall doctor` for a copy installed in a project, or the path of a clone's executable. See
+`npx shapewall doctor` for a copy installed in a project, or the path of a clone's executable. See
 [install](/docs/getting-started#install). The complete help text is [at the end of this page](#every-command-and-option).
 
 ## shapewall init
@@ -415,10 +415,13 @@ Commands
                             press Enter to save; Ctrl-C, browser close or timeout discards
                             saves a private .shapewall-auth/*.auth.json; config stays unchanged
   init                      write shapewall.config.json in this folder
-      --base-url URL        the site to capture (default http://localhost:3000)
-      --sitemap [URL|FILE]  take the pages from this sitemap instead of the examples
+      --base-url URL        the site to capture (default http://localhost:3000); finds its
+                            pages: <base URL>/sitemap.xml, else links from the home page
+                            (2 levels, 25 pages, same site only)
+      --sitemap [URL|FILE]  take the pages from this sitemap instead
                             (alone: <base URL>/sitemap.xml)
                             (with --limit, --group, --exclude as for sitemap)
+      --no-discover         do not look for pages: write the home page only
       --force               overwrite an existing config
   sitemap [URL|FILE]        add the pages of a sitemap.xml (or sitemap index) to the config
                             (default: the board's "sitemap" setting)

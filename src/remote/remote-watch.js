@@ -26,6 +26,11 @@ const validCommentId = (id) => Number.isSafeInteger(id) && id > 0
 
 const KILL_GRACE_MS = 5000
 
+// Files under .shapewall/remote/ are written without following a symlink, so
+// a project that plants agent/comment-1.png -> ~/.bashrc cannot have server
+// bytes (a pushed live HTML, a comment) written there.
+const WRITE_FLAGS = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC | (fs.constants.O_NOFOLLOW || 0)
+
 export async function watchRemote({
   remote,
   boardId,
@@ -78,7 +83,7 @@ export async function watchRemote({
   const save = async (url, file) => {
     if (!url) return ''
     try {
-      fs.writeFileSync(file, await remote.download(url), { mode: 0o600 })
+      fs.writeFileSync(file, await remote.download(url), { mode: 0o600, flag: WRITE_FLAGS })
       return file
     } catch (error) {
       log(`could not download ${url}: ${error.message}`)
@@ -94,10 +99,10 @@ export async function watchRemote({
     const liveHtml = await save(item.files.liveHtml, path.join(agentDir, `comment-${item.id}.html`))
     const local = { ...item, files: { ...item.files, screenshotFile: screenshot || null, liveHtmlFile: liveHtml || null } }
     const json = JSON.stringify({ board: boardId, comment: local }, null, 2)
-    fs.writeFileSync(commentFile, `${json}\n`, { mode: 0o600 })
+    fs.writeFileSync(commentFile, `${json}\n`, { mode: 0o600, flag: WRITE_FLAGS })
     const began = Date.now()
     const repliesBefore = Array.isArray(item.replies) ? item.replies.length : 0
-    const logFd = fs.openSync(logFile, 'w', 0o600)
+    const logFd = fs.openSync(logFile, WRITE_FLAGS, 0o600)
     let result
     try {
       await remote.setAgentStatus(boardId, item.id, 'working', { guests: includeGuests })
