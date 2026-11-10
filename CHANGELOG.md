@@ -13,6 +13,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
   panels on the right. It gives up space in a fixed order as the window narrows.
 - Fixed: a brief flash of a few oversized cards before the board settled on its starting view.
 - The demo has two scripted agents, so the picker can be tried there.
+- A Contact link in the profile menu and beside About opens the contact page on shapewall.com.
 
 ## 0.2.1 - 2026-11-10
 
