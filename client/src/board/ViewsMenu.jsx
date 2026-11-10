@@ -72,7 +72,9 @@ export function ViewsMenu({
   )
   const brokenText = broken ? `${broken} broken link${broken === 1 ? '' : 's'}` : null
   const state = [on ? `${on} on` : null, brokenText].filter(Boolean).join(', ')
-  const label = journey ? `Views: journey ${journey.name}` : state ? `Views, ${state}` : 'Views'
+  // With a journey open its full name leads, also when the button truncates
+  // it (the tooltip says it in full too).
+  const label = journey ? `Journey: ${journey.name}. Views` : state ? `Views, ${state}` : 'Views'
   const tip = journey ? (
     <KeyTip label={`Journey: ${journey.name}. Open Views to switch`} keys={[JOURNEY_KEY]} />
   ) : journeys.length ? (
