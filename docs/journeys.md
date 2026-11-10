@@ -121,7 +121,10 @@ Open a journey from any of these; they all show the same one:
 
 - **Views** in the toolbar: its **Journeys** group lists every journey with its steps (or paths), and **None** shows all pages again.
   With more than eight, the list scrolls and has a filter. While a journey is open the button shows its name, and its **x** leaves it.
-- The **Journeys** list at the end of the sidebar's pages.
+- The sidebar: expanded, its **Pages | Journeys** switch; the **Journeys** tab lists **None** (show all pages) and every journey with
+  its steps, the open one highlighted, a filter past eight and **New journey** where you can make one. The tab you chose is kept in this
+  browser; opening a journey elsewhere does not switch it, but the **Journeys** tab shows a dot while one is open. Collapsed, the
+  **Journeys** icon (with the same dot) opens that list beside the rail.
 - The command palette (Ctrl/Cmd+K): type the journey's name.
 - **J** opens the next journey, **Shift+J** the previous one; past the last one the board shows all pages again.
 - On a phone: the **...** menu's **Journeys** group.
