@@ -227,6 +227,8 @@ export function agentRouter({
   const ownerGate = Boolean(settingsToken) && !shared
   const chatNeedsOwner = (req, current = settings()) => ownerGate && current.backend === 'acp' && current.configured && !agentOwner(req)
   router.chatNeedsOwner = chatNeedsOwner
+  // The same state fields /status reports, for /api/info.
+  router.agentStatus = () => agentStatus(settings())
   const ownerNeeded = (res) =>
     fail(
       res,

@@ -412,6 +412,7 @@ export function createApp({
     const agent = chatOn
       ? {
           ...publicAgentInfo(app.locals.agentRouter.settings()),
+          ...app.locals.agentRouter.agentStatus(),
           ownerWrites: app.locals.agentRouter.ownerWritesFor(req),
           // An agent that runs commands answers only its owner (403 control_needs_owner otherwise).
           chatNeedsOwner: app.locals.agentRouter.chatNeedsOwner(req),
