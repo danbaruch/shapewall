@@ -1,46 +1,93 @@
-// Agent branch mode, in the chat's settings popover: when on, the agent's
-// fixes and chat turns run in a worktree of their own and wait on a branch
-// until you apply them (src/agent/branch-mode.js). Per project, off by
-// default. Hidden when the server does not offer it (no ACP agent, a remote
-// device, an older server).
+// Agent branch mode, in the chat's settings popover and on the Agents page:
+// when on, the agent's fixes and chat turns run in a worktree of their own and
+// wait on a branch until you apply them (src/agent/branch-mode.js). Per
+// project, off by default. Hidden when the server does not offer it (no ACP
+// agent, a remote device, an older server). Both places follow a change made
+// anywhere else ("agents changed", lib/agentEvents.js), never over a prefix
+// being typed.
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { GitBranch } from 'lucide-react'
 import { api } from '../lib/api'
+import { useAgentsChanged } from '../lib/agentEvents'
 import { Input } from '../components/ui'
 import { cn } from '../lib/utils'
 
 const PATH = '/api/agent/settings/branch-mode'
 const BRANCH_STATES = { ready: 'ready', moved: 'changed by hand', gone: 'branch deleted', pending: 'in progress' }
 
-export default function BranchModeToggle({ touch = false, disabled = false }) {
+// The on/off switch of the agent work rows (branch mode, batch fixes).
+// `touch`: a 44 px hit area around the same track.
+export function SwitchButton({ on, onChange, disabled, labelledBy, touch = false, ...props }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-labelledby={labelledBy}
+      disabled={disabled}
+      onClick={() => onChange(!on)}
+      className={cn(
+        'relative inline-flex shrink-0 items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50',
+        touch ? 'h-11 w-14' : 'h-6 w-10',
+      )}
+      {...props}
+    >
+      <span
+        aria-hidden="true"
+        className={cn(
+          'relative inline-flex items-center rounded-full border transition-colors',
+          touch ? 'h-7 w-12' : 'h-5 w-9',
+          on ? 'border-accent bg-accent' : 'border-line-strong bg-surface-2',
+        )}
+      >
+        <span
+          className={cn(
+            'absolute rounded-full bg-white shadow-card transition-transform duration-(--motion-fast)',
+            touch ? 'size-5' : 'size-3.5',
+            on ? (touch ? 'translate-x-6' : 'translate-x-4.5') : 'translate-x-0.5',
+          )}
+        />
+      </span>
+    </button>
+  )
+}
+
+// The setting as the server has it ({ enabled, prefix, sources, defaultPrefix,
+// acp }) or null (not offered), and save(body).
+export function useBranchMode() {
   const [state, setState] = useState(null)
   const [prefix, setPrefix] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
   const [branches, setBranches] = useState([])
-  useEffect(() => {
-    let live = true
-    api
-      .get(PATH)
-      .then((data) => {
-        if (!live) return
-        setState(data)
-        setPrefix(data?.prefix || '')
-      })
-      .catch(() => live && setState(null))
+  const editing = useRef(false)
+  const live = useRef(true)
+  const load = useCallback(async () => {
+    try {
+      const data = await api.get(PATH)
+      if (!live.current) return
+      setState(data)
+      if (!editing.current) setPrefix(data?.prefix || '')
+    } catch {
+      if (live.current) setState(null)
+    }
     // The agent's branches waiting in this project (applied and discarded ones are gone).
     api
       .get('/api/agent/branches')
-      .then((data) => live && setBranches(Array.isArray(data?.branches) ? data.branches : []))
+      .then((data) => live.current && setBranches(Array.isArray(data?.branches) ? data.branches : []))
       .catch(() => {})
-    return () => {
-      live = false
-    }
   }, [])
-  if (!state) return null
-  // Set by SHAPEWALL_AGENT_BRANCH_MODE: the switch shows it but cannot change it.
-  const fromEnv = state.sources?.enabled === 'env'
+  useEffect(() => {
+    live.current = true
+    load()
+    return () => {
+      live.current = false
+    }
+  }, [load])
+  useAgentsChanged(() => {
+    if (!busy) load()
+  })
   const save = async (body) => {
     setBusy(true)
     setError(null)
@@ -50,11 +97,57 @@ export default function BranchModeToggle({ touch = false, disabled = false }) {
       setPrefix(data?.prefix || '')
     } catch (failure) {
       setError(failure.message || 'Not saved.')
-      setPrefix(state.prefix || '')
+      setPrefix(state?.prefix || '')
     } finally {
       setBusy(false)
     }
   }
+  return { state, prefix, setPrefix, busy, error, branches, save, editing }
+}
+
+function PrefixField({ mode, disabled, className, touch, ...props }) {
+  const { state, prefix, setPrefix, save, editing } = mode
+  return (
+    <Input
+      value={prefix}
+      onChange={(event) => setPrefix(event.target.value)}
+      onFocus={() => {
+        editing.current = true
+      }}
+      onBlur={() => {
+        editing.current = false
+        if (prefix !== state.prefix) save({ enabled: Boolean(state.enabled), prefix: prefix || state.defaultPrefix })
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') event.currentTarget.blur()
+      }}
+      disabled={disabled || state.sources?.prefix === 'env'}
+      placeholder={state.defaultPrefix}
+      maxLength={40}
+      spellCheck={false}
+      size={touch ? 'touch' : 'sm'}
+      className={cn('min-w-0 font-mono', className)}
+      {...props}
+    />
+  )
+}
+
+const explain = (state, on) =>
+  `${
+    on
+      ? 'Fixes and chat turns run in a separate folder and are committed on a branch. Your checkout changes only when you apply one. Uncommitted changes in your checkout are not carried over.'
+      : 'Off: the agent edits your checkout directly.'
+  }${on && !state.acp ? ' It applies to a coding agent connected over ACP; this agent edits the checkout as before.' : ''}${
+    state.sources?.enabled === 'env' ? ' Set by SHAPEWALL_AGENT_BRANCH_MODE.' : ''
+  }`
+
+// The chat panel's compact row.
+export default function BranchModeToggle({ touch = false, disabled = false }) {
+  const mode = useBranchMode()
+  const { state, busy, error, branches, save } = mode
+  if (!state) return null
+  // Set by SHAPEWALL_AGENT_BRANCH_MODE: the switch shows it but cannot change it.
+  const fromEnv = state.sources?.enabled === 'env'
   const on = Boolean(state.enabled)
   return (
     <div className="space-y-1.5 border-t border-line pt-3 text-xs" data-sw-chat-branch-mode={on ? 'on' : 'off'}>
@@ -63,54 +156,24 @@ export default function BranchModeToggle({ touch = false, disabled = false }) {
         <span id="sw-branch-mode-label" className="min-w-0 flex-1 font-medium text-fg">
           Agent works on a branch
         </span>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={on}
-          aria-labelledby="sw-branch-mode-label"
+        <SwitchButton
+          on={on}
+          onChange={(next) => save({ enabled: next })}
           disabled={busy || disabled || fromEnv}
-          onClick={() => save({ enabled: !on })}
-          className={cn(
-            'relative inline-flex shrink-0 items-center rounded-full border transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50',
-            touch ? 'h-7 w-12' : 'h-5 w-9',
-            on ? 'border-accent bg-accent' : 'border-line-strong bg-surface-2',
-          )}
+          labelledBy="sw-branch-mode-label"
+          touch={touch}
           data-sw-chat-branch-mode-switch="true"
-        >
-          <span
-            aria-hidden="true"
-            className={cn(
-              'absolute rounded-full bg-white shadow-card transition-transform duration-(--motion-fast)',
-              touch ? 'size-5' : 'size-3.5',
-              on ? (touch ? 'translate-x-6' : 'translate-x-4.5') : 'translate-x-0.5',
-            )}
-          />
-        </button>
+        />
       </div>
-      <p className="text-muted">
-        {on
-          ? 'Fixes and chat turns run in a separate folder and are committed on a branch. Your checkout changes only when you apply one. Uncommitted changes in your checkout are not carried over.'
-          : 'Off: the agent edits your checkout directly.'}
-        {on && !state.acp ? ' It applies to a coding agent connected over ACP; this agent edits the checkout as before.' : ''}
-        {fromEnv ? ' Set by SHAPEWALL_AGENT_BRANCH_MODE.' : ''}
-      </p>
+      <p className="text-muted">{explain(state, on)}</p>
       {on ? (
         <label className="flex items-center gap-2 text-muted">
           <span className="shrink-0">Branch prefix</span>
-          <Input
-            value={prefix}
-            onChange={(event) => setPrefix(event.target.value)}
-            onBlur={() => {
-              if (prefix !== state.prefix) save({ enabled: on, prefix: prefix || state.defaultPrefix })
-            }}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') event.currentTarget.blur()
-            }}
-            disabled={busy || disabled || state.sources?.prefix === 'env'}
-            placeholder={state.defaultPrefix}
-            maxLength={40}
-            spellCheck={false}
-            className="h-7 min-w-0 flex-1 font-mono text-[11px]"
+          <PrefixField
+            mode={mode}
+            disabled={busy || disabled}
+            touch={touch}
+            className={touch ? 'flex-1' : 'h-7 flex-1 text-[11px]'}
             data-sw-chat-branch-prefix="true"
           />
         </label>
@@ -136,5 +199,53 @@ export default function BranchModeToggle({ touch = false, disabled = false }) {
         </p>
       ) : null}
     </div>
+  )
+}
+
+// The Agents page's row (settings/AgentWorkOptions.jsx), styled like its
+// neighbours: title, one line, the switch on the right, the prefix below.
+export function BranchModeRow({ touch = false, disabled = false }) {
+  const mode = useBranchMode()
+  const { state, busy, error, save } = mode
+  if (!state) return null
+  const fromEnv = state.sources?.enabled === 'env'
+  const on = Boolean(state.enabled)
+  return (
+    <li className="space-y-2 p-3" data-sw-agents-branch-mode={on ? 'on' : 'off'}>
+      <div className="flex items-start gap-3">
+        <GitBranch size={16} className="mt-0.5 shrink-0 text-muted" aria-hidden="true" />
+        <div className="min-w-0 flex-1">
+          <p id="sw-agents-branch-mode-label" className="text-sm font-medium text-fg">
+            Work on a branch
+          </p>
+          <p className="mt-0.5 text-xs text-muted">{explain(state, on)}</p>
+        </div>
+        <SwitchButton
+          on={on}
+          onChange={(next) => save({ enabled: next })}
+          disabled={busy || disabled || fromEnv}
+          labelledBy="sw-agents-branch-mode-label"
+          touch={touch}
+          data-sw-agents-branch-mode-switch="true"
+        />
+      </div>
+      {on ? (
+        <label className="flex flex-wrap items-center gap-x-3 gap-y-1.5 pl-7 text-xs text-muted">
+          <span className="shrink-0">Branch prefix (optional)</span>
+          <PrefixField
+            mode={mode}
+            disabled={busy || disabled}
+            touch={touch}
+            className="w-48 max-w-full"
+            data-sw-agents-branch-prefix="true"
+          />
+        </label>
+      ) : null}
+      {error ? (
+        <p role="alert" className="pl-7 text-xs text-bad" data-sw-agents-branch-mode-error="true">
+          {error}
+        </p>
+      ) : null}
+    </li>
   )
 }

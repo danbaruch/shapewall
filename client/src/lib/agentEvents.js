@@ -19,6 +19,8 @@ import { DEMO } from './demo.js'
 import { STATIC, settingsTokenHeaders } from './api.js'
 
 const listeners = new Set()
+// Batch fixes (src/agent/batch-fixes.js): "batch" events name the board.
+const batchListeners = new Set()
 let source = null
 let shownTimer = null
 
@@ -38,6 +40,7 @@ function shown() {
   shownTimer = window.setTimeout(() => {
     shownTimer = null
     notifyAgentsChanged('shown')
+    notifyBatchChanged(null)
   }, 50)
 }
 
@@ -56,6 +59,15 @@ function open() {
   try {
     source = new window.EventSource(eventsUrl())
     source.addEventListener('agents', () => notifyAgentsChanged('event'))
+    source.addEventListener('batch', (event) => {
+      let board = null
+      try {
+        board = JSON.parse(event.data).board
+      } catch {
+        return
+      }
+      notifyBatchChanged(board)
+    })
   } catch {
     source = null
   }
@@ -70,14 +82,46 @@ function close() {
   source = null
 }
 
+const watching = () => listeners.size + batchListeners.size
+
 export function subscribeAgentsChanged(listener) {
   if (typeof window === 'undefined') return () => {}
   listeners.add(listener)
-  if (listeners.size === 1) open()
+  if (watching() === 1) open()
   return () => {
     if (!listeners.delete(listener)) return
-    if (listeners.size === 0) close()
+    if (watching() === 0) close()
   }
+}
+
+// A board's batch of fixes changed (the server, or the demo's backend).
+export function notifyBatchChanged(boardId) {
+  for (const listener of [...batchListeners]) {
+    try {
+      listener(boardId)
+    } catch {
+      // One view failing never stops the others.
+    }
+  }
+}
+
+// Calls `onChange()` when the batch of fixes on `boardId` moves on, and when
+// the page is shown again.
+export function useBatchChanged(boardId, onChange, enabled = true) {
+  const latest = useRef(onChange)
+  latest.current = onChange
+  useEffect(() => {
+    if (!enabled || typeof window === 'undefined') return undefined
+    const listener = (board) => {
+      if (board === boardId || board === null) latest.current?.()
+    }
+    batchListeners.add(listener)
+    if (watching() === 1) open()
+    return () => {
+      batchListeners.delete(listener)
+      if (watching() === 0) close()
+    }
+  }, [boardId, enabled])
 }
 
 // Calls `onChange(reason)` ('event' or 'shown') whenever the agent settings

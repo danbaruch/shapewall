@@ -36,6 +36,7 @@
 
 import { createHash, randomBytes } from 'node:crypto'
 import { spawn } from 'node:child_process'
+import { EventEmitter } from 'node:events'
 import fs from 'node:fs'
 import path from 'node:path'
 import express from 'express'
@@ -61,6 +62,8 @@ import {
 } from './branch-mode.js'
 import { createBackend } from './backends/index.js'
 import { AGENTS_EVENT, createSettingsEvents } from './settings-events.js'
+import { batchFixSettings, createBatchQueue } from './batch-fixes.js'
+import { FIX_PROMPT as BATCH_FIX_PROMPT } from './fix-prompt.js'
 import { cleanChoices } from './backends/acp.js'
 import { createOptionsCache, withChoices } from './options-cache.js'
 import { authFiles } from '../config.js'
@@ -318,6 +321,7 @@ export function agentRouter({
   // Server shutdown: stop agent processes (src/server/app.js stopChildren).
   router.close = () => {
     processPool.epoch += 1
+    batchQueue.close()
     settingsEvents.close()
     // An open events stream would hold the server open: end every one.
     eventsClosed = true
@@ -678,255 +682,505 @@ export function agentRouter({
     next()
   }
 
-  router.post(
-    '/boards/:id/threads/:thread/messages',
-    findThread,
-    admitMessage,
-    express.json({ limit: BODY_LIMIT }),
-    handle(async (req, res, board, threadId) => {
-      const { controller, current, backend, ownerWrites, branchOn } = res.locals.run
-      res.locals.agentOperationRunning = true
-      // Branch mode: this turn's worktree ({ tree, meta, root }); removed at
-      // the end unless the agent's work was committed on its branch.
-      let work = null
-      try {
-        const fix = req.body?.fix === true
-        // Regenerate: the same request again, the new answer in the old one's
-        // place (threads.js replaceAnswer). Only the thread's latest answer.
-        const regenerate = req.body?.regenerate === undefined ? null : String(req.body.regenerate)
-        let previous = null
-        if (regenerate !== null) {
-          if (fix) return fail(res, 400, 'bad_regenerate', 'Regenerate and Fix with agent do not go together.')
-          const stored = readThread(config, board.id, threadId).messages
-          const last = stored.at(-1)
-          if (!last || last.id !== regenerate || last.role !== 'assistant' || last.starter || stored.at(-2)?.role !== 'user')
-            return fail(res, 409, 'cannot_regenerate', 'Only the latest answer to a message can be regenerated.')
-          if (chatBytes(config, board.id) + Buffer.byteLength(JSON.stringify(last)) > limit.chatBytesMax)
-            return fail(res, 413, 'chat_quota', 'Chat storage for this board is full. Clear a thread to free space.')
-          previous = last
-        }
-        if (fix && runs.size > 1 && !branchOn) return fail(res, 409, 'agent_running', 'Wait for other agent turns before starting a fix.')
-        res.locals.run.fix = fix
-        const commentId = commentIdOf(threadId)
-        if (fix && (!ownerWrites || !allowCapture || !commentId || backend.id !== 'acp')) {
-          return fail(res, 403, 'fix_needs_owner', 'Fix with agent needs an owner device, captures enabled, and a connected coding agent.')
-        }
-        // Images for a model that does not take them are stored, then dropped
-        // before the request, with a note in the chat (run.js).
-        // Composer extras: @ mentions (ids, checked against this board) and text files.
-        const mentions = previous ? [] : validateMentions(config, board, req.body?.mentions)
-        const files = previous ? [] : validateFiles(req.body?.files)
-        const input = previous
-          ? null
-          : { ...validateUserMessage(board, req.body, { extras: mentions.length + files.length }), mentions, files }
-        const editOf = req.body?.editOf ?? null
-        if (editOf !== null && (typeof editOf !== 'string' || editOf.length > 64 || fix || previous))
-          return fail(res, 400, 'bad_edit', 'editOf is the id of one of your messages in this thread.')
-        // An edit or a new answer rewrites the thread (and moves an owner
-        // turn's answer, with its Undo, into an earlier version): like
-        // bringing back a version, an owner session's thread needs the owner.
-        if ((editOf !== null || previous) && !controlsAllowed(req, board, threadId)) return controlDenied(res)
-        // The comment's agent status before this run, to put back when the
-        // agent never got to work (feedback-loop.js finishFix).
-        let previousStatus = null
-        if (fix) {
-          const comment = getComment(config, board.id, commentId)
-          previousStatus = comment.agentStatus ?? null
-          if (comment.status !== 'open' || ['queued', 'working'].includes(comment.agentStatus))
-            return fail(res, 409, 'comment_busy', 'This comment is resolved or already with an agent.')
-          if (comment.agentStatus === BRANCH_READY)
-            return fail(res, 409, 'comment_busy', 'A fix for this comment is waiting on a branch. Apply or discard it first.')
-        }
-        if (branchOn) {
-          // The worktree comes first: when the agent cannot work on a branch
-          // here (not a repository, no commit yet, a merge in progress), the
-          // turn does not start and the comment stays as it is.
-          const stored = readThread(config, board.id, threadId).messages
-          const asked = stored.filter((item) => item.role === 'user').length + (previous ? 0 : 1)
-          try {
-            work = await createAgentBranch(config, {
-              prefix: branchModeSettings(config, env).prefix,
-              kind: commentId ? 'comment' : 'chat',
-              boardId: board.id,
-              threadId,
-              commentId,
-              text: commentId ? getComment(config, board.id, commentId).body : '',
-              n: asked,
-            })
-          } catch (error) {
-            if (error instanceof BranchError) return fail(res, error.status, error.code, error.message)
-            log(`branch mode: ${error.message}`)
-            return fail(res, 500, 'branch_mode', 'The agent’s worktree could not be made. See the server log.')
-          }
-        }
-        if (fix) {
-          const claimed = await setAgentStatus(config, board.id, commentId, 'queued', {
-            onlyFrom: [null, 'done', 'needs-human'],
-            actor: 'shapewall',
-          })
-          if (!claimed.changed) return fail(res, 409, 'comment_busy', 'This comment is already with an agent.')
-        }
-        const snapshot = ownerWrites && commentId && allowCapture && !work ? projectSnapshot(config) : null
-        // Branch mode: the checkout should not change. An agent's own tools
-        // (its shell) are not sandboxed, so the chat says when it did.
-        const checkoutBefore = work ? await checkoutSignature(config) : null
-        let userMessage
+  // Sending a message, a fix included. Batch fixes (batch-fixes.js) run each
+  // of their fixes through this same chain (runBatchItem below).
+  const sendMessage = handle(async (req, res, board, threadId) => {
+    const { controller, current, backend, ownerWrites, branchOn } = res.locals.run
+    res.locals.agentOperationRunning = true
+    // Branch mode: this turn's worktree ({ tree, meta, root }); removed at
+    // the end unless the agent's work was committed on its branch.
+    let work = null
+    try {
+      const fix = req.body?.fix === true
+      // Regenerate: the same request again, the new answer in the old one's
+      // place (threads.js replaceAnswer). Only the thread's latest answer.
+      const regenerate = req.body?.regenerate === undefined ? null : String(req.body.regenerate)
+      let previous = null
+      if (regenerate !== null) {
+        if (fix) return fail(res, 400, 'bad_regenerate', 'Regenerate and Fix with agent do not go together.')
+        const stored = readThread(config, board.id, threadId).messages
+        const last = stored.at(-1)
+        if (!last || last.id !== regenerate || last.role !== 'assistant' || last.starter || stored.at(-2)?.role !== 'user')
+          return fail(res, 409, 'cannot_regenerate', 'Only the latest answer to a message can be regenerated.')
+        if (chatBytes(config, board.id) + Buffer.byteLength(JSON.stringify(last)) > limit.chatBytesMax)
+          return fail(res, 413, 'chat_quota', 'Chat storage for this board is full. Clear a thread to free space.')
+        previous = last
+      }
+      if (fix && runs.size > 1 && !branchOn) return fail(res, 409, 'agent_running', 'Wait for other agent turns before starting a fix.')
+      res.locals.run.fix = fix
+      const commentId = commentIdOf(threadId)
+      if (fix && (!ownerWrites || !allowCapture || !commentId || backend.id !== 'acp')) {
+        return fail(res, 403, 'fix_needs_owner', 'Fix with agent needs an owner device, captures enabled, and a connected coding agent.')
+      }
+      // Images for a model that does not take them are stored, then dropped
+      // before the request, with a note in the chat (run.js).
+      // Composer extras: @ mentions (ids, checked against this board) and text files.
+      const mentions = previous ? [] : validateMentions(config, board, req.body?.mentions)
+      const files = previous ? [] : validateFiles(req.body?.files)
+      const input = previous
+        ? null
+        : { ...validateUserMessage(board, req.body, { extras: mentions.length + files.length }), mentions, files }
+      const editOf = req.body?.editOf ?? null
+      if (editOf !== null && (typeof editOf !== 'string' || editOf.length > 64 || fix || previous))
+        return fail(res, 400, 'bad_edit', 'editOf is the id of one of your messages in this thread.')
+      // An edit or a new answer rewrites the thread (and moves an owner
+      // turn's answer, with its Undo, into an earlier version): like
+      // bringing back a version, an owner session's thread needs the owner.
+      if ((editOf !== null || previous) && !controlsAllowed(req, board, threadId)) return controlDenied(res)
+      // The comment's agent status before this run, to put back when the
+      // agent never got to work (feedback-loop.js finishFix).
+      let previousStatus = null
+      if (fix) {
+        const comment = getComment(config, board.id, commentId)
+        previousStatus = comment.agentStatus ?? null
+        if (comment.status !== 'open' || ['queued', 'working'].includes(comment.agentStatus))
+          return fail(res, 409, 'comment_busy', 'This comment is resolved or already with an agent.')
+        if (comment.agentStatus === BRANCH_READY)
+          return fail(res, 409, 'comment_busy', 'A fix for this comment is waiting on a branch. Apply or discard it first.')
+      }
+      if (branchOn) {
+        // The worktree comes first: when the agent cannot work on a branch
+        // here (not a repository, no commit yet, a merge in progress), the
+        // turn does not start and the comment stays as it is.
+        const stored = readThread(config, board.id, threadId).messages
+        const asked = stored.filter((item) => item.role === 'user').length + (previous ? 0 : 1)
         try {
-          userMessage = previous
-            ? readThread(config, board.id, threadId).messages.at(-2)
-            : await appendUserMessage(config, board.id, threadId, input, {
-                quotaBytes: limit.chatBytesMax,
-                viewer: res.locals.viewer,
-                editOf,
-              })
-        } catch (error) {
-          if (fix) await setAgentStatus(config, board.id, commentId, 'needs-human', { onlyFrom: ['queued'], actor: 'shapewall' })
-          throw error
-        }
-        if (ownerWrites) ownerThreads.add(`${board.id}/${threadId}`)
-        if (editOf !== null) resetSessions(`${board.id}/${threadId}`)
-        if (controller.signal.aborted) {
-          if (fix) await setAgentStatus(config, board.id, commentId, 'needs-human', { onlyFrom: ['queued'], actor: 'shapewall' })
-          return
-        }
-        if (fix) {
-          const working = await setAgentStatus(config, board.id, commentId, 'working', { onlyFrom: ['queued'], actor: 'shapewall' })
-          if (!working.changed)
-            return fail(res, 409, 'comment_changed', 'The comment changed before the agent started. Review it and try again.')
-        }
-        res.writeHead(200, {
-          'Content-Type': 'text/event-stream; charset=utf-8',
-          'Cache-Control': 'no-store',
-          'X-Accel-Buffering': 'no',
-          Connection: 'keep-alive',
-        })
-        res.flushHeaders?.()
-        const emit = (event, data) => {
-          if (!res.writableEnded) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
-        }
-        res.locals.run.keepalive = setInterval(() => {
-          if (!res.writableEnded) res.write(': ping\n\n')
-        }, limit.keepaliveMs)
-        try {
-          emit('user', { message: userMessage })
-          let { messages } = readThread(config, board.id, threadId)
-          if (previous) {
-            messages = messages.filter((item) => item.id !== previous.id)
-            // An ACP agent keeps its own session, which saw the old answer.
-            if (backend.id === 'acp')
-              messages[messages.length - 1] = {
-                ...messages.at(-1),
-                text: `[Shapewall] The person asked for a new answer to this same message. Answer it again from the start.\n\n${messages.at(-1).text || ''}`,
-              }
-          }
-          const requestedPages = new Set()
-          // An owner's turn: what it changes becomes the run summary, with Undo
-          // for an ACP agent's file edits (turn-changes.js).
-          const serial = ++turnSerial
-          const overlappedAtStart = runs.size > 1
-          const baseline = ownerWrites
-            ? await beginTurnChanges(config, { comments: listComments(config, board.id), files: backend.id === 'acp' && !work }).catch(
-                (error) => {
-                  log(`run summary: ${error.message}`)
-                  return null
-                },
-              )
-            : null
-          const reply = await runTurn({
-            config,
-            board,
+          work = await createAgentBranch(config, {
+            prefix: branchModeSettings(config, env).prefix,
+            kind: commentId ? 'comment' : 'chat',
+            boardId: board.id,
             threadId,
-            messages,
-            backend,
-            model: current.model,
-            // The composer's model picker (an endpoint's own list), owner turns only.
-            modelOverride: ownerWrites ? chosenModel(current, `${board.id}/${threadId}`) : null,
-            // The owner's own feedback notes go to the owner's turns only (ratings-core.js downNotes).
-            ownerTurn: res.locals.viewer === 'owner',
-            // The composer's options for this chat (an ACP session's own), owner turns only.
-            choices: ownerWrites && backend.id === 'acp' ? cleanChoices(req.body?.options) : null,
-            emit,
-            signal: controller.signal,
-            ownerWrites,
-            allowCapture,
-            capture,
-            requestedPages,
-            // Branch mode: the agent's cwd, file sandbox and commands are the worktree.
-            workdir: work ? worktreeWorkdir(work) : null,
+            commentId,
+            text: commentId ? getComment(config, board.id, commentId).body : '',
+            n: asked,
           })
-          health.record(current, reply)
-          // What the profile offers, as this turn's session saw it; a turn that
-          // could not sign in drops what was known (the next look starts fresh).
-          if (reply.error?.code === 'agent_auth') optionsCache.drop(current)
-          else if (backend.id === 'acp') rememberSession(current, backend, `${board.id}/${threadId}`)
-          if (work) {
-            emit('status', { text: 'Committing the agent’s work on its branch' })
-            await finishBranchTurn({
-              work,
-              board,
-              threadId,
-              commentId,
-              reply,
-              baseline,
-              fix,
-              previousStatus,
-              requestedPages,
-              checkoutBefore,
-              userText: userMessage?.text || '',
-              signal: controller.signal,
-            })
-          } else if (baseline) {
-            try {
-              const { summary, undo } = await finishTurnChanges(config, baseline, {
-                comments: listComments(config, board.id),
-                board,
-                reply,
-                pageIds: [...requestedPages],
-                commentId,
-                overlapped: overlappedAtStart || serial !== turnSerial || runs.size > 1,
-              })
-              if (summary) reply.summary = summary
-              if (undo) rememberUndo(`${board.id}/${threadId}/${reply.id}`, undo)
-            } catch (error) {
-              log(`run summary: ${error.message}`)
-            }
-          }
-          if (snapshot) {
-            const changed = projectChanged(snapshot, projectSnapshot(config))
-            if (fix || changed) {
-              emit('status', { text: changed ? 'Recapturing the changed page' : 'Checking the fix' })
-              await finishFix({
-                config,
-                board,
-                id: commentId,
-                reply,
-                changed,
-                pageIds: [...requestedPages],
-                capture,
-                signal: controller.signal,
-                previousStatus,
-                log,
-              })
-            }
-          }
-          if (previous) await replaceAnswer(config, board.id, threadId, previous.id, reply)
-          else await appendAssistantMessage(config, board.id, threadId, reply)
-          emit('done', { message: reply })
-        } finally {
-          clearInterval(res.locals.run.keepalive)
-          if (!res.writableEnded) res.end()
-        }
-      } finally {
-        // A worktree that holds no committed work (nothing changed, the turn
-        // never started, an error): removed now, not left for the sweep.
-        if (work && !work.kept) await discardAgentBranch(config, work.meta).catch((error) => log(`branch mode: ${error.message}`))
-        try {
-          await res.locals.releaseAgentOperation()
-        } finally {
-          res.locals.agentOperationRunning = false
-          if (runs.get(`${board.id}/${threadId}`) === res.locals.run) runs.delete(`${board.id}/${threadId}`)
+        } catch (error) {
+          if (error instanceof BranchError) return fail(res, error.status, error.code, error.message)
+          log(`branch mode: ${error.message}`)
+          return fail(res, 500, 'branch_mode', 'The agent’s worktree could not be made. See the server log.')
         }
       }
+      if (fix) {
+        const claimed = await setAgentStatus(config, board.id, commentId, 'queued', {
+          onlyFrom: [null, 'done', 'needs-human'],
+          actor: 'shapewall',
+        })
+        if (!claimed.changed) return fail(res, 409, 'comment_busy', 'This comment is already with an agent.')
+      }
+      const snapshot = ownerWrites && commentId && allowCapture && !work ? projectSnapshot(config) : null
+      // Branch mode: the checkout should not change. An agent's own tools
+      // (its shell) are not sandboxed, so the chat says when it did.
+      const checkoutBefore = work ? await checkoutSignature(config) : null
+      let userMessage
+      try {
+        userMessage = previous
+          ? readThread(config, board.id, threadId).messages.at(-2)
+          : await appendUserMessage(config, board.id, threadId, input, {
+              quotaBytes: limit.chatBytesMax,
+              viewer: res.locals.viewer,
+              editOf,
+            })
+      } catch (error) {
+        if (fix) await setAgentStatus(config, board.id, commentId, 'needs-human', { onlyFrom: ['queued'], actor: 'shapewall' })
+        throw error
+      }
+      if (ownerWrites) ownerThreads.add(`${board.id}/${threadId}`)
+      if (editOf !== null) resetSessions(`${board.id}/${threadId}`)
+      if (controller.signal.aborted) {
+        if (fix) await setAgentStatus(config, board.id, commentId, 'needs-human', { onlyFrom: ['queued'], actor: 'shapewall' })
+        return
+      }
+      if (fix) {
+        const working = await setAgentStatus(config, board.id, commentId, 'working', { onlyFrom: ['queued'], actor: 'shapewall' })
+        if (!working.changed)
+          return fail(res, 409, 'comment_changed', 'The comment changed before the agent started. Review it and try again.')
+      }
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'X-Accel-Buffering': 'no',
+        Connection: 'keep-alive',
+      })
+      res.flushHeaders?.()
+      const emit = (event, data) => {
+        if (!res.writableEnded) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
+      }
+      res.locals.run.keepalive = setInterval(() => {
+        if (!res.writableEnded) res.write(': ping\n\n')
+      }, limit.keepaliveMs)
+      try {
+        emit('user', { message: userMessage })
+        let { messages } = readThread(config, board.id, threadId)
+        if (previous) {
+          messages = messages.filter((item) => item.id !== previous.id)
+          // An ACP agent keeps its own session, which saw the old answer.
+          if (backend.id === 'acp')
+            messages[messages.length - 1] = {
+              ...messages.at(-1),
+              text: `[Shapewall] The person asked for a new answer to this same message. Answer it again from the start.\n\n${messages.at(-1).text || ''}`,
+            }
+        }
+        const requestedPages = new Set()
+        // An owner's turn: what it changes becomes the run summary, with Undo
+        // for an ACP agent's file edits (turn-changes.js).
+        const serial = ++turnSerial
+        const overlappedAtStart = runs.size > 1
+        const baseline = ownerWrites
+          ? await beginTurnChanges(config, { comments: listComments(config, board.id), files: backend.id === 'acp' && !work }).catch(
+              (error) => {
+                log(`run summary: ${error.message}`)
+                return null
+              },
+            )
+          : null
+        const reply = await runTurn({
+          config,
+          board,
+          threadId,
+          messages,
+          backend,
+          model: current.model,
+          // The composer's model picker (an endpoint's own list), owner turns only.
+          modelOverride: ownerWrites ? chosenModel(current, `${board.id}/${threadId}`) : null,
+          // The owner's own feedback notes go to the owner's turns only (ratings-core.js downNotes).
+          ownerTurn: res.locals.viewer === 'owner',
+          // The composer's options for this chat (an ACP session's own), owner turns only.
+          choices: ownerWrites && backend.id === 'acp' ? cleanChoices(req.body?.options) : null,
+          emit,
+          signal: controller.signal,
+          ownerWrites,
+          allowCapture,
+          capture,
+          requestedPages,
+          // Branch mode: the agent's cwd, file sandbox and commands are the worktree.
+          workdir: work ? worktreeWorkdir(work) : null,
+        })
+        health.record(current, reply)
+        // What the profile offers, as this turn's session saw it; a turn that
+        // could not sign in drops what was known (the next look starts fresh).
+        if (reply.error?.code === 'agent_auth') optionsCache.drop(current)
+        else if (backend.id === 'acp') rememberSession(current, backend, `${board.id}/${threadId}`)
+        if (work) {
+          emit('status', { text: 'Committing the agent’s work on its branch' })
+          await finishBranchTurn({
+            work,
+            board,
+            threadId,
+            commentId,
+            reply,
+            baseline,
+            fix,
+            previousStatus,
+            requestedPages,
+            checkoutBefore,
+            userText: userMessage?.text || '',
+            signal: controller.signal,
+          })
+        } else if (baseline) {
+          try {
+            const { summary, undo } = await finishTurnChanges(config, baseline, {
+              comments: listComments(config, board.id),
+              board,
+              reply,
+              pageIds: [...requestedPages],
+              commentId,
+              overlapped: overlappedAtStart || serial !== turnSerial || runs.size > 1,
+            })
+            if (summary) reply.summary = summary
+            if (undo) rememberUndo(`${board.id}/${threadId}/${reply.id}`, undo)
+          } catch (error) {
+            log(`run summary: ${error.message}`)
+          }
+        }
+        if (snapshot) {
+          const changed = projectChanged(snapshot, projectSnapshot(config))
+          if (fix || changed) {
+            emit('status', { text: changed ? 'Recapturing the changed page' : 'Checking the fix' })
+            await finishFix({
+              config,
+              board,
+              id: commentId,
+              reply,
+              changed,
+              pageIds: [...requestedPages],
+              capture,
+              signal: controller.signal,
+              previousStatus,
+              log,
+            })
+          }
+        }
+        if (previous) await replaceAnswer(config, board.id, threadId, previous.id, reply)
+        else await appendAssistantMessage(config, board.id, threadId, reply)
+        emit('done', { message: reply })
+      } finally {
+        clearInterval(res.locals.run.keepalive)
+        if (!res.writableEnded) res.end()
+      }
+    } finally {
+      // A worktree that holds no committed work (nothing changed, the turn
+      // never started, an error): removed now, not left for the sweep.
+      if (work && !work.kept) await discardAgentBranch(config, work.meta).catch((error) => log(`branch mode: ${error.message}`))
+      try {
+        await res.locals.releaseAgentOperation()
+      } finally {
+        res.locals.agentOperationRunning = false
+        if (runs.get(`${board.id}/${threadId}`) === res.locals.run) runs.delete(`${board.id}/${threadId}`)
+      }
+    }
+  })
+  router.post('/boards/:id/threads/:thread/messages', findThread, admitMessage, express.json({ limit: BODY_LIMIT }), sendMessage)
+
+  // ---- Batch fixes (batch-fixes.js) -------------------------------------------
+  //
+  // One fix of a batch: the request that started the batch, replayed in this
+  // process for one comment thread (its owner headers, never stored), through
+  // findThread, admitMessage and sendMessage like a click on Fix with agent.
+  // The answer streams into a response object here instead of a browser;
+  // the thread keeps it like any other.
+  const batchRequest = (startReq, boardId, commentId) => ({
+    method: 'POST',
+    url: `/boards/${boardId}/threads/comment-${commentId}/messages`,
+    headers: Object.fromEntries(
+      Object.entries(startReq.headers).filter(([name]) => !['content-length', 'content-type', 'transfer-encoding'].includes(name)),
+    ),
+    socket: { remoteAddress: startReq.socket?.remoteAddress },
+    secure: startReq.secure,
+    shapewallAccess: startReq.shapewallAccess,
+    localAccountChecked: startReq.localAccountChecked,
+    localAccount: startReq.localAccount,
+    aborted: false,
+    params: { id: boardId, thread: `comment-${commentId}` },
+    query: {},
+    body: { text: BATCH_FIX_PROMPT, fix: true },
+  })
+  const batchResponse = ({ onEvent }) => {
+    const res = new EventEmitter()
+    let buffer = ''
+    Object.assign(res, {
+      locals: {},
+      statusCode: 200,
+      headersSent: false,
+      writableEnded: false,
+      destroyed: false,
+      body: null,
+      status(code) {
+        res.statusCode = code
+        return res
+      },
+      json(value) {
+        res.body = value
+        res.headersSent = true
+        res.end()
+        return res
+      },
+      setHeader() {},
+      append() {},
+      writeHead(code) {
+        res.statusCode = code
+        res.headersSent = true
+      },
+      flushHeaders() {},
+      write(chunk) {
+        buffer += String(chunk)
+        let end
+        while ((end = buffer.indexOf('\n\n')) >= 0) {
+          const block = buffer.slice(0, end)
+          buffer = buffer.slice(end + 2)
+          const name = /^event: (.+)$/m.exec(block)?.[1]
+          const data = /^data: (.+)$/m.exec(block)?.[1]
+          if (!name || !data) continue
+          try {
+            onEvent(name, JSON.parse(data))
+          } catch {
+            // A malformed event changes nothing about the fix itself.
+          }
+        }
+        return true
+      },
+      end() {
+        if (res.writableEnded) return
+        res.writableEnded = true
+        res.emit('finish')
+        res.emit('close')
+      },
+      // The batch was cancelled before this fix took its slot.
+      destroy() {
+        if (res.destroyed || res.writableEnded) return
+        res.destroyed = true
+        res.emit('close')
+      },
+    })
+    return res
+  }
+  // Starts one fix; { done, cancel } for the queue. Busy (another answer,
+  // the rate limit) waits and tries again for up to a minute.
+  const runBatchItem =
+    (startReq) =>
+    async (boardId, commentId, { onApproval }) => {
+      const key = `${boardId}/comment-${commentId}`
+      let cancelled = false
+      let res = null
+      const cancel = () => {
+        cancelled = true
+        const run = runs.get(key)
+        if (run && run === res?.locals.run) run.controller.abort('stopped')
+        else res?.destroy()
+      }
+      const once = async () => {
+        const cards = new Map()
+        let answer = null
+        res = batchResponse({
+          onEvent: (name, data) => {
+            if (name === 'tool' && data?.id) {
+              cards.set(data.id, data)
+              const pending = [...cards.values()].find((card) => card.kind === 'permission' && card.state === 'pending')
+              // Everything the card shows the person, so the batch's card can be answered as fully informed.
+              onApproval(
+                pending
+                  ? {
+                      id: pending.id,
+                      label: pending.label,
+                      name: pending.name,
+                      detail: pending.detail || null,
+                      diff: pending.diff || null,
+                      options: pending.options || [],
+                      expiresAt: pending.expiresAt || null,
+                    }
+                  : null,
+              )
+            }
+            if (name === 'done') answer = data?.message || null
+          },
+        })
+        const req = batchRequest(startReq, boardId, commentId)
+        const closed = new Promise((resolve) => res.once('close', () => resolve(false)))
+        const passed = (middleware) => Promise.race([new Promise((resolve) => middleware(req, res, () => resolve(true))), closed])
+        if ((await passed(findThread)) && (await passed(admitMessage))) await sendMessage(req, res)
+        return { status: res.statusCode, error: res.body?.error || null, answer }
+      }
+      const done = (async () => {
+        for (let attempt = 0; ; attempt++) {
+          if (cancelled) return { skipped: true, message: 'Stopped when the batch was cancelled.' }
+          const result = await once()
+          const busy = [429].includes(result.status) || ['agent_running', 'test_running'].includes(result.error?.code)
+          if (busy && attempt < 30 && !cancelled) {
+            await new Promise((resolve) => setTimeout(resolve, 2000).unref?.())
+            continue
+          }
+          if (result.error) {
+            const skip = ['comment_busy', 'comment_changed', 'unknown_thread'].includes(result.error.code)
+            return { fixed: false, skipped: skip, message: result.error.message }
+          }
+          let comment = null
+          try {
+            comment = getComment(config, boardId, commentId)
+          } catch {
+            return { skipped: true, message: 'The comment was deleted.' }
+          }
+          const fixed = ['done', BRANCH_READY].includes(comment.agentStatus)
+          return {
+            fixed,
+            message: fixed ? null : stopReason(result.answer, cancelled ? { aborted: true } : null),
+          }
+        }
+      })()
+      return { done, cancel }
+    }
+  // The queue's runItem for the batch being started (the queue runs one batch
+  // per board, so the start request in effect is that batch's).
+  const batchStarts = new Map()
+  const batchQueue = createBatchQueue({
+    runItem: (boardId, commentId, hooks) => runBatchItem(batchStarts.get(boardId))(boardId, commentId, hooks),
+    onChange: (boardId) => batchEvents.changed(boardId),
+    log,
+  })
+  router.batchQueue = batchQueue
+  // Who hears it: the owner's open GET /events streams.
+  const batchListeners = new Set()
+  const batchEvents = {
+    changed: (boardId) => {
+      for (const listener of [...batchListeners]) listener({ boardId, at: new Date().toISOString() })
+    },
+  }
+  // Owner only, the same as Fix with agent: an owner device, captures on, a
+  // coding agent over ACP. Hosted boards do not mount this router.
+  const batchAllowed = (req, res) => {
+    if (!ownerWritesFor(req) || !sameOriginWrite(req) || !agentOwner(req)) {
+      controlDenied(res)
+      return false
+    }
+    const current = settings()
+    if (!allowCapture || current.backend !== 'acp' || !current.configured) {
+      fail(res, 403, 'fix_needs_owner', 'Fix with agent needs an owner device, captures enabled, and a connected coding agent.')
+      return false
+    }
+    return true
+  }
+  router.get(
+    '/boards/:id/batch',
+    findThread,
+    handle((req, res, board) => {
+      if (!ownerWritesFor(req)) return controlDenied(res)
+      res.json({ settings: batchFixSettings(config, env), batch: batchQueue.state(board.id) })
+    }),
+  )
+  router.post(
+    '/boards/:id/batch',
+    findThread,
+    express.json({ limit: SMALL_BODY_LIMIT }),
+    handle((req, res, board) => {
+      if (!batchAllowed(req, res)) return
+      const options = batchFixSettings(config, env)
+      if (!options.enabled) return fail(res, 403, 'batch_off', 'Batch fixes are off. Turn them on in Agents first.')
+      if (batchQueue.running(board.id))
+        return fail(res, 409, 'batch_running', 'A batch of fixes is already running on this board. Wait for it or cancel it first.')
+      const given = req.body?.commentIds
+      if (!Array.isArray(given) || !given.length || given.length > 500)
+        return fail(res, 400, 'bad_batch', 'commentIds: the ids of the open comments to fix, in order.')
+      if (given.some((id) => !Number.isSafeInteger(id) || id < 1)) return fail(res, 400, 'bad_batch', 'commentIds: whole numbers.')
+      const comments = new Map(listComments(config, board.id).map((comment) => [comment.id, comment]))
+      const ids = [...new Set(given)]
+      for (const id of ids) {
+        const comment = comments.get(id)
+        if (!comment) return fail(res, 404, 'unknown_comment', `No comment #${id} on this board.`)
+        if (comment.status !== 'open') return fail(res, 409, 'comment_busy', `Comment #${id} is resolved.`)
+        if (['queued', 'working', BRANCH_READY].includes(comment.agentStatus))
+          return fail(res, 409, 'comment_busy', `Comment #${id} is already with an agent.`)
+      }
+      // What the replayed requests need from this one (owner headers, kept in memory only).
+      batchStarts.set(board.id, {
+        headers: { ...req.headers },
+        socket: { remoteAddress: req.socket?.remoteAddress },
+        secure: req.secure,
+        shapewallAccess: req.shapewallAccess,
+        localAccountChecked: req.localAccountChecked,
+        localAccount: req.localAccount,
+      })
+      const batch = batchQueue.start({
+        boardId: board.id,
+        commentIds: ids,
+        max: options.max,
+        agent: publicAgentInfo(settings()).label || null,
+      })
+      res.json({ batch })
+    }),
+  )
+  router.post(
+    '/boards/:id/batch/cancel',
+    findThread,
+    handle((req, res, board) => {
+      if (!ownerWritesFor(req) || !sameOriginWrite(req)) return controlDenied(res)
+      res.json({ batch: batchQueue.cancel(board.id) })
+    }),
+  )
+  router.delete(
+    '/boards/:id/batch',
+    findThread,
+    handle((req, res, board) => {
+      if (!ownerWritesFor(req) || !sameOriginWrite(req)) return controlDenied(res)
+      batchQueue.clear(board.id)
+      res.json({ batch: null })
     }),
   )
 
@@ -949,6 +1203,11 @@ export function agentRouter({
     const stop = settingsEvents.subscribe((event) => {
       if (!res.writableEnded) res.write(`event: ${AGENTS_EVENT}\ndata: ${JSON.stringify({ at: event.at })}\n\n`)
     })
+    // A board's batch of fixes moved on (owner streams only): { board, at }.
+    const batchListener = (event) => {
+      if (!res.writableEnded) res.write(`event: batch\ndata: ${JSON.stringify({ board: event.boardId, at: event.at })}\n\n`)
+    }
+    if (ownerWritesFor(req)) batchListeners.add(batchListener)
     const keepalive = setInterval(() => {
       if (!res.writableEnded) res.write(': ping\n\n')
     }, limit.keepaliveMs)
@@ -957,6 +1216,7 @@ export function agentRouter({
     const done = () => {
       clearInterval(keepalive)
       stop()
+      batchListeners.delete(batchListener)
       eventStreams.delete(res)
     }
     req.on('close', done)

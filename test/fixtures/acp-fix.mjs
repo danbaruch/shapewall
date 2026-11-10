@@ -1,7 +1,10 @@
 // Scripted coding agent for the local feedback-loop fixture. No model calls.
 // Modes: edit (default), fail, no-edit, inspect, login, and branch: like edit,
 // but first checks that it runs in an agent branch worktree and that a write
-// to the person's checkout is refused (agent branch mode).
+// to the person's checkout is refused (agent branch mode). branch-media: like
+// branch, and the comment's images and drawing must arrive as image blocks in
+// the prompt and as readable files outside the worktree through get_comment.
+import fs from 'node:fs'
 import readline from 'node:readline'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
@@ -53,7 +56,7 @@ lines.on('line', async (line) => {
       say(sessionId, 'I need more information.')
       return reply({ stopReason: 'end_turn' })
     }
-    if (mode === 'branch') {
+    if (mode === 'branch' || mode === 'branch-media') {
       const marker = '/.shapewall/agent-worktrees/'
       if (!cwd.includes(marker)) throw new Error(`Not in an agent worktree: ${cwd}`)
       const checkout = cwd.slice(0, cwd.indexOf(marker))
@@ -90,6 +93,19 @@ lines.on('line', async (line) => {
         arguments: { id, body: 'Changed the fixture heading and verified owner tools.' },
       })
       if (result.isError) throw new Error(result.content[0].text)
+      if (mode === 'branch-media') {
+        const images = prompt.filter((block) => block.type === 'image').length
+        if (images < 2) throw new Error(`Expected the comment image and drawing in the prompt, got ${images} images`)
+        const got = await client.callTool({ name: 'get_comment', arguments: { id, image: 'none' } })
+        const item = JSON.parse(got.content.find((block) => block.type === 'text').text).comment
+        const files = [item.files?.markup, ...(item.files?.images || []).map((image) => image.path)]
+        if (files.length < 2 || files.some((file) => !file)) throw new Error(`Missing comment files: ${JSON.stringify(item.files)}`)
+        for (const file of files) {
+          if (file.startsWith(cwd)) throw new Error(`A comment file points into the worktree: ${file}`)
+          if (!fs.statSync(file).isFile()) throw new Error(`Not a file: ${file}`)
+        }
+        say(sessionId, `Saw ${images} images and ${files.length} comment files. `)
+      }
       say(sessionId, `Changed the fixture heading. Owner tools: ${names.join(', ')}.`)
     } finally {
       await client.close()

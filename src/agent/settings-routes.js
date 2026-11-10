@@ -48,6 +48,7 @@ import {
 } from './config.js'
 import { legacyProfile, profileForDefault, projectKey, saveUserAgentEntry, userAgentEntry, validateUserEntry } from './user-settings.js'
 import { DEFAULT_BRANCH_PREFIX, branchModeSettings, cleanBranchPrefix } from './branch-mode.js'
+import { batchFixSettings, cleanBatchFixes } from './batch-fixes.js'
 import { tokenEquals } from '../tokens.js'
 
 const TEST_TIMEOUT_MS = 15000
@@ -570,10 +571,11 @@ export function settingsRoutes({
       return fail(res, 400, 'invalid_settings', 'The settings must be an object.')
     // Old clients save only the default connection. Keep their saved profiles.
     const preserved = input && !Object.hasOwn(input, 'profiles') ? userAgentEntry(config.dir, env).entry?.profiles : undefined
-    // Branch mode has its own route (/branch-mode): a save of the connection keeps it.
+    // Branch mode and batch fixes have their own routes (/branch-mode,
+    // /batch-fixes): a save of the connection keeps them.
     const savedEntry = userAgentEntry(config.dir, env).entry || {}
     const branch = Object.fromEntries(
-      ['branchMode', 'branchPrefix']
+      ['branchMode', 'branchPrefix', 'batchFixes']
         .filter((key) => !Object.hasOwn(input, key) && savedEntry[key] !== undefined)
         .map((key) => [key, savedEntry[key]]),
     )
@@ -743,6 +745,26 @@ export function settingsRoutes({
       return fail(res, 500, 'settings_not_saved', `The setting was not saved: ${error.message}`)
     }
     res.json(branchView())
+  })
+
+  // Batch fixes (batch-fixes.js): GET what is in effect, POST { enabled, max? }
+  // to save it for this project. Off by default; max at most 20.
+  const batchView = () => ({ ...batchFixSettings(config, env), acp: settings().backend === 'acp' })
+  router.get('/batch-fixes', guard, (req, res) => res.json(batchView()))
+  router.post('/batch-fixes', guard, (req, res) => {
+    const { enabled, max } = req.body || {}
+    const { value, problems } = cleanBatchFixes({ enabled, ...(max === undefined ? {} : { max }) })
+    if (!value || typeof enabled !== 'boolean') return fail(res, 400, 'invalid_settings', problems.join('; ') || 'enabled: true or false.')
+    const saved = userAgentEntry(config.dir, env)
+    if (saved.problem) return fail(res, 409, 'settings_file_invalid', saved.problem)
+    const entry = { ...(saved.entry || {}), batchFixes: { ...(saved.entry?.batchFixes || {}), ...value } }
+    delete entry.updatedAt
+    try {
+      saveUserAgentEntry(config.dir, entry, env)
+    } catch (error) {
+      return fail(res, 500, 'settings_not_saved', `The setting was not saved: ${error.message}`)
+    }
+    res.json(batchView())
   })
 
   router.post('/test', guard, async (req, res) => {
