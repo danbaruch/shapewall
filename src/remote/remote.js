@@ -232,6 +232,8 @@ export function createRemote({ origin, token, source = null, fetchImpl = fetch, 
       }
     },
     importComments: (boardId, json) => call('POST', `${board(boardId)}/import`, { json }),
+    // One image of an imported comment, before the batch that lists it.
+    importImage: (boardId, json) => call('POST', `${board(boardId)}/import/images`, { json }),
     download,
   }
 }
