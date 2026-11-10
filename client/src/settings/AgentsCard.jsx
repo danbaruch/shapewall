@@ -24,6 +24,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { AlertTriangle, Bot, ExternalLink, Globe, Lock, Plug, RefreshCw, Trash2 } from 'lucide-react'
 import { api, forgetSettingsToken } from '../lib/api'
+import { useAgentsChanged } from '../lib/agentEvents'
 import { cn } from '../lib/utils'
 import { Badge, Button, Dialog, Spinner } from '../components/ui'
 import { AgentMark } from '../chat/AgentPicker'
@@ -114,6 +115,12 @@ export function AgentsCard({
   useEffect(() => {
     if (!given) load()
   }, [given, load])
+  // Changed elsewhere (another tab, `shapewall settings`, the agents file):
+  // the list is read-only, so it follows at once. A running action reloads
+  // when it finishes.
+  useAgentsChanged(() => {
+    if (!busy) load()
+  }, !given)
   const view = given || loaded
   const changed = async (next) => {
     if (next && !given) setLoaded(next)

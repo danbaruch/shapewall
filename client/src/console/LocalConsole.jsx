@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { ArrowUpRight, Bot, Building2, FolderKanban, LayoutDashboard, LogOut, MessageSquareText, Settings, UserRound } from 'lucide-react'
 import { AppRail, useSidebarExpanded } from '../components/app-rail'
 import { api } from '../lib/api'
+import { useAgentsChanged } from '../lib/agentEvents'
 import { leavePage, useMediaQuery, useParams, useResource } from '../lib/hooks'
 import { cn } from '../lib/utils'
 import { Badge, Button, EmptyState, Spinner, TooltipProvider } from '../components/ui'
@@ -24,6 +25,8 @@ const SECTIONS = [
 // sign in to the hosted console or manufacture hosted workspaces/accounts.
 export default function LocalConsole({ account = null, onSignOut = null }) {
   const info = useResource('/api/info')
+  // The Agents page reads the agent from info: follow changes made elsewhere.
+  useAgentsChanged(info.refetch, Boolean(info.data?.agent))
   const list = useResource('/api/boards')
   const [params, updateParams] = useParams()
   // The Agents card used to head Settings: an old `?section=settings#agents` link opens Agents.

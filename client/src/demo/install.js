@@ -8,6 +8,7 @@
 import { LayoutDashboard, RotateCcw } from 'lucide-react'
 import { leavePage } from '../lib/hooks'
 import { demoBoardFolders, demoFiles, notifyDemo, setDemoBridge } from '../lib/demo'
+import { notifyAgentsChanged } from '../lib/agentEvents'
 import { createDemoBackend } from './backend'
 import { consoleTitle } from './titles'
 import { GUEST_NAME, STATE_VERSION, VIEW_AS, seedState } from './fixtures'
@@ -102,11 +103,21 @@ export async function installDemo(app) {
     // Said in the console (shell.jsx) while it lasts: the next page would not see these changes.
     bridge.storageFull = !writeJson(STATE_KEY, tab ? { ...state, ...shared } : state)
   }
+  // The demo's agents (Agents page, chat picker, Fix with): every open view
+  // of this page and the others refetches when they change (lib/agentEvents.js).
+  let agentsSeen = JSON.stringify(state.agents ?? null)
+  const agentsMoved = () => {
+    const now = JSON.stringify(state.agents ?? null)
+    if (now === agentsSeen) return
+    agentsSeen = now
+    notifyAgentsChanged('event')
+  }
   const save = () => {
     persist()
     bridge.version += 1
     refreshBridge()
     notifyDemo()
+    agentsMoved()
   }
   const bridge = { version: 1, resetAsked: false, storageFull: false }
   const backend = createDemoBackend({
@@ -250,6 +261,7 @@ export async function installDemo(app) {
     bridge.version += 1
     refreshBridge()
     notifyDemo()
+    agentsMoved()
   })
   if (app === 'console') keepConsoleTitle(state)
 }

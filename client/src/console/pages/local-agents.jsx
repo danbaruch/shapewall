@@ -7,11 +7,11 @@
 // Self-hosted multiplayer (`shapewall hosted`) has its own model (project
 // agent tokens, pages/agent.jsx) and never renders this.
 
-import { useState } from 'react'
 import { Bot, Plug } from 'lucide-react'
 import { AgentsCard } from '../../settings/AgentsCard'
 import { AgentDetails } from '../../settings/LocalSettings'
 import { useMediaQuery } from '../../lib/hooks'
+import { notifyAgentsChanged } from '../../lib/agentEvents'
 import { Card, CardHeader, PageHeader } from '../components'
 
 // The Agents page's one line, in the local console and the demo.
@@ -36,10 +36,11 @@ export function LocalAgents({ agent = null, touch, onChanged, onOpenEndpoint = n
 // `info`: /api/info (its `agent`). `onChanged`: after a change on either card.
 export function AgentsPage({ info, touch, onChanged }) {
   // A new default or a removed agent changes what chat uses: the Chat
-  // connection card reloads its answer after each change on the Agents card.
-  const [version, setVersion] = useState(0)
+  // connection card follows, without losing unsaved typing (it listens for
+  // "agents changed", lib/agentEvents.js; this says it at once on this page
+  // too, before the server's event arrives).
   const agentsChanged = async () => {
-    setVersion((value) => value + 1)
+    notifyAgentsChanged('local')
     await onChanged?.()
   }
   return (
@@ -59,7 +60,7 @@ export function AgentsPage({ info, touch, onChanged }) {
           description="What the board chat uses now, the source folder agents work in, and an OpenAI-compatible endpoint."
         />
         <div className="px-4 py-4 sm:px-5">
-          <AgentDetails key={version} info={info} onSaved={onChanged} touch={touch} agentsHome={Boolean(info?.agent)} />
+          <AgentDetails info={info} onSaved={onChanged} touch={touch} agentsHome={Boolean(info?.agent)} />
         </div>
       </Card>
     </div>

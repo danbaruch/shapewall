@@ -14,6 +14,7 @@ import { Lock } from 'lucide-react'
 import { api, fileUrl } from '../lib/api'
 import { cn } from '../lib/utils'
 import { useResource } from '../lib/hooks'
+import { useAgentsChanged } from '../lib/agentEvents'
 import { cropCapture, ATTACH_MAX, fromFile, imageFiles } from './images'
 import { NaturalDownloadStrip } from './ReadAloud'
 import { savedVoice, saveVoice, useDictation, useSpeaker } from './speech'
@@ -108,6 +109,9 @@ export default function ChatPanel({
   // useResource loads the thread; a changed agent (connected, settings saved)
   // loads it again.
   const refetchThread = thread.refetch
+  // The agents changed elsewhere (another tab, the Agents page, the agents
+  // file): the picker's list and the header's agent come with the thread.
+  useAgentsChanged(refetchThread, Boolean(defaultAgent))
   const agentSeen = useRef(defaultAgent)
   useEffect(() => {
     if (agentSeen.current === defaultAgent) return
