@@ -222,6 +222,8 @@ To close the loop without anyone typing a command:
 - `shapewall watch --mention agent` only hands out comments that tag `@agent` (in the text or a reply), so people can talk first.
 - Its status goes `queued`, `working`, then `done` or `needs-human`; a restart or a second watcher never hands one out twice.
 - `shapewall mcp` is an MCP server with tools to list, read (with a crop of the screenshot), reply, set status, resolve and recapture.
+- Comments can carry images and a drawing on the page; agents get both
+  ([images and drawings on comments](docs/agent-workflow.md#images-and-drawings-on-comments)).
 - With Shapewall installed in your project: `claude mcp add shapewall -- npx shapewall mcp`; Codex and other clients in
   [docs/agent-workflow.md](docs/agent-workflow.md).
 
@@ -257,7 +259,9 @@ one-time download of about 90 MB; the text never leaves the browser). Connect an
 in `SHAPEWALL_AGENT_API_KEY` (OpenAI, DeepSeek, OpenRouter, or Ollama with no key), or an agent CLI on your machine over ACP with its
 own subscription login: `shapewall serve --agent-acp "claude-agent-acp"` (also `codex-acp`, `goose acp`, `gemini --acp`). Or skip the
 flags: open the board with `shapewall serve --open` and click **Connect** next to the agent CLI it found on your machine. Board text
-goes to the agent as quoted data, never as instructions. Details: [docs/agents.md](docs/agents.md).
+goes to the agent as quoted data, never as instructions. Optional, on the Agents page: an agent CLI can
+[work on a branch](docs/agents.md#work-on-a-branch) instead of your checkout, and
+[fix several comments at once](docs/agents.md#fix-several-comments-at-once), one after another. Details: [docs/agents.md](docs/agents.md).
 
 ### The sandboxed starter agent
 

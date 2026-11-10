@@ -188,7 +188,7 @@ const FEATURES = [
   {
     icon: MapPin,
     title: 'Comments on the element',
-    text: 'A pin stores the selector and text of what you clicked, so it follows the button through the next capture.',
+    text: 'A pin stores the selector and text of what you clicked, so it follows the button through the next capture. Add images or draw on the page.',
   },
   {
     icon: Bot,
@@ -315,6 +315,7 @@ function BeforeAfterSection() {
               'Before and after on each resolved comment',
               'Staging next to production, page by page',
               'Variants: try a direction without replacing the page',
+              'On every pull request: one comment with the pages that changed',
             ].map((item) => (
               <li key={item} className="flex gap-3">
                 <span className="mt-2 size-1.5 shrink-0 rounded-full bg-pin" aria-hidden="true" />

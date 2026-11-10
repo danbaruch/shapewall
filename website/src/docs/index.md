@@ -26,7 +26,12 @@ for a team.
 - [Getting started](/docs/getting-started): install, write a config, capture and open the board.
 - [Config reference](/docs/config): every key in `shapewall.config.json`.
 - [Journeys](/docs/journeys) and [before, after and staging](/docs/compare): flows through your pages and comparing versions.
-- [The agent workflow](/docs/agent-workflow): hand comments to Claude Code, Codex or any agent.
+- [The agent workflow](/docs/agent-workflow): hand comments to Claude Code, Codex or any agent, with the
+  [images and drawings on a comment](/docs/agent-workflow#images-and-drawings-on-comments) (how to add them:
+  [Getting started](/docs/getting-started#images-and-drawings)).
+- [Chat with an agent](/docs/chat): connect a model or an agent CLI, let it [work on a branch](/docs/chat#work-on-a-branch) and
+  [fix several comments at once](/docs/chat#fix-several-comments-at-once).
+- [Capture on pull requests](/docs/pull-requests): one comment on each pull request with what changed, before and after.
 - [Agent recipes](/docs/agent-recipes): copy-paste commands for Claude Code, Codex, goose, Ollama and chat bots.
 - [GitHub connect](/docs/github) and [notifications](/docs/notifications): issues and pull requests from comments, and messages to a
   webhook, Slack, Discord or email.

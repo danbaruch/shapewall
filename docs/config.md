@@ -443,6 +443,11 @@ variable holding the key, default `SHAPEWALL_AGENT_API_KEY`), `label`, `vision` 
 variable. A key goes only to this machine, a known hosted API, or a host confirmed in `SHAPEWALL_AGENT_KEY_HOSTS`.
 Environment overrides: `SHAPEWALL_AGENT_BASE_URL`, `SHAPEWALL_AGENT_MODEL`. See [agents.md](agents.md).
 
+How fixes run, both off by default and also on the Agents page of the Workspace Console (saved settings win over these):
+`branchMode` (`true` runs an agent CLI's fixes on a branch of their own) with `branchPrefix` (default `"shapewall/"`), see
+[Work on a branch](agents.md#work-on-a-branch); and `batchFixes` (`{ "enabled": true, "max": 5 }`, `max` from 1 to 20), see
+[Fix several comments at once](agents.md#fix-several-comments-at-once).
+
 ## Auth
 
 Never put credentials in the config. Two options:

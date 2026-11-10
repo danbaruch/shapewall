@@ -3,12 +3,20 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.3.0 - 2026-11-10
 
 - Agent works on a branch: an option, off by default, that runs an ACP agent's fixes and chat turns in a copy of your checkout and
   commits them on a branch of their own. The comment reads "Fix ready on branch", and the chat offers Apply to my checkout, Open
   folder, Copy branch name and Discard. Apply recaptures the page with before and after; a conflict changes nothing. See
   "Work on a branch" in docs/agents.md.
+- The Agents page of the Workspace Console has a How fixes run card: the Work on a branch switch with its branch prefix (the same
+  setting as the chat's switch), and the batch fixes switch with its limit. A change to either shows in every open view.
+- Batch fixes: an option, off by default, to fix several open comments one after another. In the comments panel choose Select, tick
+  comments (or Select all, up to the limit) and Fix N with the agent; a dialog lists them first. Each comment is an ordinary fix with
+  its own thread, approvals, recapture and Undo, and in branch mode its own branch. A card in the chat and a strip in the comments
+  panel show "Fixing 2 of 5" and each comment's state, also after a reload. The batch waits for an approval, stops on Cancel and after
+  two failures in a row. Set `"agent": { "batchFixes": { "enabled": true, "max": 5 } }` (at most 20) or use the Agents page. Not on
+  the hosted server. See "Fix several comments at once" in docs/agents.md.
 - `shapewall doctor` reports agent branches left in the project.
 - Capture on pull requests: `shapewall init --ci` writes a GitHub Actions workflow that captures the base branch and the pull request,
   compares every page and screen size with the pixel diff, and keeps one comment on the pull request up to date ("Shapewall: 4 of 23
@@ -26,7 +34,10 @@ and the project uses [Semantic Versioning](https://semver.org/).
   `get_comment` tool, `watch --exec` and Fix with agent.
 - Hosted boards keep comment images in the database, count them against the storage quota and include them in exports and in
   `shapewall share`. Share link guests can draw but not attach images.
-- The demo takes images and drawings in the browser and shows two example comments with an image.
+- The demo takes images and drawings in the browser and shows example comments with an image and a drawing, one of them with a fix
+  ready on a branch. Its Agents page has the How fixes run card, and its scripted agent runs batch fixes.
+- While you draw on a page, the collapsed sidebar's flyouts stay closed and the journey bar is hidden, so nothing covers the drawing
+  bar.
 
 ## 0.2.4 - 2026-11-10
 

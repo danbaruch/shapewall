@@ -54,6 +54,7 @@ const SECTIONS = [
     text: 'Click Comment, click the button that needs work and say what should change. The comment stores a selector and the element text, so after the next capture the pin follows the button, not the old pixel. If the element is gone, the pin says so.',
     points: [
       'Resolve, reopen, search and filter by state',
+      'Images and a drawing on the page: boxes, arrows and pen strokes',
       '@mention people, or @agent to hand it to your coding agent',
       'Replies from the agent on what it changed',
       'Works in screenshot mode too, by position',
@@ -78,6 +79,7 @@ const SECTIONS = [
       'Vendor neutral: anything that runs a command or speaks MCP',
       'Comment text reaches the agent as data, never as a command line',
       'Agent status on each pin: queued, working, done, needs a human',
+      'Optional: the agent works on a branch, or fixes several comments in one batch',
       'A hardening guide for connecting an agent to a shared board',
     ],
     links: [
@@ -109,6 +111,7 @@ const SECTIONS = [
     points: [
       'Page history: every kept capture beside the current one, with a pixel diff of what changed in red',
       'Fixed in: a link to the pull request or commit',
+      'On every pull request: one comment with the pages that changed, before, after and diff',
       'Reopen it with a note and the agent picks it up again',
     ],
     art: <BeforeAfter />,

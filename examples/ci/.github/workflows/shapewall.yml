@@ -51,7 +51,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
-      SHAPEWALL: shapewall@0.2.3
+      SHAPEWALL: shapewall@0.3.0
       PLAYWRIGHT: playwright@1.64.1
       # Preview URL mode: the deploy preview of this pull request; empty for build and serve mode.
       # Netlify-style deploy previews:

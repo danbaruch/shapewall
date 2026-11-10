@@ -205,12 +205,13 @@ With **Agent works on a branch** on, an ACP agent (Claude Code, Codex, ...) neve
 runs in a folder of its own, and Shapewall commits what it changed on a new branch. You look at the diff, then apply it or throw it
 away. It is off by default, per project, and changes nothing while off.
 
-**Turn it on** in the chat's settings (the sliders button in the chat header), or set it for a project:
+**Turn it on** on the Agents page of the Workspace Console (Work on a branch, under How fixes run) or in the chat's settings (the
+sliders button in the chat header), or set it for a project:
 
 - `"agent": { "branchMode": true, "branchPrefix": "shapewall/" }` in `shapewall.config.json`, or
 - `SHAPEWALL_AGENT_BRANCH_MODE=1` and `SHAPEWALL_AGENT_BRANCH_PREFIX=review/` in the environment (these win over the other two).
 
-The switch in the chat saves the setting next to the other agent settings ([Where the settings are saved](#where-the-settings-are-saved)).
+Either switch saves the setting next to the other agent settings ([Where the settings are saved](#where-the-settings-are-saved)).
 The prefix is letters, digits, `-`, `_` and `/`, up to 40 characters; the default is `shapewall/`.
 
 **What happens on a turn:**
@@ -251,6 +252,42 @@ The copy has no `node_modules`, so an agent that wants to build or run tests the
 agent's own tools (its shell) are not sandboxed by Shapewall: if your checkout changed during a branch turn, the chat says so.
 Git runs with hooks off (`core.hooksPath=/dev/null`), no submodule recursion, no filters or fsmonitor from the repository, and
 branch names are checked before Git sees them, so neither the agent nor the repository's own config can run code through these steps.
+
+## Fix several comments at once
+
+**Batch fixes** let you pick several open comments and have the agent fix them one after another. It is off by default, per
+project, and while off nothing on the board changes. Each item is an ordinary [Fix with agent](#fix-a-comment-with-your-agent): its
+own thread and run record, its own approvals, its own recapture and its own Undo. In [branch mode](#work-on-a-branch) each comment
+gets its own branch.
+
+**Turn it on** on the Agents page of the Workspace Console (Fix several comments at once, under How fixes run), with the most
+comments one batch may take (1 to 20, 5 by default), or for a project:
+
+- `"agent": { "batchFixes": { "enabled": true, "max": 5 } }` in `shapewall.config.json`.
+
+The switch saves the setting next to the other agent settings ([Where the settings are saved](#where-the-settings-are-saved)), which
+win over the config file. The limit can never be more than 20.
+
+**Run a batch:** in the comments panel choose **Select**, tick open comments (or **Select all**, which takes the visible open
+comments up to the limit), then **Fix N with <agent>**. A dialog lists the comments and, when you picked more than the limit, says
+that only the first ones run. Resolved comments and comments the agent already has are not offered.
+
+**While it runs** a card in the chat panel and a strip at the top of the comments panel show "Fixing 2 of 5" and each comment's state
+(waiting, running, fixed, failed or skipped) with a link to its thread. Both come from the server, so they survive a reload and show
+in every open tab. The batch:
+
+- runs one comment at a time, in the order you picked them;
+- **waits** when the agent asks for permission, and says so: answer in the batch card or in the comment's thread;
+- **stops on Cancel**: the running fix is stopped the normal way (as Stop does) and the rest are skipped;
+- **stops after two failures in a row**, and skips the rest;
+- skips a comment that someone resolved or changed while it waited, or whose thread is busy.
+
+At the end the card shows a summary until you dismiss it. Each page is recaptured right after its own fix, as a single fix does, so
+the next comment's agent sees the page as it is now; captures are not saved up for the end.
+
+**Who may run one:** the same people as a single fix (the project owner on the computer running Shapewall, from the board's own
+page). One batch runs per board at a time; starting a second one is refused with a message. The hosted server (`shapewall hosted`)
+does not offer batch fixes. The demo runs batches with its scripted agent.
 
 ## Agent settings on the board
 
@@ -939,12 +976,22 @@ The panel uses `/api/agent/*` on the local server: JSON in, server-sent events o
 | `GET /api/agent/settings`                                               | Settings > Agent: saved and effective settings, where each comes from                                                                                                                                                                                                                                 |
 | `POST /api/agent/settings`                                              | `{ settings, confirm }`; `{ confirm: [...], confirmHash }` when a dialog is needed                                                                                                                                                                                                                    |
 | `POST /api/agent/settings/test`                                         | Test connection: `{ ok, backend, host, sendsKey, message, details }`                                                                                                                                                                                                                                  |
+| `GET /api/agent/settings/branch-mode`                                   | Work on a branch: `{ enabled, prefix, defaultPrefix, sources, acp }`; `POST` with `{ enabled, prefix? }` saves it                                                                                                                                                                                     |
+| `GET /api/agent/settings/batch-fixes`                                   | Batch fixes: `{ enabled, max, ceiling, sources, acp }`; `POST` with `{ enabled, max? }` saves it                                                                                                                                                                                                      |
+| `GET /api/agent/boards/:id/batch`                                       | Owner only: `{ settings, batch }`, the board's running or last batch (or null)                                                                                                                                                                                                                        |
+| `POST /api/agent/boards/:id/batch`                                      | `{ commentIds }`: starts a batch of the open comments, in that order, up to `max`; `{ batch }`. 403 `batch_off`, 409 `batch_running` or `comment_busy`, 404 `unknown_comment`                                                                                                                         |
+| `POST /api/agent/boards/:id/batch/cancel`                               | Cancels the running batch: the running fix stops, the rest are skipped                                                                                                                                                                                                                                |
+| `DELETE /api/agent/boards/:id/batch`                                    | Dismisses a finished batch's summary                                                                                                                                                                                                                                                                  |
 
 `versions` maps the id of each edited user message on screen to `{ position, total, previous, next }` (version ids, or null). Another
 person's `chat-*` thread answers 404 on every route ([Chat history](#chat-history)).
 
 The three settings routes need the `X-Shapewall-Settings-Token` header ([Who may change them](#who-may-change-them)); `confirm` is the
 `confirmHash` of the items the dialog showed.
+
+A batch is `{ id, state, stopReason, max, requested, current, waiting, items: [{ commentId, state, message }], counts }`: `state` is
+`running`, `waiting` (for an answer to `waiting.card` in the thread `waiting.threadId`), `done`, `cancelled` or `stopped`
+(`stopReason: "failures"`). The `/api/agent/events` stream sends `batch` with `{ board }` when it changes.
 
 An attachment is `{ name, mediaType, data }` (base64), with an optional `source: { kind: "page" | "element", pageId, viewport,
 commentId? }`. The stream sends `user` (the stored message), then any of `status`, `reasoning`, `text`, `tool`, and finally `done` with
