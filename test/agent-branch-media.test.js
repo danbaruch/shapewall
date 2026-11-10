@@ -22,7 +22,11 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const gitEnv = { ...process.env, GIT_CONFIG_NOSYSTEM: '1' }
 for (const key of Object.keys(gitEnv)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CEILING)/.test(key)) delete gitEnv[key]
 const sh = (cwd, ...args) =>
-  execFileSync('git', ['-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgSign=false', ...args], { cwd, encoding: 'utf8', env: gitEnv }).trim()
+  execFileSync('git', ['-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgSign=false', ...args], {
+    cwd,
+    encoding: 'utf8',
+    env: gitEnv,
+  }).trim()
 
 const servers = []
 after(async () => {
@@ -47,7 +51,13 @@ async function serve(name, mode) {
   const env = { ...process.env, XDG_CONFIG_HOME: home, SHAPEWALL_AGENT_SETTINGS_FILE: path.join(home, 'agents.json') }
   delete env.SHAPEWALL_AGENT_BRANCH_MODE
   delete env.SHAPEWALL_AGENT_ACP
-  const app = createApp({ config, env, settingsToken: TOKEN, agentAcp: `${process.execPath} ${fixture} ${mode}`, agentLimits: { burst: 100 } })
+  const app = createApp({
+    config,
+    env,
+    settingsToken: TOKEN,
+    agentAcp: `${process.execPath} ${fixture} ${mode}`,
+    agentLimits: { burst: 100 },
+  })
   const server = await new Promise((resolve) => {
     const listening = app.listen(0, '127.0.0.1', () => resolve(listening))
   })
@@ -64,7 +74,10 @@ test('a fix in branch mode gets the comment image and drawing from the board fol
   fs.writeFileSync(path.join(captures, 'home.desktop.png'), solidPng(400, 300))
   fs.writeFileSync(
     path.join(captures, 'manifest.json'),
-    JSON.stringify({ capturedAt: '2026-01-01T00:00:00.000Z', pages: { home: { desktop: { status: 'ok', version: '20260101T000000000Z-aaaa' } } } }),
+    JSON.stringify({
+      capturedAt: '2026-01-01T00:00:00.000Z',
+      pages: { home: { desktop: { status: 'ok', version: '20260101T000000000Z-aaaa' } } },
+    }),
   )
   const box = {
     tool: 'box',
