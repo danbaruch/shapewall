@@ -401,7 +401,7 @@ export function BoardToolbar({
     >
       <h1 className="sr-only">Shapewall: {boardTitle}</h1>
       <div className={cn('flex min-w-0 items-center', innerGap)} data-sw-toolbar-zone="left">
-        <div className="flex min-w-0 flex-col justify-center" style={fit.centred ? undefined : { maxWidth: TOOLBAR.name.at(-1) }}>
+        <div className="flex min-w-0 flex-col justify-center" style={fit.centred ? undefined : { maxWidth: TOOLBAR.name[fit.step] }}>
           {project && !sidebarTitled ? <ProjectCrumb project={project} /> : null}
           {picker}
         </div>
@@ -439,7 +439,7 @@ export function BoardToolbar({
           minimapOn={minimapOn}
           toggleMinimap={toggleMinimap}
           compact={off.view}
-          labelMax={TOOLBAR.journey[Math.min(fit.step, TOOLBAR.journey.length - 1)]}
+          labelMax={fit.journey || TOOLBAR.journey[Math.min(fit.step, TOOLBAR.journey.length - 1)]}
         />
         {canCapture ? (
           <>

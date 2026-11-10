@@ -153,7 +153,7 @@ test('a long board name truncates a step at a time, never below its readable min
 })
 
 test('below every supported width: the last step, not centred, the search an icon', () => {
-  assert.deepEqual(fitToolbar({ width: 200, ...local(LONG) }), { step: FIT_STEPS.length - 1, centred: false, search: 0 })
+  assert.deepEqual(fitToolbar({ width: 200, ...local(LONG) }), { step: FIT_STEPS.length - 1, centred: false, search: 0, journey: 0 })
 })
 
 test('item widths follow the controls: a running capture and a failed one widen the status', () => {
@@ -190,7 +190,7 @@ test('an open journey: Views carries its name up to the cap and a clear button, 
   assert.equal(long.at, 'view')
 })
 
-test('an open journey keeps the search centred wherever it was centred before, and costs at most two steps', () => {
+test('an open journey never costs a step past the search one: it gives up the centre line before a label', () => {
   for (const [before, after] of [
     [local(), local('Marketing site', JOURNEY)],
     [demo(), demo(JOURNEY)],
@@ -199,11 +199,51 @@ test('an open journey keeps the search centred wherever it was centred before, a
     for (const width of widths) {
       const was = fitToolbar({ width, ...before })
       const now = fitToolbar({ width, ...after })
-      if (was.centred) assert.equal(now.centred, true, 'centred at ' + width)
-      assert.ok(now.step >= was.step && now.step <= was.step + 2, 'step ' + was.step + ' to ' + now.step + ' at ' + width)
+      assert.ok(now.step >= 1 && now.step <= Math.max(was.step, 1) + 1, 'step ' + was.step + ' to ' + now.step + ' at ' + width)
     }
   }
-  for (const width of widths.filter((value) => value >= 768)) {
-    assert.equal(fitToolbar({ width, ...local('Marketing site', JOURNEY) }).centred, true, 'centred at ' + width)
+})
+
+test("an open journey's name matters more than the search box: the search is an icon and the name grows up to 280 px", () => {
+  const items = local('Marketing site', JOURNEY)
+  assert.equal(items.searchIcon, true)
+  assert.equal(local().searchIcon, false)
+  const name = text(JOURNEY, 'ui')
+  let previous = { step: -1, journey: Infinity }
+  for (const width of [...new Set(widths)].sort((a, b) => b - a)) {
+    const fit = fitToolbar({ width, ...items })
+    assert.ok(fit.step >= 1, 'never the search box at ' + width)
+    assert.equal(fit.search, 0)
+    assert.ok(fit.journey <= TOOLBAR.journeyMax, 'capped at ' + width)
+    // Within a step, narrower never widens the name (a later step frees room).
+    if (fit.step === previous.step) assert.ok(fit.journey <= previous.journey, 'narrower never widens the name, at ' + width)
+    previous = fit
+    if (collapsed(fit.step).view) {
+      assert.equal(fit.journey, 0)
+      continue
+    }
+    // At least its step's width; everything fits side by side, and centred
+    // only when each zone fits its half beside the icon.
+    assert.ok(fit.journey >= Math.min(name, TOOLBAR.journey[Math.min(fit.step, TOOLBAR.journey.length - 1)]), 'least at ' + width)
+    const box = layout(items, width)
+    const least = items.left.find((item) => item.id === 'view').full[fit.step] - 41 - 27
+    const left = box.left + (fit.journey - least)
+    const half = (width - 2 * TOOLBAR.pad - TOOLBAR.search.icon) / 2 - box.zoneGap
+    if (fit.centred) assert.ok(left <= half + 0.5 && box.right <= half + 0.5, 'fits centred at ' + width)
+    else assert.ok(left + box.right + TOOLBAR.search.icon + 2 * box.zoneGap <= width - 2 * TOOLBAR.pad + 0.5, 'fits at ' + width)
   }
+  // A window of 1440 with the sidebar open (1184 px): the name stays, well past its old 160 px cap.
+  const at1184 = fitToolbar({ width: 1184, ...demo(JOURNEY) })
+  assert.ok(!collapsed(at1184.step).view, 'the name is shown at 1184')
+  assert.ok(at1184.journey > TOOLBAR.journey[0], String(at1184.journey))
+  // Wide: the whole cap. A short name is shown whole and never wider than itself.
+  assert.equal(fitToolbar({ width: 2504, ...items }).journey, TOOLBAR.journeyMax)
+  const short = local('Marketing site', 'Sign up')
+  const shortFit = fitToolbar({ width: 2504, ...short })
+  assert.equal(shortFit.journey, short.left.find((item) => item.id === 'view').full[shortFit.step] - 41 - 27)
+  // No journey: the search box stays, as before.
+  const plain = fitToolbar({ width: 2504, ...local() })
+  assert.equal(plain.step, 0)
+  assert.ok(plain.search > 0)
+  assert.equal(plain.journey, 0)
 })
