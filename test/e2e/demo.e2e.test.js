@@ -416,6 +416,57 @@ test('Fix with agent: the open thread offers it, the agent works on the comment,
   }
 })
 
+test('Fix with ...: the caret runs the fix once with the second scripted agent and keeps the default', async () => {
+  const { context, page, errors } = await open()
+  try {
+    await openBoard(page, `${base}?c=17`)
+    const main = page.locator('[data-sw-fix-agent="17"]')
+    assert.equal((await main.textContent()).trim(), 'Fix with Demo agent')
+    await page.click('[data-sw-fix-agent-choose="17"]')
+    await page.waitForSelector('[data-sw-agent-menu]')
+    assert.equal(await page.locator('[data-sw-agent-menu] [data-sw-agent-option]').count(), 2)
+    await page.click('[data-sw-agent-menu] [data-sw-agent-option="second"]')
+    await page.waitForSelector('[data-sw-chat-label="Second agent"]', { timeout: 20000 })
+    await page.waitForSelector('[data-sw-chat-permission] [data-sw-chat-permission-option="allow"]', { timeout: 20000 })
+    await page.click('[data-sw-chat-permission-option="allow"]')
+    await page.waitForSelector('[data-sw-chat-message="assistant"][data-status="done"] :text("Second agent, scripted for the demo")', {
+      timeout: 20000,
+    })
+    // The default is still the first agent.
+    const status = await page.evaluate(() => fetch('api/agent/status').then((response) => response.json()))
+    assert.equal(status.label, 'Demo agent')
+    assert.equal(status.profiles.find((item) => item.id === 'default').sameAs, 'demo')
+    // The chat picker switches back, with a keyboard, and says so once.
+    await page.locator('[data-sw-agent-profile]').first().focus()
+    await page.keyboard.press('Enter')
+    await page.waitForSelector('[data-sw-agent-menu]')
+    await page.keyboard.press('d')
+    await page.waitForFunction(() => document.activeElement?.getAttribute('data-sw-agent-option') === 'demo')
+    await page.keyboard.press('Enter')
+    await page.waitForSelector(':text("Switched to Demo agent. It starts fresh and can read this chat.")')
+    await page.waitForSelector('[data-sw-chat-label="Demo agent"]')
+    await shot(page, 'fix-with-second-agent')
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})
+
+test('the demo console shows the Agents card read-only with a demo note', async () => {
+  const { context, page, errors } = await open()
+  try {
+    await page.goto(consoleUrl('/settings#agents'))
+    const card = page.locator('[data-sw-local-console-agents] [data-sw-agents-card="demo"]')
+    await card.waitFor({ timeout: 20000 })
+    assert.match(await card.textContent(), /This is a demo/)
+    assert.equal(await card.locator('[data-sw-agent-row]').count(), 2)
+    assert.equal(await card.locator('button').count(), 0, 'nothing to press in the demo')
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})
+
 test('the links overlay lists the broken link and a card shows its capture network warning', async () => {
   const { context, page, errors } = await open()
   try {

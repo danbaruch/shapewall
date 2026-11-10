@@ -145,6 +145,18 @@ export function validateUserEntry(raw) {
 // profiles existed (one-click Connect saved only that), a command of its own,
 // which is shown and kept as a profile from then on (legacyProfile).
 
+// Which agent is the default is stored as the default connection itself
+// (backend "acp" and the profile's acpCommand, or an endpoint): there is no
+// separate marker to fall out of step with it. Settings that hold profiles
+// but no default connection of their own (hand-edited, or from a version
+// that only kept the list) use the first profile, unless the config's own
+// endpoint is in effect (config.js agentSettings, `defaultProfile`).
+export function implicitDefault(entry) {
+  if (!entry?.profiles?.length) return null
+  if (['backend', 'acpCommand', 'baseUrl', 'model'].some((key) => entry[key] !== undefined)) return null
+  return entry.profiles[0]
+}
+
 // The saved profile that runs the default connection's command, or null.
 export function profileForDefault(entry) {
   if (entry?.backend !== 'acp' || !entry.acpCommand) return null

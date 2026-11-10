@@ -67,16 +67,31 @@ stop another instance's work. Overlapping connection tests in the same managemen
 
 ## Several native agents, one choice per thread
 
-In **Settings > Agent > Native agent profiles**, add Claude Code, Codex, goose, or Gemini CLI from the CLIs found on this server's
-`PATH`. Each Add shows the exact fixed command for confirmation, saves it in your private agent settings file, and tests an ACP
-handshake. A failed handshake restores the previous settings. It does not send a prompt or verify your provider login. No CLI,
-adapter, subscription, or background service is installed for you.
+The home for your agents is the **Agents** card in the local Workspace Console (**Workspace > Settings**, `/console?section=settings`;
+[Agents in Workspace settings](#agents-in-workspace-settings)). Connect Claude Code, Codex, goose, or Gemini CLI from the CLIs found on
+this server's `PATH`. Each Connect shows the exact fixed command for confirmation, saves it in your private agent settings file, and
+tests an ACP handshake. A failed handshake restores the previous settings. It does not send a prompt or verify your provider login. No
+CLI, adapter, subscription, or background service is installed for you.
 
-The chat's custom **Agent profile** selector remembers a choice separately for the whole-board thread and each comment thread.
-Changing it keeps the visible transcript but starts a fresh ACP session; the selected agent receives that transcript as context.
-Removing a selected profile makes that thread unavailable until you choose another profile. It never silently switches providers.
-The default connection and existing `--agent-acp`, environment, and endpoint settings keep their existing behavior. An operator
-`--agent-acp` or `SHAPEWALL_AGENT_ACP` command locks named profiles, including choices saved by an earlier server.
+The agent picker on the chat header's agent chip remembers a choice separately for the whole-board thread and each comment thread.
+Each row shows the agent's name, how it is doing in plain words, and **Default** on the one new chats and fixes use:
+
+| State              | What the server saw (nothing polls the agent)                                                                |
+| ------------------ | ------------------------------------------------------------------------------------------------------------ |
+| **Ready**          | Connected, and the last turn or connection test went fine (or none yet since the server started).            |
+| **Not signed in**  | The last turn or test failed with the login classification (`agent_auth`); the row says how to sign in.      |
+| **Starting**       | An agent process for it is starting now.                                                                     |
+| **Not responding** | The last turn or test: it did not start, did not answer in time, or stopped (`agent_start`, `agent_exited`). |
+
+The states are kept in the server's memory (`src/agent/agent-health.js`) and come with the agent lists the board already reads
+(`/api/agent/status`, a thread's `profiles`, `/api/agent/settings` as `state` and `loginHint`). The menu has full keyboard support
+(arrow keys, type-ahead on names, Escape), **Connect another agent...** and **Agent settings**. While an answer is being written it
+does not open and says why (**Wait for the answer or stop it to switch**).
+
+Switching keeps the visible transcript but starts a fresh ACP session; the selected agent receives that transcript as context. The chat
+says so once, after the switch. Removing a selected profile makes that thread unavailable until you choose another profile. It never
+silently switches providers. The default connection and existing `--agent-acp`, environment, and endpoint settings keep their existing
+behavior. An operator `--agent-acp` or `SHAPEWALL_AGENT_ACP` command locks named profiles, including choices saved by an earlier server.
 
 Profiles and their commands live only in the owner-private `agents.json`, outside the project repository. The thread file stores
 only the profile id. Changing profiles requires the same local owner settings capability as connecting an agent. Selecting a saved
@@ -86,6 +101,28 @@ project's answer limit, rate limits, and ACP process budget; opening another pro
 
 Each profile starts its own agent session on the Shapewall computer. To message agents that already run in a Buzz chat channel
 instead, see the optional [Buzz bridge](buzz.md).
+
+## Agents in Workspace settings
+
+The local Workspace Console's **Settings** page (`/console?section=settings`, **Workspace** in the board's sidebar) has an **Agents**
+card, the one place to manage agents. The chat's agent dialog (**Connect another agent...**) and the host-only settings window
+(`shapewall settings`) show the same card; the board's general **Settings > Agent** tab links to it.
+
+- **Every agent Shapewall knows how to run** (Claude Code, Codex, goose, Gemini CLI) with its state on this machine: **Connected**
+  (with its state, **Test connection** and **Remove**, and how to sign in when it is not signed in); **Found, not connected**
+  (**Connect**, with the same **Allow this?** dialog as anywhere else); **Found, but its adapter is missing** (the exact install line to
+  copy and **Check again**; Shapewall never runs an install for you); **Not installed** (where to get it). The list comes from the same
+  `PATH` lookup as one-click Connect: nothing is started, installed or downloaded.
+- **Default agent for new chats and fixes**: a radio list of the connected agents (and the saved endpoint, when there is one). It saves
+  with `POST /api/agent/settings/profiles/:id/default` (`endpoint` for the endpoint). The default is stored as the default connection
+  itself (`backend: "acp"` with that agent's `acpCommand` in `agents.json`), so there is no second marker to fall out of step. Settings
+  that hold profiles but no default connection of their own use the first profile, unless the config's own endpoint is in effect.
+  Chats that chose another agent keep theirs. Every command here was confirmed when it was connected, so this asks nothing new.
+- **Other**: an OpenAI-compatible endpoint, in the existing form.
+
+Connecting, removing, testing and choosing the default run commands as the machine's owner, so they need the settings token (the owner
+link `shapewall serve` prints). Without it the card is read-only and says how to open that link; it asks nothing of the agent routes.
+Self-hosted multiplayer (`shapewall hosted`) has its own workspace Settings (project agent tokens), which does not show this card.
 
 ## Source folder and agent sign-in
 
@@ -108,7 +145,10 @@ review on, and look at the changed source, the recapture and before and after be
 
 ## Fix a comment with your agent
 
-On an owner tab with a connected ACP coding agent, an open comment has **Fix with agent**, the thread's primary action. It opens the comment's chat, sends the
+On an owner tab with a connected ACP coding agent, an open comment has **Fix with** and the default agent's name (**Fix with
+Codex**; **Fix again** once it has been fixed), the thread's primary action. With more than one agent connected it is a split button:
+the caret opens the agent picker to run this fix once with another agent. That moves only this comment's chat to that agent (the next
+fix from the main part moves it back); the default stays as it is. It opens the comment's chat, sends the
 comment, page context and a crop near the pin when a capture is available, and asks for a scoped edit. Existing approval cards still
 apply. The comment moves through queued and working. After a successful turn that changed project files, Shapewall recaptures the
 comment's page with a partial capture, adds a thread reply, and marks it done. The thread shows before and after while the comment

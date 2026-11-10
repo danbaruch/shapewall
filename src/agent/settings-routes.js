@@ -7,8 +7,11 @@
 //                                   (and `detected`: the agent CLIs found on PATH)
 //   POST /api/agent/settings/connect { agentId, confirm }  one-click Connect: save that agent's
 //                                   restricted command (same confirm step), test it, undo on failure
-//   POST /api/agent/settings/test   try the settings in effect: a models list or a one-token answer
-//                                   (OpenAI-compatible), the initialize handshake (ACP)
+//   POST /api/agent/settings/test   { profileId? } try the settings in effect (or that agent's): a models
+//                                   list or a one-token answer (OpenAI-compatible), the initialize handshake (ACP)
+//   POST /api/agent/settings/profiles/:id/default  make a connected agent (or "endpoint": the saved
+//                                   OpenAI-compatible endpoint) the one new chats and fixes use
+//   DELETE /api/agent/settings/profiles/:id  remove a connected agent
 //
 // These are the server owner's settings: which agent runs on their machine
 // and where their API key goes. Looking local is not enough (a proxy or TCP
@@ -43,7 +46,7 @@ import {
   keyHostConfirmed,
   publicAgentInfo,
 } from './config.js'
-import { legacyProfile, projectKey, saveUserAgentEntry, userAgentEntry, validateUserEntry } from './user-settings.js'
+import { legacyProfile, profileForDefault, projectKey, saveUserAgentEntry, userAgentEntry, validateUserEntry } from './user-settings.js'
 import { tokenEquals } from '../tokens.js'
 
 const TEST_TIMEOUT_MS = 15000
@@ -202,7 +205,8 @@ export async function testConnection(settings, { env = process.env, fetchImpl = 
     return { ...head, ok: false, message: `Not connected: ${settings.problem || 'set a base URL and a model'}.`, details: [] }
   if (settings.backend === 'acp') {
     const result = await acpHandshake(settings, { env, root, timeoutMs: timeoutMs || ACP_TEST_TIMEOUT_MS, processPool })
-    if (!result.ok) return { ...head, ok: false, message: `${settings.label} did not start: ${result.message}`, details: [] }
+    if (!result.ok)
+      return { ...head, ok: false, code: result.code, message: `${settings.label} did not start: ${result.message}`, details: [] }
     const info = result.agentInfo
     const name = info ? `${info.title || info.name}${info.version ? ` ${info.version}` : ''}` : settings.label
     // The handshake does not show whether the agent is logged in (that needs
@@ -324,7 +328,7 @@ export async function testConnection(settings, { env = process.env, fetchImpl = 
 // `repo` is the config's `agent`. `busy()` is true while an answer is being
 // written, `reload()` switches the chat over to new settings.
 // `token` is the per-process settings token (null: the routes are off).
-export function settingsRoutes({ config, env, fetchImpl, settings, shared, token, busy, reload, processPool }) {
+export function settingsRoutes({ config, env, fetchImpl, settings, shared, token, busy, reload, processPool, health = null }) {
   const router = express.Router()
   const repo = () => config.agent || {}
   let testing = false
@@ -404,13 +408,34 @@ export function settingsRoutes({ config, env, fetchImpl, settings, shared, token
     next()
   })
 
+  // How an agent is doing (agent-health.js): { state, loginHint }.
+  const statusOf = (profileId) => (health ? health.status(settings(profileId), processPool) : {})
   const profileList = (entry) => {
     const legacy = legacyProfile(entry, KNOWN_AGENTS)
+    // Profiles saved without a default connection: the first one (config.js agentSettings).
+    const fallback = settings().defaultProfile || null
     return [...(legacy ? [{ ...legacy, legacy: true }] : []), ...(entry?.profiles || [])].map(({ acpCommand, ...profile }) => ({
       ...profile,
       command: acpCommand,
-      default: entry?.backend === 'acp' && entry.acpCommand === acpCommand,
+      default: (entry?.backend === 'acp' && entry.acpCommand === acpCommand) || profile.id === fallback,
+      // A legacy command runs as the default connection.
+      ...statusOf(profile.legacy ? null : profile.id),
     }))
+  }
+  // The saved OpenAI-compatible endpoint (Settings "Other"), or null.
+  const endpointOf = (entry) => {
+    const baseUrl = entry.baseUrl ?? repo().baseUrl
+    const model = entry.model ?? repo().model
+    if (!baseUrl || !model) return null
+    const backend = entry.backend ?? repo().backend ?? 'openai-compatible'
+    const isDefault = backend === 'openai-compatible' && !settings().defaultProfile
+    return {
+      label: entry.label || repo().label || model,
+      model,
+      host: hostOf(baseUrl),
+      default: isDefault,
+      ...(isDefault ? statusOf(null) : {}),
+    }
   }
 
   const view = () => {
@@ -425,6 +450,7 @@ export function settingsRoutes({ config, env, fetchImpl, settings, shared, token
       // show: the saved profiles, and a default command saved before
       // profiles (legacy) as one of them.
       profiles: profileList(saved.entry),
+      endpoint: endpointOf(saved.entry || {}),
       project: { root: projectKey(config.dir), configFile: config.file || null },
       config: Object.fromEntries(SAVED_KEYS.filter((key) => repo()[key] !== undefined).map((key) => [key, repo()[key]])),
       effective: {
@@ -453,6 +479,8 @@ export function settingsRoutes({ config, env, fetchImpl, settings, shared, token
       // The agent CLIs found on PATH (looked up, never started), for the
       // one-click Connect in an unconnected chat panel.
       detected: detectAgents(env),
+      // Every agent Shapewall knows how to run, found or not (Settings > Agents).
+      known: KNOWN_AGENTS.map(({ id, label, adapter, cli, install }) => ({ id, label, adapter, cli, install })),
       knownKeyHosts: [...KNOWN_KEY_HOSTS],
       defaultKeyVar: DEFAULT_KEY_VAR,
       keyVarsSet: keyVarsSet(env),
@@ -582,7 +610,9 @@ export function settingsRoutes({ config, env, fetchImpl, settings, shared, token
     }
     testing = true
     try {
-      const result = await testConnection(settings(profileConnect ? agent.id : null), { env, fetchImpl, root: config.dir, processPool })
+      const tested = settings(profileConnect ? agent.id : null)
+      const result = await testConnection(tested, { env, fetchImpl, root: config.dir, processPool })
+      health?.record(tested, result)
       if (!result.ok) restore()
       res.json({ connected: result.ok, result: { ...result, label: agent.label }, ...view() })
     } catch (error) {
@@ -596,6 +626,37 @@ export function settingsRoutes({ config, env, fetchImpl, settings, shared, token
       testing = false
       await res.locals.releaseSettingsOperation?.()
     }
+  })
+
+  // The agent new chats and fixes use: a connected agent (its command
+  // becomes the default connection) or "endpoint" (the saved
+  // OpenAI-compatible endpoint). Every command here was confirmed when it
+  // was connected, so this asks nothing new. Chats that chose an agent keep it.
+  router.post('/profiles/:id/default', guard, (req, res) => {
+    if (testing) return fail(res, 409, 'test_running', 'A connection test is running.')
+    const source = settings().sources?.acpCommand
+    if (source === 'flag' || source === 'env')
+      return fail(res, 409, 'acp_overridden', 'The agent command comes from the command line or the environment, which wins over Settings.')
+    const saved = userAgentEntry(config.dir, env)
+    if (saved.problem) return fail(res, 409, 'settings_file_invalid', saved.problem)
+    const current = saved.entry || {}
+    const legacy = legacyProfile(current, KNOWN_AGENTS)
+    const entry = { ...current }
+    // A default command saved before profiles stays in the list, as a profile.
+    if (legacy) entry.profiles = [legacy, ...(current.profiles || [])]
+    if (req.params.id === 'endpoint') {
+      if (!endpointOf(current)) return fail(res, 400, 'no_endpoint', 'Set up an OpenAI-compatible endpoint first.')
+      entry.backend = 'openai-compatible'
+      delete entry.acpCommand
+    } else {
+      const profile = (entry.profiles || []).find((item) => item.id === req.params.id)
+      if (!profile) return fail(res, 404, 'unknown_profile', 'That agent is not connected.')
+      // The image toggle belonged to the agent that was the default (as on Connect).
+      if (profileForDefault(current)?.acpCommand !== profile.acpCommand) delete entry.vision
+      entry.backend = 'acp'
+      entry.acpCommand = profile.acpCommand
+    }
+    if (saveEntry(req, res, entry)) res.json(view())
   })
 
   router.delete('/profiles/:id', guard, (req, res) => {
@@ -622,9 +683,15 @@ export function settingsRoutes({ config, env, fetchImpl, settings, shared, token
   router.post('/test', guard, async (req, res) => {
     if (testing) return fail(res, 409, 'test_running', 'A connection test is already running.')
     if (busy()) return fail(res, 409, 'agent_running', 'Stop the answer or wait for the profile change before testing.')
+    const profileId = req.body?.profileId ?? null
+    if (profileId !== null && !(userAgentEntry(config.dir, env).entry?.profiles || []).some((item) => item.id === profileId))
+      return fail(res, 400, 'unknown_profile', 'profileId: one of the connected agents.')
     testing = true
     try {
-      res.json(await testConnection(settings(), { env, fetchImpl, root: config.dir, processPool }))
+      const tested = settings(profileId)
+      const result = await testConnection(tested, { env, fetchImpl, root: config.dir, processPool })
+      health?.record(tested, result)
+      res.json(result)
     } catch (error) {
       fail(res, 500, 'test_failed', `The test did not finish: ${redact(error.message)}`)
     } finally {

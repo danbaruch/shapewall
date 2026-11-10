@@ -679,3 +679,53 @@ test('demo answer feedback: rate, take back, regenerate with versions, and the a
   const member = demo(as('member'))
   assert.equal((await member.call('GET', ws('/agent-feedback'))).status, 403)
 })
+
+test('two scripted agents: status lists both, a chat switches, the second answers in its own voice', async () => {
+  const { call, state } = demo()
+  const collect = async (answer) => {
+    const events = []
+    for await (const event of answer.events) events.push(event)
+    return events
+  }
+  const status = (await call('GET', '/api/agent/status')).json
+  assert.equal(status.label, 'Demo agent')
+  assert.equal(status.demo, true)
+  assert.deepEqual(
+    status.profiles.map((item) => [item.id, item.label, item.state, item.sameAs || null]),
+    [
+      ['default', 'Demo agent', 'ready', 'demo'],
+      ['demo', 'Demo agent', 'ready', null],
+      ['second', 'Second agent', 'ready', null],
+    ],
+  )
+  assert.match(status.settingsUrl, /^console\.html#\/w\/ws_[a-f0-9]{24}\/settings#agents$/)
+
+  const path = '/api/agent/boards/demo/threads/board'
+  const before = (await call('GET', path)).json
+  assert.equal(before.profileId, 'default')
+  assert.equal(before.agent.label, 'Demo agent')
+  assert.equal((await call('POST', path + '/profile', { profileId: 'nope' })).status, 400)
+  const switched = await call('POST', path + '/profile', { profileId: 'second' })
+  assert.equal(switched.json.profileId, 'second')
+  assert.equal(switched.json.agent.label, 'Second agent')
+  const after = (await call('GET', path)).json
+  assert.equal(after.profileId, 'second')
+  assert.equal(after.agent.label, 'Second agent')
+  const second = (await collect(await call('POST', path + '/messages', { text: "What's still open?" }))).at(-1)[1].message
+  assert.match(second.text, /^Short version\. /)
+  assert.match(second.text, /Second agent, scripted for the demo/)
+  // While an answer runs, the agent stays as it is.
+  const running = await call('POST', path + '/messages', { text: "What's still open?" })
+  assert.equal((await call('POST', path + '/profile', { profileId: 'demo' })).status, 409)
+  await collect(running)
+  // Back to the default: the thread forgets its pick, the first voice again.
+  assert.equal((await call('POST', path + '/profile', { profileId: 'default' })).json.profileId, 'default')
+  assert.equal((await call('GET', path)).json.profileId, 'default')
+  const first = (await collect(await call('POST', path + '/messages', { text: "What's still open?" }))).at(-1)[1].message
+  assert.doesNotMatch(first.text, /Short version/)
+  // The pick lives in the browser's demo state; the default leaves no mark.
+  assert.equal(
+    Object.values(state.threadMeta || {}).some((meta) => meta.profileId),
+    false,
+  )
+})
