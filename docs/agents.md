@@ -67,16 +67,31 @@ stop another instance's work. Overlapping connection tests in the same managemen
 
 ## Several native agents, one choice per thread
 
-In **Settings > Agent > Native agent profiles**, add Claude Code, Codex, goose, or Gemini CLI from the CLIs found on this server's
-`PATH`. Each Add shows the exact fixed command for confirmation, saves it in your private agent settings file, and tests an ACP
-handshake. A failed handshake restores the previous settings. It does not send a prompt or verify your provider login. No CLI,
-adapter, subscription, or background service is installed for you.
+The home for your agents is the **Agents** card in the local Workspace Console (**Workspace > Settings**, `/console?section=settings`;
+[Agents in Workspace settings](#agents-in-workspace-settings)). Connect Claude Code, Codex, goose, or Gemini CLI from the CLIs found on
+this server's `PATH`. Each Connect shows the exact fixed command for confirmation, saves it in your private agent settings file, and
+tests an ACP handshake. A failed handshake restores the previous settings. It does not send a prompt or verify your provider login. No
+CLI, adapter, subscription, or background service is installed for you.
 
-The chat's custom **Agent profile** selector remembers a choice separately for the whole-board thread and each comment thread.
-Changing it keeps the visible transcript but starts a fresh ACP session; the selected agent receives that transcript as context.
-Removing a selected profile makes that thread unavailable until you choose another profile. It never silently switches providers.
-The default connection and existing `--agent-acp`, environment, and endpoint settings keep their existing behavior. An operator
-`--agent-acp` or `SHAPEWALL_AGENT_ACP` command locks named profiles, including choices saved by an earlier server.
+The agent picker on the chat header's agent chip remembers a choice separately for the whole-board thread and each comment thread.
+Each row shows the agent's name, how it is doing in plain words, and **Default** on the one new chats and fixes use:
+
+| State              | What the server saw (nothing polls the agent)                                                                |
+| ------------------ | ------------------------------------------------------------------------------------------------------------ |
+| **Ready**          | Connected, and the last turn or connection test went fine (or none yet since the server started).            |
+| **Not signed in**  | The last turn or test failed with the login classification (`agent_auth`); the row says how to sign in.      |
+| **Starting**       | An agent process for it is starting now.                                                                     |
+| **Not responding** | The last turn or test: it did not start, did not answer in time, or stopped (`agent_start`, `agent_exited`). |
+
+The states are kept in the server's memory (`src/agent/agent-health.js`) and come with the agent lists the board already reads
+(`/api/agent/status`, a thread's `profiles`, `/api/agent/settings` as `state` and `loginHint`). The menu has full keyboard support
+(arrow keys, type-ahead on names, Escape), **Connect another agent...** and **Agent settings**. While an answer is being written it
+does not open and says why (**Wait for the answer or stop it to switch**).
+
+Switching keeps the visible transcript but starts a fresh ACP session; the selected agent receives that transcript as context. The chat
+says so once, after the switch. Removing a selected profile makes that thread unavailable until you choose another profile. It never
+silently switches providers. The default connection and existing `--agent-acp`, environment, and endpoint settings keep their existing
+behavior. An operator `--agent-acp` or `SHAPEWALL_AGENT_ACP` command locks named profiles, including choices saved by an earlier server.
 
 Profiles and their commands live only in the owner-private `agents.json`, outside the project repository. The thread file stores
 only the profile id. Changing profiles requires the same local owner settings capability as connecting an agent. Selecting a saved

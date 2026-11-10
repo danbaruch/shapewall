@@ -340,7 +340,15 @@ test(
     saveUserAgentEntry(b.config.dir, { backend: 'acp', acpCommand: 'claude-agent-acp' }, b.env)
     const legacy = await b.api('GET', '/api/agent/settings')
     assert.deepEqual(legacy.json.profiles, [
-      { id: 'claude', label: 'Claude Code', command: 'claude-agent-acp', legacy: true, default: true },
+      {
+        id: 'claude',
+        label: 'Claude Code',
+        command: 'claude-agent-acp',
+        legacy: true,
+        default: true,
+        state: 'ready',
+        loginHint: 'run `claude` in a terminal and use /login, or start the agent with `claude-agent-acp --cli` and use /login there',
+      },
     ])
     assert.equal(legacy.json.saved.profiles, undefined, 'nothing is rewritten by reading')
     const chat = await b.api('GET', b.base + 'board')
@@ -393,4 +401,86 @@ test('removing a legacy default command shown as a profile clears it', { skip: !
   assert.equal(removed.status, 200)
   assert.equal(removed.json.saved.acpCommand, undefined)
   assert.deepEqual(removed.json.profiles, [])
+})
+
+test(
+  'the default agent: chosen from Settings without a new confirmation; chats that chose another keep it',
+  { skip: !POSIX },
+  async (t) => {
+    const b = await board(t)
+    const before = await b.api('GET', '/api/agent/settings')
+    assert.deepEqual(
+      before.json.profiles.map((item) => [item.id, item.default]),
+      [
+        ['claude', true],
+        ['codex', false],
+        ['goose', false],
+      ],
+    )
+    assert.equal(before.json.endpoint, null, 'no endpoint saved')
+    assert.equal((await b.select('comment-1', 'goose')).status, 200)
+    const made = await b.api('POST', '/api/agent/settings/profiles/codex/default', {})
+    assert.equal(made.status, 200, JSON.stringify(made.json))
+    assert.equal(made.json.confirm, undefined, 'a connected command was confirmed when it was connected')
+    assert.equal(made.json.saved.acpCommand, 'codex-acp')
+    assert.deepEqual(made.json.saved.profiles, profiles, 'the list is unchanged')
+    assert.deepEqual(
+      made.json.profiles.filter((item) => item.default).map((item) => item.id),
+      ['codex'],
+    )
+    const picker = await b.api('GET', b.base + 'board')
+    assert.equal(picker.json.profiles[0].sameAs, 'codex')
+    assert.equal(picker.json.agent.label, 'Codex')
+    assert.equal((await b.api('GET', b.base + 'comment-1')).json.agent.label, 'goose', 'a chat that chose an agent keeps it')
+    assert.equal((await b.api('POST', '/api/agent/settings/profiles/nobody/default', {})).status, 404)
+    assert.equal((await b.api('POST', '/api/agent/settings/profiles/endpoint/default', {})).json.error.code, 'no_endpoint')
+    // The owner's capability, as every settings route.
+    assert.equal((await b.api('POST', '/api/agent/settings/profiles/claude/default', {}, { 'X-Shapewall-Settings-Token': '' })).status, 404)
+  },
+)
+
+test('profiles saved without a default connection: the first one is the default', { skip: !POSIX }, async (t) => {
+  const b = await board(t, { saved: false })
+  saveUserAgentEntry(b.config.dir, { profiles: [profiles[1], profiles[0]] }, b.env)
+  const current = agentSettings(b.config, b.env)
+  assert.equal(current.configured, true)
+  assert.equal(current.label, 'Codex')
+  assert.equal(current.defaultProfile, 'codex')
+  const view = await b.api('GET', '/api/agent/settings')
+  assert.deepEqual(
+    view.json.profiles.map((item) => [item.id, item.default]),
+    [
+      ['codex', true],
+      ['claude', false],
+    ],
+  )
+  assert.equal((await b.api('GET', b.base + 'board')).json.profiles[0].sameAs, 'codex')
+  // The config's own endpoint stays the default when nothing else is marked.
+  const withEndpoint = { ...b.config, agent: { baseUrl: 'http://127.0.0.1:9/v1', model: 'local-model' } }
+  assert.equal(agentSettings(withEndpoint, b.env).backend, 'openai-compatible')
+  assert.equal(agentSettings(withEndpoint, b.env).defaultProfile, undefined)
+  // Making one the default stores it as the default connection.
+  const made = await b.api('POST', '/api/agent/settings/profiles/claude/default', {})
+  assert.equal(made.json.saved.acpCommand, 'claude-agent-acp')
+  assert.equal(made.json.saved.backend, 'acp')
+})
+
+test('agent states: a login failure shows on that agent only, with its sign-in hint; a test clears it', { skip: !POSIX }, async (t) => {
+  const b = await board(t)
+  assert.equal((await b.api('GET', '/api/agent/status')).json.state, 'ready')
+  assert.equal((await b.select('board', 'codex')).status, 200)
+  const reply = await finish(await b.send('board', 'loginsay'))
+  assert.equal(reply.error?.code, 'agent_auth', JSON.stringify(reply))
+  const thread = await b.api('GET', b.base + 'board')
+  const states = Object.fromEntries(thread.json.profiles.map((item) => [item.id, item.state]))
+  assert.deepEqual(states, { default: 'ready', claude: 'ready', codex: 'login', goose: 'ready' })
+  assert.equal(thread.json.profiles.find((item) => item.id === 'codex').loginHint, 'run `codex login` in a terminal')
+  assert.equal(thread.json.agent.state, 'login')
+  const settings = await b.api('GET', '/api/agent/settings')
+  assert.equal(settings.json.profiles.find((item) => item.id === 'codex').state, 'login')
+  // Test connection for that agent: the handshake works, so it reads ready again.
+  const tested = await b.api('POST', '/api/agent/settings/test', { profileId: 'codex' })
+  assert.equal(tested.json.ok, true, JSON.stringify(tested.json))
+  assert.equal((await b.api('GET', b.base + 'board')).json.agent.state, 'ready')
+  assert.equal((await b.api('POST', '/api/agent/settings/test', { profileId: 'nobody' })).status, 400)
 })

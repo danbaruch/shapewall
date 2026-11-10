@@ -4,28 +4,15 @@
 
 import { useState } from 'react'
 import { Bot, ChevronDown, Copy, Download, ExternalLink, History, Settings2, SquarePen, Trash2, X } from 'lucide-react'
-import {
-  Badge,
-  Button,
-  EmptyState,
-  IconButton,
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-  Tooltip,
-} from '../components/ui'
+import { Badge, Button, EmptyState, IconButton, Popover, PopoverContent, PopoverTrigger, Tooltip } from '../components/ui'
 import { PanelHeader } from '../components/panel-header'
 import { cn } from '../lib/utils'
 import { ReadAloudSettings } from './ReadAloud'
 import { dictationUnavailable } from './speech'
 import McpSetup from './McpSetup'
 import Disclosure from './Disclosure'
-import { choice, pickerProfiles } from './profiles'
+import { STATE_DOT, STATE_TEXT } from './profiles'
+import { AgentPicker } from './AgentPicker'
 import { DOCS_URL, QuickConnect } from './QuickConnect'
 import { SettingsHint } from '../settings/SettingsHint'
 
@@ -265,6 +252,55 @@ function agentTip(agent) {
   if (agent?.host) return `Messages go to ${agent.host}${agent.sendsKey ? ", with the server's API key" : ''}.`
   return null
 }
+// The chip, and with `picker` ({ options, value, onChoose, onConnect,
+// settingsHref, disabledReason }) the agent picker it opens. Its dot: the
+// turn (answering, waiting for you), else how the agent is doing.
+export function AgentSwitch({ agent, state, picker, touch, className }) {
+  if (!picker) return <AgentChip agent={agent} state={state} className={className} />
+  const label = agent?.label || 'Agent'
+  const current = picker.options.find((option) => option.id === picker.value)
+  const health = current?.state || agent?.state || 'ready'
+  const turn = state === 'working' || state === 'waiting' ? AGENT_STATES[state] : null
+  const dot = turn ? turn.dot : STATE_DOT[health] || STATE_DOT.ready
+  const text = turn ? turn.text : STATE_TEXT[health] || STATE_TEXT.ready
+  return (
+    <AgentPicker
+      options={picker.options}
+      value={picker.value}
+      onChoose={picker.onChoose}
+      onConnect={picker.onConnect}
+      settingsHref={picker.settingsHref}
+      disabledReason={picker.disabledReason}
+      heading="Agent for this chat"
+      touch={touch}
+    >
+      <button
+        type="button"
+        className={cn(
+          'inline-flex min-w-0 items-center gap-1.5 rounded-full border border-line bg-surface-2/70 pr-1.5 pl-1.5 text-xs text-fg outline-none hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent aria-disabled:cursor-default aria-disabled:hover:bg-surface-2/70 data-[state=open]:bg-surface-2',
+          touch ? 'h-9' : 'h-6',
+          className,
+        )}
+        aria-label={`Agent: ${label}, ${text}. Choose the agent for this chat`}
+        data-sw-agent-profile="true"
+        data-sw-chat-label={label}
+        data-sw-chat-agent-state={state}
+        data-sw-agent-health={health}
+      >
+        <span className={cn('h-2 w-2 shrink-0 rounded-full', dot)} aria-hidden="true" />
+        <span className="min-w-0 truncate font-medium">{label}</span>
+        {agent?.demo ? (
+          <span className="shrink-0 text-faint" aria-hidden="true">
+            {' '}
+            demo
+          </span>
+        ) : null}
+        <ChevronDown size={12} className="shrink-0 text-faint" aria-hidden="true" />
+      </button>
+    </AgentPicker>
+  )
+}
+
 export function AgentChip({ agent, state, className }) {
   const info = AGENT_STATES[state] || AGENT_STATES.ready
   const label = agent?.label || 'Agent'
@@ -317,6 +353,7 @@ export function ChatHeader({
   configured,
   agent,
   agentState,
+  picker = null,
   voiceUri,
   onVoice,
   readAloud,
@@ -339,7 +376,9 @@ export function ChatHeader({
   return (
     <header className="relative z-10 shrink-0 border-b border-line bg-surface" data-sw-chat-header="true">
       <Row heading={heading} onClose={onClose} touch={touch}>
-        {configured ? <AgentChip agent={agent} state={agentState} className={heading ? 'ml-1' : ''} /> : null}
+        {configured ? (
+          <AgentSwitch agent={agent} state={agentState} picker={picker} touch={touch} className={heading ? 'ml-1' : ''} />
+        ) : null}
         <span className="min-w-0 flex-1" />
         {configured ? (
           <ChatSettings
@@ -397,42 +436,5 @@ export function ChatHeader({
         </div>
       ) : null}
     </header>
-  )
-}
-
-// The thread's agent, when there is a choice: each connected agent once, by
-// name (profiles.js).
-export function ProfilePicker({ thread, agent, running, onChoose, touch }) {
-  const { show, value, known, options } = pickerProfiles(thread)
-  if (!show) return null
-  return (
-    <div className="shrink-0 border-b border-line px-3 py-2">
-      <Select
-        value={value}
-        onValueChange={(picked) => {
-          const next = choice(thread, picked)
-          if (next) onChoose(next)
-        }}
-        disabled={running || thread.running || !agent?.ownerWrites}
-      >
-        <SelectTrigger size={touch ? 'touch' : 'xs'} className="w-full" aria-label="Agent profile" data-sw-agent-profile="true">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {!known ? (
-            <SelectItem value={value} disabled>
-              Removed profile
-            </SelectItem>
-          ) : null}
-          {options.map((profile) => (
-            <SelectItem key={profile.id} value={profile.id}>
-              {profile.label}
-              {!profile.configured ? ' (unavailable)' : ''}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <p className="mt-1 text-[11px] text-faint">Agent for this chat. Switching starts a fresh agent session and keeps the transcript.</p>
-    </div>
   )
 }
