@@ -43,7 +43,6 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
 
-
 # Least privilege: the capture job, which builds and runs the pull request's
 # code, can only read. Only the comment job, which runs no code from the pull
 # request, can write the one comment.
