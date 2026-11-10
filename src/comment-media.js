@@ -217,6 +217,11 @@ function cleanGif(buffer) {
     }
     if (kind === 0x2c) {
       if (at + 10 > buffer.length) throw unreadable()
+      // Every frame: within the pixel cap and inside the logical screen. A
+      // decoder sizes its buffers by the frame, not by the screen.
+      const [left, top] = [buffer.readUInt16LE(at + 1), buffer.readUInt16LE(at + 3)]
+      const frame = checkSize(buffer.readUInt16LE(at + 5), buffer.readUInt16LE(at + 7))
+      if (left + frame.width > size.width || top + frame.height > size.height) throw unreadable()
       const local = buffer[at + 9]
       const data = at + 10 + (local & 0x80 ? 3 * 2 ** ((local & 7) + 1) : 0) + 1
       const next = subBlocks(data)

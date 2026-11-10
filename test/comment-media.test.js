@@ -375,6 +375,43 @@ test('images: broken files and huge dimensions are refused before decoding', () 
   assert.deepEqual(readImages([{ file: '../../etc/passwd' }, { file: 'abc.png' }, 'x']), [])
 })
 
+test('images: every GIF frame is checked, not only the logical screen', () => {
+  // The fixture's image descriptor: 0x2c, left, top, width, height (16-bit little-endian).
+  const withFrame = ({ left = 0, top = 0, width, height }) => {
+    const gif = Buffer.from(gifWithComment())
+    const at = gif.indexOf(Buffer.from([0x2c, 0, 0, 0, 0, 1, 0, 1, 0]))
+    gif.writeUInt16LE(left, at + 1)
+    gif.writeUInt16LE(top, at + 3)
+    gif.writeUInt16LE(width, at + 5)
+    gif.writeUInt16LE(height, at + 7)
+    return gif
+  }
+  // A 1x1 screen with a 65535x65535 frame: over the pixel cap.
+  assert.equal(
+    codeOf(() => cleanCommentImage(withFrame({ width: 65535, height: 65535 }), 'image/gif')),
+    'image_too_large_pixels',
+  )
+  // Small frames that leave the 1x1 screen.
+  assert.equal(
+    codeOf(() => cleanCommentImage(withFrame({ width: 2, height: 1 }), 'image/gif')),
+    'bad_image',
+  )
+  assert.equal(
+    codeOf(() => cleanCommentImage(withFrame({ left: 1, width: 1, height: 1 }), 'image/gif')),
+    'bad_image',
+  )
+  assert.equal(
+    codeOf(() => cleanCommentImage(withFrame({ width: 0, height: 1 }), 'image/gif')),
+    'bad_image',
+  )
+  assert.deepEqual(Object.keys(cleanCommentImage(withFrame({ width: 1, height: 1 }), 'image/gif')).sort(), [
+    'buffer',
+    'height',
+    'mediaType',
+    'width',
+  ])
+})
+
 test('images: served as their type with nosniff and a sandbox CSP, never as HTML', () => {
   const headers = {}
   let type = null
