@@ -1,7 +1,7 @@
 // The chat's agent picker lists every connected agent once, by name.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { choice, pickerProfiles } from '../client/src/chat/profiles.js'
+import { choice, isSetupError, otherProfile, pickerProfiles } from '../client/src/chat/profiles.js'
 
 const claude = { id: 'claude', label: 'Claude Code', configured: true }
 const codex = { id: 'codex', label: 'Codex', configured: true }
@@ -61,4 +61,24 @@ test('an unavailable profile is marked', () => {
     ],
   })
   assert.equal(picker.options[1].configured, false)
+})
+
+test('another connected agent to offer when this one cannot start', () => {
+  const both = { profileId: 'default', profiles: [{ id: 'default', label: 'Claude Code', sameAs: 'claude' }, claude, codex] }
+  assert.deepEqual(otherProfile(both), { id: 'codex', label: 'Codex', configured: true })
+  assert.deepEqual(otherProfile({ ...both, profileId: 'codex' }), { id: 'claude', label: 'Claude Code', configured: true })
+  assert.equal(otherProfile({ profileId: 'default', profiles: [{ id: 'default', label: 'Claude Code', sameAs: 'claude' }, claude] }), null)
+  assert.equal(
+    otherProfile({
+      profileId: 'default',
+      profiles: [
+        { id: 'default', label: 'Claude Code' },
+        { ...codex, configured: false },
+      ],
+    }),
+    null,
+  )
+  assert.equal(otherProfile(null), null)
+  for (const code of ['agent_auth', 'agent_start', 'agent_not_found']) assert.equal(isSetupError({ code }), true, code)
+  for (const error of [{ code: 'agent_exited' }, { code: 'timeout' }, null]) assert.equal(isSetupError(error), false)
 })

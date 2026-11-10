@@ -28,3 +28,15 @@ export function choice(thread, picked) {
   const { value } = pickerProfiles(thread)
   return picked === value ? null : picked
 }
+
+// Errors that mean the agent never got to work (not logged in or set up, not
+// started, not found; src/agent/errors.js): the chat then offers another
+// connected agent.
+export { isSetupError } from '../../../src/agent/errors.js'
+
+// Another connected agent this chat could switch to (the first available one
+// that is not the current), or null.
+export function otherProfile(thread) {
+  const { value, options } = pickerProfiles(thread)
+  return options.find((option) => option.id !== value && option.configured) || null
+}

@@ -516,8 +516,12 @@ export function agentRouter({
         // turn's answer, with its Undo, into an earlier version): like
         // bringing back a version, an owner session's thread needs the owner.
         if ((editOf !== null || previous) && !controlsAllowed(req, board, threadId)) return controlDenied(res)
+        // The comment's agent status before this run, to put back when the
+        // agent never got to work (feedback-loop.js finishFix).
+        let previousStatus = null
         if (fix) {
           const comment = getComment(config, board.id, commentId)
+          previousStatus = comment.agentStatus ?? null
           if (comment.status !== 'open' || ['queued', 'working'].includes(comment.agentStatus))
             return fail(res, 409, 'comment_busy', 'This comment is resolved or already with an agent.')
           const claimed = await setAgentStatus(config, board.id, commentId, 'queued', {
@@ -634,6 +638,7 @@ export function agentRouter({
                 pageIds: [...requestedPages],
                 capture,
                 signal: controller.signal,
+                previousStatus,
                 log,
               })
             }

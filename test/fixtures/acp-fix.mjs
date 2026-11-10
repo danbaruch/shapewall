@@ -44,6 +44,8 @@ lines.on('line', async (line) => {
       say(sessionId, JSON.stringify(servers))
       return reply({ stopReason: 'end_turn' })
     }
+    // An agent that is not signed in: ACP's auth_required, before any work.
+    if (mode === 'login') return send({ id: message.id, error: { code: -32000, message: 'Authentication required' } })
     if (mode === 'no-edit') {
       say(sessionId, 'I need more information.')
       return reply({ stopReason: 'end_turn' })

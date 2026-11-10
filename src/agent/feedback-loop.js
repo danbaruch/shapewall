@@ -2,6 +2,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { addReply, currentVersion, getComment, setAgentStatus } from '../store.js'
+import { isSetupError } from './errors.js'
 
 const SKIP = new Set(['.git', 'node_modules', 'dist', 'build', '.next', '.cache', 'coverage', '.output', '.shapewall'])
 const FILES_MAX = 30000
@@ -65,11 +66,45 @@ export async function recaptureComment({ config, board, id, pageIds = [], captur
   return result
 }
 
-export async function finishFix({ config, board, id, reply, changed, capture, pageIds = [], signal, log = () => {} }) {
+// Why a fix run stopped, in one plain sentence: the agent's last error (its
+// first sentence, never a stack), or that the answer was stopped.
+export function stopReason(reply, signal) {
+  const message = String(reply?.error?.message || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .find(Boolean)
+  if (message) {
+    const sentence = (/^.*?[.!?](?=\s|$)/.exec(message)?.[0] || message).slice(0, 200).trim()
+    return /[.!?]$/.test(sentence) ? sentence : `${sentence}.`
+  }
+  if (signal?.aborted || reply?.status === 'stopped') return 'The answer was stopped before it finished.'
+  return 'The agent did not finish its answer.'
+}
+
+// `previousStatus`: the comment's agent status before this run claimed it.
+export async function finishFix({
+  config,
+  board,
+  id,
+  reply,
+  changed,
+  capture,
+  pageIds = [],
+  signal,
+  previousStatus = null,
+  log = () => {},
+}) {
   let comment
   try {
     comment = getComment(config, board.id, id)
   } catch {
+    return
+  }
+  // The agent never got to work (not logged in, not set up, did not start):
+  // nothing to review on the comment, which goes back to how it was. The
+  // chat shows the error and how to fix it.
+  if (!changed && !signal?.aborted && reply.status === 'error' && isSetupError(reply.error)) {
+    await setAgentStatus(config, board.id, id, previousStatus, { onlyFrom: ['queued', 'working'], actor: 'shapewall' })
     return
   }
   if (signal?.aborted || reply.status !== 'done' || !changed) {
@@ -78,7 +113,7 @@ export async function finishFix({ config, board, id, reply, changed, capture, pa
         author: 'shapewall',
         body:
           reply.status !== 'done' || signal?.aborted
-            ? 'The agent stopped before the fix could be verified. Review its answer and try again.'
+            ? `The agent stopped before the fix could be verified. ${stopReason(reply, signal)} Review its answer and try again.`
             : 'No project file changes were detected. Review the agent’s answer before continuing.',
       })
       await setAgentStatus(config, board.id, id, 'needs-human', { actor: 'shapewall' })

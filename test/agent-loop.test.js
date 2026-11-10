@@ -6,9 +6,9 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { createApp, stopChildren } from '../src/server/app.js'
 import { createMcpServer } from '../src/mcp.js'
-import { projectChanged, projectSnapshot, finishFix } from '../src/agent/feedback-loop.js'
+import { projectChanged, projectSnapshot, finishFix, stopReason } from '../src/agent/feedback-loop.js'
 import { toolSpecs, runTool } from '../src/agent/tools.js'
-import { createComment, getComment } from '../src/store.js'
+import { createComment, getComment, setAgentStatus } from '../src/store.js'
 import { SAMPLE, sampleConfig, tempDir, request } from './helpers.js'
 import { loadConfig } from '../src/config.js'
 import { watchComments } from '../src/watch.js'
@@ -145,6 +145,83 @@ test('failed and unchanged fixes never become done or recapture', async () => {
     await finishFix({ config, board, id: comment.id, reply: { status }, changed: status !== 'done', capture: () => captures++ })
     assert.equal(captures, 0)
     assert.equal(getComment(config, board.id, comment.id).agentStatus, 'needs-human')
+  }
+})
+
+test('a stopped fix says why in one plain sentence; a fix that never started leaves the comment as it was', async () => {
+  assert.equal(
+    stopReason({ status: 'error', error: { code: 'agent_exited', message: 'Codex exited (code 3). Its log:\n at x (y.js:1)' } }),
+    'Codex exited (code 3).',
+  )
+  assert.equal(
+    stopReason({ status: 'error', error: { code: 'agent_upstream', message: 'The model refused the request' } }),
+    'The model refused the request.',
+  )
+  assert.equal(stopReason({ status: 'stopped' }, { aborted: true }), 'The answer was stopped before it finished.')
+  assert.equal(stopReason({ status: 'error' }), 'The agent did not finish its answer.')
+  assert.equal(stopReason({ status: 'error', error: { message: 'x'.repeat(500) } }).length, 201)
+
+  const config = sampleConfig('loop-stop-reason')
+  const board = config.boards[0]
+  const stopped = await createComment(config, board, valid)
+  await setAgentStatus(config, board.id, stopped.id, 'working')
+  const exited = { status: 'error', error: { code: 'agent_exited', message: 'Codex exited before it finished.' } }
+  await finishFix({ config, board, id: stopped.id, reply: exited, changed: false })
+  const after = getComment(config, board.id, stopped.id)
+  assert.equal(after.agentStatus, 'needs-human')
+  assert.equal(
+    after.replies.at(-1).body,
+    'The agent stopped before the fix could be verified. Codex exited before it finished. Review its answer and try again.',
+  )
+
+  for (const [code, previousStatus] of [
+    ['agent_auth', null],
+    ['agent_start', 'needs-human'],
+    ['agent_not_found', 'done'],
+  ]) {
+    const comment = await createComment(config, board, valid)
+    await setAgentStatus(config, board.id, comment.id, 'working')
+    const reply = { status: 'error', error: { code, message: 'Claude Code is not logged in (or not set up) on this machine.' } }
+    await finishFix({ config, board, id: comment.id, reply, changed: false, previousStatus })
+    const saved = getComment(config, board.id, comment.id)
+    assert.equal(saved.replies.length, 0, `${code}: no thread reply`)
+    assert.equal(saved.agentStatus, previousStatus, `${code}: status as it was`)
+  }
+  // A setup error after files changed is a real stop: the person reviews it.
+  const changed = await createComment(config, board, valid)
+  await setAgentStatus(config, board.id, changed.id, 'working')
+  await finishFix({
+    config,
+    board,
+    id: changed.id,
+    reply: { status: 'error', error: { code: 'agent_auth', message: 'Signed out.' } },
+    changed: true,
+  })
+  assert.equal(getComment(config, board.id, changed.id).agentStatus, 'needs-human')
+  assert.match(getComment(config, board.id, changed.id).replies.at(-1).body, /Signed out\./)
+})
+
+test('Fix with agent and an agent that is not logged in: no comment reply, status unchanged, on every retry', async () => {
+  const config = setup('fix-login')
+  const comment = await createComment(config, config.boards[0], valid)
+  const app = createApp({ config, settingsToken: token, agentAcp: `${process.execPath} ${fixture} login` })
+  const server = await listen(app)
+  const port = server.address().port
+  try {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const result = await request(port, 'POST', `/api/agent/boards/sample/threads/comment-${comment.id}/messages`, {
+        headers: { Origin: `http://127.0.0.1:${port}`, 'X-Shapewall-Settings-Token': token },
+        body: { text: 'Fix heading', fix: true },
+      })
+      assert.equal(result.status, 200)
+      assert.match(result.text, /agent_auth/)
+      const saved = getComment(config, 'sample', comment.id)
+      assert.equal(saved.replies.length, 0, `attempt ${attempt + 1}: nothing posted on the comment`)
+      assert.equal(saved.agentStatus, null, `attempt ${attempt + 1}: no "Needs a person"`)
+    }
+  } finally {
+    stopChildren(app)
+    await new Promise((resolve) => server.close(resolve))
   }
 })
 

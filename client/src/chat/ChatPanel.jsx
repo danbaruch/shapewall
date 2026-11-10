@@ -26,7 +26,8 @@ import { buildRefIndex } from './refs'
 import { abortOf, isSending, registerHost, setRun as storeRun, takeStash, updateQueue, useTurns } from './turns'
 import { ConnectedNote } from './QuickConnect'
 import { ChatHeader, ConnectAgent, ProfilePicker } from './header'
-import { CONTINUE_PROMPT, MessageList } from './messages'
+import { CONTINUE_PROMPT, FIX_PROMPT, MessageList } from './messages'
+import { otherProfile } from './profiles'
 import { Composer } from './composer'
 import { commentOfThread, mergeBy, ownerOnlyError, useChatTurn } from './useChatTurn'
 import { useAutoAllow } from './useAutoAllow'
@@ -116,13 +117,16 @@ export default function ChatPanel({
   const agent = selectedThread?.agent ? { ...defaultAgent, ...selectedThread.agent } : defaultAgent
   const configured = Boolean(agent?.configured)
   const [selectingProfile, setSelectingProfile] = useState(false)
+  // Resolves to whether the chat now uses `profileId`.
   const chooseProfile = async (profileId) => {
     setSelectingProfile(true)
     try {
       await api.post(`/api/agent/boards/${encodeURIComponent(boardId)}/threads/${encodeURIComponent(threadId)}/profile`, { profileId })
       await thread.refetch()
+      return true
     } catch (error) {
       setNotice({ tone: 'bad', text: error.message })
+      return false
     } finally {
       setSelectingProfile(false)
     }
@@ -625,6 +629,15 @@ export default function ChatPanel({
         : 'Review before sending again. The previous attempt may have made changes; retrying can repeat them.',
     })
   }
+  // The agent could not start (not logged in, not set up): switch this chat to
+  // another connected agent and send the same request again.
+  const otherAgent = otherProfile(selectedThread)
+  const tryOther = async (message, request) => {
+    if (!otherAgent || running || !request) return
+    if (!(await chooseProfile(otherAgent.id))) return
+    if (request.text === FIX_PROMPT) await submit('', true)
+    else await submit('', false, { regenerate: { message, request } })
+  }
   const readAloudProps = useMemo(() => ({ voiceUri, settings: readAloud }), [voiceUri, readAloud])
 
   // Board references in answers: what they can link to and where a chip goes.
@@ -787,6 +800,8 @@ export default function ChatPanel({
                 onRate={answerRatings.rate}
                 onRegenerate={(message, request) => submit('', false, { regenerate: { message, request } })}
                 regenerateDisabled={running || dictation.listening}
+                otherAgent={agent?.ownerWrites && otherAgent ? otherAgent : null}
+                onTryOther={tryOther}
               />
             </RefsContext.Provider>
           </AllowForChat.Provider>
