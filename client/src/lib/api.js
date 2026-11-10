@@ -71,6 +71,7 @@ const wantsToken = (url, method) =>
   url.startsWith('/api/agent/feedback') ||
   url.startsWith('/api/agent/branches') ||
   (/^\/?api\/agent\/boards\//.test(url) && url.includes('/threads')) ||
+  /^\/?api\/agent\/boards\/[a-z0-9-]+\/batch(\/|$)/.test(url) ||
   url.startsWith('/api/devices') ||
   url.startsWith('/api/share/') ||
   /^\/api\/boards\/[a-z0-9-]+\/checks\/run$/.test(url) ||

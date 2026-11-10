@@ -210,7 +210,11 @@ const TOKEN = 'batch-fixes-test-token'
 const gitEnv = { ...process.env, GIT_CONFIG_NOSYSTEM: '1' }
 for (const key of Object.keys(gitEnv)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CEILING)/.test(key)) delete gitEnv[key]
 const sh = (cwd, ...args) =>
-  execFileSync('git', ['-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgSign=false', ...args], { cwd, encoding: 'utf8', env: gitEnv }).trim()
+  execFileSync('git', ['-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgSign=false', ...args], {
+    cwd,
+    encoding: 'utf8',
+    env: gitEnv,
+  }).trim()
 
 function repo(name) {
   const dir = tempDir(name)
@@ -239,7 +243,13 @@ async function serve(name, { mode = 'edit' } = {}) {
   const env = { ...process.env, XDG_CONFIG_HOME: home, SHAPEWALL_AGENT_SETTINGS_FILE: path.join(home, 'agents.json') }
   delete env.SHAPEWALL_AGENT_BRANCH_MODE
   delete env.SHAPEWALL_AGENT_ACP
-  const app = createApp({ config, env, settingsToken: TOKEN, agentAcp: `${process.execPath} ${fixture} ${mode}`, agentLimits: { burst: 100 } })
+  const app = createApp({
+    config,
+    env,
+    settingsToken: TOKEN,
+    agentAcp: `${process.execPath} ${fixture} ${mode}`,
+    agentLimits: { burst: 100 },
+  })
   const server = await new Promise((resolve) => {
     const listening = app.listen(0, '127.0.0.1', () => resolve(listening))
   })
@@ -251,7 +261,7 @@ async function serve(name, { mode = 'edit' } = {}) {
   return { dir, config, app, port, headers, call, comment, queue: app.locals.agentRouter.batchQueue }
 }
 
-// Counts "batch" events on GET /api/agent/events (owner streams only).
+// Counts "batch" events on GET /api/agent/events (a nudge on every stream).
 function batchEvents(port, headers) {
   const seen = []
   const req = http.get({ host: '127.0.0.1', port, path: '/api/agent/events', headers }, (res) => {
@@ -337,7 +347,7 @@ test('routes: off by default, owner only, ids checked; a batch in branch mode fi
   assert.equal(getComment(config, 'sample', c.id).agentStatus ?? null, null, 'past the cap: untouched')
   assert.equal(sh(dir, 'branch', '--list', 'shapewall/*').split('\n').length, 2)
   assert.equal(fs.readFileSync(path.join(dir, 'index.html'), 'utf8'), '<h1>Original</h1>\n', 'the checkout is untouched')
-  assert.ok(await until(() => events.seen.length > 3), 'batch events on the owner stream')
+  assert.ok(await until(() => events.seen.length > 3), 'batch events on the stream')
   assert.ok(events.seen.every((event) => event.board === 'sample'))
   events.close()
   // Dismiss the summary.

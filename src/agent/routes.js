@@ -1203,11 +1203,13 @@ export function agentRouter({
     const stop = settingsEvents.subscribe((event) => {
       if (!res.writableEnded) res.write(`event: ${AGENTS_EVENT}\ndata: ${JSON.stringify({ at: event.at })}\n\n`)
     })
-    // A board's batch of fixes moved on (owner streams only): { board, at }.
+    // A board's batch of fixes moved on: { board, at }, a nudge like "agents"
+    // (the browser's EventSource cannot send the settings token). What the
+    // batch holds is only on GET /boards/:id/batch, for the owner.
     const batchListener = (event) => {
       if (!res.writableEnded) res.write(`event: batch\ndata: ${JSON.stringify({ board: event.boardId, at: event.at })}\n\n`)
     }
-    if (ownerWritesFor(req)) batchListeners.add(batchListener)
+    batchListeners.add(batchListener)
     const keepalive = setInterval(() => {
       if (!res.writableEnded) res.write(': ping\n\n')
     }, limit.keepaliveMs)

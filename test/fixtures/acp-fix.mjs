@@ -1,9 +1,11 @@
 // Scripted coding agent for the local feedback-loop fixture. No model calls.
-// Modes: edit (default), fail, no-edit, inspect, login, and branch: like edit,
+// Modes: edit (default), fail, no-edit, inspect, login, slow, and branch: like edit,
 // but first checks that it runs in an agent branch worktree and that a write
 // to the person's checkout is refused (agent branch mode). branch-media: like
 // branch, and the comment's images and drawing must arrive as image blocks in
 // the prompt and as readable files outside the worktree through get_comment.
+// slow: like edit, after a pause of 1.5 s that session/cancel ends (the turn
+// then stops as cancelled, nothing edited), so a batch can be cancelled mid-item.
 import fs from 'node:fs'
 import readline from 'node:readline'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
@@ -13,6 +15,7 @@ let cwd
 let servers = []
 let nextId = 100
 const pending = new Map()
+let cancelTurn = null
 const send = (value) => process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', ...value })}\n`)
 const ask = (method, params) =>
   new Promise((resolve, reject) => {
@@ -43,9 +46,21 @@ lines.on('line', async (line) => {
     servers = message.params.mcpServers
     return reply({ sessionId: 'fixture' })
   }
+  if (message.method === 'session/cancel') return cancelTurn?.()
   if (message.method !== 'session/prompt') return
   const { sessionId, prompt } = message.params
   try {
+    if (mode === 'slow') {
+      const cancelled = await new Promise((resolve) => {
+        const timer = setTimeout(() => resolve(false), 1500)
+        cancelTurn = () => {
+          clearTimeout(timer)
+          resolve(true)
+        }
+      })
+      cancelTurn = null
+      if (cancelled) return reply({ stopReason: 'cancelled' })
+    }
     if (mode === 'inspect') {
       say(sessionId, JSON.stringify(servers))
       return reply({ stopReason: 'end_turn' })
