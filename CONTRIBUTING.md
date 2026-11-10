@@ -65,10 +65,23 @@ rely on one to make another safe, and never add `allow-scripts` to the frame or 
 
 Prettier (no semicolons, single quotes, 140 columns) and ESLint. Plain JavaScript (ESM), Node 22+. Comments explain why, not what.
 
-## Releases
+## Releasing
 
-Maintainers move "Unreleased" in `CHANGELOG.md` under a new version, set the same version in `package.json`, run the checks above on
-that commit and tag it `vX.Y.Z`.
+A release is a tag. Nobody publishes from a laptop, and no npm token or approval is involved.
+
+1. Move "Unreleased" in `CHANGELOG.md` under a new `## X.Y.Z` heading and set the same version in `package.json` (and
+   `package-lock.json`, with `npm version X.Y.Z --no-git-tag-version`).
+2. Open a pull request, let CI pass and merge it.
+3. Tag the merged commit and push the tag:
+
+   ```sh
+   git tag vX.Y.Z
+   git push origin vX.Y.Z
+   ```
+
+4. The publish workflow (`.github/workflows/publish.yml`) checks that the tag matches `package.json`, runs the checks, publishes the
+   package to npm with provenance through npm trusted publishing, and creates the GitHub Release from that version's section of
+   `CHANGELOG.md`. A version already on npm is skipped, so pushing the tag again is harmless.
 
 ## License of contributions
 
