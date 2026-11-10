@@ -2,9 +2,9 @@ import { Link } from 'react-router-dom'
 import { ArrowRight, FileJson, Laptop, Package, Scale, Server, Users } from 'lucide-react'
 import { GitHubIcon } from '../components/brand.jsx'
 import { PageHeader } from '../components/page.jsx'
-import { Button, Container, InstallCommand } from '../components/ui.jsx'
+import { Badge, Button, Container, InstallCommand } from '../components/ui.jsx'
 import { GITHUB_URL } from '../routes.js'
-import { GITHUB_LABEL, LAUNCHED } from '../launch.js'
+import { BETA_NOTE, GITHUB_LABEL, LAUNCHED } from '../launch.js'
 
 const WAYS = [
   {
@@ -17,7 +17,8 @@ const WAYS = [
   {
     icon: Users,
     title: 'For a team',
-    text: 'Run one self-hosted server over Tailscale. Each teammate signs in with their own passkey and joins a workspace, with roles, comments, scoped agents and live presence.',
+    badge: 'Beta',
+    text: `Run one self-hosted server over Tailscale. Each teammate signs in with their own passkey and joins a workspace, with roles, comments, scoped agents and live presence. ${BETA_NOTE}`,
     code: 'shapewall hosted --tailscale --tailscale-port 8443',
     link: ['/docs/self-hosting', 'Deployment and self-hosting'],
   },
@@ -41,15 +42,18 @@ export default function OpenSource() {
   return (
     <>
       <PageHeader eyebrow="Licenses and self-hosting" title="Local tool: Apache 2.0. Multiplayer: self-hosted.">
-        The local tool keeps captures and comments on your disk and is open source under Apache 2.0. The optional team server is yours to
-        host, and its source is available under the Functional Source License.
+        The local tool keeps captures and comments on your disk and is open source under Apache 2.0. The optional team server, in beta, is
+        yours to host, and its source is available under the Functional Source License.
       </PageHeader>
       <Container className="py-16 sm:py-20">
         <div className="grid gap-5 md:grid-cols-2">
           {WAYS.map((way) => (
             <section key={way.title} className="flex min-w-0 flex-col rounded-2xl border border-line bg-card p-6 sm:p-7">
               <way.icon className="size-5 text-wall" aria-hidden="true" />
-              <h2 className="mt-4 text-[20px] font-bold tracking-tight text-ink">{way.title}</h2>
+              <h2 className="mt-4 flex flex-wrap items-center gap-2 text-[20px] font-bold tracking-tight text-ink">
+                {way.title}
+                {way.badge ? <Badge tone="amber">{way.badge}</Badge> : null}
+              </h2>
               <p className="mt-2 flex-1 text-[15px] leading-7 text-slate">{way.text}</p>
               <pre className="mt-5 overflow-x-auto rounded-xl bg-night px-4 py-3 ring-1 ring-code-edge font-mono text-[13px] text-zinc-200">
                 <code>

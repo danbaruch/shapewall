@@ -207,14 +207,18 @@ test('early access (the default): said in the hero badge and the install box, no
   for (const route of ROUTES) {
     const html = read(fileFor(route.path))
     assert.ok(!/invited users|maintainer-supplied|supplied (release )?tarball/i.test(html), `${route.path}: no leftover access wording`)
-    if (route.kind !== 'doc') assert.ok(!html.includes('github:danbaruch/shapewall'), `${route.path}: no install command before launch`)
+    if (route.kind !== 'doc') {
+      assert.ok(!html.includes('github:danbaruch/shapewall'), `${route.path}: no install command before launch`)
+      assert.ok(!html.includes('npm install --save-dev shapewall'), `${route.path}: no install command before launch`)
+    }
   }
   assert.match(home, /GitHub \(invite only\)/)
   assert.doesNotMatch(home, /"@type":"Offer"/, 'nothing is on offer before launch')
   assert.doesNotMatch(home, /blob\/main\/CHANGELOG\.md/, 'no links into the private repository')
   const install = read(fileFor('/docs/getting-started'))
   assert.match(install, /Private early access/)
-  assert.match(install, /npm install --save-dev github:danbaruch\/shapewall/)
+  assert.match(install, /npm install --save-dev shapewall\b/)
+  assert.match(install, /npm install --save-dev github:danbaruch\/shapewall/, 'GitHub stays the install for unreleased builds')
   assert.doesNotMatch(install, /Edit on GitHub/)
   checkLinks()
 })
@@ -226,7 +230,7 @@ test('launched: install command, plain GitHub links, a free Offer, no early acce
     assert.ok(!/early access|invite only|invited (users|repository|GitHub)/i.test(html), `${route.path}: no pre-launch wording`)
   }
   const home = read(fileFor('/'))
-  assert.match(home, /npm install --save-dev github:danbaruch\/shapewall/)
+  assert.match(home, /npm install --save-dev shapewall\b/)
   assert.match(home, /"@type":"Offer"/)
   assert.match(home, /"price":"0"/)
   const version = JSON.parse(read(path.join(SITE, '..', 'package.json'))).version
@@ -235,7 +239,11 @@ test('launched: install command, plain GitHub links, a free Offer, no early acce
   assert.match(home, /href="https:\/\/github\.com\/danbaruch\/shapewall\/blob\/main\/SECURITY\.md"/)
   assert.match(read(fileFor('/docs/config')), /blob\/main\/docs\/config\.md"/)
   assert.match(read(fileFor('/docs/config')), /Edit on GitHub/)
-  assert.match(read(fileFor('/docs/getting-started')), /npm install --save-dev github:danbaruch\/shapewall/)
+  assert.match(read(fileFor('/docs/getting-started')), /npm install --save-dev shapewall\b/)
+  for (const route of ['/', '/features', '/open-source', '/docs', '/docs/hosted', '/docs/faq']) {
+    assert.match(read(fileFor(route)), /\bbeta\b/i, `${route}: self-hosted multiplayer is labelled beta`)
+  }
+  assert.match(read(fileFor('/docs/security')), /id="known-limits"/)
   checkLinks()
 })
 

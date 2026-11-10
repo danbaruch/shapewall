@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import { ArrowRight, Check, Download } from 'lucide-react'
 import { PageHeader } from '../components/page.jsx'
 import { Badge, Container, Shot } from '../components/ui.jsx'
+import { BETA_NOTE } from '../launch.js'
 import {
   BeforeAfter,
   CaptureIllustration,
@@ -169,8 +170,9 @@ const SECTIONS = [
   {
     id: 'teams',
     nav: 'Teams',
+    badge: 'Beta',
     title: 'Workspaces, roles and share links',
-    text: 'Host Shapewall for a team: people sign in with a passkey, and each workspace has owners, admins, members and viewers. Admins invite people, hand out expiring share links to clients, issue API tokens for agents and read an audit log of who changed what. The live demo has all of it, running in your browser: switch who you are with View as.',
+    text: `Host Shapewall for a team: people sign in with a passkey, and each workspace has owners, admins, members and viewers. Admins invite people, hand out expiring share links to clients, issue API tokens for agents and read an audit log of who changed what. The live demo has all of it, running in your browser: switch who you are with View as. ${BETA_NOTE}`,
     points: ['Four roles, checked on every request', 'Invites and share links that expire', 'An audit log of every admin change'],
     art: <RolesIllustration />,
   },

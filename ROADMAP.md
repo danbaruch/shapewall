@@ -6,10 +6,14 @@ not promises. Ideas and pull requests are welcome: see [CONTRIBUTING.md](CONTRIB
 Shapewall has two tracks. **Local** is a single-player tool on your machine: your dev server, your agent, no account. **Multiplayer**
 is `shapewall hosted`: passkey accounts, workspaces and a scoped agent on a server you run. The local tool never needs an account.
 
+Multiplayer is in **beta**: it works and is tested with automated browsers, but it has not yet had a real multi-person team on it or
+real phone passkeys verified, so run it for people you trust and keep backups.
+
 ## Done
 
 ### Both
 
+- On npm: `npm install --save-dev shapewall`, or `npx shapewall` with no install.
 - Capture: Chromium at desktop, tablet, phone or your own viewports; fixed-frame PNG, thumbnail and sanitized live HTML (allowlist
   sanitizer, strict CSP, sandboxed frame); waits, actions, shared setup, signed-in pages, partial recaptures, run lock.
 - Board: zoomable canvas by section, variants, phone layout, URL state, page search, installable (PWA), static export.
@@ -31,7 +35,7 @@ is `shapewall hosted`: passkey accounts, workspaces and a scoped agent on a serv
 - `serve --tailscale` and `serve --lan` for your own other devices, with pairing and revocation.
 - Sitemap and title defaults, config reload without a restart, a dropdown to move between local projects.
 
-### Multiplayer (self-hosted)
+### Multiplayer (self-hosted, beta)
 
 - `shapewall hosted`: passkeys and recovery codes, workspaces with roles, invitations, an access overview, audit log, export and
   deletion.
@@ -45,15 +49,17 @@ is `shapewall hosted`: passkey accounts, workspaces and a scoped agent on a serv
 
 ## Now
 
-1. An npm release, so `npx shapewall` works without a clone or a GitHub install.
-2. Phones in multiplayer: passkey sign-in, home-screen sessions and live presence checked and polished on iOS and Android.
-3. Easier operations for a hosted server: backups and a health check set up as part of `hosted --setup`.
+1. Verify macOS and Windows: run the local tool end to end on both and fix what breaks. Reports from either are welcome.
+2. A real team trial of multiplayer, including passkey sign-in, home-screen sessions and live presence on iOS and Android phones, to
+   take it out of beta.
+3. Firefox and WebKit captures, beside Chromium.
 
 ## Next
 
 - A shorter path from a comment to changed code on a local checkout: fewer steps to connect a native agent, and clearer messages
   when its sign-in or model is the problem.
 - Pull requests from the board: have the agent's fix arrive as a branch and a PR you review, then recapture from its preview.
+- Easier operations for a hosted server: backups and a health check set up as part of `hosted --setup`.
 
 ## Later
 
@@ -61,7 +67,7 @@ is `shapewall hosted`: passkey accounts, workspaces and a scoped agent on a serv
 - A tunnel mode: your server, our URL.
 - Captures on the server for verified sites, and managed sandboxed agents.
 - A GitHub App in place of a personal token.
-- Firefox and WebKit captures; full-page captures.
+- Full-page captures.
 
 ## Not planned
 

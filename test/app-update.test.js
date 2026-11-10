@@ -59,7 +59,7 @@ test('version is bounded artifact metadata; unsupported installs never run a def
   const status = await instance.status()
   assert.equal(status.status, 200)
   assert.equal(status.headers['cache-control'], 'no-store')
-  assert.equal(status.json.current.version, '0.2.0')
+  assert.equal(status.json.current.version, JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version)
   assert.equal(status.json.supported, false)
   assert.equal(status.json.canUpdate, false)
   assert.match(status.json.reason, /person who installed/)

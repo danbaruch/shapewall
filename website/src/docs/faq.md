@@ -50,7 +50,8 @@ instead, and `shapewall watch` can start any command-line agent for each new com
 ## Is there a hosted version?
 
 You can host it yourself today: `shapewall hosted` gives a team passkey sign-in, workspaces, roles and shared boards on a server you
-run. [The hosted guide](/docs/hosted) covers setup. A service run by us on shapewall.com is planned and has not launched.
+run. It is in beta: it works and is tested with automated browsers, but it has not yet had a real multi-person team on it or real
+phone passkeys verified, so run it for people you trust and keep backups. [The hosted guide](/docs/hosted) covers setup. A service run by us on shapewall.com is planned and has not launched.
 
 ## How do I capture many pages quickly?
 

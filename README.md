@@ -1,14 +1,28 @@
 # Shapewall
 
-**Every page of your site on one zoomable wall.** Shapewall captures each page at desktop and phone width, lays them out on a canvas grouped
-by section, and lets your team pin comments to the exact element that needs work. Zoom out to see the whole product at once; zoom in and
-the screenshot turns into the real, captured HTML, with responsive CSS intact and every script stripped. Comments come out as structured
-JSON, so a coding agent can read the feedback, fix the code, and you recapture to check.
+[![npm](https://img.shields.io/npm/v/shapewall)](https://www.npmjs.com/package/shapewall)
+[![CI](https://github.com/danbaruch/shapewall/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/danbaruch/shapewall/actions/workflows/ci.yml)
+[![License: Apache-2.0 and FSL-1.1](https://img.shields.io/badge/license-Apache--2.0%20%2B%20FSL--1.1-blue)](#license)
 
-**[Live demo](https://shapewall.com/demo/)**: a board of a fictional product (26 pages, five journeys, one of them branching, comments in
-every state, page history, two variants, staging against production). Comments you add there stay in your browser.
+**Every page of your site on one zoomable wall, with comments pinned to elements that your coding agent can act on.**
 
 ![The demo board: every page of a small site, grouped, at desktop and phone width](docs/images/board-overview.png)
+
+With your dev server running, in its project folder:
+
+```sh
+npx shapewall doctor --install-browser                          # once: downloads the Chromium that captures use
+npx shapewall init --base-url http://localhost:3000 --sitemap   # your dev server and its sitemap.xml
+npx shapewall capture && npx shapewall serve --open
+```
+
+**[Live demo](https://shapewall.com/demo/)** (no install: a board of a fictional product, 26 pages, comments in every state; comments
+you add stay in your browser) · **[Docs](https://shapewall.com/docs)** · [Quickstart details](#quickstart)
+
+Shapewall captures each page at desktop and phone width, lays them out on a canvas grouped by section, and lets you pin comments to the
+exact element that needs work. Zoom out to see the whole product at once; zoom in and the screenshot turns into the real, captured
+HTML, with responsive CSS intact and every script stripped. Comments come out as structured JSON, so a coding agent can read the
+feedback, fix the code, and you recapture to check.
 
 - **Whole-site view.** Desktop, tablet and phone captures side by side, grouped (Marketing, App, ...), with per-page notes like
   "signed-out state". Add your own viewports, such as a landscape phone.
@@ -36,7 +50,7 @@ every state, page history, two variants, staging against production). Comments y
 - **Works on a phone.** 44 px touch targets, a bottom sheet for comments, and Back closes the topmost panel instead of leaving the board.
 - **Small and local.** Node 22, Playwright, Express, React Flow. Data is plain JSON files in `.shapewall/`. No account, no cloud.
 - **A team server when you want one.** `shapewall hosted` adds passkey accounts, workspaces with roles, share links and live presence
-  on a server you run. [Multiplayer](#multiplayer-on-your-own-server).
+  on a server you run. [Multiplayer (beta)](#multiplayer-on-your-own-server).
 - **Switch local projects.** Serve each project on its own port; the site dropdown lists them together while keeping every project's
   agent and files separate. [Several local projects](docs/deployment.md#several-local-projects).
 
@@ -48,24 +62,35 @@ every state, page history, two variants, staging against production). Comments y
 
 ## Quickstart
 
-You need Node.js **22.13 or newer** (basic capture works on any Node 22; local accounts and the team server need 22.13) and git.
+### Requirements
+
+- Node.js **22.13 or newer**. Basic capture works on any Node 22; local accounts and the team server need 22.13.
+- Chromium for captures: `shapewall doctor --install-browser` downloads Playwright's build, or use a Chrome you already have.
+- Platforms: Shapewall is developed and tested on Linux. macOS should work and is not yet verified by the maintainers. Windows is
+  untested; the PowerShell lines in the docs are a convenience. If you run it on macOS or Windows, please
+  [open an issue](https://github.com/danbaruch/shapewall/issues) with what worked and what did not.
+
+### Install
 
 In the project you want to review, with its dev server running:
 
 ```sh
-npm install --save-dev github:danbaruch/shapewall     # npm fetches the repository and builds the board: about a minute
-npx --no -- shapewall doctor --install-browser         # downloads the Chromium that captures use
-npx --no -- shapewall init --base-url http://localhost:3000 --sitemap
-npx --no -- shapewall capture
-npx --no -- shapewall serve --open
+npm install --save-dev shapewall
+npx shapewall doctor --install-browser         # downloads the Chromium that captures use
+npx shapewall init --base-url http://localhost:3000 --sitemap
+npx shapewall capture
+npx shapewall serve --open
 ```
 
 `--base-url` is your running dev server, staging or production. `--sitemap` reads `<base URL>/sitemap.xml`; give it a URL or a file
 for another sitemap, or leave it out and list your pages in `shapewall.config.json` (the example pages it writes need editing first).
-In an empty folder, run `npm init -y` before the install.
+In an empty folder, run `npm init -y` before the install. Without the install, `npx shapewall ...` downloads the package on first use,
+as in the three lines at the top.
 
-`npx --no --` runs the copy installed in the project and never downloads a package. The rest of this README shortens the command to
-`shapewall`. Shapewall is not on the npm registry yet, so install it from GitHub as above, or from a clone:
+`npx shapewall` runs the copy installed in the project. The rest of this README shortens the command to `shapewall`.
+
+For a build that is not released yet, install from GitHub with `npm install --save-dev github:danbaruch/shapewall` (npm clones the
+repository and builds the board: about a minute), or from a clone:
 
 ```sh
 git clone https://github.com/danbaruch/shapewall.git
@@ -89,6 +114,9 @@ Next: [configuration and sign-in](docs/config.md#auth), [capture warnings and pa
 [local accounts](docs/local-accounts.md), [updates](docs/updates.md) and [deployment](docs/deployment.md).
 
 ### Multiplayer on your own server
+
+**Beta.** The team server works and is tested with automated browsers, but it has not yet had a real multi-person team on it or real
+phone passkeys verified, so run it for people you trust and keep backups.
 
 ```sh
 shapewall hosted --data ./hosted-data --tailscale --tailscale-port 8443
@@ -194,7 +222,7 @@ To close the loop without anyone typing a command:
 - `shapewall watch --mention agent` only hands out comments that tag `@agent` (in the text or a reply), so people can talk first.
 - Its status goes `queued`, `working`, then `done` or `needs-human`; a restart or a second watcher never hands one out twice.
 - `shapewall mcp` is an MCP server with tools to list, read (with a crop of the screenshot), reply, set status, resolve and recapture.
-- With Shapewall installed in your project: `claude mcp add shapewall -- npx --no -- shapewall mcp`; Codex and other clients in
+- With Shapewall installed in your project: `claude mcp add shapewall -- npx shapewall mcp`; Codex and other clients in
   [docs/agent-workflow.md](docs/agent-workflow.md).
 
 An agent you connect on the board edits the folder the config is in, shown as **Source folder on the Shapewall computer** in Settings.
