@@ -62,8 +62,6 @@ shapewall.com {
         path_regexp html ^/(.+)\.html$
         not path /404.html /google*.html /demo/*
     }
-    @retiredRoadmap path /roadmap /roadmap/ /roadmap.html
-    redir @retiredRoadmap /features{?query} permanent
     redir /demo /demo/{?query} permanent
     redir @slash /{re.slash.1}{?query} permanent
     redir @index /{?query} permanent

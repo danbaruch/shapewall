@@ -634,10 +634,6 @@ notifications, GitHub connect or a team server you set up receive what you send 
 `journeys.json`, previous captures in `versions/`, other environments in `envs/`, cached diffs in `diffs/` and `agent/` (what
 `shapewall watch` handed to your command, with its log). Delete the folder to start over.
 
-## Roadmap
-
-What is done, next and later: [ROADMAP.md](ROADMAP.md).
-
 ## Contributing
 
 Issues and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md). Security

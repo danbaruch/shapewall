@@ -67,8 +67,6 @@ shapewall.com {
   @assets path /assets/*
   header @assets Cache-Control "public, max-age=31536000, immutable"
   header /sw.js Cache-Control "no-cache"
-  @retiredRoadmap path /roadmap /roadmap/ /roadmap.html
-  redir @retiredRoadmap /features{?query} permanent
   try_files {path}.html {path}
   file_server
   handle_errors 404 {
@@ -77,8 +75,6 @@ shapewall.com {
   }
 }
 ```
-
-The retired Roadmap URLs redirect permanently to `/features`, preserving the query string. The preview server applies the same redirects.
 
 ## Live demo
 
