@@ -11,7 +11,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { chromium } from 'playwright'
 import { createApp, stopChildren } from '../../src/server/app.js'
-import { ROOT_DIR, demoSetup, listen } from './helpers.js'
+import { ROOT_DIR, boardStartView, demoSetup, listen, overlayBackLanded } from './helpers.js'
 import { startOpenAIStub } from '../fixtures/openai-stub.js'
 
 const SHOTS = process.env.SHAPEWALL_SHOTS ? path.resolve(process.env.SHAPEWALL_SHOTS) : null
@@ -315,6 +315,10 @@ test('without the link from the terminal: no settings, a hint; the link opens th
       assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width, JSON.stringify(bounds))
     }
     await page.setViewportSize({ width: 1440, height: 900 })
+    // The chat sheet becomes the side panel again and goes Back over its
+    // history entry: let that land, or it lands after the next navigation.
+    await page.locator('[data-sw-toolbar="full"]').waitFor()
+    await overlayBackLanded(page)
     // The CLI opens its owner link in a fresh document, not a hash-only visit.
     await page.goto('about:blank')
     await page.goto(withToken(url))
@@ -351,13 +355,15 @@ test('owner link pasted into the same open board consumes its token and refreshe
       }
     })
     await page.reload()
-    await page.waitForSelector('[data-sw-node="home"]')
+    // The board writes its start view to the address bar first, so the owner
+    // link (no query string) opens a fresh document, as pasting it does.
+    await boardStartView(page)
     await page.evaluate(() => {
       window.ownerDocumentMarker = true
     })
     await page.goto(`${url}#panel=agent&settings-token=wrong-owner-fixture`)
     await page.waitForFunction(() => !location.hash.includes('settings-token') && !window.ownerDocumentMarker)
-    await page.waitForSelector('[data-sw-node="home"]')
+    await boardStartView(page)
     assert.equal(await page.locator('[data-sw-settings-open]').count(), 0, 'a foreign token never grants settings')
     await page.evaluate(() => sessionStorage.removeItem('owner-fragment-preserved'))
     await page.goto(`${url}#panel=agent&settings-token=${TOKEN}`)
@@ -381,6 +387,9 @@ for (const disabled of ['storage', 'history'])
     const url = await board()
     const { context, page, errors } = await openBoard(url, { viewport: { width: 1280, height: 900 } })
     try {
+      // Only the owner link meets the disabled API: the board's own start
+      // view is written to the address bar before it is switched off.
+      await boardStartView(page)
       const sameDocument = await page.evaluate(
         async ({ token, disabled }) => {
           window.ownerDocumentMarker = true

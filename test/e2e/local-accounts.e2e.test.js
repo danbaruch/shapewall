@@ -195,9 +195,26 @@ for (const width of [1440, 390, 320])
       await otherAuth.cdp.send('WebAuthn.setAutomaticPresenceSimulation', { authenticatorId: otherAuth.authenticatorId, enabled: false })
       for (const credential of credentials)
         await otherAuth.cdp.send('WebAuthn.addCredential', { authenticatorId: otherAuth.authenticatorId, credential })
+      // Presence stays off until the button's own ceremony starts, so the
+      // passkey autofill request (which the click aborts) cannot sign in
+      // first. The authenticator never answers a request made while presence
+      // is off, so the button's options request is held until it is back on.
+      const autofillOptions = second.waitForResponse((response) => new URL(response.url()).pathname.endsWith('/auth/login/options'))
       await second.goto(`${origin}/account`)
+      await autofillOptions
+      let presenceOn
+      let buttonAsked
+      const presence = new Promise((resolve) => (presenceOn = resolve))
+      const buttonOptions = new Promise((resolve) => (buttonAsked = resolve))
+      await second.route('**/auth/login/options', async (route) => {
+        buttonAsked()
+        await presence
+        await route.continue()
+      })
       await second.locator('[data-sw-passkey-signin]').click()
+      await buttonOptions
       await otherAuth.cdp.send('WebAuthn.setAutomaticPresenceSimulation', { authenticatorId: otherAuth.authenticatorId, enabled: true })
+      presenceOn()
       await second.locator('[data-sw-profile-photo] img').waitFor()
       assert.equal((await other.request.get(`${origin}/api/boards`)).status(), 200)
       await second.locator('[data-sw-profile-photo-remove]').click()

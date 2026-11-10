@@ -14,7 +14,7 @@ import { createApp } from '../../src/server/app.js'
 import { PNG } from 'pngjs'
 import { addReply, createComment, listComments, listVersions, setAgentStatus, updateComment, versionsDir } from '../../src/store.js'
 import { exportStatic } from '../../src/export.js'
-import { ROOT_DIR, demoSetup, listen, liveElementBox } from './helpers.js'
+import { ROOT_DIR, boardStartView, demoSetup, listen, liveElementBox } from './helpers.js'
 
 const SHOTS = process.env.SHAPEWALL_SHOTS ? path.resolve(process.env.SHAPEWALL_SHOTS) : null
 let setup
@@ -716,8 +716,24 @@ test('a desktop-only page has no empty phone frame, in Both and in Phone', async
   const page = await context.newPage()
   const errors = []
   page.on('pageerror', (error) => errors.push(error.message))
+  // Each painted frame: is the board shown while still at React Flow's
+  // default camera (100%, only the top-left cards rendered)?
+  await page.addInitScript(() => {
+    window.unplacedFrames = 0
+    const sample = () => {
+      const flow = document.querySelector('.react-flow')
+      const transform = document.querySelector('.react-flow__viewport')?.style.transform
+      if (flow && flow.style.opacity !== '0' && transform === 'translate(0px, 0px) scale(1)') window.unplacedFrames += 1
+      if (!new URLSearchParams(window.location.search).has('v')) requestAnimationFrame(sample)
+    }
+    requestAnimationFrame(sample)
+  })
   try {
     await page.goto(`${origin}/?vp=all`)
+    // Count frames once the start view is placed: before that the board
+    // renders only the cards visible at 100%.
+    await boardStartView(page)
+    assert.equal(await page.evaluate(() => window.unplacedFrames), 0, 'the board is hidden until its start view is placed')
     await page.waitForSelector('[data-sw-node="dashboard"] [data-sw-frame="dashboard:desktop"]')
     assert.equal(await page.locator('[data-sw-node="dashboard"] [data-sw-frame]').count(), 1)
     assert.equal(await page.textContent('[data-sw-node="dashboard"] [data-sw-only]'), 'Desktop only')
@@ -728,6 +744,8 @@ test('a desktop-only page has no empty phone frame, in Both and in Phone', async
     assert.equal(await page.locator('[data-sw-node="dashboard"] :text("No capture for this screen size")').count(), 0)
     // Phone mode still shows the page, as its desktop frame.
     await page.goto(`${origin}/?vp=phone`)
+    await boardStartView(page)
+    assert.equal(await page.evaluate(() => window.unplacedFrames), 0, 'the board is hidden until its start view is placed')
     await page.waitForSelector('[data-sw-node="login"] [data-sw-frame="login:phone"]')
     assert.equal(await page.locator('[data-sw-node="dashboard"] [data-sw-frame="dashboard:desktop"]').count(), 1)
     assert.deepEqual(errors, [])
