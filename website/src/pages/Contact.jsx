@@ -52,7 +52,11 @@ export default function Contact() {
         <div className="max-w-xl">
           <ContactForm />
           <p className="mt-8 border-t border-line pt-6 text-[14.5px] leading-6 text-slate">
-            Found a bug you can reproduce? Open an issue on{' '}
+            Prefer email? Write to{' '}
+            <a href="mailto:hello@shapewall.com" className="font-semibold text-wall hover:text-wall-deep">
+              hello@shapewall.com
+            </a>
+            . Found a bug you can reproduce? Open an issue on{' '}
             <a href={`${GITHUB_URL}/issues`} className="font-semibold text-wall hover:text-wall-deep">
               GitHub
             </a>
