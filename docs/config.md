@@ -296,6 +296,10 @@ shapewall init --sitemap ./public/sitemap.xml                       # a new conf
 shapewall init --base-url https://www.example.com --sitemap        # the same, from <base URL>/sitemap.xml
 ```
 
+`init --base-url URL` without `--sitemap` tries `<base URL>/sitemap.xml` too (and records it when it has pages); without one it follows
+the home page's same-site links two levels deep, up to 25 pages, titled from each page's `<title>`. `--no-discover` writes the home
+page only.
+
 - A sitemap index is followed into its child sitemaps (up to 50, three levels deep, each read once); gzipped `.xml.gz` sitemaps work.
   A child that fails is reported and skipped.
 - One site's URLs are kept: the host of `baseUrl` (or `publicUrl`) if the sitemap uses it, else its most common host. Production URLs

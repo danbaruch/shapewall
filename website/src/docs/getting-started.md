@@ -16,7 +16,7 @@ Use **Node.js 22.13 or newer**. Basic capture works on any Node 22; local accoun
 ```sh
 npm install --save-dev %INSTALL_PACKAGE%
 npx --no -- shapewall doctor --install-browser
-npx --no -- shapewall init --base-url http://localhost:3000 --sitemap
+npx --no -- shapewall init --base-url http://localhost:3000
 npx --no -- shapewall capture
 npx --no -- shapewall serve --open
 ```
@@ -63,12 +63,14 @@ server prints: [local account setup](/docs/local-accounts#tailscale-account-orig
 In the project you want to review:
 
 ```sh
-shapewall init --base-url http://localhost:3000 --sitemap
+shapewall init --base-url http://localhost:3000
 ```
 
 This writes `shapewall.config.json` in the current folder and adds `.shapewall/` (captures and comments), `shapewall-export/` (static
-exports) and `*.auth.json` (login state) to your `.gitignore`. `--sitemap` on its own takes the pages from `<base URL>/sitemap.xml`
-(give it a URL or a file for another one). Without it, open the file and list your pages:
+exports) and `*.auth.json` (login state) to your `.gitignore`. With your site running, `init` finds its pages: `<base URL>/sitemap.xml`
+if there is one, else the links on the home page (two levels deep, up to 25 pages, same site only, plain GETs without cookies). If
+the site is not up, it writes just the home page and tells you to start it and run `init --force` again. `--sitemap URL|FILE` takes
+another sitemap and `--no-discover` skips the lookup. To add or change pages, edit the file:
 
 ```json
 {
@@ -86,7 +88,7 @@ exports) and `*.auth.json` (login state) to your `.gitignore`. `--sitemap` on it
 Each page needs an `id` (lowercase, dashes) and a `path`. `group` decides which section of the wall it sits in, and `note` is shown
 on the tile, handy for "signed-out state" or "sample data". `waitFor` is a selector that must be visible before the shot.
 
-The board takes its title from the domain of `--base-url`; rename it with `title`. A running `shapewall serve` picks up edits to the
+The board takes its title from the home page's `<title>` (else the domain of `--base-url`); rename it with `title`. A running `shapewall serve` picks up edits to the
 file (title, pages, journeys) on the next refresh of the board, no restart needed.
 
 ## Capture
