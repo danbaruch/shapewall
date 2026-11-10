@@ -1,7 +1,7 @@
 // /api/agent/*: the chat panel's API. JSON in, server-sent events out.
 //
 //   GET    /api/agent/status                                  what chat is connected to (no secrets)
-//   GET    /api/agent/events                                  SSE: "agents" when the agent settings change (settings-events.js)
+//   GET    /api/agent/events                                  SSE, owner only: "agents" when the agent settings change (settings-events.js)
 //   GET    /api/agent/boards/:id/threads                      the viewer's chat history (?q= searches it)
 //   GET    /api/agent/boards/:id/threads/:thread              one thread
 //   POST   /api/agent/boards/:id/threads/:thread/messages     send a message (editOf: rerun from an edit; regenerate: a new answer); SSE back
@@ -109,6 +109,8 @@ import {
 // body this big, and only once the message is allowed to run.
 export const BODY_LIMIT = '28mb'
 const SMALL_BODY_LIMIT = '4kb'
+// Open GET /events streams at once; a new one ends the oldest.
+export const EVENT_STREAMS_MAX = 32
 
 export const DEFAULT_LIMITS = {
   // Answers being written at once, across all boards.
@@ -1196,8 +1198,19 @@ export function agentRouter({
 
   // The agent settings changed (here, in another tab, or in the file): a
   // nudge only, no settings in it; each view refetches what it shows.
+  // The owner only (the settings token in its header, a paired device or the
+  // signed-in account): the page reads it with fetch, which can send the
+  // header, not with EventSource. At most EVENT_STREAMS_MAX open at once: a
+  // new one ends the oldest (a reloaded page leaves its old stream behind
+  // until the socket closes).
   router.get('/events', (req, res) => {
     if (eventsClosed) return res.status(503).json({ error: { code: 'stopping', message: 'The server is stopping.' } })
+    if (!agentOwner(req)) return controlDenied(res)
+    while (eventStreams.size >= EVENT_STREAMS_MAX) {
+      const oldest = eventStreams.values().next().value
+      eventStreams.delete(oldest)
+      oldest.end()
+    }
     res.writeHead(200, {
       'Content-Type': 'text/event-stream; charset=utf-8',
       'Cache-Control': 'no-store',
@@ -1209,9 +1222,8 @@ export function agentRouter({
     const stop = settingsEvents.subscribe((event) => {
       if (!res.writableEnded) res.write(`event: ${AGENTS_EVENT}\ndata: ${JSON.stringify({ at: event.at })}\n\n`)
     })
-    // A board's batch of fixes moved on: { board, at }, a nudge like "agents"
-    // (the browser's EventSource cannot send the settings token). What the
-    // batch holds is only on GET /boards/:id/batch, for the owner.
+    // A board's batch of fixes moved on: { board, at }, a nudge like "agents".
+    // What the batch holds is only on GET /boards/:id/batch.
     const batchListener = (event) => {
       if (!res.writableEnded) res.write(`event: batch\ndata: ${JSON.stringify({ board: event.boardId, at: event.at })}\n\n`)
     }

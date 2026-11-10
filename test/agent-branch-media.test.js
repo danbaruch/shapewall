@@ -111,7 +111,8 @@ test('a fix in branch mode gets the comment image and drawing from the board fol
 // GET /api/agent/events, counting "agents" events.
 function agentEvents(port) {
   const seen = []
-  const req = http.get({ host: '127.0.0.1', port, path: '/api/agent/events' }, (res) => {
+  const headers = { 'X-Shapewall-Settings-Token': TOKEN }
+  const req = http.get({ host: '127.0.0.1', port, path: '/api/agent/events', headers }, (res) => {
     let buffer = ''
     res.setEncoding('utf8')
     res.on('data', (chunk) => {

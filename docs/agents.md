@@ -1002,7 +1002,8 @@ The three settings routes need the `X-Shapewall-Settings-Token` header ([Who may
 
 A batch is `{ id, state, stopReason, max, requested, current, waiting, items: [{ commentId, state, message }], counts }`: `state` is
 `running`, `waiting` (for an answer to `waiting.card` in the thread `waiting.threadId`), `done`, `cancelled` or `stopped`
-(`stopReason: "failures"`). The `/api/agent/events` stream sends `batch` with `{ board }` when it changes.
+(`stopReason: "failures"`). The `/api/agent/events` stream (owner only, with the settings token header) sends `batch` with
+`{ board }` when it changes.
 
 An attachment is `{ name, mediaType, data }` (base64), with an optional `source: { kind: "page" | "element", pageId, viewport,
 commentId? }`. The stream sends `user` (the stored message), then any of `status`, `reasoning`, `text`, `tool`, and finally `done` with
