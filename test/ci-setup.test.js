@@ -223,9 +223,11 @@ test('the workflow: security shape, both modes, the skip marker, and the copy in
   const parsed = parseYaml(yaml)
   if (!parsed) return
   assert.deepEqual(parsed.on, { pull_request: { types: ['opened', 'synchronize', 'reopened'] } })
-  assert.deepEqual(parsed.permissions, { contents: 'read', 'pull-requests': 'write' })
+  // Read only by default; only the comment job can write, and it runs no pull request code.
+  assert.deepEqual(parsed.permissions, { contents: 'read' })
   assert.deepEqual(parsed.concurrency, { group: 'shapewall-${{ github.event.pull_request.number }}', 'cancel-in-progress': true })
   const job = parsed.jobs.shapewall
+  assert.deepEqual(job.permissions, { contents: 'read' })
   assert.equal(job['timeout-minutes'], 25)
   assert.match(job.if, /!contains\(github\.event\.pull_request\.title, '\[skip shapewall\]'\)/)
   const steps = job.steps
@@ -234,19 +236,46 @@ test('the workflow: security shape, both modes, the skip marker, and the copy in
   for (const step of steps.filter((item) => String(item.uses).startsWith('actions/checkout')))
     assert.equal(step.with['persist-credentials'], false)
   assert.ok(steps.some((step) => String(step.uses).startsWith('actions/cache') && step.with.path === '~/.cache/ms-playwright'))
-  assert.ok(steps.some((step) => /install --with-deps chromium/.test(step.run || '')))
   const runs = steps.map((step) => step.run || '').join('\n')
-  assert.match(runs, /ci capture-compare --base-url "\$SHAPEWALL_BASE_URL" --head-url "\$SHAPEWALL_PREVIEW_URL"/)
-  assert.match(runs, /ci capture --allow-start --checkout \.\.\/base/)
-  assert.match(runs, /ci capture --allow-start --checkout \. /)
-  const comment = steps.find((step) => /ci comment/.test(step.run || ''))
-  assert.equal(comment.env.GITHUB_TOKEN, '${{ secrets.GITHUB_TOKEN }}')
-  assert.equal(comment['continue-on-error'], true)
-  // Only the comment step gets the token.
-  assert.equal(steps.filter((step) => step.env?.GITHUB_TOKEN).length, 1)
+  // The pinned tools are installed once, in the runner's temp folder, ignoring
+  // the project's npm config, and called by absolute path: no npx, and no
+  // step runs a tool from inside a checkout.
+  const install = steps.find((step) => /npm install/.test(step.run || ''))
+  assert.equal(install['working-directory'], '${{ runner.temp }}')
+  assert.equal(install.env.NPM_CONFIG_USERCONFIG, '/dev/null')
+  assert.match(install.run, /--ignore-scripts/)
+  assert.match(install.run, /"\$SHAPEWALL" "\$PLAYWRIGHT"/)
+  assert.match(install.run, /SW=\$PWD\/node_modules\/\.bin\/shapewall/)
+  assert.doesNotMatch(yaml, /\bnpx\b/)
+  for (const step of steps.filter((item) => /"\$(SW|PW)"/.test(item.run || '')))
+    assert.equal(step['working-directory'], '${{ runner.temp }}', step.name)
+  assert.ok(steps.some((step) => /"\$PW" install --with-deps chromium/.test(step.run || '')))
+  assert.match(
+    runs,
+    /ci capture-compare --config "\$HEAD_DIR\/shapewall\.config\.json" --base-url "\$SHAPEWALL_BASE_URL" --head-url "\$SHAPEWALL_PREVIEW_URL"/,
+  )
+  assert.match(runs, /ci capture --config "\$HEAD_DIR\/shapewall\.config\.json" --allow-start --checkout "\$BASE_DIR"/)
+  assert.match(runs, /ci capture --config "\$HEAD_DIR\/shapewall\.config\.json" --allow-start --checkout "\$HEAD_DIR"/)
+  assert.equal(job.env.HEAD_DIR, '${{ github.workspace }}/head')
   // Every capture step keeps going: the pull request is never failed by Shapewall.
   for (const step of steps.filter((item) => /ci (capture|wait)/.test(item.run || '')))
     assert.equal(step['continue-on-error'], true, step.name)
+  // The capture job gets no token at all.
+  assert.ok(!steps.some((step) => step.env?.GITHUB_TOKEN))
+  assert.equal(job.outputs.enabled, '${{ steps.gate.outputs.enabled }}')
+  // The comment: its own job, with no checkout, from the downloaded result.
+  const commentJob = parsed.jobs.comment
+  assert.equal(commentJob.needs, 'shapewall')
+  assert.deepEqual(commentJob.permissions, { contents: 'read', 'pull-requests': 'write' })
+  assert.ok(!commentJob.steps.some((step) => String(step.uses).startsWith('actions/checkout')), 'no checkout in the comment job')
+  assert.ok(commentJob.steps.some((step) => String(step.uses).startsWith('actions/download-artifact')))
+  const comment = commentJob.steps.find((step) => /ci comment/.test(step.run || ''))
+  assert.equal(comment.env.GITHUB_TOKEN, '${{ secrets.GITHUB_TOKEN }}')
+  assert.equal(comment['continue-on-error'], true)
+  assert.equal(comment['working-directory'], '${{ runner.temp }}')
+  assert.match(comment.run, /--config "\$RUNNER_TEMP\/shapewall-result\/shapewall\.config\.json" --dir "\$RUNNER_TEMP\/shapewall-result"/)
+  // Only the comment step gets the token.
+  assert.equal(commentJob.steps.filter((step) => step.env?.GITHUB_TOKEN).length, 1)
 })
 
 // YAML through Python's PyYAML when this machine has it (GitHub's Ubuntu

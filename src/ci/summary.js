@@ -15,14 +15,17 @@ export const BODY_MAX = 60000
 
 const plural = (count, word, many = `${word}s`) => `${count} ${count === 1 ? word : many}`
 
-// One table cell or line of plain text.
+// One table cell or line of plain text: no markdown, HTML, mention or link.
+// A zero-width space (U+200B) breaks every @ (mentions, and GitHub's email
+// and mailto:/xmpp: autolinks), "://" and "www." (GitHub's bare autolinks).
 export function plain(value, max = 120) {
   return String(value ?? '')
     .replace(/[\r\n\t]+/g, ' ')
     .slice(0, max)
     .replace(/[\\`*_{}[\]()#+!|<>~]/g, (char) => `\\${char}`)
-    .replace(/@(?=[A-Za-z0-9])/g, '@​')
+    .replace(/@/g, '@​')
     .replace(/:\/\//g, ':​//')
+    .replace(/(www)\./gi, '$1​.')
 }
 
 export function percent(ratio) {

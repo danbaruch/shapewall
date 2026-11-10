@@ -68,15 +68,26 @@ serving the previous deploy while it builds, wait in a step of your own until th
 
 ## What the job does
 
-1. Checks out the pull request (and the base branch in build and serve mode), with `persist-credentials: false`.
-2. `shapewall ci enabled`: stops here when the config says `"ci": { "enabled": false }` or the title has `[skip shapewall]`.
-3. Installs Chromium with the Playwright version this Shapewall captures with, and its system libraries. The browser download is cached.
-4. Captures both sides (`shapewall ci capture` or `shapewall ci capture-compare --head-url`), then compares them.
-5. Uploads the result folder as the `shapewall-ci` workflow artifact (kept 14 days).
-6. `shapewall ci comment`: creates or updates the comment.
+The workflow has two jobs. The capture job builds and captures with a read-only token; the comment job writes the comment and
+never sees the pull request's code.
 
-The workflow runs on `pull_request` only (never `pull_request_target`), with `contents: read` and `pull-requests: write`, one run per
-pull request (a new push cancels the one still going) and a 25 minute job timeout. Only the comment step gets `GITHUB_TOKEN`.
+**Capture** (`contents: read` only, no `GITHUB_TOKEN` in any step):
+
+1. Checks out the pull request (and the base branch in build and serve mode) into `head/` and `base/`, with
+   `persist-credentials: false`.
+2. Installs the pinned Shapewall and Playwright once, with `npm install --ignore-scripts` in the runner's temp folder, with no user
+   npm config: the pull request's `.npmrc` and `package.json` have no say. Every later step runs from that folder and calls the tools
+   by absolute path, pointing at the checkout with `--config` and `--checkout`.
+3. `shapewall ci enabled`: stops here when the config says `"ci": { "enabled": false }` or the title has `[skip shapewall]`.
+4. Installs Chromium with the Playwright version this Shapewall captures with, and its system libraries. The browser download is cached.
+5. Captures both sides (`shapewall ci capture` or `shapewall ci capture-compare --head-url`), then compares them.
+6. Uploads the result folder, with a copy of `shapewall.config.json`, as the `shapewall-ci` workflow artifact (kept 14 days).
+
+**Comment** (`contents: read` and `pull-requests: write`): no checkout. It downloads the artifact, installs Shapewall the same way
+and runs `shapewall ci comment` on the result, which it treats as data. Only this step gets `GITHUB_TOKEN`.
+
+The workflow runs on `pull_request` only (never `pull_request_target`), one run per pull request (a new push cancels the one still
+going) and a 25 minute capture timeout.
 
 ## The result folder
 
@@ -115,7 +126,7 @@ With `"ci": { "images": "branch" }`, the comment shows thumbnails inline: the jo
   images.
 - The images are public and stay in the branch history until you delete the branch. Delete it any time; old comments then lose their
   pictures.
-- The job needs `contents: write` in the workflow's `permissions` to push the branch. Without it, the comment falls back to links and
+- The comment job needs `contents: write` in its `permissions` to push the branch. Without it, the comment falls back to links and
   says why.
 
 ## Turning it off

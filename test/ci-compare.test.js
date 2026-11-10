@@ -327,6 +327,16 @@ test('plain() neutralises markdown, HTML, links and mentions', () => {
     '\\[x\\]\\(https:​//evil.example\\) \\<img src=x\\> @​octocat \\`code\\`',
   )
   assert.equal(plain('a\nb|c'), 'a b\\|c')
+  // GitHub's extended autolinks: bare www., emails (whatever follows the @), mailto: and xmpp:.
+  const zw = '​'
+  assert.equal(plain('see www.evil.example or WWW.Evil.example'), `see www${zw}.evil.example or WWW${zw}.Evil.example`)
+  assert.equal(plain('mail me@evil.example'), `mail me@${zw}evil.example`)
+  assert.equal(plain('x.y-z@-evil.example'), `x.y-z@${zw}-evil.example`)
+  assert.equal(plain('a@évil.example'), `a@${zw}évil.example`)
+  assert.equal(plain('mailto:me@evil.example xmpp:me@evil.example'), `mailto:me@${zw}evil.example xmpp:me@${zw}evil.example`)
+  // Nothing left that GitHub would turn into a link or a mention.
+  const out = plain('www.a.example me@b.example https://c.example @d mailto:e@f.example')
+  assert.doesNotMatch(out, /(^|\s)www\.|@[A-Za-z0-9_À-῿-]|:\/\//)
 })
 
 test('ci pages and viewports: allow-lists, the page limit, and the settle action on every page', () => {
