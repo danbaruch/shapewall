@@ -13,7 +13,8 @@ import {
   Settings,
   Waypoints,
 } from 'lucide-react'
-import { leavePage, useMediaQuery } from '../lib/hooks'
+import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { leavePage } from '../lib/hooks'
 import { cn } from '../lib/utils'
 import {
   Button,
@@ -43,6 +44,34 @@ import { KeyTip } from './KeyTip'
 import { CaptureStatus } from './CaptureStatus'
 import { BoardProfile } from './BoardProfile'
 import { viewportIcon } from './viewports'
+import { FIT_STEPS, TOOLBAR, collapsed, fitToolbar, toolbarItems } from './toolbarFit'
+
+// Text widths for the toolbar fit, measured on a canvas in the page's font.
+const FONTS = { name: '600 14px', ui: '500 13px', xs: '500 12px', count: '600 11px' }
+let ruler
+function textWidth(value, font) {
+  if (typeof document === 'undefined') return value.length * 8
+  ruler ||= document.createElement('canvas').getContext('2d')
+  if (!ruler) return value.length * 8
+  ruler.font = `${FONTS[font]} ${getComputedStyle(document.body).fontFamily}`
+  return ruler.measureText(value).width
+}
+
+// The toolbar's own width, read before paint and on every resize.
+function useWidth(ref, active) {
+  const [width, setWidth] = useState(() => (typeof window === 'undefined' ? 1280 : window.innerWidth))
+  useLayoutEffect(() => {
+    const node = ref.current
+    if (!active || !node) return undefined
+    const read = () => setWidth(Math.round(node.getBoundingClientRect().width))
+    read()
+    if (typeof ResizeObserver === 'undefined') return undefined
+    const observer = new ResizeObserver(read)
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [ref, active])
+  return width
+}
 
 // The board's view options: links between pages, compare, the minimap.
 function ViewMenu({
@@ -210,15 +239,18 @@ function PanelSwitch({
   )
 }
 
-// The board toolbar. Desktop (lg and up): three zones with fixed breakpoints
-// (no self-measuring, so labels never change with the session's history):
-//   left    logo, the project and board switcher, the capture status dot
-//   center  viewport, "Go to page or journey" (Ctrl/Cmd+K), View options
-//   right   capture and settings, Comment (the one primary action), the side
-//           panel switch (Comments | Agent | Checks), the profile
-// Below xl (1280 px) the viewport and panel switch drop their words (their
-// accessible names and tooltips stay). Phone: a compact bar whose More button
-// opens BoardMenu.
+// The board toolbar. Desktop (lg and up): three zones, the canvas-tool way:
+//   left    where you are and how you look at it: the project and board
+//           switcher, the screen-size toggle, View options, and on a local
+//           board Capture with its status (otherwise the status dot sits by
+//           the name)
+//   centre  find: "Go to page or journey" (Ctrl/Cmd+K), centred on the toolbar
+//   right   act and open panels: the viewer note, Comment (the one primary
+//           action), the side panel switch (Comments | Agent | Checks), and
+//           Agent settings last
+// toolbarFit.js decides which labels drop when the zones do not fit, from the
+// toolbar's width and what it shows (accessible names and tooltips stay).
+// Phone: a compact bar whose More button opens BoardMenu.
 export function BoardToolbar({
   wide,
   info,
@@ -271,9 +303,47 @@ export function BoardToolbar({
   // The expanded app sidebar already names the project.
   sidebarTitled,
 }) {
-  const xl = useMediaQuery('(min-width: 1280px)')
   const boardTitle = boards.find((item) => item.id === boardId)?.title || data?.board?.title || boardId
   const project = info?.hosted && info?.project?.url && info.role !== 'guest' ? info.project : null
+  const viewer = !canComment && info?.hosted && info?.role === 'viewer'
+  const commenting = canComment && !comparePair
+  const headerRef = useRef(null)
+  const toolbarWidth = useWidth(headerRef, wide)
+  const statusKind = capture?.running ? 'running' : capture?.state === 'failed' && capture.error ? 'failed' : 'dot'
+  const progress = capture?.running && capture.total ? `${capture.done || 0}/${capture.total}` : 'Capturing'
+  const viewportLabels = modes.map((item) => item.label).join('\n')
+  const fit = useMemo(
+    () =>
+      fitToolbar({
+        width: toolbarWidth,
+        ...toolbarItems({
+          text: textWidth,
+          title: boardTitle,
+          viewports: viewportLabels ? viewportLabels.split('\n') : [],
+          capture: Boolean(canCapture),
+          status: { kind: statusKind, progress },
+          viewer,
+          comment: commenting,
+          panels: { comments: allOpen, agent: Boolean(chatAvailable), checks: Boolean(canChecks) },
+          settings: Boolean(settingsAvailable),
+        }),
+      }),
+    [
+      toolbarWidth,
+      boardTitle,
+      viewportLabels,
+      canCapture,
+      statusKind,
+      progress,
+      viewer,
+      commenting,
+      allOpen,
+      chatAvailable,
+      canChecks,
+      settingsAvailable,
+    ],
+  )
+  const off = collapsed(fit.step)
   const profile = (
     <BoardProfile
       info={info}
@@ -349,7 +419,6 @@ export function BoardToolbar({
       </SelectContent>
     </Select>
   )
-  const viewer = !canComment && info?.hosted && info?.role === 'viewer'
 
   if (!wide) {
     return (
@@ -403,38 +472,56 @@ export function BoardToolbar({
     const Icon = item.id === 'all' ? Rows2 : viewportIcon(item.id)
     return {
       id: item.id,
-      label: (
-        <span className="inline-flex items-center gap-1.5">
-          <Icon size={14} aria-hidden="true" className={xl ? 'hidden 2xl:block' : undefined} />
-          <span className={xl ? undefined : 'sr-only'}>{item.label}</span>
+      tooltip: off.viewport ? item.label : null,
+      label: off.viewport ? (
+        <span className="inline-flex items-center">
+          <Icon size={14} aria-hidden="true" />
+          <span className="sr-only">{item.label}</span>
         </span>
+      ) : (
+        item.label
       ),
     }
   })
+  const status = <CaptureStatus data={data} capture={capture} />
+  const innerGap = off.tight ? 'gap-1' : 'gap-1.5'
   return (
-    <header className="flex h-14 shrink-0 items-center gap-3 border-b border-line bg-surface px-3 xl:px-4" data-sw-toolbar="full">
+    <header
+      ref={headerRef}
+      className={cn(
+        'grid h-14 shrink-0 items-center border-b border-line bg-surface px-3',
+        off.tight ? 'gap-x-3' : 'gap-x-5',
+        // Centred: two equal side columns. Too narrow for that: the left zone
+        // takes its own width (the name held to its minimum) and the search
+        // icon follows it.
+        fit.centred ? 'grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]' : 'grid-cols-[auto_auto_minmax(0,1fr)]',
+      )}
+      data-sw-toolbar="full"
+      data-sw-toolbar-fit={FIT_STEPS[fit.step]}
+      data-sw-toolbar-centred={fit.centred ? 'true' : 'false'}
+    >
       <h1 className="sr-only">Shapewall: {boardTitle}</h1>
-      <div className="flex min-w-0 flex-1 items-center gap-1.5" data-sw-toolbar-zone="left">
-        <div className="flex min-w-0 flex-col justify-center">
+      <div className={cn('flex min-w-0 items-center', innerGap)} data-sw-toolbar-zone="left">
+        <div className="flex min-w-0 flex-col justify-center" style={fit.centred ? undefined : { maxWidth: TOOLBAR.name.at(-1) }}>
           {project && !sidebarTitled ? <ProjectCrumb project={project} /> : null}
           {picker}
         </div>
-        <CaptureStatus data={data} capture={capture} />
-      </div>
-
-      <div className="flex shrink-0 items-center gap-2" data-sw-toolbar-zone="center">
+        {canCapture ? null : status}
         {modes.length > 1 ? (
           <span
             key={viewportNotice?.at || 'still'}
             className={cn('shrink-0 rounded-md', viewportNotice && 'animate-flash')}
             data-sw-viewport-flash={viewportNotice ? viewportNotice.to : undefined}
           >
-            <ToggleGroup label="Screen size" options={viewportOptions} value={mode} onChange={setMode} />
+            <ToggleGroup
+              label="Screen size"
+              options={viewportOptions}
+              value={mode}
+              onChange={setMode}
+              itemClassName={off.viewport ? 'px-2' : undefined}
+            />
           </span>
         ) : null}
-        <Tooltip content={<KeyTip label="Go to a page, journey or comment" keys={[PALETTE_KEY]} />} side="bottom">
-          <PaletteTrigger onOpen={openPalette} compact={!xl} />
-        </Tooltip>
         <ViewMenu
           showLinks={showLinks}
           toggleLinks={toggleLinks}
@@ -445,25 +532,71 @@ export function BoardToolbar({
           toggleCompare={toggleCompare}
           minimapOn={minimapOn}
           toggleMinimap={toggleMinimap}
-          compact={!xl}
+          compact={off.view}
         />
+        {canCapture ? (
+          <>
+            <IconButton
+              variant="ghost"
+              className="shrink-0 text-fg"
+              disabled={capture?.running || busy}
+              onClick={() => setCaptureConfirm(true)}
+              label="Capture now"
+              tooltip="Recapture every page"
+              side="bottom"
+              data-sw-capture="true"
+            >
+              <Camera size={16} aria-hidden="true" />
+            </IconButton>
+            {status}
+          </>
+        ) : null}
       </div>
 
-      <div className="flex shrink-0 items-center justify-end gap-2" data-sw-toolbar-zone="right">
-        {canCapture ? (
-          <IconButton
-            variant="ghost"
-            className="shrink-0 text-fg"
-            disabled={capture?.running || busy}
-            onClick={() => setCaptureConfirm(true)}
-            label="Capture now"
-            tooltip="Recapture every page"
+      <div className="flex shrink-0 items-center justify-center" data-sw-toolbar-zone="center">
+        <Tooltip content={<KeyTip label="Go to a page, journey or comment" keys={[PALETTE_KEY]} />} side="bottom">
+          <PaletteTrigger onOpen={openPalette} compact={off.search} style={off.search ? undefined : { width: fit.search }} />
+        </Tooltip>
+      </div>
+
+      <div className={cn('flex min-w-0 items-center justify-end', innerGap)} data-sw-toolbar-zone="right">
+        {viewer ? <ViewerNote /> : null}
+        {commenting ? (
+          <Tooltip
+            content={
+              <KeyTip label={commentMode ? 'Stop commenting' : 'Click a page to pin a comment'} keys={commentMode ? ['C', 'Esc'] : ['C']} />
+            }
             side="bottom"
-            data-sw-capture="true"
           >
-            <Camera size={16} aria-hidden="true" />
-          </IconButton>
+            <Button
+              variant="default"
+              className={cn(
+                'h-8 shrink-0 text-[13px]',
+                off.comment ? 'w-8 px-0' : 'px-3',
+                commentMode && 'bg-accent/90 shadow-[inset_0_1px_3px_rgb(0_0_0/0.25)] ring-2 ring-accent/30',
+              )}
+              aria-pressed={commentMode}
+              onClick={() => setCommentMode((value) => !value)}
+              data-sw-comment-mode="true"
+            >
+              <MessageSquarePlus size={15} aria-hidden="true" />
+              {off.comment ? <span className="sr-only">Comment</span> : 'Comment'}
+            </Button>
+          </Tooltip>
         ) : null}
+        <PanelSwitch
+          labels={!off.panels}
+          allOpen={allOpen}
+          panelHidden={panelHidden}
+          chatAvailable={chatAvailable}
+          chatThread={chatThread}
+          reopenChat={reopenChat}
+          checksOpen={checksOpen}
+          canChecks={canChecks}
+          openChecks={openChecks}
+          closeChecks={closeChecks}
+          updateParams={updateParams}
+        />
         {settingsAvailable ? (
           <IconButton
             variant="ghost"
@@ -477,41 +610,6 @@ export function BoardToolbar({
             <Settings size={16} aria-hidden="true" />
           </IconButton>
         ) : null}
-        {viewer ? <ViewerNote /> : null}
-        {canComment && !comparePair ? (
-          <Tooltip
-            content={
-              <KeyTip label={commentMode ? 'Stop commenting' : 'Click a page to pin a comment'} keys={commentMode ? ['C', 'Esc'] : ['C']} />
-            }
-            side="bottom"
-          >
-            <Button
-              variant="default"
-              className={cn(
-                'h-8 shrink-0 px-3 text-[13px]',
-                commentMode && 'bg-accent/90 shadow-[inset_0_1px_3px_rgb(0_0_0/0.25)] ring-2 ring-accent/30',
-              )}
-              aria-pressed={commentMode}
-              onClick={() => setCommentMode((value) => !value)}
-              data-sw-comment-mode="true"
-            >
-              <MessageSquarePlus size={15} aria-hidden="true" /> Comment
-            </Button>
-          </Tooltip>
-        ) : null}
-        <PanelSwitch
-          labels={xl}
-          allOpen={allOpen}
-          panelHidden={panelHidden}
-          chatAvailable={chatAvailable}
-          chatThread={chatThread}
-          reopenChat={reopenChat}
-          checksOpen={checksOpen}
-          canChecks={canChecks}
-          openChecks={openChecks}
-          closeChecks={closeChecks}
-          updateParams={updateParams}
-        />
       </div>
     </header>
   )
