@@ -2,7 +2,6 @@ import { Link } from 'react-router-dom'
 import { ArrowRight, Check, Download } from 'lucide-react'
 import { PageHeader } from '../components/page.jsx'
 import { Badge, Container, Shot } from '../components/ui.jsx'
-import { BETA_NOTE } from '../launch.js'
 import {
   BeforeAfter,
   CaptureIllustration,
@@ -27,9 +26,9 @@ const SECTIONS = [
     id: 'capture',
     nav: 'Capture',
     title: 'Every page, at desktop, tablet and phone width',
-    text: 'List your pages in shapewall.config.json, or take them from your sitemap. Playwright opens each one in Chromium at every viewport, waits for the network to settle, your selectors and any actions you scripted (open a menu, fill a search), then takes a fixed-size shot and a live HTML snapshot.',
+    text: 'List your pages in shapewall.config.json or import them from your sitemap. Shapewall opens each page in Chromium at every viewport, waits for the network, your selectors and any scripted actions such as opening a menu, then saves a fixed-size shot and a live HTML snapshot.',
     points: [
-      'Desktop, tablet and phone viewports, with real mobile emulation; a page can skip the ones it does not need',
+      'Desktop, tablet and phone viewports with real mobile emulation; a page can skip the ones it does not need',
       'shapewall sitemap fills the page list from a sitemap.xml, grouped by path',
       'Signed-in pages through a storage state file or a login script',
       'A failed run keeps the previous captures; runs never overlap',
@@ -40,7 +39,7 @@ const SECTIONS = [
     id: 'wall',
     nav: 'The wall',
     title: 'The whole product on one wall',
-    text: 'Pages are grouped into sections, like Marketing, App and Settings, and laid out on a zoomable canvas. Zoom out to see every page and both screen sizes at once. Zoom in and the tile turns into the real captured page, text you can select and all.',
+    text: 'Pages are grouped into sections, such as Marketing, App and Settings, on a zoomable canvas. Zoom out to see every page at every size at once. Zoom in and the tile becomes the captured page, with text you can select.',
     points: [
       'Per-page notes such as "signed-out state"',
       'Thumbnails far out, full images and live HTML up close',
@@ -52,7 +51,7 @@ const SECTIONS = [
     id: 'comments',
     nav: 'Comments',
     title: 'Comments on the exact element',
-    text: 'Click Comment, click the button that needs work, say what should change. The comment stores a selector and the element text, so after the next capture the pin follows the button, not the old pixel. If the element is gone, the pin says so.',
+    text: 'Click Comment, click the button that needs work and say what should change. The comment stores a selector and the element text, so after the next capture the pin follows the button, not the old pixel. If the element is gone, the pin says so.',
     points: [
       'Resolve, reopen, search and filter by state',
       '@mention people, or @agent to hand it to your coding agent',
@@ -72,8 +71,8 @@ const SECTIONS = [
   },
   {
     id: 'agent',
-    nav: 'Agent loop',
-    title: 'An agent loop that runs itself',
+    nav: 'Agents',
+    title: 'An agent loop that runs on its own',
     text: 'shapewall comments --json hands any agent the page, viewport, selector, text, position and screenshot path for each open comment. shapewall watch runs your agent once per new comment, and the MCP server gives Claude Code, Codex and other agents tools to list, reply, recapture and resolve.',
     points: [
       'Vendor neutral: anything that runs a command or speaks MCP',
@@ -92,7 +91,7 @@ const SECTIONS = [
     id: 'journeys',
     nav: 'Journeys',
     title: 'Journeys across real links',
-    text: 'During a capture Shapewall reads the links on each page and keeps the ones that lead to other pages on the wall. They become arrows. Name the paths that matter, like visitor to first note, highlight one, and step through it page by page.',
+    text: 'During a capture Shapewall reads the links on each page and keeps the ones that lead to other pages on the wall. They become arrows. Name the paths that matter, such as visitor to first note, highlight one, and step through it page by page.',
     points: [
       'Arrows from real links, not guesses',
       'Named journeys in the config or made on the wall',
@@ -104,19 +103,19 @@ const SECTIONS = [
   },
   {
     id: 'before-after',
-    nav: 'Before and after',
+    nav: 'Before/after',
     title: 'Before and after, in place',
-    text: 'Every comment remembers the capture it was made on, and a recapture keeps the old shot. Open a resolved comment and see before and after around the pin, so checking a change takes a second, on the page where it was asked for.',
+    text: 'Every comment remembers the capture it was made on, and a recapture keeps the old shot. Open a resolved comment to see before and after around the pin, on the page where the change was asked for.',
     points: [
       'Page history: every kept capture beside the current one, with a pixel diff of what changed in red',
       'Fixed in: a link to the pull request or commit',
-      'Reopen it if it is not right yet; the agent picks it up again',
+      'Reopen it with a note and the agent picks it up again',
     ],
     art: <BeforeAfter />,
   },
   {
     id: 'github',
-    nav: 'GitHub connect',
+    nav: 'GitHub',
     title: 'Comments, issues and pull requests, linked',
     text: 'Name your repo in the config and give Shapewall a token in the environment. A comment becomes a GitHub issue with one click, carrying the text, the page, the element and a link to the screenshot. A pull request that says shapewall:12 is linked to comment 12, and when it merges the comment resolves with the PR as its fix.',
     points: [
@@ -140,7 +139,7 @@ const SECTIONS = [
   },
   {
     id: 'compare',
-    nav: 'Staging and production',
+    nav: 'Staging',
     title: 'Staging beside production',
     text: 'Point one board at several environments. Capture staging and production with the same pages, and see them side by side before you ship. Variants put a branch preview or a redesign right next to the page it would replace.',
     points: ['Environments share one page list', 'Changed pixels in red, changed pages only', 'Variants for directions, not just fixes'],
@@ -172,15 +171,15 @@ const SECTIONS = [
     nav: 'Teams',
     badge: 'Beta',
     title: 'Workspaces, roles and share links',
-    text: `Host Shapewall for a team: people sign in with a passkey, and each workspace has owners, admins, members and viewers. Admins invite people, hand out expiring share links to clients, issue API tokens for agents and read an audit log of who changed what. The live demo has all of it, running in your browser: switch who you are with View as. ${BETA_NOTE}`,
+    text: 'Host the team server and people sign in with a passkey. Each workspace has owners, admins, members and viewers. Admins invite people, hand out expiring share links to clients, issue API tokens for agents and read an audit log of who changed what. The live demo has all of it: switch who you are with View as.',
     points: ['Four roles, checked on every request', 'Invites and share links that expire', 'An audit log of every admin change'],
     art: <RolesIllustration />,
   },
   {
     id: 'phone',
-    nav: 'On a phone',
+    nav: 'Phone',
     title: 'The wall in your pocket',
-    text: 'The board works on a phone: 44 px touch targets, a bottom sheet for comments, and Back closes the topmost panel instead of leaving the board. Install it as an app and review from the couch.',
+    text: 'The board works on a phone: 44 px touch targets, a bottom sheet for comments, and Back closes the topmost panel instead of leaving the board. Add it to your home screen and it opens like an app.',
     points: ['Installable board app', 'Pinch to zoom, tap to comment', 'Same comments, same pins'],
     art: (
       <div className="wall-dots flex items-center justify-center gap-4 rounded-2xl p-6">
@@ -204,11 +203,11 @@ const SECTIONS = [
     id: 'checks',
     nav: 'Page checks',
     title: 'See what needs attention, then verify the fix',
-    text: 'Check your original pages for reliability, SEO, social images and accessibility. Run Chrome Lighthouse for local performance metrics, compare retained reports and keep an explicit performance budget beside the page.',
+    text: 'Check your pages for reliability, SEO, social images and accessibility. Run Lighthouse for local performance metrics, compare saved reports and keep a performance budget beside the page.',
     points: [
-      'Separate navigation lab measurements and explicit interaction flows',
-      'Before and after reports with matching measurement conditions',
-      'Private by default, with deliberate report sharing',
+      'Lab measurements for page loads and for scripted interaction flows',
+      'Before and after reports under matching measurement conditions',
+      'Reports stay private until you share them',
       'Findings become editable comment drafts; you decide what reaches an agent',
     ],
     links: [{ to: '/docs/page-checks', label: 'Read about page checks' }],
@@ -231,7 +230,7 @@ const SECTIONS = [
           <strong className="text-wall">120 ms</strong>
         </div>
         <p className="border-t border-line pt-3 text-sm text-slate">Recorded budget: LCP under 2.5 seconds</p>
-        <p className="text-xs text-faint">Illustrative values. No real-user performance claim.</p>
+        <p className="text-xs text-faint">Example values.</p>
       </div>
     ),
   },
@@ -275,16 +274,17 @@ export default function Features() {
   return (
     <>
       <PageHeader eyebrow="Features" title="Everything between “change this” and “it is changed”">
-        Shapewall captures your product, puts it on one wall, turns pointing into precise work for an agent, and shows you the result where
-        you asked for it.
+        Capture every page, review it on one wall, hand precise comments to your coding agent and check the result where you asked for it.
       </PageHeader>
       <nav className="sticky top-16 z-30 border-b border-line bg-paper/90 backdrop-blur" aria-label="Features on this page">
-        <Container className="flex gap-1 overflow-x-auto py-2 [scrollbar-width:none]">
+        {/* Phone: one row that scrolls sideways, faded at both edges so clipped items read as more. Wider: the row wraps,
+            so every item is always visible. */}
+        <Container className="flex snap-x snap-proximity gap-1 overflow-x-auto py-2 pr-12 [mask-image:linear-gradient(to_right,transparent,black_1.25rem,black_calc(100%-3rem),transparent)] [scrollbar-width:none] sm:pr-12 md:flex-wrap md:gap-y-1 md:overflow-visible md:pr-8 md:[mask-image:none]">
           {SECTIONS.map((section) => (
             <a
               key={section.id}
               href={`#${section.id}`}
-              className="shrink-0 rounded-lg px-3 py-1.5 text-[13.5px] font-medium text-slate hover:bg-ink/5 hover:text-ink"
+              className="shrink-0 scroll-ml-5 snap-start rounded-lg px-2.5 py-1.5 text-[13.5px] font-medium text-slate hover:bg-ink/5 hover:text-ink"
             >
               {section.nav}
             </a>
@@ -353,8 +353,8 @@ export default function Features() {
           <div>
             <h2 className="text-[22px] font-bold tracking-tight text-ink">Small, local, and yours</h2>
             <p className="mt-2 max-w-xl text-[15.5px] leading-7 text-slate">
-              Node 22, Playwright, Express and React Flow. Data is plain JSON and images in your project. The local tool is open source
-              under Apache 2.0.
+              Built on Node.js, Playwright, Express and React Flow. Data is plain JSON and images in your project. The local tool is open
+              source under Apache 2.0.
             </p>
           </div>
           <Link to="/open-source" className="inline-flex items-center gap-1.5 text-[15px] font-semibold text-wall hover:text-wall-deep">

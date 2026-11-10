@@ -4,7 +4,7 @@ export const LEGAL_TEMPLATES = {
     [
       [
         'Scope',
-        'Replace this draft with the name, address, contact, jurisdiction and effective date of your server operator before use. This template does not offer a hosted service or create an agreement by itself.',
+        'Replace this text with the name, address, contact, jurisdiction and effective date of your server operator. This template does not create an agreement by itself.',
       ],
       [
         'Your content',
@@ -25,7 +25,7 @@ export const LEGAL_TEMPLATES = {
     [
       [
         'Who handles data',
-        'Replace this draft with the operator identity, privacy contact, effective date, hosting region, and applicable rights. The operator controls account and security data and processes captured content on instructions from workspace owners. Local Shapewall has no telemetry; pushing to a hosted server transfers the selected captures and comments to that operator.',
+        'Replace this text with the operator identity, privacy contact, effective date, hosting region, and applicable rights. The operator controls account and security data and processes captured content on instructions from workspace owners. Local Shapewall has no telemetry; pushing to a hosted server transfers the selected captures and comments to that operator.',
       ],
       [
         'What is stored',
@@ -37,7 +37,7 @@ export const LEGAL_TEMPLATES = {
       ],
       [
         'Regions and requests',
-        'Do not claim US hosting unless this deployment is hosted there. List actual regions, transfers, legal bases, subprocessors and access/deletion request procedures. The operator must document any email, analytics or anti-abuse providers it enables. This draft is not a completed privacy notice.',
+        'List the actual hosting regions, transfers, legal bases, subprocessors and access and deletion request procedures. Document any email, analytics or anti-abuse providers the operator enables. This template is not a completed privacy notice.',
       ],
     ],
   ],
@@ -50,7 +50,7 @@ export const LEGAL_TEMPLATES = {
       ],
       [
         'Optional providers to review',
-        'DigitalOcean: server hosting if used. Cloudflare: DNS, TLS proxy, object storage or Turnstile if enabled. Resend: invite delivery if configured. GitHub: source hosting or repository integration if configured. Tailscale: private networking and public Funnel transport if enabled. Include other infrastructure and backup providers used by your operator.',
+        'Hosting provider: the machine or cloud the server runs on. Cloudflare: DNS, TLS proxy, object storage or Turnstile if enabled. Resend: invite delivery if configured. GitHub: source hosting or repository integration if configured. Tailscale: private networking and public Funnel transport if enabled. Include other infrastructure and backup providers used by your operator.',
       ],
       [
         'Changes',
@@ -71,7 +71,7 @@ export const LEGAL_TEMPLATES = {
       ],
       [
         'Reporting and action',
-        'Replace this draft with the operator abuse email and notice procedure. A report form is available at /report on hosted deployments. Reports are private to the operator. The operator may suspend a workspace during review, document the reason and provide an appeal/export process where appropriate.',
+        'Replace this text with the operator abuse email and notice procedure. A report form is available at /report on hosted deployments. Reports are private to the operator. The operator may suspend a workspace during review, document the reason and provide an appeal/export process where appropriate.',
       ],
     ],
   ],

@@ -17,7 +17,7 @@ for a team.
 
 ## What you need
 
-- Node.js 22 or newer (22.13 for local accounts and the team server).
+- Node.js 22.13 or newer, on Linux, macOS or Windows. Linux is the primary tested platform.
 - Chromium for captures: Playwright's own (one install command) or a Chrome you already have.
 - A site to point it at: a local dev server, a preview deploy, staging or production.
 
@@ -27,7 +27,7 @@ for a team.
 - [Config reference](/docs/config): every key in `shapewall.config.json`.
 - [Journeys](/docs/journeys) and [before, after and staging](/docs/compare): flows through your pages and comparing versions.
 - [The agent workflow](/docs/agent-workflow): hand comments to Claude Code, Codex or any agent.
-- [Agent recipes](/docs/agent-recipes): exact, tested commands for Claude Code, Codex, goose, Ollama and chat bots.
+- [Agent recipes](/docs/agent-recipes): copy-paste commands for Claude Code, Codex, goose, Ollama and chat bots.
 - [GitHub connect](/docs/github) and [notifications](/docs/notifications): issues and pull requests from comments, and messages to a
   webhook, Slack, Discord or email.
 - [Sandboxed starter agent](/docs/starter-agent): let an agent work on comments from a shared board, inside a container.
@@ -35,8 +35,7 @@ for a team.
 - [Page checks and performance](/docs/page-checks): reliability, SEO, social images, Lighthouse, accessibility and report comparisons.
 - [Capture warnings and pacing](/docs/capture-warnings): API failures and rate limits alongside usable screenshots.
 - [Local accounts and profile photos](/docs/local-accounts) and [manual updates](/docs/updates).
-- [Hosted operator guide](/docs/hosted) (beta): self-hosted multiplayer. It works and is tested with automated browsers, but it has not
-  yet had a real multi-person team on it or real phone passkeys verified, so run it for people you trust and keep backups.
+- [Hosted operator guide](/docs/hosted) (beta): run a team server with passkey accounts, workspaces, roles and share links.
 
 ## Versions and licenses
 

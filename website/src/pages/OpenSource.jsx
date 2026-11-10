@@ -18,7 +18,7 @@ const WAYS = [
     icon: Users,
     title: 'For a team',
     badge: 'Beta',
-    text: `Run one self-hosted server over Tailscale. Each teammate signs in with their own passkey and joins a workspace, with roles, comments, scoped agents and live presence. ${BETA_NOTE}`,
+    text: `Run one server on a machine you control, reached over Tailscale. Each teammate signs in with their own passkey and joins a workspace, with roles, comments, scoped agents and live presence. ${BETA_NOTE}`,
     code: 'shapewall hosted --tailscale --tailscale-port 8443',
     link: ['/docs/self-hosting', 'Deployment and self-hosting'],
   },
@@ -32,7 +32,7 @@ const WAYS = [
   {
     icon: Server,
     title: 'On CI',
-    text: 'Capture every pull request preview and upload the wall as an artifact. shapewall capture exits 0 when every shot worked and 2 when some failed. The repository has a Dockerfile on the Playwright image.',
+    text: 'Capture every pull request preview and upload the wall as an artifact. shapewall capture exits 0 when every shot worked and 2 when some failed. A Dockerfile based on the Playwright image is included.',
     code: 'shapewall capture && shapewall export',
     link: ['/docs/self-hosting#captures-on-ci', 'Captures on CI'],
   },
@@ -41,9 +41,9 @@ const WAYS = [
 export default function OpenSource() {
   return (
     <>
-      <PageHeader eyebrow="Licenses and self-hosting" title="Local tool: Apache 2.0. Multiplayer: self-hosted.">
-        The local tool keeps captures and comments on your disk and is open source under Apache 2.0. The optional team server, in beta, is
-        yours to host, and its source is available under the Functional Source License.
+      <PageHeader eyebrow="Licenses and self-hosting" title="Local tool: Apache 2.0. Team server: self-hosted.">
+        The local tool keeps captures and comments on your disk and is open source under Apache 2.0. The team server is yours to host, and
+        its source is available under the Functional Source License.
       </PageHeader>
       <Container className="py-16 sm:py-20">
         <div className="grid gap-5 md:grid-cols-2">
@@ -86,8 +86,8 @@ export default function OpenSource() {
             <Package className="size-5 text-wall" aria-hidden="true" />
             <h2 className="mt-3 text-[19px] font-bold tracking-tight text-ink">The stack</h2>
             <p className="mt-2 text-[15px] leading-7 text-slate">
-              Node 22, Playwright for capture, parse5 for sanitizing, Express for the board server, React Flow for the wall. Data is JSON
-              files written atomically under a file lock for local projects; the optional multiplayer server uses SQLite and files.
+              Node.js, Playwright for capture, parse5 for sanitizing, Express for the board server, React Flow for the wall. Data is JSON
+              files written atomically under a file lock for local projects; the team server uses SQLite and files.
             </p>
           </div>
           <div>
@@ -96,7 +96,7 @@ export default function OpenSource() {
             <p className="mt-2 text-[15px] leading-7 text-slate">
               {LAUNCHED
                 ? 'Issues and pull requests are welcome. The repository has a contributing guide and a code of conduct.'
-                : 'The repository opens to everyone at launch. Until then, invited contributors can open issues and pull requests.'}{' '}
+                : 'The repository is invite only. Invited contributors can open issues and pull requests.'}{' '}
               Security reports go through the private reporting in the security policy, not public issues.
             </p>
           </div>
@@ -106,7 +106,7 @@ export default function OpenSource() {
           <div>
             <h2 className="text-[24px] font-bold tracking-tight">Start in your project</h2>
             <p className="mt-2 max-w-lg text-[15.5px] leading-7 text-zinc-400">
-              Install it into the project you want to review, with Node 22.13 or newer, then capture and open the board.{' '}
+              Install it into the project you want to review, with Node.js 22.13 or newer, then capture and open the board.{' '}
               <Link to="/docs/getting-started#install" className="font-medium text-wall-bright hover:text-white">
                 Read the install steps
               </Link>

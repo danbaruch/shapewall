@@ -161,7 +161,7 @@ function Footer() {
         <div className="col-span-2 max-w-xs lg:col-span-1">
           <Logo />
           <p className="mt-4 text-[14.5px] leading-6 text-slate">
-            Shape your product on the wall. Runs on your machine. The local tool is open source (Apache 2.0); the team server is
+            Shape your product on the wall. Runs on your machine. The local tool is open source under Apache 2.0, and the team server is
             source-available.
           </p>
         </div>

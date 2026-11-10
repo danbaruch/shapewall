@@ -10,7 +10,7 @@ Comparable tiles on one canvas, predictable memory, and the top of a page is wha
 larger for long pages, give one page its own `frameHeight`, or add a second page entry with a `scrollTo` action for the part further
 down.
 
-## My site needs a login.
+## Can it capture pages behind a login?
 
 Run `shapewall auth record`: sign in by hand in the fresh browser it opens, press Enter to save, and add the `auth.storageState` line
 it prints to your config. For automation, an `auth.loginScript` that reads credentials from environment variables does the same job.
@@ -24,7 +24,7 @@ removed. Screenshots show exactly what the page showed, so capture with test dat
 
 ## Can I use Firefox or WebKit?
 
-Not yet. Captures currently use Chromium, and thumbnails depend on a Chromium DevTools call.
+No. Captures use Chromium, and thumbnails depend on a Chromium DevTools call. Use Playwright's Chromium or a Chrome you already have.
 
 ## Where is my data?
 
@@ -44,21 +44,31 @@ server you chose. Setup can also download a browser, and the natural read-aloud 
 
 ## Which coding agents does it work with?
 
-Any agent that can run a shell command and read JSON: Claude Code, Codex, and others. Agents that speak MCP can use `shapewall mcp`
-instead, and `shapewall watch` can start any command-line agent for each new comment.
+Any agent that can run a shell command and read JSON, including Claude Code, Codex and goose. Agents that speak MCP can use
+`shapewall mcp` instead, and `shapewall watch` starts any command-line agent for each new comment. Shapewall includes no model of
+its own. Setups for each agent: [agent recipes](/docs/agent-recipes).
 
-## Is there a hosted version?
+## Can my team use it together?
 
-You can host it yourself today: `shapewall hosted` gives a team passkey sign-in, workspaces, roles and shared boards on a server you
-run. It is in beta: it works and is tested with automated browsers, but it has not yet had a real multi-person team on it or real
-phone passkeys verified, so run it for people you trust and keep backups. [The hosted guide](/docs/hosted) covers setup. A service run by us on shapewall.com is planned and has not launched.
+Yes, on a server you run. The team server (beta), started with `shapewall hosted`, gives your team passkey sign-in, workspaces with
+roles, share links and shared boards. [The hosted guide](/docs/hosted) covers setup.
+
+## What does it need to run?
+
+Node.js 22.13 or newer and Chromium, on Linux, macOS or Windows; Linux is the primary tested platform. `shapewall doctor
+--install-browser` downloads the Chromium build, or you can use a Chrome you already have. See [install](/docs/getting-started#install).
+
+## How is Shapewall licensed?
+
+The local tool is open source under Apache 2.0. The self-hosted team server is source-available under the Functional Source License
+and becomes Apache 2.0 two years after each release. See [licenses and self-hosting](/open-source).
 
 ## How do I capture many pages quickly?
 
-Raise `concurrency` (1 to 8, default 2). Each concurrent page is a browser context of roughly 100 to 300 MB, so a laptop is happy at 2
-and a large machine can do more. Use `--only` to recapture just the pages that changed.
+Raise `concurrency` (1 to 8, default 2). Each concurrent page is a browser context of roughly 100 to 300 MB: 2 suits a laptop, and a
+large machine can do more. Use `--only` to recapture just the pages that changed.
 
 ## How is this different from a screenshot or visual-diff tool?
 
-Those tell you that something changed. Shapewall is for deciding what should change, saying so on the exact element, and getting it
+Those show that something changed. Shapewall is for deciding what should change, saying so on the exact element and getting it
 built: the whole product on one wall, comments an agent can act on, and before and after where you asked.

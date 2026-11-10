@@ -68,33 +68,31 @@ init` adds the pattern to `.gitignore`.
 
 ## Known limits
 
-These are known gaps, stated plainly so you can plan around them.
+What these protections do not cover:
 
-- **The capture guard checks names, not every load.** When you capture a public site, Shapewall keeps the capture away from private
-  addresses by checking each host name before the browser loads it. An internal image reached through a redirect can still appear in a
-  screenshot (it is never inlined into the saved live HTML), and DNS can change between the check and the load. Capture sites you
-  trust, and do not capture untrusted sites from a machine that can reach sensitive internal services.
-- **Your own agent keeps its own tools.** When you connect Claude Code, Codex or goose over ACP, the agent runs with its own tools and
-  your permissions. Shapewall only gates the file writes and commands the agent asks Shapewall to make. Run the agent in its restricted
+- **Capture checks host names, not every load.** Before the browser loads a host, Shapewall checks its name to keep captures of public
+  sites away from private addresses. An internal image reached through a redirect can still appear in a screenshot (it is never
+  inlined into live HTML), and DNS can change between the check and the load. Do not capture untrusted sites from a machine that can
+  reach sensitive internal services.
+- **Your agent keeps its own tools.** An agent connected over ACP, such as Claude Code, Codex or goose, runs with its own tools and your
+  permissions. Shapewall gates only the file writes and commands the agent asks Shapewall to make. Run the agent in its restricted
   mode, and use the [sandboxed starter agent](/docs/starter-agent) for shared boards. See [agent hardening](/docs/agent-hardening).
-- **Comment text is untrusted input to an agent.** Anyone who can comment can write text that tries to steer the agent. On shared
-  boards, only let people you trust dispatch work to an agent.
-- **The live view is a snapshot, not a guarantee.** Live HTML is a script-free snapshot behind a strict CSP and an iframe sandbox. That
-  removes whole classes of attack, but it cannot promise protection against every browser bug.
-
-- **The sandboxed starter agent has edges.** Its approval rule for running tests covers manifests and configs, not test files or
-  installed dependencies, so changing those changes what the tests run without a new approval. A host you allow that sits behind a
-  shared CDN may accept domain fronting, and hosts you add with `--allow-host` or `--registry` may resolve to private addresses. The
-  image base is pinned by tag, not digest.
+- **Comment text can try to steer an agent.** Anyone who can comment can write text aimed at the agent. On shared boards, let only
+  people you trust dispatch work to an agent.
+- **Live HTML relies on the browser.** The script-free snapshot, strict CSP and sandboxed frame remove whole classes of attack, but
+  they cannot protect against every browser bug.
+- **Starter agent approvals cover manifests and configs.** Changing test files or installed dependencies changes what the tests run
+  without a new approval. An allowed host behind a shared CDN may accept domain fronting, and hosts added with `--allow-host` or
+  `--registry` may resolve to private addresses. The image base is pinned by tag, not digest.
 - **`shapewall mcp` trusts the agent that calls it.** A local MCP agent can sign replies with any author name, and @mentions in its
-  replies wake other agents. In `mcp --remote`, including guest comments is an argument the agent chooses, not an operator setting.
-  `list_comments` returns every matching comment and a full-size image is the whole capture: there is no paging. The `files` paths in
+  replies wake other agents. In `mcp --remote`, the agent, not the operator, chooses whether to include guest comments.
+  `list_comments` returns every matching comment with no paging, and a full-size image is the whole capture. The `files` paths in
   results are absolute local paths the agent reads with its own file access.
-- **GitHub issues copy what the comment says.** With GitHub connect on, creating an issue copies the comment text and the screenshot
-  link into that repository, which may be public.
+- **GitHub issues copy the comment.** With GitHub connect on, creating an issue copies the comment text and the screenshot link into
+  that repository, which may be public.
 - **The Buzz bridge trusts your user account.** Any process running as you can reach its local gateway socket and send as the
-  bridge's signers, and it runs the Buzz CLI you installed without verifying it. Everything channel members write is shown on the
-  board as plain text.
+  bridge's signers, and the bridge runs the Buzz CLI you installed without verifying it. Everything channel members write is shown
+  on the board as plain text.
 
 ## Reporting a vulnerability
 
