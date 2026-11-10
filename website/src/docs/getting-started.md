@@ -11,6 +11,9 @@ invited (a GitHub 404 means the signed-in account has no access). The [live demo
 
 Use **Node.js 22.13 or newer**. Basic capture works on any Node 22; local accounts and the team server need 22.13.
 
+On a bare Linux server, a container or WSL, the downloaded Chromium also needs system libraries: run
+`sudo npx playwright install-deps chromium` once (`shapewall doctor` tells you when this is the problem).
+
 Platforms: Shapewall is developed and tested on Linux. macOS should work and is not yet verified by the maintainers. Windows is
 untested; the PowerShell lines in these docs are a convenience. If you run it on macOS or Windows, please
 [open an issue](https://github.com/danbaruch/shapewall/issues) with what worked and what did not.

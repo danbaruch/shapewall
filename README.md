@@ -67,6 +67,8 @@ feedback, fix the code, and you recapture to check.
 
 - Node.js **22.13 or newer**. Basic capture works on any Node 22; local accounts and the team server need 22.13.
 - Chromium for captures: `shapewall doctor --install-browser` downloads Playwright's build, or use a Chrome you already have.
+  On a bare Linux server, a container or WSL, Chromium also needs system libraries: run
+  `sudo npx playwright install-deps chromium` once.
 - Platforms: Shapewall is developed and tested on Linux. macOS should work and is not yet verified by the maintainers. Windows is
   untested; the PowerShell lines in the docs are a convenience. If you run it on macOS or Windows, please
   [open an issue](https://github.com/danbaruch/shapewall/issues) with what worked and what did not.
