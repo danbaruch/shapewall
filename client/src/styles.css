@@ -343,6 +343,21 @@
   }
 }
 
+/* The collapsed sidebar's flyouts (components/app-rail.jsx) slide in from
+   the rail; swapping from one icon's flyout to the next does not replay it. */
+.sw-rail-flyout {
+  animation: rail-flyout-in var(--motion-fast) var(--ease-emphasized);
+}
+.sw-rail-flyout.sw-rail-flyout-swap {
+  animation: none;
+}
+@keyframes rail-flyout-in {
+  from {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
+}
+
 html,
 body,
 #root {
