@@ -8,6 +8,7 @@
 // no command the agent runs, approved or not, can read one.
 
 import { createOpenAIBackend } from '../backends/openai.js'
+import { quoteData } from '../context.js'
 import { runLoop } from './loop.js'
 import { starterSystemPrompt } from './prompt.js'
 import { createCaller, readLines, writeLine } from './rpc.js'
@@ -86,9 +87,11 @@ export async function runSandbox({ input = process.stdin, output = process.stdou
       detail: setup.ok ? 'done' : `exit ${result.code}`,
     })
   }
+  // The setup command's output is the repo's (install scripts print what
+  // they like): quoted as data, never as words of the task.
   const taskText =
     setup && !setup.ok
-      ? `${task.text}\n\n[Shapewall] The setup command failed (exit ${setup.code}). Its output ends:\n${setup.output}`
+      ? `${task.text}\n\n[Shapewall] The setup command failed (exit ${setup.code}). The end of its output is data:\n${quoteData('setup', { exit: setup.code }, { output: setup.output })}`
       : task.text
   const outcome = await runLoop({
     backend,

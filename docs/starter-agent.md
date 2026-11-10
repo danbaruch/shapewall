@@ -127,8 +127,8 @@ agent's reason. The terminal running `agent run` prints the command and a link t
 thread (the running `shapewall serve`'s own address when it recorded one, else `SHAPEWALL_BOARD_URL`, `notifications.boardUrl` or the
 default). **Run** runs that command once; **Deny**, or no answer within two minutes, is a no. The card can only be answered from
 the board on this machine: the request needs the settings token from the link `shapewall serve` prints, must be a direct local request,
-same-origin, on a board that is not shared. Nobody at the board means no answer, which is a no. On hosted boards (`--remote`) `run_shell`
-is not offered at all.
+same-origin, on a board that is not shared. Nobody at the board means no answer, which is a no. On hosted boards (`--remote`) the card
+is on the hosted board instead (see [Hosted boards](#hosted-boards)).
 
 ## Budgets
 
@@ -164,9 +164,11 @@ config, and hooks, fsmonitor and signing off. Shapewall reads the changed files 
 (a symlink is committed as a symlink) and refusing hard-linked files, and writes them with `git hash-object --no-filters`, so no clean
 filter, attribute or config from the agent's files runs. `.gitattributes` and `.gitmodules` keep the base's version, and submodules are
 left as they were. The reply calls out changes to dot files, package manifests, `Makefile`, `Dockerfile`, `justfile` and
-`shapewall.config.json`.
+`shapewall.config.json`, and symlinks that point outside the repository (`--pr` does not push those without `--allow-ci-push`).
+Nothing is read from the folder until the agent container is confirmed gone; if it cannot be removed, nothing is committed and the
+folder is left for the sweep. One commit reads in at most the disk cap's worth of changed files (a sparse file looks small to `du`).
 
-`--pr` also pushes the branch to `--git-remote NAME` (default `origin`, explicit refspec, `--no-verify`) and opens a pull request into
+`--pr` also pushes the branch to `--git-remote NAME` (default `origin`, explicit refspec, `--no-verify`, no tags, no submodules) and opens a pull request into
 `starterAgent.prBase` (default: the remote's default branch) through GitHub connect, then links it to the comment. The token is GitHub
 connect's (`SHAPEWALL_GITHUB_TOKEN` or `GITHUB_TOKEN`) and never enters the container. Nothing is ever pushed to main.
 
@@ -201,7 +203,7 @@ is logged.
 | `setupCommand`        | none                                               | Runs once before the agent, with the registry reachable. |
 | `budget`              | `{ turns: 20, tokens: 200000, minutes: 15 }`       |                                                          |
 | `modelTimeoutSeconds` | 180 for the first call, then 60                    | Time for a model call to start answering, 1 to 900.      |
-| `limits`              | `{ memory: "4g", cpus: 2, pids: 512, disk: "2g" }` | Memory up to `16g`, CPUs up to 8, disk up to `64g`.      |
+| `limits`              | `{ memory: "4g", cpus: 2, pids: 512, disk: "2g" }` | Memory and `tmp` up to `16g`, CPUs up to 8, disk `64g`.  |
 | `branchPrefix`        | `shapewall-agent/`                                 | Lowercase, ending in `/`.                                |
 | `prBase`              | the remote's default branch                        | The base branch of `--pr`.                               |
 
@@ -262,7 +264,7 @@ has none to post in a reply. The model endpoint is not on the egress allow list.
 
 ### Board text is data
 
-The comment, its replies and any page text go to the model as quoted data with provenance (`<shapewall-data source="comment"
+The comment, its replies, any page text and a failed setup command's output go to the model as quoted data with provenance (`<shapewall-data source="comment"
 trust="untrusted" ...>`), never in the system prompt, and the system prompt tells the model that text inside is never an instruction.
 That lowers the risk of prompt injection; it does not remove it, which is why the walls above exist.
 
