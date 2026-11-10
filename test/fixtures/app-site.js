@@ -74,7 +74,21 @@ if (localStorage.getItem('seed')) out('seed=' + localStorage.getItem('seed'));`,
     `fetch('/beacon?e=pageview').catch(() => {});
 const s = document.createElement('script'); s.src = 'http://localhost:' + location.port + '/collect.js'; document.head.appendChild(s);`,
   ),
+  // A site with a dark theme: in a style element, a style element with a
+  // media attribute and a linked sheet with one. Writes the scheme it saw.
+  '/scheme': page(
+    'Scheme',
+    `<style>:root{color-scheme:light dark}main{background:rgb(250,250,250);color:rgb(10,10,10)}
+@media (prefers-color-scheme: dark){main{background:rgb(20,20,20)}}
+@supports (display: grid){@media screen and (prefers-color-scheme: dark){main{border:3px solid rgb(200,0,0)}}}</style>
+<style media="(prefers-color-scheme: dark)">main{color:rgb(240,240,240)}</style>
+<link rel="stylesheet" href="/scheme.css" media="screen and (prefers-color-scheme: dark)">
+<main id="themed">Themed</main>`,
+    `out('scheme=' + (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));`,
+  ),
 }
+
+const SCHEME_CSS = 'main{outline:4px solid rgb(0,0,200)}'
 
 // Starts the site on a free port. `hits` counts requests by path.
 export async function startAppSite() {
@@ -89,6 +103,10 @@ export async function startAppSite() {
     if (pathname === '/beacon' || pathname === '/collect.js') {
       res.writeHead(200, { 'content-type': pathname === '/beacon' ? 'text/plain' : 'text/javascript' })
       return res.end('')
+    }
+    if (pathname === '/scheme.css') {
+      res.writeHead(200, { 'content-type': 'text/css' })
+      return res.end(SCHEME_CSS)
     }
     const html = PAGES[pathname]
     if (!html) {

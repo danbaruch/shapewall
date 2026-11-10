@@ -330,3 +330,67 @@ test('retiring native processes hold the global slot until actual exit', { skip:
   assert.throws(() => process.kill(secondPid, 0), { code: 'ESRCH' })
   assert.ok(b.app.locals.agentRouter.processes().length <= 1)
 })
+
+test(
+  'one list of agents: a legacy default command shows as a profile, joins the list on the next connect, and removal moves the default',
+  { skip: !POSIX },
+  async (t) => {
+    const b = await board(t, { saved: false })
+    // Settings from before profiles: one-click Connect saved only the default command.
+    saveUserAgentEntry(b.config.dir, { backend: 'acp', acpCommand: 'claude-agent-acp' }, b.env)
+    const legacy = await b.api('GET', '/api/agent/settings')
+    assert.deepEqual(legacy.json.profiles, [
+      { id: 'claude', label: 'Claude Code', command: 'claude-agent-acp', legacy: true, default: true },
+    ])
+    assert.equal(legacy.json.saved.profiles, undefined, 'nothing is rewritten by reading')
+    const chat = await b.api('GET', b.base + 'board')
+    assert.equal(chat.json.profiles[0].sameAs, undefined, 'the default is its own entry until it joins the list')
+
+    // Adding Codex keeps Claude Code in the list; only the new command is confirmed.
+    const first = await b.api('POST', '/api/agent/settings/profiles/connect', { agentId: 'codex' })
+    assert.deepEqual(
+      first.json.confirm.map((item) => item.command),
+      ['codex-acp'],
+    )
+    const next = await b.api('POST', '/api/agent/settings/profiles/connect', { agentId: 'codex', confirm: first.json.confirmHash })
+    assert.equal(next.json.connected, true, JSON.stringify(next.json))
+    assert.deepEqual(next.json.saved.profiles, [profiles[0], profiles[1]])
+    assert.equal(next.json.saved.acpCommand, 'claude-agent-acp', 'new chats still use Claude Code')
+    assert.deepEqual(
+      next.json.profiles.map((item) => [item.id, item.default]),
+      [
+        ['claude', true],
+        ['codex', false],
+      ],
+    )
+    const picker = await b.api('GET', b.base + 'board')
+    assert.deepEqual(
+      picker.json.profiles.map((item) => [item.id, item.label, item.sameAs || null]),
+      [
+        ['default', 'Claude Code', 'claude'],
+        ['claude', 'Claude Code', null],
+        ['codex', 'Codex', null],
+      ],
+    )
+
+    // Removing the agent new chats use moves them to the next one, without asking again.
+    const removed = await b.api('DELETE', '/api/agent/settings/profiles/claude')
+    assert.equal(removed.status, 200, JSON.stringify(removed.json))
+    assert.equal(removed.json.confirm, undefined)
+    assert.equal(removed.json.saved.acpCommand, 'codex-acp')
+    assert.deepEqual(removed.json.saved.profiles, [profiles[1]])
+    const last = await b.api('DELETE', '/api/agent/settings/profiles/codex')
+    assert.equal(last.json.saved.acpCommand, undefined)
+    assert.equal(last.json.saved.backend, undefined)
+    assert.deepEqual(last.json.profiles, [])
+  },
+)
+
+test('removing a legacy default command shown as a profile clears it', { skip: !POSIX }, async (t) => {
+  const b = await board(t, { saved: false })
+  saveUserAgentEntry(b.config.dir, { backend: 'acp', acpCommand: 'claude-agent-acp' }, b.env)
+  const removed = await b.api('DELETE', '/api/agent/settings/profiles/claude')
+  assert.equal(removed.status, 200)
+  assert.equal(removed.json.saved.acpCommand, undefined)
+  assert.deepEqual(removed.json.profiles, [])
+})

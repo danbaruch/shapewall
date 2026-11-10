@@ -101,6 +101,7 @@ before(async () => {
         ],
       },
       { id: 'auth', auth: { storageState: './board.auth.json' }, pages: [{ id: 'device', path: '/device', viewports: ['desktop'] }] },
+      { id: 'scheme', pages: [{ id: 'themed', path: '/scheme', viewports: ['desktop'] }] },
       {
         id: 'frames',
         groups: ['Site', 'App'],
@@ -225,6 +226,40 @@ test('a failed setup fails its shots once, by name', () => {
     result.shots.filter((entry) => entry.page === 'outside').every((entry) => entry.status === 'ok'),
     'pages outside the setup still capture',
   )
+})
+
+test('live HTML is frozen to the captured (light) scheme: a dark-scheme viewer gets the light rules', async () => {
+  assert.match(out('scheme', 'themed', 'desktop'), /scheme=light/, 'captured in light')
+  const manifest = JSON.parse(fs.readFileSync(path.join(results.scheme.dir, 'manifest.json'), 'utf8'))
+  assert.equal(manifest.pages.themed.desktop.html.colorScheme, 'light')
+  const html = live('scheme', 'themed', 'desktop')
+  assert.doesNotMatch(html, /prefers-color-scheme/)
+  const browser = await chromium.launch()
+  try {
+    for (const colorScheme of ['dark', 'light']) {
+      const context = await browser.newContext({ colorScheme, viewport: { width: 800, height: 600 } })
+      const page = await context.newPage()
+      await page.setContent(html)
+      const seen = await page.evaluate(() => {
+        const style = getComputedStyle(document.getElementById('themed'))
+        return {
+          background: style.backgroundColor,
+          color: style.color,
+          border: style.borderTopWidth,
+          outline: style.outlineStyle,
+          root: getComputedStyle(document.documentElement).colorScheme,
+        }
+      })
+      assert.deepEqual(
+        seen,
+        { background: 'rgb(250, 250, 250)', color: 'rgb(10, 10, 10)', border: '0px', outline: 'none', root: 'light only' },
+        `${colorScheme} viewer`,
+      )
+      await context.close()
+    }
+  } finally {
+    await browser.close()
+  }
 })
 
 test('the board shows a board of its own viewports: named toggles, all together, one at a time', async () => {

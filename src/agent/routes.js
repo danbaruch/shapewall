@@ -40,7 +40,7 @@ import { agentSettings, publicAgentInfo } from './config.js'
 import { AgentError } from './errors.js'
 import { beginAgentOperation } from './control.js'
 import { validateFiles, validateMentions } from './composer.js'
-import { userAgentEntry } from './user-settings.js'
+import { profileForDefault, userAgentEntry } from './user-settings.js'
 import { finishFix, projectChanged, projectSnapshot } from './feedback-loop.js'
 import { ownerMcpServers } from './owner-mcp.js'
 import { RUN_MS_MAX, commentIdOf, runTurn } from './run.js'
@@ -194,8 +194,11 @@ export function agentRouter({
   const profiles = () => {
     const saved = userAgentEntry(config.dir, env)
     const locked = acp || env.SHAPEWALL_AGENT_ACP
+    // The default connection runs the same command as a saved profile: the
+    // picker shows that profile once, by name (sameAs), not both.
+    const same = !locked ? profileForDefault(saved.entry) : null
     return [
-      { id: 'default', ...publicAgentInfo(settings()) },
+      { id: 'default', ...publicAgentInfo(settings()), ...(same ? { sameAs: same.id } : {}) },
       ...(!locked ? (saved.entry?.profiles || []).map((item) => ({ id: item.id, ...publicAgentInfo(settings(item.id)) })) : []),
     ]
   }
@@ -513,8 +516,12 @@ export function agentRouter({
         // turn's answer, with its Undo, into an earlier version): like
         // bringing back a version, an owner session's thread needs the owner.
         if ((editOf !== null || previous) && !controlsAllowed(req, board, threadId)) return controlDenied(res)
+        // The comment's agent status before this run, to put back when the
+        // agent never got to work (feedback-loop.js finishFix).
+        let previousStatus = null
         if (fix) {
           const comment = getComment(config, board.id, commentId)
+          previousStatus = comment.agentStatus ?? null
           if (comment.status !== 'open' || ['queued', 'working'].includes(comment.agentStatus))
             return fail(res, 409, 'comment_busy', 'This comment is resolved or already with an agent.')
           const claimed = await setAgentStatus(config, board.id, commentId, 'queued', {
@@ -631,6 +638,7 @@ export function agentRouter({
                 pageIds: [...requestedPages],
                 capture,
                 signal: controller.signal,
+                previousStatus,
                 log,
               })
             }

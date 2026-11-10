@@ -53,7 +53,10 @@ and shoots the frame's `height` past it.
 
 Board settings shape the context too: a board's `viewports` replace the top-level list for it; `block` patterns are aborted by one
 context route (with the private-host guard), and the requests it blocked are left out of the network warnings; `localStorage` seeds go
-in through an init script that only writes on the page's own origin; `reducedMotion` defaults to `reduce`. A board `setup` runs once
+in through an init script that only writes on the page's own origin; `reducedMotion` defaults to `reduce`; the color scheme is always
+light. Live HTML is frozen to those preferences (`src/capture/media-scheme.js` rewrites `prefers-color-scheme` and the forced
+`prefers-reduced-motion` queries to always or never match, and pins the root `color-scheme`), so a viewer whose browser prefers dark
+still sees what the screenshot shows. A board `setup` runs once
 per viewport, on first use, in its own context (`runSetup`), and its `storageState()` (cookies, localStorage, IndexedDB) is the state
 every page in its scope starts from, so a guest entry happens once per capture instead of once per shot. Actions run in
 `src/capture/actions.js`, shared with page checks: a failure names the step (`action 3 (click "...") timed out after 45 s`) from the
