@@ -9,6 +9,7 @@ import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { DEMO_SITE_PATHS, HARDENING_PDF, NOT_FOUND, ROUTES, SITE_URL } from '../src/routes.js'
 import { DEMO_SITES } from '../../scripts/demo-publish.js'
+import { THEME_KEY } from '../src/theme.js'
 
 const SITE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const DIST = path.join(SITE, 'dist')
@@ -41,6 +42,28 @@ test('every route has its own description and title', () => {
   }
 })
 
+// Light and dark: the head script that applies the saved theme before the first paint is allowed by its hash (never
+// 'unsafe-inline'), the HTML itself carries no theme, and the browser chrome has a colour for both schemes.
+function checkTheme(html, csp, where) {
+  const head = html.slice(0, html.indexOf('</head>'))
+  const boot = [...head.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]).filter((body) => body.includes('data-theme'))
+  assert.equal(boot.length, 1, `${where}: one theme script in the head`)
+  assert.ok(boot[0].includes(`'${THEME_KEY}'`), `${where}: the theme script reads the key src/theme.js writes`)
+  assert.ok(head.indexOf(boot[0]) < head.indexOf('rel="stylesheet"'), `${where}: the theme script runs before the stylesheet`)
+  const hash = crypto.createHash('sha256').update(boot[0]).digest('base64')
+  const scriptSrc = csp.split(';').find((part) => part.trim().startsWith('script-src')) || ''
+  assert.ok(scriptSrc.includes(`'sha256-${hash}'`), `${where}: the CSP allows the theme script by hash`)
+  assert.ok(!/unsafe-(inline|eval)/.test(scriptSrc), `${where}: no unsafe script sources`)
+  assert.ok(!/<html[^>]*data-theme/.test(html), `${where}: the prerendered HTML does not fix a theme`)
+  assert.match(html, /<meta name="color-scheme" content="light dark"/, `${where}: color-scheme`)
+  assert.match(html, /<meta name="theme-color" media="\(prefers-color-scheme: light\)" content="#fafaf9"/, `${where}: light theme-color`)
+  assert.match(html, /<meta name="theme-color" media="\(prefers-color-scheme: dark\)" content="#17171b"/, `${where}: dark theme-color`)
+  for (const label of ['System', 'Light', 'Dark']) {
+    const button = new RegExp(`<button[^>]*aria-pressed="(?:true|false)"[^>]*>(?:<svg[\\s\\S]*?</svg>)?${label}</button>`)
+    assert.match(html, button, `${where}: the ${label} theme button`)
+  }
+}
+
 function checkPage(route, { stealth }) {
   const html = read(fileFor(route.path))
   const title = decode(attr(html, /<title>([^<]*)<\/title>/) || '')
@@ -62,6 +85,7 @@ function checkPage(route, { stealth }) {
   const csp = decode(attr(html, /<meta http-equiv="Content-Security-Policy" content="([^"]*)"/) || '')
   assert.match(csp, /script-src 'self' https:\/\/static\.cloudflareinsights\.com( 'sha256-[^']+')*;/, `${route.path}: script-src`)
   assert.match(csp, /connect-src 'self' https:\/\/cloudflareinsights\.com;/, `${route.path}: connect-src`)
+  checkTheme(html, csp, route.path)
   // Real HTML, not an empty shell.
   assert.ok(/<div id="root">[\s\S]*<h1[^>]*>[\s\S]+?<\/h1>/.test(html), `${route.path}: prerendered content`)
   const dash = html.match(/.{0,60}[–—].{0,20}/)
@@ -77,6 +101,7 @@ test('stealth build (the default): noindex everywhere, robots.txt disallows all,
   }
   assert.equal(read(path.join(DIST, 'robots.txt')), 'User-agent: *\nDisallow: /\n')
   const notFound = read(path.join(DIST, '404.html'))
+  checkTheme(notFound, decode(attr(notFound, /<meta http-equiv="Content-Security-Policy" content="([^"]*)"/) || ''), '404')
   assert.match(notFound, /<meta name="robots" content="noindex,nofollow">/)
   assert.ok(notFound.includes(NOT_FOUND.title.replace(/&/g, '&amp;')))
 })

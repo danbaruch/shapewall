@@ -91,14 +91,14 @@ function DocsSearch({ onPick }) {
               setQuery('')
             }
           }}
-          className="h-10 w-full rounded-xl border border-line bg-white pr-3 pl-9 text-[14.5px] text-ink placeholder:text-faint focus:border-wall focus:outline-none"
+          className="h-10 w-full rounded-xl border border-line bg-card pr-3 pl-9 text-[14.5px] text-ink placeholder:text-faint focus:border-wall focus:outline-none"
         />
       </label>
       {query.trim() ? (
         <ul
           id="docs-search-results"
           role="listbox"
-          className="absolute inset-x-0 top-12 z-20 max-h-80 overflow-auto rounded-xl border border-line bg-white p-1.5 shadow-xl shadow-black/10"
+          className="absolute inset-x-0 top-12 z-20 max-h-80 overflow-auto rounded-xl border border-line bg-card p-1.5 shadow-xl shadow-black/10"
         >
           {results.length ? (
             results.map((entry, position) => (
@@ -139,7 +139,7 @@ function Sidebar({ onPick }) {
                   className={({ isActive }) =>
                     cx(
                       'block rounded-lg px-3 py-1.5 text-[14.5px] transition-colors',
-                      isActive ? 'bg-wall-wash font-semibold text-wall-deep' : 'text-slate hover:bg-black/[0.04] hover:text-ink',
+                      isActive ? 'bg-wall-wash font-semibold text-wall-deep' : 'text-slate hover:bg-ink/[0.04] hover:text-ink',
                     )
                   }
                 >
@@ -227,7 +227,7 @@ export function DocPage({ doc }) {
           <a
             href={doc.pdf.href}
             download
-            className="mt-5 inline-flex h-10 items-center gap-2 rounded-xl border border-line bg-white px-4 text-[14.5px] font-semibold text-ink hover:border-wall/40 hover:text-wall-deep"
+            className="mt-5 inline-flex h-10 items-center gap-2 rounded-xl border border-line bg-card px-4 text-[14.5px] font-semibold text-ink hover:border-wall/40 hover:text-wall-deep"
           >
             <Download className="size-4" aria-hidden="true" />
             Download the PDF <span className="font-normal text-faint">({doc.pdf.size})</span>
@@ -236,7 +236,7 @@ export function DocPage({ doc }) {
         <div ref={article} className="prose-docs mt-8 max-w-3xl" dangerouslySetInnerHTML={{ __html: md.html }} />
         <div className="mt-14 grid max-w-3xl gap-3 border-t border-line pt-8 sm:grid-cols-2">
           {prev ? (
-            <Link to={prev.path} className="group rounded-xl border border-line bg-white p-4 hover:border-wall/40">
+            <Link to={prev.path} className="group rounded-xl border border-line bg-card p-4 hover:border-wall/40">
               <span className="flex items-center gap-1.5 text-[12.5px] text-faint">
                 <ArrowLeft className="size-3.5" aria-hidden="true" /> Previous
               </span>
@@ -246,7 +246,7 @@ export function DocPage({ doc }) {
             <span />
           )}
           {next ? (
-            <Link to={next.path} className="group rounded-xl border border-line bg-white p-4 text-right hover:border-wall/40">
+            <Link to={next.path} className="group rounded-xl border border-line bg-card p-4 text-right hover:border-wall/40">
               <span className="flex items-center justify-end gap-1.5 text-[12.5px] text-faint">
                 Next <ArrowRight className="size-3.5" aria-hidden="true" />
               </span>

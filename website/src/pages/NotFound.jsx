@@ -21,7 +21,7 @@ export default function NotFound({ inDocs = false }) {
           {[0, 1, 2].map((index) => (
             <span
               key={index}
-              className={`h-16 w-12 rounded-lg border bg-white ${index === 1 ? 'border-dashed border-pin' : 'border-black/10 shadow-sm'}`}
+              className={`h-16 w-12 rounded-lg border bg-card ${index === 1 ? 'border-dashed border-pin' : 'border-edge shadow-sm'}`}
             />
           ))}
         </div>
@@ -35,7 +35,7 @@ export default function NotFound({ inDocs = false }) {
             <li key={to}>
               <Link
                 to={to}
-                className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-line bg-white px-4 text-[14.5px] font-semibold text-ink hover:border-zinc-300"
+                className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-line bg-card px-4 text-[14.5px] font-semibold text-ink hover:border-line-strong"
               >
                 {label} <ArrowRight className="size-4 text-faint" aria-hidden="true" />
               </Link>

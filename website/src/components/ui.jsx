@@ -11,12 +11,12 @@ export const cx = (...parts) => parts.filter(Boolean).join(' ')
 // kit (client/src/components/ui/button.jsx) in the site's brand colours. No
 // class merging here, so each variant carries its own radius.
 const BUTTON_VARIANTS = {
-  primary: 'rounded-xl bg-wall text-white shadow-sm shadow-wall/20 hover:bg-wall-deep',
-  secondary: 'rounded-xl border border-line bg-white text-ink hover:border-zinc-300 hover:bg-zinc-50',
+  primary: 'rounded-xl bg-wall text-on-wall shadow-sm shadow-wall/20 hover:bg-wall-deep',
+  secondary: 'rounded-xl border border-line bg-card text-ink hover:border-line-strong hover:bg-sunk',
   'ghost-dark': 'rounded-xl border border-white/15 bg-white/5 text-white hover:bg-white/10',
-  light: 'rounded-xl bg-white text-ink hover:bg-zinc-100',
-  ghost: 'rounded-xl text-ink hover:bg-black/5',
-  quiet: 'rounded-lg text-faint hover:bg-zinc-100 hover:text-ink',
+  light: 'rounded-xl bg-white text-zinc-900 hover:bg-zinc-100',
+  ghost: 'rounded-xl text-ink hover:bg-ink/5',
+  quiet: 'rounded-lg text-faint hover:bg-sunk-2 hover:text-ink',
   'quiet-dark': 'rounded-lg text-zinc-400 hover:bg-white/10 hover:text-white',
   'outline-dark': 'rounded-lg border border-white/15 text-zinc-300 hover:bg-white/10',
 }
@@ -72,7 +72,7 @@ export function IconButton({ label, variant = 'quiet', size = 'icon-sm', childre
 export function ToggleGroup({ label, options, value, onChange, className }) {
   return (
     <div
-      className={cx('flex rounded-lg border border-line bg-zinc-50 p-0.5 text-[13px] font-medium', className)}
+      className={cx('flex rounded-lg border border-line bg-sunk p-0.5 text-[13px] font-medium', className)}
       role="group"
       aria-label={label}
     >
@@ -84,7 +84,7 @@ export function ToggleGroup({ label, options, value, onChange, className }) {
           aria-pressed={value === option.id}
           className={cx(
             'h-8 rounded-md px-3 transition-colors',
-            value === option.id ? 'bg-white text-ink shadow-sm' : 'text-slate hover:text-ink',
+            value === option.id ? 'bg-card text-ink shadow-sm' : 'text-slate hover:text-ink',
           )}
         >
           {option.label}
@@ -134,7 +134,7 @@ export function InstallCommand({ dark = false, where, command = INSTALL_COMMAND,
       <div
         className={cx(
           'w-full max-w-sm rounded-xl border p-4 text-left',
-          dark ? 'border-white/15 bg-white/5' : 'border-line bg-white',
+          dark ? 'border-white/15 bg-white/5' : 'border-line bg-card',
           className,
         )}
       >
@@ -154,7 +154,7 @@ export function InstallCommand({ dark = false, where, command = INSTALL_COMMAND,
     <div
       className={cx(
         'flex min-h-12 w-full max-w-lg min-w-0 items-center gap-3 rounded-xl border pr-0.5 pl-4 text-left font-mono text-[14px]',
-        dark ? 'border-white/15 bg-white/5 text-zinc-100' : 'border-line bg-white text-ink shadow-sm shadow-black/[0.03]',
+        dark ? 'border-white/15 bg-white/5 text-zinc-100' : 'border-line bg-card text-ink shadow-sm shadow-black/[0.03]',
         className,
       )}
     >
@@ -180,10 +180,10 @@ export function Shot({ src, srcSet, sizes, alt, width, height, className, eager 
   return (
     <figure className={cx('shot', className)}>
       {bar ? (
-        <div className="flex h-7 items-center gap-1.5 border-b border-black/[0.06] bg-zinc-50 px-3" aria-hidden="true">
-          <span className="size-2.5 rounded-full bg-zinc-300" />
-          <span className="size-2.5 rounded-full bg-zinc-300" />
-          <span className="size-2.5 rounded-full bg-zinc-300" />
+        <div className="flex h-7 items-center gap-1.5 border-b border-hairline bg-sunk px-3" aria-hidden="true">
+          <span className="size-2.5 rounded-full bg-line-strong" />
+          <span className="size-2.5 rounded-full bg-line-strong" />
+          <span className="size-2.5 rounded-full bg-line-strong" />
         </div>
       ) : null}
       <img
@@ -228,8 +228,8 @@ export function Badge({ children, tone = 'teal' }) {
       className={cx(
         'inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold tracking-wide whitespace-nowrap uppercase',
         tone === 'teal' && 'bg-wall-tint text-wall-deep',
-        tone === 'amber' && 'bg-amber-100 text-pin-ink',
-        tone === 'zinc' && 'bg-zinc-100 text-slate',
+        tone === 'amber' && 'bg-pin-tint text-pin-ink',
+        tone === 'zinc' && 'bg-sunk-2 text-slate',
         tone === 'dark' && 'bg-white/10 text-wall-bright',
       )}
     >

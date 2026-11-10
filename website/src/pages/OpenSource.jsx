@@ -47,11 +47,11 @@ export default function OpenSource() {
       <Container className="py-16 sm:py-20">
         <div className="grid gap-5 md:grid-cols-2">
           {WAYS.map((way) => (
-            <section key={way.title} className="flex min-w-0 flex-col rounded-2xl border border-line bg-white p-6 sm:p-7">
+            <section key={way.title} className="flex min-w-0 flex-col rounded-2xl border border-line bg-card p-6 sm:p-7">
               <way.icon className="size-5 text-wall" aria-hidden="true" />
               <h2 className="mt-4 text-[20px] font-bold tracking-tight text-ink">{way.title}</h2>
               <p className="mt-2 flex-1 text-[15px] leading-7 text-slate">{way.text}</p>
-              <pre className="mt-5 overflow-x-auto rounded-xl bg-night px-4 py-3 font-mono text-[13px] text-zinc-200">
+              <pre className="mt-5 overflow-x-auto rounded-xl bg-night px-4 py-3 ring-1 ring-code-edge font-mono text-[13px] text-zinc-200">
                 <code>
                   <span className="text-wall-bright select-none">$ </span>
                   {way.code}

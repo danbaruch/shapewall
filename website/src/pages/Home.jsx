@@ -54,7 +54,7 @@ function Hero() {
         <div className="mx-auto max-w-3xl text-center">
           <Link
             to="/docs/getting-started#install"
-            className="inline-flex items-center gap-2 rounded-full border border-line bg-white py-1 pr-3 pl-1 text-[13px] font-medium text-slate shadow-sm shadow-black/[0.03] hover:text-ink"
+            className="inline-flex items-center gap-2 rounded-full border border-line bg-card py-1 pr-3 pl-1 text-[13px] font-medium text-slate shadow-sm shadow-black/[0.03] hover:text-ink"
           >
             <Badge>{LAUNCHED ? 'Open source' : 'Private early access'}</Badge>
             <span className="sm:hidden">Runs on your machine</span>
@@ -103,13 +103,13 @@ function Hero() {
             eager
             alt="The Shapewall board: the pages of a demo product at desktop and phone width, grouped into Marketing, Content, Get started, App and Admin, with numbered comment pins and a comments panel"
           />
-          <div className="absolute -bottom-6 -left-3 hidden w-72 rounded-xl border border-line bg-white p-3.5 shadow-xl shadow-black/10 md:block lg:-left-10">
+          <div className="absolute -bottom-6 -left-3 hidden w-72 rounded-xl border border-line bg-card p-3.5 shadow-xl shadow-black/10 md:block lg:-left-10">
             <p className="flex items-center gap-2 text-[12px] font-semibold text-wall">
               <Bot className="size-4" aria-hidden="true" /> Agent resolved #1
             </p>
             <p className="mt-1.5 text-[13.5px] leading-snug text-ink">The Plus card now uses the primary button. Pricing recaptured.</p>
           </div>
-          <div className="absolute -top-5 -right-3 hidden items-center gap-2 rounded-full border border-line bg-white py-1.5 pr-3.5 pl-2 text-[13px] font-medium text-ink shadow-lg shadow-black/10 md:flex lg:-right-8">
+          <div className="absolute -top-5 -right-3 hidden items-center gap-2 rounded-full border border-line bg-card py-1.5 pr-3.5 pl-2 text-[13px] font-medium text-ink shadow-lg shadow-black/10 md:flex lg:-right-8">
             <span className="grid size-6 place-items-center rounded-full bg-pin text-[11px] font-bold text-night">19</span>
             open comments on 26 pages
           </div>
@@ -162,7 +162,7 @@ function HowItWorks() {
             <li key={step.title}>
               {step.art}
               <div className="mt-6 flex items-center gap-3">
-                <span className="grid size-8 place-items-center rounded-lg bg-ink text-[14px] font-bold text-white">{index + 1}</span>
+                <span className="grid size-8 place-items-center rounded-lg bg-ink text-[14px] font-bold text-card">{index + 1}</span>
                 <h3 className="text-[19px] font-semibold tracking-tight text-ink">{step.title}</h3>
               </div>
               <p className="mt-3 text-[15.5px] leading-7 text-slate">{step.text}</p>
@@ -209,7 +209,7 @@ const FEATURES = [
 
 function FeatureGrid() {
   return (
-    <section className="border-y border-line bg-white py-16 sm:py-28" aria-labelledby="features">
+    <section className="border-y border-line bg-band py-16 sm:py-28" aria-labelledby="features">
       <Container>
         <div className="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
           <SectionHead eyebrow="Features" title={<span id="features">Made for creating, not just critiquing</span>}>
@@ -224,7 +224,7 @@ function FeatureGrid() {
         </div>
         <ul className="mt-12 grid gap-px overflow-hidden rounded-2xl border border-line bg-line sm:grid-cols-2 lg:grid-cols-3">
           {FEATURES.map((feature) => (
-            <li key={feature.title} className="bg-white p-6">
+            <li key={feature.title} className="bg-card p-6">
               <div className="flex items-center justify-between">
                 <feature.icon className="size-5 text-wall" aria-hidden="true" />
                 {feature.badge ? <Badge tone="amber">{feature.badge}</Badge> : null}
@@ -303,7 +303,7 @@ function Journeys() {
 
 function BeforeAfterSection() {
   return (
-    <section className="border-y border-line bg-white py-16 sm:py-28" aria-labelledby="before-after">
+    <section className="border-y border-line bg-band py-16 sm:py-28" aria-labelledby="before-after">
       <Container className="grid items-center gap-12 lg:grid-cols-[1fr_1.3fr] lg:gap-16">
         <div>
           <SectionHead eyebrow="Before and after" title={<span id="before-after">Every change, checked where you asked for it</span>}>
@@ -401,7 +401,7 @@ function OpenSourceSection() {
             </Button>
           </div>
         </div>
-        <div className="self-center overflow-hidden rounded-2xl bg-night text-[13.5px] leading-7 shadow-xl shadow-black/10">
+        <div className="self-center overflow-hidden rounded-2xl bg-night text-[13.5px] leading-7 ring-1 ring-code-edge shadow-xl shadow-black/10">
           <div className="flex items-center gap-1.5 border-b border-night-line px-4 py-2.5" aria-hidden="true">
             <span className="size-2.5 rounded-full bg-white/15" />
             <span className="size-2.5 rounded-full bg-white/15" />
@@ -437,7 +437,7 @@ function OpenSourceSection() {
 
 function FaqSection() {
   return (
-    <section className="border-y border-line bg-white py-16 sm:py-28" aria-labelledby="faq">
+    <section className="border-y border-line bg-band py-16 sm:py-28" aria-labelledby="faq">
       <Container className="grid gap-12 lg:grid-cols-[1fr_1.6fr] lg:gap-16">
         <SectionHead eyebrow="FAQ" title={<span id="faq">Questions people ask first</span>}>
           More in the{' '}
