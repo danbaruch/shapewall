@@ -46,8 +46,7 @@ agents and live presence. Start with [Tailscale deployment](hosted.md#tailnet-de
 [checklist before you invite the team](hosted.md#before-you-invite-the-team). Capture on your machine and push, or move an existing local project
 with `shapewall share`. The server does not need a public domain for a private tailnet team.
 
-The team server is in **beta**: it works and is tested with automated browsers, but it has not yet had a real multi-person team on it
-or real phone passkeys verified, so run it for people you trust and keep backups.
+The team server is in **beta**.
 
 `shapewall serve --tailscale` below is for the local owner's other devices. Pairing another device does not create a separate
 teammate account or role.

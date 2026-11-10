@@ -1,6 +1,7 @@
 // Every page of the site, with its search and share metadata. Plain data: the app (routing, head tags on client
 // navigation) and scripts/prerender.mjs (one HTML file per route, sitemap) both read it.
-// Titles stay under 60 characters and descriptions between 120 and 160 (test/build.test.js checks).
+// Search phrase first, brand last. Titles are at most 60 characters and descriptions 70 to 160, each unique
+// (test/build.test.js checks).
 
 import { GITHUB_URL, LAUNCHED } from './launch.js'
 
@@ -22,66 +23,66 @@ export const HARDENING_PDF = '/downloads/shapewall-agent-hardening.pdf'
 export const PAGES = [
   {
     path: '/',
-    title: 'Shapewall: shape your product on the wall',
+    title: 'Visual website review for AI coding agents | Shapewall',
     description: LAUNCHED
-      ? 'Shapewall captures every page of your site onto one zoomable wall. Pin comments to elements and let your coding agent build the change. Free, runs locally.'
-      : 'Shapewall captures every page of your site onto one zoomable wall. Pin comments to elements and let your coding agent build the change. In early access.',
+      ? 'Capture every page of your site onto one zoomable wall, pin comments to exact elements and let your coding agent make the change. Free, runs locally.'
+      : 'Capture every page of your site onto one zoomable wall, pin comments to exact elements and let your coding agent make the change. In early access.',
     og: 'home',
     alt: 'The Shapewall wall: every page of a demo product at desktop and phone width, with comment pins',
   },
   {
     path: '/features',
-    title: 'Features: capture, wall, comments, journeys | Shapewall',
+    title: 'Features: page capture, comments, agent loop | Shapewall',
     description:
-      'Desktop, tablet and phone captures, live HTML, element comments, journeys, page history, GitHub connect, notifications and a self-running agent loop.',
+      'Desktop, tablet and phone captures, live HTML, element comments, an agent loop, journeys, page history, GitHub issues, notifications and team workspaces.',
     og: 'features',
     alt: 'Shapewall features: capture, the wall, element comments, the agent loop, journeys and page checks',
   },
   {
     path: '/open-source',
-    title: 'Licenses and self-hosting | Shapewall',
+    title: 'Open source licenses and self-hosting | Shapewall',
     description:
-      'Shapewall runs on your machine. The local tool is Apache 2.0 open source; the self-hosted team server is source-available under the Functional Source License.',
+      'The Shapewall local tool is open source under Apache 2.0. The team server you host yourself is source-available under the Functional Source License.',
     og: 'open-source',
     alt: 'Shapewall licenses and self-hosting: Apache 2.0 local tool, Functional Source License team server',
   },
   {
     path: '/privacy',
-    title: 'Privacy | Shapewall',
+    title: 'Privacy policy | Shapewall',
     description:
-      'How Shapewall keeps data local by default, what optional agents and sharing send, and how website analytics differs from cached files and account data.',
+      'What the Shapewall tool keeps on your machine, what agents, integrations and sharing send when you connect them, and how shapewall.com counts visits.',
     og: 'privacy',
   },
   {
     path: '/legal/terms',
     noindex: true,
-    title: 'Terms: operator template | Shapewall',
+    title: 'Terms template for self-hosted servers | Shapewall',
     description:
-      'Draft terms template for a self-hosted Shapewall server. Operators must review and replace this text before inviting their workspace users.',
+      'A terms of service template for the operator of a self-hosted Shapewall server. Complete it and have it reviewed before inviting users.',
     og: 'privacy',
   },
   {
     path: '/legal/privacy',
     noindex: true,
-    title: 'Privacy: operator template | Shapewall',
+    title: 'Privacy template for self-hosted servers | Shapewall',
     description:
-      'Draft privacy template for a self-hosted Shapewall server. Operators must review and replace this text before inviting their workspace users.',
+      'A privacy notice template for the operator of a self-hosted Shapewall server: what is stored, sharing, retention and the details to complete.',
     og: 'privacy',
   },
   {
     path: '/legal/subprocessors',
     noindex: true,
-    title: 'Subprocessors: operator template | Shapewall',
+    title: 'Subprocessors template for self-hosted servers | Shapewall',
     description:
-      'Draft subprocessors template for a self-hosted Shapewall server. Operators must review and replace this text before inviting their workspace users.',
+      'A subprocessors list template for the operator of a self-hosted Shapewall server, with the optional providers to review and how to announce changes.',
     og: 'privacy',
   },
   {
     path: '/legal/acceptable-use',
     noindex: true,
-    title: 'Acceptable use: operator template | Shapewall',
+    title: 'Acceptable use template for self-hosting | Shapewall',
     description:
-      'Draft acceptable use template for a self-hosted Shapewall server. Operators must review and replace this text before inviting their workspace users.',
+      'An acceptable use policy template for the operator of a self-hosted Shapewall server: authorized use, secrets and personal data, and abuse reports.',
     og: 'privacy',
   },
 ]
@@ -96,7 +97,7 @@ export const DOC_GROUPS = [
         path: '/docs',
         file: 'index',
         nav: 'Introduction',
-        title: 'Shapewall docs: introduction',
+        title: 'Docs: how it works and where to start | Shapewall',
         description:
           'How Shapewall works in a few minutes: capture every page, see the whole product on one wall, comment on elements, and let an agent make the change.',
       },
@@ -268,9 +269,9 @@ export const DOC_GROUPS = [
         path: '/docs/faq',
         file: 'faq',
         nav: 'FAQ',
-        title: 'FAQ: single-page apps, logins, data | Shapewall',
+        title: 'FAQ: single-page apps, logins, data, teams | Shapewall',
         description:
-          'Answers about single-page apps, signed-in pages, fixed-height frames, browsers, where your data lives, and whether captured pages are safe to share.',
+          'Answers about single-page apps, signed-in pages, browsers, where your data lives, safe sharing, team use, licenses and what Shapewall needs to run.',
       },
     ],
   },

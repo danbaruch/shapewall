@@ -7,14 +7,12 @@ export default function LegalTemplate({ slug }) {
   return (
     <>
       <PageHeader eyebrow="Self-host operator template" title={title}>
-        Draft for review. Replace before inviting users.
+        A starting point for the operator of a self-hosted server. Complete it and have it reviewed before inviting users.
       </PageHeader>
       <Container className="py-14 sm:py-16">
         <div className="prose-docs max-w-2xl">
           <p>
-            <strong>
-              This is a draft template for a self-hosted server. It does not establish terms for a Shapewall-operated hosted service.
-            </strong>
+            <strong>This is a template for the operator of a self-hosted Shapewall server. It is not an agreement with Shapewall.</strong>
           </p>
           {sections.map(([heading, text]) => (
             <section key={heading}>

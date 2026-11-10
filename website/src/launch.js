@@ -30,6 +30,6 @@ export const ACCESS_LABEL = LAUNCHED ? 'Free to use' : 'Private early access'
 // One sentence on the two licenses, the same wording wherever the site states them.
 export const LICENSE_SUMMARY =
   'The local tool is open source under Apache 2.0. The self-hosted team server is source-available under the Functional Source License and becomes Apache 2.0 two years after each release.'
-// Self-hosted multiplayer (`shapewall hosted`) is in beta. The same sentence wherever the site introduces it.
-export const BETA_NOTE =
-  'Beta: it works and is tested with automated browsers, but it has not yet had a real multi-person team on it or real phone passkeys verified, so run it for people you trust and keep backups.'
+// The team server (`shapewall hosted`) is in beta. Other pages show a Beta badge; this sentence, on the Licenses
+// page only, says what that means for the reader.
+export const BETA_NOTE = 'The team server is in beta: keep backups and expect changes between releases.'

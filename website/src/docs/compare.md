@@ -1,6 +1,6 @@
 Checking a change should take a second, on the page where it was asked for. Shapewall gives you three ways to compare.
 
-## Variants (today)
+## Variants
 
 A variant is another version of a page, captured from any URL and placed beside the page on the board, joined by a dashed edge.
 Use it for a branch preview, a redesign, or an agent's take on "try a calmer hero".

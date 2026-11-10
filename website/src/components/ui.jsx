@@ -140,7 +140,7 @@ export function InstallCommand({ dark = false, where, command = INSTALL_COMMAND,
       >
         <p className={cx('text-[14px] font-semibold', dark ? 'text-white' : 'text-ink')}>{ACCESS_LABEL}</p>
         <p className={cx('mt-1 text-[13px] leading-6', dark ? 'text-zinc-400' : 'text-slate')}>
-          The repository is invite only until launch. The install steps work for invited GitHub accounts.
+          The repository is invite only. The install steps work for invited GitHub accounts.
         </p>
         <Link
           to="/docs/getting-started#install"

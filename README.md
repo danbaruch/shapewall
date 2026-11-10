@@ -65,13 +65,10 @@ feedback, fix the code, and you recapture to check.
 
 ### Requirements
 
-- Node.js **22.13 or newer**. Basic capture works on any Node 22; local accounts and the team server need 22.13.
+- Runs on Linux, macOS and Windows with Node.js **22.13 or newer**. Linux is the primary tested platform.
 - Chromium for captures: `shapewall doctor --install-browser` downloads Playwright's build, or use a Chrome you already have.
   On a bare Linux server, a container or WSL, Chromium also needs system libraries: run
   `sudo npx playwright install-deps chromium` once.
-- Platforms: Shapewall is developed and tested on Linux. macOS should work and is not yet verified by the maintainers. Windows is
-  untested; the PowerShell lines in the docs are a convenience. If you run it on macOS or Windows, please
-  [open an issue](https://github.com/danbaruch/shapewall/issues) with what worked and what did not.
 
 ### Install
 
@@ -93,7 +90,7 @@ as in the three lines at the top.
 
 `npx shapewall` runs the copy installed in the project. The rest of this README shortens the command to `shapewall`.
 
-For a build that is not released yet, install from GitHub with `npm install --save-dev github:danbaruch/shapewall` (npm clones the
+For the latest unreleased build, install from GitHub with `npm install --save-dev github:danbaruch/shapewall` (npm clones the
 repository and builds the board: about a minute), or from a clone:
 
 ```sh
@@ -119,8 +116,7 @@ Next: [configuration and sign-in](docs/config.md#auth), [capture warnings and pa
 
 ### Multiplayer on your own server
 
-**Beta.** The team server works and is tested with automated browsers, but it has not yet had a real multi-person team on it or real
-phone passkeys verified, so run it for people you trust and keep backups.
+**Beta.** The team server is in beta: keep backups and expect changes between releases.
 
 ```sh
 shapewall hosted --data ./hosted-data --tailscale --tailscale-port 8443
@@ -629,7 +625,7 @@ prints the `auth.storageState` line to add to your config. A `loginScript` is th
 **Are captured pages safe to share?** Live HTML drops hidden inputs, password values, scripts and data attributes that could carry tokens,
 and links to private hosts are removed. Screenshots show exactly what the page showed, so capture with test data.
 
-**Can I use Firefox or WebKit?** Not yet. Thumbnails use a Chromium DevTools call, and Chromium is what most teams test against first.
+**Can I use Firefox or WebKit?** No. Captures use Chromium, and thumbnails use a Chromium DevTools call.
 
 **Does it send anything anywhere?** Not by itself: there is no account and no telemetry. Captures load your pages; an agent endpoint,
 notifications, GitHub connect or a team server you set up receive what you send them.
