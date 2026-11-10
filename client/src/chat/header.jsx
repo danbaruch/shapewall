@@ -25,6 +25,7 @@ import { ReadAloudSettings } from './ReadAloud'
 import { dictationUnavailable } from './speech'
 import McpSetup from './McpSetup'
 import Disclosure from './Disclosure'
+import { choice, pickerProfiles } from './profiles'
 import { DOCS_URL, QuickConnect } from './QuickConnect'
 import { SettingsHint } from '../settings/SettingsHint'
 
@@ -399,24 +400,33 @@ export function ChatHeader({
   )
 }
 
-// The thread's agent profile, when there is a choice (or a non-default one).
+// The thread's agent, when there is a choice: each connected agent once, by
+// name (profiles.js).
 export function ProfilePicker({ thread, agent, running, onChoose, touch }) {
-  if (!Array.isArray(thread?.profiles) || !(thread.profiles.length > 1 || thread.profileId !== 'default')) return null
+  const { show, value, known, options } = pickerProfiles(thread)
+  if (!show) return null
   return (
     <div className="shrink-0 border-b border-line px-3 py-2">
-      <Select value={thread.profileId || 'default'} onValueChange={onChoose} disabled={running || thread.running || !agent?.ownerWrites}>
+      <Select
+        value={value}
+        onValueChange={(picked) => {
+          const next = choice(thread, picked)
+          if (next) onChoose(next)
+        }}
+        disabled={running || thread.running || !agent?.ownerWrites}
+      >
         <SelectTrigger size={touch ? 'touch' : 'xs'} className="w-full" aria-label="Agent profile" data-sw-agent-profile="true">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          {!thread.profiles.some((profile) => profile.id === thread.profileId) ? (
-            <SelectItem value={thread.profileId} disabled>
+          {!known ? (
+            <SelectItem value={value} disabled>
               Removed profile
             </SelectItem>
           ) : null}
-          {thread.profiles.map((profile) => (
+          {options.map((profile) => (
             <SelectItem key={profile.id} value={profile.id}>
-              {profile.id === 'default' ? `Default (${profile.label || 'connection'})` : profile.label}
+              {profile.label}
               {!profile.configured ? ' (unavailable)' : ''}
             </SelectItem>
           ))}
