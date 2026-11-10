@@ -328,8 +328,30 @@ export async function testConnection(settings, { env = process.env, fetchImpl = 
 // `repo` is the config's `agent`. `busy()` is true while an answer is being
 // written, `reload()` switches the chat over to new settings.
 // `token` is the per-process settings token (null: the routes are off).
-export function settingsRoutes({ config, env, fetchImpl, settings, shared, token, busy, reload, processPool, health = null }) {
+export function settingsRoutes({
+  config,
+  env,
+  fetchImpl,
+  settings,
+  shared,
+  token,
+  busy,
+  reload,
+  processPool,
+  health = null,
+  events = null,
+}) {
   const router = express.Router()
+  // Every change that went through (and a test, which updates an agent's
+  // state) tells the open views (settings-events.js).
+  router.use((req, res, next) => {
+    if (events && !['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+      res.on('finish', () => {
+        if (res.statusCode < 400) events.changed('settings')
+      })
+    }
+    next()
+  })
   const repo = () => config.agent || {}
   let testing = false
   let closing = false

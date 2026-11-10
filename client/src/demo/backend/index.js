@@ -21,6 +21,7 @@ import { boardData } from './board-data.js'
 import { commentHelpers, commentRoutes } from './comments.js'
 import { boardRoutes, checkRoutes } from './board-routes.js'
 import { chatRoutes } from './chat.js'
+import { agentRoutes } from './routes-agents.js'
 import { DemoError } from './util.js'
 
 export { AGENT_INFO, DemoError } from './util.js'
@@ -37,12 +38,13 @@ export function createDemoBackend({ state, loadJson, now = () => Date.now(), loc
   Object.assign(ctx, commentHelpers(ctx))
   const { me, personaFor, shareUsableNow } = ctx
 
-  // In this order: the board and its comments, checks, chat, the console.
+  // In this order: the board and its comments, checks, chat, the Agents page, the console.
   const routes = [
     ...boardRoutes(ctx),
     ...commentRoutes(ctx),
     ...checkRoutes(ctx),
     ...chatRoutes(ctx),
+    ...agentRoutes(ctx),
     ...authRoutes(ctx),
     ...workspaceRoutes(ctx),
   ]

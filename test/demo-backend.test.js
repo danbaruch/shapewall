@@ -5,6 +5,8 @@ import { after, before, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createDemoBackend } from '../client/src/demo/backend.js'
 import { demoChecks } from '../client/src/demo/checks.js'
+import { agentRows } from '../client/src/settings/agentRows.js'
+import { KNOWN_AGENTS } from '../src/agent/acp/detect.js'
 import { validateReport } from '../src/checks/schema.js'
 import { compareReports } from '../src/checks/comparison.js'
 import {
@@ -749,5 +751,89 @@ test('two scripted agents: status lists both, a chat switches, the second answer
   assert.equal(
     Object.values(state.threadMeta || {}).some((meta) => meta.profileId),
     false,
+  )
+})
+
+test('the demo Agents page: the real settings answer from sample data, the default switches and the chat follows', async () => {
+  const { call, state } = demo()
+  const view = (await call('GET', '/api/agent/settings')).json
+  assert.equal(view.editable, true)
+  assert.equal(view.demo, true)
+  // The rows the Agents card draws (settings/agentRows.js), in order.
+  assert.deepEqual(
+    agentRows(view).map((row) => [row.id, row.kind, row.profile?.default || false]),
+    [
+      ['demo', 'connected', true],
+      ['second', 'connected', false],
+      ['claude', 'needs-adapter', false],
+      ['codex', 'found', false],
+      ['goose', 'missing', false],
+      ['gemini', 'missing', false],
+    ],
+  )
+  assert.equal(agentRows(view).find((row) => row.id === 'claude').install, 'npm install -g @agentclientprotocol/claude-agent-acp')
+  // The agents Shapewall knows, as the server knows them.
+  for (const known of KNOWN_AGENTS) {
+    const demoKnown = view.known.find((item) => item.id === known.id)
+    assert.ok(demoKnown, known.id)
+    assert.deepEqual(demoKnown, { id: known.id, label: known.label, adapter: known.adapter, cli: known.cli, install: known.install })
+  }
+  // Fictional folder and endpoint only.
+  assert.equal(view.project.root, '/home/robin/code/lumen-notes')
+  assert.equal(view.saved.baseUrl, 'https://api.example.com/v1')
+  assert.equal(view.endpoint.host, 'api.example.com')
+
+  // The default switches, and the chat's default connection follows.
+  const switched = (await call('POST', '/api/agent/settings/profiles/second/default', {})).json
+  assert.equal(switched.profiles.find((item) => item.default).id, 'second')
+  const status = (await call('GET', '/api/agent/status')).json
+  assert.equal(status.label, 'Second agent')
+  assert.equal(status.profiles.find((item) => item.id === 'default').sameAs, 'second')
+  const thread = (await call('GET', '/api/agent/boards/demo/threads/board')).json
+  assert.equal(thread.agent.label, 'Second agent')
+
+  // Test connection: a scripted success.
+  const tested = (await call('POST', '/api/agent/settings/test', { profileId: 'demo' })).json
+  assert.equal(tested.ok, true)
+  assert.match(tested.message, /Demo agent answered/)
+
+  // Remove a scripted agent: the default moves, it can be connected again.
+  const removed = (await call('DELETE', '/api/agent/settings/profiles/second')).json
+  assert.deepEqual(
+    removed.profiles.map((item) => [item.id, item.default]),
+    [['demo', true]],
+  )
+  assert.equal(agentRows(removed).find((row) => row.id === 'second').kind, 'found')
+  assert.deepEqual(
+    (await call('GET', '/api/agent/status')).json.profiles.map((item) => item.id),
+    ['default', 'demo'],
+  )
+  // The last one stays, with a note rather than an error.
+  assert.match((await call('DELETE', '/api/agent/settings/profiles/demo')).json.demoNote, /keeps one agent connected/)
+  const back = (await call('POST', '/api/agent/settings/profiles/connect', { agentId: 'second' })).json
+  assert.equal(back.connected, true)
+  assert.equal(back.profiles.length, 2)
+
+  // Anything that would run a command or save on a computer: a neutral note.
+  for (const [method, path, body] of [
+    ['POST', '/api/agent/settings/profiles/connect', { agentId: 'codex' }],
+    ['POST', '/api/agent/settings', { settings: { backend: 'openai-compatible' } }],
+    ['POST', '/api/agent/settings/profiles/endpoint/default', {}],
+  ]) {
+    const answer = await call(method, path, body)
+    assert.equal(answer.status, 200, path)
+    assert.match(answer.json.demoNote, /^In the demo /, path)
+  }
+  assert.equal((await call('DELETE', '/api/agent/settings/profiles/codex')).status, 404)
+
+  // Reset (a fresh seed) puts both agents back with the first as the default.
+  state.agents = { default: 'second', removed: ['demo'] }
+  const fresh = demo()
+  assert.deepEqual(
+    (await fresh.call('GET', '/api/agent/settings')).json.profiles.map((item) => [item.id, item.default]),
+    [
+      ['demo', true],
+      ['second', false],
+    ],
   )
 })

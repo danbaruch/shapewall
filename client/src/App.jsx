@@ -7,6 +7,7 @@ import { BoardLoadError, BoardSkeleton } from './components/app-states'
 import Board from './board/Board'
 import { setFixtureClock } from './lib/utils'
 import { DEMO, useDemo } from './lib/demo'
+import { useAgentsChanged } from './lib/agentEvents'
 import { PairingScreen, DevicesPanel } from './pairing/Pairing'
 import { DemoResetDialog, DemoShareProblem } from './components/demo-banner'
 const BuzzDialog = lazy(() => import('./buzz/BuzzDialog'))
@@ -25,6 +26,9 @@ export default function App() {
   const access = useResource(REMOTE ? '/api/pairing' : null)
   const admitted = !REMOTE || ['host', 'device', 'identity'].includes(access.data?.access)
   const info = useResource(admitted ? '/api/info' : null)
+  // The chat header and agent picker read the agent from info: follow
+  // changes made in another tab, the Agents page or the agents file.
+  useAgentsChanged(info.refetch, Boolean(info.data?.agent))
   const demo = useDemo()
   const list = useResource(admitted ? '/api/boards' : null)
   const [params, updateParams] = useParams()

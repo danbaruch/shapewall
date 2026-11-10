@@ -3,6 +3,18 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## 0.2.4 - 2026-11-10
+
+- The top bar's View button is now Views: pick a journey by name there, alongside links, compare and the minimap. An open journey
+  shows its name in the top bar with a button to leave it. J and Shift+J step through journeys.
+- An open journey's name comes before the search box in the top bar: the search becomes an icon and the name shows in full up to
+  about 280 px.
+- The sidebar has a Pages | Journeys switch, and collapsed, an icon for each; the Journeys icon shows a dot while a journey is open.
+- Agent settings stay in sync everywhere: a change in another tab, the Agents page, `shapewall settings` or the agents file shows up
+  in every open view without a reload, and never over unsaved typing.
+- The demo's Agents page is the full page, with sample agents in every state.
+- Releases are published to npm from CI with provenance.
+
 ## 0.2.3 - 2026-11-10
 
 - The agent's model and thinking level are shown on a new chat before the first message, each with its own menu in the composer

@@ -146,3 +146,15 @@ test("the console's tab title names the page and the workspace", () => {
   assert.equal(consoleTitle('#/signin?next=%2F', state), 'Sign in · Shapewall demo')
   assert.equal(consoleTitle('#/', { ...state, viewAs: 'guest' }), 'Guest · Shapewall demo')
 })
+
+test('the demo Agents page names only fictional people, folders and addresses', async () => {
+  const { call } = demo()
+  const text = JSON.stringify((await call('GET', '/api/agent/settings')).json)
+  // Every folder is the sample user's, every address the reserved example domain.
+  for (const folder of text.match(/"\/[^"]*"/g) || []) assert.match(folder, /^"\/home\/robin\/code\/lumen-notes/, folder)
+  for (const url of text.match(/https?:\/\/[^"]*/g) || []) assert.match(url, /^https:\/\/api\.example\.com\//, url)
+  for (const host of [...text.matchAll(/"host":"([^"]*)"/g)].map((match) => match[1])) assert.equal(host, 'api.example.com')
+  // A step that would run something on a computer says so in plain words.
+  const note = (await call('POST', '/api/agent/settings/profiles/connect', { agentId: 'codex' })).json.demoNote
+  assert.equal(note, 'In the demo nothing runs on a computer. On your install this connects the agent.')
+})

@@ -1,14 +1,16 @@
-// The app rail on the board (desktop): the pages sidebar and search, then the
+// The app rail on the board (desktop): the pages and journeys, then the
 // places this kind of board can take you (the workspace console for hosted
 // and demo boards, the local console for a local install), sharing, and you.
 // See components/app-rail.jsx.
 
 import { useEffect } from 'react'
-import { Building2, Files, LayoutDashboard, Share2, UserRound } from 'lucide-react'
+import { Building2, Files, LayoutDashboard, Route, Share2, UserRound } from 'lucide-react'
 import { AppRail, rememberLastBoard } from '../components/app-rail'
 import { BoardProfile } from './BoardProfile'
 import { accountUrlFor } from './railLinks'
+import { JourneysList } from './JourneysList'
 import { PagesTree } from './PagesTree'
+import { SidebarNav } from './SidebarNav'
 
 // The rail holds where you are in the app (the board, its workspace); the
 // workspace's own sections (members, settings, ...) are its console's sidebar.
@@ -51,30 +53,46 @@ export function BoardRail({
     rememberLastBoard(window.location.pathname + (boardParam ? '?board=' + encodeURIComponent(boardParam) : ''))
   }, [own, boardParam])
   const items = boardRailItems({ info, localSettingsAvailable, setShareOpen })
-  // Collapsed, the page tree is one icon: hover it (or click, tap or press
-  // Enter) for the same tree in a flyout beside the rail. A choice there
-  // closes the flyout; only the panel button and Ctrl+B expand the sidebar.
+  // Collapsed, the pages and the journeys are an icon each: hover one (or
+  // click, tap or press Enter) for its list in a flyout beside the rail. A
+  // choice there closes the flyout; only the panel button and Ctrl+B expand
+  // the sidebar. The Journeys icon has a dot while a journey is open.
+  const journeysShown = Boolean(pages) && (pages.journeys?.length > 0 || pages.canEditJourneys)
+  const pick = (close, fn) => (id) => {
+    close()
+    fn?.(id)
+  }
   const sections =
     !expanded && pages
       ? [
           {
             id: 'pages',
-            label: 'Pages and journeys',
+            label: 'Pages',
             icon: Files,
             flyout: ({ close }) => (
-              <PagesTree
-                {...pages}
-                onPage={(id) => {
-                  close()
-                  pages.onPage(id)
-                }}
-                onJourney={(id) => {
-                  close()
-                  pages.onJourney(id)
-                }}
-              />
+              <PagesTree groups={pages.groups} comments={pages.comments} activePage={pages.activePage} onPage={pick(close, pages.onPage)} />
             ),
           },
+          ...(journeysShown
+            ? [
+                {
+                  id: 'journeys',
+                  label: 'Journeys',
+                  icon: Route,
+                  dot: Boolean(pages.journeyId),
+                  'data-sw-rail-journeys': pages.journeyId || 'none',
+                  flyout: ({ close }) => (
+                    <JourneysList
+                      journeys={pages.journeys}
+                      journeyId={pages.journeyId}
+                      onJourney={pick(close, pages.onJourney)}
+                      canEditJourneys={pages.canEditJourneys}
+                      onNewJourney={pages.onNewJourney ? () => pick(close, pages.onNewJourney)() : null}
+                    />
+                  ),
+                },
+              ]
+            : []),
         ]
       : []
   return (
@@ -104,7 +122,7 @@ export function BoardRail({
         />
       )}
     >
-      {pages ? <PagesTree {...pages} /> : null}
+      {pages ? <SidebarNav {...pages} /> : null}
     </AppRail>
   )
 }

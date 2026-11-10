@@ -9,7 +9,7 @@
 // the whole sidebar. Ctrl/Cmd+B or the panel button toggles it; remembered in
 // this browser, the same for the board and the console.
 //
-// items, sections: [{ id, label, icon, href | to | onSelect, active, count, shortcut, flyout, ...data attributes }]
+// items, sections: [{ id, label, icon, href | to | onSelect, active, count, shortcut, flyout, dot, ...data attributes }]
 // An item with `href` is a link (a real page change), `to` an in-app route
 // rendered with the app's own `link` component (the console's router), one
 // with `onSelect` a button. `active` marks where you are. `flyout`, a render
@@ -248,7 +248,7 @@ function focusAfter(node, skip) {
 // tap, Enter, Space or ArrowRight opens it pinned and moves focus into it.
 // Escape, a click outside or a choice in it closes it.
 function FlyoutItem({ item, flyouts }) {
-  const { id, label, icon: Icon, active, flyout } = item
+  const { id, label, icon: Icon, active, flyout, dot } = item
   const { state, intent, width } = flyouts
   const rest = Object.fromEntries(Object.entries(item).filter(([key]) => key.startsWith('data-')))
   const contentId = useId()
@@ -350,6 +350,13 @@ function FlyoutItem({ item, flyouts }) {
             }}
           >
             <Icon size={19} aria-hidden="true" className={cn('shrink-0', active && 'text-accent')} />
+            {dot ? (
+              <span
+                className="pointer-events-none absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-accent ring-2 ring-surface"
+                aria-hidden="true"
+                data-sw-rail-dot={id}
+              />
+            ) : null}
           </button>
         </PopoverPrimitive.Anchor>
         <PopoverPrimitive.Portal>
