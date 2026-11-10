@@ -84,8 +84,10 @@ async function waitForImages(page, capMs) {
 
 // Browser context options for a viewport: its device (viewportDevice), its
 // layout height (the frame's height unless it sets layoutHeight) and the
-// board's reducedMotion. `size` is the viewport's config entry.
-export function contextOptions(viewportName, size, storageState, { reducedMotion = 'reduce' } = {}) {
+// board's reducedMotion. `size` is the viewport's config entry. The color
+// scheme is fixed (light, the browser default) so captures never follow the
+// machine they run on; the live snapshot is frozen to it (media-scheme.js).
+export function contextOptions(viewportName, size, storageState, { reducedMotion = 'reduce', colorScheme = 'light' } = {}) {
   const device = viewportDevice(viewportName, size)
   return {
     viewport: { width: size.width, height: size.layoutHeight || size.height },
@@ -98,6 +100,7 @@ export function contextOptions(viewportName, size, storageState, { reducedMotion
     // board may opt out ("reducedMotion": "no-preference"), for games that
     // behave differently with it.
     reducedMotion,
+    colorScheme,
   }
 }
 
@@ -121,6 +124,8 @@ function liveSummary(live) {
     imagesDropped: live.stats.imagesDropped,
     fonts: live.stats.fonts,
     fontsDropped: live.stats.fontsDropped,
+    // The scheme the snapshot is frozen to (its prefers-color-scheme rules).
+    ...(live.colorScheme ? { colorScheme: live.colorScheme } : {}),
     // The element map the board places pins from (element-map.js).
     ...(live.elements ? { elements: live.elements } : {}),
   }

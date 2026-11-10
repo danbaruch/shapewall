@@ -14,6 +14,7 @@ import fs from 'node:fs'
 import { BlockList, isIP } from 'node:net'
 import { parse, serialize } from 'parse5'
 import { placeholderSvg, sanitizeCss, sanitizeDocument } from './sanitize.js'
+import { pinnedColorScheme, resolveMediaInCss } from './media-scheme.js'
 import { writeFileAtomic } from '../store.js'
 import { ELEMENT_MAP_EXPRESSION, ELEMENT_MAP_LIMITS, cleanElementMap } from './element-map.js'
 
@@ -256,11 +257,31 @@ export async function snapshotPage(limits) {
   // Refuse oversized pages here, before anything crosses the DevTools pipe.
   const html = `<!DOCTYPE html>${clone.outerHTML}`
   if (html.length > limits.html) return { tooLarge: `the page HTML is ${Math.round(html.length / 1048576)} MB, over the cap` }
-  return { html, chunks, base, cssImages, title: doc.title }
+  // The preferences the page was rendered with, so the snapshot can be frozen
+  // to them (media-scheme.js): the board's viewer may prefer something else.
+  const prefers = (query) => Boolean(window.matchMedia && window.matchMedia(query).matches)
+  const scheme = {
+    colorScheme: prefers('(prefers-color-scheme: dark)') ? 'dark' : 'light',
+    reducedMotion: prefers('(prefers-reduced-motion: reduce)') ? 'reduce' : 'no-preference',
+    root: getComputedStyle(doc.documentElement).colorScheme || 'normal',
+  }
+  return { html, chunks, base, cssImages, title: doc.title, scheme }
 }
 
 const SNAPSHOT_LIMITS = { html: HTML_MAX, css: CSS_MAX, quality: 0.8, imageEach: IMAGE_MAX_EACH, cssImages: CSS_IMAGES_MAX }
 export const SNAPSHOT_EXPRESSION = `(${snapshotPage.toString()})(${JSON.stringify(SNAPSHOT_LIMITS)})`
+
+// What a snapshot is frozen to. Snapshots from before this was recorded
+// (and synthetic ones) count as light, the capture default; reduced motion is
+// resolved only when it was recorded.
+export function snapshotScheme(snapshot) {
+  const recorded = snapshot?.scheme || {}
+  return {
+    colorScheme: recorded.colorScheme === 'dark' ? 'dark' : 'light',
+    ...(['reduce', 'no-preference'].includes(recorded.reducedMotion) ? { reducedMotion: recorded.reducedMotion } : {}),
+    root: typeof recorded.root === 'string' ? recorded.root.slice(0, 60) : 'normal',
+  }
+}
 
 function wrapMedia(css, media) {
   return media ? `@media ${media} {\n${css}\n}` : css
@@ -566,10 +587,13 @@ export async function buildLiveHtml(snapshot, { getBody, links } = {}) {
   stats.imageBytes = total
   const lookup = (url) => inlined.get(stripHash(url)) || null
 
-  // Pass 4: one combined stylesheet, then the strict sanitize of the whole document.
+  // Pass 4: one combined stylesheet, then the strict sanitize of the whole
+  // document. Media queries on the color scheme (and reduced motion) are
+  // resolved to what the capture saw, and the root's color-scheme is pinned.
+  const scheme = snapshotScheme(snapshot)
   const css = chunks
-    .map((chunk) => wrapMedia(sanitizeCss(chunk.text, { base: chunk.base, resolveUrl: lookup }), chunk.media))
-    .concat(FRAME_RULES)
+    .map((chunk) => resolveMediaInCss(wrapMedia(sanitizeCss(chunk.text, { base: chunk.base, resolveUrl: lookup }), chunk.media), scheme))
+    .concat(FRAME_RULES, `:root{color-scheme:only ${pinnedColorScheme(scheme.root, scheme.colorScheme)}!important}`)
     .join('\n')
     .replace(/<\/(style)/gi, '<\\/$1')
   const prepared = serialize(tree)
@@ -583,7 +607,7 @@ export async function buildLiveHtml(snapshot, { getBody, links } = {}) {
     rewriteHref: links ? createLinkRewriter(links) : null,
   })
   const html = shareRepeatedImages(sanitized, stats)
-  return { html, stats }
+  return { html, stats, colorScheme: scheme.colorScheme }
 }
 
 // Pass 5: an image used more than once is stored once, as a CSS rule
@@ -734,6 +758,7 @@ export async function writeLiveHtml({ page, responses, file, links, isCancelled 
     bytes: Buffer.byteLength(written),
     sha256: crypto.createHash('sha256').update(written).digest('hex'),
     stats: built.stats,
+    colorScheme: built.colorScheme,
     elements: elements?.map
       ? { status: 'ok', count: elements.map.elements.length, ...(elements.map.truncated ? { truncated: true } : {}) }
       : elements
