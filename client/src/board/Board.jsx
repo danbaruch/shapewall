@@ -42,6 +42,7 @@ import { BrokenLinks } from './BrokenLinks'
 import { BoardToolbar } from './BoardToolbar'
 import { BoardMenu } from './BoardMenu'
 import { CanvasNotes } from './CanvasNotes'
+import { DrawingMode, useDrawingMode } from './DrawingMode'
 import { BoardToast, NoticeBar, useToast } from './Toast'
 import { PhoneSheets, SidePanel } from './BoardPanels'
 import { BoardRail } from './BoardRail'
@@ -320,6 +321,8 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     [comments, me, seen],
   )
   const selectedComment = comments.find((comment) => comment.id === selectedCommentId) || null
+  // Desktop: a drawing tool is on (DrawingMode.jsx).
+  const drawingOn = useDrawingMode(wide)
   // Cards with a comment an agent is working on.
   const agentWorkingPages = useMemo(() => {
     const pages = new Set()
@@ -1185,31 +1188,45 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                 data-sw-canvas="true"
               >
                 {showLinks && brokenLinks.length ? <BrokenLinks items={brokenLinks} /> : null}
-                <CanvasNotes
-                  wide={wide}
-                  commentMode={commentMode}
-                  canComment={canComment}
-                  readyKeys={readyKeys}
-                  setCommentMode={setCommentMode}
-                  showLinks={showLinks}
-                  activePage={activePage}
-                  shownSteps={shownSteps}
-                  data={data}
-                  presentPages={presentPages}
-                  hiddenLinkTargets={hiddenLinkTargets}
-                  showAllLinks={showAllLinks}
-                  targetTitle={targetTitle}
-                  updateParams={updateParams}
-                  tipOpen={tipOpen}
-                  tryOpen={tryOpen}
-                  journey={journey}
-                  builder={builder}
-                  viewportNotice={viewportNotice}
-                  dismissTip={dismissTip}
-                  modes={modes}
-                  setMode={setMode}
-                  comparePair={comparePair}
-                />
+                {wide && data ? (
+                  <DrawingMode
+                    flow={flow}
+                    canvasRef={canvasRef}
+                    targets={layout.targets}
+                    focusFor={(owner) => ((owner === 'composer' ? draft?.y : selectedComment?.y) ?? 50) / 100}
+                    shotFor={(pageId, viewport) => {
+                      const image = data.captures?.[pageId]?.[viewport]
+                      return image?.file ? fileUrl(boardId, 'captures', image.thumb || image.file, imageVersion) : null
+                    }}
+                  />
+                ) : null}
+                {drawingOn ? null : (
+                  <CanvasNotes
+                    wide={wide}
+                    commentMode={commentMode}
+                    canComment={canComment}
+                    readyKeys={readyKeys}
+                    setCommentMode={setCommentMode}
+                    showLinks={showLinks}
+                    activePage={activePage}
+                    shownSteps={shownSteps}
+                    data={data}
+                    presentPages={presentPages}
+                    hiddenLinkTargets={hiddenLinkTargets}
+                    showAllLinks={showAllLinks}
+                    targetTitle={targetTitle}
+                    updateParams={updateParams}
+                    tipOpen={tipOpen}
+                    tryOpen={tryOpen}
+                    journey={journey}
+                    builder={builder}
+                    viewportNotice={viewportNotice}
+                    dismissTip={dismissTip}
+                    modes={modes}
+                    setMode={setMode}
+                    comparePair={comparePair}
+                  />
+                )}
                 {!data && view.error ? (
                   <BoardLoadError error={view.error} onRetry={view.refetch} />
                 ) : !data ? (
@@ -1262,7 +1279,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                       onChecks={canChecks ? openChecks : null}
                       onHistory={openHistory}
                       historyCountFor={(pageId) => historyCount(data?.versions, pageId)}
-                      focusedKey={focusedKey}
+                      focusedKey={drawingOn ? null : focusedKey}
                       layout={layout}
                       data={data}
                       liveKeys={liveKeys}
@@ -1277,7 +1294,11 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                       captureBusy={busy || Boolean(capture?.running)}
                     />
                     {wide && draft && !modalOpen ? (
-                      <ComposerPopover point={pinPoint(layout.targets, draft)} onClose={() => (busy ? null : setDraft(null))}>
+                      <ComposerPopover
+                        point={pinPoint(layout.targets, draft)}
+                        stowed={drawingOn}
+                        onClose={() => (busy ? null : setDraft(null))}
+                      >
                         <CommentComposer {...composerProps} touch={false} description={draftDescription} />
                       </ComposerPopover>
                     ) : null}
@@ -1286,6 +1307,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                         comment={selectedComment}
                         point={pinPoint(layout.targets, selectedComment)}
                         onClose={closeThread}
+                        stowed={drawingOn}
                         onPrev={() => stepThread(-1)}
                         onNext={() => stepThread(1)}
                         editingRef={editingRef}
@@ -1322,7 +1344,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                     }}
                   />
                 ) : null}
-                {tryOpen && data && !journey && !builder && !(commentMode && !wide) ? (
+                {tryOpen && data && !journey && !builder && !drawingOn && !(commentMode && !wide) ? (
                   <TryThis
                     touch={!wide}
                     done={tryDone}

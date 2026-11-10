@@ -63,6 +63,8 @@ export function CommentComposer({ draft, onChange, onSubmit, onCancel, busy, peo
             <DrawTools
               owner="composer"
               touch={false}
+              compact
+              className="flex-1"
               leading={canAttach ? <AttachButton draft={images} touch={false} disabled={busy} /> : null}
             />
           ) : canAttach ? (
@@ -104,9 +106,8 @@ export function CommentComposer({ draft, onChange, onSubmit, onCancel, busy, peo
         </label>
       )}
       {touch ? null : (
-        <p className="flex flex-wrap items-center gap-1 text-[11px] text-faint" data-sw-composer-keys="true">
-          <Kbd>Enter</Kbd> posts, <Kbd>Shift</Kbd>+<Kbd>Enter</Kbd> adds a line, <Kbd>Esc</Kbd> cancels. With the @ list open,{' '}
-          <Kbd>Enter</Kbd> picks.
+        <p className="flex items-center gap-1 overflow-hidden text-[11px] whitespace-nowrap text-faint" data-sw-composer-keys="true">
+          <Kbd>Enter</Kbd> posts, <Kbd>Shift</Kbd>+<Kbd>Enter</Kbd> new line, <Kbd>Esc</Kbd> cancels
         </p>
       )}
       <div className="flex items-center gap-2">

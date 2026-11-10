@@ -143,31 +143,58 @@ test('desktop 1440: attach by picker and paste, draw a box and an arrow, post, t
     assert.match(await page.textContent(`${composer} [data-sw-image-error]`), /not a PNG, JPEG, WebP or GIF/)
     assert.equal(await page.getAttribute(`${composer} [data-sw-comment-input]`, 'aria-describedby'), 'sw-composer-image-error')
 
-    // Box: drag over the page. The canvas does not move under the tool.
+    // Box: picking a tool is drawing mode. The frame is fitted into the
+    // canvas, the composer steps aside (still there) and a compact bar,
+    // docked at the top, holds the tools; the comment-mode hint makes way.
+    const camera = () => page.$eval('.react-flow__viewport', (node) => node.style.transform)
+    const start = await camera()
     await page.click(`${composer} [data-sw-draw-tool="box"]`)
-    assert.equal(await page.getAttribute(`${composer} [data-sw-draw-tool="box"]`, 'aria-pressed'), 'true')
+    const bar = '[data-sw-draw-bar="composer"]'
+    await page.waitForSelector(bar)
+    assert.equal(await page.getAttribute(`${bar} [data-sw-draw-tool="box"]`, 'aria-pressed'), 'true')
+    await page.waitForSelector('[data-sw-composer-popover][data-sw-stowed]', { state: 'attached' })
+    assert.equal(await page.locator('[data-sw-comment-hint]').count(), 0)
     await page.waitForSelector(`${frame} [data-sw-draw-input="box"]`)
-    const before = await page.locator(frame).boundingBox()
-    await drag(page, [box.x + box.width * 0.05, box.y + box.height * 0.08], [box.x + box.width * 0.3, box.y + box.height * 0.2])
+    const fitted = await settle(page, frame)
+    assert.notEqual(await camera(), start, 'the frame is fitted to draw on')
+    const barBox = await page.locator(bar).boundingBox()
+    assert.ok(barBox.y + barBox.height <= fitted.y, 'the bar never covers the frame')
+    // A point on the visible part of the fitted frame.
+    const canvas = await page.locator('[data-sw-canvas]').boundingBox()
+    const top = Math.max(fitted.y, canvas.y)
+    const shown = Math.min(fitted.y + fitted.height, canvas.y + canvas.height - 70) - top
+    const at = (fx, fy) => [fitted.x + fitted.width * fx, top + shown * fy]
+    // Drawing never pans the canvas.
+    await drag(page, at(0.05, 0.08), at(0.3, 0.2))
     const afterBox = await page.locator(frame).boundingBox()
-    assert.ok(Math.abs(afterBox.x - before.x) < 1 && Math.abs(afterBox.y - before.y) < 1, 'drawing did not pan the canvas')
-    // Arrow, in another ink.
-    await page.click(`${composer} [data-sw-draw-tool="arrow"]`)
-    await page.click(`${composer} [data-sw-draw-ink="warn"]`)
-    await drag(page, [box.x + box.width * 0.1, box.y + box.height * 0.7], [box.x + box.width * 0.3, box.y + box.height * 0.4])
-    await page.waitForSelector(`${composer} [data-sw-draw-count="2"]`)
+    assert.ok(Math.abs(afterBox.x - fitted.x) < 1 && Math.abs(afterBox.y - fitted.y) < 1, 'drawing did not pan the canvas')
+    // Arrow, in another ink, from the bar.
+    await page.click(`${bar} [data-sw-draw-tool="arrow"]`)
+    await page.click(`${bar} [data-sw-draw-ink="warn"]`)
+    await drag(page, at(0.1, 0.7), at(0.3, 0.4))
+    await page.waitForSelector(`${bar} [data-sw-draw-count="2"]`)
     assert.equal(await page.locator(`${frame} [data-sw-drawing="draft"] path`).count(), 3, 'a box and an arrow (line and head)')
-    // Escape leaves the tool first; the composer and comment mode stay.
+    await shot(page, 'drawing-mode')
+    // Escape is Done: the composer comes back with its images and drawing,
+    // the camera goes back to where it was; comment mode stays.
     await page.keyboard.press('Escape')
+    await page.waitForSelector(bar, { state: 'detached' })
     await page.waitForSelector(`${frame} [data-sw-draw-input]`, { state: 'detached' })
-    assert.equal(await page.locator(`${composer} [data-sw-comment-input]`).count(), 1)
-    // Undo and back: Undo takes the arrow away.
+    await page.waitForSelector('[data-sw-composer-popover]:not([data-sw-stowed])')
+    await page.waitForFunction((value) => document.querySelector('.react-flow__viewport').style.transform === value, start)
+    assert.equal(await page.locator(`${composer} [data-sw-composer-image="ready"]`).count(), 2)
+    await page.waitForSelector(`${composer} [data-sw-draw-count="2"]`)
+    // Undo and back: Undo takes the arrow away; Done in the bar ends it.
     await page.click(`${composer} [data-sw-draw-undo]`)
     await page.waitForSelector(`${composer} [data-sw-draw-count="1"]`)
     await page.click(`${composer} [data-sw-draw-tool="arrow"]`)
-    await drag(page, [box.x + box.width * 0.1, box.y + box.height * 0.7], [box.x + box.width * 0.3, box.y + box.height * 0.4])
-    await page.waitForSelector(`${composer} [data-sw-draw-count="2"]`)
-    await page.keyboard.press('Escape')
+    await page.waitForSelector(bar)
+    assert.deepEqual(await settle(page, frame), fitted)
+    await drag(page, at(0.1, 0.7), at(0.3, 0.4))
+    await page.waitForSelector(`${bar} [data-sw-draw-count="2"]`)
+    await page.click(`${bar} [data-sw-draw-bar-done]`)
+    await page.waitForSelector(bar, { state: 'detached' })
+    await page.waitForSelector('[data-sw-composer-popover]:not([data-sw-stowed])')
     await shot(page, 'composer')
 
     await page.fill(`${composer} [data-sw-comment-input]`, 'The header overlaps the plans')
@@ -316,14 +343,21 @@ test('phone 390: draw in the full-sheet page, attach, post; 44 px targets', asyn
     )
     const area = await page.locator(sheet).boundingBox()
     await drag(page, [area.x + area.width * 0.2, area.y + area.height * 0.1], [area.x + area.width * 0.7, area.y + area.height * 0.2])
-    await page.waitForSelector('[data-sw-draw-tools="composer"] [data-sw-draw-count="1"]')
-    const toolSizes = await page.$$eval('[data-sw-draw-tools="composer"] button', (nodes) =>
-      nodes.map((node) => node.getBoundingClientRect().height),
+    await page.waitForSelector('[role="dialog"] [data-sw-draw-count="1"]')
+    const tools = await page.$$eval('[role="dialog"] [data-sw-draw-tools="composer"] button', (nodes) =>
+      nodes.map((node) => node.getBoundingClientRect()).map((rect) => ({ height: rect.height, top: rect.top, right: rect.right })),
     )
     assert.ok(
-      toolSizes.every((height) => height >= 43.5),
-      `44 px tools: ${toolSizes}`,
+      tools.every((rect) => rect.height >= 43.5),
+      `44 px tall tools: ${JSON.stringify(tools)}`,
     )
+    // One line at 390, inside the screen.
+    assert.ok(
+      tools.every((rect) => Math.abs(rect.top - tools[0].top) < 1 && rect.right <= 390),
+      'the tools are one row',
+    )
+    // The zoom-first hint toast never sits over a sheet.
+    assert.equal(await page.locator('[data-sw-toast]').count(), 0)
     await shot(page, 'phone-sheet')
     await page.tap('[data-sw-draw-done]')
     await page.waitForSelector(sheet, { state: 'detached' })

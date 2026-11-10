@@ -255,6 +255,8 @@ function ReplyBox({ comment, busy, onReply, touch, people, autoFocus, askName = 
             <DrawTools
               owner={owner}
               touch={false}
+              compact
+              className="flex-1"
               leading={canAttach ? <AttachButton draft={images} touch={false} disabled={busy} /> : null}
             />
           ) : canAttach ? (

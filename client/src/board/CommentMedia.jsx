@@ -135,26 +135,37 @@ function useEscapeLeavesTool(active) {
 
 // A drawing tool's button: with a tooltip for the mouse; on touch screens
 // (no hover, and a tap would leave the tip up) only its accessible name.
-function ToolButton({ touch, label, tooltip, ...props }) {
-  if (touch) return <Button variant="ghost" size="icon" aria-label={label} {...props} />
-  return <IconButton size="icon-sm" label={label} tooltip={tooltip} {...props} />
+// `narrow`: a slimmer button, so a whole row of tools fits on one line.
+function ToolButton({ touch, label, tooltip, narrow, className, ...props }) {
+  if (touch) return <Button variant="ghost" size="icon" aria-label={label} className={cn(narrow ? 'w-8' : 'w-10', className)} {...props} />
+  return <IconButton size="icon-sm" label={label} tooltip={tooltip} className={cn(narrow ? 'w-6' : 'w-7', className)} {...props} />
 }
 
-// Box, Arrow, Pen, the inks, Undo and Clear for the drawing of `owner`.
-// `onTool` hears a tool being picked (the phone opens its sheet then);
-// `leading` sits first in the row (the composer's attach button).
-export function DrawTools({ owner, touch, onTool = null, leading = null, className }) {
+const Divider = ({ touch }) => <span className={cn('h-4 w-px shrink-0 bg-line', touch ? 'mx-1' : 'mx-0.5')} aria-hidden="true" />
+
+// Box, Arrow, Pen, the inks, Undo and Clear for the drawing of `owner`, on
+// one line. `onTool` hears a tool being picked (the phone opens its sheet
+// then); `leading` sits first in the row (the composer's attach button).
+// `compact` (a composer or reply box): only the tools until a tool is
+// picked or a shape is drawn. `showCount` false: the count shows elsewhere.
+export function DrawTools({ owner, touch, onTool = null, leading = null, compact = false, showCount = true, className }) {
   const mine = useDrawing((value) => (value?.owner === owner ? value : null))
   useEscapeLeavesTool(Boolean(mine?.tool))
   const count = mine?.shapes.length || 0
+  const full = !compact || Boolean(mine?.tool) || count > 0
   return (
     <div
-      className={cn('flex flex-wrap items-center gap-0.5', className)}
+      className={cn('flex min-w-0 flex-nowrap items-center', className)}
       role="group"
       aria-label="Draw on the page"
       data-sw-draw-tools={owner}
     >
-      {leading}
+      {leading ? (
+        <>
+          {leading}
+          <Divider touch={touch} />
+        </>
+      ) : null}
       {TOOLS.map((tool) => {
         const on = mine?.tool === tool.id
         return (
@@ -176,51 +187,88 @@ export function DrawTools({ owner, touch, onTool = null, leading = null, classNa
           </ToolButton>
         )
       })}
-      <span className="mx-0.5 h-4 w-px bg-line" aria-hidden="true" />
-      {DRAWING_INKS.map((ink) => {
-        const on = (mine?.ink || DRAWING_INKS[0]) === ink
-        return (
+      {full ? (
+        <>
+          <Divider touch={touch} />
+          {DRAWING_INKS.map((ink) => {
+            const on = (mine?.ink || DRAWING_INKS[0]) === ink
+            return (
+              <ToolButton
+                key={ink}
+                touch={touch}
+                narrow
+                aria-pressed={on}
+                label={`${INK_LABELS[ink]} ink`}
+                tooltip={`${INK_LABELS[ink]} ink`}
+                onClick={() => drawing.set({ ink })}
+                data-sw-draw-ink={ink}
+              >
+                <span
+                  className={cn(
+                    'block h-3.5 w-3.5 rounded-full',
+                    INK_CLASS[ink],
+                    on ? 'ring-2 ring-fg ring-offset-1 ring-offset-surface' : '',
+                  )}
+                  aria-hidden="true"
+                />
+              </ToolButton>
+            )
+          })}
+          <Divider touch={touch} />
           <ToolButton
-            key={ink}
             touch={touch}
-            aria-pressed={on}
-            label={`${INK_LABELS[ink]} ink`}
-            onClick={() => drawing.set({ ink })}
-            data-sw-draw-ink={ink}
+            label="Undo the last shape"
+            tooltip="Undo"
+            disabled={!count}
+            onClick={() => drawing.undo()}
+            data-sw-draw-undo="true"
           >
-            <span
-              className={cn('block h-3.5 w-3.5 rounded-full', INK_CLASS[ink], on ? 'ring-2 ring-fg ring-offset-1 ring-offset-surface' : '')}
-              aria-hidden="true"
-            />
+            <Undo2 size={15} aria-hidden="true" />
           </ToolButton>
-        )
-      })}
-      <span className="mx-0.5 h-4 w-px bg-line" aria-hidden="true" />
-      <ToolButton
-        touch={touch}
-        label="Undo the last shape"
-        tooltip="Undo"
-        disabled={!count}
-        onClick={() => drawing.undo()}
-        data-sw-draw-undo="true"
-      >
-        <Undo2 size={15} aria-hidden="true" />
-      </ToolButton>
-      <ToolButton
-        touch={touch}
-        label="Clear the drawing"
-        tooltip="Clear"
-        disabled={!count}
-        onClick={() => drawing.clear()}
-        data-sw-draw-clear="true"
-      >
-        <Trash2 size={15} aria-hidden="true" />
-      </ToolButton>
-      {count ? (
-        <span className="ml-1 text-caption text-faint tabular-nums" aria-live="polite" data-sw-draw-count={count}>
-          {count} {count === 1 ? 'shape' : 'shapes'}
-        </span>
+          <ToolButton
+            touch={touch}
+            label="Clear the drawing"
+            tooltip="Clear"
+            disabled={!count}
+            onClick={() => drawing.clear()}
+            data-sw-draw-clear="true"
+          >
+            <Trash2 size={15} aria-hidden="true" />
+          </ToolButton>
+        </>
       ) : null}
+      {showCount && count ? <ShapeCount count={count} className="ml-auto pl-1" /> : null}
+    </div>
+  )
+}
+
+export function ShapeCount({ count, className }) {
+  return (
+    <span
+      className={cn('shrink-0 text-caption whitespace-nowrap text-faint tabular-nums', className)}
+      aria-live="polite"
+      data-sw-draw-count={count}
+    >
+      {count} {count === 1 ? 'shape' : 'shapes'}
+    </span>
+  )
+}
+
+// Desktop, while a tool is on: the composer or thread steps aside and this
+// small bar, docked at the top of the canvas, holds the tools. Done (or
+// Escape) brings the composer back with the text, images and drawing.
+export function DrawBar({ owner }) {
+  return (
+    <div
+      className="pointer-events-auto flex max-w-full items-center gap-1 rounded-full border border-line bg-surface py-1 pr-1 pl-2 shadow-pop"
+      role="toolbar"
+      aria-label="Drawing on the page"
+      data-sw-draw-bar={owner}
+    >
+      <DrawTools owner={owner} touch={false} />
+      <Button size="xs" className="ml-1 shrink-0 rounded-full" onClick={() => drawing.set({ tool: null })} data-sw-draw-bar-done="true">
+        Done (Esc)
+      </Button>
     </div>
   )
 }
@@ -233,25 +281,29 @@ export function DrawSheet({ open, onClose, owner, src, native, title }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
   if (!native) return null
+  const close = () => {
+    drawing.set({ tool: null })
+    onClose()
+  }
   return (
     <Dialog
       open={open}
-      onClose={() => {
-        drawing.set({ tool: null })
-        onClose()
-      }}
+      onClose={close}
       title="Draw on the page"
       description={title}
       size="lg"
       className="max-h-[100dvh] rounded-none sm:rounded-xl"
       footer={
-        <Button size="touch" className="w-full sm:w-auto" onClick={onClose} data-sw-draw-done="true">
-          Done
-        </Button>
+        <div className="flex w-full items-center gap-3 sm:w-auto">
+          {mine?.shapes.length ? <ShapeCount count={mine.shapes.length} /> : null}
+          <Button size="touch" className="flex-1 sm:flex-none" onClick={close} data-sw-draw-done="true">
+            Done
+          </Button>
+        </div>
       }
     >
-      <div className="sticky top-0 z-10 border-b border-line bg-surface px-3 py-1">
-        <DrawTools owner={owner} touch />
+      <div className="sticky top-0 z-10 border-b border-line bg-surface px-2 py-1">
+        <DrawTools owner={owner} touch showCount={false} />
       </div>
       <div className="p-3">
         <div
@@ -285,6 +337,7 @@ export function AttachButton({ draft, touch, disabled }) {
     <>
       <IconButton
         size={touch ? 'icon' : 'icon-sm'}
+        className={touch ? undefined : 'w-7'}
         label={full ? `Attach an image (${COMMENT_IMAGES_MAX} is the most)` : 'Attach an image'}
         tooltip={full ? `${COMMENT_IMAGES_MAX} images is the most` : 'Attach an image (or paste one)'}
         disabled={disabled || full}
