@@ -15,8 +15,6 @@ export const DEMO_URL = '/demo/'
 // whatever the stealth setting.
 export const DEMO_SITE_PATHS = ['/lumen', '/lumen-staging']
 export const AUTHOR = 'Dan Baruch'
-// Retired marketing URLs redirect to the canonical Features page.
-export const REDIRECTS = { '/roadmap': '/features', '/roadmap/': '/features', '/roadmap.html': '/features' }
 // The agent hardening guide as a PDF: public/downloads/, printed from src/docs/agent-hardening.md by scripts/pdf.mjs.
 export const HARDENING_PDF = '/downloads/shapewall-agent-hardening.pdf'
 
@@ -45,6 +43,14 @@ export const PAGES = [
       'The Shapewall local tool is open source under Apache 2.0. The team server you host yourself is source-available under the Functional Source License.',
     og: 'open-source',
     alt: 'Shapewall licenses and self-hosting: Apache 2.0 local tool, Functional Source License team server',
+  },
+  {
+    path: '/contact',
+    title: 'Contact: feedback and feature requests | Shapewall',
+    description:
+      'Send feedback, a feature request or a question about Shapewall. Bugs go to GitHub issues and security reports to the security policy.',
+    og: 'home',
+    alt: 'The Shapewall wall: every page of a demo product at desktop and phone width, with comment pins',
   },
   {
     path: '/privacy',

@@ -67,6 +67,14 @@ shapewall.com {
     redir @index /{?query} permanent
     redir @htmlPage /{re.html.1}{?query} permanent
 
+    # The contact form API (website/contact/server.mjs, 127.0.0.1 only). Before the static handlers, so a POST never
+    # reaches the file server. X-Real-IP is the address the service rate limits by: {client_ip} is the visitor only when the
+    # CDN in front is listed in the global trusted_proxies option (otherwise every visitor shares the CDN's addresses).
+    handle /api/contact* {
+        reverse_proxy 127.0.0.1:4131 {
+            header_up X-Real-IP {client_ip}
+        }
+    }
     @umamiScript path /umami/script.js /umami/api/send
     handle @umamiScript {
         uri strip_prefix /umami

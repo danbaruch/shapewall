@@ -120,7 +120,6 @@ test('indexable build: index,follow, sitemap, structured data and analytics load
   assert.match(robots, /Allow: \//)
   assert.match(robots, /Sitemap: https:\/\/shapewall\.com\/sitemap\.xml/)
   const sitemap = read(path.join(DIST, 'sitemap.xml'))
-  assert.ok(!sitemap.includes('/roadmap'), 'retired Roadmap is not indexed')
   for (const route of ROUTES) {
     const listed = sitemap.includes(`<loc>${SITE_URL}${route.path === '/' ? '/' : route.path}</loc>`)
     assert.equal(listed, !route.noindex, `${route.path}: ${route.noindex ? 'out of' : 'in'} the sitemap`)
@@ -185,17 +184,20 @@ test('the agent hardening PDF ships, is current and is linked', () => {
   }
 })
 
-test('Features stays published while Roadmap content and promotional links are retired', () => {
+test('Features is published', () => {
   assert.ok(ROUTES.some((route) => route.path === '/features'))
-  assert.ok(!ROUTES.some((route) => route.path === '/roadmap'))
-  assert.ok(!fs.existsSync(fileFor('/roadmap')), 'no retired content page is built')
-  assert.ok(!fs.existsSync(path.join(DIST, 'og', 'roadmap.jpg')), 'no retired share card is shipped')
-  for (const route of ROUTES) {
-    const html = read(fileFor(route.path))
-    assert.ok(!/href=["'][^"']*\/roadmap(?:[/?#"'])/.test(html), `${route.path} has no retired promotional links`)
-    assert.ok(!html.includes('Where Shapewall is going'), `${route.path} has no Roadmap teaser`)
-  }
   assert.match(read(fileFor('/features')), /Everything between/)
+})
+
+test('the contact page posts to the same origin under a strict policy', () => {
+  const html = read(fileFor('/contact'))
+  assert.match(html, /<form[^>]*novalidate/i)
+  assert.ok(!/<form[^>]*\saction=/.test(html), 'no form action: the script sends JSON with fetch')
+  const honeypot = html.match(/<input[^>]*id="contact-website"[^>]*>/)?.[0] || ''
+  assert.match(honeypot, /tabindex="-1"/, 'the honeypot is out of the tab order')
+  const csp = decode(attr(html, /<meta http-equiv="Content-Security-Policy" content="([^"]*)"/) || '')
+  assert.match(csp, /form-action 'none'/)
+  for (const route of ['/', '/privacy']) assert.match(read(fileFor(route)), /href="\/contact"/, `${route} links the contact page`)
 })
 
 // Every internal link in the built pages leads to a page that exists, and its #anchor to an id on that page. The docs

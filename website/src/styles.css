@@ -36,6 +36,7 @@
   --color-on-wall: #ffffff;
   --color-pin-tint: #fef3c7;
   --color-merged: #7c3aed;
+  --color-danger: #b91c1c;
   --color-device: #18181b;
   --color-code-edge: transparent;
   --color-dots-bg: #f4f4f2;
@@ -77,6 +78,7 @@
   --color-pin-wash: #2e2209;
   --color-pin-tint: #3d2c0b;
   --color-merged: #a78bfa;
+  --color-danger: #f87171;
   --color-device: #3a3a43;
   --color-code-edge: #2c3b39;
   --color-dots-bg: #101013;
@@ -111,6 +113,7 @@
     --color-pin-wash: #2e2209;
     --color-pin-tint: #3d2c0b;
     --color-merged: #a78bfa;
+    --color-danger: #f87171;
     --color-device: #3a3a43;
     --color-code-edge: #2c3b39;
     --color-dots-bg: #101013;

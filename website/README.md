@@ -112,3 +112,45 @@ These need Playwright (installed by the CLI package at the repo root) and ImageM
 - `node scripts/pdf.mjs`: the agent hardening guide as a PDF in `public/downloads/` (from `../docs/agent-hardening.md`), and its
   source hash in `scripts/pdf-sources.json`; `npm test` fails when the guide changed and the PDF was not printed again.
 - `node scripts/shots.mjs <dir>`: every built page at 390 and 1440 px, with console errors and overflow reported.
+
+## Contact form
+
+`/contact` posts JSON with `fetch` to `/api/contact` on the same origin (the page CSP keeps `connect-src 'self'` and
+`form-action 'none'`). `contact/server.mjs` is a single-file Node service (built-ins only: `node:http`, `node:sqlite`) that validates
+each message, stores it in SQLite and sends it to Telegram as plain text. It binds `127.0.0.1` only. Tests: `contact/server.test.mjs`,
+part of `npm test`.
+
+| Variable                     | Default                    | Effect                                                                                  |
+| ---------------------------- | -------------------------- | --------------------------------------------------------------------------------------- |
+| `PORT`                       | `4131`                     | Port on 127.0.0.1.                                                                      |
+| `DATABASE_PATH`              | `./data/contact.sqlite`    | The SQLite file (its folder is created).                                                |
+| `CONTACT_ALLOWED_ORIGIN`     | `https://shapewall.com`    | The only `Origin` accepted.                                                             |
+| `CONTACT_TELEGRAM_BOT_TOKEN` | empty                      | The bot token. Keep it in a root-only environment file, never in the repo.              |
+| `CONTACT_OPENCLAW_CONFIG`    | empty                      | Alternative: path of a JSON file with the token at `channels.telegram.botToken`.        |
+| `CONTACT_TELEGRAM_CHAT_ID`   | empty                      | The chat that receives messages. Without a token and chat id, messages are stored only. |
+| `CONTACT_TELEGRAM_THREAD_ID` | empty                      | Optional forum topic id.                                                                |
+| `CONTACT_TELEGRAM_API_BASE`  | `https://api.telegram.org` | Point at a local stub for testing.                                                      |
+
+What it enforces: `POST` only, `Content-Type: application/json`, a 16 KB body limit, the exact `Origin`, a hidden honeypot field
+(filled: answered with success and dropped), at least 3 seconds between the form appearing and being sent, a kind of `feedback`,
+`feature`, `bug` or `other`, a message of 10 to 4,000 characters and an optional valid email. Rate limits: 5 messages per hour and 20
+per day per sender, 200 per day in total, kept in memory and rebuilt from the database on start. Each row stores the time, kind,
+message, email, a salted hash of the IP (the salt is random per database; the raw IP is never stored), the user agent cut to 200
+characters, and whether Telegram accepted it. A Telegram failure is logged (without the token) and the sender still sees success.
+Errors are fixed codes; the response never echoes input. `GET /api/contact/health` answers `{"ok":true}`.
+
+To deploy: copy `contact/server.mjs` to a release folder on the host, install `deploy/shapewall-contact.service.example` as a systemd
+unit (fill in its placeholders), and keep the `handle /api/contact*` block in `deploy/shapewall.Caddyfile` ahead of the static
+handlers:
+
+```caddyfile
+handle /api/contact* {
+  reverse_proxy 127.0.0.1:4131 {
+    header_up X-Real-IP {client_ip}
+  }
+}
+```
+
+The service rate limits by `X-Real-IP`, which Caddy sets from `{client_ip}` (only Caddy can reach the port, so the header is trusted;
+without it the socket address is used). Behind a CDN, list the CDN's ranges in Caddy's global `servers { trusted_proxies ... }` option
+(and its client IP header in `client_ip_headers`) so that address is the visitor's and not the CDN's.
