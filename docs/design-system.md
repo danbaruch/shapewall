@@ -111,6 +111,15 @@ Console or General settings does not unlock it. Hosted boards also label their w
 not create hosted accounts, workspaces or memberships. Inside Console, Projects and Settings stay in the sidebar; the profile menu
 contains identity and appearance rather than duplicate workspace navigation. The earlier `?settings=general` board link remains supported.
 
+The app sidebar (`AppRail`, `components/app-rail.jsx`) is a labelled menu when expanded and a rail of icons when collapsed. Collapsed,
+an icon with more behind it (the board's pages tree, the sections of the workspace or account you are in) opens a flyout beside the
+rail instead of expanding the sidebar: on hover after 150 ms, closing 250 ms after the pointer leaves both the icon and the panel, so
+you can move into it; a click, tap, Enter, Space or ArrowRight opens it pinned and moves focus in. A choice in it, Escape (focus back on
+the icon), a click outside or Tab past its end closes it. It is a non-modal `role="dialog"` named after its icon, the expanded
+sidebar's width, on the Chrome layer (above the canvas and the comment thread, below dialogs and menus). Icons with nothing behind them
+keep their tooltip. Only the panel button and Ctrl/Cmd+B expand the sidebar. The hover timing and height rules are in
+`components/rail-flyout.js`.
+
 App-level pieces outside the kit, in `client/src/components/`: `ProfileMenu` (the avatar menu: account items, the console's workspace
 switcher, View as in the demo, Appearance, and About Shapewall and updates) and `DemoBanner` (the demo's "viewing as" strip with Reset; in the console header a chip whose Reset is desktop only, on phones Reset the demo is in the profile menu).
 
@@ -131,7 +140,7 @@ One scale for `z-index`, lowest first. Pick the row that says what the thing is;
 | Canvas    | `z-10`/`z-20`     | Pins, card headers and bars, resize handles, presence cursors.                                  |
 | On canvas | `z-30`            | Things that belong to the canvas but float over cards: the comment thread and new-comment box,  |
 |           |                   | the journey bar, canvas notes, Try this.                                                        |
-| Chrome    | `z-40`            | Sticky app headers.                                                                             |
+| Chrome    | `z-40`            | Sticky app headers and the collapsed sidebar's flyouts.                                         |
 | Modal     | `z-50`            | Dialogs, sheets, the command palette and their dimmed overlay. A modal covers everything below. |
 | Menu      | `z-[60]`          | Dropdown menus, selects and small popovers, so they work inside a dialog.                       |
 | Hover     | `z-[65]`/`z-[70]` | Hover cards and tooltips.                                                                       |

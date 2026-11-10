@@ -5,7 +5,7 @@
 
 import { useEffect } from 'react'
 import { Building2, Files, LayoutDashboard, Share2 } from 'lucide-react'
-import { AppRail, SIDEBAR_KEY, rememberLastBoard } from '../components/app-rail'
+import { AppRail, rememberLastBoard } from '../components/app-rail'
 import { BoardProfile } from './BoardProfile'
 import { PagesTree } from './PagesTree'
 
@@ -43,9 +43,32 @@ export function BoardRail({
     rememberLastBoard(window.location.pathname + (boardParam ? '?board=' + encodeURIComponent(boardParam) : ''))
   }, [own, boardParam])
   const items = boardRailItems({ info, localSettingsAvailable, setShareOpen })
-  // Collapsed, the page tree is one icon that opens the sidebar.
+  // Collapsed, the page tree is one icon: hover it (or click, tap or press
+  // Enter) for the same tree in a flyout beside the rail. A choice there
+  // closes the flyout; only the panel button and Ctrl+B expand the sidebar.
   const sections =
-    !expanded && pages ? [{ id: 'pages', label: 'Pages and journeys', icon: Files, onSelect: onToggle, shortcut: SIDEBAR_KEY }] : []
+    !expanded && pages
+      ? [
+          {
+            id: 'pages',
+            label: 'Pages and journeys',
+            icon: Files,
+            flyout: ({ close }) => (
+              <PagesTree
+                {...pages}
+                onPage={(id) => {
+                  close()
+                  pages.onPage(id)
+                }}
+                onJourney={(id) => {
+                  close()
+                  pages.onJourney(id)
+                }}
+              />
+            ),
+          },
+        ]
+      : []
   return (
     <AppRail
       expanded={expanded}
