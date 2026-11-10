@@ -42,7 +42,9 @@ export function createAgentManagement({ config, env = process.env, token = newSe
   app.use('/api/agent', agents)
   app.use('/api', (req, res) => fail(res, 404))
   app.use('/assets', express.static(path.join(clientDir, 'assets'), { index: false, dotfiles: 'deny' }))
-  for (const name of ['theme-boot.js', 'favicon.svg']) app.get(`/${name}`, (req, res) => res.sendFile(path.join(clientDir, name)))
+  // Sent relative to a root: an absolute path is refused when any folder in
+  // it starts with a dot, which is where installs live (~/.local, .pnpm).
+  for (const name of ['theme-boot.js', 'favicon.svg']) app.get(`/${name}`, (req, res) => res.sendFile(name, { root: clientDir }))
   app.get('/', (req, res) => {
     const html = fs
       .readFileSync(path.join(clientDir, 'index.html'), 'utf8')
