@@ -182,7 +182,7 @@ const SECTIONS = [
     points: ['Installable board app', 'Pinch to zoom, tap to comment', 'Same comments, same pins'],
     art: (
       <div className="wall-dots flex items-center justify-center gap-4 rounded-2xl p-6">
-        <div className="w-44 overflow-hidden rounded-[22px] border-4 border-ink shadow-xl sm:w-52">
+        <div className="w-44 overflow-hidden rounded-[22px] border-4 border-device shadow-xl sm:w-52">
           <img
             src={phoneComment}
             alt="The Shapewall board on a phone with a comment sheet open"
@@ -211,7 +211,7 @@ const SECTIONS = [
     ],
     links: [{ to: '/docs/page-checks', label: 'Read about page checks' }],
     art: (
-      <div className="space-y-4 rounded-2xl border border-line bg-white p-6 text-ink shadow-sm">
+      <div className="space-y-4 rounded-2xl border border-line bg-card p-6 text-ink shadow-sm">
         <div className="flex items-center justify-between gap-3">
           <strong>Page checks</strong>
           <Badge>Example</Badge>
@@ -246,7 +246,7 @@ const ROLES = [
 function RolesIllustration() {
   return (
     <div className="wall-dots rounded-2xl p-6">
-      <ul className="mx-auto max-w-md divide-y divide-line overflow-hidden rounded-xl border border-line bg-white shadow-lg">
+      <ul className="mx-auto max-w-md divide-y divide-line overflow-hidden rounded-xl border border-line bg-card shadow-lg">
         {ROLES.map(([name, role, can]) => (
           <li key={name} className="flex items-center gap-3 px-4 py-3">
             <span
@@ -282,7 +282,7 @@ export default function Features() {
             <a
               key={section.id}
               href={`#${section.id}`}
-              className="shrink-0 rounded-lg px-3 py-1.5 text-[13.5px] font-medium text-slate hover:bg-black/5 hover:text-ink"
+              className="shrink-0 rounded-lg px-3 py-1.5 text-[13.5px] font-medium text-slate hover:bg-ink/5 hover:text-ink"
             >
               {section.nav}
             </a>
@@ -297,7 +297,7 @@ export default function Features() {
             section.dark
               ? 'bg-night py-20 text-white sm:py-24'
               : index % 2
-                ? 'border-y border-line bg-white py-20 sm:py-24'
+                ? 'border-y border-line bg-band py-20 sm:py-24'
                 : 'py-20 sm:py-24'
           }
         >
@@ -346,7 +346,7 @@ export default function Features() {
           </Container>
         </section>
       ))}
-      <section className="border-t border-line bg-white py-16">
+      <section className="border-t border-line bg-band py-16">
         <Container className="flex flex-col items-start justify-between gap-6 sm:flex-row sm:items-center">
           <div>
             <h2 className="text-[22px] font-bold tracking-tight text-ink">Small, local, and yours</h2>

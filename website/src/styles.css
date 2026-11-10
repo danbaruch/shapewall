@@ -23,6 +23,103 @@
   --color-night: #0c1312;
   --color-night-2: #142120;
   --color-night-line: #23302e;
+
+  /* Surfaces and edges that have no light-only meaning: values below, per theme. */
+  --color-card: #ffffff;
+  --color-band: #ffffff;
+  --color-sunk: #fafafa;
+  --color-sunk-2: #f4f4f5;
+  --color-sunk-3: #e4e4e7;
+  --color-line-strong: #d4d4d8;
+  --color-hairline: rgb(0 0 0 / 0.06);
+  --color-edge: rgb(0 0 0 / 0.1);
+  --color-on-wall: #ffffff;
+  --color-pin-tint: #fef3c7;
+  --color-merged: #7c3aed;
+  --color-device: #18181b;
+  --color-code-edge: transparent;
+  --color-dots-bg: #f4f4f2;
+  --color-dots: rgb(24 24 27 / 0.13);
+}
+
+/* Theme tokens. src/theme.js and the boot script in index.html set data-theme="light|dark" on <html> before the
+   first paint (System resolves to one of them). The dark values match the product app (client/src/styles.css):
+   the same near-black surfaces, text greys and bright teal accent. Without JavaScript the attribute is never set
+   and the page follows the OS through the media query below, which repeats the dark set. */
+:root {
+  color-scheme: light;
+  --shot-filter: none;
+  --shot-shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 12px 32px -12px rgb(15 40 38 / 0.22);
+  --band-edge: transparent;
+  --img-edge: transparent;
+}
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --color-paper: #17171b;
+  --color-band: #1c1c21;
+  --color-card: #222228;
+  --color-sunk: rgb(255 255 255 / 0.04);
+  --color-sunk-2: rgb(255 255 255 / 0.07);
+  --color-sunk-3: #33333b;
+  --color-ink: #f4f4f5;
+  --color-slate: #a1a1aa;
+  --color-faint: #8e8e98;
+  --color-line: #2f2f37;
+  --color-line-strong: #4a4a55;
+  --color-hairline: rgb(255 255 255 / 0.08);
+  --color-edge: rgb(255 255 255 / 0.14);
+  --color-wall: #2dd4bf;
+  --color-wall-deep: #5eead4;
+  --color-wall-tint: #134e4a;
+  --color-wall-wash: #12302d;
+  --color-on-wall: #042f2e;
+  --color-pin-ink: #fbbf24;
+  --color-pin-wash: #2e2209;
+  --color-pin-tint: #3d2c0b;
+  --color-merged: #a78bfa;
+  --color-device: #3a3a43;
+  --color-code-edge: #2c3b39;
+  --color-dots-bg: #101013;
+  --color-dots: rgb(255 255 255 / 0.09);
+  --shot-filter: brightness(0.86);
+  --shot-shadow: 0 0 0 1px rgb(255 255 255 / 0.06), 0 12px 32px -12px rgb(0 0 0 / 0.6);
+  --band-edge: #23302e;
+  --img-edge: rgb(255 255 255 / 0.14);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    color-scheme: dark;
+    --color-paper: #17171b;
+    --color-band: #1c1c21;
+    --color-card: #222228;
+    --color-sunk: rgb(255 255 255 / 0.04);
+    --color-sunk-2: rgb(255 255 255 / 0.07);
+    --color-sunk-3: #33333b;
+    --color-ink: #f4f4f5;
+    --color-slate: #a1a1aa;
+    --color-faint: #8e8e98;
+    --color-line: #2f2f37;
+    --color-line-strong: #4a4a55;
+    --color-hairline: rgb(255 255 255 / 0.08);
+    --color-edge: rgb(255 255 255 / 0.14);
+    --color-wall: #2dd4bf;
+    --color-wall-deep: #5eead4;
+    --color-wall-tint: #134e4a;
+    --color-wall-wash: #12302d;
+    --color-on-wall: #042f2e;
+    --color-pin-ink: #fbbf24;
+    --color-pin-wash: #2e2209;
+    --color-pin-tint: #3d2c0b;
+    --color-merged: #a78bfa;
+    --color-device: #3a3a43;
+    --color-code-edge: #2c3b39;
+    --color-dots-bg: #101013;
+    --color-dots: rgb(255 255 255 / 0.09);
+    --shot-filter: brightness(0.86);
+    --shot-shadow: 0 0 0 1px rgb(255 255 255 / 0.06), 0 12px 32px -12px rgb(0 0 0 / 0.6);
+    --band-edge: #23302e;
+    --img-edge: rgb(255 255 255 / 0.14);
+  }
 }
 
 @layer base {
@@ -37,6 +134,15 @@
   }
   ::selection {
     background: var(--color-wall-tint);
+    color: var(--color-ink);
+  }
+  /* Product screenshots are light UI: in the dark theme they are dimmed a little instead of glaring. */
+  main img {
+    filter: var(--shot-filter);
+  }
+  .prose-docs img {
+    outline: 1px solid var(--img-edge);
+    outline-offset: -1px;
   }
   :focus-visible {
     outline: 2px solid var(--color-wall);
@@ -52,8 +158,8 @@
 
 /* The wall: a faint dot grid, like a canvas. */
 .wall-dots {
-  background-color: #f4f4f2;
-  background-image: radial-gradient(circle at 1px 1px, rgb(24 24 27 / 0.13) 1px, transparent 0);
+  background-color: var(--color-dots-bg);
+  background-image: radial-gradient(circle at 1px 1px, var(--color-dots) 1px, transparent 0);
   background-size: 22px 22px;
 }
 .wall-dots-dark {
@@ -61,13 +167,18 @@
   background-image: radial-gradient(circle at 1px 1px, rgb(255 255 255 / 0.07) 1px, transparent 0);
   background-size: 22px 22px;
 }
+/* The intentionally dark bands sit below the page in the dark theme: a hairline keeps their edge deliberate. */
+section.wall-dots-dark,
+section.bg-night {
+  box-shadow:
+    inset 0 1px 0 var(--band-edge),
+    inset 0 -1px 0 var(--band-edge);
+}
 
 /* A product screenshot in a light app frame. */
 .shot {
-  @apply overflow-hidden rounded-xl border border-black/10 bg-white;
-  box-shadow:
-    0 1px 2px rgb(0 0 0 / 0.04),
-    0 12px 32px -12px rgb(15 40 38 / 0.22);
+  @apply overflow-hidden rounded-xl border border-edge bg-card;
+  box-shadow: var(--shot-shadow);
 }
 .shot img {
   display: block;
@@ -122,11 +233,11 @@
   color: var(--color-faint);
 }
 .prose-docs :not(pre) > code {
-  @apply rounded-md border border-line bg-white px-1.5 py-0.5 text-[0.84em] font-medium text-ink;
+  @apply rounded-md border border-line bg-card px-1.5 py-0.5 text-[0.84em] font-medium text-ink;
   overflow-wrap: anywhere;
 }
 .prose-docs .code {
-  @apply relative overflow-hidden rounded-xl bg-night text-[13px] leading-6 text-zinc-100;
+  @apply relative overflow-hidden rounded-xl bg-night text-[13px] ring-1 ring-code-edge leading-6 text-zinc-100;
 }
 .prose-docs .code[data-label]::before {
   content: attr(data-label);
@@ -142,13 +253,13 @@
   @apply text-wall-deep;
 }
 .prose-docs .table-wrap {
-  @apply overflow-x-auto rounded-xl border border-line bg-white;
+  @apply overflow-x-auto rounded-xl border border-line bg-card;
 }
 .prose-docs table {
   @apply w-full border-collapse text-left text-[14px] leading-6;
 }
 .prose-docs th {
-  @apply border-b border-line bg-zinc-50 px-3 py-2 font-semibold whitespace-nowrap text-ink;
+  @apply border-b border-line bg-sunk px-3 py-2 font-semibold whitespace-nowrap text-ink;
 }
 .prose-docs td {
   @apply border-b border-line px-3 py-2 align-top;
