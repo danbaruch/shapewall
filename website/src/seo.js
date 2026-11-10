@@ -3,6 +3,7 @@
 import fs from 'node:fs'
 import { AUTHOR, DEMO_SITE_PATHS, GITHUB_URL, ROUTES, SITE_URL, canonicalUrl } from './routes.js'
 import { LAUNCHED } from './launch.js'
+import { FAQ } from './faq-data.js'
 
 // The version people install: the root package.json, so a release bump reaches the structured data by itself.
 const VERSION = JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version
@@ -15,8 +16,18 @@ const esc = (value) => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;'
 
 export const ogImageUrl = (route) => `${SITE_URL}/og/${route.og}.jpg`
 
+// Home > Docs > page, or Home > page: the trail search results show above the title.
+function breadcrumbs(route, url) {
+  const crumb = (position, name, item) => ({ '@type': 'ListItem', position, name, item })
+  const trail = [crumb(1, 'Shapewall', `${SITE_URL}/`)]
+  if (route.kind === 'doc' && route.path !== '/docs') trail.push(crumb(2, 'Docs', `${SITE_URL}/docs`))
+  trail.push(crumb(trail.length + 1, route.nav || route.title.split(/[:|]/)[0].trim(), url))
+  return { '@type': 'BreadcrumbList', itemListElement: trail }
+}
+
 function jsonLd(route) {
   const url = canonicalUrl(route)
+  const website = { '@type': 'WebSite', '@id': `${SITE_URL}/#website`, name: 'Shapewall', url: `${SITE_URL}/`, inLanguage: 'en' }
   const organization = {
     '@type': 'Organization',
     '@id': `${SITE_URL}/#organization`,
@@ -30,6 +41,12 @@ function jsonLd(route) {
       '@context': 'https://schema.org',
       '@graph': [
         organization,
+        { ...website, publisher: { '@id': `${SITE_URL}/#organization` } },
+        // The same questions and answers the page shows.
+        {
+          '@type': 'FAQPage',
+          mainEntity: FAQ.map((item) => ({ '@type': 'Question', name: item.q, acceptedAnswer: { '@type': 'Answer', text: item.a } })),
+        },
         {
           '@type': 'SoftwareApplication',
           name: 'Shapewall',
@@ -51,18 +68,39 @@ function jsonLd(route) {
   if (route.kind === 'doc') {
     return {
       '@context': 'https://schema.org',
-      '@type': 'TechArticle',
-      headline: route.nav === 'Introduction' ? 'Shapewall docs' : route.nav,
-      description: route.description,
-      url,
-      image: ogImageUrl(route),
-      inLanguage: 'en',
-      author: { '@type': 'Person', name: AUTHOR },
-      publisher: organization,
-      isPartOf: { '@type': 'WebSite', name: 'Shapewall', url: `${SITE_URL}/` },
+      '@graph': [
+        {
+          '@type': 'TechArticle',
+          headline: route.nav === 'Introduction' ? 'Shapewall docs' : route.nav,
+          description: route.description,
+          url,
+          image: ogImageUrl(route),
+          inLanguage: 'en',
+          author: { '@type': 'Person', name: AUTHOR },
+          publisher: organization,
+          isPartOf: website,
+        },
+        breadcrumbs(route, url),
+      ],
     }
   }
-  return null
+  // Every other public page: what it is, whose site it belongs to, and where it sits.
+  return {
+    '@context': 'https://schema.org',
+    '@graph': [
+      {
+        '@type': 'WebPage',
+        name: route.title,
+        description: route.description,
+        url,
+        inLanguage: 'en',
+        primaryImageOfPage: ogImageUrl(route),
+        isPartOf: website,
+        publisher: organization,
+      },
+      breadcrumbs(route, url),
+    ],
+  }
 }
 
 // The tags between <!--seo--> and <!--/seo--> in each page's <head>.
