@@ -126,6 +126,8 @@ export function useBoardContext(input) {
 
   const board = useMemo(
     () => ({
+      // The comment thread's "Fix with ..." sets its chat's agent (FixWithAgent.jsx).
+      boardId,
       captures: data?.captures || {},
       manifest: data?.manifest || null,
       counts: data?.commentCounts || {},
