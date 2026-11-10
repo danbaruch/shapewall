@@ -217,7 +217,7 @@ test('the workflow: security shape, both modes, the skip marker, and the copy in
   )
   assert.ok(!/^\s*pull_request_target\s*:/m.test(yaml), 'never pull_request_target')
   assert.ok(!/\t/.test(yaml), 'no tabs')
-  assert.ok(!yaml.includes('—'), 'no em dash')
+  assert.ok(!yaml.includes(String.fromCharCode(0x2014)), 'no em dash')
   // Untrusted pull request text never reaches a run: line (only if: conditions and env).
   for (const line of yaml.split('\n').filter((item) => /^\s*run:/.test(item))) assert.ok(!line.includes('${{'), line)
   const parsed = parseYaml(yaml)
