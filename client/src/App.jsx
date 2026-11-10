@@ -7,7 +7,7 @@ import { BoardLoadError, BoardSkeleton } from './components/app-states'
 import Board from './board/Board'
 import { setFixtureClock } from './lib/utils'
 import { DEMO, useDemo } from './lib/demo'
-import { useAgentsChanged } from './lib/agentEvents'
+import { setAgentEventsOwner, useAgentsChanged } from './lib/agentEvents'
 import { PairingScreen, DevicesPanel } from './pairing/Pairing'
 import { DemoResetDialog, DemoShareProblem } from './components/demo-banner'
 const BuzzDialog = lazy(() => import('./buzz/BuzzDialog'))
@@ -29,6 +29,9 @@ export default function App() {
   // The chat header and agent picker read the agent from info: follow
   // changes made in another tab, the Agents page or the agents file.
   useAgentsChanged(info.refetch, Boolean(info.data?.agent))
+  // The owner-only events stream opens once the server says this page is the owner's.
+  const eventsOwner = info.data?.agent?.ownerWrites === true
+  useEffect(() => setAgentEventsOwner(eventsOwner), [eventsOwner])
   const demo = useDemo()
   const list = useResource(admitted ? '/api/boards' : null)
   const [params, updateParams] = useParams()

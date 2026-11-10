@@ -54,15 +54,41 @@ function eventsUrl() {
   return local ? '/api/agent/events' : 'api/agent/events'
 }
 
-function open() {
-  window.addEventListener('focus', shown)
-  document.addEventListener('visibilitychange', shown)
-  // Only a page opened with the owner link (the settings token) can change
-  // agent settings or see them in full: others ask no agent route.
-  if (DEMO || STATIC || typeof window.fetch !== 'function' || typeof window.TextDecoder !== 'function') return
+// Whether this page is the owner's, as the server said (/api/info's
+// agent.ownerWrites): null until known. The stream is owner-only, so it opens
+// only once this is true; a read-only, shared, locked or guest view (or a
+// tab holding a wrong token) never asks for it.
+let owner = null
+let listening = false
+
+export function setAgentEventsOwner(value) {
+  const next = value === true
+  if (next === owner) return
+  owner = next
+  if (listening) startStream()
+}
+
+function startStream() {
+  stopStream()
+  if (owner !== true || DEMO || STATIC || typeof window.fetch !== 'function' || typeof window.TextDecoder !== 'function') return
   if (!Object.keys(settingsTokenHeaders()).length) return
   source = { controller: null, timer: null, delay: RETRY_MIN }
   connect(source)
+}
+
+function stopStream() {
+  if (source) {
+    window.clearTimeout(source.timer)
+    source.controller?.abort()
+  }
+  source = null
+}
+
+function open() {
+  listening = true
+  window.addEventListener('focus', shown)
+  document.addEventListener('visibilitychange', shown)
+  startStream()
 }
 
 // One server-sent event block ("event: x\ndata: {...}").
@@ -125,15 +151,12 @@ async function connect(current) {
 }
 
 function close() {
+  listening = false
   window.removeEventListener('focus', shown)
   document.removeEventListener('visibilitychange', shown)
   if (shownTimer) window.clearTimeout(shownTimer)
   shownTimer = null
-  if (source) {
-    window.clearTimeout(source.timer)
-    source.controller?.abort()
-  }
-  source = null
+  stopStream()
 }
 
 const watching = () => listeners.size + batchListeners.size
