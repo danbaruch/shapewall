@@ -33,6 +33,7 @@ import {
   sweepAgentBranches,
 } from '../src/agent/branch-mode.js'
 import { validateUserEntry } from '../src/agent/user-settings.js'
+import { checkAgentBranches } from '../src/doctor.js'
 import { SAMPLE, tempDir, request } from './helpers.js'
 
 const fixture = path.resolve('test/fixtures/acp-fix.mjs')
@@ -315,6 +316,11 @@ test('sweep: dead turns without commits go, unapplied commits stay, applied ones
     [waiting.work.meta.id],
   )
   assert.equal(left[0].worktree, true)
+  // shapewall doctor names what is left; nothing at all in a clean project.
+  const check = await checkAgentBranches(config)
+  assert.equal(check.status, 'warn')
+  assert.match(check.message, /Agent branches: 1 left \(1 ready to apply, 1 worktree folder\): shapewall\/comment-1-/)
+  assert.equal(await checkAgentBranches(repo('branch-doctor-clean', { hooks: false }).config), null)
 })
 
 test('branch-ready goes through the store, comments --json, MCP and the hosted validators', async () => {

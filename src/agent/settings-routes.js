@@ -693,7 +693,14 @@ export function settingsRoutes({ config, env, fetchImpl, settings, shared, token
   // narrows where the agent writes. The environment still wins.
   const branchView = () => {
     const current = branchModeSettings(config, env)
-    return { enabled: current.enabled, prefix: current.prefix, sources: current.sources, defaultPrefix: DEFAULT_BRANCH_PREFIX }
+    // acp: whether it applies now (only a coding agent over ACP runs in a worktree).
+    return {
+      enabled: current.enabled,
+      prefix: current.prefix,
+      sources: current.sources,
+      defaultPrefix: DEFAULT_BRANCH_PREFIX,
+      acp: settings().backend === 'acp',
+    }
   }
   router.get('/branch-mode', guard, (req, res) => res.json(branchView()))
   router.post('/branch-mode', guard, (req, res) => {
