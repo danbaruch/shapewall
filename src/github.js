@@ -24,7 +24,7 @@ import { absoluteProgram } from './which.js'
 // Checked in this order; the first one set wins.
 export const TOKEN_VARS = ['SHAPEWALL_GITHUB_TOKEN', 'GITHUB_TOKEN']
 export const WEBHOOK_SECRET_VAR = 'SHAPEWALL_GITHUB_WEBHOOK_SECRET'
-const DEFAULT_API_URL = 'https://api.github.com'
+export const DEFAULT_API_URL = 'https://api.github.com'
 const REQUEST_TIMEOUT_MS = 20000
 const SYNC_PAGES_MAX = 5
 const SYNC_PAGE_SIZE = 50
@@ -41,7 +41,7 @@ const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]', '::1'])
 // person named themselves ($SHAPEWALL_GITHUB_API_URL). An API URL that only a
 // config file names gets no token: a cloned repository's config could
 // otherwise point it at any host.
-function tokenFrom(env, apiUrl = DEFAULT_API_URL, confirmed = true) {
+export function tokenFrom(env, apiUrl = DEFAULT_API_URL, confirmed = true) {
   if (apiUrl !== DEFAULT_API_URL && !confirmed) return null
   for (const name of TOKEN_VARS) {
     const value = typeof env[name] === 'string' ? env[name].trim() : ''
@@ -86,7 +86,7 @@ export function ghToken(env = process.env, { run = execFileSync, now = Date.now(
 
 // The API must be https; plain http only on this machine (a test stub or a
 // local proxy), so the token never crosses a network in the clear.
-function checkApiUrl(value) {
+export function checkApiUrl(value) {
   try {
     const url = new URL(value)
     if (url.protocol === 'https:') return null

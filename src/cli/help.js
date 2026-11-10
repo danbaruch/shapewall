@@ -26,7 +26,9 @@ export const SECTIONS = {
                             (alone: <base URL>/sitemap.xml)
                             (with --limit, --group, --exclude as for sitemap)
       --no-discover         do not look for pages: write the home page only
-      --force               overwrite an existing config`,
+      --force               overwrite an existing config
+      --ci                  write .github/workflows/shapewall.yml (capture on every pull request) beside
+                            the config; an existing config is kept, --force replaces only the workflow`,
   sitemap: `  sitemap [URL|FILE]        add the pages of a sitemap.xml (or sitemap index) to the config
                             (default: the board's "sitemap" setting)
       --limit N             at most N new pages, the shallowest first (default ${SITEMAP_LIMIT_DEFAULT})
@@ -154,6 +156,26 @@ export const SECTIONS = {
   github sync               link pull requests that name a comment; resolve comments whose PR merged
                             (repo: "github.repo" in the config; token: $SHAPEWALL_GITHUB_TOKEN or $GITHUB_TOKEN,
                             else a signed-in GitHub CLI ("gh auth token"))`,
+  ci: `  ci capture-compare        capture before and after, compare every page and viewport, write a result
+                            folder: summary.json, summary.md (the comment), images of changed shots
+      --base-url URL        before (default: the board's baseUrl)   --head-url URL   after
+      --base-dir DIR        or compare two capture folders   --head-dir DIR
+      --out DIR             the result folder (default shapewall-ci)
+      --threshold RATIO     share of pixels below which a shot is unchanged (default ci.threshold, 0.001)
+      --max-pages N         compare at most N pages (default ci.maxPages, 50)
+      --fail-on-change      exit 3 when something changed (default: always 0, never fails the pull request)
+  ci capture --out DIR      capture one side into a folder, from --url URL, or with --allow-start
+      --allow-start         run ci.start (install, build, serve; argv arrays, no shell) in --checkout DIR
+                            and capture its url; only inside a CI job (GITHUB_ACTIONS or CI is "true")
+  ci comment                post or update the one pull request comment from a result folder
+      --dir DIR             the result folder (default shapewall-ci)
+      --artifact-url URL    link to the workflow artifact with the images
+      --repo OWNER/NAME | --pull N   default: from the pull_request event
+                            token: $GITHUB_TOKEN; a fork's pull request gets the job summary instead
+  ci enabled                is it on for this pull request (ci.enabled, [skip shapewall] in the title)?
+                            writes enabled=true|false to $GITHUB_OUTPUT
+  ci wait --url URL         wait until a deploy preview answers   [--timeout SECONDS (default 600)]
+      --board ID | --json   (docs/pull-requests.md)`,
   mcp: `  mcp                       MCP server on stdio for coding agents
       --read-only | --no-capture`,
   notify: `  notify list               notification channels, their events and what each still needs   [--json]

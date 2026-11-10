@@ -237,6 +237,14 @@ comment text, page URL, element, screenshot link and a link back to the board. P
 `Fixes shapewall#12` (or close the comment's issue) are linked to it by `shapewall github sync` or a signed webhook, and when one merges,
 the comment resolves with the PR as its fix. Details: [docs/github.md](docs/github.md).
 
+### Capture on pull requests
+
+`npx shapewall init --ci` writes a GitHub Actions workflow. Commit it, and every pull request gets one comment, updated on each push:
+"Shapewall: 4 of 23 pages changed", with each changed page and screen size, the share of pixels that changed, and the before, after and
+diff images as a workflow artifact. It builds and serves both branches (`ci.start` in the config) or captures your deploy preview, never
+fails the pull request, and turns off with `"ci": { "enabled": false }` or `[skip shapewall]` in a title.
+Details: [docs/pull-requests.md](docs/pull-requests.md).
+
 Prompts that work, the data shapes, and how to keep it safe (comments are untrusted input): [docs/agent-workflow.md](docs/agent-workflow.md).
 Copy-paste setups for Claude Code, Codex, goose, Ollama and chat bots: [docs/agent-recipes.md](docs/agent-recipes.md).
 Optional integrations: [notifications](#notifications), GitHub connect above, and a [bridge to agents in a Buzz chat](docs/buzz.md).
@@ -380,6 +388,8 @@ Commands
                             (with --limit, --group, --exclude as for sitemap)
       --no-discover         do not look for pages: write the home page only
       --force               overwrite an existing config
+      --ci                  write .github/workflows/shapewall.yml (capture on every pull request) beside
+                            the config; an existing config is kept, --force replaces only the workflow
   sitemap [URL|FILE]        add the pages of a sitemap.xml (or sitemap index) to the config
                             (default: the board's "sitemap" setting)
       --limit N             at most N new pages, the shallowest first (default 100)
@@ -507,6 +517,26 @@ Commands
   github sync               link pull requests that name a comment; resolve comments whose PR merged
                             (repo: "github.repo" in the config; token: $SHAPEWALL_GITHUB_TOKEN or $GITHUB_TOKEN,
                             else a signed-in GitHub CLI ("gh auth token"))
+  ci capture-compare        capture before and after, compare every page and viewport, write a result
+                            folder: summary.json, summary.md (the comment), images of changed shots
+      --base-url URL        before (default: the board's baseUrl)   --head-url URL   after
+      --base-dir DIR        or compare two capture folders   --head-dir DIR
+      --out DIR             the result folder (default shapewall-ci)
+      --threshold RATIO     share of pixels below which a shot is unchanged (default ci.threshold, 0.001)
+      --max-pages N         compare at most N pages (default ci.maxPages, 50)
+      --fail-on-change      exit 3 when something changed (default: always 0, never fails the pull request)
+  ci capture --out DIR      capture one side into a folder, from --url URL, or with --allow-start
+      --allow-start         run ci.start (install, build, serve; argv arrays, no shell) in --checkout DIR
+                            and capture its url; only inside a CI job (GITHUB_ACTIONS or CI is "true")
+  ci comment                post or update the one pull request comment from a result folder
+      --dir DIR             the result folder (default shapewall-ci)
+      --artifact-url URL    link to the workflow artifact with the images
+      --repo OWNER/NAME | --pull N   default: from the pull_request event
+                            token: $GITHUB_TOKEN; a fork's pull request gets the job summary instead
+  ci enabled                is it on for this pull request (ci.enabled, [skip shapewall] in the title)?
+                            writes enabled=true|false to $GITHUB_OUTPUT
+  ci wait --url URL         wait until a deploy preview answers   [--timeout SECONDS (default 600)]
+      --board ID | --json   (docs/pull-requests.md)
   mcp                       MCP server on stdio for coding agents
       --read-only | --no-capture
   notify list               notification channels, their events and what each still needs   [--json]
