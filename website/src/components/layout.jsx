@@ -3,6 +3,7 @@ import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import { Menu, X } from 'lucide-react'
 import { GitHubIcon, Logo } from './brand.jsx'
 import { Container, GetStarted, IconButton, cx } from './ui.jsx'
+import { ThemeMenu, ThemeSwitch } from './theme.jsx'
 import { track } from '../analytics.js'
 import { DEMO_URL, DOC_GROUPS, GITHUB_URL, NOT_FOUND, SITE_URL, canonicalUrl, routeFor } from '../routes.js'
 import { GITHUB_LABEL, LAUNCHED } from '../launch.js'
@@ -72,7 +73,7 @@ function Header() {
     return () => window.removeEventListener('keydown', onKey)
   }, [open])
   return (
-    <header className="sticky top-0 z-40 border-b border-black/[0.06] bg-paper/85 backdrop-blur-md supports-[backdrop-filter]:bg-paper/75">
+    <header className="sticky top-0 z-40 border-b border-hairline bg-paper/85 backdrop-blur-md supports-[backdrop-filter]:bg-paper/75">
       <Container className="flex h-16 items-center gap-6">
         <Link to="/" className="shrink-0 rounded-lg" aria-label="Shapewall home">
           <Logo />
@@ -108,6 +109,7 @@ function Header() {
           <span className="hidden sm:inline-flex">
             <GetStarted where="header" size="md" />
           </span>
+          <ThemeMenu className="hidden md:block" />
           <IconButton
             variant="ghost"
             size="icon"
@@ -121,25 +123,29 @@ function Header() {
           </IconButton>
         </div>
       </Container>
-      <div id="mobile-nav" hidden={!open} className="border-t border-black/[0.06] bg-paper md:hidden">
+      <div id="mobile-nav" hidden={!open} className="border-t border-hairline bg-paper md:hidden">
         <Container className="flex flex-col gap-1 py-3">
           {NAV.map((item) => (
-            <Link key={item.to} to={item.to} className="rounded-xl px-3 py-3 text-[16px] font-medium text-ink hover:bg-black/5">
+            <Link key={item.to} to={item.to} className="rounded-xl px-3 py-3 text-[16px] font-medium text-ink hover:bg-ink/5">
               {item.label}
             </Link>
           ))}
           <a
             href={DEMO_URL}
             onClick={() => track('live-demo', { where: 'mobile-menu' })}
-            className="rounded-xl px-3 py-3 text-[16px] font-medium text-ink hover:bg-black/5"
+            className="rounded-xl px-3 py-3 text-[16px] font-medium text-ink hover:bg-ink/5"
           >
             Live demo
           </a>
-          <a href={GITHUB_URL} className="flex items-center gap-2 rounded-xl px-3 py-3 text-[16px] font-medium text-ink hover:bg-black/5">
+          <a href={GITHUB_URL} className="flex items-center gap-2 rounded-xl px-3 py-3 text-[16px] font-medium text-ink hover:bg-ink/5">
             <GitHubIcon className="size-[18px]" /> {GITHUB_LABEL}
           </a>
           <div className="px-1 pt-2 pb-1 [&>a]:w-full">
             <GetStarted where="mobile-menu" />
+          </div>
+          <div className="flex items-center justify-between gap-3 border-t border-line px-3 pt-3 pb-1">
+            <span className="text-[14.5px] font-medium text-slate">Theme</span>
+            <ThemeSwitch />
           </div>
         </Container>
       </div>
@@ -150,7 +156,7 @@ function Header() {
 function Footer() {
   const docs = DOC_GROUPS.flatMap((group) => group.docs).slice(0, 6)
   return (
-    <footer className="border-t border-line bg-white">
+    <footer className="border-t border-line bg-band">
       <Container className="grid grid-cols-2 gap-x-6 gap-y-10 py-14 lg:grid-cols-[1.4fr_1fr_1fr_1fr]">
         <div className="col-span-2 max-w-xs lg:col-span-1">
           <Logo />
@@ -192,6 +198,10 @@ function Footer() {
           <p>© 2026 Dan Baruch and Shapewall contributors. Apache 2.0; the team server is under the Functional Source License.</p>
           <p>Made for people who build with AI agents.</p>
         </div>
+        <div className="flex items-center gap-3 pb-8 text-[13.5px] text-faint">
+          <span>Theme</span>
+          <ThemeSwitch />
+        </div>
       </Container>
     </footer>
   )
@@ -226,10 +236,7 @@ export function Layout() {
   useScrollOnNavigate(location)
   return (
     <div className="flex min-h-dvh flex-col">
-      <a
-        href="#main"
-        className="sr-only z-50 rounded-lg bg-ink px-3 py-2 text-white focus:not-sr-only focus:fixed focus:top-3 focus:left-3"
-      >
+      <a href="#main" className="sr-only z-50 rounded-lg bg-ink px-3 py-2 text-card focus:not-sr-only focus:fixed focus:top-3 focus:left-3">
         Skip to content
       </a>
       <Header />

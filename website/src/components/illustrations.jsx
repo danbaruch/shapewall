@@ -30,8 +30,8 @@ function Tile({ src, label, phone = false, className, highlight = false, dim = f
   return (
     <figure
       className={cx(
-        'overflow-hidden rounded-lg border bg-white transition-all duration-300',
-        highlight ? 'border-pin shadow-[0_0_0_3px_rgb(245_158_11_/_0.35)]' : 'border-black/10 shadow-sm',
+        'overflow-hidden rounded-lg border bg-card transition-all duration-300',
+        highlight ? 'border-pin shadow-[0_0_0_3px_rgb(245_158_11_/_0.35)]' : 'border-edge shadow-sm',
         dim && 'opacity-45',
         className,
       )}
@@ -46,7 +46,7 @@ function Tile({ src, label, phone = false, className, highlight = false, dim = f
         className={crop ? 'block aspect-[16/10] w-full object-cover object-top' : 'block h-auto w-full'}
       />
       {label ? (
-        <figcaption className="border-t border-black/[0.06] px-2.5 py-1.5 text-[12px] font-medium text-slate">{label}</figcaption>
+        <figcaption className="border-t border-hairline px-2.5 py-1.5 text-[12px] font-medium text-slate">{label}</figcaption>
       ) : null}
     </figure>
   )
@@ -175,10 +175,10 @@ export function JourneyIllustration() {
 export function BeforeAfter() {
   const [view, setView] = useState('after')
   return (
-    <div className="overflow-hidden rounded-2xl border border-line bg-white shadow-[0_12px_32px_-12px_rgb(15_40_38_/_0.22)]">
+    <div className="overflow-hidden rounded-2xl border border-line bg-card shadow-[0_12px_32px_-12px_rgb(15_40_38_/_0.22)]">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-line p-4">
         <div className="flex min-w-0 items-start gap-3">
-          <span className="mt-0.5 grid size-6 shrink-0 place-items-center rounded-full bg-wall text-[12px] font-bold text-white">1</span>
+          <span className="mt-0.5 grid size-6 shrink-0 place-items-center rounded-full bg-wall text-[12px] font-bold text-on-wall">1</span>
           <div className="min-w-0">
             <p className="text-[14.5px] leading-snug text-ink">Make the Plus button stand out more. Maybe show the yearly price too?</p>
             <p className="mt-1 flex items-center gap-1.5 text-[12.5px] text-wall">
@@ -216,7 +216,7 @@ export function BeforeAfter() {
             view === 'after' ? 'opacity-100' : 'opacity-0',
           )}
         />
-        <span className="absolute top-3 left-3 rounded-md bg-ink/80 px-2 py-1 text-[11px] font-semibold tracking-wide text-white uppercase">
+        <span className="absolute top-3 left-3 rounded-md bg-zinc-900/80 px-2 py-1 text-[11px] font-semibold tracking-wide text-white uppercase">
           {view}
         </span>
       </div>
@@ -229,7 +229,7 @@ export function CompareIllustration() {
   return (
     <div className="wall-dots grid grid-cols-2 gap-3 rounded-2xl p-4 sm:gap-4 sm:p-6">
       {[
-        { label: 'Production', src: pricing, tone: 'bg-zinc-200 text-slate' },
+        { label: 'Production', src: pricing, tone: 'bg-sunk-3 text-slate' },
         { label: 'Staging', src: pricingV2, tone: 'bg-pin text-night' },
       ].map((side) => (
         <div key={side.label}>
@@ -239,7 +239,7 @@ export function CompareIllustration() {
           <Tile src={side.src} />
         </div>
       ))}
-      <div className="col-span-2 flex items-center gap-2 rounded-xl border border-line bg-white px-3 py-2 text-[13px] text-slate">
+      <div className="col-span-2 flex items-center gap-2 rounded-xl border border-line bg-card px-3 py-2 text-[13px] text-slate">
         <MessageSquare className="size-4 shrink-0 text-wall" aria-hidden="true" />
         <span className="min-w-0 truncate">Pricing differs: yearly switch and new Plus card on staging only</span>
       </div>
@@ -262,7 +262,7 @@ export function GithubIllustration() {
     { icon: MessageSquare, tone: 'text-pin-ink', title: 'Comment #12 on Pricing', text: 'Make the Plus button stand out more.' },
     { icon: CircleDot, tone: 'text-wall', title: 'Issue #45 opened', text: 'Comment text, page, element and a screenshot crop.' },
     { icon: GitPullRequest, tone: 'text-wall', title: 'Pull request #46', text: 'Its description says shapewall:12.' },
-    { icon: GitMerge, tone: 'text-violet-600', title: 'Merged', text: 'Comment #12 resolved, with the PR as its fix.' },
+    { icon: GitMerge, tone: 'text-merged', title: 'Merged', text: 'Comment #12 resolved, with the PR as its fix.' },
   ]
   return (
     <div className="wall-dots rounded-2xl p-4 sm:p-6">
@@ -270,7 +270,7 @@ export function GithubIllustration() {
         {steps.map((step) => (
           <li
             key={step.title}
-            className="flex items-start gap-3 rounded-xl border border-line bg-white px-4 py-3 shadow-sm shadow-black/[0.03]"
+            className="flex items-start gap-3 rounded-xl border border-line bg-card px-4 py-3 shadow-sm shadow-black/[0.03]"
           >
             <step.icon className={cx('mt-0.5 size-4.5 shrink-0', step.tone)} aria-hidden="true" />
             <div className="min-w-0">
@@ -294,12 +294,12 @@ export function NotifyIllustration() {
   ]
   return (
     <div className="wall-dots rounded-2xl p-4 sm:p-6">
-      <div className="flex items-center gap-2 rounded-xl border border-pin/60 bg-white px-4 py-3 text-[14px] font-semibold text-ink shadow-sm">
+      <div className="flex items-center gap-2 rounded-xl border border-pin/60 bg-card px-4 py-3 text-[14px] font-semibold text-ink shadow-sm">
         <Bell className="size-4.5 shrink-0 text-pin-ink" aria-hidden="true" /> A comment changes
       </div>
       <ul className="mt-3 grid gap-3 sm:grid-cols-2">
         {channels.map((channel) => (
-          <li key={channel.name} className="rounded-xl border border-line bg-white px-4 py-3 shadow-sm shadow-black/[0.03]">
+          <li key={channel.name} className="rounded-xl border border-line bg-card px-4 py-3 shadow-sm shadow-black/[0.03]">
             <p className="flex items-center gap-2 text-[13px] font-semibold text-wall">
               <channel.icon className="size-4 shrink-0" aria-hidden="true" /> {channel.name}
             </p>
