@@ -19,7 +19,7 @@ import { NaturalDownloadStrip } from './ReadAloud'
 import { savedVoice, saveVoice, useDictation, useSpeaker } from './speech'
 import { checkDownloaded, startNatural } from './tts/natural.js'
 import { loadReadAloud, saveReadAloud } from './tts/settings.js'
-import { answerPermission, stopThread, threadPath, undoTurn } from './stream'
+import { answerPermission, branchAction, stopThread, threadPath, undoTurn } from './stream'
 import { useFollowScroll } from './follow'
 import { RefsContext } from './RefChip'
 import { buildRefIndex } from './refs'
@@ -38,6 +38,7 @@ import { fallbackTitle, isChatThread, newChatId, threadKind } from './threads'
 import { useAnswerRatings } from './actions'
 import { AllowForChat } from './allowForChat'
 import { AutoAllowSettings } from './composerParts'
+import BranchModeToggle from './BranchModeToggle'
 import {
   MENTIONS_MAX,
   TEXT_FILES_MAX,
@@ -714,6 +715,19 @@ export default function ChatPanel({
     // The comment may need a person again (no longer "Agent done").
     onBoardChanged?.()
   }
+  // Agent branch mode (RunSummary): apply, discard or open the branch of an answer.
+  const onBranch = async (messageId, id, action) => {
+    const result = await branchAction(id, action)
+    if (action === 'open') return result
+    if (result?.message && threadRef.current === threadId) {
+      thread.setData((current) =>
+        current ? { ...current, messages: current.messages.map((item) => (item.id === messageId ? result.message : item)) } : current,
+      )
+    }
+    thread.refetch()
+    onBoardChanged?.()
+    return result
+  }
 
   return (
     <section
@@ -765,7 +779,12 @@ export default function ChatPanel({
           onNewChat={running ? null : newChat}
           onExport={exportCurrent}
           touch={touch}
-          settingsExtra={<AutoAllowSettings rules={allowRules[threadId]} onRevoke={revokeRule} touch={touch} />}
+          settingsExtra={
+            <>
+              <AutoAllowSettings rules={allowRules[threadId]} onRevoke={revokeRule} touch={touch} />
+              {agent?.ownerWrites ? <BranchModeToggle touch={touch} disabled={running} /> : null}
+            </>
+          }
         />
       ) : null}
       {configured ? (
@@ -833,6 +852,7 @@ export default function ChatPanel({
                 retryDisabled={running || Boolean(draft.trim() || attachments.length)}
                 owner={Boolean(agent?.ownerWrites)}
                 onUndo={running ? null : undo}
+                onBranch={running ? null : onBranch}
                 onRecapture={onRecapture}
                 versions={selectedThread?.versions || null}
                 onEdit={editMessage}

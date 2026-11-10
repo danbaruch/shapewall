@@ -46,6 +46,7 @@ export function pinState(comment) {
 const BORDER = {
   resolved: 'border-ok',
   'needs-human': 'border-warn',
+  'branch-ready': 'border-accent',
   reopened: 'border-bad',
 }
 

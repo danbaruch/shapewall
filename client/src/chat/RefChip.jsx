@@ -21,6 +21,7 @@ const COMMENT_STATUS = {
   resolved: { tone: 'ok', text: 'Resolved' },
   'needs-human': { tone: 'warn', text: 'Needs a person' },
   done: { tone: 'accent', text: 'Agent done' },
+  'branch-ready': { tone: 'accent', text: 'Fix ready on branch' },
 }
 
 function Preview({ item, refs }) {

@@ -8,14 +8,18 @@ import { useState } from 'react'
 import {
   CheckCircle2,
   ChevronRight,
+  Copy,
   ExternalLink,
   FileMinus,
   FilePen,
   FilePlus,
+  FolderOpen,
   GitBranch,
   GitCommitHorizontal,
+  GitMerge,
   GitPullRequest,
   RefreshCw,
+  Trash2,
   Undo2,
 } from 'lucide-react'
 import { Badge, Button, Dialog } from '../components/ui'
@@ -89,20 +93,169 @@ function FileRow({ file, touch }) {
   )
 }
 
+// Agent branch mode: the turn's fix waits on a branch of its own. The owner
+// brings it into the checkout (Apply), opens its folder, copies its name or
+// discards it. Apply stops with an explanation on a conflict and changes nothing.
+function BranchActions({ message, summary, owner, touch, onBranch }) {
+  const branch = summary.branch
+  const [busy, setBusy] = useState(null)
+  const [error, setError] = useState(null)
+  const [note, setNote] = useState(null)
+  const [confirming, setConfirming] = useState(false)
+  const size = touch ? 'touch' : 'sm'
+  const run = async (action) => {
+    setBusy(action)
+    setError(null)
+    setNote(null)
+    try {
+      const result = await onBranch(message.id, branch.id, action)
+      if (action === 'open') setNote(result?.opened ? 'Opened the folder.' : `The folder: ${result?.folder || 'unknown'}`)
+      if (action === 'discard') setConfirming(false)
+    } catch (failure) {
+      setError(failure.message || 'That did not work.')
+    } finally {
+      setBusy(null)
+    }
+  }
+  const copy = async () => {
+    setError(null)
+    try {
+      await navigator.clipboard.writeText(branch.name)
+      setNote('Copied the branch name.')
+    } catch {
+      setNote(`The branch: ${branch.name}`)
+    }
+  }
+  const ready = branch.state === 'ready' && !summary.undone
+  return (
+    <div className="space-y-1 border-t border-line px-2.5 py-1.5 text-caption text-muted" data-sw-chat-branch={branch.state}>
+      <p className="flex min-w-0 items-center gap-1.5">
+        <GitBranch size={12} className="shrink-0" aria-hidden="true" />
+        <span className="min-w-0 truncate">
+          {branch.state === 'applied' ? 'Applied from ' : branch.state === 'ready' ? 'Fix ready on branch ' : 'Branch '}
+          <span className="font-mono text-fg" data-sw-chat-branch-name={branch.name}>
+            {branch.name}
+          </span>
+          {branch.commit ? (
+            <>
+              , commit <span className="font-mono text-fg">{branch.commit.slice(0, 7)}</span>
+            </>
+          ) : null}
+        </span>
+      </p>
+      {ready ? <p>Your checkout is untouched until you apply it. Uncommitted changes in your checkout were not carried over.</p> : null}
+      {branch.state === 'applied' && branch.applied ? (
+        <p data-sw-chat-branch-applied={branch.applied.mode}>
+          {branch.applied.mode === 'fast-forward' ? 'Fast-forwarded your checkout.' : 'Merged into your checkout.'} The branch and its
+          folder are gone.
+        </p>
+      ) : null}
+      {ready ? (
+        <div className={cn('gap-1.5 pt-0.5', touch ? 'grid grid-cols-2' : 'flex flex-wrap')}>
+          {owner && onBranch ? (
+            <Button
+              size={size}
+              variant="default"
+              disabled={Boolean(busy)}
+              onClick={() => run('apply')}
+              data-sw-chat-branch-apply={branch.id}
+            >
+              <GitMerge size={13} aria-hidden="true" /> {busy === 'apply' ? 'Applying…' : 'Apply to my checkout'}
+            </Button>
+          ) : null}
+          {owner && onBranch ? (
+            <Button
+              size={size}
+              variant="secondary"
+              disabled={Boolean(busy)}
+              onClick={() => run('open')}
+              data-sw-chat-branch-open={branch.id}
+            >
+              <FolderOpen size={13} aria-hidden="true" /> Open folder
+            </Button>
+          ) : null}
+          <Button size={size} variant="secondary" onClick={copy} data-sw-chat-branch-copy={branch.name}>
+            <Copy size={13} aria-hidden="true" /> Copy branch name
+          </Button>
+          {owner && onBranch ? (
+            <Button
+              size={size}
+              variant="ghost"
+              className="text-muted"
+              disabled={Boolean(busy)}
+              onClick={() => {
+                setError(null)
+                setConfirming(true)
+              }}
+              data-sw-chat-branch-discard={branch.id}
+            >
+              <Trash2 size={13} aria-hidden="true" /> Discard
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+      <p className="sr-only" aria-live="polite">
+        {note || ''}
+      </p>
+      {note ? <p data-sw-chat-branch-note="true">{note}</p> : null}
+      {error && !confirming ? (
+        <p role="alert" className="text-bad" data-sw-chat-branch-error="true">
+          {error}
+        </p>
+      ) : null}
+      {ready ? (
+        <Dialog
+          open={confirming}
+          onClose={busy ? () => {} : () => setConfirming(false)}
+          title="Discard the agent’s branch?"
+          description={`This deletes the branch ${branch.name}, its commit and its folder. Your own checkout is not touched.`}
+          wrapDescription
+          footer={
+            <>
+              <Button size={touch ? 'touch' : 'md'} variant="secondary" onClick={() => setConfirming(false)} disabled={Boolean(busy)}>
+                Cancel
+              </Button>
+              <Button
+                size={touch ? 'touch' : 'md'}
+                variant="danger"
+                onClick={() => run('discard')}
+                disabled={Boolean(busy)}
+                data-sw-chat-branch-discard-confirm="true"
+              >
+                <Trash2 size={14} aria-hidden="true" /> {busy === 'discard' ? 'Discarding…' : 'Discard branch'}
+              </Button>
+            </>
+          }
+        >
+          {error ? (
+            <p role="alert" className="px-4 pb-1 text-ui text-bad">
+              {error}
+            </p>
+          ) : null}
+        </Dialog>
+      ) : null}
+    </div>
+  )
+}
+
 function UndoDialog({ open, summary, busy, error, onCancel, onConfirm, touch }) {
   const branch = summary.undo?.kind === 'branch'
+  // Agent branch mode, after Apply: Undo reverts what Apply brought in.
+  const revert = summary.undo?.kind === 'agent-branch'
   const files = summary.files || []
   return (
     <Dialog
       open={open}
       onClose={busy ? () => {} : onCancel}
-      title={branch ? 'Delete the agent’s branch?' : 'Undo the agent’s change?'}
+      title={branch ? 'Delete the agent’s branch?' : revert ? 'Revert the applied branch?' : 'Undo the agent’s change?'}
       description={
-        branch
-          ? `This deletes the branch ${summary.undo.branch} and the agent's commit on it. Your own checkout is not touched.`
-          : files.length === 1
-            ? 'This puts 1 file back the way it was before this answer. Nothing is undone if it changed since.'
-            : `This puts ${plural(files.length, 'file')} back the way they were before this answer. Nothing is undone if any of them changed since.`
+        revert
+          ? `This adds a commit that reverts ${summary.branch?.name || 'the branch'} in your checkout. Nothing changes if your checkout moved on or has uncommitted changes.`
+          : branch
+            ? `This deletes the branch ${summary.undo.branch} and the agent's commit on it. Your own checkout is not touched.`
+            : files.length === 1
+              ? 'This puts 1 file back the way it was before this answer. Nothing is undone if it changed since.'
+              : `This puts ${plural(files.length, 'file')} back the way they were before this answer. Nothing is undone if any of them changed since.`
       }
       wrapDescription
       footer={
@@ -111,13 +264,13 @@ function UndoDialog({ open, summary, busy, error, onCancel, onConfirm, touch }) 
             Cancel
           </Button>
           <Button size={touch ? 'touch' : 'md'} variant="danger" onClick={onConfirm} disabled={busy} data-sw-chat-undo-confirm="true">
-            <Undo2 size={14} aria-hidden="true" /> {busy ? 'Undoing…' : branch ? 'Delete branch' : 'Undo change'}
+            <Undo2 size={14} aria-hidden="true" /> {busy ? 'Undoing…' : branch ? 'Delete branch' : revert ? 'Revert' : 'Undo change'}
           </Button>
         </>
       }
     >
       <div className="space-y-2 px-4 pb-1">
-        {!branch && files.length ? (
+        {!branch && !revert && files.length ? (
           <ul className="max-h-48 space-y-0.5 overflow-y-auto font-mono text-caption text-muted">
             {files.map((file) => (
               <li key={file.path} className="truncate">
@@ -137,7 +290,7 @@ function UndoDialog({ open, summary, busy, error, onCancel, onConfirm, touch }) 
   )
 }
 
-export default function RunSummary({ message, owner = false, touch = false, onUndo = null, onRecapture = null }) {
+export default function RunSummary({ message, owner = false, touch = false, onUndo = null, onBranch = null, onRecapture = null }) {
   const summary = message.summary
   const refs = useRefs()
   const [confirming, setConfirming] = useState(false)
@@ -147,7 +300,8 @@ export default function RunSummary({ message, owner = false, touch = false, onUn
   if (!summary) return null
   const files = summary.files || []
   const undone = summary.undone
-  const canUndo = Boolean(owner && onUndo && summary.undo?.available && !undone)
+  const waiting = summary.branch?.state === 'ready'
+  const canUndo = Boolean(owner && onUndo && summary.undo?.available && !undone && !waiting)
   const resolved = (summary.resolved || []).map((id) => resolveToken(refs?.index, 'comment', id) || { id, plain: true })
   const commit = summary.commit
   const short = commit?.sha ? commit.sha.slice(0, 7) : null
@@ -246,11 +400,17 @@ export default function RunSummary({ message, owner = false, touch = false, onUn
           ) : null}
         </div>
       ) : null}
-      {(onRecapture && files.length && !undone) || canUndo || (owner && summary.undo && !summary.undo.available && !undone) || undone ? (
+      {summary.branch?.id && summary.branch?.name ? (
+        <BranchActions message={message} summary={summary} owner={owner} touch={touch} onBranch={onBranch} />
+      ) : null}
+      {(onRecapture && files.length && !undone && !waiting) ||
+      canUndo ||
+      (owner && summary.undo && !summary.undo.available && !undone) ||
+      undone ? (
         <footer className="space-y-1 border-t border-line px-2.5 py-1.5">
-          {(onRecapture && files.length && !undone) || canUndo ? (
+          {(onRecapture && files.length && !undone && !waiting) || canUndo ? (
             <div className={cn('gap-1.5', touch ? 'grid grid-cols-2' : 'flex flex-wrap')}>
-              {onRecapture && files.length && !undone ? (
+              {onRecapture && files.length && !undone && !waiting ? (
                 <Button
                   size={touch ? 'touch' : 'sm'}
                   variant="secondary"
@@ -289,7 +449,9 @@ export default function RunSummary({ message, owner = false, touch = false, onUn
             <p className="text-caption text-muted">
               {undone.kind === 'branch'
                 ? `Deleted the branch ${undone.branch}.`
-                : `Put ${plural(undone.files || files.length, 'file')} back.`}
+                : undone.kind === 'revert'
+                  ? `Reverted ${undone.branch} in your checkout.`
+                  : `Put ${plural(undone.files || files.length, 'file')} back.`}
             </p>
           ) : null}
         </footer>
