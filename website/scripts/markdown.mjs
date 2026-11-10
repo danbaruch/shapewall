@@ -24,6 +24,7 @@ const SAME_NAME = [
   'local-accounts',
   'notifications',
   'page-checks',
+  'pull-requests',
   'starter-agent',
   'updates',
 ]

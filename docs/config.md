@@ -41,6 +41,7 @@ in the serve log and the board keeps the last good config. `outputDir`, `boardUr
 | `agent`         | object                | none                                | The board chat's model endpoint. See [Agent](#agent) below.                                                                                                   |
 | `starterAgent`  | object                | none                                | The sandboxed starter agent: who may dispatch work, tests, budgets. See [starter-agent.md](starter-agent.md).                                                 |
 | `sitemap`       | URL, file or object   | none                                | Default source for `shapewall sitemap`. See [Sitemap import](#sitemap-import).                                                                                |
+| `ci`            | object                | none                                | Capture on pull requests: threshold, pages, ignore selectors, build and serve commands. See [CI](#ci) below.                                                  |
 
 Environment overrides: `SHAPEWALL_BROWSER_CHANNEL`, `SHAPEWALL_BROWSER_PATH`.
 
@@ -394,6 +395,41 @@ Versions are kept for the default environment only.
 only. The token comes from `SHAPEWALL_GITHUB_TOKEN` or `GITHUB_TOKEN` and the webhook secret from `SHAPEWALL_GITHUB_WEBHOOK_SECRET`; a
 `token` or `webhookSecret` key here is an error. Environment overrides: `SHAPEWALL_GITHUB_REPO`, `SHAPEWALL_BOARD_URL`,
 `SHAPEWALL_GITHUB_API_URL`. See [github.md](github.md).
+
+## CI
+
+Capture on every pull request: what `shapewall ci` and the workflow from `shapewall init --ci` read. See
+[pull-requests.md](pull-requests.md).
+
+```json
+{
+  "ci": {
+    "threshold": 0.001,
+    "pages": ["home", "pricing", "login"],
+    "viewports": ["desktop", "phone"],
+    "ignore": [".clock", "#ad-slot"],
+    "start": { "install": ["npm", "ci"], "build": ["npm", "run", "build"], "serve": ["npm", "start"], "url": "http://127.0.0.1:3000" }
+  }
+}
+```
+
+| Key         | Type     | Default         | Notes                                                                                                                                                                                    |
+| ----------- | -------- | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`   | boolean  | `true`          | `false` turns pull request captures off without deleting the workflow.                                                                                                                   |
+| `threshold` | 0-1      | `0.001`         | Share of pixels below which a shot counts as unchanged (0.001 is 0.1%). A size change always counts. `--threshold` overrides it.                                                         |
+| `pages`     | string[] | every page      | Page ids to compare (an allow-list), in the config's order.                                                                                                                              |
+| `viewports` | string[] | each page's own | Viewport names to compare.                                                                                                                                                               |
+| `ignore`    | string[] | none            | CSS selectors hidden (`visibility: hidden`) on both sides before each shot: clocks, ads, random content. Up to 50.                                                                       |
+| `images`    | string   | `"links"`       | `"links"`: the comment links to the workflow artifact. `"branch"`: thumbnails committed to a `shapewall-ci` branch and shown inline (public repositories only; needs `contents: write`). |
+| `maxPages`  | 1-500    | `50`            | Compare at most this many pages. `--max-pages` overrides it.                                                                                                                             |
+| `start`     | object   | none            | Build and serve mode: `install`, `build` and `serve` commands, the `url` serve listens on, and `timeout` in ms (default 180000).                                                         |
+
+`start` commands are argv arrays (`["npm", "run", "build"]`): a program name found on `PATH`, then its arguments, run without a shell.
+A string is an error, and so are paths (`./build.sh`, so a config cannot name a program the repository ships), shells and launchers
+(`sh`, `bash`, `cmd`, `powershell`, `env`, `sudo`, `xargs` and similar), which would turn the array back into a shell string. `url` must
+be a local address (127.0.0.1, localhost or [::1]); without it, the board's `baseUrl` is used and must be local. The commands run only
+from `shapewall ci capture --allow-start` inside a CI job (`GITHUB_ACTIONS` or `CI` is `true`), never on your own machine, and without
+`GITHUB_TOKEN` and the Actions runtime tokens in their environment.
 
 ## Agent
 

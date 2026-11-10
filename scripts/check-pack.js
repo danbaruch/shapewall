@@ -29,6 +29,7 @@ export const USER_GUIDES = [
   'docs/local-accounts.md',
   'docs/notifications.md',
   'docs/page-checks.md',
+  'docs/pull-requests.md',
   'docs/performance.md',
   'docs/starter-agent.md',
   'docs/updates.md',

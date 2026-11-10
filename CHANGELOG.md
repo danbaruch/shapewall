@@ -3,6 +3,15 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+- Capture on pull requests: `shapewall init --ci` writes a GitHub Actions workflow that captures the base branch and the pull request,
+  compares every page and screen size with the pixel diff, and keeps one comment on the pull request up to date ("Shapewall: 4 of 23
+  pages changed") with the changed share and before, after and diff images. It builds and serves both sides from `ci.start` in the
+  config, or captures a deploy preview URL. Pull requests from forks get the summary in the job summary instead. Turn it off by
+  deleting the workflow, with `"ci": { "enabled": false }`, or with `[skip shapewall]` in the title. See docs/pull-requests.md.
+- New commands: `shapewall ci capture-compare`, `ci capture`, `ci comment`, `ci enabled` and `ci wait`.
+
 ## 0.2.3 - 2026-11-10
 
 - The agent's model and thinking level are shown on a new chat before the first message, each with its own menu in the composer

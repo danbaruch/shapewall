@@ -237,6 +237,14 @@ comment text, page URL, element, screenshot link and a link back to the board. P
 `Fixes shapewall#12` (or close the comment's issue) are linked to it by `shapewall github sync` or a signed webhook, and when one merges,
 the comment resolves with the PR as its fix. Details: [docs/github.md](docs/github.md).
 
+### Capture on pull requests
+
+`npx shapewall init --ci` writes a GitHub Actions workflow. Commit it, and every pull request gets one comment, updated on each push:
+"Shapewall: 4 of 23 pages changed", with each changed page and screen size, the share of pixels that changed, and the before, after and
+diff images as a workflow artifact. It builds and serves both branches (`ci.start` in the config) or captures your deploy preview, never
+fails the pull request, and turns off with `"ci": { "enabled": false }` or `[skip shapewall]` in a title.
+Details: [docs/pull-requests.md](docs/pull-requests.md).
+
 Prompts that work, the data shapes, and how to keep it safe (comments are untrusted input): [docs/agent-workflow.md](docs/agent-workflow.md).
 Copy-paste setups for Claude Code, Codex, goose, Ollama and chat bots: [docs/agent-recipes.md](docs/agent-recipes.md).
 Optional integrations: [notifications](#notifications), GitHub connect above, and a [bridge to agents in a Buzz chat](docs/buzz.md).

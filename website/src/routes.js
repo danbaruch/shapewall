@@ -191,6 +191,16 @@ export const DOC_GROUPS = [
           'See each resolved comment before and after the change, put a branch preview beside the page as a variant, and compare staging with production.',
       },
       {
+        path: '/docs/pull-requests',
+        file: 'pull-requests',
+        repo: 'pull-requests',
+        nav: 'Capture on pull requests',
+        title: 'Capture on pull requests: a visual diff comment | Shapewall',
+        description:
+          'Capture every page before and after each pull request and keep one comment up to date with what changed, the pixel share and diff images.',
+        og: 'docs-compare',
+      },
+      {
         path: '/docs/page-checks',
         file: 'page-checks',
         repo: 'page-checks',
