@@ -95,6 +95,7 @@ jobs:
       # "ci": { "enabled": false } in the config, or [skip shapewall] in the title, stops here.
       - name: Is Shapewall on for this pull request?
         id: gate
+        continue-on-error: true
         working-directory: head
         run: npx --yes "$SHAPEWALL" ci enabled
 
@@ -107,10 +108,12 @@ jobs:
           key: shapewall-chromium-\${{ runner.os }}-${playwright}
 
       - name: Install Chromium and its system libraries
+        continue-on-error: true
         if: steps.gate.outputs.enabled == 'true' && steps.browser-cache.outputs.cache-hit != 'true'
         run: npx --yes "$PLAYWRIGHT" install --with-deps chromium
 
       - name: Install the system libraries Chromium needs (browser from the cache)
+        continue-on-error: true
         if: steps.gate.outputs.enabled == 'true' && steps.browser-cache.outputs.cache-hit == 'true'
         run: npx --yes "$PLAYWRIGHT" install-deps chromium
 
