@@ -402,7 +402,8 @@ export function loadOptionPrefs(storage = globalThis.localStorage) {
     const value = JSON.parse(storage?.getItem(OPTION_PREFS_KEY) || 'null')
     if (!value || typeof value !== 'object') return emptyPrefs()
     const chats = {}
-    for (const [key, entry] of Object.entries(value.chats || {})) chats[key] = { choices: cleanMap(entry?.choices), at: Number(entry?.at) || 0 }
+    for (const [key, entry] of Object.entries(value.chats || {}))
+      chats[key] = { choices: cleanMap(entry?.choices), at: Number(entry?.at) || 0 }
     const agents = {}
     for (const [key, entry] of Object.entries(value.agents || {})) agents[key] = cleanMap(entry)
     return { chats, agents }
@@ -490,21 +491,26 @@ export function optionGroups(options) {
 }
 
 // Whether the footer has room for a control per option ("split") or takes
-// the single combined one ("combined"). `width`: the footer row in px.
-const FOOTER_BUTTON = 44
-const FOOTER_GAP = 8
-const chipWidth = (text) => 34 + Math.ceil(String(text).length * 6.8)
-export function footerLayout({ width, options, usage = false }) {
+// the single combined one ("combined"), and whether the usage ring keeps its
+// number ("full") or shows the ring alone ("ring"; the number is in its
+// tooltip). `width`: the footer row in px. Room for the ring is kept even
+// before the first answer, so the controls do not change shape once it
+// appears. The widths are measured from the rendered controls (text-caption,
+// px-1.5, a 12 px chevron), rounded up.
+const FOOTER = {
+  pointer: { button: 36, gap: 4, chip: 26, char: 6.5, more: 32, ring: 30, usage: 56 },
+  touch: { button: 44, gap: 8, chip: 40, char: 7, more: 44, ring: 44, usage: 64 },
+}
+export function footerLayout({ width, options, usage = false, touch = false }) {
   const { model, effort, more } = optionGroups(options)
-  if (!model && !effort && !more.length) return 'none'
-  const shown = [model, effort].filter(Boolean)
-  const needed =
-    3 * FOOTER_BUTTON +
-    3 * FOOTER_GAP +
-    (usage ? 52 : 0) +
-    shown.reduce((sum, option) => sum + chipWidth(currentLabel(option)) + 2, 0) +
-    (more.length ? FOOTER_BUTTON + 2 : 0)
-  return !width || needed <= width ? 'split' : 'combined'
+  const size = touch ? FOOTER.touch : FOOTER.pointer
+  const room = width ? width - 3 * size.button - 3 * size.gap : Infinity
+  const chips =
+    [model, effort].filter(Boolean).reduce((sum, option) => sum + size.chip + Math.ceil(currentLabel(option).length * size.char) + 2, 0) +
+    (more.length ? size.more + 2 : 0)
+  const layout = !model && !effort && !more.length ? 'none' : chips + size.ring <= room ? 'split' : 'combined'
+  const used = layout === 'split' ? chips : layout === 'combined' ? Math.min(chips, 160) : 0
+  return { layout, usage: !usage || used + size.usage <= room ? 'full' : 'ring' }
 }
 
 // The answer's meta line: the model and thinking level it ran with, from
@@ -515,11 +521,9 @@ export function turnOptionsLine(message) {
   const used = Array.isArray(message?.options) && message.options.length ? message.options : null
   const items = used
     ? used.map((item) => valueLabel({ category: item.category, name: item.name }, { name: item.value, description: item.description }))
-    : (message?.cards || [])
-        .filter(isOptionNote)
-        .map((card) => {
-          const [, kind, value] = LEGACY_NOTE_RE.exec(card.label)
-          return valueLabel({ category: kind === 'model' ? 'model' : 'thought_level', name: 'effort' }, { name: value })
-        })
+    : (message?.cards || []).filter(isOptionNote).map((card) => {
+        const [, kind, value] = LEGACY_NOTE_RE.exec(card.label)
+        return valueLabel({ category: kind === 'model' ? 'model' : 'thought_level', name: 'effort' }, { name: value })
+      })
   return items.filter(Boolean).join(' · ')
 }

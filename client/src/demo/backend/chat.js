@@ -30,7 +30,7 @@ import { AGENT_INFO, demoAgentInfo, demoAgentOf, demoProfiles, fail, hex, newId,
 import { dropRating, findAnswer, ratingEntry, ratingsOf, upsertRating, validateRating } from '../../../../src/agent/ratings-core.js'
 
 const MESSAGES_MAX = 200
-import { DEMO_OPTIONS, demoFiles, demoMentions } from './composer.js'
+import { DEMO_OPTION_IDS, demoFiles, demoMentions, demoOptionsFor } from './composer.js'
 
 export function chatRoutes(ctx) {
   const { state, now, save, iso, runs, boardAccess, boardViewOf, commentsOf, chatAllowed } = ctx
@@ -144,8 +144,21 @@ export function chatRoutes(ctx) {
     }
     return workspaceId ? `console.html#/w/${workspaceId}/settings#agents` : 'console.html'
   }
-  const optionsOf = (key) =>
-    DEMO_OPTIONS.map((option) => ({ ...option, currentValue: choices.get(`${key}|${option.id}`) || option.currentValue }))
+  // The thread's scripted agent's options, with this chat's choices.
+  const optionsOf = (key, profileId = metaStore()[key]?.profileId) =>
+    demoOptionsFor(demoAgentOf(profileId).id).map((option) => {
+      const chosen = choices.get(`${key}|${option.id}`)
+      return option.values.some((item) => item.value === chosen) ? { ...option, currentValue: chosen } : option
+    })
+  // Choices a chat sends ({ configId: value }, kept in the browser): the ones
+  // this agent offers, the rest ignored as on the server.
+  const applyChoices = (key, raw) => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return
+    for (const option of optionsOf(key)) {
+      const value = raw[option.id]
+      if (typeof value === 'string' && option.values.some((item) => item.value === value)) choices.set(`${key}|${option.id}`, value)
+    }
+  }
 
   return [
     // The board's agent, both scripted agents, and where the Agents card is
@@ -220,11 +233,24 @@ export function chatRoutes(ctx) {
         const access = chatAccess(params[0], params[1])
         const key = threadKey(access, params[0], params[1])
         if (runs.has(key)) fail(409, 'agent_running', 'Wait for the answer to finish before switching.')
+        applyChoices(key, body?.choices)
         const options = optionsOf(key)
         const option = options.find((item) => item.id === body?.configId)
         if (!option || !option.values.some((item) => item.value === body?.value))
           fail(400, 'bad_option', 'The agent does not offer that choice.')
         choices.set(`${key}|${option.id}`, body.value)
+        return { options: optionsOf(key) }
+      },
+    ],
+    // Before the first message: the options a chat starts with, as on the
+    // server (src/agent/routes.js prepare). Nothing to start in the demo.
+    [
+      'POST',
+      /^\/api\/agent\/boards\/([a-z0-9-]+)\/threads\/([a-z0-9-]+)\/prepare$/,
+      ({ params, body }) => {
+        const access = chatAccess(params[0], params[1])
+        const key = threadKey(access, params[0], params[1])
+        if (!runs.has(key)) applyChoices(key, body?.choices)
         return { options: optionsOf(key) }
       },
     ],
@@ -271,7 +297,7 @@ export function chatRoutes(ctx) {
         delete state.threads[key]
         delete metaStore()[key]
         // A cleared thread is a fresh session: its model and effort start over.
-        for (const id of DEMO_OPTIONS.map((item) => item.id)) choices.delete(`${key}|${id}`)
+        for (const id of DEMO_OPTION_IDS) choices.delete(`${key}|${id}`)
         return { ok: true }
       },
     ],
@@ -440,7 +466,7 @@ export function chatRoutes(ctx) {
           attachments,
           mentions,
           files,
-          options: optionsOf(key),
+          options: (applyChoices(key, body?.options), optionsOf(key)),
           history: messages.length,
           fix: body?.fix === true,
           regenerate: Boolean(previous),

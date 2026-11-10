@@ -248,7 +248,7 @@ const AGENT_STATES = {
 }
 function agentTip(agent) {
   if (agent?.demo) return 'Scripted answers that run in this browser. Nothing is sent anywhere and nothing is changed.'
-  if (agent?.local) return 'Runs on the server’s machine over ACP, with its own login.'
+  if (agent?.local) return 'Runs on the server’s computer, with its own login.'
   if (agent?.host) return `Messages go to ${agent.host}${agent.sendsKey ? ", with the server's API key" : ''}.`
   return null
 }

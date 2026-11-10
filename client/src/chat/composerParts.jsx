@@ -1,6 +1,6 @@
 // Small pieces of the composer: mention and file chips, queued messages,
-// follow-up chips, the help card, the usage ring, the model and effort
-// pickers, and the "Allow for this chat" list in Chat settings.
+// follow-up chips, the help card, the usage ring, the agent's option menus
+// (model, thinking, more), and the "Allow for this chat" list in Chat settings.
 
 import { useState } from 'react'
 import { AtSign, ChevronDown, Clock, FileText, Pencil, ShieldCheck, SlidersHorizontal, X } from 'lucide-react'
@@ -178,7 +178,8 @@ export function HelpCard({ onClose, touch }) {
 }
 
 // Context used and the last answer's tokens, when the backend reports them.
-export function UsageRing({ usage, touch }) {
+// `ringOnly`: a tight footer; the number stays in the tooltip and label.
+export function UsageRing({ usage, touch, ringOnly = false }) {
   const summary = usageSummary(usage)
   if (!summary) return null
   const size = 18
@@ -215,7 +216,7 @@ export function UsageRing({ usage, touch }) {
                 />
               </svg>
             ) : null}
-            <span className="text-caption">{summary.label}</span>
+            {ringOnly && percent !== null ? null : <span className="text-caption">{summary.label}</span>}
           </Button>
         </PopoverTrigger>
       </Tooltip>
@@ -275,6 +276,8 @@ function OptionItems({ option, onChoose }) {
 // why it cannot change (aria-disabled, the tooltip).
 function OptionMenu({ hook, label, ariaLabel, tooltip, icon = null, options, onChoose, disabled, disabledReason, touch, width = 'w-64' }) {
   const [open, setOpen] = useState(false)
+  // The button's tooltip, never on top of its own open menu.
+  const [tip, setTip] = useState(false)
   const [busy, setBusy] = useState(false)
   const choose = async (option, value) => {
     if (busy || value === option.currentValue) return
@@ -288,7 +291,7 @@ function OptionMenu({ hook, label, ariaLabel, tooltip, icon = null, options, onC
   const sections = options.length > 1
   return (
     <DropdownMenu open={open && !disabled} onOpenChange={(next) => setOpen(next && !disabled)}>
-      <Tooltip content={disabled ? disabledReason : tooltip}>
+      <Tooltip content={disabled ? disabledReason : tooltip} open={tip && !open} onOpenChange={setTip}>
         <DropdownMenuTrigger asChild>
           <Button
             type="button"

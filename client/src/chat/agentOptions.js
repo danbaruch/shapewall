@@ -50,7 +50,9 @@ export function useAgentOptions({ boardId, threadId, profileId, agentLabel, enab
         result = null
       }
       setPrepared((current) =>
-        current.key === started ? { key: started, options: result?.options || null, error: result?.error || null, loading: false } : current,
+        current.key === started
+          ? { key: started, options: result?.options || null, error: result?.error || null, loading: false }
+          : current,
       )
       return result
     },

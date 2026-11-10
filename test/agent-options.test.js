@@ -119,6 +119,13 @@ test('prepare: an owner sees the options before the first message; the first tur
   ])
   assert.deepEqual(JSON.parse((await send(entry, 'board', 'config')).text), { model: 'stub-deep', effort: 'high' })
   assert.equal(entry.pool().length, 1, 'still one process')
+  // What a new chat starts from is the agent's defaults, not this chat's choices.
+  const fresh = await entry.api('POST', 'chat-aaaaaaaaaaaaaaaa/prepare', {})
+  assert.equal(fresh.json.cached, true)
+  assert.deepEqual(
+    fresh.json.options.map((item) => item.currentValue),
+    ['stub-fast', 'medium', 'ask'],
+  )
 })
 
 test('prepare: known options start no process; a forced look does; a full pool is never made room in', async () => {
@@ -179,6 +186,18 @@ test('prepare: quiet when the agent offers nothing; says so when it is not signe
   const again = await auth.api('POST', 'board/prepare', {})
   assert.equal(again.json.error.code, 'agent_auth')
   assert.equal(auth.pool().length, 0)
+
+  // Signed out mid-session (the prompt is refused): the answer carries how
+  // to sign in, and the session stops so Check again starts it afresh.
+  const later = await board('options-promptauth', { env: { SHAPEWALL_AGENT_ACP_ENV: 'STUB_ACP_MODE', STUB_ACP_MODE: 'promptauth' } })
+  assert.ok((await later.api('POST', 'board/prepare', {})).json.options)
+  assert.equal(later.pool().length, 1)
+  const failed = await send(later, 'board', 'hello')
+  assert.equal(failed.error.code, 'agent_auth')
+  assert.ok(await until(() => later.pool().length === 0))
+  const fresh = await later.api('POST', 'board/prepare', { force: true })
+  assert.ok(fresh.json.options)
+  assert.equal(later.pool().length, 1)
 })
 
 test('prepare: the older ACP modes become a mode option, without one that skips approvals', async () => {
@@ -196,10 +215,7 @@ test('prepare: the older ACP modes become a mode option, without one that skips 
       ],
     },
   ])
-  assert.equal(
-    (await entry.api('POST', 'board/options', { configId: MODE_OPTION_ID, value: 'bypassPermissions' })).status,
-    400,
-  )
+  assert.equal((await entry.api('POST', 'board/options', { configId: MODE_OPTION_ID, value: 'bypassPermissions' })).status, 400)
   const switched = await entry.api('POST', 'board/options', { configId: MODE_OPTION_ID, value: 'architect' })
   assert.equal(switched.json.options[0].currentValue, 'architect')
   assert.equal((await send(entry, 'board', 'mode')).text, 'architect')

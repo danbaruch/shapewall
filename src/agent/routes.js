@@ -305,11 +305,15 @@ export function agentRouter({
   router.optionsCache = optionsCache
   const cachedOptions = (current) => optionsCache.get(current)
   const rememberOptions = (current, options, error = null) => optionsCache.remember(current, options, error)
+  // A session's options as it started (the agent's defaults, not one chat's
+  // choices), for the next new chat.
+  const rememberSession = (current, backend, key) =>
+    rememberOptions(current, backend.sessionDefaults?.(key) || backend.sessionOptions?.(key))
   const pickerOptions = async (current, key) => {
     const backend = liveOwnerBackend(current)
     if (backend?.sessionOptions) {
       const live = backend.sessionOptions(key)
-      if (live?.length) rememberOptions(current, live)
+      if (live?.length) rememberSession(current, backend, key)
       return live
     }
     if (!backend?.listModels) return null
@@ -328,7 +332,8 @@ export function agentRouter({
     if (backend?.setSessionOption || (!backend && current.backend === 'acp')) {
       const option = known?.find((item) => item.id === configId)
       if (!option) throw new AgentError('no_session', 'The agent session ended. Send a message, then choose again.', 409)
-      if (!option.values.some((item) => item.value === value)) throw new AgentError('bad_option', 'The agent does not offer that choice.', 400)
+      if (!option.values.some((item) => item.value === value))
+        throw new AgentError('bad_option', 'The agent does not offer that choice.', 400)
       return withChoices(known, { ...choices, [configId]: value })
     }
     if (!backend?.listModels) throw new AgentError('no_session', 'The agent session ended. Send a message, then choose again.', 409)
@@ -653,7 +658,7 @@ export function agentRouter({
           // What the profile offers, as this turn's session saw it; a turn that
           // could not sign in drops what was known (the next look starts fresh).
           if (reply.error?.code === 'agent_auth') optionsCache.drop(current)
-          else if (backend.id === 'acp') rememberOptions(current, backend.sessionOptions?.(`${board.id}/${threadId}`))
+          else if (backend.id === 'acp') rememberSession(current, backend, `${board.id}/${threadId}`)
           if (baseline) {
             try {
               const { summary, undo } = await finishTurnChanges(config, baseline, {
@@ -934,7 +939,7 @@ export function agentRouter({
         if (runs.has(key) || selecting.has(key)) return res.json({ options: backend.sessionOptions(key) })
         const options = await backend.prepare(key, { choices, signal: admission.signal })
         ownerThreads.add(key)
-        rememberOptions(current, options)
+        rememberSession(current, backend, key)
         res.json({ options: options?.length ? options : null })
       } catch (error) {
         if (error.code === 'agent_auth') {

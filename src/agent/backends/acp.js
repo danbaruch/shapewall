@@ -578,6 +578,8 @@ class AcpProcess {
       this.choices = sessionChoices(session)
       this.configOptions = Array.isArray(session.configOptions) ? session.configOptions : []
       this.modes = session.modes && typeof session.modes === 'object' ? session.modes : null
+      // As the session started, before any chat's choices: what a new chat starts from.
+      this.startOptions = sessionOptions(this.configOptions, this.modes)
       this.state = 'ready'
     } catch (error) {
       throw this.startError(error)
@@ -765,6 +767,17 @@ class AcpProcess {
   // The composer's option menus, as sessionOptions lists them.
   options() {
     return sessionOptions(this.configOptions, this.modes)
+  }
+  // The same menus with the values the session started with (the agent's
+  // defaults): what the options cache keeps for the next new chat.
+  defaults() {
+    const now = this.options()
+    const start = new Map((this.startOptions || []).map((option) => [option.id, option.currentValue]))
+    return now.map((option) =>
+      start.has(option.id) && option.values.some((item) => item.value === start.get(option.id))
+        ? { ...option, currentValue: start.get(option.id) }
+        : option,
+    )
   }
 
   // One of those options to one of the values it lists: a config option
@@ -1268,7 +1281,8 @@ export function createAcpBackend(
   const evictFor = (evict) => {
     if (processes.size + starting.size < limit.processesMax) return
     const idle = [...processes.values()].filter((item) => !item.turn && item.state === 'ready').sort((a, b) => a.usedAt - b.usedAt)
-    if (!idle.length || !evict) throw new AgentError('agent_busy', `${settings.label} is busy in other threads. Try again in a moment.`, 429)
+    if (!idle.length || !evict)
+      throw new AgentError('agent_busy', `${settings.label} is busy in other threads. Try again in a moment.`, 429)
     idle[0].kill('evicted')
   }
 
@@ -1352,6 +1366,11 @@ export function createAcpBackend(
       const turn = agent.prompt(promptBlocks({ messages, fresh: agent.fresh, image, thread }), signal)
       try {
         for await (const event of turn.events) yield event
+      } catch (error) {
+        // Not signed in: this session stops, so Check again (or the next
+        // message) starts the agent afresh with the new login.
+        if (error?.code === 'agent_auth') agent.kill('signed_out')
+        throw error
       } finally {
         turn.finish()
         await agent.settled()
@@ -1373,6 +1392,11 @@ export function createAcpBackend(
     sessionOptions(thread) {
       const agent = processes.get(thread)
       return agent && agent.state === 'ready' ? agent.options() : null
+    },
+    // The same, with the values the session started with.
+    sessionDefaults(thread) {
+      const agent = processes.get(thread)
+      return agent && agent.state === 'ready' ? agent.defaults() : null
     },
     // The options before the first message: the thread's session, started
     // the way its first turn would start it (and then reused by that turn),

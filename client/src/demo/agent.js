@@ -5,6 +5,7 @@
 // answer look as they do with a real agent. It asks before it "edits" anything, and Stop
 // ends it like a real run. Nothing leaves the browser; it changes nothing.
 import { replyText, settleCardPositions } from '../../../src/agent/reply-text.js'
+import { demoUsedOptions } from './backend/composer.js'
 
 const sleep = (ms, signal) =>
   new Promise((resolve) => {
@@ -429,6 +430,12 @@ export async function* runScriptedTurn({ text, context, signal, run, now = () =>
   reply.text = reply.text.trim()
   settleCardPositions(reply, full)
   reply.durationMs = Math.max(0, now() - startedAt)
+  // The model and level the chat chose, for the answer's meta line.
+  const used = demoUsedOptions(context.options)
+  if (used.length) {
+    reply.options = used
+    reply.model = context.options.find((option) => option.category === 'model')?.currentValue || reply.model
+  }
   if (reply.status !== 'done') delete reply.suggestions
   // Usage as a real agent reports it: this answer's tokens and the session's
   // context (fictional numbers, a 128k window).
