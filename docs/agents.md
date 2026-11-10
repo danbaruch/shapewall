@@ -123,7 +123,10 @@ review on, and look at the changed source, the recapture and before and after be
 
 ## Fix a comment with your agent
 
-On an owner tab with a connected ACP coding agent, an open comment has **Fix with agent**, the thread's primary action. It opens the comment's chat, sends the
+On an owner tab with a connected ACP coding agent, an open comment has **Fix with** and the default agent's name (**Fix with
+Codex**; **Fix again** once it has been fixed), the thread's primary action. With more than one agent connected it is a split button:
+the caret opens the agent picker to run this fix once with another agent. That moves only this comment's chat to that agent (the next
+fix from the main part moves it back); the default stays as it is. It opens the comment's chat, sends the
 comment, page context and a crop near the pin when a capture is available, and asks for a scoped edit. Existing approval cards still
 apply. The comment moves through queued and working. After a successful turn that changed project files, Shapewall recaptures the
 comment's page with a partial capture, adds a thread reply, and marks it done. The thread shows before and after while the comment
