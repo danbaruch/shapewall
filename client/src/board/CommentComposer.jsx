@@ -59,8 +59,15 @@ export function CommentComposer({ draft, onChange, onSubmit, onCancel, busy, peo
       {canAttach ? <ComposerImages draft={images} touch={touch} id="sw-composer-image-error" /> : null}
       {canAttach || canDraw || media?.attachNote ? (
         <div className="flex flex-wrap items-center gap-0.5" data-sw-composer-media="true">
-          {canAttach ? <AttachButton draft={images} touch={touch} disabled={busy} /> : null}
-          {canDraw && !touch ? <DrawTools owner="composer" touch={false} /> : null}
+          {canDraw && !touch ? (
+            <DrawTools
+              owner="composer"
+              touch={false}
+              leading={canAttach ? <AttachButton draft={images} touch={false} disabled={busy} /> : null}
+            />
+          ) : canAttach ? (
+            <AttachButton draft={images} touch={touch} disabled={busy} />
+          ) : null}
           {canDraw && touch && media.page ? (
             <Button size="touch" variant="ghost" onClick={() => setSheet(true)} data-sw-draw-open="true">
               <Brush size={16} aria-hidden="true" /> {shapes ? `Drawing (${shapes})` : 'Draw on the page'}

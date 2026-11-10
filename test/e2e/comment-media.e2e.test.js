@@ -304,6 +304,16 @@ test('phone 390: draw in the full-sheet page, attach, post; 44 px targets', asyn
     await page.waitForFunction((sel) => document.querySelector(`${sel} img`)?.naturalWidth > 0, sheet)
     // The box tool is on when the sheet opens.
     await page.waitForSelector(`${sheet} [data-sw-draw-input="box"]`)
+    // Measured once the sheet's open animation has finished.
+    await page.waitForFunction(
+      (sel) =>
+        document
+          .querySelector(sel)
+          ?.closest('[role="dialog"]')
+          ?.getAnimations({ subtree: true })
+          .every((item) => item.playState === 'finished'),
+      sheet,
+    )
     const area = await page.locator(sheet).boundingBox()
     await drag(page, [area.x + area.width * 0.2, area.y + area.height * 0.1], [area.x + area.width * 0.7, area.y + area.height * 0.2])
     await page.waitForSelector('[data-sw-draw-tools="composer"] [data-sw-draw-count="1"]')

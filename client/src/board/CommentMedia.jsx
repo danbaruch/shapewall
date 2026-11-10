@@ -133,12 +133,19 @@ function useEscapeLeavesTool(active) {
   }, [active])
 }
 
+// A drawing tool's button: with a tooltip for the mouse; on touch screens
+// (no hover, and a tap would leave the tip up) only its accessible name.
+function ToolButton({ touch, label, tooltip, ...props }) {
+  if (touch) return <Button variant="ghost" size="icon" aria-label={label} {...props} />
+  return <IconButton size="icon-sm" label={label} tooltip={tooltip} {...props} />
+}
+
 // Box, Arrow, Pen, the inks, Undo and Clear for the drawing of `owner`.
-// `onTool` hears a tool being picked (the phone opens its sheet then).
-export function DrawTools({ owner, touch, onTool = null, className }) {
+// `onTool` hears a tool being picked (the phone opens its sheet then);
+// `leading` sits first in the row (the composer's attach button).
+export function DrawTools({ owner, touch, onTool = null, leading = null, className }) {
   const mine = useDrawing((value) => (value?.owner === owner ? value : null))
   useEscapeLeavesTool(Boolean(mine?.tool))
-  const size = touch ? 'icon' : 'icon-sm'
   const count = mine?.shapes.length || 0
   return (
     <div
@@ -147,12 +154,13 @@ export function DrawTools({ owner, touch, onTool = null, className }) {
       aria-label="Draw on the page"
       data-sw-draw-tools={owner}
     >
+      {leading}
       {TOOLS.map((tool) => {
         const on = mine?.tool === tool.id
         return (
-          <IconButton
+          <ToolButton
             key={tool.id}
-            size={size}
+            touch={touch}
             variant={on ? 'soft' : 'ghost'}
             aria-pressed={on}
             className={cn(on && 'ring-1 ring-accent/50')}
@@ -165,16 +173,16 @@ export function DrawTools({ owner, touch, onTool = null, className }) {
             data-sw-draw-tool={tool.id}
           >
             <tool.icon size={15} aria-hidden="true" />
-          </IconButton>
+          </ToolButton>
         )
       })}
       <span className="mx-0.5 h-4 w-px bg-line" aria-hidden="true" />
       {DRAWING_INKS.map((ink) => {
         const on = (mine?.ink || DRAWING_INKS[0]) === ink
         return (
-          <IconButton
+          <ToolButton
             key={ink}
-            size={size}
+            touch={touch}
             aria-pressed={on}
             label={`${INK_LABELS[ink]} ink`}
             onClick={() => drawing.set({ ink })}
@@ -184,12 +192,12 @@ export function DrawTools({ owner, touch, onTool = null, className }) {
               className={cn('block h-3.5 w-3.5 rounded-full', INK_CLASS[ink], on ? 'ring-2 ring-fg ring-offset-1 ring-offset-surface' : '')}
               aria-hidden="true"
             />
-          </IconButton>
+          </ToolButton>
         )
       })}
       <span className="mx-0.5 h-4 w-px bg-line" aria-hidden="true" />
-      <IconButton
-        size={size}
+      <ToolButton
+        touch={touch}
         label="Undo the last shape"
         tooltip="Undo"
         disabled={!count}
@@ -197,9 +205,9 @@ export function DrawTools({ owner, touch, onTool = null, className }) {
         data-sw-draw-undo="true"
       >
         <Undo2 size={15} aria-hidden="true" />
-      </IconButton>
-      <IconButton
-        size={size}
+      </ToolButton>
+      <ToolButton
+        touch={touch}
         label="Clear the drawing"
         tooltip="Clear"
         disabled={!count}
@@ -207,7 +215,7 @@ export function DrawTools({ owner, touch, onTool = null, className }) {
         data-sw-draw-clear="true"
       >
         <Trash2 size={15} aria-hidden="true" />
-      </IconButton>
+      </ToolButton>
       {count ? (
         <span className="ml-1 text-caption text-faint tabular-nums" aria-live="polite" data-sw-draw-count={count}>
           {count} {count === 1 ? 'shape' : 'shapes'}

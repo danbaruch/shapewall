@@ -251,8 +251,15 @@ function ReplyBox({ comment, busy, onReply, touch, people, autoFocus, askName = 
       ) : null}
       {canAttach || canDraw || media?.attachNote ? (
         <div className="-mt-1 -ml-1 flex w-full flex-wrap items-center gap-0.5" data-sw-reply-media={comment.id}>
-          {canAttach ? <AttachButton draft={images} touch={touch} disabled={busy} /> : null}
-          {canDraw && !touch ? <DrawTools owner={owner} touch={false} /> : null}
+          {canDraw && !touch ? (
+            <DrawTools
+              owner={owner}
+              touch={false}
+              leading={canAttach ? <AttachButton draft={images} touch={false} disabled={busy} /> : null}
+            />
+          ) : canAttach ? (
+            <AttachButton draft={images} touch={touch} disabled={busy} />
+          ) : null}
           {canDraw && touch && page ? (
             <Button size="touch" variant="ghost" onClick={() => setSheet(true)} data-sw-draw-open="true">
               <Brush size={16} aria-hidden="true" /> {shapes ? `Drawing (${shapes})` : 'Draw on the page'}
@@ -278,11 +285,11 @@ function DrawingNote({ item, currentVersion, onShow }) {
   const previous = Boolean(item.drawing.captureVersion && currentVersion && item.drawing.captureVersion !== currentVersion)
   const count = item.drawing.shapes.length
   return (
-    <p className="mt-1.5 flex flex-wrap items-center gap-1 text-xs text-muted" data-sw-message-drawing={previous ? 'previous' : 'current'}>
-      <Brush size={11} className="shrink-0" aria-hidden="true" />
+    <p className="mt-1.5 text-xs text-muted" data-sw-message-drawing={previous ? 'previous' : 'current'}>
+      <Brush size={11} className="mr-1 inline-block align-[-1px]" aria-hidden="true" />
       {previous ? (
         <>
-          <span>Drawn on the previous capture ({count === 1 ? 'one shape' : `${count} shapes`}).</span>
+          <span>Drawn on the previous capture ({count === 1 ? 'one shape' : `${count} shapes`}).</span>{' '}
           {onShow ? (
             <button
               type="button"
