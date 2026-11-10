@@ -1,12 +1,11 @@
 // Command-line parts that talk to a hosted Shapewall: `push`, `hosted`, and
 // the --remote forms of `comments`, `watch` and `mcp`.
 
-import fs from 'node:fs'
 import { portableChecks } from '../checks/transport.js'
 import { getBoard, loadConfig } from '../config.js'
 import { formatFeedback, formatFeedbackForAgent, untrustedJson } from '../feedback.js'
 import { AGENT_STATUSES, readManifest, readVariants } from '../store.js'
-import { createRemote, pushDefinition, pushFiles, remoteSettings } from './remote.js'
+import { createRemote, pushDefinition, pushFiles, readCaptureFile, remoteSettings } from './remote.js'
 import { safeOut, terminalSafe } from './terminal.js'
 
 export async function push(flags, print) {
@@ -30,7 +29,8 @@ export async function push(flags, print) {
     for (const [area, name, file] of files) {
       // A server from before element maps does not take them (its boards keep x/y pins).
       if (name.endsWith('.elements.json') && !started.limits.elements) continue
-      const data = fs.readFileSync(file)
+      // Never through a symlink (see readCaptureFile).
+      const data = readCaptureFile(config, file)
       const cap = name.endsWith('.html')
         ? started.limits.html
         : name.endsWith('.elements.json')

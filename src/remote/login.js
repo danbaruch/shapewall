@@ -10,7 +10,7 @@
 import os from 'node:os'
 import { spawn } from 'node:child_process'
 import { credentialsFile, saveCredential } from './credentials.js'
-import { remoteOrigin } from './remote.js'
+import { readBounded, remoteOrigin } from './remote.js'
 import { safeOut, terminalSafe } from './terminal.js'
 
 // No shell anywhere: on Windows `cmd /c start` would run `&`, `|` or `^` in
@@ -67,7 +67,8 @@ async function post(fetchImpl, origin, pathname, body) {
   })
   let data = null
   try {
-    data = await response.json()
+    // A login answer is small: a server cannot stream this process full.
+    data = JSON.parse((await readBounded(response, 65536)).toString('utf8'))
   } catch {
     data = null
   }
@@ -111,7 +112,8 @@ export async function login(
   for (;;) {
     if (signal?.aborted) throw new Error('Login cancelled.')
     if (Date.now() > deadline) throw new Error('The code expired before anyone approved it. Run shapewall login again.')
-    await sleep(Math.max(1, interval) * 1000)
+    // 1 to 30 seconds whatever the server says (NaN would poll in a tight loop).
+    await sleep(Math.min(Math.max(Number(interval) || 3, 1), 30) * 1000)
     let polled
     try {
       polled = await post(fetchImpl, origin, '/api/v1/device/poll', { deviceCode })

@@ -5,6 +5,7 @@
 // set. Nothing here ever prints a token.
 
 import fs from 'node:fs'
+import { randomBytes } from 'node:crypto'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -42,12 +43,20 @@ export function readCredential(origin, env = process.env) {
 export function saveCredential(origin, entry, env = process.env) {
   const file = credentialsFile(env)
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 })
+  // mkdir's mode only applies to a folder it creates: make an existing one private too.
+  if (process.platform !== 'win32') fs.chmodSync(path.dirname(file), 0o700)
   const data = readAll(file)
   data.version = 1
   data.servers[origin] = entry
-  const temp = `${file}.${process.pid}.tmp`
-  fs.writeFileSync(temp, `${JSON.stringify(data, null, 2)}\n`, { mode: 0o600 })
-  fs.renameSync(temp, file)
+  // A fresh, unguessable temporary file ('wx' never follows a planted symlink).
+  const temp = `${file}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`
+  try {
+    fs.writeFileSync(temp, `${JSON.stringify(data, null, 2)}\n`, { mode: 0o600, flag: 'wx' })
+    fs.renameSync(temp, file)
+  } catch (error) {
+    fs.rmSync(temp, { force: true })
+    throw error
+  }
   if (process.platform !== 'win32') fs.chmodSync(file, 0o600)
   return file
 }
