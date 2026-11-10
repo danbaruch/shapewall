@@ -258,7 +258,7 @@ export function AgentsCard({
             <li key={row.id} className="space-y-2 p-3" data-sw-agent-row={row.id} data-sw-agent-row-state={row.kind}>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                 <AgentMark label={row.label} state={row.kind === 'connected' ? row.profile.state : 'unavailable'} />
-                <div className="min-w-0 flex-1">
+                <div className="min-w-[10rem] flex-1">
                   <p className="flex flex-wrap items-center gap-1.5 text-sm font-medium text-fg">
                     {row.label}
                     {row.profile?.default ? <Badge tone="accent">Default</Badge> : null}
@@ -334,7 +334,7 @@ export function AgentsCard({
               <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-line bg-surface-2 text-muted">
                 <Globe size={14} aria-hidden="true" />
               </span>
-              <div className="min-w-0 flex-1">
+              <div className="min-w-[10rem] flex-1">
                 <p className="flex flex-wrap items-center gap-1.5 text-sm font-medium text-fg">
                   Other
                   {view.endpoint?.default ? <Badge tone="accent">Default</Badge> : null}
