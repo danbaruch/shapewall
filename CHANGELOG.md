@@ -5,6 +5,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+- Fixed: the `shapewall settings` page loads its theme script and icon when Shapewall is installed under a folder whose name starts
+  with a dot (such as `~/.local`), so it follows your light or dark preference.
+
 ## 0.2.0 - 2026-11-09
 
 The first public release. Shapewall is now Apache 2.0 (it was MIT), with the self-hosted team server in `src/hosted` under the

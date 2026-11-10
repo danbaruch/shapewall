@@ -723,3 +723,28 @@ test(
     assert.equal(b.app.locals.openLink().startsWith('/open/'), true)
   },
 )
+
+test('the settings page gets its theme script and icon from an install inside a dot folder', async (t) => {
+  // ~/.local/share/..., node_modules/.pnpm/...: the client files of a real install sit under a dot folder.
+  const clientDir = path.join(tempDir('management-dot-install'), '.local', 'share', 'client')
+  fs.mkdirSync(path.join(clientDir, 'assets'), { recursive: true })
+  fs.writeFileSync(path.join(clientDir, 'index.html'), '<!doctype html><html><head></head><body></body></html>')
+  fs.writeFileSync(path.join(clientDir, 'theme-boot.js'), '// theme\n')
+  fs.writeFileSync(path.join(clientDir, 'favicon.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>')
+  const config = sampleConfig('management-dot')
+  fs.mkdirSync(config.outputDir, { recursive: true })
+  const { app } = createAgentManagement({ config, env: { HOME: tempDir('management-dot-home') }, token, clientDir })
+  const server = app.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  t.after(async () => {
+    app.locals.close()
+    server.closeAllConnections()
+    await new Promise((r) => server.close(r))
+  })
+  const port = server.address().port
+  const script = await request(port, 'GET', '/theme-boot.js')
+  assert.equal(script.status, 200)
+  assert.match(script.headers['content-type'], /javascript/)
+  assert.equal((await request(port, 'GET', '/favicon.svg')).status, 200)
+  assert.equal((await request(port, 'GET', '/')).status, 200)
+})
