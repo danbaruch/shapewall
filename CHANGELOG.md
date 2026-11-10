@@ -3,6 +3,14 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+- Agent works on a branch: an option, off by default, that runs an ACP agent's fixes and chat turns in a copy of your checkout and
+  commits them on a branch of their own. The comment reads "Fix ready on branch", and the chat offers Apply to my checkout, Open
+  folder, Copy branch name and Discard. Apply recaptures the page with before and after; a conflict changes nothing. See
+  "Work on a branch" in docs/agents.md.
+- `shapewall doctor` reports agent branches left in the project.
+
 ## 0.2.3 - 2026-11-10
 
 - The agent's model and thinking level are shown on a new chat before the first message, each with its own menu in the composer
