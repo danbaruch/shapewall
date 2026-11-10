@@ -4,8 +4,8 @@
 //
 // It reuses the starter agent's git side (starter/worktree.js) and its rules:
 //
-// - the checkout is a plain copy of HEAD with no .git in it, made with
-//   read-tree and checkout-index under the explicit git dir, in
+// - the checkout is a plain copy of HEAD with no .git in it, written by
+//   Shapewall from the blobs (no git checkout, so no smudge filter runs), in
 //   <project>/.shapewall/agent-worktrees/<run id>. Nothing the agent writes
 //   there can point git anywhere, and `GIT_CEILING_DIRECTORIES` stops git
 //   commands the agent runs from finding the project's own repository;
@@ -15,13 +15,20 @@
 //   their base version; symlinks out of the checkout are refused), on a new
 //   branch made with update-ref only if it does not exist;
 // - every git call runs with hooks, fsmonitor and signing off and the system
-//   config ignored (SAFE_GIT_FLAGS), and git's environment scrubbed.
+//   config ignored (SAFE_GIT_FLAGS), and git's environment scrubbed; on the
+//   person's checkout every configured filter, merge and diff driver is
+//   overridden with an empty command (inertDriverFlags);
+// - the agent's commit leaves out what the base commit's ignore rules ignore,
+//   whatever the agent did to .gitignore.
 //
 // Apply brings the branch into the person's checkout: only when it is clean,
 // on a branch, with no merge or rebase in progress, and the agent's branch
 // still points at the agent's commit. A fast-forward when possible, else a
 // merge that `git merge-tree` checked first: on a conflict nothing changes.
-// Submodules are never recursed into, and nothing is stashed.
+// It is refused, changing nothing, when it would write over a file Git does
+// not track (an ignored .env) or touch a file a Git filter handles (LFS);
+// Undo has the same check. Submodules are never recursed into, and nothing
+// is stashed.
 //
 // The branch name comes from the comment text, sanitized to [a-z0-9-] and
 // never starting with "-"; commits are passed by their id, never by a name a
@@ -34,7 +41,9 @@ import path from 'node:path'
 import {
   createWorktree,
   commitWorktree,
+  filterNames,
   git,
+  inertDriverFlags,
   newRunId,
   processAlive,
   removeWorktree,
@@ -326,6 +335,19 @@ export async function checkRepo(config) {
   return { top, gitDir, head, branch }
 }
 
+// The Git filters (['lfs']) the attributes of HEAD and $GIT_DIR/info/attributes
+// name. Branch mode runs none of them: the agent's checkout holds those files
+// as stored (an LFS pointer file), and Apply refuses a change to one. [] when
+// it cannot tell (not a repository yet).
+export async function repoFilters(config) {
+  try {
+    const repo = await checkRepo(config)
+    return await filterNames({ gitDir: repo.gitDir, cwd: repo.top, commit: repo.head })
+  } catch {
+    return []
+  }
+}
+
 async function refTip(config, branch) {
   if (!validBranchName(branch)) return null
   const out = await git(['rev-parse', '--verify', '-q', `refs/heads/${branch}`], { cwd: config.dir, timeoutMs: 20000 }).catch(() => '')
@@ -429,11 +451,19 @@ export async function discardAgentBranch(config, meta) {
   return { branchDeleted, branchMoved }
 }
 
-// Git on the person's checkout, with its git dir and work tree named.
-const onCheckout =
-  (repo) =>
-  (args, options = {}) =>
-    git(['--git-dir', repo.gitDir, '--work-tree', repo.top, ...CHECKOUT_FLAGS, ...args], { cwd: repo.top, timeoutMs: 120000, ...options })
+// Git on the person's checkout, with its git dir and work tree named, and
+// every configured filter, merge and diff driver overridden with an empty
+// command (inertDriverFlags): Apply, Undo and the checks before them run no
+// program from the repository's or the person's config.
+async function onCheckout(repo) {
+  const inert = await inertDriverFlags({ gitDir: repo.gitDir, cwd: repo.top })
+  return (args, options = {}) =>
+    git(['--git-dir', repo.gitDir, '--work-tree', repo.top, ...CHECKOUT_FLAGS, ...inert, ...args], {
+      cwd: repo.top,
+      timeoutMs: 120000,
+      ...options,
+    })
+}
 
 // What git sees in the person's checkout: HEAD plus each changed or
 // untracked (not ignored) file with its size and time. Compared before and
@@ -442,14 +472,9 @@ const onCheckout =
 export async function checkoutSignature(config) {
   try {
     const repo = await checkRepo(config)
-    const status = await onCheckout(repo)([
-      '--no-optional-locks',
-      'status',
-      '--porcelain=v1',
-      '-z',
-      '--untracked-files=all',
-      '--ignore-submodules=all',
-    ]).catch(() => null)
+    const status = await (
+      await onCheckout(repo)
+    )(['--no-optional-locks', 'status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignore-submodules=all']).catch(() => null)
     if (status === null) return null
     const parts = status.split('\0')
     const files = []
@@ -479,6 +504,78 @@ async function assertClean(run) {
     throw new BranchError(
       'checkout_dirty',
       'Your checkout has uncommitted changes to tracked files. Commit or stash them, then apply. Nothing was changed.',
+    )
+}
+
+const listOf = (files) => `${files.slice(0, 5).join(', ')}${files.length > 5 ? ` and ${files.length - 5} more` : ''}`
+
+// The paths that going from the tree `from` (HEAD) to the tree `to` writes,
+// after checking that none of them would land on a file Git does not track:
+// an untracked or ignored file (.env) at a path the change adds, or an
+// untracked file or symlink where it needs a folder. Git itself overwrites
+// ignored files without asking. -> { written, blocked }
+export async function overwriteCheck(run, repo, from, to) {
+  const tracked = new Set((await run(['ls-tree', '-r', '-z', '--name-only', '--full-tree', from])).split('\0').filter(Boolean))
+  const parts = (await run(['diff-tree', '-r', '-z', '--no-renames', '--name-status', from, to])).split('\0')
+  const written = []
+  const blocked = new Set()
+  const exists = (rel) => {
+    try {
+      return fs.lstatSync(path.join(repo.top, rel))
+    } catch {
+      return null
+    }
+  }
+  for (let index = 0; index + 1 < parts.length; index += 2) {
+    const [status, rel] = [parts[index], parts[index + 1]]
+    if (!status || !rel || status === 'D') continue
+    written.push(rel)
+    if (!tracked.has(rel) && exists(rel)) blocked.add(rel)
+    const dirs = rel.split('/').slice(0, -1)
+    for (let depth = 1; depth <= dirs.length; depth += 1) {
+      const dir = dirs.slice(0, depth).join('/')
+      if (tracked.has(dir)) break
+      const stat = exists(dir)
+      if (!stat) break
+      if (stat.isSymbolicLink() || !stat.isDirectory()) {
+        blocked.add(dir)
+        break
+      }
+    }
+  }
+  return { written, blocked: [...blocked].sort() }
+}
+
+// The written paths a Git filter (such as Git LFS) handles, by the
+// attributes of `source` and $GIT_DIR/info/attributes. Shapewall runs no
+// filter, so it does not bring such files in. -> [{ path, filter }]
+async function filteredPaths(run, source, files) {
+  if (!files.length) return []
+  const input = `${files.join('\0')}\0`
+  let out = await run(['check-attr', '-z', '--stdin', `--source=${source}`, 'filter'], { input, status: true })
+  if (out.code !== 0) out = await run(['check-attr', '-z', '--stdin', 'filter'], { input, status: true })
+  if (out.code !== 0) throw new BranchError('apply_failed', `Git could not read the attributes: ${out.stderr.trim().slice(0, 200)}`)
+  const parts = out.stdout.split('\0')
+  const found = []
+  for (let index = 0; index + 2 < parts.length; index += 3) {
+    const value = parts[index + 2]
+    if (value && value !== 'unspecified' && value !== 'unset') found.push({ path: parts[index], filter: value })
+  }
+  return found
+}
+
+async function assertWritable(run, repo, from, to, { code, what, branch }) {
+  const { written, blocked } = await overwriteCheck(run, repo, from, to)
+  if (blocked.length)
+    throw new BranchError(
+      code,
+      `${what} would overwrite files in your checkout that Git does not track: ${listOf(blocked)}. Nothing was changed. Move them out of the way, or ${branch ? `merge ${branch}` : 'do it'} yourself with Git.`,
+    )
+  const filtered = await filteredPaths(run, from, written)
+  if (filtered.length)
+    throw new BranchError(
+      code,
+      `${what} touches files that a Git filter handles (${listOf(filtered.map((item) => item.path))}, filter ${[...new Set(filtered.map((item) => item.filter))].join(', ')}). Shapewall runs no Git filters, such as Git LFS, so nothing was changed. ${branch ? `Merge ${branch}` : 'Do it'} yourself with Git.`,
     )
 }
 
@@ -512,13 +609,14 @@ export async function applyAgentBranch(config, meta, { message = null } = {}) {
       'branch_moved',
       `The branch ${meta.branch} ${tip ? 'has moved since the agent committed' : 'is gone'}, so Shapewall does not apply it. Merge it yourself with Git.`,
     )
-  const run = onCheckout(repo)
+  const run = await onCheckout(repo)
   await assertClean(run)
   const before = repo.head
   const ancestor = await run(['merge-base', '--is-ancestor', before, meta.commit], { status: true })
   let mode
   if (before === meta.commit) throw new BranchError('already_applied', 'Your checkout already has this change.')
   if (ancestor.code === 0) {
+    await assertWritable(run, repo, before, meta.commit, { code: 'apply_overwrite', what: 'Apply', branch: meta.branch })
     await run(['merge', '--ff-only', '--no-autostash', '--no-stat', '--no-verify', meta.commit])
     mode = 'fast-forward'
   } else {
@@ -532,6 +630,9 @@ export async function applyAgentBranch(config, meta, { message = null } = {}) {
       )
     }
     if (tried.code !== 0) throw new BranchError('apply_failed', `Git could not check the merge: ${tried.stderr.trim().slice(0, 200)}`)
+    const merged = tried.stdout.split('\n')[0].trim()
+    if (!SHA_RE.test(merged)) throw new BranchError('apply_failed', 'Git could not check the merge.')
+    await assertWritable(run, repo, before, merged, { code: 'apply_overwrite', what: 'Apply', branch: meta.branch })
     const env = { ...process.env, ...(await identityEnv(repo)) }
     try {
       await run(
@@ -570,10 +671,12 @@ export async function revertAppliedBranch(config, applied) {
       'undo_conflict',
       `Your branch moved on since the agent's change was applied, so it was left as it is. Revert ${applied.after.slice(0, 7)} with Git.`,
     )
-  const run = onCheckout(repo)
+  const run = await onCheckout(repo)
   await assertClean(run).catch(() => {
     throw new BranchError('undo_conflict', 'Your checkout has uncommitted changes, so nothing was undone. Commit or stash them first.')
   })
+  // Undo brings back the tree from before Apply: the same check for what it writes.
+  await assertWritable(run, repo, applied.after, applied.before, { code: 'undo_conflict', what: 'Undo', branch: null })
   const env = { ...process.env, ...(await identityEnv(repo)) }
   try {
     if (applied.mode === 'merge') await run(['revert', '--no-edit', '-m', '1', applied.after], { env })

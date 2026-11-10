@@ -504,6 +504,12 @@ export function agentRouter({
         error instanceof BranchError ? error.message : 'The agent’s work could not be committed on its branch. See the server log.',
       )
     }
+    if (commit?.committed && commit.ignoreChanged?.length)
+      noteCard(
+        reply,
+        'note-branch-gitignore',
+        `The agent changed ${commit.ignoreChanged.slice(0, 2).join(', ')}. Files your old ignore rules left out (such as .env) were kept out of its commit anyway.`,
+      )
     if (checkoutBefore && (await checkoutSignature(config)) !== checkoutBefore)
       noteCard(
         reply,

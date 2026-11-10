@@ -7,6 +7,9 @@
 // there can point git anywhere. Git on the host never runs with that folder
 // as its repository or (except to list untracked files) as its work tree:
 //
+// - the folder is written by Shapewall from the blobs git lists (ls-tree,
+//   cat-file --batch): no checkout, so no smudge filter runs. Files a filter
+//   handles (Git LFS) come out in their stored form (a pointer file);
 // - every git call names the repository explicitly (--git-dir, the real
 //   common directory found at the start of the run), uses a temporary index
 //   kept outside the mount, ignores the system config (GIT_CONFIG_NOSYSTEM),
@@ -15,6 +18,8 @@
 //   by path or as a parent folder, and hard-linked files are refused) and
 //   writing blobs with `hash-object --no-filters --stdin`, so no clean or
 //   smudge filter, no attribute and no config from the agent's files runs;
+// - untracked files the BASE commit's ignore rules ignore are never
+//   committed, whatever the agent wrote to .gitignore;
 // - .gitattributes and .gitmodules keep the base's version whatever the
 //   agent did to them, and submodules (gitlinks) are left as they were;
 // - the branch is created with update-ref, only if it does not exist.
@@ -26,7 +31,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
 import { absoluteProgram } from '../../which.js'
 
@@ -97,6 +102,190 @@ export function git(args, { cwd, env = process.env, extraEnv = {}, input = null,
   })
 }
 
+// The repository's configured filter, merge and diff drivers, each overridden
+// with an empty command (-c filter.<name>.process= and so on), so a git call
+// that would check files out, merge or compare them runs none of the
+// repository's or the person's programs. The `.gitattributes` files and
+// $GIT_DIR/info/attributes only name drivers: a name with no command
+// configured runs nothing, so overriding every configured command is enough.
+// core.attributesFile is /dev/null in SAFE_GIT_FLAGS already.
+const DRIVER_RE = '^(filter|merge|diff)\\..*\\.(smudge|clean|process|required|driver|textconv|command)$'
+export async function inertDriverFlags({ gitDir, cwd }) {
+  const listed = await git(['--git-dir', gitDir, 'config', '-z', '--get-regexp', DRIVER_RE], { cwd, status: true, timeoutMs: 20000 })
+  if (listed.code !== 0 && listed.code !== 1) throw new Error(`git config: ${listed.stderr.trim().slice(0, 200)}`)
+  const flags = new Set(['diff.external='])
+  for (const item of listed.stdout.split('\0')) {
+    if (!item) continue
+    const key = item.split('\n')[0]
+    const match = /^(filter|merge|diff)\.(.+)\.([a-z]+)$/s.exec(key)
+    if (!match) continue
+    const [, section, name] = match
+    // `-c` splits at the first "=": such a name cannot be overridden safely.
+    if (/[=\n\0]/.test(name)) throw new Error(`refusing the git ${section} driver "${name.slice(0, 40)}": its name has "=" or a line break`)
+    if (section === 'filter') for (const key of ['smudge', 'clean', 'process']) flags.add(`filter.${name}.${key}=`)
+    if (section === 'filter') flags.add(`filter.${name}.required=false`)
+    if (section === 'merge') flags.add(`merge.${name}.driver=`)
+    if (section === 'diff') for (const key of ['textconv', 'command']) flags.add(`diff.${name}.${key}=`)
+  }
+  return [...flags].flatMap((flag) => ['-c', flag])
+}
+
+// The filter names the attributes give to files in `commit` (its
+// .gitattributes files and $GIT_DIR/info/attributes): ['lfs'] for a
+// repository that uses Git LFS. Reads attribute files as text only.
+export async function filterNames({ gitDir, cwd, commit }) {
+  const names = new Set()
+  const scan = (text) => {
+    for (const match of String(text).matchAll(/(?:^|\s)filter=([^\s]+)/g)) names.add(match[1].slice(0, 60))
+  }
+  const listed = await git(['--git-dir', gitDir, 'ls-tree', '-r', '-z', '--full-tree', commit], { cwd })
+  for (const line of listed.split('\0')) {
+    const tab = line.indexOf('\t')
+    if (tab < 0 || path.posix.basename(line.slice(tab + 1)) !== '.gitattributes') continue
+    const [, type, oid] = line.slice(0, tab).split(' ')
+    if (type === 'blob') scan(await git(['--git-dir', gitDir, 'cat-file', 'blob', oid], { cwd }))
+  }
+  try {
+    const info = (await git(['--git-dir', gitDir, 'rev-parse', '--git-path', 'info/attributes'], { cwd })).trim()
+    scan(fs.readFileSync(path.resolve(cwd, info), 'utf8'))
+  } catch {
+    /* none */
+  }
+  return [...names].sort()
+}
+
+// The entries of a tree, recursively: [{ mode, type, oid, path }].
+export async function treeEntries({ gitDir, cwd, commit, extraEnv = {} }) {
+  const out = []
+  for (const line of (await git(['--git-dir', gitDir, 'ls-tree', '-r', '-z', '--full-tree', commit], { cwd, extraEnv })).split('\0')) {
+    if (!line) continue
+    const tab = line.indexOf('\t')
+    const [mode, type, oid] = line.slice(0, tab).split(' ')
+    out.push({ mode, type, oid, path: line.slice(tab + 1) })
+  }
+  return out
+}
+
+// Reads blobs with one `git cat-file --batch`, calling `onBlob(index, data)`
+// in the order of `oids`.
+function readBlobs({ gitDir, cwd, oids, onBlob }) {
+  if (!oids.length) return Promise.resolve()
+  const program = absoluteProgram('git', process.env)
+  if (!program) return Promise.reject(new Error('git: not found on PATH'))
+  return new Promise((resolve, reject) => {
+    const child = spawn(program, [...SAFE_GIT_FLAGS, '--git-dir', gitDir, 'cat-file', '--batch'], {
+      cwd,
+      env: gitEnv(process.env),
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+    let buffer = Buffer.alloc(0)
+    let index = 0
+    let need = null
+    let failed = null
+    let stderr = ''
+    const fail = (error) => {
+      if (failed) return
+      failed = error
+      child.kill()
+    }
+    child.stdout.on('data', (chunk) => {
+      buffer = buffer.length ? Buffer.concat([buffer, chunk]) : chunk
+      try {
+        for (;;) {
+          if (need === null) {
+            const end = buffer.indexOf(10)
+            if (end < 0) break
+            const header = buffer.subarray(0, end).toString('utf8').split(' ')
+            buffer = buffer.subarray(end + 1)
+            if (header[1] !== 'blob' || header[0] !== oids[index])
+              throw new Error(`git cat-file: unexpected "${header.join(' ').slice(0, 120)}"`)
+            need = Number(header[2])
+          }
+          if (buffer.length < need + 1) break
+          onBlob(index, buffer.subarray(0, need))
+          buffer = buffer.subarray(need + 1)
+          need = null
+          index += 1
+        }
+      } catch (error) {
+        fail(error)
+      }
+    })
+    child.stderr.on('data', (chunk) => {
+      stderr = `${stderr}${chunk}`.slice(-2000)
+    })
+    child.on('error', fail)
+    child.on('close', (code) => {
+      if (failed) reject(failed)
+      else if (code !== 0 || index !== oids.length) reject(new Error(`git cat-file: ${stderr.trim().slice(0, 300) || `exit ${code}`}`))
+      else resolve()
+    })
+    child.stdin.on('error', () => {})
+    child.stdin.end(`${oids.join('\n')}\n`)
+  })
+}
+
+const BAD_PART = (part) => !part || part === '.' || part === '..' || part.toLowerCase() === '.git' || part.includes('\0')
+
+// Writes the files of `commit` into the empty folder `dir` ourselves, with
+// no checkout: git only lists the tree and hands over blob contents, so no
+// smudge filter, attribute or other configured program runs. Modes and
+// symlinks as recorded; a submodule (gitlink) becomes an empty folder.
+// Files tracked by Git LFS (or any filter) come out as their stored form
+// (an LFS pointer file).
+export async function materializeTree({ gitDir, cwd, commit, dir }) {
+  const entries = await treeEntries({ gitDir, cwd, commit })
+  const made = new Set([''])
+  const parentOf = (rel) => {
+    const parts = rel.split('/')
+    if (parts.some(BAD_PART)) throw new Error(`refusing the path "${rel.slice(0, 120)}" in the tree`)
+    let current = ''
+    for (const part of parts.slice(0, -1)) {
+      current = current ? `${current}/${part}` : part
+      if (made.has(current)) continue
+      const full = path.join(dir, current)
+      let stat = null
+      try {
+        stat = fs.lstatSync(full)
+      } catch {
+        fs.mkdirSync(full, { mode: 0o755 })
+        stat = fs.lstatSync(full)
+      }
+      if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error(`refusing to write under "${current.slice(0, 120)}": not a folder`)
+      made.add(current)
+    }
+    return path.join(dir, rel)
+  }
+  const blobs = []
+  for (const entry of entries) {
+    const full = parentOf(entry.path)
+    if (entry.mode === '160000') {
+      fs.mkdirSync(full, { mode: 0o755 })
+      made.add(entry.path)
+    } else if (entry.type === 'blob') blobs.push({ ...entry, full })
+  }
+  await readBlobs({
+    gitDir,
+    cwd,
+    oids: blobs.map((entry) => entry.oid),
+    onBlob: (index, data) => {
+      const entry = blobs[index]
+      if (entry.mode === '120000') {
+        fs.symlinkSync(data.toString('utf8'), entry.full)
+        return
+      }
+      const mode = entry.mode === '100755' ? 0o755 : 0o644
+      const fd = fs.openSync(entry.full, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, mode)
+      try {
+        fs.writeSync(fd, data)
+      } finally {
+        fs.closeSync(fd)
+      }
+    },
+  })
+  return entries.length
+}
+
 // Where run folders go: --work-dir, else the cache folder.
 export function workRoot(projectDir, { flag = null, env = process.env } = {}) {
   if (flag) return path.resolve(flag)
@@ -140,22 +329,18 @@ export async function createWorktree({ projectDir, root, runId, branch, base = '
   fs.mkdirSync(root, { recursive: true, mode: 0o700 })
   fs.writeFileSync(ownerFile(root, runId), `${process.pid}\n`, { mode: 0o600 })
   const dir = path.join(root, runId)
-  const index = indexFile(root, runId, 'checkout')
-  const extraEnv = { GIT_INDEX_FILE: index }
   let made = false
   try {
     fs.mkdirSync(dir, { mode: 0o700 })
     made = true
-    await git(['--git-dir', gitDir, 'read-tree', commit], { cwd: root, extraEnv })
-    // The base is the person's own commit: checking it out is what `git worktree add` would do.
-    await git(['--git-dir', gitDir, '--work-tree', dir, 'checkout-index', '--all', '--force'], { cwd: dir, extraEnv })
+    // Written by Shapewall from the blobs, not checked out by git: no smudge
+    // filter or other program from the repository's config runs.
+    await materializeTree({ gitDir, cwd: root, commit, dir })
   } catch (error) {
     // A half-made checkout is not left for the sweep: remove it and the owner file now.
-    if (made) fs.rmSync(dir, { recursive: true, force: true })
+    if (made) removeTree(dir)
     fs.rmSync(ownerFile(root, runId), { force: true })
     throw error
-  } finally {
-    fs.rmSync(index, { force: true })
   }
   const real = fs.realpathSync(dir)
   const sub = path.relative(top, fs.realpathSync(projectDir))
@@ -222,6 +407,38 @@ export function linkLeaves(rel, target) {
   return resolved === '..' || resolved.startsWith('../')
 }
 
+// The untracked files in the run folder that the base commit's ignore rules
+// (its .gitignore files, plus the repository's info/exclude and the person's
+// excludes file) do not ignore. The rules are read from a folder holding only
+// the base's .gitignore files, never from the agent's edited ones.
+async function untrackedByBaseRules({ run, root, runId, dir, baseEntries }) {
+  const all = (await run(['--work-tree', dir, 'ls-files', '--others', '-z', '--exclude=node_modules', '--exclude=.git']))
+    .split('\0')
+    .filter((rel) => rel && !rel.endsWith('/'))
+  if (!all.length) return []
+  const shadow = path.join(root, `${runId}.ignore`)
+  removeTree(shadow)
+  fs.mkdirSync(shadow, { mode: 0o700 })
+  try {
+    for (const [rel, entry] of baseEntries) {
+      if (rel.split('/').pop() !== '.gitignore' || entry.type !== 'blob' || entry.mode === '120000') continue
+      if (rel.split('/').some(BAD_PART)) continue
+      fs.mkdirSync(path.join(shadow, path.dirname(rel)), { recursive: true, mode: 0o700 })
+      fs.writeFileSync(path.join(shadow, rel), await run(['cat-file', 'blob', entry.oid]), { mode: 0o600 })
+    }
+    const checked = await run(['--work-tree', shadow, 'check-ignore', '-z', '--stdin', '--no-index'], {
+      cwd: shadow,
+      input: `${all.join('\0')}\0`,
+      status: true,
+    })
+    if (checked.code > 1) throw new Error(`git check-ignore: ${checked.stderr.trim().slice(0, 200)}`)
+    const ignored = new Set(checked.stdout.split('\0').filter(Boolean))
+    return all.filter((rel) => !ignored.has(rel))
+  } finally {
+    removeTree(shadow)
+  }
+}
+
 const skipped = (rel, exclude) => {
   const parts = rel.split('/')
   if (parts.some((part) => SKIP_PARTS.has(part))) return true
@@ -249,9 +466,11 @@ export async function commitWorktree({ tree, message, exclude = [], maxBytes = C
       const [mode, type, oid] = line.slice(0, tab).split(' ')
       baseEntries.set(line.slice(tab + 1), { mode, type, oid })
     }
-    // Untracked files the repository's ignore rules let through (git lists
-    // names here; it reads no file content and follows no symlink).
-    const untracked = (await run(['--work-tree', dir, 'ls-files', '--others', '--exclude-standard', '-z'])).split('\0').filter(Boolean)
+    // Untracked files the BASE commit's ignore rules let through: the agent's
+    // own edits to .gitignore never let an ignored file (.env) into the
+    // commit. Git lists names here; it reads no file content and follows no
+    // symlink.
+    const untracked = await untrackedByBaseRules({ run, root, runId, dir, baseEntries })
     const zero = '0'.repeat(format === 'sha256' ? 64 : 40)
     const updates = []
     const files = []
@@ -290,7 +509,8 @@ export async function commitWorktree({ tree, message, exclude = [], maxBytes = C
       if (!before) added.push(rel)
       if (now.mode === '120000' && linkLeaves(rel, now.data.toString('utf8'))) links.push(rel)
     }
-    if (!files.length) return { committed: false, commit: null, files: [], added: [], modified: [], deleted: [], links: [], refused }
+    if (!files.length)
+      return { committed: false, commit: null, files: [], added: [], modified: [], deleted: [], links: [], ignoreChanged: [], refused }
     await run(['update-index', '-z', '--index-info'], { input: updates.join('') })
     const treeId = (await run(['write-tree'])).trim()
     const env = {
@@ -312,6 +532,8 @@ export async function commitWorktree({ tree, message, exclude = [], maxBytes = C
       modified,
       deleted: deleted.sort(),
       links: links.sort(),
+      // .gitignore files the agent changed: what they ignore now did not decide the commit.
+      ignoreChanged: files.filter((rel) => rel.split('/').pop() === '.gitignore').sort(),
       refused,
     }
   } finally {

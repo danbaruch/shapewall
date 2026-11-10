@@ -47,7 +47,7 @@ import {
   publicAgentInfo,
 } from './config.js'
 import { legacyProfile, profileForDefault, projectKey, saveUserAgentEntry, userAgentEntry, validateUserEntry } from './user-settings.js'
-import { DEFAULT_BRANCH_PREFIX, branchModeSettings, cleanBranchPrefix } from './branch-mode.js'
+import { DEFAULT_BRANCH_PREFIX, branchModeSettings, cleanBranchPrefix, repoFilters } from './branch-mode.js'
 import { batchFixSettings, cleanBatchFixes } from './batch-fixes.js'
 import { tokenEquals } from '../tokens.js'
 
@@ -715,19 +715,22 @@ export function settingsRoutes({
   // Agent branch mode (branch-mode.js): GET what is in effect, POST
   // { enabled, prefix? } to save it for this project. No confirmation: it only
   // narrows where the agent writes. The environment still wins.
-  const branchView = () => {
+  const branchView = async () => {
     const current = branchModeSettings(config, env)
     // acp: whether it applies now (only a coding agent over ACP runs in a worktree).
+    // filters: the Git filters the repository's attributes name (['lfs']):
+    // the agent's checkout holds those files in their stored form.
     return {
       enabled: current.enabled,
       prefix: current.prefix,
       sources: current.sources,
       defaultPrefix: DEFAULT_BRANCH_PREFIX,
       acp: settings().backend === 'acp',
+      filters: await repoFilters(config),
     }
   }
-  router.get('/branch-mode', guard, (req, res) => res.json(branchView()))
-  router.post('/branch-mode', guard, (req, res) => {
+  router.get('/branch-mode', guard, async (req, res) => res.json(await branchView()))
+  router.post('/branch-mode', guard, async (req, res) => {
     const { enabled, prefix } = req.body || {}
     if (typeof enabled !== 'boolean') return fail(res, 400, 'invalid_settings', 'enabled: true or false.')
     if (prefix !== undefined && prefix !== null && prefix !== '' && !cleanBranchPrefix(prefix))
@@ -744,7 +747,7 @@ export function settingsRoutes({
     } catch (error) {
       return fail(res, 500, 'settings_not_saved', `The setting was not saved: ${error.message}`)
     }
-    res.json(branchView())
+    res.json(await branchView())
   })
 
   // Batch fixes (batch-fixes.js): GET what is in effect, POST { enabled, max? }

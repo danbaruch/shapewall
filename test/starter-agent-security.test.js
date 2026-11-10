@@ -165,8 +165,10 @@ test('a checkout that fails leaves no folder and no owner file behind', async ()
   const dir = repo('sec-failed-checkout')
   const root = fs.realpathSync(tempDir('sec-failed-checkout-runs'))
   const runId = newRunId()
-  // The temporary index path is taken by a folder: read-tree cannot write it.
-  fs.mkdirSync(path.join(root, `${runId}.checkout.index`))
+  // A blob of the commit is missing from the object store: the checkout
+  // fails after the folder was made and other files were written.
+  const oid = gitIn(dir, 'rev-parse', 'HEAD:src/hero.html').trim()
+  fs.rmSync(path.join(dir, '.git', 'objects', oid.slice(0, 2), oid.slice(2)), { force: true })
   await assert.rejects(createWorktree({ projectDir: dir, root, runId, branch: `shapewall-agent/site-1-${runId.split('-')[1]}` }))
   assert.equal(fs.existsSync(path.join(root, runId)), false, 'no checkout folder')
   assert.equal(fs.existsSync(path.join(root, `${runId}.owner`)), false, 'no owner file')
