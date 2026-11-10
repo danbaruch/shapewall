@@ -28,6 +28,114 @@ export function plain(value, max = 120) {
     .replace(/(www)\./gi, '$1​.')
 }
 
+// ---- Reading a summary.json back --------------------------------------------
+//
+// `shapewall ci comment` reads summary.json from the workflow artifact, which
+// the pull request's own code could have written. normalizeSummary() keeps
+// only what the comment uses, each field checked: counts are safe
+// non-negative integers, ratios finite numbers in [0, 1], statuses and sides
+// from their known values, image paths in the shape compare.js writes, and
+// strings capped (and still passed through plain() when rendered). Anything
+// else: null, and the comment says the result could not be read.
+
+const SHOT_STATUSES = new Set(['unchanged', 'changed', 'new', 'removed', 'failed'])
+const TOTAL_KEYS = [
+  'pages',
+  'changedPages',
+  'shots',
+  'changedShots',
+  'unchangedShots',
+  'failedShots',
+  'newPages',
+  'removedPages',
+  'pagesNotCompared',
+]
+const IMAGE_KEYS = ['before', 'after', 'diff', 'beforeThumb', 'afterThumb', 'diffThumb']
+const IMAGE_PATH_RE = /^images\/[a-z0-9][a-z0-9.-]{0,100}\/[a-z.]{1,40}\.png$/
+const SHOTS_MAX = 5000
+const FAILURES_READ_MAX = 1000
+
+class Unreadable extends Error {}
+const unreadable = () => {
+  throw new Unreadable()
+}
+const isObject = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+const count = (value) => (Number.isSafeInteger(value) && value >= 0 ? value : unreadable())
+const unit = (value) => (typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1 ? value : unreadable())
+const flag = (value) => (typeof value === 'boolean' ? value : unreadable())
+const text = (value, max, { optional = false } = {}) => {
+  if (value === null || value === undefined) return optional ? null : unreadable()
+  return typeof value === 'string' ? value.slice(0, max) : unreadable()
+}
+const size = (value) => {
+  if (value === null || value === undefined) return null
+  return isObject(value) ? { width: count(value.width), height: count(value.height) } : unreadable()
+}
+
+function cleanShot(raw) {
+  if (!isObject(raw) || !SHOT_STATUSES.has(raw.status)) unreadable()
+  let images = null
+  if (raw.images !== null && raw.images !== undefined) {
+    if (!isObject(raw.images)) unreadable()
+    images = {}
+    for (const key of IMAGE_KEYS) {
+      const value = raw.images[key]
+      if (value === undefined) continue
+      if (typeof value !== 'string' || !IMAGE_PATH_RE.test(value)) unreadable()
+      images[key] = value
+    }
+  }
+  return {
+    page: text(raw.page, 200),
+    title: text(raw.title, 300, { optional: true }),
+    path: text(raw.path, 500, { optional: true }),
+    viewport: text(raw.viewport, 64),
+    viewportSize: size(raw.viewportSize),
+    status: raw.status,
+    changed: flag(raw.changed),
+    ratio: unit(raw.ratio),
+    changedPixels: count(raw.changedPixels ?? 0),
+    totalPixels: count(raw.totalPixels ?? 0),
+    dimensionsChanged: flag(raw.dimensionsChanged ?? false),
+    base: size(raw.base),
+    head: size(raw.head),
+    images,
+    error: text(raw.error, 2000, { optional: true }),
+  }
+}
+
+function cleanFailure(raw) {
+  if (!isObject(raw) || ![null, undefined, 'base', 'head'].includes(raw.side)) unreadable()
+  return {
+    side: raw.side ?? null,
+    page: text(raw.page, 200, { optional: true }),
+    viewport: text(raw.viewport, 64, { optional: true }),
+    error: text(raw.error, 2000, { optional: true }) || '',
+  }
+}
+
+// A parsed summary.json, checked field by field: the clean summary, or null.
+export function normalizeSummary(raw) {
+  try {
+    if (!isObject(raw) || !isObject(raw.totals) || !Array.isArray(raw.shots)) return null
+    const failures = raw.failures ?? []
+    if (!Array.isArray(failures) || raw.shots.length > SHOTS_MAX || failures.length > FAILURES_READ_MAX) return null
+    const totals = {}
+    for (const key of TOTAL_KEYS) totals[key] = count(raw.totals[key] ?? 0)
+    return {
+      schema: raw.schema,
+      version: raw.version,
+      threshold: unit(raw.threshold),
+      totals,
+      failures: failures.map(cleanFailure),
+      shots: raw.shots.map(cleanShot),
+    }
+  } catch (error) {
+    if (error instanceof Unreadable) return null
+    throw error
+  }
+}
+
 export function percent(ratio) {
   const value = ratio * 100
   if (value > 0 && value < 0.01) return '<0.01%'
@@ -128,6 +236,18 @@ export function renderSummary(summary, { artifactUrl = null, runUrl = null, imag
   let body = `${lines.join('\n')}\n`
   if (body.length > BODY_MAX) body = `${body.slice(0, BODY_MAX)}\n\n(cut short; the full list is in summary.json)\n`
   return body
+}
+
+// The comment when summary.json is there but not one Shapewall wrote as it
+// should be (normalizeSummary said null): nothing from it is shown.
+export function renderUnreadable({ runUrl = null } = {}) {
+  return [
+    COMMENT_MARKER,
+    '### Shapewall: the result could not be read',
+    '',
+    `The capture result (summary.json) is not in the shape Shapewall writes, so none of it is shown here.${runUrl ? ` See [the workflow run](${runUrl}).` : ''}`,
+    '',
+  ].join('\n')
 }
 
 // The comment when no summary.json exists: the capture step itself failed.

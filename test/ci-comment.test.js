@@ -244,6 +244,66 @@ test('artifact links are kept only on the GitHub web host', () => {
   assert.equal(checkArtifactUrl('https://evil.example/x', env), null)
   assert.equal(checkArtifactUrl('http://github.com/x', env), null)
   assert.equal(checkArtifactUrl('', env), null)
+  // ( and ) are percent-encoded: they would end the markdown link.
+  assert.equal(
+    checkArtifactUrl('https://github.com/acme/site/actions/runs/1/artifacts/2)![x](https://evil.example/a.png', env),
+    'https://github.com/acme/site/actions/runs/1/artifacts/2%29!%5Bx%5D%28https://evil.example/a.png',
+  )
+})
+
+// A summary.json the pull request's code wrote: whatever it holds, nothing
+// in it reaches the comment as markup, a mention or a link.
+test('a hostile summary.json: no markup, mention or link from it reaches the comment', async () => {
+  const hostile = (edit) => {
+    const dir = result()
+    const file = path.join(dir, 'summary.json')
+    const summary = JSON.parse(fs.readFileSync(file, 'utf8'))
+    edit(summary)
+    fs.writeFileSync(file, JSON.stringify(summary))
+    return dir
+  }
+  const payloads = [
+    (s) => (s.shots[0].viewportSize = { width: '1 @octocat', height: 900 }),
+    (s) => (s.shots[0].viewportSize = { width: 1440, height: '![x](https://evil.example/a.png)' }),
+    (s) => Object.assign(s.shots[0], { dimensionsChanged: true, base: { width: '<img src=x>', height: 1 }, head: { width: 1, height: 1 } }),
+    (s) => (s.totals.pages = '2 @everyone'),
+    (s) => (s.totals.changedPages = '<b>1</b>'),
+    (s) => (s.totals.shots = -1),
+    (s) => (s.totals.unchangedShots = 1.5),
+    (s) => (s.totals.newPages = '![x](https://evil.example/a.png)'),
+    (s) => (s.shots[0].ratio = '0.02 @octocat'),
+    (s) => (s.shots[0].ratio = 7),
+    (s) => (s.threshold = Infinity),
+    (s) => (s.shots[0].status = '<script>'),
+    (s) => (s.failures = [{ side: '@octocat', page: 'home', viewport: 'desktop', error: 'x' }]),
+    (s) => (s.shots[0].images.beforeThumb = 'https://evil.example/a.png'),
+    (s) => (s.shots[0].title = { toString: '@octocat' }),
+  ]
+  for (const edit of payloads) {
+    reset()
+    const { env } = jobEnv()
+    await commentFromResult({ dir: hostile(edit), config: { ci: { images: 'branch' } }, env, log })
+    const body = state.comments[0].body
+    assert.match(body, /### Shapewall: the result could not be read/, String(edit))
+    assert.doesNotMatch(body, /@octocat|@everyone|<img|<b>|<script|evil\.example|!\[/, String(edit))
+    assert.ok(!state.requests.some((item) => item.url.includes('/git/')), 'no images pushed from it')
+  }
+  // Strings stay plain text: a hostile title and error are shown, neutralised.
+  reset()
+  const { env } = jobEnv()
+  await commentFromResult({
+    dir: hostile((s) => {
+      s.shots[0].title = '![x](https://evil.example/a.png) <img src=x> @octocat www.evil.example'
+      s.failures = [{ side: 'head', page: 'home', viewport: 'desktop', error: '@everyone <b>x</b> [y](https://evil.example)' }]
+    }),
+    env,
+    log,
+  })
+  const body = state.comments[0].body
+  assert.match(body, /### Shapewall: 1 of 2 pages changed/)
+  // Shown, but escaped (a backslash before each markup character) and broken up.
+  assert.match(body, /\\<img src=x\\>/)
+  assert.doesNotMatch(body, /@octocat|@everyone|(?<!\\)<(img|b)\b|https:\/\/evil|www\.evil|(?<!\\)!(?<!\\)\[/)
 })
 
 test('a missing summary.json says the capture failed', async () => {

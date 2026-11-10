@@ -21,7 +21,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { DEFAULT_API_URL, checkApiUrl, tokenFrom } from '../github.js'
-import { COMMENT_MARKER, renderMissing, renderSummary } from './summary.js'
+import { COMMENT_MARKER, normalizeSummary, renderMissing, renderSummary, renderUnreadable } from './summary.js'
 import { SUMMARY_SCHEMA } from './compare.js'
 
 export const IMAGES_BRANCH = 'shapewall-ci'
@@ -89,7 +89,9 @@ export function checkArtifactUrl(value, env = process.env) {
   if (!value || value === true) return null
   try {
     const url = new URL(String(value))
-    return url.protocol === 'https:' && url.origin === serverUrl(env) ? url.toString() : null
+    // ( ) [ ] percent-encoded: they could end the markdown link the URL goes in.
+    const escaped = url.toString().replace(/\(/g, '%28').replace(/\)/g, '%29').replace(/\[/g, '%5B').replace(/\]/g, '%5D')
+    return url.protocol === 'https:' && url.origin === serverUrl(env) ? escaped : null
   } catch {
     return null
   }
@@ -243,14 +245,22 @@ export async function commentFromResult({
   const context = prContext(env, { repo, pull })
   const run = runUrl(env, context.repo)
   const artifact = checkArtifactUrl(artifactUrl, env)
-  const summary = readJson(path.join(dir, 'summary.json'))
-  const valid = summary?.schema === SUMMARY_SCHEMA && Array.isArray(summary.shots)
+  // From the artifact, which the pull request's code could have written:
+  // checked field by field before any of it reaches the comment.
+  const file = path.join(dir, 'summary.json')
+  const raw = readJson(file)
+  const summary = raw?.schema === SUMMARY_SCHEMA ? normalizeSummary(raw) : null
+  const valid = Boolean(summary)
   const fallback = (reason, body) => {
     const wrote = writeStepSummary(env, body)
     log(`${reason}${wrote ? ' The summary is in the job summary instead.' : ''}`)
     return { posted: false, fallback: wrote ? 'step-summary' : null, reason }
   }
-  let body = valid ? renderSummary(summary, { artifactUrl: artifact, runUrl: run }) : renderMissing({ runUrl: run })
+  let body = valid
+    ? renderSummary(summary, { artifactUrl: artifact, runUrl: run })
+    : fs.existsSync(file)
+      ? renderUnreadable({ runUrl: run })
+      : renderMissing({ runUrl: run })
   if (!context.repo || !context.pull)
     return fallback(
       'No pull request to comment on (set GITHUB_REPOSITORY and run on a pull_request event, or pass --repo and --pull).',
