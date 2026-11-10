@@ -1,0 +1,34 @@
+# Example systemd unit for the contact form API (website/contact/server.mjs). Copy it to
+# /etc/systemd/system/shapewall-contact.service, replace every <placeholder>, then:
+#   systemctl daemon-reload && systemctl enable --now shapewall-contact
+# Check it with: curl -s http://127.0.0.1:4131/api/contact/health
+[Unit]
+Description=shapewall.com contact form API (stores messages, notifies Telegram)
+After=network.target
+
+[Service]
+Type=simple
+# A dedicated unprivileged user, able to read the token file below.
+User=<service-user>
+Environment=PORT=4131
+Environment=DATABASE_PATH=/var/lib/shapewall-contact/contact.sqlite
+Environment=CONTACT_ALLOWED_ORIGIN=https://shapewall.com
+# The bot token: either CONTACT_TELEGRAM_BOT_TOKEN (better in an EnvironmentFile readable by root only), or
+# CONTACT_OPENCLAW_CONFIG, the path of a JSON file holding it at channels.telegram.botToken.
+EnvironmentFile=-/etc/shapewall-contact.env
+Environment=CONTACT_TELEGRAM_CHAT_ID=<chat-id>
+Environment=NODE_NO_WARNINGS=1
+WorkingDirectory=<release-dir>
+ExecStart=/usr/bin/node <release-dir>/server.mjs
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=yes
+ProtectSystem=strict
+StateDirectory=shapewall-contact
+ReadWritePaths=/var/lib/shapewall-contact
+PrivateTmp=yes
+MemoryMax=256M
+SyslogIdentifier=shapewall-contact
+
+[Install]
+WantedBy=multi-user.target

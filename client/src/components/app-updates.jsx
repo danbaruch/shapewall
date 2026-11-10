@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { Button } from './ui'
 import { cn } from '../lib/utils'
-import { BUILD, VERSION } from '../lib/app-version'
+import { BUILD, CONTACT_URL, VERSION } from '../lib/app-version'
 
 const AppUpdateDialog = lazy(() => import('./app-update-dialog'))
 
@@ -16,7 +16,7 @@ export function openAbout(opener = null) {
 // The About and updates dialog; updater logic loads only on request.
 // placement:
 //   "menu" (default): nothing on screen; the profile menu's About item opens it
-//   "link": a quiet "About Shapewall · v0.1.0" text button for a page footer
+//   "link": a quiet "About Shapewall · v0.1.0" text button for a page footer, with a Contact link beside it
 //   "footer": the older full-width credit band (kept for embedders)
 export function AppUpdates({ transport, className, placement = 'menu', ref }) {
   const [open, setOpen] = useState(false)
@@ -65,21 +65,34 @@ export function AppUpdates({ transport, className, placement = 'menu', ref }) {
           </Button>
         </footer>
       ) : placement === 'link' ? (
-        <Button
-          variant="ghost"
-          size="touch"
-          className={cn('gap-1.5 px-2 text-caption font-normal text-faint hover:text-fg lg:h-8', className)}
-          onClick={() => show(trigger.current)}
-          aria-label={label}
-          data-sw-app-about="link"
-          ref={trigger}
-        >
-          <span>About Shapewall</span>
-          <span aria-hidden="true">·</span>
-          <span className="tabular-nums" data-sw-app-version>
-            v{BUILD.version}
-          </span>
-        </Button>
+        <span className="inline-flex items-center">
+          <Button
+            asChild
+            variant="ghost"
+            size="touch"
+            className="px-2 text-caption font-normal text-faint hover:text-fg lg:h-8"
+            data-sw-app-contact="link"
+          >
+            <a href={CONTACT_URL} target="_blank" rel="noopener noreferrer">
+              Contact
+            </a>
+          </Button>
+          <Button
+            variant="ghost"
+            size="touch"
+            className={cn('gap-1.5 px-2 text-caption font-normal text-faint hover:text-fg lg:h-8', className)}
+            onClick={() => show(trigger.current)}
+            aria-label={label}
+            data-sw-app-about="link"
+            ref={trigger}
+          >
+            <span>About Shapewall</span>
+            <span aria-hidden="true">·</span>
+            <span className="tabular-nums" data-sw-app-version>
+              v{BUILD.version}
+            </span>
+          </Button>
+        </span>
       ) : null}
       {activated ? (
         <Suspense

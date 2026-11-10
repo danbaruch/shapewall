@@ -34,6 +34,23 @@ export function listen(app) {
 
 export const ROOT_DIR = ROOT
 
+// The board has placed its start view and written it to the address bar
+// (?v=...). Until then it still calls history.replaceState on its own, and a
+// link that differs from the bare board URL only in its #fragment would be a
+// same-document visit rather than a fresh one.
+export async function boardStartView(page) {
+  await page.waitForSelector('[data-sw-node="home"]')
+  await page.waitForFunction(() => new URLSearchParams(window.location.search).has('v'))
+}
+
+// No overlay's Back is still landing. An overlay that closes (say a sheet
+// that becomes a side panel when the window widens) goes Back one history
+// entry; a navigation started before that lands is followed by that Back,
+// which loads the old board entry on top of the new page.
+export async function overlayBackLanded(page) {
+  await page.waitForFunction(() => !window.history.state?.shapewallOverlay)
+}
+
 // The URL of a live frame's element map, from the frame's own src: the
 // board API (live -> elements), or a static export's file beside the HTML.
 export function elementMapUrl(liveSrc) {

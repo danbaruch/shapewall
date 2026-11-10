@@ -5,7 +5,7 @@
 //
 // This file is the orchestrator (state, the streaming turn, threads). The
 // pieces it renders live beside it: header.jsx (header, settings, the chat
-// history button and New chat, profile picker, not connected), history.jsx
+// history button and New chat, the agent picker, not connected), history.jsx
 // (chat history: search, rename, archive, export, delete), messages.jsx (the message list), cards.jsx
 // (tool, plan and permission cards) and composer.jsx (the composer).
 
@@ -25,9 +25,9 @@ import { RefsContext } from './RefChip'
 import { buildRefIndex } from './refs'
 import { abortOf, isSending, registerHost, setRun as storeRun, takeStash, updateQueue, useTurns } from './turns'
 import { ConnectedNote } from './QuickConnect'
-import { ChatHeader, ConnectAgent, ProfilePicker } from './header'
+import { ChatHeader, ConnectAgent } from './header'
 import { CONTINUE_PROMPT, FIX_PROMPT, MessageList } from './messages'
-import { otherProfile } from './profiles'
+import { choice, otherProfile, pickerProfiles, switchedNote } from './profiles'
 import { Composer } from './composer'
 import { commentOfThread, mergeBy, ownerOnlyError, useChatTurn } from './useChatTurn'
 import { useAutoAllow } from './useAutoAllow'
@@ -594,6 +594,29 @@ export default function ChatPanel({
     messages.at(-1)?.cards?.some((card) => card.kind === 'permission' && card.state === 'pending' && card.answerable === true),
   )
   const agentState = waitingForPerson ? 'waiting' : run || starterBusy || remoteRunning ? 'working' : 'ready'
+  // The agent picker on the chip (AgentPicker.jsx): for the owner, when there
+  // is a choice or a way to connect another. A switch starts a fresh agent
+  // session and keeps the transcript, said once after it.
+  const profileChoice = pickerProfiles(selectedThread)
+  const agentSettingsHref = agent?.settingsUrl || (onOpenSettings ? '/console?section=settings#agents' : null)
+  const picker =
+    agent?.ownerWrites && selectedThread && profileChoice.options.length && (profileChoice.show || onOpenSettings || agent?.settingsUrl)
+      ? {
+          options: profileChoice.known
+            ? profileChoice.options
+            : [{ id: profileChoice.value, label: 'Removed agent', configured: false, state: 'unavailable' }, ...profileChoice.options],
+          value: profileChoice.value,
+          onChoose: async (picked) => {
+            const next = choice(selectedThread, picked)
+            if (!next || running) return
+            const label = profileChoice.options.find((option) => option.id === next)?.label || 'the agent'
+            if (await chooseProfile(next)) setNotice({ tone: 'info', text: switchedNote(label) })
+          },
+          onConnect: onOpenSettings,
+          settingsHref: agentSettingsHref,
+          disabledReason: running ? 'Wait for the answer or stop it to switch' : null,
+        }
+      : null
   const showStarters = !running && !dictation.listening && !draft.trim() && !attachments.length && !sentIn.has(threadId) && !thread.loading
   // After an answer: the agent's suggested next steps (or a few that fit),
   // while the box is empty.
@@ -700,6 +723,7 @@ export default function ChatPanel({
           configured={configured}
           agent={agent}
           agentState={agentState}
+          picker={picker}
           voiceUri={voiceUri}
           onVoice={(uri) => {
             setVoiceUri(uri)
@@ -746,7 +770,6 @@ export default function ChatPanel({
         />
       ) : null}
 
-      <ProfilePicker thread={selectedThread} agent={agent} running={running} onChoose={chooseProfile} touch={touch} />
       {!configured ? (
         <ConnectAgent
           agent={agent}

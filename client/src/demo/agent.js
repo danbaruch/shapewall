@@ -296,12 +296,26 @@ function helpScript() {
   ]
 }
 
+// The second demo agent says the same things in fewer words: its first
+// paragraph only, opened with "Short version." and signed off as itself, so
+// a visitor can tell the two apart after switching.
+export function voiced(steps, voice = 'demo') {
+  if (voice !== 'second') return steps
+  let first = true
+  return steps.map((step) => {
+    if (!step.say || !first) return step
+    first = false
+    const lead = String(step.say).split(/\n\n/)[0]
+    return { ...step, say: `Short version. ${lead}\n\n(Second agent, scripted for the demo.)` }
+  })
+}
+
 const words = (text) => text.match(/\S+\s*|\s+/g) || []
 // Rough token counts for the demo's usage ring (about 4 characters a token).
 const tokens = (text) => Math.max(1, Math.round(String(text || '').length / 4))
 
 // Runs a script as a generator of [event, data]; returns the stored reply.
-export async function* runScriptedTurn({ text, context, signal, run, now = () => Date.now() }) {
+export async function* runScriptedTurn({ text, context, signal, run, now = () => Date.now(), voice = 'demo' }) {
   const startedAt = now()
   const reply = {
     id: `msg_${now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`,
@@ -334,7 +348,7 @@ export async function* runScriptedTurn({ text, context, signal, run, now = () =>
   await sleep(350, signal)
   // Regenerate: the script is the same, so the new version says it is another try.
   if (context.regenerate) yield* say('Another take on this. ')
-  for (const step of pickScript(text, context)) {
+  for (const step of voiced(pickScript(text, context), voice)) {
     if (signal.aborted) break
     if (step.status) {
       yield ['status', { text: step.status }]

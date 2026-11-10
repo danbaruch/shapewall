@@ -4,7 +4,6 @@ import http from 'node:http'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { REDIRECTS } from '../src/routes.js'
 
 const DIST = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist')
 const TYPES = {
@@ -43,12 +42,6 @@ export function resolveFile(urlPath) {
 
 export function createServer() {
   return http.createServer((req, res) => {
-    const url = new URL(req.url || '/', 'http://localhost')
-    if (Object.hasOwn(REDIRECTS, url.pathname)) {
-      res.writeHead(301, { Location: REDIRECTS[url.pathname] + url.search, 'Cache-Control': 'no-cache' })
-      res.end()
-      return
-    }
     const file = resolveFile(req.url || '/')
     const status = file ? 200 : 404
     const target = file || path.join(DIST, '404.html')

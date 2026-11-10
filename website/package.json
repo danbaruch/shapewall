@@ -13,7 +13,7 @@
     "dev": "vite",
     "build": "vite build && vite build --ssr src/entry-server.jsx --outDir .ssr --emptyOutDir && node scripts/prerender.mjs",
     "preview": "node scripts/serve.mjs",
-    "test": "node --test --test-concurrency=1 test/*.test.js"
+    "test": "node --test --test-concurrency=1 test/*.test.js contact/*.test.mjs"
   },
   "dependencies": {
     "lucide-react": "^1.68.0",

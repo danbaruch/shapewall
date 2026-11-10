@@ -1,10 +1,11 @@
 import { ToggleGroup as ToggleGroupPrimitive } from 'radix-ui'
 import { cn } from '../../lib/utils'
 import { tabItemClass, tabListClass } from './tabs'
+import { Tooltip } from './tooltip'
 
 // One choice out of a few (a segmented control). Arrow keys move between the
 // options. Picking the current option again keeps it (never "nothing").
-// options: [{ id, label, count? }]. variant: segmented (default) or underline,
+// options: [{ id, label, count?, tooltip? }] (tooltip: for an icon-only label). variant: segmented (default) or underline,
 // the same two looks as Tabs.
 export function ToggleGroup({
   label,
@@ -28,15 +29,16 @@ export function ToggleGroup({
       data-sw-tabs-variant={variant}
     >
       {options.map((option) => (
-        <ToggleGroupPrimitive.Item
-          key={option.id}
-          value={option.id}
-          className={cn(tabItemClass(variant, large, 'on'), itemClassName)}
-          data-sw-option={option.id}
-        >
-          {option.label}
-          {option.count !== undefined ? <span className="tabular ml-1 text-faint">{option.count}</span> : null}
-        </ToggleGroupPrimitive.Item>
+        <Tooltip key={option.id} content={option.tooltip} side="bottom">
+          <ToggleGroupPrimitive.Item
+            value={option.id}
+            className={cn(tabItemClass(variant, large, 'on'), itemClassName)}
+            data-sw-option={option.id}
+          >
+            {option.label}
+            {option.count !== undefined ? <span className="tabular ml-1 text-faint">{option.count}</span> : null}
+          </ToggleGroupPrimitive.Item>
+        </Tooltip>
       ))}
     </ToggleGroupPrimitive.Root>
   )

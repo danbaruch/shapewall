@@ -4,7 +4,7 @@ import { Container } from '../components/ui.jsx'
 import { GITHUB_URL } from '../routes.js'
 import { LAUNCHED } from '../launch.js'
 
-export const PRIVACY_UPDATED = '2026-11-07'
+export const PRIVACY_UPDATED = '2026-11-10'
 
 export default function Privacy() {
   return (
@@ -39,8 +39,12 @@ export default function Privacy() {
             aggregate numbers only, not a record of what one visitor did.
           </p>
           <p>
-            The docs search runs in your browser. What you type is never sent anywhere. There are no forms, no newsletter signups and no ads
-            on this site, and apart from the two analytics tools above, no third-party scripts.
+            The docs search runs in your browser. What you type is never sent anywhere. There are no newsletter signups and no ads on this
+            site, and apart from the two analytics tools above, no third-party scripts.
+          </p>
+          <p id="contact-form">
+            The <Link to="/contact">contact form</Link> stores your message, the topic you chose, your email address if you gave one, and a
+            one-way hash of your IP address for rate limiting. It is used only to reply to you and to improve Shapewall.
           </p>
           <p>
             The site installs a small service worker so pages load fast and work offline. It caches this site&apos;s own files in your
