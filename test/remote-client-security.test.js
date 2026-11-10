@@ -131,6 +131,22 @@ test('the client cuts off a server that sends a huge answer', async () => {
   assert.deepEqual(await small.project(), { ok: 1 })
 })
 
+test('download keeps only the guests opt-in of a file URL query, and only for this origin', async () => {
+  const asked = []
+  const fetchImpl = async (url) => {
+    asked.push(url)
+    return new Response(new Uint8Array([1]), { status: 200, headers: { 'content-type': 'image/png' } })
+  }
+  const remote = createRemote({ origin: 'https://h.example', token: TOKEN, fetchImpl })
+  await remote.download('https://h.example/api/v1/boards/main/comment-files/a.png?guests=1&x=../../y')
+  await remote.download('https://h.example/api/v1/boards/main/comment-files/b.png?other=1')
+  assert.deepEqual(asked, [
+    'https://h.example/api/v1/boards/main/comment-files/a.png?guests=1',
+    'https://h.example/api/v1/boards/main/comment-files/b.png',
+  ])
+  await assert.rejects(remote.download('https://evil.example/api/v1/boards/main/a.png?guests=1'), /not a file/)
+})
+
 test('saved logins: the folder is made private and no predictable temporary file is followed', () => {
   const env = { XDG_CONFIG_HOME: tempDir('remote-sec-cred') }
   const file = credentialsFile(env)
