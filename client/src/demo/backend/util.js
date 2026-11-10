@@ -31,6 +31,24 @@ export const AGENT_INFO = {
   fixWithAgent: true,
   ownerWrites: true,
 }
+// Two scripted agents, so the agent picker and "Fix with ..." have a choice.
+// Both are labelled demo and answer from this browser; the second one is
+// shorter spoken (agent.js `voice`). The default connection runs the first
+// (`sameAs`), as on a real board where it runs a saved profile.
+export const DEMO_AGENTS = [
+  { id: 'demo', label: 'Demo agent', voice: 'demo' },
+  { id: 'second', label: 'Second agent', voice: 'second' },
+]
+export const demoAgentInfo = (id) => {
+  const agent = DEMO_AGENTS.find((item) => item.id === id) || DEMO_AGENTS[0]
+  return { ...AGENT_INFO, label: agent.label, state: 'ready' }
+}
+export const demoProfiles = () => [
+  { id: 'default', ...demoAgentInfo('demo'), sameAs: 'demo' },
+  ...DEMO_AGENTS.map((agent) => ({ id: agent.id, ...demoAgentInfo(agent.id) })),
+]
+// The profile a thread runs: its own pick, else the default's.
+export const demoAgentOf = (profileId) => DEMO_AGENTS.find((item) => item.id === profileId) || DEMO_AGENTS[0]
 
 export class DemoError extends Error {
   constructor(status, code, message) {
