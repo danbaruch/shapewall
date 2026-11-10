@@ -187,7 +187,13 @@ export function BatchConfirm({ open, onClose, ids, comments, max, agentName, tar
           <Button variant="secondary" size={touch ? 'touch' : 'sm'} onClick={onClose}>
             Cancel
           </Button>
-          <Button size={touch ? 'touch' : 'sm'} disabled={busy || !taken.length} onClick={() => onStart(ids)} data-sw-batch-start="true">
+          <Button
+            variant="default"
+            size={touch ? 'touch' : 'sm'}
+            disabled={busy || !taken.length}
+            onClick={() => onStart(ids)}
+            data-sw-batch-start="true"
+          >
             {busy ? (
               <Loader2 size={14} className="motion-safe:animate-spin" aria-hidden="true" />
             ) : (

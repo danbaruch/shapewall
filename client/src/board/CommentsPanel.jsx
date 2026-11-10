@@ -364,8 +364,8 @@ export default function CommentsPanel({
         >
           {selecting ? (
             <>
-              <span className="min-w-0 flex-1 tabular-nums" role="status" data-sw-batch-count={chosen.length}>
-                {chosen.length} selected{chosen.length > batch.max ? `, the first ${batch.max} will run` : ''}
+              <span className="min-w-0 flex-1 whitespace-nowrap tabular-nums" role="status" data-sw-batch-count={chosen.length}>
+                {chosen.length} selected
               </span>
               <Button
                 variant="ghost"
@@ -386,9 +386,15 @@ export default function CommentsPanel({
               >
                 Cancel
               </Button>
+              {chosen.length > batch.max ? (
+                <p className="basis-full text-xs text-fg" data-sw-batch-over="true">
+                  Only the first {batch.max} will run (the limit on the Agents page).
+                </p>
+              ) : null}
               <Button
+                variant="default"
                 size={size}
-                className="w-full sm:w-auto"
+                className="w-full"
                 disabled={!chosen.length || batchRunning(batch.batch)}
                 onClick={() => batch.onConfirm(chosen)}
                 data-sw-batch-fix={chosen.length}
