@@ -1,13 +1,15 @@
-// The board's pages and journeys in the expanded app sidebar (desktop):
-// every section with its pages and their open comments, the journeys under
-// them, and a filter. Click one to fly to it.
+// The board's pages in the app sidebar (desktop): every section with its
+// pages and their open comments, and a filter. Click one to fly to it. The
+// journeys have their own list (JourneysList.jsx); expanded, a switch above
+// shows one or the other (SidebarNav.jsx). `bare`: under that switch, so no
+// heading or top rule of its own.
 
 import { useMemo, useState } from 'react'
-import { ChevronDown, FileText, Route, Search } from 'lucide-react'
+import { ChevronDown, FileText, Search } from 'lucide-react'
 import { Input } from '../components/ui'
 import { cn } from '../lib/utils'
 
-export function PagesTree({ groups, journeys, comments, activePage, journeyId, onPage, onJourney }) {
+export function PagesTree({ groups, comments, activePage, onPage, bare = false }) {
   const [query, setQuery] = useState('')
   const [folded, setFolded] = useState(() => new Set())
   const needle = query.trim().toLowerCase()
@@ -26,13 +28,6 @@ export function PagesTree({ groups, journeys, comments, activePage, journeyId, o
         : item.pages,
     }))
     .filter((item) => item.pages.length)
-  const shownJourneys = needle
-    ? journeys.filter((item) =>
-        String(item.name || '')
-          .toLowerCase()
-          .includes(needle),
-      )
-    : journeys
   const toggle = (group) =>
     setFolded((current) => {
       const next = new Set(current)
@@ -43,18 +38,20 @@ export function PagesTree({ groups, journeys, comments, activePage, journeyId, o
   const total = groups.reduce((sum, item) => sum + item.pages.length, 0)
 
   return (
-    <div className="flex w-full flex-col border-t border-line pt-2" data-sw-pages-sidebar="true">
-      <p className="flex items-center px-2.5 pb-1 text-xs font-semibold text-faint">
-        Pages <span className="ml-1 font-normal tabular">{total}</span>
-      </p>
+    <div className={cn('flex w-full flex-col', !bare && 'border-t border-line pt-2')} data-sw-pages-sidebar="true">
+      {bare ? null : (
+        <p className="flex items-center px-2.5 pb-1 text-xs font-semibold text-faint">
+          Pages <span className="ml-1 font-normal tabular">{total}</span>
+        </p>
+      )}
       <div className="pb-2">
         <Input
           size="sm"
           icon={Search}
           value={query}
           onChange={(event) => setQuery(event.target.value.slice(0, 80))}
-          placeholder="Filter pages and journeys"
-          aria-label="Filter pages and journeys"
+          placeholder="Filter pages"
+          aria-label="Filter pages"
           data-sw-pages-filter="true"
         />
       </div>
@@ -118,36 +115,7 @@ export function PagesTree({ groups, journeys, comments, activePage, journeyId, o
             </section>
           )
         })}
-        {shownJourneys.length ? (
-          <section className="mt-2 border-t border-line pt-2" data-sw-pages-journeys="true">
-            <h3 className="flex h-7 items-center px-2.5 text-xs font-semibold text-muted">Journeys</h3>
-            <ul>
-              {shownJourneys.map((item) => {
-                const current = item.id === journeyId
-                return (
-                  <li key={item.id}>
-                    <button
-                      type="button"
-                      className={cn(
-                        'flex h-8 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] outline-none focus-visible:outline-2 focus-visible:outline-accent',
-                        current ? 'bg-accent/10 text-fg' : 'text-fg/90 hover:bg-surface-2',
-                      )}
-                      aria-current={current ? 'true' : undefined}
-                      onClick={() => onJourney(current ? null : item.id)}
-                      data-sw-pages-journey={item.id}
-                    >
-                      <Route size={14} aria-hidden="true" className={cn('shrink-0', current ? 'text-accent' : 'text-faint')} />
-                      <span className="min-w-0 flex-1 truncate">{item.name || item.id}</span>
-                    </button>
-                  </li>
-                )
-              })}
-            </ul>
-          </section>
-        ) : null}
-        {needle && !shown.length && !shownJourneys.length ? (
-          <p className="px-2.5 py-3 text-sm text-muted">Nothing matches "{query.trim()}".</p>
-        ) : null}
+        {needle && !shown.length ? <p className="px-2.5 py-3 text-sm text-muted">Nothing matches "{query.trim()}".</p> : null}
       </div>
     </div>
   )

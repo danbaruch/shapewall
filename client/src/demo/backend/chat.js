@@ -26,7 +26,7 @@ import {
   visibleTo,
 } from '../../../../src/agent/thread-history.js'
 import { latestChange, withUndoAvailability } from '../../../../src/agent/undo-state.js'
-import { AGENT_INFO, demoAgentInfo, demoAgentOf, demoProfiles, fail, hex, newId, cleanText } from './util.js'
+import { AGENT_INFO, demoAgentInfo, demoAgentOf, demoAgentState, demoProfiles, fail, hex, newId, cleanText } from './util.js'
 import { dropRating, findAnswer, ratingEntry, ratingsOf, upsertRating, validateRating } from '../../../../src/agent/ratings-core.js'
 
 const MESSAGES_MAX = 200
@@ -119,7 +119,7 @@ export function chatRoutes(ctx) {
           agent: {
             profileId: threadAt(threadKey(access, params[0], params[1]), params[1]).profileId || 'default',
             backend: AGENT_INFO.backend,
-            label: demoAgentOf(threadAt(threadKey(access, params[0], params[1]), params[1]).profileId).label,
+            label: demoAgentOf(threadAt(threadKey(access, params[0], params[1]), params[1]).profileId, state).label,
             model: AGENT_INFO.model,
           },
           previous,
@@ -132,7 +132,7 @@ export function chatRoutes(ctx) {
   // model list, they are known before the first message, so a new chat can
   // pick both before it sends anything.
   const choices = new Map()
-  // The demo console's Agents page, where the (read-only) Agents card is.
+  // The demo console's Agents page, where the Agents card is.
   const settingsUrlOf = (access = null) => {
     let workspaceId = access?.project?.workspaceId || null
     if (!workspaceId) {
@@ -146,7 +146,7 @@ export function chatRoutes(ctx) {
   }
   // The thread's scripted agent's options, with this chat's choices.
   const optionsOf = (key, profileId = metaStore()[key]?.profileId) =>
-    demoOptionsFor(demoAgentOf(profileId).id).map((option) => {
+    demoOptionsFor(demoAgentOf(profileId, state).id).map((option) => {
       const chosen = choices.get(`${key}|${option.id}`)
       return option.values.some((item) => item.value === chosen) ? { ...option, currentValue: chosen } : option
     })
@@ -161,9 +161,13 @@ export function chatRoutes(ctx) {
   }
 
   return [
-    // The board's agent, both scripted agents, and where the Agents card is
-    // (the demo console's Settings page, read-only there).
-    ['GET', /^\/api\/agent\/status$/, () => ({ ...demoAgentInfo('demo'), profiles: demoProfiles(), settingsUrl: settingsUrlOf() })],
+    // The board's agent (the default one), the connected scripted agents, and
+    // where the Agents page is (the demo console's Agents page).
+    [
+      'GET',
+      /^\/api\/agent\/status$/,
+      () => ({ ...demoAgentInfo(demoAgentState(state).default), profiles: demoProfiles(state), settingsUrl: settingsUrlOf() }),
+    ],
     [
       'GET',
       /^\/api\/agent\/boards\/([a-z0-9-]+)\/threads$/,
@@ -201,8 +205,8 @@ export function chatRoutes(ctx) {
           ratings: ratingsOf(ratingsOfBoard(access, params[0]), params[1], raterOf(access)),
           options: optionsOf(key),
           profileId: thread.profileId || 'default',
-          profiles: demoProfiles(),
-          agent: { ...demoAgentInfo(demoAgentOf(thread.profileId).id), settingsUrl: settingsUrlOf(access) },
+          profiles: demoProfiles(state),
+          agent: { ...demoAgentInfo(demoAgentOf(thread.profileId, state).id), settingsUrl: settingsUrlOf(access) },
         }
       },
     ],
@@ -216,14 +220,14 @@ export function chatRoutes(ctx) {
         const key = threadKey(access, params[0], params[1])
         if (runs.has(key)) fail(409, 'agent_running', 'Stop the answer before changing its agent.')
         const profileId = body?.profileId
-        if (typeof profileId !== 'string' || !demoProfiles().some((item) => item.id === profileId))
+        if (typeof profileId !== 'string' || !demoProfiles(state).some((item) => item.id === profileId))
           fail(400, 'unknown_profile', 'Choose a saved native agent profile.')
         const meta = metaStore()
         meta[key] = { ...(meta[key] || {}), profileId }
         if (profileId === 'default') delete meta[key].profileId
         if (!Object.keys(meta[key]).length) delete meta[key]
         save()
-        return { profileId, agent: demoAgentInfo(demoAgentOf(profileId).id) }
+        return { profileId, agent: demoAgentInfo(demoAgentOf(profileId, state).id) }
       },
     ],
     [
@@ -493,7 +497,7 @@ export function chatRoutes(ctx) {
               signal: controller.signal,
               run,
               now,
-              voice: demoAgentOf(threadAt(key, params[1]).profileId).voice,
+              voice: demoAgentOf(threadAt(key, params[1]).profileId, state).voice,
             })
             const index = previous ? messages.indexOf(previous) : -1
             if (index >= 0) {

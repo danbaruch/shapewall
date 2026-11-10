@@ -91,7 +91,7 @@ page id, any step after a page can be a fork:
 
 ## Journeys made on the board
 
-Pick **New journey** in the journey picker (on a phone: the **...** menu), then click pages in the order people visit them. Name the
+Pick **New journey** in the toolbar's **Views** menu or the command palette (on a phone: the **...** menu), then click pages in the order people visit them. Name the
 journey and save. Journeys made this way are stored in `.shapewall/<board>/journeys.json`, with the same atomic writes and file lock as
 comments, and can be edited or deleted from the journey bar. If a page leaves the config, its steps drop out of the journey (a fork left
 with one branch becomes that branch's steps).
@@ -116,6 +116,18 @@ The same structure is in `shapewall journeys --json`, the MCP tool `list_journey
 `data/boards/<board>/journeys.json`). `shapewall journeys` prints it as text, one step per line with each fork's branches indented.
 
 ## Stepping through
+
+Open a journey from any of these; they all show the same one:
+
+- **Views** in the toolbar: its **Journeys** group lists every journey with its steps (or paths), and **None** shows all pages again.
+  With more than eight, the list scrolls and has a filter. While a journey is open the button shows its name, and its **x** leaves it.
+- The sidebar: expanded, its **Pages | Journeys** switch; the **Journeys** tab lists **None** (show all pages) and every journey with
+  its steps, the open one highlighted, a filter past eight and **New journey** where you can make one. The tab you chose is kept in this
+  browser; opening a journey elsewhere does not switch it, but the **Journeys** tab shows a dot while one is open. Collapsed, the
+  **Journeys** icon (with the same dot) opens that list beside the rail.
+- The command palette (Ctrl/Cmd+K): type the journey's name.
+- **J** opens the next journey, **Shift+J** the previous one; past the last one the board shows all pages again.
+- On a phone: the **...** menu's **Journeys** group.
 
 Selecting a journey highlights its pages with numbered badges, draws arrows between consecutive steps and fades everything else. The
 journey bar steps through it:

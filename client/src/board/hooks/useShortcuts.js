@@ -61,3 +61,27 @@ export function useCommentModeKeys({ commentMode, setCommentMode, canComment, co
     return () => window.removeEventListener('keydown', onKey)
   }, [canComment, comparePair, setCommentMode, setDraft])
 }
+
+// J opens the next journey, Shift+J the previous one; past either end the
+// board shows all pages again (the Views menu's "None"). Not while typing,
+// building a journey or with a dialog, menu or list open.
+export function useJourneyCycleKey({ journeys, journey, builder, openJourney, closeJourney }) {
+  useEffect(() => {
+    if (!journeys.length || builder) return undefined
+    const onKey = (event) => {
+      if ((event.defaultPrevented && !isIgnoredTypeahead(event)) || event.altKey || event.ctrlKey || event.metaKey || event.repeat) return
+      if (event.key !== 'j' && event.key !== 'J') return
+      if (isEditable(event.target)) return
+      if (document.querySelector('[role="dialog"]:not([data-sw-thread-popover]), [role="menu"], [role="listbox"]')) return
+      event.preventDefault()
+      const at = journey ? journeys.findIndex((item) => item.id === journey.id) : -1
+      // Positions -1 (none) to length - 1, wrapping through none.
+      const span = journeys.length + 1
+      const next = ((at + 1 + (event.shiftKey ? -1 : 1) + span) % span) - 1
+      if (next < 0) closeJourney()
+      else openJourney(journeys[next].id)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [builder, closeJourney, journey, journeys, openJourney])
+}

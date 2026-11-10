@@ -2,7 +2,7 @@
 // the override note, the confirmation dialog and the test result.
 
 import { useEffect, useRef, useState } from 'react'
-import { AlertTriangle, Check, CheckCircle2, Copy, KeyRound, Terminal, XCircle } from 'lucide-react'
+import { AlertTriangle, Check, CheckCircle2, Copy, Info, KeyRound, Terminal, XCircle } from 'lucide-react'
 import { cn } from '../lib/utils'
 import { Button, Dialog } from '../components/ui'
 
@@ -141,8 +141,21 @@ export function ConfirmDialog({ items, keyVar, onCancel, onConfirm, busy, touch,
   )
 }
 
+// `{ note }`: the demo's answer for something only a computer can do, neutral.
 export function TestResult({ result }) {
   if (!result) return null
+  if (result.note) {
+    return (
+      <p
+        className="flex items-start gap-1.5 rounded-md border border-line bg-surface-2/60 p-3 text-xs text-muted"
+        role="status"
+        data-sw-settings-test-result="note"
+      >
+        <Info size={14} className="mt-px shrink-0" aria-hidden="true" />
+        <span>{result.note}</span>
+      </p>
+    )
+  }
   const Icon = result.ok ? CheckCircle2 : XCircle
   return (
     <div

@@ -309,6 +309,13 @@ async function reserveProcessSlot(processPool, agent, signal, { evict = true } =
   if (signal?.aborted) throw new AgentError('agent_stopped', 'The agent start was cancelled.', 409)
   if (processPool.epoch !== epoch) throw new AgentError('agent_start', 'The server is stopping.')
   processPool.agents.add(agent)
+  processPool.changed?.()
+}
+
+// The pool's agents changed (one started, became ready or went away): the
+// open views refetch the agents' states (routes.js processPool.changed).
+function poolChanged(processPool) {
+  processPool?.changed?.()
 }
 
 // A queue a turn's events go into and the backend's stream reads from.
@@ -1300,6 +1307,7 @@ export function createAcpBackend(
       onGone: (item) => {
         if (item.stopped || !item.pid) processPool?.agents.delete(item)
         if (processes.get(item.thread) === item) processes.delete(item.thread)
+        poolChanged(processPool)
       },
     })
     if (closed) throw new AgentError('agent_start', 'The server is stopping.')
@@ -1320,6 +1328,8 @@ export function createAcpBackend(
     } finally {
       starting.delete(agent)
       if (agent.stopped || !agent.pid) processPool?.agents.delete(agent)
+      // Ready now, or gone.
+      poolChanged(processPool)
     }
     if (closed) {
       agent.kill('shutdown')
@@ -1455,6 +1465,7 @@ export async function acpHandshake(settings, { env = process.env, root, timeoutM
     thread: 'doctor',
     onGone: (item) => {
       if (item.stopped || !item.pid) processPool?.agents.delete(item)
+      poolChanged(processPool)
     },
   })
   try {
@@ -1469,5 +1480,6 @@ export async function acpHandshake(settings, { env = process.env, root, timeoutM
     // spawn can fail without an exit event; a dead child with no pid has
     // no process left to release its reservation through onGone.
     if (agent.stopped || !agent.pid) processPool?.agents.delete(agent)
+    poolChanged(processPool)
   }
 }

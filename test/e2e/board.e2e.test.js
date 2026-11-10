@@ -241,6 +241,52 @@ test('journey step-through at desktop 1440: picker, arrows, keyboard, Back close
   }
 })
 
+test('desktop 1440: the Views menu lists the journeys, shows the open one on its button, and stays in step with the sidebar', async () => {
+  const { context, page, errors } = await openBoard({ viewport: { width: 1440, height: 900 } })
+  try {
+    await page.click('[data-sw-view-menu]')
+    const menu = '[data-sw-views-menu]'
+    await page.waitForSelector(`${menu} [data-sw-views-journey="none"][aria-checked="true"]`)
+    // Journeys first, each with its steps or paths, then what to show.
+    assert.match(await page.locator(`${menu} [data-sw-views-journey="sign-up"]`).innerText(), /4 steps/)
+    assert.match(await page.locator(`${menu} [data-sw-views-journey="open-app"]`).innerText(), /2 paths/)
+    assert.equal(await page.locator(`${menu} [data-sw-links-toggle]`).count(), 1)
+    await page.click(`${menu} [data-sw-views-journey="sign-up"]`)
+    await expectStep(page, 1, 'home')
+    // The button carries the journey's name, and the menu checks it.
+    await page.waitForSelector('[data-sw-view-menu][data-sw-view-journey="sign-up"]')
+    assert.equal(await page.locator('[data-sw-view-journey-name]').innerText(), 'Sign up')
+    const sidebar = page.locator('[data-sw-pages-journey="sign-up"]')
+    if (await sidebar.count()) assert.equal(await sidebar.first().getAttribute('aria-current'), 'true')
+    // The expanded sidebar stays on its tab; its Journeys tab shows a dot.
+    const tabs = page.locator('[data-sw-sidebar-nav]')
+    if (await tabs.count()) {
+      assert.equal(await tabs.getAttribute('data-sw-sidebar-nav'), 'pages')
+      assert.equal(await tabs.locator('[data-sw-sidebar-tab="journeys"] [data-sw-journey-dot]').count(), 1)
+    }
+    await page.click('[data-sw-view-menu]')
+    await page.waitForSelector(`${menu} [data-sw-views-journey="sign-up"][aria-checked="true"]`)
+    await page.keyboard.press('Escape')
+    await page.waitForSelector(menu, { state: 'detached' })
+    // The clear button leaves the journey.
+    await page.click('[data-sw-view-journey-clear]')
+    await page.waitForSelector('[data-sw-journey-bar]', { state: 'detached' })
+    assert.equal(await page.locator('[data-sw-view-menu][data-sw-view-journey]').count(), 0)
+    // J opens the next journey, Shift+J goes back to none.
+    await page.keyboard.press('j')
+    await page.waitForSelector('[data-sw-journey-bar="sign-up"]')
+    await page.keyboard.press('j')
+    await page.waitForSelector('[data-sw-journey-bar="open-app"]')
+    await page.keyboard.press('Shift+J')
+    await page.keyboard.press('Shift+J')
+    await page.waitForSelector('[data-sw-journey-bar]', { state: 'detached' })
+    assert.doesNotMatch(page.url(), /[?&]j=/)
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})
+
 test('journey step-through at phone 390: menu, 44 px buttons, Back closes it', async () => {
   const { context, page, errors } = await openBoard({
     viewport: { width: 390, height: 844 },
@@ -267,6 +313,10 @@ test('journey step-through at phone 390: menu, 44 px buttons, Back closes it', a
     await page.goBack()
     await page.waitForSelector('[data-sw-journey-bar]', { state: 'detached' })
     assert.equal(await page.locator('[data-sw-board="demo"]').count(), 1)
+    // The menu's Journeys group: None is checked again.
+    await page.click('[data-sw-menu]')
+    await page.waitForSelector('[data-sw-journey-open="none"][aria-checked="true"]')
+    assert.equal(await page.getAttribute('[data-sw-journey-open="sign-up"]', 'aria-checked'), 'false')
     assert.deepEqual(errors, [])
   } finally {
     await context.close()

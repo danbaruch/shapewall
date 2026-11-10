@@ -1,11 +1,13 @@
-import { Bot, Camera, Flag, GitCompare, LocateFixed, Plus, Route, Settings, Waypoints } from 'lucide-react'
-import { Button, Dialog, ToggleGroup } from '../components/ui'
+import { useState } from 'react'
+import { Bot, Camera, Eye, Flag, GitCompare, LocateFixed, Plus, Route, Search, Settings, Waypoints } from 'lucide-react'
+import { Button, Dialog, Input, ToggleGroup } from '../components/ui'
 import { BrokenBadge } from './BrokenLinks'
 import { CaptureLine } from './CaptureStatus'
 import { PageFinder } from './PageFinder'
+import { JOURNEY_LIST_MAX, journeyMeta } from './ViewsMenu'
 
-// A phone's More menu: agent, pages, viewport, journeys, links, compare,
-// settings and capture.
+// A phone's More menu: agent, pages, viewport, journeys (the same group as
+// the desktop Views menu), what to show, settings and capture.
 export function BoardMenu({
   menuOpen,
   setMenuOpen,
@@ -22,6 +24,7 @@ export function BoardMenu({
   journey,
   canEditJourneys,
   openJourney,
+  closeJourney,
   startBuilder,
   canChecks,
   openChecks,
@@ -39,6 +42,15 @@ export function BoardMenu({
   setCaptureConfirm,
 }) {
   const section = 'mb-1.5 flex items-center gap-1 text-[11px] font-medium tracking-wide text-faint uppercase'
+  const [query, setQuery] = useState('')
+  const filtering = journeys.length > JOURNEY_LIST_MAX
+  const needle = filtering ? query.trim().toLowerCase() : ''
+  const shownJourneys = needle ? journeys.filter((item) => item.name.toLowerCase().includes(needle)) : journeys
+  const pickJourney = (id) => {
+    setMenuOpen(false)
+    if (id) openJourney(id)
+    else closeJourney()
+  }
   return (
     <Dialog open={menuOpen} onClose={() => setMenuOpen(false)} title={data?.board?.title || 'Board'}>
       <div className="space-y-5 p-5">
@@ -86,25 +98,54 @@ export function BoardMenu({
         {journeys.length || canEditJourneys ? (
           <div>
             <p className={section}>Journeys</p>
-            <div className="flex flex-col gap-1.5" data-sw-journey-menu="true">
-              {journeys.map((item) => (
+            {filtering ? (
+              <Input
+                size="touch"
+                icon={Search}
+                wrapperClassName="mb-1.5"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Filter journeys"
+                aria-label="Filter journeys"
+                data-sw-views-filter="true"
+              />
+            ) : null}
+            <div
+              className={filtering ? 'flex max-h-80 flex-col gap-1.5 overflow-y-auto' : 'flex flex-col gap-1.5'}
+              role="radiogroup"
+              aria-label="Journeys"
+              data-sw-journey-menu="true"
+            >
+              {journeys.length && !needle ? (
+                <Button
+                  size="touch"
+                  className="w-full justify-start"
+                  role="radio"
+                  aria-checked={!journey}
+                  variant={journey ? 'secondary' : 'default'}
+                  onClick={() => pickJourney(null)}
+                  data-sw-journey-open="none"
+                >
+                  <Eye size={15} aria-hidden="true" /> None
+                  <span className="ml-auto text-xs opacity-70">All pages</span>
+                </Button>
+              ) : null}
+              {shownJourneys.map((item) => (
                 <Button
                   key={item.id}
                   size="touch"
                   className="w-full justify-start"
+                  role="radio"
+                  aria-checked={journey?.id === item.id}
                   variant={journey?.id === item.id ? 'default' : 'secondary'}
-                  onClick={() => {
-                    setMenuOpen(false)
-                    openJourney(item.id)
-                  }}
+                  onClick={() => pickJourney(item.id)}
                   data-sw-journey-open={item.id}
                 >
                   <Route size={15} aria-hidden="true" /> <span className="truncate">{item.name}</span>
-                  <span className="ml-auto text-xs opacity-70">
-                    {item.branching ? `${item.paths?.length || 2} paths` : `${item.steps.length} steps`}
-                  </span>
+                  <span className="ml-auto text-xs tabular-nums opacity-70">{journeyMeta(item)}</span>
                 </Button>
               ))}
+              {needle && !shownJourneys.length ? <p className="px-1 text-sm text-muted">No journey matches.</p> : null}
               {canEditJourneys ? (
                 <Button
                   size="touch"
@@ -122,7 +163,7 @@ export function BoardMenu({
           </div>
         ) : null}
         <div className="flex flex-col gap-1.5">
-          <p className={section}>View</p>
+          <p className={section}>Show</p>
           {canChecks ? (
             <Button
               size="touch"

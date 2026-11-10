@@ -25,8 +25,10 @@ const statusText = (item) => (item.status ? String(item.status) : 'No answer')
 // With the links overlay on: a chip for the links on the pages that led to
 // an error, opening the list. Their URLs come from the captured site: shown
 // as text only, never as links.
-export function BrokenLinks({ items }) {
-  const [open, setOpen] = useState(false)
+export function BrokenLinks({ items, open: openProp, onOpenChange }) {
+  const [openState, setOpenState] = useState(false)
+  const open = openProp ?? openState
+  const setOpen = onOpenChange || setOpenState
   const count = items.length
   return (
     <div className="absolute top-2 left-2 z-30 max-w-[calc(100%-1rem)] max-lg:top-[4.75rem]" data-sw-broken-links="true">

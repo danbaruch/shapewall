@@ -1,6 +1,7 @@
 // /api/agent/*: the chat panel's API. JSON in, server-sent events out.
 //
 //   GET    /api/agent/status                                  what chat is connected to (no secrets)
+//   GET    /api/agent/events                                  SSE: "agents" when the agent settings change (settings-events.js)
 //   GET    /api/agent/boards/:id/threads                      the viewer's chat history (?q= searches it)
 //   GET    /api/agent/boards/:id/threads/:thread              one thread
 //   POST   /api/agent/boards/:id/threads/:thread/messages     send a message (editOf: rerun from an edit; regenerate: a new answer); SSE back
@@ -37,6 +38,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import express from 'express'
 import { addReply, getComment, listComments, setAgentStatus } from '../store.js'
 import { createBackend } from './backends/index.js'
+import { AGENTS_EVENT, createSettingsEvents } from './settings-events.js'
 import { cleanChoices } from './backends/acp.js'
 import { createOptionsCache, withChoices } from './options-cache.js'
 import { authFiles } from '../config.js'
@@ -45,7 +47,7 @@ import { AgentError } from './errors.js'
 import { createAgentHealth } from './agent-health.js'
 import { beginAgentOperation } from './control.js'
 import { validateFiles, validateMentions } from './composer.js'
-import { profileForDefault, userAgentEntry } from './user-settings.js'
+import { profileForDefault, userAgentEntry, userSettingsFile } from './user-settings.js'
 import { finishFix, projectChanged, projectSnapshot } from './feedback-loop.js'
 import { ownerMcpServers } from './owner-mcp.js'
 import { RUN_MS_MAX, commentIdOf, runTurn } from './run.js'
@@ -178,6 +180,13 @@ export function agentRouter({
 }) {
   const limit = { ...DEFAULT_LIMITS, ...limits }
   const router = express.Router()
+  // "Agents changed" for every open view: this server's settings routes and
+  // edits of the agents file from outside (settings-events.js).
+  const settingsEvents = createSettingsEvents({ file: userSettingsFile(env), watch: limit.watchSettings !== false })
+  router.settingsEvents = settingsEvents
+  // The open GET /events responses, ended on close.
+  const eventStreams = new Set()
+  let eventsClosed = false
   const settings = (profileId = null) => {
     const current = agentSettings(config, env, { acp, profileId })
     if (shared && !allowRemoteAgent && current.backend === 'acp' && current.configured) {
@@ -195,7 +204,14 @@ export function agentRouter({
   // processes) while the settings stay the same.
   let cached = null
   const backends = new Map()
-  const processPool = { epoch: 0, agents: new Set(), max: Math.min(limit.runsMax, limit.acp?.processesMax ?? limit.runsMax) }
+  // `changed`: an agent process started, became ready or went away, which
+  // moves an agent's state ("Starting", "Ready"): the open views hear it.
+  const processPool = {
+    epoch: 0,
+    agents: new Set(),
+    max: Math.min(limit.runsMax, limit.acp?.processesMax ?? limit.runsMax),
+    changed: () => settingsEvents.changed('state'),
+  }
   // How each agent is doing (agent-health.js): from the last turn or test.
   const health = createAgentHealth()
   const agentStatus = (current) => health.status(current, processPool)
@@ -280,6 +296,11 @@ export function agentRouter({
   // Server shutdown: stop agent processes (src/server/app.js stopChildren).
   router.close = () => {
     processPool.epoch += 1
+    settingsEvents.close()
+    // An open events stream would hold the server open: end every one.
+    eventsClosed = true
+    for (const res of eventStreams) res.end()
+    eventStreams.clear()
     const settingsStopped = settingsApi.close()
     const owned = [...processPool.agents]
     for (const agent of owned) agent.kill('shutdown')
@@ -715,6 +736,34 @@ export function agentRouter({
 
   router.use(express.json({ limit: SMALL_BODY_LIMIT }))
 
+  // The agent settings changed (here, in another tab, or in the file): a
+  // nudge only, no settings in it; each view refetches what it shows.
+  router.get('/events', (req, res) => {
+    if (eventsClosed) return res.status(503).json({ error: { code: 'stopping', message: 'The server is stopping.' } })
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'X-Accel-Buffering': 'no',
+      Connection: 'keep-alive',
+    })
+    res.flushHeaders?.()
+    res.write(': connected\n\n')
+    const stop = settingsEvents.subscribe((event) => {
+      if (!res.writableEnded) res.write(`event: ${AGENTS_EVENT}\ndata: ${JSON.stringify({ at: event.at })}\n\n`)
+    })
+    const keepalive = setInterval(() => {
+      if (!res.writableEnded) res.write(': ping\n\n')
+    }, limit.keepaliveMs)
+    keepalive.unref?.()
+    eventStreams.add(res)
+    const done = () => {
+      clearInterval(keepalive)
+      stop()
+      eventStreams.delete(res)
+    }
+    req.on('close', done)
+    res.on('finish', done)
+  })
   router.get('/status', (req, res) =>
     res.json({
       ...publicAgentInfo(settings()),
@@ -727,6 +776,7 @@ export function agentRouter({
     }),
   )
   const settingsApi = settingsRoutes({
+    events: settingsEvents,
     config,
     env,
     fetchImpl,

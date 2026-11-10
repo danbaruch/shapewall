@@ -1,29 +1,9 @@
-import {
-  Bot,
-  Camera,
-  Check,
-  Eye,
-  Flag,
-  GitCompare,
-  Map as MapIcon,
-  MessageSquare,
-  MessageSquarePlus,
-  MoreHorizontal,
-  Rows2,
-  Settings,
-  Waypoints,
-} from 'lucide-react'
+import { Bot, Camera, Flag, MessageSquare, MessageSquarePlus, MoreHorizontal, Rows2, Settings } from 'lucide-react'
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { leavePage } from '../lib/hooks'
 import { cn } from '../lib/utils'
 import {
   Button,
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
   IconButton,
   Select,
   SelectContent,
@@ -38,7 +18,7 @@ import {
   Tooltip,
 } from '../components/ui'
 import { ProjectCrumb, ViewerNote } from './HostedNotes'
-import { BrokenBadge } from './BrokenLinks'
+import { ViewsMenu } from './ViewsMenu'
 import { PALETTE_KEY, PaletteTrigger } from './PageFinder'
 import { KeyTip } from './KeyTip'
 import { CaptureStatus } from './CaptureStatus'
@@ -71,100 +51,6 @@ function useWidth(ref, active) {
     return () => observer.disconnect()
   }, [ref, active])
   return width
-}
-
-// The board's view options: links between pages, compare, the minimap.
-function ViewMenu({
-  showLinks,
-  toggleLinks,
-  linksTip,
-  brokenLinks,
-  canCompare,
-  comparePair,
-  toggleCompare,
-  minimapOn,
-  toggleMinimap,
-  compact,
-}) {
-  const on = [showLinks, Boolean(comparePair)].filter(Boolean).length
-  const item = 'pr-2'
-  const check = (value) => (
-    <span className={cn('ml-auto inline-flex h-4 w-4 items-center justify-center', value ? '!text-accent' : 'opacity-0')}>
-      <Check size={14} className="!text-accent" aria-hidden="true" />
-    </span>
-  )
-  return (
-    <DropdownMenu>
-      <Tooltip content="View options: links between pages, compare, minimap" side="bottom">
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="ghost"
-            className={cn('relative h-8 shrink-0 text-[13px] text-fg', compact ? 'w-8 px-0' : 'px-2.5', on && 'text-accent')}
-            aria-label={on ? `View options, ${on} on` : 'View options'}
-            data-sw-view-menu="true"
-          >
-            <Eye size={15} aria-hidden="true" />
-            {compact ? null : 'View'}
-            {on ? (
-              <span
-                className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-accent ring-2 ring-surface"
-                aria-hidden="true"
-                data-sw-view-on={on}
-              />
-            ) : null}
-            <BrokenBadge count={brokenLinks.length} corner />
-          </Button>
-        </DropdownMenuTrigger>
-      </Tooltip>
-      <DropdownMenuContent
-        align="center"
-        className="w-72"
-        onCloseAutoFocus={(event) => {
-          // Back to the canvas, so the next shortcut reaches the board.
-          event.preventDefault()
-          document.querySelector('[data-sw-canvas]')?.focus({ preventScroll: true })
-        }}
-      >
-        <DropdownMenuLabel>View</DropdownMenuLabel>
-        <DropdownMenuItem
-          className={item}
-          role="menuitemcheckbox"
-          aria-checked={showLinks}
-          onSelect={toggleLinks}
-          data-sw-links-toggle="true"
-        >
-          <Waypoints size={15} aria-hidden="true" />
-          <span className="min-w-0">
-            <span className="block">Links between pages</span>
-            {brokenLinks.length ? (
-              <span className="block text-xs text-bad">
-                {brokenLinks.length} {brokenLinks.length === 1 ? 'link leads' : 'links lead'} to an error
-              </span>
-            ) : null}
-          </span>
-          {check(showLinks)}
-        </DropdownMenuItem>
-        {canCompare ? (
-          <DropdownMenuItem
-            className={item}
-            role="menuitemcheckbox"
-            aria-checked={Boolean(comparePair)}
-            onSelect={toggleCompare}
-            data-sw-compare-toggle="true"
-          >
-            <GitCompare size={15} aria-hidden="true" /> Compare environments
-            {check(Boolean(comparePair))}
-          </DropdownMenuItem>
-        ) : null}
-        <DropdownMenuItem className={item} role="menuitemcheckbox" aria-checked={minimapOn} onSelect={toggleMinimap}>
-          <MapIcon size={15} aria-hidden="true" /> Minimap
-          {check(minimapOn)}
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <p className="px-2 py-1.5 text-xs text-muted">{linksTip}.</p>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  )
 }
 
 // Comments, Agent and Checks share the side panel: flat buttons side by side,
@@ -243,7 +129,8 @@ function PanelSwitch({
 
 // The board toolbar. Desktop (lg and up): three zones, the canvas-tool way:
 //   left    where you are and how you look at it: the project and board
-//           switcher, the screen-size toggle, View options, and on a local
+//           switcher, the screen-size toggle, Views (journeys and what the
+//           canvas shows), and on a local
 //           board Capture with its status (otherwise the status dot sits by
 //           the name)
 //   centre  find: "Go to page or journey" (Ctrl/Cmd+K), centred on the toolbar
@@ -288,6 +175,13 @@ export function BoardToolbar({
   toggleCompare,
   minimapOn,
   toggleMinimap,
+  journeys = [],
+  journey,
+  openJourney,
+  closeJourney,
+  canEditJourneys,
+  startBuilder,
+  openBrokenLinks,
   capture,
   busy,
   canCapture,
@@ -329,6 +223,7 @@ export function BoardToolbar({
           comment: commenting,
           panels: { comments: allOpen, agent: Boolean(chatAvailable), checks: Boolean(canChecks) },
           settings: Boolean(settingsAvailable),
+          journey: journey?.name || null,
         }),
       }),
     [
@@ -344,6 +239,7 @@ export function BoardToolbar({
       chatAvailable,
       canChecks,
       settingsAvailable,
+      journey?.name,
     ],
   )
   const off = collapsed(fit.step)
@@ -461,7 +357,7 @@ export function BoardToolbar({
           variant="ghost"
           className="shrink-0 text-fg"
           onClick={() => setMenuOpen(true)}
-          label={chatAvailable ? 'More: agent, pages, journeys, screen size' : 'More: pages, journeys, screen size'}
+          label={chatAvailable ? 'More: agent, pages, views, screen size' : 'More: pages, views, screen size'}
           data-sw-menu="true"
         >
           <MoreHorizontal size={19} aria-hidden="true" />
@@ -505,7 +401,7 @@ export function BoardToolbar({
     >
       <h1 className="sr-only">Shapewall: {boardTitle}</h1>
       <div className={cn('flex min-w-0 items-center', innerGap)} data-sw-toolbar-zone="left">
-        <div className="flex min-w-0 flex-col justify-center" style={fit.centred ? undefined : { maxWidth: TOOLBAR.name.at(-1) }}>
+        <div className="flex min-w-0 flex-col justify-center" style={fit.centred ? undefined : { maxWidth: TOOLBAR.name[fit.step] }}>
           {project && !sidebarTitled ? <ProjectCrumb project={project} /> : null}
           {picker}
         </div>
@@ -525,17 +421,25 @@ export function BoardToolbar({
             />
           </span>
         ) : null}
-        <ViewMenu
+        <ViewsMenu
+          journeys={journeys}
+          journey={journey}
+          openJourney={openJourney}
+          closeJourney={closeJourney}
+          canEditJourneys={canEditJourneys}
+          startBuilder={startBuilder}
           showLinks={showLinks}
           toggleLinks={toggleLinks}
           linksTip={linksTip}
           brokenLinks={brokenLinks}
+          openBrokenLinks={openBrokenLinks}
           canCompare={canCompare}
           comparePair={comparePair}
           toggleCompare={toggleCompare}
           minimapOn={minimapOn}
           toggleMinimap={toggleMinimap}
           compact={off.view}
+          labelMax={fit.journey || TOOLBAR.journey[Math.min(fit.step, TOOLBAR.journey.length - 1)]}
         />
         {canCapture ? (
           <>

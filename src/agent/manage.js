@@ -38,7 +38,7 @@ export function createAgentManagement({ config, env = process.env, token = newSe
     if (!expires || expires < Date.now()) return fail(res, 404)
     res.redirect(303, `/#settings-token=${token}`)
   })
-  app.use('/api', (req, res, next) => (/^\/agent\/settings(?:\/|$)/.test(req.path) ? next() : fail(res, 404)))
+  app.use('/api', (req, res, next) => (/^\/agent\/(?:settings(?:\/|$)|events$)/.test(req.path) ? next() : fail(res, 404)))
   app.use('/api/agent', agents)
   app.use('/api', (req, res) => fail(res, 404))
   app.use('/assets', express.static(path.join(clientDir, 'assets'), { index: false, dotfiles: 'deny' }))
