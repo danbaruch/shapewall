@@ -82,10 +82,22 @@ These are known gaps, stated plainly so you can plan around them.
 - **The live view is a snapshot, not a guarantee.** Live HTML is a script-free snapshot behind a strict CSP and an iframe sandbox. That
   removes whole classes of attack, but it cannot promise protection against every browser bug.
 
-<!-- more known limits arrive from the security review -->
+- **The sandboxed starter agent has edges.** Its approval rule for running tests covers manifests and configs, not test files or
+  installed dependencies, so changing those changes what the tests run without a new approval. A host you allow that sits behind a
+  shared CDN may accept domain fronting, and hosts you add with `--allow-host` or `--registry` may resolve to private addresses. The
+  image base is pinned by tag, not digest.
+- **`shapewall mcp` trusts the agent that calls it.** A local MCP agent can sign replies with any author name, and @mentions in its
+  replies wake other agents. In `mcp --remote`, including guest comments is an argument the agent chooses, not an operator setting.
+  `list_comments` returns every matching comment and a full-size image is the whole capture: there is no paging. The `files` paths in
+  results are absolute local paths the agent reads with its own file access.
+- **GitHub issues copy what the comment says.** With GitHub connect on, creating an issue copies the comment text and the screenshot
+  link into that repository, which may be public.
+- **The Buzz bridge trusts your user account.** Any process running as you can reach its local gateway socket and send as the
+  bridge's signers, and it runs the Buzz CLI you installed without verifying it. Everything channel members write is shown on the
+  board as plain text.
 
 ## Reporting a vulnerability
 
 Please report security issues privately, as described in the
-[security policy](https://github.com/danbaruch/shapewall/blob/main/SECURITY.md) (GitHub private vulnerability reporting, or
-[security@shapewall.com](mailto:security@shapewall.com)), not in public issues.
+[security policy](https://github.com/danbaruch/shapewall/blob/main/SECURITY.md) (GitHub private vulnerability reporting), not in public
+issues.

@@ -10,7 +10,11 @@ and the project uses [Semantic Versioning](https://semver.org/).
   with a dot (such as `~/.local`), so it follows your light or dark preference.
 - Website: shapewall.com has a dark mode, with a System, Light and Dark choice.
 - Docs: self-hosted multiplayer (`shapewall hosted`) is labelled beta, with what that means; the security docs list known limits.
-- Security: follow-up fixes from a review of the starter agent, the MCP server and the Buzz bridge.
+- Security: a review of the starter agent, the MCP server and the remote client. `push` and `share` no longer follow symlinks out of
+  the captures folder, `watch --remote` no longer writes through one, MCP results carry the same untrusted-data framing as
+  `comments --json`, answers from a hosted server are size-capped, and the starter agent closes gaps in its limit caps, its
+  pull-request guard and its cleanup. The security docs gain a Known limits section.
+- `init --base-url` finds your site's real pages (its sitemap, else the links on its pages) instead of writing sample pages.
 - CI runs lint, unit tests, the build and the package check on every pull request.
 
 ## 0.2.0 - 2026-11-09

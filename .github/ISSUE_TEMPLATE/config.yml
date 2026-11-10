@@ -2,4 +2,4 @@ blank_issues_enabled: false
 contact_links:
   - name: Security vulnerability
     url: https://github.com/danbaruch/shapewall/security/advisories/new
-    about: Report security issues privately (GitHub private vulnerability reporting, or security@shapewall.com), as described in SECURITY.md.
+    about: Report security issues privately with GitHub private vulnerability reporting, as described in SECURITY.md.

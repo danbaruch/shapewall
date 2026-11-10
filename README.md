@@ -12,8 +12,9 @@ With your dev server running, in its project folder:
 
 ```sh
 npx shapewall doctor --install-browser                          # once: downloads the Chromium that captures use
-npx shapewall init --base-url http://localhost:3000 --sitemap   # your dev server and its sitemap.xml
-npx shapewall capture && npx shapewall serve --open
+npx shapewall init --base-url http://localhost:3000             # your dev server: finds its pages
+npx shapewall capture                                           # every page, desktop and phone
+npx shapewall serve --open                                      # the board, in your browser
 ```
 
 **[Live demo](https://shapewall.com/demo/)** (no install: a board of a fictional product, 26 pages, comments in every state; comments

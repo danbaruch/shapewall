@@ -11,7 +11,8 @@ Please report privately, not in a public issue:
 
 1. **GitHub private vulnerability reporting** (preferred): the **Report a vulnerability** button on the repository's
    [Security tab](https://github.com/danbaruch/shapewall/security).
-2. **Email** if you cannot use GitHub: [security@shapewall.com](mailto:security@shapewall.com).
+2. If you cannot use GitHub's private reporting, open a public issue that says only "security contact needed" (no details) and
+   a maintainer will reach out.
 
 Include:
 
