@@ -3,6 +3,13 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## 0.2.4 - 2026-11-10
+
+- The top bar's View button is now Views: pick a journey by name there, alongside links, compare and the minimap. An open journey
+  shows its name in the top bar with a button to leave it. J and Shift+J step through journeys.
+- The demo's Agents page is the full page, with sample agents in every state.
+- Releases are published to npm from CI with provenance.
+
 ## 0.2.3 - 2026-11-10
 
 - The agent's model and thinking level are shown on a new chat before the first message, each with its own menu in the composer
