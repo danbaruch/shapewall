@@ -1,9 +1,9 @@
 // The composer: notice line, queued messages, starter prompts or follow-ups,
 // /help, pending images, mentions and text files, the text box (with "@"
-// mentions and "/" commands, ComposerInput.jsx), the attach menu, the model
-// and effort pickers and usage ring, the mic and send / queue / stop.
+// mentions and "/" commands, ComposerInput.jsx), the attach menu, the
+// agent's option menus and usage ring, the mic and send / queue / stop.
 
-import { useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ArrowUp, Crosshair, FileImage, FileText, ListPlus, Mic, MonitorSmartphone, Paperclip, Square, Upload, X } from 'lucide-react'
 import {
   Button,
@@ -19,8 +19,8 @@ import {
 import { cn } from '../lib/utils'
 import { ATTACH_MAX } from './images'
 import { ComposerInput } from './ComposerInput'
-import { FileChips, HelpCard, MentionChips, PromptChips, QueuedMessages, SessionOptions, UsageRing } from './composerParts'
-import { TEXT_ACCEPT, TEXT_FILES_MAX } from './composerModel.js'
+import { AgentOptions, FileChips, HelpCard, MentionChips, PromptChips, QueuedMessages, UsageRing } from './composerParts'
+import { TEXT_ACCEPT, TEXT_FILES_MAX, footerLayout } from './composerModel.js'
 
 // Starter prompts: on an empty thread, and above the composer until the
 // person sends something in this thread.
@@ -57,6 +57,7 @@ export function Composer({
   onCloseHelp,
   usage = null,
   options = null,
+  optionsLoading = false,
   onChooseOption,
   onSubmit,
   onStop,
@@ -77,6 +78,17 @@ export function Composer({
   const inputRef = useRef(null)
   const fileRef = useRef(null)
   const textRef = useRef(null)
+  // The footer row's width: room for a menu per option, or one combined.
+  const actionsRef = useRef(null)
+  const [footerWidth, setFooterWidth] = useState(0)
+  useEffect(() => {
+    const node = actionsRef.current
+    if (!node || typeof ResizeObserver === 'undefined') return undefined
+    const observer = new ResizeObserver(([entry]) => setFooterWidth(Math.round(entry.contentRect.width)))
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [])
+  const layout = footerLayout({ width: footerWidth, options, usage: Boolean(usage) })
   const hasContent = Boolean(draft.trim() || attachments.length || mentions.length || files.length)
   // Footer buttons are 44px targets everywhere; with a pointer the visible
   // circle (fill, hover) is the inner 32px, so send does not outweigh the
@@ -187,7 +199,7 @@ export function Composer({
           aria-label="Message the agent"
           data-sw-chat-input="true"
         />
-        <div className="mt-2 flex h-11 items-center gap-2" data-sw-chat-actions="true">
+        <div ref={actionsRef} className="mt-2 flex h-11 items-center gap-2" data-sw-chat-actions="true" data-sw-chat-layout={layout}>
           <input
             ref={fileRef}
             type="file"
@@ -281,9 +293,16 @@ export function Composer({
               {dictation.phase === 'starting' ? 'Starting…' : dictation.phase === 'stopping' ? 'Finishing…' : 'Listening'}
             </span>
           ) : (
-            // The thread's model and effort, and usage, between attach and the mic.
+            // The agent's options (model, thinking, more), and usage, between attach and the mic.
             <span className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden" data-sw-chat-footer="true">
-              <SessionOptions options={options} onChoose={onChooseOption} disabled={running} touch={touch} />
+              <AgentOptions
+                options={options}
+                loading={optionsLoading}
+                layout={layout}
+                onChoose={onChooseOption}
+                disabled={running}
+                touch={touch}
+              />
               <UsageRing usage={usage} touch={touch} />
             </span>
           )}

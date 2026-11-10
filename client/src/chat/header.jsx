@@ -117,8 +117,8 @@ export function AgentDestination({ agent, className }) {
   if (agent?.local) {
     return (
       <p className={cn('text-xs text-muted', className)} data-sw-chat-host="local">
-        <span className="text-fg">{agent.label}</span> runs on the server&apos;s machine over ACP, with its own login. It can read and edit
-        files in the project; when it asks before acting, you answer here.
+        <span className="text-fg">{agent.label}</span> works in this project with your login. It asks before changing files or running
+        commands.
       </p>
     )
   }

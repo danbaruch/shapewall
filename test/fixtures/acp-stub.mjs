@@ -26,20 +26,34 @@
 //   "usage"             -> a usage_update (32000 of 128000) and the turn's token counts in the answer
 //   "nextsteps"         -> text that ends with a <next-steps> block
 //   "config"            -> the session's model and effort values, as JSON
+//   "mode"              -> the session's mode
 //   anything else       -> "Hello from the ACP stub."
 //
 // STUB_ACP_MODE=auth: session/new answers auth_required. STUB_ACP_MODE=silent:
 // never answers initialize. STUB_ACP_MODE=noimage: no image prompt capability.
 // STUB_ACP_MODE=promptauth: the session starts, every prompt fails with auth_required.
-// --options: session/new lists model and thought_level config options, and
-// session/set_config_option switches them.
+// --options: session/new lists model, thought_level and mode config options,
+// and session/set_config_option switches them. --modes: the older way, a
+// `modes` list in session/new switched with session/set_mode. --slow-new:
+// session/new takes 400 ms (the composer's "Loading options").
 
 import fs from 'node:fs'
 import process from 'node:process'
 
 const MODE = process.env.STUB_ACP_MODE || ''
 const OPTIONS = process.argv.includes('--options')
+const MODES = process.argv.includes('--modes')
+const SLOW_NEW = process.argv.includes('--slow-new')
 const config = { model: 'stub-fast', effort: 'medium' }
+let mode = 'ask'
+const modes = () => ({
+  currentModeId: mode,
+  availableModes: [
+    { id: 'ask', name: 'Ask' },
+    { id: 'architect', name: 'Architect', description: 'Plans before it edits' },
+    { id: 'bypassPermissions', name: 'Bypass permissions' },
+  ],
+})
 const configOptions = () => [
   {
     id: 'model',
@@ -48,8 +62,8 @@ const configOptions = () => [
     type: 'select',
     currentValue: config.model,
     options: [
-      { value: 'stub-fast', name: 'Stub fast' },
-      { value: 'stub-deep', name: 'Stub deep' },
+      { value: 'stub-fast', name: 'Stub fast', description: 'Quick answers' },
+      { value: 'stub-deep', name: 'Stub deep', description: 'Slower, more careful' },
     ],
   },
   {
@@ -64,16 +78,28 @@ const configOptions = () => [
       { value: 'high', name: 'High' },
     ],
   },
-  // Never shown by Shapewall: not a model or effort choice.
+  // Shapewall offers Ask and Plan, never Yolo (it would act without asking).
   {
     id: 'mode',
     name: 'Mode',
     category: 'mode',
     type: 'select',
+    currentValue: mode,
+    options: [
+      { value: 'ask', name: 'Ask' },
+      { value: 'plan', name: 'Plan' },
+      { value: 'yolo', name: 'Yolo' },
+    ],
+  },
+  // Never shown by Shapewall: a permission setting.
+  {
+    id: 'approvals',
+    name: 'Approval policy',
+    type: 'select',
     currentValue: 'ask',
     options: [
       { value: 'ask', name: 'Ask' },
-      { value: 'yolo', name: 'Yolo' },
+      { value: 'never', name: 'Never ask' },
     ],
   },
 ]
@@ -142,12 +168,25 @@ function handle(message) {
   if (message.method === 'session/new') {
     if (MODE === 'auth') return fail(-32000, 'Authentication required')
     sessionCwd = message.params.cwd
-    return reply({ sessionId: `stub-session-${process.pid}`, ...(OPTIONS ? { configOptions: configOptions() } : {}) })
+    const answer = () =>
+      reply({
+        sessionId: `stub-session-${process.pid}`,
+        ...(OPTIONS ? { configOptions: configOptions() } : {}),
+        ...(MODES ? { modes: modes() } : {}),
+      })
+    if (SLOW_NEW) return void setTimeout(answer, 400)
+    return answer()
+  }
+  if (message.method === 'session/set_mode') {
+    if (!MODES || !modes().availableModes.some((item) => item.id === message.params.modeId)) return fail(-32602, 'unknown mode')
+    mode = message.params.modeId
+    return reply({})
   }
   if (message.method === 'session/set_config_option') {
     const option = OPTIONS && configOptions().find((item) => item.id === message.params.configId)
     if (!option || !option.options.some((item) => item.value === message.params.value)) return fail(-32602, 'unknown option')
-    config[option.id] = message.params.value
+    if (option.id === 'mode') mode = message.params.value
+    else config[option.id] = message.params.value
     return reply({ configOptions: configOptions() })
   }
   if (message.method === 'session/prompt') {
@@ -340,6 +379,10 @@ async function prompt({ sessionId, prompt: blocks }) {
   }
   if (last === 'nextsteps') {
     say(sessionId, 'Here you go.\n<next-steps>\nFix comment #1\n- Show the phone layout\n</next-steps>')
+    return 'end_turn'
+  }
+  if (last === 'mode') {
+    say(sessionId, mode)
     return 'end_turn'
   }
   if (last === 'config') {
