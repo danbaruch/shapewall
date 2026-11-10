@@ -20,9 +20,22 @@ import path from 'node:path'
 import { splitCommand } from '../watch.js'
 import { SETTINGS_SOURCE } from './acp/command.js'
 import { DENIED_KEY_VARS, KEY_VAR_RE, validateAgent } from './config.js'
+import { cleanBranchPrefix } from './branch-mode.js'
 
 export const SETTINGS_FILE_VAR = 'SHAPEWALL_AGENT_SETTINGS_FILE'
-export const ENTRY_KEYS = ['backend', 'baseUrl', 'model', 'apiKeyEnv', 'label', 'vision', 'keyHosts', 'acpCommand', 'profiles']
+export const ENTRY_KEYS = [
+  'backend',
+  'baseUrl',
+  'model',
+  'apiKeyEnv',
+  'label',
+  'vision',
+  'keyHosts',
+  'acpCommand',
+  'profiles',
+  'branchMode',
+  'branchPrefix',
+]
 const SECRET_KEYS = ['apiKey', 'key', 'token', 'secret', 'password']
 const ACP_COMMAND_MAX = 2000
 const KEY_HOSTS_MAX = 20
@@ -63,7 +76,7 @@ export function validateUserEntry(raw) {
       problems.push(`${key}: keys are never saved; set the key in the environment and name its variable in apiKeyEnv`)
     else if (!ENTRY_KEYS.includes(key) && key !== 'updatedAt') problems.push(`${key}: not an agent setting`)
   }
-  const { keyHosts, acpCommand, profiles, updatedAt, ...rest } = given
+  const { keyHosts, acpCommand, profiles, updatedAt, branchMode, branchPrefix, ...rest } = given
   const fields = {}
   for (const key of ['backend', 'baseUrl', 'model', 'apiKeyEnv', 'label', 'vision']) if (rest[key] !== undefined) fields[key] = rest[key]
   const agentProblems = []
@@ -134,6 +147,16 @@ export function validateUserEntry(raw) {
       }
       if (checkedProfiles.length) entry.profiles = checkedProfiles
     }
+  }
+  // Agent branch mode (branch-mode.js): the agent works on a branch in a worktree.
+  if (branchMode !== undefined) {
+    if (typeof branchMode !== 'boolean') problems.push('branchMode: true or false')
+    else entry.branchMode = branchMode
+  }
+  if (branchPrefix !== undefined) {
+    const prefix = cleanBranchPrefix(branchPrefix)
+    if (!prefix) problems.push('branchPrefix: letters, digits, "-", "_" and "/", at most 40 characters, such as "shapewall/"')
+    else entry.branchPrefix = prefix
   }
   if (typeof updatedAt === 'string') entry.updatedAt = updatedAt
   return { entry: problems.length ? null : entry, problems }

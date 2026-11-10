@@ -2,7 +2,7 @@
 // identities never enter the hosted store. Every batch and its retry result
 // commit together. A completed session can only be replayed by its own token.
 import { createHash } from 'node:crypto'
-import { AGENT_STATUSES, AUTHOR_MAX, COMMENT_BODY_MAX, CommentError, cleanFixRef, validateAnchor, VERSION_RE } from '../store.js'
+import { STORED_AGENT_STATUSES, AUTHOR_MAX, COMMENT_BODY_MAX, CommentError, cleanFixRef, validateAnchor, VERSION_RE } from '../store.js'
 import { ID_RE, VIEWPORT_NAME_RE } from '../config.js'
 import { REACTIONS } from '../reactions.js'
 import { findApiToken } from './tenancy.js'
@@ -49,7 +49,7 @@ export function cleanImportedComment(raw) {
   const body = text(raw.body, COMMENT_BODY_MAX)
   if (!body) bad('A comment needs text.')
   if (!['open', 'resolved'].includes(raw.status)) bad('Invalid comment state.')
-  if (raw.agentStatus != null && !AGENT_STATUSES.includes(raw.agentStatus)) bad('Invalid agent status.')
+  if (raw.agentStatus != null && !STORED_AGENT_STATUSES.includes(raw.agentStatus)) bad('Invalid agent status.')
   if (!Number.isInteger(raw.reopenCount ?? 0) || (raw.reopenCount ?? 0) < 0 || (raw.reopenCount ?? 0) > 100000) bad('Invalid reopen count.')
   if (raw.captureVersion != null && !VERSION_RE.test(raw.captureVersion)) bad('Invalid capture version.')
   if (!Array.isArray(raw.replies) || raw.replies.length > 200) bad('At most 200 replies per comment.')

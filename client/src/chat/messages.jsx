@@ -289,6 +289,7 @@ export const AssistantMessage = memo(function AssistantMessage({
   commentId = null,
   owner = false,
   onUndo = null,
+  onBranch = null,
   onRecapture = null,
   latest = false,
   ratings = null,
@@ -384,7 +385,14 @@ export const AssistantMessage = memo(function AssistantMessage({
         ) : null}
         {!pending ? <UsedRefs reply={message} request={request} commentId={commentId} text={message.text} /> : null}
         {!pending && message.summary ? (
-          <RunSummary message={message} owner={owner} touch={touch} onUndo={earlier ? null : onUndo} onRecapture={onRecapture} />
+          <RunSummary
+            message={message}
+            owner={owner}
+            touch={touch}
+            onUndo={earlier ? null : onUndo}
+            onBranch={onBranch}
+            onRecapture={onRecapture}
+          />
         ) : null}
         {message.status === 'stopped' ? (
           <Badge tone="warn" data-sw-chat-stopped="true">
@@ -526,6 +534,7 @@ export function MessageList({
   retryDisabled,
   owner = false,
   onUndo = null,
+  onBranch = null,
   onRecapture = null,
   versions = null,
   onEdit = null,
@@ -549,6 +558,7 @@ export function MessageList({
     onRetry,
     onContinue,
     onUndo,
+    onBranch,
     onRecapture,
     onEdit,
     onVersion,
@@ -565,6 +575,7 @@ export function MessageList({
       'onRetry',
       'onContinue',
       'onUndo',
+      'onBranch',
       'onRecapture',
       'onEdit',
       'onVersion',
@@ -659,6 +670,7 @@ export function MessageList({
                 commentId={comment?.id ?? null}
                 owner={owner}
                 onUndo={onUndo ? call.onUndo : null}
+                onBranch={onBranch ? call.onBranch : null}
                 onRecapture={onRecapture ? call.onRecapture : null}
                 latest={index === shown.length - 1}
                 ratings={ratings}

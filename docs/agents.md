@@ -199,6 +199,59 @@ link, a paired device or the owner's identity) can undo, from the board's own pa
 turn left as **Agent done** goes back to needing a person, with a reply saying the change was undone. An endpoint (OpenAI-compatible)
 does not edit files, so its summary only lists the comments it resolved.
 
+## Work on a branch
+
+With **Agent works on a branch** on, an ACP agent (Claude Code, Codex, ...) never edits your checkout. Each fix and each chat turn
+runs in a folder of its own, and Shapewall commits what it changed on a new branch. You look at the diff, then apply it or throw it
+away. It is off by default, per project, and changes nothing while off.
+
+**Turn it on** in the chat's settings (the sliders button in the chat header), or set it for a project:
+
+- `"agent": { "branchMode": true, "branchPrefix": "shapewall/" }` in `shapewall.config.json`, or
+- `SHAPEWALL_AGENT_BRANCH_MODE=1` and `SHAPEWALL_AGENT_BRANCH_PREFIX=review/` in the environment (these win over the other two).
+
+The switch in the chat saves the setting next to the other agent settings ([Where the settings are saved](#where-the-settings-are-saved)).
+The prefix is letters, digits, `-`, `_` and `/`, up to 40 characters; the default is `shapewall/`.
+
+**What happens on a turn:**
+
+1. Shapewall makes a plain copy of `HEAD` in `.shapewall/agent-worktrees/<id>` and a branch for it:
+   `<prefix>comment-<n>-<slug>` for a fix (`shapewall/comment-12-make-the-heading-bigger`) or `<prefix>chat-<thread>-<n>` for a chat
+   turn. If a branch by that name exists, it adds `-2`, `-3`.
+2. It refuses, with a message and nothing changed, when the project is not in a Git repository, the repository has no commit yet, or a
+   merge, rebase, cherry-pick or revert is in progress.
+3. Uncommitted changes in your checkout are **not** carried over: the copy is `HEAD` as committed. The chat says so.
+4. The agent's session folder, its file reads and writes and its commands are the copy, not your checkout. Writes to your checkout
+   are refused, and its Git commands cannot find your repository from there.
+5. At the end of the turn Shapewall commits everything the agent changed on the branch, as your repository's author (`user.name` and
+   `user.email`), with the message `Fix comment #12: <first line of the comment>` and a link to the comment. A symlink that points
+   out of the copy stops the commit.
+6. The comment reads **Fix ready on branch shapewall/comment-12-...**, in the thread, the comments panel, `shapewall comments --json`
+   (`agentStatus: "branch-ready"`, `agentBranch`), MCP and on the hosted server.
+
+**After the turn** the answer's summary shows the diff and:
+
+- **Apply to my checkout** brings the commit into your current branch: a fast-forward when your branch has not moved, a merge commit
+  when it has. On a conflict it stops, changes nothing and names the files; merge the branch yourself with Git or discard it. It also
+  stops when your checkout has uncommitted changes to tracked files or is not on a branch. After Apply the branch and its folder are
+  deleted, and for a fix the page is recaptured with before and after, as a direct fix would be.
+- **Open folder** opens the copy in your file manager (on the computer running Shapewall).
+- **Copy branch name** copies it, for `git diff main..shapewall/comment-12-...` or a pull request.
+- **Discard** asks first, then deletes the branch and its folder. Your checkout is not touched.
+
+**Undo:** before Apply, Undo is Discard. After Apply, Undo adds a commit that reverts what Apply brought in, only while your branch
+is still where Apply left it and has no uncommitted changes; otherwise it says why and does nothing.
+
+**Housekeeping:** the chat settings list the agent branches still waiting. Folders of turns whose server stopped are swept when
+Shapewall starts, but never while their branch has a commit that is not in your checkout yet. `shapewall doctor` reports what is left.
+`shapewall init` adds `.shapewall/agent-worktrees/` to `.gitignore`.
+
+**Limits:** two fixes run at the same time in two folders. Apply waits for a capture of the board to finish and runs one at a time.
+The copy has no `node_modules`, so an agent that wants to build or run tests there has to install first, which it asks you about. An
+agent's own tools (its shell) are not sandboxed by Shapewall: if your checkout changed during a branch turn, the chat says so.
+Git runs with hooks off (`core.hooksPath=/dev/null`), no submodule recursion, no filters or fsmonitor from the repository, and
+branch names are checked before Git sees them, so neither the agent nor the repository's own config can run code through these steps.
+
 ## Agent settings on the board
 
 For direct local boards, you can configure the agent from the board instead of files. Fixed-origin account boards use

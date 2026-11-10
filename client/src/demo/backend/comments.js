@@ -61,6 +61,7 @@ export function commentHelpers(ctx) {
       comment.resolution = null
       comment.agentStatus = null
       comment.agentStatusAt = null
+      delete comment.agentBranch
       comment.reopenCount = (Number(comment.reopenCount) || 0) + 1
       comment.reopenedAt = iso()
     }

@@ -11,6 +11,7 @@
 //   "ignore cancel"     -> a word every 30 ms and ignores session/cancel
 //   "read PATH"         -> fs/read_text_file, then the content or the error message
 //   "write PATH"        -> fs/write_text_file with "written by stub", then ok or the error
+//   "writein REL"       -> the same for REL inside the session cwd, then where it wrote
 //   "run CMD ARGS..."   -> terminal/create, wait_for_exit, output, release; then the output or the error
 //   "env"               -> the names of its environment variables, as JSON
 //   "caps"              -> the client capabilities it was given, as JSON
@@ -277,6 +278,17 @@ async function prompt({ sessionId, prompt: blocks }) {
     try {
       await request('fs/write_text_file', { sessionId, path: rest.join(' '), content: 'written by stub' })
       say(sessionId, 'Write ok.')
+    } catch (error) {
+      say(sessionId, `Write refused: ${error.message}`)
+    }
+    return 'end_turn'
+  }
+  if (word === 'writein') {
+    // Agent branch mode: the session cwd is the turn's worktree, not the checkout.
+    const target = `${sessionCwd}/${rest.join(' ')}`
+    try {
+      await request('fs/write_text_file', { sessionId, path: target, content: 'written by stub\n' })
+      say(sessionId, `Wrote ${target}`)
     } catch (error) {
       say(sessionId, `Write refused: ${error.message}`)
     }

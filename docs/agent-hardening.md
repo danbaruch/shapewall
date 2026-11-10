@@ -147,6 +147,9 @@ When the chat panel drives an agent CLI over ACP:
 - **Clear forgets.** **Clear this thread** stops the agent process of that thread, so a poisoned conversation does not carry on in the
   agent's memory.
 - **No MCP servers** are added to the session.
+- **Branch mode keeps the checkout out of reach.** With [Work on a branch](agents.md#work-on-a-branch) on, the agent's session,
+  file access and commands are a copy of `HEAD` in `.shapewall/agent-worktrees/`, and Shapewall commits and applies its work with
+  hooks, filters, fsmonitor and submodule recursion off, so a hostile repository or agent cannot run code through Git.
 
 ### Remote watchers do not get the project token
 

@@ -111,6 +111,8 @@ export async function runTurn({
   // The composer's options for this chat ({ configId: value }), owner turns
   // of an agent with its own session options (an ACP agent).
   choices = null,
+  // Agent branch mode: the folder this turn's agent works in (acp.js stream).
+  workdir = null,
 }) {
   const thread = `${board.id}/${threadId}`
   const runMs = backend.runMsMax || RUN_MS_MAX
@@ -186,6 +188,7 @@ export async function runTurn({
         tools: round < TOOL_ROUNDS_MAX ? tools : [],
         ...(modelOverride ? { model: modelOverride } : {}),
         ...(choices ? { choices } : {}),
+        ...(workdir ? { workdir } : {}),
         signal,
         thread,
       })) {

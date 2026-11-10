@@ -139,7 +139,9 @@ export async function init(flags, out, { fetch }) {
   out(`Wrote ${path.relative(process.cwd(), file) || file}`)
   // Captures, comments and auth files stay out of git.
   const gitignore = path.join(path.dirname(file), '.gitignore')
-  const wanted = ['.shapewall/', 'shapewall-export/', '*.auth.json']
+  // .shapewall/agent-worktrees/ is inside .shapewall/; named too so it stays
+  // ignored if someone narrows the first line (agent branch mode's checkouts).
+  const wanted = ['.shapewall/', 'shapewall-export/', '*.auth.json', '.shapewall/agent-worktrees/']
   const current = fs.existsSync(gitignore) ? fs.readFileSync(gitignore, 'utf8') : ''
   const missing = wanted.filter((line) => !current.split(/\r?\n/).includes(line))
   if (missing.length) {

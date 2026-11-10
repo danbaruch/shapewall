@@ -92,6 +92,8 @@ export function feedbackItem(context, comment) {
     fixRef: comment.fixRef || null,
     agentStatus: comment.agentStatus || null,
     agentStatusAt: comment.agentStatusAt || null,
+    // branch-ready: the branch the agent's fix waits on (agent branch mode).
+    ...(comment.agentBranch ? { agentBranch: comment.agentBranch } : {}),
     // Handles mentioned in the comment or its replies ("@robin" -> "robin").
     mentions: comment.mentions || [],
     reopenCount: comment.reopenCount || 0,
@@ -157,7 +159,9 @@ export function formatFeedbackItem(item, { cwd = process.cwd() } = {}) {
   const rel = (file) => (file ? (/^https?:\/\//.test(file) ? file : path.relative(cwd, file) || file) : 'not captured')
   const lines = []
   const where = item.page ? `${item.page.title} (${item.page.path})` : `Variant: ${item.variant?.title || 'removed'}`
-  const agent = item.agentStatus ? ` [agent: ${item.agentStatus}]` : ''
+  const agent = item.agentStatus
+    ? ` [agent: ${item.agentStatus}${item.agentStatus === 'branch-ready' && item.agentBranch ? ` on ${item.agentBranch}` : ''}]`
+    : ''
   const reopened = item.reopenCount && item.status === 'open' ? ' [reopened]' : ''
   const guest = item.authorGuest ? ' [guest]' : ''
   // A guest's name gets its own warning line below.

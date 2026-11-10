@@ -406,7 +406,7 @@ export function ThreadView({
           <ReopenedChip comment={comment} />
           {/* While the agent works, Fix with agent says so itself. */}
           {fixable && ['queued', 'working'].includes(agentStatus) ? null : (
-            <AgentStatusChip status={agentStatus} at={comment.agentStatusAt} />
+            <AgentStatusChip status={agentStatus} at={comment.agentStatusAt} branch={comment.agentBranch || null} />
           )}
           <span className="min-w-0 flex-1" />
           {fixable ? (

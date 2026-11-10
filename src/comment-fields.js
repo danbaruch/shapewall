@@ -74,3 +74,13 @@ export function cleanFixRef(value) {
   if (ref.length > FIX_REF_MAX) throw new CommentError(400, 'invalid_fix_ref', `The fix reference is limited to ${FIX_REF_MAX} characters.`)
   return ref || null
 }
+
+// A comment's agent status: queued (handed to an agent), working, done (the
+// agent thinks it is fixed; a person still resolves) or needs-human (the
+// agent stopped and asked). These are the ones agents and people set (CLI,
+// MCP, the API). Shapewall also stores branch-ready: an agent in branch mode
+// committed its fix on a branch, waiting to be applied to the checkout
+// (src/agent/branch-mode.js). Every reader and validator takes all five.
+export const AGENT_STATUSES = ['queued', 'working', 'done', 'needs-human']
+export const BRANCH_READY = 'branch-ready'
+export const STORED_AGENT_STATUSES = [...AGENT_STATUSES, BRANCH_READY]

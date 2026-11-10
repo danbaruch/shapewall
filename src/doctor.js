@@ -15,6 +15,7 @@ import { agentSettings } from './agent/config.js'
 import { formatCommand, loginHint } from './agent/acp/command.js'
 import { acpHandshake } from './agent/backends/acp.js'
 import { cliCommand, invocation } from './invocation.js'
+import { listAgentBranches } from './agent/branch-mode.js'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const PACKAGE = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'))
@@ -247,6 +248,26 @@ export async function checkAcpAgent(config, env = process.env, { acp = null, lau
   }
 }
 
+// Agent branch mode (src/agent/branch-mode.js): branches and worktrees the
+// agent left in .shapewall/agent-worktrees/. Shown only when there are some.
+export async function checkAgentBranches(config) {
+  if (!config) return null
+  const items = await listAgentBranches(config).catch(() => [])
+  if (!items.length) return null
+  const waiting = items.filter((item) => item.state === 'ready')
+  const folders = items.filter((item) => item.worktree).length
+  const names = items
+    .slice(0, 3)
+    .map((item) => item.branch)
+    .join(', ')
+  return {
+    name: 'agent-branches',
+    status: 'warn',
+    message: `Agent branches: ${items.length} left (${waiting.length} ready to apply, ${folders} worktree folder${folders === 1 ? '' : 's'}): ${names}${items.length > 3 ? ', ...' : ''}`,
+    fix: 'Apply or discard each one from its answer in the chat. Folders of finished turns are swept when Shapewall starts; ones with unapplied commits are kept.',
+  }
+}
+
 export async function runDoctor({
   configFile = null,
   port = 4600,
@@ -272,6 +293,8 @@ export async function runDoctor({
     useAcp ? await checkAcpAgent(config, env, { acp, launch }) : checkAgent(config, env),
     await checkGithub(config, { env, fetchImpl, network }),
   ]
+  const branches = await checkAgentBranches(config)
+  if (branches) checks.push(branches)
   return { ok: !checks.some((check) => check.status === 'fail'), checks }
 }
 
