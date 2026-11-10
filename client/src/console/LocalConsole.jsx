@@ -1,16 +1,5 @@
 import { useEffect, useRef } from 'react'
-import {
-  ArrowUpRight,
-  Bot,
-  Building2,
-  FolderKanban,
-  LayoutDashboard,
-  LogOut,
-  MessageSquareText,
-  Plug,
-  Settings,
-  UserRound,
-} from 'lucide-react'
+import { ArrowUpRight, Bot, Building2, FolderKanban, LayoutDashboard, LogOut, MessageSquareText, Settings, UserRound } from 'lucide-react'
 import { AppRail, useSidebarExpanded } from '../components/app-rail'
 import { api } from '../lib/api'
 import { leavePage, useMediaQuery, useParams, useResource } from '../lib/hooks'
@@ -19,10 +8,10 @@ import { Badge, Button, EmptyState, Spinner, TooltipProvider } from '../componen
 import { ProfileMenu } from '../components/profile-menu'
 import { ConsoleFooter } from './legal-links'
 import { PairingScreen } from '../pairing/Pairing'
-import { AgentDetails, GeneralSettings } from '../settings/LocalSettings'
-import { Card, CardHeader, LoadError, Loading, Logo, PageHeader } from './components'
+import { GeneralSettings } from '../settings/LocalSettings'
+import { Card, LoadError, Loading, Logo, PageHeader } from './components'
 import { AgentFeedbackView } from './pages/agent-feedback'
-import { AGENTS_DESCRIPTION, LocalAgents } from './pages/local-agents'
+import { AGENTS_DESCRIPTION, AgentsPage } from './pages/local-agents'
 
 const SECTIONS = [
   ['projects', 'Projects', FolderKanban],
@@ -216,28 +205,7 @@ export default function LocalConsole({ account = null, onSignOut = null }) {
                 ) : section === 'agents' ? (
                   <>
                     <PageHeader title="Agents" description={AGENTS_DESCRIPTION} />
-                    <div className="grid grid-cols-[minmax(0,1fr)] gap-5">
-                      {info.data?.agent ? (
-                        <LocalAgents
-                          agent={info.data.agent}
-                          touch={!wide}
-                          onChanged={info.refetch}
-                          onOpenEndpoint={() =>
-                            document.querySelector('[data-sw-local-console-agent-details]')?.scrollIntoView({ block: 'start' })
-                          }
-                        />
-                      ) : null}
-                      <Card className="scroll-mt-20" data-sw-local-console-agent-details>
-                        <CardHeader
-                          icon={Plug}
-                          title="Chat connection"
-                          description="What the board chat uses now, the source folder agents work in, and an OpenAI-compatible endpoint."
-                        />
-                        <div className="px-4 py-4 sm:px-5">
-                          <AgentDetails info={info.data} onSaved={info.refetch} touch={!wide} agentsHome={Boolean(info.data?.agent)} />
-                        </div>
-                      </Card>
-                    </div>
+                    <AgentsPage info={info.data} touch={!wide} onChanged={info.refetch} />
                   </>
                 ) : section === 'settings' ? (
                   <>

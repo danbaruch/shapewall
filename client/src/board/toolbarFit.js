@@ -1,6 +1,6 @@
 // How much of the desktop board toolbar keeps its words, as a pure function of
 // widths (unit-tested in test/toolbar-fit.test.js). The toolbar has three zones:
-//   left    the board name and switcher, the screen-size toggle, View, Capture
+//   left    the board name and switcher, the screen-size toggle, Views, Capture
 //           and the capture status
 //   centre  "Go to page or journey", centred on the toolbar itself
 //   right   Comment, the side panel toggles (Comments, Agent, Checks), Settings
@@ -15,7 +15,7 @@ export const FIT_STEPS = [
   'full', // everything labelled, search at full width
   'search', // search becomes an icon button (its shortcut stays in the tooltip)
   'panels', // Comments, Agent, Checks lose their words (the count stays)
-  'view', // View loses its word (Capture is always an icon)
+  'view', // Views loses its word, or the open journey's name (Capture is always an icon)
   'viewport', // the screen-size toggle becomes icons with tooltips
   // Last resort, for the narrowest toolbars (a 1024 px window with the
   // sidebar at its widest): Comment as a filled icon, tighter gaps.
@@ -33,6 +33,9 @@ export const TOOLBAR = {
   // step before the next one drops labels: a long name truncates a little at
   // a time, never below the last value (about 8 characters).
   name: [200, 176, 152, 128, 104, 104],
+  // An open journey's name on the Views button, at each step up to 'view'
+  // (where it becomes an icon): it truncates with an ellipsis past these.
+  journey: [160, 128, 96],
 }
 
 // What each step turns off. `collapsed(step).panels` is true from the panels step on.
@@ -49,12 +52,14 @@ export function collapsed(step) {
 }
 
 // One zone's width at a step. items: [{ full, compact, at }], where `at` is
-// the FIT_STEPS name that collapses it (no `at`: always `full`).
+// the FIT_STEPS name that collapses it (no `at`: always `full`). `full` may
+// be a list, one width per step, for a label that shortens before it goes.
 export function zoneWidth(items, step, gap = collapsed(step).tight ? TOOLBAR.tightGap : TOOLBAR.gap) {
   const shown = items.filter(Boolean)
   if (!shown.length) return 0
   const off = collapsed(step)
-  const sum = shown.reduce((total, item) => total + (item.at && off[item.at] ? item.compact : item.full), 0)
+  const width = (item) => (item.at && off[item.at] ? item.compact : Array.isArray(item.full) ? item.full[step] : item.full)
+  const sum = shown.reduce((total, item) => total + width(item), 0)
   return sum + gap * (shown.length - 1)
 }
 
@@ -72,6 +77,7 @@ export function toolbarItems({
   comment = false,
   panels = { comments: 0, agent: false, checks: false },
   settings = false,
+  journey = null, // the open journey's name: Views shows it, with a clear button
 }) {
   const t = (value, font) => Math.ceil(text(String(value), font)) + 1
   const ICON = 32
@@ -85,7 +91,17 @@ export function toolbarItems({
       at: 'viewport',
     })
   }
-  items.left.push({ id: 'view', full: 41 + t('View', 'ui'), compact: ICON, at: 'view' })
+  // Views: px-2.5, a 15 px icon, gap-1.5 and its word. With a journey open:
+  // the journey's name (capped per step) and a 28 px clear button joined to it (1 px
+  // overlap); collapsed, an icon with a dot and no clear button.
+  items.left.push({
+    id: 'view',
+    full: journey
+      ? FIT_STEPS.map((name, step) => 41 + Math.min(t(journey, 'ui'), TOOLBAR.journey[Math.min(step, TOOLBAR.journey.length - 1)]) + 27)
+      : 41 + t('Views', 'ui'),
+    compact: ICON,
+    at: 'view',
+  })
   // Capture is an icon button at every width (its tooltip says what it does),
   // so the search box keeps its room on local boards.
   if (capture) items.left.push({ id: 'capture', full: ICON })

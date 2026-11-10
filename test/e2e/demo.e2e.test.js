@@ -455,15 +455,52 @@ test('Fix with ...: the caret runs the fix once with the second scripted agent a
   }
 })
 
-test('the demo console has its own Agents page: the Agents card read-only with a demo note', async () => {
+test('the demo console has the real Agents page: every agent and its state, the default switches, notes instead of commands', async () => {
   const { context, page, errors } = await open()
   try {
     await page.goto(consoleUrl('/agents'))
     const card = page.locator('[data-sw-local-console-agents] [data-sw-agents-card="demo"]')
     await card.waitFor({ timeout: 20000 })
-    assert.match(await card.textContent(), /This is a demo/)
-    assert.equal(await card.locator('[data-sw-agent-row]').count(), 2)
-    assert.equal(await card.locator('button').count(), 0, 'nothing to press in the demo')
+    // One demo note at the top, not per row.
+    assert.equal(await page.locator('[data-sw-agents-demo-note]').count(), 1)
+    const state = async (id) => card.locator(`[data-sw-agent-row="${id}"]`).getAttribute('data-sw-agent-row-state')
+    const rows = await card
+      .locator('[data-sw-agent-row]')
+      .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-sw-agent-row')))
+    assert.deepEqual(rows, ['demo', 'second', 'claude', 'codex', 'goose', 'gemini', 'endpoint'])
+    assert.equal(await state('demo'), 'connected')
+    assert.equal(await state('codex'), 'found')
+    assert.equal(await state('claude'), 'needs-adapter')
+    assert.equal(await state('gemini'), 'missing')
+    assert.match(await card.locator('[data-sw-agent-row="claude"]').textContent(), /npm install -g @agentclientprotocol\/claude-agent-acp/)
+    // The Chat connection card, with the fictional folder and endpoint.
+    await page.waitForSelector('[data-sw-agent-project-root]:text("/home/robin/code/lumen-notes")')
+    assert.equal(await page.inputValue('[data-sw-settings-field="baseUrl"]'), 'https://api.example.com/v1')
+
+    // Test connection: a scripted success.
+    await page.click('[data-sw-agent-test="demo"]')
+    await page.waitForSelector('[data-sw-agent-row="demo"] [data-sw-settings-test-result="ok"]')
+    // Connect on a real agent: a neutral note, not an error.
+    await page.click('[data-sw-profile-connect="codex"]')
+    await page.waitForSelector('[data-sw-agent-row="codex"] [data-sw-settings-test-result="note"]')
+    assert.equal(await page.locator('[data-sw-settings-test-result="failed"]').count(), 0)
+    // The default switches, and the chat connection follows.
+    await page.click('[data-sw-agents-default-option="second"]')
+    await page.waitForSelector('[data-sw-agent-row="second"] :text("Default")')
+    await page.waitForSelector('[data-sw-settings-status] :text("Chat uses Second agent")')
+    // Remove a scripted agent, then connect it again.
+    await page.click('[data-sw-agent-remove="demo"]')
+    await page.waitForSelector('[data-sw-agent-row="demo"][data-sw-agent-row-state="found"]')
+    await page.click('[data-sw-profile-connect="demo"]')
+    await page.waitForSelector('[data-sw-agent-row="demo"][data-sw-agent-row-state="connected"]')
+    await page.click('[data-sw-agent-remove="demo"]')
+    await page.waitForSelector('[data-sw-agent-row="demo"][data-sw-agent-row-state="found"]')
+    // Reset puts the first agent back as the default.
+    // (Reset reloads the console at its start page: wait for that before going on.)
+    await Promise.all([page.waitForURL(/console\.html$/), resetDemo(page)])
+    await page.goto(consoleUrl('/agents'))
+    await page.waitForSelector('[data-sw-agent-row="demo"][data-sw-agent-row-state="connected"]', { timeout: 20000 })
+    await page.waitForSelector('[data-sw-agent-row="demo"] :text("Default")')
     assert.equal((await page.locator('h1').first().textContent()).trim(), 'Agents')
     assert.match(await page.title(), /^Agents · /)
     assert.equal((await page.locator('[data-sw-nav="agents"][aria-current="page"]').count()) > 0, true)

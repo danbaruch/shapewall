@@ -47,7 +47,7 @@ import { PhoneSheets, SidePanel } from './BoardPanels'
 import { BoardRail } from './BoardRail'
 import { BoardDialogs } from './BoardDialogs'
 import { useLiveFrames } from './hooks/useLiveFrames'
-import { useCommentModeKeys } from './hooks/useShortcuts'
+import { useCommentModeKeys, useJourneyCycleKey } from './hooks/useShortcuts'
 import { useJourneyActions } from './hooks/useJourneyActions'
 import { useCommentActions } from './hooks/useCommentActions'
 import { useBoardData } from './hooks/useBoardData'
@@ -200,6 +200,11 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   // ---- Journeys, links, compare: URL state ----------------------------------
   const { journeys, journey, route, routeGraph, routePages, step, journeyComments } = useJourneyState({ params, data, builder })
   const showLinks = params.get('links') === '1'
+  // The broken links list over the canvas, also opened from the Views menu.
+  const [brokenOpen, setBrokenOpen] = useState(false)
+  useEffect(() => {
+    if (!showLinks) setBrokenOpen(false)
+  }, [showLinks])
   const brokenLinks = Array.isArray(data?.brokenLinks) ? data.brokenLinks : []
   const linksTip = brokenLinks.length
     ? `Arrows for the links between pages; ${brokenLinks.length} ${brokenLinks.length === 1 ? 'link leads' : 'links lead'} to an error`
@@ -682,6 +687,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   useOverlayEntry(Boolean(builder), () => setBuilder(null))
 
   useCommentModeKeys({ commentMode, setCommentMode, canComment, comparePair, setDraft })
+  useJourneyCycleKey({ journeys, journey, builder, openJourney, closeJourney })
   // The app sidebar (desktop): expanded or collapsed, Ctrl/Cmd+B, remembered.
   const [sidebarOpen, toggleSidebar] = useSidebarExpanded(wide, false)
   // Ctrl/Cmd+K: the command palette (pages, journeys, comments, actions).
@@ -1021,7 +1027,9 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     journey,
     canEditJourneys,
     openJourney,
+    closeJourney,
     startBuilder,
+    openBrokenLinks: () => setBrokenOpen(true),
     canChecks,
     openChecks,
     showLinks,
@@ -1147,7 +1155,9 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                 onKeyDown={onCanvasKeyDown}
                 data-sw-canvas="true"
               >
-                {showLinks && brokenLinks.length ? <BrokenLinks items={brokenLinks} /> : null}
+                {showLinks && brokenLinks.length ? (
+                  <BrokenLinks items={brokenLinks} open={brokenOpen} onOpenChange={setBrokenOpen} />
+                ) : null}
                 <CanvasNotes
                   wide={wide}
                   commentMode={commentMode}

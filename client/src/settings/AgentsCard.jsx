@@ -17,7 +17,9 @@
 // Connecting and removing run commands as this machine's owner, so they need
 // the settings token (src/agent/settings-routes.js). Without it the card is
 // read-only: the connected agents from /api/agent/status, and how to open
-// the owner link. In the public demo it is read-only with a demo note.
+// the owner link. The public demo shows the full card from sample data
+// (client/src/demo/backend/routes-agents.js): an action that would run a
+// command there answers `{ demoNote }`, shown as a neutral note on its row.
 
 import { useCallback, useEffect, useState } from 'react'
 import { AlertTriangle, Bot, ExternalLink, Globe, Lock, Plug, RefreshCw, Trash2 } from 'lucide-react'
@@ -37,6 +39,8 @@ const GET_IT = {
   goose: { text: 'Install goose from its install guide, then check again.', anchor: 'goose' },
   gemini: { text: 'Install Gemini CLI, then check again.', anchor: 'gemini-cli' },
 }
+
+const DEMO_CHECK = 'In the demo nothing runs on a computer. On your install this looks for the agent again.'
 
 const ROW_STATE = {
   connected: 'Connected',
@@ -70,7 +74,6 @@ export function AgentsCard({
   onBusy = null,
   onChanged = null,
   endpointForm = null,
-  demo = false,
   onOpenEndpoint = null,
   // /api/info's `agent`, when the page has it: a tab without the owner's
   // settings token asks nothing of the agent routes and shows the default.
@@ -88,11 +91,6 @@ export function AgentsCard({
   useEffect(() => onBusy?.(Boolean(busy)), [busy, onBusy])
 
   const load = useCallback(async () => {
-    if (demo) {
-      setLocked('demo')
-      setStatus(await api.get('/api/agent/status').catch(() => null))
-      return
-    }
     if (agent && !agent.settingsEditable) {
       setLocked(agent.settingsReadonly ? 'Change agents on the computer running Shapewall.' : 'owner')
       setStatus(agent)
@@ -112,7 +110,7 @@ export function AgentsCard({
       setLocked(caught.status === 404 ? 'owner' : caught.message)
       setStatus(await api.get('/api/agent/status').catch(() => null))
     }
-  }, [demo, agent])
+  }, [agent])
   useEffect(() => {
     if (!given) load()
   }, [given, load])
@@ -123,6 +121,14 @@ export function AgentsCard({
     await onChanged?.()
   }
 
+  // The demo's answer for something only a computer can do: a note, not an error.
+  const noted = (id, next) => {
+    if (!next?.demoNote) return false
+    setConfirm(null)
+    setResults((current) => ({ ...current, [id]: { note: next.demoNote } }))
+    return true
+  }
+
   // Connect: the server's own command for that agent, after the same
   // confirmation as any new command; then the handshake.
   const connect = async (agentId, hash = null) => {
@@ -130,6 +136,7 @@ export function AgentsCard({
     setResults((current) => ({ ...current, [agentId]: null }))
     try {
       const next = await api.post('/api/agent/settings/profiles/connect', { agentId, confirm: hash })
+      if (noted(agentId, next)) return
       if (next.confirm) {
         setConfirm({ agentId, items: next.confirm, hash: next.confirmHash })
         return
@@ -147,7 +154,9 @@ export function AgentsCard({
   const remove = async (id) => {
     setBusy(id)
     try {
-      await changed(await api.delete(`/api/agent/settings/profiles/${encodeURIComponent(id)}`))
+      const next = await api.delete(`/api/agent/settings/profiles/${encodeURIComponent(id)}`)
+      if (noted(id, next)) return
+      await changed(next)
       setResults((current) => ({ ...current, [id]: null }))
     } catch (error) {
       setResults((current) => ({ ...current, [id]: { ok: false, message: error.message, details: [] } }))
@@ -162,6 +171,7 @@ export function AgentsCard({
     setResults((current) => ({ ...current, [id]: null }))
     try {
       const result = await api.post('/api/agent/settings/test', asDefault ? {} : { profileId: id })
+      if (noted(id, result)) return
       setResults((current) => ({ ...current, [id]: result }))
       if (!given) await load()
     } catch (error) {
@@ -173,7 +183,9 @@ export function AgentsCard({
   const makeDefault = async (id) => {
     setBusy(`default:${id}`)
     try {
-      await changed(await api.post(`/api/agent/settings/profiles/${encodeURIComponent(id)}/default`, {}))
+      const next = await api.post(`/api/agent/settings/profiles/${encodeURIComponent(id)}/default`, {})
+      if (noted('default', next)) return
+      await changed(next)
     } catch (error) {
       setResults((current) => ({ ...current, default: { ok: false, message: error.message, details: [] } }))
     } finally {
@@ -203,7 +215,20 @@ export function AgentsCard({
   const off = Boolean(busy) || disabled || overridden
 
   return (
-    <div className="space-y-6" data-sw-agents-card="editable" data-sw-native-profiles>
+    <div className="space-y-6" data-sw-agents-card={view.demo ? 'demo' : 'editable'} data-sw-native-profiles>
+      {view.demo ? (
+        <p
+          className="flex items-start gap-2 rounded-md border border-line bg-surface-2/60 px-3 py-2.5 text-xs text-muted"
+          role="note"
+          data-sw-agents-demo-note
+        >
+          <Bot size={14} className="mt-px shrink-0" aria-hidden="true" />
+          <span>
+            This is a demo with sample agents on a pretend computer. The two scripted agents answer in this browser, and nothing is sent
+            anywhere. Choosing the default, testing, removing and connecting them works here; Reset puts everything back.
+          </span>
+        </p>
+      ) : null}
       {overridden ? (
         <p className="flex items-start gap-1.5 text-xs text-fg" data-sw-agents-override>
           <AlertTriangle size={13} className="mt-px shrink-0 text-warn" aria-hidden="true" />
@@ -290,7 +315,13 @@ export function AgentsCard({
                       {busy === row.id ? 'Connecting...' : 'Connect'}
                     </Button>
                   ) : row.kind === 'needs-adapter' || row.kind === 'missing' ? (
-                    <Button size={size} variant="ghost" disabled={Boolean(busy)} onClick={() => changed()} data-sw-agent-check={row.id}>
+                    <Button
+                      size={size}
+                      variant="ghost"
+                      disabled={Boolean(busy)}
+                      onClick={() => (view.demo ? noted(row.id, { demoNote: DEMO_CHECK }) : changed())}
+                      data-sw-agent-check={row.id}
+                    >
                       <RefreshCw size={13} aria-hidden="true" /> Check again
                     </Button>
                   ) : null}
@@ -393,7 +424,7 @@ export function AgentsCard({
   )
 }
 
-// Without the owner's capability (or in the demo): the connected agents as
+// Without the owner's capability: the connected agents as
 // they are, and one sentence on how to change them.
 function ReadOnlyAgents({ locked, status }) {
   const { options } = pickerProfiles({ profileId: 'default', profiles: status?.profiles || [] })
@@ -403,19 +434,13 @@ function ReadOnlyAgents({ locked, status }) {
       ? [{ id: 'default', label: status.label || 'Agent', state: status.state || 'ready', isDefault: true, configured: true }]
       : []
   const note =
-    locked === 'demo'
-      ? 'This is a demo: these scripted agents answer in this browser, and nothing is sent anywhere. On your own machine, this is where you connect Claude Code, Codex, goose or Gemini CLI and choose the default.'
-      : locked === 'owner'
-        ? 'To change agents, open the owner link that shapewall serve prints in your terminal (or run shapewall serve --open).'
-        : locked
+    locked === 'owner'
+      ? 'To change agents, open the owner link that shapewall serve prints in your terminal (or run shapewall serve --open).'
+      : locked
   return (
-    <div className="space-y-3" data-sw-agents-card={locked === 'demo' ? 'demo' : 'readonly'}>
+    <div className="space-y-3" data-sw-agents-card="readonly">
       <p className="flex items-start gap-2 rounded-md border border-line bg-surface-2/60 px-3 py-2.5 text-xs text-muted" role="note">
-        {locked === 'demo' ? (
-          <Bot size={14} className="mt-px shrink-0" aria-hidden="true" />
-        ) : (
-          <Lock size={14} className="mt-px shrink-0" aria-hidden="true" />
-        )}
+        <Lock size={14} className="mt-px shrink-0" aria-hidden="true" />
         <span>{note}</span>
       </p>
       {list.length ? (
@@ -427,7 +452,6 @@ function ReadOnlyAgents({ locked, status }) {
                 <p className="flex flex-wrap items-center gap-1.5 text-sm font-medium text-fg">
                   {option.label}
                   {option.isDefault ? <Badge tone="accent">Default</Badge> : null}
-                  {locked === 'demo' ? <Badge>Demo</Badge> : null}
                 </p>
                 <p className="text-xs text-muted">{stateLine(option)}</p>
               </div>
