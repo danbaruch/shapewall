@@ -95,6 +95,16 @@ test('batch fixes: off by default, on from the Agents page, three fixed in order
     await page.click('[data-sw-batch-fix="3"]')
     await page.locator('[data-sw-batch-confirm="3"]').waitFor()
     assert.equal(await page.locator('[data-sw-batch-confirm-item]').count(), 3)
+    // Each row: the number, then the comment's first line.
+    const lineOf = (comment) =>
+      comment.body
+        .split('\n')
+        .map((line) => line.trim())
+        .find(Boolean)
+    for (const comment of first) {
+      const title = await page.locator(`[data-sw-batch-confirm-title="${comment.id}"]`).textContent()
+      assert.equal(title.replace(/\s+/g, ' ').trim(), `#${comment.id} ${lineOf(comment)}`)
+    }
     await page.click('[data-sw-batch-start]')
     const strip = page.locator('[data-sw-batch-strip]')
     await strip.locator('[data-sw-batch-headline]').waitFor()
@@ -114,6 +124,10 @@ test('batch fixes: off by default, on from the Agents page, three fixed in order
       .locator('[data-sw-batch-strip] [data-sw-batch-item-state]')
       .evaluateAll((items) => items.map((item) => item.getAttribute('data-sw-batch-item-state')))
     assert.deepEqual(states, ['fixed', 'fixed', 'fixed'])
+    for (const comment of first) {
+      const title = await page.locator(`[data-sw-batch-strip] [data-sw-batch-item-title="${comment.id}"]`).textContent()
+      assert.ok(title.startsWith(lineOf(comment)), `#${comment.id}: ${title}`)
+    }
     for (const comment of first) {
       const after = getComment(config, board.id, comment.id)
       assert.equal(after.agentStatus, 'done', `#${comment.id}`)

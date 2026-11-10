@@ -835,6 +835,7 @@ export default function ChatPanel({
               <BatchProgress
                 batch={batch.batch}
                 boardId={boardId}
+                comments={comments}
                 touch={touch}
                 className="rounded-lg border border-line bg-surface-2/60 p-2.5"
                 onOpenThread={batch.onOpenThread}

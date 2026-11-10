@@ -424,6 +424,7 @@ export default function CommentsPanel({
           <BatchProgress
             batch={batch.batch}
             boardId={batch.boardId}
+            comments={comments}
             compact
             touch={touch}
             onOpenThread={batch.onOpenThread}

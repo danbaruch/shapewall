@@ -224,10 +224,10 @@ export function BatchConfirm({ open, onClose, ids, comments, max, agentName, tar
               <li key={id} className="flex min-w-0 items-start gap-2.5 px-3 py-2 text-ui" data-sw-batch-confirm-item={id}>
                 <span className="w-5 shrink-0 text-right text-xs text-faint tabular-nums">{index + 1}.</span>
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-fg">{firstLine(comment?.body)}</span>
-                  <span className="block truncate text-xs text-muted">
-                    #{id} · {comment ? targetTitle(comment.pageId) : 'comment'}
+                  <span className="block truncate text-fg" data-sw-batch-confirm-title={id}>
+                    <span className="text-muted tabular-nums">#{id}</span> {firstLine(comment?.body)}
                   </span>
+                  <span className="block truncate text-xs text-muted">{comment ? targetTitle(comment.pageId) : 'comment'}</span>
                 </span>
               </li>
             )
@@ -266,8 +266,20 @@ export function batchHeadline(batch) {
 }
 
 // `compact`: the comments panel's strip (the list folds away behind a button).
-export function BatchProgress({ batch, boardId, onOpenThread, onCancel, onDismiss, touch = false, compact = false, className }) {
+// `comments`: the board's comments, for each row's first line.
+export function BatchProgress({
+  batch,
+  boardId,
+  comments = [],
+  onOpenThread,
+  onCancel,
+  onDismiss,
+  touch = false,
+  compact = false,
+  className,
+}) {
   const [open, setOpen] = useState(!compact)
+  const bodies = useMemo(() => new Map((comments || []).map((comment) => [comment.id, comment.body])), [comments])
   const [answering, setAnswering] = useState(null)
   const [failed, setFailed] = useState(null)
   if (!batch) return null
@@ -415,7 +427,15 @@ export function BatchProgress({ batch, boardId, onOpenThread, onCancel, onDismis
                 >
                   #{item.commentId}
                 </Button>
-                <span className="min-w-0 flex-1 truncate text-xs text-muted">{item.message || ''}</span>
+                <span className="min-w-0 flex-1 truncate text-xs" data-sw-batch-item-title={item.commentId}>
+                  {bodies.has(item.commentId) ? <span className="text-fg">{firstLine(bodies.get(item.commentId))}</span> : null}
+                  {item.message ? (
+                    <span className="text-muted">
+                      {bodies.has(item.commentId) ? ' · ' : ''}
+                      {item.message}
+                    </span>
+                  ) : null}
+                </span>
                 <Badge tone={info.tone} className="shrink-0">
                   <Icon size={10} className={item.state === 'running' ? 'motion-safe:animate-spin' : undefined} aria-hidden="true" />{' '}
                   {info.label}
