@@ -54,7 +54,7 @@ export function SwitchButton({ on, onChange, disabled, labelledBy, touch = false
 }
 
 // The setting as the server has it ({ enabled, prefix, sources, defaultPrefix,
-// acp }) or null (not offered), and save(body).
+// acp, filters }) or null (not offered), and save(body).
 export function useBranchMode() {
   const [state, setState] = useState(null)
   const [prefix, setPrefix] = useState('')
@@ -141,6 +141,21 @@ const explain = (state, on) =>
     state.sources?.enabled === 'env' ? ' Set by SHAPEWALL_AGENT_BRANCH_MODE.' : ''
   }`
 
+// This repository names Git filters (Git LFS is one): branch mode runs none
+// of them, so the agent sees those files in their stored form (an LFS
+// pointer file), and Apply refuses a change to one.
+function FilterNote({ state, className }) {
+  const filters = Array.isArray(state.filters) ? state.filters.slice(0, 4) : []
+  if (!filters.length) return null
+  const lfs = filters.includes('lfs')
+  return (
+    <p className={cn('text-warn', className)} data-sw-branch-mode-filters={filters.join(' ')}>
+      This repository uses {lfs ? 'Git LFS' : `the Git filter ${filters.join(', ')}`}. On a branch, the agent sees those files as Git stores
+      them{lfs ? ' (small pointer files)' : ''}, not as you see them, and Apply refuses a change to one.
+    </p>
+  )
+}
+
 // The chat panel's compact row.
 export default function BranchModeToggle({ touch = false, disabled = false }) {
   const mode = useBranchMode()
@@ -166,6 +181,7 @@ export default function BranchModeToggle({ touch = false, disabled = false }) {
         />
       </div>
       <p className="text-muted">{explain(state, on)}</p>
+      <FilterNote state={state} />
       {on ? (
         <label className="flex items-center gap-2 text-muted">
           <span className="shrink-0">Branch prefix</span>
@@ -219,6 +235,7 @@ export function BranchModeRow({ touch = false, disabled = false }) {
             Work on a branch
           </p>
           <p className="mt-0.5 text-xs text-muted">{explain(state, on)}</p>
+          <FilterNote state={state} className="mt-1 text-xs" />
         </div>
         <SwitchButton
           on={on}

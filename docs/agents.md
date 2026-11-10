@@ -226,7 +226,8 @@ The prefix is letters, digits, `-`, `_` and `/`, up to 40 characters; the defaul
    are refused, and its Git commands cannot find your repository from there.
 5. At the end of the turn Shapewall commits everything the agent changed on the branch, as your repository's author (`user.name` and
    `user.email`), with the message `Fix comment #12: <first line of the comment>` and a link to the comment. A symlink that points
-   out of the copy stops the commit.
+   out of the copy stops the commit. Files that `HEAD`'s ignore rules ignore (`.env`, `dist/`) are never committed, even when the
+   agent edited `.gitignore`; when it did, the answer says so.
 6. The comment reads **Fix ready on branch shapewall/comment-12-...**, in the thread, the comments panel, `shapewall comments --json`
    (`agentStatus: "branch-ready"`, `agentBranch`), MCP and on the hosted server.
 
@@ -234,14 +235,17 @@ The prefix is letters, digits, `-`, `_` and `/`, up to 40 characters; the defaul
 
 - **Apply to my checkout** brings the commit into your current branch: a fast-forward when your branch has not moved, a merge commit
   when it has. On a conflict it stops, changes nothing and names the files; merge the branch yourself with Git or discard it. It also
-  stops when your checkout has uncommitted changes to tracked files or is not on a branch. After Apply the branch and its folder are
+  stops when your checkout has uncommitted changes to tracked files or is not on a branch, and, naming the files, when it would write
+  over a file Git does not track (an untracked or ignored file such as `.env`, or a file or symlink where the branch has a folder) or
+  change a file a Git filter handles (Git LFS). Nothing is changed then. After Apply the branch and its folder are
   deleted, and for a fix the page is recaptured with before and after, as a direct fix would be.
 - **Open folder** opens the copy in your file manager (on the computer running Shapewall).
 - **Copy branch name** copies it, for `git diff main..shapewall/comment-12-...` or a pull request.
 - **Discard** asks first, then deletes the branch and its folder. Your checkout is not touched.
 
 **Undo:** before Apply, Undo is Discard. After Apply, Undo adds a commit that reverts what Apply brought in, only while your branch
-is still where Apply left it and has no uncommitted changes; otherwise it says why and does nothing.
+is still where Apply left it and has no uncommitted changes, and never over a file Git does not track; otherwise it says why and
+does nothing.
 
 **Housekeeping:** the chat settings list the agent branches still waiting. Folders of turns whose server stopped are swept when
 Shapewall starts, but never while their branch has a commit that is not in your checkout yet. `shapewall doctor` reports what is left.
@@ -250,8 +254,15 @@ Shapewall starts, but never while their branch has a commit that is not in your 
 **Limits:** two fixes run at the same time in two folders. Apply waits for a capture of the board to finish and runs one at a time.
 The copy has no `node_modules`, so an agent that wants to build or run tests there has to install first, which it asks you about. An
 agent's own tools (its shell) are not sandboxed by Shapewall: if your checkout changed during a branch turn, the chat says so.
-Git runs with hooks off (`core.hooksPath=/dev/null`), no submodule recursion, no filters or fsmonitor from the repository, and
-branch names are checked before Git sees them, so neither the agent nor the repository's own config can run code through these steps.
+Git runs with hooks off (`core.hooksPath=/dev/null`), no submodule recursion and no fsmonitor, and branch names are checked before
+Git sees them. The copy is written by Shapewall from the commit's files, not checked out by Git, and every filter, merge driver and
+diff driver your Git config names is switched off for Apply and Undo, so neither the agent nor the repository's config can run code
+through these steps.
+
+**Git LFS and other filters:** because no filter runs, files that Git LFS (or another clean or smudge filter) handles are in the
+copy as Git stores them: an LFS file is a small pointer file, not the real image or model. The agent cannot see their content, and
+Apply refuses a branch that changes one. When your repository's attributes name a filter, the branch switch says so before you
+turn it on.
 
 ## Fix several comments at once
 
