@@ -111,11 +111,32 @@ Console or General settings does not unlock it. Hosted boards also label their w
 not create hosted accounts, workspaces or memberships. Inside Console, Projects and Settings stay in the sidebar; the profile menu
 contains identity and appearance rather than duplicate workspace navigation. The earlier `?settings=general` board link remains supported.
 
+The app sidebar (`AppRail`, `components/app-rail.jsx`) is a labelled menu when expanded and a rail of icons when collapsed. Collapsed,
+an icon with more behind it (the board's pages tree, the sections of the workspace or account you are in) opens a flyout beside the
+rail instead of expanding the sidebar: on hover after 150 ms, closing 250 ms after the pointer leaves both the icon and the panel, so
+you can move into it; a click, tap, Enter, Space or ArrowRight opens it pinned and moves focus in. A choice in it, Escape (focus back on
+the icon), a click outside or Tab past its end closes it. It is a non-modal `role="dialog"` named after its icon, the expanded
+sidebar's width, on the Chrome layer (above the canvas and the comment thread, below dialogs and menus). Icons with nothing behind them
+keep their tooltip. Only the panel button and Ctrl/Cmd+B expand the sidebar. The hover timing and height rules are in
+`components/rail-flyout.js`.
+
 App-level pieces outside the kit, in `client/src/components/`: `ProfileMenu` (the avatar menu: account items, the console's workspace
 switcher, View as in the demo, Appearance, and About Shapewall and updates) and `DemoBanner` (the demo's "viewing as" strip with Reset; in the console header a chip whose Reset is desktop only, on phones Reset the demo is in the profile menu).
 
 Not included on purpose: `Checkbox` and `Switch` (the board has no checkboxes; on/off options are `Toggle`s) and `ScrollArea` (native
 scrolling keeps momentum and `scrollIntoView` on phones).
+
+## The board toolbar
+
+On desktop the toolbar has three zones, the way canvas tools lay it out. Left, where you are and how you look at it: the board
+switcher, the screen-size toggle, View options and, on a local board, Capture with its status (otherwise the status dot sits by the
+name). Centre, find: the "Go to page or journey" box, centred on the toolbar itself, 240 to 320 px wide. Right, act and open panels:
+the viewer note, Comment (the one filled button), the Comments, Agent and Checks toggles as one tight group, then Agent settings. Zones
+are 20 px apart, controls inside a zone 6 px, with no dividers. When it gets narrow, `client/src/board/toolbarFit.js` drops words in a
+fixed order (search to an icon, the panel toggles, View, then the screen-size toggle to icons with tooltips) and the board name
+truncates a little at each step, never below about 8 characters. Accessible names, shortcuts and tooltips never change.
+`test/toolbar-fit.test.js` checks the order and that nothing overlaps from a 1024 px window with the widest sidebar up. The phone
+toolbar is a separate compact bar. `ToggleGroup` options take a `tooltip` for icon-only labels.
 
 ## The website
 
@@ -131,7 +152,7 @@ One scale for `z-index`, lowest first. Pick the row that says what the thing is;
 | Canvas    | `z-10`/`z-20`     | Pins, card headers and bars, resize handles, presence cursors.                                  |
 | On canvas | `z-30`            | Things that belong to the canvas but float over cards: the comment thread and new-comment box,  |
 |           |                   | the journey bar, canvas notes, Try this.                                                        |
-| Chrome    | `z-40`            | Sticky app headers.                                                                             |
+| Chrome    | `z-40`            | Sticky app headers and the collapsed sidebar's flyouts.                                         |
 | Modal     | `z-50`            | Dialogs, sheets, the command palette and their dimmed overlay. A modal covers everything below. |
 | Menu      | `z-[60]`          | Dropdown menus, selects and small popovers, so they work inside a dialog.                       |
 | Hover     | `z-[65]`/`z-[70]` | Hover cards and tooltips.                                                                       |

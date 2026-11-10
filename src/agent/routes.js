@@ -38,6 +38,7 @@ import { createBackend } from './backends/index.js'
 import { authFiles } from '../config.js'
 import { agentSettings, publicAgentInfo } from './config.js'
 import { AgentError } from './errors.js'
+import { createAgentHealth } from './agent-health.js'
 import { beginAgentOperation } from './control.js'
 import { validateFiles, validateMentions } from './composer.js'
 import { profileForDefault, userAgentEntry } from './user-settings.js'
@@ -191,15 +192,26 @@ export function agentRouter({
   let cached = null
   const backends = new Map()
   const processPool = { epoch: 0, agents: new Set(), max: Math.min(limit.runsMax, limit.acp?.processesMax ?? limit.runsMax) }
+  // How each agent is doing (agent-health.js): from the last turn or test.
+  const health = createAgentHealth()
+  const agentStatus = (current) => health.status(current, processPool)
+  router.health = health
   const profiles = () => {
     const saved = userAgentEntry(config.dir, env)
     const locked = acp || env.SHAPEWALL_AGENT_ACP
     // The default connection runs the same command as a saved profile: the
     // picker shows that profile once, by name (sameAs), not both.
-    const same = !locked ? profileForDefault(saved.entry) : null
+    const fallback = settings().defaultProfile
+    const same = !locked ? profileForDefault(saved.entry) || (fallback ? { id: fallback } : null) : null
     return [
-      { id: 'default', ...publicAgentInfo(settings()), ...(same ? { sameAs: same.id } : {}) },
-      ...(!locked ? (saved.entry?.profiles || []).map((item) => ({ id: item.id, ...publicAgentInfo(settings(item.id)) })) : []),
+      { id: 'default', ...publicAgentInfo(settings()), ...agentStatus(settings()), ...(same ? { sameAs: same.id } : {}) },
+      ...(!locked
+        ? (saved.entry?.profiles || []).map((item) => ({
+            id: item.id,
+            ...publicAgentInfo(settings(item.id)),
+            ...agentStatus(settings(item.id)),
+          }))
+        : []),
     ]
   }
   const ownerWritesFor = (req) =>
@@ -215,6 +227,8 @@ export function agentRouter({
   const ownerGate = Boolean(settingsToken) && !shared
   const chatNeedsOwner = (req, current = settings()) => ownerGate && current.backend === 'acp' && current.configured && !agentOwner(req)
   router.chatNeedsOwner = chatNeedsOwner
+  // The same state fields /status reports, for /api/info.
+  router.agentStatus = () => agentStatus(settings())
   const ownerNeeded = (res) =>
     fail(
       res,
@@ -609,6 +623,7 @@ export function agentRouter({
             capture,
             requestedPages,
           })
+          health.record(current, reply)
           if (baseline) {
             try {
               const { summary, undo } = await finishTurnChanges(config, baseline, {
@@ -668,6 +683,7 @@ export function agentRouter({
   router.get('/status', (req, res) =>
     res.json({
       ...publicAgentInfo(settings()),
+      ...agentStatus(settings()),
       ...(profiles().length > 1 ? { profiles: profiles() } : {}),
       ownerWrites: ownerWritesFor(req),
       fixWithAgent: allowCapture && ownerWritesFor(req) && settings().backend === 'acp',
@@ -681,6 +697,7 @@ export function agentRouter({
     fetchImpl,
     settings,
     processPool,
+    health,
     shared,
     token: settingsToken,
     busy: () => runs.size > 0 || selecting.size > 0,
@@ -724,6 +741,7 @@ export function agentRouter({
         profiles: profiles(),
         agent: {
           ...publicAgentInfo(current),
+          ...agentStatus(current),
           ownerWrites: ownerWritesFor(req),
           fixWithAgent: allowCapture && ownerWritesFor(req) && current.backend === 'acp',
         },

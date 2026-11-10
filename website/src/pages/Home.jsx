@@ -453,13 +453,20 @@ function FaqSection() {
   return (
     <section className="border-y border-line bg-band py-16 sm:py-28" aria-labelledby="faq">
       <Container className="grid gap-12 lg:grid-cols-[1fr_1.6fr] lg:gap-16">
-        <SectionHead eyebrow="FAQ" title={<span id="faq">Frequently asked questions</span>}>
-          More in the{' '}
-          <Link to="/docs/faq" className="font-semibold text-wall hover:text-wall-deep">
-            docs FAQ
-          </Link>
-          .
-        </SectionHead>
+        <div>
+          <SectionHead eyebrow="FAQ" title={<span id="faq">Frequently asked questions</span>}>
+            More in the{' '}
+            <Link to="/docs/faq" className="font-semibold text-wall hover:text-wall-deep">
+              docs FAQ
+            </Link>
+            .
+          </SectionHead>
+          <p className="mt-4 text-[17px] leading-7 text-slate">
+            <Link to="/contact" className="font-semibold text-wall hover:text-wall-deep">
+              Questions or feature requests? Contact us
+            </Link>
+          </p>
+        </div>
         <Faq />
       </Container>
     </section>

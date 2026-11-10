@@ -184,11 +184,13 @@ function Footer() {
                   { href: `${GITHUB_URL}/blob/main/CHANGELOG.md`, label: 'Changelog' },
                   { href: `${GITHUB_URL}/blob/main/SECURITY.md`, label: 'Security policy' },
                   { to: '/privacy', label: 'Privacy' },
+                  { to: '/contact', label: 'Contact' },
                 ]
               : [
                   { href: GITHUB_URL, label: GITHUB_LABEL },
                   { to: '/docs/security', label: 'Security model' },
                   { to: '/privacy', label: 'Privacy' },
+                  { to: '/contact', label: 'Contact' },
                 ]
           }
         />

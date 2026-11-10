@@ -1,10 +1,10 @@
 // The profile menu in the main nav of the board and the console: who you are,
 // account links, the workspace switcher (console), View as (the public demo
 // only), Appearance (light, dark or system, and a theme), remembered in this
-// browser for every Shapewall page, and About Shapewall and updates.
+// browser for every Shapewall page, About Shapewall and updates, and Contact.
 
 import { Fragment, useRef } from 'react'
-import { Check, Info, Monitor, Moon, Sun } from 'lucide-react'
+import { Check, Info, Mail, Monitor, Moon, Sun } from 'lucide-react'
 import {
   Avatar,
   Button,
@@ -20,7 +20,7 @@ import {
 } from './ui'
 import { MODES, THEMES, useAppearance } from '../lib/theme'
 import { cn } from '../lib/utils'
-import { BUILD } from '../lib/app-version'
+import { BUILD, CONTACT_URL } from '../lib/app-version'
 import { openAbout } from './app-updates'
 
 // Appearance picks apply at once and leave the menu open to compare.
@@ -180,6 +180,12 @@ export function ProfileMenu({
               <span className="text-caption text-faint tabular-nums" data-sw-app-version>
                 v{BUILD.version}
               </span>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild data-sw-app-contact="menu">
+              <a href={CONTACT_URL} target="_blank" rel="noopener noreferrer">
+                <Mail size={14} aria-hidden="true" />
+                <span className="min-w-0 flex-1 truncate">Contact</span>
+              </a>
             </DropdownMenuItem>
           </>
         ) : null}

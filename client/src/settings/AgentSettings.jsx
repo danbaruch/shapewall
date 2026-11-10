@@ -14,7 +14,7 @@ import { cn } from '../lib/utils'
 import { Badge, Button, Dialog, Input, Spinner, Tabs, TabsContent, TabsList, TabsTrigger, Toggle, ToggleGroup } from '../components/ui'
 import { SettingsHint, TOKEN_HINT } from './SettingsHint'
 import { ConfirmDialog, CopyLine, Field, Override, TestResult } from './AgentSettingsParts'
-import { NativeProfiles } from './NativeProfiles'
+import { AgentsCard } from './AgentsCard'
 
 // Used by the chat panel's quick connect too.
 export { ConfirmDialog, CopyLine }
@@ -89,7 +89,11 @@ function sameForm(a, b) {
 
 // `buzz`: this installation has the Buzz bridge on (info.buzzAvailable); only
 // then is it mentioned. `onDirtyChange` tells the dialog there are unsaved edits.
-export function AgentSettings({ onSaved, touch, buzz = false, onDirtyChange }) {
+// `agents`: where the connected agents are managed. 'inline' shows the
+// Agents card here (the chat's agent dialog, the host-only window); 'link'
+// points to it in Workspace settings (the board's general Settings); 'none'
+// leaves it out (the Agents card's own "Other" dialog).
+export function AgentSettings({ onSaved, touch, buzz = false, onDirtyChange, agents = 'inline' }) {
   const [view, setView] = useState(null)
   const [loadError, setLoadError] = useState(null)
   const [form, setForm] = useState(formFrom(null))
@@ -266,17 +270,32 @@ export function AgentSettings({ onSaved, touch, buzz = false, onDirtyChange }) {
 
   return (
     <div className="space-y-5" data-sw-settings="agent">
-      <NativeProfiles
-        buzz={buzz}
-        view={view}
-        disabled={dirty || saving || testing}
-        touch={touch}
-        onBusy={setProfileBusy}
-        onChanged={async () => {
-          await load()
-          onSaved?.()
-        }}
-      />
+      {agents === 'inline' ? (
+        <section className="space-y-3 rounded-md border border-line p-3" aria-labelledby="sw-agents-inline">
+          <div>
+            <h3 id="sw-agents-inline" className="text-sm font-semibold text-fg">
+              Agents
+            </h3>
+            <p className="mt-0.5 text-xs text-muted">
+              Connect several agents, then choose one per chat. Each runs its own session with its own login on this computer.
+              {buzz ? ' Buzz conversations are separate.' : ''}
+            </p>
+          </div>
+          <AgentsCard
+            view={view}
+            disabled={dirty || saving || testing}
+            touch={touch}
+            onBusy={setProfileBusy}
+            onChanged={async () => {
+              await load()
+              onSaved?.()
+            }}
+          />
+          {dirty ? <p className="text-xs text-muted">Save or discard your changes below before changing agents.</p> : null}
+        </section>
+      ) : agents === 'link' ? (
+        <AgentsLink view={view} touch={touch} />
+      ) : null}
       {view.project?.root ? (
         <section className="space-y-1.5 rounded-md border border-line p-3 text-xs" data-sw-agent-project>
           <h3 className="font-semibold text-fg">Source folder on the Shapewall computer</h3>
@@ -664,6 +683,34 @@ export function AgentSettings({ onSaved, touch, buzz = false, onDirtyChange }) {
         onConfirm={() => save(confirm?.hash || null)}
       />
     </div>
+  )
+}
+
+// The board's general Settings: the agents are managed in Workspace
+// settings (console/LocalConsole.jsx, the Agents card), so only a summary
+// and the way there.
+export const AGENTS_HREF = '/console?section=settings#agents'
+function AgentsLink({ view, touch }) {
+  const connected = view.profiles || []
+  const current = connected.find((item) => item.default)
+  return (
+    <section className="flex flex-wrap items-center gap-3 rounded-md border border-line p-3" data-sw-agents-link>
+      <Bot size={16} className="shrink-0 text-muted" aria-hidden="true" />
+      <div className="min-w-0 flex-1 text-xs">
+        <p className="text-sm font-semibold text-fg">Agents</p>
+        <p className="text-muted">
+          {connected.length
+            ? `${connected.map((item) => item.label).join(', ')} connected${current ? `. New chats and fixes use ${current.label}` : ''}.`
+            : 'No agent connected yet.'}{' '}
+          Connect, remove and choose the default in Workspace settings.
+        </p>
+      </div>
+      <Button asChild size={touch ? 'touch' : 'sm'}>
+        <a href={AGENTS_HREF} data-sw-agents-open>
+          Manage agents
+        </a>
+      </Button>
+    </section>
   )
 }
 

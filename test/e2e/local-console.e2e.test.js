@@ -74,10 +74,22 @@ for (const width of [1440, 390, 320]) {
         await page.locator('[data-sw-settings="general"]').waitFor()
         assert.equal(await page.locator('html').getAttribute('data-mode'), 'dark')
         assert.equal(await page.locator('html').getAttribute('data-theme'), 'contrast')
-        await page.locator('[data-sw-settings-tab="agent"]').click()
-        await page.locator('[data-sw-settings-agent-unavailable]').waitFor()
-        assert.equal(await page.locator('[data-sw-settings-field]').count(), 0)
-        await page.locator('[data-sw-settings-tab="general"]').click()
+        if (kind === 'local-locked') {
+          // Agents: read-only without the owner link, with one sentence on how to open it; no agent route is asked.
+          const agents = page.locator('[data-sw-local-console-agents] [data-sw-agents-card="readonly"]')
+          await agents.waitFor()
+          assert.match(await agents.textContent(), /open the owner link that shapewall serve prints/)
+          assert.equal(await page.locator('[data-sw-profile-connect], [data-sw-agent-remove], [data-sw-settings-field]').count(), 0)
+          await page.locator('[data-sw-settings-tab="agent"]').click()
+          await page.locator('[data-sw-settings-agent-unavailable]').waitFor()
+          await page.locator('[data-sw-settings-tab="general"]').click()
+        } else {
+          assert.equal(await page.locator('[data-sw-local-console-agents]').count(), 0, 'no chat: no Agents card')
+          await page.locator('[data-sw-settings-tab="agent"]').click()
+          await page.locator('[data-sw-settings-agent-unavailable]').waitFor()
+          assert.equal(await page.locator('[data-sw-settings-field]').count(), 0)
+          await page.locator('[data-sw-settings-tab="general"]').click()
+        }
         await page.locator('[data-sw-settings-updates]').click()
         await page.locator('[data-sw-app-updates]').waitFor()
         assert.equal(await page.locator('[role="dialog"]').count(), 1)

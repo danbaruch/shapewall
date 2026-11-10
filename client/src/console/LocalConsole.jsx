@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ArrowUpRight, Building2, FolderKanban, LayoutDashboard, LogOut, MessageSquareText, Settings, UserRound } from 'lucide-react'
 import { AppRail, useSidebarExpanded } from '../components/app-rail'
 import { api } from '../lib/api'
@@ -11,6 +11,7 @@ import { PairingScreen } from '../pairing/Pairing'
 import { LocalSettingsContent } from '../settings/LocalSettings'
 import { Card, LoadError, Loading, Logo, PageHeader } from './components'
 import { AgentFeedbackView } from './pages/agent-feedback'
+import { LocalAgents } from './pages/local-agents'
 
 const SECTIONS = [
   ['projects', 'Projects', FolderKanban],
@@ -28,6 +29,7 @@ export default function LocalConsole({ account = null, onSignOut = null }) {
   const wide = useMediaQuery('(min-width: 1024px)')
   const [expanded, toggle] = useSidebarExpanded(wide)
   const updates = useRef(null)
+  const [settingsTab, setSettingsTab] = useState('general')
   const boards = Array.isArray(list.data?.boards) ? list.data.boards : []
   const name = info.data?.title || 'Shapewall'
   const navigate = (value) => updateParams({ section: value === 'projects' ? null : value })
@@ -189,16 +191,32 @@ export default function LocalConsole({ account = null, onSignOut = null }) {
                   <AgentFeedbackView baseUrl="/api/agent/feedback" get={api.get} touch={!wide} />
                 ) : section === 'settings' ? (
                   <>
-                    <PageHeader title="Settings" description="Preferences for this browser and installation." />
-                    <Card data-sw-local-console-settings>
-                      <LocalSettingsContent
-                        info={info.data}
-                        boardCount={boards.length}
-                        onSaved={info.refetch}
-                        touch={!wide}
-                        onOpenUpdates={() => updates.current?.open()}
-                      />
-                    </Card>
+                    <PageHeader title="Settings" description="Agents, preferences for this browser, and this installation." />
+                    <div className="grid gap-5">
+                      {info.data?.agent ? (
+                        <LocalAgents
+                          agent={info.data.agent}
+                          touch={!wide}
+                          onChanged={info.refetch}
+                          onOpenEndpoint={() => {
+                            setSettingsTab('agent')
+                            document.querySelector('[data-sw-local-console-settings]')?.scrollIntoView({ block: 'start' })
+                          }}
+                        />
+                      ) : null}
+                      <Card data-sw-local-console-settings>
+                        <LocalSettingsContent
+                          info={info.data}
+                          boardCount={boards.length}
+                          onSaved={info.refetch}
+                          touch={!wide}
+                          agentsHome={Boolean(info.data?.agent)}
+                          tab={settingsTab}
+                          onTabChange={setSettingsTab}
+                          onOpenUpdates={() => updates.current?.open()}
+                        />
+                      </Card>
+                    </div>
                   </>
                 ) : (
                   <>

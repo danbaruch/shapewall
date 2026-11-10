@@ -3,6 +3,18 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## 0.2.2 - 2026-11-10
+
+- The collapsed sidebar opens flyouts: hover or click Pages for the full pages tree, or Workspace and Account for their sections,
+  without expanding the whole sidebar.
+- A new agent picker shows each connected agent with its state and your default. "Fix with agent" names the agent and, with more
+  than one connected, lets you run a fix with another. Settings gains an Agents card to connect agents, pick the default and test them.
+- The board's top bar is arranged in three groups: where you are and how you view it on the left, search in the centre, comment and
+  panels on the right. It gives up space in a fixed order as the window narrows.
+- Fixed: a brief flash of a few oversized cards before the board settled on its starting view.
+- The demo has two scripted agents, so the picker can be tried there.
+- A Contact link in the profile menu and beside About opens the contact page on shapewall.com.
+
 ## 0.2.1 - 2026-11-10
 
 - On npm: `npm install --save-dev shapewall` or `npx shapewall`. Installing from GitHub still works for unreleased builds.

@@ -10,7 +10,7 @@
 // thread or an API response.
 
 import { ACP_COMMAND_VAR, ACP_FLAG, SETTINGS_SOURCE, acpCommand, extraVarNames } from './acp/command.js'
-import { userAgentEntry } from './user-settings.js'
+import { implicitDefault, userAgentEntry } from './user-settings.js'
 
 export const AGENT_BACKENDS = ['openai-compatible', 'acp']
 // A config is usually committed. A command in it would run on the machine of
@@ -186,6 +186,14 @@ export function agentSettings(config, env = process.env, { acp = null, profileId
       },
       saved.problem,
     )
+  }
+  // Profiles saved without a default connection: the first one is the
+  // default, unless the config's own endpoint or an operator command is in effect.
+  const first = !acp && !env.SHAPEWALL_AGENT_ACP && !env.SHAPEWALL_AGENT_BASE_URL ? implicitDefault(user) : null
+  if (first && !(repo.backend !== 'acp' && repo.baseUrl && repo.model)) {
+    const fromProfile = { ...agentSettings(config, env, { acp, profileId: first.id }) }
+    delete fromProfile.profileId
+    return { ...fromProfile, defaultProfile: first.id, settingsProblem: saved.problem, keyHosts: user.keyHosts || [] }
   }
   const base = { ...repo }
   for (const key of SAVED_KEYS) if (user[key] !== undefined) base[key] = user[key]

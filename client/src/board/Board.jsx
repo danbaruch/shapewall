@@ -415,13 +415,16 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   useEffect(() => {
     if (!startPending.current || !nodesReady || !layout.nodes.length) return
     startPending.current = false
-    if (wide) {
-      const view = startViewport(layout.nodes, canvasRef.current?.getBoundingClientRect())
-      setSettledZoom(null)
-      if (view) flow.setViewport(view)
-      else flow.fitView(FIT_OPTIONS)
+    if (!wide) {
+      setStartShown(true)
+      return
     }
-    setStartShown(true)
+    const view = startViewport(layout.nodes, canvasRef.current?.getBoundingClientRect())
+    setSettledZoom(null)
+    // React Flow runs a fitView on a later frame: show the board once it is
+    // placed, or the frame in between paints it at 100%.
+    const placed = view ? flow.setViewport(view) : flow.fitView(FIT_OPTIONS)
+    Promise.resolve(placed).finally(() => setStartShown(true))
   }, [flow, layout.nodes, nodesReady, setSettledZoom, wide])
 
   // After a pick from a toolbar list, focus goes back to the canvas (not the

@@ -37,11 +37,24 @@ export default function LocalSettings({ open, onClose, info, boardCount, onSaved
   )
 }
 
-export function LocalSettingsContent({ info, boardCount, onSaved, onOpenUpdates, touch, onDirtyChange }) {
+// `agentsHome`: shown in the Workspace Console below the Agents card, which
+// lists the agents there; the Agent tab keeps the connection details and the
+// endpoint form. `tab`/`onTabChange` let the card open that tab.
+export function LocalSettingsContent({
+  info,
+  boardCount,
+  onSaved,
+  onOpenUpdates,
+  touch,
+  onDirtyChange,
+  agentsHome = false,
+  tab,
+  onTabChange,
+}) {
   const [appearance, setAppearance] = useAppearance()
   const agentAvailable = Boolean(info?.agent?.settingsEditable || info?.agent?.settingsReadonly)
   return (
-    <Tabs defaultValue="general" className="p-5">
+    <Tabs {...(tab ? { value: tab, onValueChange: onTabChange } : { defaultValue: 'general' })} className="p-5">
       <TabsList className="mb-5 max-w-72" aria-label="Settings">
         <TabsTrigger value="general" large={touch} data-sw-settings-tab="general">
           General
@@ -101,7 +114,13 @@ export function LocalSettingsContent({ info, boardCount, onSaved, onOpenUpdates,
       </TabsContent>
       <TabsContent value="agent">
         {agentAvailable ? (
-          <AgentSettings onSaved={onSaved} touch={touch} buzz={Boolean(info?.buzzAvailable)} onDirtyChange={onDirtyChange} />
+          <AgentSettings
+            onSaved={onSaved}
+            touch={touch}
+            buzz={Boolean(info?.buzzAvailable)}
+            onDirtyChange={onDirtyChange}
+            agents={agentsHome ? 'none' : 'link'}
+          />
         ) : (
           <div className="space-y-2 text-sm" data-sw-settings-agent-unavailable>
             <h2 className="font-semibold text-fg">Agent settings</h2>
