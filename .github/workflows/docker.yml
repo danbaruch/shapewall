@@ -1,0 +1,27 @@
+name: Docker image
+
+# Builds and smoke-tests the image when a maintainer starts it from the
+# Actions tab. The same steps are in docs/deployment.md for a local check.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: docker build
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t shapewall:ci .
+      - name: The image starts and serves the health check
+        run: |
+          mkdir -p work && chmod 777 work
+          echo '{"baseUrl":"http://127.0.0.1:9","pages":[{"id":"home","path":"/","title":"Home"}]}' > work/shapewall.config.json
+          docker run -d --name sw -p 127.0.0.1:4600:4600 -v "$PWD/work:/work" shapewall:ci
+          for i in $(seq 1 20); do curl -fsS http://127.0.0.1:4600/api/health && exit 0; sleep 1; done
+          docker logs sw
+          exit 1
+      - run: docker run --rm -v "$PWD/work:/work" shapewall:ci doctor

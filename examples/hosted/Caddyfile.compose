@@ -1,0 +1,77 @@
+# Caddy for hosted Shapewall: TLS, then the server. Written by
+# `shapewall hosted --setup` (docs/hosted.md, "Own domain").
+
+app.example.com {
+	encode zstd gzip
+
+	# Pushes upload one file per request; the largest is a 10 MB PNG.
+	request_body {
+		max_size 12MB
+	}
+
+	reverse_proxy shapewall:4700
+
+	# The server sets its own security headers (CSP per route, nosniff,
+	# no-referrer, HSTS, noindex, Cache-Control). Do not override them here.
+	header -Server
+
+	# A staging copy: keep it private (uncomment, make a hash with
+	# caddy hash-password). Share links and /uc/ stay outside the gate.
+	# @gated not path /s/* /share /api/shares/* /uc/* /report /api/health
+	# basic_auth @gated {
+	# 	reviewer <hash>
+	# }
+
+	log {
+		output stdout
+		# Never log cookies, tokens or the signature of a live-HTML URL.
+		# Invite, setup and share tokens travel in the URL fragment, which
+		# browsers never send.
+		format filter {
+			wrap json
+			fields {
+				request>headers>Cookie delete
+				request>headers>Authorization delete
+				request>uri query {
+					delete s
+				}
+				resp_headers>Set-Cookie delete
+			}
+		}
+	}
+}
+
+# Live HTML on its own registrable domain: no cookies in, none out, no
+# auth, nothing but /uc/ (signed, expiring URLs the board hands out).
+usercontent.example.net {
+	request_header -Cookie
+	request_header -Authorization
+	@uc path /uc/*
+	handle @uc {
+		reverse_proxy shapewall:4700 {
+			header_down -Set-Cookie
+		}
+	}
+	handle {
+		respond "Not found" 404
+	}
+	header -Server
+
+	log {
+		output stdout
+		# Never log cookies, tokens or the signature of a live-HTML URL.
+		# Invite, setup and share tokens travel in the URL fragment, which
+		# browsers never send.
+		format filter {
+			wrap json
+			fields {
+				request>headers>Cookie delete
+				request>headers>Authorization delete
+				request>uri query {
+					delete s
+				}
+				resp_headers>Set-Cookie delete
+			}
+		}
+	}
+}

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Dashboard -- Lumen Notes</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="wrap">
+        <a class="logo" href="/app/"><img src="/img/logo.svg" alt="" />Lumen</a>
+        <a class="app-search" href="/app/" role="search">Search notes <kbd>/</kbd></a>
+        <div class="app-actions">
+          <a class="btn btn-primary btn-small" href="/app/note/" data-testid="new-note">New note</a>
+          <a class="avatar" href="/app/settings/" aria-label="Account settings" data-testid="avatar">AR</a>
+        </div>
+      </div>
+    </header>
+    <main>
+      <div class="app">
+        <nav class="sidebar" aria-label="Workspace">
+          <a class="active" href="/app/">All notes</a>
+          <a href="/app/empty/">Daily notes</a>
+          <a href="/app/note/share/">Shared with me</a>
+          <a href="/app/settings/">Settings</a>
+          <p class="sidebar-label">Spaces</p>
+          <a href="/app/">Research</a>
+          <a href="/app/">Product</a>
+        </nav>
+        <div class="workspace" id="workspace"><p>Loading your notes...</p></div>
+      </div>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

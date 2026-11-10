@@ -1,0 +1,12 @@
+# Example only. The operator must explicitly approve/install/enable this.
+[Unit]
+Description=Nightly hosted Shapewall backup (optional)
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+RandomizedDelaySec=30m
+Persistent=true
+Unit=shapewall-backup.service
+
+[Install]
+WantedBy=timers.target

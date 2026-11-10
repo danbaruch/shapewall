@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Billing -- Lumen Notes</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="wrap">
+        <a class="logo" href="/app/"><img src="/img/logo.svg" alt="" />Lumen</a>
+        <a class="app-search" href="/app/" role="search">Search notes <kbd>/</kbd></a>
+        <div class="app-actions">
+          <a class="btn btn-primary btn-small" href="/app/note/" data-testid="new-note">New note</a>
+          <a class="avatar" href="/app/settings/" aria-label="Account settings" data-testid="avatar">AR</a>
+        </div>
+      </div>
+    </header>
+    <main>
+      <div class="app">
+        <nav class="sidebar" aria-label="Workspace">
+          <a href="/app/">All notes</a>
+          <a href="/app/empty/">Daily notes</a>
+          <a href="/app/note/share/">Shared with me</a>
+          <a class="active" href="/app/settings/">Settings</a>
+          <p class="sidebar-label">Spaces</p>
+          <a href="/app/">Research</a>
+          <a href="/app/">Product</a>
+        </nav>
+        <div class="workspace">
+          <h1 class="form-title">Settings</h1>
+          <div class="settings">
+            <nav class="settings-nav" aria-label="Settings">
+              <a href="/app/settings/">Profile</a>
+              <a class="active" href="/app/settings/billing/">Billing</a>
+              <a href="/app/settings/">Notifications</a>
+              <a href="/app/settings/">Danger zone</a>
+            </nav>
+            <div class="settings-body">
+              <section class="panel">
+                <h2 class="panel-title">Plan</h2>
+                <div class="field-row">
+                  <span><b>Free</b> · 1 device</span
+                  ><a class="btn btn-primary btn-small" href="/pricing/" data-testid="upgrade">Upgrade to Plus</a>
+                </div>
+                <p class="meta">Plus syncs every device and searches inside images. Try it free for 14 days.</p>
+              </section>
+              <section class="panel">
+                <h2 class="panel-title">Invoices</h2>
+                <table class="dense" data-testid="invoices">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Amount</th>
+                      <th>Status</th>
+                      <th>Receipt</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>Oct 1</td>
+                      <td>$0.00</td>
+                      <td><span class="pill">Paid</span></td>
+                      <td><a href="/app/settings/billing/">Download</a></td>
+                    </tr>
+                    <tr>
+                      <td>Sep 1</td>
+                      <td>$0.00</td>
+                      <td><span class="pill">Paid</span></td>
+                      <td><a href="/app/settings/billing/">Download</a></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </section>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </body>
+</html>

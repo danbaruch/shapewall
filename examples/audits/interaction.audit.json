@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "pageId": "checkout",
+  "viewport": "desktop",
+  "accessibility": true,
+  "steps": [
+    {
+      "action": { "click": "button.cart" },
+      "ready": "section.cart",
+      "maxDurationMs": 1500
+    },
+    {
+      "action": { "fill": ["input.quantity", "2"] },
+      "ready": "button.update"
+    }
+  ]
+}

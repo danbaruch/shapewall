@@ -1,0 +1,186 @@
+@import '@fontsource-variable/inter';
+@import '@fontsource-variable/jetbrains-mono';
+@import 'tailwindcss';
+
+/* Brand colours: brand/README.md */
+@theme {
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  --color-wall: #0f766e;
+  --color-wall-deep: #115e59;
+  --color-wall-tint: #ccfbf1;
+  --color-wall-wash: #f0fdfa;
+  --color-wall-bright: #2dd4bf;
+  --color-pin: #f59e0b;
+  --color-pin-ink: #b45309;
+  --color-pin-wash: #fffbeb;
+  --color-ink: #18181b;
+  --color-slate: #52525b;
+  --color-faint: #71717a;
+  --color-line: #e4e4e7;
+  --color-paper: #fafaf9;
+  --color-night: #0c1312;
+  --color-night-2: #142120;
+  --color-night-line: #23302e;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-padding-top: 5rem;
+  }
+  body {
+    @apply bg-paper font-sans text-ink antialiased;
+    font-feature-settings: 'cv11', 'ss01';
+    text-rendering: optimizeLegibility;
+  }
+  ::selection {
+    background: var(--color-wall-tint);
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-wall);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+  code,
+  kbd,
+  pre {
+    font-family: var(--font-mono);
+  }
+}
+
+/* The wall: a faint dot grid, like a canvas. */
+.wall-dots {
+  background-color: #f4f4f2;
+  background-image: radial-gradient(circle at 1px 1px, rgb(24 24 27 / 0.13) 1px, transparent 0);
+  background-size: 22px 22px;
+}
+.wall-dots-dark {
+  background-color: var(--color-night);
+  background-image: radial-gradient(circle at 1px 1px, rgb(255 255 255 / 0.07) 1px, transparent 0);
+  background-size: 22px 22px;
+}
+
+/* A product screenshot in a light app frame. */
+.shot {
+  @apply overflow-hidden rounded-xl border border-black/10 bg-white;
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.04),
+    0 12px 32px -12px rgb(15 40 38 / 0.22);
+}
+.shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* Docs article typography (HTML from src/docs/*.md). */
+.prose-docs {
+  @apply text-[15.5px] leading-7 text-ink/90;
+}
+.prose-docs > * + * {
+  margin-top: 1.1em;
+}
+.prose-docs h2 {
+  @apply mt-12 border-t border-line pt-8 text-2xl font-semibold tracking-tight text-ink;
+}
+.prose-docs h3 {
+  @apply mt-9 text-lg font-semibold tracking-tight text-ink;
+}
+.prose-docs h2,
+.prose-docs h3 {
+  position: relative;
+  scroll-margin-top: 5.5rem;
+}
+.prose-docs .anchor {
+  @apply absolute -left-5 font-normal text-faint no-underline opacity-0 transition-opacity;
+}
+.prose-docs h2 .anchor {
+  top: 2rem;
+}
+.prose-docs h2:hover .anchor,
+.prose-docs h3:hover .anchor {
+  opacity: 1;
+}
+.prose-docs a:not(.anchor) {
+  @apply font-medium text-wall underline decoration-wall/30 underline-offset-2 hover:decoration-wall;
+}
+.prose-docs strong {
+  @apply font-semibold text-ink;
+}
+.prose-docs ul {
+  @apply list-disc pl-5;
+}
+.prose-docs ol {
+  @apply list-decimal pl-5;
+}
+.prose-docs li + li {
+  margin-top: 0.35em;
+}
+.prose-docs li::marker {
+  color: var(--color-faint);
+}
+.prose-docs :not(pre) > code {
+  @apply rounded-md border border-line bg-white px-1.5 py-0.5 text-[0.84em] font-medium text-ink;
+  overflow-wrap: anywhere;
+}
+.prose-docs .code {
+  @apply relative overflow-hidden rounded-xl bg-night text-[13px] leading-6 text-zinc-100;
+}
+.prose-docs .code[data-label]::before {
+  content: attr(data-label);
+  @apply block border-b border-night-line px-4 py-1.5 font-sans text-[11px] font-medium tracking-wide text-zinc-400 uppercase;
+}
+.prose-docs pre {
+  @apply overflow-x-auto px-4 py-3.5;
+}
+.prose-docs blockquote {
+  @apply rounded-xl border border-wall/20 bg-wall-wash px-4 py-3 text-[15px] text-wall-deep;
+}
+.prose-docs blockquote strong {
+  @apply text-wall-deep;
+}
+.prose-docs .table-wrap {
+  @apply overflow-x-auto rounded-xl border border-line bg-white;
+}
+.prose-docs table {
+  @apply w-full border-collapse text-left text-[14px] leading-6;
+}
+.prose-docs th {
+  @apply border-b border-line bg-zinc-50 px-3 py-2 font-semibold whitespace-nowrap text-ink;
+}
+.prose-docs td {
+  @apply border-b border-line px-3 py-2 align-top;
+}
+.prose-docs tr:last-child td {
+  border-bottom: 0;
+}
+.prose-docs td code {
+  overflow-wrap: break-word;
+}
+.prose-docs td:first-child code {
+  white-space: nowrap;
+}
+/* Wide reference tables scroll sideways on phones instead of squeezing every column. */
+@media (max-width: 1023px) {
+  .prose-docs table:has(th:nth-child(3)) {
+    min-width: 36rem;
+  }
+  .prose-docs table:has(th:nth-child(4)) {
+    min-width: 44rem;
+  }
+}
+.prose-docs hr {
+  @apply my-10 border-line;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

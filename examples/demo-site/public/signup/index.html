@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Create your account -- Lumen Notes</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="logo" href="/"><img src="/img/logo.svg" alt="" />Lumen Notes</a>
+        <nav class="nav" aria-label="Main">
+          <a href="/features/">Features</a>
+          <a href="/pricing/">Pricing</a>
+          <a href="/templates/">Templates</a>
+          <a href="/blog/">Blog</a>
+        </nav>
+        <div class="header-cta">
+          <a class="btn btn-ghost" href="/login/">Sign in</a>
+          <a class="btn btn-primary" href="/signup/">Start free</a>
+          <button class="btn btn-ghost menu-button" type="button" aria-label="Open menu">Menu</button>
+        </div>
+      </div>
+    </header>
+    <main>
+      <section class="auth">
+        <form method="post" action="/accounts" aria-label="Create your account">
+          <h1 class="form-title">Create your account</h1>
+          <p class="meta" style="margin: 0">Free forever on one device. No card needed.</p>
+          <label>Name <input name="name" autocomplete="name" placeholder="Alex Reader" /></label>
+          <label>Email <input type="email" name="email" autocomplete="email" placeholder="you@example.com" /></label>
+          <label>Password <input type="password" name="password" autocomplete="new-password" /></label>
+          <p class="hint" data-testid="password-rules">At least 10 characters, with a number or a symbol.</p>
+          <button class="btn btn-primary" type="submit" data-testid="signup-submit">Create account</button>
+          <p class="meta" style="margin: 0">Already have one? <a href="/login/">Sign in</a></p>
+        </form>
+      </section>
+    </main>
+  </body>
+</html>

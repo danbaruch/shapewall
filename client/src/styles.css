@@ -1,0 +1,706 @@
+@import 'tailwindcss';
+@import '@xyflow/react/dist/style.css';
+
+/* Design tokens. Appearance (client/src/lib/theme.js, applied before the
+   first paint by public/theme-boot.js) sets two attributes on <html>:
+   data-mode="light|dark" (System resolves to one of them) and
+   data-theme="default|ocean|forest|contrast". Every theme defines the full
+   set for both modes; text tokens keep WCAG AA (4.5:1) on surface and
+   surface-2, and the contrast theme keeps 7:1 (test/theme.test.js). */
+:root {
+  --surface: #ffffff;
+  --surface-2: #f4f4f5;
+  --sunken: #ececee;
+  --line: #e0e0e4;
+  --line-strong: #b4b4bd;
+  --fg: #18181b;
+  --muted: #55555f;
+  --faint: #6b6b76;
+  --accent: #0f766e;
+  --accent-fg: #ffffff;
+  --ok: #15803d;
+  --warn: #a14a07;
+  --bad: #b91c1c;
+  --ok-fg: #ffffff;
+  --warn-fg: #ffffff;
+  --bad-fg: #ffffff;
+  /* Not colour tokens (no per-theme value): the thumbnail hairline and motion durations. */
+  --thumb-ring: rgb(0 0 0 / 0.06);
+  --motion-fast: 120ms;
+  --motion-base: 180ms;
+  --motion-slow: 280ms;
+  color-scheme: light;
+}
+
+:root[data-mode='dark'] {
+  --surface: #17171b;
+  --surface-2: #222228;
+  --sunken: #0c0c0e;
+  --line: #2f2f37;
+  --line-strong: #4a4a55;
+  --fg: #f4f4f5;
+  --muted: #a1a1aa;
+  --faint: #8e8e98;
+  --accent: #2dd4bf;
+  --accent-fg: #042f2e;
+  --ok: #4ade80;
+  --warn: #fbbf24;
+  --bad: #f87171;
+  --ok-fg: #052e16;
+  --warn-fg: #451a03;
+  --bad-fg: #450a0a;
+  --thumb-ring: rgb(255 255 255 / 0.1);
+  color-scheme: dark;
+}
+
+/* Ocean: blue accent on cool slate surfaces. */
+:root[data-theme='ocean'] {
+  --surface: #ffffff;
+  --surface-2: #f1f5f9;
+  --sunken: #e3eaf2;
+  --line: #d3dde8;
+  --line-strong: #a3b2c5;
+  --fg: #0f172a;
+  --muted: #475569;
+  --faint: #5f6c80;
+  --accent: #1d4ed8;
+  --accent-fg: #ffffff;
+  --ok: #15803d;
+  --warn: #a14a07;
+  --bad: #b91c1c;
+  --ok-fg: #ffffff;
+  --warn-fg: #ffffff;
+  --bad-fg: #ffffff;
+}
+:root[data-theme='ocean'][data-mode='dark'] {
+  --surface: #0f1a2b;
+  --surface-2: #172438;
+  --sunken: #08111e;
+  --line: #273650;
+  --line-strong: #3c4f6d;
+  --fg: #e2e8f0;
+  --muted: #a7b4c8;
+  --faint: #8796ad;
+  --accent: #60a5fa;
+  --accent-fg: #0b1b33;
+  --ok: #4ade80;
+  --warn: #fbbf24;
+  --bad: #f87171;
+  --ok-fg: #052e16;
+  --warn-fg: #451a03;
+  --bad-fg: #450a0a;
+}
+
+/* Forest: green accent on warm, paper-like surfaces. */
+:root[data-theme='forest'] {
+  --surface: #fffffb;
+  --surface-2: #f2f3ec;
+  --sunken: #e6e8dc;
+  --line: #d7dacb;
+  --line-strong: #aab09a;
+  --fg: #1a1f16;
+  --muted: #4c5644;
+  --faint: #626c58;
+  --accent: #3f6212;
+  --accent-fg: #ffffff;
+  --ok: #166534;
+  --warn: #9a4a07;
+  --bad: #b42318;
+  --ok-fg: #ffffff;
+  --warn-fg: #ffffff;
+  --bad-fg: #ffffff;
+}
+:root[data-theme='forest'][data-mode='dark'] {
+  --surface: #151b14;
+  --surface-2: #1e261c;
+  --sunken: #0b100a;
+  --line: #2e392b;
+  --line-strong: #46553f;
+  --fg: #eef2e8;
+  --muted: #b2bda8;
+  --faint: #929d88;
+  --accent: #a3e635;
+  --accent-fg: #1a2e05;
+  --ok: #4ade80;
+  --warn: #fbbf24;
+  --bad: #fb8b7e;
+  --ok-fg: #052e16;
+  --warn-fg: #451a03;
+  --bad-fg: #450a0a;
+}
+
+/* High contrast: black and white, strong borders, a saturated accent. */
+:root[data-theme='contrast'] {
+  --surface: #ffffff;
+  --surface-2: #f0f0f0;
+  --sunken: #e2e2e2;
+  --line: #3d3d3d;
+  --line-strong: #000000;
+  --fg: #000000;
+  --muted: #1f1f1f;
+  --faint: #383838;
+  --accent: #0033a0;
+  --accent-fg: #ffffff;
+  --ok: #0a5420;
+  --warn: #6b3500;
+  --bad: #8f0000;
+  --ok-fg: #ffffff;
+  --warn-fg: #ffffff;
+  --bad-fg: #ffffff;
+}
+:root[data-theme='contrast'][data-mode='dark'] {
+  --surface: #000000;
+  --surface-2: #141414;
+  --sunken: #000000;
+  --line: #c8c8c8;
+  --line-strong: #ffffff;
+  --fg: #ffffff;
+  --muted: #ebebeb;
+  --faint: #cfcfcf;
+  --accent: #ffd60a;
+  --accent-fg: #000000;
+  --ok: #6dff9b;
+  --warn: #ffc266;
+  --bad: #ff8f8f;
+  --ok-fg: #000000;
+  --warn-fg: #000000;
+  --bad-fg: #000000;
+}
+
+/* Theme swatches in the Appearance menu (classes, so the console's CSP
+   needs no inline styles). */
+.sw-swatch-default {
+  background: #0f766e;
+}
+.sw-swatch-ocean {
+  background: #1d4ed8;
+}
+.sw-swatch-forest {
+  background: #3f6212;
+}
+.sw-swatch-contrast {
+  background: linear-gradient(135deg, #000000 50%, #ffffff 50%);
+}
+
+@theme inline {
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-sunken: var(--sunken);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-bad: var(--bad);
+  /* Text on a filled ok / warn / bad chip (the fills go light in dark mode). */
+  --color-ok-fg: var(--ok-fg);
+  --color-warn-fg: var(--warn-fg);
+  --color-bad-fg: var(--bad-fg);
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.06), 0 1px 1px rgb(0 0 0 / 0.04);
+  --shadow-pop: 0 8px 24px -6px rgb(0 0 0 / 0.25), 0 2px 6px rgb(0 0 0 / 0.08);
+  /* A card that lifts on hover (clickable cards in the console). */
+  --shadow-lift: 0 6px 16px -8px rgb(0 0 0 / 0.22), 0 1px 3px rgb(0 0 0 / 0.06);
+  /* An inset hairline that keeps page thumbnails off a dark canvas (var(--thumb-ring)). */
+  --shadow-thumb: inset 0 0 0 1px var(--thumb-ring);
+
+  /* Type scale: four steps for UI text (11 / 13 / 15 / 20 px) plus a display
+     size for page titles. Body copy stays text-sm (14 px). */
+  --text-caption: 0.6875rem;
+  --text-caption--line-height: 1rem;
+  --text-caption--letter-spacing: 0.01em;
+  --text-ui: 0.8125rem;
+  --text-ui--line-height: 1.25rem;
+  --text-title: 0.9375rem;
+  --text-title--line-height: 1.375rem;
+  --text-title--letter-spacing: -0.005em;
+  --text-heading: 1.25rem;
+  --text-heading--line-height: 1.75rem;
+  --text-heading--letter-spacing: -0.012em;
+  --text-display: 1.75rem;
+  --text-display--line-height: 2.25rem;
+  --text-display--letter-spacing: -0.02em;
+
+  /* Motion: easing curves (ease-standard, ease-emphasized, ease-exit) and
+     durations as plain variables, duration-(--motion-fast) and friends. */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasized: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+
+  /* Overlay enter animations (components/ui), and opt-in exits: only
+     tooltips and hover cards use them, so dialogs, menus and popovers still
+     leave the DOM the moment they close. */
+  --animate-fade-in: fade-in 120ms ease-out;
+  --animate-pop-in: pop-in 120ms ease-out;
+  --animate-sheet-in: sheet-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-fade-out: fade-out 90ms cubic-bezier(0.4, 0, 1, 1) forwards;
+  --animate-pop-out: pop-out 90ms cubic-bezier(0.4, 0, 1, 1) forwards;
+  --animate-sheet-out: sheet-out 140ms cubic-bezier(0.4, 0, 1, 1) forwards;
+  /* Content arriving (a page after loading, a card list). */
+  --animate-rise-in: rise-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  /* Collapsible content (kit Collapsible). */
+  --animate-collapse-down: collapse-down 180ms cubic-bezier(0.2, 0, 0, 1);
+  --animate-collapse-up: collapse-up 140ms cubic-bezier(0.4, 0, 1, 1);
+  /* Something new or being worked on (a new pin, an agent at work): a soft ring, three times. */
+  --animate-pulse-ring: pulse-ring 1.4s cubic-bezier(0.2, 0, 0, 1) 3;
+  /* Loading placeholders (kit Skeleton). */
+  --animate-shimmer: shimmer 1.6s ease-in-out infinite;
+  /* A control that changed on its own (the viewport, when a comment opens on the other one). */
+  --animate-flash: flash 0.8s ease-out 2;
+
+  @keyframes fade-out {
+    to {
+      opacity: 0;
+    }
+  }
+  @keyframes pop-out {
+    to {
+      opacity: 0;
+      transform: scale(0.97);
+    }
+  }
+  @keyframes sheet-out {
+    to {
+      transform: translateY(24px);
+      opacity: 0;
+    }
+  }
+  @keyframes rise-in {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+  }
+  @keyframes collapse-down {
+    from {
+      height: 0;
+      opacity: 0;
+    }
+    to {
+      height: var(--radix-collapsible-content-height);
+    }
+  }
+  @keyframes collapse-up {
+    from {
+      height: var(--radix-collapsible-content-height);
+    }
+    to {
+      height: 0;
+      opacity: 0;
+    }
+  }
+  @keyframes pulse-ring {
+    0% {
+      box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent);
+    }
+    100% {
+      box-shadow: 0 0 0 10px transparent;
+    }
+  }
+  @keyframes shimmer {
+    0% {
+      background-position: 100% 0;
+    }
+    100% {
+      background-position: -100% 0;
+    }
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+  }
+  @keyframes pop-in {
+    from {
+      opacity: 0;
+      transform: scale(0.97);
+    }
+  }
+  @keyframes sheet-in {
+    from {
+      transform: translateY(24px);
+      opacity: 0;
+    }
+  }
+  @keyframes flash {
+    0% {
+      box-shadow: 0 0 0 0 var(--accent);
+    }
+    100% {
+      box-shadow: 0 0 0 8px transparent;
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+  }
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+/* Scrollbars, every scroller and the page, in every theme: a thin rounded
+   thumb on a clear track, no arrows, invisible until you scroll (data-scrolling,
+   set by lib/scrollbars.js) and fading out a moment after. Firmer while you
+   hover or drag the thumb. The track keeps its width, so nothing shifts.
+   Only under html.sw-scrollbars (platforms with classic, space-taking
+   scrollbars); overlay scrollbars stay native, and so do forced colors.
+   Scrollers that hide their bar (scrollbar-width: none) keep doing so. */
+:root {
+  --scrollbar-thumb: color-mix(in srgb, var(--faint) 55%, transparent);
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--faint) 85%, transparent);
+  --scrollbar-thumb-active: var(--muted);
+  /* The classic scrollbar's width (and so its reserved gutter). */
+  --scrollbar-size: 10px;
+}
+/* Classic scrollbars take space: reserve it on every scroller, so content
+   never shifts sideways when one starts or stops overflowing (switching tabs
+   in a panel). Not on the page itself: the board never scrolls, so a gutter
+   there is a dead strip that dialog overlays don't cover. Pages that do
+   scroll (the console) reserve it in their own stylesheet. */
+.sw-scrollbars [class*='overflow-y-auto'],
+.sw-scrollbars [class*='overflow-auto'] {
+  scrollbar-gutter: stable;
+}
+/* Content beside that gutter (sw-gutter-pad on a scroller with px-3, or on
+   its padded children) gives the gutter back from its right padding, so its
+   right edge lines up with the panel header above. */
+.sw-scrollbars .sw-gutter-pad {
+  padding-right: calc(0.75rem - var(--scrollbar-size));
+}
+@media (forced-colors: none) {
+  /* Firefox: the standard properties. Chromium would let these override the
+     ::-webkit-scrollbar look below, so only where that is unsupported. */
+  @supports not selector(::-webkit-scrollbar) {
+    .sw-scrollbars,
+    .sw-scrollbars * {
+      scrollbar-width: thin;
+      scrollbar-color: transparent transparent;
+    }
+    .sw-scrollbars[data-scrolling],
+    .sw-scrollbars [data-scrolling] {
+      scrollbar-color: var(--scrollbar-thumb) transparent;
+    }
+  }
+  /* Chromium and Safari. Chromium repaints a custom scrollbar when a custom
+     property on the scroller changes, so the reveal flips one (set on every
+     element, so a scrolling parent never leaks it into a child). */
+  .sw-scrollbars,
+  .sw-scrollbars * {
+    --sw-thumb: transparent;
+  }
+  .sw-scrollbars[data-scrolling],
+  .sw-scrollbars [data-scrolling] {
+    --sw-thumb: var(--scrollbar-thumb);
+  }
+  .sw-scrollbars::-webkit-scrollbar,
+  .sw-scrollbars ::-webkit-scrollbar {
+    width: var(--scrollbar-size);
+    height: var(--scrollbar-size);
+    background-color: transparent;
+  }
+  .sw-scrollbars::-webkit-scrollbar-track,
+  .sw-scrollbars ::-webkit-scrollbar-track,
+  .sw-scrollbars::-webkit-scrollbar-corner,
+  .sw-scrollbars ::-webkit-scrollbar-corner {
+    background-color: transparent;
+  }
+  .sw-scrollbars::-webkit-scrollbar-button,
+  .sw-scrollbars ::-webkit-scrollbar-button {
+    display: none;
+  }
+  .sw-scrollbars::-webkit-scrollbar-thumb,
+  .sw-scrollbars ::-webkit-scrollbar-thumb {
+    min-width: 32px;
+    min-height: 32px;
+    border: 3px solid transparent;
+    border-radius: 9999px;
+    background-color: var(--sw-thumb);
+    background-clip: padding-box;
+  }
+  .sw-scrollbars::-webkit-scrollbar-thumb:hover,
+  .sw-scrollbars ::-webkit-scrollbar-thumb:hover {
+    border-width: 2px;
+    background-color: var(--scrollbar-thumb-hover);
+  }
+  .sw-scrollbars::-webkit-scrollbar-thumb:active,
+  .sw-scrollbars ::-webkit-scrollbar-thumb:active {
+    border-width: 2px;
+    background-color: var(--scrollbar-thumb-active);
+  }
+}
+
+body {
+  margin: 0;
+  background: var(--sunken);
+  color: var(--fg);
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Kit Skeleton: a quiet sweep across a surface-2 block. */
+.sw-skeleton {
+  background-color: var(--surface-2);
+  background-image: linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--fg) 6%, transparent) 50%, transparent 100%);
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sw-skeleton {
+    animation: none !important;
+  }
+}
+
+/* Comment mode: a crosshair over the whole canvas. */
+.sw-commenting .react-flow__pane,
+.sw-commenting .react-flow__node {
+  cursor: crosshair;
+}
+
+/* Space held over the canvas: a hand everywhere on it, closed while dragging
+   (Space or middle button). Beats comment mode's crosshair; a live page being
+   selected lets go of the mouse so the drag reaches the canvas. */
+.sw-space-pan .react-flow__renderer,
+.sw-space-pan .react-flow__renderer * {
+  cursor: grab !important;
+}
+.sw-space-pan iframe,
+.sw-panning iframe {
+  pointer-events: none !important;
+}
+.sw-panning,
+.sw-panning .react-flow__renderer,
+.sw-panning .react-flow__renderer * {
+  cursor: grabbing !important;
+}
+
+.react-flow__edge.sw-edge-variant .react-flow__edge-path {
+  stroke: var(--warn);
+}
+
+.react-flow__controls-button {
+  width: 32px;
+  height: 32px;
+}
+
+/* React Flow's own chrome (canvas, minimap, zoom controls) on the theme's
+   tokens, so it follows the picked mode and theme, not only the OS. */
+.react-flow {
+  --xy-background-color: var(--sunken);
+  --xy-background-pattern-color: var(--line);
+  --xy-minimap-background-color: var(--surface);
+  --xy-minimap-mask-background-color: color-mix(in srgb, var(--sunken) 70%, transparent);
+  --xy-minimap-mask-stroke-color: var(--accent);
+  --xy-controls-button-background-color: var(--surface);
+  --xy-controls-button-background-color-hover: var(--surface-2);
+  --xy-controls-button-color: var(--fg);
+  --xy-controls-button-color-hover: var(--fg);
+  --xy-controls-button-border-color: var(--line);
+}
+.react-flow__minimap,
+.react-flow__controls {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/* Activity, not audio amplitude. Static states remain readable without motion. */
+.sw-thinking-dots,
+.sw-listening-bars {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  gap: 4px;
+  height: 24px;
+}
+.sw-thinking-dots {
+  padding: 0 10px;
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+.sw-thinking-dots i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: sw-thinking-bounce 1.2s ease-in-out infinite;
+}
+.sw-thinking-dots i:nth-child(2) {
+  animation-delay: 150ms;
+}
+.sw-thinking-dots i:nth-child(3) {
+  animation-delay: 300ms;
+}
+.sw-listening-bars {
+  gap: 3px;
+}
+.sw-listening-bars i {
+  width: 3px;
+  height: 16px;
+  border-radius: 2px;
+  background: currentColor;
+  animation: sw-listening-pulse 900ms ease-in-out infinite alternate;
+}
+.sw-listening-bars i:nth-child(1),
+.sw-listening-bars i:nth-child(5) {
+  height: 7px;
+  animation-delay: -200ms;
+}
+.sw-listening-bars i:nth-child(2),
+.sw-listening-bars i:nth-child(4) {
+  height: 12px;
+  animation-delay: -600ms;
+}
+.sw-voice-still i {
+  animation: none;
+}
+@keyframes sw-thinking-bounce {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+  }
+  30% {
+    transform: translateY(-3px);
+  }
+}
+@keyframes sw-listening-pulse {
+  from {
+    transform: scaleY(0.45);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sw-thinking-dots i,
+  .sw-listening-bars i {
+    animation: none;
+  }
+}
+
+/* Chat: Shapewall's loader (chat/Loader.jsx). The mark's four tiles,
+   clockwise from the tall one top left; the amber tile travels round. */
+:root {
+  /* The amber tile of the Shapewall mark, the same in every theme. */
+  --brand-amber: #f59e0b;
+}
+.sw-loader {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  width: 1em;
+  height: 1em;
+  vertical-align: -0.125em;
+}
+.sw-loader i {
+  position: absolute;
+  width: 45%;
+  border-radius: 0.1em;
+  background: color-mix(in srgb, var(--accent) 38%, transparent);
+}
+.sw-loader i:nth-child(1) {
+  left: 0;
+  top: 0;
+  height: 60%;
+}
+.sw-loader i:nth-child(2) {
+  right: 0;
+  top: 0;
+  height: 30%;
+  background: var(--brand-amber);
+}
+.sw-loader i:nth-child(3) {
+  right: 0;
+  bottom: 0;
+  height: 60%;
+}
+.sw-loader i:nth-child(4) {
+  left: 0;
+  bottom: 0;
+  height: 30%;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .sw-loader i {
+    animation: sw-loader-pass 1.6s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  }
+  .sw-loader i:nth-child(2) {
+    animation-delay: 0.4s;
+  }
+  .sw-loader i:nth-child(3) {
+    animation-delay: 0.8s;
+  }
+  .sw-loader i:nth-child(4) {
+    animation-delay: 1.2s;
+  }
+}
+@keyframes sw-loader-pass {
+  0%,
+  100% {
+    background: color-mix(in srgb, var(--accent) 38%, transparent);
+    transform: scale(0.86);
+  }
+  12% {
+    background: var(--brand-amber);
+    transform: scale(1);
+  }
+  30% {
+    background: var(--accent);
+    transform: scale(0.94);
+  }
+  50% {
+    background: color-mix(in srgb, var(--accent) 38%, transparent);
+    transform: scale(0.86);
+  }
+}
+
+/* Chat: the caret at the end of a reply that is still being written. */
+.sw-streaming > :is(p, h3, h4, h5, h6):last-child::after,
+.sw-streaming > :is(ul, ol):last-child > li:last-child > :last-child::after,
+.sw-streaming > pre:last-child > code::after,
+.sw-streaming > blockquote:last-child > :last-child::after {
+  content: '';
+  display: inline-block;
+  width: 0.5em;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: -0.15em;
+  border-radius: 1px;
+  background: var(--accent);
+  opacity: 0.75;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .sw-streaming > :is(p, h3, h4, h5, h6):last-child::after,
+  .sw-streaming > :is(ul, ol):last-child > li:last-child > :last-child::after,
+  .sw-streaming > pre:last-child > code::after,
+  .sw-streaming > blockquote:last-child > :last-child::after {
+    animation: sw-caret 1.06s step-end infinite;
+  }
+}
+@keyframes sw-caret {
+  50% {
+    opacity: 0;
+  }
+}

@@ -1,0 +1,16 @@
+.git
+node_modules
+dist
+**/.shapewall
+shapewall-export
+test/.output
+playwright-report
+test-results
+e2e-screenshots
+website
+brand
+docs/images
+*.auth.json
+*.log
+.env
+.env.*

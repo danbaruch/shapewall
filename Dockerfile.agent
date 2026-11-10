@@ -1,0 +1,45 @@
+# The starter agent's sandbox image: the agent (`shapewall agent sandbox`),
+# its egress proxy and the sandbox probe, on the official Playwright image
+# (Chromium for `shapewall capture`; Node, npm and git for test commands).
+# Built on your machine, never pulled: `shapewall agent run` starts it with
+# --pull never.
+#
+#   shapewall agent build-image      (builds this file from the installed package)
+#   shapewall agent doctor
+#
+# or by hand, in a clone of the repository:
+#
+#   podman build -f Dockerfile.agent -t localhost/shapewall-agent:latest .    (or docker build ...)
+#
+# The image runs as whoever `shapewall agent` says (your uid, never root),
+# with a read-only root file system: nothing here is writable at run time.
+# See docs/starter-agent.md.
+
+FROM mcr.microsoft.com/playwright:v1.64.1-noble AS deps
+WORKDIR /opt/shapewall
+# The locked versions (npm never puts package-lock.json in a package, so the
+# package ships a copy in dist/agent/ and `agent build-image` puts it here).
+COPY package.json package-lock.json ./
+# Runtime dependencies only, no install scripts.
+RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+
+FROM mcr.microsoft.com/playwright:v1.64.1-noble
+ENV NODE_ENV=production \
+    HOME=/tmp/home \
+    NODE_USE_ENV_PROXY=1
+WORKDIR /opt/shapewall
+COPY --from=deps /opt/shapewall/node_modules ./node_modules
+COPY package.json LICENSE NOTICE ./
+COPY bin ./bin
+COPY src ./src
+RUN chmod -R a+rX,go-w /opt/shapewall && ln -s /opt/shapewall/bin/shapewall.js /usr/local/bin/shapewall
+# The agent runs from a copy of node that its user may execute but not read.
+# Linux marks a process started from an unreadable program as not dumpable:
+# then nothing else running as the same user (a test command, an approved
+# shell command) can open its /proc files, so none of them can write to its
+# stdout (the line protocol with the host) or read its memory.
+RUN install -o root -g root -m 0711 "$(command -v node)" /opt/shapewall/node-agent
+USER pwuser
+WORKDIR /work
+ENTRYPOINT []
+CMD ["/opt/shapewall/node-agent", "/opt/shapewall/bin/shapewall.js", "agent", "sandbox"]

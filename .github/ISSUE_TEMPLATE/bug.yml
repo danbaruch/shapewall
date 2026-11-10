@@ -1,0 +1,43 @@
+name: Bug report
+description: Something does not work as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for the report. Please remove anything private (URLs, tokens, page content) from logs and screenshots.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you saw instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Ideally with the bundled demo site (`npm run demo`) or a minimal config.
+      placeholder: |
+        1. shapewall.config.json with ...
+        2. Run shapewall capture
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Shapewall version
+      placeholder: 0.1.0 (shapewall --version)
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: Node 22.x, macOS 15 / Ubuntu 24.04 / Windows 11, browser used for the board
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Output of the failing command, or `.shapewall/<board>/capture.log`.
+      render: text

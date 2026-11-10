@@ -1,0 +1,58 @@
+/* The console shares the board's tokens and kit (styles.css, components/ui). */
+@import '../styles.css';
+
+/* The board is a fixed canvas; the console is a page that scrolls. */
+body {
+  overscroll-behavior: auto;
+  background: var(--surface-2);
+}
+
+:root[data-mode='dark'] body {
+  background: var(--sunken);
+}
+
+#root {
+  min-height: 100%;
+  height: auto;
+}
+
+/* The console page scrolls: with classic scrollbars, keep room for the bar so
+   the layout doesn't shift sideways when a page grows past the window. */
+html.sw-scrollbars {
+  scrollbar-gutter: stable;
+}
+
+/* Horizontal nav strips on phones scroll without a bar. */
+.sw-scroll-x {
+  scrollbar-width: none;
+}
+.sw-scroll-x::-webkit-scrollbar {
+  display: none;
+}
+
+/* Secrets (tokens, links, recovery codes) wrap anywhere. */
+.sw-secret {
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+/* The edge fade on the workspace nav pills: there is more to scroll. */
+.sw-nav-fade-left {
+  background: linear-gradient(to right, var(--surface-2), transparent);
+}
+.sw-nav-fade-right {
+  background: linear-gradient(to left, var(--surface-2), transparent);
+}
+:root[data-mode='dark'] .sw-nav-fade-left {
+  background: linear-gradient(to right, var(--sunken), transparent);
+}
+:root[data-mode='dark'] .sw-nav-fade-right {
+  background: linear-gradient(to left, var(--sunken), transparent);
+}
+
+/* A project without a captured page yet: a soft accent glow on the track. */
+.sw-project-cover {
+  background:
+    radial-gradient(circle at 28% 18%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 55%),
+    radial-gradient(circle at 80% 90%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 50%), var(--surface-2);
+}

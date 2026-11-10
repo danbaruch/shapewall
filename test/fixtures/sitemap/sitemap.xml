@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://www.example.com/</loc><priority>1.0</priority></url>
+  <url><loc>https://www.example.com/pricing</loc></url>
+  <url><loc>https://www.example.com/pricing/</loc></url>
+  <url><loc>https://www.example.com/features</loc></url>
+  <url>
+    <loc>
+      https://www.example.com/blog/
+    </loc>
+    <lastmod>2026-10-01</lastmod>
+  </url>
+  <url><loc>https://www.example.com/blog/sync-without-servers</loc></url>
+  <url><loc><![CDATA[https://www.example.com/blog/notes_on-paper.html]]></loc></url>
+  <url><loc>https://www.example.com/docs/getting-started</loc></url>
+  <url><loc>https://www.example.com/docs/api/auth</loc></url>
+  <url><loc>https://www.example.com/tag/news</loc></url>
+  <url><loc>https://www.example.com/search?q=notes&amp;page=2</loc></url>
+  <url><loc>https://cdn.example.net/assets/logo</loc></url>
+  <!-- <url><loc>https://www.example.com/commented-out</loc></url> -->
+</urlset>

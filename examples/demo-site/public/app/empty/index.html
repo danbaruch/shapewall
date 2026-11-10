@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Daily notes -- Lumen Notes</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="wrap">
+        <a class="logo" href="/app/"><img src="/img/logo.svg" alt="" />Lumen</a>
+        <a class="app-search" href="/app/" role="search">Search notes <kbd>/</kbd></a>
+        <div class="app-actions">
+          <a class="btn btn-primary btn-small" href="/app/note/" data-testid="new-note">New note</a>
+          <a class="avatar" href="/app/settings/" aria-label="Account settings" data-testid="avatar">AR</a>
+        </div>
+      </div>
+    </header>
+    <main>
+      <div class="app">
+        <nav class="sidebar" aria-label="Workspace">
+          <a href="/app/">All notes</a>
+          <a class="active" href="/app/empty/">Daily notes</a>
+          <a href="/app/note/share/">Shared with me</a>
+          <a href="/app/settings/">Settings</a>
+          <p class="sidebar-label">Spaces</p>
+          <a href="/app/">Research</a>
+          <a href="/app/">Product</a>
+        </nav>
+        <div class="workspace">
+          <div class="empty" data-testid="empty-state">
+            <img class="empty-art" src="/img/empty.svg" alt="" width="200" height="140" />
+            <h1 class="form-title">No daily notes yet</h1>
+            <p class="meta">A fresh page every morning, with yesterday's open tasks carried over.</p>
+            <div class="hero-actions">
+              <a class="btn btn-primary" href="/app/note/" data-testid="empty-cta">Write today's note</a
+              ><a class="btn btn-ghost" href="/templates/">Use a template</a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </body>
+</html>

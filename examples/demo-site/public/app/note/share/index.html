@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Share: Interview notes -- Lumen Notes</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="wrap">
+        <a class="logo" href="/app/"><img src="/img/logo.svg" alt="" />Lumen</a>
+        <a class="app-search" href="/app/" role="search">Search notes <kbd>/</kbd></a>
+        <div class="app-actions">
+          <a class="btn btn-primary btn-small" href="/app/note/" data-testid="new-note">New note</a>
+          <a class="avatar" href="/app/settings/" aria-label="Account settings" data-testid="avatar">AR</a>
+        </div>
+      </div>
+    </header>
+    <main>
+      <div class="app">
+        <nav class="sidebar" aria-label="Workspace">
+          <a href="/app/">All notes</a>
+          <a href="/app/empty/">Daily notes</a>
+          <a class="active" href="/app/note/share/">Shared with me</a>
+          <a href="/app/settings/">Settings</a>
+          <p class="sidebar-label">Spaces</p>
+          <a href="/app/">Research</a>
+          <a href="/app/">Product</a>
+        </nav>
+        <div class="workspace">
+          <article class="doc" data-testid="doc">
+            <p class="meta">Research · edited 2 minutes ago · saved offline</p>
+            <h1 class="doc-title">Interview notes: onboarding</h1>
+            <p>Five people tried the new welcome flow. Three skipped the import step; two asked what a space is.</p>
+            <h2 class="doc-h2">What we heard</h2>
+            <ul>
+              <li>"I just want to start typing." Everyone said a version of this.</li>
+              <li>The progress bar helped, but step 2 felt optional and long.</li>
+              <li>Invites made more sense after the first note, not before.</li>
+            </ul>
+            <h2 class="doc-h2">Next</h2>
+            <p>Try a one-step welcome (see <a href="/welcome/">Welcome</a>) and move invites to the share dialog.</p>
+            <p class="backlinks">Linked from <a href="/app/">Q3 research plan</a> and <a href="/app/">Weekly review</a></p>
+          </article>
+        </div>
+      </div>
+      <div class="modal-backdrop">
+        <div class="modal" role="dialog" aria-modal="true" aria-label="Share this note" data-testid="share-dialog">
+          <h2 class="modal-title">Share "Interview notes: onboarding"</h2>
+          <label>Invite people <input type="email" placeholder="name@example.com" /></label>
+          <ul class="people">
+            <li class="person-row">
+              <span class="avatar">AR</span><span><b>Alex Reader</b><span class="meta"> (you)</span></span
+              ><span class="role">Owner</span>
+            </li>
+            <li class="person-row">
+              <span class="avatar alt">KT</span><span><b>Kit Tan</b></span
+              ><span class="role">Can edit</span>
+            </li>
+            <li class="person-row">
+              <span class="avatar alt2">NV</span><span><b>Noor Vale</b></span
+              ><span class="role">Can view</span>
+            </li>
+          </ul>
+          <div class="share-link">
+            <span class="switch on" aria-hidden="true"></span><span>Anyone with the link can view</span
+            ><button class="btn btn-ghost btn-small" type="button" data-testid="copy-link">Copy link</button>
+          </div>
+          <div class="onboard-actions"><a class="btn btn-primary" href="/app/note/">Done</a></div>
+        </div>
+      </div>
+    </main>
+  </body>
+</html>

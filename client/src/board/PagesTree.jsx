@@ -1,0 +1,154 @@
+// The board's pages and journeys in the expanded app sidebar (desktop):
+// every section with its pages and their open comments, the journeys under
+// them, and a filter. Click one to fly to it.
+
+import { useMemo, useState } from 'react'
+import { ChevronDown, FileText, Route, Search } from 'lucide-react'
+import { Input } from '../components/ui'
+import { cn } from '../lib/utils'
+
+export function PagesTree({ groups, journeys, comments, activePage, journeyId, onPage, onJourney }) {
+  const [query, setQuery] = useState('')
+  const [folded, setFolded] = useState(() => new Set())
+  const needle = query.trim().toLowerCase()
+  const openByPage = useMemo(() => {
+    const map = new Map()
+    for (const comment of comments || []) {
+      if (comment.status === 'open') map.set(comment.pageId, (map.get(comment.pageId) || 0) + 1)
+    }
+    return map
+  }, [comments])
+  const shown = groups
+    .map((item) => ({
+      ...item,
+      pages: needle
+        ? item.pages.filter((page) => `${page.title} ${page.path || ''} ${item.group}`.toLowerCase().includes(needle))
+        : item.pages,
+    }))
+    .filter((item) => item.pages.length)
+  const shownJourneys = needle
+    ? journeys.filter((item) =>
+        String(item.name || '')
+          .toLowerCase()
+          .includes(needle),
+      )
+    : journeys
+  const toggle = (group) =>
+    setFolded((current) => {
+      const next = new Set(current)
+      if (next.has(group)) next.delete(group)
+      else next.add(group)
+      return next
+    })
+  const total = groups.reduce((sum, item) => sum + item.pages.length, 0)
+
+  return (
+    <div className="flex w-full flex-col border-t border-line pt-2" data-sw-pages-sidebar="true">
+      <p className="flex items-center px-2.5 pb-1 text-xs font-semibold text-faint">
+        Pages <span className="ml-1 font-normal tabular">{total}</span>
+      </p>
+      <div className="pb-2">
+        <Input
+          size="sm"
+          icon={Search}
+          value={query}
+          onChange={(event) => setQuery(event.target.value.slice(0, 80))}
+          placeholder="Filter pages and journeys"
+          aria-label="Filter pages and journeys"
+          data-sw-pages-filter="true"
+        />
+      </div>
+      <div className="pb-2">
+        {shown.map((item) => {
+          const closed = folded.has(item.group) && !needle
+          return (
+            <section key={item.group} className="mb-1" data-sw-pages-group={item.group}>
+              <button
+                type="button"
+                className="flex h-7 w-full items-center gap-1 rounded-md px-2.5 text-xs font-semibold text-muted outline-none hover:text-fg focus-visible:outline-2 focus-visible:outline-accent"
+                aria-expanded={!closed}
+                onClick={() => toggle(item.group)}
+              >
+                <ChevronDown size={13} aria-hidden="true" className={cn('transition-transform', closed && '-rotate-90')} />
+                <span className="min-w-0 truncate">{item.group}</span>
+                <span className="ml-auto font-normal text-faint tabular">{item.pages.length}</span>
+              </button>
+              {closed ? null : (
+                // A wire from the section's chevron down to each page: a line
+                // through the list with a rounded elbow into every page.
+                <ul className="ml-4">
+                  {item.pages.map((page, index) => {
+                    const open = openByPage.get(page.id) || 0
+                    const current = page.id === activePage
+                    const last = index === item.pages.length - 1
+                    return (
+                      <li
+                        key={page.id}
+                        className={cn(
+                          'relative pl-3 before:pointer-events-none before:absolute before:top-0 before:left-0 before:h-4 before:w-2.5 before:rounded-bl-md before:border-b before:border-l',
+                          current ? 'before:border-accent/60' : 'before:border-line-strong/70',
+                          !last &&
+                            'after:pointer-events-none after:absolute after:inset-y-0 after:left-0 after:border-l after:border-line-strong/70',
+                        )}
+                        data-sw-pages-wire="true"
+                      >
+                        <button
+                          type="button"
+                          className={cn(
+                            'flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[13px] outline-none focus-visible:outline-2 focus-visible:outline-accent',
+                            current ? 'bg-accent/10 text-fg' : 'text-fg/90 hover:bg-surface-2',
+                          )}
+                          aria-current={current ? 'true' : undefined}
+                          onClick={() => onPage(page.id)}
+                          data-sw-pages-item={page.id}
+                        >
+                          <FileText size={14} aria-hidden="true" className={cn('shrink-0', current ? 'text-accent' : 'text-faint')} />
+                          <span className="min-w-0 flex-1 truncate">{page.title}</span>
+                          {open ? (
+                            <span className="shrink-0 text-xs text-muted tabular" aria-label={`${open} open`}>
+                              {open}
+                            </span>
+                          ) : null}
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </section>
+          )
+        })}
+        {shownJourneys.length ? (
+          <section className="mt-2 border-t border-line pt-2" data-sw-pages-journeys="true">
+            <h3 className="flex h-7 items-center px-2.5 text-xs font-semibold text-muted">Journeys</h3>
+            <ul>
+              {shownJourneys.map((item) => {
+                const current = item.id === journeyId
+                return (
+                  <li key={item.id}>
+                    <button
+                      type="button"
+                      className={cn(
+                        'flex h-8 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] outline-none focus-visible:outline-2 focus-visible:outline-accent',
+                        current ? 'bg-accent/10 text-fg' : 'text-fg/90 hover:bg-surface-2',
+                      )}
+                      aria-current={current ? 'true' : undefined}
+                      onClick={() => onJourney(current ? null : item.id)}
+                      data-sw-pages-journey={item.id}
+                    >
+                      <Route size={14} aria-hidden="true" className={cn('shrink-0', current ? 'text-accent' : 'text-faint')} />
+                      <span className="min-w-0 flex-1 truncate">{item.name || item.id}</span>
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          </section>
+        ) : null}
+        {needle && !shown.length && !shownJourneys.length ? (
+          <p className="px-2.5 py-3 text-sm text-muted">Nothing matches "{query.trim()}".</p>
+        ) : null}
+      </div>
+    </div>
+  )
+}

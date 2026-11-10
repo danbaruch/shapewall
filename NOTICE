@@ -1,0 +1,12 @@
+Shapewall
+Copyright 2026 Dan Baruch and Shapewall contributors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE),
+except for the hosted server in src/hosted, which is licensed under the
+Functional Source License, Version 1.1, ALv2 Future License (see
+src/hosted/LICENSE.md). Each version of src/hosted becomes available under the
+Apache License, Version 2.0 two years after it is released.
+
+The built board includes third-party code and data for the natural read-aloud
+voices (transformers.js, ONNX Runtime Web, misaki's lexicons and others), each
+under its own license; see THIRD_PARTY.md.

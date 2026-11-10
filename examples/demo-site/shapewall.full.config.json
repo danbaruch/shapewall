@@ -1,0 +1,145 @@
+{
+  "title": "Lumen Notes (demo)",
+  "id": "demo",
+  "baseUrl": "http://127.0.0.1:4601",
+  "outputDir": ".shapewall/full",
+  "concurrency": 2,
+  "versions": 5,
+  "viewports": {
+    "desktop": { "width": 1440, "height": 2200 },
+    "tablet": { "width": 820, "height": 1800 },
+    "phone": { "width": 390, "height": 1800 }
+  },
+  "groups": ["Marketing", "Content", "Get started", "App", "Admin", "System"],
+  "pages": [
+    { "id": "home", "path": "/", "title": "Home", "group": "Marketing", "note": "Signed out" },
+    { "id": "features", "path": "/features/", "title": "Features", "group": "Marketing" },
+    { "id": "pricing", "path": "/pricing/", "title": "Pricing", "group": "Marketing", "waitFor": ".pricing" },
+    {
+      "id": "templates",
+      "path": "/templates/",
+      "title": "Templates",
+      "group": "Marketing",
+      "note": "New on staging, not on production yet"
+    },
+    { "id": "changelog", "path": "/changelog/", "title": "Changelog", "group": "Marketing" },
+    { "id": "blog", "path": "/blog/", "title": "Blog", "group": "Content" },
+    { "id": "blog-post", "path": "/blog/sync-without-servers/", "title": "Blog post", "group": "Content" },
+    { "id": "signup", "path": "/signup/", "title": "Sign up", "group": "Get started", "note": "Signed out" },
+    {
+      "id": "verify",
+      "path": "/signup/verify/",
+      "title": "Email verified",
+      "group": "Get started",
+      "note": "From the link in the sign-up email"
+    },
+    {
+      "id": "verify-expired",
+      "path": "/signup/verify/expired/",
+      "title": "Verify: link expired",
+      "group": "Get started",
+      "note": "Error state: an old sign-up link"
+    },
+    {
+      "id": "login",
+      "path": "/login/",
+      "title": "Sign in",
+      "group": "Get started",
+      "note": "Signed out; the password and CSRF token on this page are never captured",
+      "actions": [{ "fill": ["input[name=email]", "reader@example.com"] }]
+    },
+    { "id": "login-error", "path": "/login/error/", "title": "Sign in: wrong password", "group": "Get started", "note": "Error state" },
+    { "id": "reset", "path": "/reset-password/", "title": "Reset password", "group": "Get started", "note": "Sent state" },
+    { "id": "welcome", "path": "/welcome/", "title": "Welcome, step 1", "group": "Get started", "note": "Onboarding: pick a use" },
+    {
+      "id": "welcome-import",
+      "path": "/welcome/import/",
+      "title": "Welcome, step 2",
+      "group": "Get started",
+      "note": "Onboarding: import"
+    },
+    {
+      "id": "welcome-invite",
+      "path": "/welcome/invite/",
+      "title": "Welcome, step 3",
+      "group": "Get started",
+      "note": "Onboarding: invite"
+    },
+    {
+      "id": "dashboard",
+      "path": "/app/",
+      "title": "Dashboard",
+      "group": "App",
+      "note": "Signed in; sample data rendered by a script",
+      "waitFor": "table"
+    },
+    { "id": "empty", "path": "/app/empty/", "title": "Daily notes (empty)", "group": "App", "note": "Signed in; empty state" },
+    { "id": "editor", "path": "/app/note/", "title": "Editor", "group": "App", "note": "Signed in" },
+    { "id": "share", "path": "/app/note/share/", "title": "Share dialog", "group": "App", "note": "Signed in; dialog open" },
+    { "id": "settings", "path": "/app/settings/", "title": "Settings", "group": "App", "note": "Signed in" },
+    { "id": "billing", "path": "/app/settings/billing/", "title": "Billing", "group": "App", "note": "Signed in; Free plan" },
+    {
+      "id": "admin",
+      "path": "/admin/",
+      "title": "Workspace admin",
+      "group": "Admin",
+      "note": "Desktop only (pages[].viewports)",
+      "viewports": ["desktop"]
+    },
+    { "id": "not-found", "path": "/404/", "title": "Not found (404)", "group": "System", "note": "Error page" },
+    { "id": "server-error", "path": "/error/", "title": "Server error (500)", "group": "System", "note": "Error page" },
+    {
+      "id": "status",
+      "path": "/status/",
+      "title": "Status page",
+      "group": "System",
+      "note": "Fails on purpose: shows what a failed capture looks like"
+    }
+  ],
+  "journeys": [
+    {
+      "id": "sign-up",
+      "name": "Sign up",
+      "description": "From the landing page through onboarding to the first notes; the email link works, or has expired and is sent again",
+      "steps": [
+        "home",
+        "pricing",
+        "signup",
+        {
+          "branches": [
+            { "id": "link-works", "label": "Link works", "steps": ["verify"] },
+            { "id": "link-expired", "label": "Link expired", "steps": ["verify-expired", "verify"] }
+          ]
+        },
+        "welcome",
+        "welcome-import",
+        "welcome-invite",
+        "dashboard"
+      ]
+    },
+    {
+      "id": "wrong-password",
+      "name": "Sign in, wrong password",
+      "description": "Error path: a failed sign in, a password reset, then back in (Sign in is visited twice)",
+      "steps": ["home", "login", "login-error", "reset", "login", "dashboard"]
+    },
+    {
+      "id": "upgrade",
+      "name": "Upgrade to Plus",
+      "description": "From the dashboard to the plans, through settings and billing",
+      "steps": ["dashboard", "settings", "billing", "pricing"]
+    },
+    {
+      "id": "first-note",
+      "name": "First note and share",
+      "description": "Empty state to a shared note",
+      "steps": ["empty", "editor", "share", "dashboard"]
+    },
+    {
+      "id": "broken-link",
+      "name": "Broken link",
+      "description": "Error path: an old link from the blog lands on the 404 page",
+      "steps": ["blog", "blog-post", "not-found", "home"]
+    }
+  ]
+}

@@ -1,0 +1,52 @@
+# Hosted Shapewall with Docker Compose: the server and Caddy (TLS) on one
+# machine. Written by `shapewall hosted --setup` (docs/hosted.md, "Own
+# domain"); settings live in .env next to this file.
+#
+#   docker compose up -d --build
+#   docker compose exec shapewall cat /data/setup-link    # read privately, never in logs
+#   docker compose exec shapewall node bin/shapewall.js hosted backup --data /data --to /backups --keep-days 30
+#
+# The server's port is never published: only Caddy reaches it, on the
+# compose network, which is why it trusts X-Forwarded-For from private
+# addresses (SHAPEWALL_HOSTED_TRUST_PROXY=uniquelocal).
+
+services:
+  shapewall:
+    build:
+      context: ${SHAPEWALL_SOURCE:-.}
+      dockerfile: Dockerfile.hosted
+    image: shapewall-hosted:local
+    init: true
+    restart: unless-stopped
+    user: '${SHAPEWALL_UID:-1000}:${SHAPEWALL_GID:-1000}'
+    env_file: .env
+    environment:
+      SHAPEWALL_HOSTED_DATA: /data
+      SHAPEWALL_HOSTED_TRUST_PROXY: uniquelocal
+    command: ['hosted', '--host', '0.0.0.0', '--port', '4700']
+    volumes:
+      - ./data:/data
+      - ./backups:/backups
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 2g
+    pids_limit: 256
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - shapewall
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy/data:/data
+      - ./caddy/config:/config

@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Welcome -- Lumen Notes</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="logo" href="/"><img src="/img/logo.svg" alt="" />Lumen Notes</a>
+        <div class="header-cta"><a class="btn btn-ghost" href="/app/">Skip setup</a></div>
+      </div>
+    </header>
+    <main>
+      <section class="onboard">
+        <div class="steps" aria-label="Step 1 of 3" data-testid="steps">
+          <span class="step done"></span><span class="step"></span><span class="step"></span><span class="steps-label">Step 1 of 3</span>
+        </div>
+        <h1 class="form-title">What will you use Lumen for?</h1>
+        <p class="lead">Pick any. We will set up your first space to match.</p>
+        <div class="choices">
+          <a class="choice selected" href="/welcome/import/" data-testid="choice-research"
+            ><b>Research</b><span class="meta">Sources, quotes, findings</span></a
+          >
+          <a class="choice" href="/welcome/import/"><b>Work notes</b><span class="meta">Meetings and projects</span></a>
+          <a class="choice selected" href="/welcome/import/"><b>Writing</b><span class="meta">Drafts and outlines</span></a>
+          <a class="choice" href="/welcome/import/"><b>Personal</b><span class="meta">Journal and lists</span></a>
+        </div>
+        <div class="onboard-actions">
+          <a class="btn btn-ghost" href="/signup/">Back</a
+          ><a class="btn btn-primary" href="/welcome/import/" data-testid="welcome-next">Continue</a>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

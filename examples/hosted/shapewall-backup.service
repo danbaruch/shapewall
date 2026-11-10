@@ -1,0 +1,19 @@
+# Example only. Installing these files does not enable a schedule.
+[Unit]
+Description=Back up hosted Shapewall
+
+[Service]
+Type=oneshot
+User=shapewall
+Group=shapewall
+UMask=0077
+WorkingDirectory=/opt/shapewall/current
+ExecStart=/usr/bin/node /opt/shapewall/current/bin/shapewall.js hosted backup --data /var/lib/shapewall-hosted --to /var/backups/shapewall --keep-days 30
+# If the server uses credential files, use the same LoadCredential here.
+# LoadCredential=shapewall-secret:/etc/shapewall/secret.key
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/shapewall-hosted /var/backups/shapewall
+MemoryMax=2G
