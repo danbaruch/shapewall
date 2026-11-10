@@ -1081,6 +1081,8 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                       journeyId: journey?.id || null,
                       onPage: jumpToPage,
                       onJourney: openJourney,
+                      canEditJourneys,
+                      onNewJourney: () => startBuilder(),
                     }
                   : null
               }

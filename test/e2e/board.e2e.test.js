@@ -258,6 +258,12 @@ test('desktop 1440: the Views menu lists the journeys, shows the open one on its
     assert.equal(await page.locator('[data-sw-view-journey-name]').innerText(), 'Sign up')
     const sidebar = page.locator('[data-sw-pages-journey="sign-up"]')
     if (await sidebar.count()) assert.equal(await sidebar.first().getAttribute('aria-current'), 'true')
+    // The expanded sidebar stays on its tab; its Journeys tab shows a dot.
+    const tabs = page.locator('[data-sw-sidebar-nav]')
+    if (await tabs.count()) {
+      assert.equal(await tabs.getAttribute('data-sw-sidebar-nav'), 'pages')
+      assert.equal(await tabs.locator('[data-sw-sidebar-tab="journeys"] [data-sw-journey-dot]').count(), 1)
+    }
     await page.click('[data-sw-view-menu]')
     await page.waitForSelector(`${menu} [data-sw-views-journey="sign-up"][aria-checked="true"]`)
     await page.keyboard.press('Escape')

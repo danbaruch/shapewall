@@ -113,13 +113,16 @@ not create hosted accounts, workspaces or memberships. Inside Console, Projects,
 contains identity and appearance rather than duplicate workspace navigation. The earlier `?settings=general` board link remains supported.
 
 The app sidebar (`AppRail`, `components/app-rail.jsx`) is a labelled menu when expanded and a rail of icons when collapsed. Collapsed,
-an icon with more behind it (the board's pages tree, the sections of the workspace or account you are in) opens a flyout beside the
+an icon with more behind it (the board's Pages and Journeys, the sections of the workspace or account you are in) opens a flyout beside the
 rail instead of expanding the sidebar: on hover after 150 ms, closing 250 ms after the pointer leaves both the icon and the panel, so
 you can move into it; a click, tap, Enter, Space or ArrowRight opens it pinned and moves focus in. A choice in it, Escape (focus back on
 the icon), a click outside or Tab past its end closes it. It is a non-modal `role="dialog"` named after its icon, the expanded
 sidebar's width, on the Chrome layer (above the canvas and the comment thread, below dialogs and menus). Icons with nothing behind them
 keep their tooltip. Only the panel button and Ctrl/Cmd+B expand the sidebar. The hover timing and height rules are in
-`components/rail-flyout.js`.
+`components/rail-flyout.js`. A rail icon can carry a dot (`dot`): the Journeys icon has one while a journey is open. On the board the
+expanded sidebar puts a segmented `Tabs` switch, "Pages 26 | Journeys 6" with the counts as quiet text, where a single heading would
+be, and shows the page tree (filter "Filter pages") or the journeys list (filter "Filter journeys", only past eight); the tab is
+kept per browser (`board/SidebarNav.jsx`).
 
 App-level pieces outside the kit, in `client/src/components/`: `ProfileMenu` (the avatar menu: account items, the console's workspace
 switcher, View as in the demo, Appearance, and About Shapewall and updates) and `DemoBanner` (the demo's "viewing as" strip with Reset; in the console header a chip whose Reset is desktop only, on phones Reset the demo is in the profile menu).
@@ -138,7 +141,11 @@ while it is on, agreeing with the comment-mode banner), the Comments, Agent and 
 the open panel's toggle takes the selected chip look, none while the panel is closed), then Agent settings. Zones
 are 20 px apart, controls inside a zone 6 px, with no dividers. When it gets narrow, `client/src/board/toolbarFit.js` drops words in a
 fixed order (search to an icon, the panel toggles, Views (an open journey's name shortens first), then the screen-size toggle to icons with tooltips) and the board name
-truncates a little at each step, never below about 8 characters. Accessible names, shortcuts and tooltips never change.
+truncates a little at each step, never below about 8 characters. With a journey open its name matters more than the search: the
+search is an icon from the start and the name takes the left zone's room, in full up to about 280 px; the icon leaves the centre line
+before the name truncates, and only when the zones no longer fit side by side do the steps go on (the name keeps at least 128 px, then
+96, then Views becomes an icon). Its full name is the button's accessible name and is in its tooltip. Accessible names, shortcuts and
+tooltips never change.
 `test/toolbar-fit.test.js` checks the order and that nothing overlaps from a 1024 px window with the widest sidebar up. The phone
 toolbar is a separate compact bar. `ToggleGroup` options take a `tooltip` for icon-only labels.
 

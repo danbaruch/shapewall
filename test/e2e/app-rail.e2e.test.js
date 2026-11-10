@@ -1,6 +1,7 @@
 // End to end: the collapsed app sidebar's flyouts, on the public demo export
 // (scripts/demo-export.js over dist/demo-app). Collapsed, hovering the board's
-// Pages icon opens the pages tree beside the rail; the pointer can move into
+// Pages icon opens the pages tree beside the rail (and the Journeys icon the
+// journeys); expanded, a Pages | Journeys switch shows one or the other; the pointer can move into
 // it, type in its filter and pick a page, which flies there and closes it. A
 // click pins it and moves focus in; Escape closes it with focus back on the
 // icon. The sidebar stays collapsed throughout; only the panel button expands
@@ -88,15 +89,17 @@ test('board: hovering the Pages icon opens the pages tree beside the rail, and p
     const flyout = page.locator(PAGES_FLYOUT)
     await flyout.waitFor()
     assert.equal(await flyout.getAttribute('role'), 'dialog')
-    assert.equal(await flyout.getAttribute('aria-label'), 'Pages and journeys')
+    assert.equal(await flyout.getAttribute('aria-label'), 'Pages')
+    assert.equal(await icon.getAttribute('aria-label'), 'Pages')
     assert.equal(await icon.getAttribute('aria-expanded'), 'true')
     assert.equal(await icon.getAttribute('aria-controls'), await flyout.getAttribute('id'))
-    // The same tree as the expanded sidebar: the filter, the pages with their
-    // counts and wires, the journeys.
+    // The same tree as the expanded sidebar's Pages tab: the filter, the
+    // pages with their counts and wires; the journeys have their own icon.
     assert.ok((await flyout.locator('[data-sw-pages-item]').count()) > 10, 'lists the pages')
     assert.ok(await flyout.locator('[data-sw-pages-filter]').isVisible())
     assert.ok((await flyout.locator('[data-sw-pages-wire]').count()) > 10)
-    assert.ok((await flyout.locator('[data-sw-pages-journey]').count()) > 0)
+    assert.equal(await flyout.locator('[data-sw-pages-journey]').count(), 0, 'no journeys under the pages')
+    assert.equal(await flyout.locator('[data-sw-pages-filter]').getAttribute('placeholder'), 'Filter pages')
     // Beside the rail, top-aligned with the icon, inside the window.
     const iconBox = await icon.boundingBox()
     const box = await flyout.boundingBox()
@@ -174,6 +177,104 @@ test('board: a click pins the flyout with focus in it, Escape closes it, and onl
     await page.locator('[data-sw-node="home"]').hover()
     await page.keyboard.press('Control+b')
     await page.waitForSelector(`${RAIL}[data-sw-app-rail="collapsed"]`)
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})
+
+const JOURNEYS_ICON = '[data-sw-rail-item="journeys"]'
+const JOURNEYS_FLYOUT = '[data-sw-rail-flyout="journeys"]'
+const journeyItem = (id) => '[data-sw-pages-journey="' + id + '"]'
+
+test('board: the Journeys icon has its own flyout; choosing a journey opens it, and the icon shows a dot while one is open', async () => {
+  for (const colorScheme of ['light', 'dark']) {
+    const { context, page, errors } = await open({ colorScheme })
+    try {
+      await openBoard(page)
+      const icon = page.locator(JOURNEYS_ICON)
+      assert.equal(await icon.getAttribute('aria-label'), 'Journeys')
+      assert.equal(await icon.getAttribute('data-sw-rail-journeys'), 'none')
+      assert.equal(await page.locator('[data-sw-rail-dot="journeys"]').count(), 0, 'no dot with no journey open')
+      await icon.hover()
+      const flyout = page.locator(JOURNEYS_FLYOUT)
+      await flyout.waitFor()
+      assert.equal(await flyout.getAttribute('aria-label'), 'Journeys')
+      assert.equal(await flyout.locator('[data-sw-pages-item]').count(), 0, 'no pages under the journeys')
+      assert.equal(await flyout.locator('[data-sw-pages-journey="none"]').getAttribute('aria-current'), 'true')
+      const ids = await flyout
+        .locator('[data-sw-pages-journey]')
+        .evaluateAll((els) => els.map((el) => el.getAttribute('data-sw-pages-journey')))
+      assert.ok(ids.length > 1 && ids[0] === 'none', 'None first, then the journeys')
+      assert.match(await flyout.locator(journeyItem(ids[1])).innerText(), /\d+ (step|steps|paths)/)
+      await shot(page, 'board-journeys-hover-' + colorScheme)
+      // A choice opens the journey (the URL's j) and closes the flyout.
+      await flyout.locator(journeyItem(ids[1])).click()
+      await page.waitForSelector(JOURNEYS_FLYOUT, { state: 'detached' })
+      await page.waitForFunction((id) => new URLSearchParams(window.location.search).get('j') === id, ids[1])
+      await page.waitForSelector('[data-sw-rail-dot="journeys"]')
+      assert.equal(await icon.getAttribute('data-sw-rail-journeys'), ids[1])
+      assert.equal(await railState(page), 'collapsed')
+      // Keyboard: Enter pins it with focus inside; Escape returns to the icon.
+      await icon.focus()
+      await page.keyboard.press('Enter')
+      await page.waitForFunction(() => document.activeElement?.closest('[data-sw-rail-flyout="journeys"]'))
+      assert.equal(await flyout.locator(journeyItem(ids[1])).getAttribute('aria-current'), 'true', 'the open one is highlighted')
+      await page.keyboard.press('Escape')
+      await page.waitForSelector(JOURNEYS_FLYOUT, { state: 'detached' })
+      assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('data-sw-rail-item')), 'journeys')
+      // None closes the journey.
+      await icon.click()
+      await flyout.locator('[data-sw-pages-journey="none"]').click()
+      await page.waitForFunction(() => !new URLSearchParams(window.location.search).get('j'))
+      await page.waitForSelector('[data-sw-rail-dot="journeys"]', { state: 'detached' })
+      assert.deepEqual(errors, [])
+    } finally {
+      await context.close()
+    }
+  }
+})
+
+test('board: expanded, a Pages | Journeys switch replaces the heading; the tab is remembered, and opening a journey elsewhere only adds a dot', async () => {
+  const { context, page, errors } = await open()
+  try {
+    await openBoard(page)
+    await page.click('[data-sw-sidebar-toggle]')
+    await page.waitForSelector(RAIL + '[data-sw-app-rail="expanded"]')
+    const nav = page.locator(RAIL + ' [data-sw-sidebar-nav]')
+    assert.equal(await nav.getAttribute('data-sw-sidebar-nav'), 'pages')
+    assert.match(await nav.locator('[data-sw-sidebar-tab="pages"]').innerText(), /^Pages\s*\d+$/)
+    assert.match(await nav.locator('[data-sw-sidebar-tab="journeys"]').innerText(), /^Journeys\s*\d+$/)
+    assert.equal(await nav.locator('[data-sw-pages-journey]').count(), 0, 'Pages shows no journeys')
+    assert.ok((await nav.locator('[data-sw-pages-item]').count()) > 10)
+    await nav.locator('[data-sw-sidebar-tab="journeys"]').click()
+    await page.waitForSelector(RAIL + ' [data-sw-sidebar-nav="journeys"]')
+    assert.equal(await nav.locator('[data-sw-pages-item]').count(), 0, 'Journeys shows no pages')
+    const ids = await nav.locator('[data-sw-pages-journey]').evaluateAll((els) => els.map((el) => el.getAttribute('data-sw-pages-journey')))
+    assert.equal(ids[0], 'none')
+    await nav.locator(journeyItem(ids[1])).click()
+    await page.waitForFunction((id) => new URLSearchParams(window.location.search).get('j') === id, ids[1])
+    assert.equal(await nav.locator(journeyItem(ids[1])).getAttribute('aria-current'), 'true')
+    // Remembered in this browser (the test's start-up script collapses the sidebar on every load).
+    await page.reload()
+    await page.waitForSelector(RAIL + '[data-sw-app-rail="collapsed"]', { timeout: 20000 })
+    await page.click('[data-sw-sidebar-toggle]')
+    await page.waitForSelector(RAIL + ' [data-sw-sidebar-nav="journeys"]')
+    // Back on Pages, a journey opened from the Views menu does not switch the tab: a dot says one is open.
+    await nav.locator('[data-sw-sidebar-tab="pages"]').click()
+    await page.waitForSelector(RAIL + ' [data-sw-sidebar-nav="pages"]')
+    assert.equal(
+      await nav.locator('[data-sw-sidebar-tab="journeys"] [data-sw-journey-dot]').count(),
+      1,
+      'the journey from before is still open',
+    )
+    await page.click('[data-sw-view-journey-clear]')
+    await page.waitForSelector(RAIL + ' [data-sw-journey-dot]', { state: 'detached' })
+    await page.click('[data-sw-view-menu]')
+    await page.click('[data-sw-views-journey="' + ids[1] + '"]')
+    await page.waitForSelector(RAIL + ' [data-sw-sidebar-tab="journeys"] [data-sw-journey-dot]')
+    assert.equal(await nav.getAttribute('data-sw-sidebar-nav'), 'pages', 'still on Pages')
+    assert.equal(await nav.locator('[data-sw-pages-filter]').getAttribute('placeholder'), 'Filter pages')
     assert.deepEqual(errors, [])
   } finally {
     await context.close()
