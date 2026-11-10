@@ -90,10 +90,10 @@ export function Composer({
   }, [])
   const { layout, usage: usageFit } = footerLayout({ width: footerWidth, options, usage: Boolean(usage), touch })
   const hasContent = Boolean(draft.trim() || attachments.length || mentions.length || files.length)
-  // Footer buttons are 44px targets on touch; with a pointer 36 x 44, and
-  // the visible circle (fill, hover) is the inner 32px, so send does not
-  // outweigh the icons beside it and the option menus have room.
-  const iconSize = touch ? undefined : 'w-9 rounded-full bg-clip-content px-0.5 py-1.5 shadow-none'
+  // Footer buttons are 44px targets everywhere; with a pointer the visible
+  // circle (fill, hover) is the inner 32px, so send does not outweigh the
+  // icons beside it.
+  const iconSize = touch ? undefined : 'rounded-full bg-clip-content p-1.5 shadow-none'
   const onKeyDown = (event) => {
     // React's key event has no isComposing: an IME's Enter (it picks a word) is on the native event.
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && !touch) {
@@ -199,12 +199,7 @@ export function Composer({
           aria-label="Message the agent"
           data-sw-chat-input="true"
         />
-        <div
-          ref={actionsRef}
-          className={cn('mt-2 flex h-11 items-center', touch ? 'gap-2' : 'gap-1')}
-          data-sw-chat-actions="true"
-          data-sw-chat-layout={layout}
-        >
+        <div ref={actionsRef} className="mt-2 flex h-11 items-center gap-2" data-sw-chat-actions="true" data-sw-chat-layout={layout}>
           <input
             ref={fileRef}
             type="file"
@@ -299,7 +294,9 @@ export function Composer({
             </span>
           ) : (
             // The agent's options (model, thinking, more), and usage, between attach and the mic.
-            <span className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden" data-sw-chat-footer="true">
+            // With a pointer they reach into the transparent edges of the 44px targets beside
+            // them (6px each side), never into the targets themselves.
+            <span className={cn('flex min-w-0 flex-1 items-center gap-1 overflow-hidden', !touch && '-mx-1.5')} data-sw-chat-footer="true">
               <AgentOptions
                 options={options}
                 loading={optionsLoading}

@@ -496,15 +496,16 @@ export function optionGroups(options) {
 // tooltip). `width`: the footer row in px. Room for the ring is kept even
 // before the first answer, so the controls do not change shape once it
 // appears. The widths are measured from the rendered controls (text-caption,
-// px-1.5, a 12 px chevron), rounded up.
+// px-1 with a pointer, a 12 px chevron), rounded up. `reach`: with a pointer
+// the options take the 6px transparent edges of the 44px buttons beside them.
 const FOOTER = {
-  pointer: { button: 36, gap: 4, chip: 26, char: 6.5, more: 32, ring: 30, usage: 56 },
-  touch: { button: 44, gap: 8, chip: 40, char: 7, more: 44, ring: 44, usage: 64 },
+  pointer: { button: 44, gap: 8, reach: 12, chip: 22, char: 6, more: 28, ring: 26, usage: 56 },
+  touch: { button: 44, gap: 8, reach: 0, chip: 40, char: 7, more: 44, ring: 44, usage: 64 },
 }
 export function footerLayout({ width, options, usage = false, touch = false }) {
   const { model, effort, more } = optionGroups(options)
   const size = touch ? FOOTER.touch : FOOTER.pointer
-  const room = width ? width - 3 * size.button - 3 * size.gap : Infinity
+  const room = width ? width - 3 * size.button - 3 * size.gap + size.reach : Infinity
   const chips =
     [model, effort].filter(Boolean).reduce((sum, option) => sum + size.chip + Math.ceil(currentLabel(option).length * size.char) + 2, 0) +
     (more.length ? size.more + 2 : 0)

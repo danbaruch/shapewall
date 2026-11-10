@@ -299,7 +299,7 @@ function OptionMenu({ hook, label, ariaLabel, tooltip, icon = null, options, onC
             size={touch ? 'touch' : 'sm'}
             className={cn(
               'max-w-full min-w-0 shrink gap-0.5 font-normal text-muted',
-              icon && !label ? (touch ? 'w-11 px-0' : 'w-8 px-0') : 'px-1.5',
+              icon && !label ? (touch ? 'w-11 px-0' : 'w-7 px-0') : touch ? 'px-1.5' : 'px-1',
               disabled && 'cursor-default opacity-60 hover:bg-transparent hover:text-muted',
             )}
             aria-label={ariaLabel}
