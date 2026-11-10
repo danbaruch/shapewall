@@ -66,6 +66,8 @@ jobs:
         run: npm ci
       - if: steps.exists.outputs.published == 'false'
         run: npm run lint
+      # Tags cut before the test fixtures created this folder themselves still need it.
+      - run: mkdir -p "$HOME/.cache"
       - if: steps.exists.outputs.published == 'false'
         name: Unit tests with a per-file deadline
         run: npm run pretest && node --test --test-concurrency=4 --test-timeout=120000 test/*.test.js

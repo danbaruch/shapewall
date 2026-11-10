@@ -34,7 +34,10 @@ export function signerEnv(id) {
 }
 
 export function fixture() {
-  const dir = fs.mkdtempSync(path.join(os.homedir(), '.cache/sw-bz-test-'))
+  // A fresh machine (CI) has no ~/.cache yet.
+  const cache = path.join(os.homedir(), '.cache')
+  fs.mkdirSync(cache, { recursive: true })
+  const dir = fs.mkdtempSync(path.join(cache, 'sw-bz-test-'))
   const root = path.join(dir, 'source')
   const privateDir = path.join(dir, 'private')
   fs.mkdirSync(root)
