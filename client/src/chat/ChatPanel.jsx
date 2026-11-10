@@ -598,7 +598,7 @@ export default function ChatPanel({
   // is a choice or a way to connect another. A switch starts a fresh agent
   // session and keeps the transcript, said once after it.
   const profileChoice = pickerProfiles(selectedThread)
-  const agentSettingsHref = agent?.settingsUrl || (onOpenSettings ? '/console?section=settings#agents' : null)
+  const agentSettingsHref = agent?.settingsUrl || (onOpenSettings ? '/console?section=agents' : null)
   const picker =
     agent?.ownerWrites && selectedThread && profileChoice.options.length && (profileChoice.show || onOpenSettings || agent?.settingsUrl)
       ? {

@@ -4,9 +4,10 @@
 // See components/app-rail.jsx.
 
 import { useEffect } from 'react'
-import { Building2, Files, LayoutDashboard, Share2 } from 'lucide-react'
+import { Building2, Files, LayoutDashboard, Share2, UserRound } from 'lucide-react'
 import { AppRail, rememberLastBoard } from '../components/app-rail'
 import { BoardProfile } from './BoardProfile'
+import { accountUrlFor } from './railLinks'
 import { PagesTree } from './PagesTree'
 
 // The rail holds where you are in the app (the board, its workspace); the
@@ -14,8 +15,15 @@ import { PagesTree } from './PagesTree'
 export function boardRailItems({ info, localSettingsAvailable, setShareOpen }) {
   const items = [{ id: 'board', label: 'Board', icon: LayoutDashboard, href: './', active: true }]
   const consoleUrl = info?.consoleUrl && !info?.guest ? info.consoleUrl : null
-  if (consoleUrl) items.push({ id: 'workspace', label: 'Workspace', icon: Building2, href: consoleUrl })
-  else if (localSettingsAvailable) items.push({ id: 'workspace', label: 'Workspace', icon: Building2, href: '/console' })
+  // The same three places as the console's sidebar, so the menu does not
+  // change shape as you move between the board and its workspace.
+  if (consoleUrl) {
+    items.push({ id: 'workspace', label: 'Workspace', icon: Building2, href: consoleUrl })
+    items.push({ id: 'account', label: 'Account and security', icon: UserRound, href: accountUrlFor(consoleUrl) })
+  } else if (localSettingsAvailable) {
+    items.push({ id: 'workspace', label: 'Workspace', icon: Building2, href: '/console' })
+    items.push({ id: 'account', label: 'Account and security', icon: UserRound, href: '/account' })
+  }
   if (info?.shareEnabled) items.push({ id: 'share', label: 'Share with your team', icon: Share2, onSelect: () => setShareOpen(true) })
   return items
 }

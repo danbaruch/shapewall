@@ -9,8 +9,7 @@ import { DEMO } from '../../lib/demo'
 import { api, download, wsUrl } from '../lib/api'
 import { useAction, useSession, useToast } from '../state'
 import { useWorkspace } from './workspace'
-import { currentHash, leaveTo } from '../lib/router'
-import { LocalAgents } from './local-agents'
+import { leaveTo } from '../lib/router'
 
 export function SettingsSection() {
   const { data, isAdmin, isOwner, workspaceId, reload } = useWorkspace()
@@ -61,18 +60,10 @@ export function SettingsSection() {
     })
   }
 
-  // The demo only: the local console's Agents card, read-only with a demo
-  // note, so visitors see where agents are chosen. `shapewall hosted` has its
-  // own agent model (pages/agent.jsx) and never shows it.
-  useEffect(() => {
-    if (DEMO && currentHash() === '#agents') document.getElementById('agents')?.scrollIntoView({ block: 'start' })
-  }, [])
-
   return (
     <>
       <PageHeader title="Settings" description="The workspace name, sharing, export, and leaving or deleting it." />
       <div className="grid gap-5">
-        {DEMO ? <LocalAgents demo /> : null}
         <Card>
           <CardHeader icon={PencilLine} title="Name" description="Shown to members, in invites and to guests of share links." />
           <form onSubmit={save} className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-end sm:px-5">

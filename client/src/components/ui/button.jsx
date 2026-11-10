@@ -11,6 +11,9 @@ export const buttonVariants = cva(
     variants: {
       variant: {
         default: 'bg-accent text-accent-fg shadow-card hover:bg-accent/90',
+        // The primary action at rest (a mode that is off): accent text on a light accent tint, an inset hairline so the box
+        // matches `default` exactly. Tint stays at or under 12% so accent text keeps 4.5:1 (test/theme.test.js).
+        soft: 'bg-accent/8 text-accent ring-1 ring-accent/40 ring-inset hover:bg-accent/12',
         secondary: 'border border-line bg-surface text-fg shadow-card hover:bg-surface-2',
         ghost: 'text-muted hover:bg-surface-2 hover:text-fg',
         danger: 'text-bad hover:bg-bad/10',

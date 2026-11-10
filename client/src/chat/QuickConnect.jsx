@@ -1,7 +1,7 @@
 // The unconnected chat panel on a board opened from the `shapewall serve`
 // link (it holds the settings token): the agent CLIs found on this machine,
-// each with Connect. Connect adds a native agent profile exactly like Settings
-// > Agents "Connect" (settings/AgentsCard.jsx): it sends only the agent id to
+// each with Connect. Connect adds a native agent profile exactly like the console's
+// Agents page "Connect" (settings/AgentsCard.jsx): it sends only the agent id to
 // /api/agent/settings/profiles/connect, the server saves its own restricted
 // command for it (src/agent/acp/detect.js) after the same confirmation dialog
 // as any new command, makes it the default when nothing is connected yet,

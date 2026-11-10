@@ -140,6 +140,7 @@ test("the console's tab title names the page and the workspace", () => {
   assert.equal(consoleTitle(`#/w/${WORKSPACE_ID}`, state), 'Projects · Lumen · Shapewall demo')
   assert.equal(consoleTitle(`#/w/${WORKSPACE_ID}/projects/${NOTES_PROJECT}`, state), 'Lumen Notes · Lumen · Shapewall demo')
   assert.equal(consoleTitle(`#/w/${WORKSPACE_ID}/audit#entries`, state), 'Audit log · Lumen · Shapewall demo')
+  assert.equal(consoleTitle(`#/w/${WORKSPACE_ID}/agents`, state), 'Agents · Lumen · Shapewall demo')
   assert.equal(consoleTitle('#/account', state), 'Account · Shapewall demo')
   assert.equal(consoleTitle('', state), 'Workspaces · Shapewall demo')
   assert.equal(consoleTitle('#/signin?next=%2F', state), 'Sign in · Shapewall demo')

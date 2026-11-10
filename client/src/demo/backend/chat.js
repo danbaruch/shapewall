@@ -132,7 +132,7 @@ export function chatRoutes(ctx) {
   // model list, they are known before the first message, so a new chat can
   // pick both before it sends anything.
   const choices = new Map()
-  // The demo console's Settings page, where the (read-only) Agents card is.
+  // The demo console's Agents page, where the (read-only) Agents card is.
   const settingsUrlOf = (access = null) => {
     let workspaceId = access?.project?.workspaceId || null
     if (!workspaceId) {
@@ -142,7 +142,7 @@ export function chatRoutes(ctx) {
         workspaceId = null
       }
     }
-    return workspaceId ? `console.html#/w/${workspaceId}/settings#agents` : 'console.html'
+    return workspaceId ? `console.html#/w/${workspaceId}/agents` : 'console.html'
   }
   const optionsOf = (key) =>
     DEMO_OPTIONS.map((option) => ({ ...option, currentValue: choices.get(`${key}|${option.id}`) || option.currentValue }))
