@@ -58,6 +58,8 @@ export function useChatTurn({
   setSentIn,
   setRun,
   onFixDone,
+  // The chat's agent options for this message ({ configId: value }) or null.
+  optionChoices = () => null,
 }) {
   // A send while a turn is still running in progress (between the click and
   // the stream starting too): one at a time.
@@ -106,9 +108,13 @@ export function useChatTurn({
         /* The page and element context are still supplied by the server. */
       }
     }
+    // The chat's options (model, thinking, ...) go with every turn: a session
+    // that stopped meanwhile starts with them again (src/agent/routes.js).
+    const choices = optionChoices()
+    const withOptions = (value) => (choices && Object.keys(choices).length ? { ...value, options: choices } : value)
     const body = regenerate
-      ? { regenerate: regenerate.message.id }
-      : {
+      ? withOptions({ regenerate: regenerate.message.id })
+      : withOptions({
           text,
           ...(fix ? { fix: true } : {}),
           ...(editOf ? { editOf } : {}),
@@ -118,7 +124,7 @@ export function useChatTurn({
           ...(item.files.length
             ? { files: item.files.map(({ name, mediaType, text: content }) => ({ name, mediaType, text: content })) }
             : {}),
-        }
+        })
     setNotice(null)
     if (!queued && fromComposer) {
       setDraft('')

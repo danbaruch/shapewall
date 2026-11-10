@@ -31,6 +31,7 @@ import { choice, otherProfile, pickerProfiles, switchedNote } from './profiles'
 import { Composer } from './composer'
 import { commentOfThread, mergeBy, ownerOnlyError, useChatTurn } from './useChatTurn'
 import { useAutoAllow } from './useAutoAllow'
+import { useAgentOptions, useOnScreen } from './agentOptions'
 import { excerpt } from './text'
 import { ChatHistory, exportThread, restoreVersion } from './history'
 import { fallbackTitle, isChatThread, newChatId, threadKind } from './threads'
@@ -178,6 +179,9 @@ export default function ChatPanel({
   host.current = { threadId, thread, threads, onFixDone }
   useEffect(() => registerHost(boardId, host), [boardId])
   const listRef = useRef(null)
+  // Whether the panel is on screen (a hidden one starts no agent for its options).
+  const panelRef = useRef(null)
+  const onScreen = useOnScreen(panelRef)
   const dictationBase = useRef('')
   const commentId = commentOfThread(threadId)
   const comment = commentId ? comments.find((item) => item.id === commentId) || null : null
@@ -350,8 +354,12 @@ export default function ChatPanel({
     setAttachments((current) => current.filter((entry) => entry.mentionKey !== item.key))
   }
 
+  // The agent's options for this chat (agentOptions.js), set below; a
+  // message takes the chat's choices with it.
+  const optionsRef = useRef(null)
   // One turn: send, stream, finish (useChatTurn.js).
   const submit = useChatTurn({
+    optionChoices: () => optionsRef.current?.forMessage() || null,
     boardId,
     threadId,
     draft,
@@ -453,20 +461,6 @@ export default function ChatPanel({
   // "Allow for this chat": a rule per thread for the exact same request (useAutoAllow.js).
   const ownerWrites = Boolean(agent?.ownerWrites)
   const { allowRules, setAllowRules, allowForChat, revokeRule } = useAutoAllow({ boardId, run, threadId, threadRef, ownerWrites })
-
-  // The thread's model and effort (a running ACP session's own choices).
-  const chooseOption = async (configId, value) => {
-    try {
-      const result = await api.post(`/api/agent/boards/${encodeURIComponent(boardId)}/threads/${encodeURIComponent(threadId)}/options`, {
-        configId,
-        value,
-      })
-      thread.setData((current) => (current?.id === threadId ? { ...current, options: result.options } : current))
-    } catch (error) {
-      setNotice({ tone: 'bad', text: error.message })
-      thread.refetch()
-    }
-  }
 
   // "/" commands. /fix and /review send (or queue) a prompt; the others act here.
   const runCommand = async (id) => {
@@ -638,7 +632,20 @@ export default function ChatPanel({
   })
   // Usage of the turn in flight, else of the last answer that reported it.
   const usage = liveRun?.reply?.usage || messages.findLast((message) => message.role === 'assistant' && message.usage)?.usage || null
-  const sessionOptions = selectedThread?.options || null
+  // The agent's options from the moment the panel shows a chat (agentOptions.js):
+  // only on screen, with a ready agent this viewer may use.
+  const agentOptions = useAgentOptions({
+    boardId,
+    threadId,
+    profileId: selectedThread?.profileId || 'default',
+    agentLabel: agent?.label || '',
+    enabled: Boolean(onScreen && configured && selectedThread && ownerWrites && !needsOwner && !thread.loading),
+    fresh: !messages.length,
+    live: selectedThread?.options || null,
+    onLive: (options) => thread.setData((current) => (current?.id === threadId ? { ...current, options } : current)),
+    onNotice: setNotice,
+  })
+  optionsRef.current = agentOptions
   const threadQueue = queue.filter((entry) => entry.threadId === threadId)
 
   // Put the request of a failed or stopped turn back in the composer, to review.
@@ -660,6 +667,17 @@ export default function ChatPanel({
     if (!(await chooseProfile(otherAgent.id))) return
     if (request.text === FIX_PROMPT) await submit('', true)
     else await submit('', false, { regenerate: { message, request } })
+  }
+  // Not signed in, then Check again: the agent starts afresh (prepare, which
+  // also says whether it signed in); once it does, the same request goes
+  // again. False: still not signed in.
+  const checkAgain = async (message, request) => {
+    if (running || !request) return false
+    const result = await agentOptions.recheck()
+    if (!result || result.error) return false
+    if (request.text === FIX_PROMPT) await submit('', true)
+    else await submit('', false, { regenerate: { message, request } })
+    return true
   }
   const readAloudProps = useMemo(() => ({ voiceUri, settings: readAloud }), [voiceUri, readAloud])
 
@@ -699,6 +717,7 @@ export default function ChatPanel({
 
   return (
     <section
+      ref={panelRef}
       className="relative flex h-full min-h-0 flex-col"
       aria-label="Agent chat"
       data-sw-chat={threadId}
@@ -825,6 +844,7 @@ export default function ChatPanel({
                 regenerateDisabled={running || dictation.listening}
                 otherAgent={agent?.ownerWrites && otherAgent ? otherAgent : null}
                 onTryOther={tryOther}
+                onCheckAgain={agent?.ownerWrites ? checkAgain : null}
               />
             </RefsContext.Provider>
           </AllowForChat.Provider>
@@ -872,8 +892,9 @@ export default function ChatPanel({
               help={help}
               onCloseHelp={() => setHelp(false)}
               usage={usage}
-              options={sessionOptions}
-              onChooseOption={chooseOption}
+              options={agentOptions.options}
+              optionsLoading={agentOptions.loading}
+              onChooseOption={agentOptions.choose}
               onSubmit={send}
               onStop={stop}
               onMic={() => {

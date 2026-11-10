@@ -1,7 +1,9 @@
 // End to end: the chat composer in Chromium with the ACP stub
 // (test/fixtures/acp-stub.mjs --options), never a real agent. "@" mentions
 // and "/" commands from the keyboard, a text file, suggested next steps,
-// the usage ring, the model and effort picker, queued follow-ups (sent after
+// the usage ring, the agent's option menus (model, effort, more; there before
+// the first message, a New chat included; one combined control when the
+// panel is narrow; not while an answer runs), queued follow-ups (sent after
 // a complete answer, back in the box after Stop), and "Allow for this chat"
 // with its revoke in chat settings. Then the phone layout at 390. Nothing may
 // log an error. Set SHAPEWALL_SHOTS=<dir> to keep screenshots.
@@ -45,8 +47,10 @@ after(async () => {
   await setup?.close()
 })
 
-async function openBoard(contextOptions) {
+async function openBoard(contextOptions, { railWidth = null } = {}) {
   const context = await browser.newContext(contextOptions)
+  // The side panel's width, as a person would have left it (board/prefs.js).
+  if (railWidth) await context.addInitScript((width) => window.localStorage.setItem('shapewall.rail.side', String(width)), railWidth)
   const page = await context.newPage()
   const errors = []
   page.on('console', (message) => {
@@ -181,47 +185,71 @@ test('desktop 1440: mentions, commands, a text file, next steps, usage, model, q
     await shot(page, 'usage')
     await page.keyboard.press('Escape')
 
-    // Model and effort for this chat, from the session's own options.
-    const options = page.locator('[data-sw-chat-options]')
-    await options.waitFor()
-    await options.click()
+    // A menu per option, from the session's own options: Model, Effort, and
+    // the mode under More options.
+    assert.equal(await page.locator('[data-sw-chat-actions]').getAttribute('data-sw-chat-layout'), 'split')
+    const model = page.locator('[data-sw-chat-options-trigger="model"]')
+    const effort = page.locator('[data-sw-chat-options-trigger="thought_level"]')
+    await model.click()
+    const modelMenu = page.locator('[data-sw-chat-options-menu="model"]')
+    await modelMenu.waitFor()
+    assert.match(await modelMenu.textContent(), /Stub deep.*Slower, more careful/, 'a line about each model')
     await page.locator('[data-sw-chat-option="model:stub-deep"]').click()
-    await page.waitForFunction(() => /stub deep/i.test(document.querySelector('[data-sw-chat-options]')?.textContent || ''))
-    // Both lists share one popover, which stays open for the second pick.
+    await modelMenu.waitFor({ state: 'detached' })
+    await page.waitForFunction(() => /^Stub deep/.test(document.querySelector('[data-sw-chat-options-trigger="model"]')?.textContent || ''))
+    await effort.click()
     await page.locator('[data-sw-chat-option="thought_level:high"]').click()
-    await page.waitForFunction(() => /high/i.test(document.querySelector('[data-sw-chat-options]')?.textContent || ''))
+    await page.waitForFunction(() =>
+      /^High/.test(document.querySelector('[data-sw-chat-options-trigger="thought_level"]')?.textContent || ''),
+    )
+    await page.click('[data-sw-chat-options-trigger="more"]')
+    await page.locator('[data-sw-chat-options-menu="more"] [data-sw-chat-option="mode:plan"]').waitFor()
+    assert.equal(await page.locator('[data-sw-chat-option="mode:yolo"]').count(), 0, 'never a mode that acts without asking')
     await shot(page, 'options')
     await page.keyboard.press('Escape')
     await page.locator('[data-sw-chat-options-menu]').waitFor({ state: 'detached' })
-    // With room in the footer, the label is not cut off.
-    assert.equal(await options.locator('span.truncate').evaluate((node) => node.scrollWidth <= node.clientWidth + 1), true)
-    // The keyboard: the current choice takes the focus, the arrows move.
-    await options.focus()
+    // With room in the footer, the labels are not cut off.
+    for (const trigger of [model, effort])
+      assert.equal(await trigger.locator('span.truncate').evaluate((node) => node.scrollWidth <= node.clientWidth + 1), true)
+    // The keyboard: the current choice takes the focus as the menu opens, the arrows move.
+    await model.focus()
     await page.keyboard.press('Enter')
-    await page.locator('[data-sw-chat-options-menu]').waitFor()
+    await modelMenu.waitFor()
     const focused = () => page.evaluate(() => document.activeElement?.getAttribute('data-sw-chat-option'))
-    await page.waitForFunction(() => document.activeElement?.getAttribute('data-sw-chat-option') === 'model:stub-deep')
+    assert.equal(await focused(), 'model:stub-deep', 'focused in the same frame the menu opened')
+    // Radix moves the focus for a key on the next task (a setTimeout in its
+    // roving focus), so each step waits for it rather than reading at once.
+    const focusOn = (hook) => page.waitForFunction((want) => document.activeElement?.getAttribute('data-sw-chat-option') === want, hook)
     await page.keyboard.press('Home')
-    const first = await focused()
+    await focusOn('model:stub-fast')
     await page.keyboard.press('ArrowDown')
-    assert.notEqual(await focused(), first)
+    await focusOn('model:stub-deep')
     await page.keyboard.press('ArrowUp')
-    assert.equal(await focused(), first)
-    await page.keyboard.press('ArrowUp')
-    // ArrowUp from the first choice wraps to the last.
-    await page.waitForFunction(() => /^thought_level:/.test(document.activeElement?.getAttribute('data-sw-chat-option') || ''))
+    await focusOn('model:stub-fast')
     await page.keyboard.press('Escape')
-    await page.locator('[data-sw-chat-options-menu]').waitFor({ state: 'detached' })
+    await modelMenu.waitFor({ state: 'detached' })
+    // Back on its button: Radix's focus scope returns it in a timeout after
+    // the menu unmounts, so wait for it too.
+    await page.waitForFunction(() => document.activeElement?.getAttribute('data-sw-chat-options-trigger') === 'model')
     await sendText(page, 'config')
     await doneCount(page, 5)
     assert.deepEqual(JSON.parse(await lastAssistant(page).locator('[data-sw-markdown]').textContent()), {
       model: 'stub-deep',
       effort: 'high',
     })
+    // The answer says what it ran with, quietly.
+    assert.equal((await lastAssistant(page).locator('[data-sw-chat-turn-options]').textContent()).trim(), 'Stub deep · High')
 
     // Queue while a turn runs; Stop puts the queued message back in the box.
     await sendText(page, 'slowly')
     await page.locator('[data-sw-chat-stop]').waitFor()
+    // The options wait for the answer, and say so.
+    assert.equal(await model.getAttribute('aria-disabled'), 'true')
+    await model.focus()
+    await page.getByRole('tooltip').filter({ hasText: 'Wait for the answer to finish to change this' }).waitFor()
+    await page.keyboard.press('Enter')
+    assert.equal(await page.locator('[data-sw-chat-options-menu]').count(), 0, 'no menu while it answers')
+    await shot(page, 'options-running')
     await input.fill('stream')
     await page.click('[data-sw-chat-queue-send]')
     await page.locator('[data-sw-chat-queued="0"]').waitFor()
@@ -276,6 +304,67 @@ test('desktop 1440: mentions, commands, a text file, next steps, usage, model, q
     await card.locator('[data-sw-chat-permission-option="reject"]').click()
     await doneCount(page, 9)
     assert.match(await lastAssistant(page).textContent(), /Permission: reject\./)
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})
+
+test('desktop: the options are there before the first message, a New chat included; the last used ones start the next chat', async () => {
+  const { context, page, errors } = await openBoard({ viewport: { width: 1440, height: 900 } })
+  try {
+    await page.click('[data-sw-chat-toggle]')
+    await page.locator('[data-sw-chat-new="header"]').click()
+    await page.waitForSelector('[data-sw-chat^="chat-"] [data-sw-chat-empty="thread"]')
+    const model = page.locator('[data-sw-chat-options-trigger="model"]')
+    await model.waitFor()
+    assert.equal(await page.locator('[data-sw-chat-message]').count(), 0, 'no message yet')
+    assert.match(await model.textContent(), /^Stub fast/)
+    await shot(page, 'options-empty')
+    // Chosen before the first message: the first turn uses it.
+    await model.click()
+    await page.locator('[data-sw-chat-option="model:stub-deep"]').click()
+    await page.click('[data-sw-chat-options-trigger="thought_level"]')
+    await page.locator('[data-sw-chat-option="thought_level:low"]').click()
+    await page.waitForFunction(() =>
+      /^Low/.test(document.querySelector('[data-sw-chat-options-trigger="thought_level"]')?.textContent || ''),
+    )
+    await sendText(page, 'config')
+    await doneCount(page, 1)
+    assert.deepEqual(JSON.parse(await lastAssistant(page).locator('[data-sw-markdown]').textContent()), {
+      model: 'stub-deep',
+      effort: 'low',
+    })
+    assert.equal((await lastAssistant(page).locator('[data-sw-chat-turn-options]').textContent()).trim(), 'Stub deep · Low')
+    assert.equal(await lastAssistant(page).locator('[data-sw-chat-card="note"]').count(), 0, 'no "Configured model" notes')
+    // A New chat starts with what this agent used last.
+    await page.locator('[data-sw-chat-new="header"]').click()
+    await page.waitForSelector('[data-sw-chat^="chat-"] [data-sw-chat-empty="thread"]')
+    await page.waitForFunction(() => /^Stub deep/.test(document.querySelector('[data-sw-chat-options-trigger="model"]')?.textContent || ''))
+    assert.match(await page.locator('[data-sw-chat-options-trigger="thought_level"]').textContent(), /^Low/)
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})
+
+test('desktop, a narrow panel: one combined control with every option', async () => {
+  const { context, page, errors } = await openBoard({ viewport: { width: 1440, height: 900 } }, { railWidth: 300 })
+  try {
+    await page.click('[data-sw-chat-toggle]')
+    const all = page.locator('[data-sw-chat-options-trigger="all"]')
+    await all.waitFor()
+    assert.equal(await page.locator('[data-sw-chat-actions]').getAttribute('data-sw-chat-layout'), 'combined')
+    assert.equal(await page.locator('[data-sw-chat-options-trigger="model"]').count(), 0)
+    await all.click()
+    const menu = page.locator('[data-sw-chat-options-menu="all"]')
+    await menu.waitFor()
+    for (const hook of ['model:stub-fast', 'thought_level:high', 'mode:plan'])
+      await menu.locator(`[data-sw-chat-option="${hook}"]`).waitFor()
+    const box = await menu.boundingBox()
+    assert.ok(box.x >= 0 && box.x + box.width <= 1440)
+    await shot(page, 'options-narrow')
+    await page.keyboard.press('Escape')
     assert.deepEqual(errors, [])
   } finally {
     await context.close()

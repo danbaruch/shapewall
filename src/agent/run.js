@@ -108,6 +108,9 @@ export async function runTurn({
   modelOverride = null,
   // The owner is asking (routes.js viewerOf): see modelMessages.
   ownerTurn = false,
+  // The composer's options for this chat ({ configId: value }), owner turns
+  // of an agent with its own session options (an ACP agent).
+  choices = null,
 }) {
   const thread = `${board.id}/${threadId}`
   const runMs = backend.runMsMax || RUN_MS_MAX
@@ -182,6 +185,7 @@ export async function runTurn({
         messages: conversation,
         tools: round < TOOL_ROUNDS_MAX ? tools : [],
         ...(modelOverride ? { model: modelOverride } : {}),
+        ...(choices ? { choices } : {}),
         signal,
         thread,
       })) {
@@ -197,6 +201,15 @@ export async function runTurn({
           emit('reasoning', { text: event.text })
         } else if (event.type === 'status') {
           emit('status', { text: String(event.text).slice(0, 200) })
+        } else if (event.type === 'options') {
+          // What the turn runs with (the answer's meta line): model and thinking level.
+          reply.options = (Array.isArray(event.used) ? event.used : []).slice(0, 4).map((item) => ({
+            category: String(item.category || '').slice(0, 40),
+            name: String(item.name || '').slice(0, 60),
+            value: String(item.value || '').slice(0, 80),
+            ...(item.description ? { description: String(item.description).slice(0, 160) } : {}),
+          }))
+          emit('options', { options: reply.options })
         } else if (event.type === 'notice') {
           // Something the person should know about this answer (images dropped).
           noteOnce(String(event.text || '').slice(0, 200))
@@ -274,7 +287,13 @@ export async function runTurn({
       reply.status = 'error'
       reply.error =
         error instanceof AgentError
-          ? { code: error.code, message: error.message }
+          ? {
+              code: error.code,
+              message: error.message,
+              // Not signed in: who, and the command that signs it in (acp.js authError).
+              ...(error.label ? { label: String(error.label).slice(0, 60) } : {}),
+              ...(error.login ? { login: String(error.login).slice(0, 80) } : {}),
+            }
           : { code: 'server_error', message: 'Something went wrong while talking to the agent.' }
     }
   }

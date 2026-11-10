@@ -378,3 +378,152 @@ export function autoAllowOption(card, rules, { ownerWrites = false } = {}) {
   if (!rules.some((rule) => rule.id === id)) return null
   return card.options.find((option) => option.kind === 'allow_once')?.optionId || null
 }
+
+// ---- Agent options (model, thinking, mode) ------------------------------------------
+
+// The choices people made, in this browser like the other chat preferences
+// (voice, read aloud): per chat, and the last used per agent, which a new
+// chat starts with. { chats: { "<board>/<thread>": { choices, at } },
+// agents: { "<profile>:<label>": choices } }, choices = { configId: value }.
+export const OPTION_PREFS_KEY = 'shapewall.chat.options'
+const OPTION_CHATS_MAX = 200
+const emptyPrefs = () => ({ chats: {}, agents: {} })
+const cleanMap = (value) =>
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? Object.fromEntries(
+        Object.entries(value)
+          .filter(([key, item]) => typeof item === 'string' && key.length <= 100 && item.length <= 200)
+          .slice(0, 8),
+      )
+    : {}
+
+export function loadOptionPrefs(storage = globalThis.localStorage) {
+  try {
+    const value = JSON.parse(storage?.getItem(OPTION_PREFS_KEY) || 'null')
+    if (!value || typeof value !== 'object') return emptyPrefs()
+    const chats = {}
+    for (const [key, entry] of Object.entries(value.chats || {}))
+      chats[key] = { choices: cleanMap(entry?.choices), at: Number(entry?.at) || 0 }
+    const agents = {}
+    for (const [key, entry] of Object.entries(value.agents || {})) agents[key] = cleanMap(entry)
+    return { chats, agents }
+  } catch {
+    return emptyPrefs()
+  }
+}
+
+export function saveOptionPrefs(prefs, storage = globalThis.localStorage) {
+  try {
+    storage?.setItem(OPTION_PREFS_KEY, JSON.stringify(prefs))
+  } catch {
+    /* storage full or blocked: the choices last until the page closes */
+  }
+  return prefs
+}
+
+export const chatOptionKey = (boardId, threadId) => `${boardId}/${threadId}`
+export const agentOptionKey = (profileId, label) => `${profileId || 'default'}:${label || ''}`
+
+// What a chat runs with: its own choices; a chat with no message yet starts
+// from the agent's last used ones.
+export function choicesFor(prefs, { chat, agent, fresh = false }) {
+  const own = prefs?.chats?.[chat]?.choices || {}
+  return fresh ? { ...(prefs?.agents?.[agent] || {}), ...own } : { ...own }
+}
+
+// A pick: this chat's choice, and the agent's default for new chats. The
+// oldest chats are forgotten past OPTION_CHATS_MAX.
+const withChat = (prefs, chat, choices, now) => {
+  const kept = Object.entries({ ...prefs.chats, [chat]: { choices, at: now } })
+    .sort((a, b) => b[1].at - a[1].at)
+    .slice(0, OPTION_CHATS_MAX)
+  return { ...prefs, chats: Object.fromEntries(kept) }
+}
+
+// `base`: what the chat ran with so far (its defaults), kept with the pick.
+export function rememberChoice(prefs, { chat, agent, configId, value, base = {}, now = Date.now() }) {
+  const next = withChat(prefs, chat, { ...base, ...(prefs.chats[chat]?.choices || {}), [configId]: value }, now)
+  return { ...next, agents: { ...prefs.agents, [agent]: { ...(prefs.agents[agent] || {}), [configId]: value } } }
+}
+
+// A chat's first message keeps what it ran with, so a later default for
+// new chats does not change it.
+export function keepChoices(prefs, { chat, choices, now = Date.now() }) {
+  if (!Object.keys(choices || {}).length || prefs.chats[chat]) return prefs
+  return withChat(prefs, chat, { ...choices }, now)
+}
+
+// Choices over options the server listed: each one an option offers.
+export function withChoices(options, choices) {
+  return (options || []).map((option) =>
+    option.values.some((item) => item.value === choices?.[option.id]) ? { ...option, currentValue: choices[option.id] } : option,
+  )
+}
+
+// What a value is called in the footer and the menus: the agent's name
+// without "(recommended)"; a value that is just the agent's default says so
+// ("Default model"), or names the model the agent says it currently is.
+export function valueLabel(option, item) {
+  const raw = String(item?.name || item?.value || '')
+  const name =
+    raw
+      .replace(/\s*\([^)]*\)\s*/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim() || raw
+  if (!/^default$/i.test(name)) return name
+  const now = /\bcurrently\s+([^)·,;]+?)\s*(?:\)|·|,|;|$)/i.exec(`${raw} ${item?.description || ''}`)?.[1]?.trim()
+  if (option?.category === 'model') return now || 'Default model'
+  const noun = String(option?.name || '').toLowerCase()
+  return noun && noun.length <= 20 ? `Default ${noun}` : 'Default'
+}
+
+export const currentValue = (option) =>
+  option.values.find((item) => item.value === option.currentValue) || { value: option.currentValue, name: option.currentValue }
+export const currentLabel = (option) => valueLabel(option, currentValue(option))
+
+// The footer's controls: a model menu, a thinking menu (the agent's own
+// label), and everything else under "More options".
+export function optionGroups(options) {
+  const list = options || []
+  const model = list.find((option) => option.category === 'model') || null
+  const effort = list.find((option) => option.category === 'thought_level') || null
+  return { model, effort, more: list.filter((option) => option !== model && option !== effort) }
+}
+
+// Whether the footer has room for a control per option ("split") or takes
+// the single combined one ("combined"), and whether the usage ring keeps its
+// number ("full") or shows the ring alone ("ring"; the number is in its
+// tooltip). `width`: the footer row in px. Room for the ring is kept even
+// before the first answer, so the controls do not change shape once it
+// appears. The widths are measured from the rendered controls (text-caption,
+// px-1.5, a 12 px chevron), rounded up.
+const FOOTER = {
+  pointer: { button: 36, gap: 4, chip: 26, char: 6.5, more: 32, ring: 30, usage: 56 },
+  touch: { button: 44, gap: 8, chip: 40, char: 7, more: 44, ring: 44, usage: 64 },
+}
+export function footerLayout({ width, options, usage = false, touch = false }) {
+  const { model, effort, more } = optionGroups(options)
+  const size = touch ? FOOTER.touch : FOOTER.pointer
+  const room = width ? width - 3 * size.button - 3 * size.gap : Infinity
+  const chips =
+    [model, effort].filter(Boolean).reduce((sum, option) => sum + size.chip + Math.ceil(currentLabel(option).length * size.char) + 2, 0) +
+    (more.length ? size.more + 2 : 0)
+  const layout = !model && !effort && !more.length ? 'none' : chips + size.ring <= room ? 'split' : 'combined'
+  const used = layout === 'split' ? chips : layout === 'combined' ? Math.min(chips, 160) : 0
+  return { layout, usage: !usage || used + size.usage <= room ? 'full' : 'ring' }
+}
+
+// The answer's meta line: the model and thinking level it ran with, from
+// the turn's own record, or (older answers) its "Configured model" notes.
+const LEGACY_NOTE_RE = /^Configured (model|reasoning effort): (.+)$/
+export const isOptionNote = (card) => card?.kind === 'note' && LEGACY_NOTE_RE.test(String(card.label || ''))
+export function turnOptionsLine(message) {
+  const used = Array.isArray(message?.options) && message.options.length ? message.options : null
+  const items = used
+    ? used.map((item) => valueLabel({ category: item.category, name: item.name }, { name: item.value, description: item.description }))
+    : (message?.cards || []).filter(isOptionNote).map((card) => {
+        const [, kind, value] = LEGACY_NOTE_RE.exec(card.label)
+        return valueLabel({ category: kind === 'model' ? 'model' : 'thought_level', name: 'effort' }, { name: value })
+      })
+  return items.filter(Boolean).join(' · ')
+}
