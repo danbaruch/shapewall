@@ -72,7 +72,34 @@ export function badTokenMessage(origin, source) {
   return `This token was revoked, has expired or its maker is no longer an admin there (or it is wrong). Create a new one in the console: ${origin}/${again}`
 }
 
-export function createRemote({ origin, token, source = null, fetchImpl = fetch }) {
+// The most a hosted server's answer may hold (a full-page PNG is at most
+// 10 MB, a comment list a few MB). A server that sends more, or says it will,
+// is cut off instead of filling this process's memory.
+export const RESPONSE_MAX = 64 * 1024 * 1024
+
+export async function readBounded(response, limit = RESPONSE_MAX) {
+  if (Number(response.headers.get('content-length')) > limit) throw new Error('The server sent too large a response.')
+  const reader = response.body?.getReader?.()
+  if (!reader) {
+    const bytes = Buffer.from(await response.arrayBuffer())
+    if (bytes.length > limit) throw new Error('The server sent too large a response.')
+    return bytes
+  }
+  const parts = []
+  let size = 0
+  for (;;) {
+    const { value, done } = await reader.read()
+    if (done) return Buffer.concat(parts, size)
+    size += value.byteLength
+    if (size > limit) {
+      await reader.cancel().catch(() => {})
+      throw new Error('The server sent too large a response.')
+    }
+    parts.push(value)
+  }
+}
+
+export function createRemote({ origin, token, source = null, fetchImpl = fetch, maxResponseBytes = RESPONSE_MAX }) {
   async function call(method, pathname, { json, body, contentType } = {}) {
     const headers = { Authorization: `Bearer ${token}`, Accept: 'application/json' }
     let payload
@@ -88,7 +115,7 @@ export function createRemote({ origin, token, source = null, fetchImpl = fetch }
     if (!response.ok) {
       let data = null
       try {
-        data = type.includes('json') ? await response.json() : null
+        data = type.includes('json') ? JSON.parse((await readBounded(response, 65536)).toString('utf8')) : null
       } catch {
         data = null
       }
@@ -99,7 +126,8 @@ export function createRemote({ origin, token, source = null, fetchImpl = fetch }
         terminalSafe(data?.error?.message || `${method} ${pathname} failed (${response.status})`),
       )
     }
-    return type.includes('json') ? response.json() : Buffer.from(await response.arrayBuffer())
+    const bytes = await readBounded(response, maxResponseBytes)
+    return type.includes('json') ? JSON.parse(bytes.toString('utf8')) : bytes
   }
   const enc = encodeURIComponent
   const board = (id) => `/api/v1/boards/${enc(id)}`
@@ -259,4 +287,27 @@ export function pushFiles(config, board) {
     for (const name of names.sort()) if (wanted.test(name)) files.push([area, name, path.join(dir, area, name)])
   }
   return files
+}
+
+// One capture file's bytes, for push and share. The file and every folder
+// between it and the output directory must be real (no symlinks) and the file
+// a regular one at most `cap` bytes: a project that plants
+// captures/home.desktop.png -> ~/.ssh/id_ed25519 must not get that key uploaded.
+export function readCaptureFile(config, file, cap = Infinity) {
+  const relative = path.relative(config.outputDir, file)
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('Capture file is outside the output directory.')
+  let current = config.outputDir
+  for (const part of relative.split(path.sep)) {
+    current = path.join(current, part)
+    if (fs.lstatSync(current).isSymbolicLink()) throw new Error('Refusing to upload a symlinked capture or capture directory.')
+  }
+  const fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0))
+  try {
+    const stat = fs.fstatSync(fd)
+    if (!stat.isFile() || stat.size > cap)
+      throw new Error(`Capture ${path.basename(file)} exceeds the server limit or is not a regular file; nothing was silently skipped.`)
+    return fs.readFileSync(fd)
+  } finally {
+    fs.closeSync(fd)
+  }
 }
