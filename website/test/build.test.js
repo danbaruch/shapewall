@@ -8,6 +8,7 @@ import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { DEMO_SITE_PATHS, HARDENING_PDF, NOT_FOUND, ROUTES, SITE_URL } from '../src/routes.js'
+import { FAQ } from '../src/faq-data.js'
 import { DEMO_SITES } from '../../scripts/demo-publish.js'
 import { THEME_KEY } from '../src/theme.js'
 
@@ -135,6 +136,28 @@ test('indexable build: index,follow, sitemap, structured data and analytics load
   assert.match(read(fileFor('/')), /"@type":"SoftwareApplication"/)
   assert.match(read(fileFor('/')), /"@type":"Organization"/)
   assert.match(read(fileFor('/docs/config')), /"@type":"TechArticle"/)
+  // Every public page carries structured data that parses, with a breadcrumb trail below the home page;
+  // the home page's FAQ data is the same list the page renders.
+  for (const route of ROUTES.filter((item) => !item.noindex)) {
+    const blocks = [...read(fileFor(route.path)).matchAll(/<script type="application\/ld\+json">(.*?)<\/script>/gs)]
+    assert.equal(blocks.length, 1, `${route.path}: one JSON-LD block`)
+    const graph = JSON.parse(blocks[0][1])['@graph']
+    assert.ok(Array.isArray(graph) && graph.length >= 2, `${route.path}: a graph`)
+    const types = graph.map((node) => node['@type'])
+    if (route.path === '/') {
+      const faq = graph.find((node) => node['@type'] === 'FAQPage')
+      assert.equal(faq.mainEntity.length, FAQ.length)
+      for (const item of FAQ) assert.ok(read(fileFor('/')).includes(item.q), `the home page shows "${item.q}"`)
+      assert.ok(types.includes('WebSite'))
+    } else {
+      const trail = graph.find((node) => node['@type'] === 'BreadcrumbList').itemListElement
+      assert.equal(trail.at(-1).item, `${SITE_URL}${route.path}`, `${route.path}: breadcrumb ends on the page`)
+      assert.deepEqual(
+        trail.map((item) => item.position),
+        trail.map((_, index) => index + 1),
+      )
+    }
+  }
   // 404 stays noindex even when the site is indexable.
   assert.match(read(path.join(DIST, '404.html')), /<meta name="robots" content="noindex,nofollow">/)
   // PWA basics.
