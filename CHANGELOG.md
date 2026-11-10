@@ -14,6 +14,11 @@ and the project uses [Semantic Versioning](https://semver.org/).
   the captures folder, `watch --remote` no longer writes through one, MCP results carry the same untrusted-data framing as
   `comments --json`, answers from a hosted server are size-capped, and the starter agent closes gaps in its limit caps, its
   pull-request guard and its cleanup. The security docs gain a Known limits section.
+- The live HTML view keeps the colour scheme it was captured in instead of following the viewer's dark mode.
+- Connecting an agent from the Agent panel and from Settings now gives one list of agents; a chat can switch to another connected
+  agent when the first is not signed in, and a failed sign-in no longer posts on the comment.
+- The comment-mode banner no longer covers the focused page's toolbar.
+- Capture and `doctor` say when Chromium is installed but missing system libraries (bare Linux, containers, WSL).
 - `init --base-url` finds your site's real pages (its sitemap, else the links on its pages) instead of writing sample pages.
 - CI runs lint, unit tests, the build and the package check on every pull request.
 
