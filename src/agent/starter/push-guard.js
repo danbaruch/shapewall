@@ -3,7 +3,22 @@
 // task files. The starter agent does not push a change to any of them unless
 // the person passes --allow-ci-push for that run.
 
-const DIRS = ['.github', '.gitlab', '.circleci', '.buildkite', '.woodpecker', '.azure-pipelines', '.husky', '.devcontainer']
+const DIRS = [
+  '.github',
+  '.gitlab',
+  '.circleci',
+  '.buildkite',
+  '.woodpecker',
+  '.azure-pipelines',
+  '.semaphore',
+  '.husky',
+  '.devcontainer',
+  // Package manager code a CI install runs: Yarn's own release (yarnPath) and
+  // plugins, Maven extensions and wrapper, Cargo's config (runners, aliases).
+  '.yarn',
+  '.mvn',
+  '.cargo',
+]
 const NAMES = new Set([
   // CI
   '.gitlab-ci.yml',
@@ -22,6 +37,14 @@ const NAMES = new Set([
   '.pre-commit-config.yaml',
   'netlify.toml',
   'vercel.json',
+  '.cirrus.yml',
+  'bitrise.yml',
+  '.gitpod.yml',
+  'action.yml',
+  'action.yaml',
+  'lefthook.yml',
+  '.lefthook.yml',
+  '.envrc',
   // JavaScript
   'package.json',
   'package-lock.json',
@@ -37,6 +60,14 @@ const NAMES = new Set([
   '.nvmrc',
   '.node-version',
   '.tool-versions',
+  '.pnpmfile.cjs',
+  '.pnpmfile.mjs',
+  'deno.json',
+  'deno.jsonc',
+  'bunfig.toml',
+  'turbo.json',
+  'nx.json',
+  'lerna.json',
   // Python, Ruby, Go, Rust, PHP, JVM, .NET
   'pyproject.toml',
   'poetry.lock',
@@ -60,6 +91,22 @@ const NAMES = new Set([
   'composer.lock',
   'pom.xml',
   'gradle.properties',
+  'libs.versions.toml',
+  'gradlew',
+  'gradlew.bat',
+  'gradle-wrapper.jar',
+  'gradle-wrapper.properties',
+  'mvnw',
+  'mvnw.cmd',
+  'rust-toolchain',
+  'rust-toolchain.toml',
+  'environment.yml',
+  'build.sbt',
+  'mix.exs',
+  'package.swift',
+  'podfile',
+  'pubspec.yaml',
+  'global.json',
   'nuget.config',
   'directory.build.props',
   'directory.build.targets',
@@ -67,6 +114,10 @@ const NAMES = new Set([
   'makefile',
   'gnumakefile',
   'justfile',
+  'cmakelists.txt',
+  'flake.nix',
+  'shell.nix',
+  'default.nix',
   'taskfile.yml',
   'taskfile.yaml',
   'dockerfile',

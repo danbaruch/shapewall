@@ -19,10 +19,20 @@ import { createEgressProxy, privateAddress, readClientHello } from '../src/agent
 import { gateComment } from '../src/agent/starter/gate.js'
 import { createModelRelay } from '../src/agent/starter/model-relay.js'
 import { guardedFiles, isGuarded } from '../src/agent/starter/push-guard.js'
-import { containerResult } from '../src/agent/starter/supervisor.js'
+import { containerResult, outcomeReply } from '../src/agent/starter/supervisor.js'
+import { starterSettings, validateStarterAgent } from '../src/agent/starter/settings.js'
 import { sweepLeftovers } from '../src/agent/starter/sweep.js'
 import { createTools } from '../src/agent/starter/tools.js'
-import { commitWorktree, createWorktree, git, newRunId, readEntry, sweepWorkRoot } from '../src/agent/starter/worktree.js'
+import {
+  commitWorktree,
+  createWorktree,
+  git,
+  linkLeaves,
+  newRunId,
+  pushBranch,
+  readEntry,
+  sweepWorkRoot,
+} from '../src/agent/starter/worktree.js'
 import { tempDir } from './helpers.js'
 import { startStarterStub } from './fixtures/starter-model-stub.mjs'
 
@@ -503,4 +513,137 @@ test('an edit of the comment after the trusted @agent tag needs a new tag', asyn
   assert.equal(getComment(config, 'site', made.id).editedAt, null, 'the same text is not an edit')
   await updateComment(config, 'site', made.id, { body: 'two' }, { now: new Date('2026-11-05T12:00:00Z') })
   assert.equal(getComment(config, 'site', made.id).editedAt, '2026-11-05T12:00:00.000Z')
+})
+
+// ---- 7. Launch review (2026-11): limits, guard, host programs, relay, commit, push ---
+
+test('container limits from the config are capped in bytes, whatever the unit', () => {
+  for (const [limits, message] of [
+    [{ memory: '999999m' }, /memory: at most 16g/],
+    [{ memory: '17g' }, /memory: at most 16g/],
+    [{ disk: '999999m' }, /disk: at most 64g/],
+    [{ tmp: '999999m' }, /tmp: at most 16g/],
+  ]) {
+    const problems = []
+    const value = validateStarterAgent({ limits }, problems)
+    assert.ok(
+      problems.some((problem) => message.test(problem)),
+      `${JSON.stringify(limits)}: ${problems.join('; ')}`,
+    )
+    assert.equal(value.limits.memory, '4g', 'the defaults stay')
+  }
+  const problems = []
+  assert.equal(validateStarterAgent({ limits: { memory: '8192m', disk: '10g' } }, problems).limits.memory, '8192m')
+  assert.deepEqual(problems, [])
+  const config = { starterAgent: validateStarterAgent({}, []), agent: null, boards: [] }
+  assert.throws(() => starterSettings(config, { env: {}, flags: { 'max-disk': '999999m' } }), /max-disk/)
+})
+
+test('the push guard knows package manager wrappers and plugins that CI runs', () => {
+  for (const file of [
+    '.yarn/releases/yarn-4.5.0.cjs',
+    '.yarn/plugins/x.cjs',
+    '.pnpmfile.cjs',
+    '.mvn/extensions.xml',
+    'mvnw',
+    'gradlew',
+    'gradle/wrapper/gradle-wrapper.properties',
+    'gradle/libs.versions.toml',
+    '.cargo/config.toml',
+    'action.yml',
+    'deno.json',
+    'CMakeLists.txt',
+    'flake.nix',
+  ]) {
+    assert.ok(isGuarded(file), file)
+  }
+  assert.deepEqual(guardedFiles(['src/gradle.js', 'docs/yarn.md']), [])
+})
+
+test('the disk measure runs du from absolute PATH entries only', async () => {
+  const { folderBytes } = await import('../src/agent/starter/disk.js')
+  const folder = fs.realpathSync(tempDir('sec-fake-du'))
+  const marker = path.join(folder, 'RAN')
+  fs.writeFileSync(path.join(folder, 'du'), `#!/bin/sh\ntouch ${marker}\necho 1 .\n`, { mode: 0o755 })
+  const cwd = process.cwd()
+  process.chdir(folder)
+  try {
+    assert.equal(await folderBytes(folder, { env: { PATH: '.' } }), null)
+    assert.equal(fs.existsSync(marker), false, 'the folder du never ran')
+    assert.ok((await folderBytes(folder, { env: { PATH: `.:${process.env.PATH}` } })) > 0)
+    assert.equal(fs.existsSync(marker), false)
+  } finally {
+    process.chdir(cwd)
+  }
+})
+
+test('the relay passes earlier tool calls as function calls only', async () => {
+  const stub = await startStarterStub({ script: [{ text: 'one' }] })
+  closers.push(() => stub.close())
+  const settings = { model: { baseUrl: `http://127.0.0.1:${stub.port}/v1`, model: 'm', keyVar: null, maxTokens: 64, temperature: null } }
+  const relay = createModelRelay({ settings, env: {}, budget: { turns: 5, tokens: 100000 }, send: () => {} })
+  const messages = [
+    { role: 'user', content: 'hi' },
+    {
+      role: 'assistant',
+      content: null,
+      tool_calls: [
+        { id: 'c1', type: 'function', function: { name: 'read_file', arguments: '{"path":"a"}', extra: 1 }, extra: 2 },
+        { id: 'c2', type: 'web_search_call', action: { query: 'leak' } },
+        { id: 'c3', type: 'mcp_call', server_url: 'https://evil.example' },
+      ],
+    },
+    { role: 'tool', tool_call_id: 'c1', content: 'text' },
+  ]
+  await relay.handle({ t: 'call', id: 1, method: 'model', params: { body: { messages } } })
+  assert.deepEqual(stub.calls[0].body.messages[1].tool_calls, [
+    { id: 'c1', type: 'function', function: { name: 'read_file', arguments: '{"path":"a"}' } },
+  ])
+})
+
+test('a commit reads at most its byte budget and calls out symlinks that leave the repo', async () => {
+  const { tree } = await checkout('sec-commit-cap')
+  // Sparse: du sees almost nothing, but reading them in is the whole size.
+  for (const name of ['a.bin', 'b.bin', 'c.bin']) fs.truncateSync(fs.openSync(path.join(tree.dir, name), 'w'), 40 * 1024 * 1024)
+  fs.symlinkSync('/proc/self/environ', path.join(tree.dir, 'src', 'env.txt'))
+  fs.symlinkSync('../../outside', path.join(tree.dir, 'src', 'up'))
+  fs.symlinkSync('hero.html', path.join(tree.dir, 'src', 'same.html'))
+  const made = await commitWorktree({ tree, message: 'cap\n', maxBytes: 50 * 1024 * 1024 })
+  assert.deepEqual(
+    made.refused.map((item) => [item.path, item.reason]),
+    [
+      ['b.bin', "over the run's size limit"],
+      ['c.bin', "over the run's size limit"],
+    ],
+  )
+  assert.ok(made.files.includes('a.bin'))
+  assert.deepEqual(made.links, ['src/env.txt', 'src/up'])
+  assert.equal(linkLeaves('a/b', '../c'), false)
+  assert.equal(linkLeaves('a/b', '../../c'), true)
+  assert.equal(linkLeaves('b', '/etc/passwd'), true)
+  const reply = outcomeReply({
+    result: { stop: 'answered', text: 'x', usage: { turns: 1, tokens: 1 } },
+    status: 'done',
+    branch: tree.branch,
+    commit: made,
+    pr: null,
+    budget: { turns: 20, tokens: 200000, minutes: 15 },
+    ms: 1000,
+    blocked: [],
+  })
+  assert.match(reply, /symlinks that point outside the repository: src\/env\.txt, src\/up/)
+})
+
+test('the push sends the branch only: no tags from push.followTags', async () => {
+  const { dir, tree } = await checkout('sec-push')
+  const bare = fs.realpathSync(tempDir('sec-push-remote'))
+  gitIn(bare, 'init', '-q', '--bare')
+  gitIn(dir, 'remote', 'add', 'origin', bare)
+  gitIn(dir, 'tag', '-a', 'v-secret', '-m', 'internal release')
+  gitIn(dir, 'config', 'push.followTags', 'true')
+  fs.writeFileSync(path.join(tree.dir, 'src', 'hero.html'), '<h1>Pushed</h1>\n')
+  await commitWorktree({ tree, message: 'push\n' })
+  await pushBranch({ tree, remote: 'origin' })
+  const refs = gitIn(bare, 'for-each-ref', '--format=%(refname)').trim().split('\n')
+  assert.deepEqual(refs, [`refs/heads/${tree.branch}`])
 })

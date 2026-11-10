@@ -4,6 +4,7 @@
 // --max-disk; default 2g). /tmp in the container is a tmpfs with its own size.
 
 import { execFile } from 'node:child_process'
+import { absoluteProgram } from '../../which.js'
 
 export const sizeBytes = (size) => {
   const match = /^([1-9]\d{0,5})([mg])$/.exec(String(size))
@@ -15,9 +16,13 @@ export const formatBytes = (bytes) => (bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 
 
 // What the folder takes on disk: `du -sk -x` (one file system, no symlink
 // followed), in bytes; null when it cannot tell.
-export function folderBytes(dir, { timeoutMs = 60000 } = {}) {
+// `du` from absolute PATH entries only, like host git (worktree.js): a
+// relative entry would let a `du` in the folder shapewall runs in decide what runs.
+export function folderBytes(dir, { timeoutMs = 60000, env = process.env } = {}) {
+  const program = absoluteProgram('du', env)
+  if (!program) return Promise.resolve(null)
   return new Promise((resolve) => {
-    execFile('du', ['-sk', '-x', dir], { timeout: timeoutMs }, (error, stdout) => {
+    execFile(program, ['-sk', '-x', dir], { timeout: timeoutMs }, (error, stdout) => {
       const kb = Number(String(stdout || '').split(/\s/)[0])
       // du exits non-zero for a file it could not read but still prints a total.
       resolve(Number.isFinite(kb) && String(stdout).trim() ? kb * 1024 : error ? null : 0)

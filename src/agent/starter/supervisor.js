@@ -132,6 +132,8 @@ export function outcomeReply({ result, status, branch, commit, pr, budget, ms, b
     lines.push(`Branch: ${branch} (${plural(commit.files.length, 'file')}: ${shown}${commit.files.length > 6 ? ', ...' : ''})`)
     const sensitive = commit.files.filter((file) => SENSITIVE_RE.test(file))
     if (sensitive.length) lines.push(`Review with care, it changed files that decide what runs: ${sensitive.slice(0, 5).join(', ')}`)
+    if (commit.links?.length)
+      lines.push(`Review with care, it made symlinks that point outside the repository: ${commit.links.slice(0, 5).join(', ')}`)
     // A small model that could not find the file often makes a new one instead.
     if (commit.added?.length && commit.added.length === commit.files.length)
       lines.push('Note: this run only added new files and changed no existing file; check it edited the right place.')
@@ -238,6 +240,14 @@ export function containerResult(message) {
   }
 }
 
+// Removes the agent container; true once it is gone (removed now, or not there).
+async function agentRemoved(runtime, name) {
+  const removed = await runtime.exec(['rm', '-f', name]).catch(() => ({ code: null, stderr: '' }))
+  if (removed.code === 0) return true
+  const found = await runtime.exec(['inspect', '--format', '{{.Id}}', name]).catch(() => ({ code: null, stderr: '' }))
+  return found.code !== 0 && /no such|not found|does not exist/i.test(String(found.stderr || ''))
+}
+
 // Refusal reasons from the gate, as an error.
 function gateError(id, gate) {
   return new StarterError(gate.final ? 'refused' : 'not_dispatched', `#${id} is not dispatched: ${gate.reason}`)
@@ -315,7 +325,8 @@ export async function runStarter({
   let logClosed = false
   const writeLog = (text) => {
     if (logBytes > LOG_MAX || logClosed) return
-    const clean = redact(text, logKey)
+    // Control characters escaped: `cat` of the log must not run terminal escapes from the container.
+    const clean = showCommand(redact(text, logKey))
     logBytes += Buffer.byteLength(clean)
     try {
       fs.writeSync(logFd, clean)
@@ -387,6 +398,8 @@ export async function runStarter({
   let pull = null
   let status = 'needs-human'
   let failure = null
+  let agentSpawned = false
+  let agentGone = false
   const cleanup = []
   try {
     await source.setStatus(id, 'working')
@@ -418,6 +431,7 @@ export async function runStarter({
     const args = agentRunArgs({ runtime: runtime.name, runId, image, worktree: tree.dir, uid, gid, limits: settings.limits })
     cleanup.unshift(() => runtime.exec(['rm', '-f', names.agent]))
     const child = runtime.spawn(args)
+    agentSpawned = true
     child.stdin.on('error', () => {})
     child.stderr.on('data', (chunk) => writeLog(String(chunk)))
     const projectSub = path.relative(tree.dir, tree.projectDir) || '.'
@@ -492,14 +506,14 @@ export async function runStarter({
     const askApproval = async (message, params) => {
       const command = typeof params.command === 'string' ? params.command : ''
       const reason = typeof params.reason === 'string' ? params.reason.slice(0, 500) : ''
+      if (!command.trim() || command.length > SHELL_COMMAND_MAX)
+        return answer(message.id, { approved: false, error: 'the command is empty or too long to show' })
       if (approvals && source.hosted && source.approveCommand) {
         const decision = await source.approveCommand(id, { command, reason, signal: controller.signal })
         return answer(message.id, { approved: decision.approved, ...(!decision.approved ? { error: `Command ${decision.state}` } : {}) })
       }
       if (!approvals || !local || !messageId)
         return answer(message.id, { approved: false, error: 'commands need approval on the board, which this run does not have' })
-      if (!command.trim() || command.length > SHELL_COMMAND_MAX)
-        return answer(message.id, { approved: false, error: 'the command is empty or too long to show' })
       const record = createApproval(source.config, source.board.id, {
         threadId,
         messageId,
@@ -634,13 +648,18 @@ export async function runStarter({
     // The output: a branch with the change.
     const exclude = outputDir ? [path.relative(projectDir, outputDir)].filter((item) => item && !item.startsWith('..')) : []
     const subExclude = exclude.map((item) => path.join(path.relative(tree.dir, tree.projectDir), item)).filter(Boolean)
-    // The container is gone before the host reads a file of its folder.
-    await runtime.exec(['rm', '-f', names.agent]).catch(() => {})
+    // The container is gone before the host reads a file of its folder: a
+    // process still running in it could swap a folder for a symlink while
+    // the host reads (or removes) it.
+    agentGone = await agentRemoved(runtime, names.agent)
+    if (!agentGone)
+      throw new StarterError('runtime', 'the agent container could not be removed, so nothing was read from its folder or committed')
     const made = overDisk
       ? { committed: false, commit: null, files: [], refused: [] }
       : await commitWorktree({
           tree,
           exclude: subExclude,
+          maxBytes: sizeBytes(settings.limits.disk || '2g'),
           message: `Shapewall starter agent: comment ${source.board.id}/${id}\n\nshapewall:${source.board.id}/${id}\nRun ${runId}; review before merging.`,
         })
     for (const item of made.refused) writeLog(`[commit] left out ${item.path}: ${item.reason}\n`)
@@ -650,7 +669,7 @@ export async function runStarter({
       // A pushed branch runs CI, with the repository's secrets, before anyone
       // reviews it: no push of changes to CI config, manifests or build files
       // unless the person said so for this run.
-      const guarded = guardedFiles(commit.files)
+      const guarded = [...new Set([...guardedFiles(commit.files), ...(commit.links || [])])]
       if (guarded.length && !allowGuardedPush) {
         pull = {
           error: `it changed ${guarded.slice(0, 3).join(', ')}${guarded.length > 3 ? ', ...' : ''}, which would run in CI on push; review the branch locally, or rerun with --allow-ci-push`,
@@ -671,7 +690,9 @@ export async function runStarter({
   } finally {
     signal?.removeEventListener?.('abort', onOuterAbort)
     for (const step of cleanup) await Promise.resolve(step()).catch(() => {})
-    if (tree) await removeWorktree({ tree }).catch((error) => log(`#${id}: could not remove ${tree.dir} (${error.message})`))
+    if (agentSpawned && !agentGone) agentGone = await agentRemoved(runtime, names.agent)
+    if (tree && agentSpawned && !agentGone) log(`#${id}: left ${tree.dir} in place: the agent container may still be running`)
+    else if (tree) await removeWorktree({ tree }).catch((error) => log(`#${id}: could not remove ${tree.dir} (${error.message})`))
   }
 
   const ms = now() - started
