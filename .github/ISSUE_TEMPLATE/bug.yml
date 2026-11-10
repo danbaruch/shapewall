@@ -27,7 +27,7 @@ body:
     id: version
     attributes:
       label: Shapewall version
-      placeholder: 0.1.0 (shapewall --version)
+      placeholder: 0.2.1 (shapewall --version)
     validations:
       required: true
   - type: input

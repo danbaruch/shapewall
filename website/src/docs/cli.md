@@ -6,7 +6,7 @@ An option the command does not take is an error, with the closest real one as a 
 `unknown option --onyl for "capture" (did you mean --only?)` instead of capturing every page.
 
 Messages that suggest a command (`doctor`, `init`, a missing browser) write it the way you started Shapewall:
-`npx --no -- shapewall doctor` for a copy installed in a project, or the path of a clone's executable. See
+`npx shapewall doctor` for a copy installed in a project, or the path of a clone's executable. See
 [install](/docs/getting-started#install). The complete help text is [at the end of this page](#every-command-and-option).
 
 ## shapewall init

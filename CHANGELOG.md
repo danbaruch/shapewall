@@ -3,10 +3,15 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.2.1 - 2026-11-10
 
+- On npm: `npm install --save-dev shapewall` or `npx shapewall`. Installing from GitHub still works for unreleased builds.
 - Fixed: the `shapewall settings` page loads its theme script and icon when Shapewall is installed under a folder whose name starts
   with a dot (such as `~/.local`), so it follows your light or dark preference.
+- Website: shapewall.com has a dark mode, with a System, Light and Dark choice.
+- Docs: self-hosted multiplayer (`shapewall hosted`) is labelled beta, with what that means; the security docs list known limits.
+- Security: follow-up fixes from a review of the starter agent, the MCP server and the Buzz bridge.
+- CI runs lint, unit tests, the build and the package check on every pull request.
 
 ## 0.2.0 - 2026-11-09
 

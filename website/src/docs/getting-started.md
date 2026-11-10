@@ -11,19 +11,28 @@ invited (a GitHub 404 means the signed-in account has no access). The [live demo
 
 Use **Node.js 22.13 or newer**. Basic capture works on any Node 22; local accounts and the team server need 22.13.
 
+Platforms: Shapewall is developed and tested on Linux. macOS should work and is not yet verified by the maintainers. Windows is
+untested; the PowerShell lines in these docs are a convenience. If you run it on macOS or Windows, please
+[open an issue](https://github.com/danbaruch/shapewall/issues) with what worked and what did not.
+
 ### In your project
 
 ```sh
 npm install --save-dev %INSTALL_PACKAGE%
-npx --no -- shapewall doctor --install-browser
-npx --no -- shapewall init --base-url http://localhost:3000
-npx --no -- shapewall capture
-npx --no -- shapewall serve --open
+npx shapewall doctor --install-browser
+npx shapewall init --base-url http://localhost:3000
+npx shapewall capture
+npx shapewall serve --open
 ```
 
-The install takes a minute: npm fetches the repository with git and builds the board. In an empty folder, run `npm init -y` first.
-`npx --no --` runs the copy installed in the project and never downloads anything. The rest of these docs shorten the command to
-`shapewall`.
+In an empty folder, run `npm init -y` first. `npx shapewall` runs the copy installed in the project. The rest of these docs shorten
+the command to `shapewall`. To try it without adding it to a project, the same `npx shapewall ...` lines work on their own: npx
+downloads the package the first time.
+
+### From GitHub
+
+For a build that is not released yet, install from the repository instead: `npm install --save-dev github:danbaruch/shapewall`
+(add `#<commit or tag>` to pin one). That takes a minute, because npm clones the repository and builds the board.
 
 ### From a clone
 

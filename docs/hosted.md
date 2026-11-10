@@ -1,4 +1,4 @@
-# Hosted Shapewall (v0, push-first)
+# Hosted Shapewall (beta, push-first)
 
 A server for teams: people sign in with passkeys, belong to workspaces, and review boards that were captured somewhere else and
 uploaded with `shapewall push`. Agents read and resolve the comments with a project token through `shapewall comments --remote`,
@@ -8,7 +8,9 @@ License: the server (`src/hosted`) is under the [Functional Source License 1.1, 
 You can run it for yourself or your company; you can't offer it as a competing hosted service. Each release becomes Apache 2.0
 two years later. The clients (`push` and the `--remote` commands, in `src/remote`) are Apache 2.0 like the rest of Shapewall.
 
-**Status: self-hosted multiplayer works today; a Shapewall-operated service on shapewall.com comes later.** Start with one
+**Status: beta.** Self-hosted multiplayer works and is tested with automated browsers, but it has not yet had a real multi-person
+team on it or real phone passkeys verified, so run it for people you trust and keep backups. A Shapewall-operated service on
+shapewall.com comes later. Start with one
 invite-only server that the team reaches over Tailscale. Each teammate signs in with their own Shapewall passkey and joins a workspace.
 Walk through the [checklist before you invite the team](#before-you-invite-the-team) on your own devices and network first.
 

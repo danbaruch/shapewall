@@ -66,7 +66,26 @@ init` adds the pattern to `.gitignore`.
   logs. See [self-hosting](/docs/self-hosting#for-a-team).
 - **Treat exports like the site.** If the captured pages are not public, do not publish their export publicly.
 
+## Known limits
+
+These are known gaps, stated plainly so you can plan around them.
+
+- **The capture guard checks names, not every load.** When you capture a public site, Shapewall keeps the capture away from private
+  addresses by checking each host name before the browser loads it. An internal image reached through a redirect can still appear in a
+  screenshot (it is never inlined into the saved live HTML), and DNS can change between the check and the load. Capture sites you
+  trust, and do not capture untrusted sites from a machine that can reach sensitive internal services.
+- **Your own agent keeps its own tools.** When you connect Claude Code, Codex or goose over ACP, the agent runs with its own tools and
+  your permissions. Shapewall only gates the file writes and commands the agent asks Shapewall to make. Run the agent in its restricted
+  mode, and use the [sandboxed starter agent](/docs/starter-agent) for shared boards. See [agent hardening](/docs/agent-hardening).
+- **Comment text is untrusted input to an agent.** Anyone who can comment can write text that tries to steer the agent. On shared
+  boards, only let people you trust dispatch work to an agent.
+- **The live view is a snapshot, not a guarantee.** Live HTML is a script-free snapshot behind a strict CSP and an iframe sandbox. That
+  removes whole classes of attack, but it cannot promise protection against every browser bug.
+
+<!-- more known limits arrive from the security review -->
+
 ## Reporting a vulnerability
 
 Please report security issues privately, as described in the
-[security policy](https://github.com/danbaruch/shapewall/blob/main/SECURITY.md), not in public issues.
+[security policy](https://github.com/danbaruch/shapewall/blob/main/SECURITY.md) (GitHub private vulnerability reporting, or
+[security@shapewall.com](mailto:security@shapewall.com)), not in public issues.
