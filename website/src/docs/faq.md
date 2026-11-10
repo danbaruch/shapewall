@@ -72,3 +72,7 @@ large machine can do more. Use `--only` to recapture just the pages that changed
 
 Those show that something changed. Shapewall is for deciding what should change, saying so on the exact element and getting it
 built: the whole product on one wall, comments an agent can act on, and before and after where you asked.
+
+## Where do I send a question or a feature request?
+
+Use the [contact form](/contact). Bugs you can reproduce go to GitHub issues, and security reports follow the security policy.
