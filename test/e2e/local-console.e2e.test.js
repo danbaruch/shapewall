@@ -74,22 +74,31 @@ for (const width of [1440, 390, 320]) {
         await page.locator('[data-sw-settings="general"]').waitFor()
         assert.equal(await page.locator('html').getAttribute('data-mode'), 'dark')
         assert.equal(await page.locator('html').getAttribute('data-theme'), 'contrast')
+        // Settings is general only: no Agents card, no Agent tab.
+        assert.equal(await page.locator('[data-sw-local-console-agents], [data-sw-settings-tab]').count(), 0)
+        assert.deepEqual(
+          await page.locator('[data-sw-nav]').evaluateAll((els) => [...new Set(els.map((el) => el.getAttribute('data-sw-nav')))]),
+          ['projects', 'agents', 'settings'],
+          'Agents before Settings (no Agent feedback without the owner link)',
+        )
+        await page.locator('[data-sw-nav="agents"]').first().click()
+        assert.equal(await page.title(), 'Agents · Shapewall')
+        assert.equal(new URL(page.url()).searchParams.get('section'), 'agents')
         if (kind === 'local-locked') {
           // Agents: read-only without the owner link, with one sentence on how to open it; no agent route is asked.
           const agents = page.locator('[data-sw-local-console-agents] [data-sw-agents-card="readonly"]')
           await agents.waitFor()
           assert.match(await agents.textContent(), /open the owner link that shapewall serve prints/)
           assert.equal(await page.locator('[data-sw-profile-connect], [data-sw-agent-remove], [data-sw-settings-field]').count(), 0)
-          await page.locator('[data-sw-settings-tab="agent"]').click()
-          await page.locator('[data-sw-settings-agent-unavailable]').waitFor()
-          await page.locator('[data-sw-settings-tab="general"]').click()
+          await page.locator('[data-sw-local-console-agent-details] [data-sw-settings-agent-unavailable]').waitFor()
         } else {
+          await page.locator('[data-sw-local-console-agent-details] [data-sw-settings-agent-unavailable]').waitFor()
           assert.equal(await page.locator('[data-sw-local-console-agents]').count(), 0, 'no chat: no Agents card')
-          await page.locator('[data-sw-settings-tab="agent"]').click()
-          await page.locator('[data-sw-settings-agent-unavailable]').waitFor()
           assert.equal(await page.locator('[data-sw-settings-field]').count(), 0)
-          await page.locator('[data-sw-settings-tab="general"]').click()
         }
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, 'Agents fits the width')
+        await page.locator('[data-sw-nav="settings"]').first().click()
+        await page.locator('[data-sw-settings="general"]').waitFor()
         await page.locator('[data-sw-settings-updates]').click()
         await page.locator('[data-sw-app-updates]').waitFor()
         assert.equal(await page.locator('[role="dialog"]').count(), 1)

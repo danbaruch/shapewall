@@ -117,8 +117,8 @@ export function AgentDestination({ agent, className }) {
   if (agent?.local) {
     return (
       <p className={cn('text-xs text-muted', className)} data-sw-chat-host="local">
-        <span className="text-fg">{agent.label}</span> runs on the server&apos;s machine over ACP, with its own login. It can read and edit
-        files in the project; when it asks before acting, you answer here.
+        <span className="text-fg">{agent.label}</span> works in this project with your login. It asks before changing files or running
+        commands.
       </p>
     )
   }
@@ -248,7 +248,7 @@ const AGENT_STATES = {
 }
 function agentTip(agent) {
   if (agent?.demo) return 'Scripted answers that run in this browser. Nothing is sent anywhere and nothing is changed.'
-  if (agent?.local) return 'Runs on the server’s machine over ACP, with its own login.'
+  if (agent?.local) return 'Runs on the server’s computer, with its own login.'
   if (agent?.host) return `Messages go to ${agent.host}${agent.sendsKey ? ", with the server's API key" : ''}.`
   return null
 }

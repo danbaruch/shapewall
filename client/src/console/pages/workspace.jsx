@@ -2,7 +2,7 @@
 // admins and owners (the server refuses them to anyone else anyway).
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
-import { FolderKanban, KeyRound, Lock, MailPlus, MessageSquareText, ScrollText, Settings, ShieldCheck, Users } from 'lucide-react'
+import { Bot, FolderKanban, KeyRound, Lock, MailPlus, MessageSquareText, ScrollText, Settings, ShieldCheck, Users } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { Card, LoadError, Loading, RoleBadge } from '../components'
 import { api, wsUrl } from '../lib/api'
@@ -20,6 +20,8 @@ import { TokensSection } from './tokens'
 import { AuditSection } from './audit'
 import { SettingsSection } from './settings'
 import { AgentFeedbackView } from './agent-feedback'
+import { AgentsSection } from './local-agents'
+import { DEMO } from '../../lib/demo'
 
 const WorkspaceContext = createContext(null)
 export const useWorkspace = () => useContext(WorkspaceContext)
@@ -31,6 +33,9 @@ const SECTIONS = [
   ['access', 'Access', ShieldCheck, 'admin'],
   ['tokens', 'API tokens', KeyRound, 'admin'],
   ['audit', 'Audit log', ScrollText, 'admin'],
+  // The demo only: the local console's Agents page, read-only. A team server
+  // (`shapewall hosted`) has its own agent model (pages/agent.jsx).
+  ['agents', 'Agents', Bot, 'viewer'],
   // Only where the server's boards have chat (features.agentFeedback).
   ['feedback', 'Agent feedback', MessageSquareText, 'admin'],
   ['settings', 'Settings', Settings, 'viewer'],
@@ -73,7 +78,7 @@ export function WorkspacePage({ workspaceId, section, projectId }) {
     isAdmin: roleAtLeast(role, 'admin'),
     isOwner: role === 'owner',
   }
-  const sections = SECTIONS.filter(([id]) => id !== 'feedback' || data.features?.agentFeedback)
+  const sections = SECTIONS.filter(([id]) => (id !== 'feedback' || data.features?.agentFeedback) && (id !== 'agents' || DEMO))
   const visible = sections.filter(([, , , least]) => roleAtLeast(role, least))
   // A section this role cannot see (a link from an admin, an old bookmark)
   // says so instead of quietly showing the projects.
@@ -88,6 +93,7 @@ export function WorkspacePage({ workspaceId, section, projectId }) {
   else if (current === 'access') body = <AccessSection />
   else if (current === 'tokens') body = <TokensSection />
   else if (current === 'audit') body = <AuditSection />
+  else if (current === 'agents') body = <AgentsSection />
   else if (current === 'settings') body = <SettingsSection />
   else if (current === 'feedback') body = <AgentFeedbackView baseUrl={wsUrl(workspaceId, '/agent-feedback')} get={api.get} />
   else body = <ProjectsSection />

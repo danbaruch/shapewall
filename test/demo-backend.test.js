@@ -458,6 +458,28 @@ test('demo chat: model and effort are known and settable before the first messag
     ['scripted-thorough', 'high'],
   )
   assert.equal((await call('POST', path + '/options', { configId: 'effort', value: 'max' })).status, 400)
+  // Before the first message, as on the server: the choices kept in the browser apply.
+  const other = '/api/agent/boards/demo/threads/chat-bbbbbbbbbbbbbbbb'
+  const prepared = await call('POST', other + '/prepare', { choices: { model: 'scripted-thorough', effort: 'nope' } })
+  assert.deepEqual(
+    prepared.json.options.map((option) => option.currentValue),
+    ['scripted-thorough', 'medium'],
+  )
+  assert.equal(prepared.json.options[0].values[1].description, 'Slower, more careful')
+  // The answer's meta line names the model and level it ran with.
+  const answer = await call('POST', other + '/messages', { text: "What's still open?", options: { effort: 'high' } })
+  let done = null
+  for await (const [name, data] of answer.events) if (name === 'done') done = data.message
+  assert.deepEqual(done.options, [
+    { category: 'model', name: 'Model', value: 'Thorough' },
+    { category: 'thought_level', name: 'Thinking', value: 'High' },
+  ])
+  // The second scripted agent has its own list.
+  assert.equal((await call('POST', other + '/profile', { profileId: 'second' })).status, 200)
+  assert.deepEqual(
+    (await call('GET', other)).json.options[0].values.map((item) => item.name),
+    ['Brief', 'Brief Plus'],
+  )
 })
 
 test('scripted chat: streams, asks before it edits, and Stop ends the answer', async () => {
@@ -698,7 +720,7 @@ test('two scripted agents: status lists both, a chat switches, the second answer
       ['second', 'Second agent', 'ready', null],
     ],
   )
-  assert.match(status.settingsUrl, /^console\.html#\/w\/ws_[a-f0-9]{24}\/settings#agents$/)
+  assert.match(status.settingsUrl, /^console\.html#\/w\/ws_[a-f0-9]{24}\/agents$/)
 
   const path = '/api/agent/boards/demo/threads/board'
   const before = (await call('GET', path)).json

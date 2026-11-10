@@ -168,7 +168,9 @@ function ViewMenu({
 }
 
 // Comments, Agent and Checks share the side panel: flat buttons side by side,
-// the open panel pressed (a plain fill, no box or accent underline). Each also opens its own entry point (unchanged hooks).
+// the open panel's one pressed with the kit's selected treatment (Toggle
+// `flat`), none pressed while the panel is closed. Each also opens its own
+// entry point (unchanged hooks).
 function PanelSwitch({
   labels,
   allOpen,
@@ -246,8 +248,9 @@ function PanelSwitch({
 //           the name)
 //   centre  find: "Go to page or journey" (Ctrl/Cmd+K), centred on the toolbar
 //   right   act and open panels: the viewer note, Comment (the one primary
-//           action), the side panel switch (Comments | Agent | Checks), and
-//           Agent settings last
+//           action: a soft accent button while comment mode is off, filled
+//           and aria-pressed while it is on), the side panel switch
+//           (Comments | Agent | Checks), and Agent settings last
 // toolbarFit.js decides which labels drop when the zones do not fit, from the
 // toolbar's width and what it shows (accessible names and tooltips stay).
 // Phone: a compact bar whose More button opens BoardMenu.
@@ -428,8 +431,8 @@ export function BoardToolbar({
         {canComment && !comparePair ? (
           <IconButton
             size="icon"
-            variant={commentMode ? 'default' : 'ghost'}
-            className={cn('shrink-0', !commentMode && 'text-fg')}
+            variant={commentMode ? 'default' : 'soft'}
+            className="shrink-0"
             aria-pressed={commentMode}
             onClick={() => setCommentMode((value) => !value)}
             label={commentMode ? 'Stop commenting' : 'Comment: tap a page to pin'}
@@ -569,12 +572,8 @@ export function BoardToolbar({
             side="bottom"
           >
             <Button
-              variant="default"
-              className={cn(
-                'h-8 shrink-0 text-[13px]',
-                off.comment ? 'w-8 px-0' : 'px-3',
-                commentMode && 'bg-accent/90 shadow-[inset_0_1px_3px_rgb(0_0_0/0.25)] ring-2 ring-accent/30',
-              )}
+              variant={commentMode ? 'default' : 'soft'}
+              className={cn('h-8 shrink-0 text-[13px]', off.comment ? 'w-8 px-0' : 'px-3', commentMode && 'ring-2 ring-accent/30')}
               aria-pressed={commentMode}
               onClick={() => setCommentMode((value) => !value)}
               data-sw-comment-mode="true"

@@ -97,5 +97,5 @@ What these protections do not cover:
 ## Reporting a vulnerability
 
 Please report security issues privately, as described in the
-[security policy](https://github.com/danbaruch/shapewall/blob/main/SECURITY.md) (GitHub private vulnerability reporting), not in public
+[security policy](https://github.com/danbaruch/shapewall/blob/main/SECURITY.md) (GitHub private vulnerability reporting, or [hello@shapewall.com](mailto:hello@shapewall.com)), not in public
 issues.

@@ -67,7 +67,8 @@ test('desktop 1440: an ACP agent answers, shows its plan and tools, asks permiss
     await page.waitForSelector('[data-sw-chat="board"] [data-sw-chat-empty="thread"]')
     // The panel says it is a local agent, not an endpoint with a key.
     const destination = await page.locator('[data-sw-chat-empty="thread"] [data-sw-chat-host="local"]').textContent()
-    assert.match(destination, /^acp-stub runs on the server's machine over ACP/)
+    assert.match(destination, /^acp-stub works in this project with your login. It asks before changing files or running commands./)
+    assert.doesNotMatch(destination, /ACP/)
     await shot(page, 'acp-desktop-empty')
 
     await sendText(page, 'stream')
