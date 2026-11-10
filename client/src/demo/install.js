@@ -142,6 +142,9 @@ export async function installDemo(app) {
       for (const attachment of answer.attachments || []) keepFile(attachment)
       return sseResponse(answer.events, init.signal)
     }
+    // Images on a new comment or reply, kept like chat attachments.
+    for (const attachment of answer.attachments || []) keepFile(attachment)
+    if (answer.forget?.length) forgetFiles(answer.forget)
     return new Response(JSON.stringify(answer.json), { status: answer.status, headers: { 'Content-Type': 'application/json' } })
   }
 
@@ -151,6 +154,15 @@ export async function installDemo(app) {
     const files = readJson(FILES_KEY) || {}
     const used = Object.values(files).reduce((sum, value) => sum + value.length, 0)
     if (used + url.length <= FILES_BYTES_MAX) writeJson(FILES_KEY, { ...files, [attachment.file]: url })
+  }
+
+  function forgetFiles(list) {
+    const files = readJson(FILES_KEY) || {}
+    for (const file of list) {
+      demoFiles.delete(file)
+      delete files[file]
+    }
+    writeJson(FILES_KEY, files)
   }
 
   // ---- View as, sign-in and Reset, for the profile menu and banner ----
