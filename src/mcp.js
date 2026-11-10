@@ -17,7 +17,16 @@ import { feedback, feedbackContext, feedbackItem, untrustedJson } from './feedba
 import { createIssue, githubSettings, linkPull } from './github.js'
 import { listJourneys } from './journeys.js'
 import { cropAround } from './png.js'
-import { AGENT_STATUSES, addReply, captureFiles, getComment, readManifest, setAgentStatus, updateComment } from './store.js'
+import {
+  AGENT_STATUSES,
+  STORED_AGENT_STATUSES,
+  addReply,
+  captureFiles,
+  getComment,
+  readManifest,
+  setAgentStatus,
+  updateComment,
+} from './store.js'
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version
 
@@ -176,7 +185,7 @@ export function createMcpServer({
           .optional()
           .describe('Only comments on pages of this journey (config or board journeys, any branch) and their variants'),
         agentStatus: z
-          .enum([...AGENT_STATUSES, 'none'])
+          .enum([...STORED_AGENT_STATUSES, 'none'])
           .optional()
           .describe('Only comments with this agent status ("none" = no agent has taken it)'),
         mention: z

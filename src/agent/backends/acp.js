@@ -486,9 +486,11 @@ function shownPath(root, file) {
 
 // One agent process and its ACP session (one chat thread).
 class AcpProcess {
-  constructor({ argv, label, env, sandbox, limits, log, thread, onGone, mcpServers = [] }) {
+  constructor({ argv, label, env, sandbox, limits, log, thread, onGone, mcpServers = [], extraEnv = {} }) {
     Object.assign(this, { argv, label, sandbox, limits, log, thread, onGone, mcpServers })
-    this.env = agentEnv(env)
+    // `extraEnv`: set by Shapewall itself, never by the agent (branch mode's
+    // GIT_CEILING_DIRECTORIES), for the agent and the terminals it runs.
+    this.env = { ...agentEnv(env), ...extraEnv }
     this.root = sandbox.root
     this.state = 'starting'
     this.stderr = ''
@@ -1268,6 +1270,11 @@ export function createAcpBackend(
 ) {
   const limit = { ...ACP_DEFAULTS, ...limits }
   const sandbox = createSandbox({ root, protect, sensitivePaths })
+  // A turn with a working folder of its own (agent branch mode: a worktree)
+  // gets a sandbox rooted there, made for that turn's process only.
+  const sandboxFor = (workdir) =>
+    workdir ? createSandbox({ root: workdir.root, protect: workdir.protect || [], sensitivePaths: workdir.sensitivePaths || [] }) : sandbox
+  const rootOf = (workdir) => (workdir ? fs.realpathSync(workdir.root) : sandbox.root)
   const processes = new Map()
   // Agents still starting (initialize, session/new): counted and stopped too.
   const starting = new Set()
@@ -1286,13 +1293,14 @@ export function createAcpBackend(
     idle[0].kill('evicted')
   }
 
-  const start = async (thread, signal, { evict = true } = {}) => {
+  const start = async (thread, signal, { evict = true, workdir = null } = {}) => {
     evictFor(evict)
     const agent = new AcpProcess({
       argv: settings.acp.argv,
       label: settings.label,
       env,
-      sandbox,
+      sandbox: sandboxFor(workdir),
+      extraEnv: workdir?.env || {},
       limits: limit,
       log,
       thread,
@@ -1342,15 +1350,24 @@ export function createAcpBackend(
     // `choices`: the composer's options for this chat ({ configId: value },
     // owner turns only), applied before the prompt. The turn then reports
     // the model and thinking level it runs with (the answer's meta line).
-    async *stream({ messages, signal, thread = 'default', choices = null }) {
+    // `workdir`: { root, env, protect, sensitivePaths } for a turn that works
+    // in a folder of its own (branch mode): the thread's agent runs there,
+    // started afresh when its session was in another folder.
+    async *stream({ messages, signal, thread = 'default', choices = null, workdir = null }) {
       if (signal?.aborted) return
       await preparing.get(thread)?.catch(() => {})
       let agent = processes.get(thread)
       if (agent?.turn) await agent.settled()
       agent = processes.get(thread)
+      if (agent && agent.state === 'ready' && agent.root !== rootOf(workdir)) {
+        agent.kill('workdir')
+        await agent.settled()
+        await agent.stoppingPromise
+        agent = null
+      }
       if (!agent || agent.state !== 'ready') {
         yield { type: 'status', text: `Starting ${settings.label}` }
-        agent = await start(thread, signal)
+        agent = await start(thread, signal, { workdir })
       }
       if (signal?.aborted) {
         agent.kill('aborted')

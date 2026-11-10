@@ -34,8 +34,29 @@
 // boards, and a byte quota per board for stored threads and images.
 
 import { createHash, randomBytes } from 'node:crypto'
+import { spawn } from 'node:child_process'
+import fs from 'node:fs'
+import path from 'node:path'
 import express from 'express'
-import { addReply, getComment, listComments, setAgentStatus } from '../store.js'
+import { BRANCH_READY, addReply, boardDir, getComment, listComments, setAgentStatus } from '../store.js'
+import { acquireLock, releaseLock } from '../lock.js'
+import { boardUrlFor, commentLink } from '../notify/messages.js'
+import { absoluteProgram } from '../which.js'
+import {
+  BranchError,
+  agentWorktreeRoot,
+  applyAgentBranch,
+  branchModeSettings,
+  commitAgentBranch,
+  createAgentBranch,
+  discardAgentBranch,
+  listAgentBranches,
+  readMeta,
+  revertAppliedBranch,
+  sweepAgentBranches,
+  worktreeAgentEnv,
+  writeMeta,
+} from './branch-mode.js'
 import { createBackend } from './backends/index.js'
 import { cleanChoices } from './backends/acp.js'
 import { createOptionsCache, withChoices } from './options-cache.js'
@@ -46,10 +67,10 @@ import { createAgentHealth } from './agent-health.js'
 import { beginAgentOperation } from './control.js'
 import { validateFiles, validateMentions } from './composer.js'
 import { profileForDefault, userAgentEntry } from './user-settings.js'
-import { finishFix, projectChanged, projectSnapshot } from './feedback-loop.js'
+import { finishFix, projectChanged, projectSnapshot, stopReason } from './feedback-loop.js'
 import { ownerMcpServers } from './owner-mcp.js'
 import { RUN_MS_MAX, commentIdOf, runTurn } from './run.js'
-import { beginTurnChanges, finishTurnChanges, undoFiles, undoStarterBranch } from './turn-changes.js'
+import { beginTurnChanges, finishTurnChanges, starterSummary, undoFiles, undoStarterBranch } from './turn-changes.js'
 import { latestChange, withUndoAvailability } from './undo-state.js'
 import { exportRatings, findAnswer, myRatings, raterOf, removeRating, reviewRatings, setRating } from './ratings.js'
 import { localRequest, sameOriginWrite, settingsRoutes, settingsTokenOk } from './settings-routes.js'
@@ -382,6 +403,8 @@ export function agentRouter({
   // meanwhile cannot tell its own edits apart, so it offers no Undo.
   let turnSerial = 0
   let undoing = false
+  // An agent branch being applied, discarded or opened (one at a time).
+  let applying = false
   // The stored summary says whether Undo was possible; this process knows
   // whether it still is, and only the thread's latest change offers it (undo-state.js).
   const withUndoState = (boardId, threadId, messages, all = messages) =>
@@ -393,6 +416,120 @@ export function agentRouter({
           : message.summary.undo.available === true,
       all,
     )
+  // ---- Agent branch mode (branch-mode.js) ------------------------------------
+  //
+  // What dead servers left: worktrees without unapplied commits.
+  Promise.resolve()
+    .then(() => sweepAgentBranches(config))
+    .catch(() => {})
+  // The folder a branch-mode turn's agent works in, for acp.js: the project
+  // inside the worktree, its own store protected, the files capture runs
+  // (auth.loginScript, storageState) still asking before a write there.
+  const worktreeWorkdir = (work) => {
+    const inWorktree = (file) => {
+      const rel = path.relative(config.dir, path.resolve(file))
+      return rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? path.join(work.tree.projectDir, rel) : null
+    }
+    return {
+      root: work.tree.projectDir,
+      env: worktreeAgentEnv(work.root),
+      protect: [path.join(work.tree.projectDir, '.shapewall')],
+      sensitivePaths: () => authFiles(config).map(inWorktree).filter(Boolean),
+    }
+  }
+  const noteCard = (reply, id, text) => {
+    reply.cards.push({ id, kind: 'note', name: 'note', label: String(text).slice(0, 200) })
+  }
+  // The end of a branch-mode turn: the agent's work committed on its branch
+  // (as the repository's author), the run summary from that commit, and the
+  // comment's status: branch-ready when a fix is waiting to be applied.
+  const finishBranchTurn = async ({
+    work,
+    board,
+    threadId,
+    commentId,
+    reply,
+    baseline,
+    fix,
+    previousStatus,
+    requestedPages,
+    checkoutBefore,
+    userText,
+    signal,
+  }) => {
+    const comment = commentId ? getComment(config, board.id, commentId) : null
+    const firstLine = (text) =>
+      String(text || '')
+        .split('\n')
+        .map((line) => line.trim())
+        .find(Boolean)
+        ?.slice(0, 72) || ''
+    const message = comment
+      ? `Fix comment #${commentId}: ${firstLine(comment.body) || 'agent change'}\n\n${commentLink(config, boardUrlFor(config, { env }), board.id, comment)}\n\nshapewall:${board.id}/${commentId}\n`
+      : `Agent change from chat: ${firstLine(userText) || threadId}\n\nshapewall:${board.id}/${threadId}\n`
+    let commit = null
+    try {
+      commit = await commitAgentBranch(config, { ...work, message })
+    } catch (error) {
+      log(`branch mode: commit: ${error.message}`)
+      noteCard(
+        reply,
+        'note-branch-commit',
+        error instanceof BranchError ? error.message : 'The agent’s work could not be committed on its branch. See the server log.',
+      )
+    }
+    if (checkoutBefore && projectChanged(checkoutBefore, projectSnapshot(config)))
+      noteCard(
+        reply,
+        'note-branch-checkout',
+        'Files in your own checkout changed during this turn. The agent’s own tools can write outside its worktree: check git status.',
+      )
+    const knownPages = new Set(board.pages.map((page) => page.id))
+    const recapture = [...new Set([comment?.pageId, ...requestedPages])].filter((id) => knownPages.has(id)).slice(0, 20)
+    let resolved = []
+    if (baseline) {
+      const done = await finishTurnChanges(config, baseline, { comments: listComments(config, board.id), board, reply, commentId }).catch(
+        () => null,
+      )
+      resolved = done?.summary?.resolved || []
+      if (!commit?.committed && done?.summary) reply.summary = done.summary
+    }
+    if (commit?.committed) {
+      work.kept = true
+      work.meta.messageId = reply.id
+      writeMeta(work.root, work.meta)
+      const summary = await starterSummary({ tree: work.tree, commit, branch: work.meta.branch })
+      reply.summary = {
+        ...summary,
+        kind: 'branch',
+        resolved,
+        recapture,
+        branch: { id: work.meta.id, name: work.meta.branch, commit: commit.commit, base: work.meta.base, state: 'ready' },
+        undo: { kind: 'agent-branch', available: true },
+      }
+    }
+    if (!fix) return
+    if (commit?.committed && reply.status === 'done' && !signal.aborted) {
+      const ready = await setAgentStatus(config, board.id, commentId, BRANCH_READY, {
+        onlyFrom: ['queued', 'working'],
+        actor: 'shapewall',
+        branch: work.meta.branch,
+      })
+      if (ready.changed)
+        await addReply(config, board.id, commentId, {
+          author: 'shapewall',
+          body: `The agent’s fix is ready on branch ${work.meta.branch}. Your checkout is unchanged: apply the branch from the chat to see it on the board, with before and after.`,
+        })
+    } else if (commit?.committed) {
+      await addReply(config, board.id, commentId, {
+        author: 'shapewall',
+        body: `The agent stopped before it finished. ${stopReason(reply, signal)} What it changed is on branch ${work.meta.branch}: apply or discard it from the chat.`,
+      })
+      await setAgentStatus(config, board.id, commentId, 'needs-human', { onlyFrom: ['queued', 'working'], actor: 'shapewall' })
+    } else {
+      await finishFix({ config, board, id: commentId, reply, changed: false, capture, signal, previousStatus, log })
+    }
+  }
   const buckets = new Map()
   const bucketFor = (boardId) => {
     if (!buckets.has(boardId)) buckets.set(boardId, tokenBucket(limit))
@@ -448,6 +585,7 @@ export function agentRouter({
   const admitMessage = async (req, res, next) => {
     if (connectionTesting()) return fail(res, 409, 'test_running', 'A connection test is running. Wait for it before sending.')
     if (undoing) return fail(res, 409, 'agent_running', 'An undo is running. Try again in a moment.')
+    if (applying) return fail(res, 409, 'agent_running', 'An agent branch is being applied. Try again in a moment.')
     const admission = new AbortController()
     let release
     res.once('close', () => {
@@ -485,7 +623,11 @@ export function agentRouter({
       )
     }
     const key = `${board.id}/${threadId}`
-    if ([...runs.values()].some((run) => run.fix)) return fail(res, 409, 'agent_running', 'A fix is already running in this project.')
+    // Branch mode: every ACP turn works in a worktree of its own, so a fix
+    // does not have to wait for other turns (nor they for it).
+    const branchOn = backend.id === 'acp' && branchModeSettings(config, env).enabled
+    if (!branchOn && [...runs.values()].some((run) => run.fix))
+      return fail(res, 409, 'agent_running', 'A fix is already running in this project.')
     if (runs.has(key) || selecting.has(key))
       return fail(res, 409, 'agent_running', 'An answer or profile change is still running in this thread.')
     if (runs.size >= limit.runsMax) {
@@ -500,7 +642,7 @@ export function agentRouter({
     // The slot is held from here until the response closes, whatever happens
     // (a body too large, a bad image, the board going away mid-answer).
     const controller = new AbortController()
-    const run = { controller, current, backend, ownerWrites }
+    const run = { controller, current, backend, ownerWrites, branchOn }
     runs.set(key, run)
     const timer = setTimeout(() => controller.abort('timeout'), backend.runMsMax || RUN_MS_MAX)
     res.on('close', () => {
@@ -520,8 +662,11 @@ export function agentRouter({
     admitMessage,
     express.json({ limit: BODY_LIMIT }),
     handle(async (req, res, board, threadId) => {
-      const { controller, current, backend, ownerWrites } = res.locals.run
+      const { controller, current, backend, ownerWrites, branchOn } = res.locals.run
       res.locals.agentOperationRunning = true
+      // Branch mode: this turn's worktree ({ tree, meta, root }); removed at
+      // the end unless the agent's work was committed on its branch.
+      let work = null
       try {
         const fix = req.body?.fix === true
         // Regenerate: the same request again, the new answer in the old one's
@@ -538,7 +683,7 @@ export function agentRouter({
             return fail(res, 413, 'chat_quota', 'Chat storage for this board is full. Clear a thread to free space.')
           previous = last
         }
-        if (fix && runs.size > 1) return fail(res, 409, 'agent_running', 'Wait for other agent turns before starting a fix.')
+        if (fix && runs.size > 1 && !branchOn) return fail(res, 409, 'agent_running', 'Wait for other agent turns before starting a fix.')
         res.locals.run.fix = fix
         const commentId = commentIdOf(threadId)
         if (fix && (!ownerWrites || !allowCapture || !commentId || backend.id !== 'acp')) {
@@ -567,13 +712,42 @@ export function agentRouter({
           previousStatus = comment.agentStatus ?? null
           if (comment.status !== 'open' || ['queued', 'working'].includes(comment.agentStatus))
             return fail(res, 409, 'comment_busy', 'This comment is resolved or already with an agent.')
+          if (comment.agentStatus === BRANCH_READY)
+            return fail(res, 409, 'comment_busy', 'A fix for this comment is waiting on a branch. Apply or discard it first.')
+        }
+        if (branchOn) {
+          // The worktree comes first: when the agent cannot work on a branch
+          // here (not a repository, no commit yet, a merge in progress), the
+          // turn does not start and the comment stays as it is.
+          const stored = readThread(config, board.id, threadId).messages
+          const asked = stored.filter((item) => item.role === 'user').length + (previous ? 0 : 1)
+          try {
+            work = await createAgentBranch(config, {
+              prefix: branchModeSettings(config, env).prefix,
+              kind: commentId ? 'comment' : 'chat',
+              boardId: board.id,
+              threadId,
+              commentId,
+              text: commentId ? getComment(config, board.id, commentId).body : '',
+              n: asked,
+            })
+          } catch (error) {
+            if (error instanceof BranchError) return fail(res, error.status, error.code, error.message)
+            log(`branch mode: ${error.message}`)
+            return fail(res, 500, 'branch_mode', 'The agent’s worktree could not be made. See the server log.')
+          }
+        }
+        if (fix) {
           const claimed = await setAgentStatus(config, board.id, commentId, 'queued', {
             onlyFrom: [null, 'done', 'needs-human'],
             actor: 'shapewall',
           })
           if (!claimed.changed) return fail(res, 409, 'comment_busy', 'This comment is already with an agent.')
         }
-        const snapshot = ownerWrites && commentId && allowCapture ? projectSnapshot(config) : null
+        const snapshot = ownerWrites && commentId && allowCapture && !work ? projectSnapshot(config) : null
+        // Branch mode: the checkout should not change. An agent's own tools
+        // (its shell) are not sandboxed, so the chat says when it did.
+        const checkoutBefore = work ? projectSnapshot(config) : null
         let userMessage
         try {
           userMessage = previous
@@ -629,10 +803,12 @@ export function agentRouter({
           const serial = ++turnSerial
           const overlappedAtStart = runs.size > 1
           const baseline = ownerWrites
-            ? await beginTurnChanges(config, { comments: listComments(config, board.id), files: backend.id === 'acp' }).catch((error) => {
-                log(`run summary: ${error.message}`)
-                return null
-              })
+            ? await beginTurnChanges(config, { comments: listComments(config, board.id), files: backend.id === 'acp' && !work }).catch(
+                (error) => {
+                  log(`run summary: ${error.message}`)
+                  return null
+                },
+              )
             : null
           const reply = await runTurn({
             config,
@@ -653,13 +829,31 @@ export function agentRouter({
             allowCapture,
             capture,
             requestedPages,
+            // Branch mode: the agent's cwd, file sandbox and commands are the worktree.
+            workdir: work ? worktreeWorkdir(work) : null,
           })
           health.record(current, reply)
           // What the profile offers, as this turn's session saw it; a turn that
           // could not sign in drops what was known (the next look starts fresh).
           if (reply.error?.code === 'agent_auth') optionsCache.drop(current)
           else if (backend.id === 'acp') rememberSession(current, backend, `${board.id}/${threadId}`)
-          if (baseline) {
+          if (work) {
+            emit('status', { text: 'Committing the agent’s work on its branch' })
+            await finishBranchTurn({
+              work,
+              board,
+              threadId,
+              commentId,
+              reply,
+              baseline,
+              fix,
+              previousStatus,
+              requestedPages,
+              checkoutBefore,
+              userText: userMessage?.text || '',
+              signal: controller.signal,
+            })
+          } else if (baseline) {
             try {
               const { summary, undo } = await finishTurnChanges(config, baseline, {
                 comments: listComments(config, board.id),
@@ -701,6 +895,9 @@ export function agentRouter({
           if (!res.writableEnded) res.end()
         }
       } finally {
+        // A worktree that holds no committed work (nothing changed, the turn
+        // never started, an error): removed now, not left for the sweep.
+        if (work && !work.kept) await discardAgentBranch(config, work.meta).catch((error) => log(`branch mode: ${error.message}`))
         try {
           await res.locals.releaseAgentOperation()
         } finally {
@@ -1022,6 +1219,7 @@ export function agentRouter({
       undoing = true
       try {
         let undone
+        let branchState = null
         if (summary.undo.kind === 'files') {
           const record = undoRecords.get(key)
           if (!record) {
@@ -1045,6 +1243,22 @@ export function agentRouter({
             commit: summary.undo.commit,
           })
           undone = { kind: 'branch', branch: result.branch }
+        } else if (summary.undo.kind === 'agent-branch' && summary.undo.available && summary.branch) {
+          // Branch mode: before Apply, Undo is Discard; after it, a revert
+          // of what Apply brought in, only while that is still the branch tip.
+          if (applying) return fail(res, 409, 'agent_running', 'An apply is running. Try again in a moment.')
+          if (summary.branch.state === 'ready') {
+            const meta = readMeta(config, summary.branch.id)
+            if (!meta || meta.messageId !== messageId)
+              return fail(res, 410, 'undo_unavailable', 'That branch is no longer here: it was applied or removed outside the chat.')
+            await discardAgentBranch(config, meta)
+            undone = { kind: 'branch', branch: meta.branch }
+            branchState = 'discarded'
+          } else if (summary.branch.state === 'applied' && summary.branch.applied) {
+            const reverted = await revertAppliedBranch(config, summary.branch.applied)
+            undone = { kind: 'revert', branch: summary.branch.name, commit: reverted.head }
+            branchState = 'reverted'
+          } else return fail(res, 409, 'undo_unavailable', 'Undo is not available for this branch any more.')
         } else {
           return fail(
             res,
@@ -1057,7 +1271,10 @@ export function agentRouter({
         const commentId = commentIdOf(threadId)
         if (commentId) {
           try {
-            const changed = await setAgentStatus(config, board.id, commentId, 'needs-human', { onlyFrom: ['done'], actor: 'shapewall' })
+            const changed = await setAgentStatus(config, board.id, commentId, 'needs-human', {
+              onlyFrom: ['done', BRANCH_READY],
+              actor: 'shapewall',
+            })
             if (changed.changed) {
               await addReply(config, board.id, commentId, {
                 author: 'shapewall',
@@ -1071,7 +1288,11 @@ export function agentRouter({
         const at = new Date().toISOString()
         let stored = null
         await changeMessage(config, board.id, threadId, messageId, (item) => {
-          item.summary = { ...item.summary, undone: { ...undone, at, by: req.shapewallAccess?.name || null } }
+          item.summary = {
+            ...item.summary,
+            ...(branchState ? { branch: { ...item.summary.branch, state: branchState } } : {}),
+            undone: { ...undone, at, by: req.shapewallAccess?.name || null },
+          }
           stored = item
         })
         res.json({ ok: true, message: withUndoState(board.id, threadId, [stored], readThread(config, board.id, threadId).messages)[0] })
@@ -1172,6 +1393,169 @@ export function agentRouter({
       if (state === false) return fail(res, 400, 'bad_option', 'The agent did not offer that option.')
       if (!state) return fail(res, 404, 'no_permission', 'That request is no longer waiting for an answer.')
       res.json({ state })
+    }),
+  )
+
+  // ---- Agent branches (branch mode, branch-mode.js) ----------------------------
+  //
+  //   GET  /api/agent/branches               the agent's branches waiting here
+  //   POST /api/agent/branches/:id/apply     bring one into the checkout, then recapture
+  //   POST /api/agent/branches/:id/discard   delete its worktree and branch
+  //   POST /api/agent/branches/:id/open      open its folder (this machine only)
+  //
+  // Owner device only; writes from this board's page. The folder's path is
+  // given only to a direct local request (the person at this machine).
+  // The project's folder in the worktree (a subfolder when the project is one in its repository).
+  const branchFolder = (meta) => path.join(agentWorktreeRoot(config), meta.id, ...(meta.sub ? meta.sub.split('/') : []))
+  const publicBranch = (item, local) => ({
+    id: item.id,
+    branch: item.branch,
+    boardId: item.boardId,
+    threadId: item.threadId,
+    commentId: item.commentId,
+    messageId: item.messageId,
+    commit: item.commit,
+    files: item.files,
+    createdAt: item.createdAt,
+    state: item.state,
+    ...(local && item.worktree ? { folder: branchFolder(item) } : {}),
+  })
+  const branchOwner = (req, res, next) => {
+    if (!ownerWritesFor(req)) return controlDenied(res)
+    if (req.method !== 'GET' && !sameOriginWrite(req)) return controlDenied(res)
+    next()
+  }
+  const branchMessage = async (meta, change) => {
+    if (!meta.messageId) return null
+    let stored = null
+    await changeMessage(config, meta.boardId, meta.threadId, meta.messageId, (item) => {
+      if (item.summary?.branch?.id !== meta.id) return
+      change(item)
+      stored = item
+    }).catch((error) => log(`branch mode: ${error.message}`))
+    if (!stored) return null
+    return withUndoState(meta.boardId, meta.threadId, [stored], readThread(config, meta.boardId, meta.threadId).messages)[0]
+  }
+  const branchAction = (action) =>
+    handle(async (req, res) => {
+      if (runs.size || selecting.size || undoing || applying)
+        return fail(res, 409, 'agent_running', 'Wait for the agent to finish, then try again.')
+      const meta = readMeta(config, req.params.branch)
+      if (!meta) return fail(res, 404, 'unknown_branch', 'No such agent branch. It may have been applied or discarded already.')
+      if (!meta.commit) return fail(res, 409, 'branch_pending', 'The agent has not committed anything on this branch yet.')
+      const board = config.boards.find((item) => item.id === meta.boardId)
+      if (!board) return fail(res, 404, 'unknown_board', 'The board of this branch is gone.')
+      applying = true
+      try {
+        await action(req, res, meta, board)
+      } finally {
+        applying = false
+      }
+    })
+  router.get(
+    '/branches',
+    branchOwner,
+    handle(async (req, res) => {
+      const local = localRequest(req) && settingsTokenOk(req, settingsToken)
+      const items = await listAgentBranches(config)
+      res.json({ branches: items.filter((item) => item.commit).map((item) => publicBranch(item, local)) })
+    }),
+  )
+  router.post(
+    '/branches/:branch/apply',
+    branchOwner,
+    branchAction(async (req, res, meta, board) => {
+      // Serialized with captures of this board: no capture reads the
+      // checkout while Apply changes it.
+      const dir = boardDir(config, board.id)
+      fs.mkdirSync(dir, { recursive: true })
+      const lockFile = path.join(dir, 'capture.lock')
+      if (!acquireLock(lockFile))
+        return fail(res, 409, 'capture_running', 'A capture of this board is running. Apply again when it is done.')
+      let applied
+      try {
+        applied = await applyAgentBranch(config, meta, { message: `Apply ${meta.branch} (Shapewall agent)` })
+      } finally {
+        releaseLock(lockFile)
+      }
+      const at = new Date().toISOString()
+      const message = await branchMessage(meta, (item) => {
+        item.summary = { ...item.summary, branch: { ...item.summary.branch, state: 'applied', applied: { ...applied, at } } }
+      })
+      // The comment: recaptured from the dev server, with before and after.
+      let comment = null
+      if (meta.commentId) {
+        try {
+          const moved = await setAgentStatus(config, board.id, meta.commentId, 'working', { onlyFrom: [BRANCH_READY], actor: 'shapewall' })
+          if (moved.changed && allowCapture) {
+            await finishFix({
+              config,
+              board,
+              id: meta.commentId,
+              reply: { status: 'done' },
+              changed: true,
+              pageIds: message?.summary?.recapture || [],
+              capture,
+              signal: null,
+              log,
+            })
+          } else if (moved.changed)
+            await setAgentStatus(config, board.id, meta.commentId, 'done', { onlyFrom: ['working'], actor: 'shapewall' })
+          comment = getComment(config, board.id, meta.commentId)
+        } catch (error) {
+          log(`branch mode: after apply: ${error.message}`)
+        }
+      }
+      res.json({ ok: true, applied, message, comment: comment ? { id: comment.id, agentStatus: comment.agentStatus } : null })
+    }),
+  )
+  router.post(
+    '/branches/:branch/discard',
+    branchOwner,
+    branchAction(async (req, res, meta, board) => {
+      const result = await discardAgentBranch(config, meta)
+      const at = new Date().toISOString()
+      const message = await branchMessage(meta, (item) => {
+        item.summary = {
+          ...item.summary,
+          branch: { ...item.summary.branch, state: 'discarded' },
+          undone: { kind: 'branch', branch: meta.branch, at, by: req.shapewallAccess?.name || null },
+        }
+      })
+      if (meta.commentId) {
+        try {
+          const changed = await setAgentStatus(config, board.id, meta.commentId, 'needs-human', {
+            onlyFrom: [BRANCH_READY],
+            actor: 'shapewall',
+          })
+          if (changed.changed)
+            await addReply(config, board.id, meta.commentId, {
+              author: 'shapewall',
+              body: `The agent’s branch ${meta.branch} was discarded. Your checkout was not touched.`,
+            })
+        } catch (error) {
+          log(`branch mode: after discard: ${error.message}`)
+        }
+      }
+      res.json({ ok: true, ...result, message })
+    }),
+  )
+  router.post(
+    '/branches/:branch/open',
+    branchOwner,
+    branchAction(async (req, res, meta) => {
+      if (!(localRequest(req) && settingsTokenOk(req, settingsToken)))
+        return fail(res, 403, 'open_needs_local', 'Open the folder on the computer running Shapewall.')
+      const folder = branchFolder(meta)
+      if (!fs.existsSync(folder)) return fail(res, 404, 'unknown_branch', 'The branch’s folder is gone. Its branch is still in Git.')
+      const name = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'explorer' : 'xdg-open'
+      const program = absoluteProgram(name, env)
+      if (!program) return res.json({ opened: false, folder })
+      // The folder is an absolute path Shapewall made (never an option), with no shell.
+      const child = spawn(program, [folder], { detached: true, stdio: 'ignore', shell: false })
+      child.on('error', () => {})
+      child.unref()
+      res.json({ opened: true, folder })
     }),
   )
 

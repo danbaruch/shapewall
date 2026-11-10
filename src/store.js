@@ -33,10 +33,13 @@ import { appendEvents } from './event-log.js'
 import {
   ANCHOR_SELECTOR_MAX,
   ANCHOR_SELECTOR_RE,
+  AGENT_STATUSES,
   ANCHOR_TEXT_MAX,
+  BRANCH_READY,
   COMMENT_BODY_MAX,
   CommentError,
   FIX_REF_MAX,
+  STORED_AGENT_STATUSES,
   cleanFixRef,
   validateAnchor,
 } from './comment-fields.js'
@@ -44,12 +47,15 @@ import {
 // A comment's pure field rules live in comment-fields.js (the demo's
 // in-browser backend uses them too); re-exported for everyone else.
 export {
+  AGENT_STATUSES,
   ANCHOR_SELECTOR_MAX,
   ANCHOR_SELECTOR_RE,
   ANCHOR_TEXT_MAX,
+  BRANCH_READY,
   COMMENT_BODY_MAX,
   CommentError,
   FIX_REF_MAX,
+  STORED_AGENT_STATUSES,
   cleanFixRef,
   validateAnchor,
 }
@@ -496,12 +502,16 @@ function withAgentFields(comment) {
     ...reply,
     reactions: publicReactions(reply.reactions),
   }))
+  const { agentBranch, ...rest } = comment
+  // The branch of a fix waiting on one (branch-ready), and only then.
+  const branch = comment.agentStatus === BRANCH_READY ? cleanAgentBranch(agentBranch) : null
   return {
-    ...comment,
+    ...rest,
+    ...(branch ? { agentBranch: branch } : {}),
     replies,
     reactions: publicReactions(comment.reactions),
     editedAt: typeof comment.editedAt === 'string' ? comment.editedAt : null,
-    agentStatus: AGENT_STATUSES.includes(comment.agentStatus) ? comment.agentStatus : null,
+    agentStatus: STORED_AGENT_STATUSES.includes(comment.agentStatus) ? comment.agentStatus : null,
     agentStatusAt: typeof comment.agentStatusAt === 'string' ? comment.agentStatusAt : null,
     reopenCount: Number.isSafeInteger(comment.reopenCount) && comment.reopenCount > 0 ? comment.reopenCount : 0,
     reopenedAt: typeof comment.reopenedAt === 'string' ? comment.reopenedAt : null,
@@ -704,16 +714,22 @@ export async function deleteComment(config, boardId, commentId) {
 // fixed; a person still resolves) or needs-human (the agent stopped and
 // asked). `shapewall watch` claims a comment by moving agentStatus from null
 // to queued under the file lock, so two watchers never take the same one.
+// Agent branch mode adds branch-ready (comment-fields.js), with the branch's
+// name in agentBranch while the status lasts.
 
-export const AGENT_STATUSES = ['queued', 'working', 'done', 'needs-human']
 const REPLIES_MAX = 200
+const AGENT_BRANCH_RE = /^[A-Za-z0-9][A-Za-z0-9_-]*(?:\/[A-Za-z0-9][A-Za-z0-9_-]*)*$/
 
 function cleanAgentStatus(value) {
-  if (value === null || AGENT_STATUSES.includes(value)) return value
-  throw new CommentError(400, 'invalid_agent_status', `Agent status must be one of ${AGENT_STATUSES.join(', ')} (or null to clear).`)
+  if (value === null || STORED_AGENT_STATUSES.includes(value)) return value
+  throw new CommentError(400, 'invalid_agent_status', `Agent status must be one of ${STORED_AGENT_STATUSES.join(', ')} (or null to clear).`)
 }
 
-function setAgent(comment, agentStatus, now) {
+const cleanAgentBranch = (value) => (typeof value === 'string' && value.length <= 120 && AGENT_BRANCH_RE.test(value) ? value : null)
+
+function setAgent(comment, agentStatus, now, branch = null) {
+  if (agentStatus === BRANCH_READY && cleanAgentBranch(branch)) comment.agentBranch = branch
+  else delete comment.agentBranch
   if ((comment.agentStatus ?? null) === agentStatus) return
   comment.agentStatus = agentStatus
   comment.agentStatusAt = agentStatus ? now.toISOString() : null
@@ -820,7 +836,14 @@ export async function reactToComment(config, boardId, commentId, { emoji, replyI
 // meaning unset) the change is a compare-and-set: it happens only when the
 // comment is open and its status is one of them. Returns { comment, changed }.
 // `actor` names who made the change in its event.
-export async function setAgentStatus(config, boardId, commentId, agentStatus, { onlyFrom = null, now = new Date(), actor = null } = {}) {
+// `branch`: with branch-ready, the name of the branch the fix waits on.
+export async function setAgentStatus(
+  config,
+  boardId,
+  commentId,
+  agentStatus,
+  { onlyFrom = null, now = new Date(), actor = null, branch = null } = {},
+) {
   const next = cleanAgentStatus(agentStatus)
   let previous = null
   const { comment, changed } = await changeComment(
@@ -828,11 +851,11 @@ export async function setAgentStatus(config, boardId, commentId, agentStatus, { 
     boardId,
     commentId,
     (target) => {
-      const current = AGENT_STATUSES.includes(target.agentStatus) ? target.agentStatus : null
+      const current = STORED_AGENT_STATUSES.includes(target.agentStatus) ? target.agentStatus : null
       if (onlyFrom && (target.status !== 'open' || !onlyFrom.includes(current))) return false
       if (current === next) return false
       previous = current
-      setAgent(target, next, now)
+      setAgent(target, next, now, branch)
     },
     now,
     (saved) => updateEvents(boardId, { ...saved, agentStatus: previous }, saved, now, cleanActor(actor)),

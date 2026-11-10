@@ -7,7 +7,15 @@
 import { commentMentions } from '../mentions.js'
 import { publicReactions, toggleReaction } from '../reactions.js'
 import { GUEST_SHARE } from './guest-view.js'
-import { AGENT_STATUSES, AUTHOR_MAX, COMMENT_BODY_MAX, CommentError, cleanFixRef, currentVersion, validateCommentInput } from '../store.js'
+import {
+  STORED_AGENT_STATUSES,
+  AUTHOR_MAX,
+  COMMENT_BODY_MAX,
+  CommentError,
+  cleanFixRef,
+  currentVersion,
+  validateCommentInput,
+} from '../store.js'
 
 export { GUEST_SHARE, guestView } from './guest-view.js'
 
@@ -32,8 +40,8 @@ export function cleanAuthor(value, fallback = 'agent') {
 }
 
 function cleanAgentStatus(value) {
-  if (value === null || AGENT_STATUSES.includes(value)) return value
-  throw new CommentError(400, 'invalid_agent_status', `Agent status must be one of ${AGENT_STATUSES.join(', ')} (or null to clear).`)
+  if (value === null || STORED_AGENT_STATUSES.includes(value)) return value
+  throw new CommentError(400, 'invalid_agent_status', `Agent status must be one of ${STORED_AGENT_STATUSES.join(', ')} (or null to clear).`)
 }
 
 function parseNumber(value) {
@@ -92,7 +100,7 @@ export function rowToComment(row) {
     resolvedAt: row.resolved_at || null,
     resolution: row.resolution || null,
     replies,
-    agentStatus: AGENT_STATUSES.includes(row.agent_status) ? row.agent_status : null,
+    agentStatus: STORED_AGENT_STATUSES.includes(row.agent_status) ? row.agent_status : null,
     agentStatusAt: row.agent_status_at || null,
     reopenCount: row.reopen_count || 0,
     reopenedAt: row.reopened_at || null,
@@ -293,11 +301,11 @@ export function createCommentStore(t, projectId, boardId) {
   // open comment whose status is one of them.
   function setAgentStatus(number, value, { onlyFrom = null } = {}, now = new Date()) {
     const next = cleanAgentStatus(value)
-    if (onlyFrom && (!Array.isArray(onlyFrom) || onlyFrom.some((item) => item !== null && !AGENT_STATUSES.includes(item)))) {
+    if (onlyFrom && (!Array.isArray(onlyFrom) || onlyFrom.some((item) => item !== null && !STORED_AGENT_STATUSES.includes(item)))) {
       throw new CommentError(400, 'invalid_agent_status', 'onlyFrom: a list of agent statuses (null for none).')
     }
     const row = { ...get(number) }
-    const current = AGENT_STATUSES.includes(row.agent_status) ? row.agent_status : null
+    const current = STORED_AGENT_STATUSES.includes(row.agent_status) ? row.agent_status : null
     if ((onlyFrom && (row.status !== 'open' || !onlyFrom.includes(current))) || current === next) {
       return { comment: rowToComment(row), changed: false }
     }

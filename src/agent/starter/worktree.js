@@ -51,7 +51,7 @@ const SKIP_PARTS = new Set(['.git', 'node_modules'])
 export const FILE_MAX = 100 * 1024 * 1024
 // The default bound on the bytes of changed files one commit reads in.
 export const COMMIT_MAX = 2 * 1024 ** 3
-const RUN_DIR_RE = /^\d{14}-[a-f0-9]{6}$/
+export const RUN_DIR_RE = /^\d{14}-[a-f0-9]{6}$/
 
 // The environment for git: the person's, without anything that would point
 // git somewhere else, and without the system config.
@@ -64,7 +64,9 @@ function gitEnv(env, extra = {}) {
   return { ...out, GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1', ...extra }
 }
 
-export function git(args, { cwd, env = process.env, extraEnv = {}, input = null, timeoutMs = 120000 } = {}) {
+// `status`: resolve { code, stdout } when git exits with an error code,
+// instead of rejecting (a timeout or a spawn failure still rejects).
+export function git(args, { cwd, env = process.env, extraEnv = {}, input = null, timeoutMs = 120000, status = false } = {}) {
   // An absolute path from absolute PATH entries only: a relative entry would
   // let a `git` in the folder (the agent's checkout) decide what runs.
   const program = absoluteProgram('git', env)
@@ -75,14 +77,16 @@ export function git(args, { cwd, env = process.env, extraEnv = {}, input = null,
       [...SAFE_GIT_FLAGS, ...args],
       { cwd, env: gitEnv(env, extraEnv), timeout: timeoutMs, maxBuffer: 256 * 1024 * 1024, encoding: 'buffer' },
       (error, stdout, stderr) => {
-        if (error) {
+        if (error && status && typeof error.code === 'number' && !error.killed) {
+          resolve({ code: error.code, stdout: stdout.toString('utf8'), stderr: String(stderr || '') })
+        } else if (error) {
           const message = String(stderr || error.message)
             .trim()
             .split('\n')
             .slice(-3)
             .join(' ')
           reject(new Error(`git ${args.find((arg) => !arg.startsWith('-')) || args[0]}: ${message.slice(0, 400)}`))
-        } else resolve(stdout.toString('utf8'))
+        } else resolve(status ? { code: 0, stdout: stdout.toString('utf8'), stderr: String(stderr || '') } : stdout.toString('utf8'))
       },
     )
     if (input !== null) {
@@ -230,7 +234,8 @@ const skipped = (rel, exclude) => {
 // deleted, refused } (files is all of added, modified and deleted).
 // `maxBytes` bounds what is read in for changed files: `du` sees a sparse file
 // as small, and a folder of them could keep the host reading for hours.
-export async function commitWorktree({ tree, message, exclude = [], maxBytes = COMMIT_MAX }) {
+// `author`: { name, email } for the commit (the starter agent's own by default).
+export async function commitWorktree({ tree, message, exclude = [], maxBytes = COMMIT_MAX, author = AGENT_AUTHOR }) {
   const { gitDir, dir, base, branch, format, root, runId } = tree
   const index = indexFile(root, runId, 'commit')
   const extraEnv = { GIT_INDEX_FILE: index }
@@ -290,10 +295,10 @@ export async function commitWorktree({ tree, message, exclude = [], maxBytes = C
     const treeId = (await run(['write-tree'])).trim()
     const env = {
       ...process.env,
-      GIT_AUTHOR_NAME: AGENT_AUTHOR.name,
-      GIT_AUTHOR_EMAIL: AGENT_AUTHOR.email,
-      GIT_COMMITTER_NAME: AGENT_AUTHOR.name,
-      GIT_COMMITTER_EMAIL: AGENT_AUTHOR.email,
+      GIT_AUTHOR_NAME: author.name,
+      GIT_AUTHOR_EMAIL: author.email,
+      GIT_COMMITTER_NAME: author.name,
+      GIT_COMMITTER_EMAIL: author.email,
     }
     const commit = (await run(['commit-tree', treeId, '-p', base, '-F', '-'], { env, input: message })).trim()
     // Only a new branch: the zero old value makes update-ref refuse an existing one.
@@ -359,8 +364,10 @@ const alive = (pid) => {
 }
 
 // Removes run folders whose run is gone (its owner process ended, or no
-// owner file and older than a day). Returns the run ids removed.
-export function sweepWorkRoot(root, { now = Date.now(), isAlive = alive } = {}) {
+// owner file and older than a day). Returns the run ids removed. `keep(id)`:
+// true for a folder that must stay whatever its owner (agent branch mode keeps
+// a worktree whose commit is not applied yet).
+export function sweepWorkRoot(root, { now = Date.now(), isAlive = alive, keep = () => false } = {}) {
   let names
   try {
     names = fs.readdirSync(root)
@@ -369,7 +376,7 @@ export function sweepWorkRoot(root, { now = Date.now(), isAlive = alive } = {}) 
   }
   const removed = []
   for (const name of names) {
-    if (!RUN_DIR_RE.test(name)) continue
+    if (!RUN_DIR_RE.test(name) || keep(name)) continue
     let pid = null
     try {
       pid = Number(fs.readFileSync(ownerFile(root, name), 'utf8').trim())
