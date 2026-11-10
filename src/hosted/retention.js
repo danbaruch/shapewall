@@ -82,6 +82,24 @@ function pruneBoard(db, t, dataDir, projectId, boardId, keep, dryRun) {
         )
         .map((comment) => `${comment.page_id}\u0000${comment.viewport}\u0000${comment.capture_version}`),
     )
+    // A reply's drawing is on the capture that was current when it was
+    // posted: that version stays too, so its markup keeps rendering.
+    for (const comment of t.all(
+      `SELECT page_id, viewport, replies FROM comments
+       WHERE workspace_id = :ws AND project_id = :project AND board_id = :board AND replies LIKE '%"drawing"%'`,
+      { project: projectId, board: boardId },
+    )) {
+      let replies = []
+      try {
+        replies = JSON.parse(comment.replies)
+      } catch {
+        /* unreadable: nothing referenced */
+      }
+      for (const reply of Array.isArray(replies) ? replies : []) {
+        const version = reply?.drawing?.captureVersion
+        if (typeof version === 'string') referenced.add(`${comment.page_id}\u0000${comment.viewport}\u0000${version}`)
+      }
+    }
     const names = planBoardRetention(listVersions(config, boardId), referenced, keep)
     const dir = path.join(config.outputDir, boardId, 'versions')
     let bytes = 0

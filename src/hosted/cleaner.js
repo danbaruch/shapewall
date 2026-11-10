@@ -46,7 +46,10 @@ export function createCleaner({ size = 2, maxQueue = 32, timeoutMs = 30_000, mem
     clearTimeout(job.timer)
     busy.delete(worker)
     idle.push(worker)
-    if (message.ok) job.resolve(Buffer.from(message.body.buffer, message.body.byteOffset, message.body.byteLength))
+    // A comment image comes back with what was read from it: { buffer,
+    // mediaType, width, height }. Everything else: the Buffer.
+    const buffer = message.ok ? Buffer.from(message.body.buffer, message.body.byteOffset, message.body.byteLength) : null
+    if (message.ok) job.resolve(message.meta ? { ...message.meta, buffer } : buffer)
     else job.reject(new PushError(message.status, message.code, message.message))
     pump()
   }

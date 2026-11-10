@@ -430,6 +430,38 @@ const MIGRATIONS = [
   `,
   // 10: reports are private unless the creator explicitly includes them in a link.
   `ALTER TABLE shares ADD COLUMN include_checks INTEGER NOT NULL DEFAULT 0 CHECK(include_checks IN (0, 1));`,
+  // 11: images and drawings on comments and replies. The image records and
+  // the drawing are JSON on the comment row (replies keep theirs in the
+  // replies JSON); the image bytes are BLOBs here, not in the board folder,
+  // which every push replaces. A row belongs to one comment (and reply) and
+  // goes with it; rows without a comment are images a `shapewall share`
+  // import uploaded first (import_session, import_ref) and attaches in a
+  // later batch, swept when never attached.
+  `
+  ALTER TABLE comments ADD COLUMN images TEXT;
+  ALTER TABLE comments ADD COLUMN drawing TEXT;
+  CREATE TABLE comment_files (
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    board_id TEXT NOT NULL,
+    file TEXT NOT NULL,
+    comment_number INTEGER,
+    reply_id INTEGER,
+    name TEXT NOT NULL,
+    media_type TEXT NOT NULL CHECK (media_type IN ('image/png', 'image/jpeg', 'image/webp', 'image/gif')),
+    bytes INTEGER NOT NULL,
+    width INTEGER NOT NULL,
+    height INTEGER NOT NULL,
+    data BLOB NOT NULL CHECK (length(data) <= 10485760),
+    import_session TEXT,
+    import_ref TEXT,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (project_id, board_id, file),
+    FOREIGN KEY (project_id, board_id, comment_number) REFERENCES comments(project_id, board_id, number) ON DELETE CASCADE
+  );
+  CREATE INDEX comment_files_comment ON comment_files(workspace_id, project_id, board_id, comment_number);
+  CREATE INDEX comment_files_import ON comment_files(workspace_id, project_id, import_session, import_ref);
+  `,
 ]
 
 export async function openDatabase(file) {

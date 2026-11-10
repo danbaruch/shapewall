@@ -7,7 +7,17 @@
 import { commentMentions } from '../mentions.js'
 import { publicReactions, toggleReaction } from '../reactions.js'
 import { GUEST_SHARE } from './guest-view.js'
-import { AGENT_STATUSES, AUTHOR_MAX, COMMENT_BODY_MAX, CommentError, cleanFixRef, currentVersion, validateCommentInput } from '../store.js'
+import {
+  AGENT_STATUSES,
+  AUTHOR_MAX,
+  COMMENT_BODY_MAX,
+  CommentError,
+  cleanFixRef,
+  currentVersion,
+  validateCommentInput,
+  withMedia,
+} from '../store.js'
+import { removeCommentFiles, storeImages } from './comment-files.js'
 
 export { GUEST_SHARE, guestView } from './guest-view.js'
 
@@ -56,12 +66,14 @@ function combinedReactions(current, imported) {
 // A row in the shape the board and agents know.
 export function rowToComment(row) {
   const stored = JSON.parse(row.replies || '[]')
+  // Images and a drawing, through their validators, only when present
+  // (withMedia, the same as the local store).
   const replies = stored.map(({ share: _share, user, token, reactions, ...reply }) => ({
-    ...reply,
+    ...withMedia(reply),
     reactions: combinedReactions(reactions, JSON.stringify(reply.importedReactions || [])),
     [REPLY_AUTHOR]: { user: user || null, token: token || null },
   }))
-  const comment = {
+  const comment = withMedia({
     id: row.number,
     ...(row.imported_by
       ? {
@@ -99,7 +111,9 @@ export function rowToComment(row) {
     ...(row.fix_ref ? { fixRef: row.fix_ref } : {}),
     editedAt: row.edited_at || null,
     reactions: combinedReactions(parseList(row.reactions), row.imported_reactions),
-  }
+    images: parseList(row.images),
+    drawing: parseJson(row.drawing),
+  })
   // Guests never @mention anyone: their text must not wake a watcher
   // ("watch --mention agent") or page a person.
   comment.mentions = commentMentions({
@@ -108,6 +122,14 @@ export function rowToComment(row) {
   })
   comment[GUEST_SHARE] = { comment: row.author_share_id || null, replies: stored.map((reply) => reply.share || null) }
   return comment
+}
+
+function parseJson(text) {
+  try {
+    return text ? JSON.parse(text) : null
+  } catch {
+    return null
+  }
 }
 
 function parseList(text) {
@@ -150,8 +172,10 @@ export function createCommentStore(t, projectId, boardId) {
   }
 
   // `author` is { name, userId, handle } for a person, { name, tokenId } for
-  // a token, or { name, shareId } for a share link's guest.
-  function create(config, board, input, author, now = new Date()) {
+  // a token, or { name, shareId } for a share link's guest. `media`: {
+  // images (cleaned, src/hosted/comment-files.js cleanImages), drawing
+  // (validateDrawing) }; inside the caller's transaction.
+  function create(config, board, input, author, now = new Date(), media = null) {
     const clean = validateCommentInput(config, board, input)
     const total = t.get(`SELECT COUNT(*) AS n FROM comments WHERE ${SCOPE}`, key).n
     if (total >= COMMENTS_MAX) throw new CommentError(409, 'too_many_comments', `A board holds at most ${COMMENTS_MAX} comments.`)
@@ -186,6 +210,17 @@ export function createCommentStore(t, projectId, boardId) {
         at,
       },
     )
+    if (media?.images?.length || media?.drawing) {
+      const images = storeImages(t, { projectId, boardId, commentNumber: number, images: media.images || [], at })
+      const version = rowOf(number).capture_version || null
+      t.run(`UPDATE comments SET images = :images, drawing = :drawing WHERE ${SCOPE} AND number = :number`, {
+        ...key,
+        number,
+        images: images.length ? JSON.stringify(images) : null,
+        // The drawing belongs to the capture it was drawn on.
+        drawing: media.drawing ? JSON.stringify({ ...media.drawing, captureVersion: version }) : null,
+      })
+    }
     return rowToComment(rowOf(number))
   }
 
@@ -261,14 +296,28 @@ export function createCommentStore(t, projectId, boardId) {
   }
 
   // `author`: { name, handle } for a person, { name, agent: true } for a
-  // token, { name, guest: true } for a share link's guest.
-  function reply(number, input, author, now = new Date()) {
+  // token, { name, guest: true } for a share link's guest. `media` as on
+  // create, plus the board's config (a reply's drawing is on the capture
+  // that is current when it is posted).
+  function reply(number, input, author, now = new Date(), media = null) {
     const body = cleanBody(input?.body)
     const row = { ...get(number) }
     const replies = JSON.parse(row.replies || '[]')
     if (replies.length >= REPLIES_MAX) throw new CommentError(409, 'too_many_replies', `A comment holds at most ${REPLIES_MAX} replies.`)
+    const id = Math.max(0, ...replies.map((item) => Number(item.id) || 0)) + 1
+    const images = media?.images?.length
+      ? storeImages(t, { projectId, boardId, commentNumber: row.number, replyId: id, images: media.images, at: now.toISOString() })
+      : []
+    const drawing = media?.drawing
+      ? {
+          ...media.drawing,
+          captureVersion: String(row.page_id).startsWith('variant:')
+            ? null
+            : currentVersion(media.config, boardId, row.page_id, row.viewport) || null,
+        }
+      : null
     const entry = {
-      id: Math.max(0, ...replies.map((item) => Number(item.id) || 0)) + 1,
+      id,
       author: author.name,
       ...(author.handle ? { handle: author.handle } : {}),
       ...(author.agent ? { agent: true } : {}),
@@ -278,11 +327,13 @@ export function createCommentStore(t, projectId, boardId) {
       ...(author.agent && author.tokenId ? { token: author.tokenId } : {}),
       body,
       createdAt: now.toISOString(),
+      ...(images.length ? { images } : {}),
+      ...(drawing ? { drawing } : {}),
     }
     row.replies = JSON.stringify([...replies, entry])
     // The reply as everyone sees it: which link, account or token wrote it
     // stays stored only.
-    const shown = { ...entry }
+    const shown = withMedia(entry)
     delete shown.share
     delete shown.user
     delete shown.token
@@ -346,8 +397,10 @@ export function createCommentStore(t, projectId, boardId) {
     return { comment: rowToComment(rowOf(row.number)), added }
   }
 
+  // The comment, its images and its replies' images.
   function remove(number) {
     const row = get(number)
+    removeCommentFiles(t, projectId, boardId, row.number)
     t.run(`DELETE FROM comments WHERE ${SCOPE} AND number = :number`, { ...key, number: row.number })
   }
 
