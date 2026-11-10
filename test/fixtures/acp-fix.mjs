@@ -1,4 +1,7 @@
 // Scripted coding agent for the local feedback-loop fixture. No model calls.
+// Modes: edit (default), fail, no-edit, inspect, login, and branch: like edit,
+// but first checks that it runs in an agent branch worktree and that a write
+// to the person's checkout is refused (agent branch mode).
 import readline from 'node:readline'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
@@ -49,6 +52,18 @@ lines.on('line', async (line) => {
     if (mode === 'no-edit') {
       say(sessionId, 'I need more information.')
       return reply({ stopReason: 'end_turn' })
+    }
+    if (mode === 'branch') {
+      const marker = '/.shapewall/agent-worktrees/'
+      if (!cwd.includes(marker)) throw new Error(`Not in an agent worktree: ${cwd}`)
+      const checkout = cwd.slice(0, cwd.indexOf(marker))
+      let escaped = true
+      try {
+        await ask('fs/write_text_file', { sessionId, path: `${checkout}/index.html`, content: 'escaped' })
+      } catch {
+        escaped = false
+      }
+      if (escaped) throw new Error('A write to the checkout was allowed')
     }
     await ask('fs/write_text_file', {
       sessionId,

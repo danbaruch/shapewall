@@ -22,6 +22,7 @@ import {
   agentWorktreeRoot,
   applyAgentBranch,
   branchModeSettings,
+  checkoutSignature,
   cleanBranchPrefix,
   commitAgentBranch,
   createAgentBranch,
@@ -323,6 +324,21 @@ test('sweep: dead turns without commits go, unapplied commits stay, applied ones
   assert.equal(await checkAgentBranches(repo('branch-doctor-clean', { hooks: false }).config), null)
 })
 
+test('the checkout signature changes with what git sees, not with ignored files', async () => {
+  const { dir, config } = repo('branch-signature', { hooks: false })
+  const start = await checkoutSignature(config)
+  assert.ok(start)
+  fs.mkdirSync(path.join(dir, '.shapewall', 'agent-worktrees'), { recursive: true })
+  fs.writeFileSync(path.join(dir, '.shapewall', 'agent-worktrees', 'x.json'), '{}')
+  assert.equal(await checkoutSignature(config), start, 'ignored files do not count')
+  fs.writeFileSync(path.join(dir, 'new.txt'), 'new')
+  const untracked = await checkoutSignature(config)
+  assert.notEqual(untracked, start)
+  fs.appendFileSync(path.join(dir, 'new.txt'), ' and more')
+  assert.notEqual(await checkoutSignature(config), untracked, 'a second write to a changed file counts too')
+  assert.equal(await checkoutSignature({ dir: outsideRepo('branch-signature-plain') }), null)
+})
+
 test('branch-ready goes through the store, comments --json, MCP and the hosted validators', async () => {
   const { config } = repo('branch-status', { hooks: false })
   assert.ok(STORED_AGENT_STATUSES.includes('branch-ready'))
@@ -503,6 +519,46 @@ test('branch mode refuses a fix in a project that is not a repository, and leave
     assert.equal(result.json.error.code, 'not_a_repo')
     assert.match(result.json.error.message, /not a Git repository/)
     assert.equal(getComment(config, 'sample', comment.id).agentStatus, null)
+  } finally {
+    stopChildren(app)
+    await new Promise((resolve) => server.close(resolve))
+  }
+})
+
+// A chat turn (no comment) in branch mode, with the stub agent writing a file
+// in its session cwd: the branch is <prefix>chat-<thread>-<n> and the
+// checkout never sees the file.
+test('a chat turn in branch mode runs in its own worktree and waits on a chat branch', async () => {
+  const { dir, config, marker } = repo('branch-chat')
+  const home = tempDir('branch-chat-home')
+  const env = {
+    ...process.env,
+    XDG_CONFIG_HOME: home,
+    SHAPEWALL_AGENT_SETTINGS_FILE: path.join(home, 'agents.json'),
+    SHAPEWALL_AGENT_BRANCH_MODE: 'true',
+    SHAPEWALL_AGENT_BRANCH_PREFIX: 'agent/',
+  }
+  const stub = path.resolve('test/fixtures/acp-stub.mjs')
+  const app = createApp({ config, env, settingsToken: token, agentAcp: `${process.execPath} ${stub}`, agentLimits: { burst: 100 } })
+  const server = await new Promise((resolve) => {
+    const listening = app.listen(0, '127.0.0.1', () => resolve(listening))
+  })
+  const port = server.address().port
+  const headers = { Origin: `http://127.0.0.1:${port}`, 'X-Shapewall-Settings-Token': token }
+  try {
+    const sent = await request(port, 'POST', '/api/agent/boards/sample/threads/board/messages', {
+      headers,
+      body: { text: 'writein notes.txt' },
+    })
+    assert.equal(sent.status, 200)
+    const thread = await request(port, 'GET', '/api/agent/boards/sample/threads/board', { headers })
+    const answer = thread.json.messages.at(-1)
+    assert.match(answer.text, /Wrote .*\.shapewall\/agent-worktrees\/[^/]+\/notes\.txt/)
+    assert.match(answer.summary.branch.name, /^agent\/chat-board-\d+$/)
+    assert.equal(fs.existsSync(path.join(dir, 'notes.txt')), false, 'the checkout never sees it')
+    assert.equal(sh(dir, 'show', `${answer.summary.branch.name}:notes.txt`), 'written by stub')
+    assert.equal(sh(dir, 'log', '-1', '--format=%an <%ae>', answer.summary.branch.name), 'Test Person <test@example.com>')
+    assert.equal(hookRan(marker), '')
   } finally {
     stopChildren(app)
     await new Promise((resolve) => server.close(resolve))
