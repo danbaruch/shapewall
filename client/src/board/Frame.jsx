@@ -12,6 +12,9 @@ import { DOT_CLUSTER_PX, DraftPin, Pin, PinCluster, clusterPins, pinLookAt } fro
 import { cn } from '../lib/utils'
 import { useBoardView } from './boardView'
 import { BoardContext } from './boardContext'
+import { FrameDrawing } from './CommentMedia'
+import { drawingsFor, hasDrawing } from './drawing'
+import { entryVersion } from './flow'
 
 // Device pixels per CSS pixel, capped: a dpr 3 phone does not need 3x images.
 const dpr = typeof window !== 'undefined' ? Math.min(window.devicePixelRatio || 1, 2) : 1
@@ -103,6 +106,21 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
   const listed = board.pinsFor(targetId, viewport)
   const pins = useMemo(() => (openHere && !listed.includes(openHere) ? [...listed, openHere] : listed), [listed, openHere])
   const selectedCommentId = openHere?.id ?? null
+  // The drawing shown over the page: the open thread's, else the hovered
+  // pin's, when it was drawn on this capture (an older one shows in the
+  // thread's before and after instead).
+  const hoveredDrawn = useBoardView((state) => {
+    if (comparing || state.hoveredId === null) return null
+    return pins.find((item) => item.id === state.hoveredId && hasDrawing(item)) || null
+  })
+  const drawn = openHere && hasDrawing(openHere) ? openHere : hoveredDrawn
+  const shownDrawing = useMemo(() => {
+    if (!drawn) return null
+    const current = String(targetId).startsWith('variant:')
+      ? null
+      : entryVersion(board.manifest?.pages?.[targetId]?.[viewport], board.manifest)
+    return { id: drawn.id, ...drawingsFor(drawn, current) }
+  }, [drawn, targetId, viewport, board.manifest])
   const draft = useBoardView((state) => {
     const spot = state.draftSpot
     return spot && spot.pageId === targetId && spot.viewport === viewport ? spot : null
@@ -334,6 +352,7 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
             />
           ),
         )}
+        {comparing ? null : <FrameDrawing frameKey={liveKey} native={native} shown={shownDrawing} />}
         {draft ? <DraftPin draft={draft} scale={pinScale} name={board.me?.name} colorKey={board.me?.name} /> : null}
       </div>
     </>

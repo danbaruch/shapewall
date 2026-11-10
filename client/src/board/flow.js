@@ -164,31 +164,51 @@ export function entryVersion(entry, manifest) {
     .replace(/\.(\d{3})Z$/, '$1Z')
 }
 
-// Before and after for a resolved comment: the capture it was made on and
-// the current one. Returns null when there is nothing to show, else
-// { before, after, reason } where before/after are { kind, file, version } or
-// null, and reason explains a missing side.
+// The shapes drawn on a thread (the comment and its replies) on `version`.
+function drawnOn(comment, version) {
+  return [comment, ...(comment.replies || [])]
+    .filter((item) => item?.drawing?.shapes?.length && item.drawing.captureVersion === version)
+    .flatMap((item) => item.drawing.shapes)
+}
+
+// The newest capture version a drawing in the thread was made on, other
+// than `current`; null when every drawing is on the current capture.
+function olderDrawingVersion(comment, current) {
+  const made = [comment, ...(comment.replies || [])]
+    .filter((item) => item?.drawing?.shapes?.length && item.drawing.captureVersion && item.drawing.captureVersion !== current)
+    .map((item) => item.drawing.captureVersion)
+    .sort()
+  return made.at(-1) || null
+}
+
+// Before and after for a resolved comment, or for a thread drawn on a
+// capture the page has since moved on from (the drawing belongs to that
+// capture, so it shows over "before", never over the new page): the capture
+// it was made on and the current one. Returns null when there is nothing to
+// show, else { before, after, reason, drawn? } where before/after are
+// { kind, file, version } or null, reason explains a missing side and
+// drawn lists the shapes drawn on the before capture.
 export function beforeAfter(comment, { manifest, captures, versions }) {
-  if (
-    !comment ||
-    (comment.status !== 'resolved' && comment.agentStatus !== 'done') ||
-    !comment.captureVersion ||
-    String(comment.pageId).startsWith('variant:')
-  )
-    return null
-  const { pageId, viewport, captureVersion } = comment
+  if (!comment || String(comment.pageId).startsWith('variant:')) return null
+  const { pageId, viewport } = comment
   const currentEntry = manifest?.pages?.[pageId]?.[viewport]
   const currentVersion = entryVersion(currentEntry, manifest)
+  const settled = comment.status === 'resolved' || comment.agentStatus === 'done'
+  const olderDrawing = olderDrawingVersion(comment, currentVersion)
+  const beforeVersion = settled ? comment.captureVersion : olderDrawing
+  if (!beforeVersion) return null
   const currentFile = captures?.[pageId]?.[viewport]?.file || null
   const current = currentFile ? { kind: 'captures', file: currentFile, version: currentVersion || 'current' } : null
-  if (captureVersion === currentVersion) {
+  if (beforeVersion === currentVersion) {
     return { before: current, after: null, reason: 'not-recaptured' }
   }
-  const old = (versions?.[pageId]?.[viewport] || []).find((item) => item.version === captureVersion)
+  const old = (versions?.[pageId]?.[viewport] || []).find((item) => item.version === beforeVersion)
+  const drawn = drawnOn(comment, beforeVersion)
   return {
     before: old ? { kind: 'versions', file: old.file, version: old.version } : null,
     after: current,
     reason: old ? null : 'pruned',
+    ...(drawn.length ? { drawn } : {}),
   }
 }
 

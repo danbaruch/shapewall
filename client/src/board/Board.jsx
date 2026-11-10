@@ -9,7 +9,7 @@ import { BoardContext, NODE_TYPES } from './nodes'
 import { EDGE_TYPES } from './edges'
 import { layoutBoard, nativeSize, pinPoint } from './layout'
 import { cardKeyDown, useCanvasNavigation } from './navigation'
-import { COMMENT_STATES, beforeAfter, historyCount, pageChange } from './flow'
+import { COMMENT_STATES, beforeAfter, entryVersion, historyCount, pageChange } from './flow'
 import { FILTERS } from './CommentsPanel'
 import { JourneyBar, JourneyBuilder } from './JourneyBar'
 import CompareBar from './CompareBar'
@@ -628,6 +628,27 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
       filter,
       allowed,
     })
+  const commentMedia = useMemo(
+    () => ({
+      attach: canComment && !STATIC && !info?.guest,
+      draw: canComment && !STATIC,
+      attachNote:
+        canComment && !STATIC && info?.guest ? 'Guests on a share link cannot attach images. You can still draw on the page.' : null,
+    }),
+    [canComment, info?.guest],
+  )
+  // The screenshot of a frame, for drawing on it in the phone's sheet.
+  const pageImage = useCallback(
+    (pageId, viewport) => {
+      const image = data?.captures?.[pageId]?.[viewport]
+      if (!image?.file) return null
+      const variant = String(pageId).startsWith('variant:') ? variantsById.get(pageId) : null
+      const page = pagesById.get(variant ? variant.pageId : pageId)
+      const native = nativeSize(viewports, viewport, page?.frameHeight)
+      return native ? { src: fileUrl(boardId, 'captures', image.file, imageVersion), native } : null
+    },
+    [boardId, data?.captures, imageVersion, pagesById, variantsById, viewports],
+  )
   // The comment being written: its description and what its composer needs.
   const { draftDescription, composerProps } = useCommentDraft({
     draft,
@@ -645,6 +666,11 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     targetTitle,
     people,
     info,
+    // Images go up to the board's server (or the demo's); a static export
+    // that keeps comments in this browser takes neither images nor drawings.
+    // Share link guests may draw but not upload (src/hosted).
+    media: commentMedia,
+    pageImage,
   })
 
   const { captureConfirm, setCaptureConfirm, startCapture } = useCapture({ boardId, view, setBusy, setNotice, setPolling })
@@ -807,6 +833,17 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
         role: info?.guest ? 'guest' : info?.role || null,
         hosted: Boolean(info?.hosted),
         onSaveName: setLocalName,
+        // Images and drawings on its messages and in the reply box.
+        media: {
+          ...commentMedia,
+          boardId,
+          pageImage,
+          pageTitle: targetTitle(selectedComment.pageId),
+          currentVersion: (comment) =>
+            String(comment.pageId).startsWith('variant:')
+              ? null
+              : entryVersion(data?.manifest?.pages?.[comment.pageId]?.[comment.viewport], data?.manifest),
+        },
         busy,
         touch: !wide,
         editingRef,

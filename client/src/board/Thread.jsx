@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'react'
 import {
   ArrowUp,
   Bot,
+  Brush,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -34,6 +35,9 @@ import {
 } from '../components/ui'
 import { cn, formatRelative, saveAuthor, savedAuthor } from '../lib/utils'
 import BeforeAfter from './BeforeAfter'
+import { AttachButton, ComposerImages, DrawSheet, DrawTools, MessageImages, imageDropProps } from './CommentMedia'
+import { imagesPayload, useImageDraft } from './commentImages'
+import { drawing, drawingPayload, useDrawing } from './drawing'
 import { COMMENT_MAX, sendsOnEnter } from './commentInput'
 import { Reactions } from './Reactions'
 import { viewportIcon } from './viewports'
@@ -143,27 +147,57 @@ function EditBox({ comment, busy, onSave, onCancel, touch, people }) {
 // The reply box at the bottom of a thread. `askName`: a local board with no
 // name saved in this browser asks once (the composer's saved name), so the
 // reply is not signed "anonymous".
-function ReplyBox({ comment, busy, onReply, touch, people, autoFocus, askName = false, onSaveName = null }) {
+function ReplyBox({ comment, busy, onReply, touch, people, autoFocus, askName = false, onSaveName = null, media = null }) {
   const [body, setBody] = useState('')
   const [asking, setAsking] = useState(() => askName && !savedAuthor())
   const [name, setName] = useState('')
+  const [sheet, setSheet] = useState(false)
+  const canAttach = Boolean(media?.attach)
+  const canDraw = Boolean(media?.draw)
+  const images = useImageDraft({ enabled: canAttach })
+  const owner = `reply-${comment.id}`
+  const drawKey = `${comment.pageId}|${comment.viewport}`
+  const shapes = useDrawing((value) => (value?.owner === owner ? value.shapes.length : 0))
+  // The reply's drawing lives as long as its box.
+  useEffect(() => {
+    if (!canDraw) return undefined
+    drawing.start(drawKey, owner)
+    return () => drawing.end(owner)
+  }, [canDraw, drawKey, owner])
+  const page = canDraw && touch ? media.pageImage?.(comment.pageId, comment.viewport) : null
   const submit = async (event) => {
     event?.preventDefault()
     const text = body.trim()
-    if (!text || busy) return
+    if (!text || busy || images.reading) return
     const signed = asking ? name.trim() : ''
     if (signed) {
       saveAuthor(signed)
       onSaveName?.(signed)
     }
-    if (await onReply(comment, text)) {
+    const session = drawing.get()
+    const drawn = session?.owner === owner ? session.shapes : []
+    const attached = imagesPayload(images.images)
+    const extra = {
+      ...(attached.length ? { images: attached } : {}),
+      ...(drawn.length ? { drawing: drawingPayload(drawn) } : {}),
+      onImageError: images.setError,
+    }
+    if (await onReply(comment, text, extra)) {
       setBody('')
+      images.clear()
+      drawing.set({ shapes: [], tool: null })
       if (signed) setAsking(false)
     }
   }
   const lines = Math.min(6, Math.max(1, body.split('\n').length))
+  const errorId = `sw-reply-image-error-${comment.id}`
   return (
-    <form className="flex flex-wrap items-end gap-2 border-t border-line px-3 py-2" onSubmit={submit} data-sw-reply-form={comment.id}>
+    <form
+      className="flex flex-wrap items-end gap-2 border-t border-line px-3 py-2"
+      onSubmit={submit}
+      {...imageDropProps(images, canAttach)}
+      data-sw-reply-form={comment.id}
+    >
       {asking ? (
         <label className="flex w-full items-center gap-2 text-xs text-muted">
           <span className="shrink-0">Your name</span>
@@ -195,6 +229,7 @@ function ReplyBox({ comment, busy, onReply, touch, people, autoFocus, askName = 
             }
           }}
           autoFocus={autoFocus}
+          aria-describedby={images.error ? errorId : undefined}
           data-sw-reply-input={comment.id}
         />
       </label>
@@ -203,13 +238,66 @@ function ReplyBox({ comment, busy, onReply, touch, people, autoFocus, askName = 
         variant="default"
         size={touch ? 'icon' : 'icon-sm'}
         className="rounded-full"
-        disabled={busy || !body.trim()}
-        label="Send reply"
+        disabled={busy || images.reading || !body.trim()}
+        label={busy && images.images.length ? 'Uploading the reply' : 'Send reply'}
         data-sw-reply-send={comment.id}
       >
         <ArrowUp size={16} aria-hidden="true" />
       </IconButton>
+      {canAttach ? (
+        <div className="w-full">
+          <ComposerImages draft={images} touch={touch} id={errorId} />
+        </div>
+      ) : null}
+      {canAttach || canDraw || media?.attachNote ? (
+        <div className="-mt-1 -ml-1 flex w-full flex-wrap items-center gap-0.5" data-sw-reply-media={comment.id}>
+          {canAttach ? <AttachButton draft={images} touch={touch} disabled={busy} /> : null}
+          {canDraw && !touch ? <DrawTools owner={owner} touch={false} /> : null}
+          {canDraw && touch && page ? (
+            <Button size="touch" variant="ghost" onClick={() => setSheet(true)} data-sw-draw-open="true">
+              <Brush size={16} aria-hidden="true" /> {shapes ? `Drawing (${shapes})` : 'Draw on the page'}
+            </Button>
+          ) : null}
+          {media?.attachNote ? (
+            <p className="w-full px-1 text-caption text-faint" data-sw-attach-note="true">
+              {media.attachNote}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+      {canDraw && touch && page ? (
+        <DrawSheet open={sheet} onClose={() => setSheet(false)} owner={owner} src={page.src} native={page.native} title={media.pageTitle} />
+      ) : null}
     </form>
+  )
+}
+
+// A note under a message that has a drawing: where it shows.
+function DrawingNote({ item, currentVersion, onShow }) {
+  if (!item?.drawing?.shapes?.length) return null
+  const previous = Boolean(item.drawing.captureVersion && currentVersion && item.drawing.captureVersion !== currentVersion)
+  const count = item.drawing.shapes.length
+  return (
+    <p className="mt-1.5 flex flex-wrap items-center gap-1 text-xs text-muted" data-sw-message-drawing={previous ? 'previous' : 'current'}>
+      <Brush size={11} className="shrink-0" aria-hidden="true" />
+      {previous ? (
+        <>
+          <span>Drawn on the previous capture ({count === 1 ? 'one shape' : `${count} shapes`}).</span>
+          {onShow ? (
+            <button
+              type="button"
+              className="rounded text-accent underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-accent"
+              onClick={onShow}
+              data-sw-show-drawing="true"
+            >
+              View it on Before
+            </button>
+          ) : null}
+        </>
+      ) : (
+        <span>Drawn on the page ({count === 1 ? 'one shape' : `${count} shapes`}), shown over the frame.</span>
+      )}
+    </p>
   )
 }
 
@@ -238,6 +326,7 @@ export function ThreadView({
   role = null,
   hosted = null,
   onSaveName = null,
+  media = null,
 }) {
   const [editing, setEditing] = useState(false)
   const [confirming, setConfirming] = useState(false)
@@ -262,6 +351,12 @@ export function ThreadView({
   const fixable = Boolean(actions.onFixAgent) && comment.status === 'open'
   const chips = (comment.reopenCount > 0 && !resolved) || Boolean(agentStatus)
   const issueUrl = comment.github?.issue ? safeHttpUrl(comment.github.issue.url) : null
+  const currentVersion = media?.currentVersion?.(comment) || null
+  const showBefore = () => {
+    const element = scroller.current?.querySelector('[data-sw-before-after]')
+    element?.scrollIntoView?.({ block: 'nearest' })
+    element?.querySelector('[data-sw-compare-handle], [role="tab"]')?.focus?.()
+  }
   const menu = [
     actions.onCopyLink
       ? { id: 'link', label: 'Copy link', icon: Link2, run: () => actions.onCopyLink(comment), hook: 'data-sw-copy-link' }
@@ -462,6 +557,8 @@ export function ThreadView({
                 className="block text-ui break-words whitespace-pre-wrap text-fg"
               />
             )}
+            <MessageImages boardId={media?.boardId} images={comment.images} touch={touch} label={`Comment ${comment.id}`} />
+            <DrawingNote item={comment} currentVersion={currentVersion} onShow={showBefore} />
             {comment.anchor ? (
               <Tooltip content={<span className="font-mono text-[11px] break-all">{comment.anchor.selector}</span>}>
                 <p
@@ -514,6 +611,8 @@ export function ThreadView({
                       plain={Boolean(reply.guest)}
                       className="block text-ui break-words whitespace-pre-wrap text-fg"
                     />
+                    <MessageImages boardId={media?.boardId} images={reply.images} touch={touch} label={`Reply ${reply.id}`} />
+                    <DrawingNote item={reply} currentVersion={currentVersion} onShow={showBefore} />
                   </Message>
                 ))}
               </ol>
@@ -550,6 +649,7 @@ export function ThreadView({
           people={people}
           askName={hosted === false}
           onSaveName={onSaveName}
+          media={media}
         />
       ) : (
         <p className="shrink-0 border-t border-line px-3 py-2 text-xs text-muted" data-sw-reply-denied={role || 'true'}>
