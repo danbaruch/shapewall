@@ -8,13 +8,15 @@
 // (info.agent.settingsEditable); the server refuses everyone else anyway.
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Bot, Check, KeyRound, Plug, X } from 'lucide-react'
+import { AlertTriangle, Bot, Check, KeyRound, Plug, RefreshCw, X } from 'lucide-react'
 import { api, forgetSettingsToken } from '../lib/api'
 import { cn } from '../lib/utils'
 import { Badge, Button, Dialog, Input, Spinner, Tabs, TabsContent, TabsList, TabsTrigger, Toggle, ToggleGroup } from '../components/ui'
 import { SettingsHint, TOKEN_HINT } from './SettingsHint'
 import { ConfirmDialog, CopyLine, Field, Override, TestResult } from './AgentSettingsParts'
 import { AgentsCard } from './AgentsCard'
+import { formFrom, reloadView, sameForm } from './agentForm'
+import { useAgentsChanged } from '../lib/agentEvents'
 
 // Used by the chat panel's quick connect too.
 export { ConfirmDialog, CopyLine }
@@ -68,25 +70,6 @@ function hostOf(url) {
   }
 }
 
-function formFrom(view) {
-  const saved = view?.saved || {}
-  return {
-    backend: saved.backend || view?.effective?.backend || 'openai-compatible',
-    baseUrl: saved.baseUrl || '',
-    model: saved.model || '',
-    apiKeyEnv: saved.apiKeyEnv || '',
-    label: saved.label || '',
-    acpCommand: saved.acpCommand || '',
-    keyHosts: saved.keyHosts || [],
-    // null: not set here (an ACP agent says itself; an endpoint is assumed to take images).
-    vision: typeof saved.vision === 'boolean' ? saved.vision : null,
-  }
-}
-
-function sameForm(a, b) {
-  return JSON.stringify(a) === JSON.stringify(b)
-}
-
 // `buzz`: this installation has the Buzz bridge on (info.buzzAvailable); only
 // then is it mentioned. `onDirtyChange` tells the dialog there are unsaved edits.
 // `agents`: where the connected agents are managed. 'inline' shows the
@@ -108,11 +91,15 @@ export function AgentSettings({ onSaved, touch, buzz = false, onDirtyChange, age
   // The answer to a save or a profile change replaces the form: no typing meanwhile.
   const locked = saving || profileBusy
 
+  // The saved settings changed elsewhere while this form had unsaved edits.
+  const [stale, setStale] = useState(false)
+
   const load = useCallback(async () => {
     try {
       const next = await api.get('/api/agent/settings')
       setView(next)
       setForm(formFrom(next))
+      setStale(false)
       setLoadError(null)
     } catch (caught) {
       // 404: this tab's settings token is not the server's (it restarted).
@@ -123,6 +110,22 @@ export function AgentSettings({ onSaved, touch, buzz = false, onDirtyChange, age
   useEffect(() => {
     load()
   }, [load])
+  // Changed elsewhere (another tab, the Agents card, `shapewall settings`,
+  // the agents file): never over unsaved typing (agentForm.js reloadView).
+  // A save or profile change running here reloads when it ends.
+  useAgentsChanged(async () => {
+    if (locked || !view || loadError) return
+    let next
+    try {
+      next = await api.get('/api/agent/settings')
+    } catch {
+      return
+    }
+    const merged = reloadView({ view, form, next })
+    setView(merged.view)
+    setForm(merged.form)
+    if (merged.stale) setStale(true)
+  })
 
   const set = (key) => (event) => {
     const value = typeof event === 'string' ? event : event.target.value
@@ -130,6 +133,9 @@ export function AgentSettings({ onSaved, touch, buzz = false, onDirtyChange, age
     setSavedNote(false)
   }
   const dirty = view ? !sameForm(form, formFrom(view)) : false
+  useEffect(() => {
+    if (!dirty) setStale(false)
+  }, [dirty])
   useEffect(() => {
     onDirtyChange?.(dirty)
     return () => onDirtyChange?.(false)
@@ -313,6 +319,15 @@ export function AgentSettings({ onSaved, touch, buzz = false, onDirtyChange, age
             work on another repository, serve a separate project from that checkout on the computer with your agent login.
           </p>
         </section>
+      ) : null}
+      {stale ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-line p-2.5 text-xs" role="status" data-sw-settings-stale>
+          <RefreshCw size={14} className="shrink-0 text-muted" aria-hidden="true" />
+          <span className="min-w-0 flex-1 text-muted">Agent settings changed elsewhere. Reload to see them.</span>
+          <Button size={touch ? 'touch' : 'xs'} variant="secondary" onClick={load} data-sw-settings-stale-reload>
+            Reload
+          </Button>
+        </div>
       ) : null}
       <section
         className="flex items-start gap-3 rounded-md border border-line bg-surface-2/60 p-3 text-xs"

@@ -12,6 +12,7 @@ import { ChevronDown, Loader2, ShieldQuestion, Sparkles } from 'lucide-react'
 import { Button } from '../components/ui'
 import { api } from '../lib/api'
 import { useResource } from '../lib/hooks'
+import { useAgentsChanged } from '../lib/agentEvents'
 import { cn } from '../lib/utils'
 import { useCommentAgentFocus } from '../chat/agentFocus'
 import { AgentPicker } from '../chat/AgentPicker'
@@ -31,8 +32,10 @@ export default function FixWithAgent({ comment, onFix, onOpenChat = null, busy, 
   const work = useAgentWork(comment)
   const boardId = useContext(BoardContext)?.boardId || null
   const offered = Boolean(onFix) && comment.status === 'open'
-  // The connected agents and the default's name (no polling: read when the thread opens).
+  // The connected agents and the default's name: read when the thread
+  // opens, and again when they change (lib/agentEvents.js; no polling).
   const status = useResource(offered ? '/api/agent/status' : null)
+  useAgentsChanged(status.refetch, offered)
   const [preparing, setPreparing] = useState(false)
   const [failed, setFailed] = useState(null)
   if (!offered) return null
