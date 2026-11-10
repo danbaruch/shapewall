@@ -587,7 +587,7 @@ try {
   })
   await reply(members, 'Mei', 'Rarely. Desktop only is fine for now.', 0.8)
 
-  await comment({
+  const deleteAccount = await comment({
     page: 'settings',
     viewport: 'phone',
     selector: 'button[data-testid="delete-account"]',
@@ -598,6 +598,19 @@ try {
     shot: 'delete-account-phone.png',
     draw: { from: [0.12, 0.2] },
   })
+  // Agent branch mode: the fix waits on a branch of its own until someone applies it.
+  await agent(deleteAccount, 'queued', 0.66)
+  await agent(deleteAccount, 'working', 0.65)
+  await setAgentStatus(config, board.id, deleteAccount.id, 'branch-ready', {
+    now: ago(0.64),
+    branch: `shapewall/comment-${deleteAccount.id}-delete-account`,
+  })
+  await reply(
+    deleteAccount,
+    'shapewall',
+    `The agent’s fix is ready on branch shapewall/comment-${deleteAccount.id}-delete-account. Your checkout is unchanged: apply the branch from the chat to see it on the board, with before and after.`,
+    0.64,
+  )
   await comment({
     page: 'not-found',
     selector: 'a[data-testid="home-link"]',

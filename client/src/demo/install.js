@@ -8,7 +8,7 @@
 import { LayoutDashboard, RotateCcw } from 'lucide-react'
 import { leavePage } from '../lib/hooks'
 import { demoBoardFolders, demoFiles, notifyDemo, setDemoBridge } from '../lib/demo'
-import { notifyAgentsChanged } from '../lib/agentEvents'
+import { notifyAgentsChanged, notifyBatchChanged } from '../lib/agentEvents'
 import { createDemoBackend } from './backend'
 import { consoleTitle } from './titles'
 import { GUEST_NAME, STATE_VERSION, VIEW_AS, seedState } from './fixtures'
@@ -105,9 +105,11 @@ export async function installDemo(app) {
   }
   // The demo's agents (Agents page, chat picker, Fix with): every open view
   // of this page and the others refetches when they change (lib/agentEvents.js).
-  let agentsSeen = JSON.stringify(state.agents ?? null)
+  // How fixes run (state.agentWork: branch mode, batch fixes) counts too.
+  const agentsNow = () => JSON.stringify([state.agents ?? null, state.agentWork ?? null])
+  let agentsSeen = agentsNow()
   const agentsMoved = () => {
-    const now = JSON.stringify(state.agents ?? null)
+    const now = agentsNow()
     if (now === agentsSeen) return
     agentsSeen = now
     notifyAgentsChanged('event')
@@ -124,6 +126,7 @@ export async function installDemo(app) {
     state,
     loadJson,
     save,
+    onBatch: (boardId) => notifyBatchChanged(boardId),
     location: { project: params.get('project'), base: base(), fixturesAt: info.fixturesAt || null },
   })
   if (state !== saved) persist()

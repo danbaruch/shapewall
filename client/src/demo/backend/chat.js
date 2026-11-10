@@ -7,6 +7,7 @@
 
 import { runScriptedTurn } from '../agent.js'
 import { seedChats } from '../fixtures.js'
+import { agentWorkOf } from './batch.js'
 import {
   CHAT_RE,
   QUERY_MAX,
@@ -482,7 +483,13 @@ export function chatRoutes(ctx) {
         // on the thread, anything else puts the comment back as it was.
         const fixing =
           body?.fix === true && params[1].startsWith('comment-') ? store.list.find((item) => item.id === Number(params[1].slice(8))) : null
-        const before = fixing ? { agentStatus: fixing.agentStatus ?? null, agentStatusAt: fixing.agentStatusAt ?? null } : null
+        const before = fixing
+          ? {
+              agentStatus: fixing.agentStatus ?? null,
+              agentStatusAt: fixing.agentStatusAt ?? null,
+              agentBranch: fixing.agentBranch ?? null,
+            }
+          : null
         if (fixing && fixing.status === 'open') {
           fixing.agentStatus = 'working'
           fixing.agentStatusAt = iso()
@@ -511,7 +518,11 @@ export function chatRoutes(ctx) {
               const approved =
                 reply?.status === 'done' && reply.cards.some((card) => card.kind === 'permission' && card.state === 'approved')
               if (approved) {
-                fixing.agentStatus = 'done'
+                // Work on a branch (Agents > How fixes run): the fix waits on
+                // its own branch, as on a real install (src/agent/branch-mode.js).
+                const { branchMode } = agentWorkOf(state)
+                fixing.agentStatus = branchMode.enabled ? 'branch-ready' : 'done'
+                if (branchMode.enabled) fixing.agentBranch = branchMode.prefix + 'comment-' + fixing.id
                 fixing.agentStatusAt = iso()
                 fixing.replies = fixing.replies || []
                 const replyId = Math.max(0, ...fixing.replies.map((item) => Number(item.id) || 0)) + 1
@@ -521,7 +532,9 @@ export function chatRoutes(ctx) {
                   id: replyId,
                   author: 'Coding agent',
                   agent: true,
-                  body: 'Made the change and recaptured the page. Have a look, then resolve this or reply "not yet". (Demo: nothing was edited.)',
+                  body: branchMode.enabled
+                    ? 'Made the change on its own branch and recaptured the page. Apply the branch or discard it from the thread. (Demo: nothing was edited.)'
+                    : 'Made the change and recaptured the page. Have a look, then resolve this or reply "not yet". (Demo: nothing was edited.)',
                   createdAt: iso(),
                 })
                 fixing.updatedAt = iso()

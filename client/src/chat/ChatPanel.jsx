@@ -40,6 +40,7 @@ import { useAnswerRatings } from './actions'
 import { AllowForChat } from './allowForChat'
 import { AutoAllowSettings } from './composerParts'
 import BranchModeToggle from './BranchModeToggle'
+import { BatchProgress } from '../board/BatchFixes'
 import {
   MENTIONS_MAX,
   TEXT_FILES_MAX,
@@ -96,6 +97,8 @@ export default function ChatPanel({
   // The composer's "@" list and "/" commands (composer track).
   people = [],
   onRunChecks = null,
+  // Batch fixes (board/BatchFixes.jsx): the board's batch as a card here.
+  batch = null,
 }) {
   // The test result of a one-click Connect, shown above the new thread.
   const [connected, setConnected] = useState(null)
@@ -827,6 +830,19 @@ export default function ChatPanel({
         <>
           <NaturalDownloadStrip touch={touch} />
           {/* Above the thread, which may already hold messages from an agent connected before. */}
+          {batch?.offered && batch.batch ? (
+            <div className="shrink-0 px-3 pt-3" data-sw-chat-batch="true">
+              <BatchProgress
+                batch={batch.batch}
+                boardId={boardId}
+                touch={touch}
+                className="rounded-lg border border-line bg-surface-2/60 p-2.5"
+                onOpenThread={batch.onOpenThread}
+                onCancel={batch.cancel}
+                onDismiss={batch.dismiss}
+              />
+            </div>
+          ) : null}
           {connected ? (
             <div className="shrink-0 px-3 pt-3">
               <ConnectedNote result={connected} onDismiss={() => setConnected(null)} touch={touch} />

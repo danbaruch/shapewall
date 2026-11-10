@@ -69,6 +69,7 @@ import { BoardViewContext } from './boardView'
 import { splitFrameKey, viewportLabel } from './viewports'
 import { CanvasControls } from './CanvasControls'
 import { FocusedFrameBar } from './FrameBar'
+import { BatchConfirm, useBatchFixes } from './BatchFixes'
 import { motionDuration } from '../lib/motion'
 
 const noop = () => {}
@@ -790,7 +791,34 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     updateParams({ vp: value === defaultMode ? null : value })
   }
   const allOpen = comments.filter((item) => item.status === 'open').length
+  // Batch fixes: offered only when Fix with agent is, and turned on in Agents.
+  const fixAvailable = Boolean(
+    chatAvailable && !data?.migratedTo?.readOnly && info?.agent?.fixWithAgent && info?.agent?.configured && (!info?.hosted || DEMO),
+  )
+  const batchFixes = useBatchFixes({
+    boardId,
+    enabled: fixAvailable,
+    // Each fix moves its comment and recaptures its page: both follow.
+    onProgress: () => {
+      commentsQuery.refetch()
+      view.refetch()
+    },
+  })
+  const [batchConfirm, setBatchConfirm] = useState(null)
+  const openBatchThread = (commentId) => {
+    const comment = comments.find((item) => item.id === commentId)
+    if (comment) focusComment(comment)
+    else openChat(threadForComment(commentId))
+  }
+  const batchProps = {
+    ...batchFixes,
+    agentName: info?.agent?.label || 'agent',
+    boardId,
+    onOpenThread: openBatchThread,
+    onConfirm: (ids) => setBatchConfirm(ids),
+  }
   const panelProps = {
+    batch: batchProps,
     comments: visibleComments,
     filter,
     counts,
@@ -910,6 +938,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     : null
   const chatProps = {
     boardId,
+    batch: batchProps,
     fixRequest,
     onFixDone: () => {
       setFixRequest(null)
@@ -1111,6 +1140,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
               setShareOpen={setShareOpen}
               expanded={sidebarOpen}
               onToggle={toggleSidebar}
+              quiet={drawingOn}
               pages={
                 data
                   ? {
@@ -1394,7 +1424,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                     busy={busy}
                     touch={!wide}
                   />
-                ) : journey ? (
+                ) : journey && !drawingOn ? (
                   <JourneyBar
                     key={journey.id}
                     journey={journey}
@@ -1456,6 +1486,26 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
         </>
       ) : null}
 
+      {batchFixes.offered ? (
+        <BatchConfirm
+          open={Boolean(batchConfirm)}
+          onClose={() => {
+            setBatchConfirm(null)
+            batchFixes.setError(null)
+          }}
+          ids={batchConfirm || []}
+          comments={comments}
+          max={batchFixes.max}
+          agentName={batchProps.agentName}
+          targetTitle={targetTitle}
+          busy={batchFixes.busy}
+          error={batchFixes.error}
+          touch={!wide}
+          onStart={async (ids) => {
+            if (await batchFixes.start(ids)) setBatchConfirm(null)
+          }}
+        />
+      ) : null}
       <BoardDialogs
         info={info}
         boardId={boardId}

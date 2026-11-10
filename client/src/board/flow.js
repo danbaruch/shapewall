@@ -298,6 +298,7 @@ export const COMMENT_STATES = [
   { id: 'agent-queued', label: 'Agent queued' },
   { id: 'agent-working', label: 'Agent working' },
   { id: 'agent-done', label: 'Agent done' },
+  { id: 'agent-branch', label: 'Fix ready on branch' },
   { id: 'needs-human', label: 'Needs a person' },
   { id: 'reopened', label: 'Reopened' },
   { id: 'replies', label: 'With replies' },
@@ -312,6 +313,8 @@ export function commentInState(comment, state) {
       return comment.agentStatus === 'working'
     case 'agent-done':
       return comment.agentStatus === 'done'
+    case 'agent-branch':
+      return comment.agentStatus === 'branch-ready'
     case 'needs-human':
       return comment.agentStatus === 'needs-human'
     case 'reopened':
