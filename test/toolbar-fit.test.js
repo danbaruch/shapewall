@@ -10,11 +10,14 @@ const SIZE = { name: 14, ui: 13, xs: 12, count: 11 }
 const text = (value, font) => value.length * 7 * (SIZE[font] / 13)
 
 const LONG = 'A much longer board name for the whole team'
+// An open journey with a name far past the Views button's cap.
+const JOURNEY = 'Upgrade from the free plan to Plus with a coupon and a team invite'
 // A local board: every control the toolbar can show.
-const local = (title = 'Marketing site') =>
+const local = (title = 'Marketing site', journey = null) =>
   toolbarItems({
     text,
     title,
+    journey,
     viewports: ['Desktop', 'Tablet', 'Phone', 'All'],
     capture: true,
     comment: true,
@@ -22,9 +25,10 @@ const local = (title = 'Marketing site') =>
     settings: true,
   })
 // The demo export: no Capture, no Settings.
-const demo = () =>
+const demo = (journey = null) =>
   toolbarItems({
     text,
+    journey,
     title: 'Acme storefront',
     viewports: ['Desktop', 'Tablet', 'Phone', 'All'],
     comment: true,
@@ -109,7 +113,7 @@ test('the search box collapses before any button loses its label', () => {
 })
 
 test('from 1024 px up, with the sidebar collapsed or at its widest, nothing overlaps or leaves the toolbar', () => {
-  for (const items of [local(), demo(), local(LONG)]) {
+  for (const items of [local(), demo(), local(LONG), local(LONG, JOURNEY), demo(JOURNEY)]) {
     for (const width of widths) {
       const { fit, name, left, right, centre, zoneGap } = layout(items, width)
       const inner = width - 2 * TOOLBAR.pad
@@ -166,4 +170,40 @@ test('item widths follow the controls: a running capture and a failed one widen 
   // Compact panel toggles keep the comment count.
   const panels = toolbarItems({ text, title: 'x', panels: { comments: 120 } }).right.find((item) => item.id === 'panels')
   assert.ok(panels.compact > 40 && panels.compact < panels.full)
+})
+
+test('an open journey: Views carries its name up to the cap and a clear button, collapsed it is one icon', () => {
+  const view = (journey) => local('Marketing site', journey).left.find((item) => item.id === 'view')
+  const plain = view(null)
+  const short = view('Sign up')
+  const long = view(JOURNEY)
+  assert.equal(long.full.length, FIT_STEPS.length, 'one width per step')
+  assert.ok(short.full[0] > plain.full, 'the name and clear button are wider than the word')
+  assert.ok(long.full[0] > short.full[0])
+  // The name stops at each step's cap: icon and padding (41), the name, the clear button (27).
+  TOOLBAR.journey.forEach((cap, step) => assert.equal(long.full[step], 41 + cap + 27))
+  for (let step = 1; step < FIT_STEPS.length; step += 1) assert.ok(long.full[step] <= long.full[step - 1], 'shortens at ' + step)
+  assert.deepEqual(view('A' + JOURNEY).full, long.full, 'a longer name costs nothing more')
+  // A short name never truncates.
+  assert.equal(new Set(short.full).size, 1)
+  assert.equal(long.compact, plain.compact)
+  assert.equal(long.at, 'view')
+})
+
+test('an open journey keeps the search centred wherever it was centred before, and costs at most two steps', () => {
+  for (const [before, after] of [
+    [local(), local('Marketing site', JOURNEY)],
+    [demo(), demo(JOURNEY)],
+    [local(LONG), local(LONG, JOURNEY)],
+  ]) {
+    for (const width of widths) {
+      const was = fitToolbar({ width, ...before })
+      const now = fitToolbar({ width, ...after })
+      if (was.centred) assert.equal(now.centred, true, 'centred at ' + width)
+      assert.ok(now.step >= was.step && now.step <= was.step + 2, 'step ' + was.step + ' to ' + now.step + ' at ' + width)
+    }
+  }
+  for (const width of widths.filter((value) => value >= 768)) {
+    assert.equal(fitToolbar({ width, ...local('Marketing site', JOURNEY) }).centred, true, 'centred at ' + width)
+  }
 })

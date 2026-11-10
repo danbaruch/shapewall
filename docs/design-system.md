@@ -130,13 +130,14 @@ scrolling keeps momentum and `scrollIntoView` on phones).
 ## The board toolbar
 
 On desktop the toolbar has three zones, the way canvas tools lay it out. Left, where you are and how you look at it: the board
-switcher, the screen-size toggle, View options and, on a local board, Capture with its status (otherwise the status dot sits by the
+switcher, the screen-size toggle, Views (the journeys and what the canvas shows; an open journey's name and a clear button take
+its place on the button) and, on a local board, Capture with its status (otherwise the status dot sits by the
 name). Centre, find: the "Go to page or journey" box, centred on the toolbar itself, 240 to 320 px wide. Right, act and open panels:
 the viewer note, Comment (the primary action: `soft` while comment mode is off, filled `default` with `aria-pressed="true"`
 while it is on, agreeing with the comment-mode banner), the Comments, Agent and Checks toggles as one tight group (`Toggle variant="flat"`:
 the open panel's toggle takes the selected chip look, none while the panel is closed), then Agent settings. Zones
 are 20 px apart, controls inside a zone 6 px, with no dividers. When it gets narrow, `client/src/board/toolbarFit.js` drops words in a
-fixed order (search to an icon, the panel toggles, View, then the screen-size toggle to icons with tooltips) and the board name
+fixed order (search to an icon, the panel toggles, Views (an open journey's name shortens first), then the screen-size toggle to icons with tooltips) and the board name
 truncates a little at each step, never below about 8 characters. Accessible names, shortcuts and tooltips never change.
 `test/toolbar-fit.test.js` checks the order and that nothing overlaps from a 1024 px window with the widest sidebar up. The phone
 toolbar is a separate compact bar. `ToggleGroup` options take a `tooltip` for icon-only labels.
