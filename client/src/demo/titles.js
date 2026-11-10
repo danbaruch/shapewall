@@ -8,6 +8,7 @@ const SECTION_TITLES = {
   access: 'Access',
   tokens: 'API tokens',
   audit: 'Audit log',
+  agents: 'Agents',
   feedback: 'Agent feedback',
   settings: 'Settings',
 }

@@ -105,10 +105,11 @@ colours meet WCAG AA on `surface` and `surface-2` (7:1 for High contrast), in li
 | `Skeleton`                                                                                | A loading placeholder shaped like what is coming (`className` sets the size). `aria-hidden`; give the screen one `role="status"` label.                                                                                                                           |
 
 Local installations offer **Workspace Console** from the board profile menu, including when no agent is connected or the agent owner key is absent.
-The local Console uses the hosted Console's header, sidebar and card layout with real boards from this installation. Its **Settings** section
-covers this browser's appearance, installation details and updates. Agent configuration keeps its existing owner permissions; opening
-Console or General settings does not unlock it. Hosted boards also label their workspace-management link **Workspace Console**. Local Console does
-not create hosted accounts, workspaces or memberships. Inside Console, Projects and Settings stay in the sidebar; the profile menu
+The local Console uses the hosted Console's header, sidebar and card layout with real boards from this installation. Its **Agents** section
+holds everything about agents (the Agents card, the connection details and the endpoint form); its **Settings** section covers this
+browser's appearance, installation details and updates. Agent configuration keeps its existing owner permissions; opening Console,
+Agents or General settings does not unlock it. Hosted boards also label their workspace-management link **Workspace Console**. Local Console does
+not create hosted accounts, workspaces or memberships. Inside Console, Projects, Agents and Settings stay in the sidebar; the profile menu
 contains identity and appearance rather than duplicate workspace navigation. The earlier `?settings=general` board link remains supported.
 
 The app sidebar (`AppRail`, `components/app-rail.jsx`) is a labelled menu when expanded and a rail of icons when collapsed. Collapsed,

@@ -67,8 +67,8 @@ stop another instance's work. Overlapping connection tests in the same managemen
 
 ## Several native agents, one choice per thread
 
-The home for your agents is the **Agents** card in the local Workspace Console (**Workspace > Settings**, `/console?section=settings`;
-[Agents in Workspace settings](#agents-in-workspace-settings)). Connect Claude Code, Codex, goose, or Gemini CLI from the CLIs found on
+The home for your agents is the **Agents** page in the local Workspace Console (**Workspace > Agents**, `/console?section=agents`;
+[Agents in the Workspace Console](#agents-in-the-workspace-console)). Connect Claude Code, Codex, goose, or Gemini CLI from the CLIs found on
 this server's `PATH`. Each Connect shows the exact fixed command for confirmation, saves it in your private agent settings file, and
 tests an ACP handshake. A failed handshake restores the previous settings. It does not send a prompt or verify your provider login. No
 CLI, adapter, subscription, or background service is installed for you.
@@ -102,11 +102,14 @@ project's answer limit, rate limits, and ACP process budget; opening another pro
 Each profile starts its own agent session on the Shapewall computer. To message agents that already run in a Buzz chat channel
 instead, see the optional [Buzz bridge](buzz.md).
 
-## Agents in Workspace settings
+## Agents in the Workspace Console
 
-The local Workspace Console's **Settings** page (`/console?section=settings`, **Workspace** in the board's sidebar) has an **Agents**
-card, the one place to manage agents. The chat's agent dialog (**Connect another agent...**) and the host-only settings window
-(`shapewall settings`) show the same card; the board's general **Settings > Agent** tab links to it.
+The local Workspace Console's **Agents** page (`/console?section=agents`, **Workspace** in the board's sidebar, listed before **Agent
+feedback** and **Settings**) is the one place for everything about agents: the **Connected agents** card to manage them, and below it
+the connection details and the OpenAI-compatible endpoint form. The console's **Settings** page keeps only this browser's appearance and
+the installation details. An old `/console?section=settings#agents` link opens **Agents**. The chat's agent dialog (**Connect another
+agent...**) and the host-only settings window (`shapewall settings`) show the same card; the board's general **Settings > Agent** tab and
+the agent picker's **Agent settings** item link to the Agents page.
 
 - **Every agent Shapewall knows how to run** (Claude Code, Codex, goose, Gemini CLI) with its state on this machine: **Connected**
   (with its state, **Test connection** and **Remove**, and how to sign in when it is not signed in); **Found, not connected**
@@ -122,11 +125,12 @@ card, the one place to manage agents. The chat's agent dialog (**Connect another
 
 Connecting, removing, testing and choosing the default run commands as the machine's owner, so they need the settings token (the owner
 link `shapewall serve` prints). Without it the card is read-only and says how to open that link; it asks nothing of the agent routes.
-Self-hosted multiplayer (`shapewall hosted`) has its own workspace Settings (project agent tokens), which does not show this card.
+Self-hosted multiplayer (`shapewall hosted`) has its own workspace Settings (project agent tokens) and no Agents page. The public demo
+shows the card read-only on its console's Agents page.
 
 ## Source folder and agent sign-in
 
-**Settings > Agent** shows **Source folder on the Shapewall computer**. That is the real directory containing this project's config,
+**Settings > Agent** (and the console's **Agents** page) shows **Source folder on the Shapewall computer**. That is the real directory containing this project's config,
 fixed by the server; the browser cannot choose another working directory. Native agents use that folder for every board in this project.
 The **Allow this?** connection card repeats **Source folder for every board in this project** before you confirm the command.
 Capturing a website gives the agent no access to its source: the agent edits the folder the config is in, nothing else.

@@ -698,7 +698,7 @@ test('two scripted agents: status lists both, a chat switches, the second answer
       ['second', 'Second agent', 'ready', null],
     ],
   )
-  assert.match(status.settingsUrl, /^console\.html#\/w\/ws_[a-f0-9]{24}\/settings#agents$/)
+  assert.match(status.settingsUrl, /^console\.html#\/w\/ws_[a-f0-9]{24}\/agents$/)
 
   const path = '/api/agent/boards/demo/threads/board'
   const before = (await call('GET', path)).json

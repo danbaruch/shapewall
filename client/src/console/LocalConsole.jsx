@@ -1,5 +1,16 @@
-import { useEffect, useRef, useState } from 'react'
-import { ArrowUpRight, Building2, FolderKanban, LayoutDashboard, LogOut, MessageSquareText, Settings, UserRound } from 'lucide-react'
+import { useEffect, useRef } from 'react'
+import {
+  ArrowUpRight,
+  Bot,
+  Building2,
+  FolderKanban,
+  LayoutDashboard,
+  LogOut,
+  MessageSquareText,
+  Plug,
+  Settings,
+  UserRound,
+} from 'lucide-react'
 import { AppRail, useSidebarExpanded } from '../components/app-rail'
 import { api } from '../lib/api'
 import { leavePage, useMediaQuery, useParams, useResource } from '../lib/hooks'
@@ -8,13 +19,14 @@ import { Badge, Button, EmptyState, Spinner, TooltipProvider } from '../componen
 import { ProfileMenu } from '../components/profile-menu'
 import { ConsoleFooter } from './legal-links'
 import { PairingScreen } from '../pairing/Pairing'
-import { LocalSettingsContent } from '../settings/LocalSettings'
-import { Card, LoadError, Loading, Logo, PageHeader } from './components'
+import { AgentDetails, GeneralSettings } from '../settings/LocalSettings'
+import { Card, CardHeader, LoadError, Loading, Logo, PageHeader } from './components'
 import { AgentFeedbackView } from './pages/agent-feedback'
-import { LocalAgents } from './pages/local-agents'
+import { AGENTS_DESCRIPTION, LocalAgents } from './pages/local-agents'
 
 const SECTIONS = [
   ['projects', 'Projects', FolderKanban],
+  ['agents', 'Agents', Bot],
   ['feedback', 'Agent feedback', MessageSquareText],
   ['settings', 'Settings', Settings],
 ]
@@ -25,11 +37,12 @@ export default function LocalConsole({ account = null, onSignOut = null }) {
   const info = useResource('/api/info')
   const list = useResource('/api/boards')
   const [params, updateParams] = useParams()
-  const section = ['settings', 'feedback'].includes(params.get('section')) ? params.get('section') : 'projects'
+  // The Agents card used to head Settings: an old `?section=settings#agents` link opens Agents.
+  const asked = params.get('section') === 'settings' && window.location.hash === '#agents' ? 'agents' : params.get('section')
+  const section = SECTIONS.some(([id]) => id === asked) ? asked : 'projects'
   const wide = useMediaQuery('(min-width: 1024px)')
   const [expanded, toggle] = useSidebarExpanded(wide)
   const updates = useRef(null)
-  const [settingsTab, setSettingsTab] = useState('general')
   const boards = Array.isArray(list.data?.boards) ? list.data.boards : []
   const name = info.data?.title || 'Shapewall'
   const navigate = (value) => updateParams({ section: value === 'projects' ? null : value })
@@ -38,8 +51,19 @@ export default function LocalConsole({ account = null, onSignOut = null }) {
     void list.refetch()
   }
   useEffect(() => {
-    document.title = `${{ settings: 'Settings', feedback: 'Agent feedback' }[section] || 'Projects'} · Shapewall`
+    document.title = `${SECTIONS.find(([id]) => id === section)?.[1] || 'Projects'} · Shapewall`
   }, [section])
+  // Phones: the section pills scroll sideways; keep the current one in view.
+  useEffect(() => {
+    document.querySelector('[data-sw-local-nav-pills] [aria-current="page"]')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+  }, [section])
+  // Rewrite that old link to the Agents page's own address, so Settings opens Settings again.
+  useEffect(() => {
+    if (asked === 'agents' && params.get('section') === 'settings') {
+      window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search)
+      updateParams({ section: 'agents' })
+    }
+  }, [asked, params, updateParams])
 
   if (info.error?.code === 'pairing_required' || list.error?.code === 'pairing_required') return <PairingScreen />
 
@@ -144,7 +168,7 @@ export default function LocalConsole({ account = null, onSignOut = null }) {
                     <p className="truncate text-sm font-semibold text-fg">{name}</p>
                     <Badge className="mt-1">Local installation</Badge>
                   </div>
-                  <ul className="flex gap-1 lg:sticky lg:top-20 lg:flex-col">
+                  <ul className="sw-scroll-x -mx-3 flex gap-1 overflow-x-auto px-3 sm:-mx-6 sm:px-6" data-sw-local-nav-pills>
                     {sections.map(([id, label, Icon]) => (
                       <li key={id}>
                         <Button
@@ -189,34 +213,43 @@ export default function LocalConsole({ account = null, onSignOut = null }) {
                   </Card>
                 ) : section === 'feedback' ? (
                   <AgentFeedbackView baseUrl="/api/agent/feedback" get={api.get} touch={!wide} />
-                ) : section === 'settings' ? (
+                ) : section === 'agents' ? (
                   <>
-                    <PageHeader title="Settings" description="Agents, preferences for this browser, and this installation." />
-                    <div className="grid gap-5">
+                    <PageHeader title="Agents" description={AGENTS_DESCRIPTION} />
+                    <div className="grid grid-cols-[minmax(0,1fr)] gap-5">
                       {info.data?.agent ? (
                         <LocalAgents
                           agent={info.data.agent}
                           touch={!wide}
                           onChanged={info.refetch}
-                          onOpenEndpoint={() => {
-                            setSettingsTab('agent')
-                            document.querySelector('[data-sw-local-console-settings]')?.scrollIntoView({ block: 'start' })
-                          }}
+                          onOpenEndpoint={() =>
+                            document.querySelector('[data-sw-local-console-agent-details]')?.scrollIntoView({ block: 'start' })
+                          }
                         />
                       ) : null}
-                      <Card data-sw-local-console-settings>
-                        <LocalSettingsContent
-                          info={info.data}
-                          boardCount={boards.length}
-                          onSaved={info.refetch}
-                          touch={!wide}
-                          agentsHome={Boolean(info.data?.agent)}
-                          tab={settingsTab}
-                          onTabChange={setSettingsTab}
-                          onOpenUpdates={() => updates.current?.open()}
+                      <Card className="scroll-mt-20" data-sw-local-console-agent-details>
+                        <CardHeader
+                          icon={Plug}
+                          title="Chat connection"
+                          description="What the board chat uses now, the source folder agents work in, and an OpenAI-compatible endpoint."
                         />
+                        <div className="px-4 py-4 sm:px-5">
+                          <AgentDetails info={info.data} onSaved={info.refetch} touch={!wide} agentsHome={Boolean(info.data?.agent)} />
+                        </div>
                       </Card>
                     </div>
+                  </>
+                ) : section === 'settings' ? (
+                  <>
+                    <PageHeader title="Settings" description="Preferences for this browser, and this installation." />
+                    <Card className="p-5" data-sw-local-console-settings>
+                      <GeneralSettings
+                        info={info.data}
+                        boardCount={boards.length}
+                        touch={!wide}
+                        onOpenUpdates={() => updates.current?.open()}
+                      />
+                    </Card>
                   </>
                 ) : (
                   <>

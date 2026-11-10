@@ -169,6 +169,9 @@ test('view as: each role sees what it may do, on the board and in the console', 
     assert.match(page.url(), /#\/w\/ws_[a-f0-9]{24}\/members$/)
     nav = await navSections(page)
     assert.ok(nav.includes('invites') && nav.includes('audit'), nav.join(','))
+    // Agents has its own page, right before Agent feedback and Settings.
+    const order = [...new Set(nav)].filter((id) => ['audit', 'agents', 'feedback', 'settings'].includes(id))
+    assert.deepEqual(order, ['audit', 'agents', 'feedback', 'settings'], nav.join(','))
 
     // The guest has no console.
     await page.click('[data-sw-account-menu]')
@@ -452,15 +455,22 @@ test('Fix with ...: the caret runs the fix once with the second scripted agent a
   }
 })
 
-test('the demo console shows the Agents card read-only with a demo note', async () => {
+test('the demo console has its own Agents page: the Agents card read-only with a demo note', async () => {
   const { context, page, errors } = await open()
   try {
-    await page.goto(consoleUrl('/settings#agents'))
+    await page.goto(consoleUrl('/agents'))
     const card = page.locator('[data-sw-local-console-agents] [data-sw-agents-card="demo"]')
     await card.waitFor({ timeout: 20000 })
     assert.match(await card.textContent(), /This is a demo/)
     assert.equal(await card.locator('[data-sw-agent-row]').count(), 2)
     assert.equal(await card.locator('button').count(), 0, 'nothing to press in the demo')
+    assert.equal((await page.locator('h1').first().textContent()).trim(), 'Agents')
+    assert.match(await page.title(), /^Agents · /)
+    assert.equal((await page.locator('[data-sw-nav="agents"][aria-current="page"]').count()) > 0, true)
+    // Settings keeps the general workspace settings only.
+    await page.locator('[data-sw-nav="settings"]').first().click()
+    await page.waitForSelector('[data-sw-settings-name]')
+    assert.equal(await page.locator('[data-sw-local-console-agents]').count(), 0)
     assert.deepEqual(errors, [])
   } finally {
     await context.close()

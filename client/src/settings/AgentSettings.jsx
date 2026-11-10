@@ -91,7 +91,7 @@ function sameForm(a, b) {
 // then is it mentioned. `onDirtyChange` tells the dialog there are unsaved edits.
 // `agents`: where the connected agents are managed. 'inline' shows the
 // Agents card here (the chat's agent dialog, the host-only window); 'link'
-// points to it in Workspace settings (the board's general Settings); 'none'
+// points to the Workspace Console's Agents page (the board's general Settings); 'none'
 // leaves it out (the Agents card's own "Other" dialog).
 export function AgentSettings({ onSaved, touch, buzz = false, onDirtyChange, agents = 'inline' }) {
   const [view, setView] = useState(null)
@@ -686,10 +686,10 @@ export function AgentSettings({ onSaved, touch, buzz = false, onDirtyChange, age
   )
 }
 
-// The board's general Settings: the agents are managed in Workspace
-// settings (console/LocalConsole.jsx, the Agents card), so only a summary
-// and the way there.
-export const AGENTS_HREF = '/console?section=settings#agents'
+// The board's general Settings: the agents are managed on the Workspace
+// Console's Agents page (console/LocalConsole.jsx, the Agents card), so only a
+// summary and the way there.
+export const AGENTS_HREF = '/console?section=agents'
 function AgentsLink({ view, touch }) {
   const connected = view.profiles || []
   const current = connected.find((item) => item.default)
@@ -702,7 +702,7 @@ function AgentsLink({ view, touch }) {
           {connected.length
             ? `${connected.map((item) => item.label).join(', ')} connected${current ? `. New chats and fixes use ${current.label}` : ''}.`
             : 'No agent connected yet.'}{' '}
-          Connect, remove and choose the default in Workspace settings.
+          Connect, remove and choose the default on the Agents page of the Workspace Console.
         </p>
       </div>
       <Button asChild size={touch ? 'touch' : 'sm'}>
