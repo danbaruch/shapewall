@@ -17,6 +17,7 @@ import { splitCommand } from '../../watch.js'
 import { ID_RE } from '../../config.js'
 import { parseAllowEntry } from './egress-proxy.js'
 import { DEFAULT_LIMITS, checkLimits } from './runtime.js'
+import { sizeBytes } from './disk.js'
 
 export const PROFILES = ['openai-compatible', 'claude-code', 'codex']
 export const DEFAULT_BUDGET = { turns: 20, tokens: 200000, minutes: 15 }
@@ -148,11 +149,13 @@ export function validateStarterAgent(raw, problems, { boardIds = [] } = {}) {
     else {
       try {
         // Within what one review job should take on this machine.
-        const asked = { ...DEFAULT_LIMITS, ...raw.limits }
-        if (/g$/.test(asked.memory) && Number.parseInt(asked.memory, 10) > 16) throw new Error('memory: at most 16g')
+        // Compared in bytes: "999999m" is a size too, and must not get past the cap.
+        const asked = checkLimits({ ...DEFAULT_LIMITS, ...raw.limits })
+        if (sizeBytes(asked.memory) > sizeBytes('16g')) throw new Error('memory: at most 16g')
+        if (sizeBytes(asked.tmp) > sizeBytes('16g')) throw new Error('tmp: at most 16g')
         if (Number(asked.cpus) > 8) throw new Error('cpus: at most 8')
-        if (/g$/.test(asked.disk) && Number.parseInt(asked.disk, 10) > 64) throw new Error('disk: at most 64g')
-        limits = checkLimits(asked)
+        if (sizeBytes(asked.disk) > sizeBytes('64g')) throw new Error('disk: at most 64g')
+        limits = asked
       } catch (error) {
         problems.push(`starterAgent.limits.${error.message}`)
       }
@@ -184,7 +187,7 @@ export function validateStarterAgent(raw, problems, { boardIds = [] } = {}) {
 // --max-disk SIZE: the disk cap on the mounted folder for this run.
 function diskFlag(limits, value) {
   if (value === undefined) return limits
-  if (typeof value !== 'string' || !/^[1-9]\d{0,5}[mg]$/.test(value) || (/g$/.test(value) && Number.parseInt(value, 10) > 64)) {
+  if (typeof value !== 'string' || !/^[1-9]\d{0,5}[mg]$/.test(value) || sizeBytes(value) > sizeBytes('64g')) {
     throw new Error('--max-disk: a size such as 2g or 500m, at most 64g')
   }
   return { ...limits, disk: value }

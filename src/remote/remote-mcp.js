@@ -7,6 +7,7 @@ import fs from 'node:fs'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import * as z from 'zod'
+import { untrustedJson } from '../feedback.js'
 import { cropAround } from '../png.js'
 import { AGENT_STATUSES } from '../store.js'
 
@@ -106,7 +107,7 @@ export async function createRemoteMcpServer({ remote, readOnly = false }) {
         comments = comments.filter((item) => ids.has(item.page?.id || item.variant?.pageId))
       }
       if (agentStatus) comments = comments.filter((item) => (item.agentStatus || 'none') === agentStatus)
-      return json({ ...report, count: comments.length, comments })
+      return json(untrustedJson({ ...report, count: comments.length, comments }))
     }),
   )
 
@@ -127,7 +128,7 @@ export async function createRemoteMcpServer({ remote, readOnly = false }) {
     tool(async ({ board, id, image = 'crop', includeGuests = false }) => {
       const target = boardFor(board)
       const { comment: item } = await remote.comment(target, id, { guests: includeGuests })
-      const result = json({ board: target, comment: item })
+      const result = json(untrustedJson({ board: target, comment: item }))
       if (image !== 'none' && item.files.screenshot) {
         const png = await remote.download(item.files.screenshot)
         let data = png

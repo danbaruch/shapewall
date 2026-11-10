@@ -175,6 +175,7 @@ test('context options: layout height, device, reducedMotion', () => {
   assert.ok(phone.isMobile && phone.hasTouch)
   assert.equal(phone.storageState, 'state.json')
   assert.equal(phone.reducedMotion, 'reduce', 'the default stays reduce')
+  assert.equal(phone.colorScheme, 'light', 'captures never follow the host machine scheme')
 })
 
 test('actions: every new type and option normalizes; old actions stay exactly as before', () => {

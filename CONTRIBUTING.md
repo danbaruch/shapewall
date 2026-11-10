@@ -36,7 +36,8 @@ The unit suite runs four files at a time and the end-to-end suite one file at a 
 
 ## Checks before you open a pull request
 
-Continuous integration does not run on pull requests yet, so run the checks on your machine:
+CI runs lint, the unit tests, the build, the package check and the website tests on every pull request (Node 22, Linux). Run them on
+your machine first:
 
 ```sh
 npm run lint
@@ -45,7 +46,8 @@ npm run build
 npm run check:pack    # the npm tarball has the runtime and nothing from development
 ```
 
-Then the parts that match your change:
+Then the parts that match your change (CI does not run the browser suite on pull requests, so say in the pull request which of
+these you ran):
 
 - **Board, capture or sign-in changes:** `npm run build:demo` and `npm run test:e2e` (or the e2e files that cover what you touched,
   for example `node --test test/e2e/board.e2e.test.js`). Look at the changed screens at desktop and phone width, down to 320 px, and

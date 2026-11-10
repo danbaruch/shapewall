@@ -79,7 +79,24 @@ function cleanMessage(message) {
         return [{ type: 'text', text: '[Shapewall: a part that is not text or an inline image was removed]' }]
       })
   } else out.content = ''
-  if (message.role === 'assistant' && Array.isArray(message.tool_calls)) out.tool_calls = message.tool_calls
+  // Earlier calls of the agent's own function tools, and only those fields.
+  if (message.role === 'assistant' && Array.isArray(message.tool_calls)) {
+    const calls = message.tool_calls.flatMap((call) =>
+      isObject(call) && (call.type === undefined || call.type === 'function') && isObject(call.function)
+        ? [
+            {
+              ...(typeof call.id === 'string' ? { id: call.id.slice(0, 200) } : {}),
+              type: 'function',
+              function: {
+                name: String(call.function.name || '').slice(0, 64),
+                arguments: typeof call.function.arguments === 'string' ? call.function.arguments : '{}',
+              },
+            },
+          ]
+        : [],
+    )
+    if (calls.length) out.tool_calls = calls
+  }
   if (message.role === 'tool' && typeof message.tool_call_id === 'string') out.tool_call_id = message.tool_call_id
   if (typeof message.name === 'string') out.name = message.name.slice(0, 64)
   return out

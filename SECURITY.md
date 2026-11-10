@@ -2,16 +2,26 @@
 
 ## Supported versions
 
-Security fixes go into the latest release. Shapewall is pre-1.0; please upgrade to the newest version before reporting.
+Security fixes go into the latest release only. Shapewall is pre-1.0, so please upgrade to the newest version and check that the
+problem is still there before you report it.
 
 ## Reporting a vulnerability
 
-Please report privately, not in a public issue: use GitHub's **Report a vulnerability** button on the repository's Security tab (private
-vulnerability reporting). Include the version, steps to reproduce, and the impact you see. We aim to acknowledge reports within a week and
-to agree on a disclosure date with you.
+Please report privately, not in a public issue:
 
-If you cannot use that button, open an issue that asks for a security contact and says nothing else about the problem. A maintainer
-will reply with a private channel.
+1. **GitHub private vulnerability reporting** (preferred): the **Report a vulnerability** button on the repository's
+   [Security tab](https://github.com/danbaruch/shapewall/security).
+2. If you cannot use GitHub's private reporting, open a public issue that says only "security contact needed" (no details) and
+   a maintainer will reach out.
+
+Include:
+
+- the Shapewall version (`shapewall --version`) and how you run it (`serve`, `hosted`, the starter agent, an export);
+- steps to reproduce, ideally with a minimal config or page;
+- what an attacker gains, and what they need first (a comment on a shared board, a page you capture, a link you open).
+
+Shapewall has one maintainer. Expect an acknowledgement within a few days and a first assessment soon after. We will agree on a
+disclosure date with you before anything is made public.
 
 ## Scope
 
@@ -21,8 +31,9 @@ Of most interest:
 - Secrets from captured pages (form values, tokens) surviving into live HTML.
 - Reading files outside the output folder through the server, or writing to it without the JSON/Host protections.
 - Cross-site requests or DNS rebinding against a server on 127.0.0.1.
+- The self-hosted team server (`shapewall hosted`, in beta): accounts, sessions, roles, share links and project tokens.
+- The starter agent sandbox, the MCP server and the agent bridges escaping the limits their docs describe.
 
-Also in scope: the self-hosted team server (`shapewall hosted`): accounts, sessions, roles, share links and project tokens.
-
-Out of scope: a local board (`shapewall serve`) exposed beyond localhost without an authenticating proxy (see docs/deployment.md), and
-screenshots showing what the captured page showed.
+Out of scope: a local board (`shapewall serve`) exposed beyond localhost without an authenticating proxy (see
+[docs/deployment.md](docs/deployment.md)), screenshots showing what the captured page showed, and the
+[known limits](https://shapewall.com/docs/security#known-limits) the security docs already list.

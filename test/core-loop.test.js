@@ -91,7 +91,7 @@ test('commands print the way shapewall was started', () => {
   assert.equal(invocation({ root: clone, argv1: `${clone}/bin/shapewall.js`, cwd: clone }).command, 'node bin/shapewall.js')
   const unknown = invocation({ root: clone, argv1: '/somewhere/else.js' })
   assert.equal(unknown.command, 'shapewall')
-  assert.match(unknown.note, /npx github:danbaruch\/shapewall/)
+  assert.match(unknown.note, /npx shapewall/)
 })
 
 test('doctor --install-browser needs no config: a missing one is a skip there, a FAIL otherwise', async () => {

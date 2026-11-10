@@ -16,7 +16,7 @@ import {
   writeMigration,
 } from '../store.js'
 import { listJourneys } from '../journeys.js'
-import { createRemote, pushDefinition, pushFiles, remoteOrigin, remoteSettings } from './remote.js'
+import { createRemote, pushDefinition, pushFiles, readCaptureFile, remoteOrigin, remoteSettings } from './remote.js'
 import { login } from './login.js'
 import { portableChecks } from '../checks/transport.js'
 import { safeOut } from './terminal.js'
@@ -145,22 +145,7 @@ function portableDefinition(config, board) {
 // symlink must never turn a capture upload into arbitrary local-file access.
 function readCapture(config, file, cap) {
   cap = Math.min(typeof cap === 'number' && Number.isFinite(cap) ? cap : 0, 11 * 1024 * 1024)
-  const relative = path.relative(config.outputDir, file)
-  if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('Capture file is outside the output directory.')
-  let current = config.outputDir
-  for (const part of relative.split(path.sep)) {
-    current = path.join(current, part)
-    if (fs.lstatSync(current).isSymbolicLink()) throw new Error('Refusing to upload a symlinked capture or capture directory.')
-  }
-  const fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0))
-  try {
-    const stat = fs.fstatSync(fd)
-    if (!stat.isFile() || stat.size > cap)
-      throw new Error(`Capture ${path.basename(file)} exceeds the server limit or is not a regular file; nothing was silently skipped.`)
-    return fs.readFileSync(fd)
-  } finally {
-    fs.closeSync(fd)
-  }
+  return readCaptureFile(config, file, cap)
 }
 
 // The route has a 2 MiB wire cap. Leave room for the envelope and keys;

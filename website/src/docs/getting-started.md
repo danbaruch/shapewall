@@ -11,19 +11,31 @@ invited (a GitHub 404 means the signed-in account has no access). The [live demo
 
 Use **Node.js 22.13 or newer**. Basic capture works on any Node 22; local accounts and the team server need 22.13.
 
+On a bare Linux server, a container or WSL, the downloaded Chromium also needs system libraries: run
+`sudo npx playwright install-deps chromium` once (`shapewall doctor` tells you when this is the problem).
+
+Platforms: Shapewall is developed and tested on Linux. macOS should work and is not yet verified by the maintainers. Windows is
+untested; the PowerShell lines in these docs are a convenience. If you run it on macOS or Windows, please
+[open an issue](https://github.com/danbaruch/shapewall/issues) with what worked and what did not.
+
 ### In your project
 
 ```sh
 npm install --save-dev %INSTALL_PACKAGE%
-npx --no -- shapewall doctor --install-browser
-npx --no -- shapewall init --base-url http://localhost:3000 --sitemap
-npx --no -- shapewall capture
-npx --no -- shapewall serve --open
+npx shapewall doctor --install-browser
+npx shapewall init --base-url http://localhost:3000
+npx shapewall capture
+npx shapewall serve --open
 ```
 
-The install takes a minute: npm fetches the repository with git and builds the board. In an empty folder, run `npm init -y` first.
-`npx --no --` runs the copy installed in the project and never downloads anything. The rest of these docs shorten the command to
-`shapewall`.
+In an empty folder, run `npm init -y` first. `npx shapewall` runs the copy installed in the project. The rest of these docs shorten
+the command to `shapewall`. To try it without adding it to a project, the same `npx shapewall ...` lines work on their own: npx
+downloads the package the first time.
+
+### From GitHub
+
+For a build that is not released yet, install from the repository instead: `npm install --save-dev github:danbaruch/shapewall`
+(add `#<commit or tag>` to pin one). That takes a minute, because npm clones the repository and builds the board.
 
 ### From a clone
 
@@ -63,12 +75,14 @@ server prints: [local account setup](/docs/local-accounts#tailscale-account-orig
 In the project you want to review:
 
 ```sh
-shapewall init --base-url http://localhost:3000 --sitemap
+shapewall init --base-url http://localhost:3000
 ```
 
 This writes `shapewall.config.json` in the current folder and adds `.shapewall/` (captures and comments), `shapewall-export/` (static
-exports) and `*.auth.json` (login state) to your `.gitignore`. `--sitemap` on its own takes the pages from `<base URL>/sitemap.xml`
-(give it a URL or a file for another one). Without it, open the file and list your pages:
+exports) and `*.auth.json` (login state) to your `.gitignore`. With your site running, `init` finds its pages: `<base URL>/sitemap.xml`
+if there is one, else the links on the home page (two levels deep, up to 25 pages, same site only, plain GETs without cookies). If
+the site is not up, it writes just the home page and tells you to start it and run `init --force` again. `--sitemap URL|FILE` takes
+another sitemap and `--no-discover` skips the lookup. To add or change pages, edit the file:
 
 ```json
 {
@@ -86,7 +100,7 @@ exports) and `*.auth.json` (login state) to your `.gitignore`. `--sitemap` on it
 Each page needs an `id` (lowercase, dashes) and a `path`. `group` decides which section of the wall it sits in, and `note` is shown
 on the tile, handy for "signed-out state" or "sample data". `waitFor` is a selector that must be visible before the shot.
 
-The board takes its title from the domain of `--base-url`; rename it with `title`. A running `shapewall serve` picks up edits to the
+The board takes its title from the home page's `<title>` (else the domain of `--base-url`); rename it with `title`. A running `shapewall serve` picks up edits to the
 file (title, pages, journeys) on the next refresh of the board, no restart needed.
 
 ## Capture

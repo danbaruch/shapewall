@@ -13,14 +13,14 @@ const flag = typeof __SHAPEWALL_LAUNCHED__ !== 'undefined' ? __SHAPEWALL_LAUNCHE
 
 export const LAUNCHED = String(flag ?? '').trim() === '1'
 
-// Flip to true once `shapewall` is on the npm registry: the install command and the docs then use the registry.
-export const NPM_PUBLISHED = false
+// True once `shapewall` is on the npm registry: the install command and the docs then use the registry.
+export const NPM_PUBLISHED = true
 
 export const GITHUB_REPO = 'danbaruch/shapewall'
 export const GITHUB_URL = `https://github.com/${GITHUB_REPO}`
 
-// How to add Shapewall to a project. Until the package is on npm it installs from GitHub: npm clones the
-// repository and builds the board (the package's prepare script), so no registry release is needed.
+// How to add Shapewall to a project: from the npm registry once it is published, before that from GitHub (npm clones
+// the repository and builds the board with the package's prepare script).
 export const INSTALL_PACKAGE = NPM_PUBLISHED ? 'shapewall' : `github:${GITHUB_REPO}`
 // The command on the marketing pages. Null before launch: the repository is not readable without an invitation.
 export const INSTALL_COMMAND = LAUNCHED ? `npm install --save-dev ${INSTALL_PACKAGE}` : null
@@ -30,3 +30,6 @@ export const ACCESS_LABEL = LAUNCHED ? 'Free to use' : 'Private early access'
 // One sentence on the two licenses, the same wording wherever the site states them.
 export const LICENSE_SUMMARY =
   'The local tool is open source under Apache 2.0. The self-hosted team server is source-available under the Functional Source License and becomes Apache 2.0 two years after each release.'
+// Self-hosted multiplayer (`shapewall hosted`) is in beta. The same sentence wherever the site introduces it.
+export const BETA_NOTE =
+  'Beta: it works and is tested with automated browsers, but it has not yet had a real multi-person team on it or real phone passkeys verified, so run it for people you trust and keep backups.'

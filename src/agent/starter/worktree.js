@@ -49,6 +49,8 @@ const PROTECTED_BRANCHES = new Set(['main', 'master', 'trunk', 'develop', 'produ
 const KEEP_BASE = new Set(['.gitattributes', '.gitmodules'])
 const SKIP_PARTS = new Set(['.git', 'node_modules'])
 export const FILE_MAX = 100 * 1024 * 1024
+// The default bound on the bytes of changed files one commit reads in.
+export const COMMIT_MAX = 2 * 1024 ** 3
 const RUN_DIR_RE = /^\d{14}-[a-f0-9]{6}$/
 
 // The environment for git: the person's, without anything that would point
@@ -166,7 +168,8 @@ function blobId(format, data) {
 
 // Reads one path under `root` without following a symlink anywhere:
 // { kind: 'missing' } | { kind: 'refused', reason } | { kind: 'entry', mode, data }.
-export function readEntry(root, rel) {
+// `maxSize`: refuse a file larger than this without reading it.
+export function readEntry(root, rel, { maxSize = FILE_MAX } = {}) {
   const parts = rel.split('/')
   let current = root
   for (let index = 0; index < parts.length - 1; index += 1) {
@@ -190,6 +193,7 @@ export function readEntry(root, rel) {
   if (!stat.isFile()) return { kind: 'missing' }
   if (stat.nlink > 1) return { kind: 'refused', reason: 'a hard link' }
   if (stat.size > FILE_MAX) return { kind: 'refused', reason: 'over 100 MB' }
+  if (stat.size > maxSize) return { kind: 'refused', reason: "over the run's size limit" }
   let fd
   try {
     fd = fs.openSync(full, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK)
@@ -207,6 +211,13 @@ export function readEntry(root, rel) {
   }
 }
 
+// Whether a symlink at `rel` with this target points outside the repository.
+export function linkLeaves(rel, target) {
+  if (!target || path.posix.isAbsolute(target) || /^[A-Za-z]:|^\\\\/.test(target)) return true
+  const resolved = path.posix.normalize(path.posix.join(path.posix.dirname(rel), target))
+  return resolved === '..' || resolved.startsWith('../')
+}
+
 const skipped = (rel, exclude) => {
   const parts = rel.split('/')
   if (parts.some((part) => SKIP_PARTS.has(part))) return true
@@ -217,7 +228,9 @@ const skipped = (rel, exclude) => {
 // store and the files that keep the base's version) as the agent, on the
 // run's new branch. Returns { committed, commit, files, added, modified,
 // deleted, refused } (files is all of added, modified and deleted).
-export async function commitWorktree({ tree, message, exclude = [] }) {
+// `maxBytes` bounds what is read in for changed files: `du` sees a sparse file
+// as small, and a folder of them could keep the host reading for hours.
+export async function commitWorktree({ tree, message, exclude = [], maxBytes = COMMIT_MAX }) {
   const { gitDir, dir, base, branch, format, root, runId } = tree
   const index = indexFile(root, runId, 'commit')
   const extraEnv = { GIT_INDEX_FILE: index }
@@ -241,12 +254,15 @@ export async function commitWorktree({ tree, message, exclude = [] }) {
     const added = []
     const deleted = []
     const refused = []
+    let total = 0
+    // Symlinks that point outside the repository (absolute, or up past its root).
+    const links = []
     const gitlinks = [...baseEntries].filter(([, entry]) => entry.mode === '160000').map(([rel]) => rel)
     for (const rel of new Set([...baseEntries.keys(), ...untracked])) {
       if (skipped(rel, exclude) || KEEP_BASE.has(rel.split('/').pop())) continue
       if (gitlinks.some((link) => rel === link || rel.startsWith(`${link}/`))) continue
       const before = baseEntries.get(rel)
-      const now = readEntry(dir, rel)
+      const now = readEntry(dir, rel, { maxSize: Math.max(0, maxBytes - total) })
       if (now.kind === 'refused') {
         refused.push({ path: rel, reason: now.reason })
         continue
@@ -261,13 +277,15 @@ export async function commitWorktree({ tree, message, exclude = [] }) {
       }
       const oid = blobId(format, now.data)
       if (before && before.oid === oid && before.mode === now.mode) continue
+      total += now.data.length
       const written = (await run(['hash-object', '-w', '--no-filters', '--stdin'], { input: now.data })).trim()
       if (written !== oid) throw new Error(`git wrote ${written} for ${rel}, expected ${oid}`)
       updates.push(`${now.mode} ${oid}\t${rel}\0`)
       files.push(rel)
       if (!before) added.push(rel)
+      if (now.mode === '120000' && linkLeaves(rel, now.data.toString('utf8'))) links.push(rel)
     }
-    if (!files.length) return { committed: false, commit: null, files: [], added: [], modified: [], deleted: [], refused }
+    if (!files.length) return { committed: false, commit: null, files: [], added: [], modified: [], deleted: [], links: [], refused }
     await run(['update-index', '-z', '--index-info'], { input: updates.join('') })
     const treeId = (await run(['write-tree'])).trim()
     const env = {
@@ -281,7 +299,16 @@ export async function commitWorktree({ tree, message, exclude = [] }) {
     // Only a new branch: the zero old value makes update-ref refuse an existing one.
     await run(['update-ref', '-m', 'shapewall starter agent', `refs/heads/${branch}`, commit, zero])
     const modified = files.filter((rel) => !added.includes(rel) && !deleted.includes(rel)).sort()
-    return { committed: true, commit, files: files.sort(), added: added.sort(), modified, deleted: deleted.sort(), refused }
+    return {
+      committed: true,
+      commit,
+      files: files.sort(),
+      added: added.sort(),
+      modified,
+      deleted: deleted.sort(),
+      links: links.sort(),
+      refused,
+    }
   } finally {
     fs.rmSync(index, { force: true })
     fs.rmSync(`${index}.lock`, { force: true })
@@ -370,7 +397,10 @@ export async function pushBranch({ tree, remote }) {
   const { branch } = tree
   const last = branch.split('/').pop()
   if (PROTECTED_BRANCHES.has(branch) || PROTECTED_BRANCHES.has(last)) throw new Error(`refusing to push "${branch}"`)
-  await git(['--git-dir', tree.gitDir, 'push', '--no-verify', remote, `refs/heads/${branch}:refs/heads/${branch}`], {
+  // No tags (push.followTags) and no submodule pushes (push.recurseSubmodules)
+  // from the person's config: the branch is all that goes.
+  const refspec = `refs/heads/${branch}:refs/heads/${branch}`
+  await git(['--git-dir', tree.gitDir, 'push', '--no-verify', '--no-follow-tags', '--recurse-submodules=no', remote, refspec], {
     cwd: tree.repo,
     timeoutMs: 180000,
   })

@@ -3,10 +3,24 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.2.1 - 2026-11-10
 
+- On npm: `npm install --save-dev shapewall` or `npx shapewall`. Installing from GitHub still works for unreleased builds.
 - Fixed: the `shapewall settings` page loads its theme script and icon when Shapewall is installed under a folder whose name starts
   with a dot (such as `~/.local`), so it follows your light or dark preference.
+- Website: shapewall.com has a dark mode, with a System, Light and Dark choice.
+- Docs: self-hosted multiplayer (`shapewall hosted`) is labelled beta, with what that means; the security docs list known limits.
+- Security: a review of the starter agent, the MCP server and the remote client. `push` and `share` no longer follow symlinks out of
+  the captures folder, `watch --remote` no longer writes through one, MCP results carry the same untrusted-data framing as
+  `comments --json`, answers from a hosted server are size-capped, and the starter agent closes gaps in its limit caps, its
+  pull-request guard and its cleanup. The security docs gain a Known limits section.
+- The live HTML view keeps the colour scheme it was captured in instead of following the viewer's dark mode.
+- Connecting an agent from the Agent panel and from Settings now gives one list of agents; a chat can switch to another connected
+  agent when the first is not signed in, and a failed sign-in no longer posts on the comment.
+- The comment-mode banner no longer covers the focused page's toolbar.
+- Capture and `doctor` say when Chromium is installed but missing system libraries (bare Linux, containers, WSL).
+- `init --base-url` finds your site's real pages (its sitemap, else the links on its pages) instead of writing sample pages.
+- CI runs lint, unit tests, the build and the package check on every pull request.
 
 ## 0.2.0 - 2026-11-09
 

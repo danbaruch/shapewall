@@ -245,3 +245,16 @@ test('a lookup that never answers counts as internal and is asked again', async 
   assert.equal(calls, 2)
   clearTimeout(keepAlive)
 })
+
+test('a Chromium that is installed but will not start is not reported as missing', async () => {
+  const { browserLaunchHelp } = await import('../src/capture/capture.js')
+  const engine = { executablePath: () => '/cache/chromium/chrome' }
+  const libs = new Error('browserType.launch: Target page, context or browser has been closed\nlibnss3.so: cannot open shared object file')
+  const linux = browserLaunchHelp(libs, engine, { exists: () => true, platform: 'linux' })
+  assert.match(linux, /installed but does not start/)
+  assert.match(linux, /install-deps chromium/)
+  assert.doesNotMatch(linux, /has no Chromium yet/)
+  assert.match(browserLaunchHelp(libs, engine, { exists: () => true, platform: 'darwin' }), /browser\.channel/)
+  assert.match(browserLaunchHelp(libs, engine, { exists: () => false, platform: 'linux' }), /has no Chromium yet/)
+  assert.match(browserLaunchHelp(new Error("Executable doesn't exist at /x"), engine, { exists: () => true }), /has no Chromium yet/)
+})

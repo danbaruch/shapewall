@@ -21,7 +21,7 @@ import { BeforeAfter, CaptureIllustration, JourneyIllustration, MapIllustration 
 import { AgentTerminal } from '../components/terminal.jsx'
 import { Faq } from '../components/faq.jsx'
 import { GITHUB_URL } from '../routes.js'
-import { GITHUB_LABEL, LAUNCHED, LICENSE_SUMMARY } from '../launch.js'
+import { BETA_NOTE, GITHUB_LABEL, LAUNCHED, LICENSE_SUMMARY } from '../launch.js'
 import boardOverview from '../assets/shots/board-overview.webp'
 import boardOverview960 from '../assets/shots/board-overview-960.webp'
 import liveComment960 from '../assets/shots/live-comment-960.webp'
@@ -345,10 +345,21 @@ function Teams() {
     <section className="py-16 sm:py-28" aria-labelledby="teams">
       <Container className="grid gap-12 lg:grid-cols-[1fr_1.2fr] lg:gap-16">
         <div>
-          <SectionHead eyebrow="Teams" title={<span id="teams">One wall for the whole team, on your own server</span>}>
+          <SectionHead
+            eyebrow="Teams"
+            title={
+              <>
+                <span id="teams">One wall for the whole team, on your own server</span>{' '}
+                <span className="align-middle">
+                  <Badge tone="amber">Beta</Badge>
+                </span>
+              </>
+            }
+          >
             Shapewall is single-player by default. When a team wants the same wall, run <code>shapewall hosted</code> on a machine you
             control: captures are uploaded from your computers, and nothing goes to a service of ours.
           </SectionHead>
+          <p className="mt-4 max-w-2xl text-[14.5px] leading-6 text-slate">{BETA_NOTE}</p>
           <div className="mt-8 flex flex-wrap gap-3">
             <Button to="/features#teams" variant="secondary">
               <Users className="size-4" aria-hidden="true" /> How teams work

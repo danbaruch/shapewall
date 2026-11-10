@@ -68,22 +68,27 @@ const isHttp = (value) => /^https?:\/\//i.test(value)
 // The response body, read in pieces and given up as soon as it passes the
 // cap: a server that streams without end cannot fill memory. A response
 // without a readable stream (a test double) is read whole, then checked.
-async function readBounded(response, source) {
-  const tooLarge = () => new Error(`${source}: larger than ${BYTES_MAX / 1024 / 1024} MB`)
+// Page discovery (src/discover.js) uses it too, with a smaller cap.
+export async function readBounded(response, source, max = BYTES_MAX) {
+  const tooLarge = () => new Error(`${source}: larger than ${+(max / 1024 / 1024).toFixed(1)} MB`)
   const declared = Number(response.headers?.get?.('content-length'))
-  if (Number.isFinite(declared) && declared > BYTES_MAX) {
+  if (Number.isFinite(declared) && declared > max) {
     await response.body?.cancel?.().catch(() => {})
     throw tooLarge()
   }
   const reader = response.body?.getReader?.()
-  if (!reader) return Buffer.from(await response.arrayBuffer())
+  if (!reader) {
+    const whole = Buffer.from(await response.arrayBuffer())
+    if (whole.length > max) throw tooLarge()
+    return whole
+  }
   const chunks = []
   let size = 0
   for (;;) {
     const { done, value } = await reader.read()
     if (done) break
     size += value.byteLength
-    if (size > BYTES_MAX) {
+    if (size > max) {
       await reader.cancel().catch(() => {})
       throw tooLarge()
     }

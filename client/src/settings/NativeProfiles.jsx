@@ -40,7 +40,9 @@ export function NativeProfiles({ view, disabled, touch, onBusy, onChanged, buzz 
       setBusy(false)
     }
   }
-  const saved = view.saved?.profiles || []
+  // Every connected agent (src/agent/settings-routes.js view.profiles); an
+  // older server sends only the saved list.
+  const saved = view.profiles || view.saved?.profiles || []
   return (
     <section className="space-y-3 rounded-md border border-line p-3" data-sw-native-profiles>
       <h3 className="text-sm font-semibold text-fg">Native agent profiles</h3>
@@ -55,8 +57,11 @@ export function NativeProfiles({ view, disabled, touch, onBusy, onChanged, buzz 
       ) : (
         <>
           {saved.map((profile) => (
-            <div key={profile.id} className="flex items-center justify-between gap-2 text-sm text-fg">
-              <span>{profile.label}</span>
+            <div key={profile.id} className="flex items-center justify-between gap-2 text-sm text-fg" data-sw-native-profile={profile.id}>
+              <span>
+                {profile.label}
+                {profile.default ? <span className="text-xs text-muted"> (new chats use it)</span> : null}
+              </span>
               <Button size={touch ? 'touch' : 'sm'} disabled={busy || disabled} onClick={() => remove(profile.id)}>
                 Remove profile
               </Button>

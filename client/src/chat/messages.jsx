@@ -16,6 +16,7 @@ import { AgentDestination } from './header'
 import { excerpt } from './text'
 import { AnswerActions } from './actions'
 import { FileChips, MentionChips } from './composerParts'
+import { isSetupError } from './profiles'
 import { hideNextSteps } from '../../../src/agent/next-steps.js'
 import { splitAtCards } from '../../../src/agent/reply-text.js'
 
@@ -232,6 +233,8 @@ export const AssistantMessage = memo(function AssistantMessage({
   onRate = null,
   onRegenerate = null,
   regenerateDisabled = false,
+  tryOther = null,
+  onTryOther = null,
 }) {
   // Regenerate keeps earlier versions (oldest first); null shows the current one.
   const versions = message.versions || []
@@ -325,7 +328,30 @@ export const AssistantMessage = memo(function AssistantMessage({
             {message.error.message}
           </p>
         ) : null}
-        {!pending && onRetry ? (
+        {!pending && tryOther && onTryOther && !earlier ? (
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size={touch ? 'touch' : 'sm'}
+              variant="default"
+              onClick={() => onTryOther(current, request)}
+              disabled={retryDisabled}
+              data-sw-chat-try-other={tryOther.id}
+            >
+              Try with {tryOther.label}
+            </Button>
+            {onRetry ? (
+              <Button
+                size={touch ? 'touch' : 'sm'}
+                variant="secondary"
+                onClick={() => onRetry(request)}
+                disabled={retryDisabled}
+                data-sw-chat-review-retry
+              >
+                Edit and retry
+              </Button>
+            ) : null}
+          </div>
+        ) : !pending && onRetry ? (
           <Button
             size={touch ? 'touch' : 'sm'}
             variant="secondary"
@@ -426,12 +452,14 @@ export function MessageList({
   onRate = null,
   onRegenerate = null,
   regenerateDisabled = false,
+  otherAgent = null,
+  onTryOther = null,
 }) {
   const announcement = useReplyAnnouncement(shown, liveRun)
   // The same functions for every message on every render (they call the
   // latest ones), so memo keeps the messages that did not change.
   const latest = useRef(null)
-  latest.current = { onAnswer, onRead, onRetry, onContinue, onUndo, onRecapture, onEdit, onVersion, onRate, onRegenerate }
+  latest.current = { onAnswer, onRead, onRetry, onContinue, onUndo, onRecapture, onEdit, onVersion, onRate, onRegenerate, onTryOther }
   const call = useMemo(() => {
     const out = {}
     for (const name of [
@@ -445,6 +473,7 @@ export function MessageList({
       'onVersion',
       'onRate',
       'onRegenerate',
+      'onTryOther',
     ])
       out[name] = (...args) => latest.current[name]?.(...args)
     return out
@@ -523,6 +552,8 @@ export function MessageList({
                 readAloud={readAloud}
                 touch={touch}
                 onRetry={index === shown.length - 1 && ['error', 'stopped'].includes(message.status) ? call.onRetry : null}
+                tryOther={index === shown.length - 1 && otherAgent && isSetupError(message.error) ? otherAgent : null}
+                onTryOther={onTryOther ? call.onTryOther : null}
                 onContinue={index === shown.length - 1 && !liveRun && onContinue ? call.onContinue : null}
                 retryDisabled={retryDisabled}
                 request={shown.slice(0, index).findLast((item) => item.role === 'user') || null}

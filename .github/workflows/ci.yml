@@ -1,16 +1,20 @@
 name: CI
 
-# Runs when a maintainer starts it from the Actions tab. Contributors run the
-# same checks locally (CONTRIBUTING.md); add pull_request and push triggers
-# here to run them on every change.
+# The quick checks (lint, unit tests, build, package contents, website) run on
+# every pull request and on every push to main. The full browser suite (e2e)
+# runs only when a maintainer starts this workflow from the Actions tab.
+# No job uses a secret, so pull requests from forks run the same checks.
 on:
+  pull_request:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -20,28 +24,50 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
       - run: npm ci
       - run: npm run lint
-      - name: Full package tests with a per-file deadline
+      - name: Unit tests with a per-file deadline
         run: npm run pretest && node --test --test-concurrency=4 --test-timeout=120000 test/*.test.js
-        timeout-minutes: 10
       - run: npm run build
       - name: Package contents (no tests, fixtures or captures in the tarball)
         run: npm run check:pack
 
+  website:
+    name: Website (build and SEO checks)
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - run: npm ci
+      - run: npm test
+
   e2e:
     name: End to end (Playwright Chromium)
-    # The full browser suite.
+    # The full browser suite: manual only (Actions tab, "Run workflow").
     if: github.event_name == 'workflow_dispatch'
     timeout-minutes: 20
     runs-on: ubuntu-latest
     needs: check
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -62,20 +88,3 @@ jobs:
           retention-days: 3
           path: e2e-screenshots
           if-no-files-found: ignore
-
-  website:
-    name: Website (build and SEO checks)
-    timeout-minutes: 10
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: website
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: website/package-lock.json
-      - run: npm ci
-      - run: npm test

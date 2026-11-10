@@ -139,6 +139,32 @@ export function validateUserEntry(raw) {
   return { entry: problems.length ? null : entry, problems }
 }
 
+// Native profiles are the one list of connected agents. The default
+// connection (backend "acp" with acpCommand) is what new chats use; it is
+// either one of the profiles (the same command) or, in settings saved before
+// profiles existed (one-click Connect saved only that), a command of its own,
+// which is shown and kept as a profile from then on (legacyProfile).
+
+// The saved profile that runs the default connection's command, or null.
+export function profileForDefault(entry) {
+  if (entry?.backend !== 'acp' || !entry.acpCommand) return null
+  return (entry.profiles || []).find((profile) => profile.acpCommand === entry.acpCommand) || null
+}
+
+// The default ACP command as a profile, when no saved profile runs it.
+// `known`: [{ id, label, command }] (the agents Shapewall knows, acp/detect.js)
+// names it; else it is "Agent command". The id never clashes with a saved one.
+export function legacyProfile(entry, known = []) {
+  if (entry?.backend !== 'acp' || !entry.acpCommand || profileForDefault(entry)) return null
+  const agent = known.find((item) => item.command === entry.acpCommand)
+  const taken = new Set((entry.profiles || []).map((profile) => profile.id))
+  const base = agent?.id || 'agent-command'
+  let id = base
+  for (let n = 2; taken.has(id); n += 1) id = `${base}-${n}`
+  const label = (agent?.label || entry.label || 'Agent command').slice(0, 80)
+  return { id, label, acpCommand: entry.acpCommand }
+}
+
 // A file anyone else may write could redirect your key or start a command:
 // on POSIX the file and its folder must be yours and not group/world-writable.
 function unsafeOwnership(file) {

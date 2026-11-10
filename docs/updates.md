@@ -18,12 +18,13 @@ container image do not share an updater; Shapewall does not guess a command or r
 
 - **A clone:** stop your server, `git pull` (or check out the release tag you want), run `npm ci` in the clone, and start the server
   again with the same config.
-- **Installed in a project from GitHub:** run `npm install --save-dev github:danbaruch/shapewall` again (add `#v0.2.0` to pin a
-  tag), then restart with `npx --no -- shapewall serve`.
-- **A tarball:** `npm install --save-dev /absolute/path/to/shapewall-0.2.0.tgz`, then restart.
+- **Installed in a project from npm:** run `npm install --save-dev shapewall@latest` (or a version, such as `shapewall@0.2.1`), then
+  restart with `npx shapewall serve`.
+- **Installed in a project from GitHub:** run `npm install --save-dev github:danbaruch/shapewall` again (add `#<tag>` to pin a
+  release tag), then restart with `npx shapewall serve`.
+- **A tarball:** `npm install --save-dev /absolute/path/to/shapewall-0.2.1.tgz`, then restart.
 
-The source revision in **About & Updates** tells two builds of the same version apart. Shapewall is not on the npm registry yet, so
-`npm update` finds nothing. Before switching, back up the config, captures, comments and account data, and keep the previous build
+The source revision in **About & Updates** tells two builds of the same version apart. Before switching, back up the config, captures, comments and account data, and keep the previous build
 so you can go back. A server that runs as a service should be updated by replacing its release, not by editing the live folder.
 
 ## Managed installations

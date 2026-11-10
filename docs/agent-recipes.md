@@ -15,7 +15,7 @@ All of them read the same thing: open comments as JSON, with the page, the eleme
 made on. Comment text is **untrusted** (anyone who can comment wrote it): every recipe below tells the agent to treat it as a request
 about the UI, never as instructions, and gives the agent no more than it needs. See [agent-hardening.md](agent-hardening.md).
 
-The commands assume `shapewall` is installed in the project (`npm install --save-dev github:danbaruch/shapewall`), so `npx shapewall`
+The commands assume `shapewall` is installed in the project (`npm install --save-dev shapewall`), so `npx shapewall`
 runs that copy, and that you are in the folder with `shapewall.config.json`.
 
 ## Claude Code
