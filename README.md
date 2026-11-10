@@ -55,13 +55,14 @@ In the project you want to review, with its dev server running:
 ```sh
 npm install --save-dev github:danbaruch/shapewall     # npm fetches the repository and builds the board: about a minute
 npx --no -- shapewall doctor --install-browser         # downloads the Chromium that captures use
-npx --no -- shapewall init --base-url http://localhost:3000 --sitemap
+npx --no -- shapewall init --base-url http://localhost:3000
 npx --no -- shapewall capture
 npx --no -- shapewall serve --open
 ```
 
-`--base-url` is your running dev server, staging or production. `--sitemap` reads `<base URL>/sitemap.xml`; give it a URL or a file
-for another sitemap, or leave it out and list your pages in `shapewall.config.json` (the example pages it writes need editing first).
+`--base-url` is your running dev server, staging or production. `init` finds its pages: `<base URL>/sitemap.xml` if there is one,
+else the links on the home page (two levels deep, up to 25 pages, same site only). If the site is not up it writes just the home page
+and says what to do next. `--sitemap URL|FILE` takes another sitemap; `--no-discover` skips the lookup.
 In an empty folder, run `npm init -y` before the install.
 
 `npx --no --` runs the copy installed in the project and never downloads a package. The rest of this README shortens the command to
@@ -344,10 +345,13 @@ Commands
                             press Enter to save; Ctrl-C, browser close or timeout discards
                             saves a private .shapewall-auth/*.auth.json; config stays unchanged
   init                      write shapewall.config.json in this folder
-      --base-url URL        the site to capture (default http://localhost:3000)
-      --sitemap [URL|FILE]  take the pages from this sitemap instead of the examples
+      --base-url URL        the site to capture (default http://localhost:3000); finds its
+                            pages: <base URL>/sitemap.xml, else links from the home page
+                            (2 levels, 25 pages, same site only)
+      --sitemap [URL|FILE]  take the pages from this sitemap instead
                             (alone: <base URL>/sitemap.xml)
                             (with --limit, --group, --exclude as for sitemap)
+      --no-discover         do not look for pages: write the home page only
       --force               overwrite an existing config
   sitemap [URL|FILE]        add the pages of a sitemap.xml (or sitemap index) to the config
                             (default: the board's "sitemap" setting)

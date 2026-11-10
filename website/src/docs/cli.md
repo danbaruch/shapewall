@@ -415,10 +415,13 @@ Commands
                             press Enter to save; Ctrl-C, browser close or timeout discards
                             saves a private .shapewall-auth/*.auth.json; config stays unchanged
   init                      write shapewall.config.json in this folder
-      --base-url URL        the site to capture (default http://localhost:3000)
-      --sitemap [URL|FILE]  take the pages from this sitemap instead of the examples
+      --base-url URL        the site to capture (default http://localhost:3000); finds its
+                            pages: <base URL>/sitemap.xml, else links from the home page
+                            (2 levels, 25 pages, same site only)
+      --sitemap [URL|FILE]  take the pages from this sitemap instead
                             (alone: <base URL>/sitemap.xml)
                             (with --limit, --group, --exclude as for sitemap)
+      --no-discover         do not look for pages: write the home page only
       --force               overwrite an existing config
   sitemap [URL|FILE]        add the pages of a sitemap.xml (or sitemap index) to the config
                             (default: the board's "sitemap" setting)

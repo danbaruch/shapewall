@@ -78,9 +78,9 @@ test('init: the hint names only what is left; a bad --base-url fails before writ
   const dir = tempDir('onboarding-hint')
   const file = path.join(dir, 'shapewall.config.json')
   const plain = await run(['init', '--config', file])
-  assert.match(plain.text, /Next: set baseUrl and list your pages in shapewall\.config\.json/)
+  assert.match(plain.text, /Next: start your site and run ".*init --base-url <its URL> --force" so Shapewall finds its pages/)
   assert.equal(loadConfig(file).title, 'My site')
-  const withBase = await run(['init', '--config', file, '--force', '--base-url', 'https://example.org'])
+  const withBase = await run(['init', '--config', file, '--force', '--base-url', 'https://example.org', '--no-discover'])
   assert.match(withBase.text, /Next: list your pages in shapewall\.config\.json \(or add them from a sitemap with ".*sitemap <URL>"\)/)
   assert.equal(loadConfig(file).title, 'example.org')
 
@@ -88,7 +88,11 @@ test('init: the hint names only what is left; a bad --base-url fails before writ
   await assert.rejects(run(['init', '--config', other, '--base-url', 'example.org']), /--base-url: an http\(s\) URL/)
   assert.equal(fs.existsSync(other), false)
 
-  assert.match(initNextHint({ baseUrl: 'x', givenBaseUrl: false, fromSitemap: false, file: 'site.json' }), /list your pages in site\.json/)
+  assert.match(initNextHint({ baseUrl: 'x', givenBaseUrl: true, fromSitemap: false, file: 'site.json' }), /list your pages in site\.json/)
+  assert.match(
+    initNextHint({ baseUrl: 'x', givenBaseUrl: false, fromSitemap: false, file: 'site.json' }),
+    /pages in site\.json are examples/,
+  )
   for (const fromSitemap of [false, true]) {
     assert.match(initNextHint({ baseUrl: 'x', givenBaseUrl: true, fromSitemap }), /\nApp screens behind Start.*Capturing an app/)
   }
