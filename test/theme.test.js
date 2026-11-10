@@ -55,6 +55,12 @@ function luminance(hex) {
   })
   return 0.2126 * r + 0.7152 * g + 0.0722 * b
 }
+// a over b at `alpha`, as a hex colour (a Tailwind `bg-x/12` over the surface).
+function mix(a, b, alpha) {
+  const channel = (hex, index) => parseInt(hex.slice(index, index + 2), 16)
+  const value = (index) => Math.round(channel(a, index) * alpha + channel(b, index) * (1 - alpha))
+  return '#' + [1, 3, 5].map((index) => value(index).toString(16).padStart(2, '0')).join('')
+}
 function contrast(a, b) {
   const [x, y] = [luminance(a), luminance(b)].sort((p, q) => q - p)
   return (x + 0.05) / (y + 0.05)
@@ -88,6 +94,9 @@ test('text and controls keep AA contrast in every theme, 7:1 in high contrast', 
       }
       assert.ok(contrast(tokens.fg, tokens.sunken) >= text, `${where}: fg on sunken`)
       assert.ok(contrast(tokens['accent-fg'], tokens.accent) >= text, `${where}: accent-fg on accent`)
+      // The soft button (Comment while comment mode is off): accent text on up to a 12% accent tint over the surface.
+      const soft = contrast(tokens.accent, mix(tokens.accent, tokens.surface, 0.12))
+      assert.ok(soft >= text, `${where}: accent on its soft tint is ${soft.toFixed(2)}:1`)
       // Text on a filled status chip (a resolved check, a count of broken links).
       for (const name of ['ok', 'warn', 'bad'])
         assert.ok(contrast(tokens[`${name}-fg`], tokens[name]) >= text, `${where}: ${name}-fg on ${name}`)

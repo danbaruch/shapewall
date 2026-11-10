@@ -5,6 +5,8 @@
 //   GET    /api/agent/boards/:id/threads/:thread              one thread
 //   POST   /api/agent/boards/:id/threads/:thread/messages     send a message (editOf: rerun from an edit; regenerate: a new answer); SSE back
 //   POST   /api/agent/boards/:id/threads/:thread/stop         stop the answer being written
+//   POST   /api/agent/boards/:id/threads/:thread/prepare      the composer's options before the first message (owner only)
+//   POST   /api/agent/boards/:id/threads/:thread/options      choose one of them { configId, value, choices? }
 //   PATCH  /api/agent/boards/:id/threads/:thread              rename or archive { title?, archived? }
 //   POST   /api/agent/boards/:id/threads/:thread/versions/:v  bring back an earlier version (before an edit)
 //   DELETE /api/agent/boards/:id/threads/:thread              clear the thread (a chat: delete it)
@@ -35,6 +37,8 @@ import { createHash, randomBytes } from 'node:crypto'
 import express from 'express'
 import { addReply, getComment, listComments, setAgentStatus } from '../store.js'
 import { createBackend } from './backends/index.js'
+import { cleanChoices } from './backends/acp.js'
+import { createOptionsCache, withChoices } from './options-cache.js'
 import { authFiles } from '../config.js'
 import { agentSettings, publicAgentInfo } from './config.js'
 import { AgentError } from './errors.js'
@@ -295,18 +299,43 @@ export function agentRouter({
     const entry = threadModels.get(key)
     return entry && entry.fingerprint === JSON.stringify(current) ? entry.model : null
   }
+  // What each profile's sessions offer, so a new chat shows its options
+  // without starting a process (options-cache.js).
+  const optionsCache = createOptionsCache({ ttlMs: limit.optionsTtlMs, failedTtlMs: limit.optionsFailedTtlMs })
+  router.optionsCache = optionsCache
+  const cachedOptions = (current) => optionsCache.get(current)
+  const rememberOptions = (current, options, error = null) => optionsCache.remember(current, options, error)
+  // A session's options as it started (the agent's defaults, not one chat's
+  // choices), for the next new chat.
+  const rememberSession = (current, backend, key) =>
+    rememberOptions(current, backend.sessionDefaults?.(key) || backend.sessionOptions?.(key))
   const pickerOptions = async (current, key) => {
     const backend = liveOwnerBackend(current)
-    if (backend?.sessionOptions) return backend.sessionOptions(key)
+    if (backend?.sessionOptions) {
+      const live = backend.sessionOptions(key)
+      if (live?.length) rememberSession(current, backend, key)
+      return live
+    }
     if (!backend?.listModels) return null
     const ids = await backend.listModels()
     const model = chosenModel(current, key) || current.model
     const values = [...new Set([model, ...ids])].filter(Boolean).map((id) => ({ value: id, name: id }))
     return values.length > 1 ? [{ id: 'model', category: 'model', name: 'Model', currentValue: model, values }] : null
   }
-  const setPickerOption = async (current, key, configId, value) => {
+  const setPickerOption = async (current, key, configId, value, choices = {}) => {
     const backend = liveOwnerBackend(current)
-    if (backend?.setSessionOption) return backend.setSessionOption(key, configId, value)
+    if (backend?.setSessionOption && backend.sessionOptions(key)) return backend.setSessionOption(key, configId, value)
+    // No session yet (a new chat, or one whose session stopped): the choice
+    // is checked against what the profile offers and goes with the next
+    // message (the composer sends this chat's choices with it).
+    const known = cachedOptions(current)?.options
+    if (backend?.setSessionOption || (!backend && current.backend === 'acp')) {
+      const option = known?.find((item) => item.id === configId)
+      if (!option) throw new AgentError('no_session', 'The agent session ended. Send a message, then choose again.', 409)
+      if (!option.values.some((item) => item.value === value))
+        throw new AgentError('bad_option', 'The agent does not offer that choice.', 400)
+      return withChoices(known, { ...choices, [configId]: value })
+    }
     if (!backend?.listModels) throw new AgentError('no_session', 'The agent session ended. Send a message, then choose again.', 409)
     if (configId !== 'model' || (value !== current.model && !(await backend.listModels()).includes(value)))
       throw new AgentError('bad_option', 'The endpoint does not list that model.', 400)
@@ -616,6 +645,8 @@ export function agentRouter({
             modelOverride: ownerWrites ? chosenModel(current, `${board.id}/${threadId}`) : null,
             // The owner's own feedback notes go to the owner's turns only (ratings-core.js downNotes).
             ownerTurn: res.locals.viewer === 'owner',
+            // The composer's options for this chat (an ACP session's own), owner turns only.
+            choices: ownerWrites && backend.id === 'acp' ? cleanChoices(req.body?.options) : null,
             emit,
             signal: controller.signal,
             ownerWrites,
@@ -624,6 +655,10 @@ export function agentRouter({
             requestedPages,
           })
           health.record(current, reply)
+          // What the profile offers, as this turn's session saw it; a turn that
+          // could not sign in drops what was known (the next look starts fresh).
+          if (reply.error?.code === 'agent_auth') optionsCache.drop(current)
+          else if (backend.id === 'acp') rememberSession(current, backend, `${board.id}/${threadId}`)
           if (baseline) {
             try {
               const { summary, undo } = await finishTurnChanges(config, baseline, {
@@ -706,6 +741,8 @@ export function agentRouter({
     reload: () => {
       for (const entry of backends.values()) entry.backend?.close?.()
       backends.clear()
+      // Connected again or changed: what its sessions offer is learned anew.
+      optionsCache.clear()
       return backendFor(settings())
     },
   })
@@ -851,6 +888,83 @@ export function agentRouter({
       }
     }),
   )
+  // The composer's options before the first message: { choices } (this
+  // chat's, or the agent's last used) in, { options } out, or { options:
+  // null } when the agent offers none, is busy or cannot start (with
+  // { error } when it is not signed in). Owner only and from this board's
+  // page: nobody else can chat with a native agent, so nobody else starts
+  // one. It starts (or reuses) the thread's own session, the one its first
+  // turn uses, unless the profile's options are already known (then no
+  // process starts; the choices go with the first message). Never evicts
+  // another thread's session; an unused one stops when idle, like any.
+  router.post(
+    '/boards/:id/threads/:thread/prepare',
+    findThread,
+    handle(async (req, res, board, threadId) => {
+      if (!ownerWritesFor(req) || !sameOriginWrite(req)) return controlDenied(res)
+      const key = `${board.id}/${threadId}`
+      const current = settings(readThread(config, board.id, threadId).profileId)
+      if (!current.configured || chatNeedsOwner(req, current)) return res.json({ options: null })
+      const choices = cleanChoices(req.body?.choices)
+      const force = req.body?.force === true
+      const backend = backendFor(current, true)
+      if (!backend) return res.json({ options: null })
+      if (!backend.prepare) {
+        // An endpoint: its model list, and this chat's model when it lists it.
+        if (choices.model && choices.model !== chosenModel(current, key)) {
+          try {
+            await setPickerOption(current, key, 'model', choices.model)
+          } catch {
+            /* not listed any more: the configured model stays */
+          }
+        }
+        return res.json({ options: (await pickerOptions(current, key).catch(() => null)) || null })
+      }
+      const live = backend.sessionOptions(key)
+      const busy = runs.has(key) || selecting.has(key) || connectionTesting() || undoing
+      if (live && (busy || !Object.keys(choices).length)) return res.json({ options: live })
+      const known = cachedOptions(current)
+      if (busy) return res.json({ options: known?.options ? withChoices(known.options, choices) : null })
+      if (!live && known && !force) {
+        if (known.error) return res.json({ options: null, ...(known.error.quiet ? {} : { error: known.error }) })
+        return res.json({ options: withChoices(known.options, choices), cached: true })
+      }
+      const admission = new AbortController()
+      res.once('close', () => {
+        if (!res.writableEnded) admission.abort()
+      })
+      const release = await beginAgentOperation(config, env, 'turn', { signal: admission.signal }).catch(() => null)
+      if (!release) return res.json({ options: null })
+      try {
+        if (runs.has(key) || selecting.has(key)) return res.json({ options: backend.sessionOptions(key) })
+        const options = await backend.prepare(key, { choices, signal: admission.signal })
+        ownerThreads.add(key)
+        rememberSession(current, backend, key)
+        res.json({ options: options?.length ? options : null })
+      } catch (error) {
+        if (error.code === 'agent_auth') {
+          const failure = {
+            code: error.code,
+            message: error.message,
+            ...(error.label ? { label: error.label } : {}),
+            ...(error.login ? { login: error.login } : {}),
+          }
+          health.record(current, { status: 'error', error: failure })
+          rememberOptions(current, null, failure)
+          return res.json({ options: null, error: failure })
+        }
+        // Busy or stopped: today's composer, quietly. An agent that does not
+        // start is not started again for a while either (it says why on a turn).
+        if (!['agent_busy', 'agent_stopped'].includes(error.code)) {
+          log(`options: ${error.message}`)
+          rememberOptions(current, null, { code: error.code || 'agent_start', quiet: true })
+        }
+        res.json({ options: null })
+      } finally {
+        await release()
+      }
+    }),
+  )
   // The composer's model or effort picker: { configId, value }, one of the
   // choices the thread's running agent session lists. Owner only, never
   // while an answer runs; the agent's defaults and Settings > Agent stay as
@@ -865,7 +979,8 @@ export function agentRouter({
       const { configId, value } = req.body || {}
       if (typeof configId !== 'string' || typeof value !== 'string' || configId.length > 100 || value.length > 200)
         return fail(res, 400, 'bad_option', 'configId and value are strings.')
-      const options = await setPickerOption(settings(readThread(config, board.id, threadId).profileId), key, configId, value)
+      const current = settings(readThread(config, board.id, threadId).profileId)
+      const options = await setPickerOption(current, key, configId, value, cleanChoices(req.body?.choices))
       res.json({ options })
     }),
   )

@@ -64,27 +64,58 @@ export function demoMentions(raw, { comments, pages, journeys }) {
   return out
 }
 
-// What the demo agent's session offers, like an ACP agent's config options.
-export const DEMO_OPTIONS = [
-  {
-    id: 'model',
-    category: 'model',
-    name: 'Model',
-    currentValue: 'scripted',
-    values: [
-      { value: 'scripted', name: 'Scripted' },
-      { value: 'scripted-thorough', name: 'Thorough' },
-    ],
-  },
-  {
-    id: 'effort',
-    category: 'thought_level',
-    name: 'Effort',
-    currentValue: 'medium',
-    values: [
-      { value: 'low', name: 'Low' },
-      { value: 'medium', name: 'Medium' },
-      { value: 'high', name: 'High' },
-    ],
-  },
-]
+// What each scripted agent's session offers, like an ACP agent's config
+// options: a model list (with a line about each) and a thinking level. The
+// choices are cosmetic: the script is the same, the answer's meta line says
+// which model and level it "ran" with.
+const EFFORT = {
+  id: 'effort',
+  category: 'thought_level',
+  name: 'Thinking',
+  currentValue: 'medium',
+  values: [
+    { value: 'low', name: 'Low', description: 'Fastest answers' },
+    { value: 'medium', name: 'Medium', description: 'Balanced' },
+    { value: 'high', name: 'High', description: 'Thinks longest' },
+  ],
+}
+const OPTIONS_BY_AGENT = {
+  demo: [
+    {
+      id: 'model',
+      category: 'model',
+      name: 'Model',
+      currentValue: 'scripted',
+      values: [
+        { value: 'scripted', name: 'Scripted', description: 'Quick, for everyday questions' },
+        { value: 'scripted-thorough', name: 'Thorough', description: 'Slower, more careful' },
+      ],
+    },
+    EFFORT,
+  ],
+  second: [
+    {
+      id: 'model',
+      category: 'model',
+      name: 'Model',
+      currentValue: 'brief',
+      values: [
+        { value: 'brief', name: 'Brief', description: 'Short answers' },
+        { value: 'brief-plus', name: 'Brief Plus', description: 'A little more detail' },
+      ],
+    },
+    { ...EFFORT, name: 'Effort', currentValue: 'low' },
+  ],
+}
+export const demoOptionsFor = (agentId) => OPTIONS_BY_AGENT[agentId] || OPTIONS_BY_AGENT.demo
+export const DEMO_OPTION_IDS = ['model', 'effort']
+
+// What an answer ran with, for its meta line (as src/agent/run.js records it).
+export const demoUsedOptions = (options) =>
+  (options || [])
+    .filter((option) => option.category === 'model' || option.category === 'thought_level')
+    .map((option) => ({
+      category: option.category,
+      name: option.name,
+      value: option.values.find((item) => item.value === option.currentValue)?.name || option.currentValue,
+    }))

@@ -2,7 +2,7 @@
 // (cards, Markdown, read aloud, retry), and the list that shows them.
 
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
-import { Bot, ChevronLeft, ChevronRight, Pencil, Scissors, Sparkles } from 'lucide-react'
+import { Bot, ChevronLeft, ChevronRight, KeyRound, Pencil, Scissors, Sparkles } from 'lucide-react'
 import { Badge, Button, EmptyState, IconButton, Textarea, Tooltip } from '../components/ui'
 import { cn } from '../lib/utils'
 import Markdown, { speakableText } from './Markdown'
@@ -16,6 +16,8 @@ import { AgentDestination } from './header'
 import { excerpt } from './text'
 import { AnswerActions } from './actions'
 import { FileChips, MentionChips } from './composerParts'
+import CodeBlock from './CodeBlock'
+import { isOptionNote, turnOptionsLine } from './composerModel.js'
 import { isSetupError } from './profiles'
 import { hideNextSteps } from '../../../src/agent/next-steps.js'
 import { splitAtCards } from '../../../src/agent/reply-text.js'
@@ -206,6 +208,66 @@ function MessageVersions({ version, touch, disabled, onVersion, onEdit }) {
   )
 }
 
+// A native agent that is not signed in on this computer: what it is, the
+// command that signs it in (copyable), Check again (starts the agent afresh
+// and sends the message again once it is signed in), another agent, or the
+// request back in the box. Calm: a note to act on, not an alarm.
+function SignInCard({ error, touch, onCheckAgain, onTryOther, tryOtherLabel, tryOtherId, onRetry, disabled }) {
+  const [checking, setChecking] = useState(false)
+  const [still, setStill] = useState(false)
+  const check = async () => {
+    setChecking(true)
+    setStill(false)
+    try {
+      const ok = await onCheckAgain()
+      if (ok === false) setStill(true)
+    } finally {
+      setChecking(false)
+    }
+  }
+  const size = touch ? 'touch' : 'sm'
+  return (
+    <div className="space-y-2 rounded-lg border border-line bg-surface-2/60 p-3 text-xs" role="alert" data-sw-chat-error={error.code}>
+      <p className="flex items-center gap-2 text-ui font-medium text-fg" data-sw-chat-signin-title="true">
+        <KeyRound size={14} className="shrink-0 text-warn" aria-hidden="true" />
+        {error.label} is not signed in
+      </p>
+      {error.login ? (
+        <>
+          <p className="text-muted">Run this in a terminal on this computer, then check again:</p>
+          <div data-sw-chat-signin-command="true">
+            <CodeBlock lang="sh" text={error.login} touch={touch} />
+          </div>
+        </>
+      ) : (
+        <p className="text-muted">{error.message}</p>
+      )}
+      {still ? (
+        <p className="text-muted" role="status" data-sw-chat-signin-still="true">
+          Still not signed in. Run the command above, then check again.
+        </p>
+      ) : null}
+      <div className="flex flex-wrap gap-2 pt-0.5">
+        {onCheckAgain ? (
+          <Button size={size} variant="default" onClick={check} disabled={disabled || checking} data-sw-chat-check-again="true">
+            {checking ? 'Checking…' : 'Check again'}
+          </Button>
+        ) : null}
+        {onTryOther ? (
+          <Button size={size} variant="secondary" onClick={onTryOther} disabled={disabled} data-sw-chat-try-other={tryOtherId}>
+            Try with {tryOtherLabel}
+          </Button>
+        ) : null}
+        {onRetry ? (
+          <Button size={size} variant="ghost" onClick={onRetry} disabled={disabled} data-sw-chat-review-retry>
+            Edit and retry
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
 // `onRetry(request)` and `onRegenerate(message, request)` get this answer's
 // request from here, so the list can hand every answer the same functions
 // (and an answer that did not change is not rendered again).
@@ -235,6 +297,7 @@ export const AssistantMessage = memo(function AssistantMessage({
   regenerateDisabled = false,
   tryOther = null,
   onTryOther = null,
+  onCheckAgain = null,
 }) {
   // Regenerate keeps earlier versions (oldest first); null shows the current one.
   const versions = message.versions || []
@@ -248,7 +311,11 @@ export const AssistantMessage = memo(function AssistantMessage({
   const natural = useNatural()
   const canRead = canSpeak || (readAloud?.settings.natural && natural.status === 'ready')
   // Tool calls are the activity's steps; plans, notes and permission requests stay cards.
-  const cards = (message.cards || []).filter((card) => (card.kind || 'tool') !== 'tool')
+  // The model and level an older answer noted ("Configured model: ...") are
+  // its meta line now, not cards.
+  const cards = (message.cards || []).filter((card) => (card.kind || 'tool') !== 'tool' && !isOptionNote(card))
+  const optionsLine = pending ? '' : turnOptionsLine(message)
+  const signIn = !pending && message.error?.code === 'agent_auth' && message.error.label ? message.error : null
   const textClass = 'space-y-2 text-ui break-words text-fg'
   const pieces = splitAtCards(pending ? hideNextSteps(message.text || '') : message.text || '', cards)
   // Answers the server stored can be rated (not one interrupted on the way).
@@ -275,6 +342,11 @@ export const AssistantMessage = memo(function AssistantMessage({
         ) : (
           <ActivitySummary cards={message.cards} durationMs={message.durationMs} touch={touch} />
         )}
+        {optionsLine ? (
+          <p className="-mt-1 min-w-0 truncate text-xs text-faint" data-sw-chat-turn-options="true">
+            {optionsLine}
+          </p>
+        ) : null}
         <Reasoning text={message.reasoning} />
         {/* Text and cards in the order they happened (src/agent/reply-text.js):
             an approval shows after the words that introduce it. A <next-steps>
@@ -319,7 +391,18 @@ export const AssistantMessage = memo(function AssistantMessage({
             Stopped
           </Badge>
         ) : null}
-        {message.error ? (
+        {signIn ? (
+          <SignInCard
+            error={signIn}
+            touch={touch}
+            onCheckAgain={onCheckAgain && !earlier ? () => onCheckAgain(current, request) : null}
+            onTryOther={tryOther && onTryOther && !earlier ? () => onTryOther(current, request) : null}
+            tryOtherLabel={tryOther?.label}
+            tryOtherId={tryOther?.id}
+            onRetry={onRetry && !earlier ? () => onRetry(request) : null}
+            disabled={retryDisabled}
+          />
+        ) : message.error ? (
           <p
             className="rounded-md border border-bad/40 bg-bad/10 px-2 py-1.5 text-xs text-bad"
             role="alert"
@@ -328,7 +411,7 @@ export const AssistantMessage = memo(function AssistantMessage({
             {message.error.message}
           </p>
         ) : null}
-        {!pending && tryOther && onTryOther && !earlier ? (
+        {signIn ? null : !pending && tryOther && onTryOther && !earlier ? (
           <div className="flex flex-wrap gap-2">
             <Button
               size={touch ? 'touch' : 'sm'}
@@ -454,12 +537,26 @@ export function MessageList({
   regenerateDisabled = false,
   otherAgent = null,
   onTryOther = null,
+  onCheckAgain = null,
 }) {
   const announcement = useReplyAnnouncement(shown, liveRun)
   // The same functions for every message on every render (they call the
   // latest ones), so memo keeps the messages that did not change.
   const latest = useRef(null)
-  latest.current = { onAnswer, onRead, onRetry, onContinue, onUndo, onRecapture, onEdit, onVersion, onRate, onRegenerate, onTryOther }
+  latest.current = {
+    onAnswer,
+    onRead,
+    onRetry,
+    onContinue,
+    onUndo,
+    onRecapture,
+    onEdit,
+    onVersion,
+    onRate,
+    onRegenerate,
+    onTryOther,
+    onCheckAgain,
+  }
   const call = useMemo(() => {
     const out = {}
     for (const name of [
@@ -474,6 +571,7 @@ export function MessageList({
       'onRate',
       'onRegenerate',
       'onTryOther',
+      'onCheckAgain',
     ])
       out[name] = (...args) => latest.current[name]?.(...args)
     return out
@@ -554,6 +652,7 @@ export function MessageList({
                 onRetry={index === shown.length - 1 && ['error', 'stopped'].includes(message.status) ? call.onRetry : null}
                 tryOther={index === shown.length - 1 && otherAgent && isSetupError(message.error) ? otherAgent : null}
                 onTryOther={onTryOther ? call.onTryOther : null}
+                onCheckAgain={index === shown.length - 1 && onCheckAgain ? call.onCheckAgain : null}
                 onContinue={index === shown.length - 1 && !liveRun && onContinue ? call.onContinue : null}
                 retryDisabled={retryDisabled}
                 request={shown.slice(0, index).findLast((item) => item.role === 'user') || null}

@@ -3,6 +3,16 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## 0.2.3 - 2026-11-10
+
+- The agent's model and thinking level are shown on a new chat before the first message, each with its own menu in the composer
+  footer. Choices are kept per chat, and each answer shows the model it used.
+- Agents has its own section in the workspace console, with connected agents and the chat connection on one page.
+- The top bar shows which side panel is open, and the Comment button is filled only while comment mode is on.
+- The board sidebar lists Account and security, like the console's.
+- A calmer card when an agent is not signed in, with the command to run and a Check again button.
+- Security reports can also go to hello@shapewall.com.
+
 ## 0.2.2 - 2026-11-10
 
 - The collapsed sidebar opens flyouts: hover or click Pages for the full pages tree, or Workspace and Account for their sections,

@@ -24,7 +24,7 @@ import { randomBytes } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { Readable, Writable } from 'node:stream'
 import { PROTOCOL_VERSION, RequestError, client, ndJsonStream } from '@agentclientprotocol/sdk'
-import { TERMINAL_ENV_ALLOWED, agentEnv, formatCommand, loginHint, terminalEnvRefused } from '../acp/command.js'
+import { TERMINAL_ENV_ALLOWED, acpAgentKind, agentEnv, formatCommand, loginHint, terminalEnvRefused } from '../acp/command.js'
 import { createSandbox, SandboxError } from '../acp/sandbox.js'
 import { ACP_PREAMBLE, NEXT_STEPS_PROMPT, NO_IMAGES_NOTE, quoteData } from '../context.js'
 import { AgentError } from '../errors.js'
@@ -67,38 +67,115 @@ export function sessionChoices(session) {
       return `${name}: ${showable(String(selected?.name || option.currentValue)).slice(0, 120)}`
     })
 }
-// The pickers the composer may show: model and reasoning effort selects as
-// the agent lists them, display text made showable and bounded.
+// The composer's option menus: the session's own select config options as
+// the agent lists them (model, thinking level, mode, then any other), with
+// display text made showable and bounded. Never a credential, path, command
+// or permission setting, and never a mode or value that lets the agent act
+// without asking (bypass, yolo, accept edits, full access, ...): the panel
+// promises that the agent asks before it changes files or runs commands.
+// An agent that reports its modes the older way (session/new `modes`, set
+// with session/set_mode) gets the same "mode" option, id MODE_OPTION_ID.
 const OPTION_VALUES_MAX = 60
-export function sessionOptions(configOptions) {
-  return (Array.isArray(configOptions) ? configOptions : [])
+const OPTIONS_MAX = 5
+export const MODE_OPTION_ID = 'shapewall:mode'
+const CATEGORY_ORDER = ['model', 'thought_level', 'mode']
+const UNSAFE_VALUE_RE =
+  /bypass|yolo|danger|full[\s_-]?access|accept[\s_-]?(all|edits?)|\bauto\b|never[\s_-]?ask|no[\s_-]?ask|skip[\s_-]?(perm|approv)|don'?t[\s_-]?ask|trust/i
+const SENSITIVE_OPTION_RE =
+  /perm|approv|sandbox|trust|auth|login|key|token|secret|credential|password|env|path|dir|folder|command|shell|mcp|url|host|endpoint|proxy|network/i
+
+const optionValues = (list) =>
+  (Array.isArray(list) ? list : [])
+    .flatMap((item) => (Array.isArray(item?.options) ? item.options : [item]))
+    .filter((item) => typeof item?.value === 'string')
+    .slice(0, OPTION_VALUES_MAX)
+    .map((item) => ({
+      value: item.value.slice(0, 200),
+      name: showable(String(item.name || item.value)).slice(0, 80),
+      ...(item.description ? { description: showable(String(item.description)).slice(0, 160) } : {}),
+    }))
+
+// Only the current value and safe ones of a mode or an uncategorised option.
+const safeValues = (category, values, current) =>
+  ['model', 'thought_level'].includes(category)
+    ? values
+    : values.filter((item) => item.value === current || !UNSAFE_VALUE_RE.test(`${item.value} ${item.name}`))
+
+export function sessionOptions(configOptions, modes = null) {
+  const out = (Array.isArray(configOptions) ? configOptions : [])
     .filter(
       (option) =>
-        ['model', 'thought_level'].includes(option?.category) &&
-        (option.type === undefined || option.type === 'select') &&
+        (option?.type === undefined || option.type === 'select') &&
         typeof option.id === 'string' &&
-        typeof option.currentValue === 'string',
+        typeof option.currentValue === 'string' &&
+        (CATEGORY_ORDER.includes(option.category) || !SENSITIVE_OPTION_RE.test(`${option.id} ${option.name || ''}`)),
     )
-    .slice(0, 2)
     .map((option) => {
-      const values = (Array.isArray(option.options) ? option.options : [])
-        .flatMap((item) => (Array.isArray(item?.options) ? item.options : [item]))
-        .filter((item) => typeof item?.value === 'string')
-        .slice(0, OPTION_VALUES_MAX)
-        .map((item) => ({
-          value: item.value.slice(0, 200),
-          name: showable(String(item.name || item.value)).slice(0, 80),
-          ...(item.description ? { description: showable(String(item.description)).slice(0, 160) } : {}),
-        }))
+      const category = CATEGORY_ORDER.includes(option.category) ? option.category : 'other'
       return {
         id: option.id.slice(0, 100),
-        category: option.category,
-        name: showable(String(option.name || option.category)).slice(0, 60),
+        category,
+        name: showable(String(option.name || option.category || option.id)).slice(0, 60),
+        ...(option.description ? { description: showable(String(option.description)).slice(0, 160) } : {}),
         currentValue: option.currentValue,
-        values,
+        values: safeValues(category, optionValues(option.options), option.currentValue),
       }
     })
+  const available = Array.isArray(modes?.availableModes) ? modes.availableModes : []
+  if (!out.some((option) => option.category === 'mode') && typeof modes?.currentModeId === 'string' && available.length) {
+    out.push({
+      id: MODE_OPTION_ID,
+      category: 'mode',
+      name: 'Mode',
+      currentValue: modes.currentModeId,
+      values: safeValues(
+        'mode',
+        optionValues(available.map((item) => ({ value: item?.id, name: item?.name, description: item?.description }))),
+        modes.currentModeId,
+      ),
+    })
+  }
+  // One of each of the known kinds (the first the agent lists), in that order, then the rest.
+  const rank = (option) => (CATEGORY_ORDER.includes(option.category) ? CATEGORY_ORDER.indexOf(option.category) : CATEGORY_ORDER.length)
+  const seen = new Set()
+  return out
     .filter((option) => option.values.length > 1)
+    .filter((option) => {
+      if (option.category === 'other') return true
+      if (seen.has(option.category)) return false
+      seen.add(option.category)
+      return true
+    })
+    .sort((a, b) => rank(a) - rank(b))
+    .slice(0, OPTIONS_MAX)
+}
+
+// What a turn ran with, for the answer's meta line: the model and the
+// thinking level, by their display names.
+export function usedOptions(options) {
+  return (options || [])
+    .filter((option) => ['model', 'thought_level'].includes(option.category))
+    .map((option) => {
+      const item = option.values.find((value) => value.value === option.currentValue)
+      return {
+        category: option.category,
+        name: option.name,
+        value: item?.name || showable(option.currentValue).slice(0, 80),
+        // "Default" models often say which model that is now (the meta line names it).
+        ...(item?.description && /^default\b/i.test(item.name) ? { description: item.description } : {}),
+      }
+    })
+}
+
+// A composer's choices ({ configId: value }) as sent to the server: a few
+// string pairs, bounded; anything else is dropped.
+export function cleanChoices(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const out = {}
+  for (const [key, item] of Object.entries(value).slice(0, 8)) {
+    if (typeof key === 'string' && key.length <= 100 && typeof item === 'string' && item.length <= 200) out[key] = item
+  }
+  return out
 }
 const KILL_GRACE_MS = 2000
 const POSIX = process.platform !== 'win32'
@@ -193,9 +270,13 @@ function stopTree(child) {
   return child.treeStopping
 }
 
-async function reserveProcessSlot(processPool, agent, signal) {
+// `evict: false` (a session started only to read its options): a full pool
+// is busy, never a reason to stop another thread's session.
+async function reserveProcessSlot(processPool, agent, signal, { evict = true } = {}) {
   if (!processPool) return
   const epoch = processPool.epoch
+  if (processPool.agents.size >= processPool.max && !evict)
+    throw new AgentError('agent_busy', 'Native agents are busy in other threads. Try again in a moment.', 429)
   if (processPool.agents.size >= processPool.max) {
     const idle = [...processPool.agents].filter((item) => !item.turn && item.state === 'ready').sort((a, b) => a.usedAt - b.usedAt)
     if (![...processPool.agents].some((item) => item.killedFor && item.stoppingPromise)) idle[0]?.kill('evicted')
@@ -328,11 +409,17 @@ export function modelFailureAnswer(text) {
 
 // The chat error for an agent that is not logged in, with how to fix it for
 // that agent (from the command: src/agent/acp/command.js loginHint).
+// `login`: the one command that signs that agent in, for the chat's card
+// (copyable), when there is one.
+const LOGIN_COMMANDS = { claude: 'claude auth login', codex: 'codex login', goose: 'goose configure', gemini: 'gemini' }
 export function authError(label, argv) {
-  return new AgentError(
+  const error = new AgentError(
     'agent_auth',
     `${label} is not logged in (or not set up) on this machine. To fix it, ${loginHint(argv)}; then send again.`,
   )
+  error.login = LOGIN_COMMANDS[acpAgentKind(argv)] || null
+  error.label = label
+  return error
 }
 
 // What the person's turn looks like to the agent: on a new session, the
@@ -490,6 +577,9 @@ class AcpProcess {
       this.sessionId = session.sessionId
       this.choices = sessionChoices(session)
       this.configOptions = Array.isArray(session.configOptions) ? session.configOptions : []
+      this.modes = session.modes && typeof session.modes === 'object' ? session.modes : null
+      // As the session started, before any chat's choices: what a new chat starts from.
+      this.startOptions = sessionOptions(this.configOptions, this.modes)
       this.state = 'ready'
     } catch (error) {
       throw this.startError(error)
@@ -674,24 +764,61 @@ class AcpProcess {
     turn.killTimer.unref?.()
   }
 
-  // The composer's model and effort pickers: one of the session's own
-  // config options (model or thought_level, select only) to one of the
-  // values it lists. Never while a turn runs; never a mode (permission
-  // modes stay the agent's own setting, docs/agents.md).
+  // The composer's option menus, as sessionOptions lists them.
+  options() {
+    return sessionOptions(this.configOptions, this.modes)
+  }
+  // The same menus with the values the session started with (the agent's
+  // defaults): what the options cache keeps for the next new chat.
+  defaults() {
+    const now = this.options()
+    const start = new Map((this.startOptions || []).map((option) => [option.id, option.currentValue]))
+    return now.map((option) =>
+      start.has(option.id) && option.values.some((item) => item.value === start.get(option.id))
+        ? { ...option, currentValue: start.get(option.id) }
+        : option,
+    )
+  }
+
+  // One of those options to one of the values it lists: a config option
+  // through session/set_config_option, the older modes through
+  // session/set_mode. Never while a turn runs; never a value sessionOptions
+  // leaves out (one that would let the agent act without asking).
   async setOption(configId, value) {
     if (this.state !== 'ready' || this.turn) throw new AgentError('agent_running', 'Wait for the answer to finish before switching.', 409)
-    const option = sessionOptions(this.configOptions).find((item) => item.id === configId)
+    const option = this.options().find((item) => item.id === configId)
     if (!option || !option.values.some((item) => item.value === value))
       throw new AgentError('bad_option', 'The agent does not offer that choice.', 400)
+    if (option.currentValue === value) return this.options()
     let result
     try {
-      result = await this.connection.agent.request('session/set_config_option', { sessionId: this.sessionId, configId, value })
+      result =
+        configId === MODE_OPTION_ID
+          ? await this.connection.agent.request('session/set_mode', { sessionId: this.sessionId, modeId: value })
+          : await this.connection.agent.request('session/set_config_option', { sessionId: this.sessionId, configId, value })
     } catch (error) {
       throw new AgentError('agent_upstream', `${this.label} did not switch (${cut(errorText(error) || 'no answer', 200)}).`, 502)
     }
-    if (Array.isArray(result?.configOptions)) this.configOptions = result.configOptions
+    if (configId === MODE_OPTION_ID) this.modes = { ...this.modes, currentModeId: value }
+    else if (Array.isArray(result?.configOptions)) this.configOptions = result.configOptions
     else this.configOptions = this.configOptions.map((item) => (item.id === configId ? { ...item, currentValue: value } : item))
-    return sessionOptions(this.configOptions)
+    return this.options()
+  }
+
+  // The composer's choices for this chat ({ configId: value }), before a
+  // turn: each one the session still offers and does not have yet. A choice
+  // the agent refuses keeps its own value (logged, never fatal).
+  async applyChoices(choices) {
+    for (const [configId, value] of Object.entries(choices || {})) {
+      if (this.state !== 'ready' || this.turn) return
+      const option = this.options().find((item) => item.id === configId)
+      if (!option || option.currentValue === value || !option.values.some((item) => item.value === value)) continue
+      try {
+        await this.setOption(configId, value)
+      } catch (error) {
+        this.log(`acp: ${this.label} kept its ${option.category} (${error.message})`)
+      }
+    }
   }
 
   // ---- What the agent sends ---------------------------------------------------
@@ -704,6 +831,11 @@ class AcpProcess {
     if (params?.sessionId === this.sessionId && params.update?.sessionUpdate === 'config_option_update') {
       // The agent changed its own model or effort (or confirmed ours): the composer shows it.
       if (Array.isArray(params.update.configOptions)) this.configOptions = params.update.configOptions
+      return
+    }
+    if (params?.sessionId === this.sessionId && params.update?.sessionUpdate === 'current_mode_update') {
+      if (this.modes && typeof params.update.currentModeId === 'string')
+        this.modes = { ...this.modes, currentModeId: params.update.currentModeId }
       return
     }
     const turn = this.turn
@@ -1141,15 +1273,21 @@ export function createAcpBackend(
   const starting = new Set()
   let closed = false
 
-  const evictFor = () => {
+  // Sessions started for their options only, while they start: a turn (or
+  // another look) for the same thread waits for that one instead of starting
+  // a second process.
+  const preparing = new Map()
+
+  const evictFor = (evict) => {
     if (processes.size + starting.size < limit.processesMax) return
     const idle = [...processes.values()].filter((item) => !item.turn && item.state === 'ready').sort((a, b) => a.usedAt - b.usedAt)
-    if (!idle.length) throw new AgentError('agent_busy', `${settings.label} is busy in other threads. Try again in a moment.`, 429)
+    if (!idle.length || !evict)
+      throw new AgentError('agent_busy', `${settings.label} is busy in other threads. Try again in a moment.`, 429)
     idle[0].kill('evicted')
   }
 
-  const start = async (thread, signal) => {
-    evictFor()
+  const start = async (thread, signal, { evict = true } = {}) => {
+    evictFor(evict)
     const agent = new AcpProcess({
       argv: settings.acp.argv,
       label: settings.label,
@@ -1165,7 +1303,7 @@ export function createAcpBackend(
       },
     })
     if (closed) throw new AgentError('agent_start', 'The server is stopping.')
-    if (processPool) await reserveProcessSlot(processPool, agent, signal)
+    if (processPool) await reserveProcessSlot(processPool, agent, signal, { evict })
     if (closed) {
       agent.kill('shutdown')
       await agent.stoppingPromise
@@ -1201,27 +1339,38 @@ export function createAcpBackend(
     vision: settings.vision !== false,
     label: settings.label,
     runMsMax: limit.runMs,
-    async *stream({ messages, signal, thread = 'default' }) {
+    // `choices`: the composer's options for this chat ({ configId: value },
+    // owner turns only), applied before the prompt. The turn then reports
+    // the model and thinking level it runs with (the answer's meta line).
+    async *stream({ messages, signal, thread = 'default', choices = null }) {
       if (signal?.aborted) return
+      await preparing.get(thread)?.catch(() => {})
       let agent = processes.get(thread)
       if (agent?.turn) await agent.settled()
       agent = processes.get(thread)
       if (!agent || agent.state !== 'ready') {
         yield { type: 'status', text: `Starting ${settings.label}` }
         agent = await start(thread, signal)
-        for (const text of agent.choices) yield { type: 'notice', text }
       }
       if (signal?.aborted) {
         agent.kill('aborted')
         await agent.settled()
         return
       }
+      await agent.applyChoices(choices)
+      const used = usedOptions(agent.options())
+      if (used.length) yield { type: 'options', used }
       yield { type: 'status', text: `${settings.label} is working` }
       const image = agent.image && settings.vision !== false
       if (!image && messages.at(-1)?.content?.some((part) => part.type === 'image')) yield { type: 'notice', text: NO_IMAGES_NOTE }
       const turn = agent.prompt(promptBlocks({ messages, fresh: agent.fresh, image, thread }), signal)
       try {
         for await (const event of turn.events) yield event
+      } catch (error) {
+        // Not signed in: this session stops, so Check again (or the next
+        // message) starts the agent afresh with the new login.
+        if (error?.code === 'agent_auth') agent.kill('signed_out')
+        throw error
       } finally {
         turn.finish()
         await agent.settled()
@@ -1238,11 +1387,38 @@ export function createAcpBackend(
     answerPermission(thread, id, optionId, answeredBy = null) {
       return processes.get(thread)?.answer(id, optionId, answeredBy) ?? null
     },
-    // The composer's model and effort pickers, for a thread whose session is
-    // running (they come from session/new). Null without a session.
+    // The composer's option menus, for a thread whose session is running
+    // (they come from session/new). Null without a session.
     sessionOptions(thread) {
       const agent = processes.get(thread)
-      return agent && agent.state === 'ready' ? sessionOptions(agent.configOptions) : null
+      return agent && agent.state === 'ready' ? agent.options() : null
+    },
+    // The same, with the values the session started with.
+    sessionDefaults(thread) {
+      const agent = processes.get(thread)
+      return agent && agent.state === 'ready' ? agent.defaults() : null
+    },
+    // The options before the first message: the thread's session, started
+    // the way its first turn would start it (and then reused by that turn),
+    // or the one already running. Never evicts another thread's session; an
+    // unused one stops after `idleMs` like any idle session. `choices` are
+    // applied to it as they would be before a turn.
+    async prepare(thread, { choices = null, signal = null } = {}) {
+      if (closed) throw new AgentError('agent_start', 'The server is stopping.')
+      await preparing.get(thread)?.catch(() => {})
+      let agent = processes.get(thread)
+      if (!agent || agent.state !== 'ready') {
+        const pending = start(thread, signal, { evict: false })
+        preparing.set(thread, pending)
+        try {
+          agent = await pending
+        } finally {
+          if (preparing.get(thread) === pending) preparing.delete(thread)
+        }
+        if (!agent.turn) agent.idle()
+      }
+      if (!agent.turn) await agent.applyChoices(choices)
+      return agent.options()
     },
     async setSessionOption(thread, configId, value) {
       const agent = processes.get(thread)

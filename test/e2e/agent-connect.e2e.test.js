@@ -153,13 +153,11 @@ test('desktop 1440: Claude Code found, Connect, chatting; no file edit, no resta
     )
     await shot(page, 'connect-desktop-chatting')
 
-    // Settings is in the profile menu too.
+    // The console's Agents page is in the profile menu too (Workspace Console).
     await avatar.click()
     await page.click('[data-sw-profile-item="console"]')
-    await page.locator('[data-sw-nav="settings"]').click()
-    await page.waitForSelector('[data-sw-settings="general"]')
-    await page.click('[data-sw-settings-tab="agent"]')
-    await page.waitForSelector('[data-sw-settings="agent"]')
+    await page.locator('[data-sw-nav="agents"]').click()
+    await page.waitForSelector('[data-sw-local-console-agent-details] [data-sw-settings="agent"]')
     assert.equal(await page.getAttribute('[data-sw-settings-status]', 'data-sw-settings-status'), 'connected')
     assert.deepEqual(errors, [])
   } finally {
@@ -187,7 +185,7 @@ test('desktop 1440: an agent that does not start says so and leaves nothing save
   }
 })
 
-test('without the link: General settings open while the Agent tab explains how to unlock', { skip: !POSIX }, async () => {
+test('without the link: the chat and the console Agents page explain how to unlock', { skip: !POSIX }, async () => {
   const url = await board('stub')
   const { context, page, errors } = await openBoard(url, { viewport: { width: 1440, height: 900 } })
   try {
@@ -204,9 +202,8 @@ test('without the link: General settings open while the Agent tab explains how t
     await item.waitFor()
     assert.equal(await item.getAttribute('data-disabled'), null)
     await item.click()
-    await page.locator('[data-sw-nav="settings"]').click()
-    await page.waitForSelector('[data-sw-settings="general"]')
-    await page.click('[data-sw-settings-tab="agent"]')
+    await page.locator('[data-sw-nav="agents"]').click()
+    await page.waitForSelector('[data-sw-local-console-agent-details]')
     assert.match(await page.locator('[data-sw-settings-agent-unavailable]').textContent(), /owner link printed by shapewall serve/)
     await shot(page, 'connect-desktop-profile-locked')
     assert.deepEqual(errors, [])

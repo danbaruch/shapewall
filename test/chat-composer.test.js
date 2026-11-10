@@ -582,12 +582,18 @@ test('ACP: model and effort from the session, switched by an owner between turns
     [
       ['model', 'stub-fast', 2],
       ['thought_level', 'medium', 3],
+      ['mode', 'ask', 2],
     ],
-    'the mode option is never offered',
+    'no permission setting, and no mode that acts without asking',
+  )
+  assert.deepEqual(
+    listed[2].values.map((item) => item.value),
+    ['ask', 'plan'],
   )
   assert.equal((await entry.api('GET', 'board', undefined, {})).json.options, undefined, 'owner only')
   assert.equal((await entry.api('POST', 'board/options', { configId: 'model', value: 'stub-deep' }, {})).status, 403)
-  assert.equal((await entry.api('POST', 'board/options', { configId: 'mode', value: 'yolo' })).status, 400, 'never a mode')
+  assert.equal((await entry.api('POST', 'board/options', { configId: 'mode', value: 'yolo' })).status, 400, 'never yolo')
+  assert.equal((await entry.api('POST', 'board/options', { configId: 'approvals', value: 'never' })).status, 400, 'never a permission')
   assert.equal((await entry.api('POST', 'board/options', { configId: 'model', value: 'other' })).status, 400)
   const switched = await entry.api('POST', 'board/options', { configId: 'effort', value: 'high' })
   assert.equal(switched.status, 200)
@@ -600,9 +606,21 @@ test('ACP: model and effort from the session, switched by an owner between turns
   // Another thread has its own session with the agent's defaults.
   await send(entry, 'comment-1', 'hello')
   assert.equal((await entry.api('GET', 'comment-1')).json.options[0].currentValue, 'stub-fast')
-  // No session (cleared): the switch says so.
+  // No session (cleared): the choice is checked against what the agent
+  // offers and goes with the next message.
   assert.equal((await entry.api('DELETE', 'board')).status, 200)
-  const gone = await entry.api('POST', 'board/options', { configId: 'model', value: 'stub-fast' })
-  assert.equal(gone.status, 409)
-  assert.equal(gone.json.error.code, 'no_session')
+  const later = await entry.api('POST', 'board/options', { configId: 'effort', value: 'low', choices: { model: 'stub-deep' } })
+  assert.equal(later.status, 200)
+  assert.deepEqual(
+    later.json.options.map((item) => item.currentValue),
+    ['stub-deep', 'low', 'ask'],
+  )
+  assert.equal((await entry.api('POST', 'board/options', { configId: 'effort', value: 'max' })).status, 400)
+  const next = await send(entry, 'board', { text: 'config', options: { model: 'stub-deep', effort: 'low' } })
+  assert.deepEqual(JSON.parse(next.done.text), { model: 'stub-deep', effort: 'low' })
+  assert.deepEqual(next.done.options, [
+    { category: 'model', name: 'Model', value: 'Stub deep' },
+    { category: 'thought_level', name: 'Effort', value: 'Low' },
+  ])
+  assert.equal(next.done.cards.filter((card) => card.kind === 'note').length, 0, 'no "Configured model" notes')
 })

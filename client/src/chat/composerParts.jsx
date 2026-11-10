@@ -1,13 +1,28 @@
 // Small pieces of the composer: mention and file chips, queued messages,
-// follow-up chips, the help card, the usage ring, the model and effort
-// pickers, and the "Allow for this chat" list in Chat settings.
+// follow-up chips, the help card, the usage ring, the agent's option menus
+// (model, thinking, more), and the "Allow for this chat" list in Chat settings.
 
 import { useState } from 'react'
-import { AtSign, Check, ChevronDown, Clock, Cpu, FileText, Pencil, ShieldCheck, X } from 'lucide-react'
-import { Button, IconButton, Popover, PopoverContent, PopoverTrigger, Spinner, Tooltip } from '../components/ui'
+import { AtSign, ChevronDown, Clock, FileText, Pencil, ShieldCheck, SlidersHorizontal, X } from 'lucide-react'
+import {
+  Button,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+  IconButton,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+  Spinner,
+  Tooltip,
+} from '../components/ui'
 import { cn } from '../lib/utils'
 import { MENTION_ICONS } from './ComposerInput'
-import { HELP_LINES, formatBytes, usageSummary } from './composerModel.js'
+import { HELP_LINES, currentLabel, formatBytes, optionGroups, usageSummary, valueLabel } from './composerModel.js'
 
 const chipClass = 'inline-flex max-w-full min-w-0 items-center gap-1 rounded-full border border-line bg-surface-2 pl-2 text-xs text-fg'
 
@@ -163,7 +178,8 @@ export function HelpCard({ onClose, touch }) {
 }
 
 // Context used and the last answer's tokens, when the backend reports them.
-export function UsageRing({ usage, touch }) {
+// `ringOnly`: a tight footer; the number stays in the tooltip and label.
+export function UsageRing({ usage, touch, ringOnly = false }) {
   const summary = usageSummary(usage)
   if (!summary) return null
   const size = 18
@@ -200,7 +216,7 @@ export function UsageRing({ usage, touch }) {
                 />
               </svg>
             ) : null}
-            <span className="text-caption">{summary.label}</span>
+            {ringOnly && percent !== null ? null : <span className="text-caption">{summary.label}</span>}
           </Button>
         </PopoverTrigger>
       </Tooltip>
@@ -217,104 +233,166 @@ export function UsageRing({ usage, touch }) {
   )
 }
 
-// The thread's model and effort, from the agent session's own choices: one
-// compact button (the model, then the effort) that opens both lists. The
-// list stays open while you pick (set both in one go); the arrow keys move
-// through the choices, Home and End jump, Esc closes.
-export function SessionOptions({ options, onChoose, disabled, touch }) {
-  const [busy, setBusy] = useState(null)
+// ---- Agent options: model, thinking level, mode, anything else ----------------------
+
+const optionTitle = (option) => (option.category === 'model' ? 'Model' : option.name || 'Option')
+// The hook on each choice: "model:stub-deep", "thought_level:high", and for
+// an option outside the known kinds its own id.
+const optionHook = (option, item) => `${option.category === 'other' ? option.id : option.category}:${item.value}`
+
+// The current choice of the menu takes the focus when it opens, by pointer
+// or keyboard, so the arrows start from it. Set in the menu's own mount
+// (its items are there), never a frame later.
+const focusChecked = (event) => {
+  event.preventDefault()
+  const content = event.currentTarget
+  const target = content.querySelector('[role="menuitemradio"][data-state="checked"]') || content.querySelector('[role^="menuitem"]')
+  target?.focus({ preventScroll: true })
+}
+
+function OptionItems({ option, onChoose }) {
+  return (
+    <DropdownMenuRadioGroup value={option.currentValue} onValueChange={(value) => onChoose(option, value)} aria-label={optionTitle(option)}>
+      {option.values.map((item) => (
+        <DropdownMenuRadioItem
+          key={item.value}
+          value={item.value}
+          className={cn(item.description && 'h-auto min-h-11 py-1.5 lg:h-auto lg:min-h-8')}
+          data-sw-chat-option={optionHook(option, item)}
+        >
+          <span className="flex min-w-0 flex-col">
+            <span className="truncate">{valueLabel(option, item)}</span>
+            {item.description ? <span className="truncate text-caption font-normal text-faint">{item.description}</span> : null}
+          </span>
+        </DropdownMenuRadioItem>
+      ))}
+    </DropdownMenuRadioGroup>
+  )
+}
+
+// One footer control: a quiet text button with the current value and a
+// small chevron, its own menu. `options`: what the menu lists (one option,
+// or several in sections). While a turn runs it stays focusable and says
+// why it cannot change (aria-disabled, the tooltip).
+function OptionMenu({ hook, label, ariaLabel, tooltip, icon = null, options, onChoose, disabled, disabledReason, touch, width = 'w-64' }) {
   const [open, setOpen] = useState(false)
-  if (!options?.length) return null
-  const current = (option) => option.values.find((item) => item.value === option.currentValue)?.name || option.currentValue
-  const label = options.map(current).join(' · ')
+  // The button's tooltip, never on top of its own open menu.
+  const [tip, setTip] = useState(false)
+  const [busy, setBusy] = useState(false)
   const choose = async (option, value) => {
-    // Never disable the focused choice while saving: a disabled button drops
-    // the focus, and the popover would close as if you clicked away.
-    if (busy !== null || value === option.currentValue) return
-    setBusy(option.id)
+    if (busy || value === option.currentValue) return
+    setBusy(true)
     try {
       await onChoose(option.id, value)
     } finally {
-      setBusy(null)
+      setBusy(false)
     }
   }
-  const onKeyDown = (event) => {
-    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
-    const items = [...event.currentTarget.querySelectorAll('[data-sw-chat-option]')]
-    if (!items.length) return
-    event.preventDefault()
-    const at = items.indexOf(document.activeElement)
-    const step = event.key === 'ArrowDown' ? 1 : items.length - 1
-    const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : at < 0 ? 0 : (at + step) % items.length
-    items[next].focus()
-  }
+  const sections = options.length > 1
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <Tooltip content="Model and effort for this chat">
-        <PopoverTrigger asChild>
+    <DropdownMenu open={open && !disabled} onOpenChange={(next) => setOpen(next && !disabled)}>
+      <Tooltip content={disabled ? disabledReason : tooltip} open={tip && !open} onOpenChange={setTip}>
+        <DropdownMenuTrigger asChild>
           <Button
             type="button"
             variant="ghost"
             size={touch ? 'touch' : 'sm'}
-            className="max-w-full min-w-0 shrink gap-0.5 px-1 font-normal text-muted"
-            disabled={disabled}
-            aria-label={`Model and effort for this chat: ${label}`}
-            data-sw-chat-options={options.map((option) => option.category).join(' ')}
+            className={cn(
+              'max-w-full min-w-0 shrink gap-0.5 font-normal text-muted',
+              icon && !label ? (touch ? 'w-11 px-0' : 'w-7 px-0') : touch ? 'px-1.5' : 'px-1',
+              disabled && 'cursor-default opacity-60 hover:bg-transparent hover:text-muted',
+            )}
+            aria-label={ariaLabel}
+            aria-disabled={disabled || undefined}
+            data-sw-chat-options-trigger={hook}
           >
-            <Cpu size={13} className="shrink-0" aria-hidden="true" />
-            <span className="min-w-0 truncate text-caption">{label}</span>
-            {busy ? <Spinner size={11} /> : <ChevronDown size={12} className="shrink-0 text-faint" aria-hidden="true" />}
+            {icon}
+            {label ? <span className="min-w-0 truncate text-caption">{label}</span> : null}
+            {busy ? <Spinner size={11} /> : label ? <ChevronDown size={12} className="shrink-0 text-faint" aria-hidden="true" /> : null}
           </Button>
-        </PopoverTrigger>
+        </DropdownMenuTrigger>
       </Tooltip>
-      <PopoverContent
+      <DropdownMenuContent
         align="start"
         side="top"
-        className="w-64 space-y-2 p-2"
-        onKeyDown={onKeyDown}
-        onOpenAutoFocus={(event) => {
-          // The current choice of the first list takes the focus, for the arrows.
-          event.preventDefault()
-          const content = event.currentTarget
-          const first =
-            content.querySelector('[data-sw-chat-option][aria-pressed="true"]') || content.querySelector('[data-sw-chat-option]')
-          first?.focus()
-        }}
-        data-sw-chat-options-menu="true"
+        className={cn(width, 'max-w-[calc(100vw-1rem)]')}
+        onOpenAutoFocus={focusChecked}
+        data-sw-chat-options-menu={hook}
       >
-        {options.map((option) => (
-          <div key={option.id} role="group" aria-label={option.name}>
-            <p className="px-2 pt-1 pb-0.5 text-caption font-medium text-faint">
-              {option.category === 'model' ? 'Model' : 'Reasoning effort'}
-            </p>
-            {option.values.map((item) => {
-              const selected = item.value === option.currentValue
-              return (
-                <button
-                  key={item.value}
-                  type="button"
-                  className={cn(
-                    'flex h-11 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-ui transition-colors duration-(--motion-fast) outline-none focus-visible:bg-surface-2 focus-visible:text-fg lg:h-8',
-                    selected ? 'text-fg' : 'text-muted hover:bg-surface-2 hover:text-fg',
-                    busy !== null && 'opacity-60',
-                  )}
-                  aria-pressed={selected}
-                  aria-disabled={busy !== null || undefined}
-                  onClick={() => choose(option, item.value)}
-                  data-sw-chat-option={`${option.category}:${item.value}`}
-                >
-                  <Check size={14} className={cn('shrink-0 text-accent', !selected && 'invisible')} aria-hidden="true" />
-                  <span className="min-w-0 truncate">{item.name}</span>
-                </button>
-              )
-            })}
+        {options.map((option, index) => (
+          <div key={option.id}>
+            {sections && index ? <DropdownMenuSeparator /> : null}
+            <DropdownMenuLabel>{optionTitle(option)}</DropdownMenuLabel>
+            <OptionItems option={option} onChoose={choose} />
           </div>
         ))}
-        <p className="border-t border-line px-2 pt-2 text-caption text-faint">
-          For this chat while its agent session runs. The agent&apos;s own defaults do not change.
-        </p>
-      </PopoverContent>
-    </Popover>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+// The footer's options, as the agent offers them (agentOptions.js): a Model
+// menu and a thinking menu (the agent's own label), the rest under "More
+// options"; at narrow widths (`layout` "combined", composerModel.js
+// footerLayout) one control with every option in sections. While they load
+// before the first message: a quiet "Loading options".
+export function AgentOptions({ options, loading, layout, onChoose, disabled, touch }) {
+  if (!options?.length) {
+    return loading ? (
+      <span
+        className="inline-flex min-w-0 items-center gap-1.5 px-1.5 text-caption text-faint"
+        role="status"
+        data-sw-chat-options-loading="true"
+      >
+        <Spinner size={11} />
+        <span className="truncate">Loading options</span>
+      </span>
+    ) : null
+  }
+  const disabledReason = 'Wait for the answer to finish to change this'
+  const shared = { onChoose, disabled, disabledReason, touch }
+  const { model, effort, more } = optionGroups(options)
+  const categories = options.map((option) => option.category).join(' ')
+  if (layout === 'combined') {
+    const label = [model, effort].filter(Boolean).map(currentLabel).join(' · ') || currentLabel(options[0])
+    return (
+      <span className="flex min-w-0 items-center" data-sw-chat-options={categories}>
+        <OptionMenu
+          hook="all"
+          label={label}
+          ariaLabel={`Options for this chat: ${label}`}
+          tooltip="Model and options for this chat"
+          options={options}
+          {...shared}
+        />
+      </span>
+    )
+  }
+  return (
+    <span className="flex min-w-0 items-center gap-0.5" data-sw-chat-options={categories}>
+      {[model, effort].filter(Boolean).map((option) => (
+        <OptionMenu
+          key={option.id}
+          hook={option.category}
+          label={currentLabel(option)}
+          ariaLabel={`${optionTitle(option)}: ${currentLabel(option)}`}
+          tooltip={optionTitle(option)}
+          options={[option]}
+          width={option.values.some((item) => item.description) ? 'w-72' : 'w-56'}
+          {...shared}
+        />
+      ))}
+      {more.length ? (
+        <OptionMenu
+          hook="more"
+          ariaLabel="More options"
+          tooltip={`More options: ${more.map((option) => `${optionTitle(option)} ${currentLabel(option)}`).join(', ')}`}
+          icon={<SlidersHorizontal size={14} aria-hidden="true" />}
+          options={more}
+          {...shared}
+        />
+      ) : null}
+    </span>
   )
 }
 
