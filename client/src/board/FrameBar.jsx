@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useState } from 'react'
 import { useStore } from '@xyflow/react'
 import { Camera, ExternalLink, Flag, History, MonitorPlay, MoreHorizontal, TextSelect, X } from 'lucide-react'
 import { cn } from '../lib/utils'
 import { Button, IconButton, Tooltip } from '../components/ui'
 import { isThumbnail } from './layout'
+import { notesRect, placeFrameBar } from './frameBarPlace'
 
 const TITLE_ROW_PX = 30
 
@@ -12,7 +13,9 @@ const TITLE_ROW_PX = 30
 // card, never over its title and badges: above the card, else to its right,
 // else to its left. When the card fills the canvas it shrinks to one button
 // in the card's header (or the canvas's top left corner when the header is
-// off screen), away from the page's own nav and buttons.
+// off screen), away from the page's own nav and buttons. It never covers the
+// notes along the top of the canvas (CanvasNotes), such as the comment-mode
+// hint: it moves below them or to the next spot (frameBarPlace.js).
 export default function FrameBar({
   focused,
   target,
@@ -36,11 +39,37 @@ export default function FrameBar({
   const transform = useStore((state) => state.transform)
   const width = useStore((state) => state.width)
   const height = useStore((state) => state.height)
+  const domNode = useStore((state) => state.domNode)
   const [expandedFor, setExpandedFor] = useState(null)
   const expanded = expandedFor === focused
   useEffect(() => {
     if (!focused) setExpandedFor(null)
   }, [focused])
+  // The notes' box, measured now and whenever a note comes, goes or changes
+  // (they follow the board's state) or the canvas changes size.
+  const [avoid, setAvoid] = useState(null)
+  useLayoutEffect(() => {
+    const notes = focused && domNode ? domNode.closest('[data-sw-canvas]')?.querySelector('[data-sw-canvas-notes]') : null
+    const measure = () => {
+      const box = notes
+        ? notesRect(
+            Array.from(notes.children).map((child) => child.getBoundingClientRect()),
+            domNode.getBoundingClientRect(),
+          )
+        : null
+      setAvoid((current) => (JSON.stringify(current) === JSON.stringify(box) ? current : box))
+    }
+    measure()
+    if (!notes) return undefined
+    const mutations = new MutationObserver(measure)
+    mutations.observe(notes, { childList: true, subtree: true, characterData: true })
+    const sizes = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    sizes?.observe(notes)
+    return () => {
+      mutations.disconnect()
+      sizes?.disconnect()
+    }
+  }, [focused, domNode, width, height])
   if (!focused || !target || !frame) return null
   const [tx, ty, zoom] = transform
   const left = (target.x + frame.x) * zoom + tx
@@ -58,32 +87,25 @@ export default function FrameBar({
   const barWidth =
     (touch ? 236 : 340) + (onHistory ? (touch ? 56 : 90) : 0) + (onCapture ? (touch ? 56 : 120) : 0) + (onChecks ? (touch ? 48 : 90) : 0)
   const gap = 8
-  const clampY = (value) => Math.max(gap, Math.min(height - barHeight - gap, value))
-  let place = null
-  if (cardTop - barHeight - gap >= gap)
-    place = { left: Math.max(gap, Math.min(right - barWidth, width - barWidth - gap)), top: cardTop - barHeight - gap }
-  else if (right + gap + barWidth <= width - gap) place = { left: right + gap, top: clampY(top) }
-  else if (left - gap - barWidth >= gap) place = { left: left - gap - barWidth, top: clampY(top) }
+  const { place, toggle, fallback } = placeFrameBar({
+    card: { left, top, right, bottom, titleTop: cardTop },
+    canvas: { width, height },
+    bar: { width: barWidth, height: barHeight },
+    avoid,
+    gap,
+    zoom,
+  })
 
   const size = touch ? 'touch' : 'sm'
   const quiet = 'text-fg shadow-none'
   // Labels stay 13 px on touch so the bar keeps its measured width.
   const label = touch && 'text-[13px]'
   if (!place && !expanded) {
-    // On the title row, left of its badges, when the row is on screen; else
-    // the canvas's top left corner.
-    const rowVisible = cardTop >= gap && zoom > 0.2
-    const spot = rowVisible
-      ? {
-          top: Math.max(gap, cardTop - 7),
-          left: Math.max(gap, Math.min(width - 52, right - 44 - Math.min(140, (right - left) * 0.3))),
-        }
-      : { top: gap, left: gap }
     return (
       <IconButton
         size="icon"
         variant="secondary"
-        style={spot}
+        style={toggle}
         className="nodrag nopan absolute z-20 rounded-full bg-surface/95 text-fg shadow-pop"
         onClick={(event) => {
           event.stopPropagation()
@@ -99,7 +121,7 @@ export default function FrameBar({
   }
   const style = place
     ? { left: place.left, top: place.top, width: Math.min(barWidth, width - 16) }
-    : { left: gap, top: gap, width: Math.min(barWidth, width - 16) }
+    : { left: fallback.left, top: fallback.top, width: Math.min(barWidth, width - 16) }
   return (
     <div
       className="nodrag nopan nowheel absolute z-20 flex items-center flex-wrap justify-end gap-1 rounded-lg border border-line bg-surface/95 p-1 shadow-pop backdrop-blur"
