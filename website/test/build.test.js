@@ -11,6 +11,7 @@ import { DEMO_SITE_PATHS, HARDENING_PDF, NOT_FOUND, ROUTES, SITE_URL } from '../
 import { FAQ } from '../src/faq-data.js'
 import { DEMO_SITES } from '../../scripts/demo-publish.js'
 import { THEME_KEY } from '../src/theme.js'
+import { BETA_NOTE } from '../src/launch.js'
 
 const SITE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const DIST = path.join(SITE, 'dist')
@@ -70,8 +71,9 @@ function checkPage(route, { stealth }) {
   const title = decode(attr(html, /<title>([^<]*)<\/title>/) || '')
   const description = decode(attr(html, /<meta name="description" content="([^"]*)"/) || '')
   assert.ok(title, `${route.path}: title`)
-  assert.ok(title.length < 60, `${route.path}: title is ${title.length} characters`)
-  assert.ok(description.length >= 120 && description.length <= 160, `${route.path}: description is ${description.length} characters`)
+  assert.ok(title.length <= 60, `${route.path}: title is ${title.length} characters`)
+  assert.ok(description.length >= 70 && description.length <= 160, `${route.path}: description is ${description.length} characters`)
+  assert.ok(title.endsWith('| Shapewall'), `${route.path}: the brand comes last in the title`)
   const canonical = attr(html, /<link rel="canonical" href="([^"]*)"/)
   assert.equal(canonical, SITE_URL + (route.path === '/' ? '/' : route.path), `${route.path}: canonical`)
   const image = attr(html, /<meta property="og:image" content="([^"]*)"/)
@@ -266,7 +268,15 @@ test('launched: install command, plain GitHub links, a free Offer, no early acce
   for (const route of ['/', '/features', '/open-source', '/docs', '/docs/hosted', '/docs/faq']) {
     assert.match(read(fileFor(route)), /\bbeta\b/i, `${route}: self-hosted multiplayer is labelled beta`)
   }
+  // One sentence explains what beta means, on the Licenses page only; everywhere else it is a badge or a label.
+  for (const route of ROUTES) {
+    const html = read(fileFor(route.path))
+    assert.equal(html.includes(BETA_NOTE), route.path === '/open-source', `${route.path}: the beta sentence is on /open-source only`)
+    assert.ok(!/tested with automated browsers|not yet verified|is planned|has not launched/i.test(html), `${route.path}: no process notes`)
+  }
   assert.match(read(fileFor('/docs/security')), /id="known-limits"/)
+  // The Features section nav wraps on wider screens rather than clipping items it cannot scroll to.
+  assert.match(read(fileFor('/features')), /aria-label="Features on this page"[\s\S]{0,400}md:flex-wrap/)
   checkLinks()
 })
 

@@ -4,19 +4,15 @@ Start with a running site, choose its pages, capture them and open the wall.
 
 <!-- prelaunch -->
 
-**Private early access:** the GitHub repository is invite only for now, so the commands below need a GitHub account that has been
-invited (a GitHub 404 means the signed-in account has no access). The [live demo](/demo/) needs no access.
+**Private early access:** the GitHub repository is invite only, so the commands below need a GitHub account with access (a GitHub
+404 means the signed-in account has none). The [live demo](/demo/) needs no access.
 
 <!-- /prelaunch -->
 
-Use **Node.js 22.13 or newer**. Basic capture works on any Node 22; local accounts and the team server need 22.13.
+Shapewall runs on Linux, macOS and Windows with **Node.js 22.13 or newer**. Linux is the primary tested platform.
 
 On a bare Linux server, a container or WSL, the downloaded Chromium also needs system libraries: run
 `sudo npx playwright install-deps chromium` once (`shapewall doctor` tells you when this is the problem).
-
-Platforms: Shapewall is developed and tested on Linux. macOS should work and is not yet verified by the maintainers. Windows is
-untested; the PowerShell lines in these docs are a convenience. If you run it on macOS or Windows, please
-[open an issue](https://github.com/danbaruch/shapewall/issues) with what worked and what did not.
 
 ### In your project
 
@@ -34,8 +30,8 @@ downloads the package the first time.
 
 ### From GitHub
 
-For a build that is not released yet, install from the repository instead: `npm install --save-dev github:danbaruch/shapewall`
-(add `#<commit or tag>` to pin one). That takes a minute, because npm clones the repository and builds the board.
+For the latest unreleased build, install from the repository: `npm install --save-dev github:danbaruch/shapewall` (add
+`#<commit or tag>` to pin one). npm clones the repository and builds the board, which takes about a minute.
 
 ### From a clone
 

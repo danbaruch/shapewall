@@ -21,7 +21,7 @@ import { BeforeAfter, CaptureIllustration, JourneyIllustration, MapIllustration 
 import { AgentTerminal } from '../components/terminal.jsx'
 import { Faq } from '../components/faq.jsx'
 import { GITHUB_URL } from '../routes.js'
-import { BETA_NOTE, GITHUB_LABEL, LAUNCHED, LICENSE_SUMMARY } from '../launch.js'
+import { GITHUB_LABEL, LAUNCHED, LICENSE_SUMMARY } from '../launch.js'
 import boardOverview from '../assets/shots/board-overview.webp'
 import boardOverview960 from '../assets/shots/board-overview-960.webp'
 import liveComment960 from '../assets/shots/live-comment-960.webp'
@@ -65,11 +65,11 @@ function Hero() {
             Shape your product <span className="text-wall">on the wall.</span>
           </h1>
           <p className="mx-auto mt-6 max-w-2xl text-[17px] leading-7 text-pretty text-slate sm:text-[19px] sm:leading-8">
-            Shapewall captures every page of your site at desktop, tablet and phone width and lays them out on one zoomable wall. Point at
-            the element you want changed. Your coding agent picks up the comment, builds it, and you see before and after, in place.
+            Shapewall captures every page of your site at desktop, tablet and phone width and lays them out on one zoomable wall. Pin a
+            comment to the element you want changed, your coding agent makes the change, and you see before and after in place.
           </p>
           <p className="mx-auto mt-4 max-w-2xl text-[15px] leading-6 text-pretty text-ink">
-            {LAUNCHED ? 'Free to use. ' : ''}Run the local tool on your machine, or host the team server yourself for a shared wall.
+            {LAUNCHED ? 'Free to use. ' : ''}Run it on your machine, or host the team server yourself for a shared wall.
           </p>
           <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <GetStarted where="hero" />
@@ -79,13 +79,13 @@ function Hero() {
             </Button>
           </div>
           <p className="mt-4 text-[13.5px] text-slate">
-            The live demo runs in your browser: comments, the agent chat, and the team console with roles, invites and share links.
+            The live demo runs in your browser: comments, the agent chat and the team console, with nothing to install.
           </p>
           <div className="mt-5 flex flex-col items-center gap-2">
             <InstallCommand where="hero" />
             {LAUNCHED ? (
               <p className="text-[13px] text-faint">
-                Needs Node 22.13 or newer and git.{' '}
+                Needs Node.js 22.13 or newer.{' '}
                 <Link to="/docs/getting-started#install" className="font-medium text-wall hover:text-wall-deep">
                   Install steps
                 </Link>
@@ -123,19 +123,19 @@ const STEPS = [
   {
     icon: Camera,
     title: 'Capture',
-    text: 'List your pages, run shapewall capture. Every page is shot at desktop and phone width (add a tablet or your own sizes), with a sandboxed live HTML copy you can zoom into.',
+    text: 'Run shapewall capture and every page is shot at desktop and phone width, or any sizes you add, with a live HTML copy you can zoom into.',
     art: <CaptureIllustration />,
   },
   {
     icon: LayoutGrid,
-    title: 'See the whole map',
-    text: 'The wall lays every page out, grouped into sections. Zoom out to see the product and its flows at once, zoom in to read a single button.',
+    title: 'See it all on the wall',
+    text: 'Pages are laid out in sections. Zoom out to see every page and flow at once, zoom in to read a single button.',
     art: <MapIllustration />,
   },
   {
     icon: MousePointerClick,
-    title: 'Point, and the agent builds it',
-    text: 'Click the exact element and say what should change. Your coding agent reads the comment, edits the code, recaptures, and resolves it.',
+    title: 'Point at it, your agent builds it',
+    text: 'Click the element and say what should change. Your coding agent edits the code, recaptures the page and resolves the comment.',
     art: (
       <div className="wall-dots flex aspect-[4/3] items-center rounded-2xl p-4 sm:p-5">
         <Shot
@@ -154,8 +154,8 @@ function HowItWorks() {
   return (
     <section className="py-16 sm:py-28" aria-labelledby="how">
       <Container>
-        <SectionHead eyebrow="How it works" title={<span id="how">From URL to a wall you can shape, in three steps</span>}>
-          AI does the building. You shape it from the wall, where you can see what it built across every page and every screen size.
+        <SectionHead eyebrow="How it works" title={<span id="how">From your site to a wall you can shape, in three steps</span>}>
+          Your agent writes the code. You review the result on the wall, across every page and screen size.
         </SectionHead>
         <ol className="mt-14 grid gap-10 md:grid-cols-3 md:gap-6 lg:gap-8">
           {STEPS.map((step, index) => (
@@ -178,32 +178,32 @@ const FEATURES = [
   {
     icon: Smartphone,
     title: 'Desktop, tablet and phone',
-    text: 'Every page at each width you set, side by side on one canvas, so a broken phone layout is as obvious as a broken desktop one.',
+    text: 'Every page at each width you set, side by side, so a broken phone layout is as obvious as a broken desktop one.',
   },
   {
     icon: ShieldCheck,
     title: 'Live HTML, safely inert',
-    text: 'Zoom in and the screenshot turns into the real captured page. Three independent locks keep its code from running.',
+    text: 'Zoom in and the screenshot becomes the captured page, with text you can select. Three independent safeguards keep it from running code.',
   },
   {
     icon: MapPin,
     title: 'Comments on the element',
-    text: 'A pin stores the selector and the text of what you clicked, so it follows the button after the next capture.',
+    text: 'A pin stores the selector and text of what you clicked, so it follows the button through the next capture.',
   },
   {
     icon: Bot,
-    title: 'Agents pick them up',
-    text: 'Comments come out as JSON. Watch mode and an MCP server let Claude Code, Codex or any agent take them on their own.',
+    title: 'Works with your agent',
+    text: 'Claude Code, Codex or any agent reads comments as JSON or through the MCP server, and watch mode hands it each new one.',
   },
   {
     icon: GitCompare,
     title: 'Before and after, with history',
-    text: 'Every recapture keeps the old shot. See a fix around its pin, any earlier capture with the changed pixels in red, or staging beside production.',
+    text: 'Every recapture keeps the old shot. See a fix around its pin, compare any earlier capture with changed pixels in red, or put staging beside production.',
   },
   {
     icon: FolderOpen,
-    title: 'Plain files, no cloud',
-    text: 'Captures and comments are files in .shapewall/. No account, no telemetry. Export a static copy any host can serve.',
+    title: 'Plain files in your project',
+    text: 'Captures and comments are files in .shapewall/. Export a static, read-only copy any host can serve.',
   },
 ]
 
@@ -212,8 +212,8 @@ function FeatureGrid() {
     <section className="border-y border-line bg-band py-16 sm:py-28" aria-labelledby="features">
       <Container>
         <div className="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
-          <SectionHead eyebrow="Features" title={<span id="features">Made for creating, not just critiquing</span>}>
-            Review tools stop at the comment. Shapewall keeps going until the change is built and you have seen it on the wall.
+          <SectionHead eyebrow="Features" title={<span id="features">From comment to finished change</span>}>
+            Every comment carries what an agent needs to build the change, and the wall shows you the result.
           </SectionHead>
           <Link
             to="/features"
@@ -242,7 +242,7 @@ function FeatureGrid() {
 function AgentLoop() {
   const loop = [
     { title: 'You comment', text: 'on the wall, on the exact element, in plain words.' },
-    { title: 'The agent fixes', text: 'reading the page, viewport, selector, text and screenshot.' },
+    { title: 'The agent fixes it', text: 'using the page, viewport, selector, element text and screenshot.' },
     { title: 'It recaptures', text: 'only the pages it touched.' },
     { title: 'You check', text: 'before and after, in place. Resolve, or reopen with a note.' },
   ]
@@ -251,7 +251,7 @@ function AgentLoop() {
       <Container className="grid items-center gap-12 lg:grid-cols-[1fr_1.15fr] lg:gap-16">
         <div>
           <SectionHead dark eyebrow="The agent loop" title={<span id="loop">Your agent does the building. You stay on the wall.</span>}>
-            Shapewall does not ship a model. It hands any coding agent feedback it can act on, and makes checking the result cheap.
+            Shapewall works with the coding agent you already use. It hands the agent precise feedback and shows you what changed.
           </SectionHead>
           <ol className="mt-10 space-y-5">
             {loop.map((item, index) => (
@@ -283,8 +283,8 @@ function Journeys() {
       <Container>
         <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
           <SectionHead eyebrow="Journeys" title={<span id="journeys">See the flows, not just the pages</span>}>
-            Shapewall draws arrows between pages from the links that really connect them. Name the paths that matter, highlight one, and
-            step through it page by page, commenting as you go.
+            Shapewall draws arrows between pages from the real links on them. Name the paths that matter, highlight one, and step through it
+            page by page, commenting as you go.
           </SectionHead>
           <Link
             to="/docs/journeys"
@@ -307,8 +307,8 @@ function BeforeAfterSection() {
       <Container className="grid items-center gap-12 lg:grid-cols-[1fr_1.3fr] lg:gap-16">
         <div>
           <SectionHead eyebrow="Before and after" title={<span id="before-after">Every change, checked where you asked for it</span>}>
-            When a comment is resolved, the wall keeps the capture it was made on. Flip between before and after right on the pin. Put a
-            staging build beside production, or a branch preview beside the page it changes.
+            A resolved comment keeps the capture it was made on, so you flip between before and after right on the pin. Put staging beside
+            production, or a branch preview beside the page it changes.
           </SectionHead>
           <ul className="mt-8 space-y-3 text-[15.5px] text-slate">
             {[
@@ -337,7 +337,11 @@ const TEAM_POINTS = [
   },
   { icon: Link2, title: 'Share links for clients', text: 'One project, view only or with guest comments, with an expiry and a passcode.' },
   { icon: Radio, title: 'Live presence', text: 'See who is on the wall, follow their cursor, comment together.' },
-  { icon: Bot, title: 'Agents on the team wall', text: 'A project token lets your agent read, reply to and resolve the shared comments.' },
+  {
+    icon: Bot,
+    title: 'Agents on the shared wall',
+    text: 'A project token lets your agent read, reply to and resolve the shared comments.',
+  },
 ]
 
 function Teams() {
@@ -356,16 +360,15 @@ function Teams() {
               </>
             }
           >
-            Shapewall is single-player by default. When a team wants the same wall, run <code>shapewall hosted</code> on a machine you
-            control: captures are uploaded from your computers, and nothing goes to a service of ours.
+            Run <code>shapewall hosted</code> on a machine you control and your team shares one wall. Captures upload from your computers to
+            your server.
           </SectionHead>
-          <p className="mt-4 max-w-2xl text-[14.5px] leading-6 text-slate">{BETA_NOTE}</p>
           <div className="mt-8 flex flex-wrap gap-3">
             <Button to="/features#teams" variant="secondary">
               <Users className="size-4" aria-hidden="true" /> How teams work
             </Button>
             <Button to="/docs/hosted" variant="ghost">
-              The hosted guide <ArrowRight className="size-4" aria-hidden="true" />
+              Team server guide <ArrowRight className="size-4" aria-hidden="true" />
             </Button>
           </div>
         </div>
@@ -390,15 +393,15 @@ function OpenSourceSection() {
     <section className="border-t border-line py-16 sm:py-28" aria-labelledby="open-source">
       <Container className="grid gap-12 lg:grid-cols-2 lg:gap-16">
         <div>
-          <SectionHead eyebrow="Licenses and self-hosting" title={<span id="open-source">Your pages never leave your machine</span>}>
-            Captures, comments and journeys stay as files in your project, or on the team server you run. {LICENSE_SUMMARY}
+          <SectionHead eyebrow="Licenses and self-hosting" title={<span id="open-source">Your pages stay on machines you control</span>}>
+            Captures, comments and journeys are files in your project, or on the team server you run. {LICENSE_SUMMARY}
           </SectionHead>
           <dl className="mt-10 grid gap-6 sm:grid-cols-2">
             {[
               ['No account', 'Nothing to sign up for. No telemetry.'],
               ['Local by default', 'The board listens on 127.0.0.1 and checks the Host header.'],
               ['Share safely', 'Pair your own devices, host the team server, or export a read-only copy.'],
-              ['Hackable', 'Node 22, Playwright, Express and React Flow. Read it in an afternoon.'],
+              ['Hackable', 'Built on Node.js, Playwright, Express and React Flow, with plain JSON data.'],
             ].map(([term, text]) => (
               <div key={term}>
                 <dt className="text-[15px] font-semibold text-ink">{term}</dt>
@@ -450,7 +453,7 @@ function FaqSection() {
   return (
     <section className="border-y border-line bg-band py-16 sm:py-28" aria-labelledby="faq">
       <Container className="grid gap-12 lg:grid-cols-[1fr_1.6fr] lg:gap-16">
-        <SectionHead eyebrow="FAQ" title={<span id="faq">Questions people ask first</span>}>
+        <SectionHead eyebrow="FAQ" title={<span id="faq">Frequently asked questions</span>}>
           More in the{' '}
           <Link to="/docs/faq" className="font-semibold text-wall hover:text-wall-deep">
             docs FAQ
@@ -473,7 +476,7 @@ export function FinalCta() {
         <p className="mt-4 max-w-xl text-[17px] leading-7 text-zinc-400">
           {LAUNCHED
             ? 'Install it in your project, or try the live demo first.'
-            : 'Try the live demo today: the wall, the comments and the team console run in your browser.'}
+            : 'Try the live demo: the wall, the comments and the team console run in your browser.'}
         </p>
         <div className="mt-8 flex w-full flex-col items-center gap-3 sm:w-auto sm:flex-row">
           <GetStarted where="footer-cta" variant="light" />

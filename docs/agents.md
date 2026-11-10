@@ -701,10 +701,6 @@ so before anything downloads, and nothing downloads until you press **Download v
   `default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' https://huggingface.co https://*.hf.co`.
   `shapewall serve`, the hosted server and the public demo (`website/deploy/shapewall.Caddyfile`) send it. Without it the model
   cannot load, and the system voice reads.
-- **Not yet.** WebGPU: with these 8-bit weights it was slower than WebAssembly in our test, and the faster WebGPU file (fp16) is
-  163 MB. Cross-origin isolation (COOP and COEP headers on the board) would let WebAssembly use 4 threads: first sound in about 0.9 s
-  instead of 2.4 s; the worker already uses threads when the page is isolated. Server mode (the voice made by `shapewall serve`, for
-  phones) is planned; it would run on the machine running `shapewall serve`, never on shapewall.com.
 
 ### Chat history
 
