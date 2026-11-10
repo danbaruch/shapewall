@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url'
 import { createApp, stopChildren } from '../src/server/app.js'
 import { normalizeConfig } from '../src/config.js'
 import { createSettingsEvents } from '../src/agent/settings-events.js'
+import { acpHandshake } from '../src/agent/backends/acp.js'
 import { SAMPLE, request, tempDir } from './helpers.js'
 
 const TOKEN = 'settings-token-for-events-0123456789'
@@ -116,6 +117,7 @@ function eventStream(port) {
         }
       })
       resolve({
+        response: res,
         seen,
         // Waits until `count` events arrived (or fails after 3 s).
         async until(count) {
@@ -188,4 +190,61 @@ test('api: every settings route that changes something, and an outside edit of t
     stopChildren(app)
     await new Promise((resolve) => server.close(resolve))
   }
+})
+
+test('api: a server with open events streams closes promptly', async () => {
+  const home = settingsHome()
+  const dir = tempDir('events-close')
+  const config = normalizeConfig(structuredClone(SAMPLE), { dir, file: path.join(dir, 'shapewall.config.json') })
+  const app = createApp({
+    config,
+    clientDir: tempDir('events-close-client'),
+    env: { PATH: process.env.PATH, XDG_CONFIG_HOME: home.dir },
+    settingsToken: TOKEN,
+  })
+  const server = await listen(app)
+  const port = server.address().port
+  const streams = [await eventStream(port), await eventStream(port)]
+  const ended = streams.map(
+    (stream) =>
+      new Promise((resolve) => {
+        stream.response.on('end', resolve)
+        stream.response.on('close', resolve)
+      }),
+  )
+  const started = Date.now()
+  stopChildren(app)
+  await Promise.race([
+    Promise.all([new Promise((resolve) => server.close(resolve)), ...ended]),
+    wait(2000).then(() => assert.fail('the server stayed open behind its events streams')),
+  ])
+  assert.ok(Date.now() - started < 2000)
+  // A stream asked for after close is refused, not held open.
+  const late = createApp({
+    config,
+    clientDir: tempDir('events-close-client-2'),
+    env: { PATH: process.env.PATH, XDG_CONFIG_HOME: home.dir },
+    settingsToken: TOKEN,
+  })
+  stopChildren(late)
+  const lateServer = await listen(late)
+  try {
+    const answer = await request(lateServer.address().port, 'GET', '/api/agent/events')
+    assert.equal(answer.status, 503)
+  } finally {
+    await new Promise((resolve) => lateServer.close(resolve))
+  }
+})
+
+test('events: the agent process pool says when an agent starts and when it is gone', async () => {
+  const calls = []
+  const processPool = { epoch: 0, agents: new Set(), max: 2, changed: () => calls.push([...processPool.agents].map((item) => item.state)) }
+  const result = await acpHandshake(
+    { label: 'Stub', acp: { argv: [process.execPath, STUB_ACP] } },
+    { root: tempDir('events-pool'), processPool },
+  )
+  assert.equal(result.ok, true, JSON.stringify(result))
+  assert.deepEqual(calls[0], ['starting'], 'told when it starts')
+  assert.deepEqual(calls.at(-1), [], 'and when it is gone')
+  assert.equal(processPool.agents.size, 0)
 })

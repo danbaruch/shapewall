@@ -184,6 +184,9 @@ export function agentRouter({
   // edits of the agents file from outside (settings-events.js).
   const settingsEvents = createSettingsEvents({ file: userSettingsFile(env), watch: limit.watchSettings !== false })
   router.settingsEvents = settingsEvents
+  // The open GET /events responses, ended on close.
+  const eventStreams = new Set()
+  let eventsClosed = false
   const settings = (profileId = null) => {
     const current = agentSettings(config, env, { acp, profileId })
     if (shared && !allowRemoteAgent && current.backend === 'acp' && current.configured) {
@@ -201,7 +204,14 @@ export function agentRouter({
   // processes) while the settings stay the same.
   let cached = null
   const backends = new Map()
-  const processPool = { epoch: 0, agents: new Set(), max: Math.min(limit.runsMax, limit.acp?.processesMax ?? limit.runsMax) }
+  // `changed`: an agent process started, became ready or went away, which
+  // moves an agent's state ("Starting", "Ready"): the open views hear it.
+  const processPool = {
+    epoch: 0,
+    agents: new Set(),
+    max: Math.min(limit.runsMax, limit.acp?.processesMax ?? limit.runsMax),
+    changed: () => settingsEvents.changed('state'),
+  }
   // How each agent is doing (agent-health.js): from the last turn or test.
   const health = createAgentHealth()
   const agentStatus = (current) => health.status(current, processPool)
@@ -287,6 +297,10 @@ export function agentRouter({
   router.close = () => {
     processPool.epoch += 1
     settingsEvents.close()
+    // An open events stream would hold the server open: end every one.
+    eventsClosed = true
+    for (const res of eventStreams) res.end()
+    eventStreams.clear()
     const settingsStopped = settingsApi.close()
     const owned = [...processPool.agents]
     for (const agent of owned) agent.kill('shutdown')
@@ -725,6 +739,7 @@ export function agentRouter({
   // The agent settings changed (here, in another tab, or in the file): a
   // nudge only, no settings in it; each view refetches what it shows.
   router.get('/events', (req, res) => {
+    if (eventsClosed) return res.status(503).json({ error: { code: 'stopping', message: 'The server is stopping.' } })
     res.writeHead(200, {
       'Content-Type': 'text/event-stream; charset=utf-8',
       'Cache-Control': 'no-store',
@@ -740,10 +755,14 @@ export function agentRouter({
       if (!res.writableEnded) res.write(': ping\n\n')
     }, limit.keepaliveMs)
     keepalive.unref?.()
-    req.on('close', () => {
+    eventStreams.add(res)
+    const done = () => {
       clearInterval(keepalive)
       stop()
-    })
+      eventStreams.delete(res)
+    }
+    req.on('close', done)
+    res.on('finish', done)
   })
   router.get('/status', (req, res) =>
     res.json({
