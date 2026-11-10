@@ -176,6 +176,12 @@ export function AgentSettings({ onSaved, touch, buzz = false, onDirtyChange, age
     setError(null)
     try {
       const next = await api.post('/api/agent/settings', { settings: body, confirm: confirmed })
+      // The public demo: nothing to save to, said as a note (demo/backend/routes-agents.js).
+      if (next.demoNote) {
+        setConfirm(null)
+        setResult({ note: next.demoNote })
+        return
+      }
       if (next.confirm) {
         // A new command or key host: ask, then save again with their hash.
         setConfirm({ items: next.confirm, hash: next.confirmHash })

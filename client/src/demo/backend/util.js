@@ -33,8 +33,10 @@ export const AGENT_INFO = {
 }
 // Two scripted agents, so the agent picker and "Fix with ..." have a choice.
 // Both are labelled demo and answer from this browser; the second one is
-// shorter spoken (agent.js `voice`). The default connection runs the first
-// (`sameAs`), as on a real board where it runs a saved profile.
+// shorter spoken (agent.js `voice`). The default connection runs the default
+// one (`sameAs`), as on a real board where it runs a saved profile. Which one
+// is the default and which were removed on the Agents page live in
+// state.agents (routes-agents.js); Reset puts both back.
 export const DEMO_AGENTS = [
   { id: 'demo', label: 'Demo agent', voice: 'demo' },
   { id: 'second', label: 'Second agent', voice: 'second' },
@@ -43,12 +45,27 @@ export const demoAgentInfo = (id) => {
   const agent = DEMO_AGENTS.find((item) => item.id === id) || DEMO_AGENTS[0]
   return { ...AGENT_INFO, label: agent.label, state: 'ready' }
 }
-export const demoProfiles = () => [
-  { id: 'default', ...demoAgentInfo('demo'), sameAs: 'demo' },
-  ...DEMO_AGENTS.map((agent) => ({ id: agent.id, ...demoAgentInfo(agent.id) })),
-]
-// The profile a thread runs: its own pick, else the default's.
-export const demoAgentOf = (profileId) => DEMO_AGENTS.find((item) => item.id === profileId) || DEMO_AGENTS[0]
+// { default, removed } from the saved state, tolerant of states saved before it.
+export const demoAgentState = (state) => {
+  const saved = state?.agents || {}
+  const removed = Array.isArray(saved.removed) ? saved.removed.filter((id) => DEMO_AGENTS.some((agent) => agent.id === id)) : []
+  const connected = DEMO_AGENTS.filter((agent) => !removed.includes(agent.id))
+  const fallback = connected[0]?.id || DEMO_AGENTS[0].id
+  const chosen = connected.some((agent) => agent.id === saved.default) ? saved.default : fallback
+  return { default: chosen, removed, connected }
+}
+export const demoProfiles = (state) => {
+  const agents = demoAgentState(state)
+  return [
+    { id: 'default', ...demoAgentInfo(agents.default), sameAs: agents.default },
+    ...agents.connected.map((agent) => ({ id: agent.id, ...demoAgentInfo(agent.id) })),
+  ]
+}
+// The profile a thread runs: its own pick while it is connected, else the default's.
+export const demoAgentOf = (profileId, state) => {
+  const agents = demoAgentState(state)
+  return agents.connected.find((item) => item.id === profileId) || DEMO_AGENTS.find((item) => item.id === agents.default) || DEMO_AGENTS[0]
+}
 
 export class DemoError extends Error {
   constructor(status, code, message) {
