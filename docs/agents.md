@@ -102,6 +102,28 @@ project's answer limit, rate limits, and ACP process budget; opening another pro
 Each profile starts its own agent session on the Shapewall computer. To message agents that already run in a Buzz chat channel
 instead, see the optional [Buzz bridge](buzz.md).
 
+## Agents in Workspace settings
+
+The local Workspace Console's **Settings** page (`/console?section=settings`, **Workspace** in the board's sidebar) has an **Agents**
+card, the one place to manage agents. The chat's agent dialog (**Connect another agent...**) and the host-only settings window
+(`shapewall settings`) show the same card; the board's general **Settings > Agent** tab links to it.
+
+- **Every agent Shapewall knows how to run** (Claude Code, Codex, goose, Gemini CLI) with its state on this machine: **Connected**
+  (with its state, **Test connection** and **Remove**, and how to sign in when it is not signed in); **Found, not connected**
+  (**Connect**, with the same **Allow this?** dialog as anywhere else); **Found, but its adapter is missing** (the exact install line to
+  copy and **Check again**; Shapewall never runs an install for you); **Not installed** (where to get it). The list comes from the same
+  `PATH` lookup as one-click Connect: nothing is started, installed or downloaded.
+- **Default agent for new chats and fixes**: a radio list of the connected agents (and the saved endpoint, when there is one). It saves
+  with `POST /api/agent/settings/profiles/:id/default` (`endpoint` for the endpoint). The default is stored as the default connection
+  itself (`backend: "acp"` with that agent's `acpCommand` in `agents.json`), so there is no second marker to fall out of step. Settings
+  that hold profiles but no default connection of their own use the first profile, unless the config's own endpoint is in effect.
+  Chats that chose another agent keep theirs. Every command here was confirmed when it was connected, so this asks nothing new.
+- **Other**: an OpenAI-compatible endpoint, in the existing form.
+
+Connecting, removing, testing and choosing the default run commands as the machine's owner, so they need the settings token (the owner
+link `shapewall serve` prints). Without it the card is read-only and says how to open that link; it asks nothing of the agent routes.
+Self-hosted multiplayer (`shapewall hosted`) has its own workspace Settings (project agent tokens), which does not show this card.
+
 ## Source folder and agent sign-in
 
 **Settings > Agent** shows **Source folder on the Shapewall computer**. That is the real directory containing this project's config,

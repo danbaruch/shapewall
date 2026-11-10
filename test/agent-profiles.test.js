@@ -418,6 +418,11 @@ test(
       ],
     )
     assert.equal(before.json.endpoint, null, 'no endpoint saved')
+    assert.deepEqual(
+      before.json.known.map((item) => item.id),
+      ['claude', 'codex', 'goose', 'gemini'],
+      'every agent Shapewall knows, found or not',
+    )
     assert.equal((await b.select('comment-1', 'goose')).status, 200)
     const made = await b.api('POST', '/api/agent/settings/profiles/codex/default', {})
     assert.equal(made.status, 200, JSON.stringify(made.json))
@@ -483,4 +488,36 @@ test('agent states: a login failure shows on that agent only, with its sign-in h
   assert.equal(tested.json.ok, true, JSON.stringify(tested.json))
   assert.equal((await b.api('GET', b.base + 'board')).json.agent.state, 'ready')
   assert.equal((await b.api('POST', '/api/agent/settings/test', { profileId: 'nobody' })).status, 400)
+})
+
+test('the saved endpoint (Other) can be the default, and a connected agent again after it', { skip: !POSIX }, async (t) => {
+  const b = await board(t, { saved: false })
+  saveUserAgentEntry(
+    b.config.dir,
+    { backend: 'acp', acpCommand: 'claude-agent-acp', baseUrl: 'http://127.0.0.1:9/v1', model: 'local-model', profiles: [profiles[1]] },
+    b.env,
+  )
+  const before = await b.api('GET', '/api/agent/settings')
+  assert.deepEqual(before.json.endpoint, { label: 'local-model', model: 'local-model', host: '127.0.0.1:9', default: false })
+  assert.deepEqual(
+    before.json.profiles.map((item) => [item.id, item.legacy || false, item.default]),
+    [
+      ['claude', true, true],
+      ['codex', false, false],
+    ],
+  )
+  const endpoint = await b.api('POST', '/api/agent/settings/profiles/endpoint/default', {})
+  assert.equal(endpoint.status, 200, JSON.stringify(endpoint.json))
+  assert.equal(endpoint.json.saved.backend, 'openai-compatible')
+  assert.equal(endpoint.json.endpoint.default, true)
+  assert.equal(endpoint.json.endpoint.state, 'ready')
+  assert.deepEqual(
+    endpoint.json.saved.profiles.map((item) => item.id),
+    ['claude', 'codex'],
+    'the command saved before profiles stays in the list',
+  )
+  const back = await b.api('POST', '/api/agent/settings/profiles/claude/default', {})
+  assert.equal(back.json.saved.backend, 'acp')
+  assert.equal(back.json.saved.acpCommand, 'claude-agent-acp')
+  assert.equal(back.json.endpoint.default, false)
 })

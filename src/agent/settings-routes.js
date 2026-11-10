@@ -479,6 +479,8 @@ export function settingsRoutes({ config, env, fetchImpl, settings, shared, token
       // The agent CLIs found on PATH (looked up, never started), for the
       // one-click Connect in an unconnected chat panel.
       detected: detectAgents(env),
+      // Every agent Shapewall knows how to run, found or not (Settings > Agents).
+      known: KNOWN_AGENTS.map(({ id, label, adapter, cli, install }) => ({ id, label, adapter, cli, install })),
       knownKeyHosts: [...KNOWN_KEY_HOSTS],
       defaultKeyVar: DEFAULT_KEY_VAR,
       keyVarsSet: keyVarsSet(env),
