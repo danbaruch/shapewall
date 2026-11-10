@@ -94,14 +94,20 @@ export function AgentSettings({ onSaved, touch, buzz = false, onDirtyChange, age
   // The saved settings changed elsewhere while this form had unsaved edits.
   const [stale, setStale] = useState(false)
 
-  // Every read of the settings takes a number; only the latest one applies,
-  // so a Reload is never undone by an "agents changed" read that started
-  // before it (with the old form) and answered after it. The change handler
-  // merges against the form as it is when its answer lands (latest).
+  // A full read (the first load, Reload, after a save) always wins over an
+  // "agents changed" merge: each full read takes a number, and a merge applies
+  // only when no full read started while it was asking. A change heard while
+  // a full read runs is merged again once that read has landed, so it is
+  // never lost and never undoes the Reload. Merges use the form as it is when
+  // their answer lands (latest).
   const reads = useRef(0)
+  const loading = useRef(0)
+  const changedWhileLoading = useRef(false)
   const latest = useRef({ view: null, form: null })
+  const merge = useRef(null)
   const load = useCallback(async () => {
     const mine = ++reads.current
+    loading.current += 1
     try {
       const next = await api.get('/api/agent/settings')
       if (mine !== reads.current) return
@@ -109,11 +115,18 @@ export function AgentSettings({ onSaved, touch, buzz = false, onDirtyChange, age
       setForm(formFrom(next))
       setStale(false)
       setLoadError(null)
+      latest.current = { view: next, form: formFrom(next) }
     } catch (caught) {
       if (mine !== reads.current) return
       // 404: this tab's settings token is not the server's (it restarted).
       if (caught.status === 404) forgetSettingsToken()
       setLoadError(caught.status === 404 ? TOKEN_HINT : caught.message)
+    } finally {
+      loading.current -= 1
+      if (!loading.current && changedWhileLoading.current) {
+        changedWhileLoading.current = false
+        merge.current?.()
+      }
     }
   }, [])
   useEffect(() => {
@@ -122,21 +135,26 @@ export function AgentSettings({ onSaved, touch, buzz = false, onDirtyChange, age
   // Changed elsewhere (another tab, the Agents card, `shapewall settings`,
   // the agents file): never over unsaved typing (agentForm.js reloadView).
   // A save or profile change running here reloads when it ends.
-  useAgentsChanged(async () => {
-    if (locked || !view || loadError) return
-    const mine = ++reads.current
+  merge.current = async () => {
+    if (locked || !latest.current.view || loadError) return
+    if (loading.current) {
+      changedWhileLoading.current = true
+      return
+    }
+    const started = reads.current
     let next
     try {
       next = await api.get('/api/agent/settings')
     } catch {
       return
     }
-    if (mine !== reads.current || !latest.current.view) return
+    if (started !== reads.current || loading.current || !latest.current.view) return
     const merged = reloadView({ view: latest.current.view, form: latest.current.form, next })
     setView(merged.view)
     setForm(merged.form)
     if (merged.stale) setStale(true)
-  })
+  }
+  useAgentsChanged(() => merge.current?.())
 
   const set = (key) => (event) => {
     const value = typeof event === 'string' ? event : event.target.value
