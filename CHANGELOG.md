@@ -3,6 +3,20 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+- Images on comments and replies: attach up to 4 (PNG, JPEG, WebP or GIF, 5 MB each) with a button, by pasting or by dropping them.
+  The server checks each image by its bytes, strips its metadata and serves it only as an image; the thread shows thumbnails that open
+  large. The comments list shows how many a thread has.
+- Drawing on the page as part of a comment or reply: boxes, arrows and pen strokes in three inks, with Undo and Clear. The drawing
+  shows over the page while its thread is open, and over "before" once the page is recaptured. On a phone you draw on the page in a
+  full-screen sheet.
+- Agents get the images and a picture of the drawing on its screenshot: in `comments --json` (`files.images`, `files.markup`), the MCP
+  `get_comment` tool, `watch --exec` and Fix with agent.
+- Hosted boards keep comment images in the database, count them against the storage quota and include them in exports and in
+  `shapewall share`. Share link guests can draw but not attach images.
+- The demo takes images and drawings in the browser and shows two example comments with an image.
+
 ## 0.2.3 - 2026-11-10
 
 - The agent's model and thinking level are shown on a new chat before the first message, each with its own menu in the composer
