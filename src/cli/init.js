@@ -7,6 +7,7 @@ import { writeFileAtomic } from '../store.js'
 import { addPagesToRaw, defaultSitemapUrl, formatImport, importSitemap, sitemapPages } from '../sitemap.js'
 import { DISCOVER_DEFAULTS, cutTitle, describeFetchError, discoverPages, pageTitle } from '../discover.js'
 import { cliCommand } from '../invocation.js'
+import { WORKFLOW_FILE, workflowYaml } from '../ci/workflow.js'
 
 const isHttp = (value) => /^https?:\/\//i.test(String(value))
 
@@ -147,6 +148,35 @@ export async function init(flags, out, { fetch }) {
     out(`Added ${missing.join(', ')} to .gitignore`)
   }
   out(initNextHint({ baseUrl, givenBaseUrl, fromSitemap, found, file: path.basename(file) }))
+}
+
+// `init --ci`: the pull request workflow, .github/workflows/shapewall.yml
+// beside the config (docs/pull-requests.md). Writes the config first when
+// there is none; an existing config is never touched, and --force only
+// replaces an existing workflow.
+export async function initCi(flags, out, { fetch }) {
+  const configFile = path.resolve(flags.config || CONFIG_FILE)
+  if (!fs.existsSync(configFile)) await init({ ...flags, force: false }, out, { fetch })
+  const file = path.join(path.dirname(configFile), WORKFLOW_FILE)
+  const shown = path.relative(process.cwd(), file) || file
+  if (fs.existsSync(file) && !flags.force) throw new Error(`${shown} already exists (use --ci --force to replace it)`)
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(file, workflowYaml())
+  out(`Wrote ${shown}: on every pull request it captures the pages before and after, and keeps one comment up to date.`)
+  let hasStart = false
+  try {
+    hasStart = Boolean(JSON.parse(fs.readFileSync(configFile, 'utf8'))?.ci?.start)
+  } catch {
+    hasStart = false
+  }
+  if (!hasStart)
+    out(
+      'Next: either add "ci": { "start": { "install": [...], "build": [...], "serve": [...], "url": "http://127.0.0.1:PORT" } } to the config (build and serve mode), or set SHAPEWALL_PREVIEW_URL in the workflow (preview URL mode). Then commit the workflow.',
+    )
+  else out('Next: commit the workflow; the next pull request gets a comment.')
+  out(
+    `Turn it off any time: delete ${WORKFLOW_FILE}, set "ci": { "enabled": false } in the config, or put [skip shapewall] in a pull request title.`,
+  )
 }
 
 // The "Next:" line after init: only the steps still left to do. found is
