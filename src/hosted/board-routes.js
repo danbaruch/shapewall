@@ -8,7 +8,7 @@ import express from 'express'
 import { boardSummary } from '../server/app.js'
 import { listJourneys } from '../journeys.js'
 import { MENTION_HANDLE_RE } from '../mentions.js'
-import { resolveFile } from '../store.js'
+import { resolveFile, validateCommentInput, validateCommentMedia } from '../store.js'
 import { avatarUrl } from '../accounts/avatar.js'
 import { checksView, readReport } from '../checks/store.js'
 import { agentPolicy } from './agent-policy.js'
@@ -17,6 +17,7 @@ import { guestView, rowToComment } from './comments.js'
 import { transaction } from './db.js'
 import { publicView } from './guest-view.js'
 import { HttpError, fail, guestLabel } from './http.js'
+import { checkStorageQuota, cleanImages, commentListsFile, readCommentFile, sendImage } from './comment-files.js'
 import { boardPermissions, canDeleteComment, canEditComment, guestPermissions } from './permissions.js'
 import { boardConfig, createProjectStore } from './projects.js'
 import { readPublic } from './public.js'
@@ -46,6 +47,11 @@ export function mountBoardRoutes(
     policyFor,
     dispatchView,
     boardContext,
+    // Cleans comment images off the event loop (src/hosted/cleaner.js).
+    cleaner = null,
+    // The storage quota comment images count against.
+    quotas = null,
+    workspaceQuota = undefined,
     // What readGuest needs (the shared deps of src/hosted/app.js).
     deps,
   },
@@ -65,10 +71,16 @@ export function mountBoardRoutes(
     next()
   })
   boardApi.use(guardWrites)
-  boardApi.use(express.json({ limit: '64kb' }))
+  // New comments and replies may carry images (base64, 4 of 5 MB): their
+  // body is read after the session and role checks, with its own limit
+  // (mediaBody); every other route keeps 64 kB.
+  const MEDIA_POST_RE = /^\/boards\/[^/]+\/comments(?:\/[^/]+\/replies)?\/?$/
+  const skipMedia = (parser) => (req, res, next) =>
+    req.method === 'POST' && MEDIA_POST_RE.test(req.path) ? next() : parser(req, res, next)
+  boardApi.use(skipMedia(express.json({ limit: '64kb' })))
   // Per account: API calls in one bucket, a board's files in a larger one.
   const sessionLimits = { api: limit('session', (req) => req.user.id), files: limit('sessionFiles', (req) => req.user.id) }
-  const BOARD_FILE_RE = /^\/boards\/[^/]+\/(?:captures|variants|versions|live|variant-live|elements|variant-elements)\//
+  const BOARD_FILE_RE = /^\/boards\/[^/]+\/(?:captures|variants|versions|live|variant-live|elements|variant-elements|comment-files)\//
   boardApi.use(needSession, (req, res, next) =>
     (req.method === 'GET' && BOARD_FILE_RE.test(req.path) ? sessionLimits.files : sessionLimits.api)(req, res, next),
   )
@@ -143,7 +155,7 @@ export function mountBoardRoutes(
     if (!req.project) return fail(res, 401, 'share_ended', 'This share link has ended.')
     next()
   })
-  shareApi.use(express.json({ limit: '16kb' }))
+  shareApi.use(skipMedia(express.json({ limit: '16kb' })))
 
   // A public project's board API (src/hosted/public.js): no cookie, view only.
   const publicApi = express.Router({ mergeParams: true })
@@ -184,6 +196,23 @@ export function mountBoardRoutes(
     }
     next()
   }
+  // The body of a new comment or reply: members may attach images (4 of
+  // 5 MB as base64, about 28 MB); a guest's carries a drawing at most.
+  const memberMediaJson = express.json({ limit: '28mb' })
+  const guestMediaJson = express.json({ limit: '160kb' })
+  const mediaBody = (req, res, next) => (req.guest ? guestMediaJson : memberMediaJson)(req, res, next)
+  // A new comment's or reply's images and drawing, checked and the images
+  // cleaned (nothing stored yet). Guests of a share link draw, but never
+  // upload: their images are refused before anything is decoded.
+  async function mediaOf(req) {
+    const raw = req.body || {}
+    if (req.guest && raw.images !== undefined && raw.images !== null && !(Array.isArray(raw.images) && !raw.images.length))
+      throw new HttpError(403, 'guest_no_images', 'Guests on a share link cannot attach images.')
+    const media = validateCommentMedia(raw)
+    return { images: media.images.length ? await cleanImages(cleaner, media.images) : [], drawing: media.drawing }
+  }
+  const quotaOf = (req) => workspaceQuota ?? quotas?.of(req.t.workspaceId).storageBytes ?? Infinity
+  const imageBytes = (media) => media.images.reduce((sum, image) => sum + image.buffer.length, 0)
   // Who a new comment or reply is from. A guest's name always carries
   // "(guest)", so it never reads as a member's.
   const authorOf = (req) =>
@@ -358,6 +387,21 @@ export function mountBoardRoutes(
     )
     router.all('/boards/:bid/capture', (req, res) => fail(res, 403, 'capture_disabled', 'Hosted boards are updated with shapewall push.'))
 
+    // An image on a comment or reply of this board: only a file that comment
+    // lists, as its stored image type, behind the same rule as the comment
+    // (members, the link's guests and a public project's visitors all see
+    // every comment of the board; guestView and publicView keep images).
+    // Same origin and never a document (nosniff, sandbox CSP), so no signed
+    // usercontent URL: an image cannot run script.
+    router.get(
+      '/boards/:bid/comment-files/:file',
+      withBoard((req, res, ctx) => {
+        const row = readCommentFile(req.t, req.project.id, ctx.board.id, req.params.file)
+        const comment = row ? rowToComment(ctx.comments.get(row.comment_number)) : null
+        if (!row || !commentListsFile(shown(req, comment), row)) return fail(res, 404, 'not_found', 'No such image.')
+        sendImage(res, row.data, row.media_type)
+      }),
+    )
     router.get(
       '/boards/:bid/comments',
       withBoard((req, res, ctx) => {
@@ -376,9 +420,14 @@ export function mountBoardRoutes(
     router.post(
       '/boards/:bid/comments',
       canComment,
-      withBoard((req, res, ctx) => {
+      mediaBody,
+      withBoard(async (req, res, ctx) => {
+        // The cheap checks first: a bad pin never costs an image decode.
+        validateCommentInput(ctx.config, ctx.board, req.body)
+        const media = await mediaOf(req)
         const comment = transaction(db, () => {
-          const made = ctx.comments.create(ctx.config, ctx.board, req.body, authorOf(req), now())
+          checkStorageQuota(req.t, imageBytes(media), quotaOf(req))
+          const made = ctx.comments.create(ctx.config, ctx.board, req.body, authorOf(req), now(), media)
           if (!req.guest) policyFor(req.t).autoVouch(req.project.id, ctx.board.id, ctx.comments.get(made.id), req.user.id, req.role)
           if (req.guest) auditOf(req, 'guest_commented', `${ctx.board.id}#${made.id}`, { project: req.project.id, guest: req.guest.name })
           return made
@@ -407,14 +456,21 @@ export function mountBoardRoutes(
     router.post(
       '/boards/:bid/comments/:cid/replies',
       canComment,
-      withBoard((req, res, ctx) => {
+      mediaBody,
+      withBoard(async (req, res, ctx) => {
+        // The comment and the text first, then the images.
+        ctx.comments.get(req.params.cid)
+        if (typeof req.body?.body !== 'string' || !req.body.body.trim()) throw new HttpError(400, 'empty_comment', 'Write something first.')
+        const media = await mediaOf(req)
         const result = transaction(db, () => {
+          checkStorageQuota(req.t, imageBytes(media), quotaOf(req))
           const author = authorOf(req)
           const made = ctx.comments.reply(
             req.params.cid,
             { body: req.body?.body },
             { name: author.name, handle: author.handle, userId: author.userId, guest: author.guest, shareId: author.shareId },
             now(),
+            { ...media, config: ctx.config },
           )
           if (req.guest)
             auditOf(req, 'guest_replied', `${ctx.board.id}#${made.comment.id}`, { project: req.project.id, guest: req.guest.name })

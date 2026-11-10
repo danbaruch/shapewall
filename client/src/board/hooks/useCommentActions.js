@@ -56,15 +56,23 @@ export function useCommentActions({
     }
   }
 
-  // Returns true when the reply was saved (the box then clears).
-  const replyTo = async (comment, body) => {
+  // Returns true when the reply was saved (the box then clears). `extra`:
+  // its images and drawing, and where an image the server refused is said.
+  const replyTo = async (comment, body, extra = {}) => {
+    const { onImageError, images, drawing } = extra
     setBusy(true)
     try {
-      const result = await api.post(`${commentsUrl}/${comment.id}/replies`, { body, author: authorName() || undefined })
+      const result = await api.post(`${commentsUrl}/${comment.id}/replies`, {
+        body,
+        author: authorName() || undefined,
+        ...(images?.length ? { images } : {}),
+        ...(drawing ? { drawing } : {}),
+      })
       applyComment(result.comment)
       return true
     } catch (error) {
-      setNotice({ tone: 'bad', text: error.message || 'That reply did not save.' })
+      if (onImageError && /image/.test(error.code || '')) onImageError(error.message || 'An image was not accepted.')
+      else setNotice({ tone: 'bad', text: error.message || 'That reply did not save.' })
       return false
     } finally {
       setBusy(false)

@@ -6,6 +6,7 @@ import { MENTION_HANDLE_RE } from '../../../../src/mentions.js'
 import { toggleReaction } from '../../../../src/reactions.js'
 import { COMMENT_BODY_MAX, cleanFixRef, validateAnchor } from '../../../../src/comment-fields.js'
 import { COMMENTS_MAX, REPLIES_MAX, fail, commentField } from './util.js'
+import { demoCommentImages, demoDrawing } from './comment-media.js'
 
 export function commentHelpers(ctx) {
   const { state, iso, audit } = ctx
@@ -137,6 +138,8 @@ export function commentRoutes(ctx) {
           fail(400, 'invalid_position', 'The pin must sit on the page (0 to 100 percent).')
         const text = cleanBody(body?.body)
         const anchor = commentField(() => validateAnchor(body?.anchor))
+        const media = demoCommentImages(body?.images, { guest: access.role === 'guest' })
+        const drawing = demoDrawing(body?.drawing)
         const at = iso()
         const comment = {
           id: store.nextId,
@@ -158,11 +161,13 @@ export function commentRoutes(ctx) {
           agentStatusAt: null,
           reopenCount: 0,
           reopenedAt: null,
+          ...(media.images.length ? { images: media.images } : {}),
+          ...(drawing ? { drawing: { ...drawing, captureVersion: null } } : {}),
         }
         store.nextId += 1
         store.list.push(comment)
         if (access.role === 'guest') auditBoard(access, 'guest_commented', `${params[0]}#${comment.id}`, { guest: state.guestName })
-        return { status: 201, json: { comment: shown(comment, access) } }
+        return { status: 201, json: { comment: shown(comment, access) }, attachments: media.attachments }
       },
     ],
     [
@@ -207,20 +212,25 @@ export function commentRoutes(ctx) {
         const comment = findComment(store, params[1])
         if (comment.replies.length >= REPLIES_MAX) fail(409, 'too_many_replies', `A comment holds at most ${REPLIES_MAX} replies.`)
         const author = authorOf(access)
+        const text = cleanBody(body?.body)
+        const media = demoCommentImages(body?.images, { guest: access.role === 'guest' })
+        const drawing = demoDrawing(body?.drawing)
         const reply = {
           id: Math.max(0, ...comment.replies.map((item) => Number(item.id) || 0)) + 1,
           author: author.author,
           ...(author.authorHandle ? { handle: author.authorHandle } : {}),
           ...(author.authorGuest ? { guest: true, shareId: author.shareId } : {}),
-          body: cleanBody(body?.body),
+          body: text,
           createdAt: iso(),
+          ...(media.images.length ? { images: media.images } : {}),
+          ...(drawing ? { drawing: { ...drawing, captureVersion: comment.captureVersion || null } } : {}),
         }
         comment.replies.push(reply)
         comment.updatedAt = iso()
         if (access.role === 'guest') auditBoard(access, 'guest_replied', `${params[0]}#${comment.id}`, { guest: state.guestName })
         const publicReply = { ...reply }
         delete publicReply.shareId
-        return { status: 201, json: { comment: shown(comment, access), reply: publicReply } }
+        return { status: 201, json: { comment: shown(comment, access), reply: publicReply }, attachments: media.attachments }
       },
     ],
     // Reactions: canWrite in app.js (members and up, never guests).
@@ -274,7 +284,9 @@ export function commentRoutes(ctx) {
           fail(403, 'not_author', 'Only the author or an admin can delete a comment.')
         store.list = store.list.filter((item) => item !== comment)
         auditBoard(access, 'comment_deleted', `${params[0]}#${comment.id}`)
-        return { ok: true }
+        // Its images go with it (install.js drops the kept copies).
+        const forget = [comment, ...(comment.replies || [])].flatMap((item) => (item.images || []).map((image) => image.file))
+        return { status: 200, json: { ok: true }, forget }
       },
     ],
   ]

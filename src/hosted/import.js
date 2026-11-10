@@ -7,6 +7,10 @@ import { ID_RE, VIEWPORT_NAME_RE } from '../config.js'
 import { REACTIONS } from '../reactions.js'
 import { findApiToken } from './tenancy.js'
 import { transaction, hasCommentPolicy } from './db.js'
+import { COMMENT_IMAGES_MAX, cleanImageName } from '../comment-fields.js'
+import { DrawingError, validateDrawing } from '../comment-drawing.js'
+import { parseImageInputs } from '../comment-media.js'
+import { checkStorageQuota, cleanImages, storeImages } from './comment-files.js'
 
 const hex = /^[a-f0-9]{64}$/
 const SCOPE = 'workspace_id = :ws AND project_id = :project AND board_id = :board'
@@ -37,6 +41,35 @@ const reactions = (value) => {
   })
 }
 
+// Images of an imported comment or reply: refs of images uploaded first in
+// the same session (POST .../import/images), with their display names.
+const importImages = (value) => {
+  if (value === undefined || value === null) return []
+  if (!Array.isArray(value) || value.length > COMMENT_IMAGES_MAX) bad(`At most ${COMMENT_IMAGES_MAX} images on a comment or reply.`)
+  return value.map((item) => {
+    if (!item || typeof item.ref !== 'string' || !hex.test(item.ref)) bad('An imported image needs the ref it was uploaded with.')
+    return { ref: item.ref, name: cleanImageName(item.name, 'image') }
+  })
+}
+// A drawing, checked like a new one; its capture version is the one the
+// local copy recorded (a comment's own, or the reply's when valid).
+const importDrawing = (value, version) => {
+  try {
+    const clean = validateDrawing(value)
+    return clean ? { ...clean, captureVersion: typeof version === 'string' && VERSION_RE.test(version) ? version : null } : null
+  } catch (error) {
+    if (error instanceof DrawingError) bad(error.message)
+    throw error
+  }
+}
+// Only when present, so comments without media hash as they always did
+// (an earlier import of them still reads as unchanged).
+const withImportMedia = (out, images, drawing) => ({
+  ...out,
+  ...(images.length ? { images } : {}),
+  ...(drawing ? { drawing } : {}),
+})
+
 export function cleanImportedComment(raw) {
   if (!raw || typeof raw !== 'object' || typeof raw.importKey !== 'string' || !hex.test(raw.importKey))
     bad('An import needs a SHA-256 importKey.')
@@ -53,7 +86,8 @@ export function cleanImportedComment(raw) {
   if (!Number.isInteger(raw.reopenCount ?? 0) || (raw.reopenCount ?? 0) < 0 || (raw.reopenCount ?? 0) > 100000) bad('Invalid reopen count.')
   if (raw.captureVersion != null && !VERSION_RE.test(raw.captureVersion)) bad('Invalid capture version.')
   if (!Array.isArray(raw.replies) || raw.replies.length > 200) bad('At most 200 replies per comment.')
-  return {
+  const media = { images: importImages(raw.images), drawing: importDrawing(raw.drawing, raw.captureVersion) }
+  const cleanItem = {
     importKey: raw.importKey,
     authorKind: raw.authorKind || 'local',
     localId: raw.localId,
@@ -80,24 +114,79 @@ export function cleanImportedComment(raw) {
     replies: raw.replies.map((reply, i) => {
       const body = text(reply?.body, COMMENT_BODY_MAX)
       if (!body) bad('A reply needs text.')
-      return {
-        id: i + 1,
-        author: author(reply.author),
-        body,
-        createdAt: date(reply.createdAt),
-        ...(reply.agent === true ? { agent: true } : {}),
-        ...(reply.guest === true ? { guest: true } : {}),
-        imported: true,
-        ...(reply.editedAt ? { editedAt: date(reply.editedAt) } : {}),
-        importedReactions: reactions(reply.reactions),
-      }
+      return withImportMedia(
+        {
+          id: i + 1,
+          author: author(reply.author),
+          body,
+          createdAt: date(reply.createdAt),
+          ...(reply.agent === true ? { agent: true } : {}),
+          ...(reply.guest === true ? { guest: true } : {}),
+          imported: true,
+          ...(reply.editedAt ? { editedAt: date(reply.editedAt) } : {}),
+          importedReactions: reactions(reply.reactions),
+        },
+        importImages(reply.images),
+        importDrawing(reply.drawing, reply.drawing?.captureVersion),
+      )
     }),
   }
+  return withImportMedia(cleanItem, media.images, media.drawing)
+}
+
+// Attaches the staged images an imported comment lists (by ref, uploaded in
+// this session) to it and its replies, and removes the images it had from
+// an earlier import that it no longer lists. Returns { images, replies } with
+// image records in place of refs. Inside the batch's transaction.
+function attachImportImages(t, { project, board, number, session, item }) {
+  const keep = new Set()
+  const attach = (list, replyId) =>
+    list.map(({ ref, name }) => {
+      const row = t.get(
+        `SELECT file, comment_number, reply_id, media_type, bytes, width, height FROM comment_files
+         WHERE ${SCOPE} AND import_session = :session AND import_ref = :ref`,
+        { project, board, session, ref },
+      )
+      if (!row) throw new CommentError(400, 'import_image_missing', 'An imported image was not uploaded first. Run shapewall share again.')
+      if (keep.has(row.file) || (row.comment_number !== null && (row.comment_number !== number || (row.reply_id ?? null) !== replyId)))
+        bad('An imported image belongs to another comment.')
+      t.run(`UPDATE comment_files SET comment_number = :number, reply_id = :reply, name = :name WHERE ${SCOPE} AND file = :file`, {
+        project,
+        board,
+        number,
+        reply: replyId,
+        name,
+        file: row.file,
+      })
+      keep.add(row.file)
+      return {
+        id: row.file.split('.')[0],
+        file: row.file,
+        name,
+        mediaType: row.media_type,
+        bytes: row.bytes,
+        width: row.width,
+        height: row.height,
+      }
+    })
+  const images = attach(item.images || [], null)
+  const replies = item.replies.map(({ images: refs, ...reply }) => {
+    const records = attach(refs || [], reply.id)
+    return records.length ? { ...reply, images: records } : reply
+  })
+  for (const old of t.all(`SELECT file FROM comment_files WHERE ${SCOPE} AND comment_number = :number`, { project, board, number }))
+    if (!keep.has(old.file)) t.run(`DELETE FROM comment_files WHERE ${SCOPE} AND file = :file`, { project, board, file: old.file })
+  return { images, replies }
 }
 
 // Includes reactions as well as text: a remote reaction must not be silently
 // overwritten by a later local snapshot. Identities remain server-side here.
-const fingerprint = (row) => digest(row)
+// Rows without images or a drawing hash as they did before those columns
+// existed, so comments imported earlier do not all read as changed.
+const fingerprint = (row) => {
+  const { images, drawing, ...rest } = row
+  return digest(images || drawing ? row : rest)
+}
 
 export function importBatch({ db, t, projectId, board, token, tokenHash, input, now = new Date() }) {
   if (
@@ -200,8 +289,9 @@ export function importBatch({ db, t, projectId, board, token, tokenHash, input, 
             },
           )
         }
+        const media = attachImportImages(t, { ...key, number, session: input.sessionId, item })
         t.run(
-          `UPDATE comments SET page_id=:page, viewport=:viewport, x=:x, y=:y, body=:body, author=:author, author_handle=NULL, author_user_id=NULL, author_token_id=NULL, author_share_id=NULL, anchor=:anchor, capture_version=:version, status=:status, created_at=:created, updated_at=:updated, resolved_at=:resolved, resolution=:resolution, replies=:replies, agent_status=:agent, agent_status_at=:agentAt, reopen_count=:reopens, reopened_at=:reopened, fix_ref=:fix, edited_at=:edited, reactions='[]', imported_by=:user, import_author_kind=:kind, imported_at=:at, import_orphan=:orphan, imported_reactions=:reactions ${hasPolicy ? ', imported=1, dispatch_hash=NULL, dispatch_by=NULL, dispatch_at=NULL, run_approved=0' : ''} WHERE ${SCOPE} AND number = :number`,
+          `UPDATE comments SET page_id=:page, viewport=:viewport, x=:x, y=:y, body=:body, author=:author, author_handle=NULL, author_user_id=NULL, author_token_id=NULL, author_share_id=NULL, anchor=:anchor, capture_version=:version, status=:status, created_at=:created, updated_at=:updated, resolved_at=:resolved, resolution=:resolution, replies=:replies, images=:images, drawing=:drawing, agent_status=:agent, agent_status_at=:agentAt, reopen_count=:reopens, reopened_at=:reopened, fix_ref=:fix, edited_at=:edited, reactions='[]', imported_by=:user, import_author_kind=:kind, imported_at=:at, import_orphan=:orphan, imported_reactions=:reactions ${hasPolicy ? ', imported=1, dispatch_hash=NULL, dispatch_by=NULL, dispatch_at=NULL, run_approved=0' : ''} WHERE ${SCOPE} AND number = :number`,
           {
             ...key,
             number,
@@ -218,7 +308,9 @@ export function importBatch({ db, t, projectId, board, token, tokenHash, input, 
             updated: item.updatedAt,
             resolved: item.resolvedAt,
             resolution: item.resolution,
-            replies: JSON.stringify(item.replies),
+            replies: JSON.stringify(media.replies),
+            images: media.images.length ? JSON.stringify(media.images) : null,
+            drawing: item.drawing ? JSON.stringify(item.drawing) : null,
             agent: item.agentStatus,
             agentAt: item.agentStatusAt,
             reopens: item.reopenCount,
@@ -257,6 +349,11 @@ export function importBatch({ db, t, projectId, board, token, tokenHash, input, 
       })
     }
     if (commit) {
+      // Images uploaded for this move that no batch attached go now.
+      t.run(
+        'DELETE FROM comment_files WHERE workspace_id = :ws AND project_id = :project AND import_session = :session AND comment_number IS NULL',
+        session,
+      )
       t.run('UPDATE import_sessions SET committed_at=:at WHERE workspace_id = :ws AND project_id = :project AND session_id=:session', {
         ...session,
         at: now.toISOString(),
@@ -275,7 +372,105 @@ export function importBatch({ db, t, projectId, board, token, tokenHash, input, 
   })
 }
 
-export function mountImports(v1, { db, boardContext, handle, now }) {
+// One image of an imported comment, uploaded before the batch that lists it
+// by `ref` (any 64 hex the sender picks, unique in its session; the CLI
+// hashes the comment, the slot and the bytes, so a retry sends the same
+// ref and gets the same file back). Checked and cleaned exactly like an
+// image posted on the board, counted against the storage quota, and staged
+// (no comment yet) until a batch attaches it; the session's commit or the
+// staging sweep removes it otherwise.
+export async function importImage({ db, t, projectId, board, token, tokenHash, input, cleaner, quotaBytes, now = new Date() }) {
+  if (typeof input?.sessionId !== 'string' || !hex.test(input.sessionId) || typeof input?.ref !== 'string' || !hex.test(input.ref))
+    bad('An image upload needs the import session and a ref.')
+  if (!token.scopes.includes('import'))
+    throw new CommentError(
+      403,
+      'missing_scope',
+      'This token needs the one-time import scope. Run shapewall share again and approve the move.',
+    )
+  const parsed = parseImageInputs([input.image])
+  const key = { project: projectId, board: board.id, session: input.sessionId, ref: input.ref }
+  const staged = () =>
+    t.get(
+      `SELECT file, media_type, bytes, width, height FROM comment_files WHERE ${SCOPE} AND import_session = :session AND import_ref = :ref`,
+      key,
+    )
+  const shape = (row) => ({
+    ref: input.ref,
+    file: row.file,
+    mediaType: row.media_type,
+    bytes: row.bytes,
+    width: row.width,
+    height: row.height,
+  })
+  const known = staged()
+  if (known) return shape(known)
+  const [image] = await cleanImages(cleaner, parsed)
+  return transaction(db, () => {
+    const live = typeof tokenHash === 'string' ? findApiToken(db, tokenHash, now.toISOString()) : null
+    if (!live || live.id !== token.id || live.workspace_id !== t.workspaceId || live.project_id !== projectId)
+      throw new CommentError(401, 'bad_token', 'This token is no longer valid for this project.')
+    if (!JSON.parse(live.scopes).includes('import'))
+      throw new CommentError(
+        403,
+        'missing_scope',
+        'This token needs the one-time import scope. Run shapewall share again and approve the move.',
+      )
+    const prior = t.get(
+      'SELECT token_id, committed_at FROM import_sessions WHERE workspace_id = :ws AND project_id = :project AND session_id = :session',
+      { project: projectId, session: input.sessionId },
+    )
+    if (prior && (prior.token_id !== token.id || prior.committed_at))
+      throw new CommentError(409, 'import_finished', 'This import session has finished or belongs to another token.')
+    const again = staged()
+    if (again) return shape(again)
+    checkStorageQuota(t, image.buffer.length, quotaBytes)
+    const [record] = storeImages(t, {
+      projectId,
+      boardId: board.id,
+      commentNumber: null,
+      images: [image],
+      at: now.toISOString(),
+      importSession: input.sessionId,
+      importRef: input.ref,
+    })
+    return {
+      ref: input.ref,
+      file: record.file,
+      mediaType: record.mediaType,
+      bytes: record.bytes,
+      width: record.width,
+      height: record.height,
+    }
+  })
+}
+
+export function mountImports(v1, { db, boardContext, handle, now, cleaner = null, quotaOf = () => Infinity }) {
+  // One image per request (its JSON parser: src/hosted/token-api.js).
+  v1.post(
+    '/boards/:bid/import/images',
+    (req, res, next) => {
+      if (!req.is('application/json')) return res.status(415).json({ error: { code: 'json_required', message: 'Send JSON.' } })
+      next()
+    },
+    handle(async (req, res) => {
+      const ctx = boardContext(req.t, req.project, req.params.bid)
+      res.status(201).json(
+        await importImage({
+          db,
+          t: req.t,
+          projectId: req.project.id,
+          board: ctx.board,
+          token: req.token,
+          tokenHash: req.authTokenHash,
+          input: req.body,
+          cleaner,
+          quotaBytes: quotaOf(req.t),
+          now: now(),
+        }),
+      )
+    }),
+  )
   v1.post(
     '/boards/:bid/import',
     (req, res, next) => {

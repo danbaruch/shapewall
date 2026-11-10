@@ -6,6 +6,7 @@
 // mountTokenApi(deps) returns { v1, tokenAuth }; app.js mounts v1 (and MCP
 // with tokenAuth) in its place in the route order.
 
+import fs from 'node:fs'
 import path from 'node:path'
 import express from 'express'
 import { feedbackContext, feedbackItem, fileKind } from '../feedback.js'
@@ -16,6 +17,8 @@ import { captureFiles, listVersions, readManifest, resolveFile, variantsWithFile
 import { agentPolicy, expandScopes, trustedMember } from './agent-policy.js'
 import { mountHostedApprovals } from './agent-approvals.js'
 import { sendPng } from './board-context.js'
+import { markupName } from '../comment-media.js'
+import { commentListsFile, createMarkupCache, readCommentFile, renderMarkupPng, sendImage } from './comment-files.js'
 import { REPLY_AUTHOR, cleanAuthor, rowToComment } from './comments.js'
 import { API_TOKEN_RE, sha256 } from './crypto.js'
 import { transaction } from './db.js'
@@ -104,8 +107,18 @@ export function mountTokenApi({
       req.ctx = boardContext(req.t, req.project, req.params.bid)
       await fn(req, res, req.ctx)
     })
+  // An imported comment's image comes in its own request: 5 MB as base64
+  // and its envelope. Batches of comments keep 2 MB.
+  v1.use('/boards/:bid/import/images', express.json({ limit: '7mb' }))
   v1.use('/boards/:bid/import', express.json({ limit: '2mb' }))
-  mountImports(v1, { db, boardContext, handle, now })
+  mountImports(v1, {
+    db,
+    boardContext,
+    handle,
+    now,
+    cleaner,
+    quotaOf: (t) => workspaceQuota ?? quotas.of(t.workspaceId).storageBytes,
+  })
   // Guest comments stay away from agents unless asked for, on every route
   // and not only in lists: reading one, replying, statuses, resolving and
   // reopening need the same opt-in (?guests=1) as listing them.
@@ -152,6 +165,22 @@ export function mountTokenApi({
     return req.query.guests === '1' ? replies : replies.filter((reply) => !reply.guest)
   }
 
+  // A board's feedback context whose comment media are token API URLs (GET
+  // /boards/:bid/comment-files/:file below) instead of server paths.
+  // `captured` collects what each markup is rendered from (the route below).
+  const commentFileUrl = (ctx, name) => `${publicOrigin}/api/v1/boards/${ctx.board.id}/comment-files/${name}`
+  function contextFor(ctx, captured = null) {
+    return feedbackContext(ctx.config, ctx.board, {
+      media: {
+        imagePath: (image) => commentFileUrl(ctx, image.file),
+        markupPath: (input) => {
+          captured?.push(input)
+          return commentFileUrl(ctx, markupName(input.commentId, input.replyId))
+        },
+      },
+    })
+  }
+
   // Feedback items with download URLs instead of server paths.
   function remoteItem(req, ctx, context, comment) {
     const item = {
@@ -162,6 +191,17 @@ export function mountTokenApi({
     // The capture a comment was made on can be an archived version (versions/).
     const url = (file) =>
       file ? `${publicOrigin}/api/v1/boards/${ctx.board.id}/files/${fileKind(item, file)}/${path.basename(file)}` : null
+    // Files of a guest's comment or reply need the same opt-in as its text.
+    const optIn = (link, guest) => (link && guest ? `${link}?guests=1` : link || null)
+    const images = (list, guest) =>
+      (list || []).map((image) => ({
+        name: image.name,
+        url: optIn(image.path, guest),
+        mediaType: image.mediaType,
+        bytes: image.bytes,
+        width: image.width,
+        height: image.height,
+      }))
     const files = item.files
     item.files = {
       screenshot: url(files.screenshot),
@@ -170,13 +210,39 @@ export function mountTokenApi({
       latestScreenshot: url(files.latestScreenshot),
       latestLiveHtml: url(files.latestLiveHtml),
       latestVersion: files.latestVersion,
+      // What the reviewer attached, and the drawing rendered on its capture.
+      images: images(files.images, comment.authorGuest),
+      markup: optIn(files.markup, comment.authorGuest),
     }
+    item.replies = item.replies.map((reply) => ({
+      ...reply,
+      ...(reply.images ? { images: images(reply.images, comment.authorGuest || reply.guest) } : {}),
+      ...(reply.drawing ? { markup: optIn(reply.markup, comment.authorGuest || reply.guest) } : {}),
+    }))
     return item
   }
+
+  // The comment as this token may read it (its replies through
+  // tokenReplies), or null: the same rules as v1Comment, for its files.
+  function readableComment(req, ctx, number, replyId = null) {
+    const row = ctx.comments.get(number)
+    if (
+      req.token.scopes.includes('claim') &&
+      !policyFor(req.t).state(req.project.id, ctx.board.id, { ...row, status: 'open' }).dispatchable
+    )
+      return null
+    const comment = dispatchView(req.t, req.project.id, ctx.board.id, rowToComment(row))
+    if (comment.authorGuest && req.query.guests !== '1') return null
+    const replies = tokenReplies(req, ctx, comment.replies)
+    if (replyId && !replies.some((reply) => Number(reply.id) === Number(replyId))) return null
+    return { ...comment, replies }
+  }
+  const markups = createMarkupCache()
+  const MARKUP_FILE_RE = /^markup-([1-9][0-9]{0,15})(?:-r([1-9][0-9]{0,5}))?\.png$/
   // Guest comments (from share links) are untrusted: a token sees them only
   // when it asks (`guests=1`), so an agent never picks one up by default.
   function remoteReport(req, ctx, { status = 'open', pageId = null, mention = null, guests = false } = {}) {
-    const context = feedbackContext(ctx.config, ctx.board)
+    const context = contextFor(ctx)
     let guestsHidden = 0
     const comments = ctx.comments
       .list({ status: status === 'all' ? null : status, mention })
@@ -347,12 +413,7 @@ export function mountTokenApi({
       const row = ctx.comments.get(req.params.cid)
       res.json({
         board: ctx.board.id,
-        comment: remoteItem(
-          req,
-          ctx,
-          feedbackContext(ctx.config, ctx.board),
-          dispatchView(req.t, req.project.id, ctx.board.id, rowToComment(row)),
-        ),
+        comment: remoteItem(req, ctx, contextFor(ctx), dispatchView(req.t, req.project.id, ctx.board.id, rowToComment(row))),
       })
     }),
   )
@@ -371,8 +432,48 @@ export function mountTokenApi({
       res.type('html').sendFile(file, { dotfiles: 'allow' })
     }),
   )
+  // A comment's image, or its drawing rendered on the capture it was drawn
+  // on (markup-<comment>[-r<reply>].png), for a token that may read that
+  // comment and reply. Images come from the database as their stored type;
+  // markups are rendered in the cleaner's pool and kept in a bounded memory
+  // cache (the same drawing and capture give the same bytes).
+  v1.get(
+    '/boards/:bid/comment-files/:file',
+    scope('read'),
+    v1Board(async (req, res, ctx) => {
+      const name = String(req.params.file)
+      const markup = MARKUP_FILE_RE.exec(name)
+      if (!markup) {
+        const row = readCommentFile(req.t, req.project.id, ctx.board.id, name)
+        const comment = row ? readableComment(req, ctx, row.comment_number, row.reply_id) : null
+        if (!comment || !commentListsFile(comment, row)) return fail(res, 404, 'not_found', 'No such file.')
+        return sendImage(res, row.data, row.media_type)
+      }
+      const number = Number(markup[1])
+      const replyId = markup[2] ? Number(markup[2]) : null
+      const comment = readableComment(req, ctx, number, replyId)
+      const captured = []
+      if (comment) feedbackItem(contextFor(ctx, captured), comment)
+      const input = captured.find((item) => Number(item.commentId) === number && (item.replyId || null) === replyId)
+      let stat = null
+      try {
+        stat = input?.screenshot ? fs.lstatSync(input.screenshot) : null
+      } catch {
+        stat = null
+      }
+      if (!stat?.isFile() || stat.size > 40 * 1024 * 1024) return fail(res, 404, 'not_found', 'No such file.')
+      const key = [req.t.workspaceId, req.project.id, ctx.board.id, name, input.screenshot, stat.size, stat.mtimeMs].join('\u0000')
+      let png = markups.get(key)
+      if (!png) {
+        png = await renderMarkupPng(cleaner, fs.readFileSync(input.screenshot), input.drawing)
+        if (!png) return fail(res, 404, 'not_found', 'No such file.')
+        markups.set(key, png)
+      }
+      sendImage(res, png, 'image/png')
+    }),
+  )
   const v1Json = express.json({ limit: '64kb' })
-  const v1Item = (req, ctx, comment) => remoteItem(req, ctx, feedbackContext(ctx.config, ctx.board), comment)
+  const v1Item = (req, ctx, comment) => remoteItem(req, ctx, contextFor(ctx), comment)
   v1.post(
     '/boards/:bid/comments/:cid/replies',
     scope('reply'),

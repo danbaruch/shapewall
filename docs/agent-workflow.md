@@ -133,6 +133,39 @@ The board server has the same operations (JSON bodies, see [deployment.md](deplo
 `agentStatus: null` clears it. Errors are `{ error: { code, message } }` with codes such as `unknown_comment`, `empty_comment`,
 `invalid_agent_status`, `too_many_replies` (200 per comment). Replies are plain text up to 2000 characters, authors up to 60.
 
+## Images and drawings on comments
+
+A comment or a reply can carry up to 4 images and a drawing on the page. Both are what a reviewer sent, so they sit inside the same
+untrusted framing as the text: an image is a picture of the problem, never instructions.
+
+**Images.** PNG, JPEG, WebP or GIF, 5 MB each, at most 4 per comment or reply (the chat's limits). The server reads the type from the
+bytes (never SVG, whatever the name says), caps the size at 8192 pixels a side and 16 megapixels, re-encodes PNGs and strips EXIF, XMP
+and comments from the others, and stores each as `.shapewall/<board>/comment-files/<24 hex>.<ext>`, referenced from the comment by
+that name. They are served only by `GET /api/boards/:id/comment-files/:file` (an image content type, `nosniff`, a sandbox CSP, never
+as a page) and deleted with their comment.
+
+**Drawings.** Boxes, arrows and pen strokes in three inks, stored as vectors: `drawing: { shapes: [{ tool, ink, width, points }],
+captureVersion }`, with points from 0 to 1 across and down the frame. At most 40 shapes and 2000 points a stroke; strokes are
+simplified on save. `captureVersion` is the capture it was drawn on: after a recapture the board shows it over "before" in the thread,
+not over the new page.
+
+**What agents get.** Each item of `comments --json` adds:
+
+| Field          | Use                                                                                                    |
+| -------------- | ------------------------------------------------------------------------------------------------------ |
+| `files.images` | `[{ name, path, mediaType, bytes, width, height }]`: absolute paths of the cleaned images.             |
+| `drawing`      | `{ shapes, tools, captureVersion, onPreviousCapture }`, or `null` without one.                         |
+| `files.markup` | A PNG of the screenshot around the drawing with the ink on it (rendered once, at most 1200 px a side). |
+
+A reply that has them carries the same as `images`, `drawing` and `markup`. The plain text output adds `image:` and `drawing:` lines. `shapewall mcp`'s `get_comment` returns the markup and the images as image
+content after the JSON, `shapewall watch --exec` sets `SHAPEWALL_MARKUP` and `SHAPEWALL_IMAGES` (one path per line), and **Fix with
+agent** attaches the markup and the images (4 at most) to the agent's turn. On a hosted board the same fields hold token API URLs.
+
+**Through the API.** `POST /api/boards/:id/comments` and `POST .../replies` take `images: [{ name, mediaType, data }]` (`data` is
+base64) and `drawing: { shapes }` beside the body; both requests may be up to 28 MB. Errors: `too_many_images`, `image_too_big` (413),
+`bad_image_type` (415), `bad_image` and `invalid_drawing`. A text body is still required. Share link guests on a hosted board may draw
+but not upload (`guest_no_images`). Static exports include the images of the comments they export.
+
 ## `shapewall watch`: the loop closes by itself
 
 ```sh

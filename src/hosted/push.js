@@ -25,6 +25,7 @@ import { ELEMENT_MAP_LIMITS, ElementMapError, parseElementMap } from '../capture
 import { CAPTURE_FILE_RE, VERSION_FILE_RE, VERSION_RE } from '../store.js'
 import { ID_PATTERNS, newId } from './crypto.js'
 import { transaction } from './db.js'
+import { commentFileBytes } from './comment-files.js'
 import { openPushIds, staleOpenPushes, tenant } from './tenancy.js'
 import { mergeCheckEnvironments, validateCheckEnvironments } from '../checks/environments.js'
 import { projectDir } from './projects.js'
@@ -378,14 +379,15 @@ export function createPushStore(
   }
 
   // Bytes the workspace holds apart from `boardId` of `projectId` (which a
-  // push replaces): committed boards plus every open push.
+  // push replaces): committed boards, every open push and the images on
+  // comments (src/hosted/comment-files.js; a push never replaces those).
   function workspaceBytesBesides(projectId, boardId) {
     const boards = t.get(
       'SELECT COALESCE(SUM(bytes), 0) AS n FROM boards WHERE workspace_id = :ws AND NOT (project_id = :project AND board_id = :board)',
       { project: projectId, board: boardId },
     ).n
     const open = t.get("SELECT COALESCE(SUM(bytes), 0) AS n FROM pushes WHERE workspace_id = :ws AND status = 'open'").n
-    return boards + open
+    return boards + open + commentFileBytes(t)
   }
 
   // Cleans the file off the event loop (cleaner), then writes it to the
@@ -551,7 +553,8 @@ export function createPushStore(
         'SELECT COALESCE(SUM(bytes), 0) AS n FROM boards WHERE workspace_id = :ws AND NOT (project_id = :project AND board_id = :board)',
         { project: projectId, board: board.id },
       ).n
-      if (others + bytes > workspaceQuota) throw new PushError(413, 'quota_exceeded', 'This workspace is over its storage quota.')
+      if (others + commentFileBytes(t) + bytes > workspaceQuota)
+        throw new PushError(413, 'quota_exceeded', 'This workspace is over its storage quota.')
       const definition = JSON.stringify(push.definition)
       if (existing) {
         t.run(

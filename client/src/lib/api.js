@@ -3,7 +3,7 @@
 // data/ instead.
 
 import { browserCommentsRequest } from './browserComments.js'
-import { DEMO, demoBoardFolders } from './demo.js'
+import { DEMO, demoBoardFolders, demoFiles } from './demo.js'
 
 const hasMeta = (name) => typeof document !== 'undefined' && Boolean(document.querySelector(`meta[name="${name}"]`))
 // The public demo is a static export too, but its in-browser backend
@@ -190,6 +190,15 @@ export function fileUrl(boardId, kind, file, version) {
   if (DEMO) return demoFile(boardId, kind, file)
   if (STATIC) return `data/boards/${enc(boardId)}/${kind}/${enc(file)}`
   return `api/boards/${enc(boardId)}/${kind}/${enc(file)}?v=${enc(version || '0')}`
+}
+
+// URL of an image on a comment (src/comment-media.js). The demo keeps the
+// images attached in this browser as data URLs (demoFiles); its seeded ones
+// are the export's files.
+export function commentFileUrl(boardId, file) {
+  if (DEMO) return demoFiles.get(file) || demoFile(boardId, 'comment-files', file)
+  if (STATIC) return `data/boards/${enc(boardId)}/comment-files/${enc(file)}`
+  return `api/boards/${enc(boardId)}/comment-files/${enc(file)}`
 }
 
 // URL of a live page's element map (src/capture/element-map.js): JSON the

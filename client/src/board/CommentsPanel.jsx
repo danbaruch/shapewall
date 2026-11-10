@@ -5,7 +5,7 @@
 import { useEffect, useRef } from 'react'
 import { useBoardView, useBoardViewStore } from './boardView'
 import { viewportIcon } from './viewports'
-import { Check, CheckCheck, Info, Loader2, MessageSquare, Route, Search, X } from 'lucide-react'
+import { Brush, Check, CheckCheck, Image as ImageIcon, Info, Loader2, MessageSquare, Route, Search, X } from 'lucide-react'
 import {
   Badge,
   Button,
@@ -72,6 +72,9 @@ function Row({ comment, title, selected, unread, touch, onFocus, onHover }) {
   const author = commentAuthor(comment)
   const replies = comment.replies?.length || 0
   const reactions = reactionSummary(comment)
+  const thread = [comment, ...(comment.replies || [])]
+  const imageCount = thread.reduce((sum, item) => sum + (item.images?.length || 0), 0)
+  const drawn = thread.some((item) => item.drawing?.shapes?.length)
   const ViewportIcon = viewportIcon(comment.viewport)
   return (
     <li
@@ -130,6 +133,21 @@ function Row({ comment, title, selected, unread, touch, onFocus, onHover }) {
               >
                 <MessageSquare size={11} aria-hidden="true" />
                 <span aria-hidden="true">{replies}</span>
+              </span>
+            ) : null}
+            {imageCount ? (
+              <span
+                className="inline-flex shrink-0 items-center gap-0.5 tabular"
+                aria-label={`${imageCount} ${imageCount === 1 ? 'image' : 'images'}`}
+                data-sw-comment-images={imageCount}
+              >
+                <ImageIcon size={11} aria-hidden="true" />
+                <span aria-hidden="true">{imageCount}</span>
+              </span>
+            ) : null}
+            {drawn ? (
+              <span className="inline-flex shrink-0 items-center" aria-label="Has a drawing" role="img" data-sw-comment-drawn="true">
+                <Brush size={11} aria-hidden="true" />
               </span>
             ) : null}
             {reactions.map(([emoji, count]) => (

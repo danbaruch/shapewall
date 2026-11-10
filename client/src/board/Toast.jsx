@@ -21,7 +21,25 @@ export function useToast() {
   return [toast, setToast, hold]
 }
 
+// A hint toast (`untilSheet`) goes once a sheet or dialog opens over the
+// board: it is about the canvas, and would sit on top of the sheet.
+function useGoneUnderSheet(toast, setToast) {
+  const passing = Boolean(toast?.untilSheet)
+  useEffect(() => {
+    if (!passing) return undefined
+    const check = () => {
+      if (document.querySelector('[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]'))
+        setToast((current) => (current?.untilSheet ? null : current))
+    }
+    check()
+    const observer = new MutationObserver(check)
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-state'] })
+    return () => observer.disconnect()
+  }, [passing, setToast])
+}
+
 export function BoardToast({ toast, setToast, onHold, wide, raised }) {
+  useGoneUnderSheet(toast, setToast)
   if (!toast) return null
   return (
     <div

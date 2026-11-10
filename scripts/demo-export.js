@@ -261,11 +261,65 @@ async function pinAt(viewportName, pagePath, selector) {
 const pathOf = (pageId) => board.pages.find((item) => item.id === pageId).path
 const AGENT = 'Coding agent'
 
+// A screenshot of the area around an element on staging, as someone would
+// attach it to a comment (PNG, base64).
+async function elementShot(viewportName, pagePath, selector, pad = 24) {
+  const size = config.viewports[viewportName]
+  const mobile = viewportName !== 'desktop'
+  const page = await browser.newPage({ viewport: size, isMobile: mobile, hasTouch: mobile })
+  await page.goto(joinUrl(local(staging), pagePath))
+  const box = await page.locator(selector).first().boundingBox()
+  if (!box) throw new Error(`demo shot: ${selector} is not on ${pagePath} (${viewportName})`)
+  const x = Math.max(0, box.x - pad)
+  const y = Math.max(0, box.y - pad)
+  const png = await page.screenshot({
+    clip: { x, y, width: Math.min(size.width - x, box.width + pad * 2), height: box.height + pad * 2 },
+    fullPage: true,
+  })
+  await page.close()
+  return png.toString('base64')
+}
+
+// A box around the element a comment is pinned to, and an arrow pointing at
+// it from `from` (frame-relative), as drawn on the page.
+function markup({ x, y, size }, from = null) {
+  const r = (value) => Math.round(Math.min(1, Math.max(0, value)) * 10000) / 10000
+  const [cx, cy] = [x / 100, y / 100]
+  const half = [size.w / 2 + 0.01, size.h / 2 + 0.006]
+  const box = {
+    tool: 'box',
+    ink: 'bad',
+    width: 4,
+    points: [
+      [r(cx - half[0]), r(cy - half[1])],
+      [r(cx + half[0]), r(cy + half[1])],
+    ],
+  }
+  if (!from) return { shapes: [box] }
+  const arrow = { tool: 'arrow', ink: 'bad', width: 4, points: [from.map(r), [r(cx - half[0] - 0.005), r(cy)]] }
+  return { shapes: [box, arrow] }
+}
+
 // A comment: pinned to `selector`, anchored to that element when `anchor`
-// is its text ('' when the text will change), created `days` ago.
-async function comment({ page, viewport = 'desktop', selector, anchor = null, body, author, days, path: pagePath = null }) {
+// is its text ('' when the text will change), created `days` ago. `shot`:
+// attach a screenshot of the element; `draw`: a box (and an arrow from
+// `draw.from`) around it.
+async function comment({
+  page,
+  viewport = 'desktop',
+  selector,
+  anchor = null,
+  body,
+  author,
+  days,
+  path: pagePath = null,
+  shot = null,
+  draw = null,
+}) {
   const target = page.startsWith('variant:') ? pagePath : pathOf(page)
   const { x, y, size } = await pinAt(viewport, target, selector)
+  const images = shot ? [{ name: shot, mediaType: 'image/png', data: await elementShot(viewport, target, selector) }] : null
+  const drawing = draw ? markup({ x, y, size }, draw.from || null) : null
   return createComment(
     config,
     board,
@@ -277,6 +331,8 @@ async function comment({ page, viewport = 'desktop', selector, anchor = null, bo
       body,
       author,
       ...(anchor !== null ? { anchor: { selector, text: anchor, dx: 0.5, dy: 0.5, ...size } } : {}),
+      ...(images ? { images } : {}),
+      ...(drawing ? { drawing } : {}),
     },
     { now: ago(days) },
   )
@@ -309,7 +365,14 @@ try {
   await reply(plus, AGENT, 'Switched the Plus card to the primary button and recaptured pricing. @robin over to you.', 8.8)
   await agent(plus, 'done', 8.8)
 
-  const typo = await comment({ page: 'features', selector: 'h1', body: 'Typo in the headline: "thinkng".', author: 'Jo', days: 8.5 })
+  const typo = await comment({
+    page: 'features',
+    selector: 'h1',
+    body: 'Typo in the headline: "thinkng".',
+    author: 'Jo',
+    days: 8.5,
+    draw: {},
+  })
 
   const receipts = await comment({
     page: 'billing',
@@ -532,6 +595,8 @@ try {
     body: 'On a phone Delete account sits right above Save changes. Too easy to hit: move it to the end or ask to confirm.',
     author: 'Mei',
     days: 0.7,
+    shot: 'delete-account-phone.png',
+    draw: { from: [0.12, 0.2] },
   })
   await comment({
     page: 'not-found',
@@ -557,6 +622,7 @@ try {
     body: 'On a tablet the three plans stack into one long column. Could they sit side by side from 768 px wide?',
     author: 'Sam',
     days: 0.25,
+    shot: 'plans-tablet.png',
   })
   await comment({
     page: 'dashboard',
