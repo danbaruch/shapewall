@@ -36,6 +36,10 @@ export function DevicePage() {
   const [scopes, setScopes] = useState(['read', 'reply', 'status', 'resolve', 'push'])
   const [expiry, setExpiry] = useState('90')
   const [done, setDone] = useState(null) // { approved, workspace, project }
+  // Approve was held back because the sign-in is not fresh, and the passkey
+  // check that follows was closed: said on the page, so the button never
+  // looks as if it did nothing.
+  const [needsPasskey, setNeedsPasskey] = useState(false)
   const lookup = useAction()
   const decide = useAction()
 
@@ -59,14 +63,22 @@ export function DevicePage() {
   const approve = () =>
     decide.run(async () => {
       const days = EXPIRY.find(([id]) => id === expiry)[2]
-      const result = await api.post('/api/device/approve', {
-        code,
-        workspaceId,
-        ...(projectId === '__create' ? { newProjectName } : { projectId }),
-        scopes,
-        ...(days ? { expiresInDays: days } : {}),
-      })
-      setDone({ approved: true, ...result })
+      try {
+        const result = await api.post('/api/device/approve', {
+          code,
+          workspaceId,
+          ...(projectId === '__create' ? { newProjectName } : { projectId }),
+          scopes,
+          ...(days ? { expiresInDays: days } : {}),
+        })
+        setNeedsPasskey(false)
+        setDone({ approved: true, ...result })
+      } catch (failure) {
+        // The passkey dialog opens next (useAction); if it is closed, this
+        // note stays. Any other refusal shows its message below.
+        setNeedsPasskey(failure?.code === 'reauth_required')
+        throw failure
+      }
     })
   const deny = () =>
     decide.run(async () => {
@@ -76,6 +88,7 @@ export function DevicePage() {
   const restart = () => {
     setFound(null)
     setDone(null)
+    setNeedsPasskey(false)
     setCode('')
   }
 
@@ -291,6 +304,11 @@ export function DevicePage() {
                 </Field>
               </>
             )}
+            {needsPasskey && !decide.busy && !decide.error ? (
+              <Notice tone="warn" title="Not approved yet: confirm with your passkey" data-sw-device-reauth-note>
+                Approving a login needs a fresh passkey check (once every 10 minutes). Press Approve again and use your passkey when asked.
+              </Notice>
+            ) : null}
             <FormError error={decide.error} />
             <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <Button size="touch" variant="ghost" onClick={deny} disabled={decide.busy} className="lg:h-10" data-sw-device-deny>
