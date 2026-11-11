@@ -6,6 +6,8 @@
 // system prompt. The payload is JSON with <, > and & escaped, so no text can
 // close the element early or forge another one.
 
+import { commentText } from '../comment-fields.js'
+
 // How to point at the board: the panel turns these into links to the board
 // (client/src/chat/refs.js), and only for ids the board has.
 export const REFS_RULE =
@@ -143,7 +145,7 @@ export function openCommentsContext({ board, comments, skip = null, max = COMMEN
   for (const comment of open) {
     if (blocks.length >= max) break
     const page = pages.get(comment.pageId)
-    const body = String(comment.body || '')
+    const body = commentText(comment)
     const block = quoteData(
       'comment',
       {

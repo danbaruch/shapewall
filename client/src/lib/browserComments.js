@@ -6,6 +6,7 @@
 
 import { commentMentions } from '../../../src/mentions.js'
 import { publicReactions, toggleReaction } from '../../../src/reactions.js'
+import { agentStatusOnResolve } from '../../../src/comment-fields.js'
 
 const BODY_MAX = 2000
 const AUTHOR_MAX = 60
@@ -61,6 +62,16 @@ function cleanBody(value) {
   if (!body) throw new LocalError(400, 'empty_body', 'Write something first.')
   if (body.length > BODY_MAX) throw new LocalError(400, 'body_too_long', `Comments are limited to ${BODY_MAX} characters.`)
   return body
+}
+
+// A comment just resolved: no agent is left "working" on it (the server's
+// rule, src/comment-fields.js).
+function settled(comment, now) {
+  const agentStatus = agentStatusOnResolve(comment.agentStatus)
+  if (agentStatus === (comment.agentStatus ?? null)) return comment
+  const next = { ...comment, agentStatus, agentStatusAt: agentStatus ? now : null }
+  delete next.agentBranch
+  return next
 }
 
 const cleanAuthor = (value) => (typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, AUTHOR_MAX) : '') || 'anonymous'
@@ -157,6 +168,7 @@ export async function browserCommentsRequest(method, url, body, fetchJson) {
     const reopening = !resolved && comment.status === 'resolved'
     next = { ...comment, status: resolved ? 'resolved' : 'open', resolvedAt: resolved ? now : null }
     if (!resolved) next = { ...next, resolution: null, agentStatus: null, agentStatusAt: null }
+    else if (comment.status !== 'resolved') next = settled(next, now)
     if (reopening) next = { ...next, reopenCount: (Number(comment.reopenCount) || 0) + 1, reopenedAt: now }
   } else if (method === 'POST' && action === 'replies') {
     const replies = Array.isArray(comment.replies) ? comment.replies : []
@@ -199,7 +211,7 @@ export async function browserCommentsRequest(method, url, body, fetchJson) {
         next.resolution = null
         next.reopenCount = (Number(comment.reopenCount) || 0) + 1
         next.reopenedAt = now
-      }
+      } else next = settled(next, now)
     }
   } else {
     return undefined

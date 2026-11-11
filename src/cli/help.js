@@ -103,6 +103,8 @@ export const SECTIONS = {
   comments get ID           one comment, everything about it   [--json] [--for-agent]
   comments add              add a comment   --page ID --body TEXT [--viewport NAME (default the page's first)]
                             [--selector CSS (pin it to that element)] [--author NAME (default agent)] [--json]
+  comments selectors        the selectors --selector takes, with each element's text, from the latest capture
+                            --page ID [--viewport NAME] [--text WORDS (only elements whose text has them)] [--json]
   comments resolve ID       mark a comment resolved   [--note TEXT] [--ref URL|COMMIT] [--author NAME] [--json]
   comments reopen ID        reopen a comment   [--author NAME] [--json]
   comments reply ID         add a reply   --body TEXT [--author NAME (default agent)] [--json]

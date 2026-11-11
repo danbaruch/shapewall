@@ -1,7 +1,7 @@
-// `shapewall comments`: list, get, add, resolve, reopen, reply and status.
+// `shapewall comments`: list, get, add, selectors, resolve, reopen, reply and status.
 
 import { getBoard, loadConfig } from '../config.js'
-import { addComment, authorFlag, showComment, sinceFilter } from '../comments-cli.js'
+import { addComment, authorFlag, listSelectors, showComment, sinceFilter } from '../comments-cli.js'
 import { feedback, formatFeedback, formatFeedbackForAgent, untrustedJson } from '../feedback.js'
 import { AGENT_STATUSES, addReply, setAgentStatus, updateComment } from '../store.js'
 import { mentionFlag, withNotifications } from './notify.js'
@@ -13,7 +13,7 @@ export async function comments(positional, flags, out, err) {
     return remoteComments(positional, flags, out)
   }
   const config = loadConfig(flags.config)
-  if (['list', 'get', 'show'].includes(positional[0] || 'list')) return commentAction(config, positional, flags, out, err)
+  if (['list', 'get', 'show', 'selectors'].includes(positional[0] || 'list')) return commentAction(config, positional, flags, out, err)
   return withNotifications(config, err, () => commentAction(config, positional, flags, out, err))
 }
 
@@ -39,6 +39,7 @@ async function commentAction(config, positional, flags, out, err) {
   }
   if (action === 'get' || action === 'show') return showComment(config, board, positional, flags, out)
   if (action === 'add') return addComment(config, board, flags, out, err)
+  if (action === 'selectors') return listSelectors(config, board, flags, out)
   if (action === 'resolve' || action === 'reopen') {
     const id = positional[1]
     if (!id) throw new Error(`usage: shapewall comments ${action} ID`)
@@ -80,5 +81,5 @@ async function commentAction(config, positional, flags, out, err) {
     out(flags.json ? JSON.stringify({ comment }, null, 2) : `#${comment.id} agent status: ${comment.agentStatus || 'none'}`)
     return
   }
-  throw new Error(`unknown comments action "${action}" (list, get, add, resolve, reopen, reply, status)`)
+  throw new Error(`unknown comments action "${action}" (list, get, add, selectors, resolve, reopen, reply, status)`)
 }

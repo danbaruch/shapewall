@@ -9,6 +9,7 @@ import { Badge, HoverCard, HoverCardContent, HoverCardTrigger, Popover, PopoverA
 import { cn } from '../lib/utils'
 import { refLabel, usedRefs } from './refs'
 import { excerpt } from './text'
+import { commentText } from '../../../src/comment-fields.js'
 
 // { index, onNavigate(ref), thumbFor(pageId), touch }, or null: plain text.
 export const RefsContext = createContext(null)
@@ -40,7 +41,7 @@ function Preview({ item, refs }) {
             </Badge>
           ) : null}
         </p>
-        <p className="line-clamp-4 text-ui break-words text-fg">{excerpt(comment.body, 200)}</p>
+        <p className="line-clamp-4 text-ui break-words text-fg">{excerpt(commentText(comment), 200)}</p>
         {page ? (
           <p className="truncate text-caption text-muted">
             {page.title} · {comment.viewport}

@@ -504,3 +504,53 @@ test('shapewall share sends a local comment’s images and drawing', async () =>
   assert.equal(served.status, 200)
   assert.equal(served.headers['content-type'], 'image/png')
 })
+
+test('no text: a drawing or an image is enough for a comment or a reply; an empty one is refused', async () => {
+  const comments = boardApi(project.id, '/boards/sample/comments')
+  const refused = await alice.browser.post(comments, { ...pin, body: '' })
+  assert.equal(refused.status, 400)
+  assert.equal(refused.json.error.code, 'empty_comment')
+  const drawn = await alice.browser.post(comments, { ...pin, body: '', drawing: DRAWING })
+  assert.equal(drawn.status, 201, drawn.text)
+  assert.equal(drawn.json.comment.body, '')
+  assert.equal(drawn.json.comment.drawing.shapes.length, 2)
+  const id = drawn.json.comment.id
+
+  const replies = `${comments}/${id}/replies`
+  const empty = await alice.browser.post(replies, { body: ' ', images: [], drawing: { shapes: [] } })
+  assert.equal(empty.status, 400)
+  assert.equal(empty.json.error.code, 'empty_comment')
+  const pictured = await alice.browser.post(replies, {
+    body: '',
+    images: [{ name: 'shot.png', mediaType: 'image/png', data: b64(pngWithText()) }],
+  })
+  assert.equal(pictured.status, 201, pictured.text)
+  assert.equal(pictured.json.reply.body, '')
+  assert.equal(pictured.json.reply.images.length, 1)
+  const sketched = await alice.browser.post(replies, { body: '', drawing: DRAWING })
+  assert.equal(sketched.status, 201, sketched.text)
+  // A token's reply carries no media, so it still needs text.
+  assert.equal((await tokenCall(hosted, token, 'POST', `/api/v1/boards/sample/comments/${id}/replies`, { body: { body: '' } })).status, 400)
+
+  // The author may empty the text of a comment that has a drawing.
+  const edited = await alice.browser.call('PATCH', `${comments}/${id}`, { body: { body: '' } })
+  assert.equal(edited.status, 200, edited.text)
+})
+
+test('resolving on the board ends the agent status: working becomes done, needs-human is cleared', async () => {
+  const comments = boardApi(project.id, '/boards/sample/comments')
+  const patch = (id, body) => alice.browser.call('PATCH', `${comments}/${id}`, { body })
+  for (const [from, to] of [
+    ['working', 'done'],
+    ['queued', 'done'],
+    ['needs-human', null],
+    ['done', 'done'],
+  ]) {
+    const id = (await alice.browser.post(comments, { ...pin, body: `Agent is ${from}` })).json.comment.id
+    assert.equal((await patch(id, { agentStatus: from })).json.comment.agentStatus, from)
+    const resolved = await alice.browser.post(`${comments}/${id}/resolve`, {})
+    assert.equal(resolved.status, 200, resolved.text)
+    assert.deepEqual([resolved.json.comment.status, resolved.json.comment.agentStatus], ['resolved', to], from)
+    assert.equal((await alice.browser.post(`${comments}/${id}/reopen`, {})).json.comment.agentStatus, null)
+  }
+})

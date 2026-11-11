@@ -5,7 +5,8 @@
 // guests never upload).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { drawingsFor, finishShape, hasDrawing, shapePaths } from '../client/src/board/drawing.js'
+import { drawing, drawingsFor, finishShape, hasDrawing, shapePaths } from '../client/src/board/drawing.js'
+import { replyDraftKey, replyDrafts } from '../client/src/board/replyDrafts.js'
 import { beforeAfter } from '../client/src/board/flow.js'
 import { DEMO_IMAGE_BYTES_MAX, demoCommentImages, demoDrawing, sniffDemoImage } from '../client/src/demo/backend/comment-media.js'
 import { DemoError } from '../client/src/demo/backend/util.js'
@@ -142,4 +143,27 @@ test('demo: images are sniffed by content, capped and refused for guests; the dr
     () => demoDrawing({ shapes: [{ tool: 'text', points: [[0, 0]] }] }),
     (error) => error instanceof DemoError && error.code === 'invalid_drawing',
   )
+})
+
+test('reply drafts: kept per board and comment while the page is open, forgotten when empty or cleared', () => {
+  const key = replyDraftKey('site', 7)
+  assert.notEqual(key, replyDraftKey('other', 7), 'comment ids repeat across boards')
+  assert.deepEqual(replyDrafts.get(key), { body: '', shapes: [], images: [] })
+  replyDrafts.save(key, { body: 'Half a thought' })
+  replyDrafts.save(key, { shapes: [box], drawKey: 'home|desktop' })
+  assert.deepEqual(replyDrafts.get(key), { body: 'Half a thought', shapes: [box], images: [], drawKey: 'home|desktop' })
+  assert.deepEqual(replyDrafts.get(replyDraftKey('site', 8)).shapes, [], 'another thread has its own')
+  // Emptied by hand: nothing left to keep.
+  replyDrafts.save(key, { body: '', shapes: [] })
+  assert.deepEqual(replyDrafts.get(key), { body: '', shapes: [], images: [] })
+  replyDrafts.save(key, { images: [{ id: 'img-1', state: 'ready' }] })
+  assert.equal(replyDrafts.get(key).images.length, 1)
+  replyDrafts.clear(key)
+  assert.equal(replyDrafts.get(key).images.length, 0)
+
+  // A drawing session picks a kept drawing up again.
+  drawing.start('home|desktop', 'reply-7', [box])
+  assert.equal(drawing.get().shapes.length, 1)
+  drawing.end('reply-7')
+  assert.equal(drawing.get(), null)
 })

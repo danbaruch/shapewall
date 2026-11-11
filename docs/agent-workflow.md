@@ -87,6 +87,10 @@ to comments after that id, or created or changed after that ISO time (`--since 1
 One comment, the same shape: `shapewall comments get 12 [--json]`. Every write prints its result with `--json` too (`reply`, `status`,
 `resolve`, `reopen`, `add`).
 
+A comment or a reply made on the board can be a drawing or images with no text. Its `body` is then `""` in JSON (the `drawing`,
+`files.markup` and `files.images` fields say what it has), and the text listing shows `(drawing)`, `(image)` or `(2 images)` in its
+place.
+
 ### Adding a comment from the command line
 
 ```sh
@@ -98,8 +102,19 @@ It goes through the same checks, events, mentions and notifications as a comment
 `--viewport` defaults to the page's first; `--author` defaults to `agent` (like `reply`; the starter agent never acts on an agent's own
 comment, so text a bot relays waits for a trusted person to tag it). Without `--selector` the pin sits near the page's top-left corner.
 With one, it is anchored to that element, using the selector grammar comments show (`#id`, `tag[data-testid="..."]`,
-`tag[aria-label="..."]`, `tag:nth-of-type(n)`, joined by `>`); the element text is read from the latest capture when the selector finds
-exactly one element there, and a note says so when it does not.
+`tag[aria-label="..."]`, `tag:nth-of-type(n)`, joined by `>`). When the selector finds exactly one element in the latest capture, the
+pin sits in the middle of that element, as if you had clicked there on the board, and the element's text is saved with it. When it does
+not, a note says so, the selector is saved anyway and the pin stays near the corner.
+
+To find a selector, list the ones the latest capture has, with each element's text:
+
+```sh
+shapewall comments selectors --page signup --viewport phone --text "create account"
+# button[data-testid="signup-submit"]  ("Create account")
+```
+
+`--text` keeps the elements whose text contains those words (any case); `--json` prints `{ selectors: [{ selector, text }] }`. The list
+comes from the capture's element map (`<output>/<board>/captures/<page>.<viewport>.elements.json`), so capture the page first.
 
 ### Agent status
 
@@ -113,7 +128,8 @@ exactly one element there, and a note says so when it does not.
 | `done`        | The agent thinks it is fixed and recaptured. A person checks and resolves.     | the agent, or `watch` on exit 0 + reply |
 | `needs-human` | The agent stopped: unclear request, failure, timeout. A reply says why.        | the agent, or `watch` on failure        |
 
-Resolving keeps the agent status (the MCP `resolve_comment` tool sets it to `done`); reopening clears it.
+Resolving a comment that is `queued` or `working` sets it to `done`, and clears `needs-human` (the question is answered), however it
+is resolved: the board, `comments resolve`, the API or the MCP `resolve_comment` tool. Reopening clears the agent status.
 
 ### API
 

@@ -20,9 +20,10 @@ const emit = () => listeners.forEach((listener) => listener())
 
 export const drawing = {
   get: () => session,
-  start(key, owner) {
+  // `shapes`: a drawing to pick up again (a reply left unsent, replyDrafts.js).
+  start(key, owner, shapes = []) {
     if (session?.key === key && session.owner === owner) return
-    session = { key, owner, tool: null, ink: DRAWING_INKS[0], shapes: [] }
+    session = { key, owner, tool: null, ink: DRAWING_INKS[0], shapes: shapes.slice(0, DRAWING_SHAPES_MAX) }
     emit()
   },
   // Same owner, another frame (the composer moved): the drawing starts over.

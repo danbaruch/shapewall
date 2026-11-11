@@ -41,7 +41,10 @@ import {
   CommentError,
   FIX_REF_MAX,
   STORED_AGENT_STATUSES,
+  agentStatusOnResolve,
+  cleanCommentBody,
   cleanFixRef,
+  hasCommentMedia,
   readImages,
   validateAnchor,
 } from './comment-fields.js'
@@ -573,14 +576,6 @@ export function commentCounts(config, boardId) {
   return counts
 }
 
-function cleanBody(value) {
-  const body = typeof value === 'string' ? value.replace(/\r\n/g, '\n').trim() : ''
-  if (!body) throw new CommentError(400, 'empty_comment', 'Write something first.')
-  if (body.length > COMMENT_BODY_MAX)
-    throw new CommentError(400, 'comment_too_long', `Comments are limited to ${COMMENT_BODY_MAX} characters.`)
-  return body
-}
-
 function cleanAuthor(value) {
   const author = typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, AUTHOR_MAX) : ''
   return author || 'anonymous'
@@ -617,7 +612,9 @@ export function validateCommentInput(config, board, input) {
     viewport,
     x: Math.round(x * 100) / 100,
     y: Math.round(y * 100) / 100,
-    body: cleanBody(input?.body),
+    // No text is fine when an image or a drawing comes with it (checked by
+    // validateCommentMedia, which refuses anything it does not keep).
+    body: cleanCommentBody(input?.body, { media: hasCommentMedia(input) }),
     author: cleanAuthor(input?.author),
     anchor: validateAnchor(input?.anchor),
   }
@@ -686,7 +683,6 @@ export async function updateComment(config, boardId, commentId, changes, { now =
   const id = Number(commentId)
   if (!Number.isSafeInteger(id) || id <= 0) throw new CommentError(404, 'unknown_comment', 'That comment does not exist.')
   if (!changes || typeof changes !== 'object') throw new CommentError(400, 'invalid_change', 'Nothing to change.')
-  const body = changes.body !== undefined ? cleanBody(changes.body) : undefined
   if (changes.status !== undefined && !['open', 'resolved'].includes(changes.status)) {
     throw new CommentError(400, 'invalid_status', 'Status must be open or resolved.')
   }
@@ -703,6 +699,8 @@ export async function updateComment(config, boardId, commentId, changes, { now =
     const comment = store.comments.find((item) => item.id === id)
     if (!comment) throw new CommentError(404, 'unknown_comment', 'That comment does not exist.')
     const before = withAgentFields(structuredClone(comment))
+    // The text may be emptied only on a comment that has an image or a drawing.
+    const body = changes.body !== undefined ? cleanCommentBody(changes.body, { media: hasCommentMedia(before) }) : undefined
     if (body !== undefined && body !== comment.body) {
       comment.body = body
       // Shown as "edited" beside the time.
@@ -721,6 +719,10 @@ export async function updateComment(config, boardId, commentId, changes, { now =
         comment.reopenCount = (Number.isSafeInteger(comment.reopenCount) ? comment.reopenCount : 0) + 1
         comment.reopenedAt = now.toISOString()
         if (agentStatus === undefined) setAgent(comment, null, now)
+      } else if (agentStatus === undefined && comment.agentStatus !== BRANCH_READY) {
+        // Resolved, however it happened (the board, the CLI, MCP): no agent
+        // is left "working" on it.
+        setAgent(comment, agentStatusOnResolve(before.agentStatus), now)
       }
     }
     if (agentStatus !== undefined) setAgent(comment, agentStatus, now)
@@ -824,7 +826,7 @@ export function getComment(config, boardId, commentId) {
 // Adds a reply. Returns { comment, reply }.
 // `images` and `drawing` as on a new comment (validateCommentMedia).
 export async function addReply(config, boardId, commentId, input, { now = new Date() } = {}) {
-  const body = cleanBody(input?.body)
+  const body = cleanCommentBody(input?.body, { media: hasCommentMedia(input) })
   const author = cleanAuthor(input?.author)
   const media = validateCommentMedia(input)
   const images = saveCommentImages(boardDir(config, boardId), media.images)
@@ -1037,6 +1039,7 @@ export async function recordGithubPull(config, boardId, commentId, pull, { via =
       if (target.status === 'open') {
         target.status = 'resolved'
         target.resolvedAt = now.toISOString()
+        if (target.agentStatus !== BRANCH_READY) setAgent(target, agentStatusOnResolve(before.agentStatus), now)
         target.resolution = `Merged in ${label}.`.slice(0, COMMENT_BODY_MAX)
         target.fixRef = next.url
       } else if (!target.fixRef) {

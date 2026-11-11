@@ -55,8 +55,9 @@ export const imagesPayload = (images) =>
 
 // The images of one composer: add(files), remove(id), clear(), the list
 // ({ id, name, preview, state: 'reading' | 'ready' }) and the latest error.
-export function useImageDraft({ enabled = true, max = COMMENT_IMAGES_MAX } = {}) {
-  const [images, setImages] = useState([])
+// `initial`: images to start with (a reply left unsent, replyDrafts.js).
+export function useImageDraft({ enabled = true, max = COMMENT_IMAGES_MAX, initial = null } = {}) {
+  const [images, setImages] = useState(() => (enabled && initial ? initial.slice(0, max) : []))
   const [error, setError] = useState(null)
   const count = useRef(0)
   count.current = images.length

@@ -90,6 +90,8 @@ test('comments add, get and --since from the CLI, with the author in the text ou
     dx: 0.5,
     dy: 0.5,
   })
+  // A capture without an element map (an older one): the pin stays near the corner.
+  assert.deepEqual([getComment(config, 'sample', 2).x, getComment(config, 'sample', 2).y], [2, 2])
 
   const missing = await run([
     'comments',
@@ -304,4 +306,133 @@ test('watch --no-claim prints open comments once without claiming, beside a clai
   await run(['watch', '--no-claim', '--once', '--config', file])
   assert.equal(readEventLog(config).length, before)
   assert.equal(getComment(config, 'sample', a.id).agentStatus, null)
+})
+
+// The element map of HTML above, as a capture writes it (src/capture/element-map.js).
+const MAP = {
+  v: 1,
+  width: 1000,
+  height: 2000,
+  elements: [
+    { t: 'body', n: 1, p: -1, b: [0, 0, 1000, 2000], x: 'Create account First Second one Links' },
+    { t: 'main', n: 1, p: 0, b: [0, 0, 1000, 2000], h: '#top', i: 'top', x: 'Create account First Second one Links', z: 0 },
+    { t: 'button', n: 1, p: 1, b: [400, 300, 200, 100], h: 'button[data-testid="signup"]', d: 'signup', x: 'Create account', z: 1 },
+    { t: 'section', n: 1, p: 1, b: [0, 500, 1000, 400], x: 'First Second one', z: 2 },
+    { t: 'p', n: 1, p: 3, b: [0, 500, 1000, 200], x: 'First', z: 3 },
+    { t: 'p', n: 2, p: 3, b: [0, 700, 1000, 200], x: 'Second one', z: 4 },
+    { t: 'b', n: 1, p: 5, b: [80, 700, 40, 20], x: 'one', z: 5 },
+    { t: 'nav', n: 1, p: 1, b: [0, 1900, 1000, 100], h: 'nav[aria-label="Main"]', r: 'Main', x: 'Links', z: 6 },
+  ],
+}
+
+test('comments add --selector: the pin sits in the middle of the element the latest element map has', async () => {
+  const { file, captures } = project('cli-add-map')
+  const mapFile = path.join(captures, 'home.desktop.elements.json')
+  fs.writeFileSync(mapFile, JSON.stringify(MAP))
+  const config = loadConfig(file)
+  const add = (selector, ...rest) =>
+    run(['comments', 'add', '--config', file, '--page', 'home', '--selector', selector, '--body', 'Here', '--json', ...rest])
+
+  const added = JSON.parse((await add('button[data-testid="signup"]')).text).comment
+  // The button is 400..600 across a 1000 px page and 300..400 down a 2000 px one.
+  assert.deepEqual([added.position.xPercent, added.position.yPercent], [50, 17.5])
+  assert.deepEqual(added.element, { selector: 'button[data-testid="signup"]', text: 'Create account' })
+  assert.deepEqual(getComment(config, 'sample', added.id).anchor, {
+    selector: 'button[data-testid="signup"]',
+    text: 'Create account',
+    dx: 0.5,
+    dy: 0.5,
+    w: 0.2,
+    h: 0.05,
+  })
+  const listed = await run(['comments', 'get', String(added.id), '--config', file])
+  assert.match(listed.text, /at: \d+,\d+ px \(50% \/ 17\.5%\)/)
+
+  // A path of steps, as the board writes it for an element with no hook of its own.
+  const nested = JSON.parse((await add('#top > section:nth-of-type(1) > p:nth-of-type(2)')).text).comment
+  assert.deepEqual([nested.position.xPercent, nested.position.yPercent], [50, 40])
+  assert.equal(nested.element.text, 'Second one')
+
+  // Not exactly one element: said, the selector kept, the pin near the corner as before.
+  const missing = await add('#top > div:nth-of-type(4)')
+  assert.match(missing.errors, /does not find exactly one element in the latest desktop capture/)
+  assert.match(missing.errors, /home\.desktop\.elements\.json/)
+  assert.match(missing.errors, /comments selectors --page home/)
+  assert.deepEqual([JSON.parse(missing.text).comment.position.xPercent, JSON.parse(missing.text).comment.position.yPercent], [2, 2])
+  // No --selector: the corner, as before.
+  const plain = JSON.parse((await run(['comments', 'add', '--config', file, '--page', 'home', '--body', 'x', '--json'])).text).comment
+  assert.deepEqual([plain.position.xPercent, plain.position.yPercent, plain.element], [2, 2, null])
+  // A map that does not read is no map: the text still comes from the live HTML.
+  fs.writeFileSync(mapFile, '{"v":1,')
+  const unreadable = JSON.parse((await add('button[data-testid="signup"]')).text).comment
+  assert.deepEqual([unreadable.position.xPercent, unreadable.element.text], [2, 'Create account'])
+
+  // The wrong kind of selector: the message says what is taken and how to find one.
+  await assert.rejects(add('.btn.primary'), (error) => {
+    assert.match(error.message, /--selector "\.btn\.primary" is not one Shapewall can use/)
+    assert.match(error.message, /steps like #id/)
+    assert.match(error.message, /shapewall comments selectors --page home/)
+    return true
+  })
+})
+
+test('comments selectors lists the selectors of the latest capture with their text', async () => {
+  const { file, captures } = project('cli-selectors')
+  await assert.rejects(run(['comments', 'selectors', '--config', file, '--page', 'home']), /No element map for "home" \(desktop\) yet/)
+  await assert.rejects(run(['comments', 'selectors', '--config', file]), /usage: shapewall comments selectors --page ID/)
+  fs.writeFileSync(path.join(captures, 'home.desktop.elements.json'), JSON.stringify(MAP))
+
+  const all = (await run(['comments', 'selectors', '--config', file, '--page', 'home'])).text.split('\n')
+  assert.equal(all.length, MAP.elements.length)
+  assert.ok(all.includes('button[data-testid="signup"]  ("Create account")'))
+  assert.ok(all.includes('#top > section:nth-of-type(1) > p:nth-of-type(2)  ("Second one")'))
+
+  const found = await run(['comments', 'selectors', '--config', file, '--page', 'home', '--text', 'SECOND'])
+  assert.deepEqual(found.text.split('\n'), [
+    'body:nth-of-type(1)  ("Create account First Second one Links")',
+    '#top  ("Create account First Second one Links")',
+    '#top > section:nth-of-type(1)  ("First Second one")',
+    '#top > section:nth-of-type(1) > p:nth-of-type(2)  ("Second one")',
+  ])
+  const json = JSON.parse((await run(['comments', 'selectors', '--config', file, '--page', 'home', '--text', 'links', '--json'])).text)
+  assert.equal(json.trust, 'untrusted')
+  assert.deepEqual(json.selectors.at(-1), { selector: 'nav[aria-label="Main"]', text: 'Links' })
+  assert.match((await run(['comments', 'selectors', '--config', file, '--page', 'home', '--text', 'zebra'])).text, /No element on "home"/)
+
+  // Every listed selector is one `comments add --selector` pins.
+  for (const row of JSON.parse((await run(['comments', 'selectors', '--config', file, '--page', 'home', '--json'])).text).selectors) {
+    const added = await run(['comments', 'add', '--config', file, '--page', 'home', '--selector', row.selector, '--body', 'x', '--json'])
+    assert.equal(added.errors, '', row.selector)
+    assert.notEqual(JSON.parse(added.text).comment.position.xPercent, 2, row.selector)
+  }
+})
+
+test('comments resolve ends the agent status: working and queued become done, needs-human is cleared, reopen starts clean', async () => {
+  const { file } = project('cli-resolve-status')
+  const config = loadConfig(file)
+  const agentOf = (id) => getComment(config, 'sample', id).agentStatus
+  for (const [from, to] of [
+    ['working', 'done'],
+    ['queued', 'done'],
+    ['needs-human', null],
+    ['done', 'done'],
+    [null, null],
+  ]) {
+    const { id } = JSON.parse(
+      (await run(['comments', 'add', '--config', file, '--page', 'home', '--body', `From ${from}`, '--json'])).text,
+    ).comment
+    if (from) await run(['comments', 'status', String(id), from, '--config', file])
+    assert.equal(agentOf(id), from)
+    await run(['comments', 'resolve', String(id), '--config', file])
+    assert.equal(agentOf(id), to, `resolved from ${from}`)
+    const listed = (await run(['comments', 'get', String(id), '--config', file])).text.split('\n')[0]
+    assert.match(listed, to ? new RegExp(`^#${id} \\[resolved\\] \\[agent: ${to}\\]`) : new RegExp(`^#${id} \\[resolved\\] Home`))
+    await run(['comments', 'reopen', String(id), '--config', file])
+    assert.equal(agentOf(id), null, 'a reopened comment is new work')
+  }
+  // The store rule, so the board, the API and MCP agree; an explicit status wins.
+  const made = await createComment(config, config.boards[0], { pageId: 'home', viewport: 'desktop', x: 1, y: 1, body: 'x' })
+  await updateComment(config, 'sample', made.id, { agentStatus: 'working' })
+  const kept = await updateComment(config, 'sample', made.id, { status: 'resolved', agentStatus: 'needs-human' })
+  assert.equal(kept.agentStatus, 'needs-human')
 })
