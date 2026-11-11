@@ -528,7 +528,7 @@ Commands
       --base-url URL        before (default: the board's baseUrl)   --head-url URL   after
       --base-dir DIR        or compare two capture folders   --head-dir DIR
       --out DIR             the result folder (default shapewall-ci)
-      --threshold RATIO     share of pixels below which a shot is unchanged (default ci.threshold, 0.001)
+      --threshold RATIO     share of pixels below which a shot is unchanged (default ci.threshold, 0.00001)
       --max-pages N         compare at most N pages (default ci.maxPages, 50)
       --fail-on-change      exit 3 when something changed (default: always 0, never fails the pull request)
   ci capture --out DIR      capture one side into a folder, from --url URL, or with --allow-start

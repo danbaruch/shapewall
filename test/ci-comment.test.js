@@ -9,7 +9,8 @@ import http from 'node:http'
 import path from 'node:path'
 import { PNG } from 'pngjs'
 import { commentFromResult, prContext, apiTarget, checkArtifactUrl } from '../src/ci/github.js'
-import { COMMENT_MARKER } from '../src/ci/summary.js'
+import { thresholdPercent, COMMENT_MARKER } from '../src/ci/summary.js'
+import { CI_DEFAULTS } from '../src/ci/settings.js'
 import { SUMMARY_SCHEMA } from '../src/ci/compare.js'
 import { main } from '../src/cli.js'
 import { tempDir } from './helpers.js'
@@ -356,4 +357,12 @@ test('the CLI: ci comment is off with [skip shapewall] or ci.enabled false, and 
     for (const key of Object.keys(env)) if (saved[key] === undefined) delete process.env[key]
     Object.assign(process.env, saved)
   }
+})
+
+test('the default threshold reports a small real change, and reads in full in the comment', () => {
+  // A changed price on a 1440 by 2200 shot is about 60 pixels, 0.002% of it.
+  assert.ok(60 / (1440 * 2200) >= CI_DEFAULTS.threshold)
+  assert.equal(thresholdPercent(CI_DEFAULTS.threshold), '0.001%')
+  assert.equal(thresholdPercent(0.001), '0.10%')
+  assert.equal(thresholdPercent(0), '0.00%')
 })
