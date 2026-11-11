@@ -33,6 +33,7 @@ export const USER_GUIDES = [
   'docs/performance.md',
   'docs/starter-agent.md',
   'docs/updates.md',
+  'docs/where-to-run.md',
 ]
 
 export const USER_GUIDE_IMAGES = [
