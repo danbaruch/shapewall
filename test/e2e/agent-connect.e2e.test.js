@@ -34,7 +34,13 @@ const apps = []
 function binWith(kind) {
   const dir = path.join(bins, kind)
   fs.mkdirSync(dir, { recursive: true })
-  const body = kind === 'stub' ? `#!/bin/sh\nexec "${process.execPath}" "${STUB}" "$@"\n` : '#!/bin/sh\nexit 3\n'
+  // 'slow': the handshake takes 12 s, as a real agent's takes seconds (the stub's is instant).
+  const body =
+    kind === 'stub'
+      ? `#!/bin/sh\nexec "${process.execPath}" "${STUB}" "$@"\n`
+      : kind === 'slow'
+        ? `#!/bin/sh\nexec "${process.execPath}" "${STUB}" --slow-init=12000 "$@"\n`
+        : '#!/bin/sh\nexit 3\n'
   fs.writeFileSync(path.join(dir, 'claude-agent-acp'), body, { mode: 0o755 })
   // Node and git live in different folders on CI. Keep agent discovery
   // hermetic while making the real git available for the profile-name check.
@@ -322,9 +328,9 @@ for (const width of [1440, 390])
 
 // A board whose chats start empty: the tests above leave a chat on an agent
 // that this board has not connected.
-async function freshBoard() {
+async function freshBoard(kind = 'stub') {
   for (const item of setup.config.boards) fs.rmSync(path.join(setup.config.outputDir, item.id, 'chat'), { recursive: true, force: true })
-  return board('stub')
+  return board(kind)
 }
 
 // The name and icon of an agent (src/agent/identity.js), end to end: named
@@ -556,6 +562,127 @@ test('phone 390: the Connect name field and the icon picker are touch sized and 
     await page.tap('[data-sw-settings-confirm]')
     await page.locator('[data-sw-chat-connected-note]:has-text("Connected to Pocket.")').waitFor()
     assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})
+
+// A real agent's handshake takes seconds, and the page lists the agent
+// meanwhile. What a person does in that window must work, wait visibly or be
+// off with a reason: never "A connection test is running" as an error.
+// A screenshot that does not wait for animations to end (a spinner never does).
+const liveShot = async (tab, name) => {
+  if (SHOTS) await tab.screenshot({ path: path.join(SHOTS, name + '.png'), animations: 'disabled' })
+}
+const TEST_RUNNING_RE = /connection test is (already )?running/i
+// Connect from the Agent panel under `name`, and reload while its test runs.
+async function connectAndReload(page, name) {
+  await page.click('[data-sw-chat-toggle]')
+  await page.click('[data-sw-chat-connect-agent="claude"]')
+  await page.locator('[data-sw-connect-identity] [data-sw-agent-name-input]').fill(name)
+  await page.click('[data-sw-settings-confirm]')
+  await page.reload()
+  await page.waitForSelector('[data-sw-node="home"]')
+}
+
+test('desktop 1440: rename while the Connect is still testing: Save waits for the test, nothing is refused', { skip: !POSIX }, async () => {
+  const url = await freshBoard('slow')
+  const { context, page } = await openBoard(withToken(url), { viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' })
+  try {
+    await connectAndReload(page, 'Harry')
+    // The chat header says it is not finished yet.
+    // (The panel may still be open from before the reload.)
+    const chip = page.locator('[data-sw-chat-label="Harry"]').first()
+    if (!(await page.locator('[data-sw-chat="board"]').count())) await page.click('[data-sw-chat-toggle]')
+    await chip.waitFor()
+    assert.match(await chip.getAttribute('aria-label'), /Testing the connection/)
+
+    // The Agents page: the row says so, and what cannot run now is off with the reason.
+    const settings = await context.newPage()
+    await settings.goto(`${url}console#settings-token=${TOKEN}`)
+    await settings.locator('[data-sw-nav="agents"]').first().click()
+    const row = settings.locator('[data-sw-agent-row="claude"]')
+    await row.waitFor()
+    assert.match(await row.textContent(), /Connecting\. Testing the connection/)
+    assert.match(await settings.locator('[data-sw-agents-testing="claude"]').textContent(), /Testing the connection to Harry/)
+    for (const control of ['[data-sw-agent-test="claude"]', '[data-sw-agent-remove="claude"]']) {
+      assert.equal(await row.locator(control).isDisabled(), true, control)
+      assert.match(
+        await row.locator(control).getAttribute('title'),
+        /Testing the connection to Harry\. This is available when the test finishes\./,
+      )
+    }
+    assert.equal(await settings.locator('[data-sw-agents-default-option="claude"] input').isDisabled(), true)
+    await liveShot(settings, 'identity-testing-agents-page')
+
+    // Edit is on. The name and an icon, saved while the test runs.
+    const edit = row.locator('[data-sw-agent-edit="claude"]')
+    assert.equal(await edit.isDisabled(), false)
+    await edit.click()
+    const dialog = settings.locator('[role="dialog"]')
+    await dialog.locator('[data-sw-agent-identity-waiting]').waitFor()
+    await dialog.locator('[data-sw-agent-name-input]').fill('Fixer')
+    await dialog.locator('[data-sw-agent-icon-option="owl"]').click()
+    await dialog.locator('[data-sw-agent-identity-save]').click()
+    await settings.waitForFunction(
+      () => document.querySelector('[data-sw-agent-identity-save]')?.textContent.trim() === 'Saving when the connection test finishes...',
+    )
+    await liveShot(settings, 'identity-testing-save-waits')
+    assert.equal(await dialog.locator('[data-sw-agent-identity-error]').count(), 0)
+    // The test ends: saved, the dialog closes, the row is connected under the new name.
+    await dialog.waitFor({ state: 'detached', timeout: 20000 })
+    await settings.waitForFunction(() => /Fixer/.test(document.querySelector('[data-sw-agent-row="claude"]')?.textContent || ''))
+    await settings.waitForFunction(() =>
+      /Connected\. Ready/.test(document.querySelector('[data-sw-agent-row="claude"]')?.textContent || ''),
+    )
+    assert.equal(await settings.locator('[data-sw-agents-testing]').count(), 0)
+    assert.equal(await row.locator('[data-sw-agent-test="claude"]').isDisabled(), false)
+    assert.equal(await row.locator('[data-sw-agent-avatar]').getAttribute('data-sw-agent-avatar'), 'owl')
+    assert.deepEqual(Object.values(JSON.parse(fs.readFileSync(settingsFile(), 'utf8')).projects)[0].profiles, [
+      { id: 'claude', label: 'Fixer', acpCommand: 'claude-agent-acp', icon: 'owl' },
+    ])
+    for (const tab of [page, settings]) assert.doesNotMatch(await tab.locator('body').innerText(), TEST_RUNNING_RE)
+    // The board followed: the new name, and ready.
+    await page.bringToFront()
+    await page.waitForFunction(() =>
+      /^Agent: Fixer, Ready/.test(document.querySelector('[data-sw-chat-label="Fixer"]')?.getAttribute('aria-label') || ''),
+    )
+  } finally {
+    await context.close()
+  }
+})
+
+test('desktop 1440: Fix pressed while the Connect is still testing waits for the test, in words, then runs', { skip: !POSIX }, async () => {
+  const url = await freshBoard('slow')
+  const comment = await createComment(setup.config, setup.config.boards[0], {
+    pageId: 'home',
+    viewport: 'desktop',
+    x: 40,
+    y: 14,
+    body: 'Pressed Fix straight after Connect',
+    author: 'Robin Tester',
+  })
+  const { context, page } = await openBoard(withToken(url), { viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' })
+  try {
+    await connectAndReload(page, 'Harry')
+    const item = page.locator(`[data-sw-comment="${comment.id}"]`).first()
+    if (!(await item.count())) await page.click('[data-sw-panel-toggle]')
+    await item.click()
+    const fix = page.locator(`[data-sw-fix-agent="${comment.id}"]`)
+    await fix.waitFor()
+    assert.match(await fix.textContent(), /Fix with Harry/)
+    await fix.click()
+    // The chat opens and says what it is waiting for.
+    await page.locator('[data-sw-chat-status]:has-text("Waiting for the connection test to finish")').waitFor()
+    // No agent switch while the test runs, with the reason.
+    const chip = page.locator('[data-sw-chat-label="Harry"]').first()
+    assert.match(await chip.getAttribute('aria-label'), /Testing the connection|Answering/)
+    await liveShot(page, 'identity-testing-fix-waits')
+    assert.doesNotMatch(await page.locator('body').innerText(), TEST_RUNNING_RE)
+    // The test ends and the fix runs: the agent answers.
+    await page.waitForSelector('[data-sw-chat-message="assistant"][data-status="done"]', { timeout: 30000 })
+    assert.doesNotMatch(await page.locator('body').innerText(), TEST_RUNNING_RE)
+    assert.equal(await page.locator('[data-sw-chat-message="assistant"][data-status="error"]').count(), 0)
   } finally {
     await context.close()
   }

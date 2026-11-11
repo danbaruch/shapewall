@@ -4,6 +4,7 @@
 
 import { browserCommentsRequest } from './browserComments.js'
 import { DEMO, demoBoardFolders, demoFiles } from './demo.js'
+import { TEST_WAIT_MS } from '../../../src/agent/test-timing.js'
 
 const hasMeta = (name) => typeof document !== 'undefined' && Boolean(document.querySelector(`meta[name="${name}"]`))
 // The public demo is a static export too, but its in-browser backend
@@ -128,7 +129,27 @@ async function fetchJson(target) {
   return response.json()
 }
 
+// A change sent while a connection test runs (right after Connect, with a
+// real agent that takes seconds to start) is refused with 409 test_running.
+// That is a "not yet", not a failure: the change waits here for the test,
+// a little longer than a test can last (src/agent/test-timing.js), so no
+// screen has to show "A connection test is running" as an error. The control
+// that sent it shows its own busy state meanwhile. Chat messages wait the
+// same way and say so in the answer (chat/stream.js).
+const TEST_RETRY_MS = 1000
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 async function request(method, url, body) {
+  for (let waited = 0; ; waited += TEST_RETRY_MS) {
+    try {
+      return await requestOnce(method, url, body)
+    } catch (error) {
+      if (method === 'GET' || error?.status !== 409 || error.code !== 'test_running' || waited >= TEST_WAIT_MS) throw error
+      await wait(TEST_RETRY_MS)
+    }
+  }
+}
+
+async function requestOnce(method, url, body) {
   if (BROWSER_COMMENTS) {
     const answer = await browserCommentsRequest(method, url, body, fetchJson)
     if (answer !== undefined) return answer

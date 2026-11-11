@@ -161,7 +161,8 @@ export function QuickConnect({ agent, touch, onOpenSettings, onConnected }) {
                     variant="default"
                     size={size}
                     onClick={() => connect(item)}
-                    disabled={Boolean(busy) || overridden}
+                    disabled={Boolean(busy) || overridden || Boolean(view.testing)}
+                    title={view.testing ? 'A connection test is running. Connect is available when it finishes.' : undefined}
                     data-sw-chat-connect-agent={item.id}
                   >
                     {busy === item.id ? <Spinner /> : <Plug size={13} aria-hidden="true" />}{' '}

@@ -246,7 +246,19 @@ export function agentRouter({
   }
   // How each agent is doing (agent-health.js): from the last turn or test.
   const health = createAgentHealth()
-  const agentStatus = (current) => health.status(current, processPool)
+  // While an agent's connection test runs (settings-routes.js) its state is
+  // "testing": the chat header says so instead of "Ready".
+  const testedNow = (current) => {
+    const test = connectionTest()
+    if (!test) return false
+    if (current.profileId) return test.id === current.profileId
+    const runs = current.defaultProfile || profileForDefault(userAgentEntry(config.dir, env).entry)?.id || 'default'
+    return test.id === 'default' || test.id === runs
+  }
+  const agentStatus = (current) => {
+    const status = health.status(current, processPool)
+    return testedNow(current) ? { ...status, state: 'testing' } : status
+  }
   router.health = health
   const profiles = () => {
     const saved = userAgentEntry(config.dir, env)
@@ -416,6 +428,8 @@ export function agentRouter({
   const runs = new Map()
   const selecting = new Set()
   let connectionTesting = () => false
+  // { id } while a connection test runs, else null (settings-routes.js).
+  let connectionTest = () => null
   // Keep controls privileged for the lifetime of an owner thread/session,
   // including an idle ACP process. A tokenless turn cannot reset its memory.
   const ownerThreads = new Set()
@@ -1321,6 +1335,7 @@ export function agentRouter({
     },
   })
   connectionTesting = settingsApi.isTesting
+  connectionTest = settingsApi.testing
   router.use('/settings', settingsApi)
   router.get(
     '/boards/:id/threads',

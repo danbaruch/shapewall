@@ -27,10 +27,11 @@ const threadUrl = (boardId, threadId, tail) =>
 // viewer may use it (nothing is asked for, so no agent starts, otherwise).
 // `fresh`: the chat has no message yet. `live`: the running session's
 // options from the thread, which win once there are any.
-export function useAgentOptions({ boardId, threadId, profileId, agentLabel, enabled, fresh, live, onLive, onNotice }) {
+// `profileId`: the agent this chat runs, by its own id (not its name, which its owner may change).
+export function useAgentOptions({ boardId, threadId, profileId, enabled, fresh, live, onLive, onNotice }) {
   const [prefs, setPrefs] = useState(loadOptionPrefs)
   const chat = chatOptionKey(boardId, threadId)
-  const agent = agentOptionKey(profileId, agentLabel)
+  const agent = agentOptionKey(profileId)
   const choices = useMemo(() => choicesFor(prefs, { chat, agent, fresh }), [prefs, chat, agent, fresh])
   const choicesRef = useRef(choices)
   choicesRef.current = choices
