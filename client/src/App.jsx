@@ -8,6 +8,7 @@ import Board from './board/Board'
 import { setFixtureClock } from './lib/utils'
 import { DEMO, useDemo } from './lib/demo'
 import { setAgentEventsOwner, useAgentsChanged } from './lib/agentEvents'
+import { rememberAgents } from './lib/agentIdentity'
 import { PairingScreen, DevicesPanel } from './pairing/Pairing'
 import { DemoResetDialog, DemoShareProblem } from './components/demo-banner'
 const BuzzDialog = lazy(() => import('./buzz/BuzzDialog'))
@@ -29,6 +30,13 @@ export default function App() {
   // The chat header and agent picker read the agent from info: follow
   // changes made in another tab, the Agents page or the agents file.
   useAgentsChanged(info.refetch, Boolean(info.data?.agent))
+  // Every connected agent's name and icon, for the places that only have a
+  // name to go on (an agent's reply on a comment thread, lib/agentIdentity.js).
+  const agents = useResource(admitted && info.data?.agent?.configured ? '/api/agent/status' : null)
+  useAgentsChanged(agents.refetch, Boolean(info.data?.agent?.configured))
+  const knownAgents = info.data?.agent?.configured ? [info.data.agent, agents.data, ...(agents.data?.profiles || [])] : []
+  const knownKey = JSON.stringify(knownAgents.map((agent) => [agent?.label, agent?.icon, agent?.tint, agent?.logo]))
+  useEffect(() => rememberAgents(knownAgents), [knownKey]) // eslint-disable-line react-hooks/exhaustive-deps
   // The owner-only events stream opens once the server says this page is the owner's.
   const eventsOwner = info.data?.agent?.ownerWrites === true
   useEffect(() => setAgentEventsOwner(eventsOwner), [eventsOwner])

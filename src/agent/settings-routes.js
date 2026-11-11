@@ -12,6 +12,11 @@
 //   POST /api/agent/settings/profiles/:id/default  make a connected agent (or "endpoint": the saved
 //                                   OpenAI-compatible endpoint) the one new chats and fixes use
 //   DELETE /api/agent/settings/profiles/:id  remove a connected agent
+//   POST /api/agent/settings/identity        { id, name?, icon?, tint? } what an agent is called and how
+//                                   it looks (identity.js). `id`: a connected agent, "endpoint", or
+//                                   "default" (the agent a flag or the environment fixes). Display only:
+//                                   no confirmation, no restart, no test, also while it answers
+//   POST /api/agent/settings/identity/icon   { id, png } an uploaded icon (icon-store.js)
 //
 // These are the server owner's settings: which agent runs on their machine
 // and where their API key goes. Looking local is not enough (a proxy or TCP
@@ -50,6 +55,9 @@ import { legacyProfile, profileForDefault, projectKey, saveUserAgentEntry, userA
 import { DEFAULT_BRANCH_PREFIX, branchModeSettings, cleanBranchPrefix, repoFilters } from './branch-mode.js'
 import { batchFixSettings, cleanBatchFixes } from './batch-fixes.js'
 import { tokenEquals } from '../tokens.js'
+import { cleanAgentName, identityOf, isAgentIcon, isAgentTint, isBuiltInIcon } from './identity.js'
+import { IconError, pruneIcons, saveIcon } from './icon-store.js'
+import { logoForAgent } from './agent-logos.js'
 
 const TEST_TIMEOUT_MS = 15000
 const ACP_TEST_TIMEOUT_MS = 30000
@@ -378,6 +386,109 @@ export function settingsRoutes({
     next()
   }
 
+  // ---- What an agent is called and how it looks (identity.js) ----------------
+  //
+  // Registered before the admission step below on purpose: a name, an icon
+  // and a tint change nothing an agent runs with, so saving them never waits
+  // for a turn to end, never stops an agent process and never runs a test.
+  // A flag or environment command does not block them either: it fixes the
+  // command, not what the board calls it.
+
+  // The saved place `id` names: { entry, target, known } with `target` the
+  // object inside `entry` that holds its label, icon and tint, and `known`
+  // the built-in name an empty name falls back to (null: the name is needed).
+  const identityTarget = (id, current) => {
+    const entry = { ...current, profiles: (current.profiles || []).map((item) => ({ ...item })) }
+    const source = settings().sources?.acpCommand
+    const fixed = source === 'flag' || source === 'env'
+    const legacy = legacyProfile(current, KNOWN_AGENTS)
+    const builtIn = (profileId) => KNOWN_AGENTS.find((item) => item.id === profileId)?.label || null
+    if (id === 'default') {
+      if (fixed) {
+        entry.fixedAgent = { ...(current.fixedAgent || {}) }
+        return { entry, target: entry.fixedAgent, known: true }
+      }
+      const running = profileForDefault(current) || legacy
+      if (running) return identityTarget(running.id, current)
+      return endpointOf(current) ? identityTarget('endpoint', current) : null
+    }
+    if (id === 'endpoint') return endpointOf(current) ? { entry, target: entry, known: true } : null
+    // A default command saved before profiles becomes a profile, as on Connect.
+    if (legacy?.id === id) entry.profiles = [{ ...legacy }, ...entry.profiles]
+    const profile = entry.profiles.find((item) => item.id === id)
+    return profile ? { entry, target: profile, known: builtIn(id) } : null
+  }
+
+  // Applies { name, icon, tint } (only the keys given) to the target and
+  // saves. Returns true when saved; otherwise it answered.
+  const saveIdentity = (req, res, id, change) => {
+    if (typeof id !== 'string' || !id) return fail(res, 400, 'invalid_identity', 'id: a connected agent, "endpoint" or "default".')
+    // A Connect is testing what it saved and may put the old settings back.
+    if (testing) return fail(res, 409, 'test_running', 'A connection test is running. Wait for it, then save.')
+    const saved = userAgentEntry(config.dir, env)
+    if (saved.problem) return fail(res, 409, 'settings_file_invalid', saved.problem)
+    const found = identityTarget(id, saved.entry || {})
+    if (!found) return fail(res, 404, 'unknown_profile', 'That agent is not connected.')
+    const { entry, target } = found
+    if (Object.hasOwn(change, 'name')) {
+      const { name, problem } = cleanAgentName(change.name)
+      if (problem) return fail(res, 400, 'invalid_name', problem)
+      if (name) target.label = name
+      else if (found.known === true) delete target.label
+      else if (found.known) target.label = found.known
+      else return fail(res, 400, 'invalid_name', 'name: 1 to 40 characters')
+    }
+    if (Object.hasOwn(change, 'icon')) {
+      if (change.icon === null || change.icon === '') delete target.icon
+      else if (isAgentIcon(change.icon)) target.icon = change.icon
+      else return fail(res, 400, 'invalid_icon', 'icon: one of the built-in icons, or null for none.')
+    }
+    if (Object.hasOwn(change, 'tint')) {
+      if (change.tint === null || change.tint === '') delete target.tint
+      else if (isAgentTint(change.tint)) target.tint = change.tint
+      else return fail(res, 400, 'invalid_tint', 'tint: one of the accent colours, or null for none.')
+    }
+    if (entry.fixedAgent && !Object.keys(entry.fixedAgent).length) delete entry.fixedAgent
+    if (!entry.profiles.length) delete entry.profiles
+    delete entry.updatedAt
+    try {
+      // No reload(): the agents keep running; the name is read fresh wherever it is shown.
+      saveUserAgentEntry(config.dir, entry, env)
+      pruneIcons(env)
+    } catch (error) {
+      return fail(res, 500, 'settings_not_saved', `The settings were not saved: ${error.message}`)
+    }
+    return true
+  }
+
+  router.post('/identity', guard, (req, res) => {
+    const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {}
+    const change = Object.fromEntries(['name', 'icon', 'tint'].filter((key) => Object.hasOwn(body, key)).map((key) => [key, body[key]]))
+    // An uploaded icon is set by the upload itself, never named from outside.
+    if (typeof change.icon === 'string' && !isBuiltInIcon(change.icon))
+      return fail(res, 400, 'invalid_icon', 'icon: one of the built-in icons, or null for none.')
+    if (saveIdentity(req, res, body.id, change) === true) res.json(view())
+  })
+
+  router.post('/identity/icon', guard, (req, res) => {
+    const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {}
+    // Is the agent there? Before anything is stored.
+    const saved = userAgentEntry(config.dir, env)
+    if (saved.problem) return fail(res, 409, 'settings_file_invalid', saved.problem)
+    if (typeof body.id !== 'string' || !identityTarget(body.id, saved.entry || {}))
+      return fail(res, 404, 'unknown_profile', 'That agent is not connected.')
+    let hash
+    try {
+      hash = saveIcon(body.png, env)
+    } catch (error) {
+      if (error instanceof IconError) return fail(res, error.status, error.code, error.message)
+      return fail(res, 500, 'settings_not_saved', `The icon was not saved: ${error.message}`)
+    }
+    if (saveIdentity(req, res, body.id, { icon: `upload:${hash}` }) === true) res.json(view())
+    // Not saved after all: the file just written is not left behind.
+    else pruneIcons(env)
+  })
+
   router.use(async (req, res, next) => {
     if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next()
     // Authorize before taking admission so an outsider cannot block turns.
@@ -442,6 +553,8 @@ export function settingsRoutes({
       ...profile,
       command: acpCommand,
       default: (entry?.backend === 'acp' && entry.acpCommand === acpCommand) || profile.id === fallback,
+      // Its default icon: a known agent's product mark (agent-logos.js), or null.
+      logo: settings(profile.legacy ? null : profile.id).logo || null,
       // A legacy command runs as the default connection.
       ...statusOf(profile.legacy ? null : profile.id),
     }))
@@ -455,6 +568,7 @@ export function settingsRoutes({
     const isDefault = backend === 'openai-compatible' && !settings().defaultProfile
     return {
       label: entry.label || repo().label || model,
+      ...identityOf(entry),
       model,
       host: hostOf(baseUrl),
       default: isDefault,
@@ -482,6 +596,10 @@ export function settingsRoutes({
         configured: current.configured,
         problem: current.problem,
         label: current.label,
+        icon: current.icon || null,
+        tint: current.tint || null,
+        logo: current.logo || null,
+        builtInLabel: current.builtInLabel || null,
         baseUrl: current.baseUrl,
         model: current.model,
         host: current.host,
@@ -504,7 +622,9 @@ export function settingsRoutes({
       // one-click Connect in an unconnected chat panel.
       detected: detectAgents(env),
       // Every agent Shapewall knows how to run, found or not (the console's Agents page).
-      known: KNOWN_AGENTS.map(({ id, label, adapter, cli, install }) => ({ id, label, adapter, cli, install })),
+      known: KNOWN_AGENTS.map(({ id, label, adapter, cli, install }) => ({ id, label, adapter, cli, install, logo: logoForAgent(id) })),
+      // Icons can be uploaded here (the demo has only the built-in ones).
+      iconUpload: true,
       knownKeyHosts: [...KNOWN_KEY_HOSTS],
       defaultKeyVar: DEFAULT_KEY_VAR,
       keyVarsSet: keyVarsSet(env),
@@ -571,16 +691,27 @@ export function settingsRoutes({
       return fail(res, 400, 'invalid_settings', 'The settings must be an object.')
     // Old clients save only the default connection. Keep their saved profiles.
     const preserved = input && !Object.hasOwn(input, 'profiles') ? userAgentEntry(config.dir, env).entry?.profiles : undefined
-    // Branch mode and batch fixes have their own routes (/branch-mode,
-    // /batch-fixes): a save of the connection keeps them.
+    // Branch mode, batch fixes and the icons have their own routes
+    // (/branch-mode, /batch-fixes, /identity): a save of the connection keeps them.
     const savedEntry = userAgentEntry(config.dir, env).entry || {}
     const branch = Object.fromEntries(
-      ['branchMode', 'branchPrefix', 'batchFixes']
+      ['branchMode', 'branchPrefix', 'batchFixes', 'icon', 'tint', 'fixedAgent']
         .filter((key) => !Object.hasOwn(input, key) && savedEntry[key] !== undefined)
         .map((key) => [key, savedEntry[key]]),
     )
     const { entry, problems } = validateUserEntry({ ...input, ...(preserved ? { profiles: preserved } : {}), ...branch })
     if (!entry) return fail(res, 400, 'invalid_settings', problems.join('; '))
+    // The form's name field names the agent it saves. When that is a
+    // connected agent (the default command is one of the profiles), the name
+    // belongs to that agent, the same one the Agents page's Edit changes.
+    const named = Object.hasOwn(input, 'label') ? profileForDefault(entry) : null
+    if (named) {
+      const { name, problem } = cleanAgentName(input.label)
+      if (problem) return fail(res, 400, 'invalid_settings', problem.replace(/^name/, 'label'))
+      const builtIn = KNOWN_AGENTS.find((item) => item.id === named.id)?.label
+      entry.profiles = entry.profiles.map((item) => (item.id === named.id ? { ...item, label: name || builtIn || item.label } : item))
+      delete entry.label
+    }
     // A Connect is testing what it saved and may put the old settings back:
     // a save now would be lost.
     if (testing) return fail(res, 409, 'test_running', 'A connection test is running. Wait for it, then save.')
@@ -612,6 +743,21 @@ export function settingsRoutes({
         `The agent command comes from ${source === 'flag' ? '--agent-acp' : 'SHAPEWALL_AGENT_ACP'}, which wins over the board. Change it there, or restart shapewall serve without it.`,
       )
     }
+    // What the owner calls it, from the confirmation's Name field (empty:
+    // its built-in name), and optionally a built-in icon and a tint. An
+    // uploaded icon comes after the agent is connected (POST /identity/icon).
+    const { name, problem } = cleanAgentName(req.body?.name)
+    if (problem) return fail(res, 400, 'invalid_name', problem)
+    const look = {}
+    if (req.body?.icon) {
+      if (!isBuiltInIcon(req.body.icon)) return fail(res, 400, 'invalid_icon', 'icon: one of the built-in icons.')
+      look.icon = req.body.icon
+    }
+    if (req.body?.tint) {
+      if (!isAgentTint(req.body.tint)) return fail(res, 400, 'invalid_tint', 'tint: one of the accent colours.')
+      look.tint = req.body.tint
+    }
+    const called = (profileConnect && name) || agent.label
     const before = userAgentEntry(config.dir, env)
     // The label and the image toggle belong to the agent connected before.
     const entry = { ...(before.entry || {}) }
@@ -622,7 +768,7 @@ export function settingsRoutes({
       entry.profiles = [
         ...(legacy && legacy.id !== agent.id ? [legacy] : []),
         ...(entry.profiles || []).filter((item) => item.id !== agent.id),
-        { id: agent.id, label: agent.label, acpCommand: agent.command },
+        { id: agent.id, label: called, acpCommand: agent.command, ...look },
       ]
     }
     if (!profileConnect || !settings().configured) {
@@ -646,7 +792,7 @@ export function settingsRoutes({
       const result = await testConnection(tested, { env, fetchImpl, root: config.dir, processPool })
       health?.record(tested, result)
       if (!result.ok) restore()
-      res.json({ connected: result.ok, result: { ...result, label: agent.label }, ...view() })
+      res.json({ connected: result.ok, result: { ...result, label: called }, ...view() })
     } catch (error) {
       try {
         restore()

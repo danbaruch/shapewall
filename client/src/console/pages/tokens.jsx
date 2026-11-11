@@ -2,10 +2,11 @@
 // such a token is inactive), when it was last used. Tokens are shown once, when made.
 
 import { useMemo, useState } from 'react'
-import { AlertTriangle, KeyRound, Plus, Terminal } from 'lucide-react'
+import { AlertTriangle, KeyRound, Pencil, Plus, Terminal } from 'lucide-react'
 import {
   Badge,
   Button,
+  Dialog,
   EmptyState,
   Input,
   Select,
@@ -141,6 +142,17 @@ export function TokenList({ tokens, onChanged, showProject = false }) {
   const toast = useToast()
   const [revoking, setRevoking] = useState(null)
   const revoke = useAction()
+  // { token, name }: the token being renamed and what is typed.
+  const [renaming, setRenaming] = useState(null)
+  const rename = useAction()
+  const renamed = renaming?.name.trim() || ''
+  const saveName = () =>
+    rename.run(async () => {
+      await api.patch(wsUrl(workspaceId, `/projects/${renaming.token.projectId}/tokens/${renaming.token.id}`), { name: renamed })
+      setRenaming(null)
+      toast('Token renamed')
+      await onChanged()
+    })
   return (
     <>
       <ul className="divide-y divide-line" data-sw-token-list>
@@ -194,7 +206,20 @@ export function TokenList({ tokens, onChanged, showProject = false }) {
                 )}
               </p>
             </div>
-            <div className="md:text-right">
+            <div className="flex flex-wrap gap-1.5 md:justify-end">
+              {token.status === 'active' || token.status === 'inactive' ? (
+                <Button
+                  size="touch"
+                  onClick={() => {
+                    rename.setError(null)
+                    setRenaming({ token, name: token.name })
+                  }}
+                  className="lg:h-8"
+                  data-sw-rename-token={token.name}
+                >
+                  <Pencil size={13} aria-hidden="true" /> Rename
+                </Button>
+              ) : null}
               {token.status === 'active' || token.status === 'inactive' ? (
                 <Button
                   size="touch"
@@ -229,6 +254,59 @@ export function TokenList({ tokens, onChanged, showProject = false }) {
       >
         <p>Anything using it (CI, an agent, a teammate's machine) stops working at once. This cannot be undone.</p>
       </ConfirmDialog>
+      <Dialog
+        open={Boolean(renaming)}
+        onClose={() => (rename.busy ? null : setRenaming(null))}
+        title="Rename token"
+        description="An agent that uses this token signs its replies with this name."
+        wrapDescription
+        footer={
+          <>
+            <Button size="touch" className="lg:h-9" onClick={() => setRenaming(null)} disabled={rename.busy}>
+              Cancel
+            </Button>
+            <Button
+              size="touch"
+              variant="default"
+              className="lg:h-9"
+              onClick={saveName}
+              disabled={rename.busy || !renamed || renamed === renaming?.token.name}
+              data-sw-rename-token-save
+            >
+              {rename.busy ? 'Saving...' : 'Save'}
+            </Button>
+          </>
+        }
+      >
+        <form
+          className="space-y-2 p-5"
+          onSubmit={(event) => {
+            event.preventDefault()
+            if (renamed && renamed !== renaming?.token.name && !rename.busy) saveName()
+          }}
+        >
+          <label htmlFor="sw-rename-token" className="block text-xs font-medium text-fg">
+            Name
+          </label>
+          <Input
+            id="sw-rename-token"
+            size="touch"
+            className="lg:h-9"
+            value={renaming?.name || ''}
+            maxLength={60}
+            onChange={(event) => setRenaming((current) => (current ? { ...current, name: event.target.value } : current))}
+            data-sw-rename-token-input
+          />
+          <p className="text-xs text-muted">
+            What it already wrote keeps the old name. The token itself, its scopes and its expiry do not change.
+          </p>
+          {rename.error ? (
+            <p className="text-sm text-bad" role="alert">
+              {rename.error}
+            </p>
+          ) : null}
+        </form>
+      </Dialog>
     </>
   )
 }

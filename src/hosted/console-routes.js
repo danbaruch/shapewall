@@ -9,7 +9,7 @@ import { agentPolicy, cleanPolicy } from './agent-policy.js'
 import { newId, randomToken, sha256 } from './crypto.js'
 import { transaction } from './db.js'
 import { mountDeviceApprovals } from './device-routes.js'
-import { HttpError, fail, cleanInviteNote, cleanWorkspaceName } from './http.js'
+import { HttpError, fail, cleanInviteNote, cleanName, cleanWorkspaceName } from './http.js'
 import { cleanEmail } from './mail.js'
 import {
   NEEDS,
@@ -401,6 +401,35 @@ export function mountConsoleRoutes(consoleApi, deps) {
   )
 
   mountDeviceApprovals(consoleApi, deps)
+  // Renames a token: { name }. A watcher's comments and replies are signed
+  // with its token's name, so this is what an agent is called on the board
+  // from now on (what it already wrote keeps the name it was written with).
+  // The same people who may revoke it; the secret and scopes do not change.
+  consoleApi.patch(
+    '/workspaces/:ws/projects/:pid/tokens/:tid',
+    inWorkspace(NEEDS.tokens),
+    inProject,
+    handle(async (req, res) => {
+      // A name too long is refused, not cut: it is what people will see.
+      const name = cleanName(req.body?.name, 61)
+      if (!name || name.length > 60) throw new HttpError(400, 'invalid_name', 'Token name: 1 to 60 characters.')
+      const id = String(req.params.tid)
+      const token = req.t.get(
+        'SELECT name FROM api_tokens WHERE workspace_id = :ws AND project_id = :project AND id = :id AND revoked_at IS NULL',
+        { project: req.project.id, id },
+      )
+      if (!token) throw new HttpError(404, 'unknown_token', 'No such token.')
+      if (token.name !== name) {
+        req.t.run('UPDATE api_tokens SET name = :name WHERE workspace_id = :ws AND project_id = :project AND id = :id', {
+          name,
+          project: req.project.id,
+          id,
+        })
+        auditOf(req, 'token_renamed', id, { from: token.name, to: name })
+      }
+      res.json({ token: listTokens(req.t, { projectId: req.project.id, now: iso() }).find((item) => item.id === id) })
+    }),
+  )
   consoleApi.delete(
     '/workspaces/:ws/projects/:pid/tokens/:tid',
     inWorkspace(NEEDS.tokens),

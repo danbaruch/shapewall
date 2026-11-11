@@ -19,6 +19,7 @@ import { FileChips, MentionChips } from './composerParts'
 import CodeBlock from './CodeBlock'
 import { isOptionNote, turnOptionsLine } from './composerModel.js'
 import { isSetupError } from './profiles'
+import { AgentFace, faceOf } from './agentIcons'
 import { hideNextSteps } from '../../../src/agent/next-steps.js'
 import { splitAtCards } from '../../../src/agent/reply-text.js'
 
@@ -301,6 +302,8 @@ export const AssistantMessage = memo(function AssistantMessage({
   tryOther = null,
   onTryOther = null,
   onCheckAgain = null,
+  // The agent's icon ({ label, icon, tint, logo }), when it has one: else the robot.
+  face = null,
 }) {
   // Regenerate keeps earlier versions (oldest first); null shows the current one.
   const versions = message.versions || []
@@ -330,9 +333,13 @@ export const AssistantMessage = memo(function AssistantMessage({
       data-status={pending ? 'streaming' : message.status}
       data-sw-chat-version={versions.length ? shownIndex + 1 : undefined}
     >
-      <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-surface-2 text-muted">
-        <Bot size={14} aria-hidden="true" />
-      </span>
+      {face ? (
+        <AgentFace {...face} round className="mt-0.5 h-6 w-6" />
+      ) : (
+        <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-surface-2 text-muted">
+          <Bot size={14} aria-hidden="true" />
+        </span>
+      )}
       <div className="min-w-0 flex-1 space-y-1.5">
         {pending ? (
           <LiveActivity
@@ -551,6 +558,11 @@ export function MessageList({
   onCheckAgain = null,
 }) {
   const announcement = useReplyAnnouncement(shown, liveRun)
+  // The answering agent's icon beside its answers (one object while it stays
+  // the same, so memo keeps the messages).
+  const { icon, tint, logo } = faceOf(agent)
+  const faceLabel = agent?.label || 'Agent'
+  const face = useMemo(() => (icon || logo || tint ? { label: faceLabel, icon, tint, logo } : null), [faceLabel, icon, tint, logo])
   // The same functions for every message on every render (they call the
   // latest ones), so memo keeps the messages that did not change.
   const latest = useRef(null)
@@ -679,6 +691,7 @@ export function MessageList({
                 onRate={onRate ? call.onRate : null}
                 onRegenerate={onRegenerate && canRegenerate(shown, index, liveRun) ? call.onRegenerate : null}
                 regenerateDisabled={regenerateDisabled}
+                face={face}
               />
             ),
           )}
@@ -694,6 +707,7 @@ export function MessageList({
               readAloud={readAloud}
               touch={touch}
               onAnswer={answerLive}
+              face={face}
             />
           ) : null}
           {remoteRunning && !liveRun ? (

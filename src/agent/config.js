@@ -10,7 +10,10 @@
 // thread or an API response.
 
 import { ACP_COMMAND_VAR, ACP_FLAG, SETTINGS_SOURCE, acpCommand, extraVarNames } from './acp/command.js'
-import { implicitDefault, userAgentEntry } from './user-settings.js'
+import { implicitDefault, profileForDefault, userAgentEntry } from './user-settings.js'
+import { identityOf } from './identity.js'
+import { logoForAgent } from './agent-logos.js'
+import { KNOWN_AGENTS } from './acp/detect.js'
 import { validateBranchConfig } from './branch-mode.js'
 import { validateBatchConfig } from './batch-fixes.js'
 
@@ -186,6 +189,7 @@ export function agentSettings(config, env = process.env, { acp = null, profileId
       {
         ...acpSettings(command, env),
         label: profile.label,
+        ...identityOf(profile),
         profileId,
         settingsFile: saved.file,
         sources: { backend: 'settings', acpCommand: 'settings' },
@@ -213,7 +217,14 @@ export function agentSettings(config, env = process.env, { acp = null, profileId
       backend: backendSource,
       acpCommand: command ? (command.source === SETTINGS_SOURCE ? 'settings' : backendSource) : null,
     }
-    return withProblem({ ...acpSettings(command, env), vision: base.vision !== false, ...extra, sources }, saved.problem)
+    // What the owner called it (identity.js): the connected agent that runs
+    // this command, or, for a command a flag or the environment fixes, the
+    // name and icon saved for that (`fixedAgent`). Display only.
+    // A saved command that is no connected agent's takes the form's name field.
+    const typed = user.label ? { label: user.label } : null
+    const named = !command ? null : command.source === SETTINGS_SOURCE ? profileForDefault(user) || typed : user.fixedAgent || null
+    const identity = named ? { ...(named.label ? { label: named.label } : {}), ...identityOf(named) } : identityOf(null)
+    return withProblem({ ...acpSettings(command, env), ...identity, vision: base.vision !== false, ...extra, sources }, saved.problem)
   }
   const baseUrl = String(env.SHAPEWALL_AGENT_BASE_URL || base.baseUrl || '')
     .trim()
@@ -240,6 +251,8 @@ export function agentSettings(config, env = process.env, { acp = null, profileId
     baseUrl: baseUrl || null,
     model: model || null,
     label: base.label || model || null,
+    // The endpoint's icon and tint (identity.js), saved beside its label.
+    ...identityOf(user),
     keyVar,
     hasKey,
     // A key variable named on purpose (settings or config), not the default:
@@ -287,6 +300,11 @@ function acpSettings(command, env) {
     baseUrl: null,
     model: null,
     label: command?.label || 'ACP agent',
+    // The name the command itself gives it, which an emptied name goes back to.
+    builtInLabel: command?.label || null,
+    // The product mark of a known agent (agent-logos.js), told from the
+    // command as its built-in name is: its default icon. null: initials.
+    logo: logoForAgent(KNOWN_AGENTS.find((agent) => agent.label === command?.label)?.id),
     keyVar: null,
     hasKey: false,
     host: null,
@@ -332,6 +350,13 @@ export function publicAgentInfo(settings) {
     configured: settings.configured,
     backend: settings.backend,
     label: settings.configured ? settings.label : null,
+    // How its owner made it look (identity.js): a built-in icon's id or
+    // "upload:<hash>" (served by GET /api/agent/icons/<hash>), and a tint.
+    icon: settings.configured ? settings.icon || null : null,
+    tint: settings.configured ? settings.tint || null : null,
+    // The default icon while `icon` is null: a known agent's product mark
+    // (agent-logos.js), or null for initials.
+    logo: settings.configured ? settings.logo || null : null,
     model: settings.configured ? settings.model : null,
     host: settings.host,
     // An ACP agent: a process on the server's machine, not an endpoint.

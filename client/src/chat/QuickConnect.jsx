@@ -18,6 +18,8 @@ import { api, forgetSettingsToken } from '../lib/api'
 import { cn } from '../lib/utils'
 import { ConfirmDialog, CopyLine } from '../settings/AgentSettings'
 import { SettingsHint, TOKEN_HINT } from '../settings/SettingsHint'
+import { ConnectIdentity, identityValue, nameProblem, saveIdentity } from '../settings/AgentIdentity'
+import { logoForAgent } from '../../../src/agent/agent-logos.js'
 
 export const DOCS_URL = 'https://shapewall.com/docs/chat'
 const HARDENING_URL = `${DOCS_URL}#restrict-the-agents-own-tools`
@@ -51,6 +53,8 @@ export function QuickConnect({ agent, touch, onOpenSettings, onConnected }) {
   const [busy, setBusy] = useState(null)
   const [failure, setFailure] = useState(null)
   const [confirm, setConfirm] = useState(null)
+  // The name and icon typed in the confirmation (settings/AgentIdentity.jsx).
+  const [naming, setNaming] = useState(identityValue())
 
   const load = useCallback(async () => {
     try {
@@ -70,13 +74,26 @@ export function QuickConnect({ agent, touch, onOpenSettings, onConnected }) {
     setBusy(item.id)
     setFailure(null)
     try {
-      const answer = await api.post('/api/agent/settings/profiles/connect', { agentId: item.id, confirm: confirmed })
+      // With the confirmation come the name and icon typed in it.
+      const identity = confirmed
+        ? {
+            name: naming.name.trim(),
+            ...(naming.icon && !naming.png ? { icon: naming.icon } : {}),
+            ...(naming.tint ? { tint: naming.tint } : {}),
+          }
+        : {}
+      const answer = await api.post('/api/agent/settings/profiles/connect', { agentId: item.id, confirm: confirmed, ...identity })
       if (answer.confirm) {
         // A new command runs as you: the same dialog as Settings > Agent.
+        // The Name field starts with the agent's built-in name.
+        setNaming(identityValue({ label: item.label }))
         setConfirm({ item, items: answer.confirm, hash: answer.confirmHash })
         return
       }
       setConfirm(null)
+      // A picture chosen in the confirmation is saved once the agent is there.
+      if (answer.connected && confirmed && naming.png)
+        await saveIdentity(item.id, {}, { ...naming, name: '', tint: null }).catch(() => null)
       if (!answer.connected) {
         setFailure({ id: item.id, result: answer.result })
         setView(answer)
@@ -211,7 +228,18 @@ export function QuickConnect({ agent, touch, onOpenSettings, onConnected }) {
         confirmLabel="Allow and connect"
         onCancel={() => setConfirm(null)}
         onConfirm={() => connect(confirm.item, confirm.hash)}
-      />
+        blocked={Boolean(nameProblem(naming.name))}
+      >
+        <ConnectIdentity
+          value={naming}
+          onChange={setNaming}
+          builtIn={confirm?.item.label || ''}
+          logo={logoForAgent(confirm?.item.id)}
+          upload={view.iconUpload !== false}
+          touch={touch}
+          disabled={Boolean(busy)}
+        />
+      </ConfirmDialog>
     </div>
   )
 }

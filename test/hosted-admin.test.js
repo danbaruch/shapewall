@@ -606,3 +606,67 @@ test('workspace settings: rename; deleting needs the owner, a fresh check and th
   // The user's other workspace (Olive's) is untouched.
   assert.equal((await user.browser.get(`/api/workspaces/${ws}`)).status, 200)
 })
+
+test('tokens: an owner or admin renames one; its new replies carry the name, the old ones keep theirs', async () => {
+  await freshen(owner, admin)
+  const made = await owner.browser.post(`/api/workspaces/${ws}/projects/${project.id}/tokens`, {
+    name: 'laptop (shapewall login)',
+    scopes: ['read', 'reply'],
+  })
+  assert.equal(made.status, 201, made.text)
+  const id = made.json.info.id
+  const url = `/api/workspaces/${ws}/projects/${project.id}/tokens/${id}`
+  const comment = await owner.browser.post(`/w/${ws}/p/${project.id}/api/boards/sample/comments`, {
+    pageId: 'home',
+    viewport: 'desktop',
+    x: 10,
+    y: 10,
+    body: 'Rename check',
+  })
+  assert.equal(comment.status, 201, comment.text)
+  const replyUrl = `/api/v1/boards/sample/comments/${comment.json.comment.id}/replies`
+  assert.equal((await tokenCall(hosted, made.json.token, 'POST', replyUrl, { body: { body: 'Before the rename' } })).status, 201)
+
+  // Who may: the people who may revoke it. Not a member, a viewer, or another workspace's owner.
+  for (const user of [member, viewer]) assert.equal((await api(user, 'PATCH', url, { name: 'Mallory' })).status, 403)
+  assert.equal((await api(other, 'PATCH', url, { name: 'Mallory' })).status, 404)
+  // A token is no console session: it cannot rename itself.
+  assert.equal((await tokenCall(hosted, made.json.token, 'PATCH', url, { body: { name: 'Self' } })).status, 403)
+  // What: 1 to 60 characters; an unknown or revoked token is a 404.
+  assert.equal((await api(owner, 'PATCH', url, { name: '   ' })).json.error.code, 'invalid_name')
+  assert.equal((await api(owner, 'PATCH', url, { name: 'x'.repeat(61) })).json.error.code, 'invalid_name')
+  assert.equal((await api(owner, 'PATCH', url, {})).json.error.code, 'invalid_name')
+  assert.equal((await api(owner, 'PATCH', url.replace(id, 'tk_missing'), { name: 'x' })).json.error.code, 'unknown_token')
+  assert.equal(
+    (await api(owner, 'PATCH', `/api/workspaces/${ws}/projects/${second.id}/tokens/${id}`, { name: 'x' })).json.error.code,
+    'unknown_token',
+    "another project's token",
+  )
+
+  const renamed = await api(admin, 'PATCH', url, { name: '  Harry ' })
+  assert.equal(renamed.status, 200, renamed.text)
+  assert.equal(renamed.json.token.name, 'Harry')
+  assert.equal(renamed.json.token.prefix, made.json.info.prefix, 'the token itself is the same')
+  assert.deepEqual(renamed.json.token.scopes, made.json.info.scopes)
+  assert.equal((await tokenCall(hosted, made.json.token, 'GET', '/api/v1/project')).status, 200, 'and still works')
+  assert.equal((await tokenCall(hosted, made.json.token, 'POST', replyUrl, { body: { body: 'After the rename' } })).status, 201)
+  const thread = await owner.browser.get(`/w/${ws}/p/${project.id}/api/boards/sample/comments`)
+  const replies = thread.json.comments.find((item) => item.id === comment.json.comment.id).replies
+  assert.deepEqual(
+    replies.map((reply) => [reply.author, reply.agent, reply.body]),
+    [
+      ['laptop (shapewall login)', true, 'Before the rename'],
+      ['Harry', true, 'After the rename'],
+    ],
+  )
+  // Audited, with both names.
+  const log = await owner.browser.get(`/api/workspaces/${ws}/audit?action=token_renamed`)
+  assert.equal(log.json.entries.length, 1)
+  assert.deepEqual(log.json.entries[0].detail, { from: 'laptop (shapewall login)', to: 'Harry' })
+  // The same name again changes nothing and is not logged twice.
+  assert.equal((await api(owner, 'PATCH', url, { name: 'Harry' })).status, 200)
+  assert.equal((await owner.browser.get(`/api/workspaces/${ws}/audit?action=token_renamed`)).json.entries.length, 1)
+  // A revoked token is not renamed.
+  assert.equal((await owner.browser.call('DELETE', url)).status, 200)
+  assert.equal((await api(owner, 'PATCH', url, { name: 'Again' })).json.error.code, 'unknown_token')
+})

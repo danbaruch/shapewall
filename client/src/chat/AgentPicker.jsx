@@ -3,7 +3,7 @@
 // comment thread (which agent runs this fix, once). A Radix menu: arrow keys,
 // type-ahead on the names, Escape, focus back on the trigger.
 //
-// Each row: the agent's monogram, its name, how it is doing in plain words
+// Each row: the agent's icon (or monogram), its name, how it is doing in plain words
 // (profiles.js stateLine, from src/agent/agent-health.js), and "Default" on
 // the one new chats and fixes use. The current choice is checked. Below
 // them, when given: "Connect another agent..." and "Agent settings".
@@ -21,20 +21,16 @@ import {
   Tooltip,
 } from '../components/ui'
 import { cn } from '../lib/utils'
-import { STATE_DOT, monogram, stateLine } from './profiles'
+import { STATE_DOT, stateLine } from './profiles'
+import { AgentFace } from './agentIcons'
 
-// The agent's tile: two letters, with its state dot at the corner.
-export function AgentMark({ label, state = 'ready', size = 'md', className }) {
+// The agent's tile (agentIcons.jsx: its icon, its product mark or two
+// letters), with its state dot at the corner. `icon`, `tint`, `logo`: how
+// its owner made it look (src/agent/identity.js).
+export function AgentMark({ label, state = 'ready', size = 'md', icon = null, tint = null, logo = null, className }) {
   return (
-    <span
-      className={cn(
-        'relative inline-flex shrink-0 items-center justify-center rounded-md border border-line bg-surface-2 font-semibold text-fg',
-        size === 'sm' ? 'h-5 w-5 text-[9px]' : 'h-7 w-7 text-[11px]',
-        className,
-      )}
-      aria-hidden="true"
-    >
-      {monogram(label)}
+    <span className={cn('relative inline-flex shrink-0', className)} aria-hidden="true">
+      <AgentFace label={label} icon={icon} tint={tint} logo={logo} size={size === 'sm' ? 'sm' : 'md'} />
       <span
         className={cn(
           'absolute -right-0.5 -bottom-0.5 rounded-full ring-2 ring-surface',
@@ -113,7 +109,14 @@ export function AgentPicker({
               data-sw-agent-option={option.id}
               data-sw-agent-state={option.state}
             >
-              <AgentMark label={option.label} state={option.state} className="mt-0.5" />
+              <AgentMark
+                label={option.label}
+                state={option.state}
+                icon={option.icon}
+                tint={option.tint}
+                logo={option.logo}
+                className="mt-0.5"
+              />
               <span className="min-w-0 flex-1">
                 <span className="flex min-w-0 items-center gap-1.5">
                   <span className="truncate font-medium text-fg">{option.label}</span>
