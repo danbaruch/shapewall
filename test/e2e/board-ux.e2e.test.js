@@ -220,14 +220,14 @@ test('desktop: comment mode outlines the element under the mouse, the hint stays
 })
 
 // One step at a time: picking, composing, drawing. Each step is said on the
-// canvas (data-sw-comment-state), and Esc goes back exactly one.
+// canvas (data-sw-comment-flow), and Esc goes back exactly one.
 test('desktop: once a target is picked the page is calm; an empty draft moves, a written one stays; drawing is its own step', async () => {
   const { context, page, errors } = await openBoard(DESKTOP)
   try {
     const frame = '[data-sw-frame="pricing:desktop"]'
     const canvas = '[data-sw-canvas]'
     const composer = '[data-sw-composer-popover]'
-    const state = () => page.getAttribute(canvas, 'data-sw-comment-state')
+    const state = () => page.getAttribute(canvas, 'data-sw-comment-flow')
     const camera = () => page.$eval('.react-flow__viewport', (node) => node.style.transform)
     const cursorOn = (x, y) => page.evaluate(([px, py]) => getComputedStyle(document.elementFromPoint(px, py)).cursor, [x, y])
     await page.click(frame)
@@ -241,7 +241,7 @@ test('desktop: once a target is picked the page is calm; an empty draft moves, a
 
     // Picking: crosshair, hover outline with a plain label.
     await page.keyboard.press('c')
-    await page.waitForSelector(`${canvas}[data-sw-comment-state="picking"]`)
+    await page.waitForSelector(`${canvas}[data-sw-comment-flow="picking"]`)
     await page.mouse.move(...middle(cta))
     await page.waitForSelector('[data-sw-hover-outline="element"]')
     assert.equal(await page.textContent('[data-sw-hover-label]'), 'Link: Try Plus free')
@@ -329,7 +329,7 @@ test('desktop: once a target is picked the page is calm; an empty draft moves, a
     assert.equal(await page.getAttribute('[data-sw-comment-mode]', 'aria-pressed'), 'true')
     assert.equal(await page.locator('[data-sw-picked-outline]').count(), 0)
     await page.keyboard.press('Escape')
-    await page.waitForSelector(`${canvas}[data-sw-comment-state="off"]`)
+    await page.waitForSelector(`${canvas}[data-sw-comment-flow="off"]`)
     assert.deepEqual(errors, [])
   } finally {
     await context.close()
@@ -349,7 +349,7 @@ test('desktop: on a screenshot the comment goes on the spot; a page drawn too sm
     await page.waitForSelector('[data-sw-comment-hint="page"]')
     await page.mouse.click(box.x + box.width / 2, box.y + box.height / 3)
     await page.waitForSelector('[data-sw-composer-popover] [data-sw-comment-input]')
-    assert.equal(await page.getAttribute(canvas, 'data-sw-comment-state'), 'composing')
+    assert.equal(await page.getAttribute(canvas, 'data-sw-comment-flow'), 'composing')
     // No element was picked: no outline, the pin marks the spot.
     assert.equal(await page.locator('[data-sw-picked-outline], [data-sw-hover-outline]').count(), 0)
     assert.equal(await page.locator('[data-sw-draft-pin]').count(), 1)
@@ -362,7 +362,7 @@ test('desktop: on a screenshot the comment goes on the spot; a page drawn too sm
     assert.ok((await page.locator(frame).boundingBox()).width >= 240, 'fitted to a size to draw on')
     await page.click('[data-sw-draw-bar-done]')
     await page.waitForFunction((value) => document.querySelector('.react-flow__viewport').style.transform === value, before)
-    assert.equal(await page.getAttribute(canvas, 'data-sw-comment-state'), 'composing')
+    assert.equal(await page.getAttribute(canvas, 'data-sw-comment-flow'), 'composing')
     assert.deepEqual(errors, [])
   } finally {
     await context.close()
@@ -420,7 +420,7 @@ test('desktop: the side panel stops at 560 px or 40% of the window, a wider stor
     await page.waitForSelector(`${frame}[data-sw-live="ready"]`, { timeout: 15000 })
     await settle(page)
     await page.keyboard.press('c')
-    await page.waitForSelector('[data-sw-canvas][data-sw-comment-state="picking"]')
+    await page.waitForSelector('[data-sw-canvas][data-sw-comment-flow="picking"]')
     const area = await rect(page, '[data-sw-canvas]')
     const shown = await rect(page, frame)
     await page.mouse.click(Math.min(shown.right, area.right) - 40, Math.max(shown.top, area.top) + 220)

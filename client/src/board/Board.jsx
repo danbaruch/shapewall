@@ -1011,7 +1011,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
               setNotice({ tone: 'info', text: 'The demo does not take new captures. On your own board this recaptures the changed pages.' })
           : null,
   }
-  // The step a comment is at, one at a time (data-sw-comment-state on the
+  // The step a comment is at, one at a time (data-sw-comment-flow on the
   // canvas): drawing (a tool is on), composing (a target is picked, the
   // composer is open), picking (comment mode, nothing picked yet), else off.
   const commentState = drawingOn ? 'drawing' : draft && wide ? 'composing' : commentMode && canComment && !comparePair ? 'picking' : 'off'
@@ -1247,7 +1247,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                 className={cn('relative min-w-0 flex-1 outline-none', commentState === 'picking' && 'sw-commenting')}
                 onKeyDown={onCanvasKeyDown}
                 data-sw-canvas="true"
-                data-sw-comment-state={commentState}
+                data-sw-comment-flow={commentState}
               >
                 {showLinks && brokenLinks.length ? (
                   <BrokenLinks items={brokenLinks} open={brokenOpen} onOpenChange={setBrokenOpen} />
