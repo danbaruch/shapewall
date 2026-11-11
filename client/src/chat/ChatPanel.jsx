@@ -617,7 +617,11 @@ export default function ChatPanel({
           },
           onConnect: onOpenSettings,
           settingsHref: agentSettingsHref,
-          disabledReason: running ? 'Wait for the answer or stop it to switch' : null,
+          disabledReason: running
+            ? 'Wait for the answer or stop it to switch'
+            : agent?.state === 'testing' || profileChoice.options.some((option) => option.state === 'testing')
+              ? 'Wait for the connection test to finish to switch'
+              : null,
         }
       : null
   const showStarters = !running && !dictation.listening && !draft.trim() && !attachments.length && !sentIn.has(threadId) && !thread.loading

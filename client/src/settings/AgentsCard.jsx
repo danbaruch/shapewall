@@ -130,6 +130,15 @@ export function AgentsCard({
     if (!busy) load()
   }, !given)
   const view = given || loaded
+  // A connection test this page did not start (the page was reloaded while a
+  // Connect was testing, or another tab runs it): look again until it ends,
+  // also where the "agents changed" events do not reach.
+  const testRunning = Boolean(view?.testing)
+  useEffect(() => {
+    if (!testRunning || given || busy) return undefined
+    const timer = window.setInterval(load, 1500)
+    return () => window.clearInterval(timer)
+  }, [testRunning, given, busy, load])
   const changed = async (next) => {
     if (next && !given) setLoaded(next)
     else if (!given) await load()
@@ -257,7 +266,13 @@ export function AgentsCard({
         ]
       : []),
   ]
-  const off = Boolean(busy) || disabled || overridden
+  // While a connection test runs the server takes no other change of this
+  // page (it would answer "a connection test is running"): those controls
+  // wait for it, and say why. Edit does not: a name is saved through it.
+  const testing = view.testing || null
+  const testedLabel = testing ? rows.find((row) => row.id === testing.id)?.label || view.effective?.label || 'the agent' : null
+  const waitReason = testing ? `Testing the connection to ${testedLabel}. This is available when the test finishes.` : undefined
+  const off = Boolean(busy) || disabled || overridden || Boolean(testing)
   // The name and icon are display only: Edit stays on when a flag fixes the command.
   const editOff = Boolean(busy) || disabled
   const confirming = confirm ? rows.find((row) => row.id === confirm.agentId) : null
@@ -277,6 +292,19 @@ export function AgentsCard({
           <span>
             This is a demo with sample agents on a pretend computer. The two scripted agents answer in this browser, and nothing is sent
             anywhere. Choosing the default, testing, removing and connecting them works here; Reset puts everything back.
+          </span>
+        </p>
+      ) : null}
+      {testing && !busy ? (
+        <p
+          className="flex items-center gap-2 rounded-md border border-line bg-surface-2/60 px-3 py-2.5 text-xs text-fg"
+          role="status"
+          data-sw-agents-testing={testing.id}
+        >
+          <Spinner size={12} />
+          <span>
+            Testing the connection to {testedLabel}. Connect, Test connection, Remove and the default wait for it; a name or an icon can be
+            changed meanwhile.
           </span>
         </p>
       ) : null}
@@ -300,6 +328,7 @@ export function AgentsCard({
                   choice.isDefault ? 'border-accent/50 bg-accent/10' : 'border-line bg-surface hover:bg-surface-2',
                   off && 'cursor-default opacity-70',
                 )}
+                title={waitReason}
                 data-sw-agents-default-option={choice.id}
               >
                 <input
@@ -367,13 +396,23 @@ export function AgentsCard({
                     {row.profile?.default ? <Badge tone="accent">Default</Badge> : null}
                   </p>
                   <p className={cn('text-xs', row.kind === 'connected' && row.profile.state === 'login' ? 'text-fg' : 'text-muted')}>
-                    {row.kind === 'connected' ? `Connected. ${stateLine(row.profile)}` : ROW_STATE[row.kind]}
+                    {row.kind !== 'connected'
+                      ? ROW_STATE[row.kind]
+                      : row.profile.state === 'testing'
+                        ? 'Connecting. Testing the connection...'
+                        : `Connected. ${stateLine(row.profile)}`}
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   {row.kind === 'connected' ? (
                     <>
-                      <Button size={size} disabled={off} onClick={() => test(row.id, row.profile.legacy)} data-sw-agent-test={row.id}>
+                      <Button
+                        size={size}
+                        disabled={off}
+                        title={waitReason}
+                        onClick={() => test(row.id, row.profile.legacy)}
+                        data-sw-agent-test={row.id}
+                      >
                         {busy === row.id ? <Spinner /> : null} Test connection
                       </Button>
                       <Button
@@ -387,7 +426,14 @@ export function AgentsCard({
                       >
                         <Pencil size={13} aria-hidden="true" /> Edit
                       </Button>
-                      <Button size={size} variant="danger" disabled={off} onClick={() => remove(row.id)} data-sw-agent-remove={row.id}>
+                      <Button
+                        size={size}
+                        variant="danger"
+                        disabled={off}
+                        title={waitReason}
+                        onClick={() => remove(row.id)}
+                        data-sw-agent-remove={row.id}
+                      >
                         <Trash2 size={13} aria-hidden="true" /> Remove
                       </Button>
                     </>
@@ -396,6 +442,7 @@ export function AgentsCard({
                       size={size}
                       variant="default"
                       disabled={off}
+                      title={waitReason}
                       onClick={() => connect(row.id)}
                       data-sw-profile-connect={row.id}
                       data-sw-agent-connect-row={row.id}
@@ -526,6 +573,8 @@ export function AgentsCard({
       </ConfirmDialog>
       <AgentIdentityDialog
         agent={editing}
+        // Its own Connect is still testing: Save waits for the test.
+        waiting={Boolean(testing && editing && (testing.id === editing.id || (editing.id === 'default' && testing.id === 'default')))}
         upload={view.iconUpload !== false}
         touch={touch}
         onClose={() => setEditing(null)}

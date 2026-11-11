@@ -58,6 +58,8 @@ export const STATE_TEXT = {
   ready: 'Ready',
   login: 'Not signed in',
   starting: 'Starting',
+  // Its connection test runs (a Connect, or Test connection): not finished yet.
+  testing: 'Testing the connection',
   'not-responding': 'Not responding',
   unavailable: 'Not set up',
 }
@@ -67,6 +69,7 @@ export const STATE_DOT = {
   ready: 'bg-ok',
   login: 'bg-warn',
   starting: 'bg-accent motion-safe:animate-pulse',
+  testing: 'bg-accent motion-safe:animate-pulse',
   'not-responding': 'bg-bad',
   unavailable: 'bg-faint',
 }

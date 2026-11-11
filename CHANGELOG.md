@@ -54,6 +54,14 @@ and the project uses [Semantic Versioning](https://semver.org/).
   signed with its name and marked as an agent's; replies written before keep the name they had. A command fixed with `--agent-acp`
   or `SHAPEWALL_AGENT_ACP` can be renamed too: the flag decides which agent runs, not what it is called. Only the owner on the
   machine that runs Shapewall can change any of it.
+- Right after Connect, while a real agent is still starting for its connection test (several seconds; the test may take up to
+  30), nothing answers "A connection test is running" any more. A name or an icon saved in that window is kept: for the agent
+  being connected, Save waits ("Saving when the connection test finishes...") and then saves, or says that the agent did not
+  connect; for another agent it saves at once and survives a failed test. The Agents page and the chat header say "Testing the
+  connection" instead of looking finished; Test connection, Remove, Connect and the default are off with the reason until the
+  test ends; a chat message or a Fix sent meanwhile says "Waiting for the connection test to finish" and then runs (the board now
+  waits 45 seconds, longer than a test can last; it gave up after 30). Before, renaming an agent within seconds of connecting it
+  failed with "A connection test is running. Wait for it, then save."
 - Renaming an agent keeps the model and effort it last used: new chats start from them as before. They were remembered under the
   agent's name, so a rename started them over.
 - Hosted server: a token name over 60 characters is refused when the token is made ("Token name: 1 to 60 characters."), as on a

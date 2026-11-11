@@ -311,7 +311,9 @@ export function AgentSwitch({ agent, state, picker, touch, className }) {
 }
 
 export function AgentChip({ agent, state, className }) {
-  const info = AGENT_STATES[state] || AGENT_STATES.ready
+  // Its connection test runs: said in words, like the picker's chip.
+  const testing = agent?.state === 'testing' && (!state || state === 'ready')
+  const info = testing ? { dot: STATE_DOT.testing, text: STATE_TEXT.testing } : AGENT_STATES[state] || AGENT_STATES.ready
   const label = agent?.label || 'Agent'
   return (
     <Tooltip content={agentTip(agent)}>

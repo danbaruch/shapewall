@@ -2,6 +2,7 @@
 // EventSource cannot POST). Paths are relative to the page, like lib/api.js.
 
 import { api, responseError, settingsTokenHeaders } from '../lib/api.js'
+import { TEST_WAIT_MS } from '../../../src/agent/test-timing.js'
 import { DEMO, demoFiles } from '../lib/demo.js'
 
 const enc = encodeURIComponent
@@ -17,8 +18,12 @@ const DEMO_MISSING =
 // seconds, and the server takes no message while one runs. A message sent in
 // that window (Fix pressed straight after Connect) waits for the test here
 // instead of coming back as an error the person has to retry by hand.
-const TEST_WAIT_MS = 1000
-const TEST_WAIT_TRIES = 30
+// It waits a little longer than a test can last (src/agent/test-timing.js),
+// and says so in the answer's status line while it does.
+const TEST_RETRY_MS = 1000
+const TEST_WAIT_TRIES = Math.ceil(TEST_WAIT_MS / TEST_RETRY_MS)
+export const TEST_WAIT_STATUS = 'Waiting for the connection test to finish'
+
 const pause = (ms, signal) =>
   new Promise((resolve, reject) => {
     const timer = setTimeout(resolve, ms)
@@ -52,7 +57,8 @@ export async function sendMessage(boardId, threadId, body, { onEvent, signal } =
       data = null
     }
     if (response.status === 409 && data?.error?.code === 'test_running' && attempt < TEST_WAIT_TRIES) {
-      await pause(TEST_WAIT_MS, signal)
+      if (attempt === 0) onEvent?.('status', { text: TEST_WAIT_STATUS })
+      await pause(TEST_RETRY_MS, signal)
       continue
     }
     throw responseError(response.status, data)
