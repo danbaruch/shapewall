@@ -524,6 +524,25 @@ body {
   }
 }
 
+/* Keyboard focus is always visible. In Tailwind 4 `outline-none` also sets
+   --tw-outline-style to none, so `outline-none focus-visible:outline-2` on
+   one element (the usual way to say "no ring for the mouse, a ring for the
+   keyboard") drew no ring at all. Wherever a focus-visible outline width is
+   asked for, the outline is solid again. */
+[class*='focus-visible:outline-2']:focus-visible,
+[class*='focus-visible:outline-1']:focus-visible,
+.group:focus-visible [class*='group-focus-visible:outline-2'],
+.group:focus-visible [class*='group-focus-visible:outline-1'] {
+  --tw-outline-style: solid;
+  outline-style: solid;
+}
+
+/* Arrow labels sit above the cards: the chip an off-screen journey arrow ends
+   in is a button, and a card under it must not take its click. */
+.react-flow__edgelabel-renderer {
+  z-index: 4;
+}
+
 /* Comment mode, picking a target: a crosshair over the whole canvas. */
 .sw-commenting .react-flow__pane,
 .sw-commenting .react-flow__node {

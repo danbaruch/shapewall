@@ -692,6 +692,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     closeThread,
     builder,
     addBuilderStep,
+    goStep,
     layout,
     flow,
     canvasRef,
@@ -834,6 +835,15 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   useEffect(() => {
     if (!commentMode && !draftFilled()) setDraft(null)
   }, [commentMode, draftFilled])
+
+  // A link that names both a comment and a journey: the comment wins. Its
+  // thread opens at its pin and the journey leaves the address (on load only:
+  // a comment opened while stepping a journey is fine, the next step closes it).
+  useEffect(() => {
+    const now = new URLSearchParams(window.location.search)
+    if (Number(now.get('c')) && now.get('j')) updateParams({ j: null, step: null, jc: null, jb: null })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // An open thread counts as read.
   useEffect(() => {

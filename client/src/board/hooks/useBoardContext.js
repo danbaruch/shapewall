@@ -123,6 +123,8 @@ export function useBoardContext(input) {
       onHoverComment: (id) => view.set({ hoveredId: id }),
       // "Select text": the page of this frame has the mouse (or none has).
       onReading: (key) => view.set({ readingKey: key }),
+      // The chip an off-screen journey arrow ends in: go to that step.
+      onJourneyStep: (step) => now().goStep(step),
       onOpenCluster: (targetId, viewport, items) => now().openCluster(targetId, viewport, items),
       onChecks: (...args) => now().openChecks(...args),
       onHistory: (pageId, viewport = null) => now().openHistory(pageId, viewport),
@@ -164,6 +166,7 @@ export function useBoardContext(input) {
       onPin: actions.onPin,
       onSelectComment: actions.onSelectComment,
       onReading: actions.onReading,
+      onJourneyStep: actions.onJourneyStep,
       onHoverComment: wide ? actions.onHoverComment : null,
       onOpenCluster: actions.onOpenCluster,
       onChecks: canChecks ? actions.onChecks : null,
