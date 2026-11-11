@@ -112,7 +112,7 @@ Good to know:
 - Edits to titles, pages and journeys in the config show up on the next refresh of the board, with no restart.
 
 Next: [configuration and sign-in](docs/config.md#auth), [capture warnings and pacing](docs/capture-warnings.md),
-[local accounts](docs/local-accounts.md), [updates](docs/updates.md) and [deployment](docs/deployment.md).
+[local accounts](docs/local-accounts.md), [updates](docs/updates.md) and [deployment](docs/deployment.md). Not sure which shape you need? [Where to run Shapewall](docs/where-to-run.md).
 
 ### Multiplayer on your own server
 
