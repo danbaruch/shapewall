@@ -28,7 +28,7 @@ export function useJourneyKeys({ journey, builder, goStep, step, closeJourney })
 }
 
 // Comment mode keys: C turns it on and off, Esc leaves it.
-export function useCommentModeKeys({ commentMode, setCommentMode, canComment, comparePair, setDraft }) {
+export function useCommentModeKeys({ commentMode, setCommentMode, canComment, comparePair, setDraft, keepDraft }) {
   useEffect(() => {
     if (!commentMode) return undefined
     // Escape leaves comment mode, unless it is closing something first (the
@@ -54,12 +54,14 @@ export function useCommentModeKeys({ commentMode, setCommentMode, canComment, co
       if (target?.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target?.tagName)) return
       if (document.querySelector('[role="dialog"]:not([data-sw-thread-popover]), [role="menu"], [role="listbox"]')) return
       event.preventDefault()
+      // A comment with something in it is not dropped by a stray C.
+      if (keepDraft?.()) return
       setDraft(null)
       setCommentMode((value) => !value)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [canComment, comparePair, setCommentMode, setDraft])
+  }, [canComment, comparePair, keepDraft, setCommentMode, setDraft])
 }
 
 // J opens the next journey, Shift+J the previous one; past either end the

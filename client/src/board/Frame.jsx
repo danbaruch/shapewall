@@ -350,6 +350,7 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
         ) : null}
         {hover && canHover ? <HoverOutline hover={hover} native={native} scale={pinScale} /> : null}
         {draft?.anchor && !drawingOn ? <PickedOutline draft={draft} scale={pinScale} /> : null}
+        {openHere?.anchor ? <ThreadTarget comment={openHere} box={positions?.get(openHere.id)?.box || null} /> : null}
         {clusters.map((group) =>
           group.items.length === 1 ? (
             <Pin
@@ -426,6 +427,24 @@ function PickedOutline({ draft, scale }) {
       data-sw-picked-outline="true"
     />
   )
+}
+
+// The element the open thread is on: nothing to see, only its box, so the
+// thread's popover can keep off it (ThreadPopover.jsx). From the live page
+// when the pin was resolved on it (`box`, in percent), else from the
+// comment's own anchor.
+function ThreadTarget({ comment, box }) {
+  const { anchor } = comment
+  if (!box && (!anchor.w || !anchor.h)) return null
+  const style = box
+    ? { left: `${box.left}%`, top: `${box.top}%`, width: `${box.right - box.left}%`, height: `${box.bottom - box.top}%` }
+    : {
+        left: `${comment.x - anchor.dx * anchor.w * 100}%`,
+        top: `${comment.y - anchor.dy * anchor.h * 100}%`,
+        width: `${anchor.w * 100}%`,
+        height: `${anchor.h * 100}%`,
+      }
+  return <div className="pointer-events-none absolute" style={style} aria-hidden="true" data-sw-thread-target={comment.id} />
 }
 
 // The element a click would pin a comment to, outlined, with what it is in

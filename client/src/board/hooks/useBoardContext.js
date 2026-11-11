@@ -1,28 +1,13 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { DEMO } from '../../lib/demo'
 import { STATIC, elementsUrl, fileUrl, liveUrl } from '../../lib/api'
-import { motionDuration, reducedMotion } from '../../lib/motion'
+import { motionDuration } from '../../lib/motion'
 import { createBoardView } from '../boardView'
 import { withBarRoom } from '../camera'
 import { historyCount } from '../flow'
 import { isThumbnail } from '../layout'
 
 const NO_PINS = []
-
-// The open composer shakes once and takes the keyboard back: "your comment
-// is still here, on the element you picked".
-function nudgeComposer() {
-  const box = document.querySelector('[data-sw-composer-popover]')
-  if (!box) return
-  box.setAttribute('data-sw-composer-nudged', String(Date.now()))
-  if (!reducedMotion()) {
-    box.animate?.([{ translate: '0' }, { translate: '-6px' }, { translate: '5px' }, { translate: '-3px' }, { translate: '0' }], {
-      duration: 280,
-      easing: 'ease-out',
-    })
-  }
-  box.querySelector('[data-sw-comment-input]')?.focus({ preventScroll: true })
-}
 
 // What the cards on the canvas read, in two parts (see boardView.js for why):
 //
@@ -110,12 +95,9 @@ export function useBoardContext(input) {
         const { layout, flow, canvasRef } = state
         // A target is already picked and its comment has something in it
         // (text, an image, a drawing): a click elsewhere never re-aims it.
-        // The composer nudges, so the click is not just swallowed. An empty
-        // draft moves to the new spot.
-        if (state.draftFilled()) {
-          nudgeComposer()
-          return
-        }
+        // The composer nudges (keepDraft), so the click is not just swallowed.
+        // An empty draft moves to the new spot.
+        if (state.keepDraft()) return
         if (state.selectedCommentId) state.closeThread()
         // Phone: a tap on a page drawn small zooms to it first, so the page
         // can go live and the next tap pins to the element under the finger.
