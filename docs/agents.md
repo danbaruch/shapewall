@@ -144,8 +144,8 @@ twice. Both are display only: they change nothing an agent runs with.
   back to the built-in one. It is shown as text everywhere (never read as Markdown or HTML) and reaches an agent only inside quoted
   data. A name set in `shapewall.config.json` (`agent.label`) or typed in the settings form keeps working as before.
 - **The icon** is one of twelve built-in avatars (small original drawings: robots, creatures and shapes), a picture you upload, or the
-  default. The default is the agent's **product mark** where Shapewall ships one (Claude Code and Gemini CLI today) and its initials
-  otherwise (Codex, goose, an agent command of your own, an endpoint). Picking **Default** in the dialog goes back to it. The marks
+  default. The default is the agent's **product mark** where Shapewall ships one (Claude Code, Codex with the OpenAI mark, goose and Gemini CLI today) and its initials
+  otherwise (an agent command of your own, an endpoint). Picking **Default** in the dialog goes back to it. The marks
   are other companies' trademarks, shown unchanged in one colour only to identify the agent you connected; their sources and terms
   are in `THIRD_PARTY.md`. A colour (one of eight) tints a built-in avatar or the initials, never a mark or a picture.
 - **An uploaded picture** is a PNG, JPEG or WebP of up to 2 MB. The board crops it to a square and sends a 256 by 256 PNG; the server

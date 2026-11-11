@@ -670,3 +670,18 @@ test('tokens: an owner or admin renames one; its new replies carry the name, the
   assert.equal((await owner.browser.call('DELETE', url)).status, 200)
   assert.equal((await api(owner, 'PATCH', url, { name: 'Again' })).json.error.code, 'unknown_token')
 })
+
+test('tokens: a name over 60 characters is refused when a token is made, not cut', async () => {
+  await freshen(owner)
+  const url = `/api/workspaces/${ws}/projects/${second.id}/tokens`
+  const before = (await owner.browser.get(url)).json.tokens.length
+  for (const name of ['x'.repeat(61), '', '   ']) {
+    const refused = await owner.browser.post(url, { name, scopes: ['read'] })
+    assert.equal(refused.status, 400, JSON.stringify(name))
+    assert.deepEqual(refused.json.error, { code: 'invalid_name', message: 'Token name: 1 to 60 characters.' })
+  }
+  assert.equal((await owner.browser.get(url)).json.tokens.length, before, 'nothing was made')
+  const made = await owner.browser.post(url, { name: `  ${'y'.repeat(60)}  `, scopes: ['read'] })
+  assert.equal(made.status, 201, made.text)
+  assert.equal(made.json.info.name, 'y'.repeat(60), 'sixty characters, trimmed, are fine')
+})

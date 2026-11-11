@@ -646,8 +646,8 @@ export default function ChatPanel({
   const agentOptions = useAgentOptions({
     boardId,
     threadId,
-    profileId: selectedThread?.profileId || 'default',
-    agentLabel: agent?.label || '',
+    // The agent itself: a chat on the default counts as the profile the default runs.
+    profileId: profileChoice.value || 'default',
     enabled: Boolean(onScreen && configured && selectedThread && ownerWrites && !needsOwner && !thread.loading),
     fresh: !messages.length,
     live: selectedThread?.options || null,

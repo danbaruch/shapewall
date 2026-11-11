@@ -149,18 +149,28 @@ test('every built-in icon has a drawing, every tint a colour, and no drawing car
   assert.doesNotMatch(art, /<text|<image|href|<script|url\(/)
 })
 
-test('product marks: Claude Code and Gemini CLI have one, Codex, goose and unknown agents do not; each records its source', () => {
+test('product marks: every known agent has one (Codex the OpenAI mark), unknown agents do not; each records its source', () => {
   assert.equal(logoForAgent('claude'), 'claude')
   assert.equal(logoForAgent('gemini'), 'gemini')
-  assert.equal(logoForAgent('codex'), null)
-  assert.equal(logoForAgent('goose'), null)
+  assert.equal(logoForAgent('codex'), 'openai', 'Codex shows the OpenAI mark')
+  assert.equal(logoForAgent('goose'), 'goose')
   assert.equal(logoForAgent('my-own-agent'), null)
+  assert.equal(logoForAgent('openai'), null, 'a mark id is not an agent id')
+  assert.deepEqual(
+    AGENT_LOGOS.map((logo) => logo.id),
+    ['claude', 'openai', 'goose', 'gemini'],
+  )
   assert.equal(agentLogo('nothing'), null)
   for (const logo of AGENT_LOGOS) {
     assert.match(logo.id, /^[a-z][a-z0-9-]*$/)
     assert.ok(logo.name && logo.owner, logo.id)
-    assert.match(logo.source, /Simple Icons \d+\.\d+\.\d+ .*CC0 1\.0, icons\/[a-z]+\.svg$/, logo.id)
-    assert.equal(logo.viewBox, '0 0 24 24')
+    // Where it came from, pinned: a Simple Icons release, or the project's own repository at a commit.
+    assert.match(
+      logo.source,
+      /^(Simple Icons \d+\.\d+\.\d+ .*CC0 1\.0, icons\/[a-z]+\.svg|github\.com\/aaif-goose\/goose at [0-9a-f]{40}, [\w/.-]+\.svg \(Apache 2\.0; LF Projects trademark policy\))$/,
+      logo.id,
+    )
+    assert.match(logo.viewBox, /^0 0 (24 24|45 45)$/)
     // One path of plain path data: nothing else can ride along.
     assert.match(logo.path, /^[MmLlHhVvCcSsQqTtAaZz0-9 .,-]+$/, logo.id)
     for (const agent of logo.agents)
@@ -192,7 +202,7 @@ test(
       [
         ['default', 'claude', null],
         ['claude', 'claude', null],
-        ['codex', null, null],
+        ['codex', 'openai', null],
       ],
     )
     const view = (await b.api('GET', settings)).json
@@ -200,8 +210,8 @@ test(
       view.known.map((item) => [item.id, item.logo]),
       [
         ['claude', 'claude'],
-        ['codex', null],
-        ['goose', null],
+        ['codex', 'openai'],
+        ['goose', 'goose'],
         ['gemini', 'gemini'],
       ],
     )
@@ -209,8 +219,8 @@ test(
       agentRows(view).map((row) => [row.id, row.logo]),
       [
         ['claude', 'claude'],
-        ['codex', null],
-        ['goose', null],
+        ['codex', 'openai'],
+        ['goose', 'goose'],
         ['gemini', 'gemini'],
       ],
     )
@@ -329,7 +339,7 @@ test(
       pickerProfiles(thread).options.map((option) => [option.id, option.label, option.icon, option.tint, option.logo]),
       [
         ['claude', 'Harry', 'cat', 'violet', 'claude'],
-        ['codex', 'Codex', null, null, null],
+        ['codex', 'Codex', null, null, 'openai'],
       ],
     )
     assert.equal(formFrom(renamed.json).label, 'Harry')
@@ -601,4 +611,27 @@ test('replies: a reply marked as the agent keeps its name; the owner MCP server 
     ],
     'earlier replies keep the name they were written with',
   )
+})
+
+test('the OpenAI and goose marks are the published files, unchanged, and the notices say where each came from', () => {
+  const openai = agentLogo('openai')
+  assert.deepEqual(openai.agents, ['codex'])
+  assert.match(openai.source, /^Simple Icons 15\.22\.0 /, 'the last release that has the icon')
+  // The blossom's outline starts and ends where the published path does.
+  assert.ok(openai.path.startsWith('M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108'))
+  assert.ok(openai.path.endsWith('v2.9994l-2.5974 1.4997-2.6067-1.4997Z'))
+  assert.equal(openai.path.length, 1460)
+  assert.equal(agentLogo('goose').path.length, 4754)
+  const goose = agentLogo('goose')
+  assert.deepEqual(goose.agents, ['goose'])
+  assert.ok(goose.path.startsWith('M43.2098 39.2492L39.8118 36.4522C37.9646 34.9318'))
+  assert.ok(goose.path.endsWith('43.2132 39.2517L43.2098 39.2492Z'))
+  const thirdParty = fs.readFileSync(new URL('../THIRD_PARTY.md', import.meta.url), 'utf8')
+  // The OpenAI icon's removal from Simple Icons is said, not hidden.
+  assert.match(thirdParty, /simple-icons@15\.22\.0/)
+  assert.match(thirdParty, /removed\*\* the icon in 16\.0\.0/)
+  assert.match(thirdParty, /https:\/\/openai\.com\/brand/)
+  assert.match(thirdParty, /aaif-goose\/goose/)
+  assert.ok(thirdParty.includes(goose.source.match(/[0-9a-f]{40}/)[0]), 'the commit the goose mark was taken at')
+  assert.match(thirdParty, /lfprojects\.org\/policies\/trademark-policy/)
 })

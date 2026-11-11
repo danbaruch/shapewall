@@ -14,8 +14,9 @@ export function createApiTokens({ iso, auditOf }) {
   // the token (shown once) and its listing. `via` marks how it was made
   // ("login" for `shapewall login`) in the audit log.
   function createApiToken(req, body, { via = null } = {}) {
-    const name = cleanName(body.name, 60)
-    if (!name) throw new HttpError(400, 'invalid_name', 'Token name: 1 to 60 characters.')
+    // A name too long is refused, not cut (as on a rename): it is what people will see.
+    const name = cleanName(body.name, 61)
+    if (!name || name.length > 60) throw new HttpError(400, 'invalid_name', 'Token name: 1 to 60 characters.')
     const scopes = Array.isArray(body.scopes) ? expandScopes(body.scopes) : ['read']
     if (!scopes.length || scopes.some((scope) => !TOKEN_SCOPES.includes(scope))) {
       throw new HttpError(400, 'invalid_scopes', `Scopes: ${TOKEN_SCOPES.join(', ')}.`)

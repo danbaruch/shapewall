@@ -385,7 +385,10 @@ export function autoAllowOption(card, rules, { ownerWrites = false } = {}) {
 // The choices people made, in this browser like the other chat preferences
 // (voice, read aloud): per chat, and the last used per agent, which a new
 // chat starts with. { chats: { "<board>/<thread>": { choices, at } },
-// agents: { "<profile>:<label>": choices } }, choices = { configId: value }.
+// agents: { "<profile>": choices } }, choices = { configId: value }. An
+// agent's picks are kept under its profile id, not its name: renaming an
+// agent (Agents > Edit) keeps them. Picks saved before that, under
+// "<profile>:<label>", are read once (agentPicks) and moved on the next pick.
 export const OPTION_PREFS_KEY = 'shapewall.chat.options'
 const OPTION_CHATS_MAX = 200
 const emptyPrefs = () => ({ chats: {}, agents: {} })
@@ -423,13 +426,27 @@ export function saveOptionPrefs(prefs, storage = globalThis.localStorage) {
 }
 
 export const chatOptionKey = (boardId, threadId) => `${boardId}/${threadId}`
-export const agentOptionKey = (profileId, label) => `${profileId || 'default'}:${label || ''}`
+// `profileId`: the agent's own id (the profile the default connection runs,
+// when it runs one: chat/profiles.js pickerProfiles `value`).
+export const agentOptionKey = (profileId) => profileId || 'default'
+
+// The keys picks were saved under before: "<profile>:<label>", whatever the
+// label was then. A profile id has no ":" in it, so a new key never matches.
+const oldAgentKeys = (prefs, agent) => Object.keys(prefs?.agents || {}).filter((key) => key.startsWith(`${agent}:`))
+
+// An agent's last used choices: its own, else what was saved for it under
+// its old key (the most recently written one, the last in the store).
+export function agentPicks(prefs, agent) {
+  if (prefs?.agents?.[agent]) return prefs.agents[agent]
+  const old = oldAgentKeys(prefs, agent).at(-1)
+  return old ? prefs.agents[old] : {}
+}
 
 // What a chat runs with: its own choices; a chat with no message yet starts
 // from the agent's last used ones.
 export function choicesFor(prefs, { chat, agent, fresh = false }) {
   const own = prefs?.chats?.[chat]?.choices || {}
-  return fresh ? { ...(prefs?.agents?.[agent] || {}), ...own } : { ...own }
+  return fresh ? { ...agentPicks(prefs, agent), ...own } : { ...own }
 }
 
 // A pick: this chat's choice, and the agent's default for new chats. The
@@ -444,7 +461,9 @@ const withChat = (prefs, chat, choices, now) => {
 // `base`: what the chat ran with so far (its defaults), kept with the pick.
 export function rememberChoice(prefs, { chat, agent, configId, value, base = {}, now = Date.now() }) {
   const next = withChat(prefs, chat, { ...base, ...(prefs.chats[chat]?.choices || {}), [configId]: value }, now)
-  return { ...next, agents: { ...prefs.agents, [agent]: { ...(prefs.agents[agent] || {}), [configId]: value } } }
+  // The agent's picks move to its own key here, once: the old keys go.
+  const agents = Object.fromEntries(Object.entries(prefs.agents).filter(([key]) => !oldAgentKeys(prefs, agent).includes(key)))
+  return { ...next, agents: { ...agents, [agent]: { ...agentPicks(prefs, agent), [configId]: value } } }
 }
 
 // A chat's first message keeps what it ran with, so a later default for

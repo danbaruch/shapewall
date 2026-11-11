@@ -46,14 +46,18 @@ and the project uses [Semantic Versioning](https://semver.org/).
   works while the agent is answering. Before, the name could only be typed in the full settings form, the one-click Connect gave no
   chance to name an agent, and every agent showed two initials.
 - Agent icons: twelve built-in avatars drawn for Shapewall, or a picture you upload (PNG, JPEG or WebP up to 2 MB, cropped to a
-  square, re-encoded by the server and kept next to your agent settings; never an SVG). A connected Claude Code or Gemini CLI shows
-  its product mark until you pick something else, and **Default** goes back to it; Codex, goose and other agents show initials (no
-  redistributable mark was found for them). Sources and terms of the marks are in `THIRD_PARTY.md`.
+  square, re-encoded by the server and kept next to your agent settings; never an SVG). A connected Claude Code, Codex (the OpenAI
+  mark), goose or Gemini CLI shows its product mark until you pick something else, and **Default** goes back to it; other agents
+  and endpoints show initials. Sources and terms of the marks are in `THIRD_PARTY.md`.
 - The name and icon show wherever the agent does: the Agents page and its default list, the chat header and its menu, the agent's
   answers, **Fix with <name>**, the batch of fixes and the `shapewall serve` start line. An agent's replies on a comment thread are
   signed with its name and marked as an agent's; replies written before keep the name they had. A command fixed with `--agent-acp`
   or `SHAPEWALL_AGENT_ACP` can be renamed too: the flag decides which agent runs, not what it is called. Only the owner on the
   machine that runs Shapewall can change any of it.
+- Renaming an agent keeps the model and effort it last used: new chats start from them as before. They were remembered under the
+  agent's name, so a rename started them over.
+- Hosted server: a token name over 60 characters is refused when the token is made ("Token name: 1 to 60 characters."), as on a
+  rename. Before, it was cut to 60 without a word.
 - Hosted server: an API token can be renamed on the token lists (admins and owners, like revoking it), so a watcher shows up as
   "Harry" instead of "laptop (shapewall login)". The token itself, its scopes and what it already wrote do not change.
 - Website contact page: the "Thanks, your message is on its way" heading no longer shows a focus rectangle, and the form's spacing

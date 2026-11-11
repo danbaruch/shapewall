@@ -12,7 +12,8 @@ voices (transformers.js, ONNX Runtime Web, misaki's lexicons and others), each
 under its own license; see THIRD_PARTY.md.
 
 The board shows the product marks of coding agents as their default icons
-(the Claude mark of Anthropic, PBC and the Gemini mark of Google LLC). These
-marks are trademarks of their respective owners. They are used only to
+(the Claude mark of Anthropic, PBC, the OpenAI mark of OpenAI for
+Codex, the goose mark of LF Projects, LLC and the Gemini mark of Google LLC).
+These marks are trademarks of their respective owners. They are used only to
 identify the agent you connected; no endorsement by or affiliation with their
 owners is implied. Sources and terms: THIRD_PARTY.md.
