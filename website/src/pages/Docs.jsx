@@ -10,7 +10,7 @@ import { LAUNCHED } from '../launch.js'
 // repository's own guide in docs/ (one source for GitHub, the npm package and this site); the rest are src/docs/*.md.
 const FILES = import.meta.glob('../docs/*.md', { eager: true, import: 'default' })
 const REPO_FILES = import.meta.glob(
-  '../../../docs/{agent-hardening,agent-recipes,agent-workflow,agents,buzz,capture-warnings,config,deployment,github,hosted,journeys,local-accounts,notifications,page-checks,starter-agent,updates}.md',
+  '../../../docs/{agent-hardening,agent-recipes,agent-workflow,agents,buzz,capture-warnings,config,deployment,github,hosted,journeys,local-accounts,notifications,page-checks,pull-requests,starter-agent,updates}.md',
   { eager: true, import: 'default' },
 )
 const content = (doc) => (doc.repo ? REPO_FILES[`../../../docs/${doc.repo}.md`] : FILES[`../docs/${doc.file}.md`])

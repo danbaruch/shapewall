@@ -47,6 +47,8 @@ import {
   publicAgentInfo,
 } from './config.js'
 import { legacyProfile, profileForDefault, projectKey, saveUserAgentEntry, userAgentEntry, validateUserEntry } from './user-settings.js'
+import { DEFAULT_BRANCH_PREFIX, branchModeSettings, cleanBranchPrefix, repoFilters } from './branch-mode.js'
+import { batchFixSettings, cleanBatchFixes } from './batch-fixes.js'
 import { tokenEquals } from '../tokens.js'
 
 const TEST_TIMEOUT_MS = 15000
@@ -569,7 +571,15 @@ export function settingsRoutes({
       return fail(res, 400, 'invalid_settings', 'The settings must be an object.')
     // Old clients save only the default connection. Keep their saved profiles.
     const preserved = input && !Object.hasOwn(input, 'profiles') ? userAgentEntry(config.dir, env).entry?.profiles : undefined
-    const { entry, problems } = validateUserEntry({ ...input, ...(preserved ? { profiles: preserved } : {}) })
+    // Branch mode and batch fixes have their own routes (/branch-mode,
+    // /batch-fixes): a save of the connection keeps them.
+    const savedEntry = userAgentEntry(config.dir, env).entry || {}
+    const branch = Object.fromEntries(
+      ['branchMode', 'branchPrefix', 'batchFixes']
+        .filter((key) => !Object.hasOwn(input, key) && savedEntry[key] !== undefined)
+        .map((key) => [key, savedEntry[key]]),
+    )
+    const { entry, problems } = validateUserEntry({ ...input, ...(preserved ? { profiles: preserved } : {}), ...branch })
     if (!entry) return fail(res, 400, 'invalid_settings', problems.join('; '))
     // A Connect is testing what it saved and may put the old settings back:
     // a save now would be lost.
@@ -700,6 +710,64 @@ export function settingsRoutes({
       }
     }
     if (saveEntry(req, res, entry)) res.json(view())
+  })
+
+  // Agent branch mode (branch-mode.js): GET what is in effect, POST
+  // { enabled, prefix? } to save it for this project. No confirmation: it only
+  // narrows where the agent writes. The environment still wins.
+  const branchView = async () => {
+    const current = branchModeSettings(config, env)
+    // acp: whether it applies now (only a coding agent over ACP runs in a worktree).
+    // filters: the Git filters the repository's attributes name (['lfs']):
+    // the agent's checkout holds those files in their stored form.
+    return {
+      enabled: current.enabled,
+      prefix: current.prefix,
+      sources: current.sources,
+      defaultPrefix: DEFAULT_BRANCH_PREFIX,
+      acp: settings().backend === 'acp',
+      filters: await repoFilters(config),
+    }
+  }
+  router.get('/branch-mode', guard, async (req, res) => res.json(await branchView()))
+  router.post('/branch-mode', guard, async (req, res) => {
+    const { enabled, prefix } = req.body || {}
+    if (typeof enabled !== 'boolean') return fail(res, 400, 'invalid_settings', 'enabled: true or false.')
+    if (prefix !== undefined && prefix !== null && prefix !== '' && !cleanBranchPrefix(prefix))
+      return fail(res, 400, 'invalid_settings', 'prefix: letters, digits, "-", "_" and "/", at most 40 characters, such as "shapewall/".')
+    if (busy()) return fail(res, 409, 'agent_running', 'An answer is still being written. Stop it, then change this.')
+    const saved = userAgentEntry(config.dir, env)
+    if (saved.problem) return fail(res, 409, 'settings_file_invalid', saved.problem)
+    const entry = { ...(saved.entry || {}), branchMode: enabled }
+    delete entry.updatedAt
+    if (prefix === null || prefix === '') delete entry.branchPrefix
+    else if (prefix !== undefined) entry.branchPrefix = cleanBranchPrefix(prefix)
+    try {
+      saveUserAgentEntry(config.dir, entry, env)
+    } catch (error) {
+      return fail(res, 500, 'settings_not_saved', `The setting was not saved: ${error.message}`)
+    }
+    res.json(await branchView())
+  })
+
+  // Batch fixes (batch-fixes.js): GET what is in effect, POST { enabled, max? }
+  // to save it for this project. Off by default; max at most 20.
+  const batchView = () => ({ ...batchFixSettings(config, env), acp: settings().backend === 'acp' })
+  router.get('/batch-fixes', guard, (req, res) => res.json(batchView()))
+  router.post('/batch-fixes', guard, (req, res) => {
+    const { enabled, max } = req.body || {}
+    const { value, problems } = cleanBatchFixes({ enabled, ...(max === undefined ? {} : { max }) })
+    if (!value || typeof enabled !== 'boolean') return fail(res, 400, 'invalid_settings', problems.join('; ') || 'enabled: true or false.')
+    const saved = userAgentEntry(config.dir, env)
+    if (saved.problem) return fail(res, 409, 'settings_file_invalid', saved.problem)
+    const entry = { ...(saved.entry || {}), batchFixes: { ...(saved.entry?.batchFixes || {}), ...value } }
+    delete entry.updatedAt
+    try {
+      saveUserAgentEntry(config.dir, entry, env)
+    } catch (error) {
+      return fail(res, 500, 'settings_not_saved', `The setting was not saved: ${error.message}`)
+    }
+    res.json(batchView())
   })
 
   router.post('/test', guard, async (req, res) => {

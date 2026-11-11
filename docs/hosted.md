@@ -331,6 +331,16 @@ at the first refused request instead of failing quietly; opening a board you can
 this board" page (still a 404), with "Sign in as someone else" and "Back to your workspaces". Guests' comments are text only: an
 `@agent` in one is not a mention.
 
+Comments and replies can carry up to 4 images (PNG, JPEG, WebP or GIF, 5 MB each) and a drawing (boxes, arrows and pen strokes), as
+on a local board. The server checks each image by its bytes and cleans it in the same worker pool as pushed files (PNGs re-encoded,
+metadata stripped from the others), then stores it in the database, not in the board folder, so a push never removes it. Images count
+against the workspace's storage quota (a comment over it is refused with `quota_exceeded`, and pushes count them too) and are deleted
+with their comment, project or workspace. They are served only to people who can see that comment, as images with `nosniff` and a
+sandbox CSP, never as a page. Share link guests can draw but cannot attach images. Agents get each image and the drawing rendered on
+its capture (`files.images`, `files.markup`) as token API URLs. The workspace export holds the images (`comment-files/`) and lists
+them in `comments.json`; `shapewall share` moves a local comment's images (one request each, cleaned and counted like uploads) and
+its drawing. Backups hold them, since they are in the database.
+
 ## Agents
 
 ```sh

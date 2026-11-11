@@ -22,6 +22,7 @@ import { commentHelpers, commentRoutes } from './comments.js'
 import { boardRoutes, checkRoutes } from './board-routes.js'
 import { chatRoutes } from './chat.js'
 import { agentRoutes } from './routes-agents.js'
+import { batchRoutes } from './batch.js'
 import { DemoError } from './util.js'
 
 export { AGENT_INFO, DemoError } from './util.js'
@@ -29,9 +30,10 @@ export { AGENT_INFO, DemoError } from './util.js'
 // state: the saved object (fixtures.seedState). loadJson(url): reads one of
 // the export's files. now(): the clock. location: { project, share } from the
 // page URL (which project's board is open, a share link being opened).
-export function createDemoBackend({ state, loadJson, now = () => Date.now(), location = {}, save = () => {} }) {
+// onBatch(boardId): a board's batch of fixes moved (install.js tells the views).
+export function createDemoBackend({ state, loadJson, now = () => Date.now(), location = {}, save = () => {}, onBatch = () => {} }) {
   const iso = (offset = 0) => new Date(now() + offset).toISOString()
-  const ctx = { state, loadJson, now, location, save, iso, runs: new Map() }
+  const ctx = { state, loadJson, now, location, save, iso, onBatch, runs: new Map() }
   Object.assign(ctx, identity(ctx))
   Object.assign(ctx, consoleHelpers(ctx))
   Object.assign(ctx, boardData(ctx))
@@ -45,9 +47,20 @@ export function createDemoBackend({ state, loadJson, now = () => Date.now(), loc
     ...checkRoutes(ctx),
     ...chatRoutes(ctx),
     ...agentRoutes(ctx),
+    ...batchRoutes(ctx),
     ...authRoutes(ctx),
     ...workspaceRoutes(ctx),
   ]
+
+  // One route called from inside the backend (a batch starts each fix through
+  // the Fix with agent route): its result as is, a DemoError thrown.
+  ctx.route = async (method, path, body) => {
+    for (const [routeMethod, pattern, fn] of routes) {
+      const match = pattern.exec(path)
+      if (match && (!routeMethod || routeMethod === method)) return fn({ params: match.slice(1), body, search: '' })
+    }
+    throw new DemoError(404, 'not_found', 'No such API route.')
+  }
 
   async function handle({ method, path, search = '', body, signal }) {
     try {

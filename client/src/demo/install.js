@@ -8,7 +8,7 @@
 import { LayoutDashboard, RotateCcw } from 'lucide-react'
 import { leavePage } from '../lib/hooks'
 import { demoBoardFolders, demoFiles, notifyDemo, setDemoBridge } from '../lib/demo'
-import { notifyAgentsChanged } from '../lib/agentEvents'
+import { notifyAgentsChanged, notifyBatchChanged } from '../lib/agentEvents'
 import { createDemoBackend } from './backend'
 import { consoleTitle } from './titles'
 import { GUEST_NAME, STATE_VERSION, VIEW_AS, seedState } from './fixtures'
@@ -105,9 +105,11 @@ export async function installDemo(app) {
   }
   // The demo's agents (Agents page, chat picker, Fix with): every open view
   // of this page and the others refetches when they change (lib/agentEvents.js).
-  let agentsSeen = JSON.stringify(state.agents ?? null)
+  // How fixes run (state.agentWork: branch mode, batch fixes) counts too.
+  const agentsNow = () => JSON.stringify([state.agents ?? null, state.agentWork ?? null])
+  let agentsSeen = agentsNow()
   const agentsMoved = () => {
-    const now = JSON.stringify(state.agents ?? null)
+    const now = agentsNow()
     if (now === agentsSeen) return
     agentsSeen = now
     notifyAgentsChanged('event')
@@ -124,6 +126,7 @@ export async function installDemo(app) {
     state,
     loadJson,
     save,
+    onBatch: (boardId) => notifyBatchChanged(boardId),
     location: { project: params.get('project'), base: base(), fixturesAt: info.fixturesAt || null },
   })
   if (state !== saved) persist()
@@ -153,6 +156,9 @@ export async function installDemo(app) {
       for (const attachment of answer.attachments || []) keepFile(attachment)
       return sseResponse(answer.events, init.signal)
     }
+    // Images on a new comment or reply, kept like chat attachments.
+    for (const attachment of answer.attachments || []) keepFile(attachment)
+    if (answer.forget?.length) forgetFiles(answer.forget)
     return new Response(JSON.stringify(answer.json), { status: answer.status, headers: { 'Content-Type': 'application/json' } })
   }
 
@@ -162,6 +168,15 @@ export async function installDemo(app) {
     const files = readJson(FILES_KEY) || {}
     const used = Object.values(files).reduce((sum, value) => sum + value.length, 0)
     if (used + url.length <= FILES_BYTES_MAX) writeJson(FILES_KEY, { ...files, [attachment.file]: url })
+  }
+
+  function forgetFiles(list) {
+    const files = readJson(FILES_KEY) || {}
+    for (const file of list) {
+      demoFiles.delete(file)
+      delete files[file]
+    }
+    writeJson(FILES_KEY, files)
   }
 
   // ---- View as, sign-in and Reset, for the profile menu and banner ----

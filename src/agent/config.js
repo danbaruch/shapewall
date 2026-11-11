@@ -11,6 +11,8 @@
 
 import { ACP_COMMAND_VAR, ACP_FLAG, SETTINGS_SOURCE, acpCommand, extraVarNames } from './acp/command.js'
 import { implicitDefault, userAgentEntry } from './user-settings.js'
+import { validateBranchConfig } from './branch-mode.js'
+import { validateBatchConfig } from './batch-fixes.js'
 
 export const AGENT_BACKENDS = ['openai-compatible', 'acp']
 // A config is usually committed. A command in it would run on the machine of
@@ -133,6 +135,10 @@ export function validateAgent(raw, problems) {
     tools: raw.tools !== false,
     maxTokens,
     temperature,
+    // agent.branchMode, agent.branchPrefix (branch-mode.js), only when given.
+    ...validateBranchConfig(raw, problems),
+    // agent.batchFixes (batch-fixes.js), only when given.
+    ...validateBatchConfig(raw, problems),
   }
 }
 

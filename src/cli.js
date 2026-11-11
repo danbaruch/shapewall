@@ -5,7 +5,7 @@ import { devicesCommand } from './devices-cli.js'
 import { loadConfig } from './config.js'
 import { HELP, SECTIONS, VERSION, commandHelp } from './cli/help.js'
 import { parseArgs } from './cli/args.js'
-import { init, sitemap } from './cli/init.js'
+import { init, initCi, sitemap } from './cli/init.js'
 import { serve } from './cli/serve.js'
 import { notify } from './cli/notify.js'
 import { comments } from './cli/comments.js'
@@ -34,7 +34,7 @@ const COMMANDS = {
     return authCommand(loadConfig(flags.config), positional, flags, out)
   },
   init: async ({ flags, out, fetch }) => {
-    await init(flags, out, { fetch })
+    await (flags.ci ? initCi : init)(flags, out, { fetch })
     return 0
   },
   sitemap: async ({ positional, flags, out, fetch }) => {
@@ -82,6 +82,10 @@ const COMMANDS = {
   agent: async ({ positional, flags, out, err }) => {
     const { agentCommand } = await import('./agent/starter/cli.js')
     return agentCommand(positional, flags, out, err)
+  },
+  ci: async ({ positional, flags, out, fetch }) => {
+    const { ciCommand } = await import('./cli/ci.js')
+    return ciCommand(positional, flags, out, { fetch })
   },
   mcp: ({ flags, err }) => mcp(flags, err),
   doctor: ({ flags, out }) => doctor(flags, out),

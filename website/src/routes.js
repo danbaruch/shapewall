@@ -32,7 +32,7 @@ export const PAGES = [
     path: '/features',
     title: 'Features: page capture, comments, agent loop | Shapewall',
     description:
-      'Desktop, tablet and phone captures, live HTML, element comments, an agent loop, journeys, page history, GitHub issues, notifications and team workspaces.',
+      'Captures at every size, live HTML, comments with images and drawings, an agent loop, journeys, pull request captures, GitHub issues and team workspaces.',
     og: 'features',
     alt: 'Shapewall features: capture, the wall, element comments, the agent loop, journeys and page checks',
   },
@@ -162,7 +162,7 @@ export const DOC_GROUPS = [
         nav: 'Chat with an agent',
         title: 'Chat with an agent: connect a model | Shapewall',
         description:
-          'Connect the board chat to any OpenAI-compatible model: OpenAI, DeepSeek, OpenRouter, Ollama. Images, voice, read aloud, and board text kept as data.',
+          'Connect the board chat to a model or an agent CLI, let it fix comments on a branch or several at once, with images, voice and board text kept as data.',
       },
       {
         path: '/docs/starter-agent',
@@ -189,6 +189,16 @@ export const DOC_GROUPS = [
         title: 'Before and after, staging and production | Shapewall',
         description:
           'See each resolved comment before and after the change, put a branch preview beside the page as a variant, and compare staging with production.',
+      },
+      {
+        path: '/docs/pull-requests',
+        file: 'pull-requests',
+        repo: 'pull-requests',
+        nav: 'Capture on pull requests',
+        title: 'Capture on pull requests: a visual diff comment | Shapewall',
+        description:
+          'Capture every page before and after each pull request and keep one comment up to date with what changed, the pixel share and diff images.',
+        og: 'docs-compare',
       },
       {
         path: '/docs/page-checks',

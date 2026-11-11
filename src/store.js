@@ -11,6 +11,7 @@
 //   <out>/<board>/diffs/<a>_<b>/                        cached pixel diffs between environments
 //   <out>/<board>/journeys.json                         journeys made on the board
 //   <out>/<board>/comments.json                         comments (written atomically)
+//   <out>/<board>/comment-files/                        images on comments, rendered drawings (src/comment-media.js)
 //   <out>/<board>/capture.lock | status.json | capture.log
 //   <out>/<board>/watch.lock | agent/                   `shapewall watch` (one per board)
 //   <out>/events.jsonl (+ events.1.jsonl)              comment events from every process (src/event-log.js)
@@ -33,23 +34,32 @@ import { appendEvents } from './event-log.js'
 import {
   ANCHOR_SELECTOR_MAX,
   ANCHOR_SELECTOR_RE,
+  AGENT_STATUSES,
   ANCHOR_TEXT_MAX,
+  BRANCH_READY,
   COMMENT_BODY_MAX,
   CommentError,
   FIX_REF_MAX,
+  STORED_AGENT_STATUSES,
   cleanFixRef,
+  readImages,
   validateAnchor,
 } from './comment-fields.js'
+import { DrawingError, readDrawing, validateDrawing } from './comment-drawing.js'
+import { parseImageInputs, removeCommentMedia, removeImageFiles, saveCommentImages } from './comment-media.js'
 
 // A comment's pure field rules live in comment-fields.js (the demo's
 // in-browser backend uses them too); re-exported for everyone else.
 export {
+  AGENT_STATUSES,
   ANCHOR_SELECTOR_MAX,
   ANCHOR_SELECTOR_RE,
   ANCHOR_TEXT_MAX,
+  BRANCH_READY,
   COMMENT_BODY_MAX,
   CommentError,
   FIX_REF_MAX,
+  STORED_AGENT_STATUSES,
   cleanFixRef,
   validateAnchor,
 }
@@ -492,22 +502,55 @@ function readCommentStore(config, boardId) {
 // The same goes for the reopen count; mentions are read from the text.
 // Reactions read as { emoji, count, by } on the comment and each reply.
 function withAgentFields(comment) {
-  const replies = (Array.isArray(comment.replies) ? comment.replies : []).map((reply) => ({
-    ...reply,
-    reactions: publicReactions(reply.reactions),
-  }))
+  const replies = (Array.isArray(comment.replies) ? comment.replies : []).map((reply) =>
+    withMedia({
+      ...reply,
+      reactions: publicReactions(reply.reactions),
+    }),
+  )
+  const { agentBranch, ...rest } = withMedia(comment)
+  // The branch of a fix waiting on one (branch-ready), and only then.
+  const branch = comment.agentStatus === BRANCH_READY ? cleanAgentBranch(agentBranch) : null
   return {
-    ...comment,
+    ...rest,
+    ...(branch ? { agentBranch: branch } : {}),
     replies,
     reactions: publicReactions(comment.reactions),
     editedAt: typeof comment.editedAt === 'string' ? comment.editedAt : null,
-    agentStatus: AGENT_STATUSES.includes(comment.agentStatus) ? comment.agentStatus : null,
+    agentStatus: STORED_AGENT_STATUSES.includes(comment.agentStatus) ? comment.agentStatus : null,
     agentStatusAt: typeof comment.agentStatusAt === 'string' ? comment.agentStatusAt : null,
     reopenCount: Number.isSafeInteger(comment.reopenCount) && comment.reopenCount > 0 ? comment.reopenCount : 0,
     reopenedAt: typeof comment.reopenedAt === 'string' ? comment.reopenedAt : null,
     mentions: commentMentions({ body: comment.body, replies }),
     github: cleanGithub(comment.github),
   }
+}
+
+// Images and a drawing are optional: read back through their validators,
+// and left off entirely when there are none, so older files read unchanged.
+export function withMedia(item) {
+  const out = { ...item }
+  const images = readImages(item.images)
+  const drawing = readDrawing(item.drawing)
+  delete out.images
+  delete out.drawing
+  if (images.length) out.images = images
+  if (drawing) out.drawing = drawing
+  return out
+}
+
+// The images and drawing of a new comment or reply, checked (nothing
+// written yet). Throws CommentError.
+export function validateCommentMedia(input) {
+  const images = parseImageInputs(input?.images)
+  let drawing = null
+  try {
+    drawing = validateDrawing(input?.drawing)
+  } catch (error) {
+    if (error instanceof DrawingError) throw new CommentError(400, error.code, error.message)
+    throw error
+  }
+  return { images, drawing }
 }
 
 // `mention` keeps comments whose text or replies mention that handle.
@@ -590,8 +633,13 @@ async function logEvents(config, events) {
 
 export async function createComment(config, board, input, { now = new Date() } = {}) {
   const clean = validateCommentInput(config, board, input)
+  const media = validateCommentMedia(input)
   const file = commentsFile(config, board.id)
   let events = []
+  // Written before the lock (new random names), removed again if the
+  // comment is not saved.
+  const images = saveCommentImages(boardDir(config, board.id), media.images)
+  let stored = false
   const saved = await withFileLock(file, async () => {
     assertLocalComments(config, board.id)
     const store = readCommentStore(config, board.id)
@@ -612,11 +660,17 @@ export async function createComment(config, board, input, { now = new Date() } =
       agentStatusAt: null,
     }
     if (!comment.anchor) delete comment.anchor
+    if (images.length) comment.images = images
+    // The drawing belongs to the capture it was drawn on.
+    if (media.drawing) comment.drawing = { ...media.drawing, captureVersion: comment.captureVersion }
     store.comments.push(comment)
     writeJsonAtomic(file, { nextId: store.nextId + 1, comments: store.comments })
+    stored = true
     const result = withAgentFields(comment)
     events = await logEvents(config, createdEvents(board.id, result, now))
     return result
+  }).finally(() => {
+    if (!stored) removeImageFiles(boardDir(config, board.id), images)
   })
   emitCommentEvents(events)
   return saved
@@ -692,6 +746,8 @@ export async function deleteComment(config, boardId, commentId) {
     const kept = store.comments.filter((item) => item.id !== id)
     if (kept.length === store.comments.length) throw new CommentError(404, 'unknown_comment', 'That comment does not exist.')
     writeJsonAtomic(file, { nextId: store.nextId, comments: kept })
+    // Its images, its replies' images and its rendered drawings go with it.
+    for (const gone of store.comments.filter((item) => item.id === id)) removeCommentMedia(boardDir(config, boardId), gone)
     return true
   })
 }
@@ -704,16 +760,22 @@ export async function deleteComment(config, boardId, commentId) {
 // fixed; a person still resolves) or needs-human (the agent stopped and
 // asked). `shapewall watch` claims a comment by moving agentStatus from null
 // to queued under the file lock, so two watchers never take the same one.
+// Agent branch mode adds branch-ready (comment-fields.js), with the branch's
+// name in agentBranch while the status lasts.
 
-export const AGENT_STATUSES = ['queued', 'working', 'done', 'needs-human']
 const REPLIES_MAX = 200
+const AGENT_BRANCH_RE = /^[A-Za-z0-9][A-Za-z0-9_-]*(?:\/[A-Za-z0-9][A-Za-z0-9_-]*)*$/
 
 function cleanAgentStatus(value) {
-  if (value === null || AGENT_STATUSES.includes(value)) return value
-  throw new CommentError(400, 'invalid_agent_status', `Agent status must be one of ${AGENT_STATUSES.join(', ')} (or null to clear).`)
+  if (value === null || STORED_AGENT_STATUSES.includes(value)) return value
+  throw new CommentError(400, 'invalid_agent_status', `Agent status must be one of ${STORED_AGENT_STATUSES.join(', ')} (or null to clear).`)
 }
 
-function setAgent(comment, agentStatus, now) {
+const cleanAgentBranch = (value) => (typeof value === 'string' && value.length <= 120 && AGENT_BRANCH_RE.test(value) ? value : null)
+
+function setAgent(comment, agentStatus, now, branch = null) {
+  if (agentStatus === BRANCH_READY && cleanAgentBranch(branch)) comment.agentBranch = branch
+  else delete comment.agentBranch
   if ((comment.agentStatus ?? null) === agentStatus) return
   comment.agentStatus = agentStatus
   comment.agentStatusAt = agentStatus ? now.toISOString() : null
@@ -760,29 +822,46 @@ export function getComment(config, boardId, commentId) {
 }
 
 // Adds a reply. Returns { comment, reply }.
+// `images` and `drawing` as on a new comment (validateCommentMedia).
 export async function addReply(config, boardId, commentId, input, { now = new Date() } = {}) {
   const body = cleanBody(input?.body)
   const author = cleanAuthor(input?.author)
-  const { comment, result } = await changeComment(
-    config,
-    boardId,
-    commentId,
-    (target) => {
-      const replies = Array.isArray(target.replies) ? target.replies : []
-      if (replies.length >= REPLIES_MAX) throw new CommentError(409, 'too_many_replies', `A comment holds at most ${REPLIES_MAX} replies.`)
-      const reply = {
-        id: Math.max(0, ...replies.map((item) => Number(item.id) || 0)) + 1,
-        author,
-        body,
-        createdAt: now.toISOString(),
-      }
-      target.replies = [...replies, reply]
-      return reply
-    },
-    now,
-    (saved, reply) => replyEvents(boardId, saved, reply, now),
-  )
-  return { comment, reply: result }
+  const media = validateCommentMedia(input)
+  const images = saveCommentImages(boardDir(config, boardId), media.images)
+  let stored = false
+  try {
+    const { comment, result } = await changeComment(
+      config,
+      boardId,
+      commentId,
+      (target) => {
+        const replies = Array.isArray(target.replies) ? target.replies : []
+        if (replies.length >= REPLIES_MAX)
+          throw new CommentError(409, 'too_many_replies', `A comment holds at most ${REPLIES_MAX} replies.`)
+        const reply = {
+          id: Math.max(0, ...replies.map((item) => Number(item.id) || 0)) + 1,
+          author,
+          body,
+          createdAt: now.toISOString(),
+        }
+        if (images.length) reply.images = images
+        if (media.drawing) {
+          const version = String(target.pageId).startsWith('variant:')
+            ? null
+            : currentVersion(config, boardId, target.pageId, target.viewport)
+          reply.drawing = { ...media.drawing, captureVersion: version }
+        }
+        target.replies = [...replies, reply]
+        stored = true
+        return reply
+      },
+      now,
+      (saved, reply) => replyEvents(boardId, saved, reply, now),
+    )
+    return { comment, reply: withMedia(result) }
+  } finally {
+    if (!stored) removeImageFiles(boardDir(config, boardId), images)
+  }
 }
 
 // Adds or takes away a person's emoji reaction on a comment (replyId null)
@@ -820,7 +899,14 @@ export async function reactToComment(config, boardId, commentId, { emoji, replyI
 // meaning unset) the change is a compare-and-set: it happens only when the
 // comment is open and its status is one of them. Returns { comment, changed }.
 // `actor` names who made the change in its event.
-export async function setAgentStatus(config, boardId, commentId, agentStatus, { onlyFrom = null, now = new Date(), actor = null } = {}) {
+// `branch`: with branch-ready, the name of the branch the fix waits on.
+export async function setAgentStatus(
+  config,
+  boardId,
+  commentId,
+  agentStatus,
+  { onlyFrom = null, now = new Date(), actor = null, branch = null } = {},
+) {
   const next = cleanAgentStatus(agentStatus)
   let previous = null
   const { comment, changed } = await changeComment(
@@ -828,11 +914,11 @@ export async function setAgentStatus(config, boardId, commentId, agentStatus, { 
     boardId,
     commentId,
     (target) => {
-      const current = AGENT_STATUSES.includes(target.agentStatus) ? target.agentStatus : null
+      const current = STORED_AGENT_STATUSES.includes(target.agentStatus) ? target.agentStatus : null
       if (onlyFrom && (target.status !== 'open' || !onlyFrom.includes(current))) return false
       if (current === next) return false
       previous = current
-      setAgent(target, next, now)
+      setAgent(target, next, now, branch)
     },
     now,
     (saved) => updateEvents(boardId, { ...saved, agentStatus: previous }, saved, now, cleanActor(actor)),

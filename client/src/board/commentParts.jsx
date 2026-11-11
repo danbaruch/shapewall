@@ -84,18 +84,31 @@ const AGENT_LABELS = {
   working: { label: 'Agent working', tone: 'accent' },
   done: { label: 'Agent done', tone: 'ok' },
   'needs-human': { label: 'Needs a person', tone: 'warn' },
+  // Agent branch mode: the fix is committed on a branch, not in the checkout yet.
+  'branch-ready': { label: 'Fix ready on branch', tone: 'accent' },
 }
 
-export function AgentStatusChip({ status, at = null }) {
+// `branch`: the branch a branch-ready fix waits on (local boards know it).
+export function AgentStatusChip({ status, at = null, branch = null }) {
   const info = AGENT_LABELS[status]
   if (!info) return null
+  const named = status === 'branch-ready' && branch
+  const label = named ? `${info.label} ${branch}` : info.label
   return (
     <Badge
       tone={info.tone}
-      aria-label={at ? `Agent status: ${info.label} (${formatRelative(at)})` : `Agent status: ${info.label}`}
+      aria-label={at ? `Agent status: ${label} (${formatRelative(at)})` : `Agent status: ${label}`}
       data-sw-agent-status={status}
+      className={named ? 'max-w-full' : undefined}
     >
-      <Bot size={10} aria-hidden="true" /> {info.label}
+      <Bot size={10} aria-hidden="true" />{' '}
+      {named ? (
+        <>
+          {info.label} <span className="min-w-0 truncate font-mono">{branch}</span>
+        </>
+      ) : (
+        label
+      )}
     </Badge>
   )
 }

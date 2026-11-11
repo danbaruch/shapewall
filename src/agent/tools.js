@@ -2,17 +2,68 @@
 // writes require the per-turn owner capability. Page ids never become paths
 // or commands. Tool results remain quoted untrusted data (context.js).
 
+import fs from 'node:fs'
 import { feedbackContext, feedbackItem } from '../feedback.js'
 import { addReply, captureFiles, commentCounts, getComment, listComments, setAgentStatus, updateComment } from '../store.js'
 import { quoteData } from './context.js'
 
 const LIST_MAX = 100
 
+// A comment's images, as the model sees them: no local file paths.
+const imagesForModel = (images) =>
+  (images || []).map(({ name, mediaType, bytes, width, height }) => ({ name, mediaType, bytes, width, height }))
+
 // A comment for the model: no local file paths.
 export function commentForModel(config, board, comment) {
   const item = feedbackItem(feedbackContext(config, board), comment)
+  const { images = [], markup = null } = item.files || {}
   delete item.files
+  if (images.length) item.images = imagesForModel(images)
+  if (markup) item.drawingImage = 'attached as an image'
+  item.replies = item.replies.map((reply) => {
+    const out = { ...reply }
+    if (out.images) out.images = imagesForModel(out.images)
+    if ('markup' in out) {
+      if (out.markup) out.drawingImage = 'attached as an image'
+      delete out.markup
+    }
+    return out
+  })
   return item
+}
+
+// The images of a comment's thread, for the model: the comment's drawing
+// rendered on its screenshot, its images, then the newest replies' ones,
+// at most `max` in all. Each comes after a quoted note (untrusted data).
+export const COMMENT_MEDIA_MAX = 4
+export function commentMediaParts(config, board, comment, max = COMMENT_MEDIA_MAX) {
+  const item = feedbackItem(feedbackContext(config, board), comment)
+  const found = []
+  if (item.files.markup) found.push({ path: item.files.markup, mediaType: 'image/png', kind: 'the reviewer drawing on the screenshot' })
+  for (const image of item.files.images) found.push({ ...image, kind: 'an image the reviewer attached' })
+  for (const reply of [...item.replies].reverse()) {
+    if (reply.markup) found.push({ path: reply.markup, mediaType: 'image/png', reply: reply.id, kind: 'a drawing in a reply' })
+    for (const image of reply.images || []) found.push({ ...image, reply: reply.id, kind: 'an image attached to a reply' })
+  }
+  const parts = []
+  for (const media of found.slice(0, max)) {
+    let data
+    try {
+      data = fs.readFileSync(media.path).toString('base64')
+    } catch {
+      continue
+    }
+    parts.push({
+      type: 'text',
+      text: quoteData(
+        'comment-image',
+        { board: board.id, comment: comment.id, reply: media.reply ?? null },
+        { kind: media.kind, name: media.name || undefined, mediaType: media.mediaType },
+      ),
+    })
+    parts.push({ type: 'image', mediaType: media.mediaType, data })
+  }
+  return parts
 }
 
 export const BOARD_TOOLS = [

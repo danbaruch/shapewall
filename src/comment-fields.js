@@ -74,3 +74,54 @@ export function cleanFixRef(value) {
   if (ref.length > FIX_REF_MAX) throw new CommentError(400, 'invalid_fix_ref', `The fix reference is limited to ${FIX_REF_MAX} characters.`)
   return ref || null
 }
+
+// A comment's agent status: queued (handed to an agent), working, done (the
+// agent thinks it is fixed; a person still resolves) or needs-human (the
+// agent stopped and asked). These are the ones agents and people set (CLI,
+// MCP, the API). Shapewall also stores branch-ready: an agent in branch mode
+// committed its fix on a branch, waiting to be applied to the checkout
+// (src/agent/branch-mode.js). Every reader and validator takes all five.
+export const AGENT_STATUSES = ['queued', 'working', 'done', 'needs-human']
+export const BRANCH_READY = 'branch-ready'
+export const STORED_AGENT_STATUSES = [...AGENT_STATUSES, BRANCH_READY]
+
+// Images on comments and replies: the chat's attachment limits
+// (src/agent/threads.js ATTACHMENTS_MAX, ATTACHMENT_BYTES_MAX), checked on
+// the server by src/comment-media.js and in the demo's backend.
+export const COMMENT_IMAGES_MAX = 4
+export const COMMENT_IMAGE_BYTES_MAX = 5 * 1024 * 1024
+export const COMMENT_IMAGE_TYPES = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif' }
+// A stored image's file name: 24 hex characters and its type's extension.
+export const COMMENT_FILE_RE = /^[a-f0-9]{24}\.(png|jpg|webp|gif)$/
+const IMAGE_NAME_MAX = 120
+
+// An image's display name: one line, no markup characters.
+export const cleanImageName = (value, fallback) =>
+  String(value || '')
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u001f\u007f<>"'`\\/]/g, '')
+    .trim()
+    .slice(0, IMAGE_NAME_MAX) || fallback
+
+// A stored image record as everyone reads it ({ id, file, name, mediaType,
+// bytes, width, height }); anything else (a hand-edited file) is dropped.
+export function readImages(list) {
+  if (!Array.isArray(list)) return []
+  return list
+    .filter((item) => item && typeof item === 'object' && COMMENT_FILE_RE.test(String(item.file || '')))
+    .slice(0, COMMENT_IMAGES_MAX)
+    .map((item) => {
+      const ext = item.file.split('.').pop()
+      const mediaType = Object.keys(COMMENT_IMAGE_TYPES).find((type) => COMMENT_IMAGE_TYPES[type] === ext)
+      const size = (value) => (Number.isSafeInteger(value) && value > 0 ? value : null)
+      return {
+        id: item.file.split('.')[0],
+        file: item.file,
+        name: cleanImageName(item.name, `image.${ext}`),
+        mediaType,
+        bytes: size(item.bytes),
+        width: size(item.width),
+        height: size(item.height),
+      }
+    })
+}

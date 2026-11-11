@@ -154,6 +154,9 @@ as `baseUrl`), runs `npx shapewall doctor --install-browser` (plus `npx playwrig
 the Playwright container image), then `shapewall capture`, and uploads `.shapewall/` or a `shapewall export` as an artifact.
 `shapewall doctor` exits 1 when a check fails, so it also works as a first CI step.
 
+For a comment on every pull request with what changed (before, after and diff images), `shapewall init --ci` writes a ready GitHub
+Actions workflow: see [Capture on pull requests](pull-requests.md).
+
 ## Resource use
 
 Each concurrent page is a browser context (roughly 100 to 300 MB with Chromium). The default concurrency of 2 suits a laptop; raise it on

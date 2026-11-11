@@ -9,6 +9,7 @@ import {
   CAPTURE_FILE_RE,
   VERSION_FILE_RE,
   VERSION_RE,
+  boardDir,
   listComments,
   readManifest,
   readMigration,
@@ -16,6 +17,8 @@ import {
   writeMigration,
 } from '../store.js'
 import { listJourneys } from '../journeys.js'
+import { COMMENT_IMAGE_BYTES_MAX, readImages } from '../comment-fields.js'
+import { commentFilePath } from '../comment-media.js'
 import { createRemote, pushDefinition, pushFiles, readCaptureFile, remoteOrigin, remoteSettings } from './remote.js'
 import { login } from './login.js'
 import { portableChecks } from '../checks/transport.js'
@@ -57,6 +60,11 @@ export function portableComment(comment, projectPath, boardId) {
   out.localId = comment.id
   out.importKey = hash(`${projectPath}\0${boardId}\0${comment.id}\0${comment.createdAt}`)
   out.reactions = (comment.reactions || []).map(({ emoji, count }) => ({ emoji, count }))
+  // A drawing goes as its shapes and the capture it was drawn on; images go
+  // in their own requests first (commentUploads) and are listed by ref.
+  const drawing = (value) =>
+    value?.shapes?.length ? { shapes: value.shapes, ...(value.captureVersion ? { captureVersion: value.captureVersion } : {}) } : null
+  if (drawing(comment.drawing)) out.drawing = drawing(comment.drawing)
   out.replies = (comment.replies || []).map((reply) => ({
     author: reply.author,
     body: reply.body,
@@ -65,8 +73,54 @@ export function portableComment(comment, projectPath, boardId) {
     ...(reply.agent ? { agent: true } : {}),
     ...(reply.guest ? { guest: true } : {}),
     reactions: (reply.reactions || []).map(({ emoji, count }) => ({ emoji, count })),
+    ...(drawing(reply.drawing) ? { drawing: drawing(reply.drawing) } : {}),
   }))
   return out
+}
+
+// The images of a local comment and its replies, read from the board's
+// comment-files/ (regular files only, at most the cleaned-size cap), as
+// uploads ({ ref, name, mediaType, data }) and listed on the portable
+// comment by ref. The ref hashes the comment, the slot and the bytes, so it
+// is the same on every retry and differs for any change.
+const COMMENT_IMAGE_READ_MAX = 2 * COMMENT_IMAGE_BYTES_MAX
+export function commentUploads(config, boardId, comment, portable) {
+  const folder = boardDir(config, boardId)
+  const uploads = []
+  const refs = (images, slot) =>
+    readImages(images).flatMap((image, index) => {
+      const file = commentFilePath(folder, image.file)
+      let data = null
+      try {
+        const stat = file ? fs.lstatSync(file) : null
+        if (stat?.isFile() && stat.size <= COMMENT_IMAGE_READ_MAX) data = fs.readFileSync(file)
+      } catch {
+        data = null
+      }
+      if (!data) return []
+      const ref = hash(`${portable.importKey}\0${slot}:${index}\0${hash(data.toString('base64'))}`)
+      uploads.push({ ref, name: image.name, mediaType: image.mediaType, data })
+      return [{ ref, name: image.name }]
+    })
+  const own = refs(comment.images, 'comment')
+  if (own.length) portable.images = own
+  ;(comment.replies || []).forEach((reply, index) => {
+    const listed = refs(reply.images, `reply-${index}`)
+    if (listed.length && portable.replies[index]) portable.replies[index].images = listed
+  })
+  return uploads
+}
+
+// Portable comments of a board and the images each one lists, by import key.
+function portableComments(config, board, projectPath) {
+  const uploads = new Map()
+  const comments = listComments(config, board.id).map((item) => {
+    const portable = portableComment(item, projectPath, board.id)
+    const files = commentUploads(config, board.id, item, portable)
+    if (files.length) uploads.set(portable.importKey, files)
+    return portable
+  })
+  return { comments, uploads }
 }
 
 export function shareFiles(config, board) {
@@ -186,12 +240,16 @@ async function runShare(
   const origin = remoteOrigin(flags, env)
   const boards = flags.board ? [getBoard(config, flags.board)] : config.boards
   const projectPath = fs.realpathSync(config.dir)
-  const plans = boards.map((board) => ({
-    board,
-    checks: portableChecks(config, board, { includeChecks: !!flags['include-checks'] }),
-    comments: flags['no-comments'] ? [] : listComments(config, board.id).map((item) => portableComment(item, projectPath, board.id)),
-    files: shareFiles(config, board),
-  }))
+  const plans = boards.map((board) => {
+    const portable = flags['no-comments'] ? { comments: [], uploads: new Map() } : portableComments(config, board, projectPath)
+    return {
+      board,
+      checks: portableChecks(config, board, { includeChecks: !!flags['include-checks'] }),
+      comments: portable.comments,
+      uploads: portable.uploads,
+      files: shareFiles(config, board),
+    }
+  })
   if (flags['dry-run']) {
     for (const { board, comments, files, checks } of plans)
       out(
@@ -269,7 +327,7 @@ async function runShare(
         frozen = true
         // Read again after freezing under the comment lock: no edits made
         // between planning and approval are lost from this move.
-        plan.comments = listComments(config, board.id).map((item) => portableComment(item, projectPath, board.id))
+        Object.assign(plan, portableComments(config, board, projectPath))
       }
       if (
         !project.token.scopes.includes('import') &&
@@ -309,6 +367,18 @@ async function runShare(
       if (!flags['no-comments'] && project.token.scopes.includes('import')) {
         let importedCount = 0
         for (const comments of importBatches(plan.comments)) {
+          // Their images first, one request each, cleaned and counted
+          // against the quota by the server like any upload.
+          for (const comment of comments) {
+            for (const upload of plan.uploads?.get(comment.importKey) || []) {
+              if (signal?.aborted) throw new Error('Share cancelled.')
+              await remote.importImage(board.id, {
+                sessionId,
+                ref: upload.ref,
+                image: { name: upload.name, mediaType: upload.mediaType, data: upload.data.toString('base64') },
+              })
+            }
+          }
           importedCount += comments.length
           const result = await remote.importComments(board.id, { sessionId, batchKey: hash({ board: board.id, comments }), comments })
           out(

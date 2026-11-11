@@ -147,6 +147,25 @@ When the chat panel drives an agent CLI over ACP:
 - **Clear forgets.** **Clear this thread** stops the agent process of that thread, so a poisoned conversation does not carry on in the
   agent's memory.
 - **No MCP servers** are added to the session.
+- **Branch mode keeps the checkout out of reach.** With [Work on a branch](agents.md#work-on-a-branch) on, the agent's session,
+  file access and commands are a copy of `HEAD` in `.shapewall/agent-worktrees/`. No Git command Shapewall runs for it runs a
+  program from the repository or your Git config:
+  - the copy is written by Shapewall from the commit's blobs (`git ls-tree` and `git cat-file --batch`), with their modes and
+    symlinks; there is no checkout, so no smudge filter runs;
+  - the commit is built from files Shapewall reads itself and writes with `git hash-object --no-filters`;
+  - Apply, the conflict check (`git merge-tree`), Undo (`git revert`) and the status checks override every `filter.*`, `merge.*`
+    and `diff.*` driver your config defines with an empty command, so no clean, smudge or process filter, merge driver, textconv or
+    external diff runs. Attribute files (`.gitattributes`, `$GIT_DIR/info/attributes`) only name drivers; with every configured
+    command overridden, a name runs nothing. `core.attributesFile` is `/dev/null`;
+  - hooks (`core.hooksPath=/dev/null`), fsmonitor, signing and submodule recursion are off, the system config is ignored and Git's
+    environment is cleared of `GIT_*` variables.
+
+  Because no filter runs, Git LFS files are pointer files in the copy, and Apply refuses a change to a file a filter handles.
+
+- **Branch mode never overwrites what Git does not track.** The agent's commit leaves out every file the ignore rules of `HEAD`
+  ignore, whatever the agent wrote to `.gitignore` (and the answer says when it changed one). Before Apply and Undo, Shapewall lists
+  every path they write and refuses, changing nothing and naming the files, when one of them is an untracked or ignored file in your
+  checkout (an `.env`), or when a folder it needs is an untracked file or a symlink.
 
 ### Remote watchers do not get the project token
 

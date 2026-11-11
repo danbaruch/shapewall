@@ -22,6 +22,7 @@ import path from 'node:path'
 import express from 'express'
 import { ID_PATTERNS, newId, sha256 } from './crypto.js'
 import { transaction } from './db.js'
+import { commentFileBytes } from './comment-files.js'
 import { deleteWorkspaceRows, planWorkspaceExport, writeWorkspaceExport } from './admin.js'
 import { createProjectStore } from './projects.js'
 import { ZIP_MAX_BYTES } from './zip.js'
@@ -140,7 +141,8 @@ export function listWorkspaces(db, { quotas = null } = {}) {
         .map((row) => row.handle),
       projects: t.get('SELECT COUNT(*) AS n FROM projects WHERE workspace_id = :ws').n,
       boards: boards.n,
-      bytes: boards.bytes,
+      // Pushed boards plus images on comments: what the storage quota counts.
+      bytes: boards.bytes + commentFileBytes(t),
       storageQuotaBytes: quota ? quota.storageBytes : null,
       lastPushAt: boards.last_push || null,
       shareLinksOn: Boolean(workspace.share_links),

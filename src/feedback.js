@@ -9,15 +9,71 @@ import path from 'node:path'
 import { quoteData } from './agent/context.js'
 import { boardViewports, frameSize, getBoard, joinUrl } from './config.js'
 import { boardDir, entryVersion, listComments, readManifest, readVariants, resolveFile } from './store.js'
+import { commentFilePath, markupFile } from './comment-media.js'
 
 // What the items of one board need to know about its pages and variants.
-export function feedbackContext(config, board) {
+// `media` finds a comment's files: imagePath(image) and markupPath({
+// commentId, replyId, drawing, screenshot }) give a path or null. The local
+// store's by default; the hosted server passes its own.
+export function feedbackContext(config, board, { media = null } = {}) {
+  const folder = boardDir(config, board.id)
   return {
     config,
     board,
     pages: new Map(board.pages.map((page) => [page.id, page])),
     variants: new Map(readVariants(config, board.id).map((variant) => [`variant:${variant.id}`, variant])),
     manifest: readManifest(config, board.id),
+    media: media || {
+      imagePath: (image) => commentFilePath(folder, image.file),
+      markupPath: (input) => markupFile(folder, input),
+    },
+  }
+}
+
+// The images of a comment or reply as agents get them: the file, its size
+// and type (the name is the uploader's, untrusted like the text).
+function imageFiles(context, images) {
+  return (images || [])
+    .map((image) => ({
+      name: image.name,
+      path: context.media.imagePath(image),
+      mediaType: image.mediaType,
+      bytes: image.bytes,
+      width: image.width,
+      height: image.height,
+    }))
+    .filter((image) => image.path)
+}
+
+// The screenshot a drawing was made on: that capture version's, or the
+// latest when it is the latest (or the version is not kept).
+function drawnOn(context, comment, page, name, kind, drawing) {
+  const { config, board } = context
+  if (!name) return null
+  const latest = resolveFile(config, board.id, kind, `${name}.${comment.viewport}.png`)
+  const current = page && latest ? entryVersion(context.manifest?.pages?.[page.id]?.[comment.viewport], context.manifest) : null
+  const made = drawing?.captureVersion
+  if (page && made && made !== current) {
+    return { file: resolveFile(config, board.id, 'versions', `${name}.${comment.viewport}.${made}.png`), previous: true }
+  }
+  return { file: latest, previous: false }
+}
+
+function drawingSummary(context, comment, page, name, kind, drawing, replyId = null) {
+  if (!drawing) return { drawing: null, markup: null }
+  const on = drawnOn(context, comment, page, name, kind, drawing)
+  const markup = on?.file
+    ? context.media.markupPath({ commentId: comment.id, replyId, drawing, screenshot: on.file, kind: on.previous ? 'versions' : kind })
+    : null
+  return {
+    drawing: {
+      shapes: drawing.shapes.length,
+      tools: [...new Set(drawing.shapes.map((shape) => shape.tool))],
+      captureVersion: drawing.captureVersion || null,
+      // Drawn on a capture the page has been captured again since.
+      onPreviousCapture: Boolean(on?.previous),
+    },
+    markup,
   }
 }
 
@@ -71,6 +127,7 @@ export function feedbackItem(context, comment) {
   const size = frame ? { width: frame.width, height: frame.height } : { width: 0, height: 0 }
   const name = page ? page.id : variant?.id
   const kind = page ? 'captures' : 'variants'
+  const drawn = drawingSummary(context, comment, page, name, kind, comment.drawing)
   return {
     id: comment.id,
     status: comment.status,
@@ -92,6 +149,8 @@ export function feedbackItem(context, comment) {
     fixRef: comment.fixRef || null,
     agentStatus: comment.agentStatus || null,
     agentStatusAt: comment.agentStatusAt || null,
+    // branch-ready: the branch the agent's fix waits on (agent branch mode).
+    ...(comment.agentBranch ? { agentBranch: comment.agentBranch } : {}),
     // Handles mentioned in the comment or its replies ("@robin" -> "robin").
     mentions: comment.mentions || [],
     reopenCount: comment.reopenCount || 0,
@@ -99,15 +158,23 @@ export function feedbackItem(context, comment) {
     editedAt: comment.editedAt || null,
     // The GitHub issue made from it and the pull requests linked to it.
     github: comment.github || { issue: null, pulls: [] },
-    replies: (comment.replies || []).map((reply) => ({
-      id: reply.id,
-      author: reply.author,
-      ...(reply.guest ? { guest: true } : {}),
-      ...(reply.handle ? { handle: reply.handle } : {}),
-      ...(reply.agent ? { agent: true } : {}),
-      body: reply.body,
-      createdAt: reply.createdAt,
-    })),
+    replies: (comment.replies || []).map((reply) => {
+      const drawn = drawingSummary(context, comment, page, name, kind, reply.drawing, reply.id)
+      const images = imageFiles(context, reply.images)
+      return {
+        id: reply.id,
+        author: reply.author,
+        ...(reply.guest ? { guest: true } : {}),
+        ...(reply.handle ? { handle: reply.handle } : {}),
+        ...(reply.agent ? { agent: true } : {}),
+        body: reply.body,
+        createdAt: reply.createdAt,
+        // Only when the reply has them: images (paths) and a drawing with
+        // its rendered markup PNG.
+        ...(images.length ? { images } : {}),
+        ...(drawn.drawing ? { drawing: drawn.drawing, markup: drawn.markup } : {}),
+      }
+    }),
     page: page
       ? {
           id: page.id,
@@ -130,7 +197,10 @@ export function feedbackItem(context, comment) {
     // screenshot / liveHtml: what the comment was made on (version: that
     // capture version; the latest capture when that one is gone).
     // latestScreenshot / latestLiveHtml / latestVersion: the page as it is now.
-    files: commentFiles(context, comment, page, name, kind),
+    // images: what the reviewer attached ({ name, path, mediaType, bytes,
+    // width, height }); markup: the drawing on its screenshot as a PNG.
+    drawing: drawn.drawing,
+    files: { ...commentFiles(context, comment, page, name, kind), images: imageFiles(context, comment.images), markup: drawn.markup },
   }
 }
 
@@ -157,7 +227,9 @@ export function formatFeedbackItem(item, { cwd = process.cwd() } = {}) {
   const rel = (file) => (file ? (/^https?:\/\//.test(file) ? file : path.relative(cwd, file) || file) : 'not captured')
   const lines = []
   const where = item.page ? `${item.page.title} (${item.page.path})` : `Variant: ${item.variant?.title || 'removed'}`
-  const agent = item.agentStatus ? ` [agent: ${item.agentStatus}]` : ''
+  const agent = item.agentStatus
+    ? ` [agent: ${item.agentStatus}${item.agentStatus === 'branch-ready' && item.agentBranch ? ` on ${item.agentBranch}` : ''}]`
+    : ''
   const reopened = item.reopenCount && item.status === 'open' ? ' [reopened]' : ''
   const guest = item.authorGuest ? ' [guest]' : ''
   // A guest's name gets its own warning line below.
@@ -172,6 +244,9 @@ export function formatFeedbackItem(item, { cwd = process.cwd() } = {}) {
   lines.push(`    at: ${item.position.x},${item.position.y} px (${item.position.xPercent}% / ${item.position.yPercent}%)`)
   if (item.page) lines.push(`    url: ${item.page.url}`)
   lines.push(`    screenshot: ${rel(item.files.screenshot)}`)
+  for (const image of item.files.images || []) lines.push(`    image: ${rel(image.path)} (${image.mediaType}, ${image.bytes} bytes)`)
+  if (item.files.markup)
+    lines.push(`    drawing: ${rel(item.files.markup)}${item.drawing?.onPreviousCapture ? ' (on the previous capture)' : ''}`)
   if (item.files.latestScreenshot && item.files.latestScreenshot !== item.files.screenshot) {
     lines.push(`    latest screenshot: ${rel(item.files.latestScreenshot)} (captured again since the comment)`)
   }
@@ -183,6 +258,8 @@ export function formatFeedbackItem(item, { cwd = process.cwd() } = {}) {
     const [first, ...rest] = reply.body.split('\n')
     lines.push(`    > ${reply.author}${reply.guest ? ' [guest]' : ''}: ${first}`)
     for (const line of rest) lines.push(`    >   ${line}`)
+    for (const image of reply.images || []) lines.push(`    >   image: ${rel(image.path)}`)
+    if (reply.markup) lines.push(`    >   drawing: ${rel(reply.markup)}`)
   }
   return lines
 }

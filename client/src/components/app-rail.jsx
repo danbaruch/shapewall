@@ -249,7 +249,7 @@ function focusAfter(node, skip) {
 // Escape, a click outside or a choice in it closes it.
 function FlyoutItem({ item, flyouts }) {
   const { id, label, icon: Icon, active, flyout, dot } = item
-  const { state, intent, width } = flyouts
+  const { state, intent, width, disabled } = flyouts
   const rest = Object.fromEntries(Object.entries(item).filter(([key]) => key.startsWith('data-')))
   const contentId = useId()
   const icon = useRef(null)
@@ -339,12 +339,12 @@ function FlyoutItem({ item, flyouts }) {
             data-sw-rail-flyout-trigger={id}
             data-state={open ? (state.pinned ? 'pinned' : 'open') : 'closed'}
             {...rest}
-            onPointerEnter={hover(() => intent.enterIcon(id))}
+            onPointerEnter={hover(() => !disabled && intent.enterIcon(id))}
             onPointerLeave={hover(() => intent.leave())}
             // detail 0: Enter or Space, not a pointer.
-            onClick={(event) => intent.toggle(id, event.detail === 0 ? 'key' : 'click')}
+            onClick={(event) => !disabled && intent.toggle(id, event.detail === 0 ? 'key' : 'click')}
             onKeyDown={(event) => {
-              if (event.key !== 'ArrowRight') return
+              if (event.key !== 'ArrowRight' || disabled) return
               event.preventDefault()
               if (!pinned) intent.toggle(id, 'key')
             }}
@@ -415,16 +415,18 @@ function ItemList({ items, expanded, link, label, flyouts, flush }) {
 }
 
 // The open flyout, if any, for the whole rail: one at a time.
-function useFlyouts(expanded, width) {
+// `disabled`: none opens (the board's drawing mode: the docked drawing bar
+// keeps the top of the canvas to itself); one that is open closes.
+function useFlyouts(expanded, width, disabled = false) {
   const [state, setState] = useState(() => ({ id: null, pinned: false, via: null, swap: false }))
   const intent = useRef(null)
   if (!intent.current) intent.current = createHoverIntent({ onChange: setState })
   useEffect(() => () => intent.current.dispose(), [])
   // Expanding (the button, Ctrl+B) shows it all in place: close the flyout.
   useEffect(() => {
-    if (expanded) intent.current.close()
-  }, [expanded])
-  return { state, intent: intent.current, width }
+    if (expanded || disabled) intent.current.close()
+  }, [expanded, disabled])
+  return { state, intent: intent.current, width, disabled }
 }
 
 // title: the name beside the logo when expanded (the project, the workspace).
@@ -446,12 +448,13 @@ export function AppRail({
   profile,
   children,
   className,
+  flyoutsDisabled = false,
 }) {
   const HomeTag = homeTo && link ? link : 'a'
   const homeProps = homeTo && link ? { to: homeTo } : { href: home }
   const toggleLabel = expanded ? 'Collapse sidebar' : 'Expand sidebar'
   const { width, dragging, handle } = useSidebarWidth()
-  const flyouts = useFlyouts(expanded, width)
+  const flyouts = useFlyouts(expanded, width, flyoutsDisabled)
   // Collapsed, the sections with no flyout of their own (a workspace's or
   // the account's) open from the active item's icon instead of each taking
   // a row of the rail.

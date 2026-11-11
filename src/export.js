@@ -86,6 +86,14 @@ export async function exportStatic(
     files += copyMatching(path.join(source, 'variants'), path.join(dir, 'variants'), media)
     // Previous screenshots, for before/after on resolved comments (not their live HTML).
     if (includeComments) files += copyMatching(path.join(source, 'versions'), path.join(dir, 'versions'), (name) => name.endsWith('.png'))
+    // Images on the exported comments and their replies (not markup PNGs,
+    // which are for agents, nor files of deleted comments).
+    if (includeComments) {
+      const kept = new Set()
+      for (const comment of listComments(config, board.id))
+        for (const item of [comment, ...comment.replies]) for (const image of item.images || []) kept.add(image.file)
+      files += copyMatching(path.join(source, 'comment-files'), path.join(dir, 'comment-files'), (name) => kept.has(name))
+    }
     files += await exportCompare(config, board, dir)
   }
   return { out: target, boards: config.boards.length, files }

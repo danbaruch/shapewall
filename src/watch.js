@@ -108,6 +108,10 @@ export function commentEnv(config, board, item, commentFile) {
     SHAPEWALL_LIVE_HTML: item.files.liveHtml || '',
     // The page as it is now, when it was captured again since the comment.
     SHAPEWALL_LATEST_SCREENSHOT: item.files.latestScreenshot || '',
+    // The reviewer's drawing on the screenshot (a PNG), and their images
+    // (paths, one per line); the comment file has their sizes and types.
+    SHAPEWALL_MARKUP: item.files.markup || '',
+    SHAPEWALL_IMAGES: (item.files.images || []).map((image) => image.path).join('\n'),
     SHAPEWALL_COMMENT_FILE: commentFile,
     SHAPEWALL_CONFIG: config.file || '',
   }

@@ -524,6 +524,53 @@ test('scripted chat: streams, asks before it edits, and Stop ends the answer', a
   assert.equal((await viewer.call('GET', '/api/agent/boards/demo/threads')).status, 404)
 })
 
+test('batch fixes in the demo: off by default, then one fix after another through the Fix with agent route', async () => {
+  const { call, state } = demo()
+  assert.equal((await call('GET', '/api/agent/settings/batch-fixes')).json.enabled, false)
+  assert.equal((await call('GET', '/api/agent/settings/branch-mode')).json.enabled, false)
+  // #2 is open; #1 is open with an earlier fix done, which may be fixed again.
+  const ids = [2, 1]
+  assert.equal((await call('POST', '/api/agent/boards/demo/batch', { commentIds: ids })).status, 403)
+  assert.equal((await call('POST', '/api/agent/settings/batch-fixes', { enabled: true, max: 21 })).status, 400)
+  assert.equal((await call('POST', '/api/agent/settings/batch-fixes', { enabled: true, max: 1 })).json.max, 1)
+  assert.equal((await call('POST', '/api/agent/settings/branch-mode', { enabled: true })).json.enabled, true)
+  assert.deepEqual(state.agentWork.batchFixes, { enabled: true, max: 1 })
+  assert.equal((await call('POST', '/api/agent/boards/demo/batch', { commentIds: [999999] })).status, 404)
+
+  const started = await call('POST', '/api/agent/boards/demo/batch', { commentIds: ids })
+  assert.equal(started.status, 200)
+  assert.equal(started.json.batch.requested, 2)
+  assert.deepEqual(
+    started.json.batch.items.map((item) => item.commentId),
+    ids.slice(0, 1),
+    'only the first max run',
+  )
+  assert.equal((await call('POST', '/api/agent/boards/demo/batch', { commentIds: ids })).status, 409)
+  // The item asks before it edits; the batch waits, and the card answers in its thread.
+  let batch = null
+  for (let tries = 0; tries < 200; tries += 1) {
+    batch = (await call('GET', '/api/agent/boards/demo/batch')).json.batch
+    if (batch.state === 'waiting') {
+      const answer = await call('POST', `/api/agent/boards/demo/threads/${batch.waiting.threadId}/permissions/${batch.waiting.card.id}`, {
+        optionId: 'allow',
+      })
+      assert.equal(answer.json.state, 'approved')
+    }
+    if (['done', 'stopped', 'cancelled'].includes(batch.state)) break
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+  assert.equal(batch.state, 'done')
+  assert.deepEqual(
+    batch.items.map((item) => item.state),
+    ['fixed'],
+  )
+  const fixed = (await call('GET', '/api/boards/demo/comments')).json.comments.find((item) => item.id === ids[0])
+  assert.equal(fixed.agentStatus, 'branch-ready')
+  assert.equal(fixed.agentBranch, `shapewall/comment-${ids[0]}`)
+  assert.equal((await call('DELETE', '/api/agent/boards/demo/batch')).json.batch, null)
+  assert.equal((await call('GET', '/api/agent/boards/demo/batch')).json.batch, null)
+})
+
 test('one-click sign in and sign up', async () => {
   const { call, state } = demo()
   await call('POST', '/auth/logout', {})

@@ -9,7 +9,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import * as z from 'zod'
 import { untrustedJson } from '../feedback.js'
 import { cropAround } from '../png.js'
-import { AGENT_STATUSES } from '../store.js'
+import { AGENT_STATUSES, STORED_AGENT_STATUSES } from '../store.js'
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version
 
@@ -75,7 +75,7 @@ export async function createRemoteMcpServer({ remote, readOnly = false }) {
         page: z.string().max(64).optional().describe('Only comments on this page id (and its variants)'),
         journey: z.string().max(64).optional().describe('Only comments on pages of this journey'),
         agentStatus: z
-          .enum([...AGENT_STATUSES, 'none'])
+          .enum([...STORED_AGENT_STATUSES, 'none'])
           .optional()
           .describe('Only comments with this agent status ("none" = no agent has taken it)'),
         mention: z
