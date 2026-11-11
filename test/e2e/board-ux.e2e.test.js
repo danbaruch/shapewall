@@ -16,7 +16,7 @@ import { startDemoSite } from '../../examples/demo-site/server.js'
 import { normalizeConfig } from '../../src/config.js'
 import { runCapture } from '../../src/capture/capture.js'
 import { createApp } from '../../src/server/app.js'
-import { createComment, listComments } from '../../src/store.js'
+import { createComment, listComments, setAgentStatus } from '../../src/store.js'
 import { ROOT_DIR, listen, liveElementBox } from './helpers.js'
 
 const SHOTS = process.env.SHAPEWALL_SHOTS ? path.resolve(process.env.SHAPEWALL_SHOTS) : null
@@ -526,9 +526,10 @@ test('desktop: the composer keeps off its element, a written comment is never re
     await page.waitForSelector('[data-sw-thread-popover]')
     await page.waitForSelector('[data-sw-thread-target]', { state: 'attached' })
     await apart('[data-sw-thread-popover]', '[data-sw-thread-target]', 'the thread')
-    // Off the other pin first: its hover card would take the Esc.
-    await page.mouse.move(...middle(cta))
-    await page.waitForTimeout(300)
+    // With the mouse resting on another pin (its preview is up), Esc still
+    // closes the thread first.
+    await page.hover(`[data-sw-pin="${other.id}"]`)
+    await page.waitForSelector(`[data-sw-pin-preview="${other.id}"]`)
     await page.keyboard.press('Escape')
     await page.waitForSelector('[data-sw-thread-popover]', { state: 'detached' })
 
@@ -688,10 +689,117 @@ test('desktop: a thread or composer card is dragged by its header, stays on the 
       `composer at ${after.left},${after.top}, wanted ${wantLeft},${wantTop} from ${before.left},${before.top}`,
     )
     assert.ok(Math.abs(after.left - before.left) > 20, 'it moved')
+    // Still empty and re-aimed at another spot: back to the normal place at the new pin.
+    await page.mouse.click(blog.left + blog.width * 0.4, blog.top + blog.height * 0.3)
+    await page.waitForSelector(`${composer}:not([data-sw-card-moved])`)
     await page.fill('[data-sw-comment-input]', 'Typed after moving')
     assert.equal(await page.inputValue('[data-sw-comment-input]'), 'Typed after moving')
     await page.click('[data-sw-composer-cancel]')
     await page.waitForSelector(composer, { state: 'detached' })
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})
+
+test("desktop: over a live page the wheel is always the board's; Select text hands the mouse to the page only after a click, and says so", async () => {
+  const { context, page, errors } = await openBoard(DESKTOP)
+  try {
+    const frame = '[data-sw-frame="pricing:desktop"]'
+    await page.click(frame)
+    await page.click('[data-sw-open-live="pricing|desktop"]')
+    await page.waitForSelector(`${frame}[data-sw-live="ready"]`, { timeout: 15000 })
+    await settle(page)
+    assert.equal(await page.getAttribute('[data-sw-comment-mode]', 'aria-pressed'), 'false')
+    const camera = () =>
+      page.$eval('.react-flow__viewport', (node) => {
+        const [, x, y, zoom] = /translate\(([-\d.]+)px, ([-\d.]+)px\) scale\(([-\d.]+)\)/.exec(node.style.transform)
+        return { x: Number(x), y: Number(y), zoom: Number(zoom) }
+      })
+    const browserZoom = () => page.evaluate(() => [window.devicePixelRatio, window.visualViewport.scale, window.innerWidth])
+    const untouched = await browserZoom()
+    const canvas = await rect(page, '[data-sw-canvas]')
+    const shown = await rect(page, frame)
+    // A point on the live page, well inside the canvas.
+    const at = [Math.max(shown.left, canvas.left) + 260, Math.max(shown.top, canvas.top) + 300]
+    const ctrlWheel = async (delta) => {
+      await page.keyboard.down('Control')
+      await page.mouse.wheel(0, delta)
+      await page.keyboard.up('Control')
+      await settle(page)
+    }
+    // Both work over the page, and the browser's own zoom is left alone.
+    const boardHasTheWheel = async (label) => {
+      await page.mouse.move(...at)
+      const start = await camera()
+      await page.mouse.wheel(0, 60)
+      await settle(page)
+      const panned = await camera()
+      assert.ok(Math.abs(panned.y - (start.y - 60)) < 2 && panned.zoom === start.zoom, `${label}: a plain wheel pans the board`)
+      await ctrlWheel(-100)
+      const zoomed = await camera()
+      assert.ok(zoomed.zoom > panned.zoom, `${label}: Ctrl+wheel zooms the board (${panned.zoom} -> ${zoomed.zoom})`)
+      assert.deepEqual(await browserZoom(), untouched, `${label}: the browser's zoom did not change`)
+      // Back where it was, for the next round.
+      await ctrlWheel(100)
+      await page.mouse.wheel(0, -60)
+      await settle(page)
+    }
+    await boardHasTheWheel('comment mode off')
+    await page.mouse.click(...at)
+    await boardHasTheWheel('after a click on the live page')
+
+    // Select text, step one (armed): the note says so, and the wheel is still the board's.
+    if (await page.locator('[data-sw-frame-bar-toggle]').count()) await page.click('[data-sw-frame-bar-toggle]')
+    await page.click('[data-sw-select-text]')
+    await page.waitForSelector('[data-sw-select-text-note="armed"]')
+    assert.match(await page.textContent('[data-sw-select-text-note]'), /Select text is on for Pricing · Desktop: click the page/)
+    assert.equal(await page.getAttribute(frame, 'data-sw-select-text-state'), 'armed')
+    assert.equal(await page.$eval(`${frame} iframe`, (node) => getComputedStyle(node).pointerEvents), 'none')
+    await boardHasTheWheel('Select text on, before a click')
+
+    // Step two (reading): a click hands the mouse to the page, for selecting and copying.
+    await page.mouse.click(...at)
+    await page.waitForSelector('[data-sw-select-text-note="reading"]')
+    assert.equal(await page.getAttribute(frame, 'data-sw-select-text-state'), 'reading')
+    assert.notEqual(await page.$eval(`${frame} iframe`, (node) => getComputedStyle(node).pointerEvents), 'none')
+    assert.match(
+      await page.textContent('[data-sw-select-text-note]'),
+      /Selecting text on Pricing · Desktop\. Move the pointer off the page/,
+    )
+    // The page takes the mouse: a double click in it selects a word there
+    // (the frame is another origin, so the board itself cannot read it).
+    const heading = await liveElementBox(page, frame, 'h1')
+    await page.mouse.dblclick(heading.left + 30, (heading.top + heading.bottom) / 2)
+    assert.equal(
+      await page.evaluate((sel) => document.activeElement === document.querySelector(`${sel} iframe`), frame),
+      true,
+      'the page has focus',
+    )
+    const live = page.frames().find((item) => /pricing\.desktop\.html/.test(item.url()))
+    const picked = live ? await live.evaluate(() => String(window.getSelection())).catch(() => null) : null
+    if (picked !== null) assert.ok(picked.trim().length > 0, 'a word is selected in the live page')
+    await shot(page, 'ux-select-text-reading')
+
+    // The pointer leaves the page: armed again, and the wheel is the board's.
+    await page.mouse.move(canvas.right + 200, 400, { steps: 6 })
+    await page.waitForSelector('[data-sw-select-text-note="armed"]')
+    await boardHasTheWheel('Select text on, after reading and leaving the page')
+
+    // Done ends it.
+    await page.click('[data-sw-select-text-done]')
+    await page.waitForSelector('[data-sw-select-text-note]', { state: 'detached' })
+    assert.equal(await page.getAttribute(frame, 'data-sw-select-text-state'), null)
+
+    // Ctrl+wheel over a bar floating on the canvas zooms the board too.
+    const controls = await rect(page, '[data-sw-canvas] .react-flow__panel, [data-sw-zoom-controls]').catch(() => null)
+    if (controls) {
+      await page.mouse.move(controls.left + controls.width / 2, controls.top + controls.height / 2)
+      const start = await camera()
+      await ctrlWheel(-100)
+      assert.ok((await camera()).zoom > start.zoom, 'Ctrl+wheel over the zoom controls zooms the board')
+      assert.deepEqual(await browserZoom(), untouched)
+    }
     assert.deepEqual(errors, [])
   } finally {
     await context.close()
@@ -976,5 +1084,63 @@ test('phone: one-finger drag pans and a two-finger pinch zooms', async () => {
     assert.deepEqual(errors, [])
   } finally {
     await context.close()
+  }
+})
+
+test('desktop: agents at work show on the toolbar with a count, stay still under reduced motion, and settle as done', async () => {
+  const board = config.boards[0]
+  const made = []
+  for (const body of ['First for the agent', 'Second for the agent']) {
+    made.push(await createComment(config, board, { pageId: 'features', viewport: 'desktop', x: 60, y: 70, body, author: 'Sam' }))
+  }
+  for (const item of made) await setAgentStatus(config, 'demo', item.id, 'working')
+  const { context, page, errors } = await openBoard({ ...DESKTOP, reducedMotion: 'reduce' })
+  try {
+    // The mark sits on the Agent control (on Comments where a board has no
+    // agent chat); it is there with the comments panel closed too.
+    const control = '[data-sw-toolbar="full"] [data-sw-agent-activity]'
+    await page.waitForSelector(`${control}[data-sw-agent-activity="working"]`)
+    assert.equal(await page.getAttribute(control, 'data-sw-agent-activity-count'), '2')
+    assert.equal((await page.textContent(`${control} [data-sw-agent-activity-mark="working"]`)).trim(), '2')
+    assert.match(await page.getAttribute(control, 'aria-label'), /2 agents working: #\d+ Features, #\d+ Features/)
+    await page.click('[data-sw-toolbar="full"] [data-sw-panel-toggle]')
+    await page.waitForSelector('[data-sw-rail="comments"]', { state: 'detached' })
+    assert.equal(await page.getAttribute(control, 'data-sw-agent-activity'), 'working')
+    // Reduced motion: the dot is there, nothing animates.
+    assert.equal(await page.$eval(`${control} [data-sw-agent-activity-pulse]`, (node) => getComputedStyle(node).animationName), 'none')
+    await shot(page, 'ux-agent-activity-working')
+
+    // One needs a person: the attention colour, and the words say which.
+    await setAgentStatus(config, 'demo', made[0].id, 'needs-human')
+    await setAgentStatus(config, 'demo', made[1].id, 'done')
+    await page.reload()
+    await page.waitForSelector(`${control}[data-sw-agent-activity="waiting"]`)
+    assert.match(await page.getAttribute(control, 'aria-label'), new RegExp(`#${made[0].id} Features needs a person`))
+    assert.equal(await page.locator(`${control} [data-sw-agent-activity-pulse]`).count(), 0, 'waiting does not pulse')
+
+    // The last one finishes while the board is open: "done" for a moment, then nothing.
+    await setAgentStatus(config, 'demo', made[0].id, 'done')
+    await page.waitForSelector(`${control}[data-sw-agent-activity="done"]`, { timeout: 40000 })
+    await page.waitForSelector(`${control} [data-sw-agent-activity-mark="done"]`)
+    await page.waitForSelector(`${control}[data-sw-agent-activity="idle"]`, { timeout: 10000 })
+    assert.equal(await page.locator(`${control} [data-sw-agent-activity-mark]`).count(), 0)
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})
+
+test('with motion allowed the working mark pulses like a working pin', async () => {
+  const working = listComments(config, 'demo').find((item) => item.body === 'Second for the agent')
+  await setAgentStatus(config, 'demo', working.id, 'working')
+  const { context, page } = await openBoard(DESKTOP)
+  try {
+    const control = '[data-sw-toolbar="full"] [data-sw-agent-activity]'
+    await page.waitForSelector(`${control}[data-sw-agent-activity="working"]`)
+    assert.equal(await page.getAttribute(control, 'data-sw-agent-activity-count'), '1')
+    assert.notEqual(await page.$eval(`${control} [data-sw-agent-activity-pulse]`, (node) => getComputedStyle(node).animationName), 'none')
+  } finally {
+    await context.close()
+    await setAgentStatus(config, 'demo', working.id, 'done')
   }
 })

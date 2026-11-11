@@ -362,6 +362,8 @@ export function ThreadView({
   denial = null,
   role = null,
   hosted = null,
+  // Hosted: false when no agent is listening for the project (null: not known).
+  agentListening = null,
   onSaveName = null,
   media = null,
 }) {
@@ -572,6 +574,15 @@ export function ThreadView({
                     : 'Awaiting run approval'
                   : 'Send to agent'}
             </Button>
+            {agentListening === false ? (
+              // Sent or not, nothing acts on it until an agent connects: say so
+              // instead of leaving the comment looking stuck.
+              <p className="mt-1.5 text-xs text-muted" role="status" data-sw-no-agent-listening="true">
+                {comment.dispatchable
+                  ? 'No agent is listening right now. This comment waits until one connects (shapewall watch --remote).'
+                  : 'No agent is listening right now: a comment sent to the agent waits until one connects.'}
+              </p>
+            ) : null}
           </div>
         ) : null}
         <ol className="divide-y divide-line/60" aria-label={`Comment ${comment.id} and replies`}>

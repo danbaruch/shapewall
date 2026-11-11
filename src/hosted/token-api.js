@@ -31,6 +31,7 @@ import { findApiToken, tenant } from './tenancy.js'
 import { mountTokenEvents } from './token-events.js'
 
 export function mountTokenApi({
+  agentPresence = null,
   db,
   dataDir,
   iso,
@@ -97,6 +98,9 @@ export function mountTokenApi({
       req.t.run('UPDATE api_tokens SET last_used_at = :at WHERE workspace_id = :ws AND id = :id', { at: iso(), id: row.id })
     }
     req.workspaceName = row.workspace_name
+    // A token that may take work was heard from: an agent is listening for
+    // this project (src/hosted/agent-presence.js; the name only).
+    if (req.token.scopes.includes('claim')) agentPresence?.seen(row.workspace_id, row.project_id, row.name)
     next()
   }
   v1.use(tokenAuth)
@@ -274,7 +278,7 @@ export function mountTokenApi({
   // Any `author` in the request is ignored, so a token cannot pose as a person.
   const tokenAuthor = (req) => ({ name: cleanAuthor(req.token.name, 'agent'), agent: true })
 
-  mountTokenEvents(v1, { db, iso, events, streams, scope })
+  mountTokenEvents(v1, { db, iso, events, streams, scope, agentPresence })
 
   v1.get(
     '/project',

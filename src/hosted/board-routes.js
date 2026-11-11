@@ -29,6 +29,7 @@ import { roleAtLeast, tenant } from './tenancy.js'
 export function mountBoardRoutes(
   app,
   {
+    agentPresence = null,
     db,
     dataDir,
     iso,
@@ -340,6 +341,12 @@ export function mountBoardRoutes(
           ...hostedBoardView(ctx),
           agentDispatch: Boolean(trusted),
           agentApprove: Boolean(trusted && roleAtLeast(req.role, 'admin')),
+          // Whether an agent is listening for this project, for members
+          // only (never a share link guest or a public viewer): the token's
+          // display name and when it was last heard from.
+          ...(agentPresence && !req.guest && !req.publicViewer
+            ? { agentListening: agentPresence.of(req.t.workspaceId, req.project.id) }
+            : {}),
         })
       }),
     )

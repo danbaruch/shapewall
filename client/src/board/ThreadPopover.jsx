@@ -309,6 +309,35 @@ export function ThreadPopover({ comment, point, onClose, onPrev, onNext, editing
     }, 450)
     return () => window.clearTimeout(timer)
   }, [comment.id])
+  // What Esc does here; false keeps the thread open.
+  const escape = () => {
+    // Escape in the edit box cancels the edit and keeps the thread open.
+    if (editingRef?.current && document.activeElement?.closest?.('[data-sw-edit-form]')) {
+      editingRef.current()
+      return false
+    }
+    // Closed from the keyboard: focus goes back to the pin it came from
+    // (or the cluster holding it). A click elsewhere keeps its own focus.
+    const id = String(comment.id)
+    window.setTimeout(() => focusPin(id), 0)
+    return true
+  }
+  // A pin's hover preview is a layer above the thread, so with the mouse
+  // merely resting on a pin it would take the first Esc. Esc closes the
+  // deliberate thing first: the thread (the preview goes when the mouse does).
+  const escapeRef = useRef(null)
+  escapeRef.current = { escape, onClose }
+  useEffect(() => {
+    const onKey = (event) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || !document.querySelector('[data-sw-pin-preview]')) return
+      if (document.querySelector('[role="menu"], [role="listbox"], [role="dialog"]:not([data-sw-thread-popover])')) return
+      event.preventDefault()
+      event.stopPropagation()
+      if (escapeRef.current.escape() !== false) escapeRef.current.onClose()
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [])
   return (
     <CanvasPopover
       open
@@ -321,18 +350,7 @@ export function ThreadPopover({ comment, point, onClose, onPrev, onNext, editing
       focusContent
       stowed={stowed}
       className="flex max-h-[min(560px,var(--radix-popover-content-available-height))] w-[360px] flex-col overflow-hidden p-0 outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
-      onEscape={() => {
-        // Escape in the edit box cancels the edit and keeps the thread open.
-        if (editingRef?.current && document.activeElement?.closest?.('[data-sw-edit-form]')) {
-          editingRef.current()
-          return false
-        }
-        // Closed from the keyboard: focus goes back to the pin it came from
-        // (or the cluster holding it). A click elsewhere keeps its own focus.
-        const id = String(comment.id)
-        window.setTimeout(() => focusPin(id), 0)
-        return true
-      }}
+      onEscape={escape}
       onKeyDown={(event) => stepKey(event, onPrev, onNext)}
       data-sw-thread-popover={comment.id}
     >
@@ -344,12 +362,13 @@ export function ThreadPopover({ comment, point, onClose, onPrev, onNext, editing
 // The composer at the new pin.
 // `onEscape`: returns false to keep the composer open (a comment with a
 // drawing or images asks before it is discarded).
-export function ComposerPopover({ point, onClose, onEscape, stowed, children }) {
+export function ComposerPopover({ point, onClose, onEscape, resetKey, stowed, children }) {
   return (
     <CanvasPopover
       open
       onClose={onClose}
       onEscape={onEscape}
+      resetKey={resetKey}
       selector="[data-sw-draft-pin]"
       avoid="[data-sw-picked-outline]"
       point={point}

@@ -19,6 +19,24 @@ and the project uses [Semantic Versioning](https://semver.org/).
   row in the comments list, a link to a comment or pressing C leaves it open (the box nudges); before, each of those dropped it
   without a word. An empty one makes way as before. Esc still cancels, but when the comment holds a drawing or images it asks
   first ("Discard this comment?"); Cancel never asks.
+- Scrolling and zooming the board always work over a live page, and Ctrl/Cmd+wheel or a trackpad pinch never zooms the whole
+  browser tab while the pointer is on the board. The cause was "Select text": once turned on for a page it gave that page the
+  mouse for good, wheel included, with nothing on screen saying so (comment mode hid the problem). Select text now has two visible
+  steps: on, and the board still scrolls and zooms over the page; click the page and it takes the mouse so you can select and
+  copy, until the pointer leaves it or you press Esc. A note at the top says which step you are at, with Done. Ctrl/Cmd+wheel over
+  the bars floating on the canvas zooms the board too, and over an open comment card it no longer zooms the browser.
+- You can see that agents are working without hunting for the comment. The Agent button in the toolbar (the Comments button on
+  boards without an agent chat, the More button on a phone) carries a mark for the whole board: a pulsing dot while an agent
+  works, with the number when more than one does; a still dot in the attention colour when an agent needs your OK or a comment
+  waits on a person; a green dot for a moment when the last one finishes. Its tooltip says it in words ("2 agents working: #17
+  Home, #21 Settings", "Agent needs your OK on #21 Settings"), and when exactly one thing needs you, the button opens it. With
+  reduced motion the dot does not pulse.
+- Hosted boards say whether an agent is listening. A comment is only picked up while some machine runs `shapewall watch --remote`
+  (or an MCP client) for the project; the same tooltip now reads "Agent online: <token name>" or "No agent is listening: comments
+  wait until one is", and a thread whose comment was sent to the agent says so too when none is. The server keeps this in memory
+  only (the token's name and when it was last heard, for 90 seconds), and tells members, never share link guests.
+- Esc closes the open thread first, also while the mouse rests on a pin and its preview is showing. A comment card you moved and
+  then re-aimed at another element (while still empty) goes back beside its new pin.
 - Drawing is clearly a mode. A bar at the top says "Drawing on Home · Desktop" and holds the tools, the inks, Undo, Clear and a
   Done button; the page you draw on is framed and the other pages step back; no element outlines appear under the pen. Entering it
   no longer moves the view (it did, to fit the page) unless the page is mostly off screen or drawn too small to draw on, and then

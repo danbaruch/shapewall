@@ -1,5 +1,6 @@
 import { Bot, Camera, Flag, MessageSquare, MessageSquarePlus, MoreHorizontal, Rows2, Settings } from 'lucide-react'
-import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { settles } from './agentActivity'
 import { leavePage } from '../lib/hooks'
 import { cn } from '../lib/utils'
 import {
@@ -64,6 +65,57 @@ const SEGMENT = 'h-[26px] text-ui'
 // A hairline between two groups of the bar.
 const Divider = () => <span className="h-5 w-px shrink-0 bg-line" aria-hidden="true" data-sw-toolbar-divider="true" />
 
+// The board's agent activity (agentActivity.js) on a toolbar control, as a
+// mark on its corner, so it costs no room and reads the same at every width:
+//   working  an accent dot with the same ping as a working pin (still under
+//            reduced motion), the count in it when more than one runs
+//   waiting  a still dot in the attention colour: an agent needs a person
+//   done     a still green dot for a few seconds after the last one finished
+// The words are in the control's tooltip and accessible name.
+const DONE_MS = 4000
+function useShownActivity(activity) {
+  const [done, setDone] = useState(false)
+  const previous = useRef(activity.state)
+  useEffect(() => {
+    const before = previous.current
+    previous.current = activity.state
+    if (!settles(before, activity.state)) {
+      if (activity.state !== 'idle') setDone(false)
+      return undefined
+    }
+    setDone(true)
+    const timer = window.setTimeout(() => setDone(false), DONE_MS)
+    return () => window.clearTimeout(timer)
+  }, [activity.state])
+  return activity.state === 'idle' && done ? 'done' : activity.state
+}
+
+function ActivityMark({ shown, count, touch = false }) {
+  if (shown === 'idle') return null
+  const many = count > 1
+  return (
+    <span
+      className={cn(
+        'pointer-events-none absolute flex items-center justify-center rounded-full ring-2 ring-surface',
+        touch ? 'top-1.5 right-1.5' : many ? '-top-2.5 -right-2' : '-top-1.5 -right-1.5',
+        many ? 'h-4 min-w-4 px-1 text-[10px] leading-4 font-semibold tabular' : 'h-2.5 w-2.5',
+        shown === 'working' ? 'bg-accent text-accent-fg' : shown === 'waiting' ? 'bg-warn text-warn-fg' : 'bg-ok text-ok-fg',
+      )}
+      aria-hidden="true"
+      data-sw-agent-activity-mark={shown}
+    >
+      {shown === 'working' ? (
+        <span className="absolute inset-0 rounded-full ring-2 ring-accent motion-safe:animate-ping" data-sw-agent-activity-pulse="true" />
+      ) : null}
+      {many ? count : null}
+    </span>
+  )
+}
+
+// In words: what runs and what waits, and on a hosted board whether an agent
+// is listening at all (said also when nothing is going on).
+const activityWords = (shown, activity) => (shown === 'done' ? ['Agent done', activity.text].filter(Boolean).join('. ') : activity.text)
+
 // Comments, Agent and Checks share the side panel: three siblings on one
 // track, the open panel's one raised (Toggle `segment`, the same chip as the
 // chosen screen size), none raised while the panel is closed. Each also
@@ -80,13 +132,20 @@ function PanelSwitch({
   openChecks,
   closeChecks,
   updateParams,
+  activity,
+  shown,
+  openAgentThread,
 }) {
   const commentsOn = !panelHidden && !chatThread && !checksOpen
+  const words = activityWords(shown, activity)
+  // Without an agent chat on this board the Comments button carries the mark.
+  const onComments = !chatAvailable && Boolean(words)
+  const activityHooks = { 'data-sw-agent-activity': shown, 'data-sw-agent-activity-count': activity.count || undefined }
   // Each button keeps one name; aria-pressed says whether its panel is open.
   const segment = cn(SEGMENT, !labels && 'px-2')
   return (
     <div className={TRACK} role="group" aria-label="Side panel" data-sw-panel-switch="true">
-      <Tooltip content={`${commentsOn ? 'Hide' : 'Show'} comments (${allOpen} open)`} side="bottom">
+      <Tooltip content={`${commentsOn ? 'Hide' : 'Show'} comments (${allOpen} open)${onComments ? `. ${words}` : ''}`} side="bottom">
         <Toggle
           variant="segment"
           className={segment}
@@ -94,10 +153,14 @@ function PanelSwitch({
           onPressedChange={() =>
             updateParams({ panel: panelHidden || chatThread || checksOpen ? null : 'off', chat: null, checks: null, cv: null })
           }
-          aria-label={`Comments, ${allOpen} open`}
+          aria-label={`Comments, ${allOpen} open${onComments ? `. ${words}` : ''}`}
           data-sw-panel-toggle="true"
+          {...(chatAvailable ? {} : activityHooks)}
         >
-          <MessageSquare size={14} aria-hidden="true" />
+          <span className="relative inline-flex">
+            <MessageSquare size={14} aria-hidden="true" />
+            {onComments ? <ActivityMark shown={shown} count={activity.count} /> : null}
+          </span>
           {labels ? 'Comments' : null}
           <span className="tabular rounded-full bg-fg/[0.07] px-1.5 text-[11px] leading-4 font-semibold text-fg" aria-hidden="true">
             {allOpen}
@@ -105,16 +168,24 @@ function PanelSwitch({
         </Toggle>
       </Tooltip>
       {chatAvailable ? (
-        <Tooltip content={chatThread ? 'Close the agent chat' : 'Chat with your agent about this board'} side="bottom">
+        <Tooltip content={words || (chatThread ? 'Close the agent chat' : 'Chat with your agent about this board')} side="bottom">
           <Toggle
             variant="segment"
             className={segment}
             pressed={Boolean(chatThread)}
-            aria-label="Agent"
-            onPressedChange={() => (chatThread ? updateParams({ chat: null }) : reopenChat())}
+            aria-label={words ? `Agent. ${words}` : 'Agent'}
+            // Exactly one thing needs the person: the panel opens on it.
+            onPressedChange={() =>
+              chatThread ? updateParams({ chat: null }) : activity.target ? openAgentThread(activity.target) : reopenChat()
+            }
             data-sw-chat-toggle="true"
+            {...activityHooks}
           >
-            <Bot size={14} aria-hidden="true" />
+            {/* On the icon's corner, so it reads as the agent's and not as the next button's. */}
+            <span className="relative inline-flex">
+              <Bot size={14} aria-hidden="true" />
+              <ActivityMark shown={shown} count={activity.count} />
+            </span>
             {labels ? 'Agent' : null}
           </Toggle>
         </Tooltip>
@@ -215,7 +286,12 @@ export function BoardToolbar({
   setSheetOpen,
   // The expanded app sidebar already names the project.
   sidebarTitled,
+  // What the board's agents are doing (agentActivity.js), and opening the
+  // one thread that needs the person.
+  activity = { state: 'idle', count: 0, text: '', target: null },
+  openAgentThread = () => {},
 }) {
+  const shown = useShownActivity(activity)
   const boardTitle = boards.find((item) => item.id === boardId)?.title || data?.board?.title || boardId
   const project = info?.hosted && info?.project?.url && info.role !== 'guest' ? info.project : null
   const viewer = !canComment && info?.hosted && info?.role === 'viewer'
@@ -373,9 +449,12 @@ export function BoardToolbar({
           variant="ghost"
           className="shrink-0 text-fg"
           onClick={() => setMenuOpen(true)}
-          label={chatAvailable ? 'More: agent, pages, views, screen size' : 'More: pages, views, screen size'}
+          label={`${chatAvailable ? 'More: agent, pages, views, screen size' : 'More: pages, views, screen size'}${shown !== 'idle' ? `. ${activityWords(shown, activity)}` : ''}`}
           data-sw-menu="true"
+          data-sw-agent-activity={shown}
+          data-sw-agent-activity-count={activity.count || undefined}
         >
+          <ActivityMark shown={shown} count={activity.count} touch />
           <MoreHorizontal size={19} aria-hidden="true" />
         </IconButton>
         {profile}
@@ -518,6 +597,9 @@ export function BoardToolbar({
           openChecks={openChecks}
           closeChecks={closeChecks}
           updateParams={updateParams}
+          activity={activity}
+          shown={shown}
+          openAgentThread={openAgentThread}
         />
         {settingsAvailable ? (
           <IconButton
