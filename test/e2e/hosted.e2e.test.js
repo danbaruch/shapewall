@@ -140,6 +140,24 @@ test('sign up with a passkey, push, comment on the hosted board, sign in again',
   await shot(page, '2-token')
   await page.click('[data-sw-token-done]')
 
+  // Rename the token: what a watcher using it is called on the board. The
+  // token itself stays the same (the push below still uses it).
+  await page.click('[data-sw-rename-token="CI"]')
+  const renameInput = page.locator('[data-sw-rename-token-input]')
+  await renameInput.waitFor()
+  assert.equal(await renameInput.inputValue(), 'CI')
+  assert.equal(await page.locator('[data-sw-rename-token-save]').isDisabled(), true, 'nothing to save until the name changes')
+  await renameInput.fill('Harry the watcher')
+  await shot(page, '2b-token-rename')
+  await page.click('[data-sw-rename-token-save]')
+  await page.waitForSelector('[data-sw-token="Harry the watcher"]')
+  assert.equal(await page.locator('[data-sw-token="CI"]').count(), 0)
+  assert.equal(
+    hosted.db.prepare('SELECT name FROM api_tokens').get().name,
+    'Harry the watcher',
+    'saved on the server, the one token of this project',
+  )
+
   // shapewall push, as a person would run it.
   const lines = []
   process.env.SHAPEWALL_TOKEN = pushToken

@@ -5,7 +5,7 @@
 // profile as chosen.
 //
 // { show, value, known, options: [{ id, label, configured, state,
-// loginHint, isDefault }] }. `value` is what the picker shows; choosing it
+// loginHint, isDefault, icon, tint, logo }] }. `value` is what the picker shows; choosing it
 // again changes nothing (see `choice`). `state` is the server's word for how
 // the agent is doing (src/agent/agent-health.js).
 export function pickerProfiles(thread) {
@@ -22,6 +22,11 @@ export function pickerProfiles(thread) {
       state: profile.configured === false ? 'unavailable' : profile.state || 'ready',
       loginHint: profile.loginHint || null,
       isDefault: profile.id === defaultId,
+      // How its owner made it look (src/agent/identity.js); `logo` is a
+      // known agent's product mark, its default icon.
+      icon: profile.icon || null,
+      tint: profile.tint || null,
+      logo: profile.logo || null,
     }))
   const value = current === 'default' && fallback?.sameAs ? fallback.sameAs : current
   const known = options.some((option) => option.id === value)

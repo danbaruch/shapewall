@@ -45,6 +45,28 @@ Notes:
 
 [ort-notices]: https://github.com/microsoft/onnxruntime/blob/main/ThirdPartyNotices.txt
 
+## Agent product marks (`src/agent/agent-logos.js`)
+
+The board shows the product mark of a coding agent you connected as that agent's default icon (docs/agents.md, "Name and icon"). The
+marks are data in one file, each a single-colour SVG path used exactly as sourced: not redrawn, not recoloured, not combined with
+anything else. They ship inside the npm package and the built board.
+
+| Mark          | Shown for   | Trademark of   | Source                                                                                   | Terms of the source                |
+| ------------- | ----------- | -------------- | ---------------------------------------------------------------------------------------- | ---------------------------------- |
+| Claude        | Claude Code | Anthropic, PBC | [Simple Icons](https://simpleicons.org) 16.37.0 (npm `simple-icons`), `icons/claude.svg` | CC0 1.0 (the Simple Icons project) |
+| Google Gemini | Gemini CLI  | Google LLC     | Simple Icons 16.37.0, `icons/googlegemini.svg`                                           | CC0 1.0 (the Simple Icons project) |
+
+Notes:
+
+- Simple Icons releases its collection under CC0 1.0 and records no separate licence for these two marks. Its
+  [disclaimer](https://github.com/simple-icons/simple-icons/blob/develop/DISCLAIMER.md) says a brand may still set its own terms, and
+  CC0 waives no trademark rights: the marks remain trademarks of their owners. Shapewall uses them only to identify the agent the
+  owner connected, at icon size, with no endorsement or affiliation implied (see `NOTICE`).
+- **Not included:** Codex (OpenAI) and goose (Block). Simple Icons 16.37.0 has no mark for either, so those agents show their
+  initials. Nothing was drawn to resemble a mark and nothing was copied from a vendor's site.
+- Adding or removing a mark is one entry in `src/agent/agent-logos.js` and one row here. The twelve built-in avatars
+  (`client/src/chat/agentIcons.jsx`) are original drawings made for Shapewall and are not third-party material.
+
 ## Live board presence
 
 Yjs 13.6.33 and y-protocols 1.0.7 provide transient awareness state; lib0 is their shared utility dependency. These are MIT-licensed and

@@ -4,9 +4,10 @@ import { Avatar, Button, Spinner } from './ui'
 
 // Upload only a small raster image. The server independently validates and
 // reencodes the PNG; a browser conversion is not a trust boundary.
-export async function profilePng(file) {
+// `maxBytes`, `maxLabel`: the largest file taken (an agent's icon is 2 MB).
+export async function profilePng(file, { maxBytes = 5 * 1024 * 1024, maxLabel = '5 MB' } = {}) {
   if (!file || !['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) throw new Error('Choose a PNG, JPEG or WebP image.')
-  if (file.size > 5 * 1024 * 1024) throw new Error('Choose an image smaller than 5 MB.')
+  if (file.size > maxBytes) throw new Error(`Choose an image smaller than ${maxLabel}.`)
   let bitmap
   try {
     bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' })

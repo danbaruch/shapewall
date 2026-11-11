@@ -112,7 +112,7 @@ agent...**) and the host-only settings window (`shapewall settings`) show the sa
 the agent picker's **Agent settings** item link to the Agents page.
 
 - **Every agent Shapewall knows how to run** (Claude Code, Codex, goose, Gemini CLI) with its state on this machine: **Connected**
-  (with its state, **Test connection** and **Remove**, and how to sign in when it is not signed in); **Found, not connected**
+  (with its state, **Test connection**, **Edit** for its [name and icon](#name-and-icon), **Remove**, and how to sign in when it is not signed in); **Found, not connected**
   (**Connect**, with the same **Allow this?** dialog as anywhere else); **Found, but its adapter is missing** (the exact install line to
   copy and **Check again**; Shapewall never runs an install for you); **Not installed** (where to get it). The list comes from the same
   `PATH` lookup as one-click Connect: nothing is started, installed or downloaded.
@@ -127,6 +127,47 @@ Connecting, removing, testing and choosing the default run commands as the machi
 link `shapewall serve` prints). Without it the card is read-only and says how to open that link; it asks nothing of the agent routes.
 Self-hosted multiplayer (`shapewall hosted`) has its own workspace Settings (project agent tokens) and no Agents page. The public demo
 shows the card read-only on its console's Agents page.
+
+## Name and icon
+
+Every connected agent has a name you choose and an icon, so a board with two agents reads "Harry" and "Fixer", not "Claude Code"
+twice. Both are display only: they change nothing an agent runs with.
+
+- **At Connect.** The **Allow this?** confirmation of a one-click Connect (in the Agent panel and on the Agents page) has a **Name**
+  field, filled in with the agent's built-in name ("Claude Code", "Codex", ...). Type another, or leave it. Under **Icon (optional)**,
+  folded away, you can pick an icon and a colour at the same time.
+- **Later.** On the Agents page (and the same card in `shapewall settings`) each connected agent has **Edit**: a dialog with the name,
+  the icon and the colour. Saving does not restart the agent, runs no connection test and needs no confirmation; it also works while
+  the agent is answering, and the new name shows on what it says next. The **Other** endpoint has **Name and icon** too. The name
+  field of the full settings form ("Name in the chat panel") is the same name and stays in step with it.
+- **The name** is one line of plain text, 1 to 40 characters, without control or text-direction characters. An emptied name goes
+  back to the built-in one. It is shown as text everywhere (never read as Markdown or HTML) and reaches an agent only inside quoted
+  data. A name set in `shapewall.config.json` (`agent.label`) or typed in the settings form keeps working as before.
+- **The icon** is one of twelve built-in avatars (small original drawings: robots, creatures and shapes), a picture you upload, or the
+  default. The default is the agent's **product mark** where Shapewall ships one (Claude Code and Gemini CLI today) and its initials
+  otherwise (Codex, goose, an agent command of your own, an endpoint). Picking **Default** in the dialog goes back to it. The marks
+  are other companies' trademarks, shown unchanged in one colour only to identify the agent you connected; their sources and terms
+  are in `THIRD_PARTY.md`. A colour (one of eight) tints a built-in avatar or the initials, never a mark or a picture.
+- **An uploaded picture** is a PNG, JPEG or WebP of up to 2 MB. The board crops it to a square and sends a 256 by 256 PNG; the server
+  checks it byte by byte, decodes it and writes the pixels out again, the same way as a profile photo
+  ([local-accounts.md](local-accounts.md#profile-images)), so no metadata and never an SVG is stored. It is kept next to the agent
+  settings (`agent-icons/<hash>.png` beside `agents.json`, private to you), served only as an image (`GET /api/agent/icons/<hash>`,
+  `image/png`, `nosniff`, cached by its content hash), and removed when no agent uses it any more.
+
+Where it shows: the Agents page and its default-agent list, the chat header's agent chip and its menu, the agent's answers in the
+chat, **Fix with <name>** on a comment, the batch of fixes, and the `Chat:` line `shapewall serve` prints. A reply the agent posts on
+a comment thread is signed with the name it has at that moment and marked as an agent's, with its icon beside it; replies written
+earlier keep the name they were written with, and a reply signed plain "agent" (an outside tool, `shapewall watch`) keeps the robot.
+
+Who may change it: the owner, on the machine that runs Shapewall, with the settings token and from the board's own page, like every
+other agent setting (`POST /api/agent/settings/identity` with `{ id, name?, icon?, tint? }`, and `POST
+/api/agent/settings/identity/icon` with `{ id, png }` for a picture). `id` is a connected agent, `endpoint`, or `default`. A command
+fixed with `--agent-acp` or `SHAPEWALL_AGENT_ACP` still wins over which agent runs, but does not block its name or icon: they are
+saved for that fixed agent (`fixedAgent` in `agents.json`) and the Agents page shows it with **Edit**. Everyone who can see the board
+gets the name, the icon's id and the colour in the agent info they already receive (`/api/agent/status`, `/api/info`); nothing else
+about the agent is added to it. In the public demo you can rename the two scripted agents and give them built-in icons (no upload);
+**Reset** puts them back. On a hosted board an agent is its API token: rename the token there ([hosted.md](hosted.md#workspaces-roles-and-invites));
+icons for hosted agents are not there yet.
 
 ## Source folder and agent sign-in
 
@@ -967,7 +1008,7 @@ The panel uses `/api/agent/*` on the local server: JSON in, server-sent events o
 
 | Route                                                                   | What it does                                                                                                                                                                                                                                                                                          |
 | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/agent/status`                                                 | `{ configured, backend, label, model, host, local, vision, problem, docsUrl }`                                                                                                                                                                                                                        |
+| `GET /api/agent/status`                                                 | `{ configured, backend, label, icon, tint, logo, model, host, local, vision, problem, docsUrl }`                                                                                                                                                                                                      |
 | `GET /api/agent/boards/:id/threads`                                     | Your threads with messages, newest first (`?q=` searches them): `{ threads: [{ id, kind, commentId?, title, count, createdAt, updatedAt, archived, shared, match? }] }`                                                                                                                               |
 | `GET /api/agent/boards/:id/threads/:thread`                             | `{ id, messages, kind, title, archived, shared, versions, running, ratings, options? }`; `:thread` is `board`, `comment-<id>` or `chat-<16 letters or digits>`                                                                                                                                        |
 | `POST /api/agent/boards/:id/threads/:thread/messages`                   | `{ text, attachments?, mentions?, files?, editOf?, options? }` or `{ regenerate: <answer id> }`; answers with an event stream (below). `editOf`: the id of your earlier message this one replaces; `regenerate`: the latest answer, asked again; `options`: this chat's choices `{ configId: value }` |

@@ -114,6 +114,13 @@ Projects belong to a workspace, never to a person. Roles:
 
 The console shows this table on **Access, Roles** and next to every role picker.
 
+**Renaming a token.** An agent that watches a hosted board signs its comments and replies with its token's name (for a terminal
+login, "laptop (shapewall login)"). **Rename** on the token lists (the project page and **API tokens**) gives it a human name:
+`PATCH /api/workspaces/:ws/projects/:pid/tokens/:tid` with `{ "name": "..." }`, 1 to 60 characters, for the same people who may revoke
+it (admins and owners). The secret, the scopes and the expiry do not change; what the token already wrote keeps the old name; a
+revoked token is not renamed; the audit log records `token_renamed` with both names. Icons for hosted agents are not there yet: a
+token shows the robot avatar.
+
 **Invite links** hold a 32-byte token (stored hashed), a role, an expiry (1, 3, 7, 14 or 30 days; 7 by default), and work once. Opening
 one shows the workspace and role; a new person creates an account from it, an existing one joins with a click. The token sits in the
 URL fragment (`/invite#<token>`), and the setup link the same way (`/signup#setup=<code>`): browsers never send a fragment, so the token

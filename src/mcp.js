@@ -146,7 +146,15 @@ export function createMcpServer({
   fetchImpl = undefined,
   boardId = null,
   toolNames = null,
+  // The board's own agent (src/agent/owner-mcp.js): a function giving the
+  // name its owner gave it. Its replies are signed with it and marked as an
+  // agent's. null: replies are signed "agent", as for any outside agent.
+  agentAuthor = null,
 }) {
+  const signed = (author) => {
+    const name = author ? null : agentAuthor?.()
+    return name ? { author: name, agent: true } : { author: author || 'agent' }
+  }
   const server = new McpServer({ name: 'shapewall', version: VERSION }, { instructions: INSTRUCTIONS })
   const boardFor = (id) => {
     if (boardId && id && id !== boardId) throw new Error('This agent session is scoped to one board.')
@@ -300,7 +308,7 @@ export function createMcpServer({
       },
       tool(async ({ board, id, body, author }) => {
         const target = boardFor(board)
-        const { comment, reply } = await addReply(config, target.id, id, { body, author: author || 'agent' })
+        const { comment, reply } = await addReply(config, target.id, id, { body, ...signed(author) })
         return json({
           reply,
           comment: { id: comment.id, status: comment.status, agentStatus: comment.agentStatus, replies: comment.replies.length },
@@ -323,7 +331,7 @@ export function createMcpServer({
       },
       tool(async ({ board, id, agentStatus, note }) => {
         const target = boardFor(board)
-        if (note && note.trim()) await addReply(config, target.id, id, { body: note, author: 'agent' })
+        if (note && note.trim()) await addReply(config, target.id, id, { body: note, ...signed(null) })
         const { comment } = await setAgentStatus(config, target.id, id, agentStatus === 'clear' ? null : agentStatus, { actor: 'agent' })
         return json({ id: comment.id, status: comment.status, agentStatus: comment.agentStatus })
       }),

@@ -85,7 +85,19 @@ export function Override({ children }) {
 }
 
 // The confirmation before a new command runs or a key goes to a new host.
-export function ConfirmDialog({ items, keyVar, onCancel, onConfirm, busy, touch, confirmLabel = 'Allow and save' }) {
+// `children`: shown above the items (a one-click Connect's Name and icon,
+// AgentIdentity.jsx). `blocked`: the confirm button is off (a name too long).
+export function ConfirmDialog({
+  items,
+  keyVar,
+  onCancel,
+  onConfirm,
+  busy,
+  touch,
+  confirmLabel = 'Allow and save',
+  children = null,
+  blocked = false,
+}) {
   const size = touch ? 'touch' : 'md'
   return (
     <Dialog
@@ -97,12 +109,13 @@ export function ConfirmDialog({ items, keyVar, onCancel, onConfirm, busy, touch,
           <Button size={size} onClick={onCancel} disabled={busy}>
             Cancel
           </Button>
-          <Button size={size} variant="default" onClick={onConfirm} disabled={busy} data-sw-settings-confirm="true">
+          <Button size={size} variant="default" onClick={onConfirm} disabled={busy || blocked} data-sw-settings-confirm="true">
             {busy ? 'Saving...' : confirmLabel}
           </Button>
         </>
       }
     >
+      {items ? children : null}
       <div className="space-y-3 p-5 text-sm" data-sw-settings-confirm-list="true">
         {(items || []).map((item) =>
           item.kind === 'command' ? (

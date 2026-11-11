@@ -58,6 +58,22 @@ and the project uses [Semantic Versioning](https://semver.org/).
   was deleted.
 - Hosted console, "Sign in a terminal": if you close the passkey check that Approve asks for, the page now says the login was not
   approved and why. Before, Approve looked as if it had done nothing.
+- Agents have a name you choose and an icon. Connect asks for the name: the **Allow this?** confirmation has a Name field, filled in
+  with "Claude Code", "Codex" and so on, so you can call it "Harry" before it is connected, and an optional icon. Later, **Edit** on
+  each connected agent's row of the Agents page changes the name, the icon and a colour. Saving restarts nothing, runs no test, and
+  works while the agent is answering. Before, the name could only be typed in the full settings form, the one-click Connect gave no
+  chance to name an agent, and every agent showed two initials.
+- Agent icons: twelve built-in avatars drawn for Shapewall, or a picture you upload (PNG, JPEG or WebP up to 2 MB, cropped to a
+  square, re-encoded by the server and kept next to your agent settings; never an SVG). A connected Claude Code or Gemini CLI shows
+  its product mark until you pick something else, and **Default** goes back to it; Codex, goose and other agents show initials (no
+  redistributable mark was found for them). Sources and terms of the marks are in `THIRD_PARTY.md`.
+- The name and icon show wherever the agent does: the Agents page and its default list, the chat header and its menu, the agent's
+  answers, **Fix with <name>**, the batch of fixes and the `shapewall serve` start line. An agent's replies on a comment thread are
+  signed with its name and marked as an agent's; replies written before keep the name they had. A command fixed with `--agent-acp`
+  or `SHAPEWALL_AGENT_ACP` can be renamed too: the flag decides which agent runs, not what it is called. Only the owner on the
+  machine that runs Shapewall can change any of it.
+- Hosted server: an API token can be renamed on the token lists (admins and owners, like revoking it), so a watcher shows up as
+  "Harry" instead of "laptop (shapewall login)". The token itself, its scopes and what it already wrote do not change.
 - Website contact page: the "Thanks, your message is on its way" heading no longer shows a focus rectangle, and the form's spacing
   is even (the character count sits beside the hint, above the field).
 
