@@ -1015,3 +1015,16 @@ test('the demo console: an API token can be renamed by those who may revoke it',
   const viewer = demo(as('viewer'))
   assert.equal((await viewer.call('PATCH', url, { name: 'Mallory' })).status, 403)
 })
+
+test('the demo console: a token name over 60 characters is refused when a token is made, as on the server', async () => {
+  const { call, state } = demo()
+  const ws = state.workspaces[0].id
+  const project = state.projects.find((item) => item.workspaceId === ws)
+  const url = `/api/workspaces/${ws}/projects/${project.id}/tokens`
+  const count = state.tokens.length
+  const refused = await call('POST', url, { name: 'x'.repeat(61), scopes: ['read'] })
+  assert.equal(refused.status, 400)
+  assert.equal(refused.json.error.message, 'Token name: 1 to 60 characters.')
+  assert.equal(state.tokens.length, count)
+  assert.equal((await call('POST', url, { name: 'y'.repeat(60), scopes: ['read'] })).status, 201)
+})

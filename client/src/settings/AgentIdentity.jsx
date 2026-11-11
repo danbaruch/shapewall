@@ -268,7 +268,9 @@ export function ConnectIdentity({ value, onChange, builtIn, logo = null, upload 
 
 // `agent`: { id, label, icon, tint, logo, builtIn } or null (closed).
 // `onSaved(view)`: the settings view after the save (null: nothing changed).
-export function AgentIdentityDialog({ agent, upload = true, touch = false, onClose, onSaved }) {
+// `waiting`: this agent's connection test is still running (it was just
+// connected): the save waits for the test on the server, and says so.
+export function AgentIdentityDialog({ agent, upload = true, touch = false, waiting = false, onClose, onSaved }) {
   const id = useId()
   const [value, setValue] = useState(identityValue())
   const [busy, setBusy] = useState(false)
@@ -329,7 +331,7 @@ export function AgentIdentityDialog({ agent, upload = true, touch = false, onClo
             disabled={busy || !changed || Boolean(problem || needsName)}
             data-sw-agent-identity-save
           >
-            {busy ? 'Saving...' : 'Save'}
+            {busy ? (waiting ? 'Saving when the connection test finishes...' : 'Saving...') : 'Save'}
           </Button>
         </>
       }
@@ -372,6 +374,11 @@ export function AgentIdentityDialog({ agent, upload = true, touch = false, onClo
           upload={upload}
           disabled={busy}
         />
+        {waiting && !error ? (
+          <p className="text-xs text-muted" role="status" data-sw-agent-identity-waiting>
+            Its connection test is still running. Save waits for it to finish, then saves.
+          </p>
+        ) : null}
         {error ? (
           <p className="text-xs text-bad" role="alert" data-sw-agent-identity-error>
             {error}

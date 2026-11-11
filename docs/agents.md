@@ -138,14 +138,17 @@ twice. Both are display only: they change nothing an agent runs with.
   folded away, you can pick an icon and a colour at the same time.
 - **Later.** On the Agents page (and the same card in `shapewall settings`) each connected agent has **Edit**: a dialog with the name,
   the icon and the colour. Saving does not restart the agent, runs no connection test and needs no confirmation; it also works while
-  the agent is answering, and the new name shows on what it says next. The **Other** endpoint has **Name and icon** too. The name
+  the agent is answering, and the new name shows on what it says next. Right after Connect, while the agent's connection test is
+  still running (a real agent takes several seconds to start), Save waits for the test and then saves ("Saving when the connection
+  test finishes..."); when the agent does not connect it says so, and nothing is kept for it. A name given to another agent
+  meanwhile is saved at once and survives a failed test. The **Other** endpoint has **Name and icon** too. The name
   field of the full settings form ("Name in the chat panel") is the same name and stays in step with it.
 - **The name** is one line of plain text, 1 to 40 characters, without control or text-direction characters. An emptied name goes
   back to the built-in one. It is shown as text everywhere (never read as Markdown or HTML) and reaches an agent only inside quoted
   data. A name set in `shapewall.config.json` (`agent.label`) or typed in the settings form keeps working as before.
 - **The icon** is one of twelve built-in avatars (small original drawings: robots, creatures and shapes), a picture you upload, or the
-  default. The default is the agent's **product mark** where Shapewall ships one (Claude Code and Gemini CLI today) and its initials
-  otherwise (Codex, goose, an agent command of your own, an endpoint). Picking **Default** in the dialog goes back to it. The marks
+  default. The default is the agent's **product mark** where Shapewall ships one (Claude Code, Codex with the OpenAI mark, goose and Gemini CLI today) and its initials
+  otherwise (an agent command of your own, an endpoint). Picking **Default** in the dialog goes back to it. The marks
   are other companies' trademarks, shown unchanged in one colour only to identify the agent you connected; their sources and terms
   are in `THIRD_PARTY.md`. A colour (one of eight) tints a built-in avatar or the initials, never a mark or a picture.
 - **An uploaded picture** is a PNG, JPEG or WebP of up to 2 MB. The board crops it to a square and sends a 256 by 256 PNG; the server
@@ -168,6 +171,22 @@ gets the name, the icon's id and the colour in the agent info they already recei
 about the agent is added to it. In the public demo you can rename the two scripted agents and give them built-in icons (no upload);
 **Reset** puts them back. On a hosted board an agent is its API token: rename the token there ([hosted.md](hosted.md#workspaces-roles-and-invites));
 icons for hosted agents are not there yet.
+
+### While a connection test runs
+
+A one-click Connect saves the agent, then starts it and waits for its handshake: the connection test (**Test connection** runs the
+same one). The test stub answers at once; Claude Code, Codex and the others take several seconds, and the server waits up to 30
+(`src/agent/test-timing.js`). During the test the server takes no chat message and no other change of the agent settings, so the
+board says what is going on instead of answering an error:
+
+- The agent's row on the Agents page reads **Connecting. Testing the connection...**, the chat header chip **Testing the
+  connection**, and `GET /api/agent/settings` carries `testing: { id }` (the agent's `state` is `testing` there and in
+  `/api/agent/status`). A page reloaded mid-test, or another tab, shows the same and follows when the test ends.
+- **Test connection**, **Remove**, **Connect** for another agent and the default-agent choice are off until it ends, each with the
+  reason as its tooltip. **Edit** stays on (see [Name and icon](#name-and-icon)).
+- A chat message or a **Fix** sent meanwhile waits, with "Waiting for the connection test to finish" as the answer's status, and
+  runs when the test ends. The board waits 45 seconds, a little longer than a test can last. Other settings changes sent in that
+  window (the settings form, Work on a branch) wait the same way behind their own busy state.
 
 ## Source folder and agent sign-in
 

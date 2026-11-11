@@ -51,10 +51,12 @@ The board shows the product mark of a coding agent you connected as that agent's
 marks are data in one file, each a single-colour SVG path used exactly as sourced: not redrawn, not recoloured, not combined with
 anything else. They ship inside the npm package and the built board.
 
-| Mark          | Shown for   | Trademark of   | Source                                                                                   | Terms of the source                |
-| ------------- | ----------- | -------------- | ---------------------------------------------------------------------------------------- | ---------------------------------- |
-| Claude        | Claude Code | Anthropic, PBC | [Simple Icons](https://simpleicons.org) 16.37.0 (npm `simple-icons`), `icons/claude.svg` | CC0 1.0 (the Simple Icons project) |
-| Google Gemini | Gemini CLI  | Google LLC     | Simple Icons 16.37.0, `icons/googlegemini.svg`                                           | CC0 1.0 (the Simple Icons project) |
+| Mark          | Shown for   | Trademark of                                                                               | Source                                                                                                                                                                                                                                                                   | Terms of the source                                                                                                                                  |
+| ------------- | ----------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude        | Claude Code | Anthropic, PBC                                                                             | [Simple Icons](https://simpleicons.org) 16.37.0 (npm `simple-icons`), `icons/claude.svg`                                                                                                                                                                                 | CC0 1.0 (the Simple Icons project)                                                                                                                   |
+| OpenAI        | Codex       | OpenAI                                                                                     | Simple Icons 15.22.0 (npm `simple-icons@15.22.0`, published 2025-11-23), `icons/openai.svg`; taken 2026-11-11                                                                                                                                                            | CC0 1.0 (the Simple Icons project); see the note below                                                                                               |
+| goose         | goose       | LF Projects, LLC (the goose project, founded by Block, now with the Agentic AI Foundation) | The project's own repository, <https://github.com/aaif-goose/goose> (where `github.com/block/goose` redirects), `documentation/static/img/goose.svg` at commit `0c5b5e2f2e7933fca4de5377d239645dcbe4cbb3` (file last changed in `bf760fd`, 2025-03-24); taken 2026-11-11 | Apache 2.0 (the repository's licence); the name and logo under the [LF Projects trademark policy](https://lfprojects.org/policies/trademark-policy/) |
+| Google Gemini | Gemini CLI  | Google LLC                                                                                 | Simple Icons 16.37.0, `icons/googlegemini.svg`                                                                                                                                                                                                                           | CC0 1.0 (the Simple Icons project)                                                                                                                   |
 
 Notes:
 
@@ -62,8 +64,23 @@ Notes:
   [disclaimer](https://github.com/simple-icons/simple-icons/blob/develop/DISCLAIMER.md) says a brand may still set its own terms, and
   CC0 waives no trademark rights: the marks remain trademarks of their owners. Shapewall uses them only to identify the agent the
   owner connected, at icon size, with no endorsement or affiliation implied (see `NOTICE`).
-- **Not included:** Codex (OpenAI) and goose (Block). Simple Icons 16.37.0 has no mark for either, so those agents show their
-  initials. Nothing was drawn to resemble a mark and nothing was copied from a vendor's site.
+- **The OpenAI mark's provenance.** It is the "blossom" monogram (no wordmark), byte for byte the path of `icons/openai.svg` in
+  `simple-icons@15.22.0`, the last release that has it. Simple Icons **removed** the icon in 16.0.0 (2025-11-30,
+  [pull request 13944](https://github.com/simple-icons/simple-icons/pull/13944), "Remove OpenAI ... assuming no permissions are
+  sought/obtained before then", closing [issue 12739](https://github.com/simple-icons/simple-icons/issues/12739), which asked
+  whether the icon still matched OpenAI's 2025 rebrand). So the CC0 statement of that release covers the file as Simple Icons
+  published it, but Simple Icons itself no longer distributes it, the drawing may predate the 2025 redraw, and OpenAI's own brand
+  guidelines (<https://openai.com/brand>) apply to any use of the mark. That page could not be fetched from the build machine when
+  this was added (it answered 403 to a plain request), so the guidelines were **not** reviewed against this use. The project owner
+  chose to ship the mark for Codex with this provenance; check the guidelines, or ask OpenAI, before relying on it.
+- **The goose mark** is the single path of the project's own `goose.svg` (one colour, 45 by 45), unchanged; only the file's empty
+  clipping frame is left out. The repository is Apache 2.0, whose section 6 grants no trademark rights; its `GOVERNANCE.md` points
+  to the LF Projects policies for the trademark. That policy asks, among other things, that a logo is not altered, not shown "with
+  color variations" or with other elements on top of it, and not used to promote a product without written permission. Shapewall
+  shows it only as the icon of a goose you connected. Like the other marks it is drawn in the board's text colour (near black on
+  light, near white on dark), where the file itself is near black (`#101010`): if that counts as a colour variation, the dark theme
+  needs a look.
+- Nothing here was drawn to resemble a mark and nothing was copied from an unofficial site.
 - Adding or removing a mark is one entry in `src/agent/agent-logos.js` and one row here. The twelve built-in avatars
   (`client/src/chat/agentIcons.jsx`) are original drawings made for Shapewall and are not third-party material.
 

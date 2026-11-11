@@ -151,8 +151,8 @@ export function projectRoutes(ctx) {
       ({ params, body }) => {
         const { user } = inWorkspace(params[0], 'tokens')
         const project = projectIn(params[0], params[1])
-        const name = cleanText(body?.name, 60)
-        if (!name) fail(400, 'invalid_name', 'Token name: 1 to 60 characters.')
+        const name = cleanText(body?.name, 61)
+        if (!name || name.length > 60) fail(400, 'invalid_name', 'Token name: 1 to 60 characters.')
         const scopes = Array.isArray(body?.scopes)
           ? [...new Set(body.scopes.flatMap((scope) => (scope === 'comment' ? ['reply', 'status'] : [scope])))]
           : ['read']

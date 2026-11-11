@@ -45,6 +45,8 @@ const MODE = process.env.STUB_ACP_MODE || ''
 const OPTIONS = process.argv.includes('--options')
 const MODES = process.argv.includes('--modes')
 const SLOW_NEW = process.argv.includes('--slow-new')
+// --slow-init=<ms>: the handshake takes that long, as a real agent's does (the stub's is instant).
+const SLOW_INIT = Number(process.argv.find((arg) => arg.startsWith('--slow-init='))?.slice(12)) || 0
 const config = { model: 'stub-fast', effort: 'medium' }
 let mode = 'ask'
 const modes = () => ({
@@ -159,12 +161,15 @@ function handle(message) {
   if (message.method === 'initialize') {
     if (MODE === 'silent') return
     clientCapabilities = message.params.clientCapabilities
-    return reply({
-      protocolVersion: 1,
-      agentCapabilities: { loadSession: false, promptCapabilities: { image: MODE !== 'noimage', embeddedContext: true } },
-      agentInfo: { name: 'acp-stub', title: 'ACP stub', version: '1.0.0' },
-      authMethods: [{ id: 'stub-login', name: 'Log in to the stub' }],
-    })
+    const answer = () =>
+      reply({
+        protocolVersion: 1,
+        agentCapabilities: { loadSession: false, promptCapabilities: { image: MODE !== 'noimage', embeddedContext: true } },
+        agentInfo: { name: 'acp-stub', title: 'ACP stub', version: '1.0.0' },
+        authMethods: [{ id: 'stub-login', name: 'Log in to the stub' }],
+      })
+    if (SLOW_INIT) return void sleep(SLOW_INIT).then(answer)
+    return answer()
   }
   if (message.method === 'session/new') {
     if (MODE === 'auth') return fail(-32000, 'Authentication required')

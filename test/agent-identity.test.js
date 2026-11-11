@@ -37,12 +37,19 @@ const settings = '/api/agent/settings'
 // What the board sends for an upload: a 256 by 256 RGBA PNG, in base64.
 const icon256 = (color = [20, 120, 200, 255]) => solidPng(256, 256, color).toString('base64')
 
-async function board(t, { saved = true, config = sampleConfig('identity'), ...options } = {}) {
+// `codex`: how codex-acp behaves. 'slow': its handshake takes 1.5 s, as a real
+// agent's takes seconds (the stub's is instant). 'slow-fail': it exits after 1.5 s.
+async function board(t, { saved = true, codex = null, config = sampleConfig('identity'), ...options } = {}) {
   const home = tempDir('identity-home')
   const bin = path.join(home, 'bin')
   fs.mkdirSync(bin)
-  for (const name of ['claude-agent-acp', 'codex-acp', 'gemini', 'mystery-acp'])
-    fs.writeFileSync(path.join(bin, name), `#!/bin/sh\nexec "${process.execPath}" "${STUB}" "$@"\n`, { mode: 0o755 })
+  for (const name of ['claude-agent-acp', 'codex-acp', 'gemini', 'mystery-acp']) {
+    const body =
+      name === 'codex-acp' && codex === 'slow-fail'
+        ? '#!/bin/sh\nsleep 1.5\nexit 3\n'
+        : `#!/bin/sh\nexec "${process.execPath}" "${STUB}" ${name === 'codex-acp' && codex === 'slow' ? '--slow-init=1500 ' : ''}"$@"\n`
+    fs.writeFileSync(path.join(bin, name), body, { mode: 0o755 })
+  }
   const env = { HOME: home, XDG_CONFIG_HOME: home, PATH: `${bin}${path.delimiter}${process.env.PATH}` }
   if (saved) saveUserAgentEntry(config.dir, { backend: 'acp', acpCommand: profiles[0].acpCommand, profiles }, env)
   await createComment(config, config.boards[0], { pageId: 'home', viewport: 'desktop', x: 1, y: 1, body: 'Fixture' })
@@ -149,18 +156,28 @@ test('every built-in icon has a drawing, every tint a colour, and no drawing car
   assert.doesNotMatch(art, /<text|<image|href|<script|url\(/)
 })
 
-test('product marks: Claude Code and Gemini CLI have one, Codex, goose and unknown agents do not; each records its source', () => {
+test('product marks: every known agent has one (Codex the OpenAI mark), unknown agents do not; each records its source', () => {
   assert.equal(logoForAgent('claude'), 'claude')
   assert.equal(logoForAgent('gemini'), 'gemini')
-  assert.equal(logoForAgent('codex'), null)
-  assert.equal(logoForAgent('goose'), null)
+  assert.equal(logoForAgent('codex'), 'openai', 'Codex shows the OpenAI mark')
+  assert.equal(logoForAgent('goose'), 'goose')
   assert.equal(logoForAgent('my-own-agent'), null)
+  assert.equal(logoForAgent('openai'), null, 'a mark id is not an agent id')
+  assert.deepEqual(
+    AGENT_LOGOS.map((logo) => logo.id),
+    ['claude', 'openai', 'goose', 'gemini'],
+  )
   assert.equal(agentLogo('nothing'), null)
   for (const logo of AGENT_LOGOS) {
     assert.match(logo.id, /^[a-z][a-z0-9-]*$/)
     assert.ok(logo.name && logo.owner, logo.id)
-    assert.match(logo.source, /Simple Icons \d+\.\d+\.\d+ .*CC0 1\.0, icons\/[a-z]+\.svg$/, logo.id)
-    assert.equal(logo.viewBox, '0 0 24 24')
+    // Where it came from, pinned: a Simple Icons release, or the project's own repository at a commit.
+    assert.match(
+      logo.source,
+      /^(Simple Icons \d+\.\d+\.\d+ .*CC0 1\.0, icons\/[a-z]+\.svg|github\.com\/aaif-goose\/goose at [0-9a-f]{40}, [\w/.-]+\.svg \(Apache 2\.0; LF Projects trademark policy\))$/,
+      logo.id,
+    )
+    assert.match(logo.viewBox, /^0 0 (24 24|45 45)$/)
     // One path of plain path data: nothing else can ride along.
     assert.match(logo.path, /^[MmLlHhVvCcSsQqTtAaZz0-9 .,-]+$/, logo.id)
     for (const agent of logo.agents)
@@ -192,7 +209,7 @@ test(
       [
         ['default', 'claude', null],
         ['claude', 'claude', null],
-        ['codex', null, null],
+        ['codex', 'openai', null],
       ],
     )
     const view = (await b.api('GET', settings)).json
@@ -200,8 +217,8 @@ test(
       view.known.map((item) => [item.id, item.logo]),
       [
         ['claude', 'claude'],
-        ['codex', null],
-        ['goose', null],
+        ['codex', 'openai'],
+        ['goose', 'goose'],
         ['gemini', 'gemini'],
       ],
     )
@@ -209,8 +226,8 @@ test(
       agentRows(view).map((row) => [row.id, row.logo]),
       [
         ['claude', 'claude'],
-        ['codex', null],
-        ['goose', null],
+        ['codex', 'openai'],
+        ['goose', 'goose'],
         ['gemini', 'gemini'],
       ],
     )
@@ -329,7 +346,7 @@ test(
       pickerProfiles(thread).options.map((option) => [option.id, option.label, option.icon, option.tint, option.logo]),
       [
         ['claude', 'Harry', 'cat', 'violet', 'claude'],
-        ['codex', 'Codex', null, null, null],
+        ['codex', 'Codex', null, null, 'openai'],
       ],
     )
     assert.equal(formFrom(renamed.json).label, 'Harry')
@@ -600,5 +617,163 @@ test('replies: a reply marked as the agent keeps its name; the owner MCP server 
       ['Name at start', true, 'Third'],
     ],
     'earlier replies keep the name they were written with',
+  )
+})
+
+test('the OpenAI and goose marks are the published files, unchanged, and the notices say where each came from', () => {
+  const openai = agentLogo('openai')
+  assert.deepEqual(openai.agents, ['codex'])
+  assert.match(openai.source, /^Simple Icons 15\.22\.0 /, 'the last release that has the icon')
+  // The blossom's outline starts and ends where the published path does.
+  assert.ok(openai.path.startsWith('M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108'))
+  assert.ok(openai.path.endsWith('v2.9994l-2.5974 1.4997-2.6067-1.4997Z'))
+  assert.equal(openai.path.length, 1460)
+  assert.equal(agentLogo('goose').path.length, 4754)
+  const goose = agentLogo('goose')
+  assert.deepEqual(goose.agents, ['goose'])
+  assert.ok(goose.path.startsWith('M43.2098 39.2492L39.8118 36.4522C37.9646 34.9318'))
+  assert.ok(goose.path.endsWith('43.2132 39.2517L43.2098 39.2492Z'))
+  const thirdParty = fs.readFileSync(new URL('../THIRD_PARTY.md', import.meta.url), 'utf8')
+  // The OpenAI icon's removal from Simple Icons is said, not hidden.
+  assert.match(thirdParty, /simple-icons@15\.22\.0/)
+  assert.match(thirdParty, /removed\*\* the icon in 16\.0\.0/)
+  assert.match(thirdParty, /https:\/\/openai\.com\/brand/)
+  assert.match(thirdParty, /aaif-goose\/goose/)
+  assert.ok(thirdParty.includes(goose.source.match(/[0-9a-f]{40}/)[0]), 'the commit the goose mark was taken at')
+  assert.match(thirdParty, /lfprojects\.org\/policies\/trademark-policy/)
+})
+
+// ---- A name or an icon saved while a Connect is still testing ----
+//
+// With a real agent the handshake of a one-click Connect takes seconds, and
+// the page already lists the agent. Nothing a person does in that window may
+// answer "a connection test is running" for a rename.
+
+// Connect Codex and return while its test runs: { done, hash }.
+async function connecting(b, extra = {}) {
+  const first = await b.api('POST', settings + '/profiles/connect', { agentId: 'codex' })
+  const done = b.api('POST', settings + '/profiles/connect', { agentId: 'codex', confirm: first.json.confirmHash, ...extra })
+  for (let tries = 0; tries < 100; tries += 1) {
+    if ((await b.api('GET', settings)).json.testing) return { done }
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  }
+  throw new Error('the connection test never started')
+}
+const onlyClaude = { backend: 'acp', acpCommand: 'claude-agent-acp', profiles: [profiles[0]] }
+
+test('rename during a Connect whose test then succeeds: the save waits for the test and is kept', { skip: !POSIX }, async (t) => {
+  const b = await board(t, { saved: false, codex: 'slow' })
+  saveUserAgentEntry(b.config.dir, onlyClaude, b.env)
+  const { done } = await connecting(b, { name: 'Harry' })
+  // While it runs the page says so: on the Agents page and in the agent info of the board.
+  const during = (await b.api('GET', settings)).json
+  assert.deepEqual(during.testing, { id: 'codex' })
+  assert.deepEqual(
+    during.profiles.map((item) => [item.id, item.label, item.state]),
+    [
+      ['claude', 'Claude Code', 'ready'],
+      ['codex', 'Harry', 'testing'],
+    ],
+  )
+  const status = (await b.api('GET', '/api/agent/status')).json
+  assert.equal(status.profiles.find((item) => item.id === 'codex').state, 'testing')
+  assert.equal(status.profiles.find((item) => item.id === 'claude').state, 'ready')
+  // The other changes of the page still wait for it (the board disables them meanwhile).
+  assert.equal((await b.api('DELETE', settings + '/profiles/claude')).json.error.code, 'test_running')
+  assert.equal((await b.api('POST', settings + '/profiles/claude/default', {})).json.error.code, 'test_running')
+  assert.equal((await b.api('POST', settings + '/test', { profileId: 'claude' })).json.error.code, 'test_running')
+
+  // A name for another agent: saved at once.
+  const started = Date.now()
+  const other = await b.api('POST', settings + '/identity', { id: 'claude', name: 'Old Hand', icon: 'bear' })
+  assert.equal(other.status, 200, other.text)
+  assert.ok(Date.now() - started < 1000, 'it did not wait for the test')
+  assert.equal(other.json.testing.id, 'codex', 'and the test is still running')
+
+  // A name and a picture for the agent being connected: both wait, neither is refused.
+  let answered = false
+  const rename = b.api('POST', settings + '/identity', { id: 'codex', name: 'Fixer', icon: 'owl' }).then((answer) => {
+    answered = true
+    return answer
+  })
+  const picture = b.api('POST', settings + '/identity/icon', { id: 'codex', png: icon256() })
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  assert.equal(answered, false, 'the save waits for the test')
+  assert.equal(fs.existsSync(iconDir(b.env)), false, 'no picture is stored before the agent is there')
+
+  const connected = await done
+  assert.equal(connected.json.connected, true, connected.text)
+  assert.equal(connected.json.testing, null, 'the answer shows the agent as it is, not "testing"')
+  assert.equal(connected.json.profiles.find((item) => item.id === 'codex').state, 'ready')
+  const [renamed, uploaded] = await Promise.all([rename, picture])
+  assert.equal(renamed.status, 200, renamed.text)
+  assert.equal(uploaded.status, 200, uploaded.text)
+  const saved = userAgentEntry(b.config.dir, b.env).entry
+  assert.deepEqual(saved.profiles[0], { id: 'claude', label: 'Old Hand', acpCommand: 'claude-agent-acp', icon: 'bear' })
+  assert.equal(saved.profiles[1].label, 'Fixer')
+  assert.match(saved.profiles[1].icon, /^(owl|upload:[0-9a-f]{32})$/, 'the name and an icon, whichever of the two icon saves came last')
+  assert.equal((await b.api('GET', settings)).json.testing, null)
+  assert.equal((await b.api('GET', '/api/agent/status')).json.profiles.find((item) => item.id === 'codex').label, 'Fixer')
+  // The connected agent answers under its new name.
+  assert.match((await finish(await b.send('board', 'pid'))).text, /pid \d+/)
+})
+
+test(
+  'rename during a Connect whose test then fails: the settings go back, nothing is orphaned, and the save says why',
+  { skip: !POSIX },
+  async (t) => {
+    const b = await board(t, { saved: false, codex: 'slow-fail' })
+    saveUserAgentEntry(b.config.dir, onlyClaude, b.env)
+    const { done } = await connecting(b)
+    // Another agent's name and picture, saved meanwhile: kept when the old settings are written back.
+    assert.equal((await b.api('POST', settings + '/identity', { id: 'claude', name: 'Old Hand' })).status, 200)
+    const kept = await b.api('POST', settings + '/identity/icon', { id: 'claude', png: icon256([10, 200, 90, 255]) })
+    assert.equal(kept.status, 200, kept.text)
+    // For the agent that will not connect: the saves wait, then say so in words.
+    const rename = b.api('POST', settings + '/identity', { id: 'codex', name: 'Fixer', icon: 'owl' })
+    const picture = b.api('POST', settings + '/identity/icon', { id: 'codex', png: icon256() })
+    const failed = await done
+    assert.equal(failed.json.connected, false)
+    assert.equal(failed.json.testing, null)
+    for (const answer of await Promise.all([rename, picture])) {
+      assert.equal(answer.status, 409)
+      assert.equal(answer.json.error.code, 'agent_not_connected')
+      assert.match(answer.json.error.message, /^Codex did not connect, so .* Nothing was changed\.$/)
+      assert.doesNotMatch(answer.json.error.message, /connection test is running/)
+    }
+    const saved = userAgentEntry(b.config.dir, b.env).entry
+    assert.equal(saved.acpCommand, 'claude-agent-acp')
+    assert.equal(saved.profiles.length, 1, 'Codex is not there')
+    assert.equal(saved.profiles[0].label, 'Old Hand')
+    assert.match(saved.profiles[0].icon, /^upload:[0-9a-f]{32}$/)
+    assert.equal(saved.fixedAgent, undefined)
+    assert.equal(JSON.stringify(saved).includes('Fixer'), false, 'no name left for an agent that is not there')
+    // One picture on disk: the kept one. The one for Codex was never stored.
+    assert.deepEqual(fs.readdirSync(iconDir(b.env)), [`${saved.profiles[0].icon.slice(7)}.png`])
+  },
+)
+
+test('Test connection does not hold up a rename: it changes no settings', { skip: !POSIX }, async (t) => {
+  const b = await board(t, { codex: 'slow' })
+  const tested = b.api('POST', settings + '/test', { profileId: 'codex' })
+  for (let tries = 0; tries < 100 && !(await b.api('GET', settings)).json.testing; tries += 1)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  const started = Date.now()
+  const renamed = await b.api('POST', settings + '/identity', { id: 'codex', name: 'Fixer' })
+  assert.equal(renamed.status, 200, renamed.text)
+  assert.ok(Date.now() - started < 1000)
+  assert.equal(renamed.json.profiles.find((item) => item.id === 'codex').state, 'testing')
+  assert.equal((await tested).json.ok, true)
+  assert.equal(userAgentEntry(b.config.dir, b.env).entry.profiles[1].label, 'Fixer')
+})
+
+test('the board waits longer for a connection test than the test can last', async () => {
+  const { ACP_TEST_TIMEOUT_MS, TEST_WAIT_MS } = await import('../src/agent/test-timing.js')
+  assert.ok(TEST_WAIT_MS >= ACP_TEST_TIMEOUT_MS + 10000)
+  const stream = fs.readFileSync(new URL('../client/src/chat/stream.js', import.meta.url), 'utf8')
+  assert.match(stream, /TEST_WAIT_TRIES = Math\.ceil\(TEST_WAIT_MS \/ TEST_RETRY_MS\)/)
+  assert.match(
+    fs.readFileSync(new URL('../src/agent/settings-routes.js', import.meta.url), 'utf8'),
+    /import \{ ACP_TEST_TIMEOUT_MS \} from '\.\/test-timing\.js'/,
   )
 })

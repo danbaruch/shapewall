@@ -58,9 +58,9 @@ import { tokenEquals } from '../tokens.js'
 import { cleanAgentName, identityOf, isAgentIcon, isAgentTint, isBuiltInIcon } from './identity.js'
 import { IconError, pruneIcons, saveIcon } from './icon-store.js'
 import { logoForAgent } from './agent-logos.js'
+import { ACP_TEST_TIMEOUT_MS } from './test-timing.js'
 
 const TEST_TIMEOUT_MS = 15000
-const ACP_TEST_TIMEOUT_MS = 30000
 const VISION_PROBE_MS = 3000
 const LOOPBACK_NAMES = new Set(['127.0.0.1', 'localhost', '[::1]', '::1'])
 // Any of these means a proxy or tunnel stands between the person and us.
@@ -364,6 +364,9 @@ export function settingsRoutes({
   })
   const repo = () => config.agent || {}
   let testing = false
+  // Which agent the running test is of: a profile id, or "default" (the
+  // default connection). Shown as that agent's state ("Testing the connection").
+  let testingId = null
   let closing = false
   const pending = new Set()
   router.close = async () => {
@@ -372,6 +375,15 @@ export function settingsRoutes({
   }
   // Shared admission lock: a handshake must not overlap live turns or profile changes.
   router.isTesting = () => testing
+  // { id } while a test runs, else null (routes.js: the agent's state).
+  router.testing = () => (testing ? { id: testingId } : null)
+  // A test started or ended: every open view hears it, also the ones that
+  // did not start it (a reloaded page, another tab).
+  const setTesting = (on, id = null) => {
+    testing = on
+    testingId = on ? id || 'default' : null
+    events?.changed('state')
+  }
 
   const guard = (req, res, next) => {
     if (closing) return fail(res, 503, 'settings_stopping', 'Agent settings are stopping.')
@@ -419,41 +431,70 @@ export function settingsRoutes({
     return profile ? { entry, target: profile, known: builtIn(id) } : null
   }
 
-  // Applies { name, icon, tint } (only the keys given) to the target and
-  // saves. Returns true when saved; otherwise it answered.
-  const saveIdentity = (req, res, id, change) => {
-    if (typeof id !== 'string' || !id) return fail(res, 400, 'invalid_identity', 'id: a connected agent, "endpoint" or "default".')
-    // A Connect is testing what it saved and may put the old settings back.
-    if (testing) return fail(res, 409, 'test_running', 'A connection test is running. Wait for it, then save.')
-    const saved = userAgentEntry(config.dir, env)
-    if (saved.problem) return fail(res, 409, 'settings_file_invalid', saved.problem)
-    const found = identityTarget(id, saved.entry || {})
-    if (!found) return fail(res, 404, 'unknown_profile', 'That agent is not connected.')
+  // `current` with { name, icon, tint } (only the keys given) applied to the
+  // agent `id`: { entry }, or { status, code, message } when it is refused.
+  const withIdentity = (current, id, change) => {
+    const found = identityTarget(id, current)
+    if (!found) return { status: 404, code: 'unknown_profile', message: 'That agent is not connected.' }
     const { entry, target } = found
     if (Object.hasOwn(change, 'name')) {
       const { name, problem } = cleanAgentName(change.name)
-      if (problem) return fail(res, 400, 'invalid_name', problem)
+      if (problem) return { status: 400, code: 'invalid_name', message: problem }
       if (name) target.label = name
       else if (found.known === true) delete target.label
       else if (found.known) target.label = found.known
-      else return fail(res, 400, 'invalid_name', 'name: 1 to 40 characters')
+      else return { status: 400, code: 'invalid_name', message: 'name: 1 to 40 characters' }
     }
     if (Object.hasOwn(change, 'icon')) {
       if (change.icon === null || change.icon === '') delete target.icon
       else if (isAgentIcon(change.icon)) target.icon = change.icon
-      else return fail(res, 400, 'invalid_icon', 'icon: one of the built-in icons, or null for none.')
+      else return { status: 400, code: 'invalid_icon', message: 'icon: one of the built-in icons, or null for none.' }
     }
     if (Object.hasOwn(change, 'tint')) {
       if (change.tint === null || change.tint === '') delete target.tint
       else if (isAgentTint(change.tint)) target.tint = change.tint
-      else return fail(res, 400, 'invalid_tint', 'tint: one of the accent colours, or null for none.')
+      else return { status: 400, code: 'invalid_tint', message: 'tint: one of the accent colours, or null for none.' }
     }
     if (entry.fixedAgent && !Object.keys(entry.fixedAgent).length) delete entry.fixedAgent
     if (!entry.profiles.length) delete entry.profiles
     delete entry.updatedAt
+    return { entry }
+  }
+
+  // A one-click Connect saves the agent and then tests it, which with a real
+  // agent takes seconds, and puts the old settings back when the test fails.
+  // A name or an icon saved in that window must not be lost or refused:
+  // - for the agent being connected, the save waits for the test (the person
+  //   sees "Saving when the connection test finishes..."), then is applied to
+  //   the connected agent, or answers that it did not connect;
+  // - for any other agent it is saved at once, and remembered (`renamed`) so
+  //   that a failed test, which writes the old settings back, applies it again.
+  // `connecting`: { id, done, renamed } while such a test runs, else null.
+  let connecting = null
+  const underTest = (id) => {
+    if (!connecting || typeof id !== 'string') return false
+    const found = identityTarget(id, userAgentEntry(config.dir, env).entry || {})
+    return found?.target?.id === connecting.id
+  }
+
+  // Saves the change for `id`. Returns true when saved; otherwise it answered.
+  const saveIdentity = async (req, res, id, change) => {
+    if (typeof id !== 'string' || !id) return fail(res, 400, 'invalid_identity', 'id: a connected agent, "endpoint" or "default".')
+    const waited = underTest(id) ? connecting : null
+    if (waited) await waited.done
+    const saved = userAgentEntry(config.dir, env)
+    if (saved.problem) return fail(res, 409, 'settings_file_invalid', saved.problem)
+    const next = withIdentity(saved.entry || {}, id, change)
+    if (!next.entry) {
+      // The agent it was for did not connect: said in those words.
+      if (waited && next.status === 404)
+        return fail(res, 409, 'agent_not_connected', `${waited.label} did not connect, so there is nothing to rename. Nothing was changed.`)
+      return fail(res, next.status, next.code, next.message)
+    }
     try {
       // No reload(): the agents keep running; the name is read fresh wherever it is shown.
-      saveUserAgentEntry(config.dir, entry, env)
+      saveUserAgentEntry(config.dir, next.entry, env)
+      if (connecting) connecting.renamed.push({ id, change })
       pruneIcons(env)
     } catch (error) {
       return fail(res, 500, 'settings_not_saved', `The settings were not saved: ${error.message}`)
@@ -461,22 +502,29 @@ export function settingsRoutes({
     return true
   }
 
-  router.post('/identity', guard, (req, res) => {
+  router.post('/identity', guard, async (req, res) => {
     const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {}
     const change = Object.fromEntries(['name', 'icon', 'tint'].filter((key) => Object.hasOwn(body, key)).map((key) => [key, body[key]]))
     // An uploaded icon is set by the upload itself, never named from outside.
     if (typeof change.icon === 'string' && !isBuiltInIcon(change.icon))
       return fail(res, 400, 'invalid_icon', 'icon: one of the built-in icons, or null for none.')
-    if (saveIdentity(req, res, body.id, change) === true) res.json(view())
+    if ((await saveIdentity(req, res, body.id, change)) === true) res.json(view())
   })
 
-  router.post('/identity/icon', guard, (req, res) => {
+  router.post('/identity/icon', guard, async (req, res) => {
     const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {}
+    // The agent is being connected: wait here, before the picture is stored
+    // (a file no agent uses yet would be cleaned up by another save).
+    const waited = underTest(body.id) ? connecting : null
+    if (waited) await waited.done
     // Is the agent there? Before anything is stored.
     const saved = userAgentEntry(config.dir, env)
     if (saved.problem) return fail(res, 409, 'settings_file_invalid', saved.problem)
-    if (typeof body.id !== 'string' || !identityTarget(body.id, saved.entry || {}))
+    if (typeof body.id !== 'string' || !identityTarget(body.id, saved.entry || {})) {
+      if (waited)
+        return fail(res, 409, 'agent_not_connected', `${waited.label} did not connect, so its icon was not saved. Nothing was changed.`)
       return fail(res, 404, 'unknown_profile', 'That agent is not connected.')
+    }
     let hash
     try {
       hash = saveIcon(body.png, env)
@@ -484,7 +532,7 @@ export function settingsRoutes({
       if (error instanceof IconError) return fail(res, error.status, error.code, error.message)
       return fail(res, 500, 'settings_not_saved', `The icon was not saved: ${error.message}`)
     }
-    if (saveIdentity(req, res, body.id, { icon: `upload:${hash}` }) === true) res.json(view())
+    if ((await saveIdentity(req, res, body.id, { icon: `upload:${hash}` })) === true) res.json(view())
     // Not saved after all: the file just written is not left behind.
     else pruneIcons(env)
   })
@@ -544,7 +592,12 @@ export function settingsRoutes({
   })
 
   // How an agent is doing (agent-health.js): { state, loginHint }.
-  const statusOf = (profileId) => (health ? health.status(settings(profileId), processPool) : {})
+  // While its connection test runs an agent's state is "testing", not what
+  // the last turn left ("Ready"): the page must not look finished.
+  const statusOf = (profileId) => {
+    const status = health ? health.status(settings(profileId), processPool) : {}
+    return testing && testingId === (profileId || 'default') ? { ...status, state: 'testing' } : status
+  }
   const profileList = (entry) => {
     const legacy = legacyProfile(entry, KNOWN_AGENTS)
     // Profiles saved without a default connection: the first one (config.js agentSettings).
@@ -625,6 +678,9 @@ export function settingsRoutes({
       known: KNOWN_AGENTS.map(({ id, label, adapter, cli, install }) => ({ id, label, adapter, cli, install, logo: logoForAgent(id) })),
       // Icons can be uploaded here (the demo has only the built-in ones).
       iconUpload: true,
+      // { id } while a connection test runs (a Connect, or Test connection):
+      // the other changes of this page wait for it.
+      testing: testing ? { id: testingId } : null,
       knownKeyHosts: [...KNOWN_KEY_HOSTS],
       defaultKeyVar: DEFAULT_KEY_VAR,
       keyVarsSet: keyVarsSet(env),
@@ -778,20 +834,37 @@ export function settingsRoutes({
       delete entry.vision
     }
     if (!saveEntry(req, res, entry)) return
-    // Back to what was there: the panel must not claim an agent that does not start.
+    let ended
+    const job = { id: agent.id, label: called, renamed: [], done: new Promise((resolve) => (ended = resolve)) }
+    // Back to what was there: the panel must not claim an agent that does not
+    // start. Names and icons other agents were given meanwhile are kept; one
+    // for an agent that is not there any more (this one) is dropped.
     const restore = () => {
       try {
-        saveUserAgentEntry(config.dir, before.entry || {}, env)
+        let entry = before.entry || {}
+        for (const { id, change } of job.renamed) entry = withIdentity(entry, id, change).entry || entry
+        saveUserAgentEntry(config.dir, entry, env)
+        pruneIcons(env)
       } finally {
         reload()
       }
     }
-    testing = true
+    connecting = job
+    setTesting(true, profileConnect ? agent.id : 'default')
+    // The test is over (after any restore): the saves that waited for it go
+    // on, and the answer below already shows the agent as it is, not "testing".
+    const over = () => {
+      if (connecting !== job) return
+      connecting = null
+      setTesting(false)
+      ended()
+    }
     try {
       const tested = settings(profileConnect ? agent.id : null)
       const result = await testConnection(tested, { env, fetchImpl, root: config.dir, processPool })
       health?.record(tested, result)
       if (!result.ok) restore()
+      over()
       res.json({ connected: result.ok, result: { ...result, label: called }, ...view() })
     } catch (error) {
       try {
@@ -801,7 +874,7 @@ export function settingsRoutes({
       }
       fail(res, 500, 'test_failed', `The test did not finish: ${redact(error.message)}`)
     } finally {
-      testing = false
+      over()
       await res.locals.releaseSettingsOperation?.()
     }
   })
@@ -922,7 +995,7 @@ export function settingsRoutes({
     const profileId = req.body?.profileId ?? null
     if (profileId !== null && !(userAgentEntry(config.dir, env).entry?.profiles || []).some((item) => item.id === profileId))
       return fail(res, 400, 'unknown_profile', 'profileId: one of the connected agents.')
-    testing = true
+    setTesting(true, profileId)
     try {
       const tested = settings(profileId)
       const result = await testConnection(tested, { env, fetchImpl, root: config.dir, processPool })
@@ -931,7 +1004,7 @@ export function settingsRoutes({
     } catch (error) {
       fail(res, 500, 'test_failed', `The test did not finish: ${redact(error.message)}`)
     } finally {
-      testing = false
+      setTesting(false)
       await res.locals.releaseSettingsOperation?.()
     }
   })
