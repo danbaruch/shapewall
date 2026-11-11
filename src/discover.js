@@ -266,7 +266,40 @@ export function cutTitle(value, max = 60) {
 }
 
 // Between a page's name and the site's in a <title>: bar, hyphen, en and em dash (as code points), dot, colon.
-const TITLE_SEPARATORS = [' | ', ' - ', ` ${String.fromCodePoint(0x2013)} `, ` ${String.fromCodePoint(0x2014)} `, ' · ', ' :: ', ': ']
+const TITLE_SEPARATORS = [
+  ' | ',
+  ' -- ',
+  ' - ',
+  ` ${String.fromCodePoint(0x2013)} `,
+  ` ${String.fromCodePoint(0x2014)} `,
+  ' · ',
+  ' :: ',
+  ': ',
+]
+
+// The site's name as its page titles give it: the part most of them end (or
+// start) with after a separator ("Pricing | Acme", "Blog | Acme": "Acme").
+// A home page title is often the name plus a tagline ("Acme | Notes that
+// think"), so it is one vote among the pages, not the answer. Null when
+// fewer than two titles, or fewer than half of them, agree.
+export function siteNameFrom(titles) {
+  const list = titles.map((title) => String(title || '').trim()).filter(Boolean)
+  const votes = new Map()
+  for (const title of list) {
+    const seen = new Set()
+    for (const sep of TITLE_SEPARATORS) {
+      const first = title.indexOf(sep)
+      if (first < 0) continue
+      seen.add(title.slice(0, first).trim())
+      seen.add(title.slice(title.lastIndexOf(sep) + sep.length).trim())
+    }
+    for (const part of seen) if (part) votes.set(part, (votes.get(part) || 0) + 1)
+  }
+  let best = null
+  for (const [part, count] of votes)
+    if (!best || count > best.count || (count === best.count && part.length < best.part.length)) best = { part, count }
+  return best && best.count >= 2 && best.count * 2 >= list.length ? best.part : null
+}
 
 // A page's own title without the site name around it ("Pricing | Acme" is
 // "Pricing" on the Acme board), or null when nothing of its own is left.

@@ -5,7 +5,7 @@ import path from 'node:path'
 import { CONFIG_FILE, ConfigError, SITEMAP_LIMIT_MAX, findConfigFile, normalizeConfig, starterConfig, titleFromBaseUrl } from '../config.js'
 import { writeFileAtomic } from '../store.js'
 import { addPagesToRaw, defaultSitemapUrl, formatImport, importSitemap, sitemapPages } from '../sitemap.js'
-import { DISCOVER_DEFAULTS, cutTitle, describeFetchError, discoverPages, pageTitle } from '../discover.js'
+import { DISCOVER_DEFAULTS, cutTitle, describeFetchError, discoverPages, pageTitle, siteNameFrom } from '../discover.js'
 import { cliCommand } from '../invocation.js'
 import { WORKFLOW_FILE, workflowYaml } from '../ci/workflow.js'
 
@@ -80,7 +80,7 @@ async function discoverConfig({ baseUrl, dir, fetch, out }) {
     return { config, found: 'none' }
   }
   const basePath = new URL(baseUrl).pathname.replace(/\/+$/, '')
-  const siteTitle = crawl.homeTitle
+  const siteTitle = siteNameFrom(crawl.pages.map((page) => page.title)) || crawl.homeTitle
   const titles = new Map(crawl.pages.map((page, index) => [pagePathKey(page.url, basePath), index === 0 ? 'Home' : page.title]))
   const { pages } = sitemapPages(
     crawl.pages.map((page) => page.url),

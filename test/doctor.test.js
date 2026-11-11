@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import net from 'node:net'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { formatDoctor, playwrightVersion, runDoctor } from '../src/doctor.js'
+import { isInstallerBox, formatDoctor, playwrightVersion, runDoctor } from '../src/doctor.js'
 import { cropAround, cropPng, decodePng, encodePng } from '../src/png.js'
 import { SAMPLE, tempDir } from './helpers.js'
 
@@ -87,4 +87,20 @@ test('png: crop keeps pixels, clamps to the edges, and round-trips RGBA', () => 
   const corner = cropAround(png, { x: 48, y: 39 }, { width: 20, height: 10 })
   assert.deepEqual(corner.rect, { x: 30, y: 30, width: 20, height: 10 })
   assert.throws(() => decodePng(Buffer.from('not a png at all, really not one')), /not a PNG/)
+})
+
+test("the browser install leaves out Playwright's boxed npx warning and nothing else", () => {
+  const box = [
+    '\u2554' + '\u2550'.repeat(20) + '\u2557',
+    "\u2551 WARNING: It looks like you are running 'npx playwright install' without first \u2551",
+    '\u255A' + '\u2550'.repeat(20) + '\u255D',
+  ]
+  for (const line of box) assert.equal(isInstallerBox(line), true, line)
+  for (const line of [
+    'Downloading Chromium 140.0 (playwright build v1200)',
+    'BEWARE: your OS is not officially supported by Playwright',
+    '',
+    '|  10% of 170 MiB',
+  ])
+    assert.equal(isInstallerBox(line), false, line)
 })

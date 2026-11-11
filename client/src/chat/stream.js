@@ -13,22 +13,47 @@ const DEMO_MISSING =
   'data:image/svg+xml,' +
   encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="160" height="100"><rect width="160" height="100" fill="#8885"/></svg>')
 
+// A connection test (right after Connect, or from Settings) takes a few
+// seconds, and the server takes no message while one runs. A message sent in
+// that window (Fix pressed straight after Connect) waits for the test here
+// instead of coming back as an error the person has to retry by hand.
+const TEST_WAIT_MS = 1000
+const TEST_WAIT_TRIES = 30
+const pause = (ms, signal) =>
+  new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms)
+    signal?.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer)
+        reject(signal.reason || new DOMException('Aborted', 'AbortError'))
+      },
+      { once: true },
+    )
+  })
+
 // Posts a message and calls onEvent(name, data) for each event until the
 // stream ends. Rejects with ApiError when the server refuses the message.
 export async function sendMessage(boardId, threadId, body, { onEvent, signal } = {}) {
-  const response = await fetch(`${threadPath(boardId, threadId)}/messages`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', ...settingsTokenHeaders() },
-    body: JSON.stringify(body),
-    cache: 'no-store',
-    signal,
-  })
-  if (!response.ok || !String(response.headers.get('content-type')).includes('text/event-stream')) {
+  let response
+  for (let attempt = 0; ; attempt += 1) {
+    response = await fetch(`${threadPath(boardId, threadId)}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', ...settingsTokenHeaders() },
+      body: JSON.stringify(body),
+      cache: 'no-store',
+      signal,
+    })
+    if (response.ok && String(response.headers.get('content-type')).includes('text/event-stream')) break
     let data = null
     try {
       data = await response.json()
     } catch {
       data = null
+    }
+    if (response.status === 409 && data?.error?.code === 'test_running' && attempt < TEST_WAIT_TRIES) {
+      await pause(TEST_WAIT_MS, signal)
+      continue
     }
     throw responseError(response.status, data)
   }

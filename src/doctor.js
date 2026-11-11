@@ -307,11 +307,36 @@ export function formatDoctor(report) {
   return lines.join('\n')
 }
 
+// A line of the box Playwright's installer draws around its npx warning.
+export const isInstallerBox = (line) => /^\s*[\u2554\u2551\u255A]/.test(line)
+
 // Downloads Chromium for the bundled Playwright (its own CLI, so the browser
 // build always matches). Resolves with the exit code.
 export function installBrowser({ stdio = 'inherit' } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [playwrightCli(), 'install', 'chromium'], { stdio, shell: false })
+    // Run through `npx shapewall`, Playwright's installer prints a boxed warning
+    // meant for `npx playwright install` in a project without Playwright
+    // ("install your project's dependencies first"). It does not apply here
+    // (this Playwright is Shapewall's own) and reads as a failure, so the box
+    // is left out; every other line passes through.
+    const filter = stdio === 'inherit'
+    const child = spawn(process.execPath, [playwrightCli(), 'install', 'chromium'], {
+      stdio: filter ? ['inherit', 'inherit', 'pipe'] : stdio,
+      shell: false,
+    })
+    if (filter) {
+      let rest = ''
+      const write = (text) => {
+        const lines = text.split('\n')
+        rest = lines.pop()
+        for (const line of lines) if (!isInstallerBox(line)) process.stderr.write(`${line}\n`)
+      }
+      child.stderr.setEncoding('utf8')
+      child.stderr.on('data', (chunk) => write(rest + chunk))
+      child.stderr.on('end', () => {
+        if (rest && !isInstallerBox(rest)) process.stderr.write(rest)
+      })
+    }
     child.once('error', reject)
     child.once('exit', (code) => resolve(code ?? 1))
   })

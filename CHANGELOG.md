@@ -21,6 +21,13 @@ and the project uses [Semantic Versioning](https://semver.org/).
   when the selector finds no element or several, the pin stays near the corner and a note says so.
 - New `shapewall comments selectors --page ID [--viewport NAME] [--text WORDS]` lists the selectors `--selector` takes, each with its
   element's text, from the latest capture. The error for a selector in the wrong form (a class, say) now names this command.
+- Fix pressed right after Connect no longer comes back as "A connection test is running": a message sent while the connection
+  test runs waits for it (up to 30 seconds) and then goes out.
+- `shapewall init` names the board after what most page titles share ("Pricing -- Acme", "Blog -- Acme": "Acme"), and takes that
+  name off each page's title. Before, the board got the home page's whole title, tagline included, and titles joined with ` -- ` kept
+  the site name.
+- `npx shapewall doctor --install-browser` no longer shows Playwright's boxed warning about installing your project's dependencies
+  first. It did not apply and read as a failure.
 
 ## 0.3.1 - 2026-11-10
 
