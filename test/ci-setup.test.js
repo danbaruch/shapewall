@@ -83,7 +83,7 @@ test('ci values out of shape are reported', () => {
     [
       'ci.colour: unknown setting (use enabled, threshold, pages, viewports, ignore, images, maxPages, start)',
       'ci.enabled: true or false',
-      'ci.threshold: the share of pixels (0 to 1, such as 0.001 for 0.1%) below which a shot counts as unchanged',
+      'ci.threshold: the share of pixels (0 to 1, such as 0.00001 for 0.001%) below which a shot counts as unchanged',
       'ci.pages: no page "nope"',
       'ci.viewports: no viewport "watch"',
       'ci.ignore: up to 50 CSS selectors (each up to 300 characters), such as [".clock", "#ad-slot"]',
@@ -176,6 +176,15 @@ test('startSite runs serve without a shell, waits for its URL and stops the whol
   })
   const page = await fetch(`http://127.0.0.1:${port}/pricing`).then((res) => res.text())
   assert.match(page, /\$8 a month/)
+  // A second checkout on a URL that already answers would capture the first one's site.
+  await assert.rejects(
+    startSite(start, {
+      cwd: path.join(ROOT, 'examples', 'ci'),
+      url: `http://127.0.0.1:${port}/`,
+      env: { ...process.env, PORT: String(port) },
+    }),
+    /already answers before ci\.start\.serve ran/,
+  )
   await site.stop()
   await assert.rejects(fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(2000) }))
   assert.ok(logs.some((line) => line.includes('ci.start.serve: node server.js')))

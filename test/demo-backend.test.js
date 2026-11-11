@@ -884,3 +884,43 @@ test('the demo Agents page: the real settings answer from sample data, the defau
     ],
   )
 })
+
+test('the demo takes a drawing or an image with no text, and resolving ends the agent status', async () => {
+  const { call, state } = demo(as('member'))
+  const shapes = [
+    {
+      tool: 'box',
+      ink: 'accent',
+      width: 4,
+      points: [
+        [0.1, 0.1],
+        [0.4, 0.3],
+      ],
+    },
+  ]
+  const replies = '/api/boards/demo/comments/2/replies'
+  const empty = await call('POST', replies, { body: '' })
+  assert.equal(empty.status, 400)
+  assert.equal(empty.json.error.code, 'empty_comment')
+  assert.equal((await call('POST', replies, { body: ' ', drawing: { shapes: [] } })).status, 400)
+  const drawn = await call('POST', replies, { body: '', drawing: { shapes } })
+  assert.equal(drawn.status, 201)
+  assert.equal(drawn.json.reply.body, '')
+  assert.equal(drawn.json.reply.drawing.shapes.length, 1)
+
+  const pin = { pageId: 'home', viewport: 'desktop', x: 5, y: 5 }
+  assert.equal((await call('POST', '/api/boards/demo/comments', { ...pin, body: '' })).json.error.code, 'empty_comment')
+  const made = await call('POST', '/api/boards/demo/comments', { ...pin, body: '', drawing: { shapes } })
+  assert.equal(made.status, 201)
+  assert.equal(made.json.comment.body, '')
+  // Its author may leave the text empty on an edit; a comment without media may not.
+  assert.equal((await call('PATCH', `/api/boards/demo/comments/${made.json.comment.id}`, { body: '' })).status, 200)
+  assert.equal((await call('PATCH', '/api/boards/demo/comments/2', { body: '' })).json.error.code, 'empty_comment')
+
+  const stored = Object.values(state.comments)
+    .flatMap((store) => store.list)
+    .find((item) => item.id === made.json.comment.id)
+  stored.agentStatus = 'working'
+  const resolved = await call('POST', `/api/boards/demo/comments/${stored.id}/resolve`, {})
+  assert.deepEqual([resolved.json.comment.status, resolved.json.comment.agentStatus], ['resolved', 'done'])
+})

@@ -404,7 +404,7 @@ Capture on every pull request: what `shapewall ci` and the workflow from `shapew
 ```json
 {
   "ci": {
-    "threshold": 0.001,
+    "threshold": 0.00001,
     "pages": ["home", "pricing", "login"],
     "viewports": ["desktop", "phone"],
     "ignore": [".clock", "#ad-slot"],
@@ -416,7 +416,7 @@ Capture on every pull request: what `shapewall ci` and the workflow from `shapew
 | Key         | Type     | Default         | Notes                                                                                                                                                                                    |
 | ----------- | -------- | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `enabled`   | boolean  | `true`          | `false` turns pull request captures off without deleting the workflow.                                                                                                                   |
-| `threshold` | 0-1      | `0.001`         | Share of pixels below which a shot counts as unchanged (0.001 is 0.1%). A size change always counts. `--threshold` overrides it.                                                         |
+| `threshold` | 0-1      | `0.00001`       | Share of pixels below which a shot counts as unchanged (0.00001 is 0.001%). A size change always counts. `--threshold` overrides it.                                                     |
 | `pages`     | string[] | every page      | Page ids to compare (an allow-list), in the config's order.                                                                                                                              |
 | `viewports` | string[] | each page's own | Viewport names to compare.                                                                                                                                                               |
 | `ignore`    | string[] | none            | CSS selectors hidden (`visibility: hidden`) on both sides before each shot: clocks, ads, random content. Up to 50.                                                                       |

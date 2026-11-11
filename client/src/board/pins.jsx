@@ -9,6 +9,7 @@ import { cn, formatRelative } from '../lib/utils'
 import { pinSpot } from './layout'
 import { MentionText } from './Mentions'
 import { AuthorAvatar, AuthorLabel, commentAuthor, isAgentAuthor, repliesLabel } from './commentParts'
+import { commentText } from '../../../src/comment-fields.js'
 
 // The pin's pointed corner is on its spot (pinSpot).
 const TAIL = {
@@ -73,7 +74,7 @@ function PinPreview({ comment, moved }) {
         <span className="ml-auto shrink-0 text-xs text-faint">{formatRelative(comment.createdAt)}</span>
       </div>
       <MentionText
-        text={firstLine(comment.body)}
+        text={firstLine(commentText(comment))}
         plain={Boolean(comment.authorGuest)}
         className="mt-1.5 line-clamp-2 block text-ui break-words text-fg"
       />
@@ -155,7 +156,7 @@ export function Pin({ comment, position, scale, compact = false, selected, unrea
   const badgeSide = spot.flipX ? '-left-1.5' : '-right-1.5'
   const badgeEdge = spot.flipY ? '-bottom-1.5' : '-top-1.5'
   const dotSide = spot.flipX ? '-right-0.5' : '-left-0.5'
-  const label = `Comment ${comment.id} by ${author.name}${messages > 1 ? `, ${repliesLabel(messages - 1)}` : ''}${resolved ? ', resolved' : ''}${unread ? ', unread' : ''}${moved ? ' (its element moved)' : ''}${working ? ', an agent is working on it' : ''}: ${comment.body.slice(0, 60)}`
+  const label = `Comment ${comment.id} by ${author.name}${messages > 1 ? `, ${repliesLabel(messages - 1)}` : ''}${resolved ? ', resolved' : ''}${unread ? ', unread' : ''}${moved ? ' (its element moved)' : ''}${working ? ', an agent is working on it' : ''}: ${commentText(comment).slice(0, 60)}`
   const pin = compact ? (
     <PinDot
       comment={comment}

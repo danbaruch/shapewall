@@ -104,13 +104,15 @@ test('events: the store emits created, mentioned, replied, edits, resolve, reope
     await updateComment(config, board.id, comment.id, { status: 'open' })
     assert.deepEqual(
       seen.map((event) => event.type),
-      ['comment.status_changed', 'comment.resolved', 'comment.reopened', 'comment.status_changed'],
+      // Resolving a comment an agent was working on sets its agent status to done.
+      ['comment.status_changed', 'comment.resolved', 'comment.status_changed', 'comment.reopened', 'comment.status_changed'],
     )
     assert.deepEqual(seen[0].previous, { agentStatus: null })
     assert.equal(seen[0].agentStatus, 'working')
     // Reopening clears the agent status: that is a status change too.
-    assert.deepEqual(seen[3].previous, { agentStatus: 'working' })
-    assert.equal(seen[3].agentStatus, null)
+    assert.deepEqual([seen[2].previous, seen[2].agentStatus], [{ agentStatus: 'working' }, 'done'])
+    assert.deepEqual(seen[4].previous, { agentStatus: 'done' })
+    assert.equal(seen[4].agentStatus, null)
     assert.equal(COMMENT_EVENTS.length, 6)
   } finally {
     off()

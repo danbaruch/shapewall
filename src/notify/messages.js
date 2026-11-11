@@ -6,6 +6,7 @@
 import { splitMentions } from '../mentions.js'
 import { DEFAULT_BOARD_URL, runningBoardUrl } from '../serve-state.js'
 import { boardViewports } from '../config.js'
+import { commentText } from '../comment-fields.js'
 
 const QUOTE_MAX = 500
 
@@ -54,25 +55,26 @@ export function summarize(config, event, boardUrl) {
   const who = (name) => clip(name || 'Someone', 60)
   const n = `#${comment.id}`
   let title
-  let quote = comment.body
+  // No text: what the comment has instead ("(drawing)", "(2 images)").
+  let quote = commentText(comment)
   switch (event.type) {
     case 'comment.created':
       title = `${who(comment.author)} commented on ${where}`
       break
     case 'comment.replied':
       title = `${who(event.reply?.author)} replied to ${n} on ${where}`
-      quote = event.reply?.body
+      quote = commentText(event.reply)
       break
     case 'comment.mentioned':
       title = `@${event.handle}, you were mentioned on ${n}, ${where}`
-      quote = event.reply ? event.reply.body : comment.body
+      quote = commentText(event.reply || comment)
       break
     case 'comment.status_changed':
       title = `Agent status of ${n} on ${where}: ${event.previous?.agentStatus || 'none'} -> ${event.agentStatus || 'none'}`
       break
     case 'comment.resolved':
       title = `${n} on ${where} was resolved`
-      if (comment.resolution) quote = `${comment.body}\n\nResolution: ${comment.resolution}`
+      if (comment.resolution) quote = `${quote}\n\nResolution: ${comment.resolution}`
       if (comment.fixRef) quote = `${quote}\nFix: ${comment.fixRef}`
       break
     case 'comment.reopened':

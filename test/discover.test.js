@@ -8,7 +8,7 @@ import http from 'node:http'
 import path from 'node:path'
 import { main } from '../src/cli.js'
 import { loadConfig } from '../src/config.js'
-import { cutTitle, discoverPages, htmlLinks, htmlTitle, pageLink, pageTitle } from '../src/discover.js'
+import { cutTitle, discoverPages, htmlLinks, htmlTitle, pageLink, pageTitle, siteNameFrom } from '../src/discover.js'
 import { tempDir } from './helpers.js'
 
 const page = (title, body = '') => `<!doctype html><html><head><title>${title}</title></head><body>${body}</body></html>`
@@ -288,4 +288,18 @@ test('discoverPages gives up at the total time budget', async () => {
   } finally {
     await site.close()
   }
+})
+
+test('siteNameFrom: the name most page titles share, not the home page title with its tagline', () => {
+  const titles = ['Acme -- notes that think with you', 'Pricing -- Acme', 'Blog -- Acme', 'Sign in -- Acme']
+  assert.equal(siteNameFrom(titles), 'Acme')
+  assert.equal(pageTitle('Pricing -- Acme', 'Acme'), 'Pricing')
+  assert.equal(siteNameFrom(['Acme | Home', 'Acme | Pricing', 'Acme | Docs']), 'Acme')
+  assert.equal(siteNameFrom(['Pricing - Acme Inc', 'About - Acme Inc', 'A post with - a dash - Acme Inc']), 'Acme Inc')
+  // Not enough agreement: the caller falls back to the home page title.
+  assert.equal(siteNameFrom(['Home', 'Pricing', 'About']), null)
+  assert.equal(siteNameFrom(['Only | One']), null)
+  assert.equal(siteNameFrom(['A | X', 'B | Y', 'C | Z', 'D | W']), null)
+  assert.equal(siteNameFrom([]), null)
+  assert.equal(siteNameFrom([null, '', 'Pricing | Acme', 'Blog | Acme']), 'Acme')
 })

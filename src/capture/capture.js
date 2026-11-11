@@ -541,9 +541,11 @@ export async function runCapture({
       pages: partial && previous?.pages ? { ...previous.pages } : {},
     }
     browser = await launchBrowser(config, { chromium })
-    const storageState = await resolveStorageState(browser, config, board, { log })
     // The default environment is the board's baseUrl (which callers may override).
     const baseUrl = isDefault ? board.baseUrl : env.baseUrl
+    // The login script signs in to the environment being captured, not always
+    // the first one (as the page checks already did).
+    const storageState = await resolveStorageState(browser, config, { ...board, baseUrl }, { log })
     const options = captureOptions(config, board)
     const stateFor = setupStates({ browser, board, config, baseUrl, base: storageState, viewports })
     if (board.setup)

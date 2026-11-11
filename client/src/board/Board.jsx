@@ -43,6 +43,7 @@ import { BoardToolbar } from './BoardToolbar'
 import { BoardMenu } from './BoardMenu'
 import { CanvasNotes } from './CanvasNotes'
 import { DrawingMode, useDrawingMode } from './DrawingMode'
+import { drawing } from './drawing'
 import { BoardToast, NoticeBar, useToast } from './Toast'
 import { PhoneSheets, SidePanel } from './BoardPanels'
 import { BoardRail } from './BoardRail'
@@ -731,8 +732,15 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
+  // Leaving comment mode drops a draft with nothing in it; text, a drawing
+  // or an image keeps it.
+  const draftImages = useRef(0)
+  draftImages.current = composerProps.media.images.images.length
   useEffect(() => {
-    if (!commentMode) setDraft((current) => (current && !current.body.trim() ? null : current))
+    if (commentMode) return
+    const drawn = drawing.get()
+    const media = draftImages.current > 0 || (drawn?.owner === 'composer' && drawn.shapes.length > 0)
+    setDraft((current) => (current && !current.body.trim() && !media ? null : current))
   }, [commentMode])
 
   // An open thread counts as read.

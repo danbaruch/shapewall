@@ -104,6 +104,7 @@ import {
   versionsOf,
   visibleTo,
 } from './threads.js'
+import { commentText } from '../comment-fields.js'
 
 // Four 5 MB images in base64, and the text. Only POST .../messages reads a
 // body this big, and only once the message is allowed to run.
@@ -493,7 +494,7 @@ export function agentRouter({
         .find(Boolean)
         ?.slice(0, 72) || ''
     const message = comment
-      ? `Fix comment #${commentId}: ${firstLine(comment.body) || 'agent change'}\n\n${commentLink(config, boardUrlFor(config, { env }), board.id, comment)}\n\nshapewall:${board.id}/${commentId}\n`
+      ? `Fix comment #${commentId}: ${firstLine(commentText(comment)) || 'agent change'}\n\n${commentLink(config, boardUrlFor(config, { env }), board.id, comment)}\n\nshapewall:${board.id}/${commentId}\n`
       : `Agent change from chat: ${firstLine(userText) || threadId}\n\nshapewall:${board.id}/${threadId}\n`
     let commit = null
     try {

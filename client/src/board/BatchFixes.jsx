@@ -18,6 +18,7 @@ import { useAgentsChanged, useBatchChanged } from '../lib/agentEvents'
 import { cn } from '../lib/utils'
 import { answerPermission } from '../chat/stream'
 import { DiffView } from '../chat/DiffCards'
+import { commentText } from '../../../src/comment-fields.js'
 
 const enc = encodeURIComponent
 const batchPath = (boardId) => `api/agent/boards/${enc(boardId)}/batch`
@@ -225,7 +226,7 @@ export function BatchConfirm({ open, onClose, ids, comments, max, agentName, tar
                 <span className="w-5 shrink-0 text-right text-xs text-faint tabular-nums">{index + 1}.</span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-fg" data-sw-batch-confirm-title={id}>
-                    <span className="text-muted tabular-nums">#{id}</span> {firstLine(comment?.body)}
+                    <span className="text-muted tabular-nums">#{id}</span> {firstLine(commentText(comment))}
                   </span>
                   <span className="block truncate text-xs text-muted">{comment ? targetTitle(comment.pageId) : 'comment'}</span>
                 </span>
@@ -279,7 +280,7 @@ export function BatchProgress({
   className,
 }) {
   const [open, setOpen] = useState(!compact)
-  const bodies = useMemo(() => new Map((comments || []).map((comment) => [comment.id, comment.body])), [comments])
+  const bodies = useMemo(() => new Map((comments || []).map((comment) => [comment.id, commentText(comment)])), [comments])
   const [answering, setAnswering] = useState(null)
   const [failed, setFailed] = useState(null)
   if (!batch) return null

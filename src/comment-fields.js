@@ -22,6 +22,42 @@ export class CommentError extends Error {
   }
 }
 
+// Whether a comment or reply carries something besides text: an image or a
+// drawing with shapes. Takes what a client sends, a stored comment and the
+// CLI's export item (where a drawing is { shapes: count }).
+export function hasCommentMedia(item) {
+  const shapes = item?.drawing?.shapes
+  return (Array.isArray(item?.images) && item.images.length > 0) || (Array.isArray(shapes) ? shapes.length > 0 : shapes > 0)
+}
+
+// What stands in for the text of a comment or reply that has none:
+// "(drawing)", "(image)", "(2 images)", "(image and drawing)". '' when it has
+// neither, so callers keep their own fallback.
+export function mediaLabel(item) {
+  const images = Array.isArray(item?.images) ? item.images.length : 0
+  const drawn = hasCommentMedia({ drawing: item?.drawing })
+  const parts = [images === 1 ? 'image' : images ? `${images} images` : '', drawn ? 'drawing' : ''].filter(Boolean)
+  return parts.length ? `(${parts.join(' and ')})` : ''
+}
+
+// The text to show where a comment or reply needs a line of it (lists,
+// titles, notifications, the CLI): its own, or the stand-in above.
+export function commentText(item) {
+  const body = typeof item?.body === 'string' ? item.body : ''
+  return body.trim() ? body : mediaLabel(item)
+}
+
+// The text of a comment or reply, cleaned. Empty text is refused unless
+// `media` says an image or a drawing comes with it: a drawing or a
+// screenshot can be the whole comment.
+export function cleanCommentBody(value, { media = false } = {}) {
+  const body = typeof value === 'string' ? value.replace(/\r\n/g, '\n').trim() : ''
+  if (!body && !media) throw new CommentError(400, 'empty_comment', 'Write something first.')
+  if (body.length > COMMENT_BODY_MAX)
+    throw new CommentError(400, 'comment_too_long', `Comments are limited to ${COMMENT_BODY_MAX} characters.`)
+  return body
+}
+
 export function validateAnchor(anchor) {
   if (anchor === undefined || anchor === null) return null
   const bad = (message) => new CommentError(400, 'invalid_anchor', message)
@@ -84,6 +120,15 @@ export function cleanFixRef(value) {
 export const AGENT_STATUSES = ['queued', 'working', 'done', 'needs-human']
 export const BRANCH_READY = 'branch-ready'
 export const STORED_AGENT_STATUSES = [...AGENT_STATUSES, BRANCH_READY]
+
+// The agent status of a comment once it is resolved: work that was queued
+// or under way counts as done (nobody is working on a resolved comment),
+// and a question for a person is answered, so needs-human is cleared. done
+// and branch-ready stay (a branch still waits to be applied).
+export function agentStatusOnResolve(current) {
+  if (current === 'queued' || current === 'working') return 'done'
+  return current === 'needs-human' ? null : (current ?? null)
+}
 
 // Images on comments and replies: the chat's attachment limits
 // (src/agent/threads.js ATTACHMENTS_MAX, ATTACHMENT_BYTES_MAX), checked on

@@ -25,7 +25,10 @@ import {
   sendCommentFile,
 } from '../src/comment-media.js'
 import { ATTACHMENTS_MAX, ATTACHMENT_BYTES_MAX, sniffImage } from '../src/agent/threads.js'
-import { addReply, boardDir, createComment, deleteComment, getComment, listComments } from '../src/store.js'
+import { addReply, boardDir, createComment, deleteComment, getComment, listComments, updateComment } from '../src/store.js'
+import { commentText, hasCommentMedia, mediaLabel } from '../src/comment-fields.js'
+import { commentSummary } from '../src/event-log.js'
+import { summarize } from '../src/notify/messages.js'
 import { feedback, feedbackContext, feedbackItem, formatFeedbackItem } from '../src/feedback.js'
 import { commentForModel, commentMediaParts } from '../src/agent/tools.js'
 import { modelMessages } from '../src/agent/run.js'
@@ -700,4 +703,61 @@ test('export: exported boards carry the images of exported comments only', async
   await exportStatic(config, { out: bare, clientDir: client, includeComments: false })
   assert.equal(fs.existsSync(path.join(bare, 'data', 'boards', board.id, 'comment-files')), false)
   assert.equal(listComments(config, board.id).length, 1)
+})
+
+test('no text: a drawing or an image can be the whole comment or reply, and nothing at all is still refused', async () => {
+  const { config, board, folder } = boardWithCapture('media-wordless')
+  const image = { name: 'a.png', mediaType: 'image/png', data: b64(pngWithText()) }
+  const empty = { ...valid, body: '   ' }
+  await assert.rejects(createComment(config, board, empty), { code: 'empty_comment' })
+  await assert.rejects(createComment(config, board, { ...empty, images: [], drawing: { shapes: [] } }), { code: 'empty_comment' })
+  await assert.rejects(createComment(config, board, { ...empty, drawing: null }), { code: 'empty_comment' })
+  // Media that does not validate never lets an empty comment through.
+  await assert.rejects(createComment(config, board, { ...empty, drawing: { shapes: [{ tool: 'star' }] } }), { code: 'invalid_drawing' })
+  assert.equal(listComments(config, board.id).length, 0)
+
+  const drawn = await createComment(config, board, { ...empty, drawing: { shapes: [box] } })
+  assert.equal(drawn.body, '')
+  assert.equal(drawn.drawing.shapes.length, 1)
+  const pictured = await createComment(config, board, { ...valid, body: undefined, images: [image, image] })
+  assert.equal(pictured.body, '')
+
+  await assert.rejects(addReply(config, board.id, drawn.id, { body: '' }), { code: 'empty_comment' })
+  const { reply } = await addReply(config, board.id, drawn.id, { body: '', drawing: { shapes: [arrow] } })
+  assert.equal(reply.body, '')
+  const both = await addReply(config, board.id, drawn.id, { body: '\n', images: [image], drawing: { shapes: [box] } })
+  assert.equal(both.reply.images.length, 1)
+
+  // An edit may empty the text of a comment with media, never of one without.
+  const worded = await createComment(config, board, { ...valid, drawing: { shapes: [box] } })
+  assert.equal((await updateComment(config, board.id, worded.id, { body: '' })).body, '')
+  const plain = await createComment(config, board, valid)
+  await assert.rejects(updateComment(config, board.id, plain.id, { body: ' ' }), { code: 'empty_comment' })
+
+  // One stand-in everywhere a line of text is needed.
+  assert.equal(mediaLabel(drawn), '(drawing)')
+  assert.equal(mediaLabel(pictured), '(2 images)')
+  assert.equal(mediaLabel(both.reply), '(image and drawing)')
+  assert.equal(mediaLabel(plain), '')
+  assert.equal(commentText(plain), 'Look at this')
+  assert.equal(commentText({ body: ' ', images: [{}] }), '(image)')
+  assert.equal(hasCommentMedia({ drawing: { shapes: 2 } }), true, "the CLI item's drawing is a count")
+  assert.equal(hasCommentMedia({ images: [], drawing: { shapes: [] } }), false)
+
+  const item = feedback(config, { boardId: board.id }).comments.find((entry) => entry.id === drawn.id)
+  assert.equal(item.body, '', 'JSON keeps the text as it is')
+  const lines = formatFeedbackItem(item, { cwd: folder })
+  assert.equal(lines[1], '    (drawing)')
+  assert.ok(lines.includes('    > anonymous: (drawing)'))
+  assert.ok(lines.includes('    > anonymous: (image and drawing)'))
+  const second = formatFeedbackItem(feedbackItem(feedbackContext(config, board), pictured), { cwd: folder })
+  assert.equal(second[1], '    (2 images)')
+
+  assert.equal(commentSummary(getComment(config, board.id, drawn.id)).body, '(drawing)')
+  const told = summarize(
+    config,
+    { type: 'comment.replied', boardId: board.id, comment: getComment(config, board.id, drawn.id), reply },
+    'http://localhost:4810',
+  )
+  assert.match(told.quote, /\(drawing\)/)
 })

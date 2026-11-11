@@ -4,19 +4,24 @@
 import { boardPermissions, canDeleteComment, canEditComment, guestPermissions, roleAtLeast } from '../../../../src/hosted/permissions.js'
 import { MENTION_HANDLE_RE } from '../../../../src/mentions.js'
 import { toggleReaction } from '../../../../src/reactions.js'
-import { COMMENT_BODY_MAX, cleanFixRef, validateAnchor } from '../../../../src/comment-fields.js'
+import {
+  BRANCH_READY,
+  COMMENT_BODY_MAX,
+  agentStatusOnResolve,
+  cleanCommentBody,
+  cleanFixRef,
+  hasCommentMedia,
+  validateAnchor,
+} from '../../../../src/comment-fields.js'
 import { COMMENTS_MAX, REPLIES_MAX, fail, commentField } from './util.js'
 import { demoCommentImages, demoDrawing } from './comment-media.js'
 
 export function commentHelpers(ctx) {
   const { state, iso, audit } = ctx
 
-  const cleanBody = (value) => {
-    const body = typeof value === 'string' ? value.replace(/\r\n/g, '\n').trim() : ''
-    if (!body) fail(400, 'empty_comment', 'Write something first.')
-    if (body.length > COMMENT_BODY_MAX) fail(400, 'comment_too_long', `Comments are limited to ${COMMENT_BODY_MAX} characters.`)
-    return body
-  }
+  // The server's rule (src/comment-fields.js): no text is fine when `media`
+  // says an image or a drawing comes with it.
+  const cleanBody = (value, media = false) => commentField(() => cleanCommentBody(value, { media }))
   const authorOf = (access) =>
     access.role === 'guest'
       ? { author: `${state.guestName || 'Guest'} (guest)`, authorGuest: true, shareId: access.share.id }
@@ -55,6 +60,14 @@ export function commentHelpers(ctx) {
         typeof body?.resolution === 'string' && body.resolution.trim()
           ? body.resolution.trim().slice(0, COMMENT_BODY_MAX)
           : comment.resolution || null
+      // No agent is left "working" on a resolved comment (src/store.js).
+      if (comment.agentStatus !== BRANCH_READY) {
+        const next = agentStatusOnResolve(comment.agentStatus)
+        if (next !== (comment.agentStatus ?? null)) {
+          comment.agentStatus = next
+          comment.agentStatusAt = next ? iso() : null
+        }
+      }
       auditBoard(access, 'comment_resolved', `${boardId}#${comment.id}`)
     } else {
       comment.status = 'open'
@@ -136,10 +149,10 @@ export function commentRoutes(ctx) {
           y > 100
         )
           fail(400, 'invalid_position', 'The pin must sit on the page (0 to 100 percent).')
-        const text = cleanBody(body?.body)
         const anchor = commentField(() => validateAnchor(body?.anchor))
         const media = demoCommentImages(body?.images, { guest: access.role === 'guest' })
         const drawing = demoDrawing(body?.drawing)
+        const text = cleanBody(body?.body, Boolean(media.images.length || drawing))
         const at = iso()
         const comment = {
           id: store.nextId,
@@ -181,7 +194,7 @@ export function commentRoutes(ctx) {
         if (!body || typeof body !== 'object') fail(400, 'invalid_change', 'Nothing to change.')
         if (body.body !== undefined && !canEditComment({ isAuthor: comment.authorUserId === access.user.id }))
           fail(403, 'not_author', 'Only the author can edit a comment.')
-        const text = body.body !== undefined ? cleanBody(body.body) : undefined
+        const text = body.body !== undefined ? cleanBody(body.body, hasCommentMedia(comment)) : undefined
         if (body.status !== undefined && !['open', 'resolved'].includes(body.status))
           fail(400, 'invalid_status', 'Status must be open or resolved.')
         if (body.resolution !== undefined && body.resolution !== null && typeof body.resolution !== 'string')
@@ -212,9 +225,9 @@ export function commentRoutes(ctx) {
         const comment = findComment(store, params[1])
         if (comment.replies.length >= REPLIES_MAX) fail(409, 'too_many_replies', `A comment holds at most ${REPLIES_MAX} replies.`)
         const author = authorOf(access)
-        const text = cleanBody(body?.body)
         const media = demoCommentImages(body?.images, { guest: access.role === 'guest' })
         const drawing = demoDrawing(body?.drawing)
+        const text = cleanBody(body?.body, Boolean(media.images.length || drawing))
         const reply = {
           id: Math.max(0, ...comment.replies.map((item) => Number(item.id) || 0)) + 1,
           author: author.author,

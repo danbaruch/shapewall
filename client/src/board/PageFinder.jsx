@@ -4,6 +4,7 @@ import { CornerDownLeft, FileText, MessageSquare, Plus, Route, Search, Zap } fro
 import { Button, DialogOverlay, Input, Kbd } from '../components/ui'
 import { useOverlayEntry } from '../lib/hooks'
 import { cn } from '../lib/utils'
+import { commentText } from '../../../src/comment-fields.js'
 
 // "Go to a page" on a phone: a search box over the board's pages (a long
 // select in a sheet is hard to scan). Shows the first few until you type.
@@ -144,7 +145,7 @@ function buildSections({ query, groups, journeys, canEditJourneys, comments, act
     id: `comment:${comment.id}`,
     kind: 'comment',
     icon: MessageSquare,
-    title: `#${comment.id} ${String(comment.body || '').split('\n')[0]}`,
+    title: `#${comment.id} ${commentText(comment).split('\n')[0]}`,
     detail: [titleOf(comment.pageId), comment.viewport].filter(Boolean).join(' · '),
     meta: comment.status === 'resolved' ? 'Resolved' : '',
     run: { type: 'comment', comment },

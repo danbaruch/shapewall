@@ -13,6 +13,7 @@ import { MENTION_HANDLE_RE, commentMentions, handleFor } from '../mentions.js'
 import { quoteData } from './context.js'
 import { AgentError } from './errors.js'
 import { commentForModel } from './tools.js'
+import { commentText } from '../comment-fields.js'
 
 export const MENTIONS_MAX = 8
 export const FILES_MAX = 3
@@ -68,7 +69,7 @@ export function validateMentions(config, board, raw) {
       const id = Number(item.id)
       const found = Number.isSafeInteger(id) && id > 0 ? comment(id) : null
       if (found && (kind === 'comment' || found.anchor)) {
-        const text = kind === 'element' ? found.anchor?.text || found.anchor?.selector || 'element' : found.body
+        const text = kind === 'element' ? found.anchor?.text || found.anchor?.selector || 'element' : commentText(found)
         entry = { kind, id: found.id, label: cut(`#${found.id} ${text}`, LABEL_MAX) }
       }
     } else if (kind === 'journey') {
@@ -135,7 +136,7 @@ export function mentionContext(config, board, mention, find = commentById(config
         element: { selector: comment.anchor?.selector || null, text: comment.anchor?.text || null },
         page: page ? { id: page.id, title: page.title, path: page.path } : { id: comment.pageId },
         viewport: comment.viewport,
-        comment: { id: comment.id, body: cut(comment.body, BODY_MAX), status: comment.status },
+        comment: { id: comment.id, body: cut(commentText(comment), BODY_MAX), status: comment.status },
       },
     )
   }
@@ -170,9 +171,12 @@ export function mentionContext(config, board, mention, find = commentById(config
       { ...attrs, person: handle },
       {
         person: `@${handle}`,
-        openComments: theirs
-          .slice(0, PERSON_COMMENTS_MAX)
-          .map((comment) => ({ id: comment.id, page: comment.pageId, author: comment.author || null, body: cut(comment.body, 300) })),
+        openComments: theirs.slice(0, PERSON_COMMENTS_MAX).map((comment) => ({
+          id: comment.id,
+          page: comment.pageId,
+          author: comment.author || null,
+          body: cut(commentText(comment), 300),
+        })),
         more: Math.max(0, theirs.length - PERSON_COMMENTS_MAX) || undefined,
       },
     )

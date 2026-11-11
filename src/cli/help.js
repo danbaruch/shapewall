@@ -103,6 +103,8 @@ export const SECTIONS = {
   comments get ID           one comment, everything about it   [--json] [--for-agent]
   comments add              add a comment   --page ID --body TEXT [--viewport NAME (default the page's first)]
                             [--selector CSS (pin it to that element)] [--author NAME (default agent)] [--json]
+  comments selectors        the selectors --selector takes, with each element's text, from the latest capture
+                            --page ID [--viewport NAME] [--text WORDS (only elements whose text has them)] [--json]
   comments resolve ID       mark a comment resolved   [--note TEXT] [--ref URL|COMMIT] [--author NAME] [--json]
   comments reopen ID        reopen a comment   [--author NAME] [--json]
   comments reply ID         add a reply   --body TEXT [--author NAME (default agent)] [--json]
@@ -161,7 +163,7 @@ export const SECTIONS = {
       --base-url URL        before (default: the board's baseUrl)   --head-url URL   after
       --base-dir DIR        or compare two capture folders   --head-dir DIR
       --out DIR             the result folder (default shapewall-ci)
-      --threshold RATIO     share of pixels below which a shot is unchanged (default ci.threshold, 0.001)
+      --threshold RATIO     share of pixels below which a shot is unchanged (default ci.threshold, 0.00001)
       --max-pages N         compare at most N pages (default ci.maxPages, 50)
       --fail-on-change      exit 3 when something changed (default: always 0, never fails the pull request)
   ci capture --out DIR      capture one side into a folder, from --url URL, or with --allow-start

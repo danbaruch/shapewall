@@ -433,14 +433,16 @@ function stepMatches(item, step) {
   return item.n === step.nth
 }
 
-// The first element (document order) a stored selector names, or -1: the
-// map's answer to querySelector() for the anchor grammar (child combinators).
-export function matchSelector(map, selector) {
+// Every element (document order) a stored selector names: the map's answer
+// to querySelectorAll() for the anchor grammar (child combinators). `max`
+// stops the search early.
+export function matchSelectorAll(map, selector, max = Infinity) {
+  const found = []
   const steps = parseSelector(selector)
-  if (!steps?.length) return -1
+  if (!steps?.length) return found
   const elements = map?.elements || []
   const last = steps[steps.length - 1]
-  for (let position = 0; position < elements.length; position += 1) {
+  for (let position = 0; position < elements.length && found.length < max; position += 1) {
     if (!stepMatches(elements[position], last)) continue
     let node = elements[position].p
     let ok = true
@@ -451,10 +453,13 @@ export function matchSelector(map, selector) {
       }
       node = elements[node].p
     }
-    if (ok) return position
+    if (ok) found.push(position)
   }
-  return -1
+  return found
 }
+
+// The first element a stored selector names, or -1 (querySelector()).
+export const matchSelector = (map, selector) => matchSelectorAll(map, selector, 1)[0] ?? -1
 
 function lastTag(selector) {
   const last = String(selector).split('>').pop().trim()

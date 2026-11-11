@@ -3,6 +3,7 @@
 // usage ring, and which permission cards "Allow for this chat" may answer.
 
 import { splitNextSteps } from '../../../src/agent/next-steps.js'
+import { commentText } from '../../../src/comment-fields.js'
 
 const clip = (text, max) => {
   const value = String(text || '')
@@ -44,7 +45,7 @@ export function mentionCandidates({ pages = [], comments = [], journeys = [], pe
       key: `comment:${comment.id}`,
       kind: 'comment',
       id: comment.id,
-      label: `#${comment.id} ${clip(comment.body, 48)}`,
+      label: `#${comment.id} ${clip(commentText(comment), 48)}`,
       hint: `${titles.get(comment.pageId) || comment.pageId} · ${comment.viewport}`,
       search: comment.author || '',
     })

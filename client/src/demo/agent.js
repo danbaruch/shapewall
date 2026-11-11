@@ -6,6 +6,7 @@
 // ends it like a real run. Nothing leaves the browser; it changes nothing.
 import { replyText, settleCardPositions } from '../../../src/agent/reply-text.js'
 import { demoUsedOptions } from './backend/composer.js'
+import { commentText } from '../../../src/comment-fields.js'
 
 const sleep = (ms, signal) =>
   new Promise((resolve) => {
@@ -137,6 +138,8 @@ function fixScript(context, comment) {
   // A variant's own page file (it lives on its branch), never "variant:<id>".
   const fileId = String(comment.pageId).startsWith('variant:') ? String(comment.pageId).slice(8) : comment.pageId
   const file = `src/pages/${fileId}.html`
+  // A comment that is only a drawing or an image is quoted as "(drawing)".
+  const said = commentText(comment)
   return [
     { status: 'Reading the comment' },
     { tool: { id: 'read', name: 'get_comment', label: `Read comment #${comment.id}` }, detail: `${page}, ${comment.viewport}` },
@@ -148,7 +151,7 @@ function fixScript(context, comment) {
         { content: 'Reply on the comment', status: 'pending' },
       ],
     },
-    { say: `"${comment.body.slice(0, 140)}${comment.body.length > 140 ? '...' : ''}"\n\nI can make that change in \`${file}\`. ` },
+    { say: `"${said.slice(0, 140)}${said.length > 140 ? '...' : ''}"\n\nI can make that change in \`${file}\`. ` },
     {
       ask: {
         id: 'edit',
