@@ -3,6 +3,37 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## 0.3.3 - 2026-11-11
+
+- Commenting goes one step at a time, and the board always says which step you are at. Pick: in comment mode the element under the
+  mouse is outlined, now named in plain words ("Heading: Notes that keep up...", "Button: Start free") in place of a CSS selector.
+  Write: once you click, picking is over. Nothing else lights up, the cursor is a normal one again, the element you picked keeps a
+  solid outline, and the banner reads "Commenting on ..." with Cancel. A click elsewhere moves the comment only while it is still
+  empty; once it has text, an image or a drawing it stays where it is and the composer nudges. Esc goes back exactly one step:
+  from drawing to the comment, from the comment to picking, from picking out of comment mode.
+- Drawing is clearly a mode. A bar at the top says "Drawing on Home · Desktop" and holds the tools, the inks, Undo, Clear and a
+  Done button; the page you draw on is framed and the other pages step back; no element outlines appear under the pen. Entering it
+  no longer moves the view (it did, to fit the page) unless the page is mostly off screen or drawn too small to draw on, and then
+  the view goes back when you are done. Scrolling, Space and middle-drag still move the canvas while you draw. Done and Esc return
+  to your comment with the drawing attached. In the composer the three tools are labelled "Draw".
+- The side panel (comments, agent, checks) can be dragged no wider than 560 px or 40% of the window, whichever is less. Before, it
+  could take 60% of the window and cover most of the board; a wider width remembered from before comes back inside the limit. The
+  comment box and an open thread stay on the canvas beside their pin, also when the panel is wide: before, they could end up on top
+  of the panel.
+- The board toolbar is one system: every control except the board name and Comment is the same quiet box (same height, corner,
+  hairline), and Comments, Agent and Checks sit on one track like the screen sizes, with the open panel raised. Thin dividers
+  separate the groups. Comment stays the one accent button. The status dot's tooltip says what it means ("Pages captured 3 hours
+  ago").
+- Hosted server: one board of a project can be removed. On the project page each board has "Remove board" (admins and owners, with
+  a passkey check, behind a confirmation that names the board). It deletes that board's captures, history, comments and comment
+  images from the server and frees their storage; the project, its other boards, tokens and share links stay. Pushing the same
+  board id again brings the captures back but not the comments. Before, a board pushed by mistake stayed until the whole project
+  was deleted.
+- Hosted console, "Sign in a terminal": if you close the passkey check that Approve asks for, the page now says the login was not
+  approved and why. Before, Approve looked as if it had done nothing.
+- Website contact page: the "Thanks, your message is on its way" heading no longer shows a focus rectangle, and the form's spacing
+  is even (the character count sits beside the hint, above the field).
+
 ## 0.3.2 - 2026-11-11
 
 - A comment or a reply can be a drawing or images with no text. Before, Post and Send stayed off until you typed something, and

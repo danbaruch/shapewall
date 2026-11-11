@@ -12,6 +12,8 @@ import {
   anchorFromMap,
   cleanElementMap,
   describeAt,
+  plainLabel,
+  selectorTag,
   hitTest,
   matchSelector,
   parseElementMap,
@@ -160,12 +162,28 @@ test('anchorFromMap and describeAt: what a click stores and what hover shows', (
   })
   assert.equal(anchorFromMap(map, 5000, 10, NATIVE), null)
   assert.deepEqual(describeAt(map, 8, NATIVE), {
+    name: 'Button: Start',
     label: 'button[data-testid="cta"] "Start"',
     large: false,
     rect: { left: 40, top: 420, width: 200, height: 50 },
   })
   assert.equal(describeAt(map, 6, NATIVE).large, true)
   assert.equal(describeAt(map, 6, NATIVE).label, 'main:nth-of-type(1) "Long text Start"')
+  assert.equal(describeAt(map, 6, NATIVE).name, 'Whole section: Long text Start')
+})
+
+test('plainLabel and selectorTag: what a reviewer calls an element', () => {
+  assert.equal(plainLabel('h1', 'Notes that keep up with how you think, every single day'), 'Heading: Notes that keep up with how y...')
+  assert.equal(plainLabel('a', 'Pricing'), 'Link: Pricing')
+  assert.equal(plainLabel('img', ''), 'Image')
+  assert.equal(plainLabel('div', ''), 'Section')
+  assert.equal(plainLabel('div', 'Three plans', { large: true }), 'Whole section: Three plans')
+  assert.equal(plainLabel('p', 'Plain words'), 'Text: Plain words')
+  assert.equal(plainLabel('custom-el', ''), 'Element')
+  assert.equal(plainLabel('', 'Words'), 'Text: Words')
+  assert.equal(selectorTag('nav[aria-label="Main"] > a:nth-of-type(2)'), 'a')
+  assert.equal(selectorTag('main:nth-of-type(1) > button[data-testid="cta"]'), 'button')
+  assert.equal(selectorTag('#hero'), '')
 })
 
 test('parseSelector and matchSelector: the anchor grammar on the map, with CSS escapes', () => {

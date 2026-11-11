@@ -296,6 +296,12 @@ The server treats every upload as untrusted, even from our CLI:
 - Cleaning runs in worker threads (2 at once, 32 waiting, 30 seconds and 512 MB each), never on the server's event loop; a token has at
   most 4 uploads in flight.
 - The manifest and variants are rebuilt field by field; the board definition is validated by the same code as a local config.
+- **Removing a board.** A board pushed by mistake, or one you retired, comes off the server on the project page: "Remove board"
+  on its row in the Boards list, for the same people who may delete the project (admins and owners, with a fresh passkey check).
+  It deletes that board's captures, page history, variants, checks, comments, replies and comment images, and frees their storage;
+  the project, its other boards, its tokens and its share links stay. A later push of the same board id starts a new board: the
+  captures are back, the comments are not. The audit log records who removed which board, and people who have the board open are
+  told at once (`board.removed` on the event stream). API: `DELETE /api/workspaces/:ws/projects/:pid/boards/:bid`.
 - Limits: 5000 files and 1 GB per push, 500 pages per board, 10 boards per project (checked again at commit), 20 pushes per hour per
   token, and 5 GB per workspace (committed boards plus open pushes). A push is open for an hour; after that it takes no more files and
   a sweep (at start and every 10 minutes) removes its staging folder, staging folders without a push, and board folders a commit left

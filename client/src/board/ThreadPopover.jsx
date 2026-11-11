@@ -14,6 +14,20 @@ const TEXT_FIELD = 'input, textarea, select, [contenteditable="true"]'
 // on them.
 const COLLISION_PADDING = { top: 10, right: 10, bottom: 60, left: 10 }
 
+// A pin this far past the canvas's right edge still counts as "under the
+// side panel" (not panned away): the popover stays at the edge for it.
+const UNDER_PANEL = 640
+
+// A pin that the side panel covers (the panel was opened or widened over
+// it): its popover keeps to the visible canvas, at the right edge, level
+// with the pin. Only sideways and only on the panel's side: a pin panned off
+// the top, bottom or left still hides its popover.
+function inCanvas(rect, box) {
+  if (!box || rect.left < box.right - 4 || rect.left > box.right + UNDER_PANEL) return rect
+  if (rect.bottom < box.top || rect.top > box.bottom) return rect
+  return new DOMRect(box.right - 4 - rect.width, rect.top, rect.width, rect.height)
+}
+
 // A virtual element at the pin: the pin button when it is on the page, else
 // its canvas point (`point`, flow coordinates) through the camera.
 function useCanvasAnchor(selector, point) {
@@ -26,12 +40,12 @@ function useCanvasAnchor(selector, point) {
       getBoundingClientRect() {
         const { domNode, transform } = store.getState()
         const { selector: wanted, point: at } = latest.current
-        const element = wanted ? domNode?.querySelector(wanted) : null
-        if (element) return element.getBoundingClientRect()
         const box = domNode?.getBoundingClientRect()
+        const element = wanted ? domNode?.querySelector(wanted) : null
+        if (element) return inCanvas(element.getBoundingClientRect(), box)
         if (!box || !at) return new DOMRect(-10000, -10000, 0, 0)
         const [tx, ty, zoom] = transform
-        return new DOMRect(box.left + at.x * zoom + tx, box.top + at.y * zoom + ty, 0, 0)
+        return inCanvas(new DOMRect(box.left + at.x * zoom + tx, box.top + at.y * zoom + ty, 0, 0), box)
       },
     }
   }
@@ -94,8 +108,11 @@ function CanvasPopover({
         sideOffset={10}
         alignOffset={-6}
         // Stay inside the canvas, follow the camera, hide with the pin.
+        // `sticky="always"`: a pin at the very edge (beside a wide side
+        // panel) never drags the popover over the panel with it.
         collisionBoundary={store.getState().domNode}
         collisionPadding={COLLISION_PADDING}
+        sticky="always"
         hideWhenDetached
         updatePositionStrategy="always"
         aria-label={label}

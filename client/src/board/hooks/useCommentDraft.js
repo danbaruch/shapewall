@@ -3,6 +3,8 @@ import { api } from '../../lib/api'
 import { saveAuthor } from '../../lib/utils'
 import { imagesPayload, useImageDraft } from '../commentImages'
 import { drawing, drawingPayload } from '../drawing'
+import { viewportLabel } from '../viewports'
+import { plainLabel, selectorTag } from '../../../../src/capture/element-map.js'
 
 // The new comment being written (`draft`, placed by a click in comment mode):
 // saving it, the line that says where it goes, and the composer's props.
@@ -83,8 +85,15 @@ export function useCommentDraft({
       setBusy(false)
     }
   }
+  // What the comment is attached to, in plain words: the picked element
+  // ("Heading: Notes that keep up..."), or the spot on a screenshot.
+  const draftTarget = draft
+    ? draft.anchor
+      ? draft.target || plainLabel(selectorTag(draft.anchor.selector), draft.anchor.text)
+      : `a spot on ${targetTitle(draft.pageId)}`
+    : ''
   const draftDescription = draft
-    ? `${targetTitle(draft.pageId)} · ${draft.viewport} · ${draft.anchor ? `on "${draft.anchor.text || draft.anchor.selector.split(' > ').pop()}"` : `${Math.round(draft.x)}% across, ${Math.round(draft.y)}% down`}`
+    ? `${targetTitle(draft.pageId)} · ${viewportLabel(draft.viewport)} · ${draft.anchor ? draftTarget : `${Math.round(draft.x)}% across, ${Math.round(draft.y)}% down`}`
     : ''
   const composerProps = {
     draft,
@@ -103,5 +112,5 @@ export function useCommentDraft({
       pageTitle: draft ? targetTitle(draft.pageId) : '',
     },
   }
-  return { draftDescription, composerProps }
+  return { draftDescription, draftTarget, composerProps }
 }

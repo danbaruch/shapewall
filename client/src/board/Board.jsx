@@ -151,6 +151,18 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
 
   const [commentMode, setCommentMode] = useState(false)
   const [draft, setDraft] = useState(null)
+  // Whether the comment being written has anything in it yet: text, an image
+  // or a drawing. Read when a click or a key needs to know (never rendered).
+  const draftRef = useRef(null)
+  draftRef.current = draft
+  const draftImages = useRef(0)
+  const draftFilled = useCallback(() => {
+    const drawn = drawing.get()
+    return (
+      Boolean(draftRef.current) &&
+      (Boolean(draftRef.current.body.trim()) || draftImages.current > 0 || (drawn?.owner === 'composer' && drawn.shapes.length > 0))
+    )
+  }, [])
   const [sheetOpen, setSheetOpen] = useState(false)
   // Phone: the open thread as a bottom sheet.
   const [threadSheet, setThreadSheet] = useState(false)
@@ -608,6 +620,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     setFocusedKey,
     setToast,
     setDraft,
+    draftFilled,
     checkDraft,
     setCheckDraft,
     authorName,
@@ -660,7 +673,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     [boardId, data?.captures, imageVersion, pagesById, variantsById, viewports],
   )
   // The comment being written: its description and what its composer needs.
-  const { draftDescription, composerProps } = useCommentDraft({
+  const { draftDescription, draftTarget, composerProps } = useCommentDraft({
     draft,
     setDraft,
     busy,
@@ -734,14 +747,10 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   }, [])
   // Leaving comment mode drops a draft with nothing in it; text, a drawing
   // or an image keeps it.
-  const draftImages = useRef(0)
   draftImages.current = composerProps.media.images.images.length
   useEffect(() => {
-    if (commentMode) return
-    const drawn = drawing.get()
-    const media = draftImages.current > 0 || (drawn?.owner === 'composer' && drawn.shapes.length > 0)
-    setDraft((current) => (current && !current.body.trim() && !media ? null : current))
-  }, [commentMode])
+    if (!commentMode && !draftFilled()) setDraft(null)
+  }, [commentMode, draftFilled])
 
   // An open thread counts as read.
   useEffect(() => {
@@ -1002,6 +1011,10 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
               setNotice({ tone: 'info', text: 'The demo does not take new captures. On your own board this recaptures the changed pages.' })
           : null,
   }
+  // The step a comment is at, one at a time (data-sw-comment-flow on the
+  // canvas): drawing (a tool is on), composing (a target is picked, the
+  // composer is open), picking (comment mode, nothing picked yet), else off.
+  const commentState = drawingOn ? 'drawing' : draft && wide ? 'composing' : commentMode && canComment && !comparePair ? 'picking' : 'off'
   const toggleLinks = () => updateParams({ links: showLinks ? null : '1' })
   const toggleMinimap = () => {
     const next = !minimapOn
@@ -1231,9 +1244,10 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
               <div
                 ref={canvasRef}
                 tabIndex={-1}
-                className={cn('relative min-w-0 flex-1 outline-none', commentMode && canComment && 'sw-commenting')}
+                className={cn('relative min-w-0 flex-1 outline-none', commentState === 'picking' && 'sw-commenting')}
                 onKeyDown={onCanvasKeyDown}
                 data-sw-canvas="true"
+                data-sw-comment-flow={commentState}
               >
                 {showLinks && brokenLinks.length ? (
                   <BrokenLinks items={brokenLinks} open={brokenOpen} onOpenChange={setBrokenOpen} />
@@ -1244,6 +1258,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                     canvasRef={canvasRef}
                     targets={layout.targets}
                     focusFor={(owner) => ((owner === 'composer' ? draft?.y : selectedComment?.y) ?? 50) / 100}
+                    titleFor={(pageId, viewport) => `${targetTitle(pageId)} · ${viewportLabel(viewport)}`}
                     shotFor={(pageId, viewport) => {
                       const image = data.captures?.[pageId]?.[viewport]
                       return image?.file ? fileUrl(boardId, 'captures', image.thumb || image.file, imageVersion) : null
@@ -1257,6 +1272,8 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                     canComment={canComment}
                     readyKeys={readyKeys}
                     setCommentMode={setCommentMode}
+                    composing={commentState === 'composing' ? draftTarget : null}
+                    onCancelDraft={() => (busy ? null : setDraft(null))}
                     showLinks={showLinks}
                     activePage={activePage}
                     shownSteps={shownSteps}

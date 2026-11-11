@@ -343,6 +343,23 @@ export function mountConsoleRoutes(consoleApi, deps) {
     }),
   )
 
+  // One board off the server (pushed by mistake, or retired): the same role
+  // and the same fresh passkey check as deleting the project it is in. An
+  // unknown board, a malformed id and a board of another workspace all
+  // answer the same 404. The write publishes `board.removed`
+  // (src/hosted/events.js), so open boards and token streams hear of it.
+  consoleApi.delete(
+    '/workspaces/:ws/projects/:pid/boards/:bid',
+    inWorkspace(NEEDS.projects),
+    needFresh,
+    inProject,
+    handle(async (req, res) => {
+      const gone = req.projects.removeBoard(req.project.id, req.params.bid)
+      auditOf(req, 'board_removed', `${req.project.id}/${gone.board}`, { project: req.project.name, comments: gone.comments })
+      res.json({ ok: true, board: gone.board, comments: gone.comments, bytes: gone.bytes })
+    }),
+  )
+
   consoleApi.get(
     '/workspaces/:ws/projects/:pid/tokens',
     inWorkspace(NEEDS.tokens),

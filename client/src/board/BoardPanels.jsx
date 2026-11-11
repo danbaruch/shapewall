@@ -31,16 +31,22 @@ export function SidePanel({ wide, checksOpen, checksProps, chatThread, chatProps
 }
 
 const RAIL_MIN = 280
-// Never wider than this share of the window, so the canvas keeps room.
-const RAIL_MAX_SHARE = 0.6
+// Never wider than this, nor than this share of the window: the panel is a
+// list beside the canvas, and the canvas (with the comment's popover at its
+// pin) keeps most of the room.
+const RAIL_MAX = 560
+const RAIL_MAX_SHARE = 0.4
 const RAIL_STEP = 16
 // One width for the side panel whichever tab is open (checks, agent,
 // comments), so switching between them never jumps.
 const RAIL_WIDTH_KEY = 'side'
 
+const railMax = () => Math.max(RAIL_MIN, Math.min(RAIL_MAX, Math.floor(window.innerWidth * RAIL_MAX_SHARE)))
+
+// Also on load: a wider width remembered by an earlier version comes back
+// inside the limit.
 function clampRail(width) {
-  const max = Math.max(RAIL_MIN, Math.floor(window.innerWidth * RAIL_MAX_SHARE))
-  return Math.min(max, Math.max(RAIL_MIN, Math.round(width)))
+  return Math.min(railMax(), Math.max(RAIL_MIN, Math.round(width)))
 }
 
 // A side panel with a drag handle on its left edge. Drag (or arrow keys on
@@ -102,7 +108,7 @@ function Rail({ panel, defaultWidth, className, children, ...props }) {
         aria-label="Resize panel"
         aria-valuenow={width}
         aria-valuemin={RAIL_MIN}
-        aria-valuemax={Math.max(RAIL_MIN, Math.floor(window.innerWidth * RAIL_MAX_SHARE))}
+        aria-valuemax={railMax()}
         aria-description="Drag or use the arrow keys to resize. Double-click or press Home to reset."
         tabIndex={0}
         className="group absolute inset-y-0 -left-1.5 z-20 w-3 cursor-col-resize touch-none outline-none"

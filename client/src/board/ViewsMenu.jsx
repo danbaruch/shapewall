@@ -54,6 +54,8 @@ export function ViewsMenu({
   minimapOn,
   toggleMinimap,
   compact,
+  // The toolbar's quiet box (BoardToolbar BOXED), worn while no journey is open.
+  boxed = 'text-fg',
   labelMax = 160,
 }) {
   const [query, setQuery] = useState('')
@@ -89,7 +91,7 @@ export function ViewsMenu({
       className={cn(
         'relative h-8 shrink-0 text-[13px]',
         compact ? 'w-8 px-0' : 'px-2.5',
-        active ? (compact ? '' : 'rounded-r-none') : 'text-fg',
+        active ? (compact ? '' : 'rounded-r-none') : boxed,
       )}
       aria-label={label}
       data-sw-view-menu="true"
