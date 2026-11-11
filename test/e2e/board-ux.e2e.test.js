@@ -16,7 +16,7 @@ import { startDemoSite } from '../../examples/demo-site/server.js'
 import { normalizeConfig } from '../../src/config.js'
 import { runCapture } from '../../src/capture/capture.js'
 import { createApp } from '../../src/server/app.js'
-import { createComment, listComments } from '../../src/store.js'
+import { createComment, listComments, setAgentStatus } from '../../src/store.js'
 import { ROOT_DIR, listen, liveElementBox } from './helpers.js'
 
 const SHOTS = process.env.SHAPEWALL_SHOTS ? path.resolve(process.env.SHAPEWALL_SHOTS) : null
@@ -1084,5 +1084,63 @@ test('phone: one-finger drag pans and a two-finger pinch zooms', async () => {
     assert.deepEqual(errors, [])
   } finally {
     await context.close()
+  }
+})
+
+test('desktop: agents at work show on the toolbar with a count, stay still under reduced motion, and settle as done', async () => {
+  const board = config.boards[0]
+  const made = []
+  for (const body of ['First for the agent', 'Second for the agent']) {
+    made.push(await createComment(config, board, { pageId: 'features', viewport: 'desktop', x: 60, y: 70, body, author: 'Sam' }))
+  }
+  for (const item of made) await setAgentStatus(config, 'demo', item.id, 'working')
+  const { context, page, errors } = await openBoard({ ...DESKTOP, reducedMotion: 'reduce' })
+  try {
+    // The mark sits on the Agent control (on Comments where a board has no
+    // agent chat); it is there with the comments panel closed too.
+    const control = '[data-sw-toolbar="full"] [data-sw-agent-activity]'
+    await page.waitForSelector(`${control}[data-sw-agent-activity="working"]`)
+    assert.equal(await page.getAttribute(control, 'data-sw-agent-activity-count'), '2')
+    assert.equal((await page.textContent(`${control} [data-sw-agent-activity-mark="working"]`)).trim(), '2')
+    assert.match(await page.getAttribute(control, 'aria-label'), /2 agents working: #\d+ Features, #\d+ Features/)
+    await page.click('[data-sw-toolbar="full"] [data-sw-panel-toggle]')
+    await page.waitForSelector('[data-sw-rail="comments"]', { state: 'detached' })
+    assert.equal(await page.getAttribute(control, 'data-sw-agent-activity'), 'working')
+    // Reduced motion: the dot is there, nothing animates.
+    assert.equal(await page.$eval(`${control} [data-sw-agent-activity-pulse]`, (node) => getComputedStyle(node).animationName), 'none')
+    await shot(page, 'ux-agent-activity-working')
+
+    // One needs a person: the attention colour, and the words say which.
+    await setAgentStatus(config, 'demo', made[0].id, 'needs-human')
+    await setAgentStatus(config, 'demo', made[1].id, 'done')
+    await page.reload()
+    await page.waitForSelector(`${control}[data-sw-agent-activity="waiting"]`)
+    assert.match(await page.getAttribute(control, 'aria-label'), new RegExp(`#${made[0].id} Features needs a person`))
+    assert.equal(await page.locator(`${control} [data-sw-agent-activity-pulse]`).count(), 0, 'waiting does not pulse')
+
+    // The last one finishes while the board is open: "done" for a moment, then nothing.
+    await setAgentStatus(config, 'demo', made[0].id, 'done')
+    await page.waitForSelector(`${control}[data-sw-agent-activity="done"]`, { timeout: 40000 })
+    await page.waitForSelector(`${control} [data-sw-agent-activity-mark="done"]`)
+    await page.waitForSelector(`${control}[data-sw-agent-activity="idle"]`, { timeout: 10000 })
+    assert.equal(await page.locator(`${control} [data-sw-agent-activity-mark]`).count(), 0)
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})
+
+test('with motion allowed the working mark pulses like a working pin', async () => {
+  const working = listComments(config, 'demo').find((item) => item.body === 'Second for the agent')
+  await setAgentStatus(config, 'demo', working.id, 'working')
+  const { context, page } = await openBoard(DESKTOP)
+  try {
+    const control = '[data-sw-toolbar="full"] [data-sw-agent-activity]'
+    await page.waitForSelector(`${control}[data-sw-agent-activity="working"]`)
+    assert.equal(await page.getAttribute(control, 'data-sw-agent-activity-count'), '1')
+    assert.notEqual(await page.$eval(`${control} [data-sw-agent-activity-pulse]`, (node) => getComputedStyle(node).animationName), 'none')
+  } finally {
+    await context.close()
+    await setAgentStatus(config, 'demo', working.id, 'done')
   }
 })

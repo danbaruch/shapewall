@@ -296,6 +296,12 @@ The server treats every upload as untrusted, even from our CLI:
 - Cleaning runs in worker threads (2 at once, 32 waiting, 30 seconds and 512 MB each), never on the server's event loop; a token has at
   most 4 uploads in flight.
 - The manifest and variants are rebuilt field by field; the board definition is validated by the same code as a local config.
+- **Is an agent listening?** A comment sent to the agent is only picked up while some machine runs `shapewall watch --remote` (or
+  an MCP client) with a token of the project that has the `claim` scope. The server remembers, in memory only, when such a token
+  last called the API or held its event stream open; for 90 seconds after that the project has an agent online. Members who can
+  send comments to the agent see "Agent online: <token name>" or "No agent is listening" in the board's agent tooltip and on the
+  thread. Only the token's display name and the time are told, never to share link guests or public viewers, and nothing is stored:
+  after a restart it reads "not listening" until the agent's next call.
 - **Removing a board.** A board pushed by mistake, or one you retired, comes off the server on the project page: "Remove board"
   on its row in the Boards list, for the same people who may delete the project (admins and owners, with a fresh passkey check).
   It deletes that board's captures, page history, variants, checks, comments, replies and comment images, and frees their storage;
