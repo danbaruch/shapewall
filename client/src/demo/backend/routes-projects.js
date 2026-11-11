@@ -103,6 +103,19 @@ export function projectRoutes(ctx) {
       },
     ],
     [
+      // Removing one board: in the demo it leaves the project's list until Reset.
+      'DELETE',
+      /^\/api\/workspaces\/([a-z0-9_]+)\/projects\/([a-z0-9_]+)\/boards\/([a-z0-9-]+)$/,
+      ({ params }) => {
+        inWorkspace(params[0], 'projects')
+        const project = projectIn(params[0], params[1])
+        if (!project.boards.some((item) => item.id === params[2])) fail(404, 'unknown_board', 'No such board.')
+        project.boards = project.boards.filter((item) => item.id !== params[2])
+        audit(params[0], 'board_removed', { target: `${project.id}/${params[2]}`, detail: { project: project.name } })
+        return { ok: true, board: params[2] }
+      },
+    ],
+    [
       'GET',
       /^\/api\/workspaces\/([a-z0-9_]+)\/projects\/([a-z0-9_]+)\/agent$/,
       ({ params }) => {

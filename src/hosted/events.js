@@ -21,9 +21,11 @@ export function createEventBus() {
 
 // The change event a successful write publishes (the SSE stream and board
 // presence refetch on it), or null. Only comment, approval, import, agent
-// policy and push-commit writes change what watchers see; a push's file
-// uploads, token and device approvals publish nothing.
-export function changeEventType(pathname) {
+// policy and push-commit writes change what watchers see, and a board
+// removed in the console (`method` DELETE on the board itself); a push's
+// file uploads, token and device approvals publish nothing.
+export function changeEventType(pathname, method = 'POST') {
+  if (/\/projects\/[^/]+\/boards\/[^/]+$/.test(pathname)) return method === 'DELETE' ? 'board.removed' : null
   if (/\/pushes\/[^/]+\/commit$/.test(pathname)) return 'push.committed'
   if (/\/comments\/[1-9][0-9]*\/send-to-agent$/.test(pathname)) return 'comment.vouched'
   if (/\/comments\/[1-9][0-9]*\/resolve$/.test(pathname)) return 'comment.resolved'
@@ -47,7 +49,7 @@ export const publishMutations =
       res.once('finish', () => {
         for (const check of [...streams]) check()
         const pathname = req.originalUrl.split('?')[0]
-        const type = res.statusCode < 400 && req.t && req.project ? changeEventType(pathname) : null
+        const type = res.statusCode < 400 && req.t && req.project ? changeEventType(pathname, req.method) : null
         if (type) {
           const comment = /\/comments\/([1-9][0-9]*)/.exec(pathname)?.[1]
           events.publish({
