@@ -1087,6 +1087,170 @@ test('phone: one-finger drag pans and a two-finger pinch zooms', async () => {
   }
 })
 
+// When an open comment closes on its own (Board.jsx leaveForNavigation).
+test('desktop: an open thread stays while you look around and closes when you go somewhere else; a written comment is put aside, not dropped', async () => {
+  const { context, page, errors } = await openBoard(DESKTOP)
+  try {
+    const robin = listComments(config, 'demo').find((item) => item.body === 'Covers feel heavy')
+    const row = `[data-sw-rail="comments"] [data-sw-comment="${robin.id}"]`
+    const thread = `[data-sw-thread-popover="${robin.id}"]`
+    const open = async () => {
+      await page.click(row)
+      await page.waitForSelector(thread)
+      await settle(page)
+    }
+    const closed = async (why) => {
+      await page.waitForSelector(thread, { state: 'detached' })
+      assert.equal(new URL(page.url()).searchParams.get('c'), null, `${why}: the address no longer names the comment`)
+    }
+    await open()
+    assert.equal(new URL(page.url()).searchParams.get('c'), String(robin.id))
+
+    // Looking around: it stays.
+    const canvas = await rect(page, '[data-sw-canvas]')
+    await page.mouse.move(canvas.left + 120, canvas.bottom - 200)
+    await page.mouse.wheel(0, 40)
+    await page.keyboard.down('Control')
+    await page.mouse.wheel(0, -60)
+    await page.keyboard.up('Control')
+    await settle(page)
+    assert.equal(await page.locator(thread).count(), 1, 'pan and zoom keep it')
+    if (await page.locator('[data-sw-toolbar="full"] [data-sw-chat-toggle]').count()) {
+      await page.click('[data-sw-toolbar="full"] [data-sw-chat-toggle]')
+      await page.waitForSelector('[data-sw-rail="agent"]')
+      assert.equal(await page.locator(thread).count(), 1, 'the Agent panel keeps it')
+    }
+    await page.click('[data-sw-toolbar="full"] [data-sw-panel-toggle]')
+    await page.waitForSelector('[data-sw-rail="comments"]')
+    assert.equal(await page.locator(thread).count(), 1, 'back to Comments keeps it')
+    await page.keyboard.press('c')
+    await page.waitForSelector('[data-sw-comment-mode][aria-pressed="true"]')
+    await page.keyboard.press('c')
+    assert.equal(await page.locator(thread).count(), 1, 'comment mode on and off keeps it')
+
+    // A reply left unsent, then a journey is opened: the thread closes, the reply is kept.
+    await page.fill(`${thread} [data-sw-reply-input]`, 'Half a reply')
+    await choose(page, '[data-sw-page-jump]', 'journey:sign-up')
+    await page.waitForSelector('[data-sw-journey-bar]')
+    await closed('opening a journey')
+    // Opened again while the journey is on, then a step: closed again.
+    await open()
+    assert.equal(await page.inputValue(`${thread} [data-sw-reply-input]`), 'Half a reply', 'the unsent reply survived')
+    await page.click('[data-sw-journey-next]')
+    await closed('stepping a journey')
+    await page.click('[data-sw-journey-close]')
+    await page.waitForSelector('[data-sw-journey-bar]', { state: 'detached' })
+
+    // Going to a page from the search.
+    await open()
+    await choose(page, '[data-sw-page-jump]', 'pricing')
+    await closed('going to another page')
+    // A screen size the comment is not on.
+    await open()
+    await page.click('[data-sw-toolbar="full"] [data-sw-option="phone"]')
+    await closed('another screen size')
+    await page.click('[data-sw-toolbar="full"] [data-sw-option="desktop"]')
+
+    // A new comment with text, then a journey: put aside and offered back.
+    await page.keyboard.press('c')
+    await page.waitForSelector('[data-sw-canvas][data-sw-comment-flow="picking"]')
+    await settle(page)
+    const blog = await rect(page, '[data-sw-frame="blog:desktop"]')
+    await page.mouse.click(blog.left + blog.width * 0.5, blog.top + blog.height * 0.6)
+    const composer = '[data-sw-composer-popover]'
+    await page.waitForSelector(`${composer} [data-sw-comment-input]`)
+    await page.fill('[data-sw-comment-input]', 'Do not lose me')
+    await choose(page, '[data-sw-page-jump]', 'journey:sign-up')
+    await page.waitForSelector(composer, { state: 'detached' })
+    await page.waitForSelector('[data-sw-draft-kept]')
+    assert.match(await page.textContent('[data-sw-draft-kept]'), /Draft kept for Blog/)
+    await shot(page, 'ux-flow-6-draft-kept')
+    await page.click('[data-sw-journey-close]')
+    await page.click('[data-sw-draft-reopen]')
+    await page.waitForSelector(`${composer} [data-sw-comment-input]`)
+    assert.equal(await page.inputValue('[data-sw-comment-input]'), 'Do not lose me')
+    assert.equal(await page.locator('[data-sw-draft-kept]').count(), 0)
+    // An empty one simply goes.
+    await page.fill('[data-sw-comment-input]', '')
+    await choose(page, '[data-sw-page-jump]', 'pricing')
+    await page.waitForSelector(composer, { state: 'detached' })
+    assert.equal(await page.locator('[data-sw-draft-kept], [data-sw-draft-pin]').count(), 0)
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})
+
+test('desktop: search lives in the sidebar, and the toolbar keeps its shape when a journey opens', async () => {
+  const { context, page, errors } = await openBoard(DESKTOP)
+  try {
+    const bar = '[data-sw-toolbar="full"]'
+    // No search in the top bar, collapsed or not.
+    assert.equal(await page.locator(`${bar} [data-sw-palette-trigger], ${bar} [data-sw-toolbar-zone="center"]`).count(), 0)
+    // Collapsed sidebar: a search icon in the rail opens the palette.
+    const icon = '[data-sw-app-rail] [data-sw-rail-item="search"]'
+    assert.equal(await page.locator(icon).count(), 1)
+    await page.click(icon)
+    await page.waitForSelector('[data-sw-palette]')
+    await page.keyboard.press('Escape')
+    await page.waitForSelector('[data-sw-palette]', { state: 'detached' })
+
+    // Expanded: one field at the top of the sidebar, with its shortcut; it is the palette's trigger.
+    await page.click('[data-sw-sidebar-toggle]')
+    const field = '[data-sw-app-rail] button[data-sw-palette-trigger]'
+    await page.waitForSelector(field)
+    assert.match(await page.textContent(field), /Search the board/)
+    assert.match(await page.textContent(field), /Ctrl K|⌘K/)
+    assert.equal(await page.locator('[data-sw-app-rail] [data-sw-rail-item="search"]').count(), 0, 'not also a row of the menu')
+    assert.equal(await page.locator('[data-sw-app-rail] [data-sw-pages-filter]').count(), 0, 'one field, not two')
+    const fieldBox = await rect(page, field)
+    const tabs = await rect(page, '[data-sw-sidebar-nav]')
+    assert.ok(fieldBox.bottom <= tabs.top + 1, 'above the Pages and Journeys tabs')
+    await shot(page, 'ux-search-in-sidebar')
+    await page.click(field)
+    await page.waitForSelector('[data-sw-palette] [data-sw-palette-input]')
+    await page.keyboard.type('pric')
+    await page.waitForSelector('[role="listbox"] [data-sw-option="pricing"]')
+    await page.keyboard.press('Escape')
+    await page.waitForSelector('[data-sw-palette]', { state: 'detached' })
+    // Ctrl+K from anywhere.
+    await page.keyboard.press('Control+k')
+    await page.waitForSelector('[data-sw-palette]')
+    await page.keyboard.press('Escape')
+    await page.waitForSelector('[data-sw-palette]', { state: 'detached' })
+
+    // A journey opens: nothing in the bar moves or collapses; Views carries its name in place.
+    const places = () =>
+      page.evaluate((sel) => {
+        const box = (name) => {
+          const node = document.querySelector(`${sel} ${name}`)
+          const r = node?.getBoundingClientRect()
+          return r ? [Math.round(r.left), Math.round(r.width)] : null
+        }
+        return {
+          fit: document.querySelector(sel).getAttribute('data-sw-toolbar-fit'),
+          view: box('[data-sw-view-menu]')?.[0],
+          comment: box('[data-sw-comment-mode]'),
+          panels: box('[data-sw-panel-switch]'),
+          sizes: box('[aria-label="Screen size"]'),
+        }
+      }, bar)
+    const before = await places()
+    await choose(page, '[data-sw-page-jump]', 'journey:sign-up')
+    await page.waitForSelector(`${bar} [data-sw-view-journey-name]`)
+    assert.deepEqual(await places(), before, 'the bar kept its shape')
+    const name = await rect(page, `${bar} [data-sw-view-journey-name]`)
+    assert.ok(name.width <= 241, `the journey name is capped (${name.width})`)
+    await shot(page, 'ux-toolbar-journey-open')
+    await page.click('[data-sw-view-journey-clear]')
+    await page.waitForSelector(`${bar} [data-sw-view-journey-name]`, { state: 'detached' })
+    assert.deepEqual(await places(), before)
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})
+
 test('desktop: agents at work show on the toolbar with a count, stay still under reduced motion, and settle as done', async () => {
   const board = config.boards[0]
   const made = []

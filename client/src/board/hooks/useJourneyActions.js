@@ -28,28 +28,36 @@ export function useJourneyActions({
   mode,
   comparePair,
   setSettledZoom,
+  // Going through a journey is going somewhere else: an open comment closes
+  // (Board.jsx leaveForNavigation).
+  onLeave = () => {},
 }) {
   const openJourney = useCallback(
     (id) => {
+      if (id) onLeave()
       clearFocus()
       updateParams({ j: id || null, step: id ? 1 : null, jc: null, jb: null })
     },
-    [clearFocus, updateParams],
+    [clearFocus, onLeave, updateParams],
   )
   const closeJourney = useCallback(() => updateParams({ j: null, step: null, jc: null, jb: null }), [updateParams])
   const goStep = useCallback(
     (value) => {
-      if (routePages) updateParams({ step: clampStep(value, routePages.length) })
+      if (!routePages) return
+      onLeave()
+      updateParams({ step: clampStep(value, routePages.length) })
     },
-    [routePages, updateParams],
+    [onLeave, routePages, updateParams],
   )
   // Picking a branch at a fork keeps the choices before it; later forks
   // start again from their first branch.
   const chooseJourneyBranch = useCallback(
     (ordinal, branchId) => {
-      if (route) updateParams({ jb: chooseBranch(route, ordinal, branchId).join(',') })
+      if (!route) return
+      onLeave()
+      updateParams({ jb: chooseBranch(route, ordinal, branchId).join(',') })
     },
-    [route, updateParams],
+    [onLeave, route, updateParams],
   )
   // Each step change flies to its card (not on every poll of the board).
   const zoomedStep = useRef(null)
@@ -75,6 +83,7 @@ export function useJourneyActions({
 
   const startBuilder = useCallback(
     (from = null) => {
+      onLeave()
       setCommentMode(false)
       clearFocus()
       setBuilder(
@@ -83,7 +92,7 @@ export function useJourneyActions({
           : { id: null, name: '', steps: [], into: null },
       )
     },
-    [clearFocus, setBuilder, setCommentMode],
+    [clearFocus, onLeave, setBuilder, setCommentMode],
   )
   // A click adds the page as the next step: of the branch being filled
   // (`into`: { fork, branch } indexes), else of the main line.

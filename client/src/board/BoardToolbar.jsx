@@ -20,7 +20,6 @@ import {
 } from '../components/ui'
 import { ProjectCrumb, ViewerNote } from './HostedNotes'
 import { ViewsMenu } from './ViewsMenu'
-import { PALETTE_KEY, PaletteTrigger } from './PageFinder'
 import { KeyTip } from './KeyTip'
 import { CaptureStatus } from './CaptureStatus'
 import { BoardProfile } from './BoardProfile'
@@ -90,23 +89,51 @@ function useShownActivity(activity) {
   return activity.state === 'idle' && done ? 'done' : activity.state
 }
 
-function ActivityMark({ shown, count, touch = false }) {
+const ACTIVITY_TONE = { working: 'bg-accent text-accent-fg', waiting: 'bg-warn text-warn-fg', done: 'bg-ok text-ok-fg' }
+
+// With its word, the Agent button shows the activity the way Comments shows
+// its count: a pill at the right end, the same size and type. One agent is a
+// dot in that slot; more are counted. Working breathes slowly (styles.css
+// `breathe`, the same as a working pin), inside the button and still under
+// reduced motion.
+function ActivityPill({ shown, count }) {
   if (shown === 'idle') return null
-  const many = count > 1
+  const many = count > 1 && shown !== 'done'
   return (
     <span
       className={cn(
-        'pointer-events-none absolute flex items-center justify-center rounded-full ring-2 ring-surface',
-        touch ? 'top-1.5 right-1.5' : many ? '-top-2.5 -right-2' : '-top-1.5 -right-1.5',
-        many ? 'h-4 min-w-4 px-1 text-[10px] leading-4 font-semibold tabular' : 'h-2.5 w-2.5',
-        shown === 'working' ? 'bg-accent text-accent-fg' : shown === 'waiting' ? 'bg-warn text-warn-fg' : 'bg-ok text-ok-fg',
+        'tabular inline-flex shrink-0 items-center justify-center rounded-full text-[11px] leading-4 font-semibold',
+        many ? 'px-1.5' : 'mx-1 h-2 w-2',
+        ACTIVITY_TONE[shown],
+        shown === 'working' && 'motion-safe:animate-breathe',
       )}
       aria-hidden="true"
       data-sw-agent-activity-mark={shown}
+      data-sw-agent-activity-pulse={shown === 'working' ? 'true' : undefined}
     >
-      {shown === 'working' ? (
-        <span className="absolute inset-0 rounded-full ring-2 ring-accent motion-safe:animate-ping" data-sw-agent-activity-pulse="true" />
-      ) : null}
+      {many ? count : null}
+    </span>
+  )
+}
+
+// Without its word (a narrow toolbar, the phone's More button) the mark sits
+// inside the icon's corner, small, with the same calm motion.
+function ActivityMark({ shown, count, touch = false }) {
+  if (shown === 'idle') return null
+  const many = count > 1 && shown !== 'done'
+  return (
+    <span
+      className={cn(
+        'tabular pointer-events-none absolute flex items-center justify-center rounded-full font-semibold ring-2 ring-surface',
+        touch ? 'top-2 right-2' : '-top-1 -right-1',
+        many ? 'h-3.5 min-w-3.5 px-0.5 text-[9px] leading-none' : 'h-2 w-2',
+        ACTIVITY_TONE[shown],
+        shown === 'working' && 'motion-safe:animate-breathe',
+      )}
+      aria-hidden="true"
+      data-sw-agent-activity-mark={shown}
+      data-sw-agent-activity-pulse={shown === 'working' ? 'true' : undefined}
+    >
       {many ? count : null}
     </span>
   )
@@ -181,12 +208,12 @@ function PanelSwitch({
             data-sw-chat-toggle="true"
             {...activityHooks}
           >
-            {/* On the icon's corner, so it reads as the agent's and not as the next button's. */}
             <span className="relative inline-flex">
               <Bot size={14} aria-hidden="true" />
-              <ActivityMark shown={shown} count={activity.count} />
+              {labels ? null : <ActivityMark shown={shown} count={activity.count} />}
             </span>
             {labels ? 'Agent' : null}
+            {labels ? <ActivityPill shown={shown} count={activity.count} /> : null}
           </Toggle>
         </Tooltip>
       ) : null}
@@ -252,7 +279,6 @@ export function BoardToolbar({
   comparePair,
   commentMode,
   setCommentMode,
-  openPalette,
   setMenuOpen,
   showLinks,
   toggleLinks,
@@ -447,7 +473,7 @@ export function BoardToolbar({
         <IconButton
           size="icon"
           variant="ghost"
-          className="shrink-0 text-fg"
+          className="relative shrink-0 text-fg"
           onClick={() => setMenuOpen(true)}
           label={`${chatAvailable ? 'More: agent, pages, views, screen size' : 'More: pages, views, screen size'}${shown !== 'idle' ? `. ${activityWords(shown, activity)}` : ''}`}
           data-sw-menu="true"
@@ -484,19 +510,20 @@ export function BoardToolbar({
       ref={headerRef}
       className={cn(
         'grid h-14 shrink-0 items-center border-b border-line bg-surface px-3',
+        // Two zones and the room between them; no search here any more (it is
+        // the sidebar's field), so the bar keeps its shape whatever is open.
         off.tight ? 'gap-x-3' : 'gap-x-5',
         // Centred: two equal side columns. Too narrow for that: the left zone
         // takes its own width (the name held to its minimum) and the search
         // icon follows it.
-        fit.centred ? 'grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]' : 'grid-cols-[auto_auto_minmax(0,1fr)]',
+        'grid-cols-[auto_minmax(0,1fr)]',
       )}
       data-sw-toolbar="full"
       data-sw-toolbar-fit={FIT_STEPS[fit.step]}
-      data-sw-toolbar-centred={fit.centred ? 'true' : 'false'}
     >
       <h1 className="sr-only">Shapewall: {boardTitle}</h1>
       <div className={cn('flex min-w-0 items-center', innerGap)} data-sw-toolbar-zone="left">
-        <div className="flex min-w-0 flex-col justify-center" style={fit.centred ? undefined : { maxWidth: TOOLBAR.name[fit.step] }}>
+        <div className="flex min-w-0 flex-col justify-center" style={{ maxWidth: TOOLBAR.name[fit.step] }}>
           {project && !sidebarTitled ? <ProjectCrumb project={project} /> : null}
           {picker}
         </div>
@@ -555,12 +582,6 @@ export function BoardToolbar({
             {status}
           </>
         ) : null}
-      </div>
-
-      <div className="flex shrink-0 items-center justify-center" data-sw-toolbar-zone="center">
-        <Tooltip content={<KeyTip label="Go to a page, journey or comment" keys={[PALETTE_KEY]} />} side="bottom">
-          <PaletteTrigger onOpen={openPalette} compact={off.search} style={off.search ? undefined : { width: fit.search }} />
-        </Tooltip>
       </div>
 
       <div className={cn('flex min-w-0 items-center justify-end', innerGap)} data-sw-toolbar-zone="right">

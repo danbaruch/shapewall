@@ -94,7 +94,7 @@ function WorkingRing({ dot = false }) {
   return (
     <span
       className={cn(
-        'pointer-events-none absolute rounded-full ring-2 ring-accent motion-safe:animate-ping',
+        'pointer-events-none absolute rounded-full ring-2 ring-accent motion-safe:animate-breathe',
         dot ? '-inset-1' : '-inset-1.5',
       )}
       aria-hidden="true"

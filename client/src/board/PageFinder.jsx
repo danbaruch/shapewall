@@ -171,7 +171,9 @@ function buildSections({ query, groups, journeys, canEditJourneys, comments, act
   ].filter(Boolean)
 }
 
-// The toolbar's search field look-alike that opens the palette.
+// The board's search: a field look-alike at the top of the sidebar that
+// opens the palette (pages, journeys, comments, actions), as Ctrl/Cmd+K does
+// from anywhere. Typing happens in the palette, so there is one result list.
 export function PaletteTrigger({ onOpen, compact = false, className, ...props }) {
   return (
     <button
@@ -180,10 +182,10 @@ export function PaletteTrigger({ onOpen, compact = false, className, ...props })
       onClick={onOpen}
       className={cn(
         'inline-flex h-8 shrink-0 items-center gap-2 rounded-md border border-line bg-surface-2/60 text-[13px] text-muted outline-none hover:border-faint/40 hover:bg-surface-2 hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
-        compact ? 'w-8 justify-center' : 'w-60 px-2.5',
+        compact ? 'w-8 justify-center' : 'w-full px-2.5',
         className,
       )}
-      aria-label="Go to a page, journey or comment"
+      aria-label="Search pages, journeys and comments"
       aria-haspopup="dialog"
       aria-keyshortcuts={isMac ? 'Meta+K' : 'Control+K'}
       data-sw-page-jump="true"
@@ -192,7 +194,7 @@ export function PaletteTrigger({ onOpen, compact = false, className, ...props })
       <Search size={14} aria-hidden="true" className="shrink-0" />
       {compact ? null : (
         <>
-          <span className="min-w-0 flex-1 truncate text-left">Go to page or journey</span>
+          <span className="min-w-0 flex-1 truncate text-left">Search the board</span>
           <Kbd className="shrink-0">{PALETTE_KEY}</Kbd>
         </>
       )}

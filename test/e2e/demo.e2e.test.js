@@ -448,7 +448,7 @@ test('agent activity on the toolbar: working, then needs your OK, then back, wit
     })
     assert.match(await page.getAttribute(agent, 'aria-label'), new RegExp(`${atWork + 1} agents working: `))
     assert.equal((await page.textContent(`${agent} [data-sw-agent-activity-mark="working"]`)).trim(), String(atWork + 1))
-    await page.waitForSelector(`${agent} [data-sw-agent-activity-mark="working"] [data-sw-agent-activity-pulse]`)
+    await page.waitForSelector(`${agent} [data-sw-agent-activity-mark="working"][data-sw-agent-activity-pulse]`)
     await shot(page, 'agent-activity-working')
 
     // It asks before it edits: the control turns to "needs you" and names the comment.

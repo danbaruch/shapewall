@@ -35,6 +35,19 @@ and the project uses [Semantic Versioning](https://semver.org/).
   (or an MCP client) for the project; the same tooltip now reads "Agent online: <token name>" or "No agent is listening: comments
   wait until one is", and a thread whose comment was sent to the agent says so too when none is. The server keeps this in memory
   only (the token's name and when it was last heard, for 90 seconds), and tells members, never share link guests.
+- Search moved out of the top bar into the sidebar: one field at the top of the expanded sidebar ("Search pages, journeys,
+  comments", Ctrl/Cmd+K), a search icon when the sidebar is collapsed. It opens the same search as before, and Ctrl/Cmd+K still
+  works from anywhere. The expanded sidebar no longer has a separate "Filter pages" box under its tabs. The top bar now keeps its
+  shape: opening a journey only changes the Views button, in place (the journey's name and a clear button), where before the
+  search box collapsed to a lone icon in the middle of the bar.
+- An open comment closes when you go somewhere else: opening or stepping through a journey, going to a page from the search or the
+  sidebar, switching to a screen size the comment is not on, entering compare, opening a page's history from its card. It stays
+  open while you pan, zoom, use the comments list, or switch between Comments, Agent and Checks. The address drops the comment
+  too, so a reload does not reopen it; a reply you had not sent is still there when you open the thread again. A new comment with
+  something in it is never lost this way: it is put aside and a note offers it back ("Draft kept for Home", Reopen or Discard).
+- The agent activity mark on the Agent button sits where the Comments count does, at the right end of the button, in the same size:
+  a dot for one agent, a number for more. Its motion is a slow, small breath that stays inside the button (a working pin breathes
+  the same way); the expanding ring is gone.
 - Esc closes the open thread first, also while the mouse rests on a pin and its preview is showing. A comment card you moved and
   then re-aimed at another element (while still empty) goes back beside its new pin.
 - Drawing is clearly a mode. A bar at the top says "Drawing on Home · Desktop" and holds the tools, the inks, Undo, Clear and a
