@@ -144,9 +144,9 @@ test('desktop 1440: attach by picker and paste, draw a box and an arrow, post, t
     assert.match(await page.textContent(`${composer} [data-sw-image-error]`), /not a PNG, JPEG, WebP or GIF/)
     assert.equal(await page.getAttribute(`${composer} [data-sw-comment-input]`, 'aria-describedby'), 'sw-composer-image-error')
 
-    // Box: picking a tool is drawing mode. The frame is fitted into the
-    // canvas, the composer steps aside (still there) and a compact bar,
-    // docked at the top, holds the tools; the comment-mode hint makes way.
+    // Box: picking a tool is drawing mode. The page is in view, so the
+    // camera stays put; the composer steps aside (still there) and a
+    // labelled bar, docked at the top, holds the tools; the hint makes way.
     const camera = () => page.$eval('.react-flow__viewport', (node) => node.style.transform)
     const start = await camera()
     await page.click(`${composer} [data-sw-draw-tool="box"]`)
@@ -157,12 +157,13 @@ test('desktop 1440: attach by picker and paste, draw a box and an arrow, post, t
     assert.equal(await page.locator('[data-sw-comment-hint]').count(), 0)
     await page.waitForSelector(`${frame} [data-sw-draw-input="box"]`)
     const fitted = await settle(page, frame)
-    assert.notEqual(await camera(), start, 'the frame is fitted to draw on')
-    const barBox = await page.locator(bar).boundingBox()
-    assert.ok(barBox.y + barBox.height <= fitted.y, 'the bar never covers the frame')
-    // A point on the visible part of the fitted frame.
+    assert.equal(await camera(), start, 'the page was in view: the camera did not move')
+    assert.match(await page.textContent(`${bar} [data-sw-draw-bar-title]`), /^Drawing on Pricing · Desktop$/)
+    assert.equal(await page.getAttribute('[data-sw-canvas]', 'data-sw-comment-state'), 'drawing')
+    // A point on the visible part of the frame, clear of the bar.
     const canvas = await page.locator('[data-sw-canvas]').boundingBox()
-    const top = Math.max(fitted.y, canvas.y)
+    const barBox = await page.locator(bar).boundingBox()
+    const top = Math.max(fitted.y, barBox.y + barBox.height + 8)
     const shown = Math.min(fitted.y + fitted.height, canvas.y + canvas.height - 70) - top
     const at = (fx, fy) => [fitted.x + fitted.width * fx, top + shown * fy]
     // Drawing never pans the canvas.
@@ -317,7 +318,8 @@ test('a reply can be a drawing alone, and an unsent reply survives closing the t
     await page.waitForSelector(`${frame} [data-sw-draw-input="box"]`)
     const fitted = await settle(page, frame)
     const canvas = await page.locator('[data-sw-canvas]').boundingBox()
-    const top = Math.max(fitted.y, canvas.y)
+    const barBox = await page.locator(bar).boundingBox()
+    const top = Math.max(fitted.y, barBox.y + barBox.height + 8)
     const shown = Math.min(fitted.y + fitted.height, canvas.y + canvas.height - 70) - top
     await drag(page, [fitted.x + fitted.width * 0.1, top + shown * 0.2], [fitted.x + fitted.width * 0.4, top + shown * 0.5])
     await page.waitForSelector(`${bar} [data-sw-draw-count="1"]`)

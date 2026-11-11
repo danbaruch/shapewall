@@ -3,6 +3,7 @@
 // robust reference to an element, and later to find that element again, so
 // a pin follows its element when the page is recaptured.
 
+import { plainLabel } from '../../../src/capture/element-map.js'
 import { frameDom } from './frameDom'
 
 const SELECTOR_MAX = 600
@@ -95,10 +96,11 @@ export function elementAt(doc, x, y) {
   return rect.width && rect.height ? element : null
 }
 
-// A short label for the element a comment would pin to: the last step of
-// its selector, and its text when there is some ('a[data-testid="cta"]
-// "Start free"'). `large` when it covers a big part of the page, so the
-// board can say the pin goes on a whole section.
+// What hovering shows for the element a comment would pin to: `name`, a
+// plain label ("Button: Start free"); `label`, the last step of its selector
+// and its text ('a[data-testid="cta"] "Start free"'); and `large` when it
+// covers a big part of the page, so the board can say the pin goes on a
+// whole section.
 const clip = (value, max) => (value.length > max ? `${value.slice(0, max - 3)}...` : value)
 
 export function describeElement(doc, element, native) {
@@ -107,9 +109,11 @@ export function describeElement(doc, element, native) {
   const text = textOf(element)
   const rect = element.getBoundingClientRect()
   const area = native?.width && native?.height ? (rect.width * rect.height) / (native.width * native.height) : 0
+  const large = area > 0.2
   return {
+    name: plainLabel(element.tagName.toLowerCase(), text, { large }),
     label: `${clip(step, 48)}${text ? ` "${clip(text, 28)}"` : ''}`,
-    large: area > 0.2,
+    large,
     rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
   }
 }

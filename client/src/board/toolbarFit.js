@@ -1,9 +1,10 @@
 // How much of the desktop board toolbar keeps its words, as a pure function of
 // widths (unit-tested in test/toolbar-fit.test.js). The toolbar has three zones:
-//   left    the board name and switcher, the screen-size toggle, Views, Capture
-//           and the capture status
+//   left    the board name and switcher with the capture status, a hairline,
+//           then the screen-size toggle, Views and Capture
 //   centre  "Go to page or journey", centred on the toolbar itself
-//   right   Comment, the side panel toggles (Comments, Agent, Checks), Settings
+//   right   Comment, a hairline, the side panel toggles (Comments, Agent,
+//           Checks) on one track, Settings
 // When the zones do not fit, labels drop one step at a time, in FIT_STEPS
 // order. Every control keeps its accessible name and tooltip at every step.
 // The widths come from the controls' fixed sizes plus measured text, never
@@ -55,13 +56,14 @@ export function collapsed(step) {
   }
 }
 
-// One zone's width at a step. items: [{ full, compact, at }], where `at` is
-// the FIT_STEPS name that collapses it (no `at`: always `full`). `full` may
+// One zone's width at a step. items: [{ full, compact, at, gone }], where
+// `at` is the FIT_STEPS name that collapses it (no `at`: always `full`) and
+// `gone` the one from which it is not shown at all (a hairline). `full` may
 // be a list, one width per step, for a label that shortens before it goes.
 export function zoneWidth(items, step, gap = collapsed(step).tight ? TOOLBAR.tightGap : TOOLBAR.gap) {
-  const shown = items.filter(Boolean)
-  if (!shown.length) return 0
   const off = collapsed(step)
+  const shown = items.filter((item) => item && !(item.gone && off[item.gone]))
+  if (!shown.length) return 0
   const width = (item) => (item.at && off[item.at] ? item.compact : Array.isArray(item.full) ? item.full[step] : item.full)
   const sum = shown.reduce((total, item) => total + width(item), 0)
   return sum + gap * (shown.length - 1)
@@ -86,6 +88,10 @@ export function toolbarItems({
   const t = (value, font) => Math.ceil(text(String(value), font)) + 1
   const ICON = 32
   const items = { left: [], right: [] }
+  // The hairline between the name and the view controls. Once the screen
+  // sizes are icons the bar is short of room, and the hairlines go.
+  const divider = (id) => ({ id, full: 1, gone: 'viewport' })
+  items.left.push(divider('divider'))
   if (viewports.length > 1) {
     // A bordered track (1 px + 2 px padding a side); items px-2.5 around a word, px-2 around a 14 px icon.
     items.left.push({
@@ -121,13 +127,15 @@ export function toolbarItems({
           : 16,
   })
   if (viewer) items.right.push({ id: 'viewer', full: 40 + t('Viewer', 'xs') })
-  if (comment) items.right.push({ id: 'comment', full: 45 + t('Comment', 'ui'), compact: ICON, at: 'comment' })
-  // One group, 2 px between its buttons: px-2.5, a 14 px icon, gap-1.5.
+  // Comment, then the hairline between it and the panel toggles.
+  if (comment) items.right.push({ id: 'comment', full: 45 + t('Comment', 'ui'), compact: ICON, at: 'comment' }, divider('panels-divider'))
+  // One track (1 px border + 2 px padding a side), its buttons side by side:
+  // px-2.5 (px-2 once the words are gone), a 14 px icon, gap-1.5.
   const badge = 12 + t(panels.comments, 'count')
-  const buttons = [{ full: 46 + t('Comments', 'ui') + badge, compact: 40 + badge }]
-  if (panels.agent) buttons.push({ full: 40 + t('Agent', 'ui'), compact: 34 })
-  if (panels.checks) buttons.push({ full: 40 + t('Checks', 'ui'), compact: 34 })
-  const gaps = 2 * (buttons.length - 1)
+  const buttons = [{ full: 46 + t('Comments', 'ui') + badge, compact: 36 + badge }]
+  if (panels.agent) buttons.push({ full: 40 + t('Agent', 'ui'), compact: 30 })
+  if (panels.checks) buttons.push({ full: 40 + t('Checks', 'ui'), compact: 30 })
+  const gaps = 6
   items.right.push({
     id: 'panels',
     full: buttons.reduce((sum, item) => sum + item.full, gaps),

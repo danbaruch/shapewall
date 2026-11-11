@@ -53,10 +53,21 @@ function useWidth(ref, active) {
   return width
 }
 
-// Comments, Agent and Checks share the side panel: flat buttons side by side,
-// the open panel's one pressed with the kit's selected treatment (Toggle
-// `flat`), none pressed while the panel is closed. Each also opens its own
-// entry point (unchanged hooks).
+// One look for every control in the bar (see BoardToolbar below): a quiet
+// 32 px box with a hairline. BOXED is a single button (Views, Capture, Agent
+// settings); TRACK is a row of options or toggles whose chosen one is the
+// raised chip (the screen sizes, the side panels), with SEGMENT its buttons.
+const BOXED = 'bg-surface-2/60 text-fg ring-1 ring-line ring-inset hover:bg-surface-2'
+const TRACK = 'flex shrink-0 items-center rounded-md border border-line bg-surface-2 p-0.5'
+const SEGMENT = 'h-[26px] text-ui'
+
+// A hairline between two groups of the bar.
+const Divider = () => <span className="h-5 w-px shrink-0 bg-line" aria-hidden="true" data-sw-toolbar-divider="true" />
+
+// Comments, Agent and Checks share the side panel: three siblings on one
+// track, the open panel's one raised (Toggle `segment`, the same chip as the
+// chosen screen size), none raised while the panel is closed. Each also
+// opens its own entry point (unchanged hooks).
 function PanelSwitch({
   labels,
   allOpen,
@@ -72,12 +83,12 @@ function PanelSwitch({
 }) {
   const commentsOn = !panelHidden && !chatThread && !checksOpen
   // Each button keeps one name; aria-pressed says whether its panel is open.
-  const segment = 'h-8 text-ui'
+  const segment = cn(SEGMENT, !labels && 'px-2')
   return (
-    <div className="flex shrink-0 items-center gap-0.5" role="group" aria-label="Side panel">
+    <div className={TRACK} role="group" aria-label="Side panel" data-sw-panel-switch="true">
       <Tooltip content={`${commentsOn ? 'Hide' : 'Show'} comments (${allOpen} open)`} side="bottom">
         <Toggle
-          variant="flat"
+          variant="segment"
           className={segment}
           pressed={commentsOn}
           onPressedChange={() =>
@@ -96,7 +107,7 @@ function PanelSwitch({
       {chatAvailable ? (
         <Tooltip content={chatThread ? 'Close the agent chat' : 'Chat with your agent about this board'} side="bottom">
           <Toggle
-            variant="flat"
+            variant="segment"
             className={segment}
             pressed={Boolean(chatThread)}
             aria-label="Agent"
@@ -111,7 +122,7 @@ function PanelSwitch({
       {canChecks ? (
         <Tooltip content={checksOpen ? 'Close the checks' : 'Page checks: performance, accessibility, SEO'} side="bottom" align="end">
           <Toggle
-            variant="flat"
+            variant="segment"
             className={segment}
             pressed={Boolean(checksOpen)}
             aria-label="Checks"
@@ -127,17 +138,22 @@ function PanelSwitch({
   )
 }
 
-// The board toolbar. Desktop (lg and up): three zones, the canvas-tool way:
-//   left    where you are and how you look at it: the project and board
-//           switcher, the screen-size toggle, Views (journeys and what the
-//           canvas shows), and on a local
-//           board Capture with its status (otherwise the status dot sits by
-//           the name)
+// The board toolbar. Desktop (lg and up): three zones holding four groups,
+// the canvas-tool way:
+//   left    identity: the project and board switcher with the capture
+//           status dot (when the board was captured, in its tooltip);
+//           then, after a hairline, the view controls: the screen-size
+//           switch, Views (journeys and what the canvas shows), and on a
+//           local board Capture with its status
 //   centre  find: "Go to page or journey" (Ctrl/Cmd+K), centred on the toolbar
 //   right   act and open panels: the viewer note, Comment (the one primary
-//           action: a soft accent button while comment mode is off, filled
-//           and aria-pressed while it is on), the side panel switch
-//           (Comments | Agent | Checks), and Agent settings last
+//           action and the one accent control: soft while comment mode is
+//           off, filled and aria-pressed while it is on); then, after a
+//           hairline, the side panel switch (Comments | Agent | Checks) and
+//           Agent settings last
+// Every control but the name and Comment is the same quiet box: 32 px tall,
+// the same radius, a hairline, the same tint (BOXED, TRACK). A chosen option
+// or an open panel is the raised chip on its track.
 // toolbarFit.js decides which labels drop when the zones do not fit, from the
 // toolbar's width and what it shows (accessible names and tooltips stay).
 // Phone: a compact bar whose More button opens BoardMenu.
@@ -406,6 +422,7 @@ export function BoardToolbar({
           {picker}
         </div>
         {canCapture ? null : status}
+        {off.viewport ? null : <Divider />}
         {modes.length > 1 ? (
           <span
             key={viewportNotice?.at || 'still'}
@@ -417,7 +434,7 @@ export function BoardToolbar({
               options={viewportOptions}
               value={mode}
               onChange={setMode}
-              itemClassName={off.viewport ? 'px-2' : undefined}
+              itemClassName={cn('h-[26px]', off.viewport && 'px-2')}
             />
           </span>
         ) : null}
@@ -439,13 +456,14 @@ export function BoardToolbar({
           minimapOn={minimapOn}
           toggleMinimap={toggleMinimap}
           compact={off.view}
+          boxed={BOXED}
           labelMax={fit.journey || TOOLBAR.journey[Math.min(fit.step, TOOLBAR.journey.length - 1)]}
         />
         {canCapture ? (
           <>
             <IconButton
               variant="ghost"
-              className="shrink-0 text-fg"
+              className={cn('shrink-0', BOXED)}
               disabled={capture?.running || busy}
               onClick={() => setCaptureConfirm(true)}
               label="Capture now"
@@ -487,6 +505,7 @@ export function BoardToolbar({
             </Button>
           </Tooltip>
         ) : null}
+        {commenting && !off.viewport ? <Divider /> : null}
         <PanelSwitch
           labels={!off.panels}
           allOpen={allOpen}
@@ -503,7 +522,7 @@ export function BoardToolbar({
         {settingsAvailable ? (
           <IconButton
             variant="ghost"
-            className="shrink-0 text-fg"
+            className={cn('shrink-0', BOXED)}
             onClick={openSettings}
             label="Agent settings"
             tooltip="Agent settings: which agent the chat uses"

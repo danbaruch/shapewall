@@ -494,7 +494,23 @@ body {
   pointer-events: none;
 }
 
-/* Comment mode: a crosshair over the whole canvas. */
+/* Drawing on a page (desktop): that page is the surface, so every other
+   card, and the other frames of its own card, step back. */
+[data-sw-comment-state='drawing'] .react-flow__node:not(:has([data-sw-draw-surface])),
+[data-sw-comment-state='drawing'] .react-flow__node:has([data-sw-draw-surface]) [data-sw-frame]:not([data-sw-draw-surface]),
+[data-sw-comment-state='drawing'] .react-flow__edges {
+  opacity: 0.35;
+  transition: opacity var(--motion-base) ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-sw-comment-state='drawing'] .react-flow__node,
+  [data-sw-comment-state='drawing'] .react-flow__node [data-sw-frame],
+  [data-sw-comment-state='drawing'] .react-flow__edges {
+    transition: none;
+  }
+}
+
+/* Comment mode, picking a target: a crosshair over the whole canvas. */
 .sw-commenting .react-flow__pane,
 .sw-commenting .react-flow__node {
   cursor: crosshair;

@@ -70,6 +70,8 @@ test('the steps drop labels in order: search, panel toggles, View, screen size, 
   const items = local()
   const at = Object.fromEntries([...items.left, ...items.right].map((item) => [item.id, item.at || null]))
   assert.deepEqual(at, {
+    divider: null,
+    'panels-divider': null,
     viewport: 'viewport',
     view: 'view',
     capture: null,
@@ -169,7 +171,7 @@ test('item widths follow the controls: a running capture and a failed one widen 
   )
   // Compact panel toggles keep the comment count.
   const panels = toolbarItems({ text, title: 'x', panels: { comments: 120 } }).right.find((item) => item.id === 'panels')
-  assert.ok(panels.compact > 40 && panels.compact < panels.full)
+  assert.ok(panels.compact > 36 && panels.compact < panels.full)
 })
 
 test('an open journey: Views carries its name up to the cap and a clear button, collapsed it is one icon', () => {

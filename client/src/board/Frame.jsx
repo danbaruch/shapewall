@@ -7,13 +7,13 @@ import { pinSpot } from './layout'
 import { anchorAt, describeElement, elementAt, resolveAnchor } from './anchors'
 import { frameDom } from './frameDom'
 import { useElementMap } from './elementMaps'
-import { anchorFromMap, describeAt, hitTest, resolveOnMap } from '../../../src/capture/element-map.js'
+import { anchorFromMap, describeAt, hitTest, plainLabel, resolveOnMap } from '../../../src/capture/element-map.js'
 import { DOT_CLUSTER_PX, DraftPin, Pin, PinCluster, clusterPins, pinLookAt } from './pins'
 import { cn } from '../lib/utils'
 import { useBoardView } from './boardView'
 import { BoardContext } from './boardContext'
 import { FrameDrawing } from './CommentMedia'
-import { drawingsFor, hasDrawing } from './drawing'
+import { drawingsFor, hasDrawing, useDrawing } from './drawing'
 import { entryVersion } from './flow'
 
 // Device pixels per CSS pixel, capped: a dpr 3 phone does not need 3x images.
@@ -209,12 +209,20 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
   const full = !image?.thumb || live || sharp
   const src = image ? board.imageUrl(kind, full ? image.file : image.thumb, version) : null
 
-  // Comment mode on live HTML: outline the element a click would pin to,
-  // with a short label, so a click in a gap does not land on a whole
-  // section unnoticed. Mouse only (a tap has no hover).
+  // The steps of a comment, one at a time: picking (comment mode, nothing
+  // picked yet), composing (a target is picked and its composer is open) and
+  // drawing (a drawing tool is on). Only picking shows the crosshair and the
+  // hover outline; once a target is picked the page is calm again.
+  const composing = useBoardView(isComposing)
+  const drawingOn = useDrawing(toolOn)
+  const drawSurface = useDrawing((value) => Boolean(value?.tool) && value.key === liveKey)
+  const picking = board.commentMode && !composing && !drawingOn
+  // Picking on live HTML: outline the element a click would pin to, with a
+  // short label, so a click in a gap does not land on a whole section
+  // unnoticed. Mouse only (a tap has no hover).
   const [hover, setHover] = useState(null)
   const hoverFrame = useRef(0)
-  const canHover = board.commentMode && live && Boolean(map || doc) && !board.touch
+  const canHover = picking && live && Boolean(map || doc) && !board.touch
   useEffect(() => {
     if (!canHover) setHover(null)
   }, [canHover])
@@ -253,12 +261,16 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
       x: Math.max(0, Math.min(100, fx * 100)),
       y: Math.max(0, Math.min(100, fy * 100)),
     }
-    // On a live page the tap is also anchored to the element under it.
+    // On a live page the tap is also anchored to the element under it;
+    // `target` is that element in plain words, for the composer and the banner.
     if (live && (map || doc)) {
       const x = fx * native.width
       const y = fy * native.height
       const anchor = map ? anchorFromMap(map, x, y, native) : anchorAt(doc, x, y, native)
-      if (anchor) pin.anchor = anchor
+      if (anchor) {
+        pin.anchor = anchor
+        pin.target = plainLabel(map ? map.elements[hitTest(map, x, y)]?.t : elementAt(doc, x, y)?.tagName.toLowerCase(), anchor.text)
+      }
     }
     setHover(null)
     board.onPin(pin)
@@ -275,11 +287,22 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
       <div
         className={cn(
           'absolute overflow-hidden rounded-sm border border-line bg-surface-2',
-          board.commentMode && 'nodrag nopan cursor-crosshair',
+          // Picking: a click picks, so a drag must not pan. With a target
+          // picked the page drags the canvas again, like any other page.
+          picking && 'nodrag nopan cursor-crosshair',
           live && 'border-accent/60',
-          focused && 'outline-2 outline-offset-2 outline-accent',
+          focused && !drawSurface && 'outline-2 outline-offset-2 outline-accent',
+          // The page being drawn on: a strong frame, the same weight on
+          // screen at any zoom (styles.css dims every other page).
+          drawSurface && 'outline-solid outline-accent',
         )}
-        style={{ left: frame.x, top: frame.y, width: frame.w, height: frame.h }}
+        style={{
+          left: frame.x,
+          top: frame.y,
+          width: frame.w,
+          height: frame.h,
+          ...(drawSurface ? { outlineWidth: 3 * pinScale, outlineOffset: 2 * pinScale } : null),
+        }}
         onClick={onClick}
         onMouseMove={canHover ? onMouseMove : undefined}
         onMouseLeave={canHover ? () => setHover(null) : undefined}
@@ -287,6 +310,7 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
         data-sw-image={src ? (full ? 'full' : 'thumb') : 'none'}
         data-sw-live={live ? (ready ? 'ready' : 'loading') : 'off'}
         data-sw-live-anchors={live ? (opaque ? (map ? 'map' : 'none') : 'dom') : undefined}
+        data-sw-draw-surface={drawSurface ? 'true' : undefined}
       >
         {src ? (
           <img
@@ -325,6 +349,7 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
           </p>
         ) : null}
         {hover && canHover ? <HoverOutline hover={hover} native={native} scale={pinScale} /> : null}
+        {draft?.anchor && !drawingOn ? <PickedOutline draft={draft} scale={pinScale} /> : null}
         {clusters.map((group) =>
           group.items.length === 1 ? (
             <Pin
@@ -378,7 +403,34 @@ function FrameLabel({ frame, children }) {
   )
 }
 
-// The element a click would pin a comment to, outlined, with its selector.
+const isComposing = (state) => Boolean(state.draftSpot)
+const toolOn = (value) => Boolean(value?.tool)
+
+// The element the comment being written is attached to: a calm solid
+// outline that stays while the composer is open. Its box comes from the
+// draft itself (the click point and where in the element it landed), so it
+// shows on a screenshot as well as on the live page.
+function PickedOutline({ draft, scale }) {
+  const { anchor } = draft
+  if (!anchor.w || !anchor.h) return null
+  return (
+    <div
+      className="pointer-events-none absolute z-[5] rounded-[2px] border-solid border-accent"
+      style={{
+        left: `${draft.x - anchor.dx * anchor.w * 100}%`,
+        top: `${draft.y - anchor.dy * anchor.h * 100}%`,
+        width: `${anchor.w * 100}%`,
+        height: `${anchor.h * 100}%`,
+        borderWidth: 2 * scale,
+      }}
+      data-sw-picked-outline="true"
+    />
+  )
+}
+
+// The element a click would pin a comment to, outlined, with what it is in
+// plain words ("Button: Start free"). Its selector stays on the element as
+// data-sw-hover-selector, for tests and the curious.
 function HoverOutline({ hover, native, scale }) {
   const { rect } = hover
   const percent = (value, size) => `${(value / size) * 100}%`
@@ -399,7 +451,7 @@ function HoverOutline({ hover, native, scale }) {
       data-sw-hover-outline={hover.large ? 'large' : 'element'}
     >
       <span
-        className="absolute left-0 max-w-[320px] truncate rounded-sm bg-accent px-1 font-mono text-[10px] leading-4 whitespace-nowrap text-accent-fg"
+        className="absolute left-0 max-w-[320px] truncate rounded-sm bg-accent px-1.5 text-[11px] leading-[18px] font-medium whitespace-nowrap text-accent-fg"
         style={{
           [below ? 'top' : 'bottom']: '100%',
           transform: `scale(${scale})`,
@@ -408,9 +460,9 @@ function HoverOutline({ hover, native, scale }) {
           marginBottom: below ? 0 : 2 * scale,
         }}
         data-sw-hover-label="true"
+        data-sw-hover-selector={hover.label}
       >
-        {hover.label}
-        {hover.large ? ' · whole section' : ''}
+        {hover.name}
       </span>
     </div>
   )

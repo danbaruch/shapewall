@@ -10,6 +10,8 @@ export function CanvasNotes({
   canComment,
   readyKeys,
   setCommentMode,
+  composing = null,
+  onCancelDraft,
   showLinks,
   activePage,
   shownSteps,
@@ -36,7 +38,23 @@ export function CanvasNotes({
     : `Pinch to zoom. Tap a page for its actions${canComment && !comparePair ? ', or the comment button to pin a note' : ''}.`
   return (
     <div className="pointer-events-none absolute inset-x-0 top-3 z-30 flex flex-col items-center gap-1.5 px-2" data-sw-canvas-notes="true">
-      {commentMode && canComment ? (
+      {composing ? (
+        // A target is picked: the banner says what the comment is on, and
+        // Esc (or Cancel) goes back one step, to picking.
+        <div
+          className="pointer-events-auto flex w-max max-w-full items-center gap-2 rounded-full border border-line bg-surface py-0.5 pr-0.5 pl-3 text-xs font-medium text-fg shadow-pop"
+          role="status"
+          data-sw-comment-hint="composing"
+        >
+          <MessageSquarePlus size={13} className="shrink-0 text-accent" aria-hidden="true" />
+          <span className="min-w-0 truncate" data-sw-comment-hint-target="true">
+            <span className="text-muted">Commenting on</span> {composing}
+          </span>
+          <Button size="xs" variant="ghost" className="shrink-0 rounded-full" onClick={onCancelDraft} data-sw-comment-hint-cancel="true">
+            Cancel (Esc)
+          </Button>
+        </div>
+      ) : commentMode && canComment ? (
         <div
           className="pointer-events-auto flex w-max max-w-full items-center gap-2 rounded-full bg-accent py-0.5 pr-0.5 pl-3 text-xs font-medium text-accent-fg shadow-pop"
           role="status"
@@ -95,7 +113,7 @@ export function CanvasNotes({
           </Button>
         </div>
       ) : null}
-      {tipOpen && !tryOpen && data && !commentMode && !showLinks && !journey && !builder && !viewportNotice ? (
+      {tipOpen && !tryOpen && data && !commentMode && !composing && !showLinks && !journey && !builder && !viewportNotice ? (
         <div
           className="pointer-events-auto flex w-max max-w-full items-center gap-1.5 rounded-full border border-line bg-surface py-0.5 pr-0.5 pl-3 text-xs text-fg shadow-pop"
           role="note"

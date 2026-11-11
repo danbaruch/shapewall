@@ -1,5 +1,7 @@
 // End to end, board UX details: the selected card's bar never comes loose,
-// comment mode outlines the element a click would pin to, unknown @handles
+// comment mode outlines the element a click would pin to, a comment goes one
+// step at a time (pick, write, draw) and Esc goes back one, the side panel
+// keeps to its widest and the composer to the canvas, unknown @handles
 // stay text, the phone comment card and Back, the viewport switch is said
 // out loud, phone screens open on phone captures with a first-run tip,
 // compare on a phone fits the pair, frame labels sit off the capture, pins
@@ -188,7 +190,9 @@ test('desktop: comment mode outlines the element under the mouse, the hint stays
     const target = await liveElementBox(page, frame, 'a[data-testid="plus-cta"]')
     await page.mouse.move((target.left + target.right) / 2, (target.top + target.bottom) / 2)
     await page.waitForSelector('[data-sw-hover-outline="element"]')
-    assert.match(await page.textContent('[data-sw-hover-label]'), /plus-cta.*Try Plus free/)
+    // The label is in plain words; the selector stays on it for those who want it.
+    assert.equal(await page.textContent('[data-sw-hover-label]'), 'Link: Try Plus free')
+    assert.match(await page.getAttribute('[data-sw-hover-label]', 'data-sw-hover-selector'), /plus-cta.*Try Plus free/)
     const outline = await rect(page, '[data-sw-hover-outline]')
     assert.ok(Math.abs(outline.left - target.left) < 3 && Math.abs(outline.top - target.top) < 3, 'the outline is on the button')
     await shot(page, 'ux-2-hover-outline')
@@ -209,6 +213,237 @@ test('desktop: comment mode outlines the element under the mouse, the hint stays
     const overlapY = Math.min(box.bottom, target.bottom) - Math.max(box.top, target.top)
     assert.ok(overlapX <= 2 || overlapY <= 2, `pin ${JSON.stringify(box)} over button ${JSON.stringify(target)}`)
     await shot(page, 'ux-3-pin-corner')
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})
+
+// One step at a time: picking, composing, drawing. Each step is said on the
+// canvas (data-sw-comment-state), and Esc goes back exactly one.
+test('desktop: once a target is picked the page is calm; an empty draft moves, a written one stays; drawing is its own step', async () => {
+  const { context, page, errors } = await openBoard(DESKTOP)
+  try {
+    const frame = '[data-sw-frame="pricing:desktop"]'
+    const canvas = '[data-sw-canvas]'
+    const composer = '[data-sw-composer-popover]'
+    const state = () => page.getAttribute(canvas, 'data-sw-comment-state')
+    const camera = () => page.$eval('.react-flow__viewport', (node) => node.style.transform)
+    const cursorOn = (x, y) => page.evaluate(([px, py]) => getComputedStyle(document.elementFromPoint(px, py)).cursor, [x, y])
+    await page.click(frame)
+    await page.click('[data-sw-open-live="pricing|desktop"]')
+    await page.waitForSelector(`${frame}[data-sw-live="ready"]`, { timeout: 15000 })
+    await settle(page)
+    assert.equal(await state(), 'off')
+    const cta = await liveElementBox(page, frame, 'a[data-testid="plus-cta"]')
+    const heading = await liveElementBox(page, frame, 'h1')
+    const middle = (box) => [(box.left + box.right) / 2, (box.top + box.bottom) / 2]
+
+    // Picking: crosshair, hover outline with a plain label.
+    await page.keyboard.press('c')
+    await page.waitForSelector(`${canvas}[data-sw-comment-state="picking"]`)
+    await page.mouse.move(...middle(cta))
+    await page.waitForSelector('[data-sw-hover-outline="element"]')
+    assert.equal(await page.textContent('[data-sw-hover-label]'), 'Link: Try Plus free')
+    assert.equal(await cursorOn(...middle(cta)), 'crosshair')
+
+    // Composing: picking is over. The picked element keeps a solid outline,
+    // nothing else lights up under the mouse, and the banner says what the
+    // comment is on.
+    await page.mouse.click(...middle(cta))
+    await page.waitForSelector(`${composer} [data-sw-comment-input]`)
+    assert.equal(await state(), 'composing')
+    await page.waitForSelector('[data-sw-picked-outline]')
+    const picked = await rect(page, '[data-sw-picked-outline]')
+    assert.ok(Math.abs(picked.left - cta.left) < 3 && Math.abs(picked.top - cta.top) < 3, 'the picked outline is on the picked element')
+    await page.mouse.move(...middle(heading), { steps: 4 })
+    await page.waitForTimeout(250)
+    assert.equal(await page.locator('[data-sw-hover-outline]').count(), 0, 'no hover outline while composing')
+    assert.notEqual(await cursorOn(...middle(heading)), 'crosshair')
+    assert.equal(await page.getAttribute('[data-sw-comment-hint]', 'data-sw-comment-hint'), 'composing')
+    assert.match(await page.textContent('[data-sw-comment-hint-target]'), /Commenting on Link: Try Plus free/)
+    assert.match(await page.textContent('[data-sw-composer-target]'), /Pricing · Desktop · Link: Try Plus free/)
+    await shot(page, 'ux-flow-1-composing')
+
+    // An empty draft: a click elsewhere moves the target, and the outline
+    // and the composer follow.
+    await page.mouse.click(...middle(heading))
+    await page.waitForFunction(() => /Heading:/.test(document.querySelector('[data-sw-composer-target]')?.textContent || ''))
+    const moved = await rect(page, '[data-sw-picked-outline]')
+    assert.ok(Math.abs(moved.left - heading.left) < 3 && Math.abs(moved.top - heading.top) < 3, 'the outline moved with the target')
+    assert.equal(await page.locator('[data-sw-draft-pin]').count(), 1)
+
+    // A written draft: a click elsewhere does not re-aim it. The composer
+    // nudges and keeps the keyboard.
+    await page.fill('[data-sw-comment-input]', 'This heading is long')
+    await page.mouse.click(...middle(cta))
+    await page.waitForSelector(`${composer}[data-sw-composer-nudged]`)
+    assert.match(await page.textContent('[data-sw-composer-target]'), /Heading:/, 'the target stayed')
+    const still = await rect(page, '[data-sw-picked-outline]')
+    assert.ok(Math.abs(still.left - moved.left) < 1 && Math.abs(still.top - moved.top) < 1)
+    assert.equal(await page.inputValue('[data-sw-comment-input]'), 'This heading is long')
+    assert.equal(
+      await page.evaluate(() => document.activeElement?.hasAttribute('data-sw-comment-input')),
+      true,
+      'focus is back in the composer',
+    )
+
+    // Drawing: the camera stays where it is, the bar says what is going on,
+    // and no element lights up under the pen.
+    const before = await camera()
+    assert.match(await page.textContent(`${composer} [data-sw-draw-label]`), /Draw/)
+    await page.click(`${composer} [data-sw-draw-tool="pen"]`)
+    const bar = '[data-sw-draw-bar="composer"]'
+    await page.waitForSelector(bar)
+    assert.equal(await state(), 'drawing')
+    assert.equal(await page.textContent(`${bar} [data-sw-draw-bar-title]`), 'Drawing on Pricing · Desktop')
+    await page.waitForSelector(`${frame}[data-sw-draw-surface]`)
+    await page.waitForTimeout(700)
+    assert.equal(await camera(), before, 'entering drawing mode did not move the camera')
+    const from = middle(heading)
+    await page.mouse.move(from[0] - 60, from[1] + 40)
+    await page.mouse.down()
+    await page.mouse.move(from[0], from[1] + 70, { steps: 4 })
+    await page.mouse.move(from[0] + 80, from[1] + 30, { steps: 4 })
+    await page.mouse.up()
+    await page.waitForSelector(`${bar} [data-sw-draw-count="1"]`)
+    await page.mouse.move(...middle(cta), { steps: 4 })
+    await page.waitForTimeout(250)
+    assert.equal(await page.locator('[data-sw-hover-outline], [data-sw-picked-outline]').count(), 0, 'no element outline while drawing')
+    assert.equal(await page.locator('[data-sw-comment-hint]').count(), 0)
+    await shot(page, 'ux-flow-2-drawing')
+
+    // Esc: one step back, to the composer, with the text and the drawing.
+    await page.keyboard.press('Escape')
+    await page.waitForSelector(bar, { state: 'detached' })
+    await page.waitForSelector(`${composer}:not([data-sw-stowed])`)
+    assert.equal(await state(), 'composing')
+    await page.waitForSelector(`${composer} [data-sw-draw-count="1"]`)
+    assert.equal(await page.inputValue('[data-sw-comment-input]'), 'This heading is long')
+    assert.equal(await camera(), before)
+    // Esc again: back to picking (comment mode stays on). Once more: out.
+    await page.focus('[data-sw-comment-input]')
+    await page.keyboard.press('Escape')
+    await page.waitForSelector(composer, { state: 'detached' })
+    assert.equal(await state(), 'picking')
+    assert.equal(await page.getAttribute('[data-sw-comment-mode]', 'aria-pressed'), 'true')
+    assert.equal(await page.locator('[data-sw-picked-outline]').count(), 0)
+    await page.keyboard.press('Escape')
+    await page.waitForSelector(`${canvas}[data-sw-comment-state="off"]`)
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})
+
+test('desktop: on a screenshot the comment goes on the spot; a page drawn too small is fitted to draw on and the camera goes back', async () => {
+  const { context, page, errors } = await openBoard(DESKTOP)
+  try {
+    const frame = '[data-sw-frame="pricing:desktop"]'
+    const canvas = '[data-sw-canvas]'
+    const camera = () => page.$eval('.react-flow__viewport', (node) => node.style.transform)
+    await settle(page)
+    const box = await page.locator(frame).boundingBox()
+    assert.ok(box.width < 240, `the page starts as a thumbnail (${box.width})`)
+    await page.keyboard.press('c')
+    await page.waitForSelector('[data-sw-comment-hint="page"]')
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 3)
+    await page.waitForSelector('[data-sw-composer-popover] [data-sw-comment-input]')
+    assert.equal(await page.getAttribute(canvas, 'data-sw-comment-state'), 'composing')
+    // No element was picked: no outline, the pin marks the spot.
+    assert.equal(await page.locator('[data-sw-picked-outline], [data-sw-hover-outline]').count(), 0)
+    assert.equal(await page.locator('[data-sw-draft-pin]').count(), 1)
+    assert.match(await page.textContent('[data-sw-comment-hint-target]'), /Commenting on a spot on Pricing/)
+    const before = await camera()
+    await page.click('[data-sw-composer-popover] [data-sw-draw-tool="box"]')
+    await page.waitForSelector('[data-sw-draw-bar="composer"]')
+    await page.waitForFunction((value) => document.querySelector('.react-flow__viewport').style.transform !== value, before)
+    await settle(page)
+    assert.ok((await page.locator(frame).boundingBox()).width >= 240, 'fitted to a size to draw on')
+    await page.click('[data-sw-draw-bar-done]')
+    await page.waitForFunction((value) => document.querySelector('.react-flow__viewport').style.transform === value, before)
+    assert.equal(await page.getAttribute(canvas, 'data-sw-comment-state'), 'composing')
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})
+
+test('desktop: the side panel stops at 560 px or 40% of the window, a wider stored width is clamped, and the composer stays on the canvas', async () => {
+  const context = await browser.newContext(DESKTOP)
+  await context.addInitScript(() => {
+    if (window !== window.top) return
+    window.localStorage.setItem('shapewall.tip.board', '1')
+    // A width remembered by an earlier version, far past the limit.
+    if (!window.sessionStorage.getItem('seeded')) window.localStorage.setItem('shapewall.rail.side', '900')
+    window.sessionStorage.setItem('seeded', '1')
+  })
+  const page = await context.newPage()
+  const errors = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  try {
+    await page.goto(boardUrl)
+    await page.waitForSelector('[data-sw-node="home"]')
+    const width = async () => Math.round((await page.locator('[data-sw-rail="comments"]').boundingBox()).width)
+    assert.equal(await width(), 560, 'the stored width is clamped on load')
+    assert.equal(await page.getAttribute('[data-sw-rail-handle]', 'aria-valuemax'), '560')
+
+    // Dragged as far left as it goes: still 560.
+    const handle = await page.locator('[data-sw-rail-handle]').boundingBox()
+    await page.mouse.move(handle.x + handle.width / 2, 500)
+    await page.mouse.down()
+    await page.mouse.move(60, 500, { steps: 8 })
+    await page.mouse.up()
+    assert.equal(await width(), 560)
+    // The arrow keys cannot pass it either; the minimum is kept.
+    await page.focus('[data-sw-rail-handle]')
+    await page.keyboard.press('Shift+ArrowLeft')
+    assert.equal(await width(), 560)
+    for (let presses = 0; presses < 8; presses += 1) await page.keyboard.press('Shift+ArrowRight')
+    assert.equal(await width(), 280)
+    await page.keyboard.press('Home')
+    assert.equal(await width(), 384)
+
+    // A narrower window: 40% of it.
+    await page.setViewportSize({ width: 1100, height: 800 })
+    for (let presses = 0; presses < 6; presses += 1) await page.keyboard.press('Shift+ArrowLeft')
+    assert.equal(await width(), 440)
+    await page.setViewportSize(DESKTOP.viewport)
+
+    // A comment near the panel's edge: its composer stays on the canvas, also
+    // when the panel is widened over the pin.
+    await page.keyboard.press('Home')
+    await page.evaluate(() => document.activeElement?.blur())
+    const frame = '[data-sw-frame="pricing:desktop"]'
+    await page.click(frame)
+    await page.click('[data-sw-open-live="pricing|desktop"]')
+    await page.waitForSelector(`${frame}[data-sw-live="ready"]`, { timeout: 15000 })
+    await settle(page)
+    await page.keyboard.press('c')
+    await page.waitForSelector('[data-sw-canvas][data-sw-comment-state="picking"]')
+    const area = await rect(page, '[data-sw-canvas]')
+    const shown = await rect(page, frame)
+    await page.mouse.click(Math.min(shown.right, area.right) - 40, Math.max(shown.top, area.top) + 220)
+    await page.waitForSelector('[data-sw-composer-popover] [data-sw-comment-input]')
+    const inside = async (label) => {
+      await page.waitForTimeout(300)
+      const pop = await rect(page, '[data-sw-composer-popover]')
+      const now = await rect(page, '[data-sw-canvas]')
+      assert.ok(
+        pop.left >= now.left && pop.right <= now.right + 1,
+        `${label}: composer ${pop.left}-${pop.right} in canvas ${now.left}-${now.right}`,
+      )
+      assert.equal(await page.locator('[data-sw-composer-popover]').isVisible(), true, `${label}: the composer shows`)
+    }
+    await inside('beside the panel')
+    const grip = await page.locator('[data-sw-rail-handle]').boundingBox()
+    await page.mouse.move(grip.x + grip.width / 2, 700)
+    await page.mouse.down()
+    await page.mouse.move(60, 700, { steps: 8 })
+    await page.mouse.up()
+    assert.equal(await width(), 560)
+    await inside('with the panel over the pin')
+    await shot(page, 'ux-flow-3-panel-max')
     assert.deepEqual(errors, [])
   } finally {
     await context.close()

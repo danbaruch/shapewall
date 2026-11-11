@@ -1,15 +1,16 @@
 import { cn, formatRelative } from '../lib/utils'
 import { Spinner, Tooltip } from '../components/ui'
 
-// The capture state as a status dot by the board name: the time in its
-// tooltip, progress while capturing, a short chip when the last one failed.
+// The capture state as a status dot by the board name: what it means and the
+// time in its tooltip ("Pages captured 3 hours ago"), progress while
+// capturing, a short chip when the last one failed.
 export function CaptureStatus({ data, capture }) {
   const capturedAt = data?.manifest?.capturedAt
   const failed = !capture?.running && capture?.state === 'failed' && capture.error
   const text = capture?.running
     ? `Capturing${capture.total ? ` ${capture.done || 0} of ${capture.total}` : ''}`
     : capturedAt
-      ? `Captured ${formatRelative(capturedAt)}`
+      ? `Pages captured ${formatRelative(capturedAt)}`
       : 'Not captured yet'
   return (
     <span className="flex shrink-0 items-center gap-1.5 text-xs whitespace-nowrap text-muted" data-sw-captured="true">

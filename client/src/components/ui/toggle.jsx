@@ -8,6 +8,9 @@ import { cn } from '../../lib/utils'
 // treatment of a segmented control (a filled chip with a hairline, a resting
 // shadow and the strong text colour), so the open side panel's toggle stands
 // apart from a hovered one. Ring and shadow only: the box never changes size.
+// `segment` is one button of a row of toggles on a segmented track (the
+// board toolbar's Comments, Agent, Checks): the pressed one is the raised
+// chip, exactly like the selected option of a ToggleGroup.
 // It keys on aria-pressed, not data-state: a Tooltip around the toggle sets
 // its own data-state (closed, delayed-open) on the same button.
 export const toggleVariants = cva(
@@ -18,6 +21,8 @@ export const toggleVariants = cva(
         outline:
           'rounded-md border border-line text-muted hover:text-fg data-[state=on]:border-accent data-[state=on]:bg-accent/10 data-[state=on]:text-fg',
         flat: 'relative rounded-md text-muted hover:bg-fg/[0.05] hover:text-fg focus-visible:z-10 focus-visible:outline-offset-0 aria-pressed:bg-surface-2 aria-pressed:text-fg aria-pressed:shadow-card aria-pressed:ring-1 aria-pressed:ring-line-strong/70 aria-pressed:ring-inset',
+        segment:
+          'relative rounded text-muted hover:text-fg focus-visible:z-10 focus-visible:outline-offset-0 aria-pressed:bg-surface aria-pressed:text-fg aria-pressed:shadow-card',
         pill: 'max-w-full rounded-full border border-line text-muted hover:text-fg data-[state=on]:border-warn data-[state=on]:bg-warn/15 data-[state=on]:text-fg',
       },
       size: {

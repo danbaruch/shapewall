@@ -337,9 +337,64 @@ export function hitTest(map, x, y) {
   return target === undefined ? best : target
 }
 
-// A short label for the element a comment would pin to (as
-// anchors.js describeElement): the last selector step and its text, and
-// `large` when it covers a fifth of the page or more.
+// What a reviewer would call an element, from its tag: "Heading", "Button",
+// "Image". Containers are a "Section"; other tags with words in them are "Text".
+const KINDS = {
+  h1: 'Heading',
+  h2: 'Heading',
+  h3: 'Heading',
+  h4: 'Heading',
+  h5: 'Heading',
+  h6: 'Heading',
+  a: 'Link',
+  button: 'Button',
+  summary: 'Button',
+  img: 'Image',
+  picture: 'Image',
+  svg: 'Image',
+  video: 'Video',
+  input: 'Field',
+  textarea: 'Field',
+  select: 'Field',
+  label: 'Label',
+  li: 'List item',
+  ul: 'List',
+  ol: 'List',
+  table: 'Table',
+  form: 'Form',
+  nav: 'Navigation',
+  header: 'Header',
+  footer: 'Footer',
+  section: 'Section',
+  article: 'Section',
+  main: 'Section',
+  aside: 'Section',
+  div: 'Section',
+}
+
+// The tag a selector ends on ('' when its last step is an #id).
+export function selectorTag(selector) {
+  const last = String(selector || '')
+    .split(' > ')
+    .pop()
+  const match = /^([a-z][a-z0-9-]*)/.exec(last)
+  return match ? match[1] : ''
+}
+
+// A plain name for an element: its kind and its text ("Heading: Notes that
+// keep up...", "Button: Start free", "Section"). `large`: it covers a big
+// part of the page, so a section says it is the whole of it.
+export function plainLabel(tag, text = '', { large = false, max = 32 } = {}) {
+  const words = String(text || '').trim()
+  let kind = KINDS[tag] || (words ? 'Text' : 'Element')
+  if (large && kind === 'Section') kind = 'Whole section'
+  return words ? `${kind}: ${clip(words, max)}` : kind
+}
+
+// What hovering shows for the element a comment would pin to (as
+// anchors.js describeElement): `name`, its plain label; `label`, the last
+// selector step and its text (for people who read selectors); and `large`
+// when it covers a fifth of the page or more.
 export function describeAt(map, position, native) {
   const item = map.elements[position]
   const selector = selectorOf(map, position)
@@ -347,9 +402,11 @@ export function describeAt(map, position, native) {
   const text = item.x || ''
   const [left, top, width, height] = item.b
   const area = native?.width && native?.height ? (width * height) / (native.width * native.height) : 0
+  const large = area > 0.2
   return {
+    name: plainLabel(item.t, text, { large }),
     label: `${clip(step, 48)}${text ? ` "${clip(text, 28)}"` : ''}`,
-    large: area > 0.2,
+    large,
     rect: { left, top, width, height },
   }
 }
