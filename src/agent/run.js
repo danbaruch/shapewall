@@ -117,6 +117,8 @@ export async function runTurn({
   choices = null,
   // Agent branch mode: the folder this turn's agent works in (acp.js stream).
   workdir = null,
+  // What the owner called this agent (identity.js): the author of its replies.
+  agentName = null,
 }) {
   const thread = `${board.id}/${threadId}`
   const runMs = backend.runMsMax || RUN_MS_MAX
@@ -279,7 +281,7 @@ export async function runTurn({
       for (const call of calls) {
         const id = call.id || newId('call')
         card({ id, kind: 'tool', name: call.name, label: call.name, state: 'running', detail: null })
-        const result = await runTool({ config, board, ownerWrites, allowCapture, capture, requestedPages }, call)
+        const result = await runTool({ config, board, ownerWrites, allowCapture, capture, requestedPages, agentName }, call)
         card({ id, label: result.label, state: result.ok ? 'done' : 'error', detail: result.detail })
         if (result.ok) noteRefs(call.args)
         conversation.push({ role: 'tool', toolCallId: id, content: [{ type: 'text', text: result.text }] })

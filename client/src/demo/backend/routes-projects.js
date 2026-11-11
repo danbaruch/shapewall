@@ -183,6 +183,24 @@ export function projectRoutes(ctx) {
       },
     ],
     [
+      // Renaming a token (src/hosted/console-routes.js): what a watcher is called from now on.
+      'PATCH',
+      /^\/api\/workspaces\/([a-z0-9_]+)\/projects\/([a-z0-9_]+)\/tokens\/([a-z0-9_]+)$/,
+      ({ params, body }) => {
+        inWorkspace(params[0], 'tokens')
+        projectIn(params[0], params[1])
+        const name = cleanText(body?.name, 61)
+        if (!name || name.length > 60) fail(400, 'invalid_name', 'Token name: 1 to 60 characters.')
+        const token = state.tokens.find((item) => item.projectId === params[1] && item.id === params[2] && !item.revokedAt)
+        if (!token) fail(404, 'unknown_token', 'No such token.')
+        if (token.name !== name) {
+          audit(params[0], 'token_renamed', { target: token.id, detail: { from: token.name, to: name } })
+          token.name = name
+        }
+        return { token: listTokens(params[0], params[1]).find((item) => item.id === token.id) }
+      },
+    ],
+    [
       'DELETE',
       /^\/api\/workspaces\/([a-z0-9_]+)\/projects\/([a-z0-9_]+)\/tokens\/([a-z0-9_]+)$/,
       ({ params }) => {

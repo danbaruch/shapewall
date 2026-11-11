@@ -674,7 +674,7 @@ export function AgentSettings({ onSaved, touch, buzz = false, onDirtyChange, age
           value={form.label}
           onChange={set('label')}
           placeholder={config.label || (acp ? 'the agent’s name' : 'the model name')}
-          maxLength={60}
+          maxLength={40}
           disabled={locked}
           data-sw-settings-field="label"
         />

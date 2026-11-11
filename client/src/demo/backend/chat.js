@@ -27,7 +27,7 @@ import {
   visibleTo,
 } from '../../../../src/agent/thread-history.js'
 import { latestChange, withUndoAvailability } from '../../../../src/agent/undo-state.js'
-import { AGENT_INFO, demoAgentInfo, demoAgentOf, demoAgentState, demoProfiles, fail, hex, newId, cleanText } from './util.js'
+import { AGENT_INFO, demoAgentInfo, demoAgentLook, demoAgentOf, demoAgentState, demoProfiles, fail, hex, newId, cleanText } from './util.js'
 import { dropRating, findAnswer, ratingEntry, ratingsOf, upsertRating, validateRating } from '../../../../src/agent/ratings-core.js'
 
 const MESSAGES_MAX = 200
@@ -167,7 +167,7 @@ export function chatRoutes(ctx) {
     [
       'GET',
       /^\/api\/agent\/status$/,
-      () => ({ ...demoAgentInfo(demoAgentState(state).default), profiles: demoProfiles(state), settingsUrl: settingsUrlOf() }),
+      () => ({ ...demoAgentInfo(demoAgentState(state).default, state), profiles: demoProfiles(state), settingsUrl: settingsUrlOf() }),
     ],
     [
       'GET',
@@ -207,7 +207,7 @@ export function chatRoutes(ctx) {
           options: optionsOf(key),
           profileId: thread.profileId || 'default',
           profiles: demoProfiles(state),
-          agent: { ...demoAgentInfo(demoAgentOf(thread.profileId, state).id), settingsUrl: settingsUrlOf(access) },
+          agent: { ...demoAgentInfo(demoAgentOf(thread.profileId, state).id, state), settingsUrl: settingsUrlOf(access) },
         }
       },
     ],
@@ -228,7 +228,7 @@ export function chatRoutes(ctx) {
         if (profileId === 'default') delete meta[key].profileId
         if (!Object.keys(meta[key]).length) delete meta[key]
         save()
-        return { profileId, agent: demoAgentInfo(demoAgentOf(profileId, state).id) }
+        return { profileId, agent: demoAgentInfo(demoAgentOf(profileId, state).id, state) }
       },
     ],
     [
@@ -530,7 +530,8 @@ export function chatRoutes(ctx) {
                 if (reply?.summary) undoOf()[reply.id] = { key, commentId: fixing.id, before, replyId }
                 fixing.replies.push({
                   id: replyId,
-                  author: 'Coding agent',
+                  // Under the name the visitor gave the agent, when they gave it one.
+                  author: demoAgentLook(state, demoAgentOf(threadAt(key, params[1]).profileId, state).id).label || 'Coding agent',
                   agent: true,
                   body: branchMode.enabled
                     ? 'Made the change on its own branch and recaptured the page. Apply the branch or discard it from the thread. (Demo: nothing was edited.)'

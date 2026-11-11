@@ -73,6 +73,8 @@ import { createAgentHealth } from './agent-health.js'
 import { beginAgentOperation } from './control.js'
 import { validateFiles, validateMentions } from './composer.js'
 import { profileForDefault, userAgentEntry, userSettingsFile } from './user-settings.js'
+import { uploadHashes } from './identity.js'
+import { readIcon } from './icon-store.js'
 import { finishFix, projectChanged, projectSnapshot, stopReason } from './feedback-loop.js'
 import { ownerMcpServers } from './owner-mcp.js'
 import { RUN_MS_MAX, commentIdOf, runTurn } from './run.js'
@@ -110,6 +112,8 @@ import { commentText } from '../comment-fields.js'
 // body this big, and only once the message is allowed to run.
 export const BODY_LIMIT = '28mb'
 const SMALL_BODY_LIMIT = '4kb'
+// An uploaded agent icon: 512 KiB of PNG at most (src/accounts/avatar.js), in base64.
+const ICON_BODY_LIMIT = '700kb'
 // Open GET /events streams at once; a new one ends the oldest.
 export const EVENT_STREAMS_MAX = 32
 
@@ -284,9 +288,13 @@ export function agentRouter({
       'control_needs_owner',
       'This agent can run commands on this computer, so only its owner can use it. Open the private owner link from the terminal (or run shapewall serve --open), or use a paired device.',
     )
+  // What makes a backend the same one: everything but the agent's name,
+  // icon and tint (identity.js), which are display only. Renaming an agent
+  // must not stop its processes.
+  const fingerprintOf = (current) => JSON.stringify({ ...current, label: null, icon: null, tint: null })
   const backendFor = (current, ownerWrites = false) => {
     const key = JSON.stringify({ profileId: current.profileId || 'default', ownerWrites })
-    const fingerprint = JSON.stringify(current)
+    const fingerprint = fingerprintOf(current)
     if (backends.has(key) && backends.get(key).fingerprint !== fingerprint) {
       backends.get(key).backend?.close?.()
       backends.delete(key)
@@ -294,32 +302,44 @@ export function agentRouter({
     if (!backends.has(key)) {
       // usage: an endpoint is asked for token counts (the composer's usage
       // ring); one that refuses stream_options is asked again without.
-      const backend = createBackend(
-        { ...current, usage: current.usage ?? true },
-        {
-          env,
-          fetchImpl,
-          processPool,
-          root: config.dir,
-          protect: [config.outputDir],
-          // Files capture runs or logs in with: a write needs an approval card.
-          sensitivePaths: () => authFiles(config),
-          mcpServersFor: ownerWrites ? (thread) => ownerMcpServers(config, thread.split('/')[0], { allowCapture }) : null,
-          // One agent process per thread, no more than answers at once.
-          limits: { processesMax: limit.runsMax, ...limit.acp },
-          log,
-        },
-      )
-      backends.set(key, { key, fingerprint, backend })
+      const live = { ...current, usage: current.usage ?? true }
+      const backend = createBackend(live, {
+        env,
+        fetchImpl,
+        processPool,
+        root: config.dir,
+        protect: [config.outputDir],
+        // Files capture runs or logs in with: a write needs an approval card.
+        sensitivePaths: () => authFiles(config),
+        mcpServersFor: ownerWrites
+          ? (thread) =>
+              ownerMcpServers(config, thread.split('/')[0], {
+                allowCapture,
+                env,
+                // Whose replies these are, so they are signed with its name.
+                agent: {
+                  which: live.profileId || (['flag', 'env'].includes(live.sources?.acpCommand) ? 'fixed' : 'default'),
+                  name: live.label,
+                },
+              })
+          : null,
+        // One agent process per thread, no more than answers at once.
+        limits: { processesMax: limit.runsMax, ...limit.acp },
+        log,
+      })
+      backends.set(key, { key, fingerprint, backend, live })
     }
     cached = backends.get(key)
+    // A rename since the backend was made: what it says next ("Starting
+    // Harry") uses the new name. Nothing is restarted for it.
+    Object.assign(cached.live, { label: current.label, icon: current.icon, tint: current.tint })
     return cached.backend
   }
   // The owner backend already running for these settings, never a new one
   // (the composer's pickers read a live session's choices).
   const liveOwnerBackend = (current) => {
     const entry = backends.get(JSON.stringify({ profileId: current.profileId || 'default', ownerWrites: true }))
-    return entry && entry.fingerprint === JSON.stringify(current) ? entry.backend : null
+    return entry && entry.fingerprint === fingerprintOf(current) ? entry.backend : null
   }
   // Server shutdown: stop agent processes (src/server/app.js stopChildren).
   router.close = () => {
@@ -863,6 +883,7 @@ export function agentRouter({
           requestedPages,
           // Branch mode: the agent's cwd, file sandbox and commands are the worktree.
           workdir: work ? worktreeWorkdir(work) : null,
+          agentName: current.label || null,
         })
         health.record(current, reply)
         // What the profile offers, as this turn's session saw it; a turn that
@@ -1195,7 +1216,31 @@ export function agentRouter({
 
   // ---- Everything else: small bodies only ------------------------------------
 
+  // An uploaded agent icon (settings-routes.js POST /identity/icon) is a
+  // 256 by 256 PNG in base64: larger than the small bodies below. Only a
+  // request with the owner's settings token gets the larger parser.
+  router.post('/settings/identity/icon', (req, res, next) =>
+    settingsTokenOk(req, settingsToken) ? express.json({ limit: ICON_BODY_LIMIT })(req, res, next) : next(),
+  )
   router.use(express.json({ limit: SMALL_BODY_LIMIT }))
+
+  // An icon the owner uploaded for one of this project's agents
+  // (icon-store.js), for everyone who can see the board: the agent info they
+  // get names it by its content hash ("upload:<hash>"). Always a PNG this
+  // server encoded itself, served as nothing but an image. A hash no agent
+  // of this project uses is a 404, so the folder cannot be browsed.
+  router.get('/icons/:hash', (req, res) => {
+    const hash = String(req.params.hash)
+    const used = uploadHashes(userAgentEntry(config.dir, env).entry)
+    const png = used.has(hash) ? readIcon(hash, env) : null
+    if (!png) return res.status(404).json({ error: { code: 'unknown_icon', message: 'No such agent icon.' } })
+    // The name is the hash of the bytes: it never changes under one URL.
+    res.setHeader('Cache-Control', 'private, max-age=31536000, immutable')
+    res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox")
+    res.setHeader('Cross-Origin-Resource-Policy', 'same-origin')
+    res.setHeader('X-Content-Type-Options', 'nosniff')
+    res.type('png').send(png)
+  })
 
   // The agent settings changed (here, in another tab, or in the file): a
   // nudge only, no settings in it; each view refetches what it shows.

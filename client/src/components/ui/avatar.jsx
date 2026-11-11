@@ -1,6 +1,8 @@
 import { Bot } from 'lucide-react'
 import { useState } from 'react'
 import { cn } from '../../lib/utils'
+import { useAgentIdentity } from '../../lib/agentIdentity'
+import { AgentFace } from '../../chat/agentIcons'
 
 export function initials(name) {
   const parts = String(name || '?')
@@ -34,7 +36,8 @@ const SIZES = { xs: 'h-5 w-5 text-[9px]', sm: 'h-6 w-6 text-[10px]', md: 'h-7 w-
 export function Avatar({ name, src = null, className, person = false, agent = false, colorKey, color = null, size = 'lg' }) {
   if (src && !agent)
     return <AvatarPhoto key={src} src={src} name={name} className={className} person={person} colorKey={colorKey} size={size} />
-  if (person || agent) {
+  if (agent) return <AgentAvatar name={name} className={className} size={size} />
+  if (person) {
     return (
       <span
         className={cn(
@@ -42,10 +45,10 @@ export function Avatar({ name, src = null, className, person = false, agent = fa
           SIZES[size],
           className,
         )}
-        style={{ background: agent ? AGENT_COLOR : color || personColor(colorKey || name) }}
+        style={{ background: color || personColor(colorKey || name) }}
         aria-hidden="true"
       >
-        {agent ? <Bot size={size === 'xs' ? 11 : 13} /> : initials(name)}
+        {initials(name)}
       </span>
     )
   }
@@ -58,6 +61,26 @@ export function Avatar({ name, src = null, className, person = false, agent = fa
       aria-hidden="true"
     >
       {initials(name)}
+    </span>
+  )
+}
+
+// An agent as an author: the icon its owner gave it when the name is a
+// connected agent's (lib/agentIdentity.js), else the robot.
+function AgentAvatar({ name, className, size }) {
+  const identity = useAgentIdentity(name)
+  if (identity) return <AgentFace label={name} {...identity} round className={cn(SIZES[size], className)} />
+  return (
+    <span
+      className={cn(
+        'inline-flex shrink-0 items-center justify-center rounded-full font-semibold text-white select-none',
+        SIZES[size],
+        className,
+      )}
+      style={{ background: AGENT_COLOR }}
+      aria-hidden="true"
+    >
+      <Bot size={size === 'xs' ? 11 : 13} />
     </span>
   )
 }

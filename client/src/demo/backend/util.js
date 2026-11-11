@@ -2,6 +2,7 @@
 // ids and tokens, and small text helpers.
 
 import { CommentError } from '../../../../src/comment-fields.js'
+import { cleanAgentName, isAgentTint, isBuiltInIcon } from '../../../../src/agent/identity.js'
 
 export const DAY = 86_400_000
 export const COMMENTS_MAX = 500
@@ -41,15 +42,28 @@ export const DEMO_AGENTS = [
   { id: 'demo', label: 'Demo agent', voice: 'demo' },
   { id: 'second', label: 'Second agent', voice: 'second' },
 ]
-export const demoAgentInfo = (id) => {
-  const agent = DEMO_AGENTS.find((item) => item.id === id) || DEMO_AGENTS[0]
-  return { ...AGENT_INFO, label: agent.label, state: 'ready' }
+// What the visitor called an agent and the icon they gave it on the Agents
+// page (state.agents.identity, { [id]: { label, icon, tint } }), checked like
+// the server checks it (src/agent/identity.js). Reset drops it.
+export const demoAgentLook = (state, id) => {
+  const saved = state?.agents?.identity?.[id] || {}
+  const { name } = cleanAgentName(saved.label)
+  return {
+    ...(name ? { label: name } : {}),
+    icon: isBuiltInIcon(saved.icon) ? saved.icon : null,
+    tint: isAgentTint(saved.tint) ? saved.tint : null,
+  }
+}
+const named = (agent, state) => ({ ...agent, ...demoAgentLook(state, agent.id) })
+export const demoAgentInfo = (id, state = null) => {
+  const agent = named(DEMO_AGENTS.find((item) => item.id === id) || DEMO_AGENTS[0], state)
+  return { ...AGENT_INFO, label: agent.label, icon: agent.icon, tint: agent.tint, logo: null, state: 'ready' }
 }
 // { default, removed } from the saved state, tolerant of states saved before it.
 export const demoAgentState = (state) => {
   const saved = state?.agents || {}
   const removed = Array.isArray(saved.removed) ? saved.removed.filter((id) => DEMO_AGENTS.some((agent) => agent.id === id)) : []
-  const connected = DEMO_AGENTS.filter((agent) => !removed.includes(agent.id))
+  const connected = DEMO_AGENTS.filter((agent) => !removed.includes(agent.id)).map((agent) => named(agent, state))
   const fallback = connected[0]?.id || DEMO_AGENTS[0].id
   const chosen = connected.some((agent) => agent.id === saved.default) ? saved.default : fallback
   return { default: chosen, removed, connected }
@@ -57,14 +71,17 @@ export const demoAgentState = (state) => {
 export const demoProfiles = (state) => {
   const agents = demoAgentState(state)
   return [
-    { id: 'default', ...demoAgentInfo(agents.default), sameAs: agents.default },
-    ...agents.connected.map((agent) => ({ id: agent.id, ...demoAgentInfo(agent.id) })),
+    { id: 'default', ...demoAgentInfo(agents.default, state), sameAs: agents.default },
+    ...agents.connected.map((agent) => ({ id: agent.id, ...demoAgentInfo(agent.id, state) })),
   ]
 }
 // The profile a thread runs: its own pick while it is connected, else the default's.
 export const demoAgentOf = (profileId, state) => {
   const agents = demoAgentState(state)
-  return agents.connected.find((item) => item.id === profileId) || DEMO_AGENTS.find((item) => item.id === agents.default) || DEMO_AGENTS[0]
+  return (
+    agents.connected.find((item) => item.id === profileId) ||
+    named(DEMO_AGENTS.find((item) => item.id === agents.default) || DEMO_AGENTS[0], state)
+  )
 }
 
 export class DemoError extends Error {

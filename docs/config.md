@@ -438,7 +438,7 @@ from `shapewall ci capture --allow-start` inside a CI job (`GITHUB_ACTIONS` or `
 ```
 
 The board chat's endpoint: any OpenAI-compatible chat completions API. `baseUrl` and `model` are required to connect; `apiKeyEnv` (the
-variable holding the key, default `SHAPEWALL_AGENT_API_KEY`), `label`, `vision` (default `true`), `tools` (default `true`), `maxTokens`,
+variable holding the key, default `SHAPEWALL_AGENT_API_KEY`), `label` (the name shown for it; a connected agent's name and icon are set on the Agents page, see [agents.md](agents.md#name-and-icon)), `vision` (default `true`), `tools` (default `true`), `maxTokens`,
 `temperature` and `backend` (`"openai-compatible"`) are optional. Top level only. An `apiKey`, `key` or `token` key here is an error, and `apiKeyEnv` may only name `SHAPEWALL_AGENT_*` or a `*_API_KEY`
 variable. A key goes only to this machine, a known hosted API, or a host confirmed in `SHAPEWALL_AGENT_KEY_HOSTS`.
 Environment overrides: `SHAPEWALL_AGENT_BASE_URL`, `SHAPEWALL_AGENT_MODEL`. See [agents.md](agents.md).
