@@ -26,6 +26,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - `shapewall init` names the board after what most page titles share ("Pricing -- Acme", "Blog -- Acme": "Acme"), and takes that
   name off each page's title. Before, the board got the home page's whole title, tagline included, and titles joined with ` -- ` kept
   the site name.
+- `shapewall ci capture --allow-start` stops with a clear message when the site's URL already answers before `ci.start.serve` runs.
+  Before, it captured whatever was serving that URL in place of the checkout, so a pull request could read "no visual changes" when
+  it had some.
 - `npx shapewall doctor --install-browser` no longer shows Playwright's boxed warning about installing your project's dependencies
   first. It did not apply and read as a failure.
 

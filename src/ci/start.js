@@ -118,6 +118,17 @@ export async function waitForUrl(url, { timeout = 180000, interval = 1000, fetch
   }
 }
 
+// True when `url` answers at all right now (any status).
+async function answers(url, fetchImpl = globalThis.fetch) {
+  try {
+    const response = await fetchImpl(url, { redirect: 'manual', signal: AbortSignal.timeout(3000) })
+    await response.body?.cancel().catch(() => {})
+    return true
+  } catch {
+    return false
+  }
+}
+
 // Runs install and build, starts serve and waits for `url`. Returns { stop }.
 export async function startSite(start, { cwd, url, env = process.env, log = () => {}, fetchImpl } = {}) {
   const childEnv = commandEnv(env)
@@ -126,6 +137,11 @@ export async function startSite(start, { cwd, url, env = process.env, log = () =
     log(`ci.start.${step}: ${describe(start[step])} (in ${cwd})`)
     await runToEnd(start[step], { cwd, env: childEnv, log, timeout: start.timeout })
   }
+  // Something already answering there would be captured in place of this
+  // checkout (and serve would fail on the taken port a moment too late): the
+  // base and the head would then show the same site, and "no visual changes".
+  if (await answers(url, fetchImpl))
+    throw new Error(`${url} already answers before ci.start.serve ran: stop what is serving it, so the capture is of this checkout`)
   log(`ci.start.serve: ${describe(start.serve)} (in ${cwd})`)
   const server = launch(start.serve, { cwd, env: childEnv, log, detached: process.platform !== 'win32' })
   let exited = null
