@@ -303,8 +303,12 @@ export function ThreadPopover({ comment, point, onClose, onPrev, onNext, editing
     return () => window.removeEventListener('keydown', onKey)
   }, [])
   useEffect(() => {
+    // Also from the canvas itself: a comment picked in the search hands
+    // focus to the canvas (for the board's shortcuts), and the thread that
+    // opens for it is where the keyboard should be.
     const timer = window.setTimeout(() => {
-      if (document.activeElement === document.body)
+      const active = document.activeElement
+      if (active === document.body || active?.hasAttribute?.('data-sw-canvas'))
         document.querySelector(`[data-sw-thread-popover="${comment.id}"]`)?.focus({ preventScroll: true })
     }, 450)
     return () => window.clearTimeout(timer)

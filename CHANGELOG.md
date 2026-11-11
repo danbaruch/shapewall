@@ -48,6 +48,15 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - The agent activity mark on the Agent button sits where the Comments count does, at the right end of the button, in the same size:
   a dot for one agent, a number for more. Its motion is a slow, small breath that stays inside the button (a working pin breathes
   the same way); the expanding ring is gone.
+- A journey arrow that leads to a step off screen no longer runs out of the canvas like a stray line: it fades out at the edge and
+  ends in a small chip with the step's number ("continues to step 2: Sign in" on hover); click the chip to go there. Arrows whose
+  both ends are on screen are unchanged.
+- A link that names both a comment and a journey opens the comment: its thread at its pin, the journey left out of the address.
+- Keyboard focus is visible again on the controls that had lost their ring: the Comments, Agent and Checks buttons, the sidebar's
+  items and its expand button, the page list, the journey bar's steps and more. They showed a tooltip but no outline when reached
+  with Tab.
+- A comment picked in the search (Ctrl/Cmd+K) puts the keyboard in its thread, so Tab reaches the reply box. Screen readers hear
+  "Draw an arrow on the page" and "Draw freehand on the page" (they said "Draw a arrow", "Draw a pen").
 - Esc closes the open thread first, also while the mouse rests on a pin and its preview is showing. A comment card you moved and
   then re-aimed at another element (while still empty) goes back beside its new pin.
 - Drawing is clearly a mode. A bar at the top says "Drawing on Home · Desktop" and holds the tools, the inks, Undo, Clear and a

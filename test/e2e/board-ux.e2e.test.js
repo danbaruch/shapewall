@@ -1251,6 +1251,62 @@ test('desktop: search lives in the sidebar, and the toolbar keeps its shape when
   }
 })
 
+test('desktop: a journey arrow whose next step is off screen stops at the edge in a chip that goes there; a link with a comment and a journey opens the comment', async () => {
+  const { context, page, errors } = await openBoard(DESKTOP)
+  try {
+    await choose(page, '[data-sw-page-jump]', 'journey:sign-up')
+    await page.waitForSelector('[data-sw-journey-bar]')
+    await settle(page)
+    // Zoom in on the first step until the next one is off screen.
+    const canvas = await rect(page, '[data-sw-canvas]')
+    const first = await rect(page, '[data-sw-node] [data-sw-frame]')
+    await page.mouse.move(Math.max(canvas.left + 40, Math.min(first.left + 20, canvas.right - 40)), canvas.top + 200)
+    for (let turn = 0; turn < 6 && !(await page.locator('[data-sw-edge-continues]').count()); turn += 1) {
+      await page.keyboard.down('Control')
+      await page.mouse.wheel(0, -220)
+      await page.keyboard.up('Control')
+      await settle(page)
+    }
+    const chip = '[data-sw-edge-continues="2"]'
+    await page.waitForSelector(chip)
+    assert.equal(await page.locator('[data-sw-edge="journey:1"][data-sw-edge-leaves]').count(), 1)
+    const box = await rect(page, chip)
+    assert.ok(
+      box.left >= canvas.left && box.right <= canvas.right && box.top >= canvas.top && box.bottom <= canvas.bottom,
+      'the chip is on the canvas',
+    )
+    assert.match(await page.getAttribute(chip, 'aria-label'), /^Continues to step 2: /)
+    // The line it ends fades out: no arrowhead running off the screen.
+    assert.equal(await page.locator('[data-sw-edge="journey:1"] polygon').count(), 0)
+    assert.match(await page.getAttribute('[data-sw-edge="journey:1"] path', 'stroke'), /^url\(#sw-edge-fade-/)
+    await shot(page, 'ux-journey-arrow-continues')
+    // A click on it is "go to step 2".
+    await page.click(chip)
+    await page.waitForSelector('[data-sw-journey-step="2"]')
+    await settle(page)
+    // Fitted so every step shows: the arrows are whole again, with their heads.
+    await page.keyboard.press('Shift+1')
+    await settle(page)
+    if (!(await page.locator('[data-sw-edge-continues]').count())) {
+      assert.ok((await page.locator('[data-sw-edge^="journey:"] polygon').count()) > 0)
+    }
+    await page.click('[data-sw-journey-close]')
+
+    // A link that names a comment and a journey: the comment wins.
+    const robin = listComments(config, 'demo').find((item) => item.body === 'Covers feel heavy')
+    await page.goto(`${boardUrl}?c=${robin.id}&j=sign-up&step=2`)
+    await page.waitForSelector(`[data-sw-thread-popover="${robin.id}"]`)
+    assert.equal(await page.locator('[data-sw-journey-bar]').count(), 0)
+    const query = new URL(page.url()).searchParams
+    assert.equal(query.get('c'), String(robin.id))
+    assert.equal(query.get('j'), null)
+    assert.equal(query.get('step'), null)
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})
+
 test('desktop: agents at work show on the toolbar with a count, stay still under reduced motion, and settle as done', async () => {
   const board = config.boards[0]
   const made = []

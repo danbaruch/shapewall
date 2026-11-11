@@ -190,7 +190,7 @@ export function DrawTools({ owner, touch, onTool = null, leading = null, compact
             variant={on ? 'soft' : 'ghost'}
             aria-pressed={on}
             className={cn(on && 'ring-1 ring-accent/50')}
-            label={on ? `${tool.label}: on. Draw on the page, Esc stops` : `Draw a ${tool.label.toLowerCase()} on the page`}
+            label={on ? `${tool.label}: on. Draw on the page, Esc stops` : tool.start}
             tooltip={bar || on ? tool.label : tool.start}
             onClick={() => {
               drawing.set({ tool: on ? null : tool.id })
