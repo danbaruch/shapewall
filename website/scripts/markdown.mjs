@@ -27,6 +27,7 @@ const SAME_NAME = [
   'pull-requests',
   'starter-agent',
   'updates',
+  'where-to-run',
 ]
 const SITE_PATHS = {
   'agents.md': '/docs/chat',

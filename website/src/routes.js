@@ -215,6 +215,16 @@ export const DOC_GROUPS = [
     title: 'Run it',
     docs: [
       {
+        path: '/docs/where-to-run',
+        file: 'where-to-run',
+        repo: 'where-to-run',
+        nav: 'Where to run Shapewall',
+        title: 'Where to run Shapewall: local or hosted | Shapewall',
+        description:
+          'Choose between the local board in your project and a hosted server for a team: who can reach each, what Tailscale adds, and where the work happens.',
+        og: 'docs-self-hosting',
+      },
+      {
         path: '/docs/self-hosting',
         file: 'self-hosting',
         repo: 'deployment',
