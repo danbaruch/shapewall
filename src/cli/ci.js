@@ -12,7 +12,7 @@ import { CONFIG_FILE, findConfigFile, getBoard, loadConfig } from '../config.js'
 import { CI_DEFAULTS } from '../ci/settings.js'
 import { captureSide, ciPages } from '../ci/capture.js'
 import { compareCaptures } from '../ci/compare.js'
-import { headline } from '../ci/summary.js'
+import { headline, percent } from '../ci/summary.js'
 import { commentFromResult, prContext, skipRequested } from '../ci/github.js'
 import { startRefusal, startSite, waitForUrl } from '../ci/start.js'
 
@@ -187,7 +187,7 @@ async function captureCompare(flags, out, env) {
   else {
     out(headline(summary))
     for (const shot of summary.shots.filter((item) => item.changed))
-      out(`  ${shot.page} ${shot.viewport}: ${shot.status === 'changed' ? `${(shot.ratio * 100).toFixed(2)}% of pixels` : shot.status}`)
+      out(`  ${shot.page} ${shot.viewport}: ${shot.status === 'changed' ? `${percent(shot.ratio)} of pixels` : shot.status}`)
     for (const failure of summary.failures)
       out(`  not captured: ${failure.page ? `${failure.page} ${failure.viewport} ` : ''}(${failure.side || 'compare'}) ${failure.error}`)
     out(`Result in ${target} (summary.json, summary.md, images/)`)

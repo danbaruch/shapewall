@@ -31,6 +31,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
   it had some.
 - `shapewall capture --env NAME` gives a login script that environment's `baseUrl`. Before, the script always got the first
   environment's, so a script that signs in to staging or production never saw their address. Page checks already did this.
+- Pull request capture reports small real changes. A shot now counts as changed from 0.001% of its pixels (`ci.threshold` 0.00001);
+  the default was 0.1%, which let a changed price or a renamed button on a tall page pass as "no visual changes". Set
+  `"ci": { "threshold": 0.001 }` for the old behaviour.
 - `npx shapewall doctor --install-browser` no longer shows Playwright's boxed warning about installing your project's dependencies
   first. It did not apply and read as a failure.
 

@@ -101,7 +101,10 @@ going) and a 25 minute capture timeout.
 - `images/<page>.<viewport>/`: `before.png`, `after.png`, `diff.png` (the after shot faded, changed pixels in red) and a 320 pixel wide
   `.thumb.png` of each, for changed shots only.
 
-A shot counts as changed when its share of changed pixels reaches `ci.threshold` (default 0.001, that is 0.1%) or its size changed.
+A shot counts as changed when its share of changed pixels reaches `ci.threshold` or its size changed. The default is 0.00001, that is
+0.001%: about 30 pixels of a 1440 by 2200 desktop shot, so a changed price or a renamed button is reported. Both sides are captured
+by the same browser in the same job and anti-aliasing is ignored, so an unchanged page compares as equal; if a page of yours still
+flickers (a clock, a carousel), name the element in `ci.ignore` or raise the threshold.
 A page that answers 404 before and loads after is a new page; the other way round, a removed page.
 
 You can run it on your own machine too:

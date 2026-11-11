@@ -11,7 +11,7 @@
 
 export const CI_DEFAULTS = Object.freeze({
   enabled: true,
-  threshold: 0.001,
+  threshold: 0.00001,
   images: 'links',
   maxPages: 50,
 })
@@ -142,7 +142,7 @@ function validateStart(raw, where, problems) {
 export function validateCi(raw, problems, { pageIds = [], viewportNames = [] } = {}) {
   if (raw === undefined || raw === null) return { ...CI_DEFAULTS, pages: null, viewports: null, ignore: [], start: null }
   if (!isObject(raw)) {
-    problems.push('ci: an object such as { "enabled": true, "threshold": 0.001 }')
+    problems.push('ci: an object such as { "enabled": true, "threshold": 0.00001 }')
     return { ...CI_DEFAULTS, pages: null, viewports: null, ignore: [], start: null }
   }
   const known = ['enabled', 'threshold', 'pages', 'viewports', 'ignore', 'images', 'maxPages', 'start']
@@ -154,7 +154,7 @@ export function validateCi(raw, problems, { pageIds = [], viewportNames = [] } =
   }
   if (raw.threshold !== undefined) {
     if (typeof raw.threshold !== 'number' || !Number.isFinite(raw.threshold) || raw.threshold < 0 || raw.threshold > 1)
-      problems.push('ci.threshold: the share of pixels (0 to 1, such as 0.001 for 0.1%) below which a shot counts as unchanged')
+      problems.push('ci.threshold: the share of pixels (0 to 1, such as 0.00001 for 0.001%) below which a shot counts as unchanged')
     else ci.threshold = raw.threshold
   }
   if (raw.pages !== undefined) {

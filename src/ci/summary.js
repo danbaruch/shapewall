@@ -142,6 +142,13 @@ export function percent(ratio) {
   return `${value.toFixed(2)}%`
 }
 
+// The threshold in words: "0.10%" as before, and a small one in full
+// ("0.001%") where percent() would say "<0.01%".
+export function thresholdPercent(ratio) {
+  const value = ratio * 100
+  return value > 0 && value < 0.01 ? `${Number(value.toPrecision(2))}%` : percent(ratio)
+}
+
 function screen(shot) {
   const size = shot.viewportSize ? ` ${shot.viewportSize.width}x${shot.viewportSize.height}` : ''
   return `${plain(shot.viewport, 32)}${size}`
@@ -221,7 +228,7 @@ export function renderSummary(summary, { artifactUrl = null, runUrl = null, imag
   if (totals.newPages) facts.push(plural(totals.newPages, 'new page'))
   if (totals.removedPages) facts.push(plural(totals.removedPages, 'removed page'))
   if (totals.pagesNotCompared) facts.push(`${plural(totals.pagesNotCompared, 'page')} left out by the page limit`)
-  facts.push(`a shot counts as changed from ${percent(summary.threshold)} of its pixels`)
+  facts.push(`a shot counts as changed from ${thresholdPercent(summary.threshold)} of its pixels`)
   lines.push(`${facts.join(', ')}.`)
   const links = []
   if (changed.length && artifactUrl) links.push(`[Before, after and diff images](${artifactUrl}) (the "shapewall-ci" artifact of this run)`)

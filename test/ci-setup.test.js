@@ -83,7 +83,7 @@ test('ci values out of shape are reported', () => {
     [
       'ci.colour: unknown setting (use enabled, threshold, pages, viewports, ignore, images, maxPages, start)',
       'ci.enabled: true or false',
-      'ci.threshold: the share of pixels (0 to 1, such as 0.001 for 0.1%) below which a shot counts as unchanged',
+      'ci.threshold: the share of pixels (0 to 1, such as 0.00001 for 0.001%) below which a shot counts as unchanged',
       'ci.pages: no page "nope"',
       'ci.viewports: no viewport "watch"',
       'ci.ignore: up to 50 CSS selectors (each up to 300 characters), such as [".clock", "#ad-slot"]',
