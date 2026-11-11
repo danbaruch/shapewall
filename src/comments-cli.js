@@ -1,16 +1,22 @@
-// `shapewall comments add`, `comments get` and `comments --since`: what a
-// shell-only agent or a chat bot needs besides list, reply and status.
+// `shapewall comments add`, `comments selectors`, `comments get` and
+// `comments --since`: what a shell-only agent or a chat bot needs besides
+// list, reply and status.
 //
 // add goes through the same store function the board uses (validation,
 // events, mentions, capture version). Without --selector the pin sits near
-// the page's top-left corner; with one, it is anchored to that element, and
-// the element's text is read from the latest capture's live HTML when the
-// selector finds exactly one element there.
+// the page's top-left corner; with one, it is anchored to that element.
+// When the selector finds exactly one element in the latest capture's
+// element map (src/capture/element-map.js), the pin sits in the middle of
+// that element, stored as a click there on the board would store it. A
+// capture without a map (an older one) still gives the element's text, read
+// from the live HTML.
 
 import fs from 'node:fs'
+import path from 'node:path'
 import { parse } from 'parse5'
+import { matchSelectorAll, parseElementMap, resolveOnMap, selectorOf } from './capture/element-map.js'
 import { feedbackContext, feedbackItem, formatFeedbackItem, formatFeedbackItemForAgent, untrustedJson } from './feedback.js'
-import { ANCHOR_TEXT_MAX, CommentError, createComment, getComment, resolveFile } from './store.js'
+import { ANCHOR_SELECTOR_RE, ANCHOR_TEXT_MAX, CommentError, createComment, getComment, resolveFile } from './store.js'
 import { boardViewports } from './config.js'
 
 // Who a comment, reply or status change is from when --author is not given.
@@ -143,9 +149,70 @@ export function anchorText(html, selector) {
   return text.length > ANCHOR_TEXT_MAX ? `${text.slice(0, ANCHOR_TEXT_MAX - 3).trimEnd()}...` : text
 }
 
+// ---- The element map ------------------------------------------------------------
+
+// The latest capture's element map of a page, as { file, map }, or null
+// when there is none (never captured, or captured before maps) or it does
+// not read.
+function latestElementMap(config, board, pageId, viewport) {
+  const file = resolveFile(config, board.id, 'captures', `${pageId}.${viewport}.elements.json`)
+  if (!file) return null
+  try {
+    return { file, map: parseElementMap(fs.readFileSync(file, 'utf8')) }
+  } catch {
+    return null
+  }
+}
+
+// A click in the middle of element `position`, as the board stores it:
+// { anchor, pin } with the pin in percent of the page, or null when the
+// element has no size to sit on.
+function middleOf(map, position, selector) {
+  const native = { width: map.width, height: map.height }
+  const [, , width, height] = map.elements[position].b
+  if (!width || !height || !native.width || !native.height) return null
+  const anchor = { selector, text: map.elements[position].x || '', dx: 0.5, dy: 0.5 }
+  const spot = resolveOnMap(map, anchor, native)
+  if (!spot) return null
+  const share = (value) => Math.round(Math.min(1, value) * 10000) / 10000
+  const size = { w: share(width / native.width), h: share(height / native.height) }
+  return { anchor: size.w > 0 && size.h > 0 ? { ...anchor, ...size } : anchor, pin: { x: spot.x, y: spot.y } }
+}
+
+const SELECTORS_MAX = 200
+
+// `comments selectors --page ID [--viewport NAME] [--text WORDS] [--json]`:
+// the selectors `comments add --selector` takes, each with its element's
+// text, from the latest capture's element map.
+export function listSelectors(config, board, flags, out) {
+  const pageId = typeof flags.page === 'string' ? flags.page.trim() : ''
+  const page = board.pages.find((item) => item.id === pageId)
+  if (!page) throw new Error('usage: shapewall comments selectors --page ID [--viewport NAME] [--text WORDS] [--json]')
+  const viewport = typeof flags.viewport === 'string' ? flags.viewport : page.viewports[0]
+  const found = latestElementMap(config, board, page.id, viewport)
+  if (!found) throw new Error(`No element map for "${page.id}" (${viewport}) yet. Capture it first: shapewall capture --only ${page.id}`)
+  const wanted = typeof flags.text === 'string' ? flags.text.trim().toLowerCase() : ''
+  const all = found.map.elements
+    .map((item, position) => ({ selector: selectorOf(found.map, position), text: item.x || '', sized: item.b[2] > 0 && item.b[3] > 0 }))
+    .filter((row) => row.selector && row.sized && (wanted ? row.text.toLowerCase().includes(wanted) : true))
+    .map(({ selector, text }) => ({ selector, text }))
+  const rows = all.slice(0, SELECTORS_MAX)
+  const more = all.length - rows.length
+  const lines = rows.map((row) => `${row.selector}${row.text ? `  ("${row.text}")` : ''}`)
+  if (!rows.length) lines.push(wanted ? `No element on "${page.id}" (${viewport}) has text with "${flags.text.trim()}".` : 'No elements.')
+  if (more > 0) lines.push(`... and ${more} more: narrow it with --text WORDS`)
+  print(out, flags, untrustedJson({ board: board.id, page: page.id, viewport, selectors: rows, more }), lines.join('\n'))
+  return rows
+}
+
 // ---- Commands -------------------------------------------------------------------
 
 const print = (out, flags, value, text) => out(flags.json ? JSON.stringify(value, null, 2) : text)
+
+// What a selector must look like, and where to find one.
+const selectorHelp = (pageId) =>
+  'It takes steps like #id, button[data-testid="save"], nav[aria-label="Main"] or div:nth-of-type(2), joined by " > " ' +
+  `(no classes or other CSS). List the ones on the page: shapewall comments selectors --page ${pageId} --text "words on the element"`
 
 // `comments add --page ID --body TEXT [--viewport NAME] [--selector CSS] [--author NAME]`
 export async function addComment(config, board, flags, out, err = () => {}) {
@@ -160,29 +227,41 @@ export async function addComment(config, board, flags, out, err = () => {}) {
   const viewport =
     typeof flags.viewport === 'string' ? flags.viewport : page ? page.viewports[0] : Object.keys(boardViewports(config, board))[0]
   let anchor
+  let pin = DEFAULT_PIN
   if (flags.selector !== undefined) {
     const selector = String(flags.selector).trim()
-    let text = ''
-    const live = page ? resolveFile(config, board.id, 'captures', `${page.id}.${viewport}.html`) : null
-    if (live) {
-      const found = anchorText(fs.readFileSync(live, 'utf8'), selector)
-      if (found === null)
-        err(`note: "${selector}" does not find exactly one element in the latest ${viewport} capture; saved the selector anyway`)
-      else text = found
+    if (!ANCHOR_SELECTOR_RE.test(selector))
+      throw new Error(`--selector "${selector.slice(0, 80)}" is not one Shapewall can use. ${selectorHelp(pageId)}`)
+    const mapped = page ? latestElementMap(config, board, page.id, viewport) : null
+    const hits = mapped ? matchSelectorAll(mapped.map, selector, 2) : []
+    const middle = hits.length === 1 ? middleOf(mapped.map, hits[0], selector) : null
+    if (middle) {
+      // The pin sits in the middle of the element, where the map has it.
+      anchor = middle.anchor
+      pin = middle.pin
+    } else {
+      // No map, or the map does not have exactly one such element: the
+      // selector is kept, and the pin stays near the corner until the
+      // board finds the element.
+      let text = ''
+      const live = page ? resolveFile(config, board.id, 'captures', `${page.id}.${viewport}.html`) : null
+      const found = live ? anchorText(fs.readFileSync(live, 'utf8'), selector) : ''
+      if (found === null || (mapped && hits.length !== 1)) {
+        const where = mapped
+          ? ` (its elements: ${path.relative(process.cwd(), mapped.file) || mapped.file}, or comments selectors --page ${pageId})`
+          : ''
+        err(`note: "${selector}" does not find exactly one element in the latest ${viewport} capture${where}; saved the selector anyway`)
+      }
+      if (found) text = found
+      anchor = { selector, text, dx: 0.5, dy: 0.5 }
     }
-    // The pin sits in the middle of the element.
-    anchor = { selector, text, dx: 0.5, dy: 0.5 }
   }
   let comment
   try {
-    comment = await createComment(config, board, { pageId, viewport, ...DEFAULT_PIN, body, author: authorFlag(flags), anchor })
+    comment = await createComment(config, board, { pageId, viewport, ...pin, body, author: authorFlag(flags), anchor })
   } catch (error) {
     if (error instanceof CommentError && error.code === 'invalid_anchor') {
-      throw new Error(
-        `${error.message} Use the selector a comment shows (comments --json, element.selector): steps like #id, ` +
-          'button[data-testid="save"], nav[aria-label="Main"] or div:nth-of-type(2), joined by " > ".',
-        { cause: error },
-      )
+      throw new Error(`${error.message} ${selectorHelp(pageId)}`, { cause: error })
     }
     throw error
   }

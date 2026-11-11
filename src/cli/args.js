@@ -128,6 +128,7 @@ export const COMMAND_FLAGS = {
     'since',
     'viewport',
     'selector',
+    'text',
     'json',
     'for-agent',
     'note',

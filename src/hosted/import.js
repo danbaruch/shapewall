@@ -80,13 +80,14 @@ export function cleanImportedComment(raw) {
   if (![raw.x, raw.y].every((n) => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 100)) bad('Invalid pin position.')
   if (raw.authorKind !== undefined && !['local', 'agent', 'guest'].includes(raw.authorKind)) bad('Invalid imported author kind.')
   const body = text(raw.body, COMMENT_BODY_MAX)
-  if (!body) bad('A comment needs text.')
   if (!['open', 'resolved'].includes(raw.status)) bad('Invalid comment state.')
   if (raw.agentStatus != null && !STORED_AGENT_STATUSES.includes(raw.agentStatus)) bad('Invalid agent status.')
   if (!Number.isInteger(raw.reopenCount ?? 0) || (raw.reopenCount ?? 0) < 0 || (raw.reopenCount ?? 0) > 100000) bad('Invalid reopen count.')
   if (raw.captureVersion != null && !VERSION_RE.test(raw.captureVersion)) bad('Invalid capture version.')
   if (!Array.isArray(raw.replies) || raw.replies.length > 200) bad('At most 200 replies per comment.')
   const media = { images: importImages(raw.images), drawing: importDrawing(raw.drawing, raw.captureVersion) }
+  // A drawing or an image can be the whole comment (src/comment-fields.js).
+  if (!body && !media.images.length && !media.drawing) bad('A comment needs text.')
   const cleanItem = {
     importKey: raw.importKey,
     authorKind: raw.authorKind || 'local',
@@ -113,7 +114,9 @@ export function cleanImportedComment(raw) {
     reactions: reactions(raw.reactions),
     replies: raw.replies.map((reply, i) => {
       const body = text(reply?.body, COMMENT_BODY_MAX)
-      if (!body) bad('A reply needs text.')
+      const images = importImages(reply.images)
+      const drawing = importDrawing(reply.drawing, reply.drawing?.captureVersion)
+      if (!body && !images.length && !drawing) bad('A reply needs text.')
       return withImportMedia(
         {
           id: i + 1,
@@ -126,8 +129,8 @@ export function cleanImportedComment(raw) {
           ...(reply.editedAt ? { editedAt: date(reply.editedAt) } : {}),
           importedReactions: reactions(reply.reactions),
         },
-        importImages(reply.images),
-        importDrawing(reply.drawing, reply.drawing?.captureVersion),
+        images,
+        drawing,
       )
     }),
   }

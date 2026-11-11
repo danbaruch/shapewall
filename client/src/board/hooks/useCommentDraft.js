@@ -47,14 +47,16 @@ export function useCommentDraft({
   useEffect(() => () => drawing.end('composer'), [])
 
   const saveDraft = async () => {
-    if (!draft?.body.trim() || busy || images.reading) return
+    if (!draft || busy || images.reading) return
+    const session = drawing.get()
+    const shapes = session?.owner === 'composer' && session.key === drawKey ? session.shapes : []
+    const attached = imagesPayload(images.images)
+    // A drawing or an image can be the whole comment.
+    if (!draft.body.trim() && !shapes.length && !attached.length) return
     setBusy(true)
     try {
       const author = (draft.author || '').trim()
       saveAuthor(author)
-      const session = drawing.get()
-      const shapes = session?.owner === 'composer' && session.key === drawKey ? session.shapes : []
-      const attached = imagesPayload(images.images)
       const { comment } = await api.post(commentsUrl, {
         pageId: draft.pageId,
         viewport: draft.viewport,

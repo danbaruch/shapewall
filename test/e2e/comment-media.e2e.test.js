@@ -3,8 +3,9 @@
 // (Escape closes it), a box and an arrow drawn over the page with the tools
 // (Escape leaves the tool first), the drawing over the frame while its
 // thread is open, a recapture after which it shows on "before" only, and
-// the agent's JSON with the files. On a phone: the full-sheet page to draw
-// on and 44 px targets. On a hosted board: a share link guest sees no
+// the agent's JSON with the files, and a reply that is a drawing with no
+// text, kept unsent across closing its thread. On a phone: the full-sheet
+// page to draw on and 44 px targets. On a hosted board: a share link guest sees no
 // attach button (and is refused by the server) but can draw.
 // Set SHAPEWALL_SHOTS=<dir> to keep screenshots.
 import { after, before, test } from 'node:test'
@@ -292,6 +293,71 @@ test('after a recapture the drawing shows over "before" only, with a note', asyn
     const board = setup.config.boards[0]
     const context2 = feedbackItem(feedbackContext(setup.config, board), getComment(setup.config, board.id, posted.id))
     assert.equal(context2.drawing.onPreviousCapture, true)
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})
+
+test('a reply can be a drawing alone, and an unsent reply survives closing the thread', async () => {
+  assert.ok(posted, 'the desktop test posted a comment')
+  const { context, page, errors } = await openBoard({ viewport: { width: 1440, height: 900 } }, `${boardUrl}?c=${posted.id}`)
+  try {
+    const frame = '[data-sw-frame="pricing:desktop"]'
+    const thread = `[data-sw-thread="${posted.id}"]`
+    const form = `[data-sw-reply-form="${posted.id}"]`
+    const send = `[data-sw-reply-send="${posted.id}"]`
+    await page.waitForSelector(form)
+    assert.equal(await page.isDisabled(send), true, 'nothing to send yet')
+
+    // One box over the page, no text: the reply can be sent.
+    await page.click(`${form} [data-sw-draw-tool="box"]`)
+    const bar = `[data-sw-draw-bar="reply-${posted.id}"]`
+    await page.waitForSelector(bar)
+    await page.waitForSelector(`${frame} [data-sw-draw-input="box"]`)
+    const fitted = await settle(page, frame)
+    const canvas = await page.locator('[data-sw-canvas]').boundingBox()
+    const top = Math.max(fitted.y, canvas.y)
+    const shown = Math.min(fitted.y + fitted.height, canvas.y + canvas.height - 70) - top
+    await drag(page, [fitted.x + fitted.width * 0.1, top + shown * 0.2], [fitted.x + fitted.width * 0.4, top + shown * 0.5])
+    await page.waitForSelector(`${bar} [data-sw-draw-count="1"]`)
+    await page.click(`${bar} [data-sw-draw-bar-done]`)
+    await page.waitForSelector(bar, { state: 'detached' })
+    await page.waitForSelector(`${form} [data-sw-draw-count="1"]`)
+    assert.equal(await page.isDisabled(send), false, 'a drawing is enough to send')
+
+    // Closing the thread keeps what was not sent: the text and the drawing.
+    await page.fill(`${form} [data-sw-reply-input]`, 'Half a thought')
+    await page.click(`${thread} [data-sw-thread-close]`)
+    await page.waitForSelector(thread, { state: 'detached' })
+    assert.equal(getComment(setup.config, 'demo', posted.id).replies.length, 0, 'nothing was sent')
+    await page.click(`[data-sw-comment="${posted.id}"]`)
+    await page.waitForSelector(`${form} [data-sw-draw-count="1"]`)
+    assert.equal(await page.inputValue(`${form} [data-sw-reply-input]`), 'Half a thought')
+    await page.waitForSelector(`${frame} [data-sw-drawing="draft"] path`)
+
+    // Without the text it is still a reply.
+    await page.fill(`${form} [data-sw-reply-input]`, '')
+    assert.equal(await page.isDisabled(send), false)
+    await page.click(send)
+    await page.waitForSelector(`${thread} [data-sw-reply="1"] [data-sw-message-drawing]`)
+    const [reply] = getComment(setup.config, 'demo', posted.id).replies
+    assert.equal(reply.body, '')
+    assert.deepEqual(
+      reply.drawing.shapes.map((shape) => shape.tool),
+      ['box'],
+    )
+    // Sent: the box is empty again, and stays empty after closing and reopening.
+    await page.waitForSelector(`${form} [data-sw-draw-count]`, { state: 'detached' })
+    assert.equal(await page.isDisabled(send), true)
+    await page.click(`${thread} [data-sw-thread-close]`)
+    await page.waitForSelector(thread, { state: 'detached' })
+    await page.click(`[data-sw-comment="${posted.id}"]`)
+    await page.waitForSelector(form)
+    assert.equal(await page.locator(`${form} [data-sw-draw-count]`).count(), 0)
+    assert.equal(await page.isDisabled(send), true)
+    assert.equal(await page.inputValue(`${form} [data-sw-reply-input]`), '')
+    await shot(page, 'drawing-only-reply')
     assert.deepEqual(errors, [])
   } finally {
     await context.close()

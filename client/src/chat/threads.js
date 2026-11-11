@@ -1,6 +1,8 @@
 // Naming chat threads, without the (lazy) chat panel, so the board can link
 // to them: the board thread, one per comment, and New chat conversations
 // (src/agent/threads.js on the server).
+import { commentText } from '../../../src/comment-fields.js'
+
 export const threadForComment = (id) => `comment-${id}`
 
 export const CHAT_RE = /^chat-[a-z0-9]{16}$/
@@ -79,7 +81,7 @@ export function groupThreads(threads, { now = Date.now(), timeOf = (value) => ne
 // The name a thread goes by when it has no title yet.
 export function fallbackTitle(threadId, comment = null) {
   const kind = threadKind(threadId)
-  if (kind === 'comment') return comment?.body ? String(comment.body).replace(/\s+/g, ' ').trim().slice(0, 60) : 'Comment chat'
+  if (kind === 'comment') return commentText(comment).replace(/\s+/g, ' ').trim().slice(0, 60) || 'Comment chat'
   return kind === 'board' ? 'Board chat' : 'New chat'
 }
 
@@ -95,7 +97,7 @@ export function threadMarkdown({ title, threadId, messages, comment = null, boar
   const lines = [`# ${title || fallbackTitle(threadId, comment)}`, '']
   const where = [boardTitle ? `Board: ${boardTitle}` : null, comment ? `About comment #${comment.id}` : null].filter(Boolean)
   lines.push(`_Exported from Shapewall on ${exportedAt.toISOString().slice(0, 10)}.${where.length ? ` ${where.join('. ')}.` : ''}_`, '')
-  if (comment?.body) lines.push(quoteLines(comment.body), '')
+  if (commentText(comment)) lines.push(quoteLines(commentText(comment)), '')
   for (const message of messages || []) {
     const at = message.createdAt ? ` (${String(message.createdAt).slice(0, 16).replace('T', ' ')} UTC)` : ''
     if (message.role === 'user') {

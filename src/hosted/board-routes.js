@@ -16,6 +16,7 @@ import { hostedBoardView, sendPng } from './board-context.js'
 import { guestView, rowToComment } from './comments.js'
 import { transaction } from './db.js'
 import { publicView } from './guest-view.js'
+import { cleanCommentBody, hasCommentMedia } from '../comment-fields.js'
 import { HttpError, fail, guestLabel } from './http.js'
 import { checkStorageQuota, cleanImages, commentListsFile, readCommentFile, sendImage } from './comment-files.js'
 import { boardPermissions, canDeleteComment, canEditComment, guestPermissions } from './permissions.js'
@@ -460,7 +461,7 @@ export function mountBoardRoutes(
       withBoard(async (req, res, ctx) => {
         // The comment and the text first, then the images.
         ctx.comments.get(req.params.cid)
-        if (typeof req.body?.body !== 'string' || !req.body.body.trim()) throw new HttpError(400, 'empty_comment', 'Write something first.')
+        cleanCommentBody(req.body?.body, { media: hasCommentMedia(req.body) })
         const media = await mediaOf(req)
         const result = transaction(db, () => {
           checkStorageQuota(req.t, imageBytes(media), quotaOf(req))

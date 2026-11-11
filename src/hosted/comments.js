@@ -8,6 +8,7 @@ import { commentMentions } from '../mentions.js'
 import { publicReactions, toggleReaction } from '../reactions.js'
 import { GUEST_SHARE } from './guest-view.js'
 import {
+  BRANCH_READY,
   STORED_AGENT_STATUSES,
   AUTHOR_MAX,
   COMMENT_BODY_MAX,
@@ -17,6 +18,7 @@ import {
   validateCommentInput,
   withMedia,
 } from '../store.js'
+import { agentStatusOnResolve, cleanCommentBody, hasCommentMedia } from '../comment-fields.js'
 import { removeCommentFiles, storeImages } from './comment-files.js'
 
 export { GUEST_SHARE, guestView } from './guest-view.js'
@@ -27,14 +29,6 @@ export const REPLY_AUTHOR = Symbol('replyAuthor')
 
 const COMMENTS_MAX = 5000
 const REPLIES_MAX = 200
-
-function cleanBody(value) {
-  const body = typeof value === 'string' ? value.replace(/\r\n/g, '\n').trim() : ''
-  if (!body) throw new CommentError(400, 'empty_comment', 'Write something first.')
-  if (body.length > COMMENT_BODY_MAX)
-    throw new CommentError(400, 'comment_too_long', `Comments are limited to ${COMMENT_BODY_MAX} characters.`)
-  return body
-}
 
 export function cleanAuthor(value, fallback = 'agent') {
   const author = typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, AUTHOR_MAX) : ''
@@ -176,7 +170,8 @@ export function createCommentStore(t, projectId, boardId) {
   // images (cleaned, src/hosted/comment-files.js cleanImages), drawing
   // (validateDrawing) }; inside the caller's transaction.
   function create(config, board, input, author, now = new Date(), media = null) {
-    const clean = validateCommentInput(config, board, input)
+    // Empty text goes by the media that was cleaned, never by what the request claimed.
+    const clean = validateCommentInput(config, board, { ...input, images: media?.images || [], drawing: media?.drawing || null })
     const total = t.get(`SELECT COUNT(*) AS n FROM comments WHERE ${SCOPE}`, key).n
     if (total >= COMMENTS_MAX) throw new CommentError(409, 'too_many_comments', `A board holds at most ${COMMENTS_MAX} comments.`)
     const counter = t.get('SELECT next_comment FROM boards WHERE workspace_id = :ws AND project_id = :project AND board_id = :board', key)
@@ -259,7 +254,6 @@ export function createCommentStore(t, projectId, boardId) {
   // Same semantics as store.updateComment.
   function update(number, changes, now = new Date()) {
     if (!changes || typeof changes !== 'object') throw new CommentError(400, 'invalid_change', 'Nothing to change.')
-    const body = changes.body !== undefined ? cleanBody(changes.body) : undefined
     if (changes.status !== undefined && !['open', 'resolved'].includes(changes.status)) {
       throw new CommentError(400, 'invalid_status', 'Status must be open or resolved.')
     }
@@ -269,6 +263,9 @@ export function createCommentStore(t, projectId, boardId) {
     const agentStatus = changes.agentStatus === undefined ? undefined : cleanAgentStatus(changes.agentStatus)
     const fixRef = changes.fixRef === undefined ? undefined : cleanFixRef(changes.fixRef)
     const row = { ...get(number) }
+    const before = rowToComment(row)
+    // The text may be emptied only on a comment that has an image or a drawing.
+    const body = changes.body !== undefined ? cleanCommentBody(changes.body, { media: hasCommentMedia(before) }) : undefined
     if (body !== undefined && body !== row.body) {
       t.run(
         `UPDATE comments SET dispatch_hash = NULL, dispatch_by = NULL, dispatch_at = NULL, run_approved = 0 WHERE ${SCOPE} AND number = :number`,
@@ -286,6 +283,9 @@ export function createCommentStore(t, projectId, boardId) {
         row.reopen_count = (row.reopen_count || 0) + 1
         row.reopened_at = now.toISOString()
         if (agentStatus === undefined) setAgent(row, null, now)
+      } else if (agentStatus === undefined && row.agent_status !== BRANCH_READY) {
+        // Resolved: no agent is left "working" on it (store.updateComment).
+        setAgent(row, agentStatusOnResolve(row.agent_status), now)
       }
     }
     if (agentStatus !== undefined) setAgent(row, agentStatus, now)
@@ -300,7 +300,7 @@ export function createCommentStore(t, projectId, boardId) {
   // create, plus the board's config (a reply's drawing is on the capture
   // that is current when it is posted).
   function reply(number, input, author, now = new Date(), media = null) {
-    const body = cleanBody(input?.body)
+    const body = cleanCommentBody(input?.body, { media: Boolean(media?.images?.length || media?.drawing) })
     const row = { ...get(number) }
     const replies = JSON.parse(row.replies || '[]')
     if (replies.length >= REPLIES_MAX) throw new CommentError(409, 'too_many_replies', `A comment holds at most ${REPLIES_MAX} replies.`)

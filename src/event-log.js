@@ -18,6 +18,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { withFileLock } from './lock.js'
+import { commentText } from './comment-fields.js'
 
 export const LOG_FILE = 'events.jsonl'
 export const LOG_ROTATED = 'events.1.jsonl'
@@ -36,7 +37,9 @@ export function commentSummary(comment) {
     pageId: comment.pageId,
     viewport: comment.viewport,
     author: comment.author || null,
-    body: comment.body,
+    // No text: what it has instead ("(drawing)", "(2 images)"), since a
+    // log line carries no images.
+    body: commentText(comment),
     status: comment.status,
     agentStatus: comment.agentStatus ?? null,
     resolution: comment.resolution ?? null,
@@ -62,7 +65,7 @@ export function eventRecord(event) {
     comment: commentSummary(event.comment),
   }
   if (event.reply)
-    record.reply = { id: event.reply.id, author: event.reply.author, body: event.reply.body, createdAt: event.reply.createdAt }
+    record.reply = { id: event.reply.id, author: event.reply.author, body: commentText(event.reply), createdAt: event.reply.createdAt }
   if (event.handle) record.handle = event.handle
   if (event.previous) record.previous = event.previous
   if (event.type === 'comment.status_changed') record.agentStatus = event.agentStatus ?? null

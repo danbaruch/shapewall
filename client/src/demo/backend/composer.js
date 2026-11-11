@@ -3,6 +3,7 @@
 // model and effort pickers. Fictional choices; nothing leaves the browser.
 
 import { fail } from './util.js'
+import { commentText } from '../../../../src/comment-fields.js'
 
 const TEXT_TYPES = {
   txt: 'text/plain',
@@ -46,7 +47,7 @@ export function demoMentions(raw, { comments, pages, journeys }) {
     } else if (item?.kind === 'comment' || item?.kind === 'element') {
       const comment = comments.find((value) => value.id === Number(item.id))
       if (comment && (item.kind === 'comment' || comment.anchor)) {
-        const text = item.kind === 'element' ? comment.anchor?.text || comment.anchor?.selector : comment.body
+        const text = item.kind === 'element' ? comment.anchor?.text || comment.anchor?.selector : commentText(comment)
         entry = { kind: item.kind, id: comment.id, label: clip(`#${comment.id} ${text}`, 80) }
       }
     } else if (item?.kind === 'journey') {

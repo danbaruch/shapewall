@@ -176,6 +176,15 @@ test('startSite runs serve without a shell, waits for its URL and stops the whol
   })
   const page = await fetch(`http://127.0.0.1:${port}/pricing`).then((res) => res.text())
   assert.match(page, /\$8 a month/)
+  // A second checkout on a URL that already answers would capture the first one's site.
+  await assert.rejects(
+    startSite(start, {
+      cwd: path.join(ROOT, 'examples', 'ci'),
+      url: `http://127.0.0.1:${port}/`,
+      env: { ...process.env, PORT: String(port) },
+    }),
+    /already answers before ci\.start\.serve ran/,
+  )
   await site.stop()
   await assert.rejects(fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(2000) }))
   assert.ok(logs.some((line) => line.includes('ci.start.serve: node server.js')))

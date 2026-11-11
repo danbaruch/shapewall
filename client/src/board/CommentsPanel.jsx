@@ -41,6 +41,7 @@ import { COMMENT_STATES } from './flow'
 import { AgentStatusChip, AuthorAvatar, ReopenedChip, commentAuthor } from './commentParts'
 import { useCommentAgentFocus } from '../chat/agentFocus'
 import { BatchProgress, SelectBox, batchRunning, batchable } from './BatchFixes'
+import { commentText } from '../../../src/comment-fields.js'
 
 // "No filter" in the state and mention selects (Radix items cannot be "").
 const ANY = '__any'
@@ -143,7 +144,7 @@ function Row({ comment, title, selected, unread, touch, onFocus, onHover, pick =
             </span>
           </span>
           <MentionText
-            text={comment.body}
+            text={commentText(comment)}
             plain={Boolean(comment.authorGuest)}
             className="mt-0.5 line-clamp-2 block text-ui break-words text-fg"
           />

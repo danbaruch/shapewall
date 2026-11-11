@@ -52,6 +52,7 @@ import {
   readTextFile,
   slashInput,
 } from './composerModel.js'
+import { commentText } from '../../../src/comment-fields.js'
 
 const PAGE_ITEMS_MAX = 40
 
@@ -547,7 +548,7 @@ export default function ChatPanel({
   }
   const threadTitle = useMemo(() => {
     if (selectedThread?.title) return selectedThread.title
-    if (commentId) return comment ? excerpt(comment.body, 48) : 'Comment chat'
+    if (commentId) return comment ? excerpt(commentText(comment), 48) : 'Comment chat'
     return fallbackTitle(threadId)
   }, [comment, commentId, selectedThread, threadId])
   const removedThread = (id) => {

@@ -63,6 +63,8 @@ test('event log: the store appends every change with its actor, under the lock, 
       ['comment.replied', 'agent'],
       ['comment.status_changed', 'shapewall'],
       ['comment.resolved', 'Robin'],
+      // Resolved while an agent was working: its status becomes done.
+      ['comment.status_changed', 'Robin'],
       ['comment.reopened', 'Sam'],
       ['comment.status_changed', 'Sam'],
     ],

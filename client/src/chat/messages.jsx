@@ -59,6 +59,7 @@ export const CONTINUE_PROMPT = 'Continue from where you stopped.'
 
 // The same text the server sends for each fix of a batch (src/agent/fix-prompt.js).
 import { FIX_PROMPT } from '../../../src/agent/fix-prompt.js'
+import { commentText } from '../../../src/comment-fields.js'
 export { FIX_PROMPT }
 
 // `onEdit(message, text)`: edit and rerun (null: not offered); `version`: this
@@ -622,7 +623,7 @@ export function MessageList({
               <span className="min-w-0">
                 <span className="sr-only">About comment #{comment.id}: </span>
                 <span className="block font-medium text-fg">{comment.author || 'Comment'}</span>
-                <span className="line-clamp-3 text-fg/90">{excerpt(comment.body, 220)}</span>
+                <span className="line-clamp-3 text-fg/90">{excerpt(commentText(comment), 220)}</span>
               </span>
             </div>
           ) : null}

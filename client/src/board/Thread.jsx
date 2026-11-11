@@ -38,6 +38,8 @@ import BeforeAfter from './BeforeAfter'
 import { AttachButton, ComposerImages, DrawSheet, DrawTools, MessageImages, imageDropProps } from './CommentMedia'
 import { imagesPayload, useImageDraft } from './commentImages'
 import { drawing, drawingPayload, useDrawing } from './drawing'
+import { replyDraftKey, replyDrafts } from './replyDrafts'
+import { hasCommentMedia } from '../../../src/comment-fields.js'
 import { COMMENT_MAX, sendsOnEnter } from './commentInput'
 import { Reactions } from './Reactions'
 import { viewportIcon } from './viewports'
@@ -100,10 +102,12 @@ function Message({ author, at, editedAt, children, reactions, canReact, me, onRe
 
 function EditBox({ comment, busy, onSave, onCancel, touch, people }) {
   const [body, setBody] = useState(comment.body)
+  // A comment with an image or a drawing may lose all its text.
+  const wordless = hasCommentMedia(comment)
   const submit = async (event) => {
     event?.preventDefault()
     const text = body.trim()
-    if (!text || text === comment.body) return onCancel()
+    if ((!text && !wordless) || text === comment.body) return onCancel()
     if (await onSave(comment, text)) onCancel()
   }
   return (
@@ -134,7 +138,7 @@ function EditBox({ comment, busy, onSave, onCancel, touch, people }) {
           size={touch ? 'touch' : 'xs'}
           variant="default"
           type="submit"
-          disabled={busy || !body.trim()}
+          disabled={busy || (!body.trim() && !wordless)}
           data-sw-edit-save={comment.id}
         >
           Save
@@ -146,46 +150,70 @@ function EditBox({ comment, busy, onSave, onCancel, touch, people }) {
 
 // The reply box at the bottom of a thread. `askName`: a local board with no
 // name saved in this browser asks once (the composer's saved name), so the
-// reply is not signed "anonymous".
+// reply is not signed "anonymous". What is written and not sent (text,
+// drawing, images) is kept while the page is open (replyDrafts.js), so
+// closing the thread does not lose it.
 function ReplyBox({ comment, busy, onReply, touch, people, autoFocus, askName = false, onSaveName = null, media = null }) {
-  const [body, setBody] = useState('')
+  const draftKey = replyDraftKey(media?.boardId, comment.id)
+  const [body, setBodyState] = useState(() => replyDrafts.get(draftKey).body)
+  const setBody = (value) => {
+    setBodyState(value)
+    replyDrafts.save(draftKey, { body: value })
+  }
   const [asking, setAsking] = useState(() => askName && !savedAuthor())
   const [name, setName] = useState('')
   const [sheet, setSheet] = useState(false)
   const canAttach = Boolean(media?.attach)
   const canDraw = Boolean(media?.draw)
-  const images = useImageDraft({ enabled: canAttach })
+  const images = useImageDraft({ enabled: canAttach, initial: replyDrafts.get(draftKey).images })
+  const kept = images.images
+  useEffect(() => {
+    replyDrafts.save(draftKey, { images: kept.filter((image) => image.state === 'ready') })
+  }, [draftKey, kept])
   const owner = `reply-${comment.id}`
   const drawKey = `${comment.pageId}|${comment.viewport}`
   const shapes = useDrawing((value) => (value?.owner === owner ? value.shapes.length : 0))
-  // The reply's drawing lives as long as its box.
+  // The reply's drawing is on the page as long as its box is open; its
+  // shapes are kept with the draft and picked up again with it.
   useEffect(() => {
     if (!canDraw) return undefined
-    drawing.start(drawKey, owner)
-    return () => drawing.end(owner)
-  }, [canDraw, drawKey, owner])
+    const keep = () => {
+      const session = drawing.get()
+      if (session?.owner === owner && session.key === drawKey) replyDrafts.save(draftKey, { shapes: session.shapes, drawKey })
+    }
+    const saved = replyDrafts.get(draftKey)
+    drawing.start(drawKey, owner, saved.drawKey === drawKey ? saved.shapes : [])
+    keep()
+    const stop = drawing.subscribe(keep)
+    return () => {
+      stop()
+      drawing.end(owner)
+    }
+  }, [canDraw, drawKey, owner, draftKey])
   const page = canDraw && touch ? media.pageImage?.(comment.pageId, comment.viewport) : null
   const submit = async (event) => {
     event?.preventDefault()
     const text = body.trim()
-    if (!text || busy || images.reading) return
+    const session = drawing.get()
+    const drawn = session?.owner === owner ? session.shapes : []
+    const attached = imagesPayload(images.images)
+    // A drawing or an image can be the whole reply.
+    if ((!text && !drawn.length && !attached.length) || busy || images.reading) return
     const signed = asking ? name.trim() : ''
     if (signed) {
       saveAuthor(signed)
       onSaveName?.(signed)
     }
-    const session = drawing.get()
-    const drawn = session?.owner === owner ? session.shapes : []
-    const attached = imagesPayload(images.images)
     const extra = {
       ...(attached.length ? { images: attached } : {}),
       ...(drawn.length ? { drawing: drawingPayload(drawn) } : {}),
       onImageError: images.setError,
     }
     if (await onReply(comment, text, extra)) {
-      setBody('')
+      setBodyState('')
       images.clear()
       drawing.set({ shapes: [], tool: null })
+      replyDrafts.clear(draftKey)
       if (signed) setAsking(false)
     }
   }
@@ -238,7 +266,7 @@ function ReplyBox({ comment, busy, onReply, touch, people, autoFocus, askName = 
         variant="default"
         size={touch ? 'icon' : 'icon-sm'}
         className="rounded-full"
-        disabled={busy || images.reading || !body.trim()}
+        disabled={busy || images.reading || (!body.trim() && !shapes && !images.images.length)}
         label={busy && images.images.length ? 'Uploading the reply' : 'Send reply'}
         data-sw-reply-send={comment.id}
       >
@@ -559,13 +587,13 @@ export function ThreadView({
                 touch={touch}
                 people={people}
               />
-            ) : (
+            ) : comment.body ? (
               <MentionText
                 text={comment.body}
                 plain={Boolean(comment.authorGuest)}
                 className="block text-ui break-words whitespace-pre-wrap text-fg"
               />
-            )}
+            ) : null}
             <MessageImages boardId={media?.boardId} images={comment.images} touch={touch} label={`Comment ${comment.id}`} />
             <DrawingNote item={comment} currentVersion={currentVersion} onShow={showBefore} />
             {comment.anchor ? (
@@ -615,11 +643,13 @@ export function ThreadView({
                     touch={touch}
                     data-sw-reply={reply.id}
                   >
-                    <MentionText
-                      text={reply.body}
-                      plain={Boolean(reply.guest)}
-                      className="block text-ui break-words whitespace-pre-wrap text-fg"
-                    />
+                    {reply.body ? (
+                      <MentionText
+                        text={reply.body}
+                        plain={Boolean(reply.guest)}
+                        className="block text-ui break-words whitespace-pre-wrap text-fg"
+                      />
+                    ) : null}
                     <MessageImages boardId={media?.boardId} images={reply.images} touch={touch} label={`Reply ${reply.id}`} />
                     <DrawingNote item={reply} currentVersion={currentVersion} onShow={showBefore} />
                   </Message>

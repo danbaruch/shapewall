@@ -6,6 +6,7 @@ import fs from 'node:fs'
 import { feedbackContext, feedbackItem } from '../feedback.js'
 import { addReply, captureFiles, commentCounts, getComment, listComments, setAgentStatus, updateComment } from '../store.js'
 import { quoteData } from './context.js'
+import { commentText } from '../comment-fields.js'
 
 const LIST_MAX = 100
 
@@ -112,7 +113,7 @@ export const BOARD_TOOLS = [
           pageId: comment.pageId,
           viewport: comment.viewport,
           status: comment.status,
-          body: comment.body,
+          body: commentText(comment),
           author: comment.author || null,
           element: comment.anchor?.text || null,
           agentStatus: comment.agentStatus || null,

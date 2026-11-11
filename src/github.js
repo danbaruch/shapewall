@@ -18,6 +18,7 @@ import { GITHUB_REPO_RE, ID_RE } from './config.js'
 import { feedbackContext, feedbackItem, fileKind } from './feedback.js'
 import { aroundRect } from './png.js'
 import { DEFAULT_BOARD_URL, runningBoardUrl } from './serve-state.js'
+import { commentText } from './comment-fields.js'
 import { CommentError, getComment, listComments, readJson, recordGithubPull, setGithubIssue, writeJsonAtomic } from './store.js'
 import { absoluteProgram } from './which.js'
 
@@ -213,12 +214,13 @@ function screenshotLink(settings, boardId, item) {
 // The issue made from one comment (the feedback item shape).
 export function issueContent(settings, boardId, item) {
   const where = item.page ? item.page.title : `Variant: ${item.variant?.title || 'removed'}`
-  const first = item.body.split('\n')[0].replace(/\s+/g, ' ').trim()
+  const text = commentText({ body: item.body, images: item.files?.images, drawing: item.drawing })
+  const first = text.split('\n')[0].replace(/\s+/g, ' ').trim()
   const title = `${where}: ${first.length > 90 ? `${first.slice(0, 89)}...` : first}`.slice(0, 200)
   const crop = aroundRect(item.position, item.viewport)
   const shot = screenshotLink(settings, boardId, item)
   const lines = [
-    ...item.body.split('\n').map((line) => `> ${quiet(line)}`),
+    ...text.split('\n').map((line) => `> ${quiet(line)}`),
     '',
     `-- ${quiet(item.author)}, on Shapewall comment #${item.id}`,
     '',

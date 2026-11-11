@@ -6,6 +6,7 @@ import { useImageDiff } from '../lib/imageDiff'
 import { CompareSlider } from './BeforeAfter'
 import { pageHistory } from './flow'
 import { scrollBehavior } from '../lib/motion'
+import { commentText } from '../../../src/comment-fields.js'
 
 function stamp(at) {
   if (!at) return 'Unknown time'
@@ -382,7 +383,7 @@ export default function HistoryDialog({ open, onClose, page, viewport, data, com
                         <CommentDot className={comment.status === 'resolved' ? 'bg-ok text-ok-fg' : 'bg-accent text-accent-fg'}>
                           {comment.id}
                         </CommentDot>
-                        <span className="truncate">{comment.body}</span>
+                        <span className="truncate">{commentText(comment)}</span>
                       </button>
                     </li>
                   ))}

@@ -53,9 +53,10 @@ test('agent status: set, compare-and-set claims, cleared on reopen', async () =>
   assert.equal((await setAgentStatus(config, board.id, id, 'working')).comment.agentStatus, 'working')
   await assert.rejects(setAgentStatus(config, board.id, id, 'finished'), /queued, working, done, needs-human/)
   await updateComment(config, board.id, id, { status: 'resolved', resolution: 'Logo 2x' })
-  assert.equal(getComment(config, board.id, id).agentStatus, 'working')
+  // Resolved: nobody is working on it any more.
+  assert.equal(getComment(config, board.id, id).agentStatus, 'done')
   // Resolved comments cannot be claimed.
-  assert.equal((await setAgentStatus(config, board.id, id, 'queued', { onlyFrom: [null, 'working'] })).changed, false)
+  assert.equal((await setAgentStatus(config, board.id, id, 'queued', { onlyFrom: [null, 'working', 'done'] })).changed, false)
   const reopened = await updateComment(config, board.id, id, { status: 'open' })
   assert.equal(reopened.agentStatus, null)
   assert.equal(reopened.agentStatusAt, null)

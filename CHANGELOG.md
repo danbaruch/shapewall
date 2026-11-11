@@ -3,6 +3,35 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## 0.3.2 - 2026-11-11
+
+- A comment or a reply can be a drawing or images with no text. Before, Post and Send stayed off until you typed something, and
+  closing the thread threw the drawing away. A comment with no text, no image and no drawing is still refused. Where a line of text
+  is needed (the comments list, notifications, `shapewall comments`, what an agent reads) such a comment shows as `(drawing)`,
+  `(image)` or `(2 images)`; in `--json` its `body` is `""` and the `drawing` and `files` fields say what it has. The same on the
+  hosted server and in the demo.
+- A reply you started and did not send (its text, drawing and images) is still there when you close the thread and open it again. It
+  is kept in the page only: a reload starts clean, and sending or emptying the reply clears it.
+- Resolving a comment ends its agent status, however it is resolved (the board, `shapewall comments resolve`, the API, MCP): `queued`
+  and `working` become `done`, and `needs-human` is cleared. Before, `comments resolve` left a comment showing
+  `[resolved] [agent: working]`. Resolving such a comment now sends an agent status event after the resolved one. Reopening clears the
+  status, as before.
+- `shapewall comments add --selector` puts the pin in the middle of the element when the selector finds exactly one element in the
+  latest capture, as a click there on the board would. Before, the pin always sat near the top-left corner. Without `--selector`, or
+  when the selector finds no element or several, the pin stays near the corner and a note says so.
+- New `shapewall comments selectors --page ID [--viewport NAME] [--text WORDS]` lists the selectors `--selector` takes, each with its
+  element's text, from the latest capture. The error for a selector in the wrong form (a class, say) now names this command.
+- Fix pressed right after Connect no longer comes back as "A connection test is running": a message sent while the connection
+  test runs waits for it (up to 30 seconds) and then goes out.
+- `shapewall init` names the board after what most page titles share ("Pricing -- Acme", "Blog -- Acme": "Acme"), and takes that
+  name off each page's title. Before, the board got the home page's whole title, tagline included, and titles joined with ` -- ` kept
+  the site name.
+- `shapewall ci capture --allow-start` stops with a clear message when the site's URL already answers before `ci.start.serve` runs.
+  Before, it captured whatever was serving that URL in place of the checkout, so a pull request could read "no visual changes" when
+  it had some.
+- `npx shapewall doctor --install-browser` no longer shows Playwright's boxed warning about installing your project's dependencies
+  first. It did not apply and read as a failure.
+
 ## 0.3.1 - 2026-11-10
 
 - Starter agent: the push of the agent's branch no longer follows settings in the repository's Git config that would run another

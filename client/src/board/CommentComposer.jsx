@@ -127,7 +127,7 @@ export function CommentComposer({ draft, onChange, onSubmit, onCancel, busy, peo
           size={touch ? 'touch' : 'xs'}
           variant="default"
           type="submit"
-          disabled={busy || reading || !body.trim()}
+          disabled={busy || reading || (!body.trim() && !shapes && !images?.images.length)}
           data-sw-save-comment="true"
         >
           {busy ? (images?.images.length ? 'Uploading...' : 'Posting...') : 'Post'}
