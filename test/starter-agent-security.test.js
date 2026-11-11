@@ -636,6 +636,31 @@ test('a commit reads at most its byte budget and calls out symlinks that leave t
   assert.match(reply, /symlinks that point outside the repository: src\/env\.txt, src\/up/)
 })
 
+test('the push runs no program the repository config names: receivepack, ext:: transport, signing', async () => {
+  const { dir, tree } = await checkout('sec-push-config')
+  const bare = fs.realpathSync(tempDir('sec-push-config-remote'))
+  const marker = path.join(fs.realpathSync(tempDir('sec-push-marker')), 'ran')
+  const script = path.join(path.dirname(marker), 'run.sh')
+  fs.writeFileSync(script, `#!/bin/sh\ntouch "${marker}"\nexec git-receive-pack "$@"\n`, { mode: 0o755 })
+  gitIn(bare, 'init', '-q', '--bare')
+  gitIn(dir, 'remote', 'add', 'origin', bare)
+  gitIn(dir, 'config', 'remote.origin.receivepack', script)
+  gitIn(dir, 'config', 'push.gpgSign', 'true')
+  gitIn(dir, 'config', 'gpg.program', script)
+  fs.writeFileSync(path.join(tree.dir, 'src', 'hero.html'), '<h1>Pushed safely</h1>\n')
+  await commitWorktree({ tree, message: 'push\n' })
+  await pushBranch({ tree, remote: 'origin' })
+  assert.equal(fs.existsSync(marker), false, 'neither the configured receive program nor the gpg program ran')
+  assert.deepEqual(gitIn(bare, 'for-each-ref', '--format=%(refname)').trim().split('\n'), [`refs/heads/${tree.branch}`])
+
+  // A remote whose URL is a command, with that transport allowed in the config.
+  gitIn(dir, 'remote', 'add', 'evil', `ext::sh -c touch% ${marker}`)
+  gitIn(dir, 'config', 'protocol.ext.allow', 'always')
+  await assert.rejects(pushBranch({ tree, remote: 'evil' }))
+  assert.equal(fs.existsSync(marker), false, 'the ext:: transport did not run')
+  await assert.rejects(pushBranch({ tree, remote: '--receive-pack=' + script }), /not a remote name/)
+})
+
 test('the push sends the branch only: no tags from push.followTags', async () => {
   const { dir, tree } = await checkout('sec-push')
   const bare = fs.realpathSync(tempDir('sec-push-remote'))

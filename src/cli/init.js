@@ -163,14 +163,17 @@ export async function initCi(flags, out, { fetch }) {
   const shown = path.relative(process.cwd(), file) || file
   if (fs.existsSync(file) && !flags.force) throw new Error(`${shown} already exists (use --ci --force to replace it)`)
   fs.mkdirSync(path.dirname(file), { recursive: true })
-  fs.writeFileSync(file, workflowYaml())
-  out(`Wrote ${shown}: on every pull request it captures the pages before and after, and keeps one comment up to date.`)
-  let hasStart = false
+  let ci = null
   try {
-    hasStart = Boolean(JSON.parse(fs.readFileSync(configFile, 'utf8'))?.ci?.start)
+    ci = JSON.parse(fs.readFileSync(configFile, 'utf8'))?.ci
   } catch {
-    hasStart = false
+    ci = null
   }
+  const hasStart = Boolean(ci?.start)
+  const imagesBranch = ci?.images === 'branch'
+  fs.writeFileSync(file, workflowYaml({ imagesBranch }))
+  out(`Wrote ${shown}: on every pull request it captures the pages before and after, and keeps one comment up to date.`)
+  if (imagesBranch) out('The config has "images": "branch", so the comment job has contents: write to push the images branch.')
   if (!hasStart)
     out(
       'Next: either add "ci": { "start": { "install": [...], "build": [...], "serve": [...], "url": "http://127.0.0.1:PORT" } } to the config (build and serve mode), or set SHAPEWALL_PREVIEW_URL in the workflow (preview URL mode). Then commit the workflow.',

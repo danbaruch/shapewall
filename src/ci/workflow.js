@@ -8,7 +8,9 @@ export const WORKFLOW_FILE = '.github/workflows/shapewall.yml'
 
 const PACKAGE = JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8'))
 
-export function workflowYaml({ version = PACKAGE.version, playwright = PACKAGE.dependencies.playwright } = {}) {
+// `imagesBranch`: the config has "ci": { "images": "branch" }, so the comment
+// job may push the images branch (contents: write).
+export function workflowYaml({ version = PACKAGE.version, playwright = PACKAGE.dependencies.playwright, imagesBranch = false } = {}) {
   return `# Shapewall: capture on every pull request.
 #
 # On each pull request (and each push to it) this job captures the pages in
@@ -198,10 +200,19 @@ jobs:
     if: always() && needs.shapewall.outputs.enabled == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # For "ci.images": "branch" (public repositories only) also set contents: write.
+${
+  imagesBranch
+    ? `    # contents: write is for "ci.images": "branch" (public repositories only): this
+    # job pushes the images to the shapewall-ci branch. Without that
+    # setting, contents: read is enough.
+    permissions:
+      contents: write
+      pull-requests: write`
+    : `    # For "ci.images": "branch" (public repositories only) also set contents: write.
     permissions:
       contents: read
-      pull-requests: write
+      pull-requests: write`
+}
     env:
       SHAPEWALL: shapewall@${version}
     steps:
