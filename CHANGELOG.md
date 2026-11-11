@@ -29,6 +29,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - `shapewall ci capture --allow-start` stops with a clear message when the site's URL already answers before `ci.start.serve` runs.
   Before, it captured whatever was serving that URL in place of the checkout, so a pull request could read "no visual changes" when
   it had some.
+- `shapewall capture --env NAME` gives a login script that environment's `baseUrl`. Before, the script always got the first
+  environment's, so a script that signs in to staging or production never saw their address. Page checks already did this.
 - `npx shapewall doctor --install-browser` no longer shows Playwright's boxed warning about installing your project's dependencies
   first. It did not apply and read as a failure.
 
