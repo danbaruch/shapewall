@@ -621,18 +621,46 @@ export function sweepWorkRoot(root, { now = Date.now(), isAlive = alive, keep = 
   return removed
 }
 
+// What a push may travel over: https, http, ssh and a local path. Everything
+// else is off, so a remote URL (or a url.*.insteadOf rewrite) in the
+// repository's config cannot pick a transport that runs a program
+// ("ext::sh -c ...", or any other git-remote-<name> helper). This is the
+// environment variable, not `-c protocol.allow=never`: a protocol.<name>.allow
+// in the repository's config would win over that, and never over this.
+const PUSH_PROTOCOLS = 'https:http:ssh:file'
+
 // Pushes the agent's branch, and only it, to the same name on the remote.
+//
+// The push uses the person's own credentials on purpose (their credential
+// helper, their ssh setup): that is how it reaches their remote at all. What
+// it does not take from the repository's config is anything that would run a
+// different program or send something else: the transport is limited (above),
+// the receiving program is git's own whatever remote.<name>.receivepack says,
+// and the push is not signed, so no gpg program runs.
 export async function pushBranch({ tree, remote }) {
   const { branch } = tree
   const last = branch.split('/').pop()
   if (PROTECTED_BRANCHES.has(branch) || PROTECTED_BRANCHES.has(last)) throw new Error(`refusing to push "${branch}"`)
+  // A remote name starting with "-" would be read as an option.
+  if (typeof remote !== 'string' || !remote || remote.startsWith('-')) throw new Error('refusing to push: not a remote name')
   // No tags (push.followTags) and no submodule pushes (push.recurseSubmodules)
   // from the person's config: the branch is all that goes.
   const refspec = `refs/heads/${branch}:refs/heads/${branch}`
-  await git(['--git-dir', tree.gitDir, 'push', '--no-verify', '--no-follow-tags', '--recurse-submodules=no', remote, refspec], {
-    cwd: tree.repo,
-    timeoutMs: 180000,
-  })
+  await git(
+    [
+      '--git-dir',
+      tree.gitDir,
+      'push',
+      '--no-verify',
+      '--no-follow-tags',
+      '--no-signed',
+      '--recurse-submodules=no',
+      '--receive-pack=git-receive-pack',
+      remote,
+      refspec,
+    ],
+    { cwd: tree.repo, timeoutMs: 180000, extraEnv: { GIT_ALLOW_PROTOCOL: PUSH_PROTOCOLS } },
+  )
 }
 
 export { alive as processAlive }

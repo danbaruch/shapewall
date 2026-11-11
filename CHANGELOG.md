@@ -3,6 +3,15 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## 0.3.1 - 2026-11-10
+
+- Starter agent: the push of the agent's branch no longer follows settings in the repository's Git config that would run another
+  program. The transport is limited to https, http, ssh and local paths (no `ext::` or other remote helpers, whatever
+  `protocol.*.allow` says), `remote.<name>.receivepack` is ignored, and the push is never signed. Your credential helper and ssh setup
+  are still used: that is how the push reaches your remote.
+- `shapewall init --ci` gives the comment job `contents: write` when the config has `"ci": { "images": "branch" }`, so the images
+  branch can be pushed. Before, the generated workflow always had `contents: read` and the comment fell back to links.
+
 ## 0.3.0 - 2026-11-10
 
 - Agent works on a branch: an option, off by default, that runs an ACP agent's fixes and chat turns in a copy of your checkout and

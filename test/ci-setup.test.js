@@ -208,6 +208,30 @@ test('init --ci writes the workflow once (YAML, least privilege, pull_request on
   assert.equal(fs.readFileSync(config, 'utf8'), before, '--force replaces only the workflow')
 })
 
+test('init --ci with "images": "branch" gives the comment job contents: write, and nothing else changes', async () => {
+  const dir = tempDir('ci-init-branch')
+  const config = path.join(dir, 'shapewall.config.json')
+  fs.writeFileSync(config, JSON.stringify({ ...SAMPLE, ci: { ...(SAMPLE.ci || {}), images: 'branch' } }))
+  const out = []
+  await main(['init', '--ci', '--config', config], { out: (line) => out.push(line) })
+  const yaml = fs.readFileSync(path.join(dir, WORKFLOW_FILE), 'utf8')
+  assert.equal(yaml, workflowYaml({ imagesBranch: true }))
+  assert.match(out.join('\n'), /contents: write to push the images branch/)
+  const plain = workflowYaml().split('\n')
+  const branch = yaml.split('\n')
+  const captureJob = (lines) =>
+    lines
+      .slice(
+        0,
+        lines.findIndex((line) => /^ {2}comment:/.test(line)),
+      )
+      .join('\n')
+  assert.equal(captureJob(branch), captureJob(plain), 'the job that runs pull request code is the same, read-only')
+  const grants = (lines) => lines.filter((line) => /^\s*contents: write/.test(line)).length
+  assert.equal(grants(branch), 1)
+  assert.equal(grants(plain), 0)
+})
+
 test('the workflow: security shape, both modes, the skip marker, and the copy in examples/ci', () => {
   const yaml = workflowYaml()
   assert.equal(

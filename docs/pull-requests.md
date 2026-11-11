@@ -126,8 +126,9 @@ With `"ci": { "images": "branch" }`, the comment shows thumbnails inline: the jo
   images.
 - The images are public and stay in the branch history until you delete the branch. Delete it any time; old comments then lose their
   pictures.
-- The comment job needs `contents: write` in its `permissions` to push the branch. Without it, the comment falls back to links and
-  says why.
+- The comment job needs `contents: write` in its `permissions` to push the branch. `shapewall init --ci` writes that when the config
+  already has `"images": "branch"`; if you add the setting later, change `contents: read` to `contents: write` in the comment job (or
+  run `shapewall init --ci --force`). Without it, the comment falls back to links and says why.
 
 ## Turning it off
 
