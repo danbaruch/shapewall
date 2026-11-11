@@ -60,8 +60,12 @@ function DrawInput({ tool, ink, width, height, className, children }) {
   const points = useRef([])
   const box = useRef(null)
   const point = (event) => pointIn(box.current.getBoundingClientRect(), event)
+  // While a stroke is being made the drawing bar fades back and lets the
+  // pointer through (DrawBar), so the pen can cross the strip it sits on.
+  useEffect(() => () => drawing.set({ stroking: false }), [])
   const end = (event, keep) => {
     if (!points.current.length) return
+    drawing.set({ stroking: false })
     event.currentTarget.releasePointerCapture?.(event.pointerId)
     const shape = keep ? finishShape(tool, ink, points.current) : null
     points.current = []
@@ -77,6 +81,7 @@ function DrawInput({ tool, ink, width, height, className, children }) {
         event.preventDefault()
         event.stopPropagation()
         event.currentTarget.setPointerCapture?.(event.pointerId)
+        drawing.set({ stroking: true })
         points.current = [point(event)]
         setLive({ tool, ink, width: 4, points: [points.current[0], points.current[0]] })
       }}
@@ -268,11 +273,20 @@ export function ShapeCount({ count, className }) {
 // bar, docked at the top of the canvas, says what is going on ("Drawing on
 // Home · Desktop") and holds the tools. Done (or Escape) goes one step back:
 // the composer or the reply box, with its text, images and the drawing.
+// The bar can sit over the top of the page being drawn on (the camera is
+// not moved for it), so it never blocks the pen: only its buttons take the
+// pointer, a stroke can start on its label or between its buttons, and
+// while a stroke is being made the whole bar fades back and lets go.
 export function DrawBar({ owner, title }) {
   const back = owner === 'composer' ? 'your comment' : 'your reply'
+  const stroking = useDrawing((value) => Boolean(value?.stroking))
   return (
     <div
-      className="pointer-events-auto flex max-w-full items-center gap-2 rounded-xl border border-accent/50 bg-surface py-1 pr-1 pl-3 shadow-pop ring-2 ring-accent/15"
+      className={cn(
+        'pointer-events-none flex max-w-full items-center gap-2 rounded-xl border border-accent/50 bg-surface py-1 pr-1 pl-3 shadow-pop ring-2 ring-accent/15 transition-opacity duration-(--motion-fast) motion-reduce:transition-none',
+        stroking ? 'opacity-25 [&_button]:pointer-events-none' : '[&_button]:pointer-events-auto',
+      )}
+      data-sw-draw-bar-stroking={stroking ? 'true' : undefined}
       role="toolbar"
       aria-label={title ? `Drawing on ${title}` : 'Drawing on the page'}
       data-sw-draw-bar={owner}
