@@ -10,6 +10,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createApp, stopChildren } from '../src/server/app.js'
+import { EVENT_STREAMS_MAX } from '../src/agent/routes.js'
 import { normalizeConfig } from '../src/config.js'
 import { createSettingsEvents } from '../src/agent/settings-events.js'
 import { acpHandshake } from '../src/agent/backends/acp.js'
@@ -99,10 +100,11 @@ function listen(app) {
 }
 
 // Reads GET /api/agent/events and counts "agents" events.
-function eventStream(port) {
+function eventStream(port, { token = TOKEN } = {}) {
   return new Promise((resolve, reject) => {
     const seen = []
-    const req = http.get({ host: '127.0.0.1', port, path: '/api/agent/events' }, (res) => {
+    const headers = token ? { 'X-Shapewall-Settings-Token': token } : {}
+    const req = http.get({ host: '127.0.0.1', port, path: '/api/agent/events', headers }, (res) => {
       assert.equal(res.statusCode, 200)
       assert.match(res.headers['content-type'], /text\/event-stream/)
       let buffer = ''
@@ -233,6 +235,46 @@ test('api: a server with open events streams closes promptly', async () => {
     assert.equal(answer.status, 503)
   } finally {
     await new Promise((resolve) => lateServer.close(resolve))
+  }
+})
+
+test('api: GET /api/agent/events is for the owner only, and at most 32 streams stay open (the oldest ends)', async () => {
+  const home = settingsHome()
+  const dir = tempDir('events-owner')
+  const config = normalizeConfig(structuredClone(SAMPLE), { dir, file: path.join(dir, 'shapewall.config.json') })
+  const app = createApp({
+    config,
+    clientDir: tempDir('events-owner-client'),
+    env: { PATH: process.env.PATH, XDG_CONFIG_HOME: home.dir },
+    settingsToken: TOKEN,
+  })
+  const server = await listen(app)
+  const port = server.address().port
+  const streams = []
+  try {
+    for (const headers of [{}, { 'X-Shapewall-Settings-Token': 'wrong-token' }]) {
+      const answer = await request(port, 'GET', '/api/agent/events', { headers })
+      assert.equal(answer.status, 403)
+      assert.doesNotMatch(String(answer.headers?.['content-type'] || ''), /event-stream/)
+    }
+    for (let i = 0; i < EVENT_STREAMS_MAX; i++) streams.push(await eventStream(port))
+    const first = streams[0]
+    const firstEnded = new Promise((resolve) => {
+      first.response.on('end', resolve)
+      first.response.on('close', resolve)
+    })
+    streams.push(await eventStream(port))
+    await Promise.race([firstEnded, wait(2000).then(() => assert.fail('the oldest stream stayed open past the cap'))])
+    // The newest still hears changes.
+    await request(port, 'POST', '/api/agent/settings/branch-mode', {
+      body: { enabled: true },
+      headers: { 'X-Shapewall-Settings-Token': TOKEN, Origin: `http://127.0.0.1:${port}` },
+    })
+    assert.ok((await streams.at(-1).until(1)) >= 1, 'the newest stream got the nudge')
+  } finally {
+    for (const stream of streams) stream.close()
+    stopChildren(app)
+    await new Promise((resolve) => server.close(resolve))
   }
 })
 

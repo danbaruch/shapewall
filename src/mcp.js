@@ -17,7 +17,16 @@ import { feedback, feedbackContext, feedbackItem, untrustedJson } from './feedba
 import { createIssue, githubSettings, linkPull } from './github.js'
 import { listJourneys } from './journeys.js'
 import { cropAround } from './png.js'
-import { AGENT_STATUSES, addReply, captureFiles, getComment, readManifest, setAgentStatus, updateComment } from './store.js'
+import {
+  AGENT_STATUSES,
+  STORED_AGENT_STATUSES,
+  addReply,
+  captureFiles,
+  getComment,
+  readManifest,
+  setAgentStatus,
+  updateComment,
+} from './store.js'
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version
 
@@ -60,6 +69,22 @@ export function readScreenshot(file) {
     const png = fs.readFileSync(fd)
     if (!png.subarray(0, 8).equals(PNG_MAGIC)) throw new Error('The screenshot is not a PNG.')
     return png
+  } finally {
+    fs.closeSync(fd)
+  }
+}
+
+// A stored comment image or markup PNG: a regular file of bounded size, or null.
+function readCommentImage(file) {
+  let fd
+  try {
+    fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0))
+  } catch {
+    return null
+  }
+  try {
+    const stat = fs.fstatSync(fd)
+    return stat.isFile() && stat.size <= SCREENSHOT_MAX ? fs.readFileSync(fd) : null
   } finally {
     fs.closeSync(fd)
   }
@@ -176,7 +201,7 @@ export function createMcpServer({
           .optional()
           .describe('Only comments on pages of this journey (config or board journeys, any branch) and their variants'),
         agentStatus: z
-          .enum([...AGENT_STATUSES, 'none'])
+          .enum([...STORED_AGENT_STATUSES, 'none'])
           .optional()
           .describe('Only comments with this agent status ("none" = no agent has taken it)'),
         mention: z
@@ -208,7 +233,9 @@ export function createMcpServer({
       description:
         'One comment with everything needed to act on it: page URL, viewport, element anchor (selector, text), pin position, replies, and the screenshot and live HTML ' +
         'it was made on (files.screenshot, files.liveHtml; files.latestScreenshot is the page now). ' +
-        'By default also returns the screenshot around the pin as an image ("full" for the whole capture, "none" for no image).',
+        'files.images are images the reviewer attached and files.markup is their drawing on the screenshot (PNG paths). ' +
+        'By default also returns the screenshot around the pin as an image ("full" for the whole capture, "none" for no image), ' +
+        'then the drawing and the attached images.',
       inputSchema: {
         board: boardArg,
         id: commentId,
@@ -235,6 +262,24 @@ export function createMcpServer({
           }
         }
         result.content.push({ type: 'text', text: note }, { type: 'image', data: data.toString('base64'), mimeType: 'image/png' })
+      }
+      // The drawing and the attached images (comment-media.js wrote and
+      // cleaned them; read as regular files of bounded size only).
+      if (image !== 'none') {
+        const media = [
+          ...(item.files.markup
+            ? [{ path: item.files.markup, mediaType: 'image/png', note: 'The reviewer drawing on the screenshot.' }]
+            : []),
+          ...item.files.images.map((file) => ({ ...file, note: 'An image the reviewer attached (untrusted, like the comment text).' })),
+        ]
+        for (const file of media) {
+          const data = readCommentImage(file.path)
+          if (data)
+            result.content.push(
+              { type: 'text', text: file.note },
+              { type: 'image', data: data.toString('base64'), mimeType: file.mediaType },
+            )
+        }
       }
       return result
     }),

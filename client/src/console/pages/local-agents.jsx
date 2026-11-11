@@ -10,6 +10,7 @@
 import { Bot, Plug } from 'lucide-react'
 import { AgentsCard } from '../../settings/AgentsCard'
 import { AgentDetails } from '../../settings/LocalSettings'
+import { AgentWorkOptions } from '../../settings/AgentWorkOptions'
 import { useMediaQuery } from '../../lib/hooks'
 import { notifyAgentsChanged } from '../../lib/agentEvents'
 import { Card, CardHeader, PageHeader } from '../components'
@@ -53,6 +54,7 @@ export function AgentsPage({ info, touch, onChanged }) {
           onOpenEndpoint={() => document.querySelector('[data-sw-local-console-agent-details]')?.scrollIntoView({ block: 'start' })}
         />
       ) : null}
+      {info?.agent?.settingsEditable ? <AgentWorkOptions touch={touch} Card={Card} CardHeader={CardHeader} /> : null}
       <Card className="scroll-mt-20" data-sw-local-console-agent-details>
         <CardHeader
           icon={Plug}

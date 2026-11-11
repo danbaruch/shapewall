@@ -109,3 +109,33 @@ function boundsOf(nodes) {
   }
   return Number.isFinite(minX) ? { x: minX, y: minY, width: maxX - minX, height: maxY - minY } : null
 }
+
+// Drawing on a page (desktop): the frame in the canvas below the drawing bar
+// and the card's title row (`top` screen pixels) and above the zoom
+// controls, at a size to draw on (`frameBox` is the part with content).
+// The whole of it fits, so the bar never covers it; only a page so long that
+// it would show narrower than DRAW_MIN_WIDTH is shown wider, from its top
+// (or around `focus`, 0 to 1 down the frame, when the pin is further down).
+export const DRAW_ROOM = { top: 100, bottom: 64, side: 24 }
+const DRAW_MIN_WIDTH = 280
+const DRAW_MAX_ZOOM = 2
+export function drawingViewport(frameBox, box, focus = 0.5) {
+  if (!box?.width || !box?.height || !frameBox?.width || !frameBox?.height) return null
+  const { top, bottom, side } = DRAW_ROOM
+  const width = Math.max(1, box.width - side * 2)
+  const height = Math.max(1, box.height - top - bottom)
+  const fitWidth = width / frameBox.width
+  const fitBoth = Math.min(fitWidth, height / frameBox.height)
+  const zoom = Math.min(DRAW_MAX_ZOOM, MAX_ZOOM, Math.max(fitBoth, Math.min(fitWidth, DRAW_MIN_WIDTH / frameBox.width)))
+  const shownW = frameBox.width * zoom
+  const shownH = frameBox.height * zoom
+  const x = side + (width - shownW) / 2 - frameBox.x * zoom
+  let y = top + (height - shownH) / 2 - frameBox.y * zoom
+  if (shownH > height) {
+    y = top - frameBox.y * zoom
+    const at = frameBox.y + frameBox.height * Math.min(1, Math.max(0, focus))
+    // The pin below the first screenful: centre on it instead.
+    if (y + at * zoom > top + height * 0.8) y = Math.max(top + height - (frameBox.y + frameBox.height) * zoom, top + height / 2 - at * zoom)
+  }
+  return { x, y, zoom }
+}

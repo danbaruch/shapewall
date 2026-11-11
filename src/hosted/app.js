@@ -42,6 +42,7 @@ import { changeEventType, createEventBus, publishMutations } from './events.js'
 import { mountMcpHttp } from './mcp-http.js'
 import { createProjectStore } from './projects.js'
 import { createCleaner } from './cleaner.js'
+import { sweepStagedImages } from './comment-files.js'
 import { sweepStaging } from './push.js'
 import { createRateLimiter } from './ratelimit.js'
 import { createQuotas } from './quotas.js'
@@ -391,6 +392,9 @@ export function createHostedApp({
     policyFor,
     dispatchView,
     boardContext,
+    cleaner,
+    quotas,
+    workspaceQuota,
     deps,
   })
 
@@ -469,6 +473,7 @@ export function createHostedApp({
   const sweep = () => {
     try {
       sweepStaging({ db, dataDir, now: now() })
+      sweepStagedImages(db, now())
     } catch (error) {
       log(`staging sweep: ${error.message}`)
     }

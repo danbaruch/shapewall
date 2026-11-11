@@ -3,6 +3,8 @@ import { Columns2, SplitSquareHorizontal } from 'lucide-react'
 import { Tabs, TabsContent, TabsList, TabsTrigger, ToggleGroup } from '../components/ui'
 import { cn } from '../lib/utils'
 import { cropAround } from './flow'
+import { DrawingSvg } from './CommentMedia'
+import { drawingBounds } from '../../../src/comment-drawing.js'
 
 // Two captures of the same frame, one over the other: drag the divider (or
 // use the arrow keys on it) to wipe between before (left) and after (right).
@@ -13,11 +15,12 @@ export function CompareSlider({
   label = 'Before and after',
   beforeLabel = 'Before',
   afterLabel = 'After',
+  start = 50,
   className,
   children,
   ...props
 }) {
-  const [at, setAt] = useState(50)
+  const [at, setAt] = useState(start)
   const box = useRef(null)
   const dragging = useRef(false)
   const moveTo = (clientX) => {
@@ -88,11 +91,23 @@ export function CompareSlider({
   )
 }
 
-// The image of one side, cropped around the pin (or the whole frame).
-function Frame({ url, native, crop, label, comment, onImageError }) {
+// The image of one side, cropped around the pin (or the whole frame), with
+// the ink drawn on that capture (`shapes`) over it.
+function Frame({ url, native, crop, label, comment, onImageError, shapes = null }) {
   const box = crop || { left: 0, top: 0, width: native.width, height: native.height }
   if (!url) return <div className="h-full w-full bg-surface-2" />
-  return (
+  const ink = shapes?.length ? (
+    <DrawingSvg shapes={shapes} width={native.width} height={native.height} crop={crop} className="z-[1]" data-sw-before-drawing="true" />
+  ) : null
+  if (ink && !crop) {
+    return (
+      <div className="relative w-full">
+        <Frame url={url} native={native} crop={null} label={label} comment={comment} onImageError={onImageError} />
+        {ink}
+      </div>
+    )
+  }
+  const image = (
     <img
       src={url}
       alt={`${label}: ${comment.viewport} capture`}
@@ -109,6 +124,14 @@ function Frame({ url, native, crop, label, comment, onImageError }) {
           : undefined
       }
     />
+  )
+  return ink ? (
+    <>
+      {image}
+      {ink}
+    </>
+  ) : (
+    image
   )
 }
 
@@ -128,7 +151,7 @@ function Ring({ native, crop, comment }) {
 }
 
 // One side on its own, with its caption.
-function Shot({ url, native, crop, comment, label, onImageError }) {
+function Shot({ url, native, crop, comment, label, onImageError, shapes = null }) {
   const box = crop || { left: 0, top: 0, width: native.width, height: native.height }
   return (
     <figure className="min-w-0 flex-1">
@@ -137,7 +160,7 @@ function Shot({ url, native, crop, comment, label, onImageError }) {
         className={cn('relative w-full overflow-hidden rounded-md border border-line bg-surface-2', !crop && 'max-h-80 overflow-y-auto')}
         style={crop ? { aspectRatio: `${box.width} / ${box.height}` } : undefined}
       >
-        <Frame url={url} native={native} crop={crop} label={label} comment={comment} onImageError={onImageError} />
+        <Frame url={url} native={native} crop={crop} label={label} comment={comment} onImageError={onImageError} shapes={shapes} />
         <Ring native={native} crop={crop} comment={comment} />
       </div>
     </figure>
@@ -146,6 +169,10 @@ function Shot({ url, native, crop, comment, label, onImageError }) {
 
 const VIEWS = [
   { id: 'near', label: 'Near the pin' },
+  { id: 'whole', label: 'Whole frame' },
+]
+const DRAWN_VIEWS = [
+  { id: 'near', label: 'Near the drawing' },
   { id: 'whole', label: 'Whole frame' },
 ]
 const LAYOUTS = [
@@ -179,7 +206,9 @@ const SIDES = [
 export default function BeforeAfter({ comment, pair, native, urlFor, touch, onImageError }) {
   const [view, setView] = useState('near')
   const [layout, setLayout] = useState('slider')
-  const [side, setSide] = useState('after')
+  const drawn = pair?.drawn || null
+  // A drawing made on the old capture shows on "before": open on that side.
+  const [side, setSide] = useState(drawn ? 'before' : 'after')
   const swipe = useRef(null)
   if (!pair || !native) return null
   if (!pair.before && !pair.after) return null
@@ -192,13 +221,31 @@ export default function BeforeAfter({ comment, pair, native, urlFor, touch, onIm
       </p>
     )
   }
-  const crop = view === 'near' ? cropAround(native, comment.x, comment.y) : null
+  // Near the drawing, when there is one on "before" (it may be far from the pin).
+  const bounds = drawn ? drawingBounds({ shapes: drawn }) : null
+  const center = bounds ? [(bounds.x + bounds.width / 2) * 100, (bounds.y + bounds.height / 2) * 100] : [comment.x, comment.y]
+  const crop = view === 'near' ? cropAround(native, center[0], center[1]) : null
   const box = crop || { left: 0, top: 0, width: native.width, height: native.height }
   const shared = { native, crop, comment, onImageError }
-  const zoom = <ToggleGroup label="Zoom" options={VIEWS} value={view} onChange={setView} large={touch} className={touch ? 'flex-1' : ''} />
+  const note = drawn ? (
+    <p className="text-xs text-muted" data-sw-drawn-previous="true">
+      The drawing shows on Before, over the page as it was.
+    </p>
+  ) : null
+  const zoom = (
+    <ToggleGroup
+      label="Zoom"
+      options={bounds ? DRAWN_VIEWS : VIEWS}
+      value={view}
+      onChange={setView}
+      large={touch}
+      className={touch ? 'flex-1' : ''}
+    />
+  )
   if (!touch) {
     return (
       <div className="mt-2.5 space-y-2" data-sw-before-after="ready">
+        {note}
         <div className="flex items-center gap-2">
           {zoom}
           <span className="flex-1" />
@@ -207,12 +254,14 @@ export default function BeforeAfter({ comment, pair, native, urlFor, touch, onIm
         {layout === 'slider' ? (
           <div className={cn('rounded-md border border-line bg-surface-2', !crop && 'max-h-80 overflow-y-auto')}>
             <CompareSlider
+              key={drawn ? 'drawn' : 'plain'}
+              start={drawn ? 85 : 50}
               className="w-full"
               style={crop ? { aspectRatio: `${box.width} / ${box.height}` } : undefined}
               label={`Before and after comment ${comment.id}`}
               before={
                 <div className="relative h-full w-full bg-surface-2">
-                  <Frame url={urlFor(pair.before)} label="Before" {...shared} />
+                  <Frame url={urlFor(pair.before)} label="Before" {...shared} shapes={drawn} />
                 </div>
               }
               after={
@@ -226,18 +275,19 @@ export default function BeforeAfter({ comment, pair, native, urlFor, touch, onIm
           </div>
         ) : (
           <div className="flex gap-2">
-            <Shot url={urlFor(pair.before)} label="Before" {...shared} />
+            <Shot url={urlFor(pair.before)} label="Before" {...shared} shapes={drawn} />
             <Shot url={urlFor(pair.after)} label="After" {...shared} />
           </div>
         )}
       </div>
     )
   }
-  const before = <Shot url={urlFor(pair.before)} label="Before" {...shared} />
+  const before = <Shot url={urlFor(pair.before)} label="Before" {...shared} shapes={drawn} />
   const after = <Shot url={urlFor(pair.after)} label="After" {...shared} />
   // Phones: one side at a time, as tabs (or a swipe).
   return (
     <Tabs value={side} onValueChange={setSide} className="mt-2.5 space-y-2" data-sw-before-after="ready">
+      {note}
       <div className="flex flex-wrap items-center gap-2">
         <TabsList aria-label="Show" className="flex-1">
           {SIDES.map((item) => (

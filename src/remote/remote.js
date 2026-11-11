@@ -133,11 +133,13 @@ export function createRemote({ origin, token, source = null, fetchImpl = fetch, 
   const board = (id) => `/api/v1/boards/${enc(id)}`
   const one = (boardId, id, rest, guests) => `${board(boardId)}/comments/${enc(id)}${rest}${guests ? '?guests=1' : ''}`
 
-  // A file URL from a comment (files.screenshot) as bytes. Only this origin's API.
+  // A file URL from a comment (files.screenshot, a comment image) as bytes.
+  // Only this origin's API; of the query only the guests opt-in is kept (a
+  // share link guest's image is served with it).
   async function download(url) {
     const target = new URL(url)
     if (target.origin !== origin || !target.pathname.startsWith('/api/v1/boards/')) throw new Error('not a file of this Shapewall')
-    return call('GET', target.pathname)
+    return call('GET', `${target.pathname}${target.searchParams.get('guests') === '1' ? '?guests=1' : ''}`)
   }
 
   return {
@@ -232,6 +234,8 @@ export function createRemote({ origin, token, source = null, fetchImpl = fetch, 
       }
     },
     importComments: (boardId, json) => call('POST', `${board(boardId)}/import`, { json }),
+    // One image of an imported comment, before the batch that lists it.
+    importImage: (boardId, json) => call('POST', `${board(boardId)}/import/images`, { json }),
     download,
   }
 }

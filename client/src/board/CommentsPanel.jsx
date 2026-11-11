@@ -5,7 +5,20 @@
 import { useEffect, useRef } from 'react'
 import { useBoardView, useBoardViewStore } from './boardView'
 import { viewportIcon } from './viewports'
-import { Check, CheckCheck, Info, Loader2, MessageSquare, Route, Search, X } from 'lucide-react'
+import {
+  Brush,
+  Check,
+  CheckCheck,
+  Image as ImageIcon,
+  Info,
+  ListChecks,
+  Loader2,
+  MessageSquare,
+  Route,
+  Search,
+  Sparkles,
+  X,
+} from 'lucide-react'
 import {
   Badge,
   Button,
@@ -27,6 +40,7 @@ import { MentionText } from './Mentions'
 import { COMMENT_STATES } from './flow'
 import { AgentStatusChip, AuthorAvatar, ReopenedChip, commentAuthor } from './commentParts'
 import { useCommentAgentFocus } from '../chat/agentFocus'
+import { BatchProgress, SelectBox, batchRunning, batchable } from './BatchFixes'
 
 // "No filter" in the state and mention selects (Radix items cannot be "").
 const ANY = '__any'
@@ -66,12 +80,16 @@ function RowState({ comment }) {
   return <ReopenedChip comment={comment} />
 }
 
-function Row({ comment, title, selected, unread, touch, onFocus, onHover }) {
+// `pick`: Select mode for batch fixes ({ checked, onChange, disabled }), or null.
+function Row({ comment, title, selected, unread, touch, onFocus, onHover, pick = null }) {
   // Its own answer from the view store: hovering a pin re-renders one row.
   const hovered = useBoardView((state) => state.hoveredId === comment.id)
   const author = commentAuthor(comment)
   const replies = comment.replies?.length || 0
   const reactions = reactionSummary(comment)
+  const thread = [comment, ...(comment.replies || [])]
+  const imageCount = thread.reduce((sum, item) => sum + (item.images?.length || 0), 0)
+  const drawn = thread.some((item) => item.drawing?.shapes?.length)
   const ViewportIcon = viewportIcon(comment.viewport)
   return (
     <li
@@ -79,8 +97,22 @@ function Row({ comment, title, selected, unread, touch, onFocus, onHover }) {
         'relative',
         selected ? 'bg-accent/10 shadow-[inset_3px_0_0_var(--accent)]' : hovered ? 'bg-surface-2' : '',
         comment.status === 'resolved' && !selected && 'opacity-80',
+        pick && 'flex items-start',
       )}
+      data-sw-batch-row={pick ? comment.id : undefined}
     >
+      {pick ? (
+        <span className={cn('flex shrink-0 items-center', touch ? 'pt-1.5 pl-1' : 'pt-3 pl-1.5')}>
+          <SelectBox
+            checked={pick.checked}
+            onChange={pick.onChange}
+            disabled={pick.disabled}
+            touch={touch}
+            label={`Select comment #${comment.id}`}
+            data-sw-batch-select={comment.id}
+          />
+        </span>
+      ) : null}
       <button
         type="button"
         onClick={() => onFocus(comment)}
@@ -92,6 +124,7 @@ function Row({ comment, title, selected, unread, touch, onFocus, onHover }) {
         className={cn(
           'sw-gutter-pad flex w-full gap-2.5 px-3 py-3 text-left transition-colors hover:bg-surface-2 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent',
           touch && 'min-h-11',
+          pick && 'min-w-0 flex-1 pl-1.5',
         )}
         data-sw-comment={comment.id}
         data-sw-comment-unread={unread ? 'true' : undefined}
@@ -132,6 +165,21 @@ function Row({ comment, title, selected, unread, touch, onFocus, onHover }) {
                 <span aria-hidden="true">{replies}</span>
               </span>
             ) : null}
+            {imageCount ? (
+              <span
+                className="inline-flex shrink-0 items-center gap-0.5 tabular"
+                aria-label={`${imageCount} ${imageCount === 1 ? 'image' : 'images'}`}
+                data-sw-comment-images={imageCount}
+              >
+                <ImageIcon size={11} aria-hidden="true" />
+                <span aria-hidden="true">{imageCount}</span>
+              </span>
+            ) : null}
+            {drawn ? (
+              <span className="inline-flex shrink-0 items-center" aria-label="Has a drawing" role="img" data-sw-comment-drawn="true">
+                <Brush size={11} aria-hidden="true" />
+              </span>
+            ) : null}
             {reactions.map(([emoji, count]) => (
               <span key={emoji} className="shrink-0" aria-label={`${count} ${emoji}`}>
                 {emoji}
@@ -167,6 +215,9 @@ export default function CommentsPanel({
   onResetBrowserComments = null,
   people = [],
   narrow = null,
+  // Batch fixes (BatchFixes.jsx useBatchFixes, plus agentName, onConfirm,
+  // onOpenThread), or null: nothing of it renders when they are off.
+  batch = null,
 }) {
   // A thread picked from a pin or a link scrolls into view in the list.
   const listRef = useRef(null)
@@ -189,6 +240,11 @@ export default function CommentsPanel({
   }, [touch, view])
   const narrowing = Boolean(narrow && (narrow.query || narrow.state || narrow.mention))
   const unreadShown = comments.filter((comment) => unread.has(comment.id)).length
+  const batchOn = Boolean(batch?.offered)
+  const selecting = batchOn && batch.selecting
+  const candidates = selecting ? comments.filter(batchable) : []
+  const chosen = selecting ? batch.selected.filter((id) => candidates.some((comment) => comment.id === id)) : []
+  const size = touch ? 'touch' : 'xs'
   return (
     <>
       <div className="shrink-0 border-b border-line">
@@ -298,6 +354,85 @@ export default function CommentsPanel({
           </Toggle>
         </div>
       ) : null}
+      {batchOn && filter !== 'resolved' ? (
+        <div
+          className={cn(
+            'flex flex-wrap items-center gap-1.5 border-b border-line px-3 py-1.5 text-xs text-muted',
+            selecting && 'bg-accent/5',
+          )}
+          data-sw-batch-bar={selecting ? 'selecting' : 'off'}
+        >
+          {selecting ? (
+            <>
+              <span className="min-w-0 flex-1 whitespace-nowrap tabular-nums" role="status" data-sw-batch-count={chosen.length}>
+                {chosen.length} selected
+              </span>
+              <Button
+                variant="ghost"
+                size={size}
+                className="text-fg"
+                disabled={!candidates.length}
+                onClick={() => batch.setSelected(candidates.slice(0, batch.max).map((comment) => comment.id))}
+                data-sw-batch-select-all="true"
+              >
+                Select all{candidates.length > batch.max ? ` (first ${batch.max})` : ''}
+              </Button>
+              <Button
+                variant="ghost"
+                size={size}
+                className="text-fg"
+                onClick={() => batch.setSelecting(false)}
+                data-sw-batch-select-done="true"
+              >
+                Cancel
+              </Button>
+              {chosen.length > batch.max ? (
+                <p className="basis-full text-xs text-fg" data-sw-batch-over="true">
+                  Only the first {batch.max} will run (the limit on the Agents page).
+                </p>
+              ) : null}
+              <Button
+                variant="default"
+                size={size}
+                className="w-full"
+                disabled={!chosen.length || batchRunning(batch.batch)}
+                onClick={() => batch.onConfirm(chosen)}
+                data-sw-batch-fix={chosen.length}
+              >
+                <Sparkles size={13} aria-hidden="true" /> Fix {chosen.length || ''} with {batch.agentName}
+              </Button>
+            </>
+          ) : (
+            <>
+              <span className="min-w-0 flex-1">Fix several open comments in one go.</span>
+              <Button
+                variant="ghost"
+                size={size}
+                className="text-fg"
+                disabled={batchRunning(batch.batch)}
+                onClick={() => batch.setSelecting(true)}
+                data-sw-batch-select-mode="true"
+              >
+                <ListChecks size={13} aria-hidden="true" /> Select
+              </Button>
+            </>
+          )}
+        </div>
+      ) : null}
+      {batchOn && batch.batch ? (
+        <div className="sticky top-0 z-10 border-b border-line bg-surface px-3 py-2" data-sw-batch-strip="true">
+          <BatchProgress
+            batch={batch.batch}
+            boardId={batch.boardId}
+            comments={comments}
+            compact
+            touch={touch}
+            onOpenThread={batch.onOpenThread}
+            onCancel={batch.cancel}
+            onDismiss={batch.dismiss}
+          />
+        </div>
+      ) : null}
       {unreadShown && onMarkAllRead ? (
         <div className="flex items-center gap-2 border-b border-line px-3 py-1.5 text-xs text-muted" data-sw-unread-bar="true">
           <span className="h-2 w-2 shrink-0 rounded-full bg-accent" aria-hidden="true" />
@@ -319,6 +454,15 @@ export default function CommentsPanel({
               touch={touch}
               onFocus={onFocus}
               onHover={onHover}
+              pick={
+                selecting && comment.status === 'open'
+                  ? {
+                      checked: chosen.includes(comment.id),
+                      disabled: !batchable(comment),
+                      onChange: () => batch.toggle(comment.id),
+                    }
+                  : null
+              }
             />
           ))
         ) : (

@@ -79,6 +79,9 @@ What these protections do not cover:
   mode, and use the [sandboxed starter agent](/docs/starter-agent) for shared boards. See [agent hardening](/docs/agent-hardening).
 - **Comment text can try to steer an agent.** Anyone who can comment can write text aimed at the agent. On shared boards, let only
   people you trust dispatch work to an agent.
+- **Images on comments are checked, not understood.** Shapewall checks an attached image's type by its bytes, re-encodes or strips its
+  metadata and serves it only as an image, but the picture itself can still show text aimed at an agent, and an image decoder bug in a
+  browser or a model is outside its reach. Agents get images inside the same untrusted framing as comment text.
 - **Live HTML relies on the browser.** The script-free snapshot, strict CSP and sandboxed frame remove whole classes of attack, but
   they cannot protect against every browser bug.
 - **Starter agent approvals cover manifests and configs.** Changing test files or installed dependencies changes what the tests run

@@ -104,7 +104,7 @@ export function useBoardContext(input) {
           const zoom = Math.min(4, (box.width - 16) / frame.w)
           const fy = card.y + frame.y + (frame.h * target.y) / 100
           flow.setViewport({ x: 8 - (card.x + frame.x) * zoom, y: box.height * 0.35 - fy * zoom, zoom }, { duration: motionDuration(450) })
-          state.setToast({ at: Date.now(), text: 'Zoomed in: tap the spot again to pin your comment.' })
+          state.setToast({ at: Date.now(), text: 'Zoomed in: tap the spot again to pin your comment.', untilSheet: true })
           return
         }
         state.setDraft((current) => ({

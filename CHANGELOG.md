@@ -3,6 +3,42 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## 0.3.0 - 2026-11-10
+
+- Agent works on a branch: an option, off by default, that runs an ACP agent's fixes and chat turns in a copy of your checkout and
+  commits them on a branch of their own. The comment reads "Fix ready on branch", and the chat offers Apply to my checkout, Open
+  folder, Copy branch name and Discard. Apply recaptures the page with before and after; a conflict changes nothing. See
+  "Work on a branch" in docs/agents.md.
+- The Agents page of the Workspace Console has a How fixes run card: the Work on a branch switch with its branch prefix (the same
+  setting as the chat's switch), and the batch fixes switch with its limit. A change to either shows in every open view.
+- Batch fixes: an option, off by default, to fix several open comments one after another. In the comments panel choose Select, tick
+  comments (or Select all, up to the limit) and Fix N with the agent; a dialog lists them first. Each comment is an ordinary fix with
+  its own thread, approvals, recapture and Undo, and in branch mode its own branch. A card in the chat and a strip in the comments
+  panel show "Fixing 2 of 5" and each comment's state, also after a reload. The batch waits for an approval, stops on Cancel and after
+  two failures in a row. Set `"agent": { "batchFixes": { "enabled": true, "max": 5 } }` (at most 20) or use the Agents page. Not on
+  the hosted server. See "Fix several comments at once" in docs/agents.md.
+- `shapewall doctor` reports agent branches left in the project.
+- Capture on pull requests: `shapewall init --ci` writes a GitHub Actions workflow that captures the base branch and the pull request,
+  compares every page and screen size with the pixel diff, and keeps one comment on the pull request up to date ("Shapewall: 4 of 23
+  pages changed") with the changed share and before, after and diff images. It builds and serves both sides from `ci.start` in the
+  config, or captures a deploy preview URL. Pull requests from forks get the summary in the job summary instead. Turn it off by
+  deleting the workflow, with `"ci": { "enabled": false }`, or with `[skip shapewall]` in the title. See docs/pull-requests.md.
+- New commands: `shapewall ci capture-compare`, `ci capture`, `ci comment`, `ci enabled` and `ci wait`.
+- Images on comments and replies: attach up to 4 (PNG, JPEG, WebP or GIF, 5 MB each) with a button, by pasting or by dropping them.
+  The server checks each image by its bytes, strips its metadata and serves it only as an image; the thread shows thumbnails that open
+  large. The comments list shows how many a thread has.
+- Drawing on the page as part of a comment or reply: boxes, arrows and pen strokes in three inks, with Undo and Clear. The drawing
+  shows over the page while its thread is open, and over "before" once the page is recaptured. On a phone you draw on the page in a
+  full-screen sheet.
+- Agents get the images and a picture of the drawing on its screenshot: in `comments --json` (`files.images`, `files.markup`), the MCP
+  `get_comment` tool, `watch --exec` and Fix with agent.
+- Hosted boards keep comment images in the database, count them against the storage quota and include them in exports and in
+  `shapewall share`. Share link guests can draw but not attach images.
+- The demo takes images and drawings in the browser and shows example comments with an image and a drawing, one of them with a fix
+  ready on a branch. Its Agents page has the How fixes run card, and its scripted agent runs batch fixes.
+- While you draw on a page, the collapsed sidebar's flyouts stay closed and the journey bar is hidden, so nothing covers the drawing
+  bar.
+
 ## 0.2.4 - 2026-11-10
 
 - The top bar's View button is now Views: pick a journey by name there, alongside links, compare and the minimap. An open journey

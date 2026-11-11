@@ -71,3 +71,5 @@ export const stopThread = (boardId, threadId) => api.post(`${threadPath(boardId,
 // checks every file (or the starter agent's branch) first. Resolves to
 // { ok, message } with the answer marked undone; rejects with ApiError.
 export const undoTurn = (boardId, threadId, messageId) => api.post(`${threadPath(boardId, threadId)}/messages/${enc(messageId)}/undo`, {})
+// Agent branch mode: 'apply', 'discard' or 'open' one of the agent's branches.
+export const branchAction = (id, action) => api.post(`/api/agent/branches/${enc(id)}/${action}`, {})

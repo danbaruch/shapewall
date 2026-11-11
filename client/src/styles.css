@@ -487,6 +487,13 @@ body {
   }
 }
 
+/* A composer or thread stowed while drawing on the page: its popover
+   wrapper (Radix's, which takes no class) must not catch the pen either. */
+[data-radix-popper-content-wrapper]:has(> [data-sw-stowed]) {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 /* Comment mode: a crosshair over the whole canvas. */
 .sw-commenting .react-flow__pane,
 .sw-commenting .react-flow__node {

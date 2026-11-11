@@ -105,7 +105,18 @@ export function deleteWorkspaceData(db, t, dataDir) {
 // files, to run once the transaction committed.
 export function deleteWorkspaceRows(t, dataDir) {
   const openPushes = t.all("SELECT id FROM pushes WHERE workspace_id = :ws AND status = 'open'").map((row) => row.id)
-  for (const table of ['comments', 'boards', 'pushes', 'api_tokens', 'shares', 'invites', 'projects', 'memberships', 'audit_log']) {
+  for (const table of [
+    'comment_files',
+    'comments',
+    'boards',
+    'pushes',
+    'api_tokens',
+    'shares',
+    'invites',
+    'projects',
+    'memberships',
+    'audit_log',
+  ]) {
     t.run(`DELETE FROM ${table} WHERE workspace_id = :ws`)
   }
   t.run('DELETE FROM workspaces WHERE workspace_id = :ws')
@@ -213,7 +224,14 @@ export function planWorkspaceExport(t, { dataDir, projects, iso }) {
         total += size
         return true
       })
-      plan.push({ project, row, files })
+      // Images on its comments (in the database, src/hosted/comment-files.js).
+      const images = t.all(
+        `SELECT file, bytes FROM comment_files WHERE workspace_id = :ws AND project_id = :project AND board_id = :board
+         AND comment_number IS NOT NULL ORDER BY file`,
+        { project: project.id, board: row.board_id },
+      )
+      for (const image of images) total += image.bytes
+      plan.push({ project, row, files, images })
     }
   }
   const members = t
@@ -251,7 +269,7 @@ export function planWorkspaceExport(t, { dataDir, projects, iso }) {
     projects,
     plan,
     total,
-    files: plan.reduce((sum, item) => sum + item.files.length, 0),
+    files: plan.reduce((sum, item) => sum + item.files.length + item.images.length, 0),
     members,
     tokens,
     shares,
@@ -306,7 +324,7 @@ export async function writeWorkspaceExport(t, exported, { write, now, iso, expor
   }
   await audit.write(count ? '\n]\n' : ']\n')
   await audit.end()
-  for (const { project, row, files } of plan) {
+  for (const { project, row, files, images = [] } of plan) {
     const base = `${root}projects/${project.slug}/boards/${row.board_id}/`
     const comments = createCommentStore(t, project.id, row.board_id).list()
     await zip.add(
@@ -324,6 +342,20 @@ export async function writeWorkspaceExport(t, exported, { write, now, iso, expor
         continue
       }
       await zip.add(`${base}files/${relative}`, data)
+    }
+    // comments.json lists each image ({ file, name, ... }); the file is in
+    // comment-files/. One read at a time; gone since the plan: skipped.
+    for (const { file } of images) {
+      const stored = t.get(
+        `SELECT data FROM comment_files WHERE workspace_id = :ws AND project_id = :project AND board_id = :board AND file = :file
+         AND comment_number IS NOT NULL`,
+        { project: project.id, board: row.board_id, file },
+      )
+      if (!stored) {
+        skipped.push(`${base.slice(root.length)}comment-files/${file}`)
+        continue
+      }
+      await zip.add(`${base}comment-files/${file}`, Buffer.from(stored.data), { compress: false })
     }
   }
   // Files removed after the plan (a push swapped the board, retention pruned

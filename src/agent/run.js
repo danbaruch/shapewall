@@ -11,7 +11,7 @@ import { AgentError } from './errors.js'
 import { cleanCardDiff } from './text-diff.js'
 import { attachmentData, newId } from './threads.js'
 import { recentDownNotes } from './ratings.js'
-import { commentForModel, runTool, toolSpecs } from './tools.js'
+import { commentForModel, commentMediaParts, runTool, toolSpecs } from './tools.js'
 
 export const HISTORY_MAX = 40
 // Images are sent again only for the last few person messages; older ones
@@ -64,6 +64,10 @@ export function modelMessages({ config, board, threadId, messages, comments = fa
     }
     content.push(...composerParts(config, board, message, { full: withImages.has(index) }))
     if (message.text) content.push({ type: 'text', text: message.text })
+    // A comment's thread (Fix with agent too): the reviewer's drawing on its
+    // screenshot and their images go with the newest message, as images,
+    // each after a quoted note saying what it is.
+    if (comment && index === recent.length - 1) content.push(...commentMediaParts(config, board, comment))
     for (const attachment of message.attachments || []) {
       const data = withImages.has(index) ? attachmentData(config, board.id, attachment) : null
       if (data) content.push({ type: 'image', mediaType: attachment.mediaType, data })
@@ -111,6 +115,8 @@ export async function runTurn({
   // The composer's options for this chat ({ configId: value }), owner turns
   // of an agent with its own session options (an ACP agent).
   choices = null,
+  // Agent branch mode: the folder this turn's agent works in (acp.js stream).
+  workdir = null,
 }) {
   const thread = `${board.id}/${threadId}`
   const runMs = backend.runMsMax || RUN_MS_MAX
@@ -186,6 +192,7 @@ export async function runTurn({
         tools: round < TOOL_ROUNDS_MAX ? tools : [],
         ...(modelOverride ? { model: modelOverride } : {}),
         ...(choices ? { choices } : {}),
+        ...(workdir ? { workdir } : {}),
         signal,
         thread,
       })) {

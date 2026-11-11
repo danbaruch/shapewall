@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import { ArrowUpRight, Bot, Building2, FolderKanban, LayoutDashboard, LogOut, MessageSquareText, Settings, UserRound } from 'lucide-react'
 import { AppRail, useSidebarExpanded } from '../components/app-rail'
 import { api } from '../lib/api'
-import { useAgentsChanged } from '../lib/agentEvents'
+import { setAgentEventsOwner, useAgentsChanged } from '../lib/agentEvents'
 import { leavePage, useMediaQuery, useParams, useResource } from '../lib/hooks'
 import { cn } from '../lib/utils'
 import { Badge, Button, EmptyState, Spinner, TooltipProvider } from '../components/ui'
@@ -27,6 +27,9 @@ export default function LocalConsole({ account = null, onSignOut = null }) {
   const info = useResource('/api/info')
   // The Agents page reads the agent from info: follow changes made elsewhere.
   useAgentsChanged(info.refetch, Boolean(info.data?.agent))
+  // The owner-only events stream opens once the server says this page is the owner's.
+  const eventsOwner = info.data?.agent?.ownerWrites === true
+  useEffect(() => setAgentEventsOwner(eventsOwner), [eventsOwner])
   const list = useResource('/api/boards')
   const [params, updateParams] = useParams()
   // The Agents card used to head Settings: an old `?section=settings#agents` link opens Agents.

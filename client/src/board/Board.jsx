@@ -9,7 +9,7 @@ import { BoardContext, NODE_TYPES } from './nodes'
 import { EDGE_TYPES } from './edges'
 import { layoutBoard, nativeSize, pinPoint } from './layout'
 import { cardKeyDown, useCanvasNavigation } from './navigation'
-import { COMMENT_STATES, beforeAfter, historyCount, pageChange } from './flow'
+import { COMMENT_STATES, beforeAfter, entryVersion, historyCount, pageChange } from './flow'
 import { FILTERS } from './CommentsPanel'
 import { JourneyBar, JourneyBuilder } from './JourneyBar'
 import CompareBar from './CompareBar'
@@ -42,6 +42,7 @@ import { BrokenLinks } from './BrokenLinks'
 import { BoardToolbar } from './BoardToolbar'
 import { BoardMenu } from './BoardMenu'
 import { CanvasNotes } from './CanvasNotes'
+import { DrawingMode, useDrawingMode } from './DrawingMode'
 import { BoardToast, NoticeBar, useToast } from './Toast'
 import { PhoneSheets, SidePanel } from './BoardPanels'
 import { BoardRail } from './BoardRail'
@@ -68,6 +69,7 @@ import { BoardViewContext } from './boardView'
 import { splitFrameKey, viewportLabel } from './viewports'
 import { CanvasControls } from './CanvasControls'
 import { FocusedFrameBar } from './FrameBar'
+import { BatchConfirm, useBatchFixes } from './BatchFixes'
 import { motionDuration } from '../lib/motion'
 
 const noop = () => {}
@@ -325,6 +327,8 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     [comments, me, seen],
   )
   const selectedComment = comments.find((comment) => comment.id === selectedCommentId) || null
+  // Desktop: a drawing tool is on (DrawingMode.jsx).
+  const drawingOn = useDrawingMode(wide)
   // Cards with a comment an agent is working on.
   const agentWorkingPages = useMemo(() => {
     const pages = new Set()
@@ -633,6 +637,27 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
       filter,
       allowed,
     })
+  const commentMedia = useMemo(
+    () => ({
+      attach: canComment && !STATIC && !info?.guest,
+      draw: canComment && !STATIC,
+      attachNote:
+        canComment && !STATIC && info?.guest ? 'Guests on a share link cannot attach images. You can still draw on the page.' : null,
+    }),
+    [canComment, info?.guest],
+  )
+  // The screenshot of a frame, for drawing on it in the phone's sheet.
+  const pageImage = useCallback(
+    (pageId, viewport) => {
+      const image = data?.captures?.[pageId]?.[viewport]
+      if (!image?.file) return null
+      const variant = String(pageId).startsWith('variant:') ? variantsById.get(pageId) : null
+      const page = pagesById.get(variant ? variant.pageId : pageId)
+      const native = nativeSize(viewports, viewport, page?.frameHeight)
+      return native ? { src: fileUrl(boardId, 'captures', image.file, imageVersion), native } : null
+    },
+    [boardId, data?.captures, imageVersion, pagesById, variantsById, viewports],
+  )
   // The comment being written: its description and what its composer needs.
   const { draftDescription, composerProps } = useCommentDraft({
     draft,
@@ -650,6 +675,11 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     targetTitle,
     people,
     info,
+    // Images go up to the board's server (or the demo's); a static export
+    // that keeps comments in this browser takes neither images nor drawings.
+    // Share link guests may draw but not upload (src/hosted).
+    media: commentMedia,
+    pageImage,
   })
 
   const { captureConfirm, setCaptureConfirm, startCapture } = useCapture({ boardId, view, setBusy, setNotice, setPolling })
@@ -761,7 +791,34 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     updateParams({ vp: value === defaultMode ? null : value })
   }
   const allOpen = comments.filter((item) => item.status === 'open').length
+  // Batch fixes: offered only when Fix with agent is, and turned on in Agents.
+  const fixAvailable = Boolean(
+    chatAvailable && !data?.migratedTo?.readOnly && info?.agent?.fixWithAgent && info?.agent?.configured && (!info?.hosted || DEMO),
+  )
+  const batchFixes = useBatchFixes({
+    boardId,
+    enabled: fixAvailable,
+    // Each fix moves its comment and recaptures its page: both follow.
+    onProgress: () => {
+      commentsQuery.refetch()
+      view.refetch()
+    },
+  })
+  const [batchConfirm, setBatchConfirm] = useState(null)
+  const openBatchThread = (commentId) => {
+    const comment = comments.find((item) => item.id === commentId)
+    if (comment) focusComment(comment)
+    else openChat(threadForComment(commentId))
+  }
+  const batchProps = {
+    ...batchFixes,
+    agentName: info?.agent?.label || 'agent',
+    boardId,
+    onOpenThread: openBatchThread,
+    onConfirm: (ids) => setBatchConfirm(ids),
+  }
   const panelProps = {
+    batch: batchProps,
     comments: visibleComments,
     filter,
     counts,
@@ -813,6 +870,17 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
         role: info?.guest ? 'guest' : info?.role || null,
         hosted: Boolean(info?.hosted),
         onSaveName: setLocalName,
+        // Images and drawings on its messages and in the reply box.
+        media: {
+          ...commentMedia,
+          boardId,
+          pageImage,
+          pageTitle: targetTitle(selectedComment.pageId),
+          currentVersion: (comment) =>
+            String(comment.pageId).startsWith('variant:')
+              ? null
+              : entryVersion(data?.manifest?.pages?.[comment.pageId]?.[comment.viewport], data?.manifest),
+        },
         busy,
         touch: !wide,
         editingRef,
@@ -870,6 +938,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     : null
   const chatProps = {
     boardId,
+    batch: batchProps,
     fixRequest,
     onFixDone: () => {
       setFixRequest(null)
@@ -1071,6 +1140,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
               setShareOpen={setShareOpen}
               expanded={sidebarOpen}
               onToggle={toggleSidebar}
+              quiet={drawingOn}
               pages={
                 data
                   ? {
@@ -1160,31 +1230,45 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                 {showLinks && brokenLinks.length ? (
                   <BrokenLinks items={brokenLinks} open={brokenOpen} onOpenChange={setBrokenOpen} />
                 ) : null}
-                <CanvasNotes
-                  wide={wide}
-                  commentMode={commentMode}
-                  canComment={canComment}
-                  readyKeys={readyKeys}
-                  setCommentMode={setCommentMode}
-                  showLinks={showLinks}
-                  activePage={activePage}
-                  shownSteps={shownSteps}
-                  data={data}
-                  presentPages={presentPages}
-                  hiddenLinkTargets={hiddenLinkTargets}
-                  showAllLinks={showAllLinks}
-                  targetTitle={targetTitle}
-                  updateParams={updateParams}
-                  tipOpen={tipOpen}
-                  tryOpen={tryOpen}
-                  journey={journey}
-                  builder={builder}
-                  viewportNotice={viewportNotice}
-                  dismissTip={dismissTip}
-                  modes={modes}
-                  setMode={setMode}
-                  comparePair={comparePair}
-                />
+                {wide && data ? (
+                  <DrawingMode
+                    flow={flow}
+                    canvasRef={canvasRef}
+                    targets={layout.targets}
+                    focusFor={(owner) => ((owner === 'composer' ? draft?.y : selectedComment?.y) ?? 50) / 100}
+                    shotFor={(pageId, viewport) => {
+                      const image = data.captures?.[pageId]?.[viewport]
+                      return image?.file ? fileUrl(boardId, 'captures', image.thumb || image.file, imageVersion) : null
+                    }}
+                  />
+                ) : null}
+                {drawingOn ? null : (
+                  <CanvasNotes
+                    wide={wide}
+                    commentMode={commentMode}
+                    canComment={canComment}
+                    readyKeys={readyKeys}
+                    setCommentMode={setCommentMode}
+                    showLinks={showLinks}
+                    activePage={activePage}
+                    shownSteps={shownSteps}
+                    data={data}
+                    presentPages={presentPages}
+                    hiddenLinkTargets={hiddenLinkTargets}
+                    showAllLinks={showAllLinks}
+                    targetTitle={targetTitle}
+                    updateParams={updateParams}
+                    tipOpen={tipOpen}
+                    tryOpen={tryOpen}
+                    journey={journey}
+                    builder={builder}
+                    viewportNotice={viewportNotice}
+                    dismissTip={dismissTip}
+                    modes={modes}
+                    setMode={setMode}
+                    comparePair={comparePair}
+                  />
+                )}
                 {!data && view.error ? (
                   <BoardLoadError error={view.error} onRetry={view.refetch} />
                 ) : !data ? (
@@ -1237,7 +1321,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                       onChecks={canChecks ? openChecks : null}
                       onHistory={openHistory}
                       historyCountFor={(pageId) => historyCount(data?.versions, pageId)}
-                      focusedKey={focusedKey}
+                      focusedKey={drawingOn ? null : focusedKey}
                       layout={layout}
                       data={data}
                       liveKeys={liveKeys}
@@ -1252,7 +1336,11 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                       captureBusy={busy || Boolean(capture?.running)}
                     />
                     {wide && draft && !modalOpen ? (
-                      <ComposerPopover point={pinPoint(layout.targets, draft)} onClose={() => (busy ? null : setDraft(null))}>
+                      <ComposerPopover
+                        point={pinPoint(layout.targets, draft)}
+                        stowed={drawingOn}
+                        onClose={() => (busy ? null : setDraft(null))}
+                      >
                         <CommentComposer {...composerProps} touch={false} description={draftDescription} />
                       </ComposerPopover>
                     ) : null}
@@ -1261,6 +1349,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                         comment={selectedComment}
                         point={pinPoint(layout.targets, selectedComment)}
                         onClose={closeThread}
+                        stowed={drawingOn}
                         onPrev={() => stepThread(-1)}
                         onNext={() => stepThread(1)}
                         editingRef={editingRef}
@@ -1297,7 +1386,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                     }}
                   />
                 ) : null}
-                {tryOpen && data && !journey && !builder && !(commentMode && !wide) ? (
+                {tryOpen && data && !journey && !builder && !drawingOn && !(commentMode && !wide) ? (
                   <TryThis
                     touch={!wide}
                     done={tryDone}
@@ -1335,7 +1424,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                     busy={busy}
                     touch={!wide}
                   />
-                ) : journey ? (
+                ) : journey && !drawingOn ? (
                   <JourneyBar
                     key={journey.id}
                     journey={journey}
@@ -1397,6 +1486,26 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
         </>
       ) : null}
 
+      {batchFixes.offered ? (
+        <BatchConfirm
+          open={Boolean(batchConfirm)}
+          onClose={() => {
+            setBatchConfirm(null)
+            batchFixes.setError(null)
+          }}
+          ids={batchConfirm || []}
+          comments={comments}
+          max={batchFixes.max}
+          agentName={batchProps.agentName}
+          targetTitle={targetTitle}
+          busy={batchFixes.busy}
+          error={batchFixes.error}
+          touch={!wide}
+          onStart={async (ids) => {
+            if (await batchFixes.start(ids)) setBatchConfirm(null)
+          }}
+        />
+      ) : null}
       <BoardDialogs
         info={info}
         boardId={boardId}

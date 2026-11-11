@@ -7,7 +7,7 @@
 // Only offered on a board served to this machine and opened from it
 // (info.agent.settingsEditable); the server refuses everyone else anyway.
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Bot, Check, KeyRound, Plug, RefreshCw, X } from 'lucide-react'
 import { api, forgetSettingsToken } from '../lib/api'
 import { cn } from '../lib/utils'
@@ -94,17 +94,39 @@ export function AgentSettings({ onSaved, touch, buzz = false, onDirtyChange, age
   // The saved settings changed elsewhere while this form had unsaved edits.
   const [stale, setStale] = useState(false)
 
+  // A full read (the first load, Reload, after a save) always wins over an
+  // "agents changed" merge: each full read takes a number, and a merge applies
+  // only when no full read started while it was asking. A change heard while
+  // a full read runs is merged again once that read has landed, so it is
+  // never lost and never undoes the Reload. Merges use the form as it is when
+  // their answer lands (latest).
+  const reads = useRef(0)
+  const loading = useRef(0)
+  const changedWhileLoading = useRef(false)
+  const latest = useRef({ view: null, form: null })
+  const merge = useRef(null)
   const load = useCallback(async () => {
+    const mine = ++reads.current
+    loading.current += 1
     try {
       const next = await api.get('/api/agent/settings')
+      if (mine !== reads.current) return
       setView(next)
       setForm(formFrom(next))
       setStale(false)
       setLoadError(null)
+      latest.current = { view: next, form: formFrom(next) }
     } catch (caught) {
+      if (mine !== reads.current) return
       // 404: this tab's settings token is not the server's (it restarted).
       if (caught.status === 404) forgetSettingsToken()
       setLoadError(caught.status === 404 ? TOKEN_HINT : caught.message)
+    } finally {
+      loading.current -= 1
+      if (!loading.current && changedWhileLoading.current) {
+        changedWhileLoading.current = false
+        merge.current?.()
+      }
     }
   }, [])
   useEffect(() => {
@@ -113,25 +135,33 @@ export function AgentSettings({ onSaved, touch, buzz = false, onDirtyChange, age
   // Changed elsewhere (another tab, the Agents card, `shapewall settings`,
   // the agents file): never over unsaved typing (agentForm.js reloadView).
   // A save or profile change running here reloads when it ends.
-  useAgentsChanged(async () => {
-    if (locked || !view || loadError) return
+  merge.current = async () => {
+    if (locked || !latest.current.view || loadError) return
+    if (loading.current) {
+      changedWhileLoading.current = true
+      return
+    }
+    const started = reads.current
     let next
     try {
       next = await api.get('/api/agent/settings')
     } catch {
       return
     }
-    const merged = reloadView({ view, form, next })
+    if (started !== reads.current || loading.current || !latest.current.view) return
+    const merged = reloadView({ view: latest.current.view, form: latest.current.form, next })
     setView(merged.view)
     setForm(merged.form)
     if (merged.stale) setStale(true)
-  })
+  }
+  useAgentsChanged(() => merge.current?.())
 
   const set = (key) => (event) => {
     const value = typeof event === 'string' ? event : event.target.value
     setForm((current) => ({ ...current, [key]: value }))
     setSavedNote(false)
   }
+  latest.current = { view, form }
   const dirty = view ? !sameForm(form, formFrom(view)) : false
   useEffect(() => {
     if (!dirty) setStale(false)
@@ -193,6 +223,8 @@ export function AgentSettings({ onSaved, touch, buzz = false, onDirtyChange, age
         setConfirm({ items: next.confirm, hash: next.confirmHash })
         return
       }
+      // A read that started before this save answers with older settings: dropped.
+      reads.current += 1
       setView(next)
       setForm(formFrom(next))
       setConfirm(null)

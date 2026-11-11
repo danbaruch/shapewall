@@ -42,6 +42,8 @@ export function BoardRail({
   expanded,
   onToggle,
   pages,
+  // Drawing mode: the collapsed rail's flyouts stay shut (AppRail).
+  quiet = false,
 }) {
   // So the console's rail can bring you back here: only your own boards
   // (not a share link, a guest's or a public one), and only the board in the
@@ -105,6 +107,7 @@ export function BoardRail({
       logo={<img src="./favicon.svg" alt="" className="h-7 w-7" />}
       items={items}
       sections={sections}
+      flyoutsDisabled={quiet}
       profile={(wide) => (
         <BoardProfile
           info={info}

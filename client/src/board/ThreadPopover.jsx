@@ -66,7 +66,20 @@ function useFittingSide(open, anchor, content) {
   return side
 }
 
-function CanvasPopover({ open, onClose, selector, point, children, label, onKeyDown, onEscape, focusContent, className, ...props }) {
+function CanvasPopover({
+  open,
+  onClose,
+  selector,
+  point,
+  children,
+  label,
+  onKeyDown,
+  onEscape,
+  focusContent,
+  stowed,
+  className,
+  ...props
+}) {
   const store = useStoreApi()
   const anchor = useCanvasAnchor(selector, point)
   const content = useRef(null)
@@ -90,7 +103,10 @@ function CanvasPopover({ open, onClose, selector, point, children, label, onKeyD
         // cards and their bars (z-30), under every dialog, sheet and menu
         // (z-50 and up), so a confirm opened from a side panel is never
         // covered by it. See "Layers" in docs/design-system.md.
-        className={cn('z-30', className)}
+        // `stowed`: out of the way while drawing on the page (desktop), still
+        // mounted, so the text, images and drawing in it stay.
+        className={cn('z-30', className, stowed && 'invisible')}
+        data-sw-stowed={stowed ? 'true' : undefined}
         onOpenAutoFocus={(event) => {
           if (!focusContent) return
           // The thread itself takes focus (arrow keys move between threads);
@@ -143,7 +159,7 @@ function stepKey(event, onPrev, onNext) {
 }
 
 // The open thread at its pin.
-export function ThreadPopover({ comment, point, onClose, onPrev, onNext, editingRef, children }) {
+export function ThreadPopover({ comment, point, onClose, onPrev, onNext, editingRef, stowed, children }) {
   // The camera flies to the next thread's pin, and the popover hides while
   // its pin is off the canvas, which drops focus to the page. Arrow keys
   // still step from there, and the thread takes focus back once it shows.
@@ -173,6 +189,7 @@ export function ThreadPopover({ comment, point, onClose, onPrev, onNext, editing
       point={point}
       label={`Comment ${comment.id}`}
       focusContent
+      stowed={stowed}
       className="flex max-h-[min(560px,var(--radix-popover-content-available-height))] w-[360px] flex-col overflow-hidden p-0 outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
       onEscape={() => {
         // Escape in the edit box cancels the edit and keeps the thread open.
@@ -195,7 +212,7 @@ export function ThreadPopover({ comment, point, onClose, onPrev, onNext, editing
 }
 
 // The composer at the new pin.
-export function ComposerPopover({ point, onClose, children }) {
+export function ComposerPopover({ point, onClose, stowed, children }) {
   return (
     <CanvasPopover
       open
@@ -203,6 +220,7 @@ export function ComposerPopover({ point, onClose, children }) {
       selector="[data-sw-draft-pin]"
       point={point}
       label="New comment"
+      stowed={stowed}
       className="w-[340px] p-3"
       data-sw-composer-popover="true"
     >

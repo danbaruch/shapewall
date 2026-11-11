@@ -8,6 +8,11 @@ import { countedReactions } from '../reactions.js'
 // symbol key) so members and tokens never see it; guestView uses it.
 export const GUEST_SHARE = Symbol('guestShare')
 
+const media = (item) => ({
+  ...(Array.isArray(item.images) && item.images.length ? { images: item.images } : {}),
+  ...(item.drawing ? { drawing: item.drawing } : {}),
+})
+
 // What a share link guest sees of a comment: the text, place and state, and
 // no workspace detail. Members by display name only (no handles), agents as
 // "Agent", guests of other links as "Another guest"; no agent status,
@@ -27,6 +32,9 @@ export function guestView(comment, shareId) {
     ...(comment.authorGuest ? { authorGuest: true } : {}),
     ...(comment.authorAgent ? { authorAgent: true } : {}),
     ...(comment.anchor ? { anchor: comment.anchor } : {}),
+    // Images and a drawing, when the comment has them (members attach
+    // images; guests may draw).
+    ...media(comment),
     captureVersion: comment.captureVersion,
     status: comment.status,
     createdAt: comment.createdAt,
@@ -40,6 +48,7 @@ export function guestView(comment, shareId) {
       ...(reply.agent ? { agent: true } : {}),
       body: reply.body,
       createdAt: reply.createdAt,
+      ...media(reply),
       reactions: countedReactions(reply.reactions),
     })),
     reactions: countedReactions(comment.reactions),

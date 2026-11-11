@@ -29,6 +29,8 @@ import {
   variantsWithFiles,
 } from '../store.js'
 import { LIVE_CSP } from '../capture/live.js'
+import { COMMENT_FILE_RE } from '../comment-fields.js'
+import { commentFilePath, sendCommentFile } from '../comment-media.js'
 import { elementMapName } from '../capture/element-map.js'
 import { compareEnvironments } from '../diff.js'
 import { createJourney, deleteJourney, listJourneys, updateJourney } from '../journeys.js'
@@ -310,6 +312,9 @@ export function createApp({
     app.locals.agentRouter = router
     app.use('/api/agent', router)
   }
+  // New comments and replies may carry images (base64, src/comment-media.js):
+  // 4 of 5 MB, so their own limit; every other route keeps 64 kB.
+  app.post(['/api/boards/:id/comments', '/api/boards/:id/comments/:cid/replies'], express.json({ limit: '28mb' }))
   app.use('/api', express.json({ limit: '64kb' }))
   const buzz =
     buzzBridge && !readOnly && !shared
@@ -555,6 +560,17 @@ export function createApp({
   app.get('/api/boards/:id/elements/:file', sendElements('captures'))
   app.get('/api/boards/:id/variant-elements/:file', sendElements('variants'))
 
+  // Images on comments: only names Shapewall wrote, as the image type they
+  // are (checked when stored), never rendered as a document.
+  app.get(
+    '/api/boards/:id/comment-files/:file',
+    withBoard((req, res, board) => {
+      const file = COMMENT_FILE_RE.test(req.params.file) ? commentFilePath(boardDir(config, board.id), req.params.file) : null
+      if (!file) return fail(res, 404, 'not_found', 'No such image.')
+      sendCommentFile(res, file, req.params.file)
+    }),
+  )
+
   // Who changed a comment, for its events: the name the board sends (the
   // commenter's saved name), like the author of a reply. Display text only.
   const actorOf = (author) => (typeof author === 'string' ? author : null)
@@ -591,7 +607,8 @@ export function createApp({
   app.post(
     '/api/boards/:id/comments/:cid/replies',
     withBoard(async (req, res, board) => {
-      const { comment, reply } = await addReply(config, board.id, req.params.cid, { body: req.body?.body, author: req.body?.author })
+      const { body, author, images, drawing } = req.body || {}
+      const { comment, reply } = await addReply(config, board.id, req.params.cid, { body, author, images, drawing })
       res.status(201).json({ comment, reply })
     }),
   )
