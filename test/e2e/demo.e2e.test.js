@@ -419,6 +419,59 @@ test('Fix with agent: the open thread offers it, the agent works on the comment,
   }
 })
 
+test('agent activity on the toolbar: working, then needs your OK, then back, with the comments closed and the board elsewhere', async () => {
+  const { context, page, errors } = await open()
+  try {
+    await openBoard(page, `${base}?c=17`)
+    const agent = '[data-sw-toolbar="full"] [data-sw-chat-toggle]'
+    // The demo opens with agents already at work on other comments, and
+    // some comments waiting on a person: the control counts the ones at work.
+    await page.waitForSelector(`${agent}[data-sw-agent-activity="working"]`)
+    const resting = await page.getAttribute(agent, 'aria-label')
+    const atWork = Number(await page.getAttribute(agent, 'data-sw-agent-activity-count'))
+    assert.ok(atWork >= 1)
+    assert.match(resting, /^Agent\. (Agent working on #\d+|\d+ agents working: #\d+) /)
+    assert.doesNotMatch(resting, /#17 /)
+
+    await page.click('[data-sw-fix-agent="17"]')
+    await page.waitForSelector('[data-sw-chat="comment-17"] [data-sw-chat-fix-request]')
+    // The agent panel closed, the thread closed, the canvas somewhere else:
+    // the toolbar still says an agent is at work, and on what.
+    await page.click('[data-sw-chat-close]')
+    await page.keyboard.press('Escape')
+    const canvas = await page.locator('[data-sw-canvas]').boundingBox()
+    await page.mouse.move(canvas.x + 300, canvas.y + 300)
+    await page.mouse.wheel(900, 600)
+    // One more now: the mark carries the count, the words name this one too.
+    await page.waitForSelector(`${agent}[data-sw-agent-activity="working"][data-sw-agent-activity-count="${atWork + 1}"]`, {
+      timeout: 20000,
+    })
+    assert.match(await page.getAttribute(agent, 'aria-label'), new RegExp(`${atWork + 1} agents working: `))
+    assert.equal((await page.textContent(`${agent} [data-sw-agent-activity-mark="working"]`)).trim(), String(atWork + 1))
+    await page.waitForSelector(`${agent} [data-sw-agent-activity-mark="working"] [data-sw-agent-activity-pulse]`)
+    await shot(page, 'agent-activity-working')
+
+    // It asks before it edits: the control turns to "needs you" and names the comment.
+    await page.waitForSelector(`${agent}[data-sw-agent-activity="waiting"]`, { timeout: 20000 })
+    assert.match(await page.getAttribute(agent, 'aria-label'), /Agent needs your OK on #17 Home/)
+    await shot(page, 'agent-activity-needs-you')
+    // One thing needs the person: the control opens the panel on it.
+    await page.click(agent)
+    await page.waitForSelector('[data-sw-chat="comment-17"] [data-sw-chat-permission-option="allow"]')
+    await page.click('[data-sw-chat-permission-option="allow"]')
+    await page.waitForSelector('[data-sw-chat-message="assistant"][data-status="done"] :text("Done.")', { timeout: 20000 })
+    // The run is over: the control is back to the agents still at work
+    // (the "done" settle, when nothing is left, is in board-ux.e2e).
+    await page.click('[data-sw-chat-close]')
+    await page.waitForFunction(([sel, was]) => document.querySelector(sel)?.getAttribute('aria-label') === was, [agent, resting], {
+      timeout: 20000,
+    })
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})
+
 test('Fix with ...: the caret runs the fix once with the second scripted agent and keeps the default', async () => {
   const { context, page, errors } = await open()
   try {

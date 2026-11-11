@@ -37,7 +37,11 @@ function wantsFull(frame, settledZoom, native) {
 // (anchors.js). It renders at the capture's native width and is scaled to the
 // frame, so the layout matches the screenshot, which stays visible until it
 // has loaded.
-function LiveDoc({ src, viewport, native, frame, selecting, opaque, onReady }) {
+// `selecting`: the page has the mouse, for selecting and copying text. A
+// frame's document takes its own wheel events and the board never sees them
+// (Ctrl+wheel there zooms the whole browser tab), so that is only while the
+// person is at it: `onLeave` hands the mouse back when the pointer leaves.
+function LiveDoc({ src, viewport, native, frame, selecting, opaque, onReady, onLeave }) {
   const scale = frame.w / native.width
   const ref = useRef(null)
   const [loaded, setLoaded] = useState(false)
@@ -67,6 +71,7 @@ function LiveDoc({ src, viewport, native, frame, selecting, opaque, onReady }) {
       referrerPolicy="no-referrer"
       tabIndex={selecting ? 0 : -1}
       onLoad={onLoad}
+      onMouseLeave={selecting ? onLeave : undefined}
       className={cn(
         'absolute top-0 left-0 origin-top-left border-0 bg-white transition-opacity duration-(--motion-base)',
         loaded ? 'opacity-100' : 'opacity-0',
@@ -136,6 +141,25 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
   // never for fewer than two pins, where the zoom does not matter).
   const clusterZoom = useStore((state) => (pins.length > 1 ? Math.round(state.transform[2] * 20) / 20 : 1))
   const selecting = useBoardView((state) => state.selectingKey === liveKey) && live
+  // "Select text" has two steps, so the wheel stays the board's: armed (the
+  // page looks ready, the board still pans and zooms over it) and, after a
+  // click on the page, reading (the page has the mouse: select, copy) until
+  // the pointer leaves the page or Esc. CanvasNotes says which it is.
+  const selectable = selecting && !board.commentMode
+  const reading = useBoardView((state) => state.readingKey === liveKey) && selectable
+  const { onReading } = board
+  useEffect(() => {
+    if (!selectable) return undefined
+    return () => onReading(null)
+  }, [selectable, onReading])
+  useEffect(() => {
+    if (!reading) return undefined
+    const onKey = (event) => {
+      if (event.key === 'Escape') onReading(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [reading, onReading])
   const focused = useBoardView((state) => state.focusedKey === liveKey)
   // An element map, or (local board, older capture) the frame's own DOM.
   const mapFile = image?.live ? image.elements || null : null
@@ -246,6 +270,11 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
 
   const onClick = (event) => {
     event.stopPropagation()
+    // "Select text" is on: this click hands the mouse to the page.
+    if (selectable) {
+      if (!reading) onReading(liveKey)
+      return
+    }
     // Outside comment mode a tap selects the card; its actions appear in a
     // screen-space bar, usable at any zoom.
     if (!board.commentMode) {
@@ -290,6 +319,7 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
           // Picking: a click picks, so a drag must not pan. With a target
           // picked the page drags the canvas again, like any other page.
           picking && 'nodrag nopan cursor-crosshair',
+          selectable && !reading && 'cursor-text',
           live && 'border-accent/60',
           focused && !drawSurface && 'outline-2 outline-offset-2 outline-accent',
           // The page being drawn on: a strong frame, the same weight on
@@ -311,6 +341,7 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
         data-sw-live={live ? (ready ? 'ready' : 'loading') : 'off'}
         data-sw-live-anchors={live ? (opaque ? (map ? 'map' : 'none') : 'dom') : undefined}
         data-sw-draw-surface={drawSurface ? 'true' : undefined}
+        data-sw-select-text-state={selectable ? (reading ? 'reading' : 'armed') : undefined}
       >
         {src ? (
           <img
@@ -335,9 +366,10 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
             viewport={frame.viewport}
             native={native}
             frame={frame}
-            selecting={selecting && !board.commentMode}
+            selecting={reading}
             opaque={opaque}
             onReady={onFrame}
+            onLeave={() => onReading(null)}
           />
         ) : null}
         {note && !live ? (

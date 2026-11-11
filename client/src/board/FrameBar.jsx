@@ -1,3 +1,4 @@
+import { viewportLabel } from './viewports'
 import { useEffect, useLayoutEffect, useState } from 'react'
 import { useStore } from '@xyflow/react'
 import { Camera, ExternalLink, Flag, History, MonitorPlay, MoreHorizontal, TextSelect, X } from 'lucide-react'
@@ -133,7 +134,7 @@ export default function FrameBar({
     >
       {!touch ? (
         <span className="min-w-0 flex-1 truncate px-1.5 text-xs font-medium text-muted">
-          {title} · {frame.viewport}
+          {title} · {viewportLabel(frame.viewport)}
         </span>
       ) : null}
       {hasLive && !live ? (

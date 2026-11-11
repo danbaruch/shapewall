@@ -121,6 +121,8 @@ export function useBoardContext(input) {
       },
       onSelectComment: (comment) => now().selectComment(comment),
       onHoverComment: (id) => view.set({ hoveredId: id }),
+      // "Select text": the page of this frame has the mouse (or none has).
+      onReading: (key) => view.set({ readingKey: key }),
       onOpenCluster: (targetId, viewport, items) => now().openCluster(targetId, viewport, items),
       onChecks: (...args) => now().openChecks(...args),
       onHistory: (pageId, viewport = null) => now().openHistory(pageId, viewport),
@@ -161,6 +163,7 @@ export function useBoardContext(input) {
       onFocusFrame: actions.onFocusFrame,
       onPin: actions.onPin,
       onSelectComment: actions.onSelectComment,
+      onReading: actions.onReading,
       onHoverComment: wide ? actions.onHoverComment : null,
       onOpenCluster: actions.onOpenCluster,
       onChecks: canChecks ? actions.onChecks : null,

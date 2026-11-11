@@ -60,6 +60,7 @@ import { mountDeviceApi } from './device-routes.js'
 import { createBoardContext } from './board-context.js'
 import { mountBoardRoutes } from './board-routes.js'
 import { mountTokenApi } from './token-api.js'
+import { createAgentPresence } from './agent-presence.js'
 import { mountPages } from './pages.js'
 
 export { changeEventType, publicBoardView, TOKEN_SCOPES, INVITE_DAYS }
@@ -131,6 +132,8 @@ export function createHostedApp({
   deviceLogins ||= createDeviceLogins({ db, now })
   const ownsEvents = !eventBus
   const events = eventBus || createEventBus()
+  // Which projects have an agent listening right now (in memory only).
+  const agentPresence = createAgentPresence({ now })
   const streams = new Set()
   const policyFor = (t) =>
     createAgentPolicy(t, { now, handleFor: (user) => q.get('SELECT handle FROM users WHERE id = :id', { id: user })?.handle || null })
@@ -373,6 +376,7 @@ export function createHostedApp({
   mountPublicAdmin(consoleApi, deps)
 
   const { approvalApi } = mountBoardRoutes(app, {
+    agentPresence,
     db,
     dataDir,
     iso,
@@ -401,6 +405,7 @@ export function createHostedApp({
   mountDeviceApi(app, consoleDeps)
 
   const { v1, tokenAuth } = mountTokenApi({
+    agentPresence,
     db,
     dataDir,
     iso,
@@ -502,6 +507,7 @@ export function createHostedApp({
   const presence = hub.listener(presenceAuthorizer({ db, dataDir, origin: publicOrigin, auth, now, guestOnly }), { clientIp: upgradeIp })
   app.locals.presence = { attach: presence.attach, close: presence.close, hub }
   app.locals.events = events
+  app.locals.agentPresence = agentPresence
   app.locals.sweep = sweep
   app.locals.close = async () => {
     presence.close()

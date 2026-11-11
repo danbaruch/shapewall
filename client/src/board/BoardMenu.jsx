@@ -1,3 +1,4 @@
+import { cn } from '../lib/utils'
 import { useState } from 'react'
 import { Bot, Camera, Eye, Flag, GitCompare, LocateFixed, Plus, Route, Search, Settings, Waypoints } from 'lucide-react'
 import { Button, Dialog, Input, ToggleGroup } from '../components/ui'
@@ -13,6 +14,7 @@ export function BoardMenu({
   setMenuOpen,
   data,
   chatAvailable,
+  activity,
   chatThread,
   reopenChat,
   groupedPages,
@@ -82,6 +84,20 @@ export function BoardMenu({
           >
             <Bot size={16} aria-hidden="true" /> Chat with your agent
           </Button>
+        ) : null}
+        {activity?.text ? (
+          // What the agents are doing, in words (the More button shows the mark).
+          <p
+            className={cn('-mt-1 flex items-start gap-2 text-xs', activity.state === 'waiting' ? 'text-fg' : 'text-muted')}
+            role="status"
+            data-sw-agent-activity-line={activity.state}
+          >
+            <span
+              className={cn('mt-1 h-2 w-2 shrink-0 rounded-full', activity.state === 'waiting' ? 'bg-warn' : 'bg-accent')}
+              aria-hidden="true"
+            />
+            {activity.text}
+          </p>
         ) : null}
         <div>
           <p className={section}>

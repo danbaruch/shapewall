@@ -67,6 +67,7 @@ import { useBoardContext } from './hooks/useBoardContext'
 import { useCapture } from './hooks/useCapture'
 import { useCommentDraft } from './hooks/useCommentDraft'
 import { boardPaletteActions } from './paletteActions'
+import { agentActivity } from './agentActivity'
 import { BoardViewContext } from './boardView'
 import { splitFrameKey, viewportLabel } from './viewports'
 import { CanvasControls } from './CanvasControls'
@@ -207,6 +208,8 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   // The comment an agent is working on right now (chat/agentFocus.js): its
   // pin and card ring. One per board; waiting on a permission still counts.
   const focusEntry = useAgentFocus(boardId)
+  // Hosted boards: shell commands waiting for an admin's OK (HostedApprovals).
+  const [approvalRows, setApprovalRows] = useState([])
   const focusedCommentId = focusEntry && ['working', 'waiting'].includes(focusEntry.state) ? Number(focusEntry.commentId) || null : null
   const agentFocus = useMemo(() => (focusedCommentId ? new Set([focusedCommentId]) : NO_IDS), [focusedCommentId])
   const [busy, setBusy] = useState(false)
@@ -830,6 +833,22 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     updateParams({ vp: value === defaultMode ? null : value })
   }
   const allOpen = comments.filter((item) => item.status === 'open').length
+  // What the agents are doing, board-wide, for the toolbar (agentActivity.js):
+  // from the comments' agent statuses (the events stream and the comments
+  // poll keep them fresh), the chat turn in progress and hosted approvals.
+  const activity = useMemo(
+    () =>
+      agentActivity({
+        comments,
+        focus: focusEntry,
+        approvals: approvalRows,
+        titleOf: titleOfPage,
+        // Only for people who can send comments to the agent here: nobody
+        // else needs to hear that none is listening.
+        listening: info?.hosted && data?.agentDispatch ? data?.agentListening || null : null,
+      }),
+    [approvalRows, comments, data?.agentDispatch, data?.agentListening, focusEntry, info?.hosted, titleOfPage],
+  )
   // Batch fixes: offered only when Fix with agent is, and turned on in Agents.
   const fixAvailable = Boolean(
     chatAvailable && !data?.migratedTo?.readOnly && info?.agent?.fixWithAgent && info?.agent?.configured && (!info?.hosted || DEMO),
@@ -908,6 +927,8 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
         // Who is asking, for "Viewers can't reply" and the name a local board asks for once.
         role: info?.guest ? 'guest' : info?.role || null,
         hosted: Boolean(info?.hosted),
+        // Hosted: false when no agent is listening for this project (null: not known).
+        agentListening: info?.hosted && data?.agentListening ? Boolean(data.agentListening.online) : null,
         onSaveName: setLocalName,
         // Images and drawings on its messages and in the reply box.
         media: {
@@ -1130,6 +1151,8 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     chatAvailable,
     chatThread,
     reopenChat,
+    activity,
+    openAgentThread: (commentId) => openChat(threadForComment(commentId)),
     updateParams,
     groupedPages,
     jumpToPage,
@@ -1163,7 +1186,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
       <div className="flex h-full flex-col" data-sw-board={boardId} style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
         <DemoBanner />
         <AccessLostBanner />
-        {info?.hosted && data?.agentApprove ? <HostedApprovals boardId={boardId} /> : null}
+        {info?.hosted && data?.agentApprove ? <HostedApprovals boardId={boardId} onRows={setApprovalRows} /> : null}
         <a
           href="#sw-comments"
           className="sr-only z-[80] rounded-md bg-accent px-3 py-2 text-sm font-medium text-accent-fg focus:not-sr-only focus:absolute focus:top-2 focus:left-2"
@@ -1295,6 +1318,14 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                     canComment={canComment}
                     readyKeys={readyKeys}
                     setCommentMode={setCommentMode}
+                    selectText={
+                      selectingKey && wide
+                        ? {
+                            title: `${targetTitle(splitFrameKey(selectingKey).targetId)} · ${viewportLabel(splitFrameKey(selectingKey).viewport)}`,
+                            onDone: () => setSelectingKey(null),
+                          }
+                        : null
+                    }
                     composing={commentState === 'composing' ? draftTarget : null}
                     onCancelDraft={() => (busy ? null : setDraft(null))}
                     showLinks={showLinks}
@@ -1386,6 +1417,8 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                     {wide && draft && !modalOpen ? (
                       <ComposerPopover
                         point={pinPoint(layout.targets, draft)}
+                        // Re-aimed at another spot: a card that was dragged goes back to its pin.
+                        resetKey={`${draft.pageId}|${draft.viewport}|${draft.x}|${draft.y}`}
                         stowed={drawingOn}
                         onClose={() => (busy ? null : setDraft(null))}
                         onEscape={() => {
