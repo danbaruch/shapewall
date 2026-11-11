@@ -11,11 +11,20 @@ and the project uses [Semantic Versioning](https://semver.org/).
   solid outline, and the banner reads "Commenting on ..." with Cancel. A click elsewhere moves the comment only while it is still
   empty; once it has text, an image or a drawing it stays where it is and the composer nudges. Esc goes back exactly one step:
   from drawing to the comment, from the comment to picking, from picking out of comment mode.
+- The comment box and an open thread keep off the element they are about: beside the pin on the side away from it, else below
+  it, else above it. They only overlap it when it fills the canvas. Both cards can be dragged by their top line (the "#17 Home"
+  row of a thread, the "Home · Desktop · ..." line of a new comment) to see the page or a drawing under them; a moved card stays
+  where you put it while the canvas moves, never goes under the side panel, and is back at its pin the next time it opens.
+- A comment you are writing is never thrown away by a stray click. With text, an image or a drawing in it, clicking another pin, a
+  row in the comments list, a link to a comment or pressing C leaves it open (the box nudges); before, each of those dropped it
+  without a word. An empty one makes way as before. Esc still cancels, but when the comment holds a drawing or images it asks
+  first ("Discard this comment?"); Cancel never asks.
 - Drawing is clearly a mode. A bar at the top says "Drawing on Home · Desktop" and holds the tools, the inks, Undo, Clear and a
   Done button; the page you draw on is framed and the other pages step back; no element outlines appear under the pen. Entering it
   no longer moves the view (it did, to fit the page) unless the page is mostly off screen or drawn too small to draw on, and then
   the view goes back when you are done. Scrolling, Space and middle-drag still move the canvas while you draw. Done and Esc return
-  to your comment with the drawing attached. In the composer the three tools are labelled "Draw".
+  to your comment with the drawing attached. In the composer the three tools are labelled "Draw". The bar never blocks the pen:
+  where it sits over the top of the page a stroke can start on its label or between its buttons, and it fades back while you draw.
 - The side panel (comments, agent, checks) can be dragged no wider than 560 px or 40% of the window, whichever is less. Before, it
   could take 60% of the window and cover most of the board; a wider width remembered from before comes back inside the limit. The
   comment box and an open thread stay on the canvas beside their pin, also when the panel is wide: before, they could end up on top

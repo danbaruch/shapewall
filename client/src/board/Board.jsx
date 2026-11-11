@@ -44,6 +44,7 @@ import { BoardMenu } from './BoardMenu'
 import { CanvasNotes } from './CanvasNotes'
 import { DrawingMode, useDrawingMode } from './DrawingMode'
 import { drawing } from './drawing'
+import { nudgeComposer } from './composerNudge'
 import { BoardToast, NoticeBar, useToast } from './Toast'
 import { PhoneSheets, SidePanel } from './BoardPanels'
 import { BoardRail } from './BoardRail'
@@ -162,6 +163,25 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
       Boolean(draftRef.current) &&
       (Boolean(draftRef.current.body.trim()) || draftImages.current > 0 || (drawn?.owner === 'composer' && drawn.shapes.length > 0))
     )
+  }, [])
+  // The rule for everything that would open another thread or start another
+  // comment (a click on the page, a pin, a row in the list, a link to a
+  // comment, the palette, C): a comment with something in it is never
+  // replaced. True when it was kept; the composer nudges to say so.
+  const keepDraft = useCallback(() => {
+    if (!draftFilled()) return false
+    nudgeComposer()
+    return true
+  }, [draftFilled])
+  // Esc on a comment that holds a drawing or images asks first (text alone
+  // goes at once, as before; Cancel is explicit and never asks).
+  const [discardAsk, setDiscardAsk] = useState(false)
+  useEffect(() => {
+    if (!draft) setDiscardAsk(false)
+  }, [draft])
+  const draftHasMedia = useCallback(() => {
+    const drawn = drawing.get()
+    return Boolean(draftRef.current) && (draftImages.current > 0 || (drawn?.owner === 'composer' && drawn.shapes.length > 0))
   }, [])
   const [sheetOpen, setSheetOpen] = useState(false)
   // Phone: the open thread as a bottom sheet.
@@ -384,6 +404,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   const threadFromList = useRef(false)
   const selectComment = useCallback(
     (comment) => {
+      if (keepDraft()) return
       threadFromList.current = false
       setDraft(null)
       updateParams({ c: comment.id })
@@ -392,7 +413,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
         setThreadSheet(true)
       }
     },
-    [updateParams, wide],
+    [keepDraft, updateParams, wide],
   )
   const closeThread = useCallback(() => {
     setThreadSheet(false)
@@ -408,6 +429,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   // to the list.
   const focusComment = useCallback(
     (comment) => {
+      if (keepDraft()) return
       const switching = mode !== 'all' && comment.viewport !== mode && Boolean(viewports[comment.viewport])
       setDraft(null)
       setPendingFocus(comment)
@@ -418,7 +440,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
         setThreadSheet(true)
       }
     },
-    [defaultMode, mode, updateParams, viewports, wide],
+    [defaultMode, keepDraft, mode, updateParams, viewports, wide],
   )
   useEffect(() => {
     if (!viewportNotice) return undefined
@@ -620,7 +642,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     setFocusedKey,
     setToast,
     setDraft,
-    draftFilled,
+    keepDraft,
     checkDraft,
     setCheckDraft,
     authorName,
@@ -730,7 +752,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   useOverlayEntry(Boolean(journey), closeJourney)
   useOverlayEntry(Boolean(builder), () => setBuilder(null))
 
-  useCommentModeKeys({ commentMode, setCommentMode, canComment, comparePair, setDraft })
+  useCommentModeKeys({ commentMode, setCommentMode, canComment, comparePair, setDraft, keepDraft })
   useJourneyCycleKey({ journeys, journey, builder, openJourney, closeJourney })
   // The app sidebar (desktop): expanded or collapsed, Ctrl/Cmd+B, remembered.
   const [sidebarOpen, toggleSidebar] = useSidebarExpanded(wide, false)
@@ -1085,6 +1107,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     commentMode,
     markPicked,
     setDraft,
+    keepDraft,
     setCommentMode,
     showLinks,
     toggleLinks,
@@ -1365,8 +1388,23 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                         point={pinPoint(layout.targets, draft)}
                         stowed={drawingOn}
                         onClose={() => (busy ? null : setDraft(null))}
+                        onEscape={() => {
+                          // Esc while being asked is "Keep".
+                          if (discardAsk) {
+                            setDiscardAsk(false)
+                            return false
+                          }
+                          if (!draftHasMedia()) return true
+                          setDiscardAsk(true)
+                          return false
+                        }}
                       >
-                        <CommentComposer {...composerProps} touch={false} description={draftDescription} />
+                        <CommentComposer
+                          {...composerProps}
+                          touch={false}
+                          description={draftDescription}
+                          discard={discardAsk ? { onDiscard: () => setDraft(null), onKeep: () => setDiscardAsk(false) } : null}
+                        />
                       </ComposerPopover>
                     ) : null}
                     {wide && threadProps && !draft && !modalOpen ? (
@@ -1423,6 +1461,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                     onComment={
                       canComment && !comparePair
                         ? () => {
+                            if (keepDraft()) return
                             setDraft(null)
                             setCommentMode(true)
                           }

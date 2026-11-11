@@ -321,9 +321,13 @@ test('desktop: once a target is picked the page is calm; an empty draft moves, a
     await page.waitForSelector(`${composer} [data-sw-draw-count="1"]`)
     assert.equal(await page.inputValue('[data-sw-comment-input]'), 'This heading is long')
     assert.equal(await camera(), before)
-    // Esc again: back to picking (comment mode stays on). Once more: out.
+    // Esc again: the comment holds a drawing, so it asks; Discard goes back
+    // to picking (comment mode stays on). Esc once more: out.
     await page.focus('[data-sw-comment-input]')
     await page.keyboard.press('Escape')
+    await page.waitForSelector('[data-sw-composer-discard]')
+    assert.equal(await state(), 'composing')
+    await page.click('[data-sw-composer-discard-yes]')
     await page.waitForSelector(composer, { state: 'detached' })
     assert.equal(await state(), 'picking')
     assert.equal(await page.getAttribute('[data-sw-comment-mode]', 'aria-pressed'), 'true')
@@ -444,6 +448,250 @@ test('desktop: the side panel stops at 560 px or 40% of the window, a wider stor
     assert.equal(await width(), 560)
     await inside('with the panel over the pin')
     await shot(page, 'ux-flow-3-panel-max')
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})
+
+test('desktop: the composer keeps off its element, a written comment is never replaced, Esc asks before dropping a drawing, and the pen works under the bar', async () => {
+  // A pin on the page being commented on, to click while a comment is being written.
+  const other = await createComment(config, config.boards[0], {
+    pageId: 'pricing',
+    viewport: 'desktop',
+    x: 12,
+    y: 4,
+    body: 'A pin beside the draft',
+    author: 'Robin',
+  })
+  const { context, page, errors } = await openBoard(DESKTOP)
+  try {
+    const frame = '[data-sw-frame="pricing:desktop"]'
+    const composer = '[data-sw-composer-popover]'
+    const input = '[data-sw-comment-input]'
+    await page.click(frame)
+    await page.click('[data-sw-open-live="pricing|desktop"]')
+    await page.waitForSelector(`${frame}[data-sw-live="ready"]`, { timeout: 15000 })
+    await settle(page)
+    const cta = await liveElementBox(page, frame, 'a[data-testid="plus-cta"]')
+    const heading = await liveElementBox(page, frame, 'h1')
+    const middle = (box) => [(box.left + box.right) / 2, (box.top + box.bottom) / 2]
+    const apart = async (popover, target, label) => {
+      // The popover follows its anchor on the next frames.
+      await page.waitForTimeout(450)
+      const a = await rect(page, popover)
+      const b = await rect(page, target)
+      const overlap = !(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top)
+      assert.equal(overlap, false, `${label}: popover ${JSON.stringify(a)} over its element ${JSON.stringify(b)}`)
+      const canvas = await rect(page, '[data-sw-canvas]')
+      assert.ok(a.left >= canvas.left && a.right <= canvas.right + 1, `${label}: inside the canvas`)
+    }
+
+    // Two elements, two places: the composer never sits on the one it is about.
+    await page.keyboard.press('c')
+    await page.waitForSelector('[data-sw-canvas][data-sw-comment-flow="picking"]')
+    await page.mouse.click(...middle(cta))
+    await page.waitForSelector(`${composer} ${input}`)
+    await apart(composer, '[data-sw-picked-outline]', 'the button')
+    await page.mouse.click(...middle(heading))
+    await page.waitForFunction(() => /Heading:/.test(document.querySelector('[data-sw-composer-target]')?.textContent || ''))
+    await apart(composer, '[data-sw-picked-outline]', 'the heading')
+    await shot(page, 'ux-flow-4-composer-off-target')
+
+    // With something written, nothing that opens another thread replaces it:
+    // a row in the comments list, then a pin on the page.
+    await page.fill(input, 'Keep me')
+    const nudged = () => page.getAttribute(composer, 'data-sw-composer-nudged')
+    await page.click(`[data-sw-rail="comments"] [data-sw-comment="${other.id}"]`)
+    await page.waitForFunction((sel) => document.querySelector(sel)?.hasAttribute('data-sw-composer-nudged'), composer)
+    const first = await nudged()
+    assert.equal(await page.inputValue(input), 'Keep me')
+    assert.equal(new URL(page.url()).searchParams.get('c'), null, 'no thread was opened')
+    assert.equal(await page.locator('[data-sw-thread-popover]').count(), 0)
+    assert.equal(await page.evaluate(() => document.activeElement?.hasAttribute('data-sw-comment-input')), true)
+    await page.waitForTimeout(20)
+    await page.click(`[data-sw-pin="${other.id}"]`)
+    await page.waitForFunction(
+      ([sel, was]) => document.querySelector(sel)?.getAttribute('data-sw-composer-nudged') !== was,
+      [composer, first],
+    )
+    assert.equal(await page.inputValue(input), 'Keep me')
+    assert.equal(new URL(page.url()).searchParams.get('c'), null)
+    assert.match(await page.textContent('[data-sw-composer-target]'), /Heading:/, 'still on the heading')
+
+    // Posted: its thread opens at the pin, and keeps off the element too.
+    await page.focus(input)
+    await page.keyboard.press('Enter')
+    await page.waitForSelector('[data-sw-composer]', { state: 'detached' })
+    await page.waitForSelector('[data-sw-thread-popover]')
+    await page.waitForSelector('[data-sw-thread-target]', { state: 'attached' })
+    await apart('[data-sw-thread-popover]', '[data-sw-thread-target]', 'the thread')
+    // Off the other pin first: its hover card would take the Esc.
+    await page.mouse.move(...middle(cta))
+    await page.waitForTimeout(300)
+    await page.keyboard.press('Escape')
+    await page.waitForSelector('[data-sw-thread-popover]', { state: 'detached' })
+
+    // An empty comment still makes way: the pin opens its thread.
+    await page.mouse.click(...middle(cta))
+    await page.waitForSelector(`${composer} ${input}`)
+    await page.click(`[data-sw-pin="${other.id}"]`)
+    await page.waitForSelector(`[data-sw-thread-popover="${other.id}"]`)
+    assert.equal(await page.locator(composer).count(), 0)
+    await page.mouse.move(...middle(heading))
+    await page.waitForTimeout(300)
+    await page.keyboard.press('Escape')
+    await page.waitForSelector('[data-sw-thread-popover]', { state: 'detached' })
+
+    // Drawing with the bar over the top of the page: a stroke that starts
+    // under the bar (on its label) is drawn, the bar fades back for it and
+    // comes back after.
+    await page.mouse.click(...middle(cta))
+    await page.waitForSelector(`${composer} ${input}`)
+    await page.click(`${composer} [data-sw-draw-tool="pen"]`)
+    const bar = '[data-sw-draw-bar="composer"]'
+    await page.waitForSelector(bar)
+    await page.waitForSelector(`${frame} [data-sw-draw-input="pen"]`)
+    const title = await rect(page, `${bar} [data-sw-draw-bar-title]`)
+    const surface = await rect(page, frame)
+    const start = [title.left + title.width / 2, title.top + title.height / 2]
+    assert.ok(surface.top < start[1] && surface.left < start[0] && surface.right > start[0], 'the bar sits over the page here')
+    await page.mouse.move(...start)
+    await page.mouse.down()
+    await page.mouse.move(start[0] + 40, start[1] + 60, { steps: 4 })
+    await page.waitForSelector(`${bar}[data-sw-draw-bar-stroking]`)
+    assert.ok(Number(await page.$eval(bar, (node) => getComputedStyle(node).opacity)) < 1, 'the bar fades back during a stroke')
+    await page.mouse.move(start[0] + 120, start[1] + 20, { steps: 4 })
+    await page.mouse.up()
+    await page.waitForSelector(`${bar} [data-sw-draw-count="1"]`)
+    await page.waitForSelector(`${bar}:not([data-sw-draw-bar-stroking])`)
+    await page.waitForFunction((sel) => getComputedStyle(document.querySelector(sel)).opacity === '1', bar)
+    // Its buttons still work.
+    await page.click(`${bar} [data-sw-draw-bar-done]`)
+    await page.waitForSelector(`${composer}:not([data-sw-stowed])`)
+    await page.waitForSelector(`${composer} [data-sw-draw-count="1"]`)
+
+    // Esc on a comment that holds a drawing asks first; Esc again keeps it.
+    await page.focus(input)
+    await page.keyboard.press('Escape')
+    await page.waitForSelector('[data-sw-composer-discard]')
+    assert.match(await page.textContent('[data-sw-composer-discard]'), /Discard this comment\?/)
+    await page.keyboard.press('Escape')
+    await page.waitForSelector('[data-sw-composer-discard]', { state: 'detached' })
+    assert.equal(await page.locator(`${composer} [data-sw-draw-count="1"]`).count(), 1, 'kept, with its drawing')
+    await page.focus(input)
+    await page.keyboard.press('Escape')
+    await page.click('[data-sw-composer-discard-yes]')
+    await page.waitForSelector(composer, { state: 'detached' })
+    assert.equal(await page.getAttribute('[data-sw-canvas]', 'data-sw-comment-flow'), 'picking')
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})
+
+test('desktop: a thread or composer card is dragged by its header, stays on the canvas, and goes back to its pin when reopened', async () => {
+  const { context, page, errors } = await openBoard(DESKTOP)
+  try {
+    const robin = listComments(config, 'demo').find((item) => item.body === 'Covers feel heavy')
+    const card = `[data-sw-thread-popover="${robin.id}"]`
+    const handle = `${card} [data-sw-card-drag-handle]`
+    await page.click(`[data-sw-rail="comments"] [data-sw-comment="${robin.id}"]`)
+    await page.waitForSelector(card)
+    await settle(page)
+    await page.waitForTimeout(500)
+    const home = await rect(page, card)
+    assert.equal(await page.getAttribute(card, 'data-sw-card-moved'), null)
+    assert.equal(await page.$eval(handle, (node) => getComputedStyle(node).cursor), 'grab')
+
+    // Dragged by the title: the card moves by as much.
+    const title = await rect(page, `${card} [data-sw-thread-title]`)
+    const grip = [title.left + 30, title.top + title.height / 2]
+    const dragBy = async (dx, dy) => {
+      await page.mouse.move(...grip)
+      await page.mouse.down()
+      await page.mouse.move(grip[0] + dx / 2, grip[1] + dy / 2, { steps: 4 })
+      await page.mouse.move(grip[0] + dx, grip[1] + dy, { steps: 4 })
+      await page.mouse.up()
+      await page.waitForTimeout(200)
+    }
+    const canvas = await rect(page, '[data-sw-canvas]')
+    const dx = home.left - canvas.left > 200 ? -120 : 120
+    await dragBy(dx, 60)
+    await page.waitForSelector(`${card}[data-sw-card-moved="true"]`)
+    const moved = await rect(page, card)
+    assert.ok(
+      Math.abs(moved.left - (home.left + dx)) <= 2 && Math.abs(moved.top - (home.top + 60)) <= 2,
+      `moved to ${moved.left},${moved.top}`,
+    )
+    await shot(page, 'ux-flow-5-card-moved')
+    // It stays there while the canvas moves under it.
+    const pinBefore = await rect(page, `[data-sw-pin="${robin.id}"]`)
+    await page.mouse.move(canvas.left + 80, canvas.bottom - 160)
+    await page.mouse.wheel(0, 120)
+    await settle(page)
+    const pinAfter = await rect(page, `[data-sw-pin="${robin.id}"]`)
+    assert.ok(Math.abs(pinAfter.top - pinBefore.top) > 20, 'the canvas panned')
+    const stayed = await rect(page, card)
+    assert.ok(Math.abs(stayed.left - moved.left) <= 1 && Math.abs(stayed.top - moved.top) <= 1, 'the moved card stayed put')
+
+    // It cannot go under the side panel or off the canvas.
+    grip[0] = stayed.left + 36
+    grip[1] = stayed.top + (title.top - home.top) + title.height / 2
+    await dragBy(1200, -900)
+    const held = await rect(page, card)
+    assert.ok(held.right <= canvas.right && held.top >= canvas.top, `held inside the canvas: ${held.right} <= ${canvas.right}`)
+    assert.ok(held.right > canvas.right - 30, 'as far right as the canvas goes')
+    await dragBy(-3000, 3000)
+    const corner = await rect(page, card)
+    assert.ok(corner.left >= canvas.left && corner.bottom <= canvas.bottom, 'and inside its other corner')
+
+    // A press on a header button that does not move is still a click: Close.
+    await page.click(`${card} [data-sw-thread-close]`)
+    await page.waitForSelector(card, { state: 'detached' })
+    // Reopened: back at its pin, by the normal placement.
+    await page.mouse.move(canvas.left + 80, canvas.bottom - 160)
+    await page.mouse.wheel(0, -120)
+    await settle(page)
+    await page.click(`[data-sw-rail="comments"] [data-sw-comment="${robin.id}"]`)
+    await page.waitForSelector(card)
+    await settle(page)
+    await page.waitForTimeout(500)
+    assert.equal(await page.getAttribute(card, 'data-sw-card-moved'), null)
+    const again = await rect(page, card)
+    assert.ok(Math.abs(again.left - home.left) <= 2 && Math.abs(again.top - home.top) <= 2, `back at its pin: ${again.left},${again.top}`)
+    await page.click(`${card} [data-sw-thread-close]`)
+    await page.waitForSelector(card, { state: 'detached' })
+
+    // The new-comment composer moves the same way, by its first line, and typing still works after.
+    const frame = '[data-sw-frame="blog:desktop"]'
+    await page.keyboard.press('c')
+    await page.waitForSelector('[data-sw-canvas][data-sw-comment-flow="picking"]')
+    const blog = await rect(page, frame)
+    await page.mouse.click(blog.left + blog.width * 0.5, blog.top + blog.height * 0.7)
+    const composer = '[data-sw-composer-popover]'
+    await page.waitForSelector(`${composer} [data-sw-comment-input]`)
+    await page.waitForTimeout(500)
+    const before = await rect(page, composer)
+    const line = await rect(page, `${composer} [data-sw-card-drag-handle]`)
+    grip[0] = line.left + 40
+    grip[1] = line.top + line.height / 2
+    const side = before.left - canvas.left > 200 ? -90 : 90
+    await dragBy(side, 50)
+    await page.waitForSelector(`${composer}[data-sw-card-moved="true"]`)
+    const after = await rect(page, composer)
+    // Where it was dragged to, held inside the canvas (10 px in, 60 px above its foot).
+    const wantLeft = Math.max(canvas.left + 10, Math.min(canvas.right - 10 - before.width, before.left + side))
+    const wantTop = Math.max(canvas.top + 10, Math.min(canvas.bottom - 60 - before.height, before.top + 50))
+    assert.ok(
+      Math.abs(after.left - wantLeft) <= 2 && Math.abs(after.top - wantTop) <= 2,
+      `composer at ${after.left},${after.top}, wanted ${wantLeft},${wantTop} from ${before.left},${before.top}`,
+    )
+    assert.ok(Math.abs(after.left - before.left) > 20, 'it moved')
+    await page.fill('[data-sw-comment-input]', 'Typed after moving')
+    assert.equal(await page.inputValue('[data-sw-comment-input]'), 'Typed after moving')
+    await page.click('[data-sw-composer-cancel]')
+    await page.waitForSelector(composer, { state: 'detached' })
     assert.deepEqual(errors, [])
   } finally {
     await context.close()
