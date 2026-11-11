@@ -56,7 +56,7 @@ jobs:
       enabled: ${{ steps.gate.outputs.enabled }}
       artifact-url: ${{ steps.upload.outputs.artifact-url }}
     env:
-      SHAPEWALL: shapewall@0.3.0
+      SHAPEWALL: shapewall@0.3.1
       PLAYWRIGHT: playwright@1.64.1
       # Preview URL mode: the deploy preview of this pull request; empty for build and serve mode.
       # Netlify-style deploy previews:
@@ -192,7 +192,7 @@ jobs:
       contents: read
       pull-requests: write
     env:
-      SHAPEWALL: shapewall@0.3.0
+      SHAPEWALL: shapewall@0.3.1
     steps:
       - uses: actions/setup-node@v4
         with:
