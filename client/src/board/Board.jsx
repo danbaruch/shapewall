@@ -1295,6 +1295,14 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                     canComment={canComment}
                     readyKeys={readyKeys}
                     setCommentMode={setCommentMode}
+                    selectText={
+                      selectingKey && wide
+                        ? {
+                            title: `${targetTitle(splitFrameKey(selectingKey).targetId)} · ${viewportLabel(splitFrameKey(selectingKey).viewport)}`,
+                            onDone: () => setSelectingKey(null),
+                          }
+                        : null
+                    }
                     composing={commentState === 'composing' ? draftTarget : null}
                     onCancelDraft={() => (busy ? null : setDraft(null))}
                     showLinks={showLinks}
@@ -1386,6 +1394,8 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                     {wide && draft && !modalOpen ? (
                       <ComposerPopover
                         point={pinPoint(layout.targets, draft)}
+                        // Re-aimed at another spot: a card that was dragged goes back to its pin.
+                        resetKey={`${draft.pageId}|${draft.viewport}|${draft.x}|${draft.y}`}
                         stowed={drawingOn}
                         onClose={() => (busy ? null : setDraft(null))}
                         onEscape={() => {

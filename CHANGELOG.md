@@ -19,6 +19,14 @@ and the project uses [Semantic Versioning](https://semver.org/).
   row in the comments list, a link to a comment or pressing C leaves it open (the box nudges); before, each of those dropped it
   without a word. An empty one makes way as before. Esc still cancels, but when the comment holds a drawing or images it asks
   first ("Discard this comment?"); Cancel never asks.
+- Scrolling and zooming the board always work over a live page, and Ctrl/Cmd+wheel or a trackpad pinch never zooms the whole
+  browser tab while the pointer is on the board. The cause was "Select text": once turned on for a page it gave that page the
+  mouse for good, wheel included, with nothing on screen saying so (comment mode hid the problem). Select text now has two visible
+  steps: on, and the board still scrolls and zooms over the page; click the page and it takes the mouse so you can select and
+  copy, until the pointer leaves it or you press Esc. A note at the top says which step you are at, with Done. Ctrl/Cmd+wheel over
+  the bars floating on the canvas zooms the board too, and over an open comment card it no longer zooms the browser.
+- Esc closes the open thread first, also while the mouse rests on a pin and its preview is showing. A comment card you moved and
+  then re-aimed at another element (while still empty) goes back beside its new pin.
 - Drawing is clearly a mode. A bar at the top says "Drawing on Home · Desktop" and holds the tools, the inks, Undo, Clear and a
   Done button; the page you draw on is framed and the other pages step back; no element outlines appear under the pen. Entering it
   no longer moves the view (it did, to fit the page) unless the page is mostly off screen or drawn too small to draw on, and then

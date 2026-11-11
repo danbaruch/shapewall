@@ -526,9 +526,10 @@ test('desktop: the composer keeps off its element, a written comment is never re
     await page.waitForSelector('[data-sw-thread-popover]')
     await page.waitForSelector('[data-sw-thread-target]', { state: 'attached' })
     await apart('[data-sw-thread-popover]', '[data-sw-thread-target]', 'the thread')
-    // Off the other pin first: its hover card would take the Esc.
-    await page.mouse.move(...middle(cta))
-    await page.waitForTimeout(300)
+    // With the mouse resting on another pin (its preview is up), Esc still
+    // closes the thread first.
+    await page.hover(`[data-sw-pin="${other.id}"]`)
+    await page.waitForSelector(`[data-sw-pin-preview="${other.id}"]`)
     await page.keyboard.press('Escape')
     await page.waitForSelector('[data-sw-thread-popover]', { state: 'detached' })
 
@@ -688,10 +689,117 @@ test('desktop: a thread or composer card is dragged by its header, stays on the 
       `composer at ${after.left},${after.top}, wanted ${wantLeft},${wantTop} from ${before.left},${before.top}`,
     )
     assert.ok(Math.abs(after.left - before.left) > 20, 'it moved')
+    // Still empty and re-aimed at another spot: back to the normal place at the new pin.
+    await page.mouse.click(blog.left + blog.width * 0.4, blog.top + blog.height * 0.3)
+    await page.waitForSelector(`${composer}:not([data-sw-card-moved])`)
     await page.fill('[data-sw-comment-input]', 'Typed after moving')
     assert.equal(await page.inputValue('[data-sw-comment-input]'), 'Typed after moving')
     await page.click('[data-sw-composer-cancel]')
     await page.waitForSelector(composer, { state: 'detached' })
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})
+
+test("desktop: over a live page the wheel is always the board's; Select text hands the mouse to the page only after a click, and says so", async () => {
+  const { context, page, errors } = await openBoard(DESKTOP)
+  try {
+    const frame = '[data-sw-frame="pricing:desktop"]'
+    await page.click(frame)
+    await page.click('[data-sw-open-live="pricing|desktop"]')
+    await page.waitForSelector(`${frame}[data-sw-live="ready"]`, { timeout: 15000 })
+    await settle(page)
+    assert.equal(await page.getAttribute('[data-sw-comment-mode]', 'aria-pressed'), 'false')
+    const camera = () =>
+      page.$eval('.react-flow__viewport', (node) => {
+        const [, x, y, zoom] = /translate\(([-\d.]+)px, ([-\d.]+)px\) scale\(([-\d.]+)\)/.exec(node.style.transform)
+        return { x: Number(x), y: Number(y), zoom: Number(zoom) }
+      })
+    const browserZoom = () => page.evaluate(() => [window.devicePixelRatio, window.visualViewport.scale, window.innerWidth])
+    const untouched = await browserZoom()
+    const canvas = await rect(page, '[data-sw-canvas]')
+    const shown = await rect(page, frame)
+    // A point on the live page, well inside the canvas.
+    const at = [Math.max(shown.left, canvas.left) + 260, Math.max(shown.top, canvas.top) + 300]
+    const ctrlWheel = async (delta) => {
+      await page.keyboard.down('Control')
+      await page.mouse.wheel(0, delta)
+      await page.keyboard.up('Control')
+      await settle(page)
+    }
+    // Both work over the page, and the browser's own zoom is left alone.
+    const boardHasTheWheel = async (label) => {
+      await page.mouse.move(...at)
+      const start = await camera()
+      await page.mouse.wheel(0, 60)
+      await settle(page)
+      const panned = await camera()
+      assert.ok(Math.abs(panned.y - (start.y - 60)) < 2 && panned.zoom === start.zoom, `${label}: a plain wheel pans the board`)
+      await ctrlWheel(-100)
+      const zoomed = await camera()
+      assert.ok(zoomed.zoom > panned.zoom, `${label}: Ctrl+wheel zooms the board (${panned.zoom} -> ${zoomed.zoom})`)
+      assert.deepEqual(await browserZoom(), untouched, `${label}: the browser's zoom did not change`)
+      // Back where it was, for the next round.
+      await ctrlWheel(100)
+      await page.mouse.wheel(0, -60)
+      await settle(page)
+    }
+    await boardHasTheWheel('comment mode off')
+    await page.mouse.click(...at)
+    await boardHasTheWheel('after a click on the live page')
+
+    // Select text, step one (armed): the note says so, and the wheel is still the board's.
+    if (await page.locator('[data-sw-frame-bar-toggle]').count()) await page.click('[data-sw-frame-bar-toggle]')
+    await page.click('[data-sw-select-text]')
+    await page.waitForSelector('[data-sw-select-text-note="armed"]')
+    assert.match(await page.textContent('[data-sw-select-text-note]'), /Select text is on for Pricing · Desktop: click the page/)
+    assert.equal(await page.getAttribute(frame, 'data-sw-select-text-state'), 'armed')
+    assert.equal(await page.$eval(`${frame} iframe`, (node) => getComputedStyle(node).pointerEvents), 'none')
+    await boardHasTheWheel('Select text on, before a click')
+
+    // Step two (reading): a click hands the mouse to the page, for selecting and copying.
+    await page.mouse.click(...at)
+    await page.waitForSelector('[data-sw-select-text-note="reading"]')
+    assert.equal(await page.getAttribute(frame, 'data-sw-select-text-state'), 'reading')
+    assert.notEqual(await page.$eval(`${frame} iframe`, (node) => getComputedStyle(node).pointerEvents), 'none')
+    assert.match(
+      await page.textContent('[data-sw-select-text-note]'),
+      /Selecting text on Pricing · Desktop\. Move the pointer off the page/,
+    )
+    // The page takes the mouse: a double click in it selects a word there
+    // (the frame is another origin, so the board itself cannot read it).
+    const heading = await liveElementBox(page, frame, 'h1')
+    await page.mouse.dblclick(heading.left + 30, (heading.top + heading.bottom) / 2)
+    assert.equal(
+      await page.evaluate((sel) => document.activeElement === document.querySelector(`${sel} iframe`), frame),
+      true,
+      'the page has focus',
+    )
+    const live = page.frames().find((item) => /pricing\.desktop\.html/.test(item.url()))
+    const picked = live ? await live.evaluate(() => String(window.getSelection())).catch(() => null) : null
+    if (picked !== null) assert.ok(picked.trim().length > 0, 'a word is selected in the live page')
+    await shot(page, 'ux-select-text-reading')
+
+    // The pointer leaves the page: armed again, and the wheel is the board's.
+    await page.mouse.move(canvas.right + 200, 400, { steps: 6 })
+    await page.waitForSelector('[data-sw-select-text-note="armed"]')
+    await boardHasTheWheel('Select text on, after reading and leaving the page')
+
+    // Done ends it.
+    await page.click('[data-sw-select-text-done]')
+    await page.waitForSelector('[data-sw-select-text-note]', { state: 'detached' })
+    assert.equal(await page.getAttribute(frame, 'data-sw-select-text-state'), null)
+
+    // Ctrl+wheel over a bar floating on the canvas zooms the board too.
+    const controls = await rect(page, '[data-sw-canvas] .react-flow__panel, [data-sw-zoom-controls]').catch(() => null)
+    if (controls) {
+      await page.mouse.move(controls.left + controls.width / 2, controls.top + controls.height / 2)
+      const start = await camera()
+      await ctrlWheel(-100)
+      assert.ok((await camera()).zoom > start.zoom, 'Ctrl+wheel over the zoom controls zooms the board')
+      assert.deepEqual(await browserZoom(), untouched)
+    }
     assert.deepEqual(errors, [])
   } finally {
     await context.close()
