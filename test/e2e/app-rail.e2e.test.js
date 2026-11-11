@@ -274,7 +274,9 @@ test('board: expanded, a Pages | Journeys switch replaces the heading; the tab i
     await page.click('[data-sw-views-journey="' + ids[1] + '"]')
     await page.waitForSelector(RAIL + ' [data-sw-sidebar-tab="journeys"] [data-sw-journey-dot]')
     assert.equal(await nav.getAttribute('data-sw-sidebar-nav'), 'pages', 'still on Pages')
-    assert.equal(await nav.locator('[data-sw-pages-filter]').getAttribute('placeholder'), 'Filter pages')
+    // Expanded, the board's search field sits above the tabs; the list has no filter of its own.
+    assert.equal(await nav.locator('[data-sw-pages-filter]').count(), 0)
+    assert.match(await page.textContent(RAIL + ' button[data-sw-palette-trigger]'), /Search the board/)
     assert.deepEqual(errors, [])
   } finally {
     await context.close()

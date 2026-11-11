@@ -172,6 +172,24 @@ test('desktop 1440: attach by picker and paste, draw a box and an arrow, post, t
     await drag(page, at(0.05, 0.08), at(0.3, 0.2))
     const afterBox = await page.locator(frame).boundingBox()
     assert.ok(Math.abs(afterBox.x - fitted.x) < 1 && Math.abs(afterBox.y - fitted.y) < 1, 'drawing did not pan the canvas')
+    // A drawing belongs to its page: drawn right up to (and past) the
+    // page's edge it stays inside the frame, which clips it.
+    await drag(page, at(0.6, 0.5), [fitted.x + fitted.width + 80, top + shown * 0.6])
+    await page.waitForSelector(`${bar} [data-sw-draw-count="2"]`)
+    const inside = await page.evaluate((sel) => {
+      const frameNode = document.querySelector(sel)
+      const box = frameNode.getBoundingClientRect()
+      const paths = [...frameNode.querySelectorAll('[data-sw-drawing="draft"] path')].map((path) => path.getBoundingClientRect())
+      return {
+        clipped: getComputedStyle(frameNode).overflow,
+        // Half the stroke's width may sit on the edge itself.
+        over: Math.max(...paths.map((item) => item.right - box.right)),
+      }
+    }, frame)
+    assert.equal(inside.clipped, 'hidden')
+    assert.ok(inside.over <= 4, `the stroke ends at the page's edge (${inside.over})`)
+    await page.click(`${bar} [data-sw-draw-undo]`)
+    await page.waitForSelector(`${bar} [data-sw-draw-count="1"]`)
     // Arrow, in another ink, from the bar.
     await page.click(`${bar} [data-sw-draw-tool="arrow"]`)
     await page.click(`${bar} [data-sw-draw-ink="warn"]`)

@@ -169,8 +169,11 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   // comment (a click on the page, a pin, a row in the list, a link to a
   // comment, the palette, C): a comment with something in it is never
   // replaced. True when it was kept; the composer nudges to say so.
+  const reopenParked = useRef(null)
   const keepDraft = useCallback(() => {
     if (!draftFilled()) return false
+    // Put aside by a navigation (see leaveForNavigation): it comes back.
+    if (reopenParked.current?.()) return true
     nudgeComposer()
     return true
   }, [draftFilled])
@@ -425,6 +428,50 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     threadFromList.current = false
   }, [updateParams, wide])
 
+  // When an open comment closes on its own. A thread, and the new-comment
+  // composer, belong to the spot they point at:
+  //   they STAY while you look around it: pan, zoom, scroll the comments
+  //   list, open, close or resize the side panel, switch between Comments,
+  //   Agent and Checks, toggle comment mode;
+  //   they CLOSE when you deliberately go somewhere else or change what the
+  //   canvas shows: opening or stepping a journey (or building one), going
+  //   to a page from the sidebar, the search or a chat link, switching to a
+  //   screen size the comment is not on, entering compare, opening a page's
+  //   history from its card. "Go to this comment" is not leaving: it opens
+  //   that comment instead (focusComment).
+  // The thread's `c` leaves the address too, so a reload does not bring it
+  // back. An unsent reply is kept with its thread (replyDrafts.js), so
+  // closing is safe. A new comment with something in it is never dropped:
+  // it is put aside (`draftParked`) and a note on the canvas offers it back.
+  const [draftParked, setDraftParked] = useState(false)
+  useEffect(() => {
+    if (!draft) setDraftParked(false)
+  }, [draft])
+  const openThreadId = useRef(null)
+  openThreadId.current = selectedCommentId
+  const leaveForNavigation = useCallback(() => {
+    if (openThreadId.current) {
+      threadFromList.current = false
+      setThreadSheet(false)
+      updateParams({ c: null })
+    }
+    // Desktop only: on a phone the composer is a sheet over everything.
+    if (wide && draftRef.current) {
+      if (draftFilled()) setDraftParked(true)
+      else setDraft(null)
+    }
+  }, [draftFilled, updateParams, wide])
+  const reopenDraft = useCallback(() => {
+    const kept = draftRef.current
+    if (!kept) return
+    setDraftParked(false)
+    // Back to where it points, on the screen size it was made on.
+    if (mode !== 'all' && kept.viewport !== mode && viewports[kept.viewport]) {
+      updateParams({ vp: kept.viewport === defaultMode ? null : kept.viewport })
+    }
+    setPendingFocus({ pageId: kept.pageId, viewport: kept.viewport, x: kept.x, y: kept.y })
+  }, [defaultMode, mode, updateParams, viewports])
+
   // Pan to a comment's pin, switching viewport first when it is not on screen.
   // The switch is said out loud (a note with a way back, the toggle flashes),
   // so the board never changes viewport behind the user's back. On a phone
@@ -505,6 +552,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   // ---- Journeys ------------------------------------------------------------
   const { openJourney, closeJourney, goStep, chooseJourneyBranch, startBuilder, addBuilderStep, saveBuilder, removeJourney } =
     useJourneyActions({
+      onLeave: leaveForNavigation,
       boardId,
       view,
       updateParams,
@@ -564,9 +612,15 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     historyViewportParam && viewports[historyViewportParam] ? historyViewportParam : mode === 'all' ? viewportNames[0] : mode
   const closeHistory = useCallback(() => updateParams({ hist: null, hv: null }), [updateParams])
 
+  reopenParked.current = () => {
+    if (!draftParked) return false
+    reopenDraft()
+    return true
+  }
   const jumpToPage = (pageId) => {
     const target = layout.targets[pageId]
     if (!target) return
+    leaveForNavigation()
     setSettledZoom(null)
     const frame = target.frames[0]
     const shots = target.frames.map((item) => data?.captures?.[pageId]?.[item.viewport]).filter((image) => image?.thumb || image?.file)
@@ -652,7 +706,11 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     selectComment,
     openCluster,
     openChecks,
-    openHistory,
+    // From a page's card: the open comment makes way (its own History link keeps it).
+    openHistory: (...args) => {
+      leaveForNavigation()
+      openHistory(...args)
+    },
     updateParams,
     defaultMode,
     onImageError,
@@ -829,6 +887,9 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   }, [boardView])
 
   const setMode = (value) => {
+    // A screen size the open comment (or the one being written) is not on.
+    const pointsAt = selectedComment || draft
+    if (pointsAt && value !== 'all' && pointsAt.viewport !== value) leaveForNavigation()
     setViewportNotice(null)
     updateParams({ vp: value === defaultMode ? null : value })
   }
@@ -1057,7 +1118,13 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   // The step a comment is at, one at a time (data-sw-comment-flow on the
   // canvas): drawing (a tool is on), composing (a target is picked, the
   // composer is open), picking (comment mode, nothing picked yet), else off.
-  const commentState = drawingOn ? 'drawing' : draft && wide ? 'composing' : commentMode && canComment && !comparePair ? 'picking' : 'off'
+  const commentState = drawingOn
+    ? 'drawing'
+    : draft && wide && !draftParked
+      ? 'composing'
+      : commentMode && canComment && !comparePair
+        ? 'picking'
+        : 'off'
   const toggleLinks = () => updateParams({ links: showLinks ? null : '1' })
   const toggleMinimap = () => {
     const next = !minimapOn
@@ -1121,6 +1188,10 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
       if (frame) boardContext.onFocusFrame(id, frame.viewport)
     })
 
+  const toggleCompareLeaving = () => {
+    if (!comparePair) leaveForNavigation()
+    toggleCompare()
+  }
   // Board actions in the command palette.
   const paletteActions = boardPaletteActions({
     canComment,
@@ -1133,7 +1204,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     showLinks,
     toggleLinks,
     canCompare,
-    toggleCompare,
+    toggleCompare: toggleCompareLeaving,
     wide,
     fitBoard,
     minimapOn,
@@ -1173,7 +1244,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     brokenLinks,
     canCompare,
     comparePair,
-    toggleCompare,
+    toggleCompare: toggleCompareLeaving,
     settingsAvailable,
     openSettings,
     capture,
@@ -1207,6 +1278,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
               setShareOpen={setShareOpen}
               expanded={sidebarOpen}
               onToggle={toggleSidebar}
+              openPalette={() => setPaletteOpen(true)}
               quiet={drawingOn}
               pages={
                 data
@@ -1244,7 +1316,6 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
               canComment={canComment}
               commentMode={commentMode}
               setCommentMode={setCommentMode}
-              openPalette={() => setPaletteOpen(true)}
               minimapOn={minimapOn}
               toggleMinimap={toggleMinimap}
               linksTip={linksTip}
@@ -1327,6 +1398,11 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                         : null
                     }
                     composing={commentState === 'composing' ? draftTarget : null}
+                    parkedDraft={
+                      draft && draftParked
+                        ? { title: targetTitle(draft.pageId), onReopen: reopenDraft, onDiscard: () => setDraft(null) }
+                        : null
+                    }
                     onCancelDraft={() => (busy ? null : setDraft(null))}
                     showLinks={showLinks}
                     activePage={activePage}
@@ -1398,7 +1474,10 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                     <Background gap={40} size={1} />
                     <FocusedFrameBar
                       onChecks={canChecks ? openChecks : null}
-                      onHistory={openHistory}
+                      onHistory={(...args) => {
+                        leaveForNavigation()
+                        openHistory(...args)
+                      }}
                       historyCountFor={(pageId) => historyCount(data?.versions, pageId)}
                       focusedKey={drawingOn ? null : focusedKey}
                       layout={layout}
@@ -1414,7 +1493,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                       onCapture={canCapture && !comparePair ? (pageId) => startCapture(null, [pageId]) : null}
                       captureBusy={busy || Boolean(capture?.running)}
                     />
-                    {wide && draft && !modalOpen ? (
+                    {wide && draft && !draftParked && !modalOpen ? (
                       <ComposerPopover
                         point={pinPoint(layout.targets, draft)}
                         // Re-aimed at another spot: a card that was dragged goes back to its pin.

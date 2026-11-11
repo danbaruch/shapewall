@@ -121,7 +121,7 @@ sidebar's width, on the Chrome layer (above the canvas and the comment thread, b
 keep their tooltip. Only the panel button and Ctrl/Cmd+B expand the sidebar. The hover timing and height rules are in
 `components/rail-flyout.js`. A rail icon can carry a dot (`dot`): the Journeys icon has one while a journey is open. On the board the
 expanded sidebar puts a segmented `Tabs` switch, "Pages 26 | Journeys 6" with the counts as quiet text, where a single heading would
-be, and shows the page tree (filter "Filter pages") or the journeys list (filter "Filter journeys", only past eight); the tab is
+be, and shows the board's search field over the page tree or the journeys list (filter "Filter journeys", only past eight); the tab is
 kept per browser (`board/SidebarNav.jsx`).
 
 App-level pieces outside the kit, in `client/src/components/`: `ProfileMenu` (the avatar menu: account items, the console's workspace
@@ -132,23 +132,25 @@ scrolling keeps momentum and `scrollIntoView` on phones).
 
 ## The board toolbar
 
-On desktop the toolbar has three zones holding four groups, the way canvas tools lay it out. Left, identity: the board switcher
-with the capture status dot (its tooltip says when the pages were captured); then, after a hairline, the view controls: the
-screen-size switch, Views (the journeys and what the canvas shows; an open journey's name and a clear button take its place on the
-button) and, on a local board, Capture with its status. Centre, find: the "Go to page or journey" box, centred on the toolbar
-itself, 240 to 320 px wide. Right, act and open panels: the viewer note, Comment (the primary action and the one accent control:
-`soft` while comment mode is off, filled `default` with `aria-pressed="true"` while it is on, agreeing with the comment-mode
-banner); then, after a hairline, the Comments, Agent and Checks toggles on one track (`Toggle variant="segment"`: the open panel's
-toggle is the raised chip, exactly like the chosen screen size, none while the panel is closed), then Agent settings. One look
-for every control but the name and Comment: a quiet 32 px box with the same radius, hairline and tint, either a single button or a
-track whose chosen option is the raised chip. Zones are 20 px apart, controls inside a zone 6 px; the two hairlines go once the
-screen sizes are icons. When it gets narrow, `client/src/board/toolbarFit.js` drops words in a
-fixed order (search to an icon, the panel toggles, Views (an open journey's name shortens first), then the screen-size toggle to icons with tooltips) and the board name
-truncates a little at each step, never below about 8 characters. With a journey open its name matters more than the search: the
-search is an icon from the start and the name takes the left zone's room, in full up to about 280 px; the icon leaves the centre line
-before the name truncates, and only when the zones no longer fit side by side do the steps go on (the name keeps at least 128 px, then
-96, then Views becomes an icon). Its full name is the button's accessible name and is in its tooltip. Accessible names, shortcuts and
-tooltips never change.
+On desktop the toolbar has two zones with the room between them, the way canvas tools lay it out. Left, identity: the board
+switcher with the capture status dot (its tooltip says when the pages were captured); then, after a hairline, the view controls: the
+screen-size switch, Views (the journeys and what the canvas shows) and, on a local board, Capture with its status. Right, act and
+open panels: the viewer note, Comment (the primary action and the one accent control: `soft` while comment mode is off, filled
+`default` with `aria-pressed="true"` while it is on, agreeing with the comment-mode banner); then, after a hairline, the Comments,
+Agent and Checks toggles on one track (`Toggle variant="segment"`: the open panel's toggle is the raised chip, exactly like the
+chosen screen size, none while the panel is closed), then Agent settings. One look for every control but the name and Comment: a
+quiet 32 px box with the same radius, hairline and tint, either a single button or a track whose chosen option is the raised chip.
+Comments carries its count as a pill at its right end, and Agent carries the board's agent activity in the same place and size: a
+dot for one agent, a count for more, accent while working (a slow `breathe`, the same as a working pin, never outside the button),
+the attention colour when an agent needs a person, green for a moment when the last one finishes.
+
+Search is not in the toolbar. It is the field at the top of the expanded sidebar ("Search the board" with its
+Ctrl/Cmd+K hint) and an icon in the collapsed rail; both open the command palette, as the shortcut does from anywhere. So the bar
+keeps its shape whatever is open: an open journey shows as the state of the Views button in place (its name, truncated past 240 px,
+and a clear button), and nothing else moves or collapses for it. When it gets narrow, `client/src/board/toolbarFit.js` drops words
+in a fixed order (the panel toggles, Views (an open journey's name shortens first), then the screen-size toggle to icons with
+tooltips, where the hairlines go too) and the board name truncates a little at each step, never below about 8 characters.
+Accessible names, shortcuts and tooltips never change.
 `test/toolbar-fit.test.js` checks the order and that nothing overlaps from a 1024 px window with the widest sidebar up. The phone
 toolbar is a separate compact bar. `ToggleGroup` options take a `tooltip` for icon-only labels.
 

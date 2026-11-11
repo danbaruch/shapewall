@@ -14,6 +14,7 @@ export function CanvasNotes({
   composing = null,
   onCancelDraft,
   selectText = null,
+  parkedDraft = null,
   showLinks,
   activePage,
   shownSteps,
@@ -154,6 +155,30 @@ export function CanvasNotes({
           >
             <X size={14} aria-hidden="true" />
           </IconButton>
+        </div>
+      ) : null}
+      {parkedDraft ? (
+        // A new comment with something in it was put aside when the board
+        // went somewhere else: it is offered back, never dropped.
+        <div
+          className="pointer-events-auto flex w-max max-w-full items-center gap-1 rounded-full border border-line bg-surface py-0.5 pr-0.5 pl-3 text-xs font-medium text-fg shadow-pop"
+          role="status"
+          data-sw-draft-kept="true"
+        >
+          <MessageSquarePlus size={13} className="mr-1 shrink-0 text-accent" aria-hidden="true" />
+          <span className="min-w-0 truncate">Draft kept for {parkedDraft.title}</span>
+          <Button
+            size="xs"
+            variant="soft"
+            className="ml-1 shrink-0 rounded-full"
+            onClick={parkedDraft.onReopen}
+            data-sw-draft-reopen="true"
+          >
+            Reopen
+          </Button>
+          <Button size="xs" variant="ghost" className="shrink-0 rounded-full" onClick={parkedDraft.onDiscard} data-sw-draft-discard="true">
+            Discard
+          </Button>
         </div>
       ) : null}
       {viewportNotice ? (

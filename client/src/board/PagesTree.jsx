@@ -44,17 +44,21 @@ export function PagesTree({ groups, comments, activePage, onPage, bare = false }
           Pages <span className="ml-1 font-normal tabular">{total}</span>
         </p>
       )}
-      <div className="pb-2">
-        <Input
-          size="sm"
-          icon={Search}
-          value={query}
-          onChange={(event) => setQuery(event.target.value.slice(0, 80))}
-          placeholder="Filter pages"
-          aria-label="Filter pages"
-          data-sw-pages-filter="true"
-        />
-      </div>
+      {/* The expanded sidebar has the board's search above its tabs (BoardRail.jsx): one field there, not two.
+          The collapsed rail's flyout keeps this filter for its own list. */}
+      {bare ? null : (
+        <div className="pb-2">
+          <Input
+            size="sm"
+            icon={Search}
+            value={query}
+            onChange={(event) => setQuery(event.target.value.slice(0, 80))}
+            placeholder="Filter pages"
+            aria-label="Filter pages"
+            data-sw-pages-filter="true"
+          />
+        </div>
+      )}
       <div className="pb-2">
         {shown.map((item) => {
           const closed = folded.has(item.group) && !needle
