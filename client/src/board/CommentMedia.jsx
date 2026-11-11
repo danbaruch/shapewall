@@ -4,16 +4,18 @@
 // thread); and the phone's full-sheet page to draw on.
 import { useEffect, useRef, useState } from 'react'
 import { ArrowUpRight, Brush, ChevronLeft, ChevronRight, ImagePlus, Loader2, Square, Trash2, Undo2, X } from 'lucide-react'
-import { Button, Dialog, IconButton } from '../components/ui'
+import { Button, Dialog, IconButton, Tooltip } from '../components/ui'
+import { KeyTip } from './KeyTip'
 import { commentFileUrl } from '../lib/api'
 import { cn } from '../lib/utils'
 import { COMMENT_IMAGES_MAX, IMAGE_ACCEPT, imagesFrom } from './commentImages'
 import { DRAWING_INKS, INK_LABELS, drawing, finishShape, pointIn, shapePaths, useDrawing } from './drawing'
 
+// `start`: what a click on the tool does from a composer or a reply box.
 const TOOLS = [
-  { id: 'box', label: 'Box', icon: Square },
-  { id: 'arrow', label: 'Arrow', icon: ArrowUpRight },
-  { id: 'pen', label: 'Pen', icon: Brush },
+  { id: 'box', label: 'Box', start: 'Draw a box on the page', icon: Square },
+  { id: 'arrow', label: 'Arrow', start: 'Draw an arrow on the page', icon: ArrowUpRight },
+  { id: 'pen', label: 'Pen', start: 'Draw freehand on the page', icon: Brush },
 ]
 const INK_CLASS = { accent: 'bg-accent', bad: 'bg-bad', warn: 'bg-warn' }
 const INK_STROKE = { accent: 'var(--accent)', bad: 'var(--bad)', warn: 'var(--warn)' }
@@ -58,8 +60,12 @@ function DrawInput({ tool, ink, width, height, className, children }) {
   const points = useRef([])
   const box = useRef(null)
   const point = (event) => pointIn(box.current.getBoundingClientRect(), event)
+  // While a stroke is being made the drawing bar fades back and lets the
+  // pointer through (DrawBar), so the pen can cross the strip it sits on.
+  useEffect(() => () => drawing.set({ stroking: false }), [])
   const end = (event, keep) => {
     if (!points.current.length) return
+    drawing.set({ stroking: false })
     event.currentTarget.releasePointerCapture?.(event.pointerId)
     const shape = keep ? finishShape(tool, ink, points.current) : null
     points.current = []
@@ -75,6 +81,7 @@ function DrawInput({ tool, ink, width, height, className, children }) {
         event.preventDefault()
         event.stopPropagation()
         event.currentTarget.setPointerCapture?.(event.pointerId)
+        drawing.set({ stroking: true })
         points.current = [point(event)]
         setLive({ tool, ink, width: 4, points: [points.current[0], points.current[0]] })
       }}
@@ -148,7 +155,9 @@ const Divider = ({ touch }) => <span className={cn('h-4 w-px shrink-0 bg-line', 
 // then); `leading` sits first in the row (the composer's attach button).
 // `compact` (a composer or reply box): only the tools until a tool is
 // picked or a shape is drawn. `showCount` false: the count shows elsewhere.
-export function DrawTools({ owner, touch, onTool = null, leading = null, compact = false, showCount = true, className }) {
+// `bar`: the drawing bar itself, where a tool is always on (its tooltips
+// name the tool; in a composer they say what a click starts).
+export function DrawTools({ owner, touch, onTool = null, leading = null, compact = false, showCount = true, bar = false, className }) {
   const mine = useDrawing((value) => (value?.owner === owner ? value : null))
   useEscapeLeavesTool(Boolean(mine?.tool))
   const count = mine?.shapes.length || 0
@@ -166,6 +175,12 @@ export function DrawTools({ owner, touch, onTool = null, leading = null, compact
           <Divider touch={touch} />
         </>
       ) : null}
+      {compact && !full ? (
+        // Nothing drawn yet: say what these three buttons start.
+        <span className="shrink-0 pr-1 pl-0.5 text-caption text-faint" aria-hidden="true" data-sw-draw-label="true">
+          Draw
+        </span>
+      ) : null}
       {TOOLS.map((tool) => {
         const on = mine?.tool === tool.id
         return (
@@ -175,8 +190,8 @@ export function DrawTools({ owner, touch, onTool = null, leading = null, compact
             variant={on ? 'soft' : 'ghost'}
             aria-pressed={on}
             className={cn(on && 'ring-1 ring-accent/50')}
-            label={on ? `${tool.label}: on. Draw on the page, Esc stops` : `Draw a ${tool.label.toLowerCase()} on the page`}
-            tooltip={on && !touch ? `${tool.label} (Esc stops drawing)` : tool.label}
+            label={on ? `${tool.label}: on. Draw on the page, Esc stops` : tool.start}
+            tooltip={bar || on ? tool.label : tool.start}
             onClick={() => {
               drawing.set({ tool: on ? null : tool.id })
               if (!on) onTool?.(tool.id)
@@ -255,20 +270,45 @@ export function ShapeCount({ count, className }) {
 }
 
 // Desktop, while a tool is on: the composer or thread steps aside and this
-// small bar, docked at the top of the canvas, holds the tools. Done (or
-// Escape) brings the composer back with the text, images and drawing.
-export function DrawBar({ owner }) {
+// bar, docked at the top of the canvas, says what is going on ("Drawing on
+// Home · Desktop") and holds the tools. Done (or Escape) goes one step back:
+// the composer or the reply box, with its text, images and the drawing.
+// The bar can sit over the top of the page being drawn on (the camera is
+// not moved for it), so it never blocks the pen: only its buttons take the
+// pointer, a stroke can start on its label or between its buttons, and
+// while a stroke is being made the whole bar fades back and lets go.
+export function DrawBar({ owner, title }) {
+  const back = owner === 'composer' ? 'your comment' : 'your reply'
+  const stroking = useDrawing((value) => Boolean(value?.stroking))
   return (
     <div
-      className="pointer-events-auto flex max-w-full items-center gap-1 rounded-full border border-line bg-surface py-1 pr-1 pl-2 shadow-pop"
+      className={cn(
+        'pointer-events-none flex max-w-full items-center gap-2 rounded-xl border border-accent/50 bg-surface py-1 pr-1 pl-3 shadow-pop ring-2 ring-accent/15 transition-opacity duration-(--motion-fast) motion-reduce:transition-none',
+        stroking ? 'opacity-25 [&_button]:pointer-events-none' : '[&_button]:pointer-events-auto',
+      )}
+      data-sw-draw-bar-stroking={stroking ? 'true' : undefined}
       role="toolbar"
-      aria-label="Drawing on the page"
+      aria-label={title ? `Drawing on ${title}` : 'Drawing on the page'}
       data-sw-draw-bar={owner}
     >
-      <DrawTools owner={owner} touch={false} />
-      <Button size="xs" className="ml-1 shrink-0 rounded-full" onClick={() => drawing.set({ tool: null })} data-sw-draw-bar-done="true">
-        Done (Esc)
-      </Button>
+      <p className="flex min-w-0 items-center gap-1.5 text-xs font-semibold text-fg" data-sw-draw-bar-title="true">
+        <Brush size={14} className="shrink-0 text-accent" aria-hidden="true" />
+        <span className="truncate">{title ? `Drawing on ${title}` : 'Drawing on the page'}</span>
+      </p>
+      <span className="h-5 w-px shrink-0 bg-line" aria-hidden="true" />
+      <DrawTools owner={owner} touch={false} bar />
+      <Tooltip content={<KeyTip label={`Back to ${back}`} keys={['Esc']} />} side="bottom">
+        <Button
+          size="xs"
+          variant="default"
+          className="ml-1 shrink-0 px-3"
+          onClick={() => drawing.set({ tool: null })}
+          aria-label={`Done drawing: back to ${back}`}
+          data-sw-draw-bar-done="true"
+        >
+          Done
+        </Button>
+      </Tooltip>
     </div>
   )
 }

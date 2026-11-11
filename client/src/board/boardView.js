@@ -7,6 +7,8 @@
 //
 //   focusedKey       the selected frame, `${targetId}|${viewport}`
 //   selectingKey     the live frame in "select text" mode
+//   readingKey       that frame while its page has the mouse (it was
+//                    clicked; until the pointer leaves it, or Esc)
 //   settledZoom      the zoom once the camera stopped (hooks/useSettledZoom)
 //   selectedComment  the open thread's comment (its pin stays on its frame)
 //   draftSpot        where the comment being written goes
@@ -19,6 +21,7 @@ const NO_IDS = new Set()
 const INITIAL = {
   focusedKey: null,
   selectingKey: null,
+  readingKey: null,
   settledZoom: null,
   selectedComment: null,
   draftSpot: null,

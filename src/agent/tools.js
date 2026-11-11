@@ -149,8 +149,10 @@ export const OWNER_TOOLS = [
       required: ['id', 'body'],
       additionalProperties: false,
     },
-    async run({ config, board }, args) {
-      return (await addReply(config, board.id, args.id, { body: args.body, author: 'agent' })).comment
+    // Signed with the name the owner gave the agent, and marked as an agent's.
+    async run({ config, board, agentName }, args) {
+      const signed = agentName ? { author: agentName, agent: true } : { author: 'agent' }
+      return (await addReply(config, board.id, args.id, { body: args.body, ...signed })).comment
     },
   },
   {

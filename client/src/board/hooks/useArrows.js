@@ -47,6 +47,8 @@ export function useArrows({
         hideTargets: hiddenLinkTargets,
       }).map((edge) => ({
         ...edge,
+        // The page a journey arrow leads to, for the chip it ends in when that page is off screen.
+        ...(edge.id.startsWith('journey:') ? { data: { ...edge.data, toTitle: targetTitle(edge.target) } } : {}),
         ariaLabel: edge.id.startsWith('link:')
           ? `Link from ${targetTitle(edge.source)} to ${targetTitle(edge.target)}`
           : `Journey${edge.data?.label ? ` step ${edge.data.label}` : ''}: ${targetTitle(edge.source)} to ${targetTitle(edge.target)}`,

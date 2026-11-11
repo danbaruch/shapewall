@@ -44,6 +44,9 @@ test('a Windows .cmd wrapper, a hand-saved command, and an older server without 
     id: 'agent-command',
     label: 'Agent command',
     profile: { id: 'agent-command', label: 'Agent command', legacy: true, default: true },
+    // No built-in name to fall back to and no product mark: it keeps a name and shows initials.
+    builtIn: null,
+    logo: null,
   })
   assert.deepEqual(
     agentRows({ detected: [{ id: 'goose', label: 'goose', state: 'ready' }] }).map((row) => [row.id, row.kind]),

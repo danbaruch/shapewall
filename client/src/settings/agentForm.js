@@ -5,12 +5,16 @@
 // The form's fields from a /api/agent/settings view.
 export function formFrom(view) {
   const saved = view?.saved || {}
+  // The default command is a connected agent's: the name is that agent's,
+  // the one the Agents page's Edit changes (settings-routes.js POST /).
+  const named =
+    saved.backend === 'acp' && saved.acpCommand ? (saved.profiles || []).find((item) => item.acpCommand === saved.acpCommand) : null
   return {
     backend: saved.backend || view?.effective?.backend || 'openai-compatible',
     baseUrl: saved.baseUrl || '',
     model: saved.model || '',
     apiKeyEnv: saved.apiKeyEnv || '',
-    label: saved.label || '',
+    label: named?.label || saved.label || '',
     acpCommand: saved.acpCommand || '',
     keyHosts: saved.keyHosts || [],
     // null: not set here (an ACP agent says itself; an endpoint is assumed to take images).

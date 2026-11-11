@@ -1,11 +1,15 @@
-import { memo } from 'react'
+import { memo, useContext } from 'react'
 import { EdgeLabelRenderer, useInternalNode, useStore } from '@xyflow/react'
+import { ArrowRight } from 'lucide-react'
 import { cn } from '../lib/utils'
+import { BoardContext } from './boardContext'
+import { curveUntil, edgeExit } from './edgeExit'
 
 // Arrows between page cards: links found in the captures, and the steps of
 // a journey. They run from border to border of the two cards (not from
 // fixed handles), curve a little so a -> b and b -> a stay apart, and keep
-// their on-screen thickness at any zoom.
+// their on-screen thickness at any zoom. A journey arrow whose target is off
+// screen stops at the canvas's edge, fading, in a chip with the step's number.
 
 // Where the line from the rectangle's center towards (tx, ty) leaves it.
 function borderPoint(rect, tx, ty) {
@@ -46,7 +50,13 @@ export function edgeGeometry(source, target, { bend = 0.12, gap = 6 } = {}) {
   const tx = end.x - control.x
   const ty = end.y - control.y
   const tl = Math.hypot(tx, ty) || 1
-  return { path: `M ${start.x} ${start.y} Q ${control.x} ${control.y} ${end.x} ${end.y}`, end, dir: { x: tx / tl, y: ty / tl }, mid }
+  return {
+    path: `M ${start.x} ${start.y} Q ${control.x} ${control.y} ${end.x} ${end.y}`,
+    end,
+    dir: { x: tx / tl, y: ty / tl },
+    mid,
+    curve: { start, control, end },
+  }
 }
 
 const STYLES = {
@@ -66,11 +76,64 @@ export const FlowEdge = memo(function FlowEdge({ id, source, target, data }) {
   // Thickness in screen pixels: divide by the zoom (bucketed, so edges
   // re-render only when the bucket changes).
   const unit = useStore((state) => Math.min(40, Math.max(0.25, Math.round((1 / state.transform[2]) * 8) / 8)))
+  const board = useContext(BoardContext)
   const a = rectOf(sourceNode)
   const b = rectOf(targetNode)
-  if (!a || !b) return null
   const style = STYLES[data?.tone] || STYLES.idle
-  const { path, end, dir, mid } = edgeGeometry(a, b, { bend: data?.bend ?? 0.12, gap: 4 * unit })
+  const geometry = a && b ? edgeGeometry(a, b, { bend: data?.bend ?? 0.12, gap: 4 * unit }) : null
+  // A step of the open journey whose target is off screen: where the arrow
+  // leaves the canvas (edgeExit.js), as a string so the edge re-renders only
+  // when that point moves.
+  const leaving = data?.tone === 'journey' || data?.tone === 'done'
+  const exitKey = useStore((state) => {
+    if (!leaving || !geometry) return ''
+    const exit = edgeExit(geometry.curve, state.transform, { width: state.width, height: state.height })
+    const round = (value) => Math.round(value * 10) / 10
+    return exit ? [exit.t, round(exit.point.x), round(exit.point.y), round(exit.from.x), round(exit.from.y)].join(',') : ''
+  })
+  if (!geometry) return null
+  const { path, end, dir, mid, curve } = geometry
+  if (exitKey) {
+    const [t, x, y, fromX, fromY] = exitKey.split(',').map(Number)
+    const gradient = `sw-edge-fade-${String(id).replace(/[^a-zA-Z0-9_-]/g, '-')}`
+    const title = `Continues to step ${data.label}${data.toTitle ? `: ${data.toTitle}` : ''}`
+    return (
+      <g
+        className="sw-flow-edge"
+        data-sw-edge={id}
+        data-sw-edge-tone={data.tone}
+        data-sw-edge-leaves="true"
+        style={{ opacity: style.opacity }}
+      >
+        <defs>
+          <linearGradient id={gradient} gradientUnits="userSpaceOnUse" x1={fromX} y1={fromY} x2={x} y2={y}>
+            <stop offset="0" stopColor={style.stroke} stopOpacity="1" />
+            <stop offset="1" stopColor={style.stroke} stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <path d={curveUntil(curve, t)} fill="none" stroke={`url(#${gradient})`} strokeWidth={style.width * unit} strokeLinecap="round" />
+        <EdgeLabelRenderer>
+          <button
+            type="button"
+            // On touch screens its hit area is 44 px, like a pin's.
+            className="nodrag nopan pointer-events-auto absolute flex h-6 items-center gap-0.5 rounded-full border-2 border-surface bg-accent pr-1.5 pl-1 text-[11px] font-bold text-accent-fg shadow-pop outline-none hover:bg-accent/90 focus-visible:ring-2 focus-visible:ring-accent/50 [@media(pointer:coarse)]:after:absolute [@media(pointer:coarse)]:after:-inset-2.5 [@media(pointer:coarse)]:after:content-['']"
+            style={{ transform: `translate(-50%, -50%) translate(${x}px, ${y}px) scale(${Math.min(unit, 2)})` }}
+            title={title}
+            aria-label={title}
+            tabIndex={-1}
+            onClick={(event) => {
+              event.stopPropagation()
+              board?.onJourneyStep?.(Number(data.label))
+            }}
+            data-sw-edge-continues={data.label}
+          >
+            <ArrowRight size={12} aria-hidden="true" />
+            {data.label}
+          </button>
+        </EdgeLabelRenderer>
+      </g>
+    )
+  }
   const head = (style.width * 2.5 + 5) * unit
   const px = -dir.y
   const py = dir.x

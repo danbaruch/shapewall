@@ -22,6 +22,7 @@ import { SETTINGS_SOURCE } from './acp/command.js'
 import { DENIED_KEY_VARS, KEY_VAR_RE, validateAgent } from './config.js'
 import { cleanBranchPrefix } from './branch-mode.js'
 import { cleanBatchFixes } from './batch-fixes.js'
+import { IDENTITY_KEYS, cleanAgentName, isAgentIcon, isAgentTint } from './identity.js'
 
 export const SETTINGS_FILE_VAR = 'SHAPEWALL_AGENT_SETTINGS_FILE'
 export const ENTRY_KEYS = [
@@ -37,6 +38,12 @@ export const ENTRY_KEYS = [
   'branchMode',
   'branchPrefix',
   'batchFixes',
+  // How the agent looks on the board (identity.js): `icon` and `tint` here
+  // are the endpoint's; `fixedAgent` holds the name, icon and tint of an
+  // agent whose command a flag or the environment fixes.
+  'icon',
+  'tint',
+  'fixedAgent',
 ]
 const SECRET_KEYS = ['apiKey', 'key', 'token', 'secret', 'password']
 const ACP_COMMAND_MAX = 2000
@@ -45,6 +52,18 @@ const KEY_HOSTS_MAX = 20
 const HOST_RE = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*|\[[0-9a-f:.]+\])(?::\d{1,5})?$/
 
 const isObject = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+
+// The icon and tint of `source` into `target`, each checked (identity.js).
+function readLook(source, target, problems, where) {
+  if (source.icon !== undefined) {
+    if (!isAgentIcon(source.icon)) problems.push(`${where}icon: a built-in icon or an uploaded one`)
+    else target.icon = source.icon
+  }
+  if (source.tint !== undefined) {
+    if (!isAgentTint(source.tint)) problems.push(`${where}tint: one of the accent colours`)
+    else target.tint = source.tint
+  }
+}
 
 // The settings file, or null when there is no home to put it in.
 export function userSettingsFile(env = process.env) {
@@ -78,7 +97,7 @@ export function validateUserEntry(raw) {
       problems.push(`${key}: keys are never saved; set the key in the environment and name its variable in apiKeyEnv`)
     else if (!ENTRY_KEYS.includes(key) && key !== 'updatedAt') problems.push(`${key}: not an agent setting`)
   }
-  const { keyHosts, acpCommand, profiles, updatedAt, branchMode, branchPrefix, batchFixes, ...rest } = given
+  const { keyHosts, acpCommand, profiles, updatedAt, branchMode, branchPrefix, batchFixes, icon, tint, fixedAgent, ...rest } = given
   const fields = {}
   for (const key of ['backend', 'baseUrl', 'model', 'apiKeyEnv', 'label', 'vision']) if (rest[key] !== undefined) fields[key] = rest[key]
   const agentProblems = []
@@ -130,7 +149,7 @@ export function validateUserEntry(raw) {
       for (const profile of profiles) {
         if (
           !isObject(profile) ||
-          Object.keys(profile).some((key) => !['id', 'label', 'acpCommand'].includes(key)) ||
+          Object.keys(profile).some((key) => !['id', 'label', 'acpCommand', 'icon', 'tint'].includes(key)) ||
           !/^[a-z][a-z0-9-]{0,39}$/.test(profile.id || '') ||
           profile.id === 'default' ||
           ids.has(profile.id) ||
@@ -144,10 +163,27 @@ export function validateUserEntry(raw) {
         }
         const validated = validateUserEntry({ acpCommand: profile.acpCommand })
         if (!validated.entry?.acpCommand) problems.push('profiles: each profile needs a valid ACP command')
-        else checkedProfiles.push({ id: profile.id, label: profile.label.trim(), acpCommand: validated.entry.acpCommand })
+        else {
+          const checkedProfile = { id: profile.id, label: profile.label.trim(), acpCommand: validated.entry.acpCommand }
+          readLook(profile, checkedProfile, problems, 'profiles: ')
+          checkedProfiles.push(checkedProfile)
+        }
         ids.add(profile.id)
       }
       if (checkedProfiles.length) entry.profiles = checkedProfiles
+    }
+  }
+  readLook({ icon, tint }, entry, problems, '')
+  if (fixedAgent !== undefined) {
+    if (!isObject(fixedAgent) || Object.keys(fixedAgent).some((key) => !IDENTITY_KEYS.includes(key))) {
+      problems.push('fixedAgent: { label, icon, tint }')
+    } else {
+      const fixed = {}
+      const { name, problem } = cleanAgentName(fixedAgent.label)
+      if (problem) problems.push(`fixedAgent.${problem.replace(/^name/, 'label')}`)
+      else if (name) fixed.label = name
+      readLook(fixedAgent, fixed, problems, 'fixedAgent.')
+      if (Object.keys(fixed).length) entry.fixedAgent = fixed
     }
   }
   // Agent branch mode (branch-mode.js): the agent works on a branch in a worktree.
@@ -206,6 +242,18 @@ export function legacyProfile(entry, known = []) {
   for (let n = 2; taken.has(id); n += 1) id = `${base}-${n}`
   const label = (agent?.label || entry.label || 'Agent command').slice(0, 80)
   return { id, label, acpCommand: entry.acpCommand }
+}
+
+// The name saved for one of this project's agents, or null when none is
+// saved (the caller then uses the agent's built-in name). `which`: "fixed"
+// (the agent a flag or the environment fixes), "default" (the default
+// connection) or a profile id.
+export function savedAgentName(root, which, env = process.env) {
+  const { entry } = userAgentEntry(root, env)
+  if (!entry) return null
+  if (which === 'fixed') return entry.fixedAgent?.label || null
+  if (which === 'default') return (profileForDefault(entry) || implicitDefault(entry))?.label || entry.label || null
+  return (entry.profiles || []).find((profile) => profile.id === which)?.label || null
 }
 
 // A file anyone else may write could redirect your key or start a command:

@@ -101,10 +101,16 @@ export function describeAudit(entry) {
       return `created the project ${target}`
     case 'project_deleted':
       return `deleted the project ${d.name || target}`
+    case 'board_removed':
+      return `removed the board ${String(target || '')
+        .split('/')
+        .pop()}${d.project ? ` from ${d.project}` : ''}${d.comments ? ` (${count(d.comments, 'comment', 'comments')})` : ''}`
     case 'token_created':
       return `created the API token ${target}${Array.isArray(d.scopes) ? ` (${d.scopes.join(', ')})` : ''}${d.via === 'login' ? ' with shapewall login' : ''}`
     case 'token_revoked':
       return `revoked the API token ${target}`
+    case 'token_renamed':
+      return `renamed the API token ${d.from ? `${d.from} to ` : ''}${d.to || target}`
     case 'push_committed':
       return `pushed ${d.files ?? 'some'} files`
     case 'comment_resolved':

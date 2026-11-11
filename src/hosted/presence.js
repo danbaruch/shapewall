@@ -175,7 +175,7 @@ export function createPresenceHub({ events = null, limits = {}, now = () => Date
     const room = rooms.get(`${event.workspace}:${event.project}:${event.board}`)
     if (!room) return
     const comment = Number.isSafeInteger(event.comment) && event.comment > 0 ? event.comment : null
-    if (!comment && !['push.committed', 'comment.created'].includes(event.type)) return
+    if (!comment && !['push.committed', 'comment.created', 'board.removed'].includes(event.type)) return
     for (const peer of [...room.peers])
       if (peer.access.kind !== 'public' && live(peer)) send(peer, { type: 'invalidate', comment, sequence: event.sequence || 0 })
   })

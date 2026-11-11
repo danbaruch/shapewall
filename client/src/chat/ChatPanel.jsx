@@ -617,7 +617,11 @@ export default function ChatPanel({
           },
           onConnect: onOpenSettings,
           settingsHref: agentSettingsHref,
-          disabledReason: running ? 'Wait for the answer or stop it to switch' : null,
+          disabledReason: running
+            ? 'Wait for the answer or stop it to switch'
+            : agent?.state === 'testing' || profileChoice.options.some((option) => option.state === 'testing')
+              ? 'Wait for the connection test to finish to switch'
+              : null,
         }
       : null
   const showStarters = !running && !dictation.listening && !draft.trim() && !attachments.length && !sentIn.has(threadId) && !thread.loading
@@ -646,8 +650,8 @@ export default function ChatPanel({
   const agentOptions = useAgentOptions({
     boardId,
     threadId,
-    profileId: selectedThread?.profileId || 'default',
-    agentLabel: agent?.label || '',
+    // The agent itself: a chat on the default counts as the profile the default runs.
+    profileId: profileChoice.value || 'default',
     enabled: Boolean(onScreen && configured && selectedThread && ownerWrites && !needsOwner && !thread.loading),
     fresh: !messages.length,
     live: selectedThread?.options || null,

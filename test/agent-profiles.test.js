@@ -348,6 +348,8 @@ test(
         default: true,
         state: 'ready',
         loginHint: 'run `claude` in a terminal and use /login, or start the agent with `claude-agent-acp --cli` and use /login there',
+        // Its default icon: the product mark (src/agent/agent-logos.js).
+        logo: 'claude',
       },
     ])
     assert.equal(legacy.json.saved.profiles, undefined, 'nothing is rewritten by reading')
@@ -498,7 +500,14 @@ test('the saved endpoint (Other) can be the default, and a connected agent again
     b.env,
   )
   const before = await b.api('GET', '/api/agent/settings')
-  assert.deepEqual(before.json.endpoint, { label: 'local-model', model: 'local-model', host: '127.0.0.1:9', default: false })
+  assert.deepEqual(before.json.endpoint, {
+    label: 'local-model',
+    icon: null,
+    tint: null,
+    model: 'local-model',
+    host: '127.0.0.1:9',
+    default: false,
+  })
   assert.deepEqual(
     before.json.profiles.map((item) => [item.id, item.legacy || false, item.default]),
     [

@@ -159,10 +159,13 @@ export function useCanvasNavigation({ canvasRef, flow, minZoom, maxZoom, onRest,
     const onWheel = (event) => {
       if (event.target?.closest?.('.nowheel')) {
         // Pinch over a scrolling panel: stop the browser zooming the page.
-        if (event.ctrlKey) event.preventDefault()
+        if (event.ctrlKey || event.metaKey) event.preventDefault()
         return
       }
-      if (!inRenderer(event.target)) return
+      // Over a bar or a note floating on the canvas a plain wheel does
+      // nothing, and Ctrl/Cmd+wheel (a trackpad pinch) still zooms the board:
+      // anywhere on the canvas it is the board's, never the browser's zoom.
+      if (!inRenderer(event.target) && !(event.ctrlKey || event.metaKey)) return
       event.preventDefault()
       event.stopPropagation()
       const next = wheelViewport(flow.getViewport(), event, point(event), {
@@ -287,8 +290,16 @@ export function useCanvasNavigation({ canvasRef, flow, minZoom, maxZoom, onRest,
       if (!drag) hovering = false
     }
 
+    // A thread or a composer floats over the canvas but lives outside it (a
+    // portal): a pinch there must not zoom the browser tab either. Its own
+    // scrolling stays.
+    const onCardWheel = (event) => {
+      if (!(event.ctrlKey || event.metaKey)) return
+      if (event.target?.closest?.('[data-sw-thread-popover], [data-sw-composer-popover]')) event.preventDefault()
+    }
     const capture = { capture: true }
     const active = { capture: true, passive: false }
+    window.addEventListener('wheel', onCardWheel, active)
     canvas.addEventListener('wheel', onWheel, active)
     canvas.addEventListener('gesturestart', onGestureStart, active)
     canvas.addEventListener('gesturechange', onGestureChange, active)
@@ -313,6 +324,7 @@ export function useCanvasNavigation({ canvasRef, flow, minZoom, maxZoom, onRest,
       if (nav.moving) rest()
       setSpace(false)
       canvas.classList.remove('sw-panning')
+      window.removeEventListener('wheel', onCardWheel, active)
       canvas.removeEventListener('wheel', onWheel, active)
       canvas.removeEventListener('gesturestart', onGestureStart, active)
       canvas.removeEventListener('gesturechange', onGestureChange, active)

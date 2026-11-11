@@ -131,7 +131,8 @@ test(
       // Reload takes the saved settings and drops the note.
       await agents.click('[data-sw-settings-stale-reload]')
       await agents.waitForSelector('[data-sw-settings-stale]', { state: 'detached' })
-      assert.equal(await label.inputValue(), '')
+      // The name field shows the name of the agent the form saves: the default, a connected agent.
+      assert.equal(await label.inputValue(), 'Codex')
       assert.equal(await board.evaluate(() => window.swSyncMarker), 1, 'the board never reloaded')
       assert.deepEqual(errors, [])
     } finally {

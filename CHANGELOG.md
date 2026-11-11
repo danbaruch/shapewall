@@ -3,6 +3,114 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## 0.3.3 - 2026-11-11
+
+- Commenting goes one step at a time, and the board always says which step you are at. Pick: in comment mode the element under the
+  mouse is outlined, now named in plain words ("Heading: Notes that keep up...", "Button: Start free") in place of a CSS selector.
+  Write: once you click, picking is over. Nothing else lights up, the cursor is a normal one again, the element you picked keeps a
+  solid outline, and the banner reads "Commenting on ..." with Cancel. A click elsewhere moves the comment only while it is still
+  empty; once it has text, an image or a drawing it stays where it is and the composer nudges. Esc goes back exactly one step:
+  from drawing to the comment, from the comment to picking, from picking out of comment mode.
+- The comment box and an open thread keep off the element they are about: beside the pin on the side away from it, else below
+  it, else above it. They only overlap it when it fills the canvas. Both cards can be dragged by their top line (the "#17 Home"
+  row of a thread, the "Home · Desktop · ..." line of a new comment) to see the page or a drawing under them; a moved card stays
+  where you put it while the canvas moves, never goes under the side panel, and is back at its pin the next time it opens.
+- A comment you are writing is never thrown away by a stray click. With text, an image or a drawing in it, clicking another pin, a
+  row in the comments list, a link to a comment or pressing C leaves it open (the box nudges); before, each of those dropped it
+  without a word. An empty one makes way as before. Esc still cancels, but when the comment holds a drawing or images it asks
+  first ("Discard this comment?"); Cancel never asks.
+- Scrolling and zooming the board always work over a live page, and Ctrl/Cmd+wheel or a trackpad pinch never zooms the whole
+  browser tab while the pointer is on the board. The cause was "Select text": once turned on for a page it gave that page the
+  mouse for good, wheel included, with nothing on screen saying so (comment mode hid the problem). Select text now has two visible
+  steps: on, and the board still scrolls and zooms over the page; click the page and it takes the mouse so you can select and
+  copy, until the pointer leaves it or you press Esc. A note at the top says which step you are at, with Done. Ctrl/Cmd+wheel over
+  the bars floating on the canvas zooms the board too, and over an open comment card it no longer zooms the browser.
+- You can see that agents are working without hunting for the comment. The Agent button in the toolbar (the Comments button on
+  boards without an agent chat, the More button on a phone) carries a mark for the whole board: a pulsing dot while an agent
+  works, with the number when more than one does; a still dot in the attention colour when an agent needs your OK or a comment
+  waits on a person; a green dot for a moment when the last one finishes. Its tooltip says it in words ("2 agents working: #17
+  Home, #21 Settings", "Agent needs your OK on #21 Settings"), and when exactly one thing needs you, the button opens it. With
+  reduced motion the dot does not pulse.
+- Hosted boards say whether an agent is listening. A comment is only picked up while some machine runs `shapewall watch --remote`
+  (or an MCP client) for the project; the same tooltip now reads "Agent online: <token name>" or "No agent is listening: comments
+  wait until one is", and a thread whose comment was sent to the agent says so too when none is. The server keeps this in memory
+  only (the token's name and when it was last heard, for 90 seconds), and tells members, never share link guests.
+- Search moved out of the top bar into the sidebar: one field at the top of the expanded sidebar ("Search pages, journeys,
+  comments", Ctrl/Cmd+K), a search icon when the sidebar is collapsed. It opens the same search as before, and Ctrl/Cmd+K still
+  works from anywhere. The expanded sidebar no longer has a separate "Filter pages" box under its tabs. The top bar now keeps its
+  shape: opening a journey only changes the Views button, in place (the journey's name and a clear button), where before the
+  search box collapsed to a lone icon in the middle of the bar.
+- An open comment closes when you go somewhere else: opening or stepping through a journey, going to a page from the search or the
+  sidebar, switching to a screen size the comment is not on, entering compare, opening a page's history from its card. It stays
+  open while you pan, zoom, use the comments list, or switch between Comments, Agent and Checks. The address drops the comment
+  too, so a reload does not reopen it; a reply you had not sent is still there when you open the thread again. A new comment with
+  something in it is never lost this way: it is put aside and a note offers it back ("Draft kept for Home", Reopen or Discard).
+- The agent activity mark on the Agent button sits where the Comments count does, at the right end of the button, in the same size:
+  a dot for one agent, a number for more. Its motion is a slow, small breath that stays inside the button (a working pin breathes
+  the same way); the expanding ring is gone.
+- A journey arrow that leads to a step off screen no longer runs out of the canvas like a stray line: it fades out at the edge and
+  ends in a small chip with the step's number ("continues to step 2: Sign in" on hover); click the chip to go there. Arrows whose
+  both ends are on screen are unchanged.
+- A link that names both a comment and a journey opens the comment: its thread at its pin, the journey left out of the address.
+- Keyboard focus is visible again on the controls that had lost their ring: the Comments, Agent and Checks buttons, the sidebar's
+  items and its expand button, the page list, the journey bar's steps and more. They showed a tooltip but no outline when reached
+  with Tab.
+- A comment picked in the search (Ctrl/Cmd+K) puts the keyboard in its thread, so Tab reaches the reply box. Screen readers hear
+  "Draw an arrow on the page" and "Draw freehand on the page" (they said "Draw a arrow", "Draw a pen").
+- Esc closes the open thread first, also while the mouse rests on a pin and its preview is showing. A comment card you moved and
+  then re-aimed at another element (while still empty) goes back beside its new pin.
+- Drawing is clearly a mode. A bar at the top says "Drawing on Home · Desktop" and holds the tools, the inks, Undo, Clear and a
+  Done button; the page you draw on is framed and the other pages step back; no element outlines appear under the pen. Entering it
+  no longer moves the view (it did, to fit the page) unless the page is mostly off screen or drawn too small to draw on, and then
+  the view goes back when you are done. Scrolling, Space and middle-drag still move the canvas while you draw. Done and Esc return
+  to your comment with the drawing attached. In the composer the three tools are labelled "Draw". The bar never blocks the pen:
+  where it sits over the top of the page a stroke can start on its label or between its buttons, and it fades back while you draw.
+- The side panel (comments, agent, checks) can be dragged no wider than 560 px or 40% of the window, whichever is less. Before, it
+  could take 60% of the window and cover most of the board; a wider width remembered from before comes back inside the limit. The
+  comment box and an open thread stay on the canvas beside their pin, also when the panel is wide: before, they could end up on top
+  of the panel.
+- The board toolbar is one system: every control except the board name and Comment is the same quiet box (same height, corner,
+  hairline), and Comments, Agent and Checks sit on one track like the screen sizes, with the open panel raised. Thin dividers
+  separate the groups. Comment stays the one accent button. The status dot's tooltip says what it means ("Pages captured 3 hours
+  ago").
+- Hosted server: one board of a project can be removed. On the project page each board has "Remove board" (admins and owners, with
+  a passkey check, behind a confirmation that names the board). It deletes that board's captures, history, comments and comment
+  images from the server and frees their storage; the project, its other boards, tokens and share links stay. Pushing the same
+  board id again brings the captures back but not the comments. Before, a board pushed by mistake stayed until the whole project
+  was deleted.
+- Hosted console, "Sign in a terminal": if you close the passkey check that Approve asks for, the page now says the login was not
+  approved and why. Before, Approve looked as if it had done nothing.
+- Agents have a name you choose and an icon. Connect asks for the name: the **Allow this?** confirmation has a Name field, filled in
+  with "Claude Code", "Codex" and so on, so you can call it "Harry" before it is connected, and an optional icon. Later, **Edit** on
+  each connected agent's row of the Agents page changes the name, the icon and a colour. Saving restarts nothing, runs no test, and
+  works while the agent is answering. Before, the name could only be typed in the full settings form, the one-click Connect gave no
+  chance to name an agent, and every agent showed two initials.
+- Agent icons: twelve built-in avatars drawn for Shapewall, or a picture you upload (PNG, JPEG or WebP up to 2 MB, cropped to a
+  square, re-encoded by the server and kept next to your agent settings; never an SVG). A connected Claude Code, Codex (the OpenAI
+  mark), goose or Gemini CLI shows its product mark until you pick something else, and **Default** goes back to it; other agents
+  and endpoints show initials. Sources and terms of the marks are in `THIRD_PARTY.md`.
+- The name and icon show wherever the agent does: the Agents page and its default list, the chat header and its menu, the agent's
+  answers, **Fix with <name>**, the batch of fixes and the `shapewall serve` start line. An agent's replies on a comment thread are
+  signed with its name and marked as an agent's; replies written before keep the name they had. A command fixed with `--agent-acp`
+  or `SHAPEWALL_AGENT_ACP` can be renamed too: the flag decides which agent runs, not what it is called. Only the owner on the
+  machine that runs Shapewall can change any of it.
+- Right after Connect, while a real agent is still starting for its connection test (several seconds; the test may take up to
+  30), nothing answers "A connection test is running" any more. A name or an icon saved in that window is kept: for the agent
+  being connected, Save waits ("Saving when the connection test finishes...") and then saves, or says that the agent did not
+  connect; for another agent it saves at once and survives a failed test. The Agents page and the chat header say "Testing the
+  connection" instead of looking finished; Test connection, Remove, Connect and the default are off with the reason until the
+  test ends; a chat message or a Fix sent meanwhile says "Waiting for the connection test to finish" and then runs (the board now
+  waits 45 seconds, longer than a test can last; it gave up after 30). Before, renaming an agent within seconds of connecting it
+  failed with "A connection test is running. Wait for it, then save."
+- Renaming an agent keeps the model and effort it last used: new chats start from them as before. They were remembered under the
+  agent's name, so a rename started them over.
+- Hosted server: a token name over 60 characters is refused when the token is made ("Token name: 1 to 60 characters."), as on a
+  rename. Before, it was cut to 60 without a word.
+- Hosted server: an API token can be renamed on the token lists (admins and owners, like revoking it), so a watcher shows up as
+  "Harry" instead of "laptop (shapewall login)". The token itself, its scopes and what it already wrote do not change.
+- Website contact page: the "Thanks, your message is on its way" heading no longer shows a focus rectangle, and the form's spacing
+  is even (the character count sits beside the hint, above the field).
+
 ## 0.3.2 - 2026-11-11
 
 - A comment or a reply can be a drawing or images with no text. Before, Post and Send stayed off until you typed something, and

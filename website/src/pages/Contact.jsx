@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Send } from 'lucide-react'
+import { Check, Send } from 'lucide-react'
 import { PageHeader } from '../components/page.jsx'
 import { Button, Container, cx } from '../components/ui.jsx'
 import { GITHUB_URL } from '../routes.js'
@@ -143,13 +143,22 @@ function ContactForm() {
 
   if (sent)
     return (
-      <div role="status" className="rounded-2xl border border-line bg-card p-6 sm:p-8">
-        <h2 ref={thanks} tabIndex={-1} className="text-[22px] font-bold tracking-[-0.01em] text-ink">
-          Thanks, your message is on its way.
-        </h2>
-        <p className="mt-2 text-[15.5px] leading-7 text-slate">
-          {values.email.trim() ? 'If it needs an answer, the reply will go to the email you gave.' : 'Every message is read.'}
-        </p>
+      <div role="status" className="flex items-start gap-4 rounded-2xl border border-line bg-card p-6">
+        <span
+          className="mt-0.5 inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-wall-wash text-wall"
+          aria-hidden="true"
+        >
+          <Check className="size-5" />
+        </span>
+        <div className="min-w-0">
+          {/* Focus moves here so a screen reader reads it; the heading is not a control, so it shows no focus ring. */}
+          <h2 ref={thanks} tabIndex={-1} className="text-[20px] leading-7 font-bold tracking-[-0.01em] text-ink outline-none">
+            Thanks, your message is on its way.
+          </h2>
+          <p className="mt-1 text-[15px] leading-6 text-slate">
+            {values.email.trim() ? 'If it needs an answer, the reply will go to the email you gave.' : 'Every message is read.'}
+          </p>
+        </div>
       </div>
     )
 
@@ -157,10 +166,11 @@ function ContactForm() {
   const describe = (name, hint) => [hint, errors[name] && `${name}-error`].filter(Boolean).join(' ') || undefined
 
   return (
+    // One rhythm for every group: label, 4 px, hint, 8 px, control, 8 px, error; 28 px between groups.
     <form noValidate onSubmit={submit} aria-label="Contact" className="space-y-7">
       <fieldset>
         <legend className="text-[15px] font-semibold text-ink">What is this about?</legend>
-        <div className="mt-3 flex flex-wrap gap-2">
+        <div className="mt-2 flex flex-wrap gap-2">
           {KINDS.map((kind) => (
             <label
               key={kind.id}
@@ -187,9 +197,19 @@ function ContactForm() {
         <label htmlFor="contact-message" className="text-[15px] font-semibold text-ink">
           Message
         </label>
-        <p id="message-hint" className="mt-1 text-[13.5px] text-slate">
-          {MESSAGE_MIN} to {MESSAGE_MAX.toLocaleString('en-US')} characters.
-        </p>
+        {/* The hint and the running count share one line above the field, so nothing hangs under it and every
+            group ends on its control. */}
+        <div className="mt-1 flex items-baseline justify-between gap-4">
+          <p id="message-hint" className="text-[13.5px] leading-5 text-slate">
+            {MESSAGE_MIN} to {MESSAGE_MAX.toLocaleString('en-US')} characters.
+          </p>
+          <span
+            className={cx('shrink-0 text-[13px] leading-5 tabular-nums', length > MESSAGE_MAX ? 'font-medium text-danger' : 'text-faint')}
+            aria-hidden="true"
+          >
+            {length.toLocaleString('en-US')} / {MESSAGE_MAX.toLocaleString('en-US')}
+          </span>
+        </div>
         <textarea
           id="contact-message"
           ref={fields.message}
@@ -202,25 +222,18 @@ function ContactForm() {
           aria-describedby={describe('message', 'message-hint')}
           className={cx(fieldClass(errors.message), 'mt-2 resize-y')}
         />
-        <div className="mt-1.5 flex items-start justify-between gap-4">
-          {errors.message ? (
-            <p id="message-error" className="text-[14px] font-medium text-danger">
-              {errors.message}
-            </p>
-          ) : (
-            <span />
-          )}
-          <span className={cx('shrink-0 text-[13px] tabular-nums', length > MESSAGE_MAX ? 'text-danger' : 'text-faint')} aria-hidden="true">
-            {length.toLocaleString('en-US')} / {MESSAGE_MAX.toLocaleString('en-US')}
-          </span>
-        </div>
+        {errors.message ? (
+          <p id="message-error" className="mt-2 text-[14px] leading-5 font-medium text-danger">
+            {errors.message}
+          </p>
+        ) : null}
       </div>
 
       <div>
         <label htmlFor="contact-email" className="text-[15px] font-semibold text-ink">
           Email <span className="font-normal text-slate">(optional)</span>
         </label>
-        <p id="email-hint" className="mt-1 text-[13.5px] text-slate">
+        <p id="email-hint" className="mt-1 text-[13.5px] leading-5 text-slate">
           Only if you want a reply.
         </p>
         <input
@@ -237,7 +250,7 @@ function ContactForm() {
           className={cx(fieldClass(errors.email), 'mt-2')}
         />
         {errors.email ? (
-          <p id="email-error" className="mt-1.5 text-[14px] font-medium text-danger">
+          <p id="email-error" className="mt-2 text-[14px] leading-5 font-medium text-danger">
             {errors.email}
           </p>
         ) : null}
@@ -257,7 +270,7 @@ function ContactForm() {
         />
       </div>
 
-      <div className="flex flex-wrap items-center gap-4">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 pt-1">
         <Button type="submit" size="lg" disabled={sending}>
           <Send className="size-4" aria-hidden="true" />
           {sending ? 'Sending...' : 'Send'}

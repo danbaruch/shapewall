@@ -33,6 +33,7 @@ export const USER_GUIDES = [
   'docs/performance.md',
   'docs/starter-agent.md',
   'docs/updates.md',
+  'docs/where-to-run.md',
 ]
 
 export const USER_GUIDE_IMAGES = [
@@ -49,6 +50,8 @@ export const REQUIRED = [
   'package.json',
   'bin/shapewall.js',
   'src/cli.js',
+  // The agents' product marks, with their sources (THIRD_PARTY.md).
+  'src/agent/agent-logos.js',
   'src/hosted/LICENSE.md',
   'dist/client/index.html',
   'dist/console/console.html',

@@ -4,7 +4,8 @@
 // See components/app-rail.jsx.
 
 import { useEffect } from 'react'
-import { Building2, Files, LayoutDashboard, Route, Share2, UserRound } from 'lucide-react'
+import { Building2, Files, LayoutDashboard, Route, Search, Share2, UserRound } from 'lucide-react'
+import { PALETTE_KEY, PaletteTrigger } from './PageFinder'
 import { AppRail, rememberLastBoard } from '../components/app-rail'
 import { BoardProfile } from './BoardProfile'
 import { accountUrlFor } from './railLinks'
@@ -42,6 +43,9 @@ export function BoardRail({
   expanded,
   onToggle,
   pages,
+  // The board's search (the command palette): a field at the top of the
+  // expanded sidebar, an icon in the collapsed rail.
+  openPalette = null,
   // Drawing mode: the collapsed rail's flyouts stay shut (AppRail).
   quiet = false,
 }) {
@@ -54,7 +58,25 @@ export function BoardRail({
     if (!own) return
     rememberLastBoard(window.location.pathname + (boardParam ? '?board=' + encodeURIComponent(boardParam) : ''))
   }, [own, boardParam])
-  const items = boardRailItems({ info, localSettingsAvailable, setShareOpen })
+  const places = boardRailItems({ info, localSettingsAvailable, setShareOpen })
+  // Collapsed: search is the rail's second icon (expanded, it is the field
+  // above the page list, so it is not also a row of the menu).
+  const items =
+    openPalette && !expanded
+      ? [
+          places[0],
+          {
+            id: 'search',
+            label: `Search (${PALETTE_KEY})`,
+            icon: Search,
+            onSelect: openPalette,
+            'aria-haspopup': 'dialog',
+            'data-sw-page-jump': 'true',
+            'data-sw-palette-trigger': 'true',
+          },
+          ...places.slice(1),
+        ]
+      : places
   // Collapsed, the pages and the journeys are an icon each: hover one (or
   // click, tap or press Enter) for its list in a flyout beside the rail. A
   // choice there closes the flyout; only the panel button and Ctrl+B expand
@@ -125,6 +147,11 @@ export function BoardRail({
         />
       )}
     >
+      {openPalette && expanded ? (
+        <div className="pb-2">
+          <PaletteTrigger onOpen={openPalette} />
+        </div>
+      ) : null}
       {pages ? <SidebarNav {...pages} /> : null}
     </AppRail>
   )

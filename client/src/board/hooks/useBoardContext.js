@@ -88,11 +88,16 @@ export function useBoardContext(input) {
         }
         setFocusedKey(`${targetId}|${viewport}`)
       },
-      // A click in comment mode starts a comment there (moving the one being
-      // written keeps its text).
+      // A click in comment mode starts a comment there, or moves the one
+      // being written while it is still empty.
       onPin: (target) => {
         const state = now()
         const { layout, flow, canvasRef } = state
+        // A target is already picked and its comment has something in it
+        // (text, an image, a drawing): a click elsewhere never re-aims it.
+        // The composer nudges (keepDraft), so the click is not just swallowed.
+        // An empty draft moves to the new spot.
+        if (state.keepDraft()) return
         if (state.selectedCommentId) state.closeThread()
         // Phone: a tap on a page drawn small zooms to it first, so the page
         // can go live and the next tap pins to the element under the finger.
@@ -116,6 +121,10 @@ export function useBoardContext(input) {
       },
       onSelectComment: (comment) => now().selectComment(comment),
       onHoverComment: (id) => view.set({ hoveredId: id }),
+      // "Select text": the page of this frame has the mouse (or none has).
+      onReading: (key) => view.set({ readingKey: key }),
+      // The chip an off-screen journey arrow ends in: go to that step.
+      onJourneyStep: (step) => now().goStep(step),
       onOpenCluster: (targetId, viewport, items) => now().openCluster(targetId, viewport, items),
       onChecks: (...args) => now().openChecks(...args),
       onHistory: (pageId, viewport = null) => now().openHistory(pageId, viewport),
@@ -156,6 +165,8 @@ export function useBoardContext(input) {
       onFocusFrame: actions.onFocusFrame,
       onPin: actions.onPin,
       onSelectComment: actions.onSelectComment,
+      onReading: actions.onReading,
+      onJourneyStep: actions.onJourneyStep,
       onHoverComment: wide ? actions.onHoverComment : null,
       onOpenCluster: actions.onOpenCluster,
       onChecks: canChecks ? actions.onChecks : null,

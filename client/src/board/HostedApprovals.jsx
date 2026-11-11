@@ -10,8 +10,13 @@ export async function confirmHostedPasskey() {
   await consoleApi.post('/auth/reauth/verify', { response })
 }
 
-export function HostedApprovals({ boardId }) {
+// `onRows(rows)`: the board hears what is waiting (the toolbar's agent
+// activity counts an approval as "needs your OK").
+export function HostedApprovals({ boardId, onRows = null }) {
   const [rows, setRows] = useState([])
+  useEffect(() => {
+    onRows?.(rows)
+  }, [onRows, rows])
   const [budget, setBudget] = useState(null)
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)

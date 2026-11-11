@@ -114,6 +114,13 @@ Projects belong to a workspace, never to a person. Roles:
 
 The console shows this table on **Access, Roles** and next to every role picker.
 
+**Renaming a token.** An agent that watches a hosted board signs its comments and replies with its token's name (for a terminal
+login, "laptop (shapewall login)"). **Rename** on the token lists (the project page and **API tokens**) gives it a human name:
+`PATCH /api/workspaces/:ws/projects/:pid/tokens/:tid` with `{ "name": "..." }`, 1 to 60 characters, for the same people who may revoke
+it (admins and owners). The secret, the scopes and the expiry do not change; what the token already wrote keeps the old name; a
+revoked token is not renamed; the audit log records `token_renamed` with both names. Icons for hosted agents are not there yet: a
+token shows the robot avatar.
+
 **Invite links** hold a 32-byte token (stored hashed), a role, an expiry (1, 3, 7, 14 or 30 days; 7 by default), and work once. Opening
 one shows the workspace and role; a new person creates an account from it, an existing one joins with a click. The token sits in the
 URL fragment (`/invite#<token>`), and the setup link the same way (`/signup#setup=<code>`): browsers never send a fragment, so the token
@@ -296,6 +303,18 @@ The server treats every upload as untrusted, even from our CLI:
 - Cleaning runs in worker threads (2 at once, 32 waiting, 30 seconds and 512 MB each), never on the server's event loop; a token has at
   most 4 uploads in flight.
 - The manifest and variants are rebuilt field by field; the board definition is validated by the same code as a local config.
+- **Is an agent listening?** A comment sent to the agent is only picked up while some machine runs `shapewall watch --remote` (or
+  an MCP client) with a token of the project that has the `claim` scope. The server remembers, in memory only, when such a token
+  last called the API or held its event stream open; for 90 seconds after that the project has an agent online. Members who can
+  send comments to the agent see "Agent online: <token name>" or "No agent is listening" in the board's agent tooltip and on the
+  thread. Only the token's display name and the time are told, never to share link guests or public viewers, and nothing is stored:
+  after a restart it reads "not listening" until the agent's next call.
+- **Removing a board.** A board pushed by mistake, or one you retired, comes off the server on the project page: "Remove board"
+  on its row in the Boards list, for the same people who may delete the project (admins and owners, with a fresh passkey check).
+  It deletes that board's captures, page history, variants, checks, comments, replies and comment images, and frees their storage;
+  the project, its other boards, its tokens and its share links stay. A later push of the same board id starts a new board: the
+  captures are back, the comments are not. The audit log records who removed which board, and people who have the board open are
+  told at once (`board.removed` on the event stream). API: `DELETE /api/workspaces/:ws/projects/:pid/boards/:bid`.
 - Limits: 5000 files and 1 GB per push, 500 pages per board, 10 boards per project (checked again at commit), 20 pushes per hour per
   token, and 5 GB per workspace (committed boards plus open pushes). A push is open for an hour; after that it takes no more files and
   a sweep (at start and every 10 minutes) removes its staging folder, staging folders without a push, and board folders a commit left

@@ -1,5 +1,5 @@
-// /w/:ws/projects/:pid (admins): a project's boards, share links and API
-// tokens, and deleting it.
+// /w/:ws/projects/:pid (admins): a project's boards (and removing one),
+// share links and API tokens, and deleting it.
 
 import { useState } from 'react'
 import { ArrowLeft, ArrowUpRight, Globe, KeyRound, LayoutDashboard, Link2, Plus, Trash2 } from 'lucide-react'
@@ -25,6 +25,9 @@ export function ProjectPage({ projectId }) {
   const [tokenOpen, setTokenOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [makingPrivate, setMakingPrivate] = useState(false)
+  // The board (its id) the "Remove board" dialog is asking about.
+  const [removingBoard, setRemovingBoard] = useState(null)
+  const removeBoard = useAction()
   const remove = useAction()
   const toast = useToast()
 
@@ -39,6 +42,8 @@ export function ProjectPage({ projectId }) {
     )
   }
   const shareOn = data.workspace.settings.shareLinks
+  // The same people who may delete the project (the server checks again).
+  const canRemoveBoards = isAdmin
   const setPublic = (next) =>
     publicAction.run(async () => {
       await api.put(wsUrl(workspaceId, `/projects/${projectId}/public`), { public: next })
@@ -84,7 +89,7 @@ export function ProjectPage({ projectId }) {
           {project.boards.length ? (
             <ul className="divide-y divide-line">
               {project.boards.map((board) => (
-                <li key={board.id} className="flex flex-wrap items-center gap-3 px-4 py-3 text-sm sm:px-5">
+                <li key={board.id} className="flex flex-wrap items-center gap-3 px-4 py-3 text-sm sm:px-5" data-sw-project-board={board.id}>
                   <code className="font-mono text-[13px] text-fg">{board.id}</code>
                   <span className="text-xs text-muted">
                     {board.pushes} {board.pushes === 1 ? 'push' : 'pushes'} · last <Time value={board.pushedAt} />
@@ -96,6 +101,21 @@ export function ProjectPage({ projectId }) {
                   >
                     Open <ArrowUpRight size={14} aria-hidden="true" />
                   </a>
+                  {canRemoveBoards ? (
+                    <Button
+                      size="touch"
+                      variant="danger"
+                      className="lg:h-8"
+                      onClick={() => {
+                        removeBoard.setError(null)
+                        setRemovingBoard(board.id)
+                      }}
+                      aria-label={`Remove board ${board.id}`}
+                      data-sw-remove-board={board.id}
+                    >
+                      <Trash2 size={15} aria-hidden="true" /> Remove board
+                    </Button>
+                  ) : null}
                 </li>
               ))}
             </ul>
@@ -254,6 +274,31 @@ export function ProjectPage({ projectId }) {
             }
           >
             <p>This deletes every board, capture, comment, token and share link of the project. It cannot be undone.</p>
+          </ConfirmDialog>
+          {/* useAction asks for the passkey first when the sign-in is not fresh, then removes; any other
+              refusal shows in the dialog. */}
+          <ConfirmDialog
+            open={Boolean(removingBoard)}
+            onClose={() => setRemovingBoard(null)}
+            title={`Remove the board ${removingBoard || ''}?`}
+            confirmLabel="Remove board"
+            tone="danger"
+            busy={removeBoard.busy}
+            error={removeBoard.error}
+            onConfirm={() =>
+              removeBoard.run(async () => {
+                await api.delete(wsUrl(workspaceId, `/projects/${projectId}/boards/${removingBoard}`))
+                await reload()
+                toast(`Removed the board ${removingBoard}`)
+                setRemovingBoard(null)
+              })
+            }
+          >
+            <p data-sw-remove-board-note>
+              This deletes the captures, the page history and every comment of <code className="font-mono text-fg">{removingBoard}</code> on
+              this server. It cannot be undone. Pushing a board with the same id later brings its captures back, but not the comments.
+            </p>
+            <p className="mt-2">The project, its other boards, its tokens and its share links stay.</p>
           </ConfirmDialog>
           <ConfirmDialog
             open={makingPrivate}

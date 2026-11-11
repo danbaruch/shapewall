@@ -27,7 +27,9 @@ test('sendMessage waits out "test_running" and then streams the answer', async (
     'the same message each time',
   )
   assert.match(calls[0].url, /boards\/board\/threads\/thread-1\/messages$/)
+  // The wait is said once, as the answer's status, then the answer streams.
   assert.deepEqual(events, [
+    ['status', { text: 'Waiting for the connection test to finish' }],
     ['delta', { text: 'Hi' }],
     ['done', {}],
   ])

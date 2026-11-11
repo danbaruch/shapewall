@@ -13,6 +13,7 @@ import McpSetup from './McpSetup'
 import Disclosure from './Disclosure'
 import { STATE_DOT, STATE_TEXT } from './profiles'
 import { AgentPicker } from './AgentPicker'
+import { AgentFace, faceOf } from './agentIcons'
 import { DOCS_URL, QuickConnect } from './QuickConnect'
 import { SettingsHint } from '../settings/SettingsHint'
 
@@ -252,6 +253,13 @@ function agentTip(agent) {
   if (agent?.host) return `Messages go to ${agent.host}${agent.sendsKey ? ", with the server's API key" : ''}.`
   return null
 }
+// The agent's icon in the chip, when it has one (an avatar its owner chose
+// or a known agent's mark): a chip without one stays as it was.
+function ChipFace({ agent, label }) {
+  const face = faceOf(agent)
+  if (!face.icon && !face.logo && !face.tint) return null
+  return <AgentFace label={label} {...face} size="xs" />
+}
 // The chip, and with `picker` ({ options, value, onChoose, onConnect,
 // settingsHref, disabledReason }) the agent picker it opens. Its dot: the
 // turn (answering, waiting for you), else how the agent is doing.
@@ -288,6 +296,7 @@ export function AgentSwitch({ agent, state, picker, touch, className }) {
         data-sw-agent-health={health}
       >
         <span className={cn('h-2 w-2 shrink-0 rounded-full', dot)} aria-hidden="true" />
+        <ChipFace agent={current || agent} label={label} />
         <span className="min-w-0 truncate font-medium">{label}</span>
         {agent?.demo ? (
           <span className="shrink-0 text-faint" aria-hidden="true">
@@ -302,7 +311,9 @@ export function AgentSwitch({ agent, state, picker, touch, className }) {
 }
 
 export function AgentChip({ agent, state, className }) {
-  const info = AGENT_STATES[state] || AGENT_STATES.ready
+  // Its connection test runs: said in words, like the picker's chip.
+  const testing = agent?.state === 'testing' && (!state || state === 'ready')
+  const info = testing ? { dot: STATE_DOT.testing, text: STATE_TEXT.testing } : AGENT_STATES[state] || AGENT_STATES.ready
   const label = agent?.label || 'Agent'
   return (
     <Tooltip content={agentTip(agent)}>
@@ -318,6 +329,7 @@ export function AgentChip({ agent, state, className }) {
         aria-label={`${label}: ${info.text}`}
       >
         <span className={cn('h-2 w-2 shrink-0 rounded-full', info.dot)} aria-hidden="true" />
+        <ChipFace agent={agent} label={label} />
         <span className="min-w-0 truncate font-medium">{label}</span>
         {agent?.demo ? <span className="shrink-0 text-faint">demo</span> : null}
       </span>

@@ -110,7 +110,28 @@ function boundsOf(nodes) {
   return Number.isFinite(minX) ? { x: minX, y: minY, width: maxX - minX, height: maxY - minY } : null
 }
 
-// Drawing on a page (desktop): the frame in the canvas below the drawing bar
+// Whether a page can be drawn on as the camera stands, so drawing mode
+// leaves the view alone: `frameBox` (flow coordinates, the part with
+// content) at `viewport` inside the canvas `box`. No when it is drawn
+// narrower than DRAW_WIDTH_MIN, or when less than DRAW_SHOWN_MIN of it is on
+// screen (of the canvas instead, when the page is bigger than the canvas:
+// zoomed in, a canvas full of page is plenty to draw on).
+export const DRAW_SHOWN_MIN = 0.35
+export const DRAW_WIDTH_MIN = 240
+export function canDrawInPlace(frameBox, viewport, box) {
+  if (!frameBox?.width || !frameBox?.height || !box?.width || !box?.height || !viewport?.zoom) return true
+  const left = frameBox.x * viewport.zoom + viewport.x
+  const top = frameBox.y * viewport.zoom + viewport.y
+  const width = frameBox.width * viewport.zoom
+  const height = frameBox.height * viewport.zoom
+  if (width < DRAW_WIDTH_MIN) return false
+  const shownW = Math.max(0, Math.min(left + width, box.width) - Math.max(left, 0))
+  const shownH = Math.max(0, Math.min(top + height, box.height) - Math.max(top, 0))
+  return (shownW * shownH) / Math.min(width * height, box.width * box.height) >= DRAW_SHOWN_MIN
+}
+
+// Drawing on a page (desktop), when it has to be fitted first (see
+// canDrawInPlace): the frame in the canvas below the drawing bar
 // and the card's title row (`top` screen pixels) and above the zoom
 // controls, at a size to draw on (`frameBox` is the part with content).
 // The whole of it fits, so the bar never covers it; only a page so long that

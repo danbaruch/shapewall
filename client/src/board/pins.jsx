@@ -94,7 +94,7 @@ function WorkingRing({ dot = false }) {
   return (
     <span
       className={cn(
-        'pointer-events-none absolute rounded-full ring-2 ring-accent motion-safe:animate-ping',
+        'pointer-events-none absolute rounded-full ring-2 ring-accent motion-safe:animate-breathe',
         dot ? '-inset-1' : '-inset-1.5',
       )}
       aria-hidden="true"
@@ -244,7 +244,7 @@ export function Pin({ comment, position, scale, compact = false, selected, unrea
   return (
     <HoverCard>
       <HoverCardTrigger asChild>{pin}</HoverCardTrigger>
-      <HoverCardContent side={spot.flipX ? 'left' : 'right'} align="start">
+      <HoverCardContent side={spot.flipX ? 'left' : 'right'} align="start" data-sw-pin-preview={comment.id}>
         <PinPreview comment={comment} moved={moved} />
       </HoverCardContent>
     </HoverCard>

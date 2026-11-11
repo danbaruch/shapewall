@@ -11,7 +11,9 @@
 //   installs or downloads anything); Not installed (where to get it).
 // - The default agent for new chats and fixes, saved through
 //   POST /api/agent/settings/profiles/:id/default.
-// - Per connected agent: Test connection, Remove, and how to sign in.
+// - Per connected agent: Test connection, Edit (its name and icon,
+//   AgentIdentity.jsx), Remove, and how to sign in. Connect asks for the
+//   name in its confirmation.
 // - Other: an OpenAI-compatible endpoint, in the existing form.
 //
 // Connecting and removing run commands as this machine's owner, so they need
@@ -22,16 +24,18 @@
 // command there answers `{ demoNote }`, shown as a neutral note on its row.
 
 import { useCallback, useEffect, useState } from 'react'
-import { AlertTriangle, Bot, ExternalLink, Globe, Lock, Plug, RefreshCw, Trash2 } from 'lucide-react'
+import { AlertTriangle, Bot, ExternalLink, Globe, Lock, Pencil, Plug, RefreshCw, Trash2 } from 'lucide-react'
 import { api, forgetSettingsToken } from '../lib/api'
 import { useAgentsChanged } from '../lib/agentEvents'
 import { cn } from '../lib/utils'
 import { Badge, Button, Dialog, Spinner } from '../components/ui'
 import { AgentMark } from '../chat/AgentPicker'
+import { faceOf } from '../chat/agentIcons'
 import { pickerProfiles, signInHint, stateLine } from '../chat/profiles'
 import { DOCS_URL } from '../chat/QuickConnect'
 import { ConfirmDialog, CopyLine, TestResult } from './AgentSettingsParts'
 import { agentRows } from './agentRows'
+import { AgentIdentityDialog, ConnectIdentity, identityValue, nameProblem, saveIdentity } from './AgentIdentity'
 
 // Where to get an agent that is not on this machine: one line and its docs.
 const GET_IT = {
@@ -89,6 +93,10 @@ export function AgentsCard({
   const [confirm, setConfirm] = useState(null)
   const [results, setResults] = useState({})
   const [endpointOpen, setEndpointOpen] = useState(false)
+  // The agent whose name and icon are being edited (AgentIdentityDialog), or null.
+  const [editing, setEditing] = useState(null)
+  // The name and icon typed in the Connect confirmation.
+  const [naming, setNaming] = useState(identityValue())
   useEffect(() => onBusy?.(Boolean(busy)), [busy, onBusy])
 
   const load = useCallback(async () => {
@@ -122,6 +130,15 @@ export function AgentsCard({
     if (!busy) load()
   }, !given)
   const view = given || loaded
+  // A connection test this page did not start (the page was reloaded while a
+  // Connect was testing, or another tab runs it): look again until it ends,
+  // also where the "agents changed" events do not reach.
+  const testRunning = Boolean(view?.testing)
+  useEffect(() => {
+    if (!testRunning || given || busy) return undefined
+    const timer = window.setInterval(load, 1500)
+    return () => window.clearInterval(timer)
+  }, [testRunning, given, busy, load])
   const changed = async (next) => {
     if (next && !given) setLoaded(next)
     else if (!given) await load()
@@ -142,13 +159,28 @@ export function AgentsCard({
     setBusy(agentId)
     setResults((current) => ({ ...current, [agentId]: null }))
     try {
-      const next = await api.post('/api/agent/settings/profiles/connect', { agentId, confirm: hash })
+      // With the confirmation come the name and icon typed in it.
+      const identity = hash
+        ? {
+            name: naming.name.trim(),
+            ...(naming.icon && !naming.png ? { icon: naming.icon } : {}),
+            ...(naming.tint ? { tint: naming.tint } : {}),
+          }
+        : {}
+      let next = await api.post('/api/agent/settings/profiles/connect', { agentId, confirm: hash, ...identity })
       if (noted(agentId, next)) return
       if (next.confirm) {
+        // The Name field starts with the agent's built-in name.
+        setNaming(identityValue({ label: rows.find((row) => row.id === agentId)?.label || '' }))
         setConfirm({ agentId, items: next.confirm, hash: next.confirmHash })
         return
       }
       setConfirm(null)
+      // A picture chosen in the confirmation is saved once the agent is there.
+      if (next.connected && hash && naming.png) {
+        const withIcon = await saveIdentity(agentId, {}, { ...naming, name: '', tint: null }).catch(() => null)
+        if (withIcon) next = { ...next, ...withIcon }
+      }
       setResults((current) => ({ ...current, [agentId]: next.result }))
       if (next.connected) await changed(next)
     } catch (error) {
@@ -214,12 +246,39 @@ export function AgentsCard({
   const rows = agentRows(view)
   const connected = rows.filter((row) => row.kind === 'connected')
   const choices = [
-    ...connected.map((row) => ({ id: row.id, label: row.label, state: row.profile.state, isDefault: row.profile.default })),
+    ...connected.map((row) => ({
+      id: row.id,
+      label: row.label,
+      state: row.profile.state,
+      isDefault: row.profile.default,
+      ...faceOf(row.profile),
+      logo: row.logo,
+    })),
     ...(view.endpoint
-      ? [{ id: 'endpoint', label: view.endpoint.label, state: view.endpoint.state, isDefault: view.endpoint.default }]
+      ? [
+          {
+            id: 'endpoint',
+            label: view.endpoint.label,
+            state: view.endpoint.state,
+            isDefault: view.endpoint.default,
+            ...faceOf(view.endpoint),
+          },
+        ]
       : []),
   ]
-  const off = Boolean(busy) || disabled || overridden
+  // While a connection test runs the server takes no other change of this
+  // page (it would answer "a connection test is running"): those controls
+  // wait for it, and say why. Edit does not: a name is saved through it.
+  const testing = view.testing || null
+  const testedLabel = testing ? rows.find((row) => row.id === testing.id)?.label || view.effective?.label || 'the agent' : null
+  const waitReason = testing ? `Testing the connection to ${testedLabel}. This is available when the test finishes.` : undefined
+  const off = Boolean(busy) || disabled || overridden || Boolean(testing)
+  // The name and icon are display only: Edit stays on when a flag fixes the command.
+  const editOff = Boolean(busy) || disabled
+  const confirming = confirm ? rows.find((row) => row.id === confirm.agentId) : null
+  // The agent a flag or the environment fixes: it has no row of its own, so
+  // it gets one, with Edit only.
+  const fixed = overridden && view.effective?.configured ? { id: 'default', label: view.effective.label, ...faceOf(view.effective) } : null
 
   return (
     <div className="space-y-6" data-sw-agents-card={view.demo ? 'demo' : 'editable'} data-sw-native-profiles>
@@ -233,6 +292,19 @@ export function AgentsCard({
           <span>
             This is a demo with sample agents on a pretend computer. The two scripted agents answer in this browser, and nothing is sent
             anywhere. Choosing the default, testing, removing and connecting them works here; Reset puts everything back.
+          </span>
+        </p>
+      ) : null}
+      {testing && !busy ? (
+        <p
+          className="flex items-center gap-2 rounded-md border border-line bg-surface-2/60 px-3 py-2.5 text-xs text-fg"
+          role="status"
+          data-sw-agents-testing={testing.id}
+        >
+          <Spinner size={12} />
+          <span>
+            Testing the connection to {testedLabel}. Connect, Test connection, Remove and the default wait for it; a name or an icon can be
+            changed meanwhile.
           </span>
         </p>
       ) : null}
@@ -256,6 +328,7 @@ export function AgentsCard({
                   choice.isDefault ? 'border-accent/50 bg-accent/10' : 'border-line bg-surface hover:bg-surface-2',
                   off && 'cursor-default opacity-70',
                 )}
+                title={waitReason}
                 data-sw-agents-default-option={choice.id}
               >
                 <input
@@ -266,10 +339,10 @@ export function AgentsCard({
                   disabled={off}
                   onChange={() => makeDefault(choice.id)}
                 />
-                {choice.id === 'endpoint' ? (
+                {choice.id === 'endpoint' && !choice.icon && !choice.tint ? (
                   <Globe size={16} className="shrink-0 text-muted" aria-hidden="true" />
                 ) : (
-                  <AgentMark label={choice.label} state={choice.state} size="sm" />
+                  <AgentMark label={choice.label} state={choice.state} size="sm" icon={choice.icon} tint={choice.tint} logo={choice.logo} />
                 )}
                 <span className="min-w-0 flex-1 truncate font-medium text-fg">{choice.label}</span>
                 {busy === `default:${choice.id}` ? <Spinner size={12} /> : null}
@@ -286,26 +359,81 @@ export function AgentsCard({
         description="Shapewall looks for these on this computer's PATH. It never installs or downloads anything."
       >
         <ul className="divide-y divide-line rounded-md border border-line" aria-label="Agents on this machine">
+          {fixed ? (
+            <li className="p-3" data-sw-agent-row="default" data-sw-agent-row-state="fixed">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                <AgentMark label={fixed.label} state={view.effective.problem ? 'unavailable' : 'ready'} {...faceOf(fixed)} />
+                <div className="min-w-[10rem] flex-1">
+                  <p className="flex flex-wrap items-center gap-1.5 text-sm font-medium text-fg">
+                    {fixed.label} <Badge tone="accent">Default</Badge>
+                  </p>
+                  <p className="text-xs text-muted">Started from {view.env.acp === 'flag' ? '--agent-acp' : 'SHAPEWALL_AGENT_ACP'}</p>
+                </div>
+                <Button
+                  size={size}
+                  disabled={editOff}
+                  onClick={() => setEditing({ ...fixed, builtIn: view.effective.builtInLabel || fixed.label })}
+                  aria-label={`Edit ${fixed.label}: name and icon`}
+                  data-sw-agent-edit="default"
+                >
+                  <Pencil size={13} aria-hidden="true" /> Edit
+                </Button>
+              </div>
+            </li>
+          ) : null}
           {rows.map((row) => (
             <li key={row.id} className="space-y-2 p-3" data-sw-agent-row={row.id} data-sw-agent-row-state={row.kind}>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                <AgentMark label={row.label} state={row.kind === 'connected' ? row.profile.state : 'unavailable'} />
+                <AgentMark
+                  label={row.label}
+                  state={row.kind === 'connected' ? row.profile.state : 'unavailable'}
+                  {...faceOf(row.profile)}
+                  logo={row.logo}
+                />
                 <div className="min-w-[10rem] flex-1">
                   <p className="flex flex-wrap items-center gap-1.5 text-sm font-medium text-fg">
                     {row.label}
                     {row.profile?.default ? <Badge tone="accent">Default</Badge> : null}
                   </p>
                   <p className={cn('text-xs', row.kind === 'connected' && row.profile.state === 'login' ? 'text-fg' : 'text-muted')}>
-                    {row.kind === 'connected' ? `Connected. ${stateLine(row.profile)}` : ROW_STATE[row.kind]}
+                    {row.kind !== 'connected'
+                      ? ROW_STATE[row.kind]
+                      : row.profile.state === 'testing'
+                        ? 'Connecting. Testing the connection...'
+                        : `Connected. ${stateLine(row.profile)}`}
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   {row.kind === 'connected' ? (
                     <>
-                      <Button size={size} disabled={off} onClick={() => test(row.id, row.profile.legacy)} data-sw-agent-test={row.id}>
+                      <Button
+                        size={size}
+                        disabled={off}
+                        title={waitReason}
+                        onClick={() => test(row.id, row.profile.legacy)}
+                        data-sw-agent-test={row.id}
+                      >
                         {busy === row.id ? <Spinner /> : null} Test connection
                       </Button>
-                      <Button size={size} variant="danger" disabled={off} onClick={() => remove(row.id)} data-sw-agent-remove={row.id}>
+                      <Button
+                        size={size}
+                        disabled={editOff}
+                        onClick={() =>
+                          setEditing({ id: row.id, label: row.label, ...faceOf(row.profile), logo: row.logo, builtIn: row.builtIn })
+                        }
+                        aria-label={`Edit ${row.label}: name and icon`}
+                        data-sw-agent-edit={row.id}
+                      >
+                        <Pencil size={13} aria-hidden="true" /> Edit
+                      </Button>
+                      <Button
+                        size={size}
+                        variant="danger"
+                        disabled={off}
+                        title={waitReason}
+                        onClick={() => remove(row.id)}
+                        data-sw-agent-remove={row.id}
+                      >
                         <Trash2 size={13} aria-hidden="true" /> Remove
                       </Button>
                     </>
@@ -314,6 +442,7 @@ export function AgentsCard({
                       size={size}
                       variant="default"
                       disabled={off}
+                      title={waitReason}
                       onClick={() => connect(row.id)}
                       data-sw-profile-connect={row.id}
                       data-sw-agent-connect-row={row.id}
@@ -369,9 +498,13 @@ export function AgentsCard({
           ))}
           <li className="space-y-2 p-3" data-sw-agent-row="endpoint" data-sw-agent-row-state={view.endpoint ? 'connected' : 'none'}>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-              <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-line bg-surface-2 text-muted">
-                <Globe size={14} aria-hidden="true" />
-              </span>
+              {view.endpoint?.icon || view.endpoint?.tint ? (
+                <AgentMark label={view.endpoint.label} state={view.endpoint.state || 'ready'} {...faceOf(view.endpoint)} />
+              ) : (
+                <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-line bg-surface-2 text-muted">
+                  <Globe size={14} aria-hidden="true" />
+                </span>
+              )}
               <div className="min-w-[10rem] flex-1">
                 <p className="flex flex-wrap items-center gap-1.5 text-sm font-medium text-fg">
                   Other
@@ -387,6 +520,19 @@ export function AgentsCard({
                 {view.endpoint?.default ? (
                   <Button size={size} disabled={off} onClick={() => test('endpoint', true)} data-sw-agent-test="endpoint">
                     {busy === 'endpoint' ? <Spinner /> : null} Test connection
+                  </Button>
+                ) : null}
+                {view.endpoint ? (
+                  <Button
+                    size={size}
+                    disabled={editOff}
+                    onClick={() =>
+                      setEditing({ id: 'endpoint', label: view.endpoint.label, ...faceOf(view.endpoint), builtIn: view.endpoint.model })
+                    }
+                    aria-label={`Name and icon of ${view.endpoint.label}`}
+                    data-sw-agent-edit="endpoint"
+                  >
+                    <Pencil size={13} aria-hidden="true" /> Name and icon
                   </Button>
                 ) : null}
                 {endpointForm || onOpenEndpoint ? (
@@ -413,6 +559,26 @@ export function AgentsCard({
         onCancel={() => setConfirm(null)}
         onConfirm={() => connect(confirm.agentId, confirm.hash)}
         confirmLabel="Allow and connect"
+        blocked={Boolean(nameProblem(naming.name))}
+      >
+        <ConnectIdentity
+          value={naming}
+          onChange={setNaming}
+          builtIn={confirming?.builtIn || confirming?.label || ''}
+          logo={confirming?.logo}
+          upload={view.iconUpload !== false}
+          touch={touch}
+          disabled={Boolean(busy)}
+        />
+      </ConfirmDialog>
+      <AgentIdentityDialog
+        agent={editing}
+        // Its own Connect is still testing: Save waits for the test.
+        waiting={Boolean(testing && editing && (testing.id === editing.id || (editing.id === 'default' && testing.id === 'default')))}
+        upload={view.iconUpload !== false}
+        touch={touch}
+        onClose={() => setEditing(null)}
+        onSaved={(next) => (next ? changed(next) : null)}
       />
       {endpointForm ? (
         <Dialog
@@ -438,7 +604,16 @@ function ReadOnlyAgents({ locked, status }) {
   const list = options.length
     ? options
     : status?.configured
-      ? [{ id: 'default', label: status.label || 'Agent', state: status.state || 'ready', isDefault: true, configured: true }]
+      ? [
+          {
+            id: 'default',
+            label: status.label || 'Agent',
+            state: status.state || 'ready',
+            isDefault: true,
+            configured: true,
+            ...faceOf(status),
+          },
+        ]
       : []
   const note =
     locked === 'owner'
@@ -454,7 +629,7 @@ function ReadOnlyAgents({ locked, status }) {
         <ul className="divide-y divide-line rounded-md border border-line" aria-label="Connected agents">
           {list.map((option) => (
             <li key={option.id} className="flex items-center gap-3 p-3" data-sw-agent-row={option.id} data-sw-agent-row-state="connected">
-              <AgentMark label={option.label} state={option.state} />
+              <AgentMark label={option.label} state={option.state} icon={option.icon} tint={option.tint} logo={option.logo} />
               <div className="min-w-0 flex-1">
                 <p className="flex flex-wrap items-center gap-1.5 text-sm font-medium text-fg">
                   {option.label}

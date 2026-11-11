@@ -8,7 +8,7 @@ import { findApiToken } from './tenancy.js'
 
 const STREAMS_PER_WORKSPACE = 100
 
-export function mountTokenEvents(v1, { db, iso, events, streams, scope }) {
+export function mountTokenEvents(v1, { db, iso, events, streams, scope, agentPresence = null }) {
   v1.get('/events', scope('read'), (req, res) => {
     if (streams.size >= 1000 || [...streams].filter((check) => check.tokenId === req.token.id).length >= 5)
       return fail(res, 429, 'stream_budget', 'Too many event streams for this token.')
@@ -51,7 +51,10 @@ export function mountTokenEvents(v1, { db, iso, events, streams, scope }) {
     })
     timer = setInterval(() => {
       check()
-      if (!closed) res.write(': keepalive\n\n')
+      if (closed) return
+      res.write(': keepalive\n\n')
+      // An open stream of a token that may take work is an agent listening.
+      if (req.token.scopes.includes('claim')) agentPresence?.seen(req.t.workspaceId, req.project.id, req.token.name)
     }, 15000)
     timer.unref()
     res.write(': connected\n\n')

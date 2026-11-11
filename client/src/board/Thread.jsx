@@ -362,6 +362,8 @@ export function ThreadView({
   denial = null,
   role = null,
   hosted = null,
+  // Hosted: false when no agent is listening for the project (null: not known).
+  agentListening = null,
   onSaveName = null,
   media = null,
 }) {
@@ -427,7 +429,15 @@ export function ThreadView({
 
   return (
     <div className="flex max-h-[inherit] min-h-0 flex-col" data-sw-selected-comment={comment.id} data-sw-thread={comment.id}>
-      <div className={cn('flex shrink-0 items-center gap-0.5 border-b border-line', touch ? 'px-2 py-1' : 'py-1 pr-1 pl-3')}>
+      {/* On desktop the header is also the card's handle (ThreadPopover.jsx): drag it to see what the card
+          covers. Its buttons keep their clicks. */}
+      <div
+        className={cn(
+          'flex shrink-0 items-center gap-0.5 border-b border-line',
+          touch ? 'px-2 py-1' : 'cursor-grab touch-none py-1 pr-1 pl-3 select-none',
+        )}
+        data-sw-card-drag-handle={touch ? undefined : 'true'}
+      >
         <p className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-muted" data-sw-thread-title="true">
           {onClose ? (
             <>
@@ -564,6 +574,15 @@ export function ThreadView({
                     : 'Awaiting run approval'
                   : 'Send to agent'}
             </Button>
+            {agentListening === false ? (
+              // Sent or not, nothing acts on it until an agent connects: say so
+              // instead of leaving the comment looking stuck.
+              <p className="mt-1.5 text-xs text-muted" role="status" data-sw-no-agent-listening="true">
+                {comment.dispatchable
+                  ? 'No agent is listening right now. This comment waits until one connects (shapewall watch --remote).'
+                  : 'No agent is listening right now: a comment sent to the agent waits until one connects.'}
+              </p>
+            ) : null}
           </div>
         ) : null}
         <ol className="divide-y divide-line/60" aria-label={`Comment ${comment.id} and replies`}>

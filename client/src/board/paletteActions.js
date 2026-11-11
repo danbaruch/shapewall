@@ -8,6 +8,7 @@ export function boardPaletteActions({
   commentMode,
   markPicked,
   setDraft,
+  keepDraft,
   setCommentMode,
   showLinks,
   toggleLinks,
@@ -31,6 +32,7 @@ export function boardPaletteActions({
           keys: 'C',
           run: () => {
             markPicked()
+            if (keepDraft()) return
             setDraft(null)
             setCommentMode((value) => !value)
           },

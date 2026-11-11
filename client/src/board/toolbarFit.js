@@ -1,22 +1,28 @@
 // How much of the desktop board toolbar keeps its words, as a pure function of
-// widths (unit-tested in test/toolbar-fit.test.js). The toolbar has three zones:
-//   left    the board name and switcher, the screen-size toggle, Views, Capture
-//           and the capture status
-//   centre  "Go to page or journey", centred on the toolbar itself
-//   right   Comment, the side panel toggles (Comments, Agent, Checks), Settings
-// When the zones do not fit, labels drop one step at a time, in FIT_STEPS
-// order. Every control keeps its accessible name and tooltip at every step.
-// The widths come from the controls' fixed sizes plus measured text, never
-// from the rendered toolbar, so the result depends only on the toolbar's
-// width and what it shows (no feedback loop, no history).
+// widths (unit-tested in test/toolbar-fit.test.js). The toolbar has two zones
+// with a flexible gap between them:
+//   left    the board name and switcher with the capture status, a hairline,
+//           then the screen-size toggle, Views and Capture
+//   right   Comment, a hairline, the side panel toggles (Comments, Agent,
+//           Checks) on one track, Settings
+// Search is not in the toolbar: it is the sidebar's field (BoardRail.jsx).
+// When the zones do not fit side by side, labels drop one step at a time, in
+// FIT_STEPS order. Every control keeps its accessible name and tooltip at
+// every step. The widths come from the controls' fixed sizes plus measured
+// text, never from the rendered toolbar, so the result depends only on the
+// toolbar's width and what it shows (no feedback loop, no history).
+//
+// An open journey never changes the toolbar's shape: its name takes the place
+// of the word on the Views button, in the same spot, as wide as the spare
+// room allows up to `journeyMax`, and nothing else moves or collapses for it
+// beyond what the widths ask.
 
 // Each step adds one collapse to the ones before it.
 export const FIT_STEPS = [
-  'full', // everything labelled, search at full width
-  'search', // search becomes an icon button (its shortcut stays in the tooltip)
+  'full', // everything labelled
   'panels', // Comments, Agent, Checks lose their words (the count stays)
   'view', // Views loses its word, or the open journey's name (Capture is always an icon)
-  'viewport', // the screen-size toggle becomes icons with tooltips
+  'viewport', // the screen-size toggle becomes icons with tooltips; the hairlines go
   // Last resort, for the narrowest toolbars (a 1024 px window with the
   // sidebar at its widest): Comment as a filled icon, tighter gaps.
   'tight',
@@ -25,28 +31,27 @@ export const FIT_STEPS = [
 export const TOOLBAR = {
   pad: 12, // header padding on each side (px-3)
   gap: 6, // between controls inside a zone (gap-1.5)
-  zoneGap: 20, // between zones (gap-x-5)
-  tightGap: 4, // the same two at the tight step (gap-1, gap-x-3)
+  zoneGap: 20, // the least between the zones
+  tightGap: 4, // the same two at the tight step (gap-1)
   tightZoneGap: 12,
-  search: { min: 240, max: 320, icon: 32 }, // 240: the whole "Go to page or journey" and its Ctrl K
   // The room the board name's trigger (title, padding, chevron) keeps at each
   // step before the next one drops labels: a long name truncates a little at
   // a time, never below the last value (about 8 characters).
-  name: [200, 176, 152, 128, 104, 104],
-  // An open journey's name on the Views button. It matters more than the
-  // search box: with a journey open the search is an icon from the start,
-  // and the name takes the left zone's spare room up to `journeyMax`. These
-  // are the least it keeps at each step up to 'view' (where it becomes an
-  // icon); past its width it truncates with an ellipsis.
-  journey: [160, 128, 96],
-  journeyMax: 280,
+  name: [200, 176, 152, 128, 104],
+  // An open journey's name on the Views button: the least it keeps at each
+  // step up to 'view' (where it becomes an icon), and the most it takes when
+  // there is room; past its width it truncates with an ellipsis.
+  journey: [160, 112],
+  journeyMax: 240,
+  // Room kept on the Agent button for its activity pill (a count), so a run
+  // starting never pushes a label off the toolbar.
+  agentPill: 22,
 }
 
 // What each step turns off. `collapsed(step).panels` is true from the panels step on.
 export function collapsed(step) {
   const at = (name) => step >= FIT_STEPS.indexOf(name)
   return {
-    search: at('search'),
     panels: at('panels'),
     view: at('view'),
     viewport: at('viewport'),
@@ -55,13 +60,14 @@ export function collapsed(step) {
   }
 }
 
-// One zone's width at a step. items: [{ full, compact, at }], where `at` is
-// the FIT_STEPS name that collapses it (no `at`: always `full`). `full` may
+// One zone's width at a step. items: [{ full, compact, at, gone }], where
+// `at` is the FIT_STEPS name that collapses it (no `at`: always `full`) and
+// `gone` the one from which it is not shown at all (a hairline). `full` may
 // be a list, one width per step, for a label that shortens before it goes.
 export function zoneWidth(items, step, gap = collapsed(step).tight ? TOOLBAR.tightGap : TOOLBAR.gap) {
-  const shown = items.filter(Boolean)
-  if (!shown.length) return 0
   const off = collapsed(step)
+  const shown = items.filter((item) => item && !(item.gone && off[item.gone]))
+  if (!shown.length) return 0
   const width = (item) => (item.at && off[item.at] ? item.compact : Array.isArray(item.full) ? item.full[step] : item.full)
   const sum = shown.reduce((total, item) => total + width(item), 0)
   return sum + gap * (shown.length - 1)
@@ -86,6 +92,10 @@ export function toolbarItems({
   const t = (value, font) => Math.ceil(text(String(value), font)) + 1
   const ICON = 32
   const items = { left: [], right: [] }
+  // The hairline between the name and the view controls. Once the screen
+  // sizes are icons the bar is short of room, and the hairlines go.
+  const divider = (id) => ({ id, full: 1, gone: 'viewport' })
+  items.left.push(divider('divider'))
   if (viewports.length > 1) {
     // A bordered track (1 px + 2 px padding a side); items px-2.5 around a word, px-2 around a 14 px icon.
     items.left.push({
@@ -98,7 +108,7 @@ export function toolbarItems({
   // Views: px-2.5, a 15 px icon, gap-1.5 and its word. With a journey open:
   // the journey's name (capped per step) and a 28 px clear button joined to it (1 px
   // overlap); collapsed, an icon with a dot and no clear button.
-  // `grow`: how much wider the name may get at each step when the zone has room.
+  // `grow`: how much wider the name may get at each step when the bar has room.
   const name = journey ? t(journey, 'ui') : 0
   const least = (step) => Math.min(name, TOOLBAR.journey[Math.min(step, TOOLBAR.journey.length - 1)])
   items.left.push({
@@ -108,8 +118,7 @@ export function toolbarItems({
     compact: ICON,
     at: 'view',
   })
-  // Capture is an icon button at every width (its tooltip says what it does),
-  // so the search box keeps its room on local boards.
+  // Capture is an icon button at every width (its tooltip says what it does).
   if (capture) items.left.push({ id: 'capture', full: ICON })
   items.left.push({
     id: 'capture-status',
@@ -121,13 +130,16 @@ export function toolbarItems({
           : 16,
   })
   if (viewer) items.right.push({ id: 'viewer', full: 40 + t('Viewer', 'xs') })
-  if (comment) items.right.push({ id: 'comment', full: 45 + t('Comment', 'ui'), compact: ICON, at: 'comment' })
-  // One group, 2 px between its buttons: px-2.5, a 14 px icon, gap-1.5.
+  // Comment, then the hairline between it and the panel toggles.
+  if (comment) items.right.push({ id: 'comment', full: 45 + t('Comment', 'ui'), compact: ICON, at: 'comment' }, divider('panels-divider'))
+  // One track (1 px border + 2 px padding a side), its buttons side by side:
+  // px-2.5 (px-2 once the words are gone), a 14 px icon, gap-1.5. The Agent
+  // button keeps room for its activity pill while it has its word.
   const badge = 12 + t(panels.comments, 'count')
-  const buttons = [{ full: 46 + t('Comments', 'ui') + badge, compact: 40 + badge }]
-  if (panels.agent) buttons.push({ full: 40 + t('Agent', 'ui'), compact: 34 })
-  if (panels.checks) buttons.push({ full: 40 + t('Checks', 'ui'), compact: 34 })
-  const gaps = 2 * (buttons.length - 1)
+  const buttons = [{ full: 46 + t('Comments', 'ui') + badge, compact: 36 + badge }]
+  if (panels.agent) buttons.push({ full: 40 + t('Agent', 'ui') + TOOLBAR.agentPill, compact: 30 })
+  if (panels.checks) buttons.push({ full: 40 + t('Checks', 'ui'), compact: 30 })
+  const gaps = 6
   items.right.push({
     id: 'panels',
     full: buttons.reduce((sum, item) => sum + item.full, gaps),
@@ -136,12 +148,11 @@ export function toolbarItems({
   })
   if (settings) items.right.push({ id: 'settings', full: ICON })
   // The name trigger: px-2.5, the title, gap-1.5 and a 14 px chevron.
-  // An open journey puts its name before the search box.
-  return { name: 40 + t(title, 'name'), left: items.left, right: items.right, searchIcon: Boolean(journey) }
+  return { name: 40 + t(title, 'name'), left: items.left, right: items.right }
 }
 
-// The journey name's room at a step: its least width plus what the left zone
-// has spare, up to its `grow` (0 when collapsed or no journey).
+// The journey name's room at a step: its least width plus what the bar has
+// spare, up to its `grow` (0 when collapsed or no journey).
 function journeyRoom(left, step, spare) {
   const item = left.find((entry) => entry.id === 'view' && entry.grow)
   if (!item || collapsed(step).view) return 0
@@ -151,55 +162,20 @@ function journeyRoom(left, step, spare) {
 
 // The step to render. width: the toolbar's width. name: the name trigger's
 // natural width. left/right: the other controls in each zone (see zoneWidth).
-// Returns { step, centred, search, journey } with `search` the search box's
-// width (0 when it is an icon) and `journey` the open journey's name width
-// (0: none, or collapsed).
-//
-// No journey: the first step at which both side zones fit their half of the
-// toolbar beside the centred search. When even the last step cannot keep the
-// search on the centre line, centred is false and the search icon simply
-// sits between the zones.
-//
-// `searchIcon` (a journey is open): its name matters more than the search,
-// which is an icon from the search step on. The first step at which the
-// zones fit side by side (the search icon between them, centred or not)
-// wins, and the name takes the room left, up to its `grow`. The search stays
-// on the centre line only when that costs the name nothing.
-//
+// Returns { step, journey }: the first step at which the two zones fit side
+// by side with the least gap between them, and the open journey's name width
+// there (0: none, or collapsed), which takes the spare room up to its `grow`.
 // Narrower never means a smaller step.
-export function fitToolbar({ width, name, left = [], right = [], searchIcon = false, config = TOOLBAR }) {
+export function fitToolbar({ width, name, left = [], right = [], config = TOOLBAR }) {
   const inner = Math.max(0, width - 2 * config.pad)
   const last = FIT_STEPS.length - 1
-  const sides = (step) => {
+  for (let step = 0; step <= last; step += 1) {
     const tight = collapsed(step).tight
     const gap = tight ? config.tightGap : config.gap
     const rest = zoneWidth(left, step, gap)
-    const nameWidth = Math.min(name, config.name[step])
-    return {
-      left: nameWidth + (rest ? gap + rest : 0),
-      right: zoneWidth(right, step, gap),
-      zoneGap: tight ? config.tightZoneGap : config.zoneGap,
-    }
+    const leftWidth = Math.min(name, config.name[step]) + (rest ? gap + rest : 0)
+    const spare = inner - leftWidth - zoneWidth(right, step, gap) - (tight ? config.tightZoneGap : config.zoneGap)
+    if (spare >= 0) return { step, journey: journeyRoom(left, step, spare) }
   }
-  for (let step = searchIcon ? 1 : 0; step <= last; step += 1) {
-    const side = sides(step)
-    // Centred: each side zone gets the same half of what the search leaves.
-    const room = inner - 2 * (Math.max(side.left, side.right) + side.zoneGap)
-    if (step === 0) {
-      if (room >= config.search.min) return { step, centred: true, search: Math.min(config.search.max, room), journey: 0 }
-      continue
-    }
-    if (searchIcon) {
-      // Side by side: what is left once both zones, the icon and the gaps are in.
-      const spare = inner - side.left - side.right - config.search.icon - 2 * side.zoneGap
-      if (spare < 0) continue
-      const journey = journeyRoom(left, step, spare)
-      // Centred when the left zone, name grown, still fits its half (and so does the right).
-      const half = (inner - config.search.icon) / 2 - side.zoneGap
-      const grown = side.left + journey - journeyRoom(left, step, 0)
-      return { step, centred: grown <= half && side.right <= half, search: 0, journey }
-    }
-    if (room >= config.search.icon) return { step, centred: true, search: 0, journey: 0 }
-  }
-  return { step: last, centred: false, search: 0, journey: journeyRoom(left, last, 0) }
+  return { step: last, journey: journeyRoom(left, last, 0) }
 }

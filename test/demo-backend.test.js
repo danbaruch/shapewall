@@ -7,6 +7,7 @@ import { createDemoBackend } from '../client/src/demo/backend.js'
 import { demoChecks } from '../client/src/demo/checks.js'
 import { agentRows } from '../client/src/settings/agentRows.js'
 import { KNOWN_AGENTS } from '../src/agent/acp/detect.js'
+import { logoForAgent } from '../src/agent/agent-logos.js'
 import { validateReport } from '../src/checks/schema.js'
 import { compareReports } from '../src/checks/comparison.js'
 import {
@@ -823,7 +824,14 @@ test('the demo Agents page: the real settings answer from sample data, the defau
   for (const known of KNOWN_AGENTS) {
     const demoKnown = view.known.find((item) => item.id === known.id)
     assert.ok(demoKnown, known.id)
-    assert.deepEqual(demoKnown, { id: known.id, label: known.label, adapter: known.adapter, cli: known.cli, install: known.install })
+    assert.deepEqual(demoKnown, {
+      id: known.id,
+      label: known.label,
+      adapter: known.adapter,
+      cli: known.cli,
+      install: known.install,
+      logo: logoForAgent(known.id),
+    })
   }
   // Fictional folder and endpoint only.
   assert.equal(view.project.root, '/home/robin/code/lumen-notes')
@@ -923,4 +931,100 @@ test('the demo takes a drawing or an image with no text, and resolving ends the 
   stored.agentStatus = 'working'
   const resolved = await call('POST', `/api/boards/demo/comments/${stored.id}/resolve`, {})
   assert.deepEqual([resolved.json.comment.status, resolved.json.comment.agentStatus], ['resolved', 'done'])
+})
+
+test('the demo Agents page: a scripted agent takes a name, a built-in icon and a colour; the chat and replies follow; Reset restores', async () => {
+  const { call, state } = demo()
+  const before = (await call('GET', '/api/agent/settings')).json
+  assert.equal(before.iconUpload, false, 'no uploaded pictures in the demo')
+  assert.deepEqual(
+    before.profiles.map((item) => [item.id, item.label, item.icon, item.tint]),
+    [
+      ['demo', 'Demo agent', null, null],
+      ['second', 'Second agent', null, null],
+    ],
+  )
+  const renamed = (await call('POST', '/api/agent/settings/identity', { id: 'demo', name: '  Harry ', icon: 'owl', tint: 'green' })).json
+  assert.deepEqual(
+    renamed.profiles.map((item) => [item.id, item.label, item.icon, item.tint]),
+    [
+      ['demo', 'Harry', 'owl', 'green'],
+      ['second', 'Second agent', null, null],
+    ],
+  )
+  assert.equal(renamed.effective.label, 'Harry')
+  // Everywhere the board reads the agent from.
+  const status = (await call('GET', '/api/agent/status')).json
+  assert.deepEqual([status.label, status.icon, status.tint], ['Harry', 'owl', 'green'])
+  assert.deepEqual(
+    status.profiles.map((item) => [item.id, item.label, item.icon]),
+    [
+      ['default', 'Harry', 'owl'],
+      ['demo', 'Harry', 'owl'],
+      ['second', 'Second agent', null],
+    ],
+  )
+  assert.equal((await call('GET', '/api/agent/boards/demo/threads/board')).json.agent.label, 'Harry')
+  assert.match((await call('POST', '/api/agent/settings/test', { profileId: 'demo' })).json.message, /^Harry answered/)
+  // The other changes on the page keep the name.
+  await call('POST', '/api/agent/settings/profiles/second/default', {})
+  await call('POST', '/api/agent/settings/profiles/demo/default', {})
+  assert.equal((await call('GET', '/api/agent/status')).json.label, 'Harry')
+  // The server's rules.
+  for (const [body, code] of [
+    [{ id: 'demo', name: 'x'.repeat(41) }, 'invalid_name'],
+    [{ id: 'demo', name: 'two\nlines' }, 'invalid_name'],
+    [{ id: 'demo', icon: `upload:${'a'.repeat(32)}` }, 'invalid_icon'],
+    [{ id: 'demo', icon: 'nope' }, 'invalid_icon'],
+    [{ id: 'demo', tint: '#fff' }, 'invalid_tint'],
+    [{ id: 'codex', name: 'x' }, 'unknown_profile'],
+  ]) {
+    const refused = await call('POST', '/api/agent/settings/identity', body)
+    assert.equal(refused.json.error.code, code, JSON.stringify(body))
+  }
+  assert.match((await call('POST', '/api/agent/settings/identity/icon', { id: 'demo', png: 'AAAA' })).json.demoNote, /^In the demo /)
+  // An emptied name and "no icon" go back to the defaults.
+  const cleared = (await call('POST', '/api/agent/settings/identity', { id: 'demo', name: '', icon: null, tint: null })).json
+  assert.deepEqual(
+    cleared.profiles.map((item) => [item.label, item.icon, item.tint]),
+    [
+      ['Demo agent', null, null],
+      ['Second agent', null, null],
+    ],
+  )
+  assert.equal(state.agents.identity, undefined, 'nothing is kept for an agent with the defaults')
+  // Reset (a fresh seed) forgets a name.
+  await call('POST', '/api/agent/settings/identity', { id: 'second', name: 'Fixer' })
+  assert.equal(state.agents.identity.second.label, 'Fixer')
+  assert.equal((await demo().call('GET', '/api/agent/settings')).json.profiles[1].label, 'Second agent')
+})
+
+test('the demo console: an API token can be renamed by those who may revoke it', async () => {
+  const { call, state } = demo()
+  const ws = state.workspaces[0].id
+  const token = state.tokens.find((item) => item.workspaceId === ws && !item.revokedAt)
+  const url = `/api/workspaces/${ws}/projects/${token.projectId}/tokens/${token.id}`
+  const renamed = await call('PATCH', url, { name: '  Harry  ' })
+  assert.equal(renamed.status, 200)
+  assert.equal(renamed.json.token.name, 'Harry')
+  assert.equal(state.audit.at(0).action === 'token_renamed' || state.audit.at(-1).action === 'token_renamed', true)
+  assert.equal((await call('PATCH', url, { name: '' })).json.error.code, 'invalid_name')
+  assert.equal((await call('PATCH', url, { name: 'x'.repeat(61) })).json.error.code, 'invalid_name')
+  assert.equal((await call('PATCH', url.replace(token.id, 'tk_missing'), { name: 'x' })).json.error.code, 'unknown_token')
+  // A viewer may not.
+  const viewer = demo(as('viewer'))
+  assert.equal((await viewer.call('PATCH', url, { name: 'Mallory' })).status, 403)
+})
+
+test('the demo console: a token name over 60 characters is refused when a token is made, as on the server', async () => {
+  const { call, state } = demo()
+  const ws = state.workspaces[0].id
+  const project = state.projects.find((item) => item.workspaceId === ws)
+  const url = `/api/workspaces/${ws}/projects/${project.id}/tokens`
+  const count = state.tokens.length
+  const refused = await call('POST', url, { name: 'x'.repeat(61), scopes: ['read'] })
+  assert.equal(refused.status, 400)
+  assert.equal(refused.json.error.message, 'Token name: 1 to 60 characters.')
+  assert.equal(state.tokens.length, count)
+  assert.equal((await call('POST', url, { name: 'y'.repeat(60), scopes: ['read'] })).status, 201)
 })

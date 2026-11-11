@@ -7,6 +7,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
+import { ID_RE } from '../config.js'
 import { ID_PATTERNS, newId } from './crypto.js'
 import { transaction } from './db.js'
 
@@ -121,5 +122,35 @@ export function createProjectStore(t, { db, dataDir, maxProjects = PROJECTS_MAX 
       board: String(boardId || ''),
     }) || null
 
-  return { get, list, create, remove, boards, board }
+  // One board of a project, gone from this server: its rows in one
+  // transaction (comment images before the comments they hang on, the board
+  // row last), then its folder (captures, live HTML, versions, variants,
+  // checks) and the staging folders of pushes still open for it. The
+  // project, its tokens and its share links stay; a later push of the same
+  // board id starts a new board (comment numbers from 1 again). The
+  // workspace's storage count is a sum over these rows, so it drops by
+  // itself. Returns what went: { board, comments, bytes }.
+  const BOARD_TABLES = ['comment_files', 'comment_imports', 'agent_approvals', 'agent_claims', 'comments', 'pushes', 'boards']
+  function removeBoard(projectId, boardId) {
+    const id = String(boardId || '')
+    const project = get(projectId)
+    const row = project && ID_RE.test(id) ? board(project.id, id) : null
+    if (!row) throw new ProjectError(404, 'unknown_board', 'No such board.')
+    const key = { project: project.id, board: row.board_id }
+    const gone = transaction(db, () => {
+      const where = 'WHERE workspace_id = :ws AND project_id = :project AND board_id = :board'
+      const comments = t.get(`SELECT COUNT(*) AS n FROM comments ${where}`, key).n
+      const images = t.get(`SELECT COALESCE(SUM(bytes), 0) AS n FROM comment_files ${where}`, key).n
+      const open = t.all(`SELECT id FROM pushes ${where} AND status = 'open'`, key).map((push) => push.id)
+      for (const table of BOARD_TABLES) t.run(`DELETE FROM ${table} ${where}`, key)
+      return { comments, bytes: row.bytes + images, open }
+    })
+    fs.rmSync(path.join(projectDir(dataDir, t.workspaceId, project.id), row.board_id), { recursive: true, force: true })
+    for (const pushId of gone.open) {
+      if (/^[a-z0-9_]+$/i.test(pushId)) fs.rmSync(path.join(dataDir, 'staging', pushId), { recursive: true, force: true })
+    }
+    return { board: row.board_id, comments: gone.comments, bytes: gone.bytes }
+  }
+
+  return { get, list, create, remove, removeBoard, boards, board }
 }

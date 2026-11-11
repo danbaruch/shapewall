@@ -16,14 +16,18 @@ export function agentRows(view) {
   const known = Array.isArray(view?.known) && view.known.length ? view.known : detected
   const rows = known.map((agent) => {
     const profile = profiles.find((item) => item.id === agent.id)
-    if (profile) return { kind: 'connected', id: agent.id, label: profile.label || agent.label, profile }
+    // `builtIn`: the name Shapewall has for it, which an emptied name goes
+    // back to. `logo`: its product mark (src/agent/agent-logos.js), or null.
+    const known = { builtIn: agent.label, logo: agent.logo || null }
+    if (profile) return { kind: 'connected', id: agent.id, label: profile.label || agent.label, profile, ...known }
     const found = detected.find((item) => item.id === agent.id)
-    if (!found) return { kind: 'missing', id: agent.id, label: agent.label }
+    if (!found) return { kind: 'missing', id: agent.id, label: agent.label, ...known }
     const kind = found.state === 'ready' ? 'found' : found.state === 'needs-shell' ? 'needs-shell' : 'needs-adapter'
-    return { kind, id: agent.id, label: agent.label, install: found.install || agent.install || null }
+    return { kind, id: agent.id, label: agent.label, install: found.install || agent.install || null, ...known }
   })
   for (const profile of profiles) {
-    if (!rows.some((row) => row.id === profile.id)) rows.push({ kind: 'connected', id: profile.id, label: profile.label, profile })
+    if (!rows.some((row) => row.id === profile.id))
+      rows.push({ kind: 'connected', id: profile.id, label: profile.label, profile, builtIn: null, logo: profile.logo || null })
   }
   return rows
 }

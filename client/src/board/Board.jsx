@@ -44,6 +44,7 @@ import { BoardMenu } from './BoardMenu'
 import { CanvasNotes } from './CanvasNotes'
 import { DrawingMode, useDrawingMode } from './DrawingMode'
 import { drawing } from './drawing'
+import { nudgeComposer } from './composerNudge'
 import { BoardToast, NoticeBar, useToast } from './Toast'
 import { PhoneSheets, SidePanel } from './BoardPanels'
 import { BoardRail } from './BoardRail'
@@ -66,6 +67,7 @@ import { useBoardContext } from './hooks/useBoardContext'
 import { useCapture } from './hooks/useCapture'
 import { useCommentDraft } from './hooks/useCommentDraft'
 import { boardPaletteActions } from './paletteActions'
+import { agentActivity } from './agentActivity'
 import { BoardViewContext } from './boardView'
 import { splitFrameKey, viewportLabel } from './viewports'
 import { CanvasControls } from './CanvasControls'
@@ -151,6 +153,40 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
 
   const [commentMode, setCommentMode] = useState(false)
   const [draft, setDraft] = useState(null)
+  // Whether the comment being written has anything in it yet: text, an image
+  // or a drawing. Read when a click or a key needs to know (never rendered).
+  const draftRef = useRef(null)
+  draftRef.current = draft
+  const draftImages = useRef(0)
+  const draftFilled = useCallback(() => {
+    const drawn = drawing.get()
+    return (
+      Boolean(draftRef.current) &&
+      (Boolean(draftRef.current.body.trim()) || draftImages.current > 0 || (drawn?.owner === 'composer' && drawn.shapes.length > 0))
+    )
+  }, [])
+  // The rule for everything that would open another thread or start another
+  // comment (a click on the page, a pin, a row in the list, a link to a
+  // comment, the palette, C): a comment with something in it is never
+  // replaced. True when it was kept; the composer nudges to say so.
+  const reopenParked = useRef(null)
+  const keepDraft = useCallback(() => {
+    if (!draftFilled()) return false
+    // Put aside by a navigation (see leaveForNavigation): it comes back.
+    if (reopenParked.current?.()) return true
+    nudgeComposer()
+    return true
+  }, [draftFilled])
+  // Esc on a comment that holds a drawing or images asks first (text alone
+  // goes at once, as before; Cancel is explicit and never asks).
+  const [discardAsk, setDiscardAsk] = useState(false)
+  useEffect(() => {
+    if (!draft) setDiscardAsk(false)
+  }, [draft])
+  const draftHasMedia = useCallback(() => {
+    const drawn = drawing.get()
+    return Boolean(draftRef.current) && (draftImages.current > 0 || (drawn?.owner === 'composer' && drawn.shapes.length > 0))
+  }, [])
   const [sheetOpen, setSheetOpen] = useState(false)
   // Phone: the open thread as a bottom sheet.
   const [threadSheet, setThreadSheet] = useState(false)
@@ -175,6 +211,8 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   // The comment an agent is working on right now (chat/agentFocus.js): its
   // pin and card ring. One per board; waiting on a permission still counts.
   const focusEntry = useAgentFocus(boardId)
+  // Hosted boards: shell commands waiting for an admin's OK (HostedApprovals).
+  const [approvalRows, setApprovalRows] = useState([])
   const focusedCommentId = focusEntry && ['working', 'waiting'].includes(focusEntry.state) ? Number(focusEntry.commentId) || null : null
   const agentFocus = useMemo(() => (focusedCommentId ? new Set([focusedCommentId]) : NO_IDS), [focusedCommentId])
   const [busy, setBusy] = useState(false)
@@ -372,6 +410,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   const threadFromList = useRef(false)
   const selectComment = useCallback(
     (comment) => {
+      if (keepDraft()) return
       threadFromList.current = false
       setDraft(null)
       updateParams({ c: comment.id })
@@ -380,7 +419,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
         setThreadSheet(true)
       }
     },
-    [updateParams, wide],
+    [keepDraft, updateParams, wide],
   )
   const closeThread = useCallback(() => {
     setThreadSheet(false)
@@ -389,6 +428,50 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     threadFromList.current = false
   }, [updateParams, wide])
 
+  // When an open comment closes on its own. A thread, and the new-comment
+  // composer, belong to the spot they point at:
+  //   they STAY while you look around it: pan, zoom, scroll the comments
+  //   list, open, close or resize the side panel, switch between Comments,
+  //   Agent and Checks, toggle comment mode;
+  //   they CLOSE when you deliberately go somewhere else or change what the
+  //   canvas shows: opening or stepping a journey (or building one), going
+  //   to a page from the sidebar, the search or a chat link, switching to a
+  //   screen size the comment is not on, entering compare, opening a page's
+  //   history from its card. "Go to this comment" is not leaving: it opens
+  //   that comment instead (focusComment).
+  // The thread's `c` leaves the address too, so a reload does not bring it
+  // back. An unsent reply is kept with its thread (replyDrafts.js), so
+  // closing is safe. A new comment with something in it is never dropped:
+  // it is put aside (`draftParked`) and a note on the canvas offers it back.
+  const [draftParked, setDraftParked] = useState(false)
+  useEffect(() => {
+    if (!draft) setDraftParked(false)
+  }, [draft])
+  const openThreadId = useRef(null)
+  openThreadId.current = selectedCommentId
+  const leaveForNavigation = useCallback(() => {
+    if (openThreadId.current) {
+      threadFromList.current = false
+      setThreadSheet(false)
+      updateParams({ c: null })
+    }
+    // Desktop only: on a phone the composer is a sheet over everything.
+    if (wide && draftRef.current) {
+      if (draftFilled()) setDraftParked(true)
+      else setDraft(null)
+    }
+  }, [draftFilled, updateParams, wide])
+  const reopenDraft = useCallback(() => {
+    const kept = draftRef.current
+    if (!kept) return
+    setDraftParked(false)
+    // Back to where it points, on the screen size it was made on.
+    if (mode !== 'all' && kept.viewport !== mode && viewports[kept.viewport]) {
+      updateParams({ vp: kept.viewport === defaultMode ? null : kept.viewport })
+    }
+    setPendingFocus({ pageId: kept.pageId, viewport: kept.viewport, x: kept.x, y: kept.y })
+  }, [defaultMode, mode, updateParams, viewports])
+
   // Pan to a comment's pin, switching viewport first when it is not on screen.
   // The switch is said out loud (a note with a way back, the toggle flashes),
   // so the board never changes viewport behind the user's back. On a phone
@@ -396,6 +479,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   // to the list.
   const focusComment = useCallback(
     (comment) => {
+      if (keepDraft()) return
       const switching = mode !== 'all' && comment.viewport !== mode && Boolean(viewports[comment.viewport])
       setDraft(null)
       setPendingFocus(comment)
@@ -406,7 +490,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
         setThreadSheet(true)
       }
     },
-    [defaultMode, mode, updateParams, viewports, wide],
+    [defaultMode, keepDraft, mode, updateParams, viewports, wide],
   )
   useEffect(() => {
     if (!viewportNotice) return undefined
@@ -468,6 +552,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   // ---- Journeys ------------------------------------------------------------
   const { openJourney, closeJourney, goStep, chooseJourneyBranch, startBuilder, addBuilderStep, saveBuilder, removeJourney } =
     useJourneyActions({
+      onLeave: leaveForNavigation,
       boardId,
       view,
       updateParams,
@@ -527,9 +612,15 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     historyViewportParam && viewports[historyViewportParam] ? historyViewportParam : mode === 'all' ? viewportNames[0] : mode
   const closeHistory = useCallback(() => updateParams({ hist: null, hv: null }), [updateParams])
 
+  reopenParked.current = () => {
+    if (!draftParked) return false
+    reopenDraft()
+    return true
+  }
   const jumpToPage = (pageId) => {
     const target = layout.targets[pageId]
     if (!target) return
+    leaveForNavigation()
     setSettledZoom(null)
     const frame = target.frames[0]
     const shots = target.frames.map((item) => data?.captures?.[pageId]?.[item.viewport]).filter((image) => image?.thumb || image?.file)
@@ -601,6 +692,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     closeThread,
     builder,
     addBuilderStep,
+    goStep,
     layout,
     flow,
     canvasRef,
@@ -608,13 +700,18 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     setFocusedKey,
     setToast,
     setDraft,
+    keepDraft,
     checkDraft,
     setCheckDraft,
     authorName,
     selectComment,
     openCluster,
     openChecks,
-    openHistory,
+    // From a page's card: the open comment makes way (its own History link keeps it).
+    openHistory: (...args) => {
+      leaveForNavigation()
+      openHistory(...args)
+    },
     updateParams,
     defaultMode,
     onImageError,
@@ -660,7 +757,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     [boardId, data?.captures, imageVersion, pagesById, variantsById, viewports],
   )
   // The comment being written: its description and what its composer needs.
-  const { draftDescription, composerProps } = useCommentDraft({
+  const { draftDescription, draftTarget, composerProps } = useCommentDraft({
     draft,
     setDraft,
     busy,
@@ -717,7 +814,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   useOverlayEntry(Boolean(journey), closeJourney)
   useOverlayEntry(Boolean(builder), () => setBuilder(null))
 
-  useCommentModeKeys({ commentMode, setCommentMode, canComment, comparePair, setDraft })
+  useCommentModeKeys({ commentMode, setCommentMode, canComment, comparePair, setDraft, keepDraft })
   useJourneyCycleKey({ journeys, journey, builder, openJourney, closeJourney })
   // The app sidebar (desktop): expanded or collapsed, Ctrl/Cmd+B, remembered.
   const [sidebarOpen, toggleSidebar] = useSidebarExpanded(wide, false)
@@ -734,14 +831,19 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   }, [])
   // Leaving comment mode drops a draft with nothing in it; text, a drawing
   // or an image keeps it.
-  const draftImages = useRef(0)
   draftImages.current = composerProps.media.images.images.length
   useEffect(() => {
-    if (commentMode) return
-    const drawn = drawing.get()
-    const media = draftImages.current > 0 || (drawn?.owner === 'composer' && drawn.shapes.length > 0)
-    setDraft((current) => (current && !current.body.trim() && !media ? null : current))
-  }, [commentMode])
+    if (!commentMode && !draftFilled()) setDraft(null)
+  }, [commentMode, draftFilled])
+
+  // A link that names both a comment and a journey: the comment wins. Its
+  // thread opens at its pin and the journey leaves the address (on load only:
+  // a comment opened while stepping a journey is fine, the next step closes it).
+  useEffect(() => {
+    const now = new URLSearchParams(window.location.search)
+    if (Number(now.get('c')) && now.get('j')) updateParams({ j: null, step: null, jc: null, jb: null })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // An open thread counts as read.
   useEffect(() => {
@@ -795,10 +897,29 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   }, [boardView])
 
   const setMode = (value) => {
+    // A screen size the open comment (or the one being written) is not on.
+    const pointsAt = selectedComment || draft
+    if (pointsAt && value !== 'all' && pointsAt.viewport !== value) leaveForNavigation()
     setViewportNotice(null)
     updateParams({ vp: value === defaultMode ? null : value })
   }
   const allOpen = comments.filter((item) => item.status === 'open').length
+  // What the agents are doing, board-wide, for the toolbar (agentActivity.js):
+  // from the comments' agent statuses (the events stream and the comments
+  // poll keep them fresh), the chat turn in progress and hosted approvals.
+  const activity = useMemo(
+    () =>
+      agentActivity({
+        comments,
+        focus: focusEntry,
+        approvals: approvalRows,
+        titleOf: titleOfPage,
+        // Only for people who can send comments to the agent here: nobody
+        // else needs to hear that none is listening.
+        listening: info?.hosted && data?.agentDispatch ? data?.agentListening || null : null,
+      }),
+    [approvalRows, comments, data?.agentDispatch, data?.agentListening, focusEntry, info?.hosted, titleOfPage],
+  )
   // Batch fixes: offered only when Fix with agent is, and turned on in Agents.
   const fixAvailable = Boolean(
     chatAvailable && !data?.migratedTo?.readOnly && info?.agent?.fixWithAgent && info?.agent?.configured && (!info?.hosted || DEMO),
@@ -877,6 +998,8 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
         // Who is asking, for "Viewers can't reply" and the name a local board asks for once.
         role: info?.guest ? 'guest' : info?.role || null,
         hosted: Boolean(info?.hosted),
+        // Hosted: false when no agent is listening for this project (null: not known).
+        agentListening: info?.hosted && data?.agentListening ? Boolean(data.agentListening.online) : null,
         onSaveName: setLocalName,
         // Images and drawings on its messages and in the reply box.
         media: {
@@ -1002,6 +1125,16 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
               setNotice({ tone: 'info', text: 'The demo does not take new captures. On your own board this recaptures the changed pages.' })
           : null,
   }
+  // The step a comment is at, one at a time (data-sw-comment-flow on the
+  // canvas): drawing (a tool is on), composing (a target is picked, the
+  // composer is open), picking (comment mode, nothing picked yet), else off.
+  const commentState = drawingOn
+    ? 'drawing'
+    : draft && wide && !draftParked
+      ? 'composing'
+      : commentMode && canComment && !comparePair
+        ? 'picking'
+        : 'off'
   const toggleLinks = () => updateParams({ links: showLinks ? null : '1' })
   const toggleMinimap = () => {
     const next = !minimapOn
@@ -1065,6 +1198,10 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
       if (frame) boardContext.onFocusFrame(id, frame.viewport)
     })
 
+  const toggleCompareLeaving = () => {
+    if (!comparePair) leaveForNavigation()
+    toggleCompare()
+  }
   // Board actions in the command palette.
   const paletteActions = boardPaletteActions({
     canComment,
@@ -1072,11 +1209,12 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     commentMode,
     markPicked,
     setDraft,
+    keepDraft,
     setCommentMode,
     showLinks,
     toggleLinks,
     canCompare,
-    toggleCompare,
+    toggleCompare: toggleCompareLeaving,
     wide,
     fitBoard,
     minimapOn,
@@ -1094,6 +1232,8 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     chatAvailable,
     chatThread,
     reopenChat,
+    activity,
+    openAgentThread: (commentId) => openChat(threadForComment(commentId)),
     updateParams,
     groupedPages,
     jumpToPage,
@@ -1114,7 +1254,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     brokenLinks,
     canCompare,
     comparePair,
-    toggleCompare,
+    toggleCompare: toggleCompareLeaving,
     settingsAvailable,
     openSettings,
     capture,
@@ -1127,7 +1267,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
       <div className="flex h-full flex-col" data-sw-board={boardId} style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
         <DemoBanner />
         <AccessLostBanner />
-        {info?.hosted && data?.agentApprove ? <HostedApprovals boardId={boardId} /> : null}
+        {info?.hosted && data?.agentApprove ? <HostedApprovals boardId={boardId} onRows={setApprovalRows} /> : null}
         <a
           href="#sw-comments"
           className="sr-only z-[80] rounded-md bg-accent px-3 py-2 text-sm font-medium text-accent-fg focus:not-sr-only focus:absolute focus:top-2 focus:left-2"
@@ -1148,6 +1288,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
               setShareOpen={setShareOpen}
               expanded={sidebarOpen}
               onToggle={toggleSidebar}
+              openPalette={() => setPaletteOpen(true)}
               quiet={drawingOn}
               pages={
                 data
@@ -1185,7 +1326,6 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
               canComment={canComment}
               commentMode={commentMode}
               setCommentMode={setCommentMode}
-              openPalette={() => setPaletteOpen(true)}
               minimapOn={minimapOn}
               toggleMinimap={toggleMinimap}
               linksTip={linksTip}
@@ -1231,9 +1371,10 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
               <div
                 ref={canvasRef}
                 tabIndex={-1}
-                className={cn('relative min-w-0 flex-1 outline-none', commentMode && canComment && 'sw-commenting')}
+                className={cn('relative min-w-0 flex-1 outline-none', commentState === 'picking' && 'sw-commenting')}
                 onKeyDown={onCanvasKeyDown}
                 data-sw-canvas="true"
+                data-sw-comment-flow={commentState}
               >
                 {showLinks && brokenLinks.length ? (
                   <BrokenLinks items={brokenLinks} open={brokenOpen} onOpenChange={setBrokenOpen} />
@@ -1244,6 +1385,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                     canvasRef={canvasRef}
                     targets={layout.targets}
                     focusFor={(owner) => ((owner === 'composer' ? draft?.y : selectedComment?.y) ?? 50) / 100}
+                    titleFor={(pageId, viewport) => `${targetTitle(pageId)} · ${viewportLabel(viewport)}`}
                     shotFor={(pageId, viewport) => {
                       const image = data.captures?.[pageId]?.[viewport]
                       return image?.file ? fileUrl(boardId, 'captures', image.thumb || image.file, imageVersion) : null
@@ -1257,6 +1399,21 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                     canComment={canComment}
                     readyKeys={readyKeys}
                     setCommentMode={setCommentMode}
+                    selectText={
+                      selectingKey && wide
+                        ? {
+                            title: `${targetTitle(splitFrameKey(selectingKey).targetId)} · ${viewportLabel(splitFrameKey(selectingKey).viewport)}`,
+                            onDone: () => setSelectingKey(null),
+                          }
+                        : null
+                    }
+                    composing={commentState === 'composing' ? draftTarget : null}
+                    parkedDraft={
+                      draft && draftParked
+                        ? { title: targetTitle(draft.pageId), onReopen: reopenDraft, onDiscard: () => setDraft(null) }
+                        : null
+                    }
+                    onCancelDraft={() => (busy ? null : setDraft(null))}
                     showLinks={showLinks}
                     activePage={activePage}
                     shownSteps={shownSteps}
@@ -1327,7 +1484,10 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                     <Background gap={40} size={1} />
                     <FocusedFrameBar
                       onChecks={canChecks ? openChecks : null}
-                      onHistory={openHistory}
+                      onHistory={(...args) => {
+                        leaveForNavigation()
+                        openHistory(...args)
+                      }}
                       historyCountFor={(pageId) => historyCount(data?.versions, pageId)}
                       focusedKey={drawingOn ? null : focusedKey}
                       layout={layout}
@@ -1343,13 +1503,30 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                       onCapture={canCapture && !comparePair ? (pageId) => startCapture(null, [pageId]) : null}
                       captureBusy={busy || Boolean(capture?.running)}
                     />
-                    {wide && draft && !modalOpen ? (
+                    {wide && draft && !draftParked && !modalOpen ? (
                       <ComposerPopover
                         point={pinPoint(layout.targets, draft)}
+                        // Re-aimed at another spot: a card that was dragged goes back to its pin.
+                        resetKey={`${draft.pageId}|${draft.viewport}|${draft.x}|${draft.y}`}
                         stowed={drawingOn}
                         onClose={() => (busy ? null : setDraft(null))}
+                        onEscape={() => {
+                          // Esc while being asked is "Keep".
+                          if (discardAsk) {
+                            setDiscardAsk(false)
+                            return false
+                          }
+                          if (!draftHasMedia()) return true
+                          setDiscardAsk(true)
+                          return false
+                        }}
                       >
-                        <CommentComposer {...composerProps} touch={false} description={draftDescription} />
+                        <CommentComposer
+                          {...composerProps}
+                          touch={false}
+                          description={draftDescription}
+                          discard={discardAsk ? { onDiscard: () => setDraft(null), onKeep: () => setDiscardAsk(false) } : null}
+                        />
                       </ComposerPopover>
                     ) : null}
                     {wide && threadProps && !draft && !modalOpen ? (
@@ -1406,6 +1583,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                     onComment={
                       canComment && !comparePair
                         ? () => {
+                            if (keepDraft()) return
                             setDraft(null)
                             setCommentMode(true)
                           }

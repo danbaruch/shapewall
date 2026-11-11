@@ -1,5 +1,6 @@
 import { Bot, Camera, Flag, MessageSquare, MessageSquarePlus, MoreHorizontal, Rows2, Settings } from 'lucide-react'
-import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { settles } from './agentActivity'
 import { leavePage } from '../lib/hooks'
 import { cn } from '../lib/utils'
 import {
@@ -19,7 +20,6 @@ import {
 } from '../components/ui'
 import { ProjectCrumb, ViewerNote } from './HostedNotes'
 import { ViewsMenu } from './ViewsMenu'
-import { PALETTE_KEY, PaletteTrigger } from './PageFinder'
 import { KeyTip } from './KeyTip'
 import { CaptureStatus } from './CaptureStatus'
 import { BoardProfile } from './BoardProfile'
@@ -53,10 +53,100 @@ function useWidth(ref, active) {
   return width
 }
 
-// Comments, Agent and Checks share the side panel: flat buttons side by side,
-// the open panel's one pressed with the kit's selected treatment (Toggle
-// `flat`), none pressed while the panel is closed. Each also opens its own
-// entry point (unchanged hooks).
+// One look for every control in the bar (see BoardToolbar below): a quiet
+// 32 px box with a hairline. BOXED is a single button (Views, Capture, Agent
+// settings); TRACK is a row of options or toggles whose chosen one is the
+// raised chip (the screen sizes, the side panels), with SEGMENT its buttons.
+const BOXED = 'bg-surface-2/60 text-fg ring-1 ring-line ring-inset hover:bg-surface-2'
+const TRACK = 'flex shrink-0 items-center rounded-md border border-line bg-surface-2 p-0.5'
+const SEGMENT = 'h-[26px] text-ui'
+
+// A hairline between two groups of the bar.
+const Divider = () => <span className="h-5 w-px shrink-0 bg-line" aria-hidden="true" data-sw-toolbar-divider="true" />
+
+// The board's agent activity (agentActivity.js) on a toolbar control, as a
+// mark on its corner, so it costs no room and reads the same at every width:
+//   working  an accent dot with the same ping as a working pin (still under
+//            reduced motion), the count in it when more than one runs
+//   waiting  a still dot in the attention colour: an agent needs a person
+//   done     a still green dot for a few seconds after the last one finished
+// The words are in the control's tooltip and accessible name.
+const DONE_MS = 4000
+function useShownActivity(activity) {
+  const [done, setDone] = useState(false)
+  const previous = useRef(activity.state)
+  useEffect(() => {
+    const before = previous.current
+    previous.current = activity.state
+    if (!settles(before, activity.state)) {
+      if (activity.state !== 'idle') setDone(false)
+      return undefined
+    }
+    setDone(true)
+    const timer = window.setTimeout(() => setDone(false), DONE_MS)
+    return () => window.clearTimeout(timer)
+  }, [activity.state])
+  return activity.state === 'idle' && done ? 'done' : activity.state
+}
+
+const ACTIVITY_TONE = { working: 'bg-accent text-accent-fg', waiting: 'bg-warn text-warn-fg', done: 'bg-ok text-ok-fg' }
+
+// With its word, the Agent button shows the activity the way Comments shows
+// its count: a pill at the right end, the same size and type. One agent is a
+// dot in that slot; more are counted. Working breathes slowly (styles.css
+// `breathe`, the same as a working pin), inside the button and still under
+// reduced motion.
+function ActivityPill({ shown, count }) {
+  if (shown === 'idle') return null
+  const many = count > 1 && shown !== 'done'
+  return (
+    <span
+      className={cn(
+        'tabular inline-flex shrink-0 items-center justify-center rounded-full text-[11px] leading-4 font-semibold',
+        many ? 'px-1.5' : 'mx-1 h-2 w-2',
+        ACTIVITY_TONE[shown],
+        shown === 'working' && 'motion-safe:animate-breathe',
+      )}
+      aria-hidden="true"
+      data-sw-agent-activity-mark={shown}
+      data-sw-agent-activity-pulse={shown === 'working' ? 'true' : undefined}
+    >
+      {many ? count : null}
+    </span>
+  )
+}
+
+// Without its word (a narrow toolbar, the phone's More button) the mark sits
+// inside the icon's corner, small, with the same calm motion.
+function ActivityMark({ shown, count, touch = false }) {
+  if (shown === 'idle') return null
+  const many = count > 1 && shown !== 'done'
+  return (
+    <span
+      className={cn(
+        'tabular pointer-events-none absolute flex items-center justify-center rounded-full font-semibold ring-2 ring-surface',
+        touch ? 'top-2 right-2' : '-top-1 -right-1',
+        many ? 'h-3.5 min-w-3.5 px-0.5 text-[9px] leading-none' : 'h-2 w-2',
+        ACTIVITY_TONE[shown],
+        shown === 'working' && 'motion-safe:animate-breathe',
+      )}
+      aria-hidden="true"
+      data-sw-agent-activity-mark={shown}
+      data-sw-agent-activity-pulse={shown === 'working' ? 'true' : undefined}
+    >
+      {many ? count : null}
+    </span>
+  )
+}
+
+// In words: what runs and what waits, and on a hosted board whether an agent
+// is listening at all (said also when nothing is going on).
+const activityWords = (shown, activity) => (shown === 'done' ? ['Agent done', activity.text].filter(Boolean).join('. ') : activity.text)
+
+// Comments, Agent and Checks share the side panel: three siblings on one
+// track, the open panel's one raised (Toggle `segment`, the same chip as the
+// chosen screen size), none raised while the panel is closed. Each also
+// opens its own entry point (unchanged hooks).
 function PanelSwitch({
   labels,
   allOpen,
@@ -69,24 +159,35 @@ function PanelSwitch({
   openChecks,
   closeChecks,
   updateParams,
+  activity,
+  shown,
+  openAgentThread,
 }) {
   const commentsOn = !panelHidden && !chatThread && !checksOpen
+  const words = activityWords(shown, activity)
+  // Without an agent chat on this board the Comments button carries the mark.
+  const onComments = !chatAvailable && Boolean(words)
+  const activityHooks = { 'data-sw-agent-activity': shown, 'data-sw-agent-activity-count': activity.count || undefined }
   // Each button keeps one name; aria-pressed says whether its panel is open.
-  const segment = 'h-8 text-ui'
+  const segment = cn(SEGMENT, !labels && 'px-2')
   return (
-    <div className="flex shrink-0 items-center gap-0.5" role="group" aria-label="Side panel">
-      <Tooltip content={`${commentsOn ? 'Hide' : 'Show'} comments (${allOpen} open)`} side="bottom">
+    <div className={TRACK} role="group" aria-label="Side panel" data-sw-panel-switch="true">
+      <Tooltip content={`${commentsOn ? 'Hide' : 'Show'} comments (${allOpen} open)${onComments ? `. ${words}` : ''}`} side="bottom">
         <Toggle
-          variant="flat"
+          variant="segment"
           className={segment}
           pressed={commentsOn}
           onPressedChange={() =>
             updateParams({ panel: panelHidden || chatThread || checksOpen ? null : 'off', chat: null, checks: null, cv: null })
           }
-          aria-label={`Comments, ${allOpen} open`}
+          aria-label={`Comments, ${allOpen} open${onComments ? `. ${words}` : ''}`}
           data-sw-panel-toggle="true"
+          {...(chatAvailable ? {} : activityHooks)}
         >
-          <MessageSquare size={14} aria-hidden="true" />
+          <span className="relative inline-flex">
+            <MessageSquare size={14} aria-hidden="true" />
+            {onComments ? <ActivityMark shown={shown} count={activity.count} /> : null}
+          </span>
           {labels ? 'Comments' : null}
           <span className="tabular rounded-full bg-fg/[0.07] px-1.5 text-[11px] leading-4 font-semibold text-fg" aria-hidden="true">
             {allOpen}
@@ -94,24 +195,32 @@ function PanelSwitch({
         </Toggle>
       </Tooltip>
       {chatAvailable ? (
-        <Tooltip content={chatThread ? 'Close the agent chat' : 'Chat with your agent about this board'} side="bottom">
+        <Tooltip content={words || (chatThread ? 'Close the agent chat' : 'Chat with your agent about this board')} side="bottom">
           <Toggle
-            variant="flat"
+            variant="segment"
             className={segment}
             pressed={Boolean(chatThread)}
-            aria-label="Agent"
-            onPressedChange={() => (chatThread ? updateParams({ chat: null }) : reopenChat())}
+            aria-label={words ? `Agent. ${words}` : 'Agent'}
+            // Exactly one thing needs the person: the panel opens on it.
+            onPressedChange={() =>
+              chatThread ? updateParams({ chat: null }) : activity.target ? openAgentThread(activity.target) : reopenChat()
+            }
             data-sw-chat-toggle="true"
+            {...activityHooks}
           >
-            <Bot size={14} aria-hidden="true" />
+            <span className="relative inline-flex">
+              <Bot size={14} aria-hidden="true" />
+              {labels ? null : <ActivityMark shown={shown} count={activity.count} />}
+            </span>
             {labels ? 'Agent' : null}
+            {labels ? <ActivityPill shown={shown} count={activity.count} /> : null}
           </Toggle>
         </Tooltip>
       ) : null}
       {canChecks ? (
         <Tooltip content={checksOpen ? 'Close the checks' : 'Page checks: performance, accessibility, SEO'} side="bottom" align="end">
           <Toggle
-            variant="flat"
+            variant="segment"
             className={segment}
             pressed={Boolean(checksOpen)}
             aria-label="Checks"
@@ -127,17 +236,22 @@ function PanelSwitch({
   )
 }
 
-// The board toolbar. Desktop (lg and up): three zones, the canvas-tool way:
-//   left    where you are and how you look at it: the project and board
-//           switcher, the screen-size toggle, Views (journeys and what the
-//           canvas shows), and on a local
-//           board Capture with its status (otherwise the status dot sits by
-//           the name)
+// The board toolbar. Desktop (lg and up): three zones holding four groups,
+// the canvas-tool way:
+//   left    identity: the project and board switcher with the capture
+//           status dot (when the board was captured, in its tooltip);
+//           then, after a hairline, the view controls: the screen-size
+//           switch, Views (journeys and what the canvas shows), and on a
+//           local board Capture with its status
 //   centre  find: "Go to page or journey" (Ctrl/Cmd+K), centred on the toolbar
 //   right   act and open panels: the viewer note, Comment (the one primary
-//           action: a soft accent button while comment mode is off, filled
-//           and aria-pressed while it is on), the side panel switch
-//           (Comments | Agent | Checks), and Agent settings last
+//           action and the one accent control: soft while comment mode is
+//           off, filled and aria-pressed while it is on); then, after a
+//           hairline, the side panel switch (Comments | Agent | Checks) and
+//           Agent settings last
+// Every control but the name and Comment is the same quiet box: 32 px tall,
+// the same radius, a hairline, the same tint (BOXED, TRACK). A chosen option
+// or an open panel is the raised chip on its track.
 // toolbarFit.js decides which labels drop when the zones do not fit, from the
 // toolbar's width and what it shows (accessible names and tooltips stay).
 // Phone: a compact bar whose More button opens BoardMenu.
@@ -165,7 +279,6 @@ export function BoardToolbar({
   comparePair,
   commentMode,
   setCommentMode,
-  openPalette,
   setMenuOpen,
   showLinks,
   toggleLinks,
@@ -199,7 +312,12 @@ export function BoardToolbar({
   setSheetOpen,
   // The expanded app sidebar already names the project.
   sidebarTitled,
+  // What the board's agents are doing (agentActivity.js), and opening the
+  // one thread that needs the person.
+  activity = { state: 'idle', count: 0, text: '', target: null },
+  openAgentThread = () => {},
 }) {
+  const shown = useShownActivity(activity)
   const boardTitle = boards.find((item) => item.id === boardId)?.title || data?.board?.title || boardId
   const project = info?.hosted && info?.project?.url && info.role !== 'guest' ? info.project : null
   const viewer = !canComment && info?.hosted && info?.role === 'viewer'
@@ -355,11 +473,14 @@ export function BoardToolbar({
         <IconButton
           size="icon"
           variant="ghost"
-          className="shrink-0 text-fg"
+          className="relative shrink-0 text-fg"
           onClick={() => setMenuOpen(true)}
-          label={chatAvailable ? 'More: agent, pages, views, screen size' : 'More: pages, views, screen size'}
+          label={`${chatAvailable ? 'More: agent, pages, views, screen size' : 'More: pages, views, screen size'}${shown !== 'idle' ? `. ${activityWords(shown, activity)}` : ''}`}
           data-sw-menu="true"
+          data-sw-agent-activity={shown}
+          data-sw-agent-activity-count={activity.count || undefined}
         >
+          <ActivityMark shown={shown} count={activity.count} touch />
           <MoreHorizontal size={19} aria-hidden="true" />
         </IconButton>
         {profile}
@@ -389,23 +510,25 @@ export function BoardToolbar({
       ref={headerRef}
       className={cn(
         'grid h-14 shrink-0 items-center border-b border-line bg-surface px-3',
+        // Two zones and the room between them; no search here any more (it is
+        // the sidebar's field), so the bar keeps its shape whatever is open.
         off.tight ? 'gap-x-3' : 'gap-x-5',
         // Centred: two equal side columns. Too narrow for that: the left zone
         // takes its own width (the name held to its minimum) and the search
         // icon follows it.
-        fit.centred ? 'grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]' : 'grid-cols-[auto_auto_minmax(0,1fr)]',
+        'grid-cols-[auto_minmax(0,1fr)]',
       )}
       data-sw-toolbar="full"
       data-sw-toolbar-fit={FIT_STEPS[fit.step]}
-      data-sw-toolbar-centred={fit.centred ? 'true' : 'false'}
     >
       <h1 className="sr-only">Shapewall: {boardTitle}</h1>
       <div className={cn('flex min-w-0 items-center', innerGap)} data-sw-toolbar-zone="left">
-        <div className="flex min-w-0 flex-col justify-center" style={fit.centred ? undefined : { maxWidth: TOOLBAR.name[fit.step] }}>
+        <div className="flex min-w-0 flex-col justify-center" style={{ maxWidth: TOOLBAR.name[fit.step] }}>
           {project && !sidebarTitled ? <ProjectCrumb project={project} /> : null}
           {picker}
         </div>
         {canCapture ? null : status}
+        {off.viewport ? null : <Divider />}
         {modes.length > 1 ? (
           <span
             key={viewportNotice?.at || 'still'}
@@ -417,7 +540,7 @@ export function BoardToolbar({
               options={viewportOptions}
               value={mode}
               onChange={setMode}
-              itemClassName={off.viewport ? 'px-2' : undefined}
+              itemClassName={cn('h-[26px]', off.viewport && 'px-2')}
             />
           </span>
         ) : null}
@@ -439,13 +562,14 @@ export function BoardToolbar({
           minimapOn={minimapOn}
           toggleMinimap={toggleMinimap}
           compact={off.view}
+          boxed={BOXED}
           labelMax={fit.journey || TOOLBAR.journey[Math.min(fit.step, TOOLBAR.journey.length - 1)]}
         />
         {canCapture ? (
           <>
             <IconButton
               variant="ghost"
-              className="shrink-0 text-fg"
+              className={cn('shrink-0', BOXED)}
               disabled={capture?.running || busy}
               onClick={() => setCaptureConfirm(true)}
               label="Capture now"
@@ -458,12 +582,6 @@ export function BoardToolbar({
             {status}
           </>
         ) : null}
-      </div>
-
-      <div className="flex shrink-0 items-center justify-center" data-sw-toolbar-zone="center">
-        <Tooltip content={<KeyTip label="Go to a page, journey or comment" keys={[PALETTE_KEY]} />} side="bottom">
-          <PaletteTrigger onOpen={openPalette} compact={off.search} style={off.search ? undefined : { width: fit.search }} />
-        </Tooltip>
       </div>
 
       <div className={cn('flex min-w-0 items-center justify-end', innerGap)} data-sw-toolbar-zone="right">
@@ -487,6 +605,7 @@ export function BoardToolbar({
             </Button>
           </Tooltip>
         ) : null}
+        {commenting && !off.viewport ? <Divider /> : null}
         <PanelSwitch
           labels={!off.panels}
           allOpen={allOpen}
@@ -499,11 +618,14 @@ export function BoardToolbar({
           openChecks={openChecks}
           closeChecks={closeChecks}
           updateParams={updateParams}
+          activity={activity}
+          shown={shown}
+          openAgentThread={openAgentThread}
         />
         {settingsAvailable ? (
           <IconButton
             variant="ghost"
-            className="shrink-0 text-fg"
+            className={cn('shrink-0', BOXED)}
             onClick={openSettings}
             label="Agent settings"
             tooltip="Agent settings: which agent the chat uses"

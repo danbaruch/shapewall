@@ -1,5 +1,7 @@
 # Running and sharing a board
 
+Not sure whether you want the local board or a hosted server? Start with [Where to run Shapewall](where-to-run.md).
+
 ## Locally (the default)
 
 ```sh

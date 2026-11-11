@@ -103,6 +103,19 @@ export function projectRoutes(ctx) {
       },
     ],
     [
+      // Removing one board: in the demo it leaves the project's list until Reset.
+      'DELETE',
+      /^\/api\/workspaces\/([a-z0-9_]+)\/projects\/([a-z0-9_]+)\/boards\/([a-z0-9-]+)$/,
+      ({ params }) => {
+        inWorkspace(params[0], 'projects')
+        const project = projectIn(params[0], params[1])
+        if (!project.boards.some((item) => item.id === params[2])) fail(404, 'unknown_board', 'No such board.')
+        project.boards = project.boards.filter((item) => item.id !== params[2])
+        audit(params[0], 'board_removed', { target: `${project.id}/${params[2]}`, detail: { project: project.name } })
+        return { ok: true, board: params[2] }
+      },
+    ],
+    [
       'GET',
       /^\/api\/workspaces\/([a-z0-9_]+)\/projects\/([a-z0-9_]+)\/agent$/,
       ({ params }) => {
@@ -138,8 +151,8 @@ export function projectRoutes(ctx) {
       ({ params, body }) => {
         const { user } = inWorkspace(params[0], 'tokens')
         const project = projectIn(params[0], params[1])
-        const name = cleanText(body?.name, 60)
-        if (!name) fail(400, 'invalid_name', 'Token name: 1 to 60 characters.')
+        const name = cleanText(body?.name, 61)
+        if (!name || name.length > 60) fail(400, 'invalid_name', 'Token name: 1 to 60 characters.')
         const scopes = Array.isArray(body?.scopes)
           ? [...new Set(body.scopes.flatMap((scope) => (scope === 'comment' ? ['reply', 'status'] : [scope])))]
           : ['read']
@@ -167,6 +180,24 @@ export function projectRoutes(ctx) {
         })
         audit(params[0], 'token_created', { target: id, detail: { project: project.id, scopes } })
         return { status: 201, json: { token, info: listTokens(params[0], project.id).find((item) => item.id === id) } }
+      },
+    ],
+    [
+      // Renaming a token (src/hosted/console-routes.js): what a watcher is called from now on.
+      'PATCH',
+      /^\/api\/workspaces\/([a-z0-9_]+)\/projects\/([a-z0-9_]+)\/tokens\/([a-z0-9_]+)$/,
+      ({ params, body }) => {
+        inWorkspace(params[0], 'tokens')
+        projectIn(params[0], params[1])
+        const name = cleanText(body?.name, 61)
+        if (!name || name.length > 60) fail(400, 'invalid_name', 'Token name: 1 to 60 characters.')
+        const token = state.tokens.find((item) => item.projectId === params[1] && item.id === params[2] && !item.revokedAt)
+        if (!token) fail(404, 'unknown_token', 'No such token.')
+        if (token.name !== name) {
+          audit(params[0], 'token_renamed', { target: token.id, detail: { from: token.name, to: name } })
+          token.name = name
+        }
+        return { token: listTokens(params[0], params[1]).find((item) => item.id === token.id) }
       },
     ],
     [

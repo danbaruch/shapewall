@@ -3,19 +3,20 @@
 // a token in the console, `shapewall push` uploads a real capture of the demo
 // site, and the board (the same client as local) shows it: live HTML through
 // the signed path, an element-anchored comment, then sign-out and passkey
-// sign-in. Then the admin loop: invite -> accept on a phone -> role change ->
+// sign-in. Then `shapewall login` approved with a passkey check, one board
+// removed in the console, and the admin loop: invite -> accept on a phone -> role change ->
 // share link with a passcode -> a guest comments -> revoke. Desktop and phone
 // widths, light and dark; no console errors.
 // Set SHAPEWALL_SHOTS=<dir> to keep screenshots.
 import { execFileSync } from 'node:child_process'
 import { loadConfig } from '../../src/config.js'
-import { createRemote } from '../../src/remote/remote.js'
+import { createRemote, pushDefinition, pushFiles } from '../../src/remote/remote.js'
 import { remoteSource } from '../../src/agent/starter/source.js'
 import { starterSettings } from '../../src/agent/starter/settings.js'
 import { runStarter } from '../../src/agent/starter/supervisor.js'
 import { startStarterStub } from '../fixtures/starter-model-stub.mjs'
 import { hostedStarterRuntime } from '../fixtures/hosted-starter-runtime.mjs'
-import { tempDir } from '../helpers.js'
+import { sampleConfig, tempDir } from '../helpers.js'
 import { after, before, test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -23,7 +24,7 @@ import path from 'node:path'
 import { chromium } from 'playwright'
 import { runCapture } from '../../src/capture/capture.js'
 import { main } from '../../src/cli.js'
-import { startHostedServer, tokenCall } from '../hosted-helpers.js'
+import { startHostedServer, tokenCall, writeLocalCaptures } from '../hosted-helpers.js'
 import { ROOT_DIR, demoSetup, liveElementBox } from './helpers.js'
 
 const SHOTS = process.env.SHAPEWALL_SHOTS ? path.resolve(process.env.SHAPEWALL_SHOTS) : null
@@ -139,6 +140,24 @@ test('sign up with a passkey, push, comment on the hosted board, sign in again',
   await shot(page, '2-token')
   await page.click('[data-sw-token-done]')
 
+  // Rename the token: what a watcher using it is called on the board. The
+  // token itself stays the same (the push below still uses it).
+  await page.click('[data-sw-rename-token="CI"]')
+  const renameInput = page.locator('[data-sw-rename-token-input]')
+  await renameInput.waitFor()
+  assert.equal(await renameInput.inputValue(), 'CI')
+  assert.equal(await page.locator('[data-sw-rename-token-save]').isDisabled(), true, 'nothing to save until the name changes')
+  await renameInput.fill('Harry the watcher')
+  await shot(page, '2b-token-rename')
+  await page.click('[data-sw-rename-token-save]')
+  await page.waitForSelector('[data-sw-token="Harry the watcher"]')
+  assert.equal(await page.locator('[data-sw-token="CI"]').count(), 0)
+  assert.equal(
+    hosted.db.prepare('SELECT name FROM api_tokens').get().name,
+    'Harry the watcher',
+    'saved on the server, the one token of this project',
+  )
+
   // shapewall push, as a person would run it.
   const lines = []
   process.env.SHAPEWALL_TOKEN = pushToken
@@ -231,6 +250,141 @@ test('sign up with a passkey, push, comment on the hosted board, sign in again',
   await page.waitForSelector('[data-sw-node="home"]')
   assert.equal(new URL(page.url()).pathname, new URL(boardUrl).pathname)
   assert.deepEqual(errors, [])
+})
+
+// A `shapewall login` waiting for approval, as the terminal starts one.
+async function startDeviceLogin() {
+  hosted.rateLimiter.reset()
+  const response = await fetch(`${hosted.origin}/api/v1/device/start`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'Fixture laptop' }),
+  })
+  assert.equal(response.status, 201)
+  return response.json()
+}
+
+// The owner's sign-in as it is ten minutes on: sensitive actions ask for the passkey again.
+const staleSignIn = () => hosted.db.prepare('UPDATE sessions SET verified_at = ?').run(new Date(Date.now() - 30 * 60_000).toISOString())
+
+test('sign in a terminal: Approve with a sign-in that is not fresh asks for the passkey, says so when that is closed, and shows a refusal', async () => {
+  const { page, errors } = owner
+  // The 403s below are the point of this test; the browser logs each one.
+  const expected = (text) => /status of 40[34]/.test(text)
+  const login = await startDeviceLogin()
+  staleSignIn()
+  await page.goto(`${hosted.origin}/device`)
+  await page.fill('[data-sw-device-code]', login.userCode)
+  await page.click('[data-sw-device-lookup]')
+  await page.waitForSelector('[data-sw-device-approve]')
+
+  // Approve answers 403 reauth_required: the passkey dialog opens.
+  const refused = page.waitForResponse((response) => response.url().endsWith('/api/device/approve') && response.status() === 403)
+  await page.click('[data-sw-device-approve]')
+  await refused
+  await page.waitForSelector('[data-sw-reauth]')
+  await shot(page, 'device-1-passkey')
+  // Closed without confirming: the page says why nothing was approved.
+  await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click()
+  await page.waitForSelector('[data-sw-reauth]', { state: 'detached' })
+  await page.waitForSelector('[data-sw-device-reauth-note]')
+  assert.match(await page.textContent('[data-sw-device-reauth-note]'), /Not approved yet.*passkey/)
+  assert.equal(await page.locator('[data-sw-device-done]').count(), 0)
+  assert.equal(await page.isEnabled('[data-sw-device-approve]'), true)
+  await shot(page, 'device-2-not-approved')
+
+  // Again, with the passkey: approved, and the terminal gets its token.
+  await page.click('[data-sw-device-approve]')
+  await page.click('[data-sw-reauth]')
+  await page.waitForSelector('[data-sw-device-done="approved"]')
+  const polled = await fetch(`${hosted.origin}/api/v1/device/poll`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ deviceCode: login.deviceCode }),
+  })
+  assert.equal((await polled.json()).status, 'approved')
+
+  // Any other refusal shows its message: here the code was used up
+  // elsewhere between Continue and Approve.
+  const second = await startDeviceLogin()
+  await page.goto(`${hosted.origin}/device`)
+  await page.fill('[data-sw-device-code]', second.userCode)
+  await page.click('[data-sw-device-lookup]')
+  await page.waitForSelector('[data-sw-device-approve]')
+  assert.equal(hosted.app.locals.deviceLogins.deny(second.userCode.replace('-', '')), true)
+  await page.click('[data-sw-device-approve]')
+  await page.waitForSelector('[data-sw-device] [data-sw-error]')
+  assert.match(await page.textContent('[data-sw-device] [data-sw-error]'), /code is not right, or it expired|already used/)
+  assert.equal(await page.locator('[data-sw-device-reauth-note]').count(), 0)
+  assert.deepEqual(
+    errors.filter((text) => !expected(text)),
+    [],
+  )
+  errors.length = 0
+})
+
+test('remove one board in the console: its captures and comments go, the other board and its comments stay', async () => {
+  const { page, errors } = owner
+  const projectId = hosted.db.prepare("SELECT id FROM projects WHERE name = 'Demo site'").get().id
+  // A second board pushed by mistake, with a comment on it.
+  const config = sampleConfig('hosted-e2e-extra', { id: 'mistake', title: 'Pushed by mistake' })
+  writeLocalCaptures(config, 'mistake')
+  const remote = createRemote({ origin: hosted.origin, token: pushToken })
+  const started = await remote.startPush(pushDefinition(config, config.boards[0]))
+  for (const [area, name, file] of pushFiles(config, config.boards[0])) await remote.pushFile(started.id, area, name, fs.readFileSync(file))
+  const manifest = JSON.parse(fs.readFileSync(path.join(config.outputDir, 'mistake', 'captures', 'manifest.json'), 'utf8'))
+  await remote.commitPush(started.id, { manifest, variants: [] })
+  const boardApi = `${hosted.origin}/w/${workspaceId}/p/${projectId}/api`
+  const posted = await page.request.post(`${boardApi}/boards/mistake/comments`, {
+    data: { pageId: 'home', viewport: 'desktop', x: 20, y: 20, body: 'On the board that goes' },
+    headers: { Origin: hosted.origin },
+  })
+  assert.equal(posted.status(), 201)
+  const kept = hosted.db.prepare("SELECT COUNT(*) AS n FROM comments WHERE project_id = ? AND board_id = 'demo'").get(projectId).n
+  assert.ok(kept > 0, 'the demo board has comments from the tests before')
+  const folder = (board) => path.join(hosted.dataDir, 'files', workspaceId, projectId, board)
+  assert.ok(fs.existsSync(folder('mistake')))
+
+  await page.goto(`${hosted.origin}/w/${workspaceId}/projects/${projectId}`)
+  await page.waitForSelector('[data-sw-project-board="mistake"]')
+  assert.equal(await page.locator('[data-sw-project-board]').count(), 2)
+  // The dialog names the board and says what goes.
+  staleSignIn()
+  await page.click('[data-sw-remove-board="mistake"]')
+  await page.waitForSelector('[data-sw-remove-board-note]')
+  assert.match(await page.textContent('[role="dialog"]'), /Remove the board mistake\?/)
+  assert.match(
+    await page.textContent('[data-sw-remove-board-note]'),
+    /captures, the page history and every comment of mistake on this server/,
+  )
+  assert.match(await page.textContent('[data-sw-remove-board-note]'), /brings its captures back, but not the comments/)
+  await shot(page, 'board-remove-1-confirm')
+  // The sign-in is not fresh: the passkey first, then it is removed.
+  await page.click('[data-sw-confirm]')
+  await page.click('[data-sw-reauth]')
+  await page.waitForSelector('[data-sw-project-board="mistake"]', { state: 'detached' })
+  await page.waitForSelector('[data-sw-project-board="demo"]')
+  assert.equal(await page.locator('[data-sw-project-board]').count(), 1)
+  await shot(page, 'board-remove-2-done')
+
+  assert.equal(fs.existsSync(folder('mistake')), false)
+  assert.ok(fs.existsSync(path.join(folder('demo'), 'captures', 'manifest.json')))
+  assert.equal(hosted.db.prepare("SELECT COUNT(*) AS n FROM comments WHERE project_id = ? AND board_id = 'mistake'").get(projectId).n, 0)
+  assert.equal(hosted.db.prepare("SELECT COUNT(*) AS n FROM comments WHERE project_id = ? AND board_id = 'demo'").get(projectId).n, kept)
+  // The removed board's address answers not found; the other board opens with its pins.
+  assert.equal((await page.request.get(`${boardApi}/boards/mistake`)).status(), 404)
+  assert.equal((await page.request.get(`${boardApi}/boards/demo`)).status(), 200)
+  await page.goto(`${hosted.origin}/w/${workspaceId}/p/${projectId}/?board=demo`)
+  await page.waitForSelector('[data-sw-node="home"]')
+  await page.waitForSelector('[data-sw-pin]')
+  // The audit page says it in words.
+  await page.goto(`${hosted.origin}/w/${workspaceId}/audit`)
+  await page.waitForSelector('text=removed the board mistake from Demo site')
+  assert.deepEqual(
+    errors.filter((text) => !/status of 40[34]/.test(text)),
+    [],
+  )
+  errors.length = 0
 })
 
 test('admin loop: invite, accept on a phone, change the role, share a link, guest comments, revoke', async () => {

@@ -7,6 +7,7 @@ import assert from 'node:assert/strict'
 import {
   OPTION_PREFS_KEY,
   agentOptionKey,
+  agentPicks,
   chatOptionKey,
   choicesFor,
   currentLabel,
@@ -58,7 +59,7 @@ const OPTIONS = [
 
 test('a pick is the chat’s own choice and the agent’s default for the next new chat, not for older chats', () => {
   const chat = chatOptionKey('board', 'chat-1')
-  const agent = agentOptionKey('claude', 'Claude Code')
+  const agent = agentOptionKey('claude')
   let prefs = loadOptionPrefs(storage())
   assert.deepEqual(prefs, { chats: {}, agents: {} })
   prefs = rememberChoice(prefs, { chat, agent, configId: 'model', value: 'deep', base: { effort: 'medium' }, now: 1 })
@@ -74,12 +75,12 @@ test('a pick is the chat’s own choice and the agent’s default for the next n
   // keepChoices never overwrites a chat's own choices.
   assert.equal(keepChoices(prefs, { chat, choices: { model: 'deep' } }), prefs)
   // Another agent has its own defaults.
-  assert.deepEqual(choicesFor(prefs, { chat: chatOptionKey('board', 'chat-3'), agent: agentOptionKey('codex', 'Codex'), fresh: true }), {})
+  assert.deepEqual(choicesFor(prefs, { chat: chatOptionKey('board', 'chat-3'), agent: agentOptionKey('codex'), fresh: true }), {})
 })
 
 test('the first turn sends what was chosen before any message, and the server’s options show it', () => {
   const chat = chatOptionKey('board', 'chat-1')
-  const agent = agentOptionKey('claude', 'Claude Code')
+  const agent = agentOptionKey('claude')
   const prefs = rememberChoice(loadOptionPrefs(storage()), { chat, agent, configId: 'effort', value: 'high', now: 1 })
   const first = choicesFor(prefs, { chat, agent, fresh: true })
   assert.deepEqual(first, { effort: 'high' })
@@ -142,4 +143,43 @@ test('the meta line: the model and level an answer ran with, from its record or 
   assert.equal(turnOptionsLine(old), 'Sonnet 5.5 · high')
   assert.deepEqual(old.cards.map(isOptionNote), [true, true, false])
   assert.equal(turnOptionsLine({}), '')
+})
+
+test('an agent’s picks are kept under its id: renaming it keeps them, and picks saved under the old name-based key carry over once', () => {
+  assert.equal(agentOptionKey('claude'), 'claude')
+  assert.equal(agentOptionKey(null), 'default')
+  const chat = chatOptionKey('board', 'chat-1')
+  const agent = agentOptionKey('claude')
+  // A pick today; the agent is then renamed (Agents > Edit). Nothing about the key is its name.
+  let prefs = rememberChoice(loadOptionPrefs(storage()), { chat, agent, configId: 'model', value: 'deep', now: 1 })
+  assert.deepEqual(prefs.agents, { claude: { model: 'deep' } })
+  assert.deepEqual(choicesFor(prefs, { chat: chatOptionKey('board', 'chat-2'), agent: agentOptionKey('claude'), fresh: true }), {
+    model: 'deep',
+  })
+
+  // A browser that saved picks before: under "<profile>:<label>", whatever the label was.
+  const store = storage()
+  store.setItem(
+    'shapewall.chat.options',
+    JSON.stringify({
+      chats: {},
+      agents: { 'claude:Claude Code': { model: 'deep', effort: 'high' }, 'codex:Codex': { model: 'fast' }, 'claudette:X': { model: 'no' } },
+    }),
+  )
+  const old = loadOptionPrefs(store)
+  // Read as they are, also after a rename to something else.
+  assert.deepEqual(agentPicks(old, 'claude'), { model: 'deep', effort: 'high' })
+  assert.deepEqual(choicesFor(old, { chat, agent: 'claude', fresh: true }), { model: 'deep', effort: 'high' })
+  assert.deepEqual(choicesFor(old, { chat, agent: 'codex', fresh: true }), { model: 'fast' })
+  assert.deepEqual(agentPicks(old, 'goose'), {})
+  // The next pick moves them to the id, once: the old key goes, other agents' stay.
+  const moved = rememberChoice(old, { chat, agent: 'claude', configId: 'effort', value: 'low', now: 2 })
+  assert.deepEqual(moved.agents, {
+    'codex:Codex': { model: 'fast' },
+    'claudette:X': { model: 'no' },
+    claude: { model: 'deep', effort: 'low' },
+  })
+  // And a reload reads the same.
+  saveOptionPrefs(moved, store)
+  assert.deepEqual(agentPicks(loadOptionPrefs(store), 'claude'), { model: 'deep', effort: 'low' })
 })

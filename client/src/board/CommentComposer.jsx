@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Brush } from 'lucide-react'
 import { Button, Input, Kbd } from '../components/ui'
 import { MentionTextarea } from './Mentions'
+import { cn } from '../lib/utils'
 import { COMMENT_MAX, sendsOnEnter } from './commentInput'
 import { AttachButton, ComposerImages, DrawSheet, DrawTools, imageDropProps } from './CommentMedia'
 import { useDrawing } from './drawing'
@@ -11,7 +12,22 @@ import { useDrawing } from './drawing'
 // useCommentDraft): images to attach (`attach`, `images`, `attachNote` when
 // they are off for this person) and the drawing tools (`draw`; `page` is
 // the screenshot the phone draws on in a full sheet).
-export function CommentComposer({ draft, onChange, onSubmit, onCancel, busy, people, touch, hosted, signedInAs, description, media }) {
+// `discard` ({ onDiscard, onKeep }): Esc was pressed on a comment that holds a
+// drawing or images, so the composer asks before dropping that work.
+export function CommentComposer({
+  draft,
+  onChange,
+  onSubmit,
+  onCancel,
+  busy,
+  people,
+  touch,
+  hosted,
+  signedInAs,
+  description,
+  media,
+  discard = null,
+}) {
   const body = draft?.body || ''
   const lines = Math.min(8, Math.max(touch ? 3 : 2, body.split('\n').length))
   const [sheet, setSheet] = useState(false)
@@ -31,7 +47,14 @@ export function CommentComposer({ draft, onChange, onSubmit, onCancel, busy, peo
       data-sw-composer="true"
     >
       {description ? (
-        <p className="truncate text-xs text-muted" data-sw-composer-target="true">
+        // On desktop also the card's handle (ThreadPopover.jsx): drag it to
+        // see what is under the composer. It reaches the card's top edge.
+        <p
+          className={cn('truncate text-xs text-muted', !touch && '-mx-3 -mt-3 cursor-grab touch-none px-3 pt-3 select-none')}
+          title={touch ? undefined : 'Drag to move'}
+          data-sw-composer-target="true"
+          data-sw-card-drag-handle={touch ? undefined : 'true'}
+        >
           {description}
         </p>
       ) : null}
@@ -105,7 +128,22 @@ export function CommentComposer({ draft, onChange, onSubmit, onCancel, busy, peo
           />
         </label>
       )}
-      {touch ? null : (
+      {discard ? (
+        <div
+          className="flex items-center gap-2 rounded-md border border-warn/40 bg-warn/10 py-1 pr-1 pl-2.5 text-xs text-fg"
+          role="alertdialog"
+          aria-label="Discard this comment?"
+          data-sw-composer-discard="true"
+        >
+          <p className="min-w-0 flex-1 font-medium">Discard this comment?</p>
+          <Button size="xs" variant="danger" onClick={discard.onDiscard} autoFocus data-sw-composer-discard-yes="true">
+            Discard
+          </Button>
+          <Button size="xs" variant="secondary" onClick={discard.onKeep} data-sw-composer-discard-keep="true">
+            Keep
+          </Button>
+        </div>
+      ) : touch ? null : (
         <p className="flex items-center gap-1 overflow-hidden text-[11px] whitespace-nowrap text-faint" data-sw-composer-keys="true">
           <Kbd>Enter</Kbd> posts, <Kbd>Shift</Kbd>+<Kbd>Enter</Kbd> new line, <Kbd>Esc</Kbd> cancels
         </p>
