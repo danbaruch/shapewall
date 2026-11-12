@@ -143,6 +143,10 @@ test('view as: each role sees what it may do, on the board and in the console', 
     await shot(page, '1-profile-menu')
     await page.keyboard.press('Escape')
     assert.equal((await page.locator('[data-sw-comment-mode]').count()) > 0, true, 'the owner comments')
+    // A selected page's bar has Comment first, pointed out once to someone who has not commented here.
+    await page.locator('[data-sw-frame]').first().click()
+    await page.waitForSelector('[data-sw-frame-bar] > [data-sw-frame-comment][data-sw-frame-comment-emphasis="true"]')
+    assert.equal(await page.evaluate(() => window.localStorage.getItem('shapewall.tip.pageComment')), '1')
 
     // A viewer reads but does not comment.
     await viewAs(page, 'viewer')
@@ -156,6 +160,8 @@ test('view as: each role sees what it may do, on the board and in the console', 
     )
     const viewerFrame = page.locator('[data-sw-frame]').first()
     await viewerFrame.click()
+    await page.waitForSelector('[data-sw-frame-bar]')
+    assert.equal(await page.locator('[data-sw-frame-comment]').count(), 0, 'a viewer has no Comment on the page bar')
     await page.click('[data-sw-open-live]')
     await page.waitForSelector('[data-sw-frame][data-sw-live="ready"]', { timeout: 20000 })
     await page.waitForSelector('[data-sw-tools]')
@@ -199,6 +205,11 @@ test('view as: each role sees what it may do, on the board and in the console', 
 
     // Reset (after a confirmation): back to the owner on the board.
     await resetDemo(page)
+    // And the page bar's Comment is pointed out again.
+    assert.equal(await page.evaluate(() => window.localStorage.getItem('shapewall.tip.pageComment')), null)
+    await openBoard(page)
+    await page.locator('[data-sw-frame]').first().click()
+    await page.waitForSelector('[data-sw-frame-comment][data-sw-frame-comment-emphasis="true"]')
     assert.deepEqual(errors, [])
   } finally {
     await context.close()
@@ -330,6 +341,14 @@ test('an invite shows up on the invites, access and audit pages; a share link op
     await other.waitForFunction(() => document.title === 'Members · Lumen · Shapewall demo')
     await other.close()
     assert.equal((await page.locator('[data-sw-comment-mode]').count()) > 0, true, 'a comment link comments')
+    // A guest who may comment has Comment on a page's bar too, and it starts a comment on that page.
+    await page.locator('[data-sw-frame]').first().click()
+    await page.click('[data-sw-frame-bar] > [data-sw-frame-comment]')
+    await page.waitForSelector('[data-sw-comment-hint-page]')
+    await page.keyboard.press('Escape')
+    await page.waitForSelector('[data-sw-comment-hint]', { state: 'detached' })
+    await page.click('[data-sw-frame-bar-close]')
+    await page.waitForSelector('[data-sw-frame-bar]', { state: 'detached' })
     await page.click('[data-sw-profile-menu]')
     assert.equal(await page.locator('[data-sw-profile-item="console"]').count(), 0, 'a guest has no console')
     await page.keyboard.press('Escape')

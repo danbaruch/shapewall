@@ -157,12 +157,35 @@ the tools, and each has a tooltip with its shortcut. A person who may not commen
 Select left there is no toolbar (a viewer on a phone). On a desktop they keep Select and Hand, and Select text while a page
 is live.
 
-The note for the tool in use sits just above the tools, one at a time: the comment hint ("Click a page to comment ..."),
+The note for the tool in use sits just above the tools, one at a time: the comment hint ("Click a page to comment ...", or
+"Click where the comment goes on Pricing" when Comment was pressed on that page's bar),
 "Commenting on ..." while the composer is open, the drawing bar, or the select-text note. Select has none. The tools, their note,
 an open journey's bar and the toast are one column (the tool dock), so they never overlap. The tools are centred on the canvas,
 not the window, and never sit over the zoom controls (bottom left) or the minimap (bottom right): on a narrow canvas they shift
 off centre, then the zoom controls compact to out, level and in, then the minimap steps aside (`toolDock.js`, unit-tested). On a
 phone the tools are the bottom bar: 44 px targets above the safe-area inset, hidden while a sheet or the keyboard is up.
+
+### The page bar
+
+A selected page has a bar of its actions floating beside it in screen pixels (`client/src/board/FrameBar.jsx`): above the card, else
+to its right or left, never over the notes at the top of the canvas or the tool dock at the bottom, and one "..." button when
+there is no room (`frameBarPlace.js`). In order: the page's name and screen size, **Comment**, **Open live** (or **Select text**
+once the page is live), **Checks**, **History**, **Capture**, open in a new tab, close.
+
+**Comment** is first because it is the main thing people do with a page, and the tools at the bottom are easy to miss. It is the
+`soft` button at rest (accent text on a light accent tint) and the filled accent while on (`aria-pressed`); its tooltip is
+"Comment on this page" with the C key. It turns the Comment tool on with this page as the target: the hint above the tools names
+the page, the next click on it pins (to the element, on a live page), and a click anywhere else is comment mode's as ever. From
+the keyboard, Enter on the button moves the focus to the page, and Enter there opens the composer near the top left of what
+shows of it; Esc gives the focus back to the button. Only people who have the Comment tool have the button (the same rule: not
+viewers, view-only links, compare mode or static exports). The first time someone who has not started a comment in this browser
+selects a page, the button wears an accent ring for about two and a half seconds (`shapewall.tip.pageComment` in local storage;
+the demo's Reset forgets it). It is a ring, not an animation, so reduced motion needs no other path.
+
+The bar is always one line. When the canvas is too narrow for it, words drop in a fixed order and each button keeps its
+accessible name and a tooltip (`fitFrameBar` in `frameBarPlace.js`, unit-tested): Capture, History, Checks, then the page's
+name, then Open live, and Comment last. The widths come from the buttons' fixed sizes, never from the rendered bar. On a phone
+the bar has 44 px targets, no name, and words only on Comment and Open live.
 
 Search is not in the toolbar. It is the field at the top of the expanded sidebar ("Search the board" with its
 Ctrl/Cmd+K hint) and an icon in the collapsed rail; both open the command palette, as the shortcut does from anywhere. So the bar

@@ -147,7 +147,9 @@ const NOTE =
 
 // The note for the tool in use, just above the tools. One at a time; Select
 // has none.
-//   picking    comment mode, nothing picked yet ({ live, draw })
+//   picking    comment mode, nothing picked yet ({ live, draw, page }); `page`
+//              ({ key, title, keyboard }): Comment was pressed on that page's
+//              bar, so the note names it
 //   composing  a target is picked, its composer is open ({ target, onCancel })
 //   selectText "Select text" is on for a page ({ title, onDone })
 export function ToolNote({ wide, picking = null, composing = null, selectText = null, onDone }) {
@@ -176,6 +178,7 @@ export function ToolNote({ wide, picking = null, composing = null, selectText = 
   if (picking) {
     const Icon = picking.draw ? Brush : MessageSquarePlus
     const verb = wide ? 'Click' : 'Tap'
+    const page = picking.draw ? null : picking.page
     const text = picking.draw
       ? `${verb} a page to draw on it. The drawing goes with your comment.`
       : picking.live
@@ -189,9 +192,17 @@ export function ToolNote({ wide, picking = null, composing = null, selectText = 
         role="status"
         data-sw-tool-note="true"
         data-sw-comment-hint={picking.draw ? 'draw' : picking.live ? 'element' : 'page'}
+        data-sw-comment-hint-page={page ? page.key : undefined}
       >
         <Icon size={13} className="shrink-0" aria-hidden="true" />
-        <span className="min-w-0">{text}</span>
+        {page ? (
+          <span className="min-w-0 truncate">
+            {verb} where the comment goes on <span className="font-semibold">{page.title}</span>
+            {page.keyboard ? ', or press Enter' : null}
+          </span>
+        ) : (
+          <span className="min-w-0">{text}</span>
+        )}
         <Button
           size={wide ? 'xs' : 'touch'}
           variant="inverse"

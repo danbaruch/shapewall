@@ -10,7 +10,7 @@ for a team.
    writes a screenshot, a thumbnail and a live HTML snapshot with every script removed.
 2. **The wall.** `shapewall serve` starts a small local server with the board: a canvas with your pages grouped into sections. Zoomed
    out you see thumbnails of everything; zoomed in, a tile turns into the captured page itself.
-3. **Comments.** Pick **Comment** in the tools at the bottom of the board, click an element, write what should change. On live HTML the comment is anchored to the element
+3. **Comments.** Click a page and press **Comment** on its bar (or pick **Comment** in the tools at the bottom of the board), click an element, write what should change. On live HTML the comment is anchored to the element
    (a selector plus its text), so it follows that element through the next capture.
 4. **The agent loop.** `shapewall comments --open --json`, `shapewall watch` or the MCP server give any coding agent precise,
    structured work. It changes the code, recaptures the pages it touched, replies, and you check before and after on the wall.

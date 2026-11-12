@@ -80,3 +80,85 @@ export function placeFrameBar({ card, canvas, bar, avoid = null, gap = 8, zoom =
   const fallback = { left: gap, top: clear({ left: gap, top: gap }) ? gap : below }
   return { place, toggle, fallback }
 }
+
+// ---- What the bar shows at a width ---------------------------------------------
+// The bar is one line, always. When the canvas is too narrow for all of it,
+// words drop one step at a time (each step adds to the ones before it), and
+// every button keeps its accessible name and a tooltip:
+//   capture, history, checks   their words go, in that order
+//   title                      the page's name and screen size go
+//   live                       Open live (or Select text) becomes an icon
+//   comment                    Comment becomes an icon, last of all
+// So Comment and Open live stay labelled for as long as they fit. Phones
+// never show the title or the words of Checks, History and Capture.
+// The widths are the buttons' fixed sizes plus their text, rounded up
+// (FrameBar.jsx renders exactly these), never read back from the bar.
+export const BAR_STEPS = ['full', 'capture', 'history', 'checks', 'title', 'live', 'comment']
+
+const BAR = {
+  desktop: {
+    icon: 32,
+    gap: 4,
+    pad: 10, // p-1 and the border, both sides
+    title: 150, // the room the name gets when everything fits
+    titleMin: 96, // and the least it keeps before the next word drops
+    label: { comment: 100, open: 104, select: 104, done: 74, checks: 84, history: 88, capture: 90 },
+  },
+  touch: {
+    icon: 44,
+    gap: 4,
+    pad: 10,
+    title: 0,
+    titleMin: 0,
+    label: { comment: 108, open: 112, select: 118, done: 82, checks: 44, history: 44, capture: 44 },
+  },
+}
+
+// `items`: { comment, live: 'open' | 'select' | 'done' | null, checks,
+// history, capture, link } (what this page's bar has; Close is always there).
+// Returns { step, labels: { comment, live, checks, history, capture }, title,
+// width, fits }: which words show, whether the title does, the bar's width
+// (never more than the canvas less a margin) and whether its content fits it.
+export function fitFrameBar({ canvasWidth, touch = false, items = {}, margin = 16 }) {
+  const sizes = touch ? BAR.touch : BAR.desktop
+  const room = Math.max(0, canvasWidth - margin)
+  const widthAt = (step) => {
+    const at = BAR_STEPS.indexOf(step)
+    const words = (id) => !touch || id === 'comment' || id === 'live'
+    const labelled = (id) => Boolean(items[id]) && words(id) && at < BAR_STEPS.indexOf(id)
+    const parts = []
+    if (items.comment) parts.push(labelled('comment') ? sizes.label.comment : sizes.icon)
+    if (items.live) parts.push(labelled('live') ? sizes.label[items.live] : sizes.icon)
+    for (const id of ['checks', 'history', 'capture']) {
+      if (items[id]) parts.push(labelled(id) ? sizes.label[id] : sizes.icon)
+    }
+    if (items.link) parts.push(sizes.icon)
+    parts.push(sizes.icon) // Close
+    const title = !touch && at < BAR_STEPS.indexOf('title')
+    if (title) parts.push(0) // the title's own gap
+    const fixed = parts.reduce((sum, part) => sum + part, 0) + sizes.gap * (parts.length - 1) + sizes.pad
+    return {
+      step,
+      title,
+      fixed,
+      labels: {
+        comment: labelled('comment'),
+        live: labelled('live'),
+        checks: labelled('checks'),
+        history: labelled('history'),
+        capture: labelled('capture'),
+      },
+    }
+  }
+  const full = widthAt('full')
+  const width = Math.min(full.fixed + sizes.title, room)
+  let pick = null
+  for (const step of BAR_STEPS) {
+    const candidate = widthAt(step)
+    pick = candidate
+    if (candidate.fixed + (candidate.title ? sizes.titleMin : 0) <= width) break
+  }
+  const fits = pick.fixed + (pick.title ? sizes.titleMin : 0) <= width
+  // Without the title nothing stretches: the bar is as wide as its buttons.
+  return { step: pick.step, labels: pick.labels, title: pick.title, width: pick.title ? width : Math.min(pick.fixed, room), fits }
+}
