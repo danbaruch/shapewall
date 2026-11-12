@@ -3,6 +3,8 @@
 // so a person sees an agent at work with the comments closed or the canvas
 // somewhere else. A pure function of what the board already knows (no
 // polling of its own), unit-tested in test/agent-activity.test.js.
+// On a hosted board the sentence ends with the project's agents by name:
+// "Builder online, Fixer offline".
 //
 //   comments   the board's comments (agentStatus: queued, working, done,
 //              needs-human, branch-ready)
@@ -11,9 +13,11 @@
 //   approvals  hosted boards: shell commands waiting for an admin's OK
 //              ([{ comment_number }])
 //   titleOf    (pageId) -> the page's title, for "#17 Home"
-//   listening  hosted boards: { online, name } of the agent listening for
-//              this project (src/hosted/agent-presence.js), or null when
-//              the board does not know (local boards run their own agent)
+//   agents     hosted boards: the project's agents (GET
+//              api/boards/:id/agents, hostedAgents.js), or null when the
+//              board does not know (local boards run their own agent)
+//   listening  hosted boards before 0.4.0: { online, name } of the agent
+//              last heard from for this project; used when `agents` is null
 //
 // Returns { state, working, waiting, count, text, target }:
 //   state   'waiting'  an agent is stopped until a person answers (a
@@ -28,9 +32,11 @@
 //   text    the whole of it in words, for the tooltip and screen readers
 //   target  the one comment that needs the person: the only one an agent
 //           is stopped on, else the only one waiting
+import { agentsSummary, anyOnline } from './hostedAgents.js'
+
 const open = (comment) => comment.status !== 'resolved'
 
-export function agentActivity({ comments = [], focus = null, approvals = [], titleOf = () => '', listening = null }) {
+export function agentActivity({ comments = [], focus = null, approvals = [], titleOf = () => '', listening = null, agents = null }) {
   const byId = new Map(comments.map((comment) => [Number(comment.id), comment]))
   const name = (id) => {
     const comment = byId.get(Number(id))
@@ -68,11 +74,12 @@ export function agentActivity({ comments = [], focus = null, approvals = [], tit
   if (passive.length === 1)
     parts.push(passive[0].why === 'branch-ready' ? `Fix ready to apply on ${passive[0].name}` : `${passive[0].name} needs a person`)
   else if (passive.length) parts.push(`${passive.length} comments wait for you: ${names(passive)}`)
-  // Hosted: say whether anything would act on a comment at all.
-  if (listening) parts.push(listening.online ? `Agent online: ${listening.name || 'agent'}` : NO_LISTENER)
+  // Hosted: say which agents would act on a comment, if any.
+  if (agents) parts.push(agentsSummary(agents))
+  else if (listening) parts.push(listening.online ? `Agent online: ${listening.name || 'agent'}` : NO_LISTENER)
   return {
     state,
-    listening: listening ? Boolean(listening.online) : null,
+    listening: agents ? anyOnline(agents) : listening ? Boolean(listening.online) : null,
     working: list(working),
     waiting,
     count,
