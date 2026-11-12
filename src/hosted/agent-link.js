@@ -143,14 +143,15 @@ export function createChatService({ db, hub, links, events, chatFor, now = () =>
   // A fix that ended without its machine (it went away, was revoked, or the
   // server restarted): the comment is not left "working" under a claim
   // nobody holds. It needs a person; the claim ends with its usage record.
-  function releaseFix(t, row) {
+  // `status`: where the comment stands ("branch-ready" when the fix left a branch).
+  function releaseFix(t, row, status = 'needs-human') {
     if (row.kind !== 'fix' || !row.comment_number) return
     const at = now().toISOString()
     const key = { project: row.project_id, board: row.board_id, number: row.comment_number, at }
     t.run(
-      `UPDATE comments SET agent_status = 'needs-human', agent_status_at = :at WHERE workspace_id = :ws AND project_id = :project
+      `UPDATE comments SET agent_status = :status, agent_status_at = :at WHERE workspace_id = :ws AND project_id = :project
          AND board_id = :board AND number = :number AND status = 'open' AND agent_status IN ('queued', 'working')`,
-      key,
+      { ...key, status },
     )
     t.run(
       'UPDATE agent_claims SET ended_at = :at WHERE workspace_id = :ws AND project_id = :project AND board_id = :board AND comment_number = :number AND ended_at IS NULL',
@@ -289,7 +290,21 @@ export function createChatService({ db, hub, links, events, chatFor, now = () =>
     }
     return ended
   }
-  return { notify, interrupt, interruptAgent, sweep, sweepStale, agentChanged, auditDue, close, now, permsFor, nameOf, cancelCards }
+  return {
+    notify,
+    interrupt,
+    interruptAgent,
+    sweep,
+    sweepStale,
+    agentChanged,
+    auditDue,
+    close,
+    now,
+    permsFor,
+    nameOf,
+    cancelCards,
+    releaseFix,
+  }
 }
 
 const VERSION_RE = /^\d{1,4}\.\d{1,4}\.\d{1,4}(?:[-+][0-9A-Za-z.-]{1,40})?$/
@@ -748,6 +763,9 @@ export function mountAgentLink(
         )
         const state = reply.status === 'done' ? 'done' : reply.status === 'stopped' ? 'stopped' : 'error'
         if (!store.endTurn(row, state, { ...usageOf(reply), approvals: row.kind === 'fix' ? perms.counts(row.id) : null })) return null
+        // A finished fix leaves its comment where it stands at once, should the
+        // machine go away before it says so itself (it posts its reply next).
+        chat.releaseFix(req.t, row, reply.summary ? 'branch-ready' : 'needs-human')
         if (reply.summary) {
           const detail = {
             project: row.project_id,

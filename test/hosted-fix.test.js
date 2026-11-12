@@ -231,7 +231,7 @@ test('Fix with agent: a card with the diff, answered with a fresh passkey, ends 
   // The comment: a reply from the agent, and where the fix is.
   const after = await until(async () => {
     const item = await seen(made.id)
-    return item.agentStatus === 'branch-ready' ? item : null
+    return item.agentStatus === 'branch-ready' && item.replies.length ? item : null
   }, 'the comment to say branch-ready')
   assert.equal(after.replies.at(-1).author, 'Builder')
   assert.match(after.replies.at(-1).body, new RegExp(`Fix ready on branch ${branch}\\.`))
@@ -281,7 +281,7 @@ test('Deny leaves nothing: no branch, no folder, the comment needs a person', as
     fixFolders(builder).filter((name) => !name.endsWith('.owner')),
     [],
   )
-  await until(async () => (await seen(made.id)).agentStatus === 'needs-human', 'needs-human')
+  await until(async () => ((item) => item.agentStatus === 'needs-human' && item.replies.length > 0)(await seen(made.id)), 'needs-human')
   assert.match((await seen(made.id)).replies.at(-1).body, /No change was committed/)
   const run = lastRun()
   assert.deepEqual([run.kind, run.outcome, run.approvals_asked, run.approvals_allowed, run.approvals_denied], ['fix', 'answered', 1, 0, 1])
@@ -309,7 +309,10 @@ test('Stop cancels a waiting card; a card nobody answers expires; neither can be
   assert.equal(final.cards.find((item) => item.id === asked.id).state, 'cancelled')
   assert.deepEqual(await waiting(), [])
   assert.deepEqual(branches(builder), before)
-  await until(async () => (await seen(stopped.id)).agentStatus === 'needs-human', 'needs-human after Stop')
+  await until(
+    async () => ((item) => item.agentStatus === 'needs-human' && item.replies.length > 0)(await seen(stopped.id)),
+    'needs-human after Stop',
+  )
 
   // Nobody answers: two minutes later the card is expired here, whatever the machine does.
   const slow = await comment(ada, `Wait for me ${fixScript([['edit', 'index.html', 'Hello', 'Late']])}`)
@@ -357,7 +360,7 @@ test('a fix is pushed to the machine’s remote when it has one, and the run say
     .filter((row) => row.action === 'agent_branch_pushed')
     .at(-1)
   assert.deepEqual([pushed.detail.branch, pushed.detail.remote, pushed.detail.agentName], [branch, 'origin', 'Pusher'])
-  await until(async () => (await seen(made.id)).agentStatus === 'branch-ready', 'branch-ready')
+  await until(async () => ((item) => item.agentStatus === 'branch-ready' && item.replies.length > 0)(await seen(made.id)), 'branch-ready')
 
   // package.json is a settings file: only because this machine named it may it be asked at all,
   // and a branch that changes it is kept on the machine.
@@ -462,7 +465,7 @@ test('refused before it starts: a checkout with uncommitted changes, a folder th
   assert.match(final.error.message, /uncommitted changes, which a fix would not include/)
   assert.deepEqual(branches(dirty), ['main'])
   assert.equal(fs.readFileSync(path.join(dirty.dir, 'index.html'), 'utf8'), '<h1>Work in progress</h1>\n')
-  await until(async () => (await seen(made.id)).agentStatus === 'needs-human', 'needs-human')
+  await until(async () => ((item) => item.agentStatus === 'needs-human' && item.replies.length > 0)(await seen(made.id)), 'needs-human')
   assert.match((await seen(made.id)).replies.at(-1).body, /I could not start this fix\. .*uncommitted changes/)
   await dirty.link.stop()
 

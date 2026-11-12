@@ -348,7 +348,10 @@ test('Fix with Builder: the card with its diff, Allow with the passkey, the bran
   assert.match(git('show', `${name}:index.html`), /Hi there/)
 
   // The comment: the agent's reply, and a fix waiting on a branch (nothing to apply here).
-  await until(async () => (await seen(id)).agentStatus === 'branch-ready', 'the comment to say the fix is ready')
+  await until(
+    async () => ((item) => item.agentStatus === 'branch-ready' && item.replies.length > 0)(await seen(id)),
+    'the comment to say the fix is ready',
+  )
   await each(adas, async (page, view) => {
     await page.goto(boardPage(`&c=${id}`))
     const thread = `[data-sw-thread${view.phone ? '-sheet' : '-popover'}="${id}"]`

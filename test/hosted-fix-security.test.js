@@ -693,7 +693,10 @@ test('the agent does something else after the answer: a changed edit, a file nob
       `${label}: ${JSON.stringify(final.cards.map((item) => item.label))}`,
     )
     untouched(rogue)
-    await until(async () => (await seen(made.id)).agentStatus === 'needs-human', `${label}: needs-human`)
+    await until(
+      async () => ((item) => item.agentStatus === 'needs-human' && item.replies.length > 0)(await seen(made.id)),
+      `${label}: needs-human`,
+    )
   }
   // A write into the person's own checkout by the agent's own tools cannot be prevented by Shapewall
   // (it does not sandbox the agent), but it is never in the commit, and the thread says it happened.
