@@ -482,8 +482,8 @@ export default function CommentsPanel({
                 {!canAct
                   ? 'This board is read-only.'
                   : touch
-                    ? 'Tap Comment, then tap a page to pin a note.'
-                    : 'Press C or turn on Comment, then click a page to pin a note.'}
+                    ? 'Tap the Comment tool at the bottom of the board, then tap a page to pin a note.'
+                    : 'Press C or pick the Comment tool at the bottom of the board, then click a page to pin a note.'}
               </EmptyState>
             )}
           </li>

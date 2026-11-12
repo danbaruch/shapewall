@@ -78,6 +78,10 @@ function useZoomKeys({ fitBoard, zoomTo }) {
 
 // Inside the canvas. Desktop: one zoom cluster (out, the zoom level with a
 // menu, in, fit, minimap) bottom left, and a small minimap bottom right.
+// `compact`: the canvas is too narrow for the cluster beside the board's
+// tools (toolDock.js), so Fit and the minimap switch leave it (both are in
+// the level's menu, and Fit is Shift+1). `hideZoom`: narrower still, the
+// cluster goes (the wheel, pinch and the + and - keys still zoom).
 // Phone: a fit button (hidden while a journey bar is up).
 export function CanvasControls({
   wide,
@@ -88,6 +92,8 @@ export function CanvasControls({
   toggleMinimap,
   hideFit,
   hideMinimap = false,
+  compact = false,
+  hideZoom = false,
   fitBoard,
 }) {
   const flow = useReactFlow()
@@ -107,7 +113,7 @@ export function CanvasControls({
     return (
       <>
         <ZoomVars />
-        <Panel position="bottom-left" className={cn('!m-2', hideFit && 'hidden')}>
+        <Panel position="bottom-left" className={cn('!m-2 !mb-[calc(0.5rem+env(safe-area-inset-bottom,0px))]', hideFit && 'hidden')}>
           <IconButton
             size="icon"
             variant="secondary"
@@ -129,12 +135,12 @@ export function CanvasControls({
   return (
     <>
       <ZoomVars />
-      <Panel position="bottom-left" className="!m-3">
+      <Panel position="bottom-left" className={cn('!m-3', hideZoom && 'hidden')}>
         <div
           className="flex items-center gap-0.5 rounded-lg border border-line bg-surface/95 p-0.5 shadow-pop backdrop-blur"
           role="group"
           aria-label="Zoom"
-          data-sw-zoom-controls="true"
+          data-sw-zoom-controls={compact ? 'compact' : 'true'}
         >
           <IconButton
             className={cn(button, 'react-flow__controls-zoomout')}
@@ -171,6 +177,11 @@ export function CanvasControls({
               <DropdownMenuItem onSelect={fitBoard}>
                 Fit the whole board <Kbd className="ml-auto">Shift 1</Kbd>
               </DropdownMenuItem>
+              {compact ? (
+                <DropdownMenuItem onSelect={toggleMinimap} data-sw-minimap-item="true">
+                  {minimapOn ? 'Hide the minimap' : 'Show the minimap'}
+                </DropdownMenuItem>
+              ) : null}
             </DropdownMenuContent>
           </DropdownMenu>
           <IconButton
@@ -181,25 +192,29 @@ export function CanvasControls({
           >
             <Plus size={15} aria-hidden="true" />
           </IconButton>
-          <span className="mx-0.5 h-5 w-px bg-line" aria-hidden="true" />
-          <IconButton
-            className={cn(button, 'react-flow__controls-fitview')}
-            onClick={fitBoard}
-            label="Fit the whole board"
-            tooltip={<KeyTip label="Fit the whole board" keys={['Shift', '1']} />}
-          >
-            <Maximize size={14} aria-hidden="true" />
-          </IconButton>
-          <IconButton
-            className={cn(button, minimapOn && 'text-accent hover:text-accent')}
-            aria-pressed={minimapOn}
-            onClick={toggleMinimap}
-            label={minimapOn ? 'Hide the minimap' : 'Show the minimap'}
-            tooltip={minimapTip}
-            data-sw-minimap-toggle={minimapOn ? (liveKeys.size ? 'auto-hidden' : 'on') : 'off'}
-          >
-            <MapIcon size={14} aria-hidden="true" />
-          </IconButton>
+          {compact ? null : (
+            <>
+              <span className="mx-0.5 h-5 w-px bg-line" aria-hidden="true" />
+              <IconButton
+                className={cn(button, 'react-flow__controls-fitview')}
+                onClick={fitBoard}
+                label="Fit the whole board"
+                tooltip={<KeyTip label="Fit the whole board" keys={['Shift', '1']} />}
+              >
+                <Maximize size={14} aria-hidden="true" />
+              </IconButton>
+              <IconButton
+                className={cn(button, minimapOn && 'text-accent hover:text-accent')}
+                aria-pressed={minimapOn}
+                onClick={toggleMinimap}
+                label={minimapOn ? 'Hide the minimap' : 'Show the minimap'}
+                tooltip={minimapTip}
+                data-sw-minimap-toggle={minimapOn ? (liveKeys.size ? 'auto-hidden' : 'on') : 'off'}
+              >
+                <MapIcon size={14} aria-hidden="true" />
+              </IconButton>
+            </>
+          )}
         </div>
       </Panel>
       {showMinimap ? (

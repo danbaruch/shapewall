@@ -176,6 +176,8 @@ export function PhoneSheets({
   setDraft,
   draftDescription,
   composerProps,
+  // The Draw tool picked this page: the composer opens on its drawing sheet.
+  startDraw = false,
 }) {
   return (
     <>
@@ -230,7 +232,7 @@ export function PhoneSheets({
         description={draftDescription}
       >
         <div className="p-4">
-          <CommentComposer {...composerProps} touch />
+          <CommentComposer {...composerProps} touch startDraw={startDraw} />
         </div>
       </Dialog>
     </>

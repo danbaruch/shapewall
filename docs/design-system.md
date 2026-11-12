@@ -134,15 +134,32 @@ scrolling keeps momentum and `scrollIntoView` on phones).
 
 On desktop the toolbar has two zones with the room between them, the way canvas tools lay it out. Left, identity: the board
 switcher with the capture status dot (its tooltip says when the pages were captured); then, after a hairline, the view controls: the
-screen-size switch, Views (the journeys and what the canvas shows) and, on a local board, Capture with its status. Right, act and
-open panels: the viewer note, Comment (the primary action and the one accent control: `soft` while comment mode is off, filled
-`default` with `aria-pressed="true"` while it is on, agreeing with the comment-mode banner); then, after a hairline, the Comments,
-Agent and Checks toggles on one track (`Toggle variant="segment"`: the open panel's toggle is the raised chip, exactly like the
-chosen screen size, none while the panel is closed), then Agent settings. One look for every control but the name and Comment: a
-quiet 32 px box with the same radius, hairline and tint, either a single button or a track whose chosen option is the raised chip.
+screen-size switch, Views (the journeys and what the canvas shows) and, on a local board, Capture with its status. Right, open
+panels: the viewer note, then the Comments, Agent and Checks toggles on one track (`Toggle variant="segment"`: the open panel's
+toggle is the raised chip, exactly like the chosen screen size, none while the panel is closed), then Agent settings. The toolbar
+holds what you look at; what you do to the board is in the board tools (below). One look for every control but the name: a quiet
+32 px box with the same radius, hairline and tint, either a single button or a track whose chosen option is the raised chip.
 Comments carries its count as a pill at its right end, and Agent carries the board's agent activity in the same place and size: a
 dot for one agent, a count for more, accent while working (a slow `breathe`, the same as a working pin, never outside the button),
 the attention colour when an agent needs a person, green for a moment when the last one finishes.
+
+### The board tools
+
+The tools you use on the board float at the bottom centre of the canvas, the way FigJam, Miro and tldraw do it
+(`client/src/board/BoardTools.jsx`): **Select** (the default pointer: pan, zoom, open pages), **Comment** (C), **Draw** (click a
+page to draw on it; with a comment or a reply open it draws on that comment's page) and, on desktop when the board has live
+pages, **Select text**. One tool is in use at a time, the filled accent button (`aria-pressed`); Esc goes back a step at a time
+and ends on Select. The pill is the zoom controls' pill (`rounded-lg border border-line bg-surface/95 p-0.5 shadow-pop
+backdrop-blur`, 32 px icon buttons), a labelled `role="toolbar"` with one tab stop: the arrow keys, Home and End move between
+the tools, and each has a tooltip with its shortcut. A person who may not comment has no Comment or Draw tool, and with only
+Select left there is no toolbar.
+
+The note for the tool in use sits just above the tools, one at a time: the comment hint ("Click a page to comment ..."),
+"Commenting on ..." while the composer is open, the drawing bar, or the select-text note. Select has none. The tools, their note,
+an open journey's bar and the toast are one column (the tool dock), so they never overlap. The tools are centred on the canvas,
+not the window, and never sit over the zoom controls (bottom left) or the minimap (bottom right): on a narrow canvas they shift
+off centre, then the zoom controls compact to out, level and in, then the minimap steps aside (`toolDock.js`, unit-tested). On a
+phone the tools are the bottom bar: 44 px targets above the safe-area inset, hidden while a sheet or the keyboard is up.
 
 Search is not in the toolbar. It is the field at the top of the expanded sidebar ("Search the board" with its
 Ctrl/Cmd+K hint) and an icon in the collapsed rail; both open the command palette, as the shortcut does from anywhere. So the bar
@@ -167,7 +184,7 @@ One scale for `z-index`, lowest first. Pick the row that says what the thing is;
 | --------- | ----------------- | ----------------------------------------------------------------------------------------------- |
 | Canvas    | `z-10`/`z-20`     | Pins, card headers and bars, resize handles, presence cursors.                                  |
 | On canvas | `z-30`            | Things that belong to the canvas but float over cards: the comment thread and new-comment box,  |
-|           |                   | the journey bar, canvas notes, Try this.                                                        |
+|           |                   | the board tools and their note, the journey bar, canvas notes, Try this.                        |
 | Chrome    | `z-40`            | Sticky app headers and the collapsed sidebar's flyouts.                                         |
 | Modal     | `z-50`            | Dialogs, sheets, the command palette and their dimmed overlay. A modal covers everything below. |
 | Menu      | `z-[60]`          | Dropdown menus, selects and small popovers, so they work inside a dialog.                       |

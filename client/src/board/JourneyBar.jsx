@@ -135,10 +135,9 @@ export function JourneyBar({ journey, route, step, pageTitle, onStep, onChoose, 
   return (
     <div
       className={cn(
-        'pointer-events-auto absolute z-30 flex flex-col gap-1.5 rounded-xl border border-line bg-surface/95 shadow-pop backdrop-blur',
-        touch
-          ? 'inset-x-2 bottom-2 p-2'
-          : 'bottom-4 left-1/2 w-max max-w-[min(760px,calc(100%-2rem))] min-w-[440px] -translate-x-1/2 px-3 py-2',
+        // A child of the tool dock (BoardTools.jsx), above the board's tools.
+        'pointer-events-auto relative z-30 flex flex-col gap-1.5 rounded-xl border border-line bg-surface/95 shadow-pop backdrop-blur',
+        touch ? 'w-full p-2' : 'w-max max-w-[min(760px,100%)] min-w-[min(440px,100%)] px-3 py-2',
       )}
       role="region"
       aria-label={`Journey: ${journey.name}`}
@@ -314,8 +313,9 @@ export function JourneyBuilder({ draft, onChange, onSave, onCancel, pageTitle, b
   return (
     <div
       className={cn(
-        'pointer-events-auto absolute z-30 flex max-h-[70%] flex-col gap-2 overflow-y-auto rounded-xl border border-accent/50 bg-surface/95 p-3 shadow-pop backdrop-blur',
-        touch ? 'inset-x-2 bottom-2' : 'bottom-4 left-1/2 w-[min(680px,calc(100%-2rem))] -translate-x-1/2',
+        // A child of the tool dock (BoardTools.jsx), above the board's tools.
+        'pointer-events-auto relative z-30 flex max-h-[60dvh] flex-col gap-2 overflow-y-auto rounded-xl border border-accent/50 bg-surface/95 p-3 shadow-pop backdrop-blur',
+        touch ? 'w-full' : 'w-[min(680px,100%)]',
       )}
       role="region"
       aria-label={draft.id ? 'Edit journey' : 'New journey'}

@@ -180,13 +180,17 @@ the same way. Scrolling inside a `nowheel` element (the frame bar, a live page b
   group at a readable zoom (two cards across), top-aligned. Pins never shrink below their 44 px touch target, and a tap in comment mode
   on a page drawn small zooms to it first, so the next tap can pin to an element.
 - The desktop toolbar never truncates: below 1440 px (1600 px with Capture and Agent) Links and Compare drop their labels, below
-  1280 px the lists become icons and the capture time moves into a tooltip. Notes over the canvas (comment mode, the tip, the
-  viewport switch, the links note) are pills in one stack at its top, so turning comment mode on never moves the canvas. The minimap
+  1280 px the lists become icons and the capture time moves into a tooltip. Notes about what the canvas shows (the tip, the
+  viewport switch, the links note) are pills in one stack at its top. The board tools (Select, Comment, Draw, Select text) float at
+  the bottom centre of the canvas, with the note for the tool in use (the comment hint, the drawing bar) just above them, so
+  turning comment mode on never moves the canvas; they stay clear of the zoom controls and the minimap at every width
+  (`client/src/board/toolDock.js`), and on a phone they are the bottom bar. The minimap
   can be turned off and hides while a page is live. Resolve and delete show a toast with Undo (a delete is sent after a few seconds,
   or when the page is left).
 - Keyboard: each card is one tab stop; the arrow keys move through its pins and buttons, Esc returns to the card, Enter opens its
   action bar. "Skip to comments" is the first tab stop. After a pick from a toolbar list, focus returns to the canvas, and a closed
-  list ignores typed letters (Radix type-ahead), so shortcuts like C keep working. Esc closes a journey.
+  list ignores typed letters (Radix type-ahead), so shortcuts like C keep working. Esc closes a journey. The board tools are one
+  tab stop (a labelled toolbar): the arrow keys, Home and End move between them, C is Comment and Esc ends on Select.
 - URL state: board, viewport mode, comment filter, selected comment, camera, journey, branches and step, links, and compare pair live in the
   query string.
 - Overlays (dialogs, the comment sheet, the selected card, comment mode) each own a history entry, so Back closes the topmost one.
@@ -198,7 +202,7 @@ for replies, a dot for news) drawn at screen size; pins closer than about 30 scr
 count, and clicking it zooms in until they part (`clusterPins` in `client/src/board/pins.jsx`). Hovering a pin previews the thread in
 a kit `HoverCard`. Resolved threads are hidden by the Open filter, which is the toggle for showing them.
 
-C (or the Comment button) turns comment mode on; a click drops a draft pin and an inline composer (`ComposerPopover`) opens beside
+C (or the Comment tool, in the board tools at the bottom of the canvas) turns comment mode on; a click drops a draft pin and an inline composer (`ComposerPopover`) opens beside
 it: Enter posts, Shift+Enter adds a line, Esc cancels and stays in comment mode, @ suggests people. The open thread is a popover at
 its pin (`ThreadPopover`): resolve, previous and next (also the arrow keys), and a more menu (copy link, edit, ask agent, GitHub,
 history, delete), then the messages with reactions and an inline reply box. Both are Radix popovers anchored to a virtual element

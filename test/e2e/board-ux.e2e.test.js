@@ -168,7 +168,7 @@ test('desktop: the frame bar clears on compare, journeys and fit, and hides when
   }
 })
 
-test('desktop: comment mode outlines the element under the mouse, the hint stays off the page, the pin sits beside it', async () => {
+test('desktop: comment mode outlines the element under the mouse, the hint sits just above the tools, the pin sits beside it', async () => {
   const { context, page, errors } = await openBoard(DESKTOP)
   try {
     const frame = '[data-sw-frame="pricing:desktop"]'
@@ -178,12 +178,17 @@ test('desktop: comment mode outlines the element under the mouse, the hint stays
     const before = await rect(page, '[data-sw-canvas]')
     await page.click('[data-sw-comment-mode]')
     await page.waitForSelector('[data-sw-comment-hint="element"]')
-    // The hint is a small pill over the canvas: turning comment mode on does
-    // not move the canvas (or the page under the mouse).
+    // The hint is a small pill over the canvas, just above the board's tools
+    // (next to the tool it explains): turning comment mode on does not move
+    // the canvas (or the page under the mouse).
     const hint = await rect(page, '[data-sw-comment-hint]')
     const canvas = await rect(page, '[data-sw-canvas]')
+    const tools = await rect(page, '[data-sw-tools]')
     assert.equal(canvas.top, before.top, 'the canvas did not move')
-    assert.ok(hint.top >= canvas.top && hint.bottom < canvas.top + 60, `hint ${hint.top}-${hint.bottom} canvas ${canvas.top}`)
+    assert.ok(
+      hint.bottom <= tools.top && tools.top - hint.bottom <= 12 && hint.top > canvas.top + 60,
+      `hint ${hint.top}-${hint.bottom} tools ${tools.top} canvas ${canvas.top}`,
+    )
     assert.ok(hint.right - hint.left < canvas.right - canvas.left, 'a pill, not a full-width bar')
     assert.match(await page.textContent('[data-sw-comment-hint]'), /element/)
 
@@ -681,9 +686,10 @@ test('desktop: a thread or composer card is dragged by its header, stays on the 
     await dragBy(side, 50)
     await page.waitForSelector(`${composer}[data-sw-card-moved="true"]`)
     const after = await rect(page, composer)
-    // Where it was dragged to, held inside the canvas (10 px in, 60 px above its foot).
+    // Where it was dragged to, held inside the canvas (10 px in, and above its
+    // foot: the board's tools and the "Commenting on ..." note above them, 100 px).
     const wantLeft = Math.max(canvas.left + 10, Math.min(canvas.right - 10 - before.width, before.left + side))
-    const wantTop = Math.max(canvas.top + 10, Math.min(canvas.bottom - 60 - before.height, before.top + 50))
+    const wantTop = Math.max(canvas.top + 10, Math.min(canvas.bottom - 100 - before.height, before.top + 50))
     assert.ok(
       Math.abs(after.left - wantLeft) <= 2 && Math.abs(after.top - wantTop) <= 2,
       `composer at ${after.left},${after.top}, wanted ${wantLeft},${wantTop} from ${before.left},${before.top}`,
@@ -1230,12 +1236,13 @@ test('desktop: search lives in the sidebar, and the toolbar keeps its shape when
         return {
           fit: document.querySelector(sel).getAttribute('data-sw-toolbar-fit'),
           view: box('[data-sw-view-menu]')?.[0],
-          comment: box('[data-sw-comment-mode]'),
           panels: box('[data-sw-panel-switch]'),
           sizes: box('[aria-label="Screen size"]'),
         }
       }, bar)
     const before = await places()
+    // Comment is a tool on the canvas, not a control of this bar.
+    assert.equal(await page.locator(`${bar} [data-sw-comment-mode]`).count(), 0)
     await choose(page, '[data-sw-page-jump]', 'journey:sign-up')
     await page.waitForSelector(`${bar} [data-sw-view-journey-name]`)
     assert.deepEqual(await places(), before, 'the bar kept its shape')

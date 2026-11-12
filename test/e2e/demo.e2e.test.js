@@ -148,11 +148,13 @@ test('view as: each role sees what it may do, on the board and in the console', 
     await viewAs(page, 'viewer')
     assert.match(await page.textContent('[data-sw-demo-banner]'), /Viewer/)
     assert.equal(await page.locator('[data-sw-comment-mode]').count(), 0, 'a viewer cannot comment')
+    assert.equal(await page.locator('[data-sw-tool="draw"]').count(), 0, 'nor draw')
     await shot(page, '2-viewer')
 
     // A member comments; in the console it has no admin sections.
     await viewAs(page, 'member')
     assert.equal((await page.locator('[data-sw-comment-mode]').count()) > 0, true, 'a member comments')
+    assert.equal(await page.locator('[data-sw-tools] [data-sw-tool="draw"]').count(), 1, 'and draws')
     await page.goto(consoleUrl(''))
     await page.waitForSelector('[data-sw-nav="projects"]')
     let nav = await navSections(page)

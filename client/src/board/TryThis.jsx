@@ -33,7 +33,8 @@ export function useTryThis(enabled) {
   return [enabled && open, close]
 }
 
-export function TryThis({ touch, done, onOpenComment, onComment, onAgent, onClose }) {
+// `chip`: shown folded whatever was chosen (a tool's note needs the room).
+export function TryThis({ touch, chip = false, done, onOpenComment, onComment, onAgent, onClose }) {
   const [folded, setFolded] = useState(true)
   const steps = [
     {
@@ -47,7 +48,7 @@ export function TryThis({ touch, done, onOpenComment, onComment, onAgent, onClos
       id: 'comment',
       icon: MessageSquarePlus,
       label: touch ? 'Pin your own comment' : 'Press C to comment',
-      hint: touch ? 'The comment button, then a page' : 'Then click anywhere on a page',
+      hint: touch ? 'The comment tool below, then a page' : 'Then click anywhere on a page',
       run: onComment,
     },
     onAgent
@@ -55,8 +56,9 @@ export function TryThis({ touch, done, onOpenComment, onComment, onAgent, onClos
       : null,
   ].filter(Boolean)
   const finished = steps.filter((step) => done.has(step.id)).length
-  const place = touch ? 'bottom-16 left-2' : 'bottom-16 left-3'
-  if (folded) {
+  // Above the zoom controls (desktop) or the Fit button (phone), left of the board's tools.
+  const place = touch ? 'bottom-[calc(4rem+env(safe-area-inset-bottom,0px))] left-2' : 'bottom-16 left-3'
+  if (folded || chip) {
     return (
       <button
         type="button"
@@ -81,7 +83,7 @@ export function TryThis({ touch, done, onOpenComment, onComment, onAgent, onClos
     <section
       className={cn(
         'pointer-events-auto absolute z-30 animate-pop-in rounded-xl border border-line bg-surface/95 p-3 text-fg shadow-pop backdrop-blur',
-        touch ? 'inset-x-2 bottom-16' : 'bottom-16 left-3 w-72',
+        touch ? 'inset-x-2 bottom-[calc(4rem+env(safe-area-inset-bottom,0px))]' : 'bottom-16 left-3 w-72',
       )}
       aria-label="Try this"
       data-sw-try-this="true"

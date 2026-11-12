@@ -153,7 +153,7 @@ npm run demo                                     # captures the bundled demo sit
 npm run demo -- --full                           # the whole fictional product, as in the live demo (26 pages)
 ```
 
-Open http://127.0.0.1:4600/ and try it: zoom in on a page, click **Comment**, click a button on the page, write a note.
+Open http://127.0.0.1:4600/ and try it: zoom in on a page, pick **Comment** in the tools at the bottom of the board (or press C), click a button on the page, write a note.
 
 ## How it works
 

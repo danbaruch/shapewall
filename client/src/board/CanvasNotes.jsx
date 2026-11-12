@@ -1,19 +1,16 @@
-import { Lightbulb, MessageSquarePlus, TextSelect, X } from 'lucide-react'
-import { useBoardView } from './boardView'
+import { Lightbulb, MessageSquarePlus, X } from 'lucide-react'
 import { Button, IconButton } from '../components/ui'
 import { IDLE_LINKS_MAX, countLinks } from './flow'
 
-// The notes along the top of the canvas: the comment-mode hint, the links
-// hints, the first-visit tip and the viewport switch notice.
+// The notes along the top of the canvas, about what the canvas shows: the
+// links hints, the first-visit tip, a draft put aside and the viewport switch
+// notice. The note for the tool in use (the comment hint, the drawing bar,
+// "Select text") sits above the tools at the bottom (BoardTools.jsx).
 export function CanvasNotes({
   wide,
   commentMode,
   canComment,
-  readyKeys,
-  setCommentMode,
-  composing = null,
-  onCancelDraft,
-  selectText = null,
+  composing = false,
   parkedDraft = null,
   showLinks,
   activePage,
@@ -34,77 +31,13 @@ export function CanvasNotes({
   setMode,
   comparePair,
 }) {
-  // "Select text" on a live page: armed, or the page has the mouse.
-  const reading = useBoardView((state) => Boolean(state.readingKey))
   const modeLabel = (id) => modes.find((item) => item.id === id)?.label || id
   // The tip names only what this person can do here.
   const tipText = wide
     ? `Scroll or drag to move, Ctrl+scroll or pinch to zoom. Click a page for its actions${canComment && !comparePair ? ', or press C to comment' : ''}.`
-    : `Pinch to zoom. Tap a page for its actions${canComment && !comparePair ? ', or the comment button to pin a note' : ''}.`
+    : `Pinch to zoom. Tap a page for its actions${canComment && !comparePair ? ', or the comment tool below to pin a note' : ''}.`
   return (
     <div className="pointer-events-none absolute inset-x-0 top-3 z-30 flex flex-col items-center gap-1.5 px-2" data-sw-canvas-notes="true">
-      {selectText && !composing && !commentMode ? (
-        // "Select text" is a mode with two steps; this says which, and how to
-        // get the board's scrolling and zoom back.
-        <div
-          className="pointer-events-auto flex w-max max-w-full items-center gap-2 rounded-full border border-line bg-surface py-0.5 pr-0.5 pl-3 text-xs font-medium text-fg shadow-pop"
-          role="status"
-          data-sw-select-text-note={reading ? 'reading' : 'armed'}
-        >
-          <TextSelect size={13} className="shrink-0 text-accent" aria-hidden="true" />
-          <span className="min-w-0">
-            {reading
-              ? `Selecting text on ${selectText.title}. Move the pointer off the page to scroll and zoom the board again.`
-              : `Select text is on for ${selectText.title}: click the page, then select and copy.`}
-          </span>
-          <Button size="xs" variant="ghost" className="shrink-0 rounded-full" onClick={selectText.onDone} data-sw-select-text-done="true">
-            Done
-          </Button>
-        </div>
-      ) : null}
-      {composing ? (
-        // A target is picked: the banner says what the comment is on, and
-        // Esc (or Cancel) goes back one step, to picking.
-        <div
-          className="pointer-events-auto flex w-max max-w-full items-center gap-2 rounded-full border border-line bg-surface py-0.5 pr-0.5 pl-3 text-xs font-medium text-fg shadow-pop"
-          role="status"
-          data-sw-comment-hint="composing"
-        >
-          <MessageSquarePlus size={13} className="shrink-0 text-accent" aria-hidden="true" />
-          <span className="min-w-0 truncate" data-sw-comment-hint-target="true">
-            <span className="text-muted">Commenting on</span> {composing}
-          </span>
-          <Button size="xs" variant="ghost" className="shrink-0 rounded-full" onClick={onCancelDraft} data-sw-comment-hint-cancel="true">
-            Cancel (Esc)
-          </Button>
-        </div>
-      ) : commentMode && canComment ? (
-        <div
-          className="pointer-events-auto flex w-max max-w-full items-center gap-2 rounded-full bg-accent py-0.5 pr-0.5 pl-3 text-xs font-medium text-accent-fg shadow-pop"
-          role="status"
-          data-sw-comment-hint={readyKeys.size ? 'element' : 'page'}
-        >
-          <MessageSquarePlus size={13} className="shrink-0" aria-hidden="true" />
-          <span className="min-w-0">
-            {readyKeys.size
-              ? wide
-                ? 'Click an element on the live page to comment on it.'
-                : 'Tap an element on the live page to comment on it.'
-              : wide
-                ? 'Click a page to comment. Zoom in until the page goes live to pin it to an element.'
-                : 'Tap a page to pin a comment.'}
-          </span>
-          <Button
-            size={wide ? 'xs' : 'touch'}
-            variant="inverse"
-            className="shrink-0 rounded-full"
-            onClick={() => setCommentMode(false)}
-            data-sw-comment-hint-done="true"
-          >
-            Done{wide ? ' (Esc)' : ''}
-          </Button>
-        </div>
-      ) : null}
       {showLinks && !activePage && !shownSteps && countLinks(data?.links, presentPages, hiddenLinkTargets) > IDLE_LINKS_MAX ? (
         <p
           className="w-max max-w-full rounded-full bg-surface px-3 py-1 text-xs font-medium text-muted shadow-pop"

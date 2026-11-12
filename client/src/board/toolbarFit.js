@@ -3,9 +3,11 @@
 // with a flexible gap between them:
 //   left    the board name and switcher with the capture status, a hairline,
 //           then the screen-size toggle, Views and Capture
-//   right   Comment, a hairline, the side panel toggles (Comments, Agent,
+//   right   the viewer note, the side panel toggles (Comments, Agent,
 //           Checks) on one track, Settings
 // Search is not in the toolbar: it is the sidebar's field (BoardRail.jsx).
+// Nor are the tools you use on the board (Select, Comment, Draw): they float
+// at the bottom of the canvas (BoardTools.jsx).
 // When the zones do not fit side by side, labels drop one step at a time, in
 // FIT_STEPS order. Every control keeps its accessible name and tooltip at
 // every step. The widths come from the controls' fixed sizes plus measured
@@ -24,7 +26,7 @@ export const FIT_STEPS = [
   'view', // Views loses its word, or the open journey's name (Capture is always an icon)
   'viewport', // the screen-size toggle becomes icons with tooltips; the hairlines go
   // Last resort, for the narrowest toolbars (a 1024 px window with the
-  // sidebar at its widest): Comment as a filled icon, tighter gaps.
+  // sidebar at its widest): tighter gaps.
   'tight',
 ]
 
@@ -55,7 +57,6 @@ export function collapsed(step) {
     panels: at('panels'),
     view: at('view'),
     viewport: at('viewport'),
-    comment: at('tight'),
     tight: at('tight'),
   }
 }
@@ -84,7 +85,6 @@ export function toolbarItems({
   capture = false, // the Capture button (local boards)
   status = { kind: 'dot' }, // the capture status: { kind: 'dot' | 'running' | 'failed', progress }
   viewer = false,
-  comment = false,
   panels = { comments: 0, agent: false, checks: false },
   settings = false,
   journey = null, // the open journey's name: Views shows it, with a clear button
@@ -130,8 +130,6 @@ export function toolbarItems({
           : 16,
   })
   if (viewer) items.right.push({ id: 'viewer', full: 40 + t('Viewer', 'xs') })
-  // Comment, then the hairline between it and the panel toggles.
-  if (comment) items.right.push({ id: 'comment', full: 45 + t('Comment', 'ui'), compact: ICON, at: 'comment' }, divider('panels-divider'))
   // One track (1 px border + 2 px padding a side), its buttons side by side:
   // px-2.5 (px-2 once the words are gone), a 14 px icon, gap-1.5. The Agent
   // button keeps room for its activity pill while it has its word.

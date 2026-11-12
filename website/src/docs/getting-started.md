@@ -131,7 +131,7 @@ shapewall serve
 ```
 
 Open [http://127.0.0.1:4600/](http://127.0.0.1:4600/) (or add `--open` and Shapewall opens it for you). Scroll or drag to pan (Shift+scroll goes sideways, Space+drag and middle-drag work anywhere), Ctrl+scroll (Cmd+scroll on a Mac) or a pinch to zoom. Zoom in on a page and it switches
-from a screenshot to live HTML. Click **Comment**, click an element on the page, write what should change.
+from a screenshot to live HTML. Pick **Comment** in the tools at the bottom of the board (or press C), click an element on the page, write what should change.
 
 ### Images and drawings
 
@@ -140,8 +140,9 @@ A comment or a reply can show as well as tell:
 - **Images.** Attach up to 4 with the image button, or paste or drop them into the comment. PNG, JPEG, WebP or GIF, up to 5 MB each.
   The thread shows them as thumbnails; click one to see it large (Esc closes it).
 - **Drawing.** Pick **Box**, **Arrow** or **Pen** under the comment and draw right on the page; pick an ink, **Undo** or **Clear**.
-  Esc stops drawing first, then leaves comment mode. On a phone, **Draw on the page** opens the page full screen to draw on with a
-  finger.
+  Or start from the drawing: pick **Draw** in the tools at the bottom of the board and click a page. Either way the drawing is
+  part of a comment. Esc stops drawing first, then leaves comment mode. On a phone, **Draw on the page** opens the page full
+  screen to draw on with a finger.
 - The drawing shows over the page while its thread is open or its pin is hovered. After a recapture it moves to the thread's before
   and after view, over the page as it was when it was drawn.
 

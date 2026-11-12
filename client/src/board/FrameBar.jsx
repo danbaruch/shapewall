@@ -15,8 +15,9 @@ const TITLE_ROW_PX = 30
 // else to its left. When the card fills the canvas it shrinks to one button
 // in the card's header (or the canvas's top left corner when the header is
 // off screen), away from the page's own nav and buttons. It never covers the
-// notes along the top of the canvas (CanvasNotes), such as the comment-mode
-// hint: it moves below them or to the next spot (frameBarPlace.js).
+// notes along the top of the canvas (CanvasNotes), such as the links hint
+// or the tip: it moves below them or to the next spot (frameBarPlace.js).
+// Nor the tool dock along the bottom (the board's tools and their note).
 export default function FrameBar({
   focused,
   target,
@@ -47,25 +48,45 @@ export default function FrameBar({
     if (!focused) setExpandedFor(null)
   }, [focused])
   // The notes' box, measured now and whenever a note comes, goes or changes
-  // (they follow the board's state) or the canvas changes size.
+  // (they follow the board's state) or the canvas changes size. The tool
+  // dock along the bottom (BoardTools.jsx: the board's tools, the note for
+  // the tool in use, a journey bar) is kept clear the same way: the bar is
+  // placed in the canvas above it (`dockRoom`, px from the canvas's bottom).
   const [avoid, setAvoid] = useState(null)
+  const [dockRoom, setDockRoom] = useState(0)
   useLayoutEffect(() => {
-    const notes = focused && domNode ? domNode.closest('[data-sw-canvas]')?.querySelector('[data-sw-canvas-notes]') : null
+    const canvas = focused && domNode ? domNode.closest('[data-sw-canvas]') : null
+    const notes = canvas?.querySelector('[data-sw-canvas-notes]') || null
+    const dock = canvas?.querySelector('[data-sw-tool-dock]') || null
     const measure = () => {
+      const origin = domNode?.getBoundingClientRect()
       const box = notes
         ? notesRect(
             Array.from(notes.children).map((child) => child.getBoundingClientRect()),
-            domNode.getBoundingClientRect(),
+            origin,
           )
         : null
       setAvoid((current) => (JSON.stringify(current) === JSON.stringify(box) ? current : box))
+      const docked = dock
+        ? notesRect(
+            // Not a passing toast: the bar does not jump for six seconds of it.
+            Array.from(dock.children)
+              .filter((child) => !child.hasAttribute('data-sw-toast'))
+              .map((child) => child.getBoundingClientRect()),
+            origin,
+          )
+        : null
+      setDockRoom(docked ? Math.max(0, Math.round(origin.height - docked.top)) : 0)
     }
     measure()
-    if (!notes) return undefined
+    if (!notes && !dock) return undefined
     const mutations = new MutationObserver(measure)
-    mutations.observe(notes, { childList: true, subtree: true, characterData: true })
     const sizes = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
-    sizes?.observe(notes)
+    for (const node of [notes, dock]) {
+      if (!node) continue
+      mutations.observe(node, { childList: true, subtree: true, characterData: true })
+      sizes?.observe(node)
+    }
     return () => {
       mutations.disconnect()
       sizes?.disconnect()
@@ -90,7 +111,7 @@ export default function FrameBar({
   const gap = 8
   const { place, toggle, fallback } = placeFrameBar({
     card: { left, top, right, bottom, titleTop: cardTop },
-    canvas: { width, height },
+    canvas: { width, height: Math.max(barHeight + gap * 2, height - dockRoom) },
     bar: { width: barWidth, height: barHeight },
     avoid,
     gap,

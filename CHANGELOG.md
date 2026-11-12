@@ -3,6 +3,34 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## 0.6.1 - 2026-11-12
+
+Board tools: the tools you use on the board moved out of the top bar.
+
+- **A floating toolbar at the bottom centre of the canvas,** like FigJam, Miro and tldraw. It holds what you do to the board:
+  **Select** (the default pointer: pan, zoom, open pages), **Comment** (C), **Draw** and, on desktop when the board has live
+  pages, **Select text**. One tool is in use at a time; Esc goes back a step at a time and ends on Select. The top bar keeps what
+  you look at: the board, the screen sizes, Views and the Comments, Agent and Checks panels. The Comment button is no longer in
+  the top bar.
+- **Draw is a tool of its own.** Pick Draw and click a page: a comment starts on that page and you draw at once (a box, an arrow
+  or the pen, as before). With a comment or a reply open, Draw draws on that comment's page. A drawing is still part of a
+  comment, and the Box, Arrow and Pen buttons under a comment work as they did.
+- **The note for the tool in use sits just above the tools:** the comment hint, "Commenting on ...", the drawing bar and the
+  select-text note moved there from the top of the canvas. The tip, the links notes and the viewport notice stay at the top.
+- **Nothing overlaps.** The tools are centred on the canvas (not the window), so they move when the sidebar or the side panel
+  opens or is resized. On a narrow canvas they shift clear of the zoom controls, then the zoom controls compact (Fit and the
+  minimap switch stay in the zoom menu), then the minimap steps aside. An open journey's bar and the toast sit above the tools.
+- **Phones:** the tools are the bottom bar (44 px targets, above the safe-area inset) and the comment button left the top row.
+  They step aside while a sheet or the keyboard is up. Draw, then a tap on a page, opens the page full screen to draw on.
+- **Permissions are unchanged.** A viewer, a read-only share link or an export without comments has no Comment or Draw tool;
+  a guest who may comment has both. Compare mode has neither, as before.
+- **Keyboard and screen readers:** the tools are a labelled toolbar with one tab stop; the arrow keys, Home and End move between
+  them, and each says whether it is in use. Tooltips show the shortcuts.
+- **Esc goes back one step at a time.** With a journey open, Esc leaves comment mode (or Select text) first and the next Esc
+  leaves the journey; one press used to do both. Turning comment mode on ends Select text, so one tool is in use at a time.
+- **Comments keep clear of the tools.** A thread or a new-comment card near the bottom of the canvas sits above the tools, and
+  above their note while one shows.
+
 ## 0.6.0 - 2026-11-12
 
 Connected agents, stage C: approvals and edits from a hosted board. A connected agent can make a fix for a comment, on a new
