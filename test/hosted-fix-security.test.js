@@ -545,6 +545,10 @@ test('a server that says "allowed": for nothing asked, for other content, twice,
   await fresh(ada)
   assert.equal((await answer(ada, other.id, bystander, 'deny')).status, 200)
   await beside.done
+  // Neither frame moved the third card: it still waits, here and on the machine. It is answered
+  // now (a real Deny), so the turn ends on an answer and not on the card's two minutes running out.
+  assert.equal(cardRow(third.id).state, 'pending', 'an answer sent under another turn is nothing')
+  assert.equal((await answer(ada, made.id, third, 'deny')).status, 200)
   const { final } = await turn.done
   // Every forged "allow" was a deny or nothing: no file was written, nothing was committed.
   assert.match(final.text, /refused edit index\.html/)
