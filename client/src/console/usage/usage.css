@@ -59,3 +59,182 @@
     overflow: visible !important;
   }
 }
+
+/* ---- The dashboard grid (Dashboard.jsx; react-grid-layout places the widgets) ---- */
+
+.sw-layout .react-grid-layout {
+  position: relative;
+}
+.sw-layout .react-grid-item {
+  /* Never a box of its own: the card inside is the widget. */
+  min-width: 0;
+  border-radius: 0.75rem;
+}
+/* Widgets glide to their places only while the layout is edited. */
+.sw-layout-editing .react-grid-layout {
+  transition: height 180ms ease;
+}
+.sw-layout-editing .react-grid-item {
+  transition:
+    transform 180ms ease,
+    width 180ms ease,
+    height 180ms ease;
+}
+.sw-layout-editing .react-grid-item.resizing,
+.sw-layout-editing .react-grid-item.react-draggable-dragging {
+  transition: none;
+  z-index: 5;
+}
+.sw-layout-editing .react-grid-item.react-draggable-dragging {
+  box-shadow: var(--shadow-pop, 0 12px 32px rgb(0 0 0 / 0.22));
+  background: var(--bg, var(--surface));
+  cursor: grabbing;
+}
+.sw-layout-editing .react-grid-item.react-draggable-dragging .sw-widget-body,
+.sw-layout-editing .react-grid-item.resizing .sw-widget-body {
+  opacity: 1;
+}
+/* Where a dragged or resized widget will land. */
+.sw-layout .react-grid-item.react-grid-placeholder {
+  z-index: 1;
+  border: 2px dashed var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  transition: transform 100ms ease;
+  user-select: none;
+}
+.sw-layout .react-resizable-hide > .react-resizable-handle {
+  display: none;
+}
+
+/* A widget while the layout is edited: an outline, a bar to hold it by, a corner to size it by. */
+.sw-layout-editing .sw-widget {
+  outline: 1px dashed var(--line-strong);
+  outline-offset: 3px;
+}
+.sw-layout-editing .sw-widget:hover {
+  outline-color: var(--accent);
+}
+.sw-layout-editing .sw-widget:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.sw-layout-editing .sw-widget-body {
+  /* Nothing inside is pressed while editing; it stays readable. */
+  opacity: 0.82;
+}
+.sw-widget-bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  height: 32px;
+  margin-bottom: 4px;
+  padding: 0 4px 0 2px;
+  border: 1px solid var(--line-strong);
+  border-radius: 0.5rem;
+  background: var(--surface-2);
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 600;
+}
+.sw-widget-grip {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 4px;
+  align-self: stretch;
+  padding: 0 6px;
+}
+.sw-widget-grip-on {
+  cursor: grab;
+  /* A finger on the bar drags the widget; anywhere else it scrolls the page. */
+  touch-action: none;
+  user-select: none;
+}
+.sw-layout .sw-resize-handle {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  z-index: 2;
+  width: 28px;
+  height: 28px;
+  cursor: se-resize;
+  touch-action: none;
+}
+/* Three strokes across the corner, on a chip of the surface so they read on any card. */
+.sw-layout .sw-resize-handle::before {
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px 0 10px 0;
+  background:
+    linear-gradient(
+        135deg,
+        transparent 0 46%,
+        var(--fg) 46% 54%,
+        transparent 54% 64%,
+        var(--fg) 64% 72%,
+        transparent 72% 82%,
+        var(--fg) 82% 90%,
+        transparent 90%
+      )
+      no-repeat 2px 2px / 14px 14px,
+    var(--surface);
+}
+.sw-layout .sw-resize-handle:hover::before {
+  border-color: var(--accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sw-layout-editing .react-grid-layout,
+  .sw-layout-editing .react-grid-item,
+  .sw-layout .react-grid-item.react-grid-placeholder {
+    transition: none;
+  }
+}
+
+/* On paper the widgets follow one another in reading order, each as tall as it needs. */
+@media print {
+  .sw-layout .react-grid-layout {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: 12px;
+    height: auto !important;
+  }
+  .sw-layout .react-grid-item {
+    position: static !important;
+    transform: none !important;
+    width: auto !important;
+    height: auto !important;
+    grid-column: span 12;
+    break-inside: avoid;
+  }
+  .sw-layout .react-grid-item[data-sw-widget-type^='tile_'] {
+    grid-column: span 4;
+  }
+  .sw-layout .react-grid-item[data-sw-widget-type^='top_'] {
+    grid-column: span 6;
+  }
+  .sw-layout [data-sw-chart],
+  .sw-layout [data-sw-tile],
+  .sw-layout [data-sw-top],
+  .sw-layout [data-sw-usage-budgets] {
+    height: auto !important;
+    overflow: visible !important;
+  }
+  .sw-layout .recharts-brush {
+    display: none;
+  }
+  .sw-layout [data-sw-chart-legend],
+  .sw-layout [data-sw-top] ol,
+  .sw-layout [data-sw-usage-budgets] ul,
+  .sw-layout [data-sw-breakdown] {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+}

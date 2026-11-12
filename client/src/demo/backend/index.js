@@ -34,7 +34,7 @@ export { AGENT_INFO, DemoError } from './util.js'
 
 // What the Usage and Activity pages ask for (src/hosted/usage-routes.js).
 const USAGE_PATHS =
-  /^\/api\/workspaces\/[a-z0-9_]+\/(usage(\/.*)?|views(\/[a-z0-9_]+)?|activity(\/(filters|export))?|people\/[a-z0-9_]+|agents\/[a-z0-9_]+\/profile|access-review(\/export)?)$/
+  /^\/api\/workspaces\/[a-z0-9_]+\/(usage(\/.*)?|views(\/[a-z0-9_]+(\/layout)?)?|activity(\/(filters|export))?|people\/[a-z0-9_]+|agents\/[a-z0-9_]+\/profile|access-review(\/export)?)$/
 
 // state: the saved object (fixtures.seedState). loadJson(url): reads one of
 // the export's files. now(): the clock. location: { project, share } from the

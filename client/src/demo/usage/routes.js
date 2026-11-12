@@ -9,7 +9,8 @@
 //
 // Exports are made here, in the browser, and answered as
 // { file: { name, type, text } } (install.js hands it over as a download).
-// Saved views live in the demo's state, so Reset clears them.
+// Saved views and dashboard layouts live in the demo's state, so Reset
+// clears them.
 
 import { ACCOUNT_ACTIONS, ACTION_GROUP_IDS } from '../../../../src/hosted/usage-shape.js'
 import {
@@ -26,16 +27,20 @@ import { HttpError } from '../../../../src/hosted/http.js'
 import { NEEDS, ROLE_ACCESS, roleAtLeast } from '../../../../src/hosted/permissions.js'
 import {
   USAGE_LIMITS,
+  checkedLayout,
   cleanBucket,
   cleanDimension,
   cleanMetric,
+  cleanTopLimit,
   cleanUsageFilter,
   cleanView,
+  cleanViewLayout,
   tooManyViews,
   usageCsvHeader,
   usageCsvLine,
   usageScope,
 } from '../../../../src/hosted/usage-core.js'
+import { readLayout } from '../../../../src/hosted/usage-layout.js'
 import { WORKSPACE_ID } from '../fixtures.js'
 import { demoAgentLook, fail, newId } from '../backend/util.js'
 import { generateActivity, generateRuns } from './generate.js'
@@ -454,7 +459,30 @@ export function usageRoutes(ctx) {
   const viewsFor = (role, page) => {
     if (page !== 'activity' && !roleAtLeast(role, NEEDS.usage)) fail(403, 'forbidden', 'Usage is for members, admins and owners.')
   }
-  const publicView = (view) => ({ id: view.id, page: view.page, name: view.name, query: view.query, updatedAt: view.updatedAt })
+  const publicView = (view) => ({
+    id: view.id,
+    page: view.page,
+    name: view.name,
+    query: view.query,
+    updatedAt: view.updatedAt,
+    hasLayout: Boolean(layoutsOf().view[view.id]),
+  })
+
+  // ---- Dashboard layouts (the same rules as src/hosted/usage.js createLayouts) ----
+
+  // Kept in the demo's own state: each visitor role's own layout per
+  // workspace, the workspace's default, and the layouts saved views carry.
+  const layoutsOf = () => {
+    const kept = state.usageLayouts
+    if (!kept || typeof kept !== 'object' || !kept.person || !kept.default || !kept.view)
+      state.usageLayouts = { person: {}, default: {}, view: {} }
+    return state.usageLayouts
+  }
+  const layoutAnswer = (ws, user, role) => ({
+    layout: readLayout(layoutsOf().person[`${ws}:${user.id}`]),
+    default: readLayout(layoutsOf().default[ws]),
+    canSetDefault: roleAtLeast(role, NEEDS.usageDefaultLayout),
+  })
 
   const csvFile = (ws, what, text) => ({
     file: {
@@ -489,7 +517,7 @@ export function usageRoutes(ctx) {
       const bucket = cleanBucket(query.bucket)
       return { bucket, buckets: store.latency(filterOf(query), scope, bucket) }
     }),
-    usage('/top', ({ store, scope, query }) => store.top(filterOf(query), scope)),
+    usage('/top', ({ store, scope, query }) => store.top(filterOf(query), scope, { limit: cleanTopLimit(query.limit) })),
     usage('/budgets', ({ ws, store, scope }) => ({
       projects: store.budgets(
         scope,
@@ -562,6 +590,7 @@ export function usageRoutes(ctx) {
         const { user, role } = inWorkspace(params[0], 'activity')
         viewsFor(role, body?.page)
         const { page, name, query } = cleanView(body || {})
+        const layout = cleanViewLayout(page, body?.layout)
         const mine = viewsOf().filter((view) => view.workspaceId === params[0] && view.userId === user.id && view.page === page)
         // The same name again replaces that view.
         let view = mine.find((item) => item.name === name)
@@ -571,6 +600,8 @@ export function usageRoutes(ctx) {
           view = { id: newId('vw'), workspaceId: params[0], userId: user.id, page, name, query, updatedAt: iso() }
           viewsOf().push(view)
         }
+        if (layout) layoutsOf().view[view.id] = layout
+        else delete layoutsOf().view[view.id]
         return { status: 201, json: { view: publicView(view) } }
       },
     ],
@@ -582,7 +613,69 @@ export function usageRoutes(ctx) {
         const at = viewsOf().findIndex((view) => view.workspaceId === params[0] && view.id === params[1] && view.userId === user.id)
         if (at < 0) fail(404, 'unknown_view', 'No such saved view.')
         viewsOf().splice(at, 1)
+        delete layoutsOf().view[params[1]]
         return { ok: true }
+      },
+    ],
+    // The layout a view carries, for whoever opens the view's link.
+    [
+      'GET',
+      /^\/api\/workspaces\/([a-z0-9_]+)\/views\/([a-z0-9_]+)\/layout$/,
+      ({ params }) => {
+        const { user } = inWorkspace(params[0], 'usage')
+        const view = viewsOf().find((item) => item.workspaceId === params[0] && item.id === params[1] && item.page === 'usage')
+        const layout = view ? readLayout(layoutsOf().view[view.id]) : null
+        if (!layout) fail(404, 'unknown_view', 'No such saved view, or it carries no layout.')
+        return { view: { id: view.id, name: view.name, mine: view.userId === user.id, layout } }
+      },
+    ],
+
+    [
+      'GET',
+      /^\/api\/workspaces\/([a-z0-9_]+)\/usage\/layout$/,
+      ({ params }) => {
+        const { user, role } = inWorkspace(params[0], 'usage')
+        return layoutAnswer(params[0], user, role)
+      },
+    ],
+    [
+      'PUT',
+      /^\/api\/workspaces\/([a-z0-9_]+)\/usage\/layout$/,
+      ({ params, body }) => {
+        const { user } = inWorkspace(params[0], 'usage')
+        const layout = checkedLayout(body?.layout)
+        layoutsOf().person[`${params[0]}:${user.id}`] = layout
+        return { layout }
+      },
+    ],
+    [
+      'DELETE',
+      /^\/api\/workspaces\/([a-z0-9_]+)\/usage\/layout$/,
+      ({ params }) => {
+        const { user, role } = inWorkspace(params[0], 'usage')
+        delete layoutsOf().person[`${params[0]}:${user.id}`]
+        return layoutAnswer(params[0], user, role)
+      },
+    ],
+    [
+      'PUT',
+      /^\/api\/workspaces\/([a-z0-9_]+)\/usage\/layout\/default$/,
+      ({ params, body }) => {
+        inWorkspace(params[0], 'usageDefaultLayout')
+        const layout = checkedLayout(body?.layout)
+        layoutsOf().default[params[0]] = layout
+        audit(params[0], 'usage_layout_default_set', { detail: { widgets: layout.items.length } })
+        return { default: layout }
+      },
+    ],
+    [
+      'DELETE',
+      /^\/api\/workspaces\/([a-z0-9_]+)\/usage\/layout\/default$/,
+      ({ params }) => {
+        inWorkspace(params[0], 'usageDefaultLayout')
+        if (layoutsOf().default[params[0]]) audit(params[0], 'usage_layout_default_removed', { detail: {} })
+        delete layoutsOf().default[params[0]]
+        return { default: null }
       },
     ],
 

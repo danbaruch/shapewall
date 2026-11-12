@@ -11,6 +11,7 @@
 
 import { HttpError } from './http.js'
 import { roleAtLeast } from './permissions.js'
+import { LayoutError, cleanLayout } from './usage-layout.js'
 import {
   KIND_LABEL,
   OUTCOME_GROUP_LABEL,
@@ -34,6 +35,8 @@ export const USAGE_LIMITS = {
   // Series drawn in one chart; the rest fold into "Other".
   series: 7,
   views: 30,
+  // Entries in one top list.
+  top: 10,
   viewName: 60,
   viewQuery: 2000,
 }
@@ -409,10 +412,28 @@ export function usageRowView(row, scope, { detail = false, labelOf, isMember, li
   }
 }
 
-// Median and 95th percentile turn duration (nearest rank) of one group:
-// `row` { n, p50, p95, longest }, or nothing for a group with no turns.
-export const latencyView = (row) => ({ turns: row?.n || 0, p50: row?.p50 ?? null, p95: row?.p95 ?? null, longest: row?.longest ?? null })
-// Per bucket, every bucket present. `rows`: [{ b, n, p50, p95, longest }].
+// Turn duration percentiles (nearest rank) of one group: the median, and
+// the 90th, 95th and 99th. `row` { n, p50, p90, p95, p99, longest }, or
+// nothing for a group with no turns.
+export const latencyView = (row) => ({
+  turns: row?.n || 0,
+  p50: row?.p50 ?? null,
+  p90: row?.p90 ?? null,
+  p95: row?.p95 ?? null,
+  p99: row?.p99 ?? null,
+  longest: row?.longest ?? null,
+})
+// The rank (from 1) of the `percent`th percentile among `n` values, nearest rank.
+export const percentileRank = (n, percent) => Math.max(1, Math.floor((n * percent + 99) / 100))
+// How many entries a top list holds: 5 unless asked, at most USAGE_LIMITS.top.
+export const cleanTopLimit = (value) => {
+  if (value === undefined || value === null || value === '') return 5
+  const count = Number(value)
+  if (!Number.isInteger(count) || count < 1 || count > USAGE_LIMITS.top)
+    throw new HttpError(400, 'invalid_option', `limit: 1 to ${USAGE_LIMITS.top}.`)
+  return count
+}
+// Per bucket, every bucket present. `rows`: [{ b, n, p50, p90, p95, p99, longest }].
 export function latencyBuckets(rows, filter, bucket) {
   const found = new Map(rows.map((row) => [row.b, row]))
   return bucketKeys(filter, bucket).map((key) => ({ bucket: key, ...latencyView(found.get(key)) }))
@@ -463,13 +484,13 @@ export function seriesView(rows, filter, { bucket, groupBy, metric }, labelOf) {
 }
 
 // The "top" lists that come from the split by agent (breakdownView).
-export function topAgents(agents) {
+export function topAgents(agents, limit = 5) {
   return {
-    agents: agents.slice(0, 5).map((item) => ({ key: item.key, label: item.label, machine: item.machine || null, calls: item.calls })),
+    agents: agents.slice(0, limit).map((item) => ({ key: item.key, label: item.label, machine: item.machine || null, calls: item.calls })),
     denied: agents
       .filter((item) => (item.approvals.denied || 0) > 0)
       .sort((a, b) => b.approvals.denied - a.approvals.denied)
-      .slice(0, 5)
+      .slice(0, limit)
       .map((item) => ({ key: item.key, label: item.label, denied: item.approvals.denied, asked: item.approvals.asked })),
   }
 }
@@ -584,5 +605,20 @@ export function cleanView({ page, name, query } = {}) {
   if (typeof query !== 'string' || query.length > USAGE_LIMITS.viewQuery || !VIEW_QUERY.test(query))
     throw new HttpError(400, 'invalid_view', 'query: the filters as the page keeps them in its address.')
   return { page, name: label, query }
+}
+// The layout a saved view of the Usage page may carry: checked, or nothing.
+export function cleanViewLayout(page, layout) {
+  if (layout === null || layout === undefined) return null
+  if (page !== 'usage') throw new HttpError(400, 'invalid_view', 'Only a view of the Usage page carries a layout.')
+  return checkedLayout(layout)
+}
+// A dashboard layout as it may be stored (usage-layout.js), or an HttpError.
+export function checkedLayout(layout) {
+  try {
+    return cleanLayout(layout)
+  } catch (error) {
+    if (error instanceof LayoutError) throw new HttpError(error.code === 'layout_too_large' ? 413 : 400, error.code, error.message)
+    throw error
+  }
 }
 export const tooManyViews = () => new HttpError(409, 'too_many_views', `You have ${USAGE_LIMITS.views} saved views here. Delete one first.`)

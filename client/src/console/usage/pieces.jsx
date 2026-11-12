@@ -55,6 +55,9 @@ export function OutcomeChip({ outcome, className }) {
 // One headline number with its change against the period before and, when
 // there is one, a small trend line. `better`: which direction is good news
 // ('up', 'down', or null when a change is just a change).
+// On the dashboard a tile is a widget: `fill` makes it as tall as its place
+// on the grid (and sizes its number to its width), `menu` is its options
+// button, `spark` and `showCompare` are what its options turned on or off.
 export function StatTile({
   label,
   value,
@@ -67,6 +70,11 @@ export function StatTile({
   note = null,
   compare = 'the period before',
   testId,
+  fill = false,
+  menu = null,
+  spark = true,
+  showCompare = true,
+  showLabel = true,
 }) {
   const theme = useChartTheme()
   const delta = change(current, previous)
@@ -75,23 +83,50 @@ export function StatTile({
   const good = delta && better && !flat ? (better === 'up') === up : null
   const Arrow = flat ? Minus : up ? ArrowUpRight : ArrowDownRight
   return (
-    <Card className="min-w-0 px-4 py-3" data-sw-tile={testId}>
-      <p className="truncate text-xs font-medium text-muted">{label}</p>
+    <Card
+      // (Without its label, while the layout is edited, a tile is shorter by its bar: less padding keeps every line in view.)
+      className={cn(
+        'min-w-0 px-4',
+        showLabel ? 'py-3' : 'py-1.5',
+        fill && '@container/tile flex h-full flex-col justify-center overflow-hidden',
+      )}
+      data-sw-tile={testId}
+    >
+      {showLabel || menu ? (
+        <div className="flex items-center justify-between gap-1">
+          <p className="truncate text-xs font-medium text-muted">{showLabel ? label : ''}</p>
+          {menu}
+        </div>
+      ) : null}
       {loading ? (
         <Skeleton className="mt-2 h-7 w-24" />
       ) : (
         <div className="mt-0.5 flex items-end justify-between gap-2">
-          <p className="min-w-0 text-[21px] leading-8 font-semibold text-fg sm:truncate sm:text-[26px]" data-sw-tile-value>
+          <p
+            className={cn(
+              'min-w-0 leading-8 font-semibold text-fg',
+              fill ? 'truncate text-[19px] @min-[13rem]/tile:text-[26px]' : 'text-[21px] sm:truncate sm:text-[26px]',
+            )}
+            title={fill && typeof value === 'string' ? value : undefined}
+            data-sw-tile-value
+          >
             {value}
           </p>
-          {trend ? (
-            <span className="hidden sm:block">
+          {trend && spark ? (
+            <span className={fill ? 'hidden @min-[15rem]/tile:block' : 'hidden sm:block'} data-sw-tile-spark>
               <Sparkline values={trend} color={theme.series[0]} />
             </span>
           ) : null}
         </div>
       )}
-      <p className="mt-0.5 flex min-h-4 flex-wrap items-center gap-x-1.5 text-caption text-muted">
+      <p
+        className={cn(
+          'mt-0.5 flex min-h-4 items-center gap-x-1.5 text-caption text-muted',
+          fill ? 'min-w-0' : 'flex-wrap',
+          !showCompare && 'hidden',
+        )}
+        data-sw-tile-compare
+      >
         {loading ? null : delta ? (
           <span
             className={cn(
@@ -106,7 +141,11 @@ export function StatTile({
         ) : null}
         {loading ? null : <span className="truncate">{delta ? `against ${compare}` : (note ?? 'Nothing to compare with yet')}</span>}
       </p>
-      {hint && !loading ? <p className="mt-0.5 text-caption text-pretty text-muted">{hint}</p> : null}
+      {hint && !loading ? (
+        <p className={cn('mt-0.5 text-caption text-muted', fill ? 'truncate' : 'text-pretty')} title={fill ? hint : undefined}>
+          {hint}
+        </p>
+      ) : null}
     </Card>
   )
 }

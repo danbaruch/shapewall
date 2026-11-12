@@ -15,6 +15,17 @@ a Usage view on a local board.
   and the median and 95th percentile turn duration. Top lists, and each project's daily budgets with today's use. Hover or tap for
   exact values; press a bar, a row or a legend entry to filter the whole page; every chart has a table, "copy as CSV" and "copy as
   an image". One palette, checked for colour-blind readers in light and dark.
+- **The Usage dashboard is yours to arrange.** "Edit layout" turns the overview into a grid of widgets: drag one by its bar,
+  resize it from its corner (a chart cannot be made too small to read; a tile has three widths), hide it and add it back,
+  duplicate a chart so two sit side by side with different measures, undo, and reset. Every widget has options behind its "..."
+  button, saved per widget: bars or lines, legend and brush, how many rows, shares or counts, which percentiles (now also the
+  90th and 99th) and a logarithmic axis, tiles' trend and comparison lines, chart or table. Arrow keys move a widget and Shift
+  with arrows resizes it, announced as you go; a finger drags on a tablet; a phone shows one column with up and down buttons.
+  Layouts are saved per person per workspace, checked strictly on the server, and autosaved with Undo. A saved view of
+  the overview keeps its layout and widget options unless you untick "Include this layout"; whoever opens its link sees them
+  without losing their own. Lists and the budgets are as tall as what they hold until sized by hand. Owners can set the layout everyone
+  starts from (audited). Printing follows reading order. One additive migration (16); see docs/hosted.md, "Arranging the
+  dashboard". The public demo has all of it, kept until Reset.
 - **Nothing is estimated, and "not reported" is not zero.** A cost appears only when the agent or its endpoint reported one. An
   agent that reports no tokens shows "Not reported" (a dash, or a hatched area in a chart), and totals say how many turns reported.
 - **Turns: a real grid.** Sorted, filtered and paged by the server (fast at 100,000 rows, tested), virtual rows, column chooser

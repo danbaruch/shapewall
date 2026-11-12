@@ -26,6 +26,7 @@ import {
   dimensionLabel,
   latencyBuckets,
   latencyView,
+  percentileRank,
   localDate,
   previousPeriod,
   projectBudgets,
@@ -138,7 +139,9 @@ function percentiles(rows) {
   return {
     n,
     p50: durations[Math.floor((n + 1) / 2) - 1],
-    p95: durations[Math.max(1, Math.floor((n * 95 + 99) / 100)) - 1],
+    p90: durations[percentileRank(n, 90) - 1],
+    p95: durations[percentileRank(n, 95) - 1],
+    p99: durations[percentileRank(n, 99) - 1],
     longest: durations[n - 1],
   }
 }
@@ -280,7 +283,7 @@ export function createMemoryUsage({ rows: allRows, names, policyOf, now = () => 
       yield sorted.slice(at, Math.min(at + USAGE_LIMITS.exportPage, max)).map((item) => rowView(item, scope, { detail: true }))
   }
 
-  function top(filter, scope) {
+  function top(filter, scope, { limit = 5 } = {}) {
     const found = matching(allRows(), filter, scope)
     const agents = breakdown(filter, scope, 'agent')
     const threads = [
@@ -305,13 +308,13 @@ export function createMemoryUsage({ rows: allRows, names, policyOf, now = () => 
       })
       .filter((item) => item.tokens !== null)
       .sort((a, b) => b.tokens - a.tokens)
-      .slice(0, 5)
+      .slice(0, limit)
       .map((item) => topThread(item, scope))
-    const fromAgents = topAgents(agents)
+    const fromAgents = topAgents(agents, limit)
     return {
       agents: fromAgents.agents,
       threads,
-      slowest: rows(filter, scope, { sort: 'duration', dir: 'desc', limit: 5 }).rows.filter((item) => item.durationMs !== null),
+      slowest: rows(filter, scope, { sort: 'duration', dir: 'desc', limit }).rows.filter((item) => item.durationMs !== null),
       denied: fromAgents.denied,
     }
   }

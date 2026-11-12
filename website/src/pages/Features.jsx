@@ -177,7 +177,7 @@ const SECTIONS = [
     nav: 'Teams',
     badge: 'Beta',
     title: 'Workspaces, roles and share links',
-    text: 'Host the team server and people sign in with a passkey. Each workspace has owners, admins, members and viewers. Admins invite people, hand out expiring share links to clients, issue API tokens for agents and read an audit log of who changed what. A Usage page shows every agent turn with the tokens and cost each agent reported, and Activity shows who signed in, who changed which setting and who approved what. The live demo has the roles, the links and both pages, with made-up numbers: switch who you are with View as.',
+    text: 'Host the team server and people sign in with a passkey. Each workspace has owners, admins, members and viewers. Admins invite people, hand out expiring share links to clients, issue API tokens for agents and read an audit log of who changed what. A Usage page shows every agent turn with the tokens and cost each agent reported, as a dashboard each person arranges for themselves (drag, resize, hide and duplicate its charts), and Activity shows who signed in, who changed which setting and who approved what. The live demo has the roles, the links and both pages, with made-up numbers: switch who you are with View as.',
     points: [
       'Four roles, checked on every request',
       'Invites and share links that expire',

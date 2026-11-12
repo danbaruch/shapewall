@@ -16,6 +16,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { tenant } from '../src/hosted/tenancy.js'
 import { cleanUsageFilter, createUsage, usageCsvLine, usageScope } from '../src/hosted/usage.js'
+import { LAYOUT_LIMITS, defaultLayout, duplicateItem, resizeItem, setOptions } from '../src/hosted/usage-layout.js'
 import { OUTCOME_GROUP_IDS, USAGE_BUCKETS, USAGE_DIMENSIONS, USAGE_METRICS, USAGE_SORTS, outcomeGroup } from '../src/hosted/usage-shape.js'
 import { generateActivity, generateRuns, historyMarks } from '../client/src/demo/usage/generate.js'
 import { createMemoryUsage } from '../client/src/demo/usage/store.js'
@@ -892,4 +893,102 @@ test('the Audit log page reads the same history as Activity: the same entries, w
     [],
   )
   assert.equal((await demo(as('member')).call('GET', ws('/audit'))).status, 403)
+})
+
+test('the dashboard’s layout in the demo: kept in the demo’s state, checked like a server’s, cleared by Reset', async () => {
+  const { get, call, state } = demo()
+  // Robin (the owner) starts with no layout of their own and no workspace default.
+  assert.deepEqual(await get(ws('/usage/layout')), { layout: null, default: null, canSetDefault: true })
+  const half = resizeItem(defaultLayout(), 'time', 6, 6)
+  const { layout: two, id } = duplicateItem(half, 'time')
+  const mine = setOptions(two, id, { metric: 'tokens', by: 'model', style: 'lines' })
+  const saved = await call('PUT', ws('/usage/layout'), { layout: mine })
+  assert.equal(saved.status, 200)
+  assert.deepEqual(saved.json.layout, mine)
+  assert.deepEqual((await get(ws('/usage/layout'))).layout, mine)
+  // The same checks as the server: junk refused, unknown widgets dropped.
+  assert.equal((await call('PUT', ws('/usage/layout'), { layout: { v: 1 } })).json.error.code, 'invalid_layout')
+  assert.equal((await call('PUT', ws('/usage/layout'), {})).json.error.code, 'invalid_layout')
+  assert.equal(
+    (await call('PUT', ws('/usage/layout'), { layout: { v: 1, items: [], pad: 'x'.repeat(LAYOUT_LIMITS.bytes) } })).json.error.code,
+    'layout_too_large',
+  )
+  assert.deepEqual((await get(ws('/usage/layout'))).layout, mine, 'a refused save leaves what was there')
+  const mixed = await call('PUT', ws('/usage/layout'), {
+    layout: {
+      v: 1,
+      items: [
+        { id: 'clock', type: 'clock', x: 0, y: 0, w: 4, h: 2 },
+        { id: 'tile_calls', type: 'tile_calls', x: 0, y: 9, w: 4, h: 2 },
+        { id: 'time', type: 'time', x: 0, y: 0, w: 99, h: 6 },
+      ],
+    },
+  })
+  assert.deepEqual(
+    mixed.json.layout.items.map((item) => [item.id, item.y]),
+    [['tile_calls', 0]],
+  )
+  await call('PUT', ws('/usage/layout'), { layout: mine })
+
+  // The owner sets the default everyone starts from: an entry in the demo's audit log.
+  const set = await call('PUT', ws('/usage/layout/default'), { layout: half })
+  assert.equal(set.status, 200)
+  assert.deepEqual(set.json.default, half)
+  assert.deepEqual(
+    state.audit.filter((entry) => entry.action === 'usage_layout_default_set').map((entry) => entry.detail),
+    [{ widgets: half.items.length }],
+  )
+  // A saved view carries a layout for whoever opens it.
+  const view = (await call('POST', ws('/views'), { page: 'usage', name: 'Two charts', query: 'range=90d', layout: mine })).json.view
+  assert.equal(view.hasLayout, true)
+  assert.equal(
+    (await call('POST', ws('/views'), { page: 'activity', name: 'No', query: '', layout: mine })).json.error.code,
+    'invalid_view',
+  )
+
+  // Another role is another person: their own layout (none), the same default, the view's layout by its link.
+  state.viewAs = 'member'
+  assert.deepEqual(await get(ws('/usage/layout')), { layout: null, default: half, canSetDefault: false })
+  assert.deepEqual((await get(ws(`/views/${view.id}/layout`))).view, { id: view.id, name: 'Two charts', mine: false, layout: mine })
+  assert.equal((await call('GET', ws('/views/vw_nothing/layout'))).status, 404)
+  assert.equal((await call('PUT', ws('/usage/layout/default'), { layout: mine })).status, 403)
+  assert.equal((await call('DELETE', ws('/usage/layout/default'))).status, 403)
+  assert.equal((await call('PUT', ws('/usage/layout'), { layout: defaultLayout() })).status, 200)
+  assert.equal((await call('DELETE', ws('/usage/layout'))).json.layout, null)
+  state.viewAs = 'admin'
+  assert.equal((await get(ws('/usage/layout'))).canSetDefault, false, 'the default is the owner’s to set')
+  // A viewer has no Usage page, a guest no session.
+  state.viewAs = 'viewer'
+  for (const [method, path] of [
+    ['GET', '/usage/layout'],
+    ['PUT', '/usage/layout'],
+    ['DELETE', '/usage/layout'],
+    ['GET', `/views/${view.id}/layout`],
+  ])
+    assert.equal((await call(method, ws(path), { layout: mine })).status, 403, `${method} ${path}`)
+  state.viewAs = 'guest'
+  assert.equal((await call('GET', ws('/usage/layout'))).status, 401)
+  assert.equal((await call('PUT', ws('/usage/layout'), { layout: mine })).status, 401)
+  // Another workspace is not there.
+  state.viewAs = 'owner'
+  assert.equal((await call('GET', '/api/workspaces/ws_elsewhere/usage/layout')).status, 404)
+  assert.deepEqual((await get(ws('/usage/layout'))).layout, mine, 'the owner’s layout is still theirs')
+  assert.equal((await get(ws(`/views/${view.id}/layout`))).view.mine, true, 'and the view is their own')
+
+  // Removing the view removes its layout; removing the default is logged once.
+  assert.equal((await call('DELETE', ws(`/views/${view.id}`))).status, 200)
+  assert.equal((await call('GET', ws(`/views/${view.id}/layout`))).status, 404)
+  await call('DELETE', ws('/usage/layout/default'))
+  await call('DELETE', ws('/usage/layout/default'))
+  assert.equal(state.audit.filter((entry) => entry.action === 'usage_layout_default_removed').length, 1)
+  // All of it lives in the state the demo saves, which Reset replaces.
+  assert.deepEqual(Object.keys(state.usageLayouts.person), [`${WORKSPACE_ID}:${userId('robin')}`])
+  assert.equal(seedState(NOW.getTime()).usageLayouts, undefined, 'a fresh demo has no layouts')
+  const fresh = demo()
+  assert.deepEqual(await fresh.get(ws('/usage/layout')), { layout: null, default: null, canSetDefault: true })
+  // The top lists take a length, and the duration chart four percentiles, as on a server.
+  assert.equal((await get(ws(`/usage/top?${range()}&limit=10`))).slowest.length, 10)
+  assert.equal((await call('GET', ws(`/usage/top?${range()}&limit=11`))).json.error.code, 'invalid_option')
+  const bucket = (await get(ws(`/usage/latency?${range()}&bucket=week`))).buckets.find((item) => item.turns > 20)
+  assert.ok(bucket.p50 <= bucket.p90 && bucket.p90 <= bucket.p95 && bucket.p95 <= bucket.p99 && bucket.p99 <= bucket.longest)
 })
