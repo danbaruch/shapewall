@@ -52,7 +52,8 @@ feedback, fix the code, and you recapture to check.
 - **Small and local.** Node 22, Playwright, Express, React Flow. Data is plain JSON files in `.shapewall/`. No account, no cloud.
 - **A team server when you want one.** `shapewall hosted` adds passkey accounts, workspaces with roles, share links and live presence
   on a server you run. `shapewall agent connect` puts your Claude Code on the hosted board: teammates chat with it there, and it
-  reads the project and answers (no edits, no commands). Each machine that watches a hosted board is an agent too, with a name, an
+  reads the project and answers. When its own machine says so (`--approvals`), it also makes a fix for a comment on a new branch,
+  each edit allowed on the board. Each machine that watches a hosted board is an agent too, with a name, an
   icon and a state; people send a comment to one by name, and each agent says whose work it takes.
   [Multiplayer (beta)](#multiplayer-on-your-own-server).
 - **Switch local projects.** Serve each project on its own port; the site dropdown lists them together while keeping every project's
@@ -131,9 +132,11 @@ and `push` upload new captures. Comments, roles, scoped agents and live presence
 `shapewall watch --remote URL` is an agent on that board, listed by name with its state; people send a comment to one agent or to
 any, and each agent takes work only from the people it is shared with. `shapewall agent connect --remote URL`, run in a project's
 folder, connects that machine's Claude Code for chat on the board: an admin approves it in the browser, members ask it questions
-from the Agents panel, and it reads the project and answers. It does not change files or run commands from the board. Codex, goose
-and Gemini CLI are not offered by `agent connect` in this release; for them, `shapewall watch --remote` stays the way
-([Connected agents](docs/hosted.md#connected-agents)). You need no public domain and no Shapewall account.
+from the Agents panel, and it reads the project and answers. By default it does not change files or run commands from the board.
+Edits are switched on only on the machine that has the code (`--approvals owner` or `admins`): **Fix with** on a comment then
+makes the fix on a new branch there, never in the checkout, and each edit is a card with the full diff that someone allows or
+denies on the board. It runs no commands from the board. Codex, goose and Gemini CLI are not offered by `agent connect` in this
+release; for them, `shapewall watch --remote` stays the way ([Connected agents](docs/hosted.md#connected-agents)). You need no public domain and no Shapewall account.
 
 The command runs in the foreground and sets up Tailscale Serve; running it as a service and backing it up are covered in
 [the hosted guide](docs/hosted.md), with a [checklist to walk through before you invite the team](docs/hosted.md#before-you-invite-the-team).

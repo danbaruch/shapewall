@@ -180,7 +180,9 @@ for local `serve --tailscale` or `serve --lan`, separate from hosted workspace a
 
 ```text
 shapewall agent connect --remote URL [--agent claude|ID] [--name NAME] [--as NAME]
-                        [--audience owner|server] [--takeover] [--concurrency N] [--token-file FILE]
+                        [--audience owner|server] [--approvals none|owner|admins] [--auto none|edits]
+                        [--allow-path FILE] [--base BRANCH] [--git-remote NAME]
+                        [--takeover] [--concurrency N] [--token-file FILE]
 shapewall agent build-image [--runtime podman|docker] [--image NAME]
 shapewall agent doctor [--no-egress]
 shapewall agent run --comment ID
@@ -190,8 +192,8 @@ shapewall agent watch [--once]
 `agent connect` makes Claude Code on this machine an agent of a project on a
 [team server](/docs/hosted#connected-agents). Run it in the project's folder. The first run prints a code that an admin approves in
 the server's console, where they name the agent and choose who may use it; its token is saved privately and never printed. Members
-then chat with it from the board's Agents panel. It reads the project and answers: it does not change files or run commands from
-the board. Ctrl+C disconnects it.
+then chat with it from the board's Agents panel. By default it reads the project and answers: it does not change files or run
+commands from the board. Ctrl+C disconnects it.
 
 Only Claude Code is offered in this release, because its own controls were shown to keep a session read-only. Codex, goose and
 Gemini CLI are refused with a message; use `shapewall watch --remote` for them. The session starts without your Claude Code
@@ -199,6 +201,31 @@ settings files and with only its reading tools. One process holds an agent's lin
 refused and names the machine already connected, and `--takeover` closes that link first. `--audience owner` asks the server to
 keep the agent to the person who connected it, and the machine refuses a job the server labels as someone else's; the machine
 cannot check that label, so this does not protect against a compromised server.
+
+Edits from the board are switched on only here, on the machine that has the code. `--approvals owner` lets the person who
+connected the agent allow each edit on the board. `--approvals admins` takes the answer from whoever the server lets answer: the
+agent's answer role (admin by default), in its audience and trusted by the project. `--approvals none` switches it off again. The
+choice is saved for this connection in the machine's own policy file (`agent-policy.json` beside the saved token, readable by you
+only, outside every repository). It is the ceiling: the server can only narrow it. With edits on, **Fix with** on a hosted comment
+starts a fix on this machine. The agent works in a fresh copy of the base commit in a folder outside the project, never in this
+checkout. Each edit is checked here, then shown on the board as a card with the full diff, and Shapewall commits only what was
+allowed on a new branch, `shapewall/comment-<n>-<slug>`. Chat messages never edit.
+
+The flags that go with it, each saved for the connection:
+
+- `--auto none|edits`: what the server's "Allow without asking" rule may apply to. The default is `none`: every request waits for
+  a person.
+- `--allow-path FILE`: a settings file the agent may ask to edit. Dotfiles, `package.json`, a `Makefile`, a `Dockerfile` and CI
+  config are refused otherwise. Each run adds one file; `none` empties the list.
+- `--base BRANCH`: where a fix starts. The default is the commit the checkout is on, and then a checkout with uncommitted changes
+  to tracked files refuses the fix, because the fix would silently leave them out.
+- `--git-remote NAME|none`: where a finished fix is pushed (default `origin`). A fix that touches dependency manifests or CI
+  config is not pushed. A pull request is opened when [GitHub connect](/docs/github) is set up on this machine.
+
+`--allow-command` is in the help text and is not available for Claude Code in Shapewall 0.6.0. Started with its shell tool, Claude
+Code runs commands it takes to be read-only (`ls`, `cat`) without asking anyone, and those can read outside the project. So a fix
+session of Claude Code gets no shell tool, the flag is refused with that explanation, and no connected agent runs a command from
+the board in this release. The whole of it, with the trust table: [the hosted guide](/docs/hosted#edits-from-the-board-the-trust-decision).
 
 The sandboxed starter agent is separate from native ACP board chat. Its [guide](/docs/starter-agent) explains the container, model and
 trusted-author prerequisites, budgets and approval limits. `shapewall agent --help` lists current run/watch policy flags.
@@ -380,7 +407,7 @@ tokens), and the clients that talk to it. Its console covers user management: in
 `RESEND_API_KEY` and `SHAPEWALL_EMAIL_FROM` are set), members and roles (owner, admin, member, viewer), an access overview of who
 reaches which project, API tokens, an audit log, signed-in devices, and share links that give one project's boards to people without
 an account (view-only or with guest comments, off until an admin turns them on). `shapewall agent connect --remote URL` connects
-Claude Code for chat on a hosted board ([shapewall agent](#shapewall-agent)). There is no hosted Shapewall service to sign up for
+Claude Code for chat on a hosted board, and for fixes on a branch when its machine says so ([shapewall agent](#shapewall-agent)). There is no hosted Shapewall service to sign up for
 yet. The local commands work the same without any of this.
 
 The [hosted operator guide](/docs/hosted) covers `hosted setup-link`, `move-origin`, Tailscale/Funnel and own-domain setup,
