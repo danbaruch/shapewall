@@ -61,7 +61,11 @@ a Usage view on a local board.
   turn, saved views, CSV and JSON exports (made in the browser), a person's page, an agent's page and the access review work.
   Asking the agent or running a fix on the demo board adds a turn and its activity; Reset puts everything back. The demo counts
   rows in memory and shares the rest with the server (`src/hosted/usage-core.js`, `activity-core.js`); a test puts the same rows
-  into a real server and compares every answer. The charts still load only with these two pages.
+  into a real server and compares every answer. The demo's Audit log page reads the same history, each agent has its token on
+  the API tokens page, and a turn's link opens its comment on the demo board. The charts still load only with these two pages.
+- **Fixed: filter options ticked quickly all hold.** On Usage, ticking two options of a filter faster than the page redrew kept
+  only the last one: each press wrote the list the menu was drawn with. A press is now applied to the address as it is when it
+  lands. The same goes for removing filter chips, pressing a chart to filter, and "Worth a look" on Activity.
 
 - **The panel buttons are the panel's header.** With a side panel open, Comments, Agent and Checks in the top bar are exactly as
   wide as the panel under them (the same inset as the panel's own rows), share that width, and follow the panel as you drag its

@@ -112,8 +112,8 @@ export function usageRoutes(ctx) {
       names: namesOf(ws),
       policyOf: (projectId) => USAGE_POLICY[projectId] || USAGE_POLICY_DEFAULT,
       now: clock,
-      // The board in the demo: index.html with the project in the query.
-      linkUrl: (row) => `index.html?project=${row.project_id}`,
+      // The board in the demo: index.html with the project in the query, at the comment when the turn has one.
+      linkUrl: (row) => `index.html?project=${row.project_id}${row.comment_number ? `&c=${row.comment_number}` : ''}`,
     })
 
   // ---- Usage ----
@@ -675,7 +675,11 @@ export function usageRoutes(ctx) {
 
   // One request: the route's answer, the server's own errors (a bad filter,
   // no access) answered as the server answers them.
-  return function handle({ method, path, search, body }) {
+  // The Audit log page reads the same log as Activity (routes-audit.js):
+  // the workspace's entries, without the sign-ins of people's accounts.
+  handle.auditLog = (ws) => logOf(ws).filter((entry) => !entry.account)
+  return handle
+  function handle({ method, path, search, body }) {
     const params = new URLSearchParams(search || '')
     // A parameter given more than once is a list, as on the server.
     const query = {}

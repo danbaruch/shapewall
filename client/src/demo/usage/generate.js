@@ -90,7 +90,7 @@ function turn(world, random, { day, age, start, failing, agents }) {
   let asker = weighted(random, world.people).id
   if (kind === 'review' && random() < 0.06) asker = null
   else if (age > world.former.leftDays && random() < 0.07) asker = world.former.id
-  const comment = kind === 'chat' ? null : 1 + Math.floor(random() * 14)
+  const comment = kind === 'chat' ? null : 1 + Math.floor(random() * (world.comments?.[agent.projectId] || 14))
   // A person's private chats: a few per stretch of days, so some grow long.
   const chat = `chat-${hexOf(generator((world.people.findIndex((item) => item.id === asker) + 2) * 7919 + Math.floor(day / 9) * 31 + Math.floor(random() * 4)), 16)}`
   const thread = kind === 'chat' ? (random() < 0.4 ? 'board' : chat) : `comment-${comment}`

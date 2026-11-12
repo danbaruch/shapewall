@@ -277,6 +277,18 @@ test('the grid sorts, groups with subtotals and compares; columns change; a turn
     await page.locator('[data-sw-drawer-close]').click()
     await page.locator('[data-sw-drawer="turn"]').waitFor({ state: 'detached' })
 
+    // A fix was asked for on a comment: its link opens that comment on the board.
+    const fix = (await ask(page, api(`/usage/rows?${query}&kind=fix&outcome=completed&limit=1`))).rows[0]
+    await page.goto(consoleUrl(`/usage?tab=turns&row=${fix.id}`))
+    const link = page.locator('[data-sw-drawer="turn"] [data-sw-turn-link]')
+    await link.waitFor()
+    assert.equal(await link.getAttribute('href'), `index.html?project=${fix.project.id}&c=${fix.commentNumber}`)
+    assert.equal((await link.textContent()).trim(), `Comment #${fix.commentNumber}`)
+    await link.click()
+    await page.waitForSelector(`[data-sw-thread-popover="${fix.commentNumber}"]`, { timeout: 20000 })
+    await page.goto(consoleUrl('/usage?tab=turns'))
+    await page.locator('[data-sw-grid="table"] [data-sw-grid-row]').first().waitFor()
+
     // Columns: hide one, bring another in.
     await page.locator('[data-sw-grid-columns]').click()
     await page.locator('[data-sw-grid-column="kind"]').click()
@@ -408,7 +420,7 @@ test('activity: the log with filters and an entry, a person, an agent, and the a
     // A person's page: what they made, their usage (the same number as the Usage API), their activity.
     await page.goto(consoleUrl(`/activity/${userId('jo')}`))
     await page.locator('[data-sw-person="jo"]').waitFor()
-    assert.equal(await page.locator('[data-sw-person-made] li').count(), 3, 'two agents and a token')
+    assert.equal(await page.locator('[data-sw-person-made] li').count(), 2, 'the two agents Jo connected (their tokens are theirs)')
     assert.equal(await page.locator('[data-sw-person-devices] li').count(), 2)
     await page.locator('[data-sw-subject-usage] [data-sw-tile="calls"] [data-sw-tile-value]').waitFor()
     const jos = (await ask(page, api(`/usage/summary?${await pageQuery(page)}&person=${userId('jo')}`))).current.calls
@@ -428,15 +440,19 @@ test('activity: the log with filters and an entry, a person, an agent, and the a
     assert.match(about, /An agent of Lumen Website, on build-box/)
     await page.locator('[data-sw-activity-log] [data-sw-grid-row]').first().waitFor()
     await shot(page, 'agent')
-    await page.locator('[data-sw-agent-page] a', { hasText: 'Agents' }).first().click()
-    await page.waitForSelector('[data-sw-agents-card]')
+    // Its token is on the API tokens page: the link from its page lands on a list that has it.
+    await page.locator('[data-sw-agent-settings]').click()
+    await page.waitForFunction(() => window.location.hash.endsWith('/tokens'))
+    await page.getByText('swp_W3bs1teK').first().waitFor()
+    for (const name of ['Demo agent', 'Second agent', 'Coding agent', 'Website agent'])
+      assert.ok(await page.getByText(name, { exact: true }).count(), `${name} has a token on the page`)
 
     // The access review, and its export.
     await page.goto(consoleUrl('/activity?tab=review'))
     await page.locator('[data-sw-access-review]').waitFor()
     assert.equal(await page.locator('[data-sw-review="people"] [data-sw-review-row]').count(), 6)
     assert.equal(await page.locator('[data-sw-review="agents"] [data-sw-review-row]').count(), 4)
-    assert.equal(await page.locator('[data-sw-review="tokens"] [data-sw-review-row]').count(), 3)
+    assert.equal(await page.locator('[data-sw-review="tokens"] [data-sw-review-row]').count(), 6)
     assert.equal(await page.locator('[data-sw-review="shares"] [data-sw-review-row]').count(), 2)
     const [download] = await Promise.all([page.waitForEvent('download'), page.locator('[data-sw-review-export]').click()])
     assert.match(download.suggestedFilename(), /^lumen-access-review-.*\.csv$/)
@@ -445,10 +461,22 @@ test('activity: the log with filters and an entry, a person, an agent, and the a
         .readFileSync(await download.path(), 'utf8')
         .trim()
         .split('\r\n').length - 1,
-      18,
-      '6 people, 3 tokens, 4 agents, 2 links, 3 invites',
+      21,
+      '6 people, 6 tokens, 4 agents, 2 links, 3 invites',
     )
     await shot(page, 'access-review')
+    // The Audit log page reads the same history, without people's sign-ins.
+    await page.goto(consoleUrl('/audit'))
+    await page.locator('[data-sw-audit-entry="agent_turn_started"]').first().waitFor()
+    const auditText = await page.locator('[data-sw-audit-list]').textContent()
+    assert.match(auditText, /asked (Demo|Second|Website|Coding) agent/i)
+    assert.doesNotMatch(auditText, /signed in on/i)
+    assert.equal(await page.locator('[data-sw-audit-entry="signed_in"]').count(), 0)
+    const newest = (await ask(page, api('/audit?limit=5'))).entries.map((entry) => entry.id)
+    const same = (await ask(page, api('/activity?limit=50'))).entries
+      .filter((entry) => entry.scope === 'workspace')
+      .map((entry) => entry.id)
+    assert.deepEqual(newest, same.slice(0, 5), 'the two pages list the same entries')
     // The log's own export.
     await page.goto(consoleUrl('/activity?group=members'))
     await page.locator('[data-sw-activity-log] [data-sw-grid-row]').first().waitFor()

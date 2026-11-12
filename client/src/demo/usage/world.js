@@ -26,7 +26,7 @@ export const USAGE_AGENTS = [
     audience: 'trusted',
     rule: 'ask',
     connectedDays: 58,
-    token: { id: fixedId('tk', 11), prefix: 'swp_Dm4agN7p', scopes: ['read', 'comment', 'claim'] },
+    token: { id: fixedId('tk', 11), prefix: 'swp_Dm4agN7p', scopes: ['claim', 'comment', 'read'] },
   },
   {
     id: DEMO_AGENT_IDS.second,
@@ -42,7 +42,7 @@ export const USAGE_AGENTS = [
     audience: 'trusted',
     rule: 'ask',
     connectedDays: 55,
-    token: { id: fixedId('tk', 12), prefix: 'swp_S2ndQx81', scopes: ['read', 'comment', 'claim'] },
+    token: { id: fixedId('tk', 12), prefix: 'swp_S2ndQx81', scopes: ['claim', 'comment', 'read'] },
   },
   {
     id: DEMO_AGENT_IDS.coding,
@@ -58,8 +58,8 @@ export const USAGE_AGENTS = [
     audience: 'trusted',
     rule: 'auto',
     connectedDays: 21,
-    // The "Coding agent" token of the API tokens page.
-    token: { id: fixedId('tk', 2), prefix: 'swp_7xRb2NqE', scopes: ['comment', 'read', 'resolve'] },
+    // Each agent's token is on the API tokens page (fixtures.js).
+    token: { id: fixedId('tk', 2), prefix: 'swp_7xRb2NqE', scopes: ['claim', 'comment', 'read', 'resolve'] },
   },
   {
     id: DEMO_AGENT_IDS.website,
@@ -75,7 +75,7 @@ export const USAGE_AGENTS = [
     audience: 'trusted',
     rule: 'ask',
     connectedDays: 52,
-    token: { id: fixedId('tk', 13), prefix: 'swp_W3bs1teK', scopes: ['read', 'comment', 'claim'] },
+    token: { id: fixedId('tk', 13), prefix: 'swp_W3bs1teK', scopes: ['claim', 'comment', 'read'] },
   },
 ]
 
@@ -99,6 +99,9 @@ export const USAGE_WORLD = {
   viewer: USAGE_VIEWER,
   boards: { [NOTES_PROJECT]: EXPORT_BOARD, [WEBSITE_PROJECT]: WEBSITE_BOARD },
   projects: [NOTES_PROJECT, WEBSITE_PROJECT],
+  // The highest comment number an agent is asked about on each project's board
+  // (so a turn's link opens a comment that is there).
+  comments: { [NOTES_PROJECT]: 14, [WEBSITE_PROJECT]: 4 },
 }
 
 // Each project's daily budgets (its agent policy), set so today's use shows

@@ -74,6 +74,9 @@ export function createDemoBackend({
   ]
   let usageLoading = null
   const usagePart = () => (usageLoading ||= import('../usage/routes.js').then((part) => part.usageRoutes(ctx)))
+  // The audit log as the console reads it: the fictional history and the
+  // demo's own entries as one list, the same one the Activity page shows.
+  ctx.auditLog = async (ws) => (await usagePart()).auditLog(ws)
 
   // One route called from inside the backend (a batch starts each fix through
   // the Fix with agent route): its result as is, a DemoError thrown.

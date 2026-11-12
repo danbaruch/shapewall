@@ -64,7 +64,7 @@ export const EXPORT_AGENT = 'Coding agent'
 
 // fixturesAt: the moment the export's times stand for (data/info.json); the
 // backend moves them by timeShift so they sit on the same clock as these.
-export const STATE_VERSION = 2
+export const STATE_VERSION = 3
 export function seedState(now = Date.now(), { fixturesAt = null } = {}) {
   const at = (days) => new Date(now - days * DAY).toISOString()
   const ahead = (days) => new Date(now + days * DAY).toISOString()
@@ -107,10 +107,42 @@ export function seedState(now = Date.now(), { fixturesAt = null } = {}) {
       project: NOTES_PROJECT,
       name: 'Coding agent',
       prefix: 'swp_7xRb2NqE',
-      scopes: ['comment', 'read', 'resolve'],
+      scopes: ['claim', 'comment', 'read', 'resolve'],
       by: 'jo',
       made: 21,
       used: 0.1,
+    },
+    // The tokens of the other agents the Usage and Activity pages know
+    // (usage/world.js): each agent works through its own token.
+    {
+      n: 11,
+      project: NOTES_PROJECT,
+      name: 'Demo agent',
+      prefix: 'swp_Dm4agN7p',
+      scopes: ['claim', 'comment', 'read'],
+      by: 'robin',
+      made: 58,
+      used: 0.02,
+    },
+    {
+      n: 12,
+      project: NOTES_PROJECT,
+      name: 'Second agent',
+      prefix: 'swp_S2ndQx81',
+      scopes: ['claim', 'comment', 'read'],
+      by: 'jo',
+      made: 55,
+      used: 0.05,
+    },
+    {
+      n: 13,
+      project: WEBSITE_PROJECT,
+      name: 'Website agent',
+      prefix: 'swp_W3bs1teK',
+      scopes: ['claim', 'comment', 'read'],
+      by: 'priya',
+      made: 52,
+      used: 0.08,
     },
     { n: 3, project: WEBSITE_PROJECT, name: 'Website CI', prefix: 'swp_Hq8vT1mW', scopes: ['push', 'read'], by: 'lee', made: 25, used: 5 },
     {
@@ -226,14 +258,29 @@ export function seedState(now = Date.now(), { fixturesAt = null } = {}) {
     log(days, 'invite_accepted', { by: handle, target: fixedId('iv', 30 + days), detail: { role }, ip: '203.0.113.7' })
   log(67, 'member_role_changed', { by: 'robin', target: user('jo'), detail: { from: 'member', to: 'admin' } })
   log(61, 'invite_accepted', { by: 'priya', target: fixedId('iv', 91), detail: { role: 'admin' }, ip: '203.0.113.45' })
+  log(58, 'token_created', {
+    by: 'robin',
+    target: fixedId('tk', 11),
+    detail: { project: NOTES_PROJECT, scopes: ['claim', 'comment', 'read'] },
+  })
   log(56, 'project_created', { by: 'jo', target: WEBSITE_PROJECT })
+  log(55, 'token_created', {
+    by: 'jo',
+    target: fixedId('tk', 12),
+    detail: { project: NOTES_PROJECT, scopes: ['claim', 'comment', 'read'] },
+  })
+  log(52, 'token_created', {
+    by: 'priya',
+    target: fixedId('tk', 13),
+    detail: { project: WEBSITE_PROJECT, scopes: ['claim', 'comment', 'read'] },
+  })
   log(33, 'token_created', { by: 'robin', target: fixedId('tk', 1), detail: { project: NOTES_PROJECT, scopes: ['push', 'read'] } })
   log(30, 'token_created', { by: 'robin', target: fixedId('tk', 4), detail: { project: NOTES_PROJECT, scopes: ['read'] } })
   log(25, 'token_created', { by: 'lee', target: fixedId('tk', 3), detail: { project: WEBSITE_PROJECT, scopes: ['push', 'read'] } })
   log(21, 'token_created', {
     by: 'jo',
     target: fixedId('tk', 2),
-    detail: { project: NOTES_PROJECT, scopes: ['comment', 'read', 'resolve'] },
+    detail: { project: NOTES_PROJECT, scopes: ['claim', 'comment', 'read', 'resolve'] },
   })
   log(20, 'invite_created', { by: 'jo', target: fixedId('iv', 6), detail: { role: 'member', days: 7, emailed: true } })
   log(19, 'share_links_enabled', { by: 'priya' })

@@ -513,7 +513,20 @@ test('the demo console answers every Usage request like a server: tiles, charts,
   assert.ok(first.rows[0].totalTokens > first.rows[99].totalTokens)
   const turn = (await get(ws(`/usage/rows/${first.rows[0].id}`))).row
   assert.equal(turn.id, first.rows[0].id)
-  assert.equal(turn.link.url, `index.html?project=${turn.project.id}`, 'the board of the demo')
+  // Its link opens the comment on the demo's board when the turn has one, the board otherwise.
+  assert.equal(turn.link.url, `index.html?project=${turn.project.id}${turn.commentNumber ? `&c=${turn.commentNumber}` : ''}`)
+  const withComment = (await get(ws(`/usage/rows?${range()}&kind=fix&project=${WEBSITE_PROJECT}&limit=200`))).rows
+  assert.ok(
+    withComment.every((row) => row.commentNumber >= 1 && row.commentNumber <= 4),
+    'only comments the website board has',
+  )
+  const fixTurn = (await get(ws(`/usage/rows/${withComment[0].id}`))).row
+  assert.deepEqual(fixTurn.link, {
+    url: `index.html?project=${WEBSITE_PROJECT}&c=${fixTurn.commentNumber}`,
+    label: `Comment #${fixTurn.commentNumber}`,
+  })
+  const chatTurn = (await get(ws(`/usage/rows?${range()}&kind=chat&q=board&limit=1`))).rows[0]
+  assert.equal((await get(ws(`/usage/rows/${chatTurn.id}`))).row.link.url, `index.html?project=${chatTurn.project.id}`)
   assert.ok(turn.tools && turn.contextSize === 200_000)
   assert.equal((await call('GET', ws('/usage/rows/run_000000000000000000000000'))).status, 404)
 })
@@ -680,6 +693,15 @@ test('activity in the demo: filters, before and after, paging, a person, an agen
   assert.equal((await call('GET', ws('/agents/ag_000000000000000000000000/profile'))).status, 404)
   const review = await get(ws('/access-review'))
   assert.deepEqual([review.people.length, review.agents.length, review.shares.length, review.invites.length], [6, 4, 2, 3])
+  // Every agent is on the API tokens page too, by its token: a click from its page lands on a list that has it.
+  const tokens = (await get(ws('/tokens'))).tokens
+  for (const item of review.agents) {
+    const token = tokens.find((entry) => entry.id === item.tokenId)
+    assert.deepEqual([token?.name, token?.projectName, token?.status], [item.name, item.projectName, 'active'], item.name)
+    const page = (await get(ws(`/agents/${item.id}/profile`))).agent
+    assert.equal(page.token.prefix, token.prefix)
+    assert.equal(page.createdBy.userId, token.createdBy.userId)
+  }
   assert.ok(
     review.tokens.some((token) => token.status === 'inactive'),
     'the token of someone who left',
@@ -808,4 +830,66 @@ test('the site and the docs link to the demo pages that show Usage and Activity'
   // And those addresses are pages of the demo: the console's title names them.
   assert.equal(consoleTitle(`#/w/${WORKSPACE_ID}/usage`, seedState(NOW.getTime())), 'Usage · Lumen · Shapewall demo')
   assert.equal(consoleTitle(`#/w/${WORKSPACE_ID}/activity/${USERS[1].id}`, seedState(NOW.getTime())), 'Activity · Lumen · Shapewall demo')
+})
+
+test('the Audit log page reads the same history as Activity: the same entries, without people’s sign-ins', async () => {
+  const { get, call } = demo()
+  // Everything the workspace's log holds, page by page, on both pages.
+  const all = async (path) => {
+    const out = []
+    let before = null
+    for (;;) {
+      const page = await get(ws(`${path}${path.includes('?') ? '&' : '?'}limit=200${before ? `&before=${before}` : ''}`))
+      out.push(...page.entries)
+      if (!page.next) return out
+      before = page.next
+    }
+  }
+  const audit = await all('/audit')
+  const activity = (await all('/activity')).filter((entry) => entry.scope === 'workspace')
+  assert.ok(audit.length > 2000, `${audit.length} entries`)
+  assert.deepEqual(
+    audit.map((entry) => [entry.id, entry.action, entry.at, entry.actor.label]),
+    activity.map((entry) => [entry.id, entry.action, entry.at, entry.actor.label]),
+  )
+  assert.ok(!audit.some((entry) => entry.action === 'signed_in'), 'sign-ins belong to a person’s account, not to the workspace’s log')
+  assert.ok(
+    audit.every((entry, index) => !index || audit[index - 1].id > entry.id),
+    'newest first, each id once',
+  )
+  // The demo's own entries and the history, in one list.
+  for (const action of [
+    'workspace_created',
+    'token_created',
+    'share_created',
+    'agent_turn_started',
+    'agent_permission_approved',
+    'usage_exported',
+  ])
+    assert.ok(
+      audit.some((entry) => entry.action === action),
+      action,
+    )
+  // Its filters work over all of it: an action, a person, a search.
+  const filters = await get(ws('/audit/filters'))
+  assert.ok(filters.actions.includes('agent_turn_started') && filters.actions.includes('invite_created'))
+  assert.ok(filters.actors.some((actor) => actor.label === 'Mei Lin'))
+  const renamed = (await get(ws('/audit?action=agent_renamed'))).entries
+  assert.deepEqual(
+    renamed.map((entry) => entry.detail.to),
+    ['Website agent'],
+  )
+  const meis = (await get(ws(`/audit?actor=user:${userId('mei')}&limit=200`))).entries
+  assert.ok(meis.length > 50 && meis.every((entry) => entry.actor.id === userId('mei')))
+  assert.ok((await get(ws('/audit?q=build-box'))).entries.length >= 2)
+  // What is done in the demo lands on top of both.
+  await call('POST', ws('/invites'), { role: 'viewer', days: 7 })
+  assert.equal((await get(ws('/audit?limit=1'))).entries[0].action, 'invite_created')
+  assert.equal((await get(ws('/activity?limit=1'))).entries[0].action, 'invite_created')
+  // The sandbox workspace has only its own entries.
+  assert.deepEqual(
+    (await get(`/api/workspaces/${SANDBOX_ID}/audit`)).entries.map((entry) => entry.action),
+    [],
+  )
+  assert.equal((await demo(as('member')).call('GET', ws('/audit'))).status, 403)
 })

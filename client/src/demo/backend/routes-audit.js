@@ -1,10 +1,14 @@
-// The console's review routes: agent feedback and the audit log.
+// The console's review routes: agent feedback and the audit log. The log is
+// the one the Activity page reads (usage/routes.js): the workspace's
+// fictional history with what was done in the demo on top, newest first.
 
 import { exportDocument, reviewQuery, summarizeRatings } from '../../../../src/agent/ratings-core.js'
 import { AUDIT_PAGE, AUDIT_PAGE_MAX, fail } from './util.js'
 
 export function auditRoutes(ctx) {
   const { state, userById, inWorkspace, actorOf, targetLabel, now } = ctx
+  // Set once every part is in place (backend/index.js): read when a request comes.
+  const auditLog = (ws) => ctx.auditLog(ws)
 
   return [
     // Agent feedback: ratings on chat answers across the workspace's boards,
@@ -38,10 +42,10 @@ export function auditRoutes(ctx) {
     [
       'GET',
       /^\/api\/workspaces\/([a-z0-9_]+)\/audit$/,
-      ({ params, search }) => {
+      async ({ params, search }) => {
         inWorkspace(params[0], 'audit')
         const query = new URLSearchParams(search || '')
-        let entries = state.audit.filter((item) => item.workspaceId === params[0])
+        let entries = await auditLog(params[0])
         const before = Number(query.get('before'))
         if (Number.isSafeInteger(before) && before > 0) entries = entries.filter((item) => item.id < before)
         const actor = query.get('actor')
@@ -97,9 +101,9 @@ export function auditRoutes(ctx) {
     [
       'GET',
       /^\/api\/workspaces\/([a-z0-9_]+)\/audit\/filters$/,
-      ({ params }) => {
+      async ({ params }) => {
         inWorkspace(params[0], 'audit')
-        const entries = state.audit.filter((item) => item.workspaceId === params[0])
+        const entries = await auditLog(params[0])
         const counts = new Map()
         for (const item of entries) {
           const key = `${item.userId}|${item.tokenId}|${item.shareId}`
