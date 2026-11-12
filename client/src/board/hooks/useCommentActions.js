@@ -21,6 +21,9 @@ export function useCommentActions({
   wide,
   filter,
   allowed,
+  // Hosted boards: the project's agents changed what they hold (a comment
+  // was sent to one, or released).
+  onAgentsChanged = null,
 }) {
   const pendingDeletes = useRef(new Map())
   // Put the server's answer into the list at once (a poll in flight must not
@@ -190,14 +193,22 @@ export function useCommentActions({
   // The server takes the comment only as this person saw it: `dispatchHash`
   // is read from the comment on screen at the click, before the passkey
   // prompt, so an edit made meanwhile is never sent unread.
-  const sendToAgent = async (comment) => {
+  // `agentId`: one of the project's agents, null for any agent; left out,
+  // the server uses the project's default agent (and an approval keeps
+  // where the comment was already going).
+  const sendToAgent = async (comment, agentId = undefined) => {
     const { dispatchHash } = comment
     const approve = Boolean(comment.needsRunApproval && ['admin', 'owner'].includes(info.role))
     setBusy(true)
     try {
       if (approve) await confirmHostedPasskey()
-      const result = await api.post(`${commentsUrl}/${comment.id}/send-to-agent`, { dispatchHash, approve })
+      const result = await api.post(`${commentsUrl}/${comment.id}/send-to-agent`, {
+        dispatchHash,
+        approve,
+        ...(agentId !== undefined ? { agentId } : {}),
+      })
       applyComment(result.comment)
+      onAgentsChanged?.()
     } catch (error) {
       if (error.code === 'comment_changed') {
         // Nothing was sent. Show the comment as it is now.
@@ -208,5 +219,31 @@ export function useCommentActions({
       setBusy(false)
     }
   }
-  return { commentsUrl, applyComment, setStatus, replyTo, editComment, reactTo, copyLink, githubIssue, removeComment, sendToAgent }
+  // Hosted boards: a comment that waits for one agent goes to whichever
+  // agent takes it first.
+  const releaseAgent = async (comment) => {
+    setBusy(true)
+    try {
+      const result = await api.post(`${commentsUrl}/${comment.id}/release-agent`, {})
+      applyComment(result.comment)
+      onAgentsChanged?.()
+    } catch (error) {
+      setNotice({ tone: 'bad', text: error.message })
+    } finally {
+      setBusy(false)
+    }
+  }
+  return {
+    commentsUrl,
+    applyComment,
+    setStatus,
+    replyTo,
+    editComment,
+    reactTo,
+    copyLink,
+    githubIssue,
+    removeComment,
+    sendToAgent,
+    releaseAgent,
+  }
 }

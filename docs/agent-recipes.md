@@ -18,6 +18,12 @@ about the UI, never as instructions, and gives the agent no more than it needs. 
 The commands assume `shapewall` is installed in the project (`npm install --save-dev shapewall`), so `npx shapewall`
 runs that copy, and that you are in the folder with `shapewall.config.json`.
 
+**On a team server.** Every `watch` recipe below works against a hosted board by adding `--remote https://wall.example.com` (after
+`shapewall login --remote https://wall.example.com`, with **Take agent work** ticked). The watcher then shows up on that board as an
+agent with a name, an icon and a state, and people send comments to it by name. A new agent takes work only from the person who
+connected it until an admin shares it on the project's Agents page. See
+[Agents on a hosted board](hosted.md#agents-on-a-hosted-board).
+
 ## Claude Code
 
 ### MCP in your session

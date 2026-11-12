@@ -68,6 +68,7 @@ import { useCapture } from './hooks/useCapture'
 import { useCommentDraft } from './hooks/useCommentDraft'
 import { boardPaletteActions } from './paletteActions'
 import { agentActivity } from './agentActivity'
+import { rememberHostedAgents } from '../lib/agentIdentity'
 import { BoardViewContext } from './boardView'
 import { splitFrameKey, viewportLabel } from './viewports'
 import { CanvasControls } from './CanvasControls'
@@ -717,24 +718,44 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     onImageError,
   })
 
-  const { commentsUrl, applyComment, setStatus, replyTo, editComment, reactTo, copyLink, githubIssue, removeComment, sendToAgent } =
-    useCommentActions({
-      boardId,
-      commentsQuery,
-      view,
-      info,
-      localName,
-      authorName,
-      setBusy,
-      setNotice,
-      setToast,
-      setDeletingIds,
-      selectedCommentId,
-      closeThread,
-      wide,
-      filter,
-      allowed,
-    })
+  // Hosted boards: the project's agents as this person may see and use them
+  // (src/hosted/agents.js), for the Agent panel, "Send to <agent>" on a
+  // thread and the faces on agents' replies. Members only; refreshed on a
+  // timer, since an agent going offline is nobody's write.
+  const hostedMember = Boolean(info?.hosted && !DEMO && !info?.guest && info?.role && boardId)
+  const agentsQuery = useResource(hostedMember ? `/api/boards/${encodeURIComponent(boardId)}/agents` : null, { pollMs: 15000 })
+  const agentList = hostedMember ? agentsQuery.data || null : null
+  useEffect(() => rememberHostedAgents(agentList?.agents || []), [agentList])
+  const {
+    commentsUrl,
+    applyComment,
+    setStatus,
+    replyTo,
+    editComment,
+    reactTo,
+    copyLink,
+    githubIssue,
+    removeComment,
+    sendToAgent,
+    releaseAgent,
+  } = useCommentActions({
+    onAgentsChanged: agentsQuery.refetch,
+    boardId,
+    commentsQuery,
+    view,
+    info,
+    localName,
+    authorName,
+    setBusy,
+    setNotice,
+    setToast,
+    setDeletingIds,
+    selectedCommentId,
+    closeThread,
+    wide,
+    filter,
+    allowed,
+  })
   const commentMedia = useMemo(
     () => ({
       attach: canComment && !STATIC && !info?.guest,
@@ -905,10 +926,12 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   }
   // Hosted boards have no chat, but people who can send comments to the
   // agent get the Agent control all the same: it opens a small panel that
-  // says whether an agent is listening and what it is doing
-  // (HostedAgentPanel.jsx). Desktop only for now; `ha=1` in the address.
+  // lists the project's agents, their state and what each is doing
+  // (HostedAgentPanel.jsx): beside the canvas on desktop, a sheet from the
+  // More menu on a phone; `ha=1` in the address.
   const hostedAgent = Boolean(info?.hosted && !DEMO && data?.agentDispatch && !chatAvailable)
   const hostedAgentOpen = hostedAgent && wide && params.get('ha') === '1' && !checksOpen
+  const hostedAgentSheet = hostedAgent && !wide && params.get('ha') === '1' && !checksOpen
   const openHostedAgent = () => updateParams({ ha: '1', checks: null, cv: null })
   const allOpen = comments.filter((item) => item.status === 'open').length
   // What the agents are doing, board-wide, for the toolbar (agentActivity.js):
@@ -921,12 +944,35 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
         focus: focusEntry,
         approvals: approvalRows,
         titleOf: titleOfPage,
-        // Only for people who can send comments to the agent here: nobody
-        // else needs to hear that none is listening.
+        // Only for people who can send comments to an agent here: nobody
+        // else needs to hear that none is online.
+        agents: info?.hosted && data?.agentDispatch ? agentList : null,
         listening: info?.hosted && data?.agentDispatch ? data?.agentListening || null : null,
       }),
-    [approvalRows, comments, data?.agentDispatch, data?.agentListening, focusEntry, info?.hosted, titleOfPage],
+    [agentList, approvalRows, comments, data?.agentDispatch, data?.agentListening, focusEntry, info?.hosted, titleOfPage],
   )
+  // The hosted Agent panel, beside the canvas or as a phone's sheet.
+  const hostedAgentProps = hostedAgent
+    ? {
+        agents: agentList,
+        listening: data?.agentListening || null,
+        activity,
+        approvals: approvalRows.length,
+        titleOf: (id) => titleOfPage(comments.find((item) => item.id === id)?.pageId),
+        // Admins manage agents in the console (the project's Agents page).
+        manageUrl:
+          ['admin', 'owner'].includes(info?.role) && info?.workspace?.id && info?.project?.id
+            ? `/w/${info.workspace.id}/agents/${info.project.id}`
+            : null,
+        onOpenComment: (id) => {
+          const comment = comments.find((item) => item.id === id)
+          if (!comment) return
+          // On a phone the sheet makes way for the thread.
+          if (!wide) updateParams({ ha: null })
+          focusComment(comment)
+        },
+      }
+    : null
   // Batch fixes: offered only when Fix with agent is, and turned on in Agents.
   const fixAvailable = Boolean(
     chatAvailable && !data?.migratedTo?.readOnly && info?.agent?.fixWithAgent && info?.agent?.configured && (!info?.hosted || DEMO),
@@ -1005,8 +1051,8 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
         // Who is asking, for "Viewers can't reply" and the name a local board asks for once.
         role: info?.guest ? 'guest' : info?.role || null,
         hosted: Boolean(info?.hosted),
-        // Hosted: false when no agent is listening for this project (null: not known).
-        agentListening: info?.hosted && data?.agentListening ? Boolean(data.agentListening.online) : null,
+        // Hosted: the project's agents, for "Send to <agent>" (null: not known).
+        agents: info?.hosted && data?.agentDispatch ? agentList : null,
         onSaveName: setLocalName,
         // Images and drawings on its messages and in the reply box.
         media: {
@@ -1026,6 +1072,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
           onReply: replyTo,
           onSendToAgent:
             info?.hosted && data?.agentDispatch && !selectedComment.authorGuest && !selectedComment.authorAgent ? sendToAgent : null,
+          onReleaseAgent: info?.hosted && data?.agentDispatch ? releaseAgent : null,
           onStatus: setStatus,
           onEdit: editComment,
           onDelete: removeComment,
@@ -1583,6 +1630,8 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                     onInvalidate={() => {
                       commentsQuery.refetch()
                       view.refetch()
+                      // An agent took or finished something.
+                      agentsQuery.refetch()
                     }}
                   />
                 ) : null}
@@ -1652,19 +1701,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                 panelHidden={panelHidden}
                 panelProps={panelProps}
                 updateParams={updateParams}
-                hostedAgent={
-                  hostedAgentOpen
-                    ? {
-                        listening: data?.agentListening || null,
-                        activity,
-                        approvals: approvalRows.length,
-                        onOpenComment: (id) => {
-                          const comment = comments.find((item) => item.id === id)
-                          if (comment) focusComment(comment)
-                        },
-                      }
-                    : null
-                }
+                hostedAgent={hostedAgentOpen ? hostedAgentProps : null}
               />
             </div>
           </div>
@@ -1675,6 +1712,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
       {!wide ? (
         <>
           <PhoneSheets
+            hostedAgent={hostedAgentSheet ? hostedAgentProps : null}
             checksOpen={checksOpen}
             closeChecks={closeChecks}
             checksProps={checksProps}
@@ -1696,7 +1734,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
             draftDescription={draftDescription}
             composerProps={composerProps}
           />
-          <BoardMenu {...barProps} menuOpen={menuOpen} />
+          <BoardMenu {...barProps} menuOpen={menuOpen} hostedAgents={hostedAgent ? { open: openHostedAgent, list: agentList } : null} />
         </>
       ) : null}
 

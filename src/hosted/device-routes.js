@@ -98,7 +98,7 @@ export function mountDeviceApprovals(consoleApi, deps) {
             scopes: req.body?.scopes,
             expiresInDays: req.body?.expiresInDays ?? null,
           },
-          { via: found.entry.purpose === 'import' ? 'import' : 'login' },
+          { via: found.entry.purpose === 'import' ? 'import' : 'login', machine: found.entry.name },
         )
         const approved = deviceLogins.approve(found.code, {
           token: token.token,

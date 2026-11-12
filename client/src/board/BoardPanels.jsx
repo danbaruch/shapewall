@@ -154,6 +154,8 @@ function Rail({ panel, defaultWidth, className, children, ...props }) {
 // The same on a phone, as sheets: checks, the agent chat, the comments, the
 // open thread and the comment being written.
 export function PhoneSheets({
+  // A hosted board's Agent panel (HostedAgentPanel's props), or null.
+  hostedAgent = null,
   checksOpen,
   closeChecks,
   checksProps,
@@ -192,6 +194,14 @@ export function PhoneSheets({
             <Suspense fallback={<ChatSkeleton heading={false} />}>
               <BoardChat {...chatProps} heading={false} />
             </Suspense>
+          </div>
+        </Dialog>
+      ) : null}
+      {hostedAgent ? (
+        <Dialog open onClose={() => updateParams({ ha: null })} title="Agents" size="md">
+          {/* Read first: focus goes to the sheet, not to its first link. */}
+          <div className="flex max-h-[78dvh] min-h-0 flex-col outline-none" tabIndex={-1} data-autofocus data-sw-hosted-agent-sheet="true">
+            <HostedAgentPanel {...hostedAgent} heading={false} />
           </div>
         </Dialog>
       ) : null}

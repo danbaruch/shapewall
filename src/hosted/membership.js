@@ -13,7 +13,7 @@ import { audit, inviteUsable, tenant, workspacesForUser } from './tenancy.js'
 
 const WORKSPACES_PER_USER = 10
 
-export function createMembership({ db, quotas, iso, auditOf }) {
+export function createMembership({ db, quotas, iso, auditOf, agentsFor = null }) {
   function publicUser(user) {
     return { id: user.id, handle: user.handle, displayName: user.display_name, avatarUrl: avatarUrl(db, user.id) }
   }
@@ -102,6 +102,14 @@ export function createMembership({ db, quotas, iso, auditOf }) {
         }).changes
       : 0
     if (invites || shares || tokens) auditOf(req, 'member_grants_revoked', userId, { invites, shares, tokens }, t)
+    // A revoked token that was an agent lets go of what it held and what
+    // waited for it (src/hosted/agents.js releaseGone).
+    if (tokens && agentsFor) {
+      const agents = agentsFor(t)
+      agents.forget()
+      for (const project of t.all('SELECT id FROM projects WHERE workspace_id = :ws'))
+        agents.releaseGone(project.id, (action, target, detail) => auditOf(req, action, target, detail, t))
+    }
     return { invites, shares, tokens }
   }
 

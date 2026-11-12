@@ -386,7 +386,7 @@ test('migration 6 applies once after later migrations without losing existing da
     ALTER TABLE comments DROP COLUMN dispatch_at; ALTER TABLE comments DROP COLUMN imported;
     ALTER TABLE comments DROP COLUMN run_approved;
     DELETE FROM schema_migrations WHERE version = 6;`)
-  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 11)
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 12)
   db.close()
   db = await openDatabase(file)
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM schema_migrations WHERE version = 6').get().n, 1)

@@ -268,7 +268,7 @@ export function createCommentStore(t, projectId, boardId) {
     const body = changes.body !== undefined ? cleanCommentBody(changes.body, { media: hasCommentMedia(before) }) : undefined
     if (body !== undefined && body !== row.body) {
       t.run(
-        `UPDATE comments SET dispatch_hash = NULL, dispatch_by = NULL, dispatch_at = NULL, run_approved = 0 WHERE ${SCOPE} AND number = :number`,
+        `UPDATE comments SET dispatch_hash = NULL, dispatch_by = NULL, dispatch_at = NULL, run_approved = 0, agent_id = NULL WHERE ${SCOPE} AND number = :number`,
         { ...key, number: row.number },
       )
       row.body = body

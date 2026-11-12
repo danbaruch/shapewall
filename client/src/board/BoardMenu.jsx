@@ -42,6 +42,8 @@ export function BoardMenu({
   canCapture,
   busy,
   setCaptureConfirm,
+  // Hosted boards: { open, list } for the Agents sheet (null: no such panel here).
+  hostedAgents = null,
 }) {
   const section = 'mb-1.5 flex items-center gap-1 text-[11px] font-medium tracking-wide text-faint uppercase'
   const [query, setQuery] = useState('')
@@ -83,6 +85,25 @@ export function BoardMenu({
             data-sw-chat-toggle="true"
           >
             <Bot size={16} aria-hidden="true" /> Chat with your agent
+          </Button>
+        ) : null}
+        {hostedAgents ? (
+          <Button
+            size="touch"
+            className="w-full justify-start"
+            variant="secondary"
+            onClick={() => {
+              setMenuOpen(false)
+              hostedAgents.open()
+            }}
+            data-sw-hosted-agent-open="true"
+          >
+            <Bot size={16} aria-hidden="true" /> Agents
+            {hostedAgents.list?.agents?.length ? (
+              <span className="ml-auto text-xs font-normal text-muted">
+                {hostedAgents.list.agents.filter((agent) => agent.state !== 'offline').length} of {hostedAgents.list.agents.length} online
+              </span>
+            ) : null}
           </Button>
         ) : null}
         {activity?.text ? (

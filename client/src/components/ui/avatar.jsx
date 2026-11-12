@@ -33,10 +33,20 @@ const SIZES = { xs: 'h-5 w-5 text-[9px]', sm: 'h-6 w-6 text-[10px]', md: 'h-7 w-
 // control's label). With `person` the circle takes that person's colour
 // (comments); `agent` shows a robot instead of initials. `color` sets the
 // circle's colour outright (presence: the colour of that person's cursor).
-export function Avatar({ name, src = null, className, person = false, agent = false, colorKey, color = null, size = 'lg' }) {
+export function Avatar({
+  name,
+  src = null,
+  className,
+  person = false,
+  agent = false,
+  agentId = null,
+  colorKey,
+  color = null,
+  size = 'lg',
+}) {
   if (src && !agent)
     return <AvatarPhoto key={src} src={src} name={name} className={className} person={person} colorKey={colorKey} size={size} />
-  if (agent) return <AgentAvatar name={name} className={className} size={size} />
+  if (agent) return <AgentAvatar name={name} agentId={agentId} className={className} size={size} />
   if (person) {
     return (
       <span
@@ -67,8 +77,8 @@ export function Avatar({ name, src = null, className, person = false, agent = fa
 
 // An agent as an author: the icon its owner gave it when the name is a
 // connected agent's (lib/agentIdentity.js), else the robot.
-function AgentAvatar({ name, className, size }) {
-  const identity = useAgentIdentity(name)
+function AgentAvatar({ name, agentId, className, size }) {
+  const identity = useAgentIdentity(name, agentId)
   if (identity) return <AgentFace label={name} {...identity} round className={cn(SIZES[size], className)} />
   return (
     <span

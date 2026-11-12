@@ -67,14 +67,23 @@ The hosted server never captures a page and never edits code. Those happen on a 
    code; a wrapper around it recaptures, pushes and replies. [Agent recipes](agent-recipes.md) has commands for Claude Code, Codex and
    goose.
 
-While the watching machine is off, comments still save on the server and wait. Nothing is lost; nothing is fixed until it is back.
+Each machine that watches is an **agent** of the project, with a name. The board lists them in its Agent panel ("Builder: online",
+"Fixer: offline, last seen 2 hours ago") and **Send to agent** on a comment names the one it goes to: the project's default agent on
+the button, the others and **Any agent** in its menu. In the console, **Agents** is where an admin names each one, gives it an icon,
+picks the default and says who may send it work: a new agent only takes comments from the person who connected it, until they share
+it with named members or with everyone the project trusts. [Agents on a hosted board](hosted.md#agents-on-a-hosted-board) has the
+whole of it.
+
+While a watching machine is off, comments still save on the server and wait: a comment sent to that agent says "Waiting for Builder
+(offline ...)" with **Let any agent take it**. Nothing is lost; nothing is fixed until an agent is back.
 
 ### One machine, several projects
 
 `shapewall login` remembers one project for each server. For a second project on the same server, make a token on that project's page
 in the console, keep it in a file only you can read, and pass it: `--token-file ~/.config/shapewall/other-project.token` (or
 `SHAPEWALL_TOKEN`). A watcher that runs as a service should use a token file of its own, so a later `login` cannot change what it
-talks to.
+talks to. Each token is its own agent on its project's board, so one machine can be "Builder" in one project and "Docs bot" in
+another; the workspace's **Agents** page lists them all.
 
 ## Which one should I start with?
 

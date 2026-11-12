@@ -213,6 +213,7 @@ export const SECTIONS = {
                             the same commands against a hosted board (--board ID picks one)
                             token: $SHAPEWALL_TOKEN or --token-file FILE (a project token, swp_...)
                             watch --exec commands get no token unless --pass-token
+                            watch and mcp show on the board as an agent, by the token's name
       --include-guests      comments and watch: also share link guests' comments (untrusted)`,
   hosted: `  hosted                    run the hosted server (accounts, workspaces, pushed boards)
       --data DIR            default ./shapewall-hosted-data (or $SHAPEWALL_HOSTED_DATA)
