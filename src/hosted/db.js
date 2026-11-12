@@ -627,6 +627,49 @@ const MIGRATIONS = [
   ALTER TABLE agent_runs ADD COLUMN approvals_denied INTEGER;
   ALTER TABLE agents ADD COLUMN approval_rule_by TEXT;
   `,
+  // 15: the Usage dashboard and people's activity (0.7.0). The usage record
+  // of a turn gains what the dashboard shows and nothing else: how long it
+  // took (duration_ms: the server's own clock; agent_ms: what the agent said),
+  // its tool calls counted by type (tools, JSON of name to count), requests
+  // allowed without asking and who answered the others (approvals_auto,
+  // approvals_by: JSON of user id to counts), the context window as the agent
+  // reported it, and the person who connected the agent (agent_owner: they
+  // may read everything that ran on their machine). Never text.
+  // saved_views: a person's named filters on the Usage and Activity pages
+  // (a name and a query string; a view never widens what its reader may see).
+  // retention_usage_days: how long a workspace keeps usage records (NULL: the
+  // server default). Indexes for the activity filters. Additive; an older
+  // build ignores all of it (docs/hosted.md, "Rolling back").
+  `
+  ALTER TABLE agent_runs ADD COLUMN agent_owner TEXT;
+  ALTER TABLE agent_runs ADD COLUMN duration_ms INTEGER;
+  ALTER TABLE agent_runs ADD COLUMN agent_ms INTEGER;
+  ALTER TABLE agent_runs ADD COLUMN tools TEXT;
+  ALTER TABLE agent_runs ADD COLUMN approvals_auto INTEGER;
+  ALTER TABLE agent_runs ADD COLUMN approvals_by TEXT;
+  ALTER TABLE agent_runs ADD COLUMN window_used INTEGER;
+  ALTER TABLE agent_runs ADD COLUMN window_size INTEGER;
+  UPDATE agent_runs SET agent_owner = (SELECT a.created_by FROM agents a WHERE a.id = agent_runs.agent_id);
+  UPDATE agent_runs SET duration_ms = MAX(0, CAST(ROUND((julianday(ended_at) - julianday(started_at)) * 86400000) AS INTEGER))
+    WHERE ended_at IS NOT NULL;
+  CREATE INDEX agent_runs_owner ON agent_runs(workspace_id, agent_owner, started_at);
+  CREATE INDEX agent_runs_thread ON agent_runs(workspace_id, project_id, board_id, thread_id);
+  CREATE TABLE saved_views (
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    page TEXT NOT NULL CHECK (page IN ('usage', 'activity')),
+    name TEXT NOT NULL,
+    query TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX saved_views_user ON saved_views(workspace_id, user_id, page);
+  ALTER TABLE workspaces ADD COLUMN retention_usage_days INTEGER;
+  CREATE INDEX audit_workspace_at ON audit_log(workspace_id, at);
+  CREATE INDEX audit_workspace_user ON audit_log(workspace_id, user_id, id);
+  CREATE INDEX audit_account_user ON audit_log(user_id, id) WHERE workspace_id IS NULL;
+  `,
 ]
 
 export async function openDatabase(file) {

@@ -1,0 +1,61 @@
+/* Usage and Activity (loaded with their lazy chunk). */
+
+/* Recharts draws focus rings of its own on the plot; the cards have theirs. */
+[data-sw-chart] .recharts-wrapper:focus,
+[data-sw-chart] .recharts-surface:focus {
+  outline: none;
+}
+[data-sw-chart] .recharts-wrapper:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* The brush under the time chart: quiet until it is used. */
+[data-sw-chart] .recharts-brush-slide {
+  fill: var(--accent);
+  fill-opacity: 0.14;
+}
+[data-sw-chart] .recharts-brush-traveller rect {
+  fill: var(--line-strong);
+}
+[data-sw-chart] .recharts-brush text {
+  fill: var(--muted);
+  font-size: 10px;
+}
+
+/* The grid scrolls inside itself; keep its scrollbars slim. */
+[data-sw-grid-scroll] {
+  scrollbar-width: thin;
+  overscroll-behavior: contain;
+}
+
+/* Printing the Usage page: the report alone, on white, charts kept whole. */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  [data-sw-usage-report],
+  [data-sw-usage-report] * {
+    visibility: visible;
+  }
+  [data-sw-usage-report] {
+    position: absolute;
+    inset: 0 auto auto 0;
+    width: 100%;
+    padding: 0 8px;
+  }
+  [data-sw-usage-report] .print\:hidden {
+    display: none !important;
+  }
+  [data-sw-chart],
+  [data-sw-tile],
+  [data-sw-top] {
+    break-inside: avoid;
+    box-shadow: none !important;
+  }
+  [data-sw-grid-scroll] {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+}

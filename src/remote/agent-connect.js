@@ -18,6 +18,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { KNOWN_AGENTS, detectAgents } from '../agent/acp/detect.js'
 import { acpAgentKind } from '../agent/acp/command.js'
+import { ACP_DEFAULTS, acpHandshake, adapterName, adapterWarning } from '../agent/backends/acp.js'
 import { createBackend } from '../agent/backends/index.js'
 import { agentSettings } from '../agent/config.js'
 import { REMOTE_FIX_PREAMBLE, REMOTE_PREAMBLE } from '../agent/context.js'
@@ -237,6 +238,16 @@ export function policyChanges(flags, saved, kind = null) {
   return changes
 }
 
+// What this machine's rules come to, for the approval page: who may allow
+// edits from the board (or "none"), whether edits may be allowed without
+// asking, and the branch a fix starts from. Commands are left out: none is
+// in effect for an agent they were not proven with.
+export function askedOf(policy, kind = null) {
+  const approvals = POLICY_APPROVALS.includes(policy?.approvals) ? policy.approvals : 'none'
+  const auto = (Array.isArray(policy?.auto) ? policy.auto : []).filter((item) => item !== 'commands' || COMMANDS_PROVEN.includes(kind))
+  return { approvals, auto: approvals !== 'none' && auto.includes('edits'), base: approvals !== 'none' ? policy?.base || null : null }
+}
+
 export async function agentConnect(
   flags,
   print,
@@ -286,7 +297,10 @@ export async function agentConnect(
       signal,
       ...(sleep ? { sleep } : {}),
       purpose: 'agent',
-      agent: { kind, name: suggested },
+      // What this machine will take from the board, as it will be once this run's flags are saved:
+      // the approval page shows it, as this terminal's report.
+      agent: { kind, name: suggested, asks: askedOf({ ...policyNow, ...changes }, kind) },
+      command: 'shapewall agent connect',
       onApproved: (result) => {
         const file = saveAgentCredential(
           origin,
@@ -336,6 +350,28 @@ export async function agentConnect(
   if (profile.refuse.length)
     throw new Error(`${label} is not started read-only on this machine. ${profile.refuse.join(' ')} See docs/agent-hardening.md.`)
   for (const line of profile.notes) log(line)
+
+  // ---- Can a session be opened at all? ----
+  // Asked of the agent now, the way a question from the board would start it
+  // (no prompt is sent, so nothing is spent): an adapter that cannot open the
+  // session, or that this release was not tested with, is said here and not
+  // at somebody's first question.
+  const opens = async (what, how) => {
+    const result = await acpHandshake({ ...settings, ...how }, { env, root: config.dir, timeoutMs: ACP_DEFAULTS.startMs })
+    if (result.ok) return result
+    const said = adapterName(result.agentInfo)
+    if (result.stderr) log(`${label} last output: ${terminalSafe(result.stderr)}`)
+    throw new Error(
+      `${label} could not open ${what} on this machine, so it is not connected${said && !result.message.includes(said) ? ` (adapter: ${terminalSafe(said)})` : ''}. ${terminalSafe(result.message)}`,
+    )
+  }
+  const opened = await opens('a read-only session', { readOnly: true })
+  if (edits)
+    await opens('a session for edits', { readOnly: false, remoteEdit: { commands: policy.commands, allowPaths: policy.allowPaths } })
+  const adapter = terminalSafe(adapterName(opened.agentInfo) || 'an adapter that does not say its version')
+  const untested = adapterWarning(kind, opened.agentInfo, label)
+  if (untested) log(`Warning: ${terminalSafe(untested)}`)
+  else log(`${label} answers through ${adapter}, a version this release was tested with.`)
 
   const backend = createBackend(
     // Read and answer only (src/agent/backends/acp.js readOnly), with the

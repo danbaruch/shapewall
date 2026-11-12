@@ -1,5 +1,16 @@
-import { useEffect, useRef } from 'react'
-import { ArrowUpRight, Bot, Building2, FolderKanban, LayoutDashboard, LogOut, MessageSquareText, Settings, UserRound } from 'lucide-react'
+import { Suspense, lazy, useEffect, useRef } from 'react'
+import {
+  ArrowUpRight,
+  BarChart3,
+  Bot,
+  Building2,
+  FolderKanban,
+  LayoutDashboard,
+  LogOut,
+  MessageSquareText,
+  Settings,
+  UserRound,
+} from 'lucide-react'
 import { AppRail, useSidebarExpanded } from '../components/app-rail'
 import { api } from '../lib/api'
 import { setAgentEventsOwner, useAgentsChanged } from '../lib/agentEvents'
@@ -14,9 +25,13 @@ import { Card, LoadError, Loading, Logo, PageHeader } from './components'
 import { AgentFeedbackView } from './pages/agent-feedback'
 import { AGENTS_DESCRIPTION, AgentsPage } from './pages/local-agents'
 
+// The Usage view brings the charts with it: loaded when it opens.
+const LocalUsage = lazy(() => import('./usage/LocalUsage.jsx'))
+
 const SECTIONS = [
   ['projects', 'Projects', FolderKanban],
   ['agents', 'Agents', Bot],
+  ['usage', 'Usage', BarChart3],
   ['feedback', 'Agent feedback', MessageSquareText],
   ['settings', 'Settings', Settings],
 ]
@@ -90,7 +105,9 @@ export default function LocalConsole({ account = null, onSignOut = null }) {
     }
   }
   // Agent feedback: where the board has chat, for the owner (the server checks too).
-  const sections = SECTIONS.filter(([id]) => id !== 'feedback' || showFeedback)
+  // Usage, like the feedback, is the owner's: who used which agent on this computer.
+  const showUsage = Boolean(info.data?.agent?.ownerWrites) || section === 'usage'
+  const sections = SECTIONS.filter(([id]) => (id !== 'feedback' || showFeedback) && (id !== 'usage' || showUsage))
   const railSections = sections.map(([id, label, Icon]) => ({
     id: `local-${id}`,
     label,
@@ -208,6 +225,10 @@ export default function LocalConsole({ account = null, onSignOut = null }) {
                   </Card>
                 ) : section === 'feedback' ? (
                   <AgentFeedbackView baseUrl="/api/agent/feedback" get={api.get} touch={!wide} />
+                ) : section === 'usage' ? (
+                  <Suspense fallback={<Loading label="Loading usage" rows={4} />}>
+                    <LocalUsage />
+                  </Suspense>
                 ) : section === 'agents' ? (
                   <>
                     <PageHeader title="Agents" description={AGENTS_DESCRIPTION} />

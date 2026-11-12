@@ -63,6 +63,7 @@ import { mountTokenApi } from './token-api.js'
 import { createAgentPresence } from './agent-presence.js'
 import { COMMENT_ROUTING, createAgentStore } from './agents.js'
 import { mountAgentRoutes } from './agent-routes.js'
+import { mountUsageRoutes } from './usage-routes.js'
 import { createAgentLinks, createChatService } from './agent-link.js'
 import { createChatStore } from './chat-store.js'
 import { createTurnHub } from './turn-hub.js'
@@ -125,6 +126,10 @@ export function createHostedApp({
   turnstile = null,
   // Where "Report this board" on a public project goes (an email address).
   reportEmail = null,
+  // Whether a workspace's owners see their members' account events (sign-ins,
+  // passkeys, sessions) in Activity. Off: those are each person's own. For a
+  // server with one team; set by the operator (--owners-see-sign-ins).
+  ownersSeeSignIns = false,
 }) {
   const base = new URL(origin)
   if (!['http:', 'https:'].includes(base.protocol) || base.pathname !== '/' || base.search)
@@ -410,6 +415,7 @@ export function createHostedApp({
     ownerCount,
     createApiToken,
     agentsFor,
+    ownersSeeSignIns: ownersSeeSignIns === true,
   }
   mountInviteLinks(consoleApi, consoleDeps)
   // Share link preview and opening: no session, the link is the secret.
@@ -421,6 +427,7 @@ export function createHostedApp({
   consoleApi.use(limit('session', (req) => req.user.id))
   mountConsoleRoutes(consoleApi, consoleDeps)
   mountAgentRoutes(consoleApi, consoleDeps)
+  mountUsageRoutes(consoleApi, consoleDeps)
   mountAdmin(consoleApi, deps)
   mountShareAdmin(consoleApi, deps)
   mountPublicAdmin(consoleApi, deps)

@@ -101,4 +101,8 @@ export const LIMITS = {
   deviceLookup: { limit: 10, windowMs: 60_000 },
   // Workspace exports per person (each is a zip of everything).
   export: { limit: 5, windowMs: 60 * 60_000 },
+  // Usage, activity and access review downloads, per person.
+  usageExport: { limit: 30, windowMs: 60 * 60_000 },
+  // Activity searches and filters by agent or project (they read the log entry by entry), per person.
+  activitySearch: { limit: 60, windowMs: 60_000 },
 }

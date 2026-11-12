@@ -323,6 +323,60 @@ test('sign in a terminal: Approve with a sign-in that is not fresh asks for the 
   errors.length = 0
 })
 
+test('sign in a terminal: before a code is typed, each command reads on a line of its own in a code block, at 1440 and at 390', async () => {
+  const { page, errors } = owner
+  errors.length = 0
+  const commands = [`shapewall agent connect --remote ${hosted.origin}`, `shapewall login --remote ${hosted.origin}`]
+  for (const [width, height] of [
+    [1440, 900],
+    [390, 844],
+  ]) {
+    await page.setViewportSize({ width, height })
+    await page.goto(`${hosted.origin}/device`)
+    await page.waitForSelector('[data-sw-device-howto]')
+    const blocks = await page.evaluate(() =>
+      [...document.querySelectorAll('[data-sw-device-command]')].map((el) => {
+        const box = el.getBoundingClientRect()
+        const style = getComputedStyle(el)
+        return {
+          tag: el.tagName,
+          text: el.textContent,
+          width: Math.round(box.width),
+          lines: Math.round(
+            (el.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom)) / parseFloat(style.lineHeight),
+          ),
+          top: Math.round(box.top),
+          cut: el.scrollWidth > el.clientWidth + 1,
+        }
+      }),
+    )
+    assert.deepEqual(
+      blocks.map((block) => block.text),
+      commands,
+      `${width}: the two commands, whole`,
+    )
+    for (const block of blocks) {
+      assert.equal(block.tag, 'PRE', `${width}: a code block`)
+      // One line on a desktop. On a phone a long server address goes to a second line, at a space, and nothing is cut off.
+      if (width >= 1440) assert.equal(block.lines, 1, `${width}: one line: ${block.text}`)
+      else assert.ok(block.lines <= 2, `${width}: at most two lines: ${block.text}`)
+      assert.equal(block.cut, false, `${width}: the whole command shows, nothing to scroll: ${block.text}`)
+      assert.ok(block.width >= 300, `${width}: as wide as the card, not a narrow column (${block.width}px)`)
+    }
+    assert.ok(blocks[1].top > blocks[0].top, `${width}: one under the other`)
+    // The sentence that leads to them reads as a line of words, not letters in a column.
+    const lead = await page.locator('[data-sw-device-howto] p').first().boundingBox()
+    assert.ok(
+      lead.width >= 280 && lead.height <= 48,
+      `${width}: the instruction reads as a line (${Math.round(lead.width)}x${Math.round(lead.height)})`,
+    )
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), `${width}: no sideways scroll`)
+    await shot(page, `device-howto-${width}`)
+  }
+  await page.setViewportSize({ width: 1440, height: 900 })
+  assert.deepEqual(errors, [])
+})
+
 test('remove one board in the console: its captures and comments go, the other board and its comments stay', async () => {
   const { page, errors } = owner
   const projectId = hosted.db.prepare("SELECT id FROM projects WHERE name = 'Demo site'").get().id

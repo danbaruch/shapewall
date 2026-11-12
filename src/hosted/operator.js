@@ -27,6 +27,7 @@ import { deleteWorkspaceRows, planWorkspaceExport, writeWorkspaceExport } from '
 import { createProjectStore } from './projects.js'
 import { ZIP_MAX_BYTES } from './zip.js'
 import { accounts, allWorkspaces, audit, auditAccount, findShareById, tenant } from './tenancy.js'
+import { setUsageRetention } from './usage.js'
 
 export const REPORT_REASONS = {
   copyright: 'Copyright or trademark',
@@ -250,11 +251,29 @@ export function setRetention(db, { workspaceId, keep, operator, now = new Date()
   return { id: workspaceId, name: row.name, keep }
 }
 
+// How long one workspace keeps its usage records, in days (null: the server
+// default). The setting itself is changed by one function, usage.js
+// setUsageRetention, which the workspace's audit log hears too.
+export function setUsageRetentionFor(db, { workspaceId, days, operator, now = new Date() }) {
+  const { t, row } = findWorkspace(db, workspaceId)
+  if (days !== null && !(Number.isInteger(days) && days >= 1 && days <= 3650))
+    throw new OperatorError('--usage-days: a whole number from 1 to 3650, or "default"')
+  const at = now.toISOString()
+  const result = transaction(db, () => {
+    const set = setUsageRetention(t, days, {
+      audit: (action, target, detail) => audit(t, { action, target, detail: { ...detail, by: 'operator' }, at }),
+    })
+    logOperator(db, { operator, action: 'usage_retention', target: workspaceId, detail: { name: row.name, days }, at })
+    return set
+  })
+  return { id: workspaceId, name: row.name, usageDays: result.days, own: result.own }
+}
+
 export function recordRetentionRun(db, { operator, result, dryRun, now = new Date() }) {
   logOperator(db, {
     operator,
     action: dryRun ? 'retention_dry_run' : 'retention_run',
-    detail: { files: result.files, bytes: result.bytes, boards: result.boards },
+    detail: { files: result.files, bytes: result.bytes, boards: result.boards, usageRows: result.usageRows || 0 },
     at: now.toISOString(),
   })
 }
