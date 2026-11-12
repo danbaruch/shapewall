@@ -61,7 +61,7 @@ const ALL = '__all__'
 const linkClass = 'font-medium text-accent underline-offset-2 hover:underline'
 const SOURCE_ICON = { person: UserRound, token: Bot, guest: Globe, system: ServerCog }
 const SOURCE_LABEL = { person: 'A person', token: 'An API token', guest: 'A share link guest', system: 'The server' }
-const dash = <span className="text-faint">{'—'}</span>
+const dash = <span className="text-faint">{'–'}</span>
 
 // The filters of the log, from the address, as API parameters.
 function useActivityFilter(fixed = {}) {

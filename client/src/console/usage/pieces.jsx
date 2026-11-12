@@ -16,7 +16,7 @@ export function Unreported({ what = null }) {
   return (
     <Tooltip content={what ? `${what}: not reported by the agent` : NOT_REPORTED}>
       <span className="text-faint" aria-label={NOT_REPORTED} data-sw-unreported>
-        {'—'}
+        {'–'}
       </span>
     </Tooltip>
   )

@@ -3,7 +3,7 @@
 // as 0.
 
 export const NOT_REPORTED = 'Not reported'
-export const DASH = '—'
+export const DASH = '–'
 
 const compact = new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 })
 const full = new Intl.NumberFormat()

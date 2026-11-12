@@ -530,7 +530,7 @@ function Budgets({ state, workspaceId }) {
 
 // ---- Turns: the grid ----
 
-const dash = <span className="text-faint">{'—'}</span>
+const dash = <span className="text-faint">{'–'}</span>
 const USAGE_COLUMNS = [
   { id: 'started', header: 'When', width: 146, sort: 'started', always: true, cell: (row) => formatTime(row.startedAt) },
   { id: 'kind', header: 'Kind', width: 128, cell: (row) => KIND_LABEL[row.kind] || row.kind },
