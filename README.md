@@ -49,12 +49,16 @@ feedback, fix the code, and you recapture to check.
   screenshot path for each open comment. `shapewall watch` dispatches new comments to your agent by itself, and `shapewall mcp` gives it
   tools. It fixes, recaptures, replies on the comment; the pins tell you if it worked.
 - **Works on a phone.** 44 px touch targets, a bottom sheet for comments, and Back closes the topmost panel instead of leaving the board.
+- **Agent usage you can see.** Every agent turn leaves a usage record (numbers and ids, never the question or the answer): the
+  local console's Usage page shows turns, tokens, time and reported cost by day and agent.
 - **Small and local.** Node 22, Playwright, Express, React Flow. Data is plain JSON files in `.shapewall/`. No account, no cloud.
 - **A team server when you want one.** `shapewall hosted` adds passkey accounts, workspaces with roles, share links and live presence
   on a server you run. `shapewall agent connect` puts your Claude Code on the hosted board: teammates chat with it there, and it
   reads the project and answers. When its own machine says so (`--approvals`), it also makes a fix for a comment on a new branch,
   each edit allowed on the board. Each machine that watches a hosted board is an agent too, with a name, an
-  icon and a state; people send a comment to one by name, and each agent says whose work it takes.
+  icon and a state; people send a comment to one by name, and each agent says whose work it takes. The console's **Usage** page
+  shows every agent turn with the tokens and cost each agent reported (never estimated), as charts and a grid, and **Activity**
+  shows who signed in, who changed which setting and who approved what.
   [Multiplayer (beta)](#multiplayer-on-your-own-server).
 - **Switch local projects.** Serve each project on its own port; the site dropdown lists them together while keeping every project's
   agent and files separate. [Several local projects](docs/deployment.md#several-local-projects).

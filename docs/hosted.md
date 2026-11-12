@@ -114,6 +114,10 @@ Projects belong to a workspace, never to a person. Roles:
 
 The console shows this table on **Access, Roles** and next to every role picker.
 
+From 0.7.0: a member also reads their own agent usage (and that of agents they connected), and everyone reads their own
+activity. Admins and owners read the workspace's usage, everyone's activity and the access review
+([Usage and activity](#usage-and-activity)).
+
 **Renaming a token.** An agent that watches a hosted board signs its comments and replies with its token's name (for a terminal
 login, "laptop (shapewall login)"). **Rename** on the token lists (the project page and **API tokens**) gives it a human name:
 `PATCH /api/workspaces/:ws/projects/:pid/tokens/:tid` with `{ "name": "..." }`, 1 to 60 characters, for the same people who may revoke
@@ -221,6 +225,10 @@ Projects and Members; admins and owners see everything.
   (`q`: names, handles, projects, tokens, links, details); 50 a page, newest first, "Load older events" for more. Each entry shows the
   relative and the exact time. "Export CSV" downloads up to 10,000 entries with the same filters (`GET /audit/export`; cells that
   start with `=`, `+`, `-` or `@` get a leading `'` so a spreadsheet does not run them).
+- **Usage.** Every agent turn with the numbers each agent reported: tiles against the period before, charts, a grid of every turn,
+  saved views and exports ([Usage and activity](#usage-and-activity)).
+- **Activity.** What people did, read from the audit log: sign-ins, settings with before and after, agents, approvals, tokens and
+  exports; a page per person and per agent; and the access review.
 - **Settings.** Rename (admins), share links on or off (admins), public projects on (owners) or off (admins), export (admins), leave, and delete the workspace (the owner, with a
   passkey check and the workspace name typed back). Deleting removes every project, board, file, comment, token, invite, share link and
   audit entry, and writes one `workspace_deleted` entry to the account log.
@@ -1053,7 +1061,7 @@ is still a good idea to give a connected agent a profile of its own: a separate 
 Every chat turn writes one usage record: who asked, which agent, the board and thread (or comment), when it started and ended, and
 how it ended (answered, stopped, failed, interrupted). The model, the effort and the token counts are kept only when the agent
 reports them, and a cost only when the agent itself reports one: nothing is estimated, and "not reported" is not zero. A record
-never holds a message or an answer. There is no page for them yet.
+never holds a message or an answer. They are shown on the Usage page: see [Usage and activity](#usage-and-activity).
 
 A fix is one usage record of kind "fix": its steps, how it ended (fix ready, answered, stopped, failed, interrupted), and how many
 requests it asked and how many were allowed and denied.
@@ -1099,6 +1107,154 @@ the agent is in, and whether you may press Fix and answer its cards, with the re
 Fix with an agent is `POST .../threads/comment-<n>/messages` with `{ fix: true }` (and `agentId` for an agent other than the
 thread's, `dispatchHash` for the text you saw). A card is answered with `POST .../threads/:thread/permissions/:id`
 (`{ optionId: "allow" | "deny", hash }`), and `GET agent/boards/:board/permissions` lists the cards that wait for you.
+
+## Usage and activity
+
+Two pages of the Workspace Console (Shapewall 0.7.0) answer two different questions. **Usage** is about agents: every turn an
+agent ran, with the numbers it reported. **Activity** is about people: who signed in, who changed what, who answered which
+approval. Activity is read from the audit log, which stays the security record; the two pages link to each other and are never
+merged.
+
+### What a usage record holds
+
+One row per agent turn: a chat answer, a comment an agent answered, a fix, or the push of a fix. It is written when the turn
+starts and completed when it ends.
+
+| Recorded                              | Where it comes from                                                                               |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| When it started and ended, how long   | The server's own clock, from the question to the end of the turn                                  |
+| Who asked                             | The signed-in person (nobody, when an agent took a queued comment by itself)                      |
+| Which agent, on which machine         | The agent and the machine label it connected with; and who connected it                           |
+| Project, board, thread or comment     | Ids. A private chat's id is shown only to the person who started it                               |
+| Kind                                  | Chat, comment answer, fix or push                                                                 |
+| Outcome                               | Answered, fix ready, needs a person, stopped, failed, interrupted, and a few "let go" states      |
+| Model and effort                      | As the agent reported them                                                                        |
+| Input, output and cached tokens       | As the agent reported them                                                                        |
+| Context used, of how much             | As the agent reported it                                                                          |
+| Cost                                  | Only when the agent or its endpoint reported a cost                                               |
+| Steps, and tool calls counted by type | The number of steps and a count per tool type ("read: 12, edit: 3"). Never a label or an argument |
+| Approvals                             | How many it asked, how many were allowed, how many without asking, how many denied, and by whom   |
+| The agent's own time                  | How long the agent says it worked, when it says                                                   |
+
+**Never recorded:** the question, the answer, file contents, file names from a step, a diff or a command. Those are in the thread,
+which has its own access rule (members and up; a private chat only its starter). A usage row links to the comment or board for
+people who may read it there.
+
+**Nothing is estimated.** Shapewall has no table of model prices. Subscription CLIs often report tokens and no cost, and some
+agents report nothing. Wherever a number was not reported the pages say "Not reported" (a dash in a table, a hatched area in a
+chart), never zero, and each total says how many of its turns reported the number ("723 of 1,795 turns reported").
+
+### The Usage page
+
+`/w/<workspace>/usage`. Everything on it follows one filter, shown in one row above it:
+
+- **Period:** today, the last 7, 30 or 90 days, this month, or a custom range of up to 400 days. Days, weeks and months are in
+  your browser's time zone (the server stores UTC), including across a clock change. Weeks start on Monday.
+- **Agent, project, person, kind, model, outcome:** several values each. "No model reported" and "nobody" are values too.
+- **Ranges** of tokens and of duration, and a **search over ids** (a turn, an agent, a project, a board, a comment number).
+
+The filters live in the page's address, so a link is a view and Back undoes a filter.
+
+**Overview** shows, for that filter:
+
+- **Tiles:** turns, tokens, agent time, reported cost, fixes that ended ready, and the share that failed or was stopped, each with
+  its change against the period just before (the same length).
+- **Usage over time:** stacked bars per day, week or month, split by agent, project, person, kind, model or outcome, measuring
+  turns, tokens (total, input, output, cached), time or reported cost. Drag the bar under the chart to zoom, then "Use ... for the
+  page" to keep that range.
+- **A breakdown:** ranked bars with each group's share.
+- **How turns ended** as a share per day, **approvals** (allowed by a person, allowed without asking, denied), and **turn
+  duration** (the median and the 95th percentile).
+- **Top lists:** the busiest agents, the threads that used the most tokens, the slowest turns, the agents with the most denied
+  approvals.
+- **Budgets today** (admins and owners): each project's daily chat turns and fixes from its agent policy, with today's use, last
+  week's daily average, and a forecast for the end of the day once a third of the day has passed and there are at least five
+  turns to go by. The day is UTC, as the policy counts it. There are no per-agent budgets yet.
+
+Hovering (or tapping) a chart shows exact values. Pressing a bar, a row of the breakdown or a legend entry filters the whole page
+to it. Every chart has a table of the same numbers, "copy as CSV" and "copy as an image". The colours are one palette, checked for
+colour-blind readers in light and dark, and never the only sign: legends carry names, outcomes carry icons.
+
+**Turns** is every turn of the filter in a grid: sorted, filtered and paged by the server (a hundred rows at a time as you
+scroll, by a cursor, so the last page costs what the first does). Choose and reorder columns, pin columns to the left, sort by
+time, duration, tokens or cost, group by any dimension with subtotals, and switch to denser rows. Arrow keys move through the
+rows and Enter opens one. A turn opens in a drawer with everything in the table above, a link to its comment or board, and for
+admins a link to the activity around it. On a phone the grid is a list of cards and the drawer is a sheet.
+
+**Saved views** are yours alone: a name for the page's address (filters, chart switches, columns, sort). "Copy a link to this
+view" shares the address; whoever opens it sees what they themselves may see, so a link or a view never widens access.
+
+**Print** prints the overview as a report (the period and filters at the top). **Export** downloads the turns of the filter as CSV
+or JSON: streamed, newest first, at most 50,000 rows, with an audit entry (`usage_exported`: who, the format, how many rows, the
+period). There are no scheduled or emailed exports.
+
+### Who sees usage
+
+| Role                                                   | Sees                                                                                                         |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| Owner, admin                                           | Every turn in the workspace                                                                                  |
+| Member                                                 | The turns they asked for, and every turn of an agent they connected (it ran on their machine), whoever asked |
+| Viewer                                                 | Nothing (the page says so)                                                                                   |
+| Share link guests, project tokens, signed-out browsers | Nothing: the usage routes take a signed-in session only                                                      |
+
+The server decides this for every request, including exports, a turn opened by its id, and the lists the filter pickers offer. A
+member who filters by someone else gets an empty answer, not that person's rows. Another workspace's ids open nothing.
+
+### The Activity page
+
+`/w/<workspace>/activity`. What people did, newest first, from the audit log: sign-in and sign-out, passkeys and sessions, members
+and invites, settings (with the value before and after), projects and pushes, share links and guests, tokens, agents (connected,
+audience, approval rule, revoked), approval cards (who allowed or denied what), agent work, and exports. Filter by person, kind of
+action, agent, project, where it came through (a person, a token, a share link guest, the server) and period; search; open an
+entry for the address and device it came from and exactly what was recorded. "Worth a look" keeps the security-relevant changes:
+roles, audiences, approval rules, the agent policy, share links switched on, a project made public, tokens made, passkeys
+removed, and exports.
+
+- **Owners and admins** read everyone's activity. **Anyone else** in the workspace reads their own, whatever they filter by.
+- **Sign-ins are account events:** they belong to the person, not to one workspace. A workspace's admins see them for people who
+  are members now, and only from the day each joined. The entry holds a device label ("Chrome on macOS") and the address the
+  server saw.
+- **A person's page** (`/activity/<user id>`; admins, or the person themselves): role and when it changed, what they can reach,
+  the tokens and agents they made, the devices they are signed in on (a label and when last seen; no address), how much they
+  commented, their agent usage and their activity.
+- **An agent's page** (`/activity/<agent id>`; admins): what it is, who connected it, who may send it work, its approval rule,
+  its usage and the activity about it.
+- **Access review** (admins and owners): every person, agent, API token, share link, public project and open invite in one place,
+  with what it reaches, who made it and when it was last used. Anything unused for 90 days is marked. "Export CSV" downloads it
+  (audited as `access_exported`); each list links to the page where access is cut.
+- **Export CSV** on the log downloads up to 10,000 entries of the filter (audited as `audit_exported`). The older Audit log page
+  and its export are unchanged, and that export now leaves the same audit entry.
+
+New audit entries in 0.7.0: `signed_out`, `usage_exported`, `audit_exported`, `access_exported`, `usage_retention_changed`, and
+`agent_policy_changed` now says which settings changed, from what to what.
+
+**What the log does and does not prove.** The application has no route that edits or deletes an audit entry; entries are ordered
+by one increasing id and leave only when the workspace is deleted. That is a record for people who trust the server. It is not
+tamper-evident: someone with the database file can change it, and there is no hash chain yet. Keep backups if you need to compare.
+
+### Retention, quota and export
+
+- **Retention.** Usage records are kept for 400 days by default, and a finished record older than that is removed by the
+  retention job (at start and every 6 hours). A turn still running is never removed. The operator sets it per workspace:
+  `shapewall hosted admin retention ws_ID --usage-days 90` (or `default`). Audit entries are not pruned.
+- **Quota.** Each usage record counts 400 bytes toward the workspace's storage quota.
+- **Workspace export.** "Download a copy" now includes `usage.json`: the usage records, newest first, at most 50,000.
+
+### The usage and activity API
+
+For the console (session cookie; every route answers 404 for a workspace you are not in). All of them are one function each in
+`src/hosted/usage.js` and `src/hosted/activity.js`, so a later admin tool calls the same code.
+
+`GET /api/workspaces/:ws/usage/summary`, `/usage/series?bucket=day|week|month&groupBy=<dimension>|none&metric=`,
+`/usage/breakdown?groupBy=`, `/usage/latency?bucket=`, `/usage/top`, `/usage/budgets`, `/usage/options`,
+`/usage/rows?sort=started|duration|tokens|input|output|cached|cost|steps&dir=asc|desc&cursor=&limit=`, `/usage/rows/:id`,
+`/usage/export?format=csv|json`. Each takes the filter: `from`, `to` (ISO instants), `tz` (an IANA zone), `agent`, `project`,
+`person`, `kind`, `model`, `outcome` (comma lists; `~` is the empty value), `tokensMin`, `tokensMax`, `durationMin`,
+`durationMax` (milliseconds) and `q`.
+
+`GET /api/workspaces/:ws/activity?person=&agent=&project=&group=&action=&source=&sensitive=1&from=&to=&q=&before=&limit=`,
+`/activity/filters`, `/activity/export`, `/people/:user`, `/agents/:agent/profile`, `/access-review`, `/access-review/export`.
+`GET|POST /views` and `DELETE /views/:id` keep a person's saved views.
 
 ## Moving to a new origin
 
@@ -1323,7 +1479,8 @@ plus the limits listed above. Run one hosted process per data folder.
 
 ## Retention, backup and restore
 
-Current captures stay. By default retention keeps the newest two historical captures per page and viewport plus every historical
+Usage records (one small row per agent turn) are kept for 400 days unless a workspace has its own `--usage-days`; see
+[Retention, quota and export](#retention-quota-and-export). Current captures stay. By default retention keeps the newest two historical captures per page and viewport plus every historical
 capture a comment references, open or resolved. Variants are left alone. It runs at start and every 6 hours in-process when the
 operator starts the hosted server. `--retention-hours 0` disables it; `--retention-keep N` changes the default. To preview or run it:
 
@@ -1332,6 +1489,7 @@ shapewall hosted admin retention --run --dry-run --data ./hosted-data
 shapewall hosted admin retention --run --data ./hosted-data
 shapewall hosted admin retention ws_ID --keep 4 --data ./hosted-data
 shapewall hosted admin retention ws_ID --keep default --data ./hosted-data
+shapewall hosted admin retention ws_ID --usage-days 90 --data ./hosted-data
 shapewall hosted backup --data ./hosted-data --to ./backups --keep-days 30
 shapewall hosted restore --from ./backups --check
 shapewall hosted restore --from ./backups --data ./restored-new-folder
@@ -1447,6 +1605,38 @@ To remove the schema as well (SQLite 3.35+), with the server stopped: `DROP TABL
 COLUMN approvals_asked; ALTER TABLE agent_runs DROP COLUMN approvals_allowed; ALTER TABLE agent_runs DROP COLUMN
 approvals_denied; DELETE FROM schema_migrations WHERE version = 14; PRAGMA user_version = 13;`. Never reset the ledger any other
 way. Test a rollback on a copy first.
+
+### Migration 15 and rollback
+
+Migration 15 (0.7.0) adds what the Usage and Activity pages need ([Usage and activity](#usage-and-activity)). It is additive
+and runs once:
+
+- columns on `agent_runs`: `agent_owner` (who connected the agent; filled in for existing rows), `duration_ms` (filled in for
+  finished rows from their start and end), `agent_ms`, `tools`, `approvals_auto`, `approvals_by`, `window_used`, `window_size`;
+- indexes `agent_runs_owner` and `agent_runs_thread`;
+- table `saved_views` (a person's named filters on the Usage and Activity pages);
+- column `workspaces.retention_usage_days` (how long a workspace keeps usage records; empty means the default, 400 days);
+- indexes on the audit log for the Activity filters: `audit_workspace_at`, `audit_workspace_user`, `audit_account_user`.
+
+Nothing existing is rewritten beyond the two fill-ins above, and no role gains a permission it did not have, except that members
+may now read their own usage and everyone their own activity. Back up before upgrading. From 0.7.0 the retention job removes
+finished usage records older than 400 days; set `--usage-days` for a workspace first if you want to keep them longer.
+
+For rollback, prefer the pre-upgrade backup in a fresh data folder with the previous release. Running 0.6.0 on the upgraded
+database also works, since it ignores the new columns, table and indexes, but:
+
+- **There are no Usage and Activity pages,** and turns recorded by 0.6.0 lack the new fields (they show as "not reported" after
+  upgrading again, and their duration is not filled in).
+- **Usage records are not pruned** and do not count toward the quota while 0.6.0 runs.
+- **Saved views stay** in their table, unused.
+
+To remove the schema as well (SQLite 3.35+), with the server stopped: `DROP TABLE saved_views; DROP INDEX agent_runs_owner; DROP
+INDEX agent_runs_thread; DROP INDEX audit_workspace_at; DROP INDEX audit_workspace_user; DROP INDEX audit_account_user; ALTER
+TABLE agent_runs DROP COLUMN agent_owner; ALTER TABLE agent_runs DROP COLUMN duration_ms; ALTER TABLE agent_runs DROP COLUMN
+agent_ms; ALTER TABLE agent_runs DROP COLUMN tools; ALTER TABLE agent_runs DROP COLUMN approvals_auto; ALTER TABLE agent_runs
+DROP COLUMN approvals_by; ALTER TABLE agent_runs DROP COLUMN window_used; ALTER TABLE agent_runs DROP COLUMN window_size; ALTER
+TABLE workspaces DROP COLUMN retention_usage_days; DELETE FROM schema_migrations WHERE version = 15; PRAGMA user_version = 14;`.
+Never reset the ledger any other way. Test a rollback on a copy first.
 
 ## Secrets, logs and legal review
 
