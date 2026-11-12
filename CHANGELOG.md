@@ -141,7 +141,12 @@ Board tools: the tools you use on the board moved out of the top bar.
   leaves the journey; one press used to do both. Turning comment mode on ends Select text, so one tool is in use at a time.
 - **Comments keep clear of the tools.** A thread or a new-comment card near the bottom of the canvas sits above the tools, and
   above their note while one shows.
-
+- **Comment, right on the page.** Select a page and its bar now starts with **Comment**: press it, then click where the comment
+  goes on that page (the hint above the tools names the page; on a live page it pins to the element you click). It works from the
+  keyboard too (Enter on the button, Enter again for the top left of the page) and is the first action when you tap a page on a
+  phone. The Comment tool at the bottom of the board and the C key work as before. People who cannot comment do not see it. The
+  first time you select a page the button is pointed out with a ring, once. The bar itself is now always one line: on a narrow
+  canvas its buttons become icons with tooltips, Comment and Open live last.
 
 ## 0.6.0 - 2026-11-12
 

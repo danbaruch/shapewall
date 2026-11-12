@@ -204,7 +204,7 @@ for replies, a dot for news) drawn at screen size; pins closer than about 30 scr
 count, and clicking it zooms in until they part (`clusterPins` in `client/src/board/pins.jsx`). Hovering a pin previews the thread in
 a kit `HoverCard`. Resolved threads are hidden by the Open filter, which is the toggle for showing them.
 
-C (or the Comment tool, in the board tools at the bottom of the canvas) turns comment mode on; a click drops a draft pin and an inline composer (`ComposerPopover`) opens beside
+C (or the Comment tool, in the board tools at the bottom of the canvas, or Comment on the selected page's bar, which also names that page in the hint) turns comment mode on; a click drops a draft pin and an inline composer (`ComposerPopover`) opens beside
 it: Enter posts, Shift+Enter adds a line, Esc cancels and stays in comment mode, @ suggests people. The open thread is a popover at
 its pin (`ThreadPopover`): resolve, previous and next (also the arrow keys), and a more menu (copy link, edit, ask agent, GitHub,
 history, delete), then the messages with reactions and an inline reply box. Both are Radix popovers anchored to a virtual element

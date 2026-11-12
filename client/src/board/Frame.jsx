@@ -281,9 +281,13 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
       board.onFocusFrame(targetId, frame.viewport)
       return
     }
-    const rect = event.currentTarget.getBoundingClientRect()
-    const fx = (event.clientX - rect.left) / rect.width
-    const fy = (event.clientY - rect.top) / rect.height
+    pinAt(event.currentTarget.getBoundingClientRect(), event.clientX, event.clientY)
+  }
+  // Starts a comment at a point of the screen that is on this page. `anchored`:
+  // on a live page, also to the element under it.
+  const pinAt = (rect, clientX, clientY, anchored = true) => {
+    const fx = (clientX - rect.left) / rect.width
+    const fy = (clientY - rect.top) / rect.height
     const pin = {
       pageId: targetId,
       viewport: frame.viewport,
@@ -292,7 +296,7 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
     }
     // On a live page the tap is also anchored to the element under it;
     // `target` is that element in plain words, for the composer and the banner.
-    if (live && (map || doc)) {
+    if (anchored && live && (map || doc)) {
       const x = fx * native.width
       const y = fy * native.height
       const anchor = map ? anchorFromMap(map, x, y, native) : anchorAt(doc, x, y, native)
@@ -303,6 +307,24 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
     }
     setHover(null)
     board.onPin(pin)
+  }
+  // "Comment" on this page's bar was pressed (FrameBar.jsx): the page takes
+  // the keyboard, and Enter pins a comment near the top left of what shows of
+  // it (a page has no comment without a spot). No element: nothing was
+  // pointed at.
+  const commentTarget = useBoardView((state) => state.commentTargetKey === liveKey) && picking
+  const onKeyDown = (event) => {
+    if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) return
+    if (event.altKey || event.ctrlKey || event.metaKey) return
+    event.preventDefault()
+    event.stopPropagation()
+    const rect = event.currentTarget.getBoundingClientRect()
+    const canvas = event.currentTarget.closest('[data-sw-canvas]')?.getBoundingClientRect() || rect
+    // 24 px in from the corner, less on a page drawn small.
+    const inset = Math.min(24, rect.width * 0.04, rect.height * 0.04)
+    const x = Math.min(rect.right - inset, Math.max(rect.left, canvas.left) + inset)
+    const y = Math.min(rect.bottom - inset, Math.max(rect.top, canvas.top) + inset)
+    pinAt(rect, x, y, false)
   }
 
   return (
@@ -322,6 +344,8 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
           selectable && !reading && 'cursor-text',
           live && 'border-accent/60',
           focused && !drawSurface && 'outline-2 outline-offset-2 outline-accent',
+          // The keyboard is on the page (Enter pins): a heavier frame.
+          commentTarget && 'focus-visible:outline-4',
           // The page being drawn on: a strong frame, the same weight on
           // screen at any zoom (styles.css dims every other page).
           drawSurface && 'outline-solid outline-accent',
@@ -334,6 +358,14 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
           ...(drawSurface ? { outlineWidth: 3 * pinScale, outlineOffset: 2 * pinScale } : null),
         }}
         onClick={onClick}
+        tabIndex={commentTarget ? 0 : undefined}
+        // A group, not a button: the page's pins are buttons inside it.
+        role={commentTarget ? 'group' : undefined}
+        aria-label={
+          commentTarget ? `The ${frame.viewport} page: press Enter to comment at its top left, or click where the comment goes` : undefined
+        }
+        onKeyDown={commentTarget ? onKeyDown : undefined}
+        data-sw-comment-target={commentTarget ? 'true' : undefined}
         onMouseMove={canHover ? onMouseMove : undefined}
         onMouseLeave={canHover ? () => setHover(null) : undefined}
         data-sw-frame={`${targetId}:${frame.viewport}`}

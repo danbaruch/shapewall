@@ -14,7 +14,7 @@ import { startDemoSite } from '../../examples/demo-site/server.js'
 import { normalizeConfig } from '../../src/config.js'
 import { runCapture } from '../../src/capture/capture.js'
 import { createApp } from '../../src/server/app.js'
-import { createComment } from '../../src/store.js'
+import { createComment, listComments } from '../../src/store.js'
 import { ROOT_DIR, listen, overlayBackLanded } from './helpers.js'
 
 const SHOTS = process.env.SHAPEWALL_SHOTS ? path.resolve(process.env.SHAPEWALL_SHOTS) : null
@@ -788,6 +788,418 @@ test('phone 390: the tools are the bottom bar with 44 px targets, the top row ha
     await page.tap('[data-sw-composer-cancel]')
     await page.waitForSelector('[data-sw-composer]', { state: 'detached' })
     await page.waitForSelector(TOOLS)
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})
+
+// ---- "Comment" on the selected page's bar ---------------------------------------
+
+const PAGE_COMMENT_KEY = 'shapewall.tip.pageComment'
+// Back on Select with a page still selected (the selected page keeps its own
+// history entry, so onSelect's "no overlay entry" never comes): comment
+// mode's entry goes with a Back, which lands within a moment.
+async function selectAgain(page) {
+  await page.waitForSelector(`${TOOLS}[data-sw-tools="select"]`)
+  await page.waitForTimeout(250)
+}
+const barComment = (key) => `[data-sw-frame-bar="${key}"] [data-sw-frame-comment="${key}"]`
+// The selected page's bar is one line inside the canvas, with nothing cut off.
+async function assertBarFits(page, label) {
+  const info = await page.evaluate(() => {
+    const bar = document.querySelector('[data-sw-frame-bar]')
+    const canvas = document.querySelector('[data-sw-canvas]').getBoundingClientRect()
+    const box = bar.getBoundingClientRect()
+    const kids = [...bar.children].map((node) => node.getBoundingClientRect())
+    return {
+      left: box.left - canvas.left,
+      right: canvas.right - box.right,
+      height: box.height,
+      scroll: bar.scrollWidth - bar.clientWidth,
+      tops: [...new Set(kids.map((kid) => Math.round(kid.top + kid.height / 2)))],
+      inside: kids.every((kid) => kid.left >= box.left - 0.5 && kid.right <= box.right + 0.5),
+    }
+  })
+  assert.ok(info.left >= 0 && info.right >= 0, `the bar is inside the canvas, ${label}: ${JSON.stringify(info)}`)
+  assert.ok(info.scroll <= 0, `nothing overflows the bar, ${label}`)
+  assert.ok(info.inside, `every button is inside the bar, ${label}`)
+  assert.equal(info.tops.length, 1, `the bar is one line, ${label}`)
+  assert.ok(info.height <= 56, `the bar is one line high, ${label} (${info.height})`)
+}
+
+test('page bar: Comment comes first, starts a comment on that page with the hint above the tools, and the next click pins', async () => {
+  // A person who has never commented in this browser: the button is pointed out once.
+  const { context, page, errors } = await openBoard(DESKTOP)
+  try {
+    await page.waitForSelector(TOOLS)
+    let frame = await rect(page, '[data-sw-frame="features:desktop"]')
+    await page.mouse.click(frame.left + frame.width / 2, frame.top + 80)
+    await page.waitForSelector('[data-sw-frame-bar="features|desktop"]')
+    const button = barComment('features|desktop')
+    await page.waitForSelector(`${button}[data-sw-frame-comment-emphasis="true"]`)
+    assert.equal(await page.evaluate((key) => window.localStorage.getItem(key), PAGE_COMMENT_KEY), '1', 'pointed out once per browser')
+    await shot(page, 'page-bar-1-emphasis')
+    // First after the page's name; labelled, named and with its shortcut.
+    const order = await page.$$eval('[data-sw-frame-bar] > *', (nodes) =>
+      nodes.map((node) => (node.matches('button, a') ? node.getAttribute('aria-label') : 'title')),
+    )
+    assert.deepEqual(order.slice(0, 2), ['title', 'Comment on this page'], order.join(', '))
+    assert.equal(order.at(-1), 'Close')
+    assert.match(await page.textContent(button), /Comment/)
+    assert.equal(await page.getAttribute(button, 'aria-pressed'), 'false')
+    await page.hover(button)
+    await page.waitForSelector('[role="tooltip"]')
+    assert.match(await page.textContent('[role="tooltip"]'), /Comment on this page\s*C/)
+    await assertBarFits(page, '1440')
+    // The emphasis is a ring for a moment, then gone; it never comes back.
+    await page.waitForSelector(`${button}[data-sw-frame-comment-emphasis]`, { state: 'detached', timeout: 6000 })
+
+    // Press it: the Comment tool with this page as the target.
+    await page.click(button)
+    await page.waitForSelector('[data-sw-comment-hint-page="features|desktop"]')
+    assert.equal(await active(page), 'comment')
+    assert.equal(await page.getAttribute(button, 'aria-pressed'), 'true')
+    assert.match(await page.textContent('[data-sw-comment-hint]'), /Click where the comment goes on Features/)
+    assert.match(await page.textContent('[data-sw-comment-hint-done]'), /Esc/)
+    const row = await bottomRow(page)
+    assertClear(row, 'comment on a page')
+    assert.ok(row.note.bottom <= row.tools.top, 'the hint is just above the tools')
+    assert.equal(overlap(await maybeRect(page, '[data-sw-frame-bar]'), row.note), false, 'the bar and the hint do not overlap')
+    await shot(page, 'page-bar-2-hint')
+
+    // The next click on that page places the pin and opens the composer.
+    frame = await rect(page, '[data-sw-frame="features:desktop"]')
+    await page.mouse.click(frame.left + frame.width * 0.4, Math.max(frame.top + 60, 300))
+    await page.waitForSelector('[data-sw-composer-popover]')
+    await page.waitForSelector('[data-sw-comment-hint="composing"]')
+    assert.match(await page.textContent('[data-sw-composer-popover]'), /Features/)
+    // Esc goes back a step at a time: the composer, then comment mode.
+    await page.keyboard.press('Escape')
+    await page.waitForSelector('[data-sw-composer-popover]', { state: 'detached' })
+    await page.waitForSelector('[data-sw-comment-hint-page="features|desktop"]')
+    await page.keyboard.press('Escape')
+    await selectAgain(page)
+    assert.equal(await page.getAttribute(button, 'aria-pressed'), 'false')
+
+    // Again turns it off, as the tool's own button does.
+    await page.click(button)
+    await page.waitForSelector('[data-sw-comment-hint-page]')
+    await page.click(button)
+    await selectAgain(page)
+
+    // A click elsewhere is comment mode's as ever: another page takes the comment.
+    await page.click(button)
+    await page.waitForSelector('[data-sw-comment-hint-page]')
+    const elsewhere = await page.evaluate(() => {
+      const canvas = document.querySelector('[data-sw-canvas]').getBoundingClientRect()
+      for (const node of document.querySelectorAll('[data-sw-frame]')) {
+        if (node.getAttribute('data-sw-frame') === 'features:desktop') continue
+        const box = node.getBoundingClientRect()
+        // The part of it on screen, clear of the notes at the top and the dock at the bottom.
+        const left = Math.max(box.left, canvas.left) + 10
+        const right = Math.min(box.right, canvas.right) - 10
+        const top = Math.max(box.top, canvas.top + 110) + 10
+        const bottom = Math.min(box.bottom, canvas.bottom - 130) - 10
+        if (right - left < 20 || bottom - top < 20) continue
+        const x = (left + right) / 2
+        const y = (top + bottom) / 2
+        if (!node.contains(document.elementFromPoint(x, y))) continue
+        return { x, y, frame: node.getAttribute('data-sw-frame') }
+      }
+      return null
+    })
+    assert.ok(elsewhere, 'another page is on screen')
+    await page.mouse.click(elsewhere.x, elsewhere.y)
+    await page.waitForSelector('[data-sw-composer-popover]')
+    assert.doesNotMatch(await page.textContent('[data-sw-comment-hint-target]'), /Features/, `the comment is on ${elsewhere.frame}`)
+    await page.keyboard.press('Escape')
+    await page.waitForSelector('[data-sw-composer-popover]', { state: 'detached' })
+    // The comment is no longer aimed at Features: the note is the tool's own.
+    await page.waitForSelector('[data-sw-comment-hint]:not([data-sw-comment-hint-page])')
+    await page.keyboard.press('Escape')
+    await selectAgain(page)
+
+    // A reload: no emphasis the second time.
+    await page.reload()
+    await page.waitForSelector('[data-sw-node="home"]')
+    await page.waitForSelector(TOOLS)
+    frame = await rect(page, '[data-sw-frame="features:desktop"]')
+    await page.mouse.click(frame.left + frame.width / 2, frame.top + 80)
+    await page.waitForSelector(button)
+    await page.waitForTimeout(200)
+    assert.equal(await page.locator('[data-sw-frame-comment-emphasis]').count(), 0, 'pointed out once only')
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})
+
+test('page bar: someone who found Comment another way is not shown the emphasis; reduced motion gets no animation', async () => {
+  const { context, page, errors } = await openBoard({ ...DESKTOP, reducedMotion: 'reduce' })
+  try {
+    await page.waitForSelector(TOOLS)
+    let frame = await rect(page, '[data-sw-frame="features:desktop"]')
+    await page.mouse.click(frame.left + frame.width / 2, frame.top + 80)
+    const button = barComment('features|desktop')
+    await page.waitForSelector(`${button}[data-sw-frame-comment-emphasis="true"]`)
+    const motion = await page.$eval(button, (node) => {
+      const style = getComputedStyle(node)
+      return { animation: style.animationName, outline: style.outlineStyle }
+    })
+    assert.equal(motion.animation, 'none', 'the emphasis is a ring, not an animation')
+    assert.equal(motion.outline, 'solid')
+    await context.close()
+
+    const second = await openBoard(DESKTOP)
+    try {
+      await second.page.waitForSelector(TOOLS)
+      await second.page.keyboard.press('c')
+      await second.page.waitForSelector('[data-sw-comment-hint]')
+      await second.page.keyboard.press('Escape')
+      await selectAgain(second.page)
+      frame = await rect(second.page, '[data-sw-frame="features:desktop"]')
+      await second.page.mouse.click(frame.left + frame.width / 2, frame.top + 80)
+      await second.page.waitForSelector(button)
+      await second.page.waitForTimeout(200)
+      assert.equal(await second.page.locator('[data-sw-frame-comment-emphasis]').count(), 0)
+      assert.deepEqual(second.errors, [])
+    } finally {
+      await second.context.close()
+    }
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})
+
+test('page bar, keyboard: the button is in the tab order; Enter on it, then Enter with the page focused, opens the composer near its top left', async () => {
+  const { context, page, errors } = await openBoard(DESKTOP, { storage: { [PAGE_COMMENT_KEY]: '1' } })
+  try {
+    await page.waitForSelector(TOOLS)
+    const frame = await rect(page, '[data-sw-frame="features:desktop"]')
+    await page.mouse.click(frame.left + frame.width / 2, frame.top + 80)
+    const button = barComment('features|desktop')
+    await page.waitForSelector(button)
+    assert.equal(await page.$eval(button, (node) => node.tabIndex), 0, 'a tab stop')
+    // Tab reaches it from the page's name (the first thing in the bar).
+    await page.focus(button)
+    assert.equal(await page.$eval(button, (node) => node === document.activeElement), true)
+    await page.keyboard.press('Enter')
+    await page.waitForSelector('[data-sw-comment-hint-page="features|desktop"]')
+    assert.match(await page.textContent('[data-sw-comment-hint]'), /Click where the comment goes on Features, or press Enter/)
+    // The page takes the keyboard.
+    await page.waitForFunction(() => document.activeElement?.getAttribute('data-sw-frame') === 'features:desktop')
+    assert.match(await page.getAttribute('[data-sw-comment-target]', 'aria-label'), /press Enter to comment/)
+    await shot(page, 'page-bar-3-keyboard')
+    await page.keyboard.press('Enter')
+    await page.waitForSelector('[data-sw-composer-popover]')
+    assert.match(await page.textContent('[data-sw-composer-popover]'), /Features/)
+    // A spot on the page, not an element: nothing was pointed at.
+    assert.match(await page.textContent('[data-sw-comment-hint-target]'), /a spot on Features/)
+    // The composer has the keyboard: type and post without a mouse.
+    await page.waitForFunction(() => document.activeElement?.matches('[data-sw-comment-input], [data-sw-comment-input] *'))
+    await page.keyboard.type('From the keyboard')
+    await page.keyboard.press('Enter')
+    await page.waitForSelector('[data-sw-composer-popover]', { state: 'detached' })
+    await page.waitForFunction(() => document.body.textContent.includes('From the keyboard'))
+    // It is pinned near the top left of the page (which is all on screen here).
+    const posted = listComments(config, config.boards[0].id).find((item) => item.body === 'From the keyboard')
+    assert.equal(posted.pageId, 'features')
+    assert.equal(posted.viewport, 'desktop')
+    assert.ok(posted.x > 0 && posted.x <= 10 && posted.y > 0 && posted.y <= 10, `at ${posted.x}, ${posted.y}`)
+    assert.equal(posted.anchor ?? null, null)
+
+    // Back to Select (whatever the post left open), and once more: Esc from
+    // the focused page leaves comment mode and the focus goes back to the button.
+    for (let tries = 0; tries < 4; tries += 1) {
+      const idle = await page.evaluate(
+        () =>
+          document.querySelector('[data-sw-tools]')?.getAttribute('data-sw-tools') === 'select' &&
+          !document.querySelector('[data-sw-thread-popover], [data-sw-composer-popover]'),
+      )
+      if (idle) break
+      await page.keyboard.press('Escape')
+      await page.waitForTimeout(300)
+    }
+    await selectAgain(page)
+    await page.waitForSelector(button)
+    await page.focus(button)
+    await page.keyboard.press('Enter')
+    await page.waitForFunction(() => document.activeElement?.getAttribute('data-sw-frame') === 'features:desktop')
+    await page.keyboard.press('Escape')
+    await selectAgain(page)
+    await page.waitForFunction(() => document.activeElement?.hasAttribute('data-sw-frame-comment'))
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})
+
+test('page bar: a live page pins the comment to the element under the click', async () => {
+  const { context, page, errors } = await openBoard(DESKTOP, { storage: { [PAGE_COMMENT_KEY]: '1' } })
+  try {
+    await page.waitForSelector(TOOLS)
+    await page.click('[data-sw-page-jump]')
+    await page.click('[role="listbox"] [data-sw-option="pricing"]')
+    await page.waitForSelector('[data-sw-frame-bar="pricing|desktop"]')
+    // Going to a page zooms in until it is live.
+    await page.waitForSelector('[data-sw-frame="pricing:desktop"][data-sw-live="ready"]', { timeout: 20000 })
+    await page.click(barComment('pricing|desktop'))
+    await page.waitForSelector('[data-sw-comment-hint="element"][data-sw-comment-hint-page="pricing|desktop"]')
+    const frame = await rect(page, '[data-sw-frame="pricing:desktop"]')
+    await page.mouse.click(frame.left + frame.width / 2, frame.top + 120)
+    await page.waitForSelector('[data-sw-composer-popover]')
+    // Anchored: the note names the element, not "a spot".
+    assert.doesNotMatch(await page.textContent('[data-sw-comment-hint-target]'), /a spot on/)
+    await page.keyboard.press('Escape')
+    await page.keyboard.press('Escape')
+    await selectAgain(page)
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})
+
+test('page bar: a read-only board, and compare mode, have no Comment on it', async () => {
+  const viewer = await listen(createApp({ config, readOnly: true }))
+  const home = boardUrl
+  try {
+    boardUrl = `http://127.0.0.1:${viewer.address().port}/`
+    const { context, page, errors } = await openBoard(DESKTOP)
+    try {
+      const frame = await rect(page, '[data-sw-frame="features:desktop"]')
+      await page.mouse.click(frame.left + frame.width / 2, frame.top + 80)
+      await page.waitForSelector('[data-sw-frame-bar="features|desktop"]')
+      assert.equal(await page.locator('[data-sw-frame-comment]').count(), 0, 'a viewer has no Comment on the bar')
+      assert.equal(await page.locator(tool('comment')).count(), 0, 'nor the Comment tool')
+      assert.equal(await page.evaluate((key) => window.localStorage.getItem(key), PAGE_COMMENT_KEY), null, 'and nothing was pointed out')
+      await assertBarFits(page, 'viewer')
+      await shot(page, 'page-bar-4-viewer')
+      assert.deepEqual(errors, [])
+    } finally {
+      await context.close()
+    }
+  } finally {
+    boardUrl = home
+    await new Promise((resolve) => viewer.close(resolve))
+  }
+  // Compare mode: pages are selected, nobody comments.
+  const { context, page, errors } = await openBoard(DESKTOP, { query: '?cmp=staging_production' })
+  try {
+    await page.waitForSelector('[data-sw-compare-bar]')
+    await page.click('[data-sw-page-jump]')
+    await page.click('[role="listbox"] [data-sw-option="pricing"]')
+    await page.waitForSelector('[data-sw-frame-bar]')
+    assert.equal(await page.locator('[data-sw-frame-comment]').count(), 0, 'no Comment while comparing')
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})
+
+test('page bar: one line inside the canvas at 1024, 1280 and 1440 with the sidebar and a panel open; Comment keeps its word', async () => {
+  for (const width of [1024, 1280, 1440]) {
+    const { context, page, errors } = await openBoard({ viewport: { width, height: 800 } }, { storage: { [PAGE_COMMENT_KEY]: '1' } })
+    try {
+      await page.waitForSelector(TOOLS)
+      await page.waitForSelector('[data-sw-rail]')
+      await page.click('[data-sw-page-jump]')
+      await page.click('[role="listbox"] [data-sw-option="pricing"]')
+      await page.waitForSelector('[data-sw-frame-bar="pricing|desktop"]')
+      const check = async (label) => {
+        await page.waitForTimeout(500)
+        if (await page.locator('[data-sw-frame-bar-toggle]').count()) await page.click('[data-sw-frame-bar-toggle]')
+        await page.waitForSelector('[data-sw-frame-bar]')
+        await assertBarFits(page, `${label} at ${width}`)
+        const words = await page.$$eval('[data-sw-frame-bar] > button, [data-sw-frame-bar] > a', (nodes) =>
+          nodes.map((node) => [node.getAttribute('aria-label'), node.textContent.trim()]),
+        )
+        // Every button has a name; the ones that keep a word are the first ones.
+        assert.ok(
+          words.every(([name]) => name),
+          JSON.stringify(words),
+        )
+        assert.equal(words[0][0], 'Comment on this page')
+        assert.equal(words[0][1], 'Comment', `Comment keeps its word, ${label} at ${width}`)
+        assert.ok(words[1][1], `the live button keeps its word, ${label} at ${width}`)
+        // Words drop from the end: after the first icon there are only icons.
+        assert.match(words.map(([, text]) => (text ? 'w' : 'i')).join(''), /^w+i+$/, JSON.stringify(words))
+        const row = await bottomRow(page)
+        assert.equal(overlap(await maybeRect(page, '[data-sw-frame-bar]'), row.tools), false, 'the bar clears the tools')
+        return page.getAttribute('[data-sw-frame-bar]', 'data-sw-frame-bar-fit')
+      }
+      const withPanel = await check('panel open')
+      if (width >= 1280) assert.equal(withPanel, 'full', `everything fits at ${width}`)
+      await page.click('[data-sw-sidebar-toggle]')
+      const both = await check('sidebar and panel open')
+      if (width === 1024) {
+        assert.notEqual(both, 'full', 'the narrow canvas drops words')
+        // An icon that lost its word has a tooltip.
+        await page.hover('[data-sw-frame-bar] [data-sw-frame-checks]')
+        await page.waitForSelector('[role="tooltip"]')
+        assert.match(await page.textContent('[role="tooltip"]'), /Page checks/)
+        await page.mouse.move(5, 5)
+      }
+      await shot(page, `page-bar-width-${width}`)
+      // Comment from the bar here: the hint and the bar both stay inside the canvas.
+      await page.click('[data-sw-frame-comment]')
+      await page.waitForSelector('[data-sw-comment-hint-page]')
+      await page.waitForTimeout(250)
+      assertClear(await bottomRow(page), `comment from the bar at ${width}`)
+      await assertBarFits(page, `commenting at ${width}`)
+      await page.keyboard.press('Escape')
+      await selectAgain(page)
+      assert.deepEqual(errors, [])
+    } finally {
+      await context.close()
+    }
+  }
+})
+
+test('phone 390: "Comment on this page" is the first action of a tapped page, fits the screen, and starts a comment on it', async () => {
+  const { context, page, errors } = await openBoard(PHONE)
+  try {
+    await page.waitForSelector(TOOLS)
+    const frame = await page.locator('[data-sw-frame^="home:"]').first().boundingBox()
+    await page.touchscreen.tap(frame.x + frame.width / 2, Math.max(frame.y + 60, 200))
+    await page.waitForSelector('[data-sw-frame-bar]')
+    await page.waitForTimeout(700)
+    const first = await page.$eval('[data-sw-frame-bar] > :first-child', (node) => [
+      node.getAttribute('aria-label'),
+      node.textContent.trim(),
+    ])
+    assert.deepEqual(first, ['Comment on this page', 'Comment'])
+    const sizes = await page.$$eval('[data-sw-frame-bar] > *', (nodes) =>
+      nodes.map((node) => {
+        const box = node.getBoundingClientRect()
+        return [box.width, box.height]
+      }),
+    )
+    assert.ok(
+      sizes.every(([w, h]) => w >= 44 && h >= 44),
+      `44 px targets: ${JSON.stringify(sizes)}`,
+    )
+    await assertBarFits(page, 'phone')
+    await shot(page, 'page-bar-phone-1')
+    await page.tap('[data-sw-frame-comment]')
+    await page.waitForSelector('[data-sw-comment-hint-page]')
+    assert.equal(await active(page), 'comment')
+    assert.match(await page.textContent('[data-sw-comment-hint]'), /Tap where the comment goes on Home/)
+    const hinted = await bottomRow(page)
+    assert.ok(hinted.note.left >= 0 && hinted.note.right <= 390, 'the hint fits the phone')
+    assert.ok(hinted.note.bottom <= hinted.tools.top, 'above the tools')
+    await shot(page, 'page-bar-phone-2-hint')
+    // A tap on the page pins (a page drawn small zooms in first; the next tap pins).
+    for (let tries = 0; tries < 3 && !(await page.locator('[data-sw-composer]').count()); tries += 1) {
+      await page.waitForTimeout(900)
+      const box = await page.locator('[data-sw-frame^="home:"]').first().boundingBox()
+      const top = Math.max(box.y, 140)
+      const bottom = Math.min(box.y + box.height, 640)
+      await page.touchscreen.tap(box.x + box.width / 2, (top + bottom) / 2)
+    }
+    await page.waitForSelector('[role="dialog"] [data-sw-composer] [data-sw-comment-input]')
+    assert.match(await page.textContent('[role="dialog"]'), /Home/)
     assert.deepEqual(errors, [])
   } finally {
     await context.close()

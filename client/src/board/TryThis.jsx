@@ -49,8 +49,8 @@ export function TryThis({ touch, chip = false, done, onOpenComment, onComment, o
     onComment && {
       id: 'comment',
       icon: MessageSquarePlus,
-      label: touch ? 'Pin your own comment' : 'Press C to comment',
-      hint: touch ? 'The comment tool below, then a page' : 'Then click anywhere on a page',
+      label: touch ? 'Pin your own comment' : 'Comment on a page',
+      hint: touch ? 'Tap a page, then Comment' : 'Click a page, then Comment (or press C)',
       run: onComment,
     },
     onAgent

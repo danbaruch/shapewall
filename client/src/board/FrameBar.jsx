@@ -1,11 +1,13 @@
 import { viewportLabel } from './viewports'
 import { useEffect, useLayoutEffect, useState } from 'react'
 import { useStore } from '@xyflow/react'
-import { Camera, ExternalLink, Flag, History, MonitorPlay, MoreHorizontal, TextSelect, X } from 'lucide-react'
+import { Camera, ExternalLink, Flag, History, MessageSquarePlus, MonitorPlay, MoreHorizontal, TextSelect, X } from 'lucide-react'
 import { cn } from '../lib/utils'
 import { Button, IconButton, Tooltip } from '../components/ui'
 import { isThumbnail } from './layout'
-import { notesRect, placeFrameBar } from './frameBarPlace'
+import { fitFrameBar, notesRect, placeFrameBar } from './frameBarPlace'
+import { KeyTip } from './KeyTip'
+import { pageCommentSeen, rememberPageCommentSeen } from './prefs'
 
 const TITLE_ROW_PX = 30
 
@@ -18,6 +20,11 @@ const TITLE_ROW_PX = 30
 // notes along the top of the canvas (CanvasNotes), such as the links hint
 // or the tip: it moves below them or to the next spot (frameBarPlace.js).
 // Nor the tool dock along the bottom (the board's tools and their note).
+//
+// Comment comes first, for whoever may comment here (`onComment`; the same
+// rule as the Comment tool at the bottom of the board): it starts a comment
+// on this page. The bar is one line at any width: frameBarPlace.js
+// (fitFrameBar) says which buttons keep their words.
 export default function FrameBar({
   focused,
   target,
@@ -32,6 +39,8 @@ export default function FrameBar({
   onOpenLive,
   onToggleSelect,
   onClose,
+  onComment = null,
+  commenting = false,
   history = 0,
   onHistory = null,
   onChecks = null,
@@ -106,8 +115,20 @@ export default function FrameBar({
   // other cards and groups. It comes back when the card is large again.
   if (isThumbnail(frame, zoom)) return null
   const barHeight = touch ? 54 : 40
-  const barWidth =
-    (touch ? 236 : 340) + (onHistory ? (touch ? 56 : 90) : 0) + (onCapture ? (touch ? 56 : 120) : 0) + (onChecks ? (touch ? 48 : 90) : 0)
+  const liveAction = live ? (selecting ? 'done' : 'select') : hasLive ? 'open' : null
+  const fit = fitFrameBar({
+    canvasWidth: width,
+    touch,
+    items: {
+      comment: Boolean(onComment),
+      live: liveAction,
+      checks: Boolean(onChecks),
+      history: Boolean(onHistory),
+      capture: Boolean(onCapture),
+      link: Boolean(href),
+    },
+  })
+  const barWidth = fit.width
   const gap = 8
   const { place, toggle, fallback } = placeFrameBar({
     card: { left, top, right, bottom, titleTop: cardTop },
@@ -119,6 +140,8 @@ export default function FrameBar({
   })
 
   const size = touch ? 'touch' : 'sm'
+  // A button without its word is the square icon button.
+  const sized = (labelled) => (labelled ? size : touch ? 'icon' : 'icon-sm')
   const quiet = 'text-fg shadow-none'
   // Labels stay 13 px on touch so the bar keeps its measured width.
   const label = touch && 'text-[13px]'
@@ -141,65 +164,115 @@ export default function FrameBar({
       </IconButton>
     )
   }
-  const style = place
-    ? { left: place.left, top: place.top, width: Math.min(barWidth, width - 16) }
-    : { left: fallback.left, top: fallback.top, width: Math.min(barWidth, width - 16) }
+  const style = place ? { left: place.left, top: place.top, width: barWidth } : { left: fallback.left, top: fallback.top, width: barWidth }
+  // A button that lost its word keeps its name: a tooltip (mouse, keyboard).
+  const tipped = (content, button, shown = true) =>
+    shown && !touch ? (
+      <Tooltip content={content} side="bottom">
+        {button}
+      </Tooltip>
+    ) : (
+      button
+    )
   return (
     <div
-      className="nodrag nopan nowheel absolute z-20 flex items-center flex-wrap justify-end gap-1 rounded-lg border border-line bg-surface/95 p-1 shadow-pop backdrop-blur"
+      className={cn(
+        'nodrag nopan nowheel absolute z-20 flex flex-nowrap items-center gap-1 overflow-hidden rounded-lg border border-line bg-surface/95 p-1 shadow-pop backdrop-blur',
+        // Too narrow even for the icons: the first ones stay.
+        fit.fits ? 'justify-end' : 'justify-start',
+      )}
       style={style}
       role="toolbar"
       aria-label={`${title} actions`}
       data-sw-frame-bar={focused}
+      data-sw-frame-bar-fit={fit.step}
       onClick={(event) => event.stopPropagation()}
     >
-      {!touch ? (
+      {fit.title ? (
         <span className="min-w-0 flex-1 truncate px-1.5 text-xs font-medium text-muted">
           {title} · {viewportLabel(frame.viewport)}
         </span>
       ) : null}
-      {hasLive && !live ? (
-        <Button size={size} variant="default" className={cn('shadow-none', label)} onClick={onOpenLive} data-sw-open-live={focused}>
-          <MonitorPlay size={15} aria-hidden="true" /> Open live
-        </Button>
+      {onComment ? (
+        <CommentAction
+          key={focused}
+          focused={focused}
+          size={sized(fit.labels.comment)}
+          touch={touch}
+          labelled={fit.labels.comment}
+          active={commenting}
+          onComment={onComment}
+        />
       ) : null}
-      {live ? (
-        <Button
-          size={size}
-          variant={selecting ? 'default' : 'ghost'}
-          className={cn('shadow-none', label, !selecting && 'text-fg')}
-          aria-pressed={selecting}
-          disabled={!ready}
-          onClick={onToggleSelect}
-          data-sw-select-text={focused}
-        >
-          <TextSelect size={15} aria-hidden="true" /> {selecting ? 'Done' : 'Select text'}
-        </Button>
-      ) : null}
-      {onChecks ? (
-        <Button size={size} variant="ghost" className={quiet} onClick={onChecks} aria-label="Page checks" data-sw-frame-checks={focused}>
-          <Flag size={15} aria-hidden="true" />
-          {touch ? null : 'Checks'}
-        </Button>
-      ) : null}
+      {hasLive && !live
+        ? tipped(
+            'Open live',
+            <Button
+              size={sized(fit.labels.live)}
+              variant="default"
+              className={cn('shadow-none', label)}
+              onClick={onOpenLive}
+              aria-label="Open live"
+              data-sw-open-live={focused}
+            >
+              <MonitorPlay size={15} aria-hidden="true" /> {fit.labels.live ? 'Open live' : null}
+            </Button>,
+            !fit.labels.live,
+          )
+        : null}
+      {live
+        ? tipped(
+            selecting ? 'Done selecting text' : 'Select text',
+            <Button
+              size={sized(fit.labels.live)}
+              variant={selecting ? 'default' : 'ghost'}
+              className={cn('shadow-none', label, !selecting && 'text-fg')}
+              aria-label={selecting ? 'Done' : 'Select text'}
+              aria-pressed={selecting}
+              disabled={!ready}
+              onClick={onToggleSelect}
+              data-sw-select-text={focused}
+            >
+              <TextSelect size={15} aria-hidden="true" /> {fit.labels.live ? (selecting ? 'Done' : 'Select text') : null}
+            </Button>,
+            !fit.labels.live,
+          )
+        : null}
+      {onChecks
+        ? tipped(
+            'Page checks',
+            <Button
+              size={sized(fit.labels.checks)}
+              variant="ghost"
+              className={quiet}
+              onClick={onChecks}
+              aria-label="Page checks"
+              data-sw-frame-checks={focused}
+            >
+              <Flag size={15} aria-hidden="true" />
+              {fit.labels.checks ? 'Checks' : null}
+            </Button>,
+            !fit.labels.checks,
+          )
+        : null}
       {onHistory ? (
         <Tooltip content={`Page history: ${history + 1} captures`}>
           <Button
-            size={size}
+            size={sized(fit.labels.history)}
             variant="ghost"
             className={quiet}
             onClick={onHistory}
             aria-label={`Page history: ${history + 1} captures`}
             data-sw-frame-history={focused}
           >
-            <History size={15} aria-hidden="true" /> {touch ? null : 'History'}
+            <History size={15} aria-hidden="true" /> {fit.labels.history ? 'History' : null}
           </Button>
         </Tooltip>
       ) : null}
       {onCapture ? (
         <Tooltip content="Recapture this page at every screen size">
           <Button
-            size={size}
+            size={sized(fit.labels.capture)}
             variant="ghost"
             className={quiet}
             disabled={captureBusy}
@@ -207,7 +280,7 @@ export default function FrameBar({
             aria-label="Capture this page"
             data-sw-frame-capture={focused}
           >
-            <Camera size={15} aria-hidden="true" /> {touch ? null : 'Capture'}
+            <Camera size={15} aria-hidden="true" /> {fit.labels.capture ? 'Capture' : null}
           </Button>
         </Tooltip>
       ) : null}
@@ -230,6 +303,46 @@ export default function FrameBar({
   )
 }
 
+// How long the one-time emphasis on Comment stays.
+const EMPHASIS_MS = 2600
+
+// "Comment" on the selected page: starts a comment on this page (Board.jsx
+// commentOnPage), and while that is on it is pressed; again turns it off.
+// The first time a person who has never started a comment in this browser
+// sees it, it wears a ring for a moment (prefs.js: once per browser; the
+// demo's Reset brings it back). No motion: the ring is there, then not.
+function CommentAction({ focused, size, touch, labelled, active, onComment }) {
+  const [emphasis, setEmphasis] = useState(false)
+  useEffect(() => {
+    if (pageCommentSeen()) return undefined
+    rememberPageCommentSeen()
+    setEmphasis(true)
+    const timer = window.setTimeout(() => setEmphasis(false), EMPHASIS_MS)
+    return () => window.clearTimeout(timer)
+  }, [])
+  const button = (
+    <Button
+      size={size}
+      variant={active ? 'default' : 'soft'}
+      className={cn('shadow-none', touch && 'text-[13px]', emphasis && !active && 'bg-accent/12 outline-2 outline-offset-1 outline-accent')}
+      aria-label="Comment on this page"
+      aria-pressed={active}
+      aria-keyshortcuts="C"
+      onClick={onComment}
+      data-sw-frame-comment={focused}
+      data-sw-frame-comment-emphasis={emphasis ? 'true' : undefined}
+    >
+      <MessageSquarePlus size={15} aria-hidden="true" /> {labelled ? 'Comment' : null}
+    </Button>
+  )
+  if (touch) return button
+  return (
+    <Tooltip content={<KeyTip label="Comment on this page" keys={['C']} />} side="bottom">
+      {button}
+    </Tooltip>
+  )
+}
+
 // Resolves the focused key ("<target>|<viewport>") to its card and renders FrameBar.
 export function FocusedFrameBar({
   onChecks,
@@ -248,6 +361,8 @@ export function FocusedFrameBar({
   onClose,
   onCapture,
   captureBusy,
+  onComment = null,
+  commentTargetKey = null,
 }) {
   if (!focusedKey) return null
   const split = focusedKey.lastIndexOf('|')
@@ -273,6 +388,8 @@ export function FocusedFrameBar({
       onOpenLive={() => onOpenLive(targetId, viewport)}
       onToggleSelect={() => onToggleSelect(focusedKey)}
       onClose={onClose}
+      onComment={onComment ? (event) => onComment(focusedKey, event) : null}
+      commenting={commentTargetKey === focusedKey}
       history={page ? data?.versions?.[page.id]?.[viewport]?.length || 0 : 0}
       onChecks={page && onChecks ? () => onChecks(page.id, viewport) : null}
       onHistory={page && historyCountFor(page.id) ? () => onHistory(page.id, viewport) : null}
