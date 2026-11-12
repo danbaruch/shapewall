@@ -125,8 +125,9 @@ the agent picker's **Agent settings** item link to the Agents page.
 
 Connecting, removing, testing and choosing the default run commands as the machine's owner, so they need the settings token (the owner
 link `shapewall serve` prints). Without it the card is read-only and says how to open that link; it asks nothing of the agent routes.
-Self-hosted multiplayer (`shapewall hosted`) has its own workspace Settings (project agent tokens) and no Agents page. The public demo
-shows the card read-only on its console's Agents page.
+Self-hosted multiplayer (`shapewall hosted`) has its own Agents pages, for the machines that watch a hosted project
+([Agents on a hosted board](hosted.md#agents-on-a-hosted-board)): they list and name agents, and never start a program on the server.
+The public demo shows this card read-only on its console's Agents page.
 
 ## Name and icon
 
@@ -169,8 +170,9 @@ fixed with `--agent-acp` or `SHAPEWALL_AGENT_ACP` still wins over which agent ru
 saved for that fixed agent (`fixedAgent` in `agents.json`) and the Agents page shows it with **Edit**. Everyone who can see the board
 gets the name, the icon's id and the colour in the agent info they already receive (`/api/agent/status`, `/api/info`); nothing else
 about the agent is added to it. In the public demo you can rename the two scripted agents and give them built-in icons (no upload);
-**Reset** puts them back. On a hosted board an agent is its API token: rename the token there ([hosted.md](hosted.md#workspaces-roles-and-invites));
-icons for hosted agents are not there yet.
+**Reset** puts them back. On a hosted board an agent is a project API token that may take work: an admin gives it a name, one of the
+same built-in icons and a colour on the project's Agents page in the console
+([Agents on a hosted board](hosted.md#agents-on-a-hosted-board)). Pictures are not uploaded there.
 
 ### While a connection test runs
 

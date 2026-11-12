@@ -118,8 +118,8 @@ The console shows this table on **Access, Roles** and next to every role picker.
 login, "laptop (shapewall login)"). **Rename** on the token lists (the project page and **API tokens**) gives it a human name:
 `PATCH /api/workspaces/:ws/projects/:pid/tokens/:tid` with `{ "name": "..." }`, 1 to 60 characters, for the same people who may revoke
 it (admins and owners). The secret, the scopes and the expiry do not change; what the token already wrote keeps the old name; a
-revoked token is not renamed; the audit log records `token_renamed` with both names. Icons for hosted agents are not there yet: a
-token shows the robot avatar.
+revoked token is not renamed; the audit log records `token_renamed` with both names. A token that may take work is an agent with an
+icon, a state and rules of its own: see [Agents on a hosted board](#agents-on-a-hosted-board).
 
 **Invite links** hold a 32-byte token (stored hashed), a role, an expiry (1, 3, 7, 14 or 30 days; 7 by default), and work once. Opening
 one shows the workspace and role; a new person creates an account from it, an existing one joins with a click. The token sits in the
@@ -303,12 +303,14 @@ The server treats every upload as untrusted, even from our CLI:
 - Cleaning runs in worker threads (2 at once, 32 waiting, 30 seconds and 512 MB each), never on the server's event loop; a token has at
   most 4 uploads in flight.
 - The manifest and variants are rebuilt field by field; the board definition is validated by the same code as a local config.
-- **Is an agent listening?** A comment sent to the agent is only picked up while some machine runs `shapewall watch --remote` (or
-  an MCP client) with a token of the project that has the `claim` scope. The server remembers, in memory only, when such a token
-  last called the API or held its event stream open; for 90 seconds after that the project has an agent online. Members who can
-  send comments to the agent see "Agent online: <token name>" or "No agent is listening" in the board's Agent panel (the Agent button in the top bar), in its tooltip and on the
-  thread. Only the token's display name and the time are told, never to share link guests or public viewers, and nothing is stored:
-  after a restart it reads "not listening" until the agent's next call.
+- **Which agents are online?** A comment sent to an agent is only picked up while some machine runs `shapewall watch --remote` (or
+  an MCP client) with a token of the project that has the `claim` scope. Each such token is an agent
+  ([Agents on a hosted board](#agents-on-a-hosted-board)). The server remembers, in memory, when each one last called the API or held
+  its event stream open; for 90 seconds after that the agent is online. Members who can send comments to an agent see every agent
+  by name with its state in the board's Agent panel (the Agent button in the top bar; on a phone, **Agents** in the More menu), in
+  the button's tooltip ("Builder online, Fixer offline") and on the thread. Only names, faces and times are told, never a token, and
+  never to share link guests or public viewers. After a restart every agent reads offline, with the last time it was seen, until
+  its next call.
 - **Removing a board.** A board pushed by mistake, or one you retired, comes off the server on the project page: "Remove board"
   on its row in the Boards list, for the same people who may delete the project (admins and owners, with a fresh passkey check).
   It deletes that board's captures, page history, variants, checks, comments, replies and comment images, and frees their storage;
@@ -324,7 +326,7 @@ The server treats every upload as untrusted, even from our CLI:
 
 `/w/<workspace>/p/<project>/` serves the same board client as `shapewall serve`, on an API with the same shape, for members of the
 workspace. Comments are signed with the account's name and handle (the server sets them; the board shows the handle beside the name).
-A token's replies are signed with the token's name and marked as an agent; the API ignores any `author` it sends. Captures from the board and editing journeys are off on a
+A token's replies are signed with the token's name and marked as an agent, with its agent's icon beside them; the API ignores any `author` it sends. Captures from the board and editing journeys are off on a
 hosted board (push again instead). Compare between environments is not hosted yet.
 
 Live HTML is served from `/uc/...` through HMAC-signed URLs that expire after 2 minutes. The board API gives each new frame load a
@@ -405,6 +407,79 @@ Emoji reactions are for people: members and up toggle one with `POST /api/boards
 (`{ emoji, replyId? }`, one of a fixed set of six) from the board. Viewers and guests cannot react (guests see counts only, never who
 reacted), tokens have no reactions route and the token API leaves reactions out of what agents read. Reacting does not change a
 comment's `updatedAt` or notify anyone.
+
+### Agents on a hosted board
+
+Every project API token with the `claim` scope is an **agent**: a named thing the board lists, that people choose when they send a
+comment, with a state and rules about who may use it. Nothing changes on the machine that runs it: `shapewall watch --remote` and
+`shapewall mcp --remote` work as before, with the same token, and need no new flag. The server still never runs an agent.
+
+- **Name and face.** The agent's name is its token's name. In the console (**Agents**, then the project) **Edit** changes the name
+  (1 to 40 characters, one line), picks one of the built-in icons and a colour, and says what runs behind it (Claude Code, Codex,
+  goose, Gemini CLI, another program, or an unknown watcher). A known program shows its mark until you pick an icon; a watcher
+  whose command is unknown shows its initials. The agent's replies on a thread wear its face. A token made with `shapewall login`
+  keeps the machine's name as a label.
+- **State.** Online (heard from in the last 90 seconds), working (online and holding a comment it took), offline (with the last time
+  it was seen) or revoked (its token was revoked or expired, or its maker is no longer an admin).
+- **Sending a comment to one agent.** **Send to agent** on a thread is a split button: the main part names the project's default
+  agent, the caret lists every agent with its state, and **Any agent** hands the comment to whichever takes it first (what every
+  comment did before 0.4.0). A comment sent to one agent can only be taken by that agent's token. The other tokens of the project do
+  not see it at all: not in lists, not by id, not through MCP.
+- **The default agent.** An admin or owner picks it on the project's Agents page (**Make default**). It is what the main part of
+  Send to agent names, and where a trusted member's new comment goes (such a comment is sent as it is written). Without a default,
+  and for people the default does not take work from, comments go to any agent. A project starts with no default.
+- **An agent that is offline.** The comment waits for it, and the thread and the Agent panel say so: "Waiting for Builder (offline,
+  last seen 2 hours ago)". Nothing is lost: when the agent is back it takes what was sent to it. **Let any agent take it** hands the
+  comment to whichever agent is free; **Choose another** sends it to a different one. Revoking an agent sends what waited for it to
+  any agent.
+- **Who may send it work (the audience).** Work sent to an agent runs on the machine of the person who connected it, so each agent
+  says whose work it takes:
+
+  | Audience                                    | Takes work from                                                               |
+  | ------------------------------------------- | ----------------------------------------------------------------------------- |
+  | Only the person who connected it            | That person. **The default for every agent made from 0.4.0 on**               |
+  | Named members                               | That person and the members you choose                                        |
+  | Everyone this project's agent policy trusts | The team case: whoever may send work to an agent here at all may use this one |
+
+  The audience only narrows: the project's **Agent policy** still decides who may send work to an agent at all. The server checks it
+  twice, when the comment is sent (and when an admin approves someone else's run) and again when the agent's token takes it, against
+  the person whose approval stands on the comment. On the board, an agent you may not use is listed, greyed, with the reason ("Only
+  Ada can send work to Builder. Ask them, or an admin, to share it."). Changing an audience asks for a fresh passkey check.
+  **Tokens that already had the `claim` scope before 0.4.0 keep the behaviour they had**: everyone the agent policy trusts. The
+  console marks them "kept from before 0.4.0".
+
+- **Approvals.** Each agent has an approval rule and two roles: who may answer its approvals, and who may change the rule (admins and
+  owners, or owners only; only an owner changes those two). The rule in effect is always **Always ask**: a command an agent asks to
+  run waits for a person with that role and a fresh passkey check. **Approve automatically** is listed as not available: it needs the
+  agent's own machine to allow approvals from the board first, which arrives with connected agents in a later release. It is never the
+  default and is never possible on the server's say alone.
+- **Revoke.** Revoking an agent revokes its token (and revoking the token on the Tokens page revokes the agent).
+- **The workspace overview.** **Agents** in the workspace menu (admins and owners) lists every agent of the workspace: the project
+  it serves, its state, when it was last seen, who may send it work and who connected it, with a link to manage each. An agent
+  belongs to one project; a machine that works on two projects has two tokens and so two agents.
+- **Audit.** `agent_created`, `agent_first_seen`, `agent_renamed`, `agent_identity_changed`, `agent_default_changed`,
+  `agent_audience_changed`, `agent_approval_rule_changed`, `agent_revoked` and `agent_queue_released` are in the workspace's audit log
+  with what it was before and after.
+- **Usage records.** For every comment an agent takes, the server writes one row: who asked, which agent, project, board and comment,
+  when it started, when it ended and how (done, needs a person, resolved, released). No comment text and no answers. This is the
+  groundwork of a usage page; there is nothing to look at yet, and the rows go with their project.
+
+Connecting one, on the machine that has the code:
+
+```sh
+shapewall login --remote https://wall.example.com     # approve in the console, choose the project, tick "Take agent work"
+shapewall watch --remote https://wall.example.com --exec "<your agent command>"
+```
+
+It appears on the project's Agents page as online. Give it a name and an icon there, and choose who may send it work.
+[Agent recipes](agent-recipes.md) has the commands for Claude Code, Codex and goose.
+
+Console API (admins and owners): `GET /api/workspaces/:ws/agents`, `GET /api/workspaces/:ws/projects/:pid/agents`,
+`PATCH .../agents/:aid` (`{ name, icon, tint, kind }`), `PUT .../agents/:aid/audience` (`{ audience: "owner" | "members" | "trusted",
+users }`), `PUT .../agents/:aid/approval` (`{ rule, changeRole, answerRole }`), `PUT .../default-agent` (`{ agentId }`, `null` for
+none) and `DELETE .../agents/:aid`. Board API (members): `GET /api/boards/:board/agents`, `POST .../comments/:id/send-to-agent` takes
+`agentId` (an agent's id, `null` for any agent; left out, the default agent) and `POST .../comments/:id/release-agent` lets any agent
+take a comment that waits for one.
 
 ## Moving to a new origin
 
@@ -494,6 +569,9 @@ server_state; DROP INDEX projects_public_id; ALTER TABLE projects DROP COLUMN pu
 public_at; ALTER TABLE projects DROP COLUMN public_by; ALTER TABLE workspaces DROP COLUMN public_projects; ALTER TABLE passkeys
 DROP COLUMN rp_id; ALTER TABLE sessions DROP COLUMN admin_seen_at; PRAGMA user_version = 4;`. Do not roll back during an origin
   move: the old build cannot serve the old address.
+- **12** (agents, 0.4.0): tables `agents` and `agent_runs`, columns `projects.default_agent_id`, `comments.agent_id` and
+  `agent_claims.agent_id`, and a backfill that turns every token with the `claim` scope into an agent that behaves as before. What a
+  rollback loses is in [Migration 12 and rollback](#migration-12-and-rollback).
 
 **Why SQLite through `node:sqlite`.** One host, one process, small metadata (images are files), so SQLite fits. `node:sqlite` ships with
 Node, so the npm package stays free of native addons for the many people who only use the CLI; `better-sqlite3` would download or build a
@@ -668,6 +746,34 @@ For rollback, prefer the pre-upgrade backup in a fresh data folder and the previ
 on the new database ignores additive columns but also removes suspension enforcement: keep affected workspaces blocked externally
 until upgraded again. Do not drop the operator log or reset the ledger casually. Test rollback on a copy first.
 
+### Migration 12 and rollback
+
+Migration 12 (0.4.0) makes agents first-class ([Agents on a hosted board](#agents-on-a-hosted-board)). It is additive and runs once:
+
+- tables `agents` (one row per token with the `claim` scope: kind, icon, tint, machine label, audience, approval rule and its two
+  roles, who created it, when it was last seen) and `agent_runs` (the usage record of each comment an agent took);
+- columns `projects.default_agent_id`, `comments.agent_id` (the agent a comment was sent to; empty means any agent) and
+  `agent_claims.agent_id`;
+- a backfill: every token that already has the `claim` scope becomes an agent of kind "watcher" with the audience "everyone the
+  agent policy trusts", which is what it did before. Open claims are linked to their agent. No project gets a default agent and no
+  comment gets an address, so every comment stays open to any agent, as before.
+
+A token with the `claim` scope that has no agent row (made while an older build ran on the upgraded database) becomes an agent the
+first time it calls the server, with the same audience. Back up before upgrading.
+
+For rollback, prefer the pre-upgrade backup in a fresh data folder with the previous release. Running 0.3.4 on the upgraded database
+also works, since it ignores the new tables and columns, but it loses what they held:
+
+- **Routing.** A comment sent to one agent can be taken by any watcher, and an agent takes work from everyone the agent policy
+  trusts, whatever audience it was given. Tighten the project's Agent policy first if that matters.
+- **Agents made after the upgrade** (audience "only the person who connected it") behave like every other token there.
+- Default agents, icons, audiences, approval roles and usage records are not shown, and are still there when you upgrade again.
+
+To remove the schema as well (SQLite 3.35+), with the server stopped: `DROP TABLE agent_runs; DROP TABLE agents; ALTER TABLE projects
+DROP COLUMN default_agent_id; ALTER TABLE comments DROP COLUMN agent_id; ALTER TABLE agent_claims DROP COLUMN agent_id; DELETE FROM
+schema_migrations WHERE version = 12; PRAGMA user_version = 11;`. The next upgrade then backfills again from the tokens. Never reset
+the ledger any other way. Test a rollback on a copy first.
+
 ## Secrets, logs and legal review
 
 `SHAPEWALL_HOSTED_SECRET_FILE` and `RESEND_API_KEY_FILE` read private secret files. systemd `LoadCredential=shapewall-secret:...` and
@@ -709,6 +815,11 @@ with `--include-guests`. Imported comments start inert and need an explicit
 trusted vouch. Claim tokens see only dispatched comments, including direct-id
 reads; guest replies are removed from their responses. Read tokens without
 `claim` may inspect untrusted comments with the existing guest opt-in.
+
+A claim token is an agent ([Agents on a hosted board](#agents-on-a-hosted-board)), and two more rules apply to it on every route:
+it sees and takes only comments sent to it or to any agent, and only when the person whose approval stands on the comment is in its
+audience. A comment sent to another agent answers 404 `unknown_comment`, exactly like one that was never dispatched: lists, direct
+reads, replies, statuses, approvals, comment files and the MCP tools. The events stream still carries ids only.
 
 Claims use an atomic per-project budget and compare-and-set. Exceeding a budget
 returns HTTP 429 `agent_budget`; another token cannot take over a live claim.

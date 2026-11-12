@@ -51,7 +51,8 @@ feedback, fix the code, and you recapture to check.
 - **Works on a phone.** 44 px touch targets, a bottom sheet for comments, and Back closes the topmost panel instead of leaving the board.
 - **Small and local.** Node 22, Playwright, Express, React Flow. Data is plain JSON files in `.shapewall/`. No account, no cloud.
 - **A team server when you want one.** `shapewall hosted` adds passkey accounts, workspaces with roles, share links and live presence
-  on a server you run. [Multiplayer (beta)](#multiplayer-on-your-own-server).
+  on a server you run. Each machine that watches a hosted board is an agent with a name, an icon and a state; people send a comment
+  to one by name, and each agent says whose work it takes. [Multiplayer (beta)](#multiplayer-on-your-own-server).
 - **Switch local projects.** Serve each project on its own port; the site dropdown lists them together while keeping every project's
   agent and files separate. [Several local projects](docs/deployment.md#several-local-projects).
 
@@ -124,8 +125,9 @@ shapewall hosted --data ./hosted-data --tailscale --tailscale-port 8443
 
 Run that on one machine. Teammates open its HTTPS address over Tailscale, sign in with their own passkeys and join a workspace you
 invite them to. Captures still run on your machine: `shapewall share --remote URL` moves an existing project to the server, or `login`
-and `push` upload new captures. Comments, roles, scoped agents and live presence work on the shared server. You need no public domain
-and no Shapewall account.
+and `push` upload new captures. Comments, roles, scoped agents and live presence work on the shared server. A machine that runs
+`shapewall watch --remote URL` is an agent on that board, listed by name with its state; people send a comment to one agent or to
+any, and each agent takes work only from the people it is shared with. You need no public domain and no Shapewall account.
 
 The command runs in the foreground and sets up Tailscale Serve; running it as a service and backing it up are covered in
 [the hosted guide](docs/hosted.md), with a [checklist to walk through before you invite the team](docs/hosted.md#before-you-invite-the-team).
@@ -580,6 +582,7 @@ Hosted Shapewall (docs/hosted.md)
                             the same commands against a hosted board (--board ID picks one)
                             token: $SHAPEWALL_TOKEN or --token-file FILE (a project token, swp_...)
                             watch --exec commands get no token unless --pass-token
+                            watch and mcp show on the board as an agent, by the token's name
       --include-guests      comments and watch: also share link guests' comments (untrusted)
   hosted                    run the hosted server (accounts, workspaces, pushed boards)
       --data DIR            default ./shapewall-hosted-data (or $SHAPEWALL_HOSTED_DATA)
