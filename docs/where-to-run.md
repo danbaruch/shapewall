@@ -70,9 +70,10 @@ The hosted server never captures a page and never edits code. Those happen on a 
    goose.
 
 4. **Chat with your coding agent on the board (optional).** `shapewall agent connect --remote https://your-server`, run in the
-   project's folder, connects that machine's Claude Code, Codex, goose or Gemini CLI. An admin approves it in the console (a name,
-   an icon, who may use it), and members then ask it questions from the board's Agents panel. It reads the project and answers; it
-   does not change files or run commands from the board, so fixes stay with `watch`. Leave it running, or run it as a service.
+   project's folder, connects that machine's Claude Code. An admin approves it in the console (a name, an icon, who may use it),
+   and members then ask it questions from the board's Agents panel. It reads the project and answers; it does not change files or
+   run commands from the board, so fixes stay with `watch`. Codex, goose and Gemini CLI are not offered by `agent connect` in this
+   release: for them, `watch` is the way. Leave it running, or run it as a service.
    [Connected agents](hosted.md#connected-agents) has the details.
 
 Each machine that watches or connects is an **agent** of the project, with a name. The board lists them in its Agent panel ("Builder: online",
@@ -96,6 +97,7 @@ another; the workspace's **Agents** page lists them all.
 
 `shapewall agent connect` keeps a token of its own for each server, apart from the login, and serves the project whose folder it
 runs in. For a second project on the same server, run it in that project's folder with `--as NAME` (its own approval, its own token).
+One process holds an agent's link: a second `agent connect` on the same token is refused, unless it is started with `--takeover`.
 
 ## Which one should I start with?
 

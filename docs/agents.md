@@ -128,8 +128,8 @@ link `shapewall serve` prints). Without it the card is read-only and says how to
 Self-hosted multiplayer (`shapewall hosted`) has its own Agents pages, for the machines that watch a hosted project or connect a
 coding agent to it ([Agents on a hosted board](hosted.md#agents-on-a-hosted-board)): they list and name agents, and never start a
 program on the server. The chat panel described here is also on hosted boards, for an agent connected with `shapewall agent
-connect`: the same panel, with an agent that reads the project and answers and does not edit
-([Connected agents](hosted.md#connected-agents)).
+connect`: the same panel, with an agent that reads the project and answers and does not edit. Only Claude Code can be connected
+that way in this release ([Connected agents](hosted.md#connected-agents)).
 The public demo shows this card read-only on its console's Agents page.
 
 ## Name and icon

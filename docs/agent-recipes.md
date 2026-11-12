@@ -25,15 +25,17 @@ connected it until an admin shares it on the project's Agents page. See
 [Agents on a hosted board](hosted.md#agents-on-a-hosted-board).
 
 **Chat on a team server.** To let teammates ask your coding agent questions on the hosted board, run this in the project's folder,
-on the machine that has Claude Code, Codex, goose or Gemini CLI set up for the board chat (the ACP sections below):
+on the machine that has Claude Code set up for the board chat ([The board chat (ACP)](#the-board-chat-acp) below):
 
 ```sh
-shapewall agent connect --remote https://wall.example.com              # the first agent found; or --agent claude|codex|goose|gemini
-shapewall agent connect --remote https://wall.example.com --as fixer --agent codex --name "Fixer"   # a second one
+shapewall agent connect --remote https://wall.example.com              # this project's agent, else Claude Code; or --agent claude
+shapewall agent connect --remote https://wall.example.com --as scout --name "Scout"   # a second connection, with its own token
 ```
 
 An admin approves the code it prints, names the agent and chooses who may use it. It reads the project and answers; it does not
-change files or run commands from the board, so keep a `watch` recipe for fixes.
+change files or run commands from the board, so keep a `watch` recipe for fixes. Only Claude Code can be connected in this release.
+Codex, goose and Gemini CLI are refused with a message: their read-only behaviour could not be shown to hold, so for them the
+`watch` recipes below, with `--remote`, stay the way.
 See [Connected agents](hosted.md#connected-agents).
 
 ## Claude Code

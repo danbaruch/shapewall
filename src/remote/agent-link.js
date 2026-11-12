@@ -13,8 +13,10 @@
 //   - which program runs and where: the caller's backend, built from this
 //     machine's own saved agent. Nothing in a job names a command.
 //   - that the agent reads and answers only (the backend refuses the rest).
-//   - who it works for: with `policy.audience` "owner", only a job the
-//     server marks as asked by the person who connected the agent.
+//   - who it works for: with `policy.audience` "owner", a job the server
+//     labels as asked by someone else is refused here. The machine cannot
+//     check that label, so this narrows an honest server's audience and is
+//     no protection against a server that lies.
 //   - how many turns run at once, and for how long.
 //   - what leaves: the answer, with this agent's token removed from it.
 //
@@ -533,6 +535,7 @@ export async function runAgentLink({
   }
 
   let wait = limit.backoffMinMs
+  let held = 0
   try {
     while (!signal?.aborted) {
       const began = Date.now()
@@ -542,6 +545,14 @@ export async function runAgentLink({
         if (takenOver) break
         if (!signal?.aborted) log('link closed by the server; reconnecting')
       } catch (error) {
+        // "Already connected" right after another process stopped: the server
+        // may not have noticed its closed stream yet. A few tries, a second
+        // apart, before taking its word that another machine holds the link.
+        if (error?.code === 'already_connected' && held < 4 && !signal?.aborted) {
+          held += 1
+          await pause(1000, signal)
+          continue
+        }
         if (fatalLinkError(error)) throw error
         if (signal?.aborted) break
         log(`link: ${error.name === 'AbortError' ? 'no word from the server; reconnecting' : `${error.message}; reconnecting`}`)

@@ -51,7 +51,7 @@ feedback, fix the code, and you recapture to check.
 - **Works on a phone.** 44 px touch targets, a bottom sheet for comments, and Back closes the topmost panel instead of leaving the board.
 - **Small and local.** Node 22, Playwright, Express, React Flow. Data is plain JSON files in `.shapewall/`. No account, no cloud.
 - **A team server when you want one.** `shapewall hosted` adds passkey accounts, workspaces with roles, share links and live presence
-  on a server you run. `shapewall agent connect` puts your coding agent on the hosted board: teammates chat with it there, and it
+  on a server you run. `shapewall agent connect` puts your Claude Code on the hosted board: teammates chat with it there, and it
   reads the project and answers (no edits, no commands). Each machine that watches a hosted board is an agent too, with a name, an
   icon and a state; people send a comment to one by name, and each agent says whose work it takes.
   [Multiplayer (beta)](#multiplayer-on-your-own-server).
@@ -130,9 +130,10 @@ invite them to. Captures still run on your machine: `shapewall share --remote UR
 and `push` upload new captures. Comments, roles, scoped agents and live presence work on the shared server. A machine that runs
 `shapewall watch --remote URL` is an agent on that board, listed by name with its state; people send a comment to one agent or to
 any, and each agent takes work only from the people it is shared with. `shapewall agent connect --remote URL`, run in a project's
-folder, connects that machine's coding agent (Claude Code, Codex, goose or Gemini CLI) for chat on the board: an admin approves it in
-the browser, members ask it questions from the Agents panel, and it reads the project and answers. It does not change files or run
-commands from the board ([Connected agents](docs/hosted.md#connected-agents)). You need no public domain and no Shapewall account.
+folder, connects that machine's Claude Code for chat on the board: an admin approves it in the browser, members ask it questions
+from the Agents panel, and it reads the project and answers. It does not change files or run commands from the board. Codex, goose
+and Gemini CLI are not offered by `agent connect` in this release; for them, `shapewall watch --remote` stays the way
+([Connected agents](docs/hosted.md#connected-agents)). You need no public domain and no Shapewall account.
 
 The command runs in the foreground and sets up Tailscale Serve; running it as a service and backing it up are covered in
 [the hosted guide](docs/hosted.md), with a [checklist to walk through before you invite the team](docs/hosted.md#before-you-invite-the-team).
@@ -507,12 +508,15 @@ Commands
   agent connect             make this machine's coding agent an agent of a hosted project: members chat with it
                             on the board, and it reads this folder and answers. Read and answer only: no edits, no
                             commands. The first run is approved in the browser by an admin.   --remote URL
-      --agent NAME          which agent: claude, codex, goose, gemini, or a saved agent's id (default: this
-                            project's agent, else the first one found). Never a command from the server
+      --agent NAME          which agent: claude, or a saved agent's id that runs Claude Code (default: this
+                            project's agent, else Claude Code when found). Codex, goose and Gemini CLI are not
+                            offered in this release. Never a command from the server
       --name "Builder"      the name to suggest on the approval page (the approver has the last word)
       --as NAME             a second connection from this machine (its own token; default "default")
-      --audience owner|server  "owner": only the person who connects it may ask, whatever the server says;
-                            "server" (default): whoever its audience on the server names
+      --audience owner|server  "owner": the server keeps it to the person who connects it even if its audience
+                            there is widened, and this machine refuses a job the server says is someone else's
+                            (no protection from a server that lies); "server" (default): its audience on the server
+      --takeover            close the link another machine holds for this agent, and take its place
       --concurrency N       answers at once, 1 to 4 (default 2)
       --token-file FILE     for a service: the agent's own token, no browser (docs/hosted.md)
   agent run --comment ID    the sandboxed starter agent on one comment: a container with only a fresh

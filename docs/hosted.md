@@ -500,8 +500,9 @@ take a comment that waits for one.
 
 ## Connected agents
 
-A **connected agent** is a coding agent on a machine that has the project's code (Claude Code, Codex, goose or Gemini CLI), joined
-to a hosted project so that members can chat with it on the board. One command connects it:
+A **connected agent** is a coding agent on a machine that has the project's code, joined to a hosted project so that members can
+chat with it on the board. In this release that agent is Claude Code ([which agents](#which-agents-can-be-connected)). One command
+connects it:
 
 ```sh
 cd ~/projects/site                                   # the project's folder, on the machine that has the code
@@ -520,28 +521,54 @@ shapewall agent connect --remote https://wall.example.com
    it in the same panel a local board has: the answer streams in, with the agent's steps.
 
 **A connected agent reads and answers. It does not change files and it runs no commands.** The machine that runs it enforces this,
-whatever the server sends: the agent is offered no way to write a file or open a terminal through Shapewall, and every permission
-request it makes is refused on the spot. The answer then shows what was refused ("Refused: read and answer only"), and nobody is
-asked. When a change is needed, the agent says what to change and where. Edits, commands and approvals from the board are not in
-this release. For fixes, keep using `shapewall watch --remote --exec`, as before.
+whatever the server sends, in two ways. The agent's own controls are set so that it cannot act: its session starts without your
+settings files and with only its reading tools ([read-only by the agent's own controls](#read-only-by-the-agents-own-controls)).
+And Shapewall offers it no way to write a file or open a terminal, and refuses every permission request it makes on the spot. The
+answer then shows what was refused ("Refused: read and answer only"), and nobody is asked. If the session cannot be made
+read-only, the agent is not started. When a change is needed, the agent says what to change and where. Edits, commands and
+approvals from the board are not in this release. For fixes, keep using `shapewall watch --remote --exec`, as before.
 
 The server still never runs an agent. It stores the conversation and passes messages between the browser and the agent's machine.
 
+### Which agents can be connected
+
+Only **Claude Code** is offered by `agent connect` in this release. An agent is offered when its own controls were shown, with its
+real adapter, to keep a read-only session from editing, running commands and reading outside the project. Refusing what an agent
+asks for is not enough when it does not ask.
+
+| Agent       | `agent connect`         | Why                                                                                                                                                                                                    |
+| ----------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Claude Code | Yes                     | Started with only its reading tools and none of your settings files, it created no file, ran no command, and asked before reading outside the project                                                  |
+| Codex       | Refused, with a message | Started in its read-only sandbox it changed no file in our check, but it still ran shell commands and read a file outside the project without asking. What it reads can leave the machine in an answer |
+| goose       | Refused, with a message | Its chat-only mode could not be verified on the test machine                                                                                                                                           |
+| Gemini CLI  | Refused, with a message | It was not installed to verify                                                                                                                                                                         |
+
+The same rule holds for an agent saved on the machine: it can be connected only when its command starts Claude Code. For Codex,
+goose and Gemini CLI, `shapewall watch --remote` stays the way to work on a hosted board. How the check was done is in
+[agent-hardening.md](agent-hardening.md#connected-agents).
+
 ### The connect command
 
-| Flag                       | Default                                    | Meaning                                                                                                                         |
-| -------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
-| `--agent NAME`             | This project's agent, else the first found | `claude`, `codex`, `goose`, `gemini`, or the id of an agent saved on this machine. Never a command from the server              |
-| `--name "Builder"`         | The agent's own name                       | The name to suggest on the approval page. The approver has the last word, and an admin can rename it later                      |
-| `--as NAME`                | `default`                                  | A second connection from this machine, with a token of its own                                                                  |
-| `--audience owner\|server` | `server`                                   | `owner`: only the person who connected it may ask, whatever the server says. `server`: whoever its audience on the server names |
-| `--concurrency N`          | 2                                          | Answers at once, 1 to 4                                                                                                         |
-| `--token-file FILE`        |                                            | For a service: the agent's own token from a file, no browser                                                                    |
+| Flag                       | Default                                           | Meaning                                                                                                                                                                                                                |
+| -------------------------- | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--agent NAME`             | This project's agent, else Claude Code when found | `claude`, or the id of an agent saved on this machine that runs Claude Code. Never a command from the server                                                                                                           |
+| `--name "Builder"`         | The agent's own name                              | The name to suggest on the approval page. The approver has the last word, and an admin can rename it later                                                                                                             |
+| `--as NAME`                | `default`                                         | A second connection from this machine, with a token of its own                                                                                                                                                         |
+| `--audience owner\|server` | `server`                                          | `owner`: the server is asked to keep it to the person who connected it even if its audience there is widened, and this machine refuses a job the server labels as someone else's. `server`: its audience on the server |
+| `--takeover`               |                                                   | Close the link another process holds for this agent, and take its place                                                                                                                                                |
+| `--concurrency N`          | 2                                                 | Answers at once, 1 to 4                                                                                                                                                                                                |
+| `--token-file FILE`        |                                                   | For a service: the agent's own token from a file, no browser                                                                                                                                                           |
 
-- **Which program runs** is the machine's choice: an agent saved for this project on that machine, or one of the known agents found
-  on its `PATH` with its ACP adapter, the same detection a local board uses ([agents.md](agents.md)). Only coding agents that speak
-  ACP can be connected, not a model endpoint. Nothing the server sends names a command, an argument, a folder or an environment
-  variable.
+- **Which program runs** is the machine's choice: an agent saved for this project on that machine, or Claude Code found on its
+  `PATH` with its ACP adapter, the same detection a local board uses ([agents.md](agents.md)). Codex, goose, Gemini CLI, a saved
+  agent that runs one of them, a program Shapewall does not know and a model endpoint are all refused with a message. Nothing the
+  server sends names a command, an argument, a folder or an environment variable.
+- **`--audience owner` trusts the server's label.** The machine cannot check who really asked: it sees only what the server says
+  about a job. So this setting holds against a later change of the audience on the server, and does not protect against a
+  compromised server.
+- **One link per agent.** One `agent connect` process holds an agent's link. A second one on the same token is refused by the
+  server, and the command exits with an error that names the machine already connected and since when. `--takeover` closes the
+  other link first; the process that lost it prints that another connect took over, and exits 0.
 - **The folder it reads** is the one the command runs in (the folder of `shapewall.config.json` when there is one). The agent
   process starts with a small environment and never gets `SHAPEWALL_TOKEN` or any other `SHAPEWALL_*` variable.
 - **The token** comes from `SHAPEWALL_TOKEN`, then `--token-file`, then the one saved by an earlier approval. It must be a connected
@@ -578,9 +605,12 @@ watcher) is an agent as before, with no link and no chat.
 - **One answer at a time** in a thread. A second message while one is being answered is refused; the panel queues it for you.
 - **Stop** ends the answer. The person who asked, the person who connected the agent, and admins may stop it.
 - **A turn outlives the tab that started it.** Reload, or open the same shared thread as a second person: the running answer is
-  replayed from its start and then followed live. Closing the tab does not stop the agent; Stop does.
-- **Choosing the agent.** The chip in the chat's header lists the project's connected agents with where each runs, or why you
-  cannot use it. You can point a thread only at an agent you may use yourself.
+  replayed from its start, in order, and then followed live. A viewer whose stream drops resumes from the last event it has and
+  misses nothing. Closing the tab does not stop the agent; Stop does.
+- **A thread stays with its agent.** The chip in the chat's header lists the project's connected agents with where each runs, or
+  why you cannot use it. You can point a thread only at an agent you may use yourself, and a thread never moves to another agent
+  by itself. Switching a thread that has messages adds a line to it: who switched it, from which agent to which. Only then does
+  the other agent get the thread: the messages of people it takes work from, and none of the first agent's answers.
 - **History** is kept on the server: the person's messages and the agent's answers with their steps. It counts against the
   workspace's storage quota, is in backups, and goes when its board or project is deleted. Rename, archive and delete your own
   chats from the chat history; a shared thread is cleared only by an admin. A thread keeps its newest 200 messages.
@@ -593,15 +623,19 @@ watcher) is an agent as before, with no link and no chat.
 The audience rules of [Agents on a hosted board](#agents-on-a-hosted-board) apply to chat exactly as they do to comments, and the
 project's agent policy still decides who may use any agent at all. On top of them:
 
-- **The machine has the last word.** Started with `--audience owner`, the agent's machine takes questions only from the person who
-  connected it, whatever audience the server has. The server refuses everyone else, the machine refuses them again by itself, and the
-  board says what is in effect: "Only Ada (set on the agent's own machine)". A machine's setting only narrows; nothing on the server
-  can widen it.
+- **The machine can narrow it.** Started with `--audience owner`, the agent's machine asks the server to keep the agent to the
+  person who connected it, even if its audience there is widened later. The server refuses everyone else, the machine refuses a
+  job the server labels as someone else's, and the board says what is in effect: "Only Ada (set on the agent's own machine)". The
+  machine cannot check that label, so this does not protect against a compromised server.
 - **A shared thread is not a way around an audience.** What reaches an agent is only what people in its audience wrote, and its own
   earlier answers. A message by someone outside its audience stays in the thread for people to read and is never sent to that
   agent; nor are another agent's answers. The same goes for replies on a comment.
-- **A share link guest's text never reaches a connected agent**: not their comments, not their replies, and a guest's comment cannot
-  be mentioned in a message.
+- **Comments follow the audience too.** The board context an agent gets with a question holds a comment only when the person
+  asking wrote it, or the agent holds it, or its author is in the agent's audience and the comment was sent to an agent and not
+  to another one. That is what the token API would show that agent's token. The same rule decides the comment of a comment's
+  thread and what an "@" mention of a comment carries: a mention of a comment the agent may not read keeps only its number.
+- **A share link guest's text never reaches a connected agent**: not their comments, not their replies, and not through a
+  mention.
 
 ### Comments sent to a connected agent
 
@@ -618,6 +652,9 @@ watchers to fix new comments: every trusted member's new comment would go to an 
 
 - **Chat is refused.** The composer gives way to "Builder is offline. Chat needs it online; a comment sent to it waits until it is
   back." A conversation that silently queues is worse than a clear no.
+- **The thread does not move by itself.** A thread whose agent is offline, or was revoked, stays with it. When another agent you
+  may use is online, the panel offers **Ask Scout instead**. Choosing it switches the thread in the open, with the line described
+  under [Chat with a connected agent](#chat-with-a-connected-agent).
 - **Comments wait**, as for any agent: "Waiting for Builder (offline, last seen 2 hours ago)", with **Let any agent take it**. The
   agent takes what was sent to it when it is back.
 
@@ -627,10 +664,16 @@ watchers to fix new comments: every trusted member's new comment would go to an 
   is open and picks up from there. A batch of an answer the server did not hear is sent again; a repeat is dropped.
 - **The machine goes away mid-answer.** After 45 seconds without a word and without a link, the turn ends as interrupted, with what
   the agent had written so far: "The agent's machine went away before it finished. Ask again."
-- **The server restarts.** Answers in progress are over; their threads say so the next time they are read. Stored messages are
-  untouched.
+- **The server restarts.** Answers in progress are over. Every turn a stop left queued or running is ended as interrupted when
+  the server starts, with its usage record, whether or not anyone opens its thread again. Stored messages are untouched.
 - **The agent is revoked** (on the Agents page, or its token on the Tokens page). Its link closes at once, what it was answering ends
   with "Builder was revoked before it finished.", and the command on its machine exits.
+- **A second connect.** Refused while the first holds the link, or it takes over with `--takeover`
+  ([the connect command](#the-connect-command)). After a hard crash the server may still believe the old link is open for a short
+  while, and refuses a restart until it notices.
+- **A link that flaps** does not flood anything. Boards are told that an agent came or went at most once every 3 seconds per
+  agent, and the audit log gets at most one connected and one disconnected entry a minute per agent. A revoked or taken-over link
+  is always written.
 
 ### Limits of chat
 
@@ -643,9 +686,12 @@ watchers to fix new comments: every trusted member's new comment would go to an 
 | An answer                           | 100,000 characters                                                     |
 | What the machine sends at once      | 256 KB and 100 events in a batch                                       |
 | What the machine fetches for a turn | 2 MB                                                                   |
-| Links one agent token holds         | 2                                                                      |
+| Links one agent token holds         | 1 (a second is refused, or takes over with `--takeover`)               |
+| Link opens by one agent token       | 6 a minute                                                             |
+| Chats of your own on one board      | 50 (the shared threads are apart)                                      |
 
-`dailyTurns` is part of the project's agent policy. The console's form has no field for it yet (and keeps the value when you save
+The daily budget is counted from the usage records, so deleting a thread gives no turns back. `dailyTurns` is part of the
+project's agent policy. The console's form has no field for it yet (and keeps the value when you save
 the form): read the policy with `GET /api/workspaces/:ws/projects/:pid/agent`, set `dailyTurns` (0 to 100000; 0 stops chat turns)
 and `PUT` the whole policy back. The link has its own request budget on the token API, so a streamed answer does not use up the
 agent's budget for comments.
@@ -664,7 +710,7 @@ After=network-online.target
 
 [Service]
 WorkingDirectory=%h/projects/site
-ExecStart=/usr/bin/env shapewall agent connect --remote https://wall.example.com
+ExecStart=/usr/bin/env shapewall agent connect --remote https://wall.example.com --takeover
 Restart=on-failure
 RestartSec=10
 # A clean environment: only what the agent needs to find its programs and its own login.
@@ -674,6 +720,8 @@ Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin
 WantedBy=default.target
 ```
 
+- `--takeover` is there so a restart is not refused: after a hard crash the server may still count the old link as open for a short
+  while. It also means this service takes the link from any other process that holds it for this agent.
 - With the token in a file of its own (a secret store, another user), add `--token-file /path/to/token`. The file holds the agent's
   token and nothing else.
 - SIGTERM is a clean stop (exit 0), so `systemctl --user stop` does not count as a failure. A revoked token exits 1; the unit then
@@ -692,14 +740,35 @@ WantedBy=default.target
   folder that those tools can read, a `.env` file included. Its instructions say not to quote secrets, and the machine removes the
   agent's own token from anything it sends; neither is a guarantee. Connect only a project whose code the agent's audience may
   read, and keep secrets out of the folder or out of the agent's reach.
-- **It is only as read-only as its own profile.** Shapewall refuses every request the agent makes. A tool the agent is set up to
-  run **without asking** never asks: an allow rule for a shell command in Claude Code's settings, a mode that accepts edits or skips
-  permissions. `agent connect` warns when it finds Claude Code allow rules for editing or shell tools, and a session whose mode acts
-  without asking is switched to one that asks, or is not started. Give a connected agent a restricted profile of its own (its own
-  config folder, no allow rules, its default mode left at one that asks). See
-  [agent-hardening.md](agent-hardening.md#connected-agents).
+- **It cannot act, by its own controls.** The session has only its reading tools and none of your settings files, and it is not
+  started when that cannot be set up ([read-only by the agent's own controls](#read-only-by-the-agents-own-controls)).
 - **What the machine sends back** is cleaned by the server field by field before anything is shown or stored. A stolen agent token
   can pose as the agent (read what was sent to it, post answers); it cannot reach the machine.
+
+### Read-only by the agent's own controls
+
+Refusing what an agent asks for is not enough: a tool it is set up to run without asking never asks. So a connected Claude Code
+session is started in a way that leaves it nothing to act with, and anything that cannot be set up that way stops the start
+(fail closed).
+
+- **No settings files.** Your `~/.claude/settings.json` and the project's `.claude/settings.json` and
+  `.claude/settings.local.json` are left out of the session. Their allow rules, hooks, default mode and plugins do not apply.
+  When one of them holds such rules, `agent connect` says so: "Left out of this session".
+- **No MCP servers** from `.mcp.json` or from settings.
+- **Only its reading tools:** Read, Grep and Glob. Bash, Edit, Write, MultiEdit, NotebookEdit, WebFetch, WebSearch, Task/Agent and
+  Skill are removed from the session, and bypassing permissions is switched off.
+- **A mode that asks.** The session's mode must be "default" or "plan". Any other is switched to "default", or the agent is not
+  started. An agent that reports no session mode at all is not started read-only. An agent that switches itself to another mode
+  mid-answer is stopped.
+- **Reading outside the project asks**, and the request is refused like every other.
+- **Managed settings cannot be left out.** When `/etc/claude-code/managed-settings.json` allows acting tools (Bash, Edit, Write,
+  MultiEdit, NotebookEdit, WebFetch, WebSearch, Task, `mcp__*`, or Read of absolute or home paths) or runs hooks, `agent connect`
+  refuses to start and says why. It no longer only warns.
+- **What this costs you.** Settings that live in those files, such as an `apiKeyHelper` or `env`, do not apply to the connected
+  session either. The login itself is not in those files.
+
+This was shown on one machine with one adapter version ([agent-hardening.md](agent-hardening.md#connected-agents) says how). It
+is still a good idea to give a connected agent a profile of its own: a separate config folder, logged in for this purpose.
 
 ### Chat usage records and the audit log
 
@@ -709,8 +778,9 @@ reports them, and a cost only when the agent itself reports one: nothing is esti
 never holds a message or an answer. There is no page for them yet.
 
 The audit log gains `agent_connected` (who approved which agent, on which machine, for whom), `agent_link_connected` and
-`agent_link_disconnected` (with the reason), `chat_thread_created`, `chat_thread_deleted`, `agent_turn_started` and
-`agent_turn_stopped` (who, which agent, which board and thread). No entry holds message text.
+`agent_link_disconnected` (with the reason; at most one of each a minute per agent, except a revoked or taken-over link, which is
+always written), `chat_thread_created`, `chat_thread_deleted`, `chat_thread_agent_changed` (who switched a thread from which agent
+to which), `agent_turn_started` and `agent_turn_stopped` (who, which agent, which board and thread). No entry holds message text.
 
 ### The link and chat APIs
 

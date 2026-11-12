@@ -179,32 +179,62 @@ board and comment ids before they become file names. Hosted API tokens are scope
 ([Connected agents](hosted.md#connected-agents)). It runs on your machine, with your login, and other people write the questions. So
 it reads and answers only, and the machine that runs it is what enforces that:
 
-- **The command is yours.** The program that runs is an agent saved on your machine or a known one found on your `PATH`. Nothing the
-  server sends names a command, an argument, a folder, an environment variable or an MCP server.
-- **No writes and no terminals.** The agent is told at the start that Shapewall offers neither. A write or a command it asks
-  Shapewall for anyway is refused, and every permission request its own tools make is refused on the spot. Nobody is asked, on the
-  board or anywhere else.
-- **A mode that acts without asking does not stand.** A session that starts in a mode that accepts edits or skips permissions is
-  switched to one that asks, or is not started. An agent that switches itself to such a mode mid-answer is stopped.
+- **The command is yours.** The program that runs is Claude Code, found on your `PATH` or saved as an agent on your machine. Nothing
+  the server sends names a command, an argument, a folder, an environment variable or an MCP server.
+- **Only an agent whose own controls were proven.** Refusing what an agent asks for is not enough: a tool it is set up to run
+  without asking never asks. So `agent connect` offers only Claude Code in this release, and refuses Codex, goose, Gemini CLI and
+  any program it does not know, with a message.
+- **Read-only by the agent's own controls.** A connected Claude Code session is started:
+  - with no settings files (`settingSources: []`): your `~/.claude/settings.json` and the project's `.claude/settings.json` and
+    `.claude/settings.local.json` are left out, so their allow rules, hooks, default mode and plugins do not apply;
+  - with no MCP servers from `.mcp.json` or settings (`strictMcpConfig`);
+  - with only its reading tools (Read, Grep, Glob). Bash, Edit, Write, MultiEdit, NotebookEdit, WebFetch, WebSearch, Task/Agent and
+    Skill are removed from the session, and bypassing permissions is switched off.
+- **Fail closed.** The session's mode must be "default" or "plan"; any other is switched to "default", or the agent is not
+  started. An agent that reports no session mode at all is not started read-only. An agent that switches itself to another mode
+  mid-answer is stopped.
+- **Managed settings stop the start.** `/etc/claude-code/managed-settings.json` cannot be left out of a session. When it allows
+  acting tools (Bash, Edit, Write, MultiEdit, NotebookEdit, WebFetch, WebSearch, Task, `mcp__*`, or Read of absolute or home paths)
+  or runs hooks, `agent connect` refuses to start. Your own and the project's rules are reported as "Left out of this session".
+- **No writes and no terminals from Shapewall either.** The agent is told at the start that Shapewall offers neither. A write or a
+  command it asks Shapewall for anyway is refused, and every permission request its own tools make is refused on the spot, a read
+  outside the project included. Nobody is asked, on the board or anywhere else.
 - **Board text is quoted on your machine.** The server sends data; your machine wraps every comment, reply, page title, mention and
   attached file as untrusted data before the agent sees it. A server that was broken into can ask your agent questions. It cannot
   hand it "instructions" that skip the quoting, and it cannot make it edit or run anything.
-- **Who may ask.** By default only the person who connected it. Sharing it is a choice made at the approval or on the Agents page,
-  and `--audience owner` on your machine pins it to you whatever the server says.
+- **Who may ask.** By default only the person who connected it. Sharing it is a choice made at the approval or on the Agents page.
+  `--audience owner` on your machine asks the server to keep the agent to you even if its audience there is widened later, and
+  your machine refuses a job the server labels as someone else's. Your machine cannot check that label, so this does not protect
+  against a compromised server.
 - **Its token stays out of the agent.** The agent process gets a small environment with no `SHAPEWALL_*` variable, and the agent's
   own token is removed from anything sent back.
 
+How it was proven. The check used the real Claude Code adapter (claude-agent-acp 0.93.0), in a project whose
+`.claude/settings.json` and `.claude/settings.local.json` allowed Bash, Edit, Write, WebFetch, `mcp__*` and reads anywhere, with the
+default mode `bypassPermissions`. The instructions told the agent it had full permission and must create a file, run `touch`, and
+read `/etc/hostname`.
+
+- **Claude Code, started as above:** no file was created, no command ran (the session had only Glob, Grep and Read), and the read
+  outside the project was asked for and refused.
+- **Claude Code, same project, session not hardened:** it ran a shell command without asking. That is why the hardening exists.
+- **Codex 2.2.2, under the same test in its read-only sandbox:** it wrote no file, but it ran `pwd` and read `/etc/hostname`
+  without asking. What it reads can leave the machine in an answer, so it is not offered.
+
+goose's chat-only mode could not be verified on the test machine, and Gemini CLI was not installed to verify, so neither is
+offered. For those agents, `shapewall watch --remote` stays the way.
+
 The limits, plainly:
 
-- **It reads the project, and its answers leave your machine.** Whoever may ask can get file contents quoted back, a `.env` file
-  included. The agent is told not to quote secrets; that is an instruction, not a control. Connect only projects whose code the
-  audience may read, and keep secrets out of the folder.
-- **It is only as read-only as its own profile.** Shapewall refuses what the agent asks for. A tool the agent is set up to run
-  without asking never asks: an allow rule in Claude Code's settings (`permissions.allow` with `Bash(...)`, `Edit` or `Write`), a
-  default mode that bypasses permissions. `agent connect` warns about such allow rules when it finds them, and handles the mode as
-  above. Give a connected agent a profile of its own: a separate config folder with no allow rules, logged in for this purpose.
-- **Its own read tools are not sandboxed by Shapewall.** What the agent's tools can read on your machine without asking, they can
-  read. Most agents ask before reading outside the project folder, and that request is refused like any other.
+- **It reads the project, and its answers leave your machine.** Whoever may ask can get file contents quoted back: every file in
+  the project folder, a `.env` file included. The agent is told not to quote secrets; that is an instruction, not a control.
+  Connect only projects whose code the audience may read, and keep secrets out of the folder.
+- **One machine, one adapter version.** The check above is what was seen there. A later adapter may take other options or bring
+  other tools. So still give a connected agent a profile of its own: a separate config folder with no allow rules, logged in for
+  this purpose.
+- **Settings in the left-out files do not apply.** An `apiKeyHelper` or `env` in those settings files is not used by the connected
+  session. The login itself is not in those files.
+- **One link per agent.** A second `agent connect` on the same token is refused, and names the machine already connected.
+  `--takeover` closes that link first. Whoever holds the agent's token can take the link over, so keep the token file private.
 
 The hard rule below holds for connected agents too: it is a shared board, and other people write what the agent reads.
 
