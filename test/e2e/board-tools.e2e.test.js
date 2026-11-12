@@ -584,7 +584,11 @@ test('desktop: Hand pans over pages and pins and opens nothing; Space is a tempo
     assert.ok(Math.abs(after[1] - before[1] - 50) <= 2, 'Select: a drag on empty canvas pans')
 
     // V and H while typing a comment are letters, not tools.
+    // (The thread's Back has landed and the camera has rested before the next tool.)
+    await overlayBackLanded(page)
+    await page.waitForTimeout(300)
     await page.keyboard.press('c')
+    await page.waitForSelector('[data-sw-canvas][data-sw-comment-flow="picking"]')
     await page.waitForSelector(`${TOOLS}[data-sw-tools="comment"]`)
     frame = await rect(page, frameSel)
     await page.mouse.click(frame.left + frame.width / 2, frame.top + 80)
