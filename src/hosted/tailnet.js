@@ -45,6 +45,8 @@ export function sessionReader({ auth, tailnet = null }) {
     if (!bound) return found
     const identity = tailnet ? tailnet.identityOf(req) : null
     if (!identity || identity.login !== bound || found.user.tailnet_login !== bound) return null
+    // And the same tailnet user as the one the account is held to, not only the same login string.
+    if (!identity.userId || found.user.tailnet_user_id !== identity.userId) return null
     return found
   }
 }
@@ -65,7 +67,29 @@ export function handleFromLogin(login) {
 export function createTailnetAccounts({ db, iso, now }) {
   const q = accounts(db)
 
+  // The account a login string is linked to (for "is this login taken").
   const userFor = (login) => q.get('SELECT * FROM users WHERE tailnet_login = :login', { login }) || null
+
+  // The account a proven identity is: linked to its login AND held to the
+  // same tailnet user. A login is a name (ada@example.com); a tailnet can
+  // give that name to someone else later, or a node shared in from another
+  // tailnet can carry a login that reads the same. Tailscale's own id of the
+  // user does not move with the name, so an account keeps the id it was
+  // linked with and a later request must carry the same one. An account
+  // linked before the id was kept (or by `hosted claim --login`, which knows
+  // only the name) takes the id of the first proven request that arrives as
+  // its login.
+  function accountOf(identity) {
+    const user = identity?.login ? userFor(identity.login) : null
+    if (!user || !identity.userId) return null
+    if (!user.tailnet_user_id) {
+      q.run('UPDATE users SET tailnet_user_id = :tid WHERE id = :id AND tailnet_user_id IS NULL', { tid: identity.userId, id: user.id })
+      return { ...user, tailnet_user_id: identity.userId }
+    }
+    return user.tailnet_user_id === identity.userId ? user : null
+  }
+  // The login is linked here, but to another tailnet user than this one.
+  const heldByAnother = (identity) => Boolean(identity?.login && userFor(identity.login)) && !accountOf(identity)
 
   function freeHandle(wanted) {
     for (let n = 1; n < 1000; n += 1) {
@@ -78,14 +102,19 @@ export function createTailnetAccounts({ db, iso, now }) {
   }
 
   // Links an account to a login. One account per login, one login per account.
-  function link(userId, login) {
+  function link(userId, login, tailnetUserId = null) {
     login = cleanTailnetLogin(login)
     if (!login) throw new HttpError(400, 'invalid_login', 'That is not a tailnet login.')
     return transaction(db, () => {
       const holder = userFor(login)
       if (holder && holder.id !== userId)
         throw new HttpError(409, 'tailnet_login_taken', 'That tailnet login is linked to another account here.')
-      q.run('UPDATE users SET tailnet_login = :login, tailnet_linked_at = :at WHERE id = :id', { login, at: iso(), id: userId })
+      q.run('UPDATE users SET tailnet_login = :login, tailnet_linked_at = :at, tailnet_user_id = :tid WHERE id = :id', {
+        login,
+        at: iso(),
+        tid: tailnetUserId ? String(tailnetUserId) : null,
+        id: userId,
+      })
       q.run('DELETE FROM tailnet_visitors WHERE login = :login', { login })
       return login
     })
@@ -96,7 +125,7 @@ export function createTailnetAccounts({ db, iso, now }) {
     return transaction(db, () => {
       const user = q.get('SELECT tailnet_login FROM users WHERE id = :id', { id: userId })
       if (!user?.tailnet_login) return null
-      q.run('UPDATE users SET tailnet_login = NULL, tailnet_linked_at = NULL WHERE id = :id', { id: userId })
+      q.run('UPDATE users SET tailnet_login = NULL, tailnet_linked_at = NULL, tailnet_user_id = NULL WHERE id = :id', { id: userId })
       q.run('DELETE FROM sessions WHERE user_id = :user AND tailnet_login IS NOT NULL', { user: userId })
       return user.tailnet_login
     })
@@ -130,9 +159,17 @@ export function createTailnetAccounts({ db, iso, now }) {
         tailnet_login: identity.login,
       }
       q.run(
-        `INSERT INTO users (id, handle, display_name, webauthn_user_id, created_at, tailnet_login, tailnet_linked_at)
-         VALUES (:id, :handle, :name, :webauthn, :at, :login, :at)`,
-        { id: user.id, handle: user.handle, name, webauthn: user.webauthn_user_id, at: user.created_at, login: identity.login },
+        `INSERT INTO users (id, handle, display_name, webauthn_user_id, created_at, tailnet_login, tailnet_linked_at, tailnet_user_id)
+         VALUES (:id, :handle, :name, :webauthn, :at, :login, :at, :tid)`,
+        {
+          id: user.id,
+          handle: user.handle,
+          name,
+          webauthn: user.webauthn_user_id,
+          at: user.created_at,
+          login: identity.login,
+          tid: identity.userId ? String(identity.userId) : null,
+        },
       )
       q.run('DELETE FROM tailnet_visitors WHERE login = :login', { login: identity.login })
       return user
@@ -176,5 +213,5 @@ export function createTailnetAccounts({ db, iso, now }) {
 
   const forgetVisitor = (login) => q.run('DELETE FROM tailnet_visitors WHERE login = :login', { login: String(login) }).changes > 0
 
-  return { userFor, link, unlink, createUser, suggestion, noteVisitor, visitors, forgetVisitor }
+  return { userFor, accountOf, heldByAnother, link, unlink, createUser, suggestion, noteVisitor, visitors, forgetVisitor }
 }

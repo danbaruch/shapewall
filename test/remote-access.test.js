@@ -7,7 +7,7 @@ import { Devices, PAIR_MS, DEVICE_IDLE_MS, DEVICE_MAX_MS } from '../src/server/d
 import { createApp, stopChildren } from '../src/server/app.js'
 import { ownerIdentity } from '../src/server/pairing-routes.js'
 import { lanAccess, tailscaleAccess } from '../src/server/tailscale.js'
-import { believedGate } from './tailnet-helpers.js'
+import { believedGate, tailnetUserId } from './tailnet-helpers.js'
 import { devicesCommand } from '../src/devices-cli.js'
 import { parseArgs } from '../src/cli.js'
 import { createApproval, readApproval } from '../src/agent/starter/approvals.js'
@@ -97,7 +97,12 @@ test('device capabilities stay hashed/private/project-isolated, slide 30 days, s
 })
 
 test('Tailscale owner identity is exact, loopback-only, never a settings capability', () => {
-  const tailscale = { host: 'fixture.example.ts.net', ownerLogin: 'owner@example.test', gate: believedGate() }
+  const tailscale = {
+    host: 'fixture.example.ts.net',
+    ownerLogin: 'owner@example.test',
+    ownerUserId: tailnetUserId('owner@example.test'),
+    gate: believedGate(),
+  }
   const req = {
     socket: { remoteAddress: '127.0.0.1' },
     headers: { host: 'fixture.example.ts.net:4600', 'tailscale-user-login': 'owner@example.test' },
@@ -221,7 +226,12 @@ test('unpaired remote APIs and files are closed; host approval grants owner righ
 
 test('remote chat and approval switches deny the whole boundary; Tailscale owner cannot change settings', async (t) => {
   const { config, env, devices } = fixture('remote-flags')
-  const tail = { host: 'fixture.example.ts.net', ownerLogin: 'owner@example.test', gate: believedGate() }
+  const tail = {
+    host: 'fixture.example.ts.net',
+    ownerLogin: 'owner@example.test',
+    ownerUserId: tailnetUserId('owner@example.test'),
+    gate: believedGate(),
+  }
   const app = createApp({
     config,
     env,
@@ -291,7 +301,7 @@ const tailStatus = {
   Self: { DNSName: 'fixture.example.ts.net.', ID: 'nHOSTfixture', TailscaleIPs: ['100.64.0.1'] },
   TailscaleIPs: ['100.64.0.1'],
 }
-function fakeTail({ serve = {}, funnel = {}, who = { UserProfile: { LoginName: 'owner@example.test' }, Node: {} } } = {}) {
+function fakeTail({ serve = {}, funnel = {}, who = { UserProfile: { LoginName: 'owner@example.test', ID: 4242 }, Node: {} } } = {}) {
   const calls = []
   return {
     calls,
@@ -370,11 +380,12 @@ test('serve --tailscale: a Tailscale-User-Login header counts only through the s
       }
     if (args[0] === 'whois') {
       // .1 is this host (its own node), .5 the owner's phone; nothing else is on the tailnet.
-      const node = { '100.64.0.1': 'nHOSTfixture', '100.64.0.5': 'nPHONEfixture' }[args.at(-1)]
+      const node = { '100.64.0.1': 'nHOSTfixture', '100.64.0.5': 'nPHONEfixture', '100.64.0.9': 'nOTHERfixture' }[args.at(-1)]
       if (!node) throw new Error('peer not found')
       return {
         stdout: JSON.stringify({
-          UserProfile: { LoginName: 'owner@example.test' },
+          // .9: a device whose login reads like the owner's, of another tailnet user (a shared-in node, say).
+          UserProfile: { LoginName: 'owner@example.test', ID: args.at(-1) === '100.64.0.9' ? 999 : 4242 },
           Node: { StableID: node, Addresses: [`${args.at(-1)}/32`] },
         }),
       }
@@ -477,9 +488,14 @@ test('serve --tailscale: a Tailscale-User-Login header counts only through the s
   assert.equal((await viaServe('GET', '/api/info')).json.remote.kind, 'identity')
   assert.equal((await viaServe('GET', '/api/info', { headers: { 'Tailscale-User-Login': 'attacker@example.test' } })).status, 401)
   assert.equal(
-    (await viaServe('GET', '/api/info', { headers: { 'X-Forwarded-For': '100.64.0.9' } })).status,
+    (await viaServe('GET', '/api/info', { headers: { 'X-Forwarded-For': '100.64.0.10' } })).status,
     401,
     'tailscaled does not vouch for that address',
+  )
+  assert.equal(
+    (await viaServe('GET', '/api/info', { headers: { 'X-Forwarded-For': '100.64.0.9' } })).status,
+    401,
+    'a device whose login reads like the owner’s, of another tailnet user: not the owner',
   )
   // THE HOST ITSELF, through its own tailnet name: any program on this computer can ask tailscaled for
   // the serve URL. The source is the host's own tailnet address, whois names the owner, serve sets the
@@ -498,4 +514,74 @@ test('serve --tailscale: a Tailscale-User-Login header counts only through the s
   // A serve config that is no longer the one entry: nobody is the owner by identity.
   served = 'http://127.0.0.1:4600'
   await tail.stop()
+})
+
+test('serve --tailscale: a failed self test of the peer check keeps identity off; the 30 second watch does not switch it back on', async () => {
+  const base = fakeTail()
+  let served = null
+  const run = async (command, args) => {
+    if (args[0] === 'status') return { stdout: JSON.stringify({ ...tailStatus, TUN: true, Version: '1.104.2' }) }
+    if (args[0] === 'serve' && args.includes('--bg')) {
+      served = args.at(-1)
+      return { stdout: '' }
+    }
+    if (args[0] === 'serve' && args[1] === 'status' && served)
+      return {
+        stdout: JSON.stringify({
+          TCP: { 4600: { HTTPS: true } },
+          Web: { 'fixture.example.ts.net:4600': { Handlers: { '/': { Proxy: served } } } },
+        }),
+      }
+    return base.run(command, args)
+  }
+  const facts = () => ({ tailscaled: [{ pid: 1, uid: 0, argv: ['/usr/sbin/tailscaled'] }], unreadable: 0, container: null })
+  const lines = []
+  const server = http.createServer(() => {})
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  try {
+    // The peer check names somebody else for a connection this process made itself: it does not work here.
+    const broken = await tailscaleAccess({
+      port: 4600,
+      command: '/fixture/tailscale',
+      run,
+      facts,
+      log: (line) => lines.push(line),
+      proof: { problem: () => null, trusted: () => true, ownerOf: () => process.getuid() + 1 },
+    })
+    assert.ok(broken.gate)
+    // Each tick of the watch is awaited here: the serve config and tailscaled are fine every time.
+    let ticks = 0
+    const timers = []
+    const realSetInterval = globalThis.setInterval
+    globalThis.setInterval = (fn) => {
+      timers.push(fn)
+      return { unref() {} }
+    }
+    try {
+      await broken.start(server, { watchMs: 30_000 })
+    } finally {
+      globalThis.setInterval = realSetInterval
+    }
+    assert.match(broken.gate.suspended(), /did not recognise a test connection/)
+    assert.equal(timers.length, 1)
+    for (; ticks < 3; ticks += 1) await timers[0]()
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.match(broken.gate.suspended(), /did not recognise a test connection/, 'still off after the watch looked three times')
+    assert.equal(lines.filter((line) => /Tailscale identity is off \(pairing still works\)/.test(line)).length, 1)
+    await broken.stop()
+    // The same machine with a peer check that works: on, and the watch keeps it on.
+    served = null
+    const working = await tailscaleAccess({
+      port: 4600,
+      command: '/fixture/tailscale',
+      run,
+      facts,
+      proof: { problem: () => null, trusted: () => true, ownerOf: () => process.getuid() },
+    })
+    await working.start(server, { watchMs: 0 })
+    assert.equal(working.gate.suspended(), null)
+    await working.stop()
+  } finally {
+    server.close()
+  }
 })

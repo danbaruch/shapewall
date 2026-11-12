@@ -74,6 +74,7 @@
 // one with a plain 404).
 
 import fs from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import os from 'node:os'
 import net from 'node:net'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
@@ -276,17 +277,45 @@ export async function proofSelfTest(server, proof) {
 // dialled by tailscaled itself.
 const DEBUG_SWITCHES = ['TS_DEBUG_NETSTACK_LOOPBACK_PORT', 'TS_DEBUG_NETSTACK_SUBNETS']
 
+// The pid systemd runs tailscaled.service as, or null (no systemd, no such
+// unit, or it is not running). Any user may ask.
+export function systemdMainPid(unit = 'tailscaled.service', run = execFileSync) {
+  try {
+    const text = String(
+      run('systemctl', ['show', '--property=MainPID', '--value', unit], {
+        encoding: 'utf8',
+        timeout: 3000,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }),
+    )
+    const pid = Number.parseInt(text.trim(), 10)
+    return Number.isSafeInteger(pid) && pid > 0 ? pid : null
+  } catch {
+    return null
+  }
+}
+
 // What this machine says about tailscaled and about where this process runs.
 // { tailscaled: [{ pid, uid, argv, env }], unreadable: n, container: reason | null }
-// Only processes of root count. Anyone can start a program called
-// "tailscaled"; one that is not root's is no tailscaled this server would
-// believe anyway, and must not be able to switch the feature off for
-// everyone. Where this process may read it (it is root itself), the
-// executable must also be a file called tailscaled that root owns.
+//
+// Which process is tailscaled:
+//   - Where systemd runs it (`mainPid`: the MainPID of tailscaled.service),
+//     that process and no other, whatever anything else on the machine is
+//     called. It is the daemon the `tailscale` command talks to and the one
+//     that dials the serve target.
+//   - Otherwise by name (comm "tailscaled"), which anyone can give a program.
+// And in both cases only a process that is root in all four of its ids (the
+// `Uid:` line of /proc/<pid>/status: real, effective, saved, filesystem). A
+// setuid-root program that an ordinary user started under the name
+// "tailscaled" is root only in some of them: it is not tailscaled, and it
+// must neither be believed nor be able to switch the feature off for
+// everyone by being counted as a second daemon. Where this process may read
+// it (it is root itself), the executable must also be a file called
+// tailscaled that root owns.
 // `env`: the names of the debug switches found in its environment, or null
 // when that cannot be read (normal for a server that is not root: what root
 // put in tailscaled's environment is then trusted root configuration).
-export function hostFacts({ proc = '/proc', read = fs, env = process.env } = {}) {
+export function hostFacts({ proc = '/proc', read = fs, env = process.env, mainPid = systemdMainPid } = {}) {
   const facts = { tailscaled: [], unreadable: 0, container: null }
   let pids = []
   try {
@@ -294,32 +323,44 @@ export function hostFacts({ proc = '/proc', read = fs, env = process.env } = {})
   } catch {
     facts.unreadable += 1
   }
-  for (const pid of pids) {
-    let comm
-    try {
-      comm = read.readFileSync(`${proc}/${pid}/comm`, 'utf8').trim()
-    } catch {
-      continue // gone, or hidden
+  const main = typeof mainPid === 'function' ? mainPid() : mainPid
+  const known = Number.isSafeInteger(main) && main > 0 ? String(main) : null
+  if (known && !pids.includes(known)) pids = []
+  for (const pid of known ? [known] : pids) {
+    if (!known) {
+      let comm
+      try {
+        comm = read.readFileSync(`${proc}/${pid}/comm`, 'utf8').trim()
+      } catch {
+        continue // gone, or hidden
+      }
+      if (comm !== 'tailscaled') continue
     }
-    if (comm !== 'tailscaled') continue
-    let uid
+    // Root in every id, or it is somebody's program under that name: ignored.
+    let ids
     try {
-      uid = read.statSync(`${proc}/${pid}`).uid
+      ids = /^Uid:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*$/m.exec(read.readFileSync(`${proc}/${pid}/status`, 'utf8'))
     } catch {
+      continue // gone
+    }
+    if (!ids) {
+      facts.unreadable += 1
       continue
     }
-    // Someone else's program with that name: ignored.
-    if (uid !== 0) continue
-    try {
-      const exe = read.readlinkSync(`${proc}/${pid}/exe`)
-      if (!/(^|\/)tailscaled(?: \(deleted\))?$/.test(exe)) continue
+    if (ids.slice(1).some((id) => id !== '0')) continue
+    const uid = 0
+    if (!known) {
       try {
-        if (read.statSync(exe.replace(/ \(deleted\)$/, '')).uid !== 0) continue
+        const exe = read.readlinkSync(`${proc}/${pid}/exe`)
+        if (!/(^|\/)tailscaled(?: \(deleted\))?$/.test(exe)) continue
+        try {
+          if (read.statSync(exe.replace(/ \(deleted\)$/, '')).uid !== 0) continue
+        } catch {
+          /* replaced by an update while it runs: the name is what there is */
+        }
       } catch {
-        /* replaced by an update while it runs: the name is what there is */
+        /* not readable by this user: root's process with that name is taken as it is */
       }
-    } catch {
-      /* not readable by this user: root's process with that name is taken as it is */
     }
     try {
       const argv = read.readFileSync(`${proc}/${pid}/cmdline`, 'utf8').split('\0').filter(Boolean)
@@ -403,9 +444,9 @@ export function tailscaledProblem(status, facts) {
 }
 
 // whois from the answer of `tailscale whois --json <address>`: { login,
-// tagged, stableId, addresses } or null (no such peer, or an answer that
+// userId, expired, tagged, stableId, addresses } or null (no such peer, or an answer that
 // names no user). stableId and addresses say which node it is.
-export function whoisAnswer(stdout) {
+export function whoisAnswer(stdout, now = Date.now()) {
   let data
   try {
     data = JSON.parse(stdout)
@@ -415,8 +456,19 @@ export function whoisAnswer(stdout) {
   if (!data || typeof data !== 'object' || !data.Node || typeof data.Node !== 'object') return null
   const login = cleanTailnetLogin(data.UserProfile?.LoginName)
   if (!login) return null
+  // Tailscale's own id of the user (a number, or a string in newer versions): what a login string stands for.
+  const rawUser = data.UserProfile?.ID ?? data.Node.User
+  const userId =
+    ['number', 'string'].includes(typeof rawUser) && /^[A-Za-z0-9_-]{1,64}$/.test(String(rawUser)) && String(rawUser) !== '0'
+      ? String(rawUser)
+      : null
+  // A node whose key expired is no longer that person's device as far as the tailnet goes.
+  const expiry = typeof data.Node.KeyExpiry === 'string' ? Date.parse(data.Node.KeyExpiry) : Number.NaN
+  const expired = data.Node.Expired === true || (Number.isFinite(expiry) && expiry > Date.parse('1970-01-02T00:00:00Z') && expiry <= now)
   return {
     login,
+    userId,
+    expired,
     tagged: Array.isArray(data.Node.Tags) && data.Node.Tags.length > 0,
     stableId: typeof data.Node.StableID === 'string' && data.Node.StableID ? data.Node.StableID : null,
     addresses: (Array.isArray(data.Node.Addresses) ? data.Node.Addresses : [])
@@ -559,13 +611,34 @@ const WHOIS_TTL_MS = 60_000
 // whois(address): async, { login, tagged, stableId, addresses } | null (see
 // whoisAnswer). self(): this node now, { stableId, addresses } | null (see
 // selfFromStatus); without it nobody is believed.
-export function createTailnetGate({ secret, proof, whois, self = () => null, log = () => {}, now = () => Date.now() }) {
+export function createTailnetGate({
+  secret,
+  proof,
+  whois,
+  self = () => null,
+  interfaces = () => os.networkInterfaces(),
+  log = () => {},
+  now = () => Date.now(),
+}) {
   if (typeof secret !== 'string' || secret.length < 32) throw new Error('the serve secret: at least 32 characters')
   const marked = Buffer.from(`${SECRET_PREFIX}${secret}`)
   const proven = new WeakMap()
   const vouched = new WeakMap() // socket -> Map(address -> { at, answer })
   const answers = new WeakMap()
   const fromHere = new WeakSet()
+  // Every address this machine has right now, asked on each request: `self`
+  // comes from `tailscale status` and is half a minute old at worst, and an
+  // address that tailscaled was given since must count as this machine at once.
+  const localAddresses = () => {
+    try {
+      return Object.values(interfaces() || {})
+        .flat()
+        .map((item) => canonicalAddress(item?.address))
+        .filter(Boolean)
+    } catch {
+      return []
+    }
+  }
   let suspendedFor = null
   let loggedAt = -Infinity
   const refused = (why) => {
@@ -602,12 +675,19 @@ export function createTailnetGate({ secret, proof, whois, self = () => null, log
       known.set(address, entry)
     }
     const answer = entry.answer
-    if (!answer || answer.tagged || answer.login !== login) return 'no'
+    if (!answer || answer.tagged || answer.login !== login) return { is: 'no' }
+    // A device whose key expired is not let in by the tailnet either.
+    if (answer.expired) return { is: 'expired' }
     // Which node: without that it cannot be told from this one.
     const here = self()
-    if (!here || !answer.stableId) return 'unknown'
-    if (answer.stableId === here.stableId || answer.addresses.some((item) => here.addresses.includes(item))) return 'self'
-    return 'yes'
+    if (!here || !answer.stableId) return { is: 'unknown' }
+    const local = localAddresses()
+    if (answer.stableId === here.stableId || answer.addresses.some((item) => here.addresses.includes(item) || local.includes(item)))
+      return { is: 'self' }
+    // Which user: the login is a name, and a name can be given to someone else later. Accounts are held
+    // to Tailscale's own id of the user (src/hosted/tailnet.js), so an answer without one names nobody.
+    if (!answer.userId) return { is: 'no-user' }
+    return { is: 'yes', userId: answer.userId }
   }
 
   async function admit(req, res = null) {
@@ -640,16 +720,18 @@ export function createTailnetGate({ secret, proof, whois, self = () => null, log
             const here = self()
             const source = canonicalAddress(address)
             if (!here) refused('this machine’s own tailnet addresses are not known')
-            else if (here.addresses.includes(source)) {
+            else if (here.addresses.includes(source) || localAddresses().includes(source)) {
               fromHere.add(req)
               refused('the request came from this machine itself')
             } else {
               const vouched = await vouch(socket, address, parsed.login)
-              if (vouched === 'yes') answer = parsed
-              else if (vouched === 'self') {
+              if (vouched.is === 'yes') answer = { ...parsed, userId: vouched.userId }
+              else if (vouched.is === 'self') {
                 fromHere.add(req)
                 refused('the request came from this machine itself')
-              } else if (vouched === 'unknown') refused('tailscaled does not say which device that address is')
+              } else if (vouched.is === 'unknown') refused('tailscaled does not say which device that address is')
+              else if (vouched.is === 'expired') refused('that device’s key has expired')
+              else if (vouched.is === 'no-user') refused('tailscaled does not say which user that login is')
               else refused('tailscaled does not say that address is that person’s device')
             }
           }

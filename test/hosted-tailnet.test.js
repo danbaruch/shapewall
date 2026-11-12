@@ -25,11 +25,11 @@ import {
   tailscaledProblem,
   whoisAnswer,
 } from '../src/hosted/tailnet-identity.js'
-import { selfFromStatus } from '../src/tailnet-proof.js'
+import { selfFromStatus, systemdMainPid } from '../src/tailnet-proof.js'
 import { handleFromLogin } from '../src/hosted/tailnet.js'
 import { createProject, invite, reauth, signUp } from './hosted-helpers.js'
 import { tempDir } from './helpers.js'
-import { TAILNET_HOST, TAILNET_ORIGIN, fakeTailscale, me, plainFacts, qEncode, startTailnet } from './tailnet-helpers.js'
+import { TAILNET_HOST, TAILNET_ORIGIN, fakeTailscale, me, plainFacts, qEncode, startTailnet, tailnetUserId } from './tailnet-helpers.js'
 
 const servers = []
 after(async () => {
@@ -230,20 +230,36 @@ test('the gate: the secret, a connection from tailscaled, tailscaled’s own who
   const asked = []
   let clock = 0
   const owners = new Map([
-    ['100.64.0.7', { login: 'ada@example.com', tagged: false, stableId: 'nADA', addresses: ['100.64.0.7'] }],
-    ['100.64.0.8', { login: 'ben@example.com', tagged: false, stableId: 'nBEN', addresses: ['100.64.0.8'] }],
-    ['100.64.0.9', { login: 'ada@example.com', tagged: true, stableId: 'nTAG', addresses: ['100.64.0.9'] }],
+    ['100.64.0.7', { login: 'ada@example.com', userId: 'uADA', tagged: false, stableId: 'nADA', addresses: ['100.64.0.7'] }],
+    ['100.64.0.8', { login: 'ben@example.com', userId: 'uBEN', tagged: false, stableId: 'nBEN', addresses: ['100.64.0.8'] }],
+    ['100.64.0.9', { login: 'ada@example.com', userId: 'uADA', tagged: true, stableId: 'nTAG', addresses: ['100.64.0.9'] }],
     // The server's own node, under an address the server did not list, and a node that also holds one of its addresses.
-    ['100.64.0.20', { login: 'ada@example.com', tagged: false, stableId: 'nSELF', addresses: ['100.64.0.20'] }],
+    ['100.64.0.20', { login: 'ada@example.com', userId: 'uADA', tagged: false, stableId: 'nSELF', addresses: ['100.64.0.20'] }],
     [
       '100.64.0.21',
-      { login: 'ada@example.com', tagged: false, stableId: 'nOTHER', addresses: ['100.64.0.21', 'fd7a:115c:a1e0:0:0:0:0:1'] },
+      {
+        login: 'ada@example.com',
+        userId: 'uADA',
+        tagged: false,
+        stableId: 'nOTHER',
+        addresses: ['100.64.0.21', 'fd7a:115c:a1e0:0:0:0:0:1'],
+      },
     ],
-    ['100.64.0.22', { login: 'ada@example.com', tagged: false, stableId: null, addresses: [] }],
-    ['100.64.0.1', { login: 'ada@example.com', tagged: false, stableId: 'nSELF', addresses: ['100.64.0.1'] }],
-    ['fd7a:115c:a1e0::1', { login: 'ada@example.com', tagged: false, stableId: 'nSELF', addresses: [] }],
+    ['100.64.0.22', { login: 'ada@example.com', userId: 'uADA', tagged: false, stableId: null, addresses: [] }],
+    ['100.64.0.1', { login: 'ada@example.com', userId: 'uADA', tagged: false, stableId: 'nSELF', addresses: ['100.64.0.1'] }],
+    ['fd7a:115c:a1e0::1', { login: 'ada@example.com', userId: 'uADA', tagged: false, stableId: 'nSELF', addresses: [] }],
+    ['100.64.0.30', { login: 'ada@example.com', userId: null, tagged: false, stableId: 'nNOUSER', addresses: ['100.64.0.30'] }],
+    [
+      '100.64.0.31',
+      { login: 'ada@example.com', userId: 'uADA', expired: true, tagged: false, stableId: 'nOLD', addresses: ['100.64.0.31'] },
+    ],
+    [
+      '100.64.0.32',
+      { login: 'ada@example.com', userId: 'uADA', tagged: false, stableId: 'nLATE', addresses: ['100.64.0.32', '100.64.0.40'] },
+    ],
   ])
   let here = { stableId: 'nSELF', addresses: ['100.64.0.1', 'fd7a:115c:a1e0:0:0:0:0:1'] }
+  let local0 = { lo: [{ address: '127.0.0.1' }], tailscale0: [{ address: '100.64.0.1' }] }
   const gate = createTailnetGate({
     secret,
     proof: { trusted: (socket) => socket?.remotePort === 1 },
@@ -253,6 +269,8 @@ test('the gate: the secret, a connection from tailscaled, tailscaled’s own who
       return owners.get(address) || null
     },
     self: () => here,
+    // What the machine's interfaces say right now (asked on each request).
+    interfaces: () => local0,
     log: (line) => lines.push(line),
     now: () => clock,
   })
@@ -269,7 +287,25 @@ test('the gate: the secret, a connection from tailscaled, tailscaled’s own who
   const through = `/_ts/${secret}`
   // Everything in place: believed, and the secret is gone from the path the application sees.
   const good = request(tailscaled, `${through}/auth/me?x=1`, ada())
-  assert.deepEqual(await who(good), { login: 'ada@example.com', name: 'ada' })
+  assert.deepEqual(await who(good), { login: 'ada@example.com', name: 'ada', userId: 'uADA' })
+  // tailscaled does not say which user the login is, or the device's key expired: nobody.
+  assert.equal(await who(request(tailscaled, `${through}/auth/me`, ada('100.64.0.30'))), null)
+  assert.equal(await who(request(tailscaled, `${through}/auth/me`, ada('100.64.0.31'))), null)
+  // An address this machine got since the last look at tailscale status (its interfaces have it now):
+  // this machine, at once. As the source, and as an address of the node whois names.
+  assert.deepEqual(await who(request({ remotePort: 1 }, `${through}/auth/me`, ada('100.64.0.32'))), {
+    login: 'ada@example.com',
+    name: 'ada',
+    userId: 'uADA',
+  })
+  local0 = { ...local0, tailscale0: [{ address: '100.64.0.1' }, { address: '100.64.0.7' }, { address: '100.64.0.40' }] }
+  const lateSource = request({ remotePort: 1 }, `${through}/auth/me`, ada('100.64.0.7'))
+  assert.equal(await who(lateSource), null)
+  assert.equal(gate.ownMachine(lateSource), true)
+  const lateNode = request({ remotePort: 1 }, `${through}/auth/me`, ada('100.64.0.32'))
+  assert.equal(await who(lateNode), null)
+  assert.equal(gate.ownMachine(lateNode), true)
+  local0 = { lo: [{ address: '127.0.0.1' }], tailscale0: [{ address: '100.64.0.1' }] }
   assert.equal(good.url, '/auth/me?x=1')
   const root = request(tailscaled, through, ada())
   await who(root)
@@ -349,7 +385,7 @@ test('the gate: the secret, a connection from tailscaled, tailscaled’s own who
     null,
     'the device left the tailnet: not believed on the open connection either',
   )
-  owners.set('100.64.0.7', { login: 'ada@example.com', tagged: false, stableId: 'nADA', addresses: ['100.64.0.7'] })
+  owners.set('100.64.0.7', { login: 'ada@example.com', userId: 'uADA', tagged: false, stableId: 'nADA', addresses: ['100.64.0.7'] })
   clock += 61_000
   // Suspended: nobody, also for a request admitted before.
   const earlier = request(tailscaled, `${through}/a`, ada())
@@ -420,7 +456,13 @@ test('a tailscaled whose connections cannot be believed: userspace networking, a
     '/proc/1/cgroup': '0::/init.scope\n',
   }
   const fakeFs = (overrides = {}, uid = 0) => {
-    const all = { ...files, ...overrides }
+    // Root's process is root in all four ids; pid 90 is somebody's setuid-root program (root in three).
+    const all = {
+      '/proc/40/status': `Name:\ttailscaled\nUid:\t${uid}\t${uid}\t${uid}\t${uid}\nGid:\t0\t0\t0\t0\n`,
+      '/proc/90/status': 'Name:\ttailscaled\nUid:\t1000\t0\t0\t0\nGid:\t1000\t1000\t1000\t1000\n',
+      ...files,
+      ...overrides,
+    }
     const missing = (file) => Object.assign(new Error(`ENOENT ${file}`), { code: 'ENOENT' })
     return {
       readdirSync: () => ['1', '40', '77', 'self', 'net'],
@@ -430,7 +472,8 @@ test('a tailscaled whose connections cannot be believed: userspace networking, a
       },
       statSync(file) {
         if (file === '/proc/40') return { uid }
-        if (file === '/proc/90') return { uid: 1000 }
+        // A setuid-root program: its /proc entry is root's, whoever started it.
+        if (file === '/proc/90') return { uid: 0 }
         if (file === '/usr/sbin/tailscaled') return { uid: all['exe-owner'] ?? 0 }
         if (all[file] === undefined || all[file] === null) throw missing(file)
         return { uid: 0 }
@@ -442,7 +485,7 @@ test('a tailscaled whose connections cannot be believed: userspace networking, a
       },
     }
   }
-  assert.deepEqual(hostFacts({ read: fakeFs(), env: {} }), {
+  assert.deepEqual(hostFacts({ mainPid: null, read: fakeFs(), env: {} }), {
     tailscaled: [
       { pid: 40, uid: 0, argv: ['/usr/sbin/tailscaled', '--state=/var/lib/tailscale/tailscaled.state', '--port=41641'], env: null },
     ],
@@ -454,19 +497,90 @@ test('a tailscaled whose connections cannot be believed: userspace networking, a
   const impostor = { '/proc/90/comm': 'tailscaled\n', '/proc/90/cmdline': null }
   const withImpostor = { ...fakeFs(impostor), readdirSync: () => ['1', '40', '77', '90'] }
   assert.deepEqual(
-    hostFacts({ read: withImpostor, env: {} }).tailscaled.map((item) => item.pid),
+    hostFacts({ mainPid: null, read: withImpostor, env: {} }).tailscaled.map((item) => item.pid),
     [40],
   )
-  assert.equal(hostFacts({ read: withImpostor, env: {} }).unreadable, 0)
-  assert.equal(tailscaledProblem(status, hostFacts({ read: withImpostor, env: {} })), null)
-  assert.deepEqual(hostFacts({ read: fakeFs({}, 1000), env: {} }).tailscaled, [], 'a tailscaled that is not root’s does not count at all')
+  assert.equal(hostFacts({ mainPid: null, read: withImpostor, env: {} }).unreadable, 0)
+  assert.equal(tailscaledProblem(status, hostFacts({ mainPid: null, read: withImpostor, env: {} })), null)
+  assert.deepEqual(
+    hostFacts({ mainPid: null, read: fakeFs({}, 1000), env: {} }).tailscaled,
+    [],
+    'a tailscaled that is not root’s does not count at all',
+  )
+  // A setuid-root program started under the name tailscaled (through a symlink) is root in some ids only:
+  // ignored, with whatever flags it was given. Root in three of four is not root.
+  const setuid = { '/proc/90/comm': 'tailscaled\n', '/proc/90/cmdline': 'tailscaled\0--socks5-server=localhost:1080\0' }
+  const withSetuid = { ...fakeFs(setuid), readdirSync: () => ['1', '40', '77', '90'] }
+  assert.deepEqual(
+    hostFacts({ mainPid: null, read: withSetuid, env: {} }).tailscaled.map((item) => item.pid),
+    [40],
+  )
+  assert.equal(tailscaledProblem(status, hostFacts({ mainPid: null, read: withSetuid, env: {} })), null)
+  for (const ids of ['0\t0\t0\t1000', '0\t1000\t0\t0', '1000\t1000\t0\t0'])
+    assert.deepEqual(hostFacts({ mainPid: null, read: fakeFs({ '/proc/40/status': `Uid:\t${ids}\n` }), env: {} }).tailscaled, [], ids)
+  assert.equal(
+    hostFacts({ mainPid: null, read: fakeFs({ '/proc/40/status': 'Name:\tx\n' }), env: {} }).unreadable,
+    1,
+    'no Uid line: cannot tell',
+  )
+  // Where systemd runs tailscaled, its MainPID is the daemon and nothing else is: not a second root process
+  // that calls itself tailscaled (its flags are not the ones checked, and it does not count as a second
+  // daemon), and the real one is found though it is called something else.
+  const rootFake = {
+    '/proc/90/comm': 'tailscaled\n',
+    '/proc/90/cmdline': 'tailscaled\0--tun=userspace-networking\0',
+    '/proc/90/status': 'Uid:\t0\t0\t0\t0\n',
+  }
+  const two = { ...fakeFs(rootFake), readdirSync: () => ['1', '40', '77', '90'] }
+  assert.match(tailscaledProblem(status, hostFacts({ mainPid: null, read: two, env: {} })), /more than one tailscaled/, 'by name: two')
+  const byUnit = hostFacts({ mainPid: () => 40, read: two, env: {} })
+  assert.deepEqual(
+    byUnit.tailscaled.map((item) => [item.pid, item.argv[0]]),
+    [[40, '/usr/sbin/tailscaled']],
+  )
+  assert.equal(tailscaledProblem(status, byUnit), null)
+  const renamed = { ...fakeFs({ ...rootFake, '/proc/40/comm': '.tailscaled-wrap\n' }), readdirSync: () => ['1', '40', '77', '90'] }
+  assert.deepEqual(
+    hostFacts({ mainPid: () => 40, read: renamed, env: {} }).tailscaled.map((item) => item.pid),
+    [40],
+    'the real daemon under another name: found by its unit, and the fake’s flags are not read',
+  )
+  assert.match(
+    tailscaledProblem(status, hostFacts({ mainPid: () => 90, read: two, env: {} })),
+    /userspace-networking/,
+    'the flags checked are those of the process systemd names',
+  )
+  assert.deepEqual(hostFacts({ mainPid: () => 4242, read: two, env: {} }).tailscaled, [], 'a MainPID that is not there: no daemon')
+  assert.deepEqual(hostFacts({ mainPid: () => 90, read: withSetuid, env: {} }).tailscaled, [], 'nor one that is not root in every id')
+  assert.equal(
+    systemdMainPid('tailscaled.service', () => '1163\n'),
+    1163,
+  )
+  for (const answer of ['0\n', '', 'x', '-4'])
+    assert.equal(
+      systemdMainPid('tailscaled.service', () => answer),
+      null,
+      JSON.stringify(answer),
+    )
+  assert.equal(
+    systemdMainPid('tailscaled.service', () => {
+      throw new Error('no systemd')
+    }),
+    null,
+  )
   // Where the executable can be read (this server is root): it must be a file called tailscaled that root owns.
-  assert.equal(hostFacts({ read: fakeFs({ '/proc/40/exe->': '/usr/sbin/tailscaled' }), env: {} }).tailscaled.length, 1)
-  assert.equal(hostFacts({ read: fakeFs({ '/proc/40/exe->': '/usr/sbin/tailscaled (deleted)' }), env: {} }).tailscaled.length, 1)
-  assert.equal(hostFacts({ read: fakeFs({ '/proc/40/exe->': '/usr/bin/python3' }), env: {} }).tailscaled.length, 0)
-  assert.equal(hostFacts({ read: fakeFs({ '/proc/40/exe->': '/usr/sbin/tailscaled', 'exe-owner': 1000 }), env: {} }).tailscaled.length, 0)
+  assert.equal(hostFacts({ mainPid: null, read: fakeFs({ '/proc/40/exe->': '/usr/sbin/tailscaled' }), env: {} }).tailscaled.length, 1)
+  assert.equal(
+    hostFacts({ mainPid: null, read: fakeFs({ '/proc/40/exe->': '/usr/sbin/tailscaled (deleted)' }), env: {} }).tailscaled.length,
+    1,
+  )
+  assert.equal(hostFacts({ mainPid: null, read: fakeFs({ '/proc/40/exe->': '/usr/bin/python3' }), env: {} }).tailscaled.length, 0)
+  assert.equal(
+    hostFacts({ mainPid: null, read: fakeFs({ '/proc/40/exe->': '/usr/sbin/tailscaled', 'exe-owner': 1000 }), env: {} }).tailscaled.length,
+    0,
+  )
   // Its environment, where it can be read: the debug switches that make it forward to loopback.
-  const withEnv = (text) => hostFacts({ read: fakeFs({ '/proc/40/environ': text }), env: {} })
+  const withEnv = (text) => hostFacts({ mainPid: null, read: fakeFs({ '/proc/40/environ': text }), env: {} })
   assert.deepEqual(withEnv('PATH=/usr/bin\0LANG=C\0').tailscaled[0].env, [])
   assert.deepEqual(withEnv('PATH=/usr/bin\0TS_DEBUG_NETSTACK_LOOPBACK_PORT=4700\0').tailscaled[0].env, ['TS_DEBUG_NETSTACK_LOOPBACK_PORT'])
   assert.match(
@@ -475,17 +589,17 @@ test('a tailscaled whose connections cannot be believed: userspace networking, a
   )
   assert.equal(tailscaledProblem(status, withEnv('PATH=/usr/bin\0')), null)
   assert.equal(
-    hostFacts({ read: fakeFs(), env: {} }).tailscaled[0].env,
+    hostFacts({ mainPid: null, read: fakeFs(), env: {} }).tailscaled[0].env,
     null,
     'not readable (the usual case): root’s configuration is trusted',
   )
   assert.equal(
-    hostFacts({ read: fakeFs({ '/proc/40/cmdline': null }), env: {} }).unreadable,
+    hostFacts({ mainPid: null, read: fakeFs({ '/proc/40/cmdline': null }), env: {} }).unreadable,
     1,
     'its command line is hidden: cannot be determined',
   )
-  assert.equal(hostFacts({ read: fakeFs({ '/proc/40/cmdline': '' }), env: {} }).unreadable, 1)
-  assert.deepEqual(hostFacts({ read: fakeFs({ '/proc/40/comm': 'bash\n' }), env: {} }).tailscaled, [])
+  assert.equal(hostFacts({ mainPid: null, read: fakeFs({ '/proc/40/cmdline': '' }), env: {} }).unreadable, 1)
+  assert.deepEqual(hostFacts({ mainPid: null, read: fakeFs({ '/proc/40/comm': 'bash\n' }), env: {} }).tailscaled, [])
   for (const [label, read, env] of [
     ['a user namespace', fakeFs({ '/proc/self/uid_map': '         0     100000      65536\n' }), {}],
     ['no uid_map', fakeFs({ '/proc/self/uid_map': null }), {}],
@@ -495,7 +609,7 @@ test('a tailscaled whose connections cannot be believed: userspace networking, a
     ['kubernetes', fakeFs(), { KUBERNETES_SERVICE_HOST: '10.0.0.1' }],
     ['a docker cgroup', fakeFs({ '/proc/1/cgroup': '0::/docker/abc\n' }), {}],
   ])
-    assert.ok(hostFacts({ read, env }).container, label)
+    assert.ok(hostFacts({ mainPid: null, read, env }).container, label)
   // tailscaled's own answer about an address.
   assert.deepEqual(
     whoisAnswer(
@@ -506,11 +620,27 @@ test('a tailscaled whose connections cannot be believed: userspace networking, a
     ),
     {
       login: 'ada@example.com',
+      userId: null,
+      expired: false,
       tagged: false,
       stableId: 'nADA',
       addresses: ['100.64.0.7', 'fd7a:115c:a1e0:0:0:0:0:7'],
     },
   )
+  // Which user (Tailscale's own id, a number or a string), and whether the device's key expired.
+  const who = (node, profile) =>
+    whoisAnswer(
+      JSON.stringify({ Node: { ID: 1, ...node }, UserProfile: { LoginName: 'ada@example.com', ...profile } }),
+      Date.parse('2026-11-12T00:00:00Z'),
+    )
+  assert.equal(who({}, { ID: 123456789 }).userId, '123456789')
+  assert.equal(who({}, { ID: 'uABC123CNTRL' }).userId, 'uABC123CNTRL')
+  assert.equal(who({ User: 42 }, {}).userId, '42')
+  for (const bad of [0, '', 'has space', {}, null, 'x'.repeat(65)]) assert.equal(who({}, { ID: bad }).userId, null, JSON.stringify(bad))
+  assert.equal(who({ KeyExpiry: '0001-01-01T00:00:00Z' }, {}).expired, false, 'no expiry')
+  assert.equal(who({ KeyExpiry: '2027-01-01T00:00:00Z' }, {}).expired, false)
+  assert.equal(who({ KeyExpiry: '2026-11-11T00:00:00Z' }, {}).expired, true)
+  assert.equal(who({ Expired: true, KeyExpiry: '2027-01-01T00:00:00Z' }, {}).expired, true)
   assert.deepEqual(
     selfFromStatus({ Self: { ID: 'nSELF', TailscaleIPs: ['100.64.0.1'] }, TailscaleIPs: ['100.64.0.1', 'fd7a:115c:a1e0::1'] }),
     {
@@ -529,6 +659,8 @@ test('a tailscaled whose connections cannot be believed: userspace networking, a
     assert.equal(selfFromStatus(unknown), null)
   assert.deepEqual(whoisAnswer(JSON.stringify({ Node: { ID: 1 }, UserProfile: { LoginName: 'Ada@Example.com' } })), {
     login: 'ada@example.com',
+    userId: null,
+    expired: false,
     tagged: false,
     stableId: null,
     addresses: [],
@@ -1251,18 +1383,49 @@ test('a tailnet account with no passkey: everything in the workspace, a passkey 
   }
   // With no passkey on the account this session is as strong as the account gets: it may end the others.
   assert.equal((await ben.post('/auth/sessions/revoke-others', {})).status, 200)
-  // Adding the first passkey needs no check: the tailnet identity is all the account has.
+  // Adding the first passkey needs no passkey check (the tailnet identity is all the account has), but it is
+  // asked for in a browser, on a page of this site, and after a step that names the device.
   const { createAuthenticator } = await import('./hosted-helpers.js')
   const authenticator = createAuthenticator({ origin: TAILNET_ORIGIN })
-  const options = await ben.post('/auth/passkeys/options', {})
+  const page = {
+    headers: {
+      'Sec-Fetch-Site': 'same-origin',
+      'Sec-Fetch-Mode': 'cors',
+      'Sec-Fetch-Dest': 'empty',
+      'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+    },
+  }
+  const bare = await ben.post('/auth/passkeys/options', {})
+  assert.equal(bare.json.error.code, 'browser_required', 'not from a page: no')
+  const fromCli = await ben.post('/auth/passkeys/options', {}, { headers: { ...page.headers, 'User-Agent': 'shapewall-cli/0.7.0' } })
+  assert.equal(fromCli.json.error.code, 'browser_required', 'a command line session: no')
+  const unconfirmed = await ben.post('/auth/passkeys/options', {}, page)
+  assert.equal(unconfirmed.status, 409)
+  assert.equal(unconfirmed.json.error.code, 'confirm_device')
+  assert.equal(unconfirmed.json.error.device, 'Chrome on Linux')
+  assert.match(unconfirmed.json.error.message, /Confirm adding a passkey from Chrome on Linux/)
+  assert.equal((await ben.post('/auth/passkeys/options', { confirmDevice: 'Safari on macOS' }, page)).json.error.code, 'confirm_device')
+  const options = await ben.post('/auth/passkeys/options', { confirmDevice: 'Chrome on Linux' }, page)
   assert.equal(options.status, 200, options.text)
-  const added = await ben.post('/auth/passkeys/verify', { response: authenticator.register(options.json.options), nickname: 'Laptop' })
+  assert.equal((await ben.post('/auth/passkeys/verify', { response: {}, nickname: 'Laptop' }, page)).json.error.code, 'confirm_device')
+  const added = await ben.post(
+    '/auth/passkeys/verify',
+    { response: authenticator.register(options.json.options), nickname: 'Laptop', confirmDevice: 'Chrome on Linux' },
+    page,
+  )
   assert.equal(added.status, 201, added.text)
   // It signs in at once, but it is on hold for 24 hours for the fixed core: a tailnet identity is per
   // device, and whatever runs as ben on one of his devices could have added it.
   assert.ok(Date.parse(added.json.passkeys[0].onHoldUntil) > Date.now() + 23 * 3_600_000, 'on hold for 24 hours')
   const event = (await ben.get('/auth/security-log')).json.events.find((entry) => entry.action === 'passkey_added')
-  assert.deepEqual(event.detail, { viaRecovery: false, viaTailnet: true, onHold: true })
+  assert.deepEqual(event.detail, { viaRecovery: false, viaTailnet: true, onHold: true, device: 'Chrome on Linux' })
+  // Every page of the account says so, on every device of his, with a way to take it away.
+  const notice = (await me(ben)).json.heldPasskeys
+  assert.equal(notice.length, 1)
+  assert.deepEqual(
+    { device: notice[0].device, nickname: notice[0].nickname, canRemove: notice[0].canRemove, id: notice[0].id },
+    { device: 'Chrome on Linux', nickname: 'Laptop', canRemove: true, id: added.json.id },
+  )
   const laptop = (await import('./hosted-helpers.js')).createBrowser(server.localPort, TAILNET_ORIGIN)
   const start = await laptop.post('/auth/login/options', {})
   const signedIn = await laptop.post('/auth/login/verify', { response: authenticator.assert(start.json.options) })
@@ -1278,6 +1441,12 @@ test('a tailnet account with no passkey: everything in the workspace, a passkey 
   assert.equal((await call(ben, 'DELETE', `/api/workspaces/${ws}`, { confirm: 'x' })).json.error.code, 'reauth_required')
   // With a passkey on the account, ending the other sessions needs that passkey once.
   assert.equal((await ben.post('/auth/sessions/revoke-others', {})).json.error.stepUp, 'sessions')
+  // The held passkey cannot add a second one, from the session it signed in or by confirming the tailnet session.
+  assert.equal((await laptop.post('/auth/passkeys/options', { confirmDevice: 'Chrome on Linux' }, page)).json.error.code, 'reauth_required')
+  assert.equal((await ben.post('/auth/passkeys/options', { confirmDevice: 'Chrome on Linux' }, page)).json.error.code, 'reauth_required')
+  assert.equal((await laptop.post('/auth/recovery-codes', {})).json.error.code, 'reauth_required')
+  assert.equal((await me(laptop)).json.heldPasskeys[0].canRemove, false, 'the session of the held passkey sees the notice, not the button')
+  assert.equal((await call(laptop, 'DELETE', '/auth/passkeys/' + added.json.id)).json.error.code, 'reauth_required')
   // A day later the hold is over.
   server.db.prepare("UPDATE passkeys SET recovery_added_at = '2000-01-01T00:00:00.000Z' WHERE recovery_added_at IS NOT NULL").run()
   await reauth({ browser: ben, authenticator })
@@ -1291,6 +1460,103 @@ test('a tailnet account with no passkey: everything in the workspace, a passkey 
   off.jar.set('__Host-sw_session', ben.jar.get('__Host-sw_session'))
   assert.equal((await off.get(`/api/workspaces/${ws}`)).status, 401)
   assert.ok(user.id)
+})
+
+const PAGE = {
+  headers: {
+    'Sec-Fetch-Site': 'same-origin',
+    'Sec-Fetch-Mode': 'cors',
+    'Sec-Fetch-Dest': 'empty',
+    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+  },
+}
+async function addFirstPasskey(browser, authenticator, nickname = 'Planted') {
+  const confirmDevice = 'Chrome on Linux'
+  const options = await browser.post('/auth/passkeys/options', { confirmDevice }, PAGE)
+  assert.equal(options.status, 200, options.text)
+  const added = await browser.post(
+    '/auth/passkeys/verify',
+    { response: authenticator.register(options.json.options), nickname, confirmDevice },
+    PAGE,
+  )
+  assert.equal(added.status, 201, added.text)
+  return added.json.id
+}
+
+test('"Not you? Remove it": a first passkey that something on one of the person’s tailnet devices added is taken away from any of their devices, and never gets to confirm anything', async () => {
+  const { createAuthenticator, createBrowser } = await import('./hosted-helpers.js')
+  const server = await tailnet('tailnet-held-passkey')
+  const ada = await claimWithPasskey(server, await server.device(ADA))
+  const ws = ada.workspaceId
+  const { browser: laptop } = await joinByInvite(server, ada, await server.device(BEN), 'owner')
+  // Something running as ben on his laptop adds a passkey of its own to his account.
+  const planted = createAuthenticator({ origin: TAILNET_ORIGIN })
+  const id = await addFirstPasskey(laptop, planted)
+  const thief = createBrowser(server.localPort, TAILNET_ORIGIN)
+  const start = await thief.post('/auth/login/options', {})
+  assert.equal((await thief.post('/auth/login/verify', { response: planted.assert(start.json.options) })).status, 200)
+  // Ben, on his phone (another tailnet device of his, a tailnet session): told on every page, with no passkey of his own.
+  const phone = (await server.device(BEN)).browser()
+  const seen = (await me(phone)).json
+  assert.equal(seen.via, 'tailnet')
+  assert.deepEqual(
+    seen.heldPasskeys.map((key) => [key.id, key.device, key.nickname, key.canRemove]),
+    [[id, 'Chrome on Linux', 'Planted', true]],
+  )
+  // He is not locked into it: nothing he could be asked for exists (the only passkey is the planted one, on hold).
+  assert.equal((await phone.post('/auth/recovery-codes', {})).json.error.code, 'reauth_required')
+  // Nobody else removes it: another account, a session off the tailnet, a wrong id.
+  assert.notEqual((await call(ada.browser, 'DELETE', '/auth/passkeys/' + id)).status, 200)
+  assert.equal(server.db.prepare('SELECT COUNT(*) AS n FROM passkeys WHERE id = ?').get(id).n, 1)
+  assert.equal((await call(thief, 'DELETE', '/auth/passkeys/' + id)).json.error.code, 'reauth_required')
+  assert.equal((await call(phone, 'DELETE', '/auth/passkeys/nope')).json.error.code, 'reauth_required')
+  // He removes it: no passkey check, though it is the account's last passkey and there are no recovery codes.
+  const removed = await call(phone, 'DELETE', '/AUTH/passkeys/' + encodeURIComponent(id) + '/')
+  assert.equal(removed.status, 200, removed.text)
+  assert.deepEqual(removed.json.passkeys, [])
+  assert.deepEqual(removed.json.heldPasskeys, [])
+  assert.equal(
+    server.db.prepare('SELECT COUNT(*) AS n FROM passkeys WHERE user_id = (SELECT id FROM users WHERE handle = ?)').get('ben').n,
+    0,
+  )
+  // The planted passkey's session is gone, and the passkey signs nobody in.
+  assert.equal((await thief.get('/api/workspaces/' + ws)).status, 401)
+  const retry = await thief.post('/auth/login/options', {})
+  assert.equal((await thief.post('/auth/login/verify', { response: planted.assert(retry.json.options) })).status, 401)
+  // Audited, and "Worth a look".
+  const log = (await phone.get('/auth/security-log')).json.events.filter((entry) => /^passkey_/.test(entry.action))
+  assert.deepEqual(
+    log.map((entry) => entry.action),
+    ['passkey_removed', 'passkey_added'],
+  )
+  assert.deepEqual(
+    { onHold: log[0].detail.onHold, via: log[0].detail.via, addedFrom: log[0].detail.addedFrom, ended: log[0].detail.otherSessionsEnded },
+    { onHold: true, via: 'tailnet', addedFrom: 'Chrome on Linux', ended: true },
+  )
+  const activity = await phone.get('/api/workspaces/' + ws + '/activity?sensitive=1&person=' + seen.user.id)
+  assert.ok(activity.json.entries.some((entry) => entry.action === 'passkey_removed' && entry.sensitive))
+  assert.ok(activity.json.entries.some((entry) => entry.action === 'passkey_added' && entry.sensitive))
+  // The account is as it was: the tailnet signs him in, and the fixed core tells him to add a passkey.
+  assert.equal((await call(phone, 'DELETE', '/api/workspaces/' + ws, { confirm: 'x' })).json.error.code, 'passkey_required')
+
+  // It is planted again, and a second one is on hold for another reason: removing one starts the other's day again.
+  const second = createAuthenticator({ origin: TAILNET_ORIGIN })
+  const secondId = await addFirstPasskey(phone, second, 'Second')
+  const almost = new Date(Date.now() - 23 * 3_600_000).toISOString()
+  server.db.prepare('UPDATE passkeys SET recovery_added_at = ? WHERE id = ?').run(almost, secondId)
+  server.db
+    .prepare(
+      "INSERT INTO passkeys (id, user_id, public_key, counter, transports, nickname, created_at, recovery_added_at, tailnet_added_from) SELECT 'other-held', user_id, public_key, 0, '[]', 'Other', created_at, ?, 'Firefox on Linux' FROM passkeys WHERE id = ?",
+    )
+    .run(almost, secondId)
+  assert.equal((await me(phone)).json.heldPasskeys.length, 2)
+  assert.equal((await call(phone, 'DELETE', '/auth/passkeys/other-held')).status, 200)
+  const restarted = server.db.prepare('SELECT recovery_added_at FROM passkeys WHERE id = ?').get(secondId).recovery_added_at
+  assert.ok(Date.parse(restarted) > Date.now() - 60_000, 'the other passkey on hold starts its 24 hours again')
+  // Once the hold is over the passkey is an ordinary one: removing it needs a passkey check.
+  server.db.prepare("UPDATE passkeys SET recovery_added_at = '2000-01-01T00:00:00.000Z' WHERE id = ?").run(secondId)
+  assert.deepEqual((await me(phone)).json.heldPasskeys, [])
+  assert.equal((await call(phone, 'DELETE', '/auth/passkeys/' + secondId)).json.error.code, 'reauth_required')
 })
 
 test('while the serve config is not as this server made it, nobody is signed in by tailnet identity', async () => {
@@ -1434,13 +1700,13 @@ test('a tailnet session is stored so that a build from before tailnet sign-in ca
   // Open responses of tailnet sessions (live streams) are cut: by person on unlink, all of them when trust is suspended.
   const { createGuards } = await import('../src/hosted/guards.js')
   const session = (id) => ({
-    user: { id, tailnet_login: `${id}@example.com` },
+    user: { id, tailnet_login: `${id}@example.com`, tailnet_user_id: `u-${id}` },
     session: { via: 'tailnet', tailnet_login: `${id}@example.com` },
   })
   const guards = createGuards({
     db: server.db,
     auth: { readSession: (cookie) => (cookie ? session(cookie) : null) },
-    tailnet: { identityOf: (req) => ({ login: `${req.who}@example.com` }) },
+    tailnet: { identityOf: (req) => ({ login: `${req.who}@example.com`, userId: `u-${req.who}` }) },
     SESSION_COOKIE: 'sw_session',
     siteOf: () => ({ origin: TAILNET_ORIGIN }),
     rateLimiter: null,
@@ -1509,4 +1775,177 @@ test('the serve secret is in no error either: tailscale quoting its arguments ba
   assert.match(failure.message, /tailscale serve --https=443 failed/)
   assert.ok(secret && secret.length === 43)
   assert.equal(failure.message.includes(secret), false)
+})
+
+// ---- After the third security review ---------------------------------------------------------------
+
+test('the operator’s escape hatch: shapewall hosted admin passkeys lists and removes an account’s passkeys, with the data folder as the proof', async () => {
+  const { createAuthenticator, createBrowser } = await import('./hosted-helpers.js')
+  const { hostedCommand } = await import('../src/hosted/ops-cli.js')
+  const server = await tailnet('tailnet-operator-passkeys')
+  const ada = await claimWithPasskey(server, await server.device(ADA))
+  const { browser: ben } = await joinByInvite(server, ada, await server.device(BEN), 'member')
+  const planted = createAuthenticator({ origin: TAILNET_ORIGIN })
+  const id = await addFirstPasskey(ben, planted)
+  const thief = createBrowser(server.localPort, TAILNET_ORIGIN)
+  const start = await thief.post('/auth/login/options', {})
+  assert.equal((await thief.post('/auth/login/verify', { response: planted.assert(start.json.options) })).status, 200)
+  const admin = async (args, flags) => {
+    const lines = []
+    let code
+    try {
+      code = await hostedCommand(['admin', ...args], { data: server.dataDir, operator: 'op@fixture', ...flags }, (line) =>
+        lines.push(String(line)),
+      )
+    } catch (error) {
+      return { code: 1, text: error.message }
+    }
+    return { code, text: lines.join('\n') }
+  }
+  // Whose: one of --handle and --login, and it must be an account.
+  for (const [args, flags, why] of [
+    [['passkeys', 'list'], {}, /--handle HANDLE or --login TAILNET_LOGIN/],
+    [['passkeys', 'list'], { handle: 'ben', login: 'ben@example.com' }, /one of them/],
+    [['passkeys', 'list'], { handle: 'nobody' }, /no account with that handle/],
+    [['passkeys', 'list'], { login: 'nobody@example.com' }, /no account is linked to that tailnet login/],
+    [['passkeys', 'remove'], { handle: 'ben' }, /usage: hosted admin passkeys remove ID/],
+    [['passkeys', 'remove', 'nope'], { handle: 'ben' }, /no passkey with that id/],
+    [['passkeys', 'remove', id], { handle: 'ada' }, /no passkey with that id/],
+    [['passkeys'], { handle: 'ben' }, /usage: hosted admin passkeys list\|remove/],
+  ]) {
+    const refused = await admin(args, flags)
+    assert.equal(refused.code, 1, JSON.stringify(args))
+    assert.match(refused.text, why)
+  }
+  const listed = await admin(['passkeys', 'list'], { login: 'Ben@Example.com' })
+  assert.equal(listed.code, 0, listed.text)
+  assert.match(listed.text, /@ben \(tailnet login ben@example\.com\):/)
+  assert.ok(listed.text.includes(id))
+  assert.match(listed.text, /Planted; added .* from Chrome on Linux in a tailnet session; last used .*; on hold until/)
+  const asJson = JSON.parse((await admin(['passkeys', 'list'], { handle: '@ben', json: true })).text)
+  assert.deepEqual([asJson.user.handle, asJson.passkeys.length, asJson.passkeys[0].addedFrom], ['ben', 1, 'Chrome on Linux'])
+  const removed = await admin(['passkeys', 'remove', id], { handle: 'ben' })
+  assert.equal(removed.code, 0, removed.text)
+  assert.match(removed.text, /Removed the passkey Planted of @ben\. 1 passkey session ended; 0 passkeys left\./)
+  assert.match(removed.text, /no passkey now: ben@example\.com signs in through the tailnet and can add one/)
+  // The planted passkey and its session are gone; ben's tailnet session goes on.
+  assert.equal((await thief.get(`/api/workspaces/${ada.workspaceId}`)).status, 401)
+  assert.equal((await ben.get(`/api/workspaces/${ada.workspaceId}`)).status, 200)
+  assert.deepEqual((await me(ben)).json.passkeys, [])
+  // In the operator log, and in the account's own security log as the operator's doing.
+  const log = server.db.prepare("SELECT operator, action, detail FROM operator_log WHERE action LIKE 'passkey%' ORDER BY id").all()
+  assert.deepEqual(
+    log.map((row) => [row.operator, row.action]),
+    [
+      ['op@fixture', 'passkeys_list'],
+      ['op@fixture', 'passkeys_list'],
+      ['op@fixture', 'passkey_remove'],
+    ],
+  )
+  assert.ok(!log.at(-1).detail.includes(id), 'the log names the passkey by the start of its id only')
+  const event = (await ben.get('/auth/security-log')).json.events.find((entry) => entry.action === 'passkey_removed')
+  assert.deepEqual({ by: event.detail.by, operator: event.detail.operator }, { by: 'operator', operator: 'op@fixture' })
+  // The last passkey of a passkey account goes too (the operator decides), and its sessions end.
+  const adaKey = (await me(ada.browser)).json.passkeys[0].id
+  const last = await admin(['passkeys', 'remove', adaKey], { handle: 'ada' })
+  assert.match(last.text, /0 passkeys left/)
+  assert.equal((await ada.browser.get(`/api/workspaces/${ada.workspaceId}`)).status, 401)
+})
+
+test('"Approve command line logins in the browser" also keeps an identity-only session from inviting or making an admin; an owner who leaves passes the fixed core', async () => {
+  const { createAuthenticator } = await import('./hosted-helpers.js')
+  const server = await tailnet('tailnet-admin-making')
+  const ada = await claimWithPasskey(server, await server.device(ADA))
+  const ws = ada.workspaceId
+  // Ben: an owner whose tailnet signs him in. Cyd: a member.
+  const { browser: ben, user: benUser } = await joinByInvite(server, ada, await server.device(BEN), 'owner')
+  const { user: cydUser } = await joinByInvite(server, ada, await server.device(CYD), 'member')
+  const invites = `/api/workspaces/${ws}/invites`
+  const member = (id) => `/api/workspaces/${ws}/members/${id}`
+  // Off (the default): his identity is enough to invite an admin, and to make one.
+  assert.equal((await ben.post(invites, { role: 'admin' })).status, 201)
+  assert.equal((await call(ben, 'PATCH', member(cydUser.id), { role: 'admin' })).status, 200)
+  assert.equal((await call(ada.browser, 'PATCH', member(cydUser.id), { role: 'member' })).status, 200)
+  assert.equal((await call(ada.browser, 'PATCH', `/api/workspaces/${ws}/step-up`, { cliApproval: true })).status, 200)
+  // On: refused, with the rule's name; lesser roles are still his to give.
+  for (const [method, url, body] of [
+    ['POST', invites, { role: 'admin' }],
+    ['POST', invites, { role: 'admin', tailnetLogin: 'dee@example.com' }],
+    ['PATCH', member(cydUser.id), { role: 'admin' }],
+  ]) {
+    const refused = await call(ben, method, url, body)
+    assert.equal(refused.status, 403, `${method} ${url}: ${refused.text}`)
+    assert.equal(refused.json.error.code, 'passkey_required', 'he has no passkey: told to add one')
+    assert.equal(refused.json.error.stepUp, 'cliApproval')
+  }
+  assert.equal((await ben.post(invites, { role: 'member' })).status, 201)
+  assert.equal((await call(ben, 'PATCH', member(cydUser.id), { role: 'viewer' })).status, 200)
+  assert.equal(server.db.prepare("SELECT COUNT(*) AS n FROM memberships WHERE role = 'admin'").get().n, 0)
+  // With a passkey that may confirm, the same session may.
+  const authenticator = createAuthenticator({ origin: TAILNET_ORIGIN })
+  await addFirstPasskey(ben, authenticator, 'Mine')
+  const asked = await ben.post(invites, { role: 'admin' })
+  assert.deepEqual([asked.json.error.code, asked.json.error.stepUp], ['reauth_required', 'cliApproval'])
+  assert.match(asked.json.error.message, /invites and makes admins only with a passkey/)
+  server.db.prepare("UPDATE passkeys SET recovery_added_at = '2000-01-01T00:00:00.000Z' WHERE recovery_added_at IS NOT NULL").run()
+  await reauth({ browser: ben, authenticator })
+  assert.equal((await ben.post(invites, { role: 'admin' })).status, 201)
+  assert.equal((await call(ben, 'PATCH', member(cydUser.id), { role: 'admin' })).status, 200)
+
+  // An owner who leaves is an owner removed: the fixed core asks, as when another owner removes them.
+  server.db.prepare("UPDATE sessions SET verified_at = '2000-01-01T00:00:00.000Z' WHERE verified_at > '2001'").run()
+  const leaving = await call(ben, 'DELETE', member(benUser.id))
+  assert.deepEqual([leaving.status, leaving.json.error.code, leaving.json.error.stepUp], [403, 'reauth_required', 'always'])
+  assert.equal(server.db.prepare('SELECT role FROM memberships WHERE user_id = ?').get(benUser.id).role, 'owner')
+  // Leaving with a lesser role asks nothing.
+  const cyd = (await server.device(CYD)).browser()
+  await me(cyd)
+  assert.equal((await call(cyd, 'DELETE', member(cydUser.id))).status, 200)
+  // With the passkey he leaves.
+  await reauth({ browser: ben, authenticator })
+  assert.equal((await call(ben, 'DELETE', member(benUser.id))).status, 200)
+})
+
+test('an account is held to the tailnet user it was linked for, not to a login that reads the same; an expired device is nobody', async () => {
+  const server = await tailnet('tailnet-user-id')
+  const ada = await claimWithPasskey(server, await server.device(ADA))
+  const ws = ada.workspaceId
+  const { browser: ben, user } = await joinByInvite(server, ada, await server.device(BEN), 'admin')
+  const stored = server.db.prepare('SELECT tailnet_user_id FROM users WHERE id = ?').get(user.id).tailnet_user_id
+  assert.equal(stored, tailnetUserId('ben@example.com'), 'kept when the account was made')
+  assert.equal((await ben.get(`/api/workspaces/${ws}`)).status, 200)
+  // The login string is given to someone else (or a node shared in from another tailnet carries the same
+  // one): tailscaled says another user. Nobody here, by sign-in, by a session, by joining or by linking.
+  const other = await server.device({ ...BEN, userId: 987654321 })
+  const stranger = other.browser()
+  const asked = await me(stranger)
+  assert.equal(asked.json.user, null)
+  assert.deepEqual(asked.json.tailnet, { state: 'changed', login: 'ben@example.com' })
+  const signIn = await stranger.post('/auth/tailnet/sign-in', {})
+  assert.deepEqual([signIn.status, signIn.json.error.code], [403, 'tailnet_user_changed'])
+  assert.match(signIn.json.error.message, /for a different tailnet user than the one asking/)
+  assert.equal((await stranger.post('/auth/tailnet/join', {})).json.error.code, 'tailnet_user_changed')
+  stranger.jar.set('__Host-sw_session', ben.jar.get('__Host-sw_session'))
+  assert.equal((await stranger.get(`/api/workspaces/${ws}`)).status, 401, 'ben’s session is worth nothing to the other user')
+  assert.equal(server.db.prepare('SELECT tailnet_user_id FROM users WHERE id = ?').get(user.id).tailnet_user_id, stored)
+  assert.equal((await ben.get(`/api/workspaces/${ws}`)).status, 200, 'and ben goes on')
+  // whois that names no user at all: nobody.
+  assert.equal((await me((await server.device({ ...BEN, userId: null })).browser())).json.tailnet.state, 'none')
+  // A device whose key expired: nobody, though it is ben's.
+  assert.equal((await me((await server.device({ ...BEN, expired: true })).browser())).json.tailnet.state, 'none')
+  // A link made before the id was kept (or by `hosted claim --login`, which knows only the name) takes
+  // the id of the first proven request, and is held to it from then on.
+  server.db.prepare('UPDATE users SET tailnet_user_id = NULL WHERE id = ?').run(user.id)
+  const again = (await server.device(BEN)).browser()
+  assert.equal((await me(again)).json.user.handle, 'ben')
+  assert.equal(server.db.prepare('SELECT tailnet_user_id FROM users WHERE id = ?').get(user.id).tailnet_user_id, stored)
+  assert.equal((await me((await server.device({ ...BEN, userId: 987654321 })).browser())).json.tailnet.state, 'changed')
+  // A passkey account that links its login keeps the id too, and unlinking forgets it.
+  assert.equal(
+    server.db.prepare("SELECT tailnet_user_id FROM users WHERE handle = 'ada'").get().tailnet_user_id,
+    tailnetUserId('ada@example.com'),
+  )
+  await reauth(ada)
+  assert.equal((await call(ada.browser, 'DELETE', '/auth/tailnet/link')).status, 200)
+  assert.equal(server.db.prepare("SELECT tailnet_user_id FROM users WHERE handle = 'ada'").get().tailnet_user_id, null)
 })

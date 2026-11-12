@@ -77,10 +77,13 @@ export async function tailscaleAccess({
   if (configs(config).some((entry) => entry.TCP?.[port] || Object.keys(entry.Web || {}).some((key) => key.endsWith(`:${port}`))))
     throw new Error(`Tailscale port ${port} is already configured. Choose another --port; Shapewall will not replace it.`)
   let ownerLogin = null
+  let ownerUserId = null
   if (!noIdentity) {
     const who = JSON.parse(await call(['whois', '--json', status.TailscaleIPs[0]]))
     // Tagged/shared nodes without a user never grant identity access.
     ownerLogin = who.Node?.Tags?.length ? null : who.UserProfile?.LoginName || null
+    // Tailscale's own id of the owner: a device is the owner's by that, not by a login that reads the same.
+    ownerUserId = ownerLogin ? whoisAnswer(JSON.stringify(who))?.userId || null : null
   }
   // The owner's other devices are let in by their tailnet identity only when
   // a request can be proven to come through the serve entry made here: the
@@ -129,6 +132,7 @@ export async function tailscaleAccess({
   return {
     host,
     ownerLogin,
+    ownerUserId,
     noIdentity,
     // null: no identity proof (pairing only); else admit(req, res) and identityOf(req).
     gate,
@@ -138,9 +142,15 @@ export async function tailscaleAccess({
     command: `tailscale serve --bg --https=${port} http://127.0.0.1:${port}${secret ? '/_ts/<a secret made at each start>' : ''}`,
     // `server`: the listening board server, for the proof's self test.
     async start(server = null, { watchMs = 30_000 } = {}) {
+      // A self test that failed stays failed: the peer check does not work on this machine, and nothing
+      // the watch below can see changes that. Identity stays off until the board is started again.
+      let failedSelfTest = null
       if (gate && server) {
-        const problem = await proofSelfTest(server, proof)
-        if (problem) gate.suspend(problem)
+        failedSelfTest = await proofSelfTest(server, proof)
+        if (failedSelfTest) {
+          gate.suspend(failedSelfTest)
+          log('Tailscale identity is off (pairing still works): ' + failedSelfTest + '.')
+        }
       }
       await call(args)
       started = true
@@ -149,7 +159,7 @@ export async function tailscaleAccess({
       // can be believed: checked now and every half minute; nobody is let in
       // by identity while it is not so.
       const watch = async () => {
-        const problem = await verify()
+        const problem = failedSelfTest || (await verify())
         if (problem && !gate.suspended()) log(`Tailscale identity is suspended (pairing still works): ${problem}.`)
         if (problem) gate.suspend(problem)
         else if (gate.suspended()) gate.resume()

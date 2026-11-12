@@ -53,6 +53,9 @@ export function mountAuthRoutes(authRouter, deps) {
     needSession,
     needFresh,
     needFreshOrRecovery,
+    needFreshOrHeldRemoval,
+    removesHeldPasskey,
+    noPasskey,
     needPasskeyBacked,
     auditOf,
     publicUser,
@@ -150,7 +153,8 @@ export function mountAuthRoutes(authRouter, deps) {
       const identity = tailnet.identityOf(req)
       const { user, extra } = await auth.finishSignUp(ceremonyCookie(req), req.body?.response, (created, data) => {
         let workspaceId
-        const linked = identity && data.linkTailnet === identity.login ? tailnetAccounts.link(created.id, identity.login) : null
+        const linked =
+          identity && data.linkTailnet === identity.login ? tailnetAccounts.link(created.id, identity.login, identity.userId) : null
         if (linked)
           auditAccount(db, { userId: created.id, action: 'tailnet_linked', ip, at: iso(), detail: { tailnet: linked, atSignUp: true } })
         // Ceremonies started before hashes were kept carry the raw token.
@@ -330,6 +334,8 @@ export function mountAuthRoutes(authRouter, deps) {
         via: req.auth.session.via,
         ...tailnet.memberInfo(req),
         securityNotice: securityNoticeFor(req),
+        // Passkeys a tailnet session added that are still on hold: shown on every page ("Not you? Remove it").
+        heldPasskeys: auth.heldPasskeys(req.user.id).map((key) => ({ ...key, canRemove: req.auth.session.via === 'tailnet' })),
         signup,
       })
     }),
@@ -492,12 +498,49 @@ export function mountAuthRoutes(authRouter, deps) {
     }),
   )
 
+  // The first passkey of an account that its tailnet signs in is added with
+  // no passkey check. Two conditions on top of the 24 hour hold, both cheap
+  // for a person and both honest about what they are:
+  //   - the request comes from a page of this site in a browser (the fetch
+  //     metadata a browser sets and a page cannot change), and not from a
+  //     command line session. A program on the person's device can forge
+  //     those headers; this is not a barrier against it. It keeps the
+  //     command line's own tailnet sessions and cross-site requests out.
+  //   - the person confirmed a step that names the device ("Add a passkey
+  //     from Chrome on Linux?"): the request carries that name, the server
+  //     compares it with the device it sees, and the passkey is stored with
+  //     it, so the notice on the person's other devices can say where the
+  //     passkey came from.
+  // What protects the account is the hold, the notice on every page and
+  // "Not you? Remove it" from any of the person's tailnet devices.
+  function firstByTailnetOrThrow(req) {
+    if (!noPasskey(req)) return null
+    const device = deviceLabel(req.headers['user-agent'])
+    const inBrowser =
+      req.headers['sec-fetch-site'] === 'same-origin' &&
+      ['cors', 'same-origin'].includes(req.headers['sec-fetch-mode']) &&
+      req.headers['sec-fetch-dest'] === 'empty' &&
+      device !== 'Shapewall CLI'
+    if (!inBrowser) {
+      throw new AuthError(403, 'browser_required', 'A first passkey is added in a browser, on the Account page of this server.')
+    }
+    if (req.body?.confirmDevice !== device) {
+      throw new HttpError(
+        409,
+        'confirm_device',
+        'Confirm adding a passkey from ' + device + '. It is your account’s first passkey: it will be on hold for 24 hours.',
+        { device },
+      )
+    }
+    return device
+  }
   authRouter.post(
     '/passkeys/options',
     limit('ceremony'),
     needSession,
     needFreshOrRecovery,
     handle(async (req, res) => {
+      firstByTailnetOrThrow(req)
       const { options, ceremony } = await auth.registrationOptions({ userId: req.user.id })
       setCookie(res, CEREMONY_COOKIE, ceremony, 300)
       res.json({ options })
@@ -515,9 +558,13 @@ export function mountAuthRoutes(authRouter, deps) {
       // only its tailnet signs in. A tailnet identity is per device: whatever
       // runs as that person on one of their devices could add a passkey of
       // its own, and without the hold use it at once for everything.
-      const firstByTailnet = req.auth.session.via === 'tailnet' && auth.passkeyCount(req.user.id) === 0
+      const tailnetFrom = firstByTailnetOrThrow(req)
+      const firstByTailnet = Boolean(tailnetFrom)
       const viaRecovery = (req.auth.session.via === 'recovery' || firstByTailnet) && !auth.isFresh(req.auth.session)
-      const { id } = await auth.finishAddPasskey(ceremonyCookie(req), req.body?.response, req.user.id, req.body?.nickname, { viaRecovery })
+      const { id } = await auth.finishAddPasskey(ceremonyCookie(req), req.body?.response, req.user.id, req.body?.nickname, {
+        viaRecovery,
+        tailnetFrom: firstByTailnet && viaRecovery ? tailnetFrom : null,
+      })
       auditAccount(db, {
         userId: req.user.id,
         action: 'passkey_added',
@@ -525,7 +572,7 @@ export function mountAuthRoutes(authRouter, deps) {
         at: iso(),
         detail: {
           viaRecovery: viaRecovery && !firstByTailnet,
-          ...(firstByTailnet ? { viaTailnet: true, onHold: viaRecovery } : {}),
+          ...(firstByTailnet ? { viaTailnet: true, onHold: viaRecovery, device: tailnetFrom } : {}),
         },
       })
       setCookie(res, CEREMONY_COOKIE, '', 0)
@@ -543,8 +590,29 @@ export function mountAuthRoutes(authRouter, deps) {
   authRouter.delete(
     '/passkeys/:id',
     needSession,
-    needFresh,
+    needFreshOrHeldRemoval,
     handle(async (req, res) => {
+      // "Not you? Remove it": a tailnet session takes away a passkey that a
+      // tailnet session added and that is still on hold (guards.js).
+      if (!auth.isFresh(req.auth.session) && removesHeldPasskey(req, req.params.id)) {
+        const key = auth.removeHeldPasskey(req.user.id, req.params.id)
+        auth.deleteOtherSessions(req.user.id, req.auth.session.hash)
+        auditAccount(db, {
+          userId: req.user.id,
+          action: 'passkey_removed',
+          ip: clientIp(req),
+          at: iso(),
+          detail: {
+            otherSessionsEnded: true,
+            onHold: true,
+            via: 'tailnet',
+            device: deviceLabel(req.headers['user-agent']),
+            addedFrom: key.tailnet_added_from,
+            addedAt: key.created_at,
+          },
+        })
+        return res.json({ passkeys: auth.listPasskeys(req.user.id), heldPasskeys: auth.heldPasskeys(req.user.id) })
+      }
       auth.removePasskey(req.user.id, req.params.id)
       // A session signed in with that passkey must not outlive it.
       auth.deleteOtherSessions(req.user.id, req.auth.session.hash)

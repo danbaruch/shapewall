@@ -93,6 +93,7 @@ export function mountConsoleRoutes(consoleApi, deps) {
     inProject,
     coreFreshOrThrow,
     machineTokensOrThrow,
+    adminMakingOrThrow,
     stepUp,
     stepUpOrThrow,
     auditOf,
@@ -106,9 +107,14 @@ export function mountConsoleRoutes(consoleApi, deps) {
   } = deps
   // Making, changing or removing an owner always asks for the passkey; the
   // same for an admin when the workspace asks for it ("Members and roles").
-  const roleStepUp = (req, { owner, admin }) => {
+  // makesAdmin: the request gives someone the admin role (an invite, or a
+  // change of role). With "Approve command line logins in the browser" on,
+  // a session that only a tailnet identity stands behind may not: the new
+  // admin could make the tokens that switch keeps from it (guards.js).
+  const roleStepUp = (req, { owner, admin, makesAdmin = false }) => {
     if (owner) coreFreshOrThrow(req)
     else if (admin) stepUpOrThrow(req, 'members')
+    if (makesAdmin && !owner) adminMakingOrThrow(req)
   }
 
   consoleApi.get(
@@ -217,7 +223,7 @@ export function mountConsoleRoutes(consoleApi, deps) {
     handle(async (req, res) => {
       const role = req.body?.role
       if (!ROLES.includes(role)) throw new HttpError(400, 'invalid_role', `Role: ${ROLES.join(', ')}.`)
-      roleStepUp(req, { owner: role === 'owner', admin: role === 'admin' })
+      roleStepUp(req, { owner: role === 'owner', admin: role === 'admin', makesAdmin: role === 'admin' })
       let revoked = { invites: 0, shares: 0, tokens: 0 }
       transaction(db, () => {
         const target = req.t.get('SELECT role FROM memberships WHERE workspace_id = :ws AND user_id = :user', {
@@ -254,7 +260,9 @@ export function mountConsoleRoutes(consoleApi, deps) {
         if (!canRemoveMember(req.role, target.role, { self })) throw new HttpError(403, 'forbidden', 'You cannot remove this member.')
         if (leavesNoOwner({ targetRole: target.role, owners: ownerCount(req.t) }))
           throw new HttpError(409, 'last_owner', 'A workspace needs an owner.')
-        if (!self) roleStepUp(req, { owner: target.role === 'owner', admin: target.role === 'admin' })
+        // An owner who leaves is an owner removed, like any other: the fixed core asks. Leaving with a
+        // lesser role is one's own business and asks nothing.
+        roleStepUp(req, { owner: target.role === 'owner', admin: !self && target.role === 'admin' })
         req.t.run('DELETE FROM memberships WHERE workspace_id = :ws AND user_id = :user', { user: userId })
         // Their saved views on the Usage and Activity pages go with them.
         createViews(req.t).removeOf(userId)
@@ -277,7 +285,7 @@ export function mountConsoleRoutes(consoleApi, deps) {
       const role = req.body?.role || 'member'
       if (!ROLES.includes(role)) throw new HttpError(400, 'invalid_role', `Role: ${ROLES.join(', ')}.`)
       if (!canInvite(req.role, role)) throw new HttpError(403, 'forbidden', 'Only an owner can invite an owner.')
-      roleStepUp(req, { owner: role === 'owner', admin: role === 'admin' })
+      roleStepUp(req, { owner: role === 'owner', admin: role === 'admin', makesAdmin: role === 'admin' })
       const days = req.body?.expiresInDays ?? INVITE_DAYS_DEFAULT
       if (!INVITE_DAYS.includes(days)) throw new HttpError(400, 'invalid_expiry', `expiresInDays: one of ${INVITE_DAYS.join(', ')}.`)
       // An invite for one tailnet login: only an account linked to that login

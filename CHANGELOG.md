@@ -132,7 +132,21 @@ Signing in to a team server: fewer passkey prompts, and your tailnet login as th
 - **Upgrade notes.** Migration 16 is additive (the settings, tailnet logins on accounts, sessions and invites, the list of
   tailnet visitors); see [Migration 16 and rollback](docs/hosted.md#migration-16-and-rollback). If you want the passkey prompts
   back, an owner switches the groups on in each workspace's Settings.
-- **The fixed core matches paths as the router does** (any case, a trailing slash, an encoded parameter).
+- **The fixed core matches paths as the router does** (any case, a trailing slash, an encoded parameter). An owner who
+  leaves a workspace passes it too, like any other owner removed.
+- **A first passkey added in a tailnet session can be taken away again.** Adding it needs a browser and a step that names
+  the device. While it is on hold (24 hours), every page of the account shows "A passkey was added from ..." with "Not you?
+  Remove it": any tailnet session of the account removes it with no passkey check, though it is the only passkey, and every
+  other passkey on hold starts its day again. A held passkey cannot add a second one. After the hold, or for any account,
+  the operator has `shapewall hosted admin passkeys list|remove --handle HANDLE | --login LOGIN --data DIR` (audited).
+- **"Approve command line logins in the browser" covers three things:** approving a login or an agent, making an API token,
+  and inviting or making an admin. The settings card says exactly that.
+- **An account is held to the tailnet user, not to the login's spelling.** The server keeps Tailscale's id of the user with
+  a linked login (migration 16, `users.tailnet_user_id`) and requires it on every request; a link made by `hosted claim
+  --login` takes the id of the first proven request. A device with an expired key is nobody. The machine's own addresses
+  are also read from its network interfaces on every request.
+- **Which process is tailscaled:** the main process of `tailscaled.service` where systemd runs it, else by name; root in all
+  four ids in both cases. On a local board a failed self test of the peer check keeps identity off until a restart.
 - **Not in this release:** tailnet sign-in on macOS or Windows servers, in containers, or with a userspace-networking
   tailscaled (no way there to prove a request came through tailscale serve), more admin commands or MCP tools for
   administration, admin tokens, and profile pictures from the tailnet. The proof was tested with a stand-in for tailscale

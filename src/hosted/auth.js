@@ -205,13 +205,13 @@ export function createAuth({ db, origin, rpId, rpName = 'Shapewall', now = () =>
     return { row, info }
   }
 
-  function storePasskey(userId, info, nickname = '', { viaRecovery = false } = {}) {
+  function storePasskey(userId, info, nickname = '', { viaRecovery = false, tailnetFrom = null } = {}) {
     if (q.get('SELECT id FROM passkeys WHERE id = :id', { id: info.credential.id })) {
       throw new AuthError(409, 'passkey_exists', 'That passkey is already registered.')
     }
     q.run(
-      `INSERT INTO passkeys (id, user_id, public_key, counter, transports, device_type, backed_up, nickname, created_at, recovery_added_at, rp_id)
-       VALUES (:id, :user, :key, :counter, :transports, :device, :backed, :nickname, :at, :recovery, :rp)`,
+      `INSERT INTO passkeys (id, user_id, public_key, counter, transports, device_type, backed_up, nickname, created_at, recovery_added_at, rp_id, tailnet_added_from)
+       VALUES (:id, :user, :key, :counter, :transports, :device, :backed, :nickname, :at, :recovery, :rp, :tailnet)`,
       {
         id: info.credential.id,
         user: userId,
@@ -224,6 +224,7 @@ export function createAuth({ db, origin, rpId, rpName = 'Shapewall', now = () =>
         at: iso(),
         recovery: viaRecovery ? iso() : null,
         rp: rpId,
+        tailnet: tailnetFrom ? String(tailnetFrom).slice(0, 80) : null,
       },
     )
   }
@@ -255,13 +256,13 @@ export function createAuth({ db, origin, rpId, rpName = 'Shapewall', now = () =>
   // no session yet). `check(row)` runs in the same transaction before the
   // passkey is stored and may return { viaRecovery } (a rebind consumes its
   // token there, so a token is used at most once).
-  async function finishAddPasskey(ceremony, response, userId, nickname, { viaRecovery = false, check = null } = {}) {
+  async function finishAddPasskey(ceremony, response, userId, nickname, { viaRecovery = false, tailnetFrom = null, check = null } = {}) {
     const { row, info } = await verifyRegistration(ceremony, response)
     if (!row.user_id || (userId !== null && row.user_id !== userId))
       throw new AuthError(400, 'no_ceremony', 'Start again: the sign-in request expired.')
     transaction(db, () => {
       const extra = check ? check(row) || {} : {}
-      storePasskey(row.user_id, info, nickname, { viaRecovery: extra.viaRecovery ?? viaRecovery })
+      storePasskey(row.user_id, info, nickname, { viaRecovery: extra.viaRecovery ?? viaRecovery, tailnetFrom })
     })
     return { id: info.credential.id, userId: row.user_id, data: row.data }
   }
@@ -323,6 +324,20 @@ export function createAuth({ db, origin, rpId, rpName = 'Shapewall', now = () =>
   }
 
   const onHold = (key) => Boolean(key.recovery_added_at) && now().getTime() - Date.parse(key.recovery_added_at) < RECOVERY_HOLD_MS
+  // On hold, and added by a tailnet session with no passkey check (the first
+  // passkey of an account its tailnet signs in). Until the hold ends, any
+  // tailnet session of the account may take it away again (removeHeldPasskey).
+  const heldByTailnet = (key) => Boolean(key.tailnet_added_from) && onHold(key)
+  const heldPasskeys = (userId) =>
+    passkeysOf(userId)
+      .filter(heldByTailnet)
+      .map((key) => ({
+        id: key.id,
+        nickname: key.nickname,
+        addedAt: key.created_at,
+        device: key.tailnet_added_from,
+        onHoldUntil: new Date(Date.parse(key.recovery_added_at) + RECOVERY_HOLD_MS).toISOString(),
+      }))
 
   // ---- Passkey management ----
 
@@ -367,6 +382,44 @@ export function createAuth({ db, origin, rpId, rpName = 'Shapewall', now = () =>
         )
       }
       q.run('DELETE FROM passkeys WHERE id = :id AND user_id = :user', { id, user: userId })
+    })
+  }
+
+  // "Not you? Remove it": a passkey that a tailnet session added, taken away
+  // while it is still on hold. Unlike removePasskey this needs no passkey
+  // check and no recovery codes, and may leave the account with no passkey:
+  // the account is back where it was before the passkey (its tailnet signs
+  // it in), and nothing else could remove a passkey that somebody else on one
+  // of the person's devices made. Every other passkey still on hold starts
+  // its 24 hours again: someone objected, so nothing added around then is
+  // trusted sooner. Returns the removed passkey's row.
+  function removeHeldPasskey(userId, id) {
+    return transaction(db, () => {
+      const key = passkeysOf(userId).find((item) => item.id === id)
+      if (!key) throw new AuthError(404, 'unknown_passkey', 'No such passkey.')
+      if (!heldByTailnet(key))
+        throw new AuthError(409, 'passkey_not_held', 'That passkey is no longer on hold. Removing it needs a passkey check.')
+      q.run('DELETE FROM passkeys WHERE id = :id AND user_id = :user', { id, user: userId })
+      q.run(
+        'UPDATE passkeys SET recovery_added_at = :at WHERE user_id = :user AND recovery_added_at IS NOT NULL AND recovery_added_at > :since',
+        {
+          at: iso(),
+          user: userId,
+          since: iso(-RECOVERY_HOLD_MS),
+        },
+      )
+      return key
+    })
+  }
+
+  // The operator's way (shapewall hosted admin passkeys): any passkey, also
+  // the last one, with no rule about recovery codes. Returns the row or null.
+  function removePasskeyAsOperator(userId, id) {
+    return transaction(db, () => {
+      const key = passkeysOf(userId).find((item) => item.id === id)
+      if (!key) return null
+      q.run('DELETE FROM passkeys WHERE id = :id AND user_id = :user', { id, user: userId })
+      return key
     })
   }
 
@@ -554,6 +607,10 @@ export function createAuth({ db, origin, rpId, rpName = 'Shapewall', now = () =>
     listPasskeys,
     renamePasskey,
     removePasskey,
+    removeHeldPasskey,
+    removePasskeyAsOperator,
+    heldPasskeys,
+    isHeldByTailnet: (userId, id) => passkeysOf(userId).some((key) => key.id === id && heldByTailnet(key)),
     newRecoveryCodes,
     recoveryRemaining,
     useRecoveryCode,

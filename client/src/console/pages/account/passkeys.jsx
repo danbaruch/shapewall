@@ -40,7 +40,9 @@ export function Passkeys() {
   // The last passkey that will keep working: old-address ones do not count.
   const working = keys.filter((key) => !oldKey(key))
   const isLast = (key) => (working.length ? working.length === 1 && working[0].id === key.id : keys.length === 1)
-  const cannotRemove = (key) => isLast(key) && me.recoveryCodesLeft === 0
+  // A passkey a tailnet session added, still on hold: a tailnet session may always take it away again.
+  const heldHere = (key) => Boolean(me.heldPasskeys?.some((held) => held.id === key.id && held.canRemove))
+  const cannotRemove = (key) => isLast(key) && me.recoveryCodesLeft === 0 && !heldHere(key)
   const cannotRemoveLast = keys.some(cannotRemove)
   const onlyOneDevice = keys.length === 1 && !keys[0].synced
   useEffect(() => {
@@ -195,19 +197,30 @@ export function Passkeys() {
 
 function AddPasskey({ open, onClose, onAdded }) {
   const [nickname, setNickname] = useState('')
+  // The first passkey of an account that its tailnet signs in: the server asks to confirm the device by name.
+  const [confirmDevice, setConfirmDevice] = useState(null)
   const { run, busy, error, setError } = useAction()
   useEffect(() => {
     if (open) {
       setNickname('')
+      setConfirmDevice(null)
       setError(null)
     }
   }, [open, setError])
   const add = (event) => {
     event.preventDefault()
     run(async () => {
-      const { options } = await api.post('/auth/passkeys/options', {})
+      const confirmed = confirmDevice ? { confirmDevice } : {}
+      let options
+      try {
+        ;({ options } = await api.post('/auth/passkeys/options', confirmed))
+      } catch (failure) {
+        if (failure.code !== 'confirm_device' || !failure.details?.device || confirmDevice) throw failure
+        setConfirmDevice(failure.details.device)
+        return
+      }
       const response = await createPasskey(options)
-      await api.post('/auth/passkeys/verify', { response, nickname })
+      await api.post('/auth/passkeys/verify', { response, nickname, ...confirmed })
       await onAdded()
     })
   }
@@ -227,13 +240,20 @@ function AddPasskey({ open, onClose, onAdded }) {
             />
           )}
         </Field>
+        {confirmDevice ? (
+          <Notice tone="warn" title={`Add a passkey from ${confirmDevice}?`} data-sw-passkey-confirm-device>
+            This is your account’s first passkey, and your tailnet signed you in, so nothing checks that it is you. It will be on hold for
+            24 hours, and every device signed in to your account shows a notice with “Remove it” until then.
+          </Notice>
+        ) : null}
         <FormError error={error} />
         <div className="flex justify-end gap-2">
           <Button size="touch" variant="ghost" onClick={onClose} disabled={busy} className="lg:h-10">
             Cancel
           </Button>
           <Button type="submit" size="touch" variant="default" disabled={busy} className="lg:h-10" data-sw-passkey-create>
-            {busy ? <Spinner /> : <KeyRound size={16} aria-hidden="true" />} Create passkey
+            {busy ? <Spinner /> : <KeyRound size={16} aria-hidden="true" />}{' '}
+            {confirmDevice ? 'Yes, add it from this device' : 'Create passkey'}
           </Button>
         </div>
       </form>

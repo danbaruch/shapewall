@@ -323,7 +323,7 @@ test('the serve secret is in no response of the local board, with accounts on: i
       env: { SHAPEWALL_DEVICES_FILE: path.join(tempDir('secret-crawl-dev'), 'devices.json') },
       settingsToken: 'fixture-owner',
       localAccounts: { db: accounts, origin },
-      remote: { tailscale: { host: 'localhost', ownerLogin: 'owner@example.test', gate } },
+      remote: { tailscale: { host: 'localhost', ownerLogin: 'owner@example.test', ownerUserId: '4242', gate } },
     })
     holder.app = app
     t.after(() => {

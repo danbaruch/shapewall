@@ -33,13 +33,23 @@ export function believedGate() {
       const login = req?.headers?.['tailscale-user-login']
       if (typeof login !== 'string' || !login || this.ownMachine(req)) return null
       const name = req.headers['tailscale-user-name']
-      return { login: login.toLowerCase(), name: typeof name === 'string' && name ? name : login.split('@')[0] }
+      // The tailnet's id of the user: one per login here, unless a test says the name changed hands.
+      const said = req.headers['x-fixture-tailnet-user']
+      return {
+        login: login.toLowerCase(),
+        name: typeof name === 'string' && name ? name : login.split('@')[0],
+        userId: typeof said === 'string' && said ? said : tailnetUserId(login),
+      }
     },
     suspend() {},
     resume() {},
     suspended: () => null,
   }
 }
+
+// A stand-in for Tailscale's id of a user: the same for the same login.
+export const tailnetUserId = (login) =>
+  String([...String(login).toLowerCase()].reduce((sum, char) => (sum * 31 + char.charCodeAt(0)) % 9_000_000_000, 7) + 1_000_000_000)
 
 export const TAILNET_HOST = 'board.example.ts.net'
 // The server's own node on the fake tailnet: its stable id and its own addresses.
@@ -81,9 +91,15 @@ export function fakeTailscale() {
             StableID: who.self ? SELF_NODE : `n-${args.at(-1)}`,
             Name: 'device.example.ts.net.',
             Addresses: [`${args.at(-1)}/32`],
+            KeyExpiry: who.expired ? '2001-01-01T00:00:00Z' : '0001-01-01T00:00:00Z',
             ...(who.tagged ? { Tags: ['tag:server'] } : {}),
           },
-          UserProfile: { LoginName: who.tagged ? 'tagged-devices' : who.login, DisplayName: who.name || '' },
+          // userId: the tailnet's own id of the user (null: an answer without one).
+          UserProfile: {
+            LoginName: who.tagged ? 'tagged-devices' : who.login,
+            DisplayName: who.name || '',
+            ...(who.userId === null ? {} : { ID: who.userId ?? Number(tailnetUserId(who.login || 'x')) }),
+          },
         }),
       }
     }

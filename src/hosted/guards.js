@@ -162,29 +162,39 @@ export function createGuards({
     }
   const needFresh = asMiddleware(coreRefusal)
   const coreFreshOrThrow = asThrow(coreRefusal)
-  // "Approve command line logins in the browser" (a workspace's switch): a
-  // token that a command line or an agent can use is made only by a session
-  // with a passkey check in the last 10 minutes. Without it the switch would
-  // be no barrier: a session that only a tailnet identity stands behind
-  // (which is per device: anything running as the person on a tailnet device
-  // of theirs has it) could not approve a waiting login, but could make the
-  // same token on the project's page. So both ways of making a token ask
-  // here: approving a login or an agent (device-routes.js) and a new project
-  // token (console-routes.js). Decided from the session; nothing a client
-  // sends changes it. Returns whether only an identity stands behind the
-  // session (for the audit entry).
-  const machineTokensOrThrow = (req, t = req.t) => {
-    const identityOnly = req.auth.session.via === 'tailnet' && !auth.isFresh(req.auth.session)
-    if (identityOnly && stepUpSettings(t).get().cliApproval) {
-      throw notFresh(
-        req,
-        REAUTH_MS,
-        'This workspace makes tokens for machines and agents only with a passkey, in the browser (Settings, "Approve command line logins in the browser"). Confirm with your passkey.',
-        { stepUp: 'cliApproval' },
-      )
-    }
-    return identityOnly
+  // "Approve command line logins in the browser" (a workspace's switch,
+  // cliApproval). What it covers, exactly: while it is on, a session that
+  // only a tailnet identity stands behind (a tailnet session with no passkey
+  // check in the last 10 minutes; such an identity is per device, so anything
+  // running as the person on a tailnet device of theirs has it) may not
+  //   1. approve a waiting command line login or agent (device-routes.js),
+  //   2. make an API token on a project's page (console-routes.js),
+  //   3. invite an admin, or make a member an admin (console-routes.js): an
+  //      admin's own session could then do 1 and 2. Owners are the fixed
+  //      core's, always.
+  // Each alone would be no barrier, which is why they go together. What it
+  // does not cover: everything else that session's role allows in the
+  // workspace (projects, comments, members and viewers, settings that ask
+  // for more), and tokens and agents that exist already. Decided from the
+  // session; nothing a client sends changes it.
+  const identityOnly = (req) => req.auth.session.via === 'tailnet' && !auth.isFresh(req.auth.session)
+  const cliApprovalOrThrow = (req, t, message) => {
+    if (identityOnly(req) && stepUpSettings(t).get().cliApproval) throw notFresh(req, REAUTH_MS, message, { stepUp: 'cliApproval' })
+    return identityOnly(req)
   }
+  // Returns whether only an identity stands behind the session (for the audit entry).
+  const machineTokensOrThrow = (req, t = req.t) =>
+    cliApprovalOrThrow(
+      req,
+      t,
+      'This workspace makes tokens for machines and agents only with a passkey, in the browser (Settings, "Approve command line logins in the browser"). Confirm with your passkey.',
+    )
+  const adminMakingOrThrow = (req, t = req.t) =>
+    cliApprovalOrThrow(
+      req,
+      t,
+      'This workspace invites and makes admins only with a passkey (Settings, "Approve command line logins in the browser": an admin can make tokens). Confirm with your passkey.',
+    )
   // A passkey check in the last 10 minutes for a rule of its own: passkeyOrThrow(req, message, { stepUp }).
   const passkeyOrThrow = asThrow((req, message, extra) => notFresh(req, REAUTH_MS, message, extra))
   // After inWorkspace (req.t): stepUp('tokens').
@@ -222,24 +232,38 @@ export function createGuards({
     pattern: new RegExp(`^${line.path.replace(/:[a-z]+/g, '([^/]+)')}/?$`, 'i'),
     params: [...line.path.matchAll(/:([a-z]+)/g)].map((match) => match[1]),
   }))
+  // A parameter as Express hands it to the route: decoded (a malformed one matches nothing).
+  const param = (match, line, name) => {
+    try {
+      return decodeURIComponent(match[1 + line.params.indexOf(name)] || '')
+    } catch {
+      return ''
+    }
+  }
+  // "Not you? Remove it." The first passkey of an account that its tailnet
+  // signs in is added with no passkey check (there is none to check with),
+  // so whatever runs as the person on one of their tailnet devices can add
+  // one. The person must be able to take it away again from any of their
+  // devices, and a passkey check cannot be the condition: the only passkey
+  // is the one in question, and it is on hold. So while such a passkey is on
+  // hold, a tailnet session of the same account (the same proven identity
+  // that could add it) may remove it. That gives the identity nothing it did
+  // not have: the account ends as it was before the passkey.
+  const removesHeldPasskey = (req, id) => req.auth.session.via === 'tailnet' && auth.isHeldByTailnet(req.auth.user.id, String(id || ''))
+  const needFreshOrHeldRemoval = (req, res, next) => (removesHeldPasskey(req, req.params.id) ? next() : needFresh(req, res, next))
   const fixedCore = (req, res, next) => {
     for (const line of coreLines) {
       if (line.method !== req.method) continue
       const match = line.pattern.exec(req.path)
       if (!match || !sessionOf(req)) continue
       if (line.role) {
-        // The parameter as Express hands it to the route: decoded (a malformed one is nobody's workspace).
-        let ws = ''
-        try {
-          ws = decodeURIComponent(match[1 + line.params.indexOf('ws')] || '')
-        } catch {
-          ws = ''
-        }
+        const ws = param(match, line, 'ws')
         const role = ID_PATTERNS.workspace.test(ws) ? roleIn(db, req.auth.user.id, ws) : null
         // Not theirs to do: the route says so (404 or 403), as for anyone.
         if (!role || !roleAtLeast(role, line.role)) continue
       }
       if (line.first && (auth.canAddAfterRecovery(req.auth.session) || noPasskey(req))) continue
+      if (line.held && removesHeldPasskey(req, param(match, line, 'id'))) continue
       const error = coreRefusal(req)
       if (error) return refuse(res, error)
     }
@@ -343,12 +367,16 @@ export function createGuards({
     needSession,
     needFresh,
     needFreshOrRecovery,
+    needFreshOrHeldRemoval,
+    removesHeldPasskey,
+    noPasskey,
     needUnrestricted,
     needPasskeyBacked,
     fixedCore,
     cutTailnetSessions,
     passkeyOrThrow,
     machineTokensOrThrow,
+    adminMakingOrThrow,
     coreFreshOrThrow,
     stepUp,
     stepUpOrThrow,

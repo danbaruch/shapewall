@@ -179,6 +179,8 @@ const ADMIN_HELP = `shapewall hosted admin <command> --data DIR   (on the server
   retention WS --keep N|default   older versions kept per page and viewport
   retention WS --usage-days N|default   how long usage records are kept (400 days by default)
   retention --run [--dry-run]  prune now (the server also does it every 6 hours)
+  passkeys list --handle HANDLE | --login TAILNET_LOGIN      an account's passkeys (ids, where added, on hold)
+  passkeys remove ID --handle HANDLE | --login TAILNET_LOGIN   remove one, also the last; ends the account's passkey sessions
   log [--limit N]              the operator log
   --operator NAME              who you are in the operator log (default user@host)
   --json                       machine-readable output`
@@ -305,6 +307,40 @@ async function admin(positional, flags, out) {
           `${result.id} (${show(result.name)}) keeps ${keep === null ? 'the server default number of' : keep} older versions per page and viewport.`,
         )
         return 0
+      }
+      case 'passkeys': {
+        const who = { handle: flags.handle, login: flags.login, operator }
+        if (target === 'list') {
+          const result = ops.listPasskeysOf(db, who)
+          if (flags.json) return json(result)
+          const name = `@${show(result.user.handle)}${result.user.tailnetLogin ? ` (tailnet login ${show(result.user.tailnetLogin)})` : ''}`
+          if (!result.passkeys.length) return say(`${name} has no passkey.`)
+          out(`${name}:`)
+          for (const key of result.passkeys)
+            out(
+              `  ${key.id}\n    ${show(key.nickname) || '(no name)'}; added ${key.createdAt.slice(0, 16).replace('T', ' ')}` +
+                `${key.addedFrom ? ` from ${show(key.addedFrom)} in a tailnet session` : ''}; last used ${key.lastUsedAt ? key.lastUsedAt.slice(0, 16).replace('T', ' ') : 'never'}` +
+                `${key.onHoldUntil ? `; on hold until ${key.onHoldUntil.slice(0, 16).replace('T', ' ')}` : ''}`,
+            )
+          return 0
+        }
+        if (target === 'remove') {
+          if (!extra) throw new ops.OperatorError('usage: hosted admin passkeys remove ID --handle HANDLE | --login TAILNET_LOGIN')
+          const result = ops.removePasskeyOf(db, { ...who, id: extra })
+          if (flags.json) return json(result)
+          out(
+            `Removed the passkey ${show(result.removed.nickname) || result.removed.id.slice(0, 12)} of @${show(result.user.handle)}. ` +
+              `${result.sessionsEnded} passkey session${result.sessionsEnded === 1 ? '' : 's'} ended; ${result.left} passkey${result.left === 1 ? '' : 's'} left.`,
+          )
+          if (!result.left)
+            out(
+              result.user.tailnetLogin
+                ? `The account has no passkey now: ${show(result.user.tailnetLogin)} signs in through the tailnet and can add one.`
+                : 'The account has no passkey now: it signs in with a recovery code, if it has one left.',
+            )
+          return 0
+        }
+        throw new ops.OperatorError('usage: hosted admin passkeys list|remove ID --handle HANDLE | --login TAILNET_LOGIN')
       }
       case 'log': {
         ops.recordOperatorRead(db, { action: 'log', operator })

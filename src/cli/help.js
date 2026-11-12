@@ -297,7 +297,8 @@ export const SECTIONS = {
   hosted --setup --domain HOST   write a Docker Compose + Caddy folder for your own domain
       --usercontent-domain HOST  live HTML on its own domain; --email (TLS); --dir (./shapewall-hosted)
       --source DIR          a Shapewall checkout to build from; --dry-run; --force; --start (build, start, setup link)
-  hosted admin list|suspend|resume|delete|export|reports|retention|log   the operator's commands
+  hosted admin list|suspend|resume|delete|export|reports|retention|passkeys|log   the operator's commands
+                            (passkeys list|remove ID --handle HANDLE | --login LOGIN: an account's passkeys)
   hosted backup --to DIR [--keep-days N]   a consistent copy while the server runs
   hosted restore --from BACKUP --data NEW | --from BACKUP --check (the restore drill)`,
 }

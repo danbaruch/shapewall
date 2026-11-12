@@ -87,8 +87,14 @@ serve` is signed in as the account linked to their tailnet login, with no passke
   reading the data folder is the proof. On a local board the host uses `localhost`.
 - **An identity is per device, not per person.** Anything running as you on a tailnet device of yours can act as you in a
   tailnet session. So the fixed core asks for a passkey, a first passkey is on hold for 24 hours, a passkey account is linked
-  to a tailnet login only when you tick the box, and a workspace can require a passkey for approving machines and making
-  API tokens (one switch covers both, because a token is what a command line works with).
+  to a tailnet login only when you tick the box, and a workspace can require a passkey for approving machines, making API
+  tokens and inviting or making admins (one switch covers the three, because each leads to the others). While a first passkey
+  is on hold every page of the account shows where it was added, and any tailnet session of the account removes it with one
+  button, no passkey needed; after that the server's operator can (`shapewall hosted admin passkeys`). Several OS users of
+  one tailnet device all count as that device's owner.
+- **An account is held to the tailnet user.** The server keeps Tailscale's own id of the user with a linked login and requires
+  it on every request, so a login that is later given to someone else, or that reads the same on a node shared in from another
+  tailnet, signs nobody in. A device whose key expired is nobody.
 - **The local board uses the same proof.** `shapewall serve --tailscale` lets the owner's other devices in by tailnet identity
   only with it, and approving an agent's command needs the host's settings token, a paired device or that proof: a local
   program cannot approve its own command with a forged header.

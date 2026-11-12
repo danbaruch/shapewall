@@ -26,7 +26,14 @@ export function ownerIdentity(req, tailscale) {
   const host = String(req.headers.host || '')
     .toLowerCase()
     .replace(/:\d+$/, '')
-  return host === tailscale.host && tailscale.gate.identityOf(req)?.login === String(tailscale.ownerLogin).toLowerCase()
+  const identity = tailscale.gate.identityOf(req)
+  // The owner's login, and the same tailnet user as the one this node belongs to.
+  return (
+    host === tailscale.host &&
+    identity?.login === String(tailscale.ownerLogin).toLowerCase() &&
+    Boolean(tailscale.ownerUserId) &&
+    identity.userId === tailscale.ownerUserId
+  )
 }
 
 // Before every board API and file route: there is one owner, never anonymous guests.

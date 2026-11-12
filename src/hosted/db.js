@@ -675,13 +675,19 @@ const MIGRATIONS = [
   // tailnet login an account is linked to, the one a session came in with
   // (such a session works only on requests that carry that identity), the
   // one an invite is for, and the logins that arrived and belong to nobody
-  // yet.
+  // yet. users.tailnet_user_id: Tailscale's own id of the user behind the
+  // linked login (a login string can be given to someone else later; the id
+  // cannot). passkeys.tailnet_added_from: set (to the device's label) on a
+  // passkey that a tailnet session added with no passkey check, the first
+  // of its account; with recovery_added_at as its 24 hour clock.
   // Additive; an older build ignores all of it (docs/hosted.md,
   // "Rolling back").
   `
   ALTER TABLE workspaces ADD COLUMN step_up TEXT NOT NULL DEFAULT '{}';
   ALTER TABLE users ADD COLUMN tailnet_login TEXT;
   ALTER TABLE users ADD COLUMN tailnet_linked_at TEXT;
+  ALTER TABLE users ADD COLUMN tailnet_user_id TEXT;
+  ALTER TABLE passkeys ADD COLUMN tailnet_added_from TEXT;
   CREATE UNIQUE INDEX users_tailnet_login ON users(tailnet_login) WHERE tailnet_login IS NOT NULL;
   ALTER TABLE sessions ADD COLUMN tailnet_login TEXT;
   ALTER TABLE invites ADD COLUMN tailnet_login TEXT;

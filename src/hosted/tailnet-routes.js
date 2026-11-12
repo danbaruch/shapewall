@@ -32,6 +32,9 @@ const OUT_DAYS = 30
 const OWN_MACHINE =
   'This is the server’s own machine: a tailnet identity is never taken from here, because any program on this machine could ask the same way. Use a passkey, or another tailnet device.'
 
+const USER_CHANGED =
+  'This tailnet login is linked to an account here for a different tailnet user than the one asking (the name was given to someone else, or comes from another tailnet). Sign in with a passkey, or ask whoever runs this server.'
+
 export function mountTailnetAuth(authRouter, deps) {
   const {
     db,
@@ -107,7 +110,7 @@ export function mountTailnetAuth(authRouter, deps) {
   function autoSignIn(req, res) {
     const identity = sameOrigin(req) ? identityOf(req) : null
     if (!identity || signedOutHere(req)) return false
-    const user = tailnetAccounts.userFor(identity.login)
+    const user = tailnetAccounts.accountOf(identity)
     if (!user) return false
     signIn(req, res, user, identity)
     return true
@@ -120,6 +123,8 @@ export function mountTailnetAuth(authRouter, deps) {
     // From the server's own machine: never signed in by identity (any program there could ask the same way).
     if (!identity && sameOrigin(req) && tailnet.ownMachine?.(req)) return { tailnet: { state: 'self' } }
     if (!identity) return { tailnet: { state: 'none' } }
+    // The login is linked here, but for another tailnet user than this one: nobody, and the page says why.
+    if (tailnetAccounts.heldByAnother(identity)) return { tailnet: { state: 'changed', login: identity.login } }
     if (tailnetAccounts.userFor(identity.login)) return { tailnet: { state: 'signed_out', login: identity.login, name: identity.name } }
     const invites = usableInvites(identity.login).map((row) => ({ workspace: row.workspace_name, role: row.role }))
     // Listed for the admins until someone invites it (or it stops coming).
@@ -163,7 +168,8 @@ export function mountTailnetAuth(authRouter, deps) {
     limit('ceremony'),
     handle(async (req, res) => {
       const identity = arrived(req)
-      const user = tailnetAccounts.userFor(identity.login)
+      if (tailnetAccounts.heldByAnother(identity)) throw new HttpError(403, 'tailnet_user_changed', USER_CHANGED)
+      const user = tailnetAccounts.accountOf(identity)
       if (!user) throw new HttpError(404, 'no_account', `No account here is linked to ${identity.login}.`)
       signIn(req, res, user, identity)
       res.json({ user: publicUser(user) })
@@ -199,6 +205,7 @@ export function mountTailnetAuth(authRouter, deps) {
         )
         return res.json({ joined, workspaceId: joined[0] || null })
       }
+      if (tailnetAccounts.heldByAnother(identity)) throw new HttpError(403, 'tailnet_user_changed', USER_CHANGED)
       if (tailnetAccounts.userFor(identity.login))
         throw new HttpError(409, 'has_account', `${identity.login} already has an account here. Continue as that account instead.`)
       const { invite, setup, handle: wantedHandle, displayName, workspaceName } = req.body || {}
@@ -254,7 +261,7 @@ export function mountTailnetAuth(authRouter, deps) {
     needFresh,
     handle(async (req, res) => {
       const identity = arrived(req)
-      const login = tailnetAccounts.link(req.user.id, identity.login)
+      const login = tailnetAccounts.link(req.user.id, identity.login, identity.userId)
       auditAccount(db, { userId: req.user.id, action: 'tailnet_linked', ip: clientIp(req), at: iso(), detail: { tailnet: login } })
       res.json({ linked: login })
     }),

@@ -66,13 +66,17 @@ export const STEP_UP_WINDOW_DEFAULT = 15
 export const FIXED_CORE = [
   { method: 'POST', path: '/auth/passkeys/options', first: true, says: 'adding or removing a passkey' },
   { method: 'POST', path: '/auth/passkeys/verify', first: true, says: 'adding or removing a passkey' },
-  { method: 'DELETE', path: '/auth/passkeys/:id', says: 'adding or removing a passkey' },
+  // held: a tailnet session may take away a passkey that a tailnet session added and that is still on hold.
+  { method: 'DELETE', path: '/auth/passkeys/:id', held: true, says: 'adding or removing a passkey' },
   { method: 'POST', path: '/auth/recovery-codes', says: 'new recovery codes' },
   { method: 'POST', path: '/auth/tailnet/link', says: 'linking or unlinking a tailnet login' },
   { method: 'DELETE', path: '/auth/tailnet/link', says: 'linking or unlinking a tailnet login' },
   { method: 'DELETE', path: '/auth/me', says: 'deleting your account' },
   { method: 'DELETE', path: '/api/workspaces/:ws', role: 'owner', says: 'deleting a workspace' },
-  { inRoute: 'console-routes.js roleStepUp', says: 'making someone an owner, changing or removing an owner, inviting an owner' },
+  {
+    inRoute: 'console-routes.js roleStepUp',
+    says: 'making someone an owner, changing or removing an owner (leaving as one too), inviting an owner',
+  },
   { inRoute: 'rebind.js POST /auth/rebind/start', says: "moving your account to the server's new address" },
   { inRoute: 'step-up-settings.js change', says: 'making these settings weaker' },
 ]

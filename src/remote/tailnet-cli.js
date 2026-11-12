@@ -104,7 +104,8 @@ export async function whoAmI(client) {
   if (state === 'unknown' || state === 'invited')
     return { mode: 'visitor', login: terminalSafe(me.tailnet.login), invites: Array.isArray(me.tailnet.invites) ? me.tailnet.invites : [] }
   if (state === 'self') return { mode: 'self' }
-  if (state === 'none' || state === 'signed_out') return { mode: 'none' }
+  // 'changed': the login is linked here for another tailnet user than this one (nobody, like 'none').
+  if (state === 'none' || state === 'signed_out' || state === 'changed') return { mode: 'none' }
   return { mode: 'off' }
 }
 

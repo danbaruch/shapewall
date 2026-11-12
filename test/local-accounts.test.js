@@ -13,7 +13,7 @@ import { sha256 } from '../src/hosted/crypto.js'
 import { accountOrigin, localOwnerSetupAllowed, openLocalAccountDatabase } from '../src/accounts/local.js'
 import { createAuthenticator, createBrowser } from './hosted-helpers.js'
 import { sampleConfig, tempDir, SAMPLE } from './helpers.js'
-import { believedGate } from './tailnet-helpers.js'
+import { believedGate, tailnetUserId } from './tailnet-helpers.js'
 
 const instances = []
 after(async () => {
@@ -80,7 +80,12 @@ async function signIn(instance, authenticator, browser = instance.browser()) {
 }
 
 test('Tailscale first-owner setup trusts only the configured identity through the loopback proxy', () => {
-  const tailscale = { host: 'fixture.example.ts.net', ownerLogin: 'owner@example.test', gate: believedGate() }
+  const tailscale = {
+    host: 'fixture.example.ts.net',
+    ownerLogin: 'owner@example.test',
+    ownerUserId: tailnetUserId('owner@example.test'),
+    gate: believedGate(),
+  }
   const req = {
     socket: { remoteAddress: '127.0.0.1' },
     headers: { host: 'fixture.example.ts.net:9443', 'tailscale-user-login': 'owner@example.test' },
@@ -100,7 +105,12 @@ test('Tailscale first-owner setup trusts only the configured identity through th
 })
 
 test('Tailscale owner can enroll at the fixed origin without gaining agent settings or further registration', async () => {
-  const tailscale = { host: 'fixture.example.ts.net', ownerLogin: 'owner@example.test', gate: believedGate() }
+  const tailscale = {
+    host: 'fixture.example.ts.net',
+    ownerLogin: 'owner@example.test',
+    ownerUserId: tailnetUserId('owner@example.test'),
+    gate: believedGate(),
+  }
   const home = tempDir('tailscale-account-home')
   const instance = await fixture({
     origin: 'https://fixture.example.ts.net:9443',
