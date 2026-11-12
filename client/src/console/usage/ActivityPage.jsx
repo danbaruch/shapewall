@@ -42,6 +42,7 @@ import {
   Spinner,
   ToggleGroup,
 } from '../../components/ui'
+import { DEMO } from '../../lib/demo'
 import { cn } from '../../lib/utils'
 import { ACTION_GROUP_IDS, ACTION_GROUP_LABEL } from '../../../../src/hosted/usage-shape.js'
 import { Card, CardHeader, LoadError, Loading, PageHeader, RoleBadge, Time } from '../components'
@@ -54,7 +55,7 @@ import { setSearch, useAddress, useUsageFilter, useWs, useWsPages } from './data
 import { PeriodPicker, ViewsMenu } from './filters'
 import { formatCount, formatTime, periodOf } from './format'
 import { ColumnChooser, DataGrid, readLayout, writeLayout } from './grid'
-import { Drawer, Fact, Facts } from './pieces'
+import { DemoNote, Drawer, Fact, Facts } from './pieces'
 import { Overview } from './UsagePage'
 
 const ALL = '__all__'
@@ -484,6 +485,10 @@ export function ActivityPage() {
           </Link>
         }
       />
+      <DemoNote testId="activity">
+        This is a demo with a made-up history: the sign-ins, settings, agents and approvals of a pretend team. What you do in the demo is
+        added on top; Reset puts everything back.
+      </DemoNote>
       {isAdmin ? (
         <div className="mb-4 flex print:hidden">
           <ToggleGroup
@@ -546,6 +551,7 @@ export function PersonPage({ userId }) {
         badge={<RoleBadge role={person.role} />}
         description={`@${person.handle} · joined ${formatDate(person.joinedAt)}${person.roleChanged?.from ? ` · ${ROLE_LABEL[person.roleChanged.from] || person.roleChanged.from} until ${formatDate(person.roleChanged.at)}` : ''}`}
       />
+      <DemoNote testId="person">This is a demo: {person.displayName} is made up, and so are these numbers.</DemoNote>
       <div className="mb-5 grid gap-4 lg:grid-cols-3">
         <Card>
           <CardHeader icon={ShieldCheck} title="What they can reach" />
@@ -687,11 +693,19 @@ export function AgentPage({ agentId }) {
         badge={<Badge tone={agent.state === 'revoked' ? 'bad' : agent.state === 'offline' ? 'neutral' : 'ok'}>{stateLabel}</Badge>}
         description={`An agent of ${agent.projectName}${agent.machine ? `, on ${agent.machine}` : ''}.`}
         actions={
-          <Link to={`/w/${workspaceId}/agents/${agent.projectId}`} className={cn(linkClass, 'inline-flex items-center gap-1 text-sm')}>
-            Its settings <ArrowUpRight size={14} aria-hidden="true" />
+          // The demo has one Agents page (the local console's), not one per project.
+          <Link
+            to={DEMO ? `/w/${workspaceId}/agents` : `/w/${workspaceId}/agents/${agent.projectId}`}
+            className={cn(linkClass, 'inline-flex items-center gap-1 text-sm')}
+          >
+            {DEMO ? 'Agents' : 'Its settings'} <ArrowUpRight size={14} aria-hidden="true" />
           </Link>
         }
       />
+      <DemoNote testId="agent">
+        This is a demo: the machine, the models and the numbers of {agent.name} are made up. On the board it is a scripted agent that
+        answers in this browser.
+      </DemoNote>
       <Card className="mb-5">
         <Facts>
           <Fact label="Connected by">

@@ -18,9 +18,11 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '../../components/ui'
+import { DEMO } from '../../lib/demo'
 import { useMediaQuery } from '../../lib/hooks'
 import { cn } from '../../lib/utils'
 import { DIMENSION_LABEL, KIND_LABEL, OUTCOME_GROUP_IDS, OUTCOME_GROUP_LABEL, USAGE_KINDS } from '../../../../src/hosted/usage-shape.js'
+import { currentPath } from '../lib/router'
 import { useToast } from '../state'
 import { FILTER_KEYS, RANGE_KEYS, VIEW_SKIP, useViews } from './data'
 import { PRESETS, dateInput, formatCount } from './format'
@@ -433,7 +435,9 @@ export function ViewsMenu({ workspaceId, page, search, onOpen }) {
   const active = views.find((view) => view.query === current)
   const copyLink = async () => {
     try {
-      await navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}${current ? `?${current}` : ''}`)
+      // The public demo keeps the route, and so the filters, in the fragment.
+      const route = DEMO ? `#${currentPath()}` : ''
+      await navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}${route}${current ? `?${current}` : ''}`)
       toast('Link copied. It carries the filters, not your access.')
     } catch {
       toast('This browser did not allow copying', 'bad')

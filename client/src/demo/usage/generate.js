@@ -10,6 +10,7 @@
 //
 // The shape of the history:
 //   - busy weekdays, quiet weekends, the recent weeks busier than the first
+//     (each agent has turns only from the day it was connected)
 //   - three spikes (a release day), and a quiet stretch (two days with next
 //     to nothing, running into a weekend)
 //   - a day when most turns failed
@@ -78,9 +79,9 @@ const PATHS = [
 const PRICE = { 'opus-max': 5, 'sonnet-large': 1 }
 
 // One turn. `random` is the day's own generator.
-function turn(world, random, { day, age, start, failing }) {
+function turn(world, random, { day, age, start, failing, agents }) {
   const pick = (list) => list[Math.floor(random() * list.length)]
-  const agent = weighted(random, world.agents)
+  const agent = weighted(random, agents)
   const roll = random()
   const kind = roll < 0.52 ? 'chat' : roll < 0.74 ? 'review' : roll < 0.96 ? 'fix' : 'push'
   const fix = kind === 'fix' || kind === 'push'
@@ -191,13 +192,15 @@ export function generateRuns(world, { now, days = 60, seed = 20_260_704, offsetM
     let volume = (weekday < 5 ? 62 : 11) * (0.55 + 0.45 * (1 - age / days))
     if (marks.spikes.has(day)) volume *= marks.spikes.get(day)
     if (marks.quiet.has(day)) volume *= 0.03
-    const count = Math.round(volume * (0.85 + 0.3 * random()))
+    // An agent has turns from the day it was connected.
+    const agents = world.agents.filter((agent) => agent.connectedDays === undefined || age < agent.connectedDays)
+    const count = agents.length ? Math.round(volume * (0.85 + 0.3 * random())) : 0
     for (let index = 0; index < count; index += 1) {
       // Working hours, mostly; a few in the evening.
       const hour = 8 + random() * 10 + (random() < 0.1 ? 4 : 0)
       const start = day * DAY - offset + Math.floor(hour * HOUR)
       const failing = day === marks.failures ? random() < 0.62 : random() < 0.04
-      const row = turn(world, random, { day, age, start, failing })
+      const row = turn(world, random, { day, age, start, failing, agents })
       // Today: only what has already ended.
       if (Date.parse(row.ended_at) <= now) rows.push(row)
     }

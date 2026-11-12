@@ -1,12 +1,14 @@
 // The public demo's onboarding: one small checklist, three things worth
-// trying, each a button that does it, plus how to move around. It starts as
+// trying, each a button that does it, a way to the console's Usage page (what
+// the agents did, with the visitor's own turns in it), plus how to move
+// around. It starts as
 // a chip (as a card it would cover pins and pages at the bottom left of the
 // first view, and half a phone screen) and unfolds into the card and back
 // on a click. Closed once, it and the board's navigation tip stay closed in
 // this browser.
 // Only in the demo build; never a sales pitch (no sign-up or pricing links).
 import { useState } from 'react'
-import { Bot, Check, ChevronDown, MessageSquare, MessageSquarePlus, Sparkles, X } from 'lucide-react'
+import { ArrowUpRight, BarChart3, Bot, Check, ChevronDown, MessageSquare, MessageSquarePlus, Sparkles, X } from 'lucide-react'
 import { Button, IconButton } from '../components/ui'
 import { cn } from '../lib/utils'
 
@@ -34,7 +36,7 @@ export function useTryThis(enabled) {
 }
 
 // `chip`: shown folded whatever was chosen (a tool's note needs the room).
-export function TryThis({ touch, chip = false, done, onOpenComment, onComment, onAgent, onClose }) {
+export function TryThis({ touch, chip = false, done, onOpenComment, onComment, onAgent, onUsage, onClose }) {
   const [folded, setFolded] = useState(true)
   const steps = [
     {
@@ -55,6 +57,10 @@ export function TryThis({ touch, chip = false, done, onOpenComment, onComment, o
       ? { id: 'agent', icon: Bot, label: 'Ask the agent', hint: touch ? 'In the ... menu' : 'It reads the open comments', run: onAgent }
       : null,
   ].filter(Boolean)
+  // Not a step to tick off: it leaves the board for the console.
+  const usage = onUsage
+    ? { id: 'usage', icon: BarChart3, label: 'See what the agents did', hint: 'Usage in the console: turns, tokens, charts', run: onUsage }
+    : null
   const finished = steps.filter((step) => done.has(step.id)).length
   // Above the zoom controls (desktop) or the Fit button (phone), left of the board's tools.
   const place = touch ? 'bottom-[calc(4rem+env(safe-area-inset-bottom,0px))] left-2' : 'bottom-16 left-3'
@@ -142,6 +148,26 @@ export function TryThis({ touch, chip = false, done, onOpenComment, onComment, o
             </li>
           )
         })}
+        {usage ? (
+          <li>
+            <Button
+              size={touch ? 'touch' : 'sm'}
+              variant="ghost"
+              className="h-auto w-full justify-start py-1.5 text-left"
+              onClick={usage.run}
+              data-sw-try-step={usage.id}
+            >
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent/10 text-accent" aria-hidden="true">
+                <usage.icon size={13} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-[13px] font-medium text-fg">{usage.label}</span>
+                <span className="block text-xs font-normal text-muted">{usage.hint}</span>
+              </span>
+              <ArrowUpRight size={13} className="shrink-0 text-faint" aria-hidden="true" />
+            </Button>
+          </li>
+        ) : null}
       </ol>
       <p className="mt-2 border-t border-line px-2 pt-2 text-xs text-muted" data-sw-try-nav="true">
         {touch ? 'Drag to move around, pinch to zoom.' : 'Scroll to move, Ctrl+scroll or pinch to zoom, Space+drag to pan.'}

@@ -19,6 +19,8 @@ import { OUTCOME_GROUP_IDS, USAGE_BUCKETS, USAGE_DIMENSIONS, USAGE_METRICS, USAG
 import { generateActivity, generateRuns, historyMarks } from '../client/src/demo/usage/generate.js'
 import { createMemoryUsage } from '../client/src/demo/usage/store.js'
 import { USAGE_WORLD } from '../client/src/demo/usage/world.js'
+import { createDemoBackend } from '../client/src/demo/backend.js'
+import { DEMO_AGENT_IDS, NOTES_PROJECT, SANDBOX_ID, USERS, WEBSITE_PROJECT, WORKSPACE_ID, seedState } from '../client/src/demo/fixtures.js'
 import * as helpers from './hosted-helpers.js'
 import { insertRuns, seedWorkspace } from './fixtures/usage-seed.js'
 
@@ -361,4 +363,435 @@ test('the activity that goes with the turns: who asked, who answered, sign-ins, 
   assert.ok(entries.filter((entry) => entry.action === 'signed_in').every((entry) => entry.account && entry.detail.device))
   // Documentation addresses only, and no text beyond names, ids and paths.
   assert.ok(entries.every((entry) => /^(203\.0\.113|198\.51\.100)\.\d+$/.test(entry.ip)))
+})
+
+// ---- The demo's own API (client/src/demo/usage/routes.js) ----
+
+// A small export: the board view and comments the chat routes read.
+const EXPORT = {
+  'data/boards/demo.json': {
+    board: {
+      id: 'demo',
+      title: 'Lumen Notes (demo)',
+      groups: ['Marketing'],
+      pages: [
+        { id: 'home', title: 'Home', group: 'Marketing', viewports: ['desktop', 'phone'] },
+        { id: 'pricing', title: 'Pricing', group: 'Marketing', viewports: ['desktop', 'phone'] },
+      ],
+    },
+    viewports: { desktop: { width: 1440, height: 2200 }, phone: { width: 390, height: 1800 } },
+    manifest: { pages: { home: {}, pricing: {} } },
+    captures: { home: {}, pricing: {} },
+    links: {},
+    journeys: [],
+    versions: {},
+    environments: [],
+    variants: [],
+    commentCounts: {},
+  },
+  'data/boards/demo/comments.json': {
+    comments: [
+      {
+        id: 2,
+        pageId: 'home',
+        viewport: 'phone',
+        x: 50,
+        y: 50,
+        body: 'Shorter label.',
+        author: 'Mei',
+        status: 'open',
+        createdAt: '2026-09-30T12:00:00.000Z',
+        replies: [],
+      },
+    ],
+  },
+}
+const userId = (handle) => USERS.find((item) => item.handle === handle).id
+const ws = (rest = '') => `/api/workspaces/${WORKSPACE_ID}${rest}`
+const range = (days = 30) => `from=${new Date(NOW.getTime() - days * DAY).toISOString()}&to=${NOW.toISOString()}&tz=UTC`
+
+function demo(change = () => {}) {
+  const clock = { at: NOW.getTime() }
+  const state = seedState(clock.at)
+  change(state)
+  const backend = createDemoBackend({
+    state,
+    location: { project: NOTES_PROJECT },
+    now: () => clock.at,
+    loadJson: async (url) => structuredClone(EXPORT[url] ?? Promise.reject(new Error(url))),
+  })
+  const call = async (method, path, body) => {
+    const [pathname, search = ''] = path.split('?')
+    return backend.handle({ method, path: pathname, search: search ? `?${search}` : '', body })
+  }
+  const get = async (path) => {
+    const answer = await call('GET', path)
+    assert.equal(answer.status, 200, `${path}: ${JSON.stringify(answer.json)}`)
+    return answer.json
+  }
+  return { state, backend, call, get, clock }
+}
+const as = (role) => (state) => (state.viewAs = role)
+
+test('the demo console answers every Usage request like a server: tiles, charts, table, a turn, budgets', async () => {
+  const { get, call } = demo()
+  const options = await get(ws('/usage/options'))
+  assert.equal(options.scope, 'workspace')
+  assert.deepEqual(options.options.agent.map((item) => item.label).sort(), ['Coding agent', 'Demo agent', 'Second agent', 'Website agent'])
+  assert.deepEqual(options.options.project.map((item) => item.label).sort(), ['Lumen Notes', 'Lumen Website'])
+  // The demo's own people, and one who left.
+  const people = options.options.person.map((item) => item.label)
+  for (const name of ['Robin Ash', 'Jo Park', 'Mei Lin', 'Sam Ortiz', 'Priya Nair', 'Former member', 'Nobody (automatic)'])
+    assert.ok(people.includes(name), name)
+  assert.ok(options.options.model.some((item) => item.label === 'Not reported'))
+  assert.ok(options.options.model.length >= 4, 'a few models')
+
+  const summary = await get(ws(`/usage/summary?${range()}`))
+  assert.ok(summary.current.calls > 600 && summary.previous.calls > 300)
+  // "Not reported" is visible: fewer turns reported a cost than tokens, fewer tokens than turns.
+  assert.ok(summary.current.reported.cost > 0 && summary.current.reported.cost < summary.current.reported.tokens)
+  assert.ok(summary.current.reported.tokens < summary.current.calls)
+  assert.ok(summary.current.latency.p95 > 4 * summary.current.latency.p50)
+  for (const group of ['completed', 'needs_person', 'failed', 'stopped', 'other', 'running'])
+    assert.ok(summary.current.outcomes[group] > 0, group)
+  for (const key of ['asked', 'allowed', 'denied', 'auto']) assert.ok(summary.current.approvals[key] > 0, key)
+
+  const series = await get(ws(`/usage/series?${range()}&bucket=day&groupBy=agent&metric=tokens`))
+  assert.equal(series.buckets.length, 31)
+  assert.equal(series.groups.length, 4)
+  assert.equal(
+    series.points.reduce((sum, point) => sum + point.calls, 0),
+    summary.current.calls,
+    'the chart and the tiles count the same turns',
+  )
+  const weekly = await get(ws(`/usage/series?${range(60)}&bucket=week&groupBy=none&metric=calls`))
+  assert.ok(weekly.buckets.length >= 9)
+  const breakdown = await get(ws(`/usage/breakdown?${range()}&groupBy=model`))
+  assert.equal(
+    breakdown.groups.reduce((sum, group) => sum + group.calls, 0),
+    summary.current.calls,
+  )
+  const before = await get(ws(`/usage/breakdown?${range()}&groupBy=person&previous=1`))
+  assert.equal(
+    before.groups.reduce((sum, group) => sum + group.calls, 0),
+    summary.previous.calls,
+  )
+  const latency = await get(ws(`/usage/latency?${range()}&bucket=day`))
+  assert.equal(latency.buckets.length, 31)
+  const top = await get(ws(`/usage/top?${range()}`))
+  assert.equal(top.agents.length, 4)
+  assert.equal(top.threads.length, 5)
+  const budgets = await get(ws('/usage/budgets'))
+  assert.deepEqual(
+    budgets.projects.map((item) => [item.project.name, item.budgets.map((budget) => budget.limit)]),
+    [
+      ['Lumen Notes', [120, 30]],
+      ['Lumen Website', [60, 12]],
+    ],
+  )
+  assert.ok(
+    budgets.projects[0].budgets[0].used > 0 && budgets.projects[0].budgets[0].used < 120,
+    'today counts against the budget, within it',
+  )
+
+  // A filter narrows every answer; a bad one is refused as the server refuses it.
+  const fixes = await get(ws(`/usage/summary?${range()}&kind=fix&outcome=failed&outcome=stopped`))
+  assert.ok(fixes.current.calls > 0 && fixes.current.calls < summary.current.calls / 5)
+  assert.equal(fixes.current.fixes, fixes.current.calls)
+  const bad = await call('GET', ws(`/usage/summary?${range()}&kind=nonsense`))
+  assert.deepEqual([bad.status, bad.json.error.code], [400, 'invalid_filter'])
+  assert.equal((await call('GET', ws('/usage/summary?tz=Mars/Olympus'))).json.error.code, 'invalid_zone')
+
+  // The table pages by cursor and sorts by any number; a turn opens with its detail.
+  const first = await get(ws(`/usage/rows?${range()}&sort=tokens&dir=desc&limit=100`))
+  assert.equal(first.total, summary.current.calls)
+  assert.equal(first.rows.length, 100)
+  const second = await get(ws(`/usage/rows?${range()}&sort=tokens&dir=desc&limit=100&cursor=${encodeURIComponent(first.next)}`))
+  assert.ok(first.rows.at(-1).totalTokens >= second.rows[0].totalTokens)
+  assert.ok(first.rows[0].totalTokens > first.rows[99].totalTokens)
+  const turn = (await get(ws(`/usage/rows/${first.rows[0].id}`))).row
+  assert.equal(turn.id, first.rows[0].id)
+  assert.equal(turn.link.url, `index.html?project=${turn.project.id}`, 'the board of the demo')
+  assert.ok(turn.tools && turn.contextSize === 200_000)
+  assert.equal((await call('GET', ws('/usage/rows/run_000000000000000000000000'))).status, 404)
+})
+
+test('who reads what in the demo: a member their own turns, a viewer no usage, nobody another workspace', async () => {
+  const owner = demo()
+  const all = (await owner.get(ws(`/usage/summary?${range()}`))).current.calls
+  // View as Member is Mei: her own turns (she connected no agent).
+  const member = demo(as('member'))
+  assert.equal((await member.get(ws('/usage/options'))).scope, 'own')
+  const own = await member.get(ws(`/usage/rows?${range()}&limit=500`))
+  assert.ok(own.total > 60 && own.total < all / 3)
+  assert.ok(own.rows.every((row) => row.person?.id === userId('mei')))
+  assert.deepEqual((await member.get(ws('/usage/budgets'))).projects, [])
+  // An admin who connected agents reads the workspace too.
+  const admin = demo(as('admin'))
+  assert.equal((await admin.get(ws(`/usage/summary?${range()}`))).current.calls, all)
+  // A viewer has no usage; signed out, nothing; the sandbox workspace has no history.
+  const viewer = demo(as('viewer'))
+  assert.equal((await viewer.call('GET', ws(`/usage/summary?${range()}`))).status, 403)
+  assert.equal((await viewer.call('GET', ws('/views?page=usage'))).status, 403)
+  assert.equal((await viewer.call('GET', ws('/views?page=activity'))).status, 200)
+  const out = demo((state) => (state.signedOut = true))
+  assert.equal((await out.call('GET', ws(`/usage/summary?${range()}`))).status, 401)
+  const sandbox = await owner.get(`/api/workspaces/${SANDBOX_ID}/usage/summary?${range()}`)
+  assert.equal(sandbox.current.calls, 0)
+  assert.equal((await owner.get(`/api/workspaces/${SANDBOX_ID}/usage/rows?${range()}`)).total, 0)
+})
+
+test('exports are the filtered set, made in the browser, and leave an entry; saved views live in the demo’s state', async () => {
+  const { get, call, state } = demo()
+  const total = (await get(ws(`/usage/summary?${range()}&kind=fix`))).current.calls
+  const csv = await call('GET', ws(`/usage/export?${range()}&kind=fix`))
+  assert.equal(csv.status, 200)
+  assert.equal(csv.file.name, 'lumen-usage-2026-11-10.csv')
+  assert.match(csv.file.type, /^text\/csv/)
+  const lines = csv.file.text.trimEnd().split('\r\n')
+  assert.equal(lines.length, total + 1)
+  assert.match(lines[0], /^"started_at","ended_at","kind","outcome","agent"/)
+  assert.ok(lines.slice(1).every((line) => line.includes('"fix"')))
+  const json = await call('GET', ws(`/usage/export?${range()}&kind=fix&format=json`))
+  assert.equal(json.file.name, 'lumen-usage-2026-11-10.json')
+  assert.equal(JSON.parse(json.file.text).length, total)
+  assert.equal((await call('GET', ws(`/usage/export?${range()}&format=xml`))).json.error.code, 'invalid_format')
+  const exported = state.audit.filter((entry) => entry.action === 'usage_exported')
+  assert.deepEqual(
+    exported.map((entry) => [entry.detail.format, entry.detail.rows, entry.detail.scope]),
+    [
+      ['csv', total, 'workspace'],
+      ['json', total, 'workspace'],
+    ],
+  )
+
+  // Robin starts with two saved views of Usage and one of Activity.
+  assert.deepEqual(
+    (await get(ws('/views?page=usage'))).views.map((view) => view.name),
+    ['Fixes that failed or stopped', 'Tokens by model, week by week'],
+  )
+  assert.equal((await get(ws('/views?page=activity'))).views.length, 1)
+  const saved = await call('POST', ws('/views'), { page: 'usage', name: '  Mei this  week ', query: 'range=week&person=' + userId('mei') })
+  assert.equal(saved.status, 201)
+  assert.equal(saved.json.view.name, 'Mei this week')
+  // The same name again replaces it; a bad query is refused.
+  const again = await call('POST', ws('/views'), { page: 'usage', name: 'Mei this week', query: 'range=7d' })
+  assert.equal(again.json.view.id, saved.json.view.id)
+  assert.equal((await get(ws('/views?page=usage'))).views.find((view) => view.id === saved.json.view.id).query, 'range=7d')
+  assert.equal((await call('POST', ws('/views'), { page: 'usage', name: 'x', query: '<script>' })).json.error.code, 'invalid_view')
+  assert.equal(state.views.length, 4, 'kept in the state the demo saves and Reset replaces')
+  assert.equal((await call('DELETE', ws(`/views/${saved.json.view.id}`))).status, 200)
+  assert.equal((await call('DELETE', ws(`/views/${saved.json.view.id}`))).status, 404)
+  // Views are their maker's: the admin has none, and cannot remove Robin's.
+  const admin = demo(as('admin'))
+  assert.deepEqual((await admin.get(ws('/views?page=usage'))).views, [])
+  assert.equal((await admin.call('DELETE', ws(`/views/${state.views[0].id}`))).status, 404)
+  // Reset is a new state: the seeded views, nothing a visitor saved.
+  assert.equal(seedState(NOW.getTime()).views.length, 3)
+  assert.deepEqual(seedState(NOW.getTime()).usageRuns, [])
+})
+
+test('activity in the demo: filters, before and after, paging, a person, an agent and the access review', async () => {
+  const { get, call, state } = demo()
+  const filters = await get(ws('/activity/filters'))
+  assert.equal(filters.people.length, 6)
+  assert.equal(filters.agents.length, 4)
+  assert.equal(filters.accounts, 'members')
+  const first = await get(ws('/activity?limit=100'))
+  assert.equal(first.scope, 'workspace')
+  assert.equal(first.entries.length, 100)
+  assert.ok(
+    first.entries.every((entry, index) => !index || first.entries[index - 1].at >= entry.at),
+    'newest first',
+  )
+  const second = await get(ws(`/activity?limit=100&before=${first.next}`))
+  assert.ok(second.entries[0].at <= first.entries.at(-1).at)
+  assert.ok(!second.entries.some((entry) => first.entries.some((other) => other.id === entry.id)))
+
+  // Each kind of activity the task names is there, as the page reads it.
+  const of = async (query) => (await get(ws(`/activity?limit=200&${query}`))).entries
+  const signIns = await of('group=signin')
+  assert.ok(signIns.length > 100 && signIns.every((entry) => entry.scope === 'account' && entry.group === 'signin'))
+  assert.ok(signIns.some((entry) => entry.device === 'Chrome on macOS'))
+  const roles = (await of('group=members')).filter((entry) => entry.action === 'member_role_changed')
+  assert.deepEqual(roles.find((entry) => entry.targetLabel === 'Sam Ortiz').change, { before: 'admin', after: 'member' })
+  assert.ok(roles.every((entry) => entry.sensitive))
+  const agents = await of('group=agents')
+  for (const action of ['agent_created', 'agent_connected', 'agent_audience_changed', 'agent_approval_rule_changed', 'agent_renamed'])
+    assert.ok(
+      agents.some((entry) => entry.action === action),
+      action,
+    )
+  assert.deepEqual(agents.find((entry) => entry.action === 'agent_approval_rule_changed').change, { before: 'ask', after: 'auto' })
+  const approvals = await of('group=approvals')
+  assert.ok(
+    approvals.some((entry) => entry.action === 'agent_permission_approved') &&
+      approvals.some((entry) => entry.action === 'agent_permission_denied'),
+  )
+  assert.ok(approvals.every((entry) => entry.agent && entry.project))
+  assert.ok(
+    (await of('group=tokens')).some((entry) => entry.action === 'token_created'),
+    'the demo’s own audit log is part of it',
+  )
+  const exports = await of('group=exports')
+  assert.ok(exports.length >= 7 && exports.every((entry) => entry.sensitive))
+  const sensitive = await of('sensitive=1')
+  assert.ok(sensitive.length > 10 && sensitive.every((entry) => entry.sensitive))
+
+  // One person; one agent; a search; a period.
+  const mei = await of(`person=${userId('mei')}`)
+  assert.ok(mei.length > 50 && mei.every((entry) => entry.actor.id === userId('mei')))
+  const coding = await of(`agent=${DEMO_AGENT_IDS.coding}`)
+  assert.ok(coding.length > 20 && coding.every((entry) => entry.agent?.id === DEMO_AGENT_IDS.coding && entry.agent.name === 'Coding agent'))
+  const website = await of(`project=${WEBSITE_PROJECT}`)
+  assert.ok(website.length > 20 && website.every((entry) => entry.project?.name === 'Lumen Website'))
+  const search = await get(ws('/activity?q=Website%20agent&limit=50'))
+  assert.ok(search.entries.length > 5 && search.searchedFrom)
+  const week = await of(`from=${new Date(NOW.getTime() - 7 * DAY).toISOString()}&to=${NOW.toISOString()}`)
+  assert.ok(week.length > 0 && week.every((entry) => entry.at >= new Date(NOW.getTime() - 7 * DAY).toISOString()))
+  assert.equal((await call('GET', ws('/activity?group=nonsense'))).json.error.code, 'invalid_filter')
+
+  // The export is the filtered log, and exporting is itself activity.
+  const csv = await call('GET', ws('/activity/export?group=exports'))
+  assert.equal(csv.file.name, 'lumen-activity-2026-11-10.csv')
+  assert.equal(csv.file.text.trimEnd().split('\r\n').length, exports.length + 1)
+  assert.equal(state.audit.at(-1).action, 'audit_exported')
+  assert.equal((await of('group=exports')).length, exports.length + 1)
+
+  // A person's page: what they reach, what they made, their devices.
+  const jo = (await get(ws(`/people/${userId('jo')}`))).person
+  assert.deepEqual([jo.displayName, jo.role, jo.access], ['Jo Park', 'admin', 'manage'])
+  assert.deepEqual(jo.agents.map((agent) => agent.name).sort(), ['Coding agent', 'Second agent'])
+  assert.ok(jo.tokens.some((token) => token.name === 'Coding agent'))
+  assert.ok(jo.counts.chatMessages.count > 50 && jo.counts.approvalsAnswered.count > 10)
+  assert.equal(jo.sessions.length, 2, 'the demo’s owner sees where members are signed in')
+  const sam = (await get(ws(`/people/${userId('sam')}`))).person
+  assert.deepEqual([sam.roleChanged.from, sam.roleChanged.to], ['admin', 'member'])
+  assert.equal((await call('GET', ws(`/people/${userId('lee')}`))).status, 404, 'someone who left has no page')
+
+  // An agent's page, and the access review with its export.
+  const agent = (await get(ws(`/agents/${DEMO_AGENT_IDS.demo}/profile`))).agent
+  assert.deepEqual(
+    [agent.name, agent.machine, agent.projectName, agent.createdBy.displayName],
+    ['Demo agent', 'robin-macbook', 'Lumen Notes', 'Robin Ash'],
+  )
+  assert.equal((await call('GET', ws('/agents/ag_000000000000000000000000/profile'))).status, 404)
+  const review = await get(ws('/access-review'))
+  assert.deepEqual([review.people.length, review.agents.length, review.shares.length, review.invites.length], [6, 4, 2, 3])
+  assert.ok(
+    review.tokens.some((token) => token.status === 'inactive'),
+    'the token of someone who left',
+  )
+  assert.equal(review.staleDays, 90)
+  const reviewCsvFile = await call('GET', ws('/access-review/export'))
+  assert.equal(reviewCsvFile.file.name, 'lumen-access-review-2026-11-10.csv')
+  assert.match(reviewCsvFile.file.text, /"agent","Website agent \(build-box\)","Lumen Website"/)
+  assert.equal(state.audit.at(-1).action, 'access_exported')
+})
+
+test('activity is scoped like a server’s: an admin sees no one else’s sign-ins, a member and a viewer their own entries', async () => {
+  const admin = demo(as('admin'))
+  const all = (await admin.get(ws('/activity?limit=200&group=signin'))).entries
+  assert.deepEqual(all, [], 'sign-ins are their person’s (the owner sees them in the demo)')
+  const own = (await admin.get(ws(`/activity?limit=200&group=signin&person=${userId('jo')}`))).entries
+  assert.ok(own.length > 10 && own.every((entry) => entry.actor.id === userId('jo')))
+  assert.equal((await admin.get(ws(`/people/${userId('mei')}`))).person.sessions, null)
+
+  const member = demo(as('member'))
+  const mine = await member.get(ws('/activity?limit=200'))
+  assert.equal(mine.scope, 'own')
+  assert.ok(mine.entries.length > 50 && mine.entries.every((entry) => entry.actor.id === userId('mei')))
+  assert.ok(
+    mine.entries.some((entry) => entry.action === 'signed_in') && mine.entries.some((entry) => entry.action === 'agent_turn_started'),
+  )
+  // Asking for someone else changes nothing; other people's pages, agents' pages and the review are not theirs.
+  const other = await member.get(ws(`/activity?limit=200&person=${userId('robin')}`))
+  assert.ok(other.entries.every((entry) => entry.actor.id === userId('mei')))
+  assert.deepEqual((await member.get(ws('/activity/filters'))).people, [])
+  assert.equal((await member.call('GET', ws(`/people/${userId('robin')}`))).status, 404)
+  assert.equal((await member.get(ws(`/people/${userId('mei')}`))).person.sessions.length, 2)
+  assert.equal((await member.call('GET', ws(`/agents/${DEMO_AGENT_IDS.demo}/profile`))).status, 403)
+  assert.equal((await member.call('GET', ws('/access-review'))).status, 403)
+
+  const viewer = demo(as('viewer'))
+  const theirs = await viewer.get(ws('/activity?limit=200'))
+  assert.ok(theirs.entries.length > 2 && theirs.entries.every((entry) => entry.actor.id === userId('alex')))
+  assert.equal((await demo((state) => (state.signedOut = true)).call('GET', ws('/activity'))).status, 401)
+})
+
+test('using the demo feeds the pages: a chat turn and a fix add turns and activity', async (t) => {
+  // The scripted agent types with timers: they are mocked, never waited out.
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const { get, call, state, clock } = demo()
+  const today = `from=${new Date(NOW.getTime() - DAY).toISOString()}&to=${new Date(NOW.getTime() + DAY).toISOString()}&tz=UTC`
+  const before = (await get(ws(`/usage/summary?${today}`))).current
+  const run = async (path, body, onEvent = () => {}) => {
+    const answer = await call('POST', path, body)
+    assert.equal(answer.status, 200)
+    let done = false
+    const reading = (async () => {
+      for await (const [name, data] of answer.events) await onEvent(name, data)
+      done = true
+    })()
+    while (!done) {
+      clock.at += 400
+      t.mock.timers.tick(400)
+      await new Promise((resolve) => setImmediate(resolve))
+    }
+    await reading
+  }
+
+  await run('/api/agent/boards/demo/threads/board/messages', { text: "What's still open?" })
+  const chat = state.usageRuns.at(-1)
+  assert.deepEqual(
+    [chat.kind, chat.outcome, chat.agent_id, chat.asked_by, chat.thread_id, chat.project_id, chat.model],
+    ['chat', 'answered', DEMO_AGENT_IDS.demo, userId('robin'), 'board', NOTES_PROJECT, 'Scripted'],
+  )
+  assert.ok(chat.duration_ms > 0 && chat.input_tokens > 0 && chat.output_tokens > 0)
+  assert.equal(chat.cost_micros, null, 'the scripted agent reports tokens and no cost')
+  assert.ok(chat.steps > 0 && JSON.parse(chat.tools))
+  assert.equal(chat.approvals_asked, null)
+  // Numbers and ids only: nothing of the question or the answer.
+  assert.ok(!JSON.stringify(chat).includes('still open'))
+
+  // A fix that is allowed: one approval asked and allowed, by the person who answered.
+  await run(
+    '/api/agent/boards/demo/threads/comment-2/messages',
+    { text: 'Fix this review comment in the project.', fix: true },
+    async (name, data) => {
+      if (name === 'tool' && data.kind === 'permission' && data.state === 'pending')
+        await call('POST', `/api/agent/boards/demo/threads/comment-2/permissions/${data.id}`, { optionId: 'allow' })
+    },
+  )
+  const fix = state.usageRuns.at(-1)
+  assert.deepEqual(
+    [fix.kind, fix.outcome, fix.comment_number, fix.approvals_asked, fix.approvals_allowed, fix.approvals_denied, fix.approvals_auto],
+    ['fix', 'fix_ready', 2, 1, 1, 0, 0],
+  )
+  assert.deepEqual(JSON.parse(fix.approvals_by), { [userId('robin')]: { allowed: 1, denied: 0 } })
+
+  // The pages show both: the tiles, the table (newest first), the turn, the activity.
+  const after = (await get(ws(`/usage/summary?${today}`))).current
+  assert.equal(after.calls, before.calls + 2)
+  assert.equal(after.fixes, before.fixes + 1)
+  assert.equal(after.approvals.allowed, (before.approvals.allowed || 0) + 1)
+  const rows = (await get(ws(`/usage/rows?${today}&limit=5`))).rows
+  assert.deepEqual(
+    rows.slice(0, 2).map((row) => row.id),
+    [fix.id, chat.id],
+  )
+  assert.deepEqual([rows[0].agent.name, rows[0].person.name, rows[0].project.name], ['Demo agent', 'Robin Ash', 'Lumen Notes'])
+  const turn = (await get(ws(`/usage/rows/${fix.id}`))).row
+  assert.deepEqual(turn.approvals.by, [{ userId: userId('robin'), name: 'Robin Ash', allowed: 1, denied: 0 }])
+  assert.equal(turn.link.label, 'Comment #2')
+  const activity = (await get(ws('/activity?limit=10'))).entries
+    .slice(0, 3)
+    .map((entry) => [entry.action, entry.actor.label, entry.agent?.name])
+  assert.deepEqual(activity, [
+    ['agent_permission_approved', 'Robin Ash', 'Demo agent'],
+    ['agent_turn_started', 'Robin Ash', 'Demo agent'],
+    ['agent_turn_started', 'Robin Ash', 'Demo agent'],
+  ])
+  // The newest turns only: the demo's state is kept in localStorage.
+  assert.ok(state.usageRuns.length === 2)
 })

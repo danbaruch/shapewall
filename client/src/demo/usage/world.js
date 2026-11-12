@@ -25,7 +25,7 @@ export const USAGE_AGENTS = [
     weight: 34,
     audience: 'trusted',
     rule: 'ask',
-    connectedDays: 36,
+    connectedDays: 58,
     token: { id: fixedId('tk', 11), prefix: 'swp_Dm4agN7p', scopes: ['read', 'comment', 'claim'] },
   },
   {
@@ -41,7 +41,7 @@ export const USAGE_AGENTS = [
     weight: 24,
     audience: 'trusted',
     rule: 'ask',
-    connectedDays: 29,
+    connectedDays: 55,
     token: { id: fixedId('tk', 12), prefix: 'swp_S2ndQx81', scopes: ['read', 'comment', 'claim'] },
   },
   {
@@ -74,7 +74,7 @@ export const USAGE_AGENTS = [
     weight: 26,
     audience: 'trusted',
     rule: 'ask',
-    connectedDays: 24,
+    connectedDays: 52,
     token: { id: fixedId('tk', 13), prefix: 'swp_W3bs1teK', scopes: ['read', 'comment', 'claim'] },
   },
 ]

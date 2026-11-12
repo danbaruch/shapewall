@@ -8,7 +8,12 @@
 //
 // handle({ method, path, search, body, signal }) resolves to
 // { status, json } or, for a chat message, { status: 200, events } where
-// events is an async iterable of [name, data] (server-sent events).
+// events is an async iterable of [name, data] (server-sent events), or, for
+// an export, { status: 200, file: { name, type, text } } (a download).
+//
+// The console's Usage and Activity pages have their own part (usage/routes.js:
+// a fictional history and the queries over it), loaded when one of them first
+// asks, so the board and the rest of the console never load it.
 //
 // Each part gets one shared ctx: the inputs below, then the helpers of the
 // parts before it (identity, console helpers, board data, comment helpers).
@@ -27,13 +32,27 @@ import { DemoError } from './util.js'
 
 export { AGENT_INFO, DemoError } from './util.js'
 
+// What the Usage and Activity pages ask for (src/hosted/usage-routes.js).
+const USAGE_PATHS =
+  /^\/api\/workspaces\/[a-z0-9_]+\/(usage(\/.*)?|views(\/[a-z0-9_]+)?|activity(\/(filters|export))?|people\/[a-z0-9_]+|agents\/[a-z0-9_]+\/profile|access-review(\/export)?)$/
+
 // state: the saved object (fixtures.seedState). loadJson(url): reads one of
 // the export's files. now(): the clock. location: { project, share } from the
 // page URL (which project's board is open, a share link being opened).
 // onBatch(boardId): a board's batch of fixes moved (install.js tells the views).
-export function createDemoBackend({ state, loadJson, now = () => Date.now(), location = {}, save = () => {}, onBatch = () => {} }) {
+// zoneOffset: the viewer's time zone, in minutes ahead of UTC (the fictional
+// usage history keeps the viewer's days and working hours).
+export function createDemoBackend({
+  state,
+  loadJson,
+  now = () => Date.now(),
+  location = {},
+  save = () => {},
+  onBatch = () => {},
+  zoneOffset = 0,
+}) {
   const iso = (offset = 0) => new Date(now() + offset).toISOString()
-  const ctx = { state, loadJson, now, location, save, iso, onBatch, runs: new Map() }
+  const ctx = { state, loadJson, now, location, save, iso, onBatch, zoneOffset, runs: new Map() }
   Object.assign(ctx, identity(ctx))
   Object.assign(ctx, consoleHelpers(ctx))
   Object.assign(ctx, boardData(ctx))
@@ -50,14 +69,18 @@ export function createDemoBackend({ state, loadJson, now = () => Date.now(), loc
     ...batchRoutes(ctx),
     ...authRoutes(ctx),
     ...workspaceRoutes(ctx),
+    // Usage and Activity, loaded on first use.
+    [null, USAGE_PATHS, async (request) => (await usagePart())(request)],
   ]
+  let usageLoading = null
+  const usagePart = () => (usageLoading ||= import('../usage/routes.js').then((part) => part.usageRoutes(ctx)))
 
   // One route called from inside the backend (a batch starts each fix through
   // the Fix with agent route): its result as is, a DemoError thrown.
   ctx.route = async (method, path, body) => {
     for (const [routeMethod, pattern, fn] of routes) {
       const match = pattern.exec(path)
-      if (match && (!routeMethod || routeMethod === method)) return fn({ params: match.slice(1), body, search: '' })
+      if (match && (!routeMethod || routeMethod === method)) return fn({ params: match.slice(1), body, search: '', method, path })
     }
     throw new DemoError(404, 'not_found', 'No such API route.')
   }
@@ -67,9 +90,10 @@ export function createDemoBackend({ state, loadJson, now = () => Date.now(), loc
       for (const [routeMethod, pattern, fn] of routes) {
         const match = pattern.exec(path)
         if (!match || (routeMethod && routeMethod !== method)) continue
-        const result = await fn({ params: match.slice(1), body, search, signal })
+        const result = await fn({ params: match.slice(1), body, search, signal, method, path })
         if (result && result.events) return result
         save()
+        if (result && result.file) return { status: 200, file: result.file }
         if (result && typeof result.status === 'number' && 'json' in result) return result
         return { status: 200, json: result }
       }

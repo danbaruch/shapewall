@@ -32,9 +32,11 @@ import { dropRating, findAnswer, ratingEntry, ratingsOf, upsertRating, validateR
 
 const MESSAGES_MAX = 200
 import { DEMO_OPTION_IDS, demoFiles, demoMentions, demoOptionsFor } from './composer.js'
+import { usageLog } from './usage-log.js'
 
 export function chatRoutes(ctx) {
   const { state, now, save, iso, runs, boardAccess, boardViewOf, commentsOf, chatAllowed } = ctx
+  const usage = usageLog(ctx)
 
   // ---- Chat (the scripted agent) --------------------------------------------
 
@@ -357,10 +359,17 @@ export function chatRoutes(ctx) {
         const run = runs.get(threadKey(access, params[0], params[1]))
         const optionId = body?.optionId ?? null
         if (optionId !== null && typeof optionId !== 'string') fail(400, 'bad_option', 'optionId is a string or null.')
-        const state = run?.answer?.(params[2], optionId)
-        if (state === false) fail(400, 'bad_option', 'The agent did not offer that option.')
-        if (!state) fail(404, 'no_permission', 'That request is no longer waiting for an answer.')
-        return { state }
+        const answer = run?.answer?.(params[2], optionId)
+        if (answer === false) fail(400, 'bad_option', 'The agent did not offer that option.')
+        if (!answer) fail(404, 'no_permission', 'That request is no longer waiting for an answer.')
+        // The console's Activity page shows who answered (usage-log.js).
+        usage.approvalAnswered({
+          access,
+          boardId: params[0],
+          profile: demoAgentOf(threadAt(threadKey(access, params[0], params[1]), params[1]).profileId, state),
+          approved: answer === 'approved',
+        })
+        return { state: answer }
       },
     ],
     [
@@ -494,6 +503,14 @@ export function chatRoutes(ctx) {
           fixing.agentStatus = 'working'
           fixing.agentStatusAt = iso()
         }
+        // The turn, for the console's Usage and Activity pages (usage-log.js).
+        const turn = usage.turnStarted({
+          access,
+          boardId: params[0],
+          threadId: params[1],
+          profile: demoAgentOf(threadAt(key, params[1]).profileId, state),
+          fix: Boolean(fixing),
+        })
         const events = (async function* stream() {
           let reply = null
           try {
@@ -514,6 +531,11 @@ export function chatRoutes(ctx) {
             } else messages.push(reply)
             yield ['done', { message: reply }]
           } finally {
+            usage.turnEnded(turn, {
+              reply,
+              fixed: reply?.status === 'done' && reply.cards.some((card) => card.kind === 'permission' && card.state === 'approved'),
+              branch: agentWorkOf(state).branchMode.enabled,
+            })
             if (fixing && fixing.agentStatus === 'working') {
               const approved =
                 reply?.status === 'done' && reply.cards.some((card) => card.kind === 'permission' && card.state === 'approved')

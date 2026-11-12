@@ -104,10 +104,7 @@ export function WorkspacePage({ workspaceId, section, projectId, subjectId = nul
     isAdmin: roleAtLeast(role, 'admin'),
     isOwner: role === 'owner',
   }
-  // The public demo has no server to answer the Usage and Activity pages.
-  const sections = SECTIONS.filter(
-    ([id]) => (id !== 'feedback' || data.features?.agentFeedback) && !(DEMO && ['usage', 'activity'].includes(id)),
-  )
+  const sections = SECTIONS.filter(([id]) => id !== 'feedback' || data.features?.agentFeedback)
   const visible = sections.filter(([, , , least]) => roleAtLeast(role, least))
   // A section this role cannot see (a link from an admin, an old bookmark)
   // says so instead of quietly showing the projects.

@@ -85,11 +85,11 @@ export function seedState(now = Date.now(), { fixturesAt = null } = {}) {
     })
 
   const memberships = [
-    ['robin', 'owner', 40, 0.05],
-    ['jo', 'admin', 38, 0.3],
-    ['priya', 'admin', 30, 1.2],
-    ['mei', 'member', 36, 0.6],
-    ['sam', 'member', 35, 2.1],
+    ['robin', 'owner', 70, 0.05],
+    ['jo', 'admin', 68, 0.3],
+    ['priya', 'admin', 61, 1.2],
+    ['mei', 'member', 66, 0.6],
+    ['sam', 'member', 65, 2.1],
     ['alex', 'viewer', 12, 3.5],
   ].map(([handle, role, joined, active]) => ({
     workspaceId: WORKSPACE_ID,
@@ -213,20 +213,22 @@ export function seedState(now = Date.now(), { fixturesAt = null } = {}) {
   }))
 
   // The workspace's history, oldest first.
-  log(40, 'workspace_created', { by: 'robin' })
-  log(39.9, 'project_created', { by: 'robin', target: NOTES_PROJECT })
+  // (It starts before the sixty days of agent usage the console's Usage page
+  // shows: usage/generate.js.)
+  log(70, 'workspace_created', { by: 'robin' })
+  log(69.9, 'project_created', { by: 'robin', target: NOTES_PROJECT })
   for (const [handle, role, days] of [
-    ['jo', 'member', 38],
-    ['mei', 'member', 36],
-    ['sam', 'member', 35],
-    ['lee', 'member', 34],
+    ['jo', 'member', 68],
+    ['mei', 'member', 66],
+    ['sam', 'member', 65],
+    ['lee', 'member', 64],
   ])
-    log(days, 'invite_accepted', { by: handle, target: fixedId('iv', 90 + days), detail: { role }, ip: '203.0.113.7' })
-  log(37, 'member_role_changed', { by: 'robin', target: user('jo'), detail: { from: 'member', to: 'admin' } })
+    log(days, 'invite_accepted', { by: handle, target: fixedId('iv', 30 + days), detail: { role }, ip: '203.0.113.7' })
+  log(67, 'member_role_changed', { by: 'robin', target: user('jo'), detail: { from: 'member', to: 'admin' } })
+  log(61, 'invite_accepted', { by: 'priya', target: fixedId('iv', 91), detail: { role: 'admin' }, ip: '203.0.113.45' })
+  log(56, 'project_created', { by: 'jo', target: WEBSITE_PROJECT })
   log(33, 'token_created', { by: 'robin', target: fixedId('tk', 1), detail: { project: NOTES_PROJECT, scopes: ['push', 'read'] } })
-  log(31, 'invite_accepted', { by: 'priya', target: fixedId('iv', 91), detail: { role: 'admin' }, ip: '203.0.113.45' })
   log(30, 'token_created', { by: 'robin', target: fixedId('tk', 4), detail: { project: NOTES_PROJECT, scopes: ['read'] } })
-  log(26, 'project_created', { by: 'jo', target: WEBSITE_PROJECT })
   log(25, 'token_created', { by: 'lee', target: fixedId('tk', 3), detail: { project: WEBSITE_PROJECT, scopes: ['push', 'read'] } })
   log(21, 'token_created', {
     by: 'jo',
@@ -275,7 +277,7 @@ export function seedState(now = Date.now(), { fixturesAt = null } = {}) {
     viewAs: 'owner',
     guestName: GUEST_NAME,
     workspaces: [
-      { id: WORKSPACE_ID, name: 'Lumen', createdAt: at(40), shareLinks: true },
+      { id: WORKSPACE_ID, name: 'Lumen', createdAt: at(70), shareLinks: true },
       { id: SANDBOX_ID, name: "Robin's sandbox", createdAt: at(20), shareLinks: false },
     ],
     users: USERS,
@@ -287,7 +289,7 @@ export function seedState(now = Date.now(), { fixturesAt = null } = {}) {
         workspaceId: WORKSPACE_ID,
         name: 'Lumen Notes',
         slug: 'lumen-notes',
-        createdAt: at(39.9),
+        createdAt: at(69.9),
         boards: [{ id: EXPORT_BOARD, folder: EXPORT_BOARD, pushedAt: at(2), pushes: 14 }],
       },
       {
@@ -295,7 +297,7 @@ export function seedState(now = Date.now(), { fixturesAt = null } = {}) {
         workspaceId: WORKSPACE_ID,
         name: 'Lumen Website',
         slug: 'lumen-website',
-        createdAt: at(26),
+        createdAt: at(56),
         boards: [{ id: WEBSITE_BOARD, folder: EXPORT_BOARD, groups: WEBSITE_GROUPS, title: 'Lumen website', pushedAt: at(5), pushes: 6 }],
       },
       { id: fixedId('pr', 3), workspaceId: SANDBOX_ID, name: 'Scratch', slug: 'scratch', createdAt: at(20), boards: [] },
@@ -305,6 +307,23 @@ export function seedState(now = Date.now(), { fixturesAt = null } = {}) {
     shares,
     audit,
     nextAudit: auditId + 1,
+    // The console's Usage and Activity pages: the turns a visitor's own chat
+    // and fixes add (backend/usage-log.js; the history under them is made
+    // when a page opens, usage/generate.js), and saved views, per person.
+    usageRuns: [],
+    views: [
+      ['usage', 'Fixes that failed or stopped', 'kind=fix&outcome=failed&outcome=stopped&tab=turns'],
+      ['usage', 'Tokens by model, week by week', 'range=90d&metric=tokens&by=model&bucket=week'],
+      ['activity', 'Security-relevant changes', 'sensitive=1'],
+    ].map(([page, name, query], index) => ({
+      id: fixedId('vw', index + 1),
+      workspaceId: WORKSPACE_ID,
+      userId: user('robin'),
+      page,
+      name,
+      query,
+      updatedAt: at(9 - index * 2),
+    })),
     // Comments per board ("<project>/<board>"), seeded on first use.
     comments: {},
     threads: { [NOTES_PROJECT + '/' + EXPORT_BOARD + '/board']: seedThread(now), ...seedChats(now).threads },
