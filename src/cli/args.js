@@ -166,6 +166,12 @@ export const COMMAND_FLAGS = {
     'allow-ci-push',
     'json',
     'board',
+    // agent connect
+    'agent',
+    'name',
+    'as',
+    'audience',
+    'concurrency',
     ...REMOTE_FLAGS,
   ],
   github: ['board', 'json'],

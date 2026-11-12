@@ -72,6 +72,11 @@ function pullRequester(config, settings, source, env) {
 
 export async function agentCommand(positional, flags, out, err, { env = process.env } = {}) {
   const action = positional[0]
+  if (action === 'connect') {
+    // A connected agent of a hosted board: this machine's coding agent, read and answer only.
+    const { agentConnect } = await import('../../remote/agent-connect.js')
+    return agentConnect(flags, out, err, { env })
+  }
   if (action === 'sandbox') {
     // Inside the container only.
     const { runSandbox } = await import('./sandbox-main.js')
@@ -100,7 +105,7 @@ export async function agentCommand(positional, flags, out, err, { env = process.
     return 0
   }
   if (!['run', 'watch', 'doctor'].includes(action))
-    throw new Error('usage: shapewall agent run --comment ID | agent watch | agent doctor | agent build-image')
+    throw new Error('usage: shapewall agent connect --remote URL | agent run --comment ID | agent watch | agent doctor | agent build-image')
   const config = configFor(flags)
   const settings = starterSettings(config, { env, flags })
   const image = agentImage({ flag: flags.image || null, env })
