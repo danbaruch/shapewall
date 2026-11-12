@@ -502,10 +502,25 @@ export function createUsage(t, { now = () => new Date() } = {}) {
       outcome: row.outcome,
       outcomeGroup: outcomeGroup(row.outcome),
       agent: row.agent_id
-        ? { id: row.agent_id, name: row.agent_name || 'Removed agent', machine: row.agent_machine || null, kind: row.agent_kind || null }
+        ? {
+            id: row.agent_id,
+            name: row.agent_name || 'Removed agent',
+            machine: row.agent_machine || null,
+            kind: row.agent_kind || null,
+            // Whether it still has a page to link to.
+            exists: Boolean(row.agent_name),
+          }
         : null,
       project: { id: row.project_id, name: row.project_name || 'Removed project' },
-      person: row.asked_by ? { id: row.asked_by, name: row.person_name || 'Former member', handle: row.person_handle || null } : null,
+      person: row.asked_by
+        ? {
+            id: row.asked_by,
+            name: row.person_name || 'Former member',
+            handle: row.person_handle || null,
+            // Still in this workspace (someone who left has no page here).
+            member: loadNames().person.has(row.asked_by),
+          }
+        : null,
       boardId: row.board_id,
       commentNumber: row.comment_number,
       thread: kind ? { kind, private: kind === 'chat', id: ownThread ? row.thread_id : null } : null,

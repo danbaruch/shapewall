@@ -92,7 +92,9 @@ export const PRESETS = [
   ['7d', 'Last 7 days'],
   ['30d', 'Last 30 days'],
   ['90d', 'Last 90 days'],
+  ['week', 'This week'],
   ['month', 'This month'],
+  ['lastmonth', 'Last month'],
 ]
 export const zone = () => {
   try {
@@ -103,7 +105,6 @@ export const zone = () => {
 }
 const pad = (value) => String(value).padStart(2, '0')
 export const dateInput = (date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
-const startOfDay = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate())
 const parseDay = (text) => {
   const match = /^(\d{4})-(\d\d)-(\d\d)$/.exec(text || '')
   if (!match) return null
@@ -114,26 +115,73 @@ const parseDay = (text) => {
 // The instants a period covers, in the viewer's own time zone: whole local
 // days, ending at the end of today. `range`: a preset id, or "custom" with
 // `from` and `to` as local dates (both included).
+// Each period also names the one to compare it with (`previous`) and how to
+// say so (`compare`): the same number of local days just before; for a
+// calendar period, the calendar unit before it (this month so far against
+// last month up to the same day; last month against the month before).
+// Local dates all the way, so a clock change never moves a boundary.
 export function periodOf({ range = '30d', from = null, to = null } = {}, now = new Date()) {
-  const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
-  const daysBack = (count) => new Date(now.getFullYear(), now.getMonth(), now.getDate() - count + 1)
+  const day = (date, offset = 0) => new Date(date.getFullYear(), date.getMonth(), date.getDate() + offset)
+  const tomorrow = day(now, 1)
+  const span = (first, end, label) => {
+    const days = Math.round((day(end) - day(first)) / 86_400_000)
+    return {
+      from: first,
+      to: end,
+      label,
+      previous: { from: day(first, -days), to: first },
+      compare: days === 1 ? 'the day before' : `the ${days} days before`,
+    }
+  }
   if (range === 'custom') {
     const first = parseDay(from)
     const last = parseDay(to)
-    if (first && last && first <= last)
-      return {
-        range,
-        from: first,
-        to: new Date(last.getFullYear(), last.getMonth(), last.getDate() + 1),
-        label: `${shortDate(first)} to ${shortDate(last)}`,
-      }
+    if (first && last && first <= last) return { range, ...span(first, day(last, 1), `${shortDate(first)} to ${shortDate(last)}`) }
     range = '30d'
   }
-  if (range === 'today') return { range, from: startOfDay(now), to: tomorrow, label: 'Today' }
-  if (range === '7d') return { range, from: daysBack(7), to: tomorrow, label: 'Last 7 days' }
-  if (range === '90d') return { range, from: daysBack(90), to: tomorrow, label: 'Last 90 days' }
-  if (range === 'month') return { range, from: new Date(now.getFullYear(), now.getMonth(), 1), to: tomorrow, label: 'This month' }
-  return { range: '30d', from: daysBack(30), to: tomorrow, label: 'Last 30 days' }
+  if (range === 'today') return { range, ...span(day(now), tomorrow, 'Today'), compare: 'yesterday' }
+  if (range === '7d') return { range, ...span(day(now, -6), tomorrow, 'Last 7 days') }
+  if (range === '90d') return { range, ...span(day(now, -89), tomorrow, 'Last 90 days') }
+  if (range === 'week') {
+    // Weeks start on Monday. This week so far against last week up to the same weekday.
+    const monday = day(now, -((now.getDay() + 6) % 7))
+    const days = Math.round((tomorrow - monday) / 86_400_000)
+    return {
+      range,
+      from: monday,
+      to: tomorrow,
+      label: 'This week',
+      previous: { from: day(monday, -7), to: day(monday, -7 + days) },
+      compare: 'last week to the same day',
+    }
+  }
+  if (range === 'month') {
+    const first = new Date(now.getFullYear(), now.getMonth(), 1)
+    const before = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+    // The same day of last month, or its last day when it is shorter.
+    const end = new Date(Math.min(day(before, now.getDate()).getTime(), first.getTime()))
+    return {
+      range,
+      from: first,
+      to: tomorrow,
+      label: 'This month',
+      previous: { from: before, to: end },
+      compare: 'last month to the same day',
+    }
+  }
+  if (range === 'lastmonth') {
+    const first = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+    const end = new Date(now.getFullYear(), now.getMonth(), 1)
+    return {
+      range,
+      from: first,
+      to: end,
+      label: 'Last month',
+      previous: { from: new Date(now.getFullYear(), now.getMonth() - 2, 1), to: first },
+      compare: 'the month before',
+    }
+  }
+  return { range: '30d', ...span(day(now, -29), tomorrow, 'Last 30 days') }
 }
 export const periodDays = (period) => Math.max(1, Math.round((period.to - period.from) / 86_400_000))
 // The bucket that suits a period when none is chosen.

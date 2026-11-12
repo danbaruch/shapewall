@@ -25,20 +25,21 @@ SSRF surface. You capture on your machine or in CI (it can reach `localhost` and
 shapewall hosted --data /var/lib/shapewall-hosted --origin https://app.example.com --port 4700 --trust-proxy
 ```
 
-| Flag                    | Env                                | Default                   | What                                                                                                    |
-| ----------------------- | ---------------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `--data DIR`            | `SHAPEWALL_HOSTED_DATA`            | `./shapewall-hosted-data` | Database, secret, pushed files                                                                          |
-| `--origin URL`          | `SHAPEWALL_HOSTED_ORIGIN`          | `http://HOST:PORT`        | The public origin. Passkeys are bound to its host name (the RP ID).                                     |
-| `--port`/`--host`       |                                    | `4700` on `127.0.0.1`     | Keep it on loopback behind a reverse proxy                                                              |
-| `--signup`              | `SHAPEWALL_HOSTED_SIGNUP`          | `invite`                  | `invite`: only invite links (and the setup link). `open`: anyone                                        |
-| `--trust-proxy`         | `SHAPEWALL_HOSTED_TRUST_PROXY=1`   | off                       | Client IPs from `X-Forwarded-For` (only from a proxy on this host)                                      |
-|                         | `SHAPEWALL_HOSTED_SECRET`          | `<data>/secret.key`       | Key for signed live-HTML URLs (made on first start, mode 0600)                                          |
-|                         | `RESEND_API_KEY`                   | unset                     | With `SHAPEWALL_EMAIL_FROM`: invite emails through Resend                                               |
-|                         | `SHAPEWALL_EMAIL_FROM`             | unset                     | Sender for invite emails, e.g. `Shapewall <invites@example.com>`                                        |
-| `--previous-origin URL` | `SHAPEWALL_HOSTED_PREVIOUS_ORIGIN` | unset                     | The old origin during a move ([Moving to a new origin](#moving-to-a-new-origin))                        |
-| `--report-email ADDR`   | `SHAPEWALL_HOSTED_REPORT_EMAIL`    | unset                     | "Report this board" on public projects opens a mail to this address                                     |
-|                         | `SHAPEWALL_TURNSTILE_SITE_KEY`     | unset                     | With `SHAPEWALL_TURNSTILE_SECRET`: a Cloudflare Turnstile check on open sign-up and comment share links |
-|                         | `SHAPEWALL_TURNSTILE_SECRET`       | unset                     | Turnstile secret key. Both keys or neither (one alone is a warning and stays off)                       |
+| Flag                    | Env                                      | Default                   | What                                                                                                                                              |
+| ----------------------- | ---------------------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--data DIR`            | `SHAPEWALL_HOSTED_DATA`                  | `./shapewall-hosted-data` | Database, secret, pushed files                                                                                                                    |
+| `--origin URL`          | `SHAPEWALL_HOSTED_ORIGIN`                | `http://HOST:PORT`        | The public origin. Passkeys are bound to its host name (the RP ID).                                                                               |
+| `--port`/`--host`       |                                          | `4700` on `127.0.0.1`     | Keep it on loopback behind a reverse proxy                                                                                                        |
+| `--signup`              | `SHAPEWALL_HOSTED_SIGNUP`                | `invite`                  | `invite`: only invite links (and the setup link). `open`: anyone                                                                                  |
+| `--trust-proxy`         | `SHAPEWALL_HOSTED_TRUST_PROXY=1`         | off                       | Client IPs from `X-Forwarded-For` (only from a proxy on this host)                                                                                |
+|                         | `SHAPEWALL_HOSTED_SECRET`                | `<data>/secret.key`       | Key for signed live-HTML URLs (made on first start, mode 0600)                                                                                    |
+|                         | `RESEND_API_KEY`                         | unset                     | With `SHAPEWALL_EMAIL_FROM`: invite emails through Resend                                                                                         |
+|                         | `SHAPEWALL_EMAIL_FROM`                   | unset                     | Sender for invite emails, e.g. `Shapewall <invites@example.com>`                                                                                  |
+| `--previous-origin URL` | `SHAPEWALL_HOSTED_PREVIOUS_ORIGIN`       | unset                     | The old origin during a move ([Moving to a new origin](#moving-to-a-new-origin))                                                                  |
+| `--report-email ADDR`   | `SHAPEWALL_HOSTED_REPORT_EMAIL`          | unset                     | "Report this board" on public projects opens a mail to this address                                                                               |
+| `--owners-see-sign-ins` | `SHAPEWALL_HOSTED_OWNERS_SEE_SIGN_INS=1` | off                       | Workspace owners see their members' sign-ins, passkey events and devices in Activity. For a server with one team ([Activity](#the-activity-page)) |
+|                         | `SHAPEWALL_TURNSTILE_SITE_KEY`           | unset                     | With `SHAPEWALL_TURNSTILE_SECRET`: a Cloudflare Turnstile check on open sign-up and comment share links                                           |
+|                         | `SHAPEWALL_TURNSTILE_SECRET`             | unset                     | Turnstile secret key. Both keys or neither (one alone is a warning and stays off)                                                                 |
 
 It needs Node 22.13 or newer (it uses the built-in `node:sqlite`). Passkeys need a secure context: `https://`, or `http://localhost`
 for trying it on your own machine (`--origin http://localhost:4700`; not `127.0.0.1`, which is not a valid passkey RP ID).
@@ -1148,8 +1149,9 @@ chart), never zero, and each total says how many of its turns reported the numbe
 
 `/w/<workspace>/usage`. Everything on it follows one filter, shown in one row above it:
 
-- **Period:** today, the last 7, 30 or 90 days, this month, or a custom range of up to 400 days. Days, weeks and months are in
-  your browser's time zone (the server stores UTC), including across a clock change. Weeks start on Monday.
+- **Period:** today, the last 7, 30 or 90 days, this week, this month, last month, or a custom range of up to 400 days. Days,
+  weeks and months are in your browser's time zone (the server stores UTC), across any number of clock changes, north or south.
+  Weeks start on Monday.
 - **Agent, project, person, kind, model, outcome:** several values each. "No model reported" and "nobody" are values too.
 - **Ranges** of tokens and of duration, and a **search over ids** (a turn, an agent, a project, a board, a comment number).
 
@@ -1158,7 +1160,9 @@ The filters live in the page's address, so a link is a view and Back undoes a fi
 **Overview** shows, for that filter:
 
 - **Tiles:** turns, tokens, agent time, reported cost, fixes that ended ready, and the share that failed or was stopped, each with
-  its change against the period just before (the same length).
+  its change against the period to compare with, which the tile names: the same number of days just before (whole local days,
+  whatever the clocks did); this week or this month so far against last week or last month up to the same day; last month against
+  the month before.
 - **Usage over time:** stacked bars per day, week or month, split by agent, project, person, kind, model or outcome, measuring
   turns, tokens (total, input, output, cached), time or reported cost. Drag the bar under the chart to zoom, then "Use ... for the
   page" to keep that range.
@@ -1176,9 +1180,12 @@ to it. Every chart has a table of the same numbers, "copy as CSV" and "copy as a
 colour-blind readers in light and dark, and never the only sign: legends carry names, outcomes carry icons.
 
 **Turns** is every turn of the filter in a grid: sorted, filtered and paged by the server (a hundred rows at a time as you
-scroll, by a cursor, so the last page costs what the first does). Choose and reorder columns, pin columns to the left, sort by
-time, duration, tokens or cost, group by any dimension with subtotals, and switch to denser rows. Arrow keys move through the
-rows and Enter opens one. A turn opens in a drawer with everything in the table above, a link to its comment or board, and for
+scroll, by a cursor, so the last page costs what the first does). Choose columns, drag a header to move its column and drag its right edge to resize it (each header's menu does both from the
+keyboard: move left or right, wider, narrower), pin columns to the left, sort by time, duration, tokens or cost, group by any
+dimension with subtotals, and switch to denser rows. With groups on, **Compare** adds two columns to the group rows: the group's
+turns in the period before, and the change. While you page through a sorted table it holds still: a turn that finishes meanwhile
+keeps the place it had when the first page was read, and turns that started later wait for the next look. Arrow keys move
+through the rows and Enter opens one. A turn opens in a drawer with everything in the table above, a link to its comment or board, and for
 admins a link to the activity around it. On a phone the grid is a list of cards and the drawer is a sheet.
 
 **Saved views** are yours alone: a name for the page's address (filters, chart switches, columns, sort). "Copy a link to this
@@ -1211,12 +1218,24 @@ roles, audiences, approval rules, the agent policy, share links switched on, a p
 removed, and exports.
 
 - **Owners and admins** read everyone's activity. **Anyone else** in the workspace reads their own, whatever they filter by.
-- **Sign-ins are account events:** they belong to the person, not to one workspace. A workspace's admins see them for people who
-  are members now, and only from the day each joined. The entry holds a device label ("Chrome on macOS") and the address the
-  server saw.
+- **What someone did in this workspace** (with the address it came from) is the workspace's record, as before.
+- **Sign-ins, passkey and recovery-code events and the list of signed-in devices are account events.** They belong to the person
+  and cover every workspace that person is in, so by default nobody else sees them: each person sees their own, on their own
+  activity and their own page, and an owner or admin sees none of them for anyone else, in the list, on a person's page or in an
+  export.
+- **On a server with one team** the operator can switch that on: `shapewall hosted --owners-see-sign-ins` (or
+  `SHAPEWALL_HOSTED_OWNERS_SEE_SIGN_INS=1`). Then a workspace's **owners** (not admins) also see those events and devices for the
+  people who are members of their workspace now, from the day each joined, and the page says so. Do not switch it on where
+  separate teams share a server: a person's sign-in is not tied to one workspace, so an owner would see sign-ins a member made
+  for another team. An entry holds a device label ("Chrome on macOS") and the address the server saw; the device list holds a
+  label and when it was last seen, never an address.
 - **A person's page** (`/activity/<user id>`; admins, or the person themselves): role and when it changed, what they can reach,
-  the tokens and agents they made, the devices they are signed in on (a label and when last seen; no address), how much they
-  commented, their agent usage and their activity.
+  the tokens and agents they made, how much they commented, their agent usage and their activity; and, for the person themselves
+  (or an owner where the operator said so), the devices they are signed in on.
+- **A page is at most 200 entries** however many are asked for; older ones load as you scroll. **A text search always has a
+  start:** without a period it looks at the last 90 days and says so. Searches and filters by agent or project are limited to 60
+  a minute per person.
+- **Saved views** work here for everyone who has the page, viewers too.
 - **An agent's page** (`/activity/<agent id>`; admins): what it is, who connected it, who may send it work, its approval rule,
   its usage and the activity about it.
 - **Access review** (admins and owners): every person, agent, API token, share link, public project and open invite in one place,
@@ -1238,7 +1257,9 @@ tamper-evident: someone with the database file can change it, and there is no ha
   retention job (at start and every 6 hours). A turn still running is never removed. The operator sets it per workspace:
   `shapewall hosted admin retention ws_ID --usage-days 90` (or `default`). Audit entries are not pruned.
 - **Quota.** Each usage record counts 400 bytes toward the workspace's storage quota.
-- **Workspace export.** "Download a copy" now includes `usage.json`: the usage records, newest first, at most 50,000.
+- **Workspace export.** "Download a copy" now includes `usage.json`: every usage record of the workspace, newest first, read a
+  page at a time (the 50,000 cap is for downloads from the Usage page only).
+- **A deleted account** takes its saved views with it, in every workspace.
 
 ### The usage and activity API
 
@@ -1249,8 +1270,10 @@ For the console (session cookie; every route answers 404 for a workspace you are
 `/usage/breakdown?groupBy=`, `/usage/latency?bucket=`, `/usage/top`, `/usage/budgets`, `/usage/options`,
 `/usage/rows?sort=started|duration|tokens|input|output|cached|cost|steps&dir=asc|desc&cursor=&limit=`, `/usage/rows/:id`,
 `/usage/export?format=csv|json`. Each takes the filter: `from`, `to` (ISO instants), `tz` (an IANA zone), `agent`, `project`,
-`person`, `kind`, `model`, `outcome` (comma lists; `~` is the empty value), `tokensMin`, `tokensMax`, `durationMin`,
-`durationMax` (milliseconds) and `q`.
+`person`, `kind`, `outcome` (a comma list or the parameter repeated), `model` (the parameter repeated, once per name, never
+split: a model's name may hold commas, brackets and spaces), `~` for the empty value, `tokensMin`, `tokensMax`, `durationMin`,
+`durationMax` (milliseconds), `q`, and `prevFrom` with `prevTo` (the period to compare with; without them, the same span on the
+wall clock just before). `/usage/breakdown` takes `previous=1` for the same split over that period.
 
 `GET /api/workspaces/:ws/activity?person=&agent=&project=&group=&action=&source=&sensitive=1&from=&to=&q=&before=&limit=`,
 `/activity/filters`, `/activity/export`, `/people/:user`, `/agents/:agent/profile`, `/access-review`, `/access-review/export`.

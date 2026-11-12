@@ -8,7 +8,7 @@
 // this page only says which of the two it is showing.
 
 import { useCallback, useMemo, useState } from 'react'
-import { ArrowUpRight, BarChart3, Download, Gauge, Printer, Rows3, Rows4 } from 'lucide-react'
+import { ArrowUpRight, BarChart3, Download, Gauge, GitCompareArrows, Printer, Rows3, Rows4 } from 'lucide-react'
 import { useQueries } from '@tanstack/react-query'
 import {
   Button,
@@ -44,7 +44,7 @@ import { useWorkspace } from '../pages/workspace'
 import { ApprovalsChart, BreakdownChart, LatencyChart, OutcomesChart, TimeChart } from './charts'
 import { setSearch, useUsageFilter, useWs, useWsPages } from './data'
 import { FilterBar, ViewsMenu } from './filters'
-import { bucketRange, defaultBucket, formatCost, formatCount, formatDuration, formatTime, percent, shortDate } from './format'
+import { bucketRange, change, defaultBucket, formatCost, formatCount, formatDuration, formatTime, percent, shortDate } from './format'
 import { ColumnChooser, DataGrid, readLayout, writeLayout } from './grid'
 import { OutcomeChip, StatTile, Unreported, orUnreported } from './pieces'
 import { TurnDrawer } from './TurnDrawer'
@@ -217,6 +217,7 @@ export function Overview({ filter, isAdmin, compact = false, extraQuery = '' }) 
         </EmptyState>
       </Card>
     )
+  const compare = period.compare
   const reportedNote = (key) =>
     now && now.calls
       ? now.reported[key] === now.calls
@@ -232,6 +233,7 @@ export function Overview({ filter, isAdmin, compact = false, extraQuery = '' }) 
       >
         <StatTile
           testId="calls"
+          compare={compare}
           label="Turns"
           loading={loading}
           value={formatCount(now?.calls ?? 0)}
@@ -241,6 +243,7 @@ export function Overview({ filter, isAdmin, compact = false, extraQuery = '' }) 
         />
         <StatTile
           testId="tokens"
+          compare={compare}
           label="Tokens"
           loading={loading}
           value={now?.tokens === null ? 'Not reported' : formatCount(now?.tokens)}
@@ -251,6 +254,7 @@ export function Overview({ filter, isAdmin, compact = false, extraQuery = '' }) 
         />
         <StatTile
           testId="duration"
+          compare={compare}
           label="Agent time"
           loading={loading}
           value={formatDuration(now?.duration)}
@@ -260,6 +264,7 @@ export function Overview({ filter, isAdmin, compact = false, extraQuery = '' }) 
         />
         <StatTile
           testId="cost"
+          compare={compare}
           label="Reported cost"
           loading={loading}
           value={now?.cost === null ? 'Not reported' : formatCost(now?.cost)}
@@ -272,6 +277,7 @@ export function Overview({ filter, isAdmin, compact = false, extraQuery = '' }) 
           <>
             <StatTile
               testId="fixes"
+              compare={compare}
               label="Fixes ready"
               loading={loading}
               value={now?.fixes ? `${formatCount(now.fixesDone)} of ${formatCount(now.fixes)}` : '0'}
@@ -282,6 +288,7 @@ export function Overview({ filter, isAdmin, compact = false, extraQuery = '' }) 
             />
             <StatTile
               testId="failed"
+              compare={compare}
               label="Failed or stopped"
               loading={loading}
               value={now ? percent(now.outcomes.failed + now.outcomes.stopped, now.calls) : ''}
@@ -636,6 +643,42 @@ const USAGE_COLUMNS = [
   },
   { id: 'id', header: 'Turn id', width: 232, cell: (row) => <code className="font-mono text-[11px] text-muted">{row.id}</code> },
 ]
+// Two more columns for grouped rows, when "Compare" is on: the group's turns in the period before, and the change.
+const COMPARE_IDS = ['before', 'change']
+const COMPARED_COLUMNS = [
+  ...USAGE_COLUMNS,
+  {
+    id: 'before',
+    header: 'Turns before',
+    title: 'Turns in the period before',
+    width: 116,
+    align: 'right',
+    cell: () => '',
+    subtotal: (group) => (group.before ? formatCount(group.before.calls) : ''),
+  },
+  {
+    id: 'change',
+    header: 'Change',
+    title: 'Change in turns against the period before',
+    width: 96,
+    align: 'right',
+    cell: () => '',
+    subtotal: (group) => {
+      if (!group.before) return ''
+      const delta = change(group.calls, group.before.calls)
+      return delta ? delta.text : group.before.calls ? '' : 'New'
+    },
+  },
+]
+// They sit right after the columns the group row labels, whatever else is shown.
+const withCompare = (layout, comparing) =>
+  comparing
+    ? {
+        ...layout,
+        order: [...layout.order.filter((id) => !COMPARE_IDS.includes(id)), ...COMPARE_IDS],
+        hidden: layout.hidden.filter((id) => !COMPARE_IDS.includes(id)),
+      }
+    : layout
 const USAGE_DEFAULTS = {
   shown: ['started', 'kind', 'agent', 'project', 'person', 'outcome', 'duration', 'tokens', 'cost'],
   pinned: ['started'],
@@ -676,16 +719,34 @@ function Turns({ filter }) {
   }
   const groupBy = pick(get('group'), USAGE_DIMENSIONS, '')
   const dense = get('dense') === '1'
+  // Grouped rows can show each group's turns in the period before, and the change.
+  const comparing = Boolean(groupBy) && get('cmp') === '1'
+  const columns = comparing ? COMPARED_COLUMNS : USAGE_COLUMNS
   const layout = useMemo(
     () =>
-      readLayout(USAGE_COLUMNS, {
-        cols: get('cols') || null,
-        pin: filter.params.has('pin') ? (get('pin') === 'none' ? '' : get('pin')) : null,
-        defaults: USAGE_DEFAULTS,
-      }),
-    [get, filter.params],
+      withCompare(
+        readLayout(columns, {
+          cols: get('cols') || null,
+          pin: filter.params.has('pin') ? (get('pin') === 'none' ? '' : get('pin')) : null,
+          widths: get('w') || null,
+          defaults: USAGE_DEFAULTS,
+        }),
+        comparing,
+      ),
+    [get, filter.params, columns, comparing],
   )
-  const setLayout = (next) => set(writeLayout(next, USAGE_DEFAULTS))
+  // The comparison columns come and go with their switch: they are not part of the saved column choice.
+  const setLayout = (next) =>
+    set(
+      writeLayout(
+        {
+          ...next,
+          order: next.order.filter((id) => !COMPARE_IDS.includes(id)),
+          hidden: next.hidden.filter((id) => !COMPARE_IDS.includes(id)),
+        },
+        USAGE_DEFAULTS,
+      ),
+    )
   const sortQuery = `&sort=${sort.id}&dir=${sort.dir}`
 
   // Not grouped: pages by cursor as the grid scrolls.
@@ -699,6 +760,7 @@ function Turns({ filter }) {
   )
   // Grouped: the groups with their subtotals, and the rows of the open ones.
   const groups = useWs(workspaceId, `/usage/breakdown?${query}&groupBy=${groupBy || 'agent'}`, { enabled: Boolean(groupBy) })
+  const before = useWs(workspaceId, `/usage/breakdown?${query}&groupBy=${groupBy || 'agent'}&previous=1`, { enabled: comparing })
   const [open, setOpen] = useState({})
   const openKeys = groupBy ? Object.keys(open).filter((key) => open[key] && key.startsWith(`${groupBy}:`)) : []
   const groupQueries = useQueries({
@@ -726,9 +788,11 @@ function Turns({ filter }) {
           : groupBy === 'kind'
             ? KIND_LABEL[group.key] || group.label
             : group.label
+      // What the same group did in the period to compare with (nothing: it was not there).
+      const earlier = comparing && before.data ? before.data.groups.find((item) => item.key === group.key) || { calls: 0 } : null
       out.push({
         type: 'group',
-        group: { ...group, label },
+        group: { ...group, label, before: earlier },
         open: Boolean(limit),
         summary: `${formatCount(group.calls)} ${group.calls === 1 ? 'turn' : 'turns'}`,
       })
@@ -748,7 +812,7 @@ function Turns({ filter }) {
     }
     return out
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [groupBy, pages.data, groups.data, open, groupStamp])
+  }, [groupBy, pages.data, groups.data, open, groupStamp, comparing, before.data])
   const toggleGroup = (key) => setOpen((current) => ({ ...current, [`${groupBy}:${key}`]: current[`${groupBy}:${key}`] ? 0 : GROUP_PAGE }))
   const state = groupBy ? groups : pages
   const loaded = items.filter((item) => item.type === 'row').length
@@ -769,6 +833,21 @@ function Turns({ filter }) {
           onChange={(next) => set({ group: next === 'none' ? null : next }, { push: true })}
           options={[['none', 'Not grouped'], ...USAGE_DIMENSIONS.map((id) => [id, `Group by ${DIMENSION_LABEL[id].toLowerCase()}`])]}
         />
+        {groupBy ? (
+          <button
+            type="button"
+            aria-pressed={comparing}
+            onClick={() => set({ cmp: comparing ? null : '1' })}
+            title={`Show each group's turns in ${filter.period.compare}, and the change`}
+            className={cn(
+              'inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs font-medium outline-none focus-visible:outline-2 focus-visible:outline-accent',
+              comparing ? 'border-accent/50 bg-accent/10 text-fg' : 'border-line bg-surface text-fg hover:bg-surface-2',
+            )}
+            data-sw-grid-compare={comparing ? 'on' : 'off'}
+          >
+            <GitCompareArrows size={14} className="text-muted" aria-hidden="true" /> Compare
+          </button>
+        ) : null}
         <span className="hidden items-center gap-2 sm:flex">
           <IconButton
             label={dense ? 'Roomier rows' : 'Denser rows'}
@@ -780,7 +859,12 @@ function Turns({ filter }) {
           >
             {dense ? <Rows3 size={15} aria-hidden="true" /> : <Rows4 size={15} aria-hidden="true" />}
           </IconButton>
-          <ColumnChooser columns={USAGE_COLUMNS} layout={layout} onLayout={setLayout} onReset={() => set({ cols: null, pin: null })} />
+          <ColumnChooser
+            columns={USAGE_COLUMNS}
+            layout={{ ...layout, order: layout.order.filter((id) => !COMPARE_IDS.includes(id)) }}
+            onLayout={setLayout}
+            onReset={() => set({ cols: null, pin: null, w: null })}
+          />
         </span>
       </div>
       {state.error && !state.data ? (
@@ -798,7 +882,7 @@ function Turns({ filter }) {
       ) : (
         <DataGrid
           label="Agent turns"
-          columns={USAGE_COLUMNS}
+          columns={columns}
           items={items}
           rowKey={(row) => row.id}
           layout={layout}

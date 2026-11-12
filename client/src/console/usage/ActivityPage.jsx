@@ -254,7 +254,7 @@ export function ActivityLog({ fixed = {}, embedded = false }) {
   const { workspaceId, isAdmin } = useWorkspace()
   const filter = useActivityFilter(fixed)
   const { get, set, query, search } = filter
-  const filters = useWs(workspaceId, '/activity/filters', { keep: false, enabled: isAdmin && !embedded })
+  const filters = useWs(workspaceId, '/activity/filters', { keep: false, enabled: !embedded })
   const pages = useWsPages(workspaceId, (before) => `/activity?${query}&limit=100${before ? `&before=${before}` : ''}`, {
     next: (page) => page.next,
   })
@@ -269,6 +269,7 @@ export function ActivityLog({ fixed = {}, embedded = false }) {
       readLayout(ACTIVITY_COLUMNS, {
         cols: get('cols') || null,
         pin: filter.params.has('pin') ? (get('pin') === 'none' ? '' : get('pin')) : null,
+        widths: get('w') || null,
         defaults: ACTIVITY_DEFAULTS,
       }),
     [get, filter.params],
@@ -390,7 +391,7 @@ export function ActivityLog({ fixed = {}, embedded = false }) {
                 columns={ACTIVITY_COLUMNS}
                 layout={layout}
                 onLayout={setLayout}
-                onReset={() => set({ cols: null, pin: null })}
+                onReset={() => set({ cols: null, pin: null, w: null })}
               />
             </span>
             <Button size="sm" variant="secondary" className="h-9" onClick={exportCsv} disabled={exporter.busy} data-sw-activity-export>
@@ -402,6 +403,20 @@ export function ActivityLog({ fixed = {}, embedded = false }) {
       {exporter.error ? (
         <p className="mb-2 text-sm text-bad" role="alert">
           {exporter.error}
+        </p>
+      ) : null}
+      {pages.data?.pages[0]?.searchedFrom ? (
+        <p className="mb-2 text-xs text-muted" data-sw-activity-search-bound>
+          Searching the last 90 days. Choose a period to search further back.
+        </p>
+      ) : null}
+      {!embedded && filters.data ? (
+        <p className="mb-2 text-xs text-muted" data-sw-activity-accounts={filters.data.accounts}>
+          {filters.data.accounts === 'members'
+            ? 'Sign-ins, passkeys and devices of this workspace\u2019s members are shown here, to owners: this server\u2019s operator switched that on.'
+            : isAdmin
+              ? 'Sign-ins and passkeys belong to each person and are not shown here. Everyone sees their own on their own page.'
+              : 'This is your own activity here, with your sign-ins.'}
         </p>
       ) : null}
       <Card>
@@ -600,7 +615,7 @@ export function PersonPage({ userId }) {
         <Card>
           <CardHeader icon={Laptop} title="Signed in on" description="Devices with a live session, by when each was last seen." />
           <ul className="divide-y divide-line text-sm" data-sw-person-devices>
-            {person.sessions.map((session, index) => (
+            {(person.sessions || []).map((session, index) => (
               <li key={index} className="px-4 py-2 sm:px-5">
                 <span className="block truncate text-fg">{session.device || 'An unknown device'}</span>
                 <span className="block text-caption text-muted">
@@ -609,7 +624,13 @@ export function PersonPage({ userId }) {
                 </span>
               </li>
             ))}
-            {!person.sessions.length ? <li className="px-5 py-6 text-center text-xs text-muted">Not signed in anywhere.</li> : null}
+            {person.sessions === null ? (
+              <li className="px-5 py-6 text-center text-xs text-muted" data-sw-person-devices-private>
+                Where someone is signed in is theirs to see: it covers every workspace they are in.
+              </li>
+            ) : !person.sessions.length ? (
+              <li className="px-5 py-6 text-center text-xs text-muted">Not signed in anywhere.</li>
+            ) : null}
           </ul>
         </Card>
       </div>

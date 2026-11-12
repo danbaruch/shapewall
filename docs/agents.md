@@ -144,7 +144,10 @@ estimated: an agent that reports no tokens shows "Not reported", never zero. A r
 file's name or content, or a diff.
 
 - **On a local board** the records are lines in `.shapewall/agent-usage.jsonl` (past 5 MB the file is renamed to
-  `agent-usage.1.jsonl` and a new one starts). The Workspace Console's **Usage** page (`/console?section=usage`) shows them to the
+  `agent-usage.1.jsonl` and a new one starts). The file is readable by its owner only (0600) and is written under a file lock,
+  like the event log. It says who used which agent and when, so keep it out of git: `.shapewall/` is ignored by `shapewall
+init`, which from 0.7.0 also adds `.shapewall/agent-usage*.jsonl` by name. In a project set up earlier, check that your
+  `.gitignore` has `.shapewall/` (or add that line) before you commit. The Workspace Console's **Usage** page (`/console?section=usage`) shows them to the
   owner: turns, tokens, agent time and reported cost for the last 7, 30 or 90 days against the days before, a chart by day and
   agent (turns, tokens, time or cost), how turns ended, and a table of the newest 200 turns. It needs the owner link, like Agent
   feedback: it says who used which agent on this computer. `GET /api/agent/usage?days=30` is the same data. The local view has no

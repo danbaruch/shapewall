@@ -29,7 +29,7 @@ export function TurnDrawer({ id, onClose }) {
   const most = Math.max(1, ...tools.map(([, count]) => count))
   // The activity around it: the same agent, from a minute before to a minute after.
   const around =
-    row && isAdmin && row.agent
+    row && isAdmin && row.agent?.exists
       ? `/w/${workspaceId}/activity?agent=${row.agent.id}&range=custom&from=${row.startedAt.slice(0, 10)}&to=${(row.endedAt || row.startedAt).slice(0, 10)}`
       : null
   return (
@@ -74,7 +74,7 @@ export function TurnDrawer({ id, onClose }) {
           <Facts title="Who and where">
             <Fact label="Asked by">
               {row.person ? (
-                isAdmin || row.person.id === data.me.userId ? (
+                row.person.member && (isAdmin || row.person.id === data.me.userId) ? (
                   <Link to={`/w/${workspaceId}/activity/${row.person.id}`} className={linkClass}>
                     {row.person.name}
                   </Link>
@@ -87,7 +87,7 @@ export function TurnDrawer({ id, onClose }) {
             </Fact>
             <Fact label="Agent">
               {row.agent ? (
-                isAdmin ? (
+                isAdmin && row.agent.exists ? (
                   <Link to={`/w/${workspaceId}/activity/${row.agent.id}`} className={linkClass}>
                     {row.agent.name}
                   </Link>

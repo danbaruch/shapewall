@@ -48,6 +48,7 @@ export function StatTile({
   trend = null,
   loading = false,
   note = null,
+  compare = 'the period before',
   testId,
 }) {
   const theme = useChartTheme()
@@ -86,7 +87,7 @@ export function StatTile({
             {delta.text}
           </span>
         ) : null}
-        {loading ? null : <span className="truncate">{delta ? 'against the period before' : (note ?? 'Nothing to compare with yet')}</span>}
+        {loading ? null : <span className="truncate">{delta ? `against ${compare}` : (note ?? 'Nothing to compare with yet')}</span>}
       </p>
       {hint && !loading ? <p className="mt-0.5 text-caption text-pretty text-muted">{hint}</p> : null}
     </Card>

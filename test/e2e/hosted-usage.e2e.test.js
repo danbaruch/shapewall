@@ -417,6 +417,221 @@ test('on a phone (390 px): nothing scrolls sideways, tiles stack, the grid is a 
   assert.deepEqual(errors, [])
 })
 
+test('columns resize and move by pointer and by keyboard; grouped rows compare with the period before', async () => {
+  const { page, errors } = await open(s.ada)
+  await page.goto(url('/usage?tab=turns'))
+  await page.locator('[data-sw-grid="table"] [data-sw-grid-row]').first().waitFor()
+  const widthOf = (id) => page.locator(`[data-sw-grid-header="${id}"]`).evaluate((node) => Math.round(node.getBoundingClientRect().width))
+  const order = () =>
+    page.locator('[data-sw-grid-header]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-sw-grid-header')))
+
+  // Drag the right edge of a header: the column follows, and the address keeps the width.
+  const before = await widthOf('agent')
+  const edge = await page.locator('[data-sw-grid-resize="agent"]').boundingBox()
+  await page.mouse.move(edge.x + edge.width / 2, edge.y + edge.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(edge.x + edge.width / 2 + 30, edge.y + edge.height / 2, { steps: 3 })
+  assert.ok((await widthOf('agent')) > before + 20, 'it follows the pointer')
+  await page.mouse.move(edge.x + edge.width / 2 + 60, edge.y + edge.height / 2, { steps: 3 })
+  await page.mouse.up()
+  await page.waitForFunction(() => /[?&]w=agent%3A\d+/.test(window.location.search))
+  assert.equal(await widthOf('agent'), before + 60)
+  // The cells of the column are as wide as its header.
+  assert.equal(
+    await page
+      .locator('[data-sw-grid-row]')
+      .first()
+      .locator('[data-sw-grid-cell="agent"]')
+      .evaluate((node) => Math.round(node.getBoundingClientRect().width)),
+    before + 60,
+  )
+  await page.reload()
+  await page.locator('[data-sw-grid-row]').first().waitFor()
+  assert.equal(await widthOf('agent'), before + 60, 'a reload keeps it')
+
+  // The same from the keyboard: the header's menu has Narrower, Wider and the moves.
+  await page.locator('[data-sw-grid-menu="agent"]').focus()
+  await page.keyboard.press('Enter')
+  await page.locator('[data-sw-grid-narrower="agent"]').waitFor()
+  await page.keyboard.press('ArrowDown')
+  await page.locator('[data-sw-grid-narrower="agent"]').focus()
+  await page.keyboard.press('Enter')
+  await page.waitForFunction(
+    (width) => Math.round(document.querySelector('[data-sw-grid-header="agent"]').getBoundingClientRect().width) === width,
+    before + 28,
+  )
+  await page.locator('[data-sw-grid-menu="agent"]').focus()
+  await page.keyboard.press('Enter')
+  await page.getByRole('menuitem', { name: 'Move right' }).focus()
+  await page.keyboard.press('Enter')
+  await page.waitForFunction(() => /[?&]cols=/.test(window.location.search))
+  assert.deepEqual((await order()).slice(0, 4), ['started', 'kind', 'project', 'agent'])
+
+  // Drag a header onto another: it takes that place.
+  await page.locator('[data-sw-grid-header="outcome"]').dragTo(page.locator('[data-sw-grid-header="kind"]'))
+  await page.waitForFunction(() => {
+    const ids = [...document.querySelectorAll('[data-sw-grid-header]')].map((node) => node.getAttribute('data-sw-grid-header'))
+    return ids[1] === 'outcome'
+  })
+  assert.deepEqual((await order()).slice(0, 5), ['started', 'outcome', 'kind', 'project', 'agent'])
+  // (By hand this time: press on the header, move a little so the drag starts, then on to the target.)
+  const source = await page.locator('[data-sw-grid-header="kind"]').boundingBox()
+  const target = await page.locator('[data-sw-grid-header="agent"]').boundingBox()
+  await page.mouse.move(source.x + 30, source.y + source.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(source.x + 60, source.y + source.height / 2, { steps: 4 })
+  await page.mouse.move(target.x + target.width / 2, target.y + target.height / 2, { steps: 6 })
+  await page.mouse.up()
+  await page.waitForFunction(() => {
+    const ids = [...document.querySelectorAll('[data-sw-grid-header]')].map((node) => node.getAttribute('data-sw-grid-header'))
+    return ids.indexOf('kind') === ids.indexOf('agent') + 1
+  })
+  assert.deepEqual((await order()).slice(0, 5), ['started', 'outcome', 'project', 'agent', 'kind'])
+  assert.match(page.url(), /cols=started%2Coutcome%2Cproject%2Cagent%2Ckind/)
+  // "Back to the usual columns" undoes order and widths.
+  await page.locator('[data-sw-grid-columns]').click()
+  await page.locator('[data-sw-grid-columns-reset]').click()
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(() => !/[?&](cols|w)=/.test(window.location.search))
+  assert.equal(await widthOf('agent'), before)
+
+  // Grouped rows, with the period before beside them.
+  await page.goto(url('/usage?tab=turns&group=agent'))
+  await page.locator('[data-sw-grid-group]').first().waitFor()
+  assert.equal(await page.locator('[data-sw-grid-header="before"]').count(), 0)
+  await page.locator('[data-sw-grid-compare="off"]').click()
+  await page.locator('[data-sw-grid-header="before"]').waitFor()
+  await page.locator('[data-sw-grid-header="change"]').waitFor()
+  const query = await pageQuery(page)
+  const now = (await s.ada.browser.get(api(`/usage/breakdown?${query}&groupBy=agent`))).json.groups
+  // The page compares the last 30 days with the 30 before: the same days the API is asked for here.
+  const range = await page.evaluate(() => {
+    const today = new Date()
+    const from = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 59)
+    const to = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 29)
+    return `from=${from.toISOString()}&to=${to.toISOString()}&tz=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}`
+  })
+  const earlier = (await s.ada.browser.get(api(`/usage/breakdown?${range}&groupBy=agent`))).json.groups
+  const top = now[0]
+  const was = earlier.find((group) => group.key === top.key)
+  await page.waitForFunction(
+    ([key, text]) => document.querySelector(`[data-sw-grid-group="${key}"]`)?.textContent.includes(text),
+    [top.key, was.calls.toLocaleString('en-US')],
+  )
+  const row = await page.locator(`[data-sw-grid-group="${top.key}"]`).textContent()
+  const delta = ((top.calls - was.calls) / was.calls) * 100
+  assert.ok(row.includes(`${delta > 0 ? '+' : ''}${Math.abs(delta) >= 1000 ? Math.round(delta) : Math.round(delta * 10) / 10}%`), row)
+  await shot(page, 'e2e-usage-compare')
+  await page.locator('[data-sw-grid-compare="on"]').click()
+  await page.locator('[data-sw-grid-header="before"]').waitFor({ state: 'detached' })
+  assert.deepEqual(errors, [])
+})
+
+test('after review: calendar periods, any model name, links only where a page opens, views for a viewer, sign-ins kept to their owner', async () => {
+  // A model whose name has brackets, a comma and spaces, as agents really report them.
+  const agent = s.agents[0]
+  const insert = hosted.db.prepare(
+    "INSERT INTO agent_runs (workspace_id, project_id, id, kind, agent_id, thread_id, board_id, asked_by, started_at, ended_at, outcome, model, duration_ms, agent_owner) VALUES (?, ?, ?, 'chat', ?, 'board', 'home', ?, ?, ?, 'answered', ?, 1000, ?)",
+  )
+  const at = new Date(Date.now() - 3_600_000).toISOString()
+  insert.run(s.ws, agent.projectId, 'run_e2e0000000000000000000a1', agent.id, s.cyd.user.id, at, at, 'claude-opus-4-1[1m]', agent.owner)
+  insert.run(s.ws, agent.projectId, 'run_e2e0000000000000000000a2', agent.id, s.ada.user.id, at, at, 'local, quantized (q4)', agent.owner)
+  const { page, errors } = await open(s.ada)
+  await page.goto(url('/usage?tab=turns'))
+  await page.locator('[data-sw-grid-row]').first().waitFor()
+  await page.locator('[data-sw-filter="model"]').click()
+  await page.locator('[data-sw-filter-option="claude-opus-4-1[1m]"]').click()
+  await page.locator('[data-sw-filter-option="local, quantized (q4)"]').click()
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(() => new URLSearchParams(window.location.search).getAll('model').length === 2)
+  assert.deepEqual(await page.evaluate(() => new URLSearchParams(window.location.search).getAll('model')), [
+    'claude-opus-4-1[1m]',
+    'local, quantized (q4)',
+  ])
+  await page.waitForFunction(() => document.querySelector('[data-sw-turn-count]')?.getAttribute('data-sw-turn-count') === '2')
+  assert.equal(await page.locator('[data-sw-usage-chips] [data-sw-chip]').count(), 2)
+  await page.reload()
+  await page.waitForFunction(() => document.querySelector('[data-sw-turn-count]')?.getAttribute('data-sw-turn-count') === '2')
+  // A saved view keeps such a filter too.
+  await page.locator('[data-sw-views]').click()
+  await page.locator('[data-sw-view-save]').click()
+  await page.locator('[data-sw-view-form] input').fill('Odd model names')
+  await page.locator('[data-sw-view-form] button[type="submit"]').click()
+  await page.waitForFunction(() => document.querySelector('[data-sw-views]')?.textContent.includes('Odd model names'))
+
+  // Calendar periods compare with the calendar unit before, and say so.
+  for (const [preset, words] of [
+    ['lastmonth', 'against the month before'],
+    ['month', 'against last month to the same day'],
+    ['week', 'against last week to the same day'],
+    ['7d', 'against the 7 days before'],
+  ]) {
+    await page.goto(url(`/usage?range=${preset}`))
+    await page.locator('[data-sw-tile="calls"] [data-sw-tile-value]').waitFor()
+    const text = await page.locator('[data-sw-usage-tiles]').textContent()
+    assert.ok(text.includes(words) || text.includes('Nothing to compare with yet'), `${preset}: ${text.slice(0, 200)}`)
+  }
+  await page.goto(url('/usage?range=lastmonth'))
+  await page.locator('[data-sw-tile="calls"] [data-sw-tile-delta]').waitFor()
+  assert.match(await page.locator('[data-sw-tile="calls"]').textContent(), /against the month before/)
+  assert.match(await page.locator('[data-sw-period]').textContent(), /Last month/)
+  // The summary the page asked for names both periods as whole calendar months.
+  const asked = await page.evaluate(() => {
+    const today = new Date()
+    const iso = (year, month) => new Date(year, month, 1).toISOString()
+    return [
+      iso(today.getFullYear(), today.getMonth() - 1),
+      iso(today.getFullYear(), today.getMonth()),
+      iso(today.getFullYear(), today.getMonth() - 2),
+    ]
+  })
+  const summary = (
+    await s.ada.browser.get(
+      api(
+        `/usage/summary?from=${asked[0]}&to=${asked[1]}&prevFrom=${asked[2]}&prevTo=${asked[0]}&tz=${encodeURIComponent('America/Chicago')}`,
+      ),
+    )
+  ).json
+  assert.equal(number(await page.locator('[data-sw-tile="calls"] [data-sw-tile-value]').textContent()), summary.current.calls)
+
+  // An owner on a server as it comes: the page says sign-ins are each person's own, and shows no devices of others.
+  await page.goto(url('/activity'))
+  await page.locator('[data-sw-activity-accounts="own"]').waitFor()
+  assert.equal(await page.locator('[data-sw-grid-row]').first().isVisible(), true)
+  await page.goto(url(`/activity/${s.cyd.user.id}`))
+  await page.locator('[data-sw-person="cyd"]').waitFor()
+  await page.locator('[data-sw-person-devices-private]').waitFor()
+  assert.deepEqual(errors, [])
+
+  // A member opens a turn: no link to an agent's page (admins only), and to a person's page only when it is their own.
+  const cyd = await open(s.cyd)
+  await cyd.page.goto(url('/usage?tab=turns&row=run_e2e0000000000000000000a1'))
+  await cyd.page.locator('[data-sw-drawer="turn"] [data-sw-turn]').waitFor()
+  const links = await cyd.page.locator('[data-sw-drawer="turn"] a').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('href')))
+  assert.deepEqual(
+    links.filter((href) => href.includes('/activity')),
+    [`/w/${s.ws}/activity/${s.cyd.user.id}`],
+    'her own page, and nothing she cannot open',
+  )
+  await cyd.page.goto(url(`/activity/${s.cyd.user.id}`))
+  await cyd.page.locator('[data-sw-person="cyd"]').waitFor()
+  await cyd.page.locator('[data-sw-person-devices] li').first().waitFor()
+  assert.equal(await cyd.page.locator('[data-sw-person-devices-private]').count(), 0, 'her own devices are hers to see')
+  assert.deepEqual(cyd.errors, [])
+
+  // A viewer has Activity, with a views menu that works (it used to answer 403).
+  const viewer = await open(s.viewer)
+  await viewer.page.goto(url('/activity'))
+  await viewer.page.locator('[data-sw-grid-row]').first().waitFor()
+  await viewer.page.locator('[data-sw-views]').click()
+  await viewer.page.locator('[data-sw-view-save]').click()
+  await viewer.page.locator('[data-sw-view-form] input').fill('Mine')
+  await viewer.page.locator('[data-sw-view-form] button[type="submit"]').click()
+  await viewer.page.waitForFunction(() => document.querySelector('[data-sw-views]')?.textContent.includes('Mine'))
+  assert.deepEqual(viewer.errors, [])
+  hosted.db.prepare("DELETE FROM agent_runs WHERE id LIKE 'run_e2e%'").run()
+})
+
 test('a local board: the owner’s Usage view shows the turns of this computer; anyone else is told it is the owner’s', async () => {
   const setup = await demoSetup('usage-local')
   const now = Date.now()

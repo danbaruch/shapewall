@@ -35,20 +35,29 @@ export { useSearch }
 export const setSearch = (params, options) => leavePage(() => replaceSearch(params.toString(), options))
 
 // The address as an object, with one setter: set({ key: value }) replaces
-// keys (null, '' or an empty list removes one). List values are comma lists.
+// keys (null, '' or an empty list removes one). A list is the key repeated
+// (agent=a&agent=b), so a value may hold any character: a model's name has
+// commas and brackets. Older links with comma lists of ids still read.
 export function useAddress() {
   const search = useSearch()
   const params = useMemo(() => new URLSearchParams(search), [search])
   const get = useCallback((key, fallback = '') => params.get(key) ?? fallback, [params])
-  const list = useCallback((key) => (params.get(key) ? params.get(key).split(',').filter(Boolean) : []), [params])
+  const list = useCallback(
+    (key) =>
+      params
+        .getAll(key)
+        .flatMap((value) => (UNSPLIT.includes(key) ? [value] : value.split(',')))
+        .filter(Boolean),
+    [params],
+  )
   const set = useCallback((changes, options) => {
     // Read when the change lands, so two changes in a row both hold.
     leavePage(() => {
       const next = new URLSearchParams(currentSearch())
       for (const [key, value] of Object.entries(changes)) {
-        const text = Array.isArray(value) ? value.join(',') : value
-        if (text === null || text === undefined || text === '' || text === false) next.delete(key)
-        else next.set(key, String(text))
+        next.delete(key)
+        for (const item of Array.isArray(value) ? value : [value])
+          if (item !== null && item !== undefined && item !== '' && item !== false) next.append(key, String(item))
       }
       replaceSearch(next.toString(), options)
     })
@@ -56,6 +65,8 @@ export function useAddress() {
   return { params, search, get, list, set }
 }
 
+// Filters whose values are never split on commas (whatever an agent called its model).
+const UNSPLIT = ['model']
 // The filter keys of the Usage pages, as the address and the API name them.
 export const FILTER_KEYS = ['agent', 'project', 'person', 'kind', 'model', 'outcome']
 export const RANGE_KEYS = ['tokensMin', 'tokensMax', 'durationMin', 'durationMax']
@@ -71,8 +82,14 @@ export function useUsageFilter() {
     const out = new URLSearchParams()
     out.set('from', period.from.toISOString())
     out.set('to', period.to.toISOString())
+    // What to compare with: the page says, so "this month" compares with last month.
+    out.set('prevFrom', period.previous.from.toISOString())
+    out.set('prevTo', period.previous.to.toISOString())
     out.set('tz', zone())
-    for (const key of [...FILTER_KEYS, ...RANGE_KEYS, 'q']) if (params.get(key)) out.set(key, params.get(key))
+    for (const key of FILTER_KEYS)
+      for (const value of params.getAll(key).flatMap((item) => (UNSPLIT.includes(key) ? [item] : item.split(','))))
+        if (value) out.append(key, value)
+    for (const key of [...RANGE_KEYS, 'q']) if (params.get(key)) out.set(key, params.get(key))
     return out.toString()
   }, [params, period])
   const active = [...FILTER_KEYS, ...RANGE_KEYS, 'q'].filter((key) => params.get(key))

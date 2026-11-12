@@ -10,7 +10,11 @@
 //             { type: 'group', group, open } | { type: 'more', group, busy }
 //   layout    { order, hidden, pinned }: kept by the page in its address.
 //
-// Keyboard: the grid is one tab stop. Up and Down (and Home, End, Page Up,
+// Columns: drag a header to move it, drag its right edge to resize it; the
+// header's menu does both from the keyboard (move left or right, wider,
+// narrower), and sorts, pins and hides.
+//
+// Keyboard: the rows are one tab stop. Up and Down (and Home, End, Page Up,
 // Page Down) move the current row, Enter or Space opens it, Right and Left
 // open and close a group. On a phone the grid is a list of cards.
 
@@ -32,6 +36,8 @@ import {
   ArrowUp,
   ChevronDown,
   ChevronRight,
+  ChevronsLeftRight,
+  ChevronsRightLeft,
   Columns3,
   EyeOff,
   MoreVertical,
@@ -64,9 +70,14 @@ const features = tableFeatures({
 })
 const NO_DATA = []
 
+export const COLUMN_MIN = 64
+export const COLUMN_MAX = 640
+const clampWidth = (value) => Math.min(COLUMN_MAX, Math.max(COLUMN_MIN, Math.round(value)))
+
 // The layout a page keeps in its address: "cols" (the visible columns, in
-// order) and "pin". Missing: the columns' own defaults.
-export function readLayout(columns, { cols, pin, defaults }) {
+// order), "pin", and "w" (the widths that were changed, "id:px"). Missing:
+// the columns' own defaults.
+export function readLayout(columns, { cols, pin, widths = null, defaults }) {
   const known = new Set(columns.map((column) => column.id))
   const shown = (cols ? cols.split(',') : defaults.shown).filter((id) => known.has(id))
   for (const column of columns) if (column.always && !shown.includes(column.id)) shown.unshift(column.id)
@@ -75,6 +86,13 @@ export function readLayout(columns, { cols, pin, defaults }) {
     order: [...shown, ...rest],
     hidden: rest,
     pinned: (pin === undefined || pin === null ? defaults.pinned : pin.split(',')).filter((id) => shown.includes(id)),
+    sizes: Object.fromEntries(
+      String(widths || '')
+        .split(',')
+        .map((part) => part.split(':'))
+        .filter(([id, px]) => known.has(id) && Number.isFinite(Number(px)) && Number(px) > 0)
+        .map(([id, px]) => [id, clampWidth(Number(px))]),
+    ),
   }
 }
 export const writeLayout = (layout, defaults) => {
@@ -83,6 +101,10 @@ export const writeLayout = (layout, defaults) => {
   return {
     cols: same(shown, defaults.shown) ? null : shown.join(','),
     pin: same(layout.pinned, defaults.pinned) ? null : layout.pinned.join(',') || 'none',
+    w:
+      Object.entries(layout.sizes || {})
+        .map(([id, px]) => `${id}:${px}`)
+        .join(',') || null,
   }
 }
 
@@ -109,6 +131,11 @@ export function DataGrid({
   const phone = useMediaQuery('(max-width: 639px)')
   const scroll = useRef(null)
   const [active, setActive] = useState(0)
+  // A column being resized follows the pointer here; the address gets the width when the drag ends.
+  const [resizing, setResizing] = useState(null)
+  const [dragging, setDragging] = useState(null)
+  const [dropOn, setDropOn] = useState(null)
+  const sizes = resizing ? { ...layout.sizes, [resizing.id]: resizing.width } : layout.sizes || {}
   const rowHeight = phone ? 84 : dense ? 34 : 44
 
   const defs = useMemo(
@@ -134,6 +161,7 @@ export function DataGrid({
       columnOrder: layout.order,
       columnVisibility: Object.fromEntries(layout.hidden.map((id) => [id, false])),
       columnPinning: { start: layout.pinned, end: [] },
+      columnSizing: sizes,
       sorting: sort ? [{ id: columns.find((column) => column.sort === sort.id)?.id || '', desc: sort.dir === 'desc' }] : [],
     },
     onColumnOrderChange: (updater) => onLayout({ ...layout, order: typeof updater === 'function' ? updater(layout.order) : updater }),
@@ -143,6 +171,8 @@ export function DataGrid({
       const hidden = Object.keys(next).filter((id) => next[id] === false)
       onLayout({ ...layout, hidden, pinned: layout.pinned.filter((id) => !hidden.includes(id)) })
     },
+    onColumnSizingChange: (updater) =>
+      onLayout({ ...layout, sizes: typeof updater === 'function' ? updater(layout.sizes || {}) : updater }),
     onColumnPinningChange: (updater) => {
       const next = typeof updater === 'function' ? updater({ start: layout.pinned, end: [] }) : updater
       onLayout({ ...layout, pinned: next.start || next.left || [] })
@@ -165,6 +195,42 @@ export function DataGrid({
   }
   const total = left
   const lastPinned = ordered.filter((column) => column.getIsPinned()).length - 1
+
+  // Dragging a header's right edge: the column follows, and the width is kept when the pointer lets go.
+  const startResize = (event, column) => {
+    event.preventDefault()
+    event.stopPropagation()
+    const startX = event.clientX
+    const startWidth = column.getSize()
+    let width = startWidth
+    const move = (moved) => {
+      width = clampWidth(startWidth + moved.clientX - startX)
+      setResizing({ id: column.id, width })
+    }
+    const done = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', done)
+      window.removeEventListener('pointercancel', done)
+      setResizing(null)
+      if (width !== startWidth) table.setColumnSizing({ ...(layout.sizes || {}), [column.id]: width })
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', done)
+    window.addEventListener('pointercancel', done)
+    setResizing({ id: column.id, width })
+  }
+  // Dropping a header on another puts it in that one's place.
+  const dropColumn = (target) => {
+    const source = dragging
+    setDragging(null)
+    setDropOn(null)
+    if (!source || source === target) return
+    const order = layout.order.filter((id) => id !== source)
+    const at = order.indexOf(target)
+    const forward = layout.order.indexOf(source) < layout.order.indexOf(target)
+    order.splice(forward ? at + 1 : at, 0, source)
+    table.setColumnOrder(order)
+  }
 
   const virtual = useVirtualizer({
     count: items.length,
@@ -306,11 +372,33 @@ export function DataGrid({
                     ...(pinned ? { left: offsets[index] } : {}),
                   }}
                   className={cn(
-                    'flex h-9 items-center gap-0.5 bg-surface-2 pr-1 pl-3 text-xs font-medium text-muted',
+                    'group/header relative flex h-9 items-center gap-0.5 bg-surface-2 pr-1 pl-3 text-xs font-medium text-muted',
                     pinned && 'sticky z-10',
                     pinned && index === lastPinned && 'border-r border-line',
                     meta.align === 'right' && 'justify-end',
+                    dragging === column.id && 'opacity-50',
+                    dropOn === column.id && dragging !== column.id && 'bg-accent/15 shadow-[inset_2px_0_0_var(--accent)]',
                   )}
+                  draggable={!resizing}
+                  onDragStart={(event) => {
+                    event.dataTransfer.effectAllowed = 'move'
+                    event.dataTransfer.setData('text/plain', column.id)
+                    setDragging(column.id)
+                  }}
+                  onDragOver={(event) => {
+                    if (!dragging) return
+                    event.preventDefault()
+                    event.dataTransfer.dropEffect = 'move'
+                    if (dropOn !== column.id) setDropOn(column.id)
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault()
+                    dropColumn(column.id)
+                  }}
+                  onDragEnd={() => {
+                    setDragging(null)
+                    setDropOn(null)
+                  }}
                   data-sw-grid-header={column.id}
                 >
                   {column.getCanSort() ? (
@@ -341,6 +429,24 @@ export function DataGrid({
                     layout={layout}
                     onLayout={onLayout}
                     canHide={headerOf.get(column.id)?.column.getCanHide() !== false}
+                    onWidth={(width) => table.setColumnSizing({ ...(layout.sizes || {}), [column.id]: clampWidth(width) })}
+                    onResetWidth={() =>
+                      table.setColumnSizing(Object.fromEntries(Object.entries(layout.sizes || {}).filter(([id]) => id !== column.id)))
+                    }
+                  />
+                  {/* The right edge resizes the column (the menu's Wider and Narrower do the same from the keyboard). */}
+                  <span
+                    aria-hidden="true"
+                    onPointerDown={(event) => startResize(event, column)}
+                    onDoubleClick={() =>
+                      table.setColumnSizing(Object.fromEntries(Object.entries(layout.sizes || {}).filter(([id]) => id !== column.id)))
+                    }
+                    draggable={false}
+                    className={cn(
+                      'absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize touch-none select-none after:absolute after:inset-y-1.5 after:left-1/2 after:w-px after:bg-line-strong after:opacity-0 group-hover/header:after:opacity-100',
+                      resizing?.id === column.id && 'after:w-0.5 after:bg-accent after:opacity-100',
+                    )}
+                    data-sw-grid-resize={column.id}
                   />
                 </div>
               )
@@ -484,7 +590,7 @@ export function DataGrid({
 }
 
 // A column's own menu: sort, pin, move, hide.
-function ColumnMenu({ column, meta, index, layout, onLayout, canHide }) {
+function ColumnMenu({ column, meta, index, layout, onLayout, canHide, onWidth, onResetWidth }) {
   const pinned = Boolean(column.getIsPinned())
   const shownOrder = layout.order.filter((id) => !layout.hidden.includes(id))
   const at = shownOrder.indexOf(column.id)
@@ -504,7 +610,6 @@ function ColumnMenu({ column, meta, index, layout, onLayout, canHide }) {
         <button
           type="button"
           aria-label={`${meta.title || meta.header}: column options`}
-          tabIndex={-1}
           className="inline-flex h-6 w-5 shrink-0 items-center justify-center rounded text-faint opacity-0 outline-none hover:bg-surface hover:text-fg focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-accent data-[state=open]:opacity-100 [[role=columnheader]:hover_&]:opacity-100"
           data-sw-grid-menu={column.id}
         >
@@ -532,6 +637,26 @@ function ColumnMenu({ column, meta, index, layout, onLayout, canHide }) {
         <DropdownMenuItem disabled={at < 0 || at >= shownOrder.length - 1} onSelect={() => swap(1)}>
           <ArrowRight size={14} aria-hidden="true" /> Move right
         </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          disabled={column.getSize() >= COLUMN_MAX}
+          onSelect={() => onWidth(column.getSize() + 32)}
+          data-sw-grid-wider={column.id}
+        >
+          <ChevronsLeftRight size={14} aria-hidden="true" /> Wider
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={column.getSize() <= COLUMN_MIN}
+          onSelect={() => onWidth(column.getSize() - 32)}
+          data-sw-grid-narrower={column.id}
+        >
+          <ChevronsRightLeft size={14} aria-hidden="true" /> Narrower
+        </DropdownMenuItem>
+        {layout.sizes?.[column.id] ? (
+          <DropdownMenuItem onSelect={onResetWidth}>
+            <RotateCcw size={14} aria-hidden="true" /> Its usual width
+          </DropdownMenuItem>
+        ) : null}
         {canHide && !meta.always ? (
           <>
             <DropdownMenuSeparator />
@@ -553,7 +678,7 @@ export function ColumnChooser({ columns, layout, onLayout, onReset }) {
     const hidden = layout.hidden.includes(id) ? layout.hidden.filter((item) => item !== id) : [...layout.hidden, id]
     // A column that comes back goes after the visible ones.
     const order = [...layout.order.filter((item) => !hidden.includes(item)), ...layout.order.filter((item) => hidden.includes(item))]
-    onLayout({ order, hidden, pinned: layout.pinned.filter((item) => !hidden.includes(item)) })
+    onLayout({ ...layout, order, hidden, pinned: layout.pinned.filter((item) => !hidden.includes(item)) })
   }
   const move = (id, step) => {
     const order = [...layout.order]
