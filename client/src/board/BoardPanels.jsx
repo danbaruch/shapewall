@@ -1,10 +1,12 @@
-import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { ChatSkeleton } from '../components/app-states'
 import { Dialog } from '../components/ui'
 import { cn } from '../lib/utils'
 import CommentsPanel from './CommentsPanel'
 import { HostedAgentPanel } from './HostedAgentPanel'
 import { railWidthSaved, rememberRailWidth } from './prefs'
+import { publishSidePanelWidth } from './sidePanelWidth'
+import { SIDE_PANEL } from './toolbarFit'
 import { CommentComposer } from './CommentComposer'
 import { ThreadView } from './Thread'
 const ChecksPanel = lazy(() => import('./ChecksPanel'))
@@ -25,34 +27,33 @@ export function SidePanel({
   hostedAgent = null,
 }) {
   return wide && checksOpen ? (
-    <Rail key="checks" panel="checks" defaultWidth={384} aria-label="Checks">
+    <Rail key="checks" panel="checks" aria-label="Checks">
       <Suspense fallback={<p className="p-4 text-sm text-muted">Loading checks…</p>}>
         <ChecksPanel {...checksProps} />
       </Suspense>
     </Rail>
   ) : wide && chatThread ? (
-    <Rail key="agent" panel="agent" defaultWidth={384} aria-label="Agent">
+    <Rail key="agent" panel="agent" aria-label="Agent">
       <Suspense fallback={<ChatSkeleton />}>
         <BoardChat {...chatProps} onClose={() => updateParams({ chat: null })} />
       </Suspense>
     </Rail>
   ) : wide && hostedAgent ? (
-    <Rail key="hosted-agent" panel="agent" defaultWidth={384} aria-label="Agent">
+    <Rail key="hosted-agent" panel="agent" aria-label="Agent">
       <HostedAgentPanel {...hostedAgent} onClose={() => updateParams({ ha: null })} />
     </Rail>
   ) : wide && !panelHidden ? (
-    <Rail key="comments" panel="comments" defaultWidth={384} id="sw-comments" tabIndex={-1} className="outline-none" aria-label="Comments">
+    <Rail key="comments" panel="comments" id="sw-comments" tabIndex={-1} className="outline-none" aria-label="Comments">
       <CommentsPanel {...panelProps} onClose={() => updateParams({ panel: 'off' })} />
     </Rail>
   ) : null
 }
 
-const RAIL_MIN = 280
-// Never wider than this, nor than this share of the window: the panel is a
-// list beside the canvas, and the canvas (with the comment's popover at its
-// pin) keeps most of the room.
-const RAIL_MAX = 560
-const RAIL_MAX_SHARE = 0.4
+// Never narrower than the toolbar's panel toggles need (they span the panel,
+// BoardToolbar.jsx), never wider than `max`, nor than `share` of the window:
+// the panel is a list beside the canvas, and the canvas (with the comment's
+// popover at its pin) keeps most of the room.
+const { width: RAIL_DEFAULT, min: RAIL_MIN, max: RAIL_MAX, share: RAIL_MAX_SHARE } = SIDE_PANEL
 const RAIL_STEP = 16
 // One width for the side panel whichever tab is open (checks, agent,
 // comments), so switching between them never jumps.
@@ -69,10 +70,15 @@ function clampRail(width) {
 // A side panel with a drag handle on its left edge. Drag (or arrow keys on
 // the focused handle) to resize, double-click to go back to the default.
 // The width is shared by every panel and remembered in this browser.
-function Rail({ panel, defaultWidth, className, children, ...props }) {
+function Rail({ panel, defaultWidth = RAIL_DEFAULT, className, children, ...props }) {
   const [width, setWidth] = useState(() => clampRail(railWidthSaved(RAIL_WIDTH_KEY) ?? defaultWidth))
   const [dragging, setDragging] = useState(false)
   const drag = useRef(null)
+
+  // The toolbar's panel toggles are as wide as the panel: it reads the width
+  // before paint, on every step of a drag, and null once no panel is open.
+  useLayoutEffect(() => publishSidePanelWidth(width), [width])
+  useLayoutEffect(() => () => publishSidePanelWidth(null), [])
 
   useEffect(() => {
     const fit = () => setWidth((current) => clampRail(current))

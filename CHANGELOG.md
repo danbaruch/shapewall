@@ -63,6 +63,12 @@ a Usage view on a local board.
   rows in memory and shares the rest with the server (`src/hosted/usage-core.js`, `activity-core.js`); a test puts the same rows
   into a real server and compares every answer. The charts still load only with these two pages.
 
+- **The panel buttons are the panel's header.** With a side panel open, Comments, Agent and Checks in the top bar are exactly as
+  wide as the panel under them (the same inset as the panel's own rows), share that width, and follow the panel as you drag its
+  edge. With no panel open they go back to their own width at the right of the bar; so do they in a window too narrow to fit
+  them stretched. Agent settings now sits left of them, in the same place either way. The panel's default width is unchanged
+  (384 px); the narrowest it drags to is now 368 px (was 280), so it is never narrower than its buttons need. Phones are unchanged.
+
 ### Fixes found on a real setup
 
 A fix for connected agents on the current Claude Code adapter.

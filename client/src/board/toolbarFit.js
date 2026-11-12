@@ -3,8 +3,8 @@
 // with a flexible gap between them:
 //   left    the board name and switcher with the capture status, a hairline,
 //           then the screen-size toggle, Views and Capture
-//   right   the viewer note, the side panel toggles (Comments, Agent,
-//           Checks) on one track, Settings
+//   right   the viewer note, Settings, then the side panel toggles
+//           (Comments, Agent, Checks) on one track
 // Search is not in the toolbar: it is the sidebar's field (BoardRail.jsx).
 // Nor are the tools you use on the board (Select, Comment, Draw): they float
 // at the bottom of the canvas (BoardTools.jsx).
@@ -13,6 +13,12 @@
 // every step. The widths come from the controls' fixed sizes plus measured
 // text, never from the rendered toolbar, so the result depends only on the
 // toolbar's width and what it shows (no feedback loop, no history).
+//
+// While a side panel is open its toggles are the panel's header: their track
+// is as wide as the panel (inside the bar's padding on both sides) and the
+// three share that width, so the right zone is the panel's width and the left
+// zone drops labels sooner. When even the last step cannot fit that, the
+// toggles go back to their own width (`stretched` is not set).
 //
 // An open journey never changes the toolbar's shape: its name takes the place
 // of the word on the Views button, in the same spot, as wide as the spare
@@ -49,6 +55,13 @@ export const TOOLBAR = {
   // starting never pushes a label off the toolbar.
   agentPill: 22,
 }
+
+// The side panel beside the canvas (BoardPanels.jsx): its default width, the
+// least and the most it can be dragged to (never more than `share` of the
+// window). The least still fits the three toggles with their words, a
+// three-digit comment count and the Agent pill inside the bar's padding
+// (test/toolbar-fit.test.js, and the board e2e with the real font).
+export const SIDE_PANEL = { width: 384, min: 368, max: 560, share: 0.4 }
 
 // What each step turns off. `collapsed(step).panels` is true from the panels step on.
 export function collapsed(step) {
@@ -130,6 +143,7 @@ export function toolbarItems({
           : 16,
   })
   if (viewer) items.right.push({ id: 'viewer', full: 40 + t('Viewer', 'xs') })
+  if (settings) items.right.push({ id: 'settings', full: ICON })
   // One track (1 px border + 2 px padding a side), its buttons side by side:
   // px-2.5 (px-2 once the words are gone), a 14 px icon, gap-1.5. The Agent
   // button keeps room for its activity pill while it has its word.
@@ -144,7 +158,6 @@ export function toolbarItems({
     compact: buttons.reduce((sum, item) => sum + item.compact, gaps),
     at: 'panels',
   })
-  if (settings) items.right.push({ id: 'settings', full: ICON })
   // The name trigger: px-2.5, the title, gap-1.5 and a 14 px chevron.
   return { name: 40 + t(title, 'name'), left: items.left, right: items.right }
 }
@@ -158,16 +171,9 @@ function journeyRoom(left, step, spare) {
   return least + Math.max(0, Math.min(item.grow[step], Math.floor(spare)))
 }
 
-// The step to render. width: the toolbar's width. name: the name trigger's
-// natural width. left/right: the other controls in each zone (see zoneWidth).
-// Returns { step, journey }: the first step at which the two zones fit side
-// by side with the least gap between them, and the open journey's name width
-// there (0: none, or collapsed), which takes the spare room up to its `grow`.
-// Narrower never means a smaller step.
-export function fitToolbar({ width, name, left = [], right = [], config = TOOLBAR }) {
-  const inner = Math.max(0, width - 2 * config.pad)
-  const last = FIT_STEPS.length - 1
-  for (let step = 0; step <= last; step += 1) {
+// The first step at which the two zones fit side by side, or null.
+function firstFit({ inner, name, left, right, config }) {
+  for (let step = 0; step < FIT_STEPS.length; step += 1) {
     const tight = collapsed(step).tight
     const gap = tight ? config.tightGap : config.gap
     const rest = zoneWidth(left, step, gap)
@@ -175,5 +181,29 @@ export function fitToolbar({ width, name, left = [], right = [], config = TOOLBA
     const spare = inner - leftWidth - zoneWidth(right, step, gap) - (tight ? config.tightZoneGap : config.zoneGap)
     if (spare >= 0) return { step, journey: journeyRoom(left, step, spare) }
   }
-  return { step: last, journey: journeyRoom(left, last, 0) }
+  return null
+}
+
+// The step to render. width: the toolbar's width. name: the name trigger's
+// natural width. left/right: the other controls in each zone (see zoneWidth).
+// panel: the open side panel's width (null: none open).
+// Returns { step, journey }: the first step at which the two zones fit side
+// by side with the least gap between them, and the open journey's name width
+// there (0: none, or collapsed), which takes the spare room up to its `grow`.
+// Narrower never means a smaller step.
+// With a panel open it first tries the panel toggles as wide as the panel
+// (their track `panel` less the padding on each side, the words kept), and
+// returns that with `stretched: true` when some step fits it.
+export function fitToolbar({ width, name, left = [], right = [], panel = null, config = TOOLBAR }) {
+  const inner = Math.max(0, width - 2 * config.pad)
+  const last = FIT_STEPS.length - 1
+  const toggles = panel ? right.find((item) => item.id === 'panels') : null
+  const track = toggles ? panel - 2 * config.pad : 0
+  if (toggles && toggles.full <= track) {
+    // The track and the padding on its left; the bar's own padding is on its right.
+    const wide = right.map((item) => (item === toggles ? { id: 'panels', full: track + config.pad } : item))
+    const fit = firstFit({ inner, name, left, right: wide, config })
+    if (fit) return { ...fit, stretched: true }
+  }
+  return firstFit({ inner, name, left, right, config }) || { step: last, journey: journeyRoom(left, last, 0) }
 }
