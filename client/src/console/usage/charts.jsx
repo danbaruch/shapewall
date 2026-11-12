@@ -7,9 +7,16 @@
 // stacked segments; a legend for two or more series, never colour alone;
 // hover and keyboard focus show exact values; "not reported" is a hatch or a
 // gap, never a zero; text is ink, only marks wear the series colour.
+//
+// On the Usage dashboard a chart is a widget (widgets.jsx): `fill` makes it
+// as tall as its place on the grid, `menu` is its options button, and the
+// chart or table view is whatever the widget saved. Anywhere else (a local
+// board's Usage, a person's or an agent's page) a chart keeps its own height
+// and its own view.
 
-import { useId, useMemo, useRef, useState } from 'react'
-import { Bar, BarChart, Brush, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
+import { Bar, BarChart, Brush, CartesianGrid, ComposedChart, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import {
   BarChart3,
   Check,
@@ -78,8 +85,18 @@ export function ChartCard({
   className,
   testId,
   footer = null,
+  fill = false,
+  menu = null,
+  view: savedView = null,
+  onView = null,
+  // Its switches need a wide card to sit beside the title (the chart over time).
+  wideControls = false,
+  // false while the dashboard's layout is edited: the widget's bar is its heading then.
+  header = true,
 }) {
-  const [view, setView] = useState('chart')
+  const [ownView, setOwnView] = useState('chart')
+  const view = savedView ?? ownView
+  const setView = onView ?? setOwnView
   const body = useRef(null)
   const toast = useToast()
   const theme = useChartTheme()
@@ -102,42 +119,63 @@ export function ChartCard({
     }
   }
   return (
-    <Card className={cn('flex min-w-0 flex-col', className)} data-sw-chart={testId}>
-      <div className="flex flex-wrap items-start gap-x-3 gap-y-2 px-4 pt-3.5 sm:px-5">
+    <Card className={cn('@container/chart flex min-w-0 flex-col', fill && 'h-full overflow-hidden', className)} data-sw-chart={testId}>
+      <div
+        className={cn('shrink-0 flex-wrap items-start gap-x-3 gap-y-2 px-4 pt-3.5 sm:px-5', header ? 'flex' : 'hidden')}
+        data-sw-chart-header
+      >
         <div className="min-w-0 flex-[1_1_10rem]">
-          <h2 className="text-title font-semibold text-fg">{title}</h2>
-          {subtitle ? <p className="mt-0.5 text-xs text-muted">{subtitle}</p> : null}
+          <h2 className={cn('text-title font-semibold text-fg', fill && 'truncate')} title={fill ? title : undefined}>
+            {title}
+          </h2>
+          {subtitle ? (
+            <p className={cn('mt-0.5 text-xs text-muted', fill && 'truncate')} title={fill ? subtitle : undefined}>
+              {subtitle}
+            </p>
+          ) : null}
         </div>
         <div className="flex flex-wrap items-center gap-1.5 print:hidden">
-          {controls}
-          <ToggleGroup
-            label={`${title}: chart or table`}
-            value={view}
-            onChange={setView}
-            options={[
-              { id: 'chart', label: <BarChart3 size={14} aria-label="Chart" />, tooltip: 'Chart' },
-              { id: 'table', label: <Table2 size={14} aria-label="Table" />, tooltip: 'Table' },
-            ]}
-          />
-          <IconButton label="Copy as CSV" onClick={copyCsv} disabled={!table?.rows.length} data-sw-chart-csv>
-            <ClipboardCopy size={15} aria-hidden="true" />
-          </IconButton>
-          <IconButton label="Copy as an image" onClick={copyImage} disabled={view !== 'chart' || empty || loading} data-sw-chart-image>
-            <Image size={15} aria-hidden="true" />
-          </IconButton>
+          {/* A narrow widget keeps its title and its options button; the switches are all in the options. */}
+          <div
+            className={cn(
+              'flex-wrap items-center gap-1.5',
+              menu !== null ? (wideControls ? 'hidden @min-[46rem]/chart:flex' : 'hidden @min-[26rem]/chart:flex') : 'flex',
+            )}
+            data-sw-chart-controls
+          >
+            {controls}
+            <ToggleGroup
+              label={`${title}: chart or table`}
+              value={view}
+              onChange={setView}
+              options={[
+                { id: 'chart', label: <BarChart3 size={14} aria-label="Chart" />, tooltip: 'Chart' },
+                { id: 'table', label: <Table2 size={14} aria-label="Table" />, tooltip: 'Table' },
+              ]}
+            />
+            <IconButton label="Copy as CSV" onClick={copyCsv} disabled={!table?.rows.length} data-sw-chart-csv>
+              <ClipboardCopy size={15} aria-hidden="true" />
+            </IconButton>
+            <IconButton label="Copy as an image" onClick={copyImage} disabled={view !== 'chart' || empty || loading} data-sw-chart-image>
+              <Image size={15} aria-hidden="true" />
+            </IconButton>
+          </div>
+          {menu}
         </div>
       </div>
       <div
         ref={body}
         className={cn(
           'min-w-0 flex-1 px-2 pt-2 pb-3 transition-opacity sm:px-3',
+          fill && 'flex min-h-0 flex-col',
           state?.isPlaceholderData && state?.isFetching && 'opacity-60',
         )}
         aria-busy={Boolean(state?.isFetching)}
         onTouchStart={showAtTouch}
+        data-sw-chart-body
       >
         {loading ? (
-          <ChartSkeleton />
+          <ChartSkeleton fill={fill} />
         ) : error ? (
           <div className="p-2">
             <LoadError error={error} onRetry={state.refetch} />
@@ -147,7 +185,7 @@ export function ChartCard({
             {typeof empty === 'string' ? empty : 'Try a longer period, or clear a filter.'}
           </EmptyState>
         ) : view === 'table' ? (
-          <DataTable table={table} title={title} />
+          <DataTable table={table} title={title} fill={fill} />
         ) : (
           children
         )}
@@ -157,10 +195,59 @@ export function ChartCard({
   )
 }
 
-function ChartSkeleton() {
+// Whether the page is being printed. A browser lays a page out for paper
+// without running anything in between, so a chart that follows its widget's
+// height is given a fixed one the moment printing starts (before the
+// snapshot is taken), and its own again afterwards.
+function usePrinting() {
+  const [printing, setPrinting] = useState(() => typeof window !== 'undefined' && Boolean(window.matchMedia?.('print').matches))
+  useEffect(() => {
+    const on = () => flushSync(() => setPrinting(true))
+    const off = () => setPrinting(false)
+    const media = window.matchMedia?.('print')
+    const changed = (event) => (event.matches ? on() : off())
+    window.addEventListener('beforeprint', on)
+    window.addEventListener('afterprint', off)
+    media?.addEventListener?.('change', changed)
+    return () => {
+      window.removeEventListener('beforeprint', on)
+      window.removeEventListener('afterprint', off)
+      media?.removeEventListener?.('change', changed)
+    }
+  }, [])
+  return printing
+}
+
+// The plot of a chart. On the dashboard it takes whatever height its widget
+// has left (never less than a chart can be read at); anywhere else, `height`.
+// A change of size is taken up after a short pause, so dragging a widget's
+// corner does not redraw the chart on every pixel. On paper every plot has
+// one height, whatever its widget's.
+function Plot({ fill, height, children, ...rest }) {
+  const printing = usePrinting()
+  if (!fill || printing)
+    return (
+      <div {...rest}>
+        <ResponsiveContainer width="100%" height={height}>
+          {children}
+        </ResponsiveContainer>
+      </div>
+    )
+  return (
+    <div className="relative min-h-[96px] flex-1" data-sw-plot {...rest}>
+      <div className="absolute inset-0">
+        <ResponsiveContainer width="100%" height="100%" debounce={60}>
+          {children}
+        </ResponsiveContainer>
+      </div>
+    </div>
+  )
+}
+
+function ChartSkeleton({ fill }) {
   // Columns of a chart to come, not a spinner.
   return (
-    <div className="flex h-[236px] items-end gap-2 px-3 pb-6" role="status" data-sw-chart-loading>
+    <div className={cn('flex items-end gap-2 px-3 pb-6', fill ? 'min-h-0 flex-1' : 'h-[236px]')} role="status" data-sw-chart-loading>
       <span className="sr-only">Loading the chart</span>
       {[40, 65, 50, 80, 60, 90, 70, 45, 75, 55, 85, 62].map((height, index) => (
         <Skeleton key={index} className="flex-1 rounded-sm" style={{ height: `${height}%` }} />
@@ -170,9 +257,15 @@ function ChartSkeleton() {
 }
 
 // The same numbers as the chart, as a table (also what a screen reader gets).
-export function DataTable({ table, title }) {
+export function DataTable({ table, title, fill = false }) {
   return (
-    <div className="max-h-[300px] overflow-auto px-2" tabIndex={0} role="region" aria-label={`${title}: table`} data-sw-chart-table>
+    <div
+      className={cn('overflow-auto px-2', fill ? 'min-h-0 flex-1' : 'max-h-[300px]')}
+      tabIndex={0}
+      role="region"
+      aria-label={`${title}: table`}
+      data-sw-chart-table
+    >
       <table className="w-full border-collapse text-xs">
         <thead className="sticky top-0 bg-surface">
           <tr>
@@ -305,10 +398,14 @@ function TooltipBox({ title, rows, footer }) {
 }
 
 // A legend that is also a filter: a press narrows the page to that entry.
-export function Legend({ items, onPick, pressed = [], className }) {
+// `fill`: at most two lines of entries, the rest a scroll away (the plot keeps its room).
+export function Legend({ items, onPick, pressed = [], className, fill = false }) {
   if (!items.length) return null
   return (
-    <ul className={cn('flex flex-wrap gap-x-1 gap-y-0.5 px-2 pt-1', className)} data-sw-chart-legend>
+    <ul
+      className={cn('flex flex-wrap gap-x-1 gap-y-0.5 px-2 pt-1', fill && 'max-h-[62px] min-w-0 flex-[1_1_0%] overflow-y-auto', className)}
+      data-sw-chart-legend
+    >
       {items.map((item) => {
         const Icon = item.icon
         const content = (
@@ -377,7 +474,26 @@ const valueOf = (item, metric) => (metric === 'calls' ? item.calls : item[metric
 // where turns ran but none reported the metric is hatched from top to
 // bottom: unknown, not zero. Click a segment or a legend entry to filter;
 // drag the brush under the chart to zoom, then keep that range for the page.
-export function TimeChart({ data, metric, bucket, dimension, state, onPick, pressed, onRange, controls }) {
+// `style`: stacked bars (the default), grouped bars (side by side) or lines.
+export function TimeChart({
+  data,
+  metric,
+  bucket,
+  dimension,
+  state,
+  onPick,
+  pressed,
+  onRange,
+  controls,
+  style = 'stacked',
+  showLegend = true,
+  showBrush = true,
+  fill = false,
+  header = true,
+  menu = null,
+  view = null,
+  onView = null,
+}) {
   const theme = useChartTheme()
   const hatchId = `hatch-${useId().replace(/:/g, '')}`
   const [zoom, setZoom] = useState(null)
@@ -437,8 +553,13 @@ export function TimeChart({ data, metric, bucket, dimension, state, onPick, pres
     ]),
   }
   const rows = model?.rows || []
-  const brush = rows.length > 14
-  const zoomed = zoom && (zoom.startIndex > 0 || zoom.endIndex < rows.length - 1)
+  const brush = showBrush && rows.length > 14
+  const zoomed = brush && zoom && (zoom.startIndex > 0 || zoom.endIndex < rows.length - 1)
+  const lines = style === 'lines'
+  const stack = style === 'stacked' ? 'stack' : undefined
+  const series = single ? [{ key: 'total', label: METRIC_LABEL[metric] }] : groups
+  const few = rows.length <= 31
+  const Chart = lines ? ComposedChart : BarChart
   return (
     <ChartCard
       title={`${METRIC_LABEL[metric]} over time`}
@@ -455,101 +576,121 @@ export function TimeChart({ data, metric, bucket, dimension, state, onPick, pres
       state={state}
       empty={model && !model.any}
       testId="time"
+      wideControls
+      fill={fill}
+      header={header}
+      menu={menu}
+      view={view}
+      onView={onView}
     >
-      <div data-sw-time-chart={metric}>
-        <ResponsiveContainer width="100%" height={brush ? 276 : 248}>
-          <BarChart data={rows} margin={{ top: 8, right: 8, bottom: 0, left: 0 }} barCategoryGap="18%" accessibilityLayer>
-            <Hatch id={hatchId} color={theme.muted} />
-            <CartesianGrid vertical={false} stroke={theme.grid} />
-            <XAxis dataKey="bucket" tickFormatter={(key) => bucketLabel(key, bucket)} minTickGap={22} {...axisProps(theme)} />
-            <YAxis
-              width={46}
-              allowDecimals={false}
-              tickFormatter={(value) => formatAxis(metric, value)}
-              {...axisProps(theme)}
-              axisLine={false}
-              domain={[0, model?.anyValue ? 'auto' : 1]}
-              // Nothing known to measure against: no numbers on the axis.
-              {...(model?.anyValue ? {} : { tick: false })}
-            />
-            <Tooltip
-              cursor={{ fill: theme.track, opacity: 0.7 }}
+      <Plot fill={fill} height={brush ? 276 : 248} data-sw-time-chart={metric} data-sw-time-style={style}>
+        <Chart data={rows} margin={{ top: 8, right: 8, bottom: 0, left: 0 }} barCategoryGap="18%" accessibilityLayer>
+          <Hatch id={hatchId} color={theme.muted} />
+          <CartesianGrid vertical={false} stroke={theme.grid} />
+          <XAxis dataKey="bucket" tickFormatter={(key) => bucketLabel(key, bucket)} minTickGap={22} {...axisProps(theme)} />
+          <YAxis
+            width={46}
+            allowDecimals={false}
+            tickFormatter={(value) => formatAxis(metric, value)}
+            {...axisProps(theme)}
+            axisLine={false}
+            domain={[0, model?.anyValue ? 'auto' : 1]}
+            // Nothing known to measure against: no numbers on the axis.
+            {...(model?.anyValue ? {} : { tick: false })}
+          />
+          <Tooltip
+            cursor={{ fill: theme.track, opacity: 0.7 }}
+            isAnimationActive={false}
+            content={({ active, payload, label }) => {
+              if (!active || !payload?.length) return null
+              const row = payload[0].payload
+              const lines = single
+                ? [
+                    {
+                      label: METRIC_LABEL[metric],
+                      value: row.unknown ? 'Not reported' : formatMetric(metric, row.total ?? 0, { exact: true }),
+                      color: theme.series[0],
+                    },
+                  ]
+                : groups
+                    .filter((group) => row[group.key] !== undefined)
+                    .map((group) => ({
+                      label: group.label,
+                      value: formatMetric(metric, row[group.key], { exact: true }),
+                      color: theme.colorFor(dimension, group.key),
+                    }))
+                    .reverse()
+              if (!single && row.unknown)
+                lines.push({ label: 'Not reported', value: formatCount(row.calls), color: theme.muted, hatch: true })
+              const reported = METRIC_REPORTED[metric] && row.calls ? ` · ${row.reported} of ${row.calls} reported` : ''
+              return (
+                <TooltipBox
+                  title={bucketLabel(label, bucket, { long: true })}
+                  rows={lines}
+                  footer={`${single || row.total === null ? '' : `Total ${formatMetric(metric, row.total, { exact: true })} · `}${formatCount(row.calls, { exact: true })} ${row.calls === 1 ? 'turn' : 'turns'}${reported}`}
+                />
+              )
+            }}
+          />
+          {/* Turns ran and none reported the measure: a hatched column as tall as the plot, never a zero. */}
+          {hasUnknown ? (
+            <Bar
+              dataKey="__unknown"
+              name="Not reported"
+              stackId={stack}
+              fill={`url(#${hatchId})`}
+              stroke="none"
+              maxBarSize={24}
               isAnimationActive={false}
-              content={({ active, payload, label }) => {
-                if (!active || !payload?.length) return null
-                const row = payload[0].payload
-                const lines = single
-                  ? [
-                      {
-                        label: METRIC_LABEL[metric],
-                        value: row.unknown ? 'Not reported' : formatMetric(metric, row.total ?? 0, { exact: true }),
-                        color: theme.series[0],
-                      },
-                    ]
-                  : groups
-                      .filter((group) => row[group.key] !== undefined)
-                      .map((group) => ({
-                        label: group.label,
-                        value: formatMetric(metric, row[group.key], { exact: true }),
-                        color: theme.colorFor(dimension, group.key),
-                      }))
-                      .reverse()
-                if (!single && row.unknown)
-                  lines.push({ label: 'Not reported', value: formatCount(row.calls), color: theme.muted, hatch: true })
-                const reported = METRIC_REPORTED[metric] && row.calls ? ` · ${row.reported} of ${row.calls} reported` : ''
-                return (
-                  <TooltipBox
-                    title={bucketLabel(label, bucket, { long: true })}
-                    rows={lines}
-                    footer={`${single || row.total === null ? '' : `Total ${formatMetric(metric, row.total, { exact: true })} · `}${formatCount(row.calls, { exact: true })} ${row.calls === 1 ? 'turn' : 'turns'}${reported}`}
-                  />
-                )
-              }}
             />
-            {/* Turns ran and none reported the measure: a hatched column as tall as the plot, never a zero. */}
-            {hasUnknown ? (
-              <Bar
-                dataKey="__unknown"
-                name="Not reported"
-                stackId="stack"
-                fill={`url(#${hatchId})`}
-                stroke="none"
-                maxBarSize={24}
+          ) : null}
+          {series.map((group, index, all) =>
+            lines ? (
+              <Line
+                key={group.key}
+                dataKey={group.key}
+                name={group.label}
+                stroke={single ? theme.series[0] : theme.colorFor(dimension, group.key)}
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                dot={few ? { r: 2.5, strokeWidth: 0, fill: single ? theme.series[0] : theme.colorFor(dimension, group.key) } : false}
+                activeDot={{ r: 4, stroke: theme.surface, strokeWidth: 2 }}
+                connectNulls={false}
                 isAnimationActive={false}
               />
-            ) : null}
-            {(single ? [{ key: 'total', label: METRIC_LABEL[metric] }] : groups).map((group, index, all) => (
+            ) : (
               <Bar
                 key={group.key}
                 dataKey={group.key}
                 name={group.label}
-                stackId="stack"
+                stackId={stack}
                 fill={single ? theme.series[0] : theme.colorFor(dimension, group.key)}
                 stroke={theme.surface}
                 strokeWidth={1}
                 maxBarSize={24}
-                radius={index === all.length - 1 ? [3, 3, 0, 0] : 0}
+                radius={!stack || index === all.length - 1 ? [3, 3, 0, 0] : 0}
                 isAnimationActive={false}
                 cursor={onPick && !single && group.key !== OTHER ? 'pointer' : undefined}
                 onClick={onPick && !single && group.key !== OTHER ? () => onPick(group.key) : undefined}
               />
-            ))}
-            {brush ? (
-              <Brush
-                dataKey="bucket"
-                height={22}
-                travellerWidth={10}
-                stroke={theme.axis}
-                fill={theme.surface}
-                tickFormatter={(key) => bucketLabel(key, bucket)}
-                onChange={(range) => setZoom(range)}
-              />
-            ) : null}
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <Legend items={legend} onPick={onPick} pressed={pressed} />
+            ),
+          )}
+          {brush ? (
+            <Brush
+              dataKey="bucket"
+              height={22}
+              travellerWidth={10}
+              stroke={theme.axis}
+              fill={theme.surface}
+              tickFormatter={(key) => bucketLabel(key, bucket)}
+              onChange={(range) => setZoom(range)}
+            />
+          ) : null}
+        </Chart>
+      </Plot>
+      <div className={cn('flex flex-wrap items-center justify-between gap-2', fill && 'shrink-0')}>
+        {showLegend ? <Legend items={legend} onPick={onPick} pressed={pressed} fill={fill} /> : <span />}
         {zoomed && onRange ? (
           <Button
             size="xs"
@@ -571,7 +712,24 @@ export function TimeChart({ data, metric, bucket, dimension, state, onPick, pres
 // Horizontal bars, largest first, each with its value at the tip and its
 // share. A group that reported nothing has a hatched track and says so.
 // Each row is a button: pressing it filters the page to that group.
-export function BreakdownChart({ groups, metric, dimension, state, onPick, pressed, controls, title }) {
+// `rows`: how many show before "Show all". `showShare`: each row's share of the total.
+export function BreakdownChart({
+  groups,
+  metric,
+  dimension,
+  state,
+  onPick,
+  pressed,
+  controls,
+  title,
+  rows: count = 8,
+  showShare = true,
+  fill = false,
+  header = true,
+  menu = null,
+  view = null,
+  onView = null,
+}) {
   const theme = useChartTheme()
   const [all, setAll] = useState(false)
   const ranked = useMemo(
@@ -580,7 +738,7 @@ export function BreakdownChart({ groups, metric, dimension, state, onPick, press
   )
   const total = ranked.reduce((sum, group) => sum + (valueOf(group, metric) || 0), 0)
   const max = Math.max(1, ...ranked.map((group) => valueOf(group, metric) || 0))
-  const shown = all ? ranked : ranked.slice(0, 8)
+  const shown = all ? ranked : ranked.slice(0, count)
   const table = {
     columns: [title, METRIC_LABEL[metric], 'Share', 'Turns'],
     rows: ranked.map((group) => {
@@ -602,8 +760,13 @@ export function BreakdownChart({ groups, metric, dimension, state, onPick, press
       state={state}
       empty={groups && !groups.length}
       testId="breakdown"
+      fill={fill}
+      header={header}
+      menu={menu}
+      view={view}
+      onView={onView}
     >
-      <ol className="space-y-0.5 px-2 pt-1" data-sw-breakdown={dimension}>
+      <ol className={cn('space-y-0.5 px-2 pt-1', fill && 'min-h-0 flex-1 overflow-y-auto')} data-sw-breakdown={dimension}>
         {shown.map((group) => {
           const value = valueOf(group, metric)
           const unknown = value === null || value === undefined
@@ -615,7 +778,12 @@ export function BreakdownChart({ groups, metric, dimension, state, onPick, press
                 onClick={() => onPick?.(group.key)}
                 aria-pressed={pressed?.includes(group.key)}
                 aria-label={`${group.label}: ${formatMetric(metric, value, { exact: true })}${unknown ? '' : `, ${percent(value, total)} of the total`}, ${group.calls} turns. Show only this.`}
-                className="group grid w-full grid-cols-[minmax(0,9rem)_minmax(0,1fr)_auto] items-center gap-x-3 rounded-md px-2 py-1.5 text-left outline-none hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-accent sm:grid-cols-[minmax(0,12rem)_minmax(0,1fr)_auto]"
+                className={cn(
+                  'group grid w-full items-center gap-x-3 rounded-md px-2 py-1.5 text-left outline-none hover:bg-surface-2 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent',
+                  fill
+                    ? 'grid-cols-[minmax(0,38%)_minmax(0,1fr)_auto] @min-[30rem]/chart:grid-cols-[minmax(0,12rem)_minmax(0,1fr)_auto]'
+                    : 'grid-cols-[minmax(0,9rem)_minmax(0,1fr)_auto] sm:grid-cols-[minmax(0,12rem)_minmax(0,1fr)_auto]',
+                )}
                 data-sw-breakdown-row={group.key}
               >
                 <span className="flex min-w-0 items-center gap-1.5 text-xs text-fg">
@@ -639,17 +807,21 @@ export function BreakdownChart({ groups, metric, dimension, state, onPick, press
                 </span>
                 <span className="tabular flex items-baseline gap-2 text-xs">
                   <span className={cn('font-medium', unknown ? 'text-muted' : 'text-fg')}>{formatMetric(metric, value)}</span>
-                  <span className="w-11 text-right text-muted">{unknown ? '' : percent(value, total)}</span>
+                  {showShare ? (
+                    <span className="w-11 text-right text-muted" data-sw-breakdown-share>
+                      {unknown ? '' : percent(value, total)}
+                    </span>
+                  ) : null}
                 </span>
               </button>
             </li>
           )
         })}
       </ol>
-      {ranked.length > 8 ? (
-        <div className="px-3 pt-1 print:hidden">
-          <Button size="xs" variant="ghost" onClick={() => setAll(!all)}>
-            {all ? 'Show the top 8' : `Show all ${ranked.length}`}
+      {ranked.length > count ? (
+        <div className="shrink-0 px-3 pt-1 print:hidden">
+          <Button size="xs" variant="ghost" onClick={() => setAll(!all)} data-sw-breakdown-all>
+            {all ? `Show the top ${count}` : `Show all ${ranked.length}`}
           </Button>
         </div>
       ) : null}
@@ -659,8 +831,22 @@ export function BreakdownChart({ groups, metric, dimension, state, onPick, press
 
 // ---- Outcomes: a rate over time ----
 
-export function OutcomesChart({ data, bucket, state, onPick, pressed }) {
+// `mode`: each outcome's share of a bucket's turns (the default), or how many turns.
+export function OutcomesChart({
+  data,
+  bucket,
+  state,
+  onPick,
+  pressed,
+  mode = 'share',
+  fill = false,
+  header = true,
+  menu = null,
+  view = null,
+  onView = null,
+}) {
   const theme = useChartTheme()
+  const counts = mode === 'counts'
   const rows = useMemo(() => {
     if (!data) return []
     const found = new Map(data.points.map((point) => [point.bucket, point]))
@@ -668,11 +854,12 @@ export function OutcomesChart({ data, bucket, state, onPick, pressed }) {
       const point = found.get(key)
       const row = { bucket: key, calls: point?.calls || 0 }
       // Shares of the turns of the bucket; a bucket with none stays empty.
-      for (const id of OUTCOME_GROUP_IDS) row[id] = point?.calls ? (point.outcomes[id] || 0) / point.calls : undefined
+      for (const id of OUTCOME_GROUP_IDS)
+        row[id] = point?.calls ? (counts ? point.outcomes[id] || 0 : (point.outcomes[id] || 0) / point.calls) : undefined
       row.counts = point?.outcomes || {}
       return row
     })
-  }, [data])
+  }, [data, counts])
   const totals = Object.fromEntries(OUTCOME_GROUP_IDS.map((id) => [id, rows.reduce((sum, row) => sum + (row.counts[id] || 0), 0)]))
   const all = Object.values(totals).reduce((a, b) => a + b, 0)
   const present = OUTCOME_GROUP_IDS.filter((id) => totals[id] > 0)
@@ -698,25 +885,40 @@ export function OutcomesChart({ data, bucket, state, onPick, pressed }) {
   return (
     <ChartCard
       title="How turns ended"
-      subtitle="The share of each outcome, per bucket."
+      subtitle={counts ? 'The turns of each outcome, per bucket.' : 'The share of each outcome, per bucket.'}
       table={table}
       legend={legend}
       state={state}
       empty={data && !all}
       testId="outcomes"
+      fill={fill}
+      header={header}
+      menu={menu}
+      view={view}
+      onView={onView}
     >
-      <ResponsiveContainer width="100%" height={220}>
+      <Plot fill={fill} height={220} data-sw-outcomes-mode={mode}>
         <BarChart data={rows} margin={{ top: 8, right: 8, bottom: 0, left: 0 }} barCategoryGap="32%" accessibilityLayer>
           <CartesianGrid vertical={false} stroke={theme.grid} />
           <XAxis dataKey="bucket" tickFormatter={(key) => bucketLabel(key, bucket)} minTickGap={22} {...axisProps(theme)} />
-          <YAxis
-            width={40}
-            domain={[0, 1]}
-            ticks={[0, 0.25, 0.5, 0.75, 1]}
-            tickFormatter={(value) => `${Math.round(value * 100)}%`}
-            {...axisProps(theme)}
-            axisLine={false}
-          />
+          {counts ? (
+            <YAxis
+              width={40}
+              allowDecimals={false}
+              tickFormatter={(value) => formatAxis('calls', value)}
+              {...axisProps(theme)}
+              axisLine={false}
+            />
+          ) : (
+            <YAxis
+              width={40}
+              domain={[0, 1]}
+              ticks={[0, 0.25, 0.5, 0.75, 1]}
+              tickFormatter={(value) => `${Math.round(value * 100)}%`}
+              {...axisProps(theme)}
+              axisLine={false}
+            />
+          )}
           <Tooltip
             cursor={{ fill: theme.track, opacity: 0.7 }}
             isAnimationActive={false}
@@ -754,16 +956,28 @@ export function OutcomesChart({ data, bucket, state, onPick, pressed }) {
             />
           ))}
         </BarChart>
-      </ResponsiveContainer>
-      <Legend items={legend} onPick={onPick} pressed={pressed} />
+      </Plot>
+      <Legend items={legend} onPick={onPick} pressed={pressed} fill={fill} />
     </ChartCard>
   )
 }
 
 // ---- Approvals ----
 
-export function ApprovalsChart({ data, bucket, state }) {
+// `mode`: one stacked bar per bucket (the default), or the three ends side by side.
+export function ApprovalsChart({
+  data,
+  bucket,
+  state,
+  mode = 'stacked',
+  fill = false,
+  header = true,
+  menu = null,
+  view = null,
+  onView = null,
+}) {
   const theme = useChartTheme()
+  const stack = mode === 'separate' ? undefined : 'stack'
   const series = [
     { key: 'person', label: 'Allowed by a person', color: theme.series[0] },
     { key: 'auto', label: 'Allowed without asking', color: theme.series[3] },
@@ -803,8 +1017,13 @@ export function ApprovalsChart({ data, bucket, state }) {
       empty={data && !totals.asked ? 'No agent asked for an approval in this period.' : false}
       emptyTitle="No approvals asked"
       testId="approvals"
+      fill={fill}
+      header={header}
+      menu={menu}
+      view={view}
+      onView={onView}
     >
-      <ResponsiveContainer width="100%" height={220}>
+      <Plot fill={fill} height={220} data-sw-approvals-mode={mode}>
         <BarChart data={rows} margin={{ top: 8, right: 8, bottom: 0, left: 0 }} barCategoryGap="18%" accessibilityLayer>
           <CartesianGrid vertical={false} stroke={theme.grid} />
           <XAxis dataKey="bucket" tickFormatter={(key) => bucketLabel(key, bucket)} minTickGap={22} {...axisProps(theme)} />
@@ -837,46 +1056,73 @@ export function ApprovalsChart({ data, bucket, state }) {
               key={item.key}
               dataKey={item.key}
               name={item.label}
-              stackId="stack"
+              stackId={stack}
               fill={item.color}
               stroke={theme.surface}
               strokeWidth={1}
-              maxBarSize={24}
-              radius={index === series.length - 1 ? [3, 3, 0, 0] : 0}
+              maxBarSize={stack ? 24 : 12}
+              radius={!stack || index === series.length - 1 ? [3, 3, 0, 0] : 0}
               isAnimationActive={false}
             />
           ))}
         </BarChart>
-      </ResponsiveContainer>
-      <Legend items={legend} />
+      </Plot>
+      <Legend items={legend} fill={fill} />
     </ChartCard>
   )
 }
 
 // ---- Latency: median and 95th percentile ----
 
-export function LatencyChart({ data, bucket, state }) {
+const PERCENTILE = {
+  p50: { label: 'Median', slot: 0 },
+  p90: { label: '90th percentile', slot: 2, dash: '2 3' },
+  p95: { label: '95th percentile', slot: 1, dash: '5 3' },
+  p99: { label: '99th percentile', slot: 4, dash: '8 3 2 3' },
+}
+const LOG_TICKS = [1000, 10_000, 60_000, 600_000, 3_600_000, 36_000_000]
+// `percentiles`: which lines to draw. `log`: a logarithmic duration axis
+// (off unless asked), for when one slow day flattens every other.
+export function LatencyChart({
+  data,
+  bucket,
+  state,
+  percentiles = ['p50', 'p95'],
+  log = false,
+  fill = false,
+  header = true,
+  menu = null,
+  view = null,
+  onView = null,
+}) {
   const theme = useChartTheme()
-  const rows = (data?.buckets || []).map((row) => ({ ...row, p50: row.p50 ?? undefined, p95: row.p95 ?? undefined }))
+  const shown = Object.keys(PERCENTILE).filter((key) => percentiles.includes(key))
+  // A logarithmic axis has no zero: a turn that took no time at all sits on its floor.
+  const plotted = (value) => (value === null || value === undefined ? undefined : log ? Math.max(value, 100) : value)
+  const rows = (data?.buckets || []).map((row) => ({ ...row, ...Object.fromEntries(shown.map((key) => [key, plotted(row[key])])) }))
   const any = rows.some((row) => row.turns > 0)
-  const series = [
-    { key: 'p50', label: 'Median', color: theme.series[0] },
-    { key: 'p95', label: '95th percentile', color: theme.series[1], dash: '5 3' },
-  ]
+  const series = shown.map((key) => ({
+    key,
+    label: PERCENTILE[key].label,
+    color: theme.series[PERCENTILE[key].slot],
+    dash: PERCENTILE[key].dash,
+  }))
   const few = rows.filter((row) => row.turns > 0).length <= 31
-  const ticks = durationTicks(Math.max(1000, ...rows.map((row) => row.p95 || 0)))
+  const highest = Math.max(1000, ...rows.flatMap((row) => shown.map((key) => row[key] || 0)))
+  const lowest = Math.min(highest, ...rows.flatMap((row) => shown.map((key) => row[key] || Infinity)))
+  const ticks = log
+    ? LOG_TICKS.filter((tick, index) => tick >= lowest / 10 && (tick <= highest || LOG_TICKS[index - 1] < highest))
+    : durationTicks(highest)
   const table = {
     columns: [
       bucket === 'month' ? 'Month' : bucket === 'week' ? 'Week of' : 'Day',
-      'Median',
-      '95th percentile',
+      ...series.map((item) => item.label),
       'Longest',
       'Finished turns',
     ],
-    rows: rows.map((row) => [
+    rows: (data?.buckets || []).map((row) => [
       bucketLabel(row.bucket, bucket, { long: true }),
-      row.turns ? formatDuration(row.p50) : '',
-      row.turns ? formatDuration(row.p95) : '',
+      ...shown.map((key) => (row.turns ? formatDuration(row[key]) : '')),
       row.turns ? formatDuration(row.longest) : '',
       row.turns,
     ]),
@@ -884,38 +1130,59 @@ export function LatencyChart({ data, bucket, state }) {
   return (
     <ChartCard
       title="Turn duration"
-      subtitle="Half the turns finished within the median; 95 in 100 within the 95th percentile. Gaps: no finished turn."
+      subtitle={
+        shown.join() === 'p50,p95'
+          ? 'Half the turns finished within the median; 95 in 100 within the 95th percentile. Gaps: no finished turn.'
+          : 'How long turns took: the share of them that finished within each line. Gaps: no finished turn.'
+      }
       table={table}
       legend={series}
       state={state}
       empty={data && !any}
       testId="latency"
+      fill={fill}
+      header={header}
+      menu={menu}
+      view={view}
+      onView={onView}
     >
-      <ResponsiveContainer width="100%" height={220}>
+      <Plot fill={fill} height={220} data-sw-latency-scale={log ? 'log' : 'linear'} data-sw-latency-lines={shown.join(' ')}>
         <LineChart data={rows} margin={{ top: 8, right: 12, bottom: 0, left: 0 }} accessibilityLayer>
           <CartesianGrid vertical={false} stroke={theme.grid} />
           <XAxis dataKey="bucket" tickFormatter={(key) => bucketLabel(key, bucket)} minTickGap={22} {...axisProps(theme)} />
-          <YAxis
-            width={52}
-            ticks={ticks}
-            domain={[0, ticks.at(-1)]}
-            tickFormatter={formatDurationTick}
-            {...axisProps(theme)}
-            axisLine={false}
-          />
+          {log ? (
+            <YAxis
+              width={52}
+              scale="log"
+              ticks={ticks}
+              domain={[ticks[0], ticks.at(-1)]}
+              allowDataOverflow
+              tickFormatter={formatDurationTick}
+              {...axisProps(theme)}
+              axisLine={false}
+            />
+          ) : (
+            <YAxis
+              width={52}
+              ticks={ticks}
+              domain={[0, ticks.at(-1)]}
+              tickFormatter={formatDurationTick}
+              {...axisProps(theme)}
+              axisLine={false}
+            />
+          )}
           <Tooltip
             cursor={{ stroke: theme.axis }}
             isAnimationActive={false}
             content={({ active, payload, label }) => {
               if (!active || !payload?.length) return null
-              const row = payload[0].payload
+              const row = (data?.buckets || []).find((item) => item.bucket === payload[0].payload.bucket) || payload[0].payload
               return (
                 <TooltipBox
                   title={bucketLabel(label, bucket, { long: true })}
-                  rows={[
-                    { label: '95th percentile', value: formatDuration(row.p95), color: series[1].color },
-                    { label: 'Median', value: formatDuration(row.p50), color: series[0].color },
-                  ]}
+                  rows={[...series]
+                    .reverse()
+                    .map((item) => ({ label: item.label, value: formatDuration(row[item.key]), color: item.color }))}
                   footer={`${formatCount(row.turns, { exact: true })} finished ${row.turns === 1 ? 'turn' : 'turns'} · longest ${formatDuration(row.longest)}`}
                 />
               )
@@ -938,8 +1205,8 @@ export function LatencyChart({ data, bucket, state }) {
             />
           ))}
         </LineChart>
-      </ResponsiveContainer>
-      <ul className="flex flex-wrap gap-x-4 gap-y-1 px-3 pt-1 text-xs text-fg" data-sw-chart-legend>
+      </Plot>
+      <ul className={cn('flex flex-wrap gap-x-4 gap-y-1 px-3 pt-1 text-xs text-fg', fill && 'shrink-0')} data-sw-chart-legend>
         {series.map((item) => (
           <li key={item.key} className="inline-flex items-center gap-1.5">
             <svg width="18" height="6" aria-hidden="true">

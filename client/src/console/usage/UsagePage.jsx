@@ -1,14 +1,16 @@
 // Usage: what the workspace's agents did. Two views of one filter: an
-// overview (tiles against the period before, usage over time, breakdowns,
-// outcomes, approvals, turn duration, the top lists and budgets) and Turns
-// (every turn in a grid, with a drawer for one).
+// overview and Turns (every turn in a grid, with a drawer for one). The
+// overview is a dashboard of widgets (tiles against the period before,
+// usage over time, breakdowns, outcomes, approvals, turn duration, the top
+// lists and budgets) that each person arranges for themselves: Dashboard.jsx
+// draws it, layout-state.js saves it, src/hosted/usage-layout.js is its model.
 //
 // Owners and admins see the whole workspace; a member sees their own turns
 // and the agents they connected. The server decides that for every request;
 // this page only says which of the two it is showing.
 
-import { useCallback, useMemo, useState } from 'react'
-import { ArrowUpRight, BarChart3, Download, Gauge, GitCompareArrows, Printer, Rows3, Rows4 } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { ArrowUpRight, BarChart3, Download, GitCompareArrows, LayoutDashboard, Printer, Rows3, Rows4 } from 'lucide-react'
 import { useQueries } from '@tanstack/react-query'
 import {
   Button,
@@ -18,14 +20,10 @@ import {
   DropdownMenuTrigger,
   EmptyState,
   IconButton,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
   Spinner,
   ToggleGroup,
 } from '../../components/ui'
+import { DEMO } from '../../lib/demo'
 import { cn } from '../../lib/utils'
 import {
   DIMENSION_LABEL,
@@ -36,39 +34,23 @@ import {
   USAGE_DIMENSIONS,
   USAGE_METRICS,
 } from '../../../../src/hosted/usage-shape.js'
-import { Card, CardHeader, LoadError, PageHeader } from '../components'
+import { Card, LoadError, PageHeader } from '../components'
 import { api, download, wsUrl } from '../lib/api'
 import { Link } from '../lib/router'
 import { useAction, useToast } from '../state'
 import { useWorkspace } from '../pages/workspace'
-import { ApprovalsChart, BreakdownChart, LatencyChart, OutcomesChart, TimeChart } from './charts'
+import { BreakdownChart, OutcomesChart, TimeChart } from './charts'
+import { Dashboard, EditLayoutButton } from './Dashboard'
 import { setSearch, useUsageFilter, useWs, useWsPages } from './data'
 import { FilterBar, ViewsMenu } from './filters'
-import { bucketRange, change, defaultBucket, formatCost, formatCount, formatDuration, formatTime, percent, shortDate } from './format'
+import { bucketRange, change, defaultBucket, formatCost, formatCount, formatDuration, formatTime, shortDate } from './format'
 import { ColumnChooser, DataGrid, readLayout, writeLayout } from './grid'
 import { DemoNote, OutcomeChip, StatTile, Unreported, orUnreported } from './pieces'
+import { useDashboardLayout } from './layout-state'
 import { TurnDrawer } from './TurnDrawer'
+import { Picker } from './widgets'
 
 const pick = (value, allowed, fallback) => (allowed.includes(value) ? value : fallback)
-const SMALL_SELECT = 'h-8 w-auto min-w-0 gap-1 px-2 text-xs'
-
-function Picker({ label, value, onChange, options, testId }) {
-  return (
-    <Select value={value} onValueChange={onChange}>
-      <SelectTrigger className={SMALL_SELECT} aria-label={label} data-sw-pick={testId}>
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        {options.map(([id, text]) => (
-          <SelectItem key={id} value={id}>
-            {text}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  )
-}
-
 export function UsagePage() {
   const { workspaceId, data, isAdmin } = useWorkspace()
   const filter = useUsageFilter()
@@ -78,6 +60,17 @@ export function UsagePage() {
   const exporter = useAction()
   const toast = useToast()
   const own = options.data?.scope === 'own'
+  // The dashboard's layout: this person's own, the workspace's, or the one a shared view carries (?view=).
+  const board = useDashboardLayout(workspaceId, { viewId: get('view') || null })
+  const [editing, setEditing] = useState(false)
+  const arranging = editing && tab === 'overview' && !board.preview
+  useEffect(() => {
+    // A link to a view whose layout is gone: the filters still hold, the dashboard is the reader's own.
+    if (board.previewMissing) {
+      set({ view: null })
+      toast('That view no longer carries a layout. This is your own.', 'bad')
+    }
+  }, [board.previewMissing, set, toast])
   const exportAs = (format) =>
     exporter.run(async () => {
       const file = await download('GET', wsUrl(workspaceId, `/usage/export?${query}&format=${format}`), undefined, `usage.${format}`)
@@ -95,6 +88,14 @@ export function UsagePage() {
         }
         actions={
           <span className="flex flex-wrap items-center gap-2 print:hidden">
+            {tab === 'overview' ? (
+              <EditLayoutButton
+                editing={arranging}
+                onEditing={setEditing}
+                disabled={!board.ready || Boolean(board.preview)}
+                why={board.preview ? 'Choose "Use this layout" or "Back to my layout" first' : null}
+              />
+            ) : null}
             <Button size="touch" variant="secondary" className="lg:h-9" onClick={() => window.print()} data-sw-usage-print>
               <Printer size={15} aria-hidden="true" /> Print
             </Button>
@@ -120,6 +121,21 @@ export function UsagePage() {
         This is a demo with made-up numbers: about sixty days of a pretend team&apos;s agent turns. Ask the agent on the board, or run a
         fix, and your turn is added here. Exports are made in this browser; Reset puts everything back.
       </DemoNote>
+      {DEMO && tab === 'overview' && !arranging && !board.preview ? (
+        <p
+          className="mb-4 flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-md border border-accent/40 bg-accent/8 px-3 py-2 text-xs text-fg print:hidden"
+          data-sw-demo-try="layout"
+        >
+          <LayoutDashboard size={14} className="shrink-0 text-accent" aria-hidden="true" />
+          <span className="min-w-0 flex-[1_1_14rem]">
+            <strong className="font-semibold">Try this:</strong> make the dashboard yours. Drag a chart to a new place, resize it from its
+            corner, hide a tile, or put two charts side by side. Reset puts it back.
+          </span>
+          <Button size="xs" variant="soft" onClick={() => setEditing(true)} disabled={!board.ready} data-sw-demo-try-edit>
+            Edit layout
+          </Button>
+        </p>
+      ) : null}
       {exporter.error ? (
         <p className="mb-3 text-sm text-bad" role="alert">
           {exporter.error}
@@ -136,7 +152,11 @@ export function UsagePage() {
           workspaceId={workspaceId}
           page="usage"
           search={search}
-          onOpen={(saved) => setSearch(new URLSearchParams(saved), { push: true })}
+          layout={tab === 'overview' ? board.layout : null}
+          onOpen={(saved) => {
+            setEditing(false)
+            setSearch(new URLSearchParams(saved), { push: true })
+          }}
         />
       </FilterBar>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2 print:hidden">
@@ -158,30 +178,41 @@ export function UsagePage() {
           </p>
         ) : null}
       </div>
-      {tab === 'turns' ? <Turns filter={filter} /> : <Overview filter={filter} isAdmin={isAdmin} />}
+      {tab === 'turns' ? (
+        <Turns filter={filter} />
+      ) : board.error && !board.ready ? (
+        <LoadError error={board.error} onRetry={board.refetch} />
+      ) : board.ready ? (
+        <Dashboard filter={filter} isAdmin={isAdmin} board={board} editing={arranging} onEditing={setEditing} />
+      ) : (
+        <p className="flex items-center justify-center gap-2 px-4 py-16 text-sm text-muted" role="status" data-sw-layout-loading>
+          <Spinner /> Loading the dashboard
+        </p>
+      )}
       {get('row') ? <TurnDrawer id={get('row')} onClose={() => set({ row: null })} /> : null}
     </div>
   )
 }
 
-// ---- Overview ----
+// ---- A person's or an agent's page: a short, fixed overview ----
 
-export function Overview({ filter, isAdmin, compact = false, extraQuery = '' }) {
+// Four tiles, usage over time, a breakdown and how turns ended, for the
+// Activity pages of one person or one agent (`extraQuery` narrows every
+// query to them). Not a dashboard: nothing here is arranged or saved, and
+// its switches live in the address.
+export function Overview({ filter, extraQuery = '' }) {
   const { workspaceId } = useWorkspace()
   const { get, set, list, period } = filter
   const query = `${filter.query}${extraQuery}`
   const metric = pick(get('metric'), USAGE_METRICS, 'calls')
-  const by = pick(get('by'), [...USAGE_DIMENSIONS, 'none'], compact ? 'kind' : 'agent')
+  const by = pick(get('by'), [...USAGE_DIMENSIONS, 'none'], 'kind')
   const bucket = pick(get('bucket'), USAGE_BUCKETS, defaultBucket(period))
-  const breakdownBy = pick(get('bd'), USAGE_DIMENSIONS, compact ? 'project' : 'project')
+  const breakdownBy = pick(get('bd'), USAGE_DIMENSIONS, 'project')
 
   const summary = useWs(workspaceId, `/usage/summary?${query}`)
   const series = useWs(workspaceId, `/usage/series?${query}&bucket=${bucket}&groupBy=${by}&metric=${metric}`)
   const plain = useWs(workspaceId, `/usage/series?${query}&bucket=${bucket}&groupBy=none&metric=calls`)
   const breakdown = useWs(workspaceId, `/usage/breakdown?${query}&groupBy=${breakdownBy}`)
-  const latency = useWs(workspaceId, `/usage/latency?${query}&bucket=${bucket}`)
-  const top = useWs(workspaceId, `/usage/top?${query}`, { enabled: !compact })
-  const budgets = useWs(workspaceId, '/usage/budgets', { enabled: isAdmin && !compact, keep: false })
 
   // A press on a mark or a legend entry narrows the whole page to it (again: undoes it).
   const toggle = useCallback(
@@ -196,30 +227,12 @@ export function Overview({ filter, isAdmin, compact = false, extraQuery = '' }) 
     set({ range: 'custom', from: bucketRange(first, bucket).from, to: bucketRange(last, bucket).to }, { push: true })
   const now = summary.data?.current
   const before = summary.data?.previous
-  const trendOf = (key) => {
-    if (!plain.data) return null
-    const found = new Map(plain.data.points.map((point) => [point.bucket, point]))
-    return plain.data.buckets.map((id) =>
-      found.get(id) ? (key === 'calls' ? found.get(id).calls : found.get(id)[key]) : key === 'calls' ? 0 : null,
-    )
-  }
   const loading = summary.isLoading
   if (summary.error && !summary.data)
     return (
       <div data-sw-usage-error>
         <LoadError error={summary.error} onRetry={summary.refetch} />
       </div>
-    )
-  // Nothing at all in the period: one clear empty state, not six empty charts.
-  if (now && now.calls === 0 && !compact)
-    return (
-      <Card data-sw-usage-empty>
-        <EmptyState icon={BarChart3} size="lg" title="No agent turns in this period">
-          {filter.active.length
-            ? 'Nothing matches these filters. Clear one, or choose a longer period.'
-            : 'When someone chats with a connected agent, or an agent takes a comment, each turn shows up here: who asked, how it ended, and what the agent reported.'}
-        </EmptyState>
-      </Card>
     )
   const compare = period.compare
   const reportedNote = (key) =>
@@ -231,10 +244,7 @@ export function Overview({ filter, isAdmin, compact = false, extraQuery = '' }) 
 
   return (
     <div className="space-y-4" data-sw-usage-overview>
-      <div
-        className={cn('grid gap-3', compact ? 'grid-cols-2 lg:grid-cols-4' : 'grid-cols-2 lg:grid-cols-3 min-[1760px]:grid-cols-6')}
-        data-sw-usage-tiles
-      >
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4" data-sw-usage-tiles>
         <StatTile
           testId="calls"
           compare={compare}
@@ -243,7 +253,7 @@ export function Overview({ filter, isAdmin, compact = false, extraQuery = '' }) 
           value={formatCount(now?.calls ?? 0)}
           current={now?.calls}
           previous={before?.calls}
-          trend={trendOf('calls')}
+          trend={plain.data ? plain.data.buckets.map((id) => plain.data.points.find((point) => point.bucket === id)?.calls ?? 0) : null}
         />
         <StatTile
           testId="tokens"
@@ -277,32 +287,6 @@ export function Overview({ filter, isAdmin, compact = false, extraQuery = '' }) 
           hint={now?.cost === null ? null : reportedNote('cost')}
           note={now?.cost === null ? 'No agent reported a cost' : undefined}
         />
-        {compact ? null : (
-          <>
-            <StatTile
-              testId="fixes"
-              compare={compare}
-              label="Fixes ready"
-              loading={loading}
-              value={now?.fixes ? `${formatCount(now.fixesDone)} of ${formatCount(now.fixes)}` : '0'}
-              current={now?.fixes ? now.fixesDone / now.fixes : null}
-              previous={before?.fixes ? before.fixesDone / before.fixes : null}
-              better="up"
-              hint={now?.fixes ? `${percent(now.fixesDone, now.fixes)} ended with a fix or an answer` : 'No fix was asked for'}
-            />
-            <StatTile
-              testId="failed"
-              compare={compare}
-              label="Failed or stopped"
-              loading={loading}
-              value={now ? percent(now.outcomes.failed + now.outcomes.stopped, now.calls) : ''}
-              current={now?.calls ? (now.outcomes.failed + now.outcomes.stopped) / now.calls : null}
-              previous={before?.calls ? (before.outcomes.failed + before.outcomes.stopped) / before.calls : null}
-              better="down"
-              hint={now ? `${formatCount(now.outcomes.failed)} failed · ${formatCount(now.outcomes.stopped)} stopped` : null}
-            />
-          </>
-        )}
       </div>
 
       <TimeChart
@@ -360,182 +344,8 @@ export function Overview({ filter, isAdmin, compact = false, extraQuery = '' }) 
           }
         />
         <OutcomesChart data={plain.data} bucket={bucket} state={plain} onPick={toggle('outcome')} pressed={list('outcome')} />
-        {compact ? null : (
-          <>
-            <ApprovalsChart data={plain.data} bucket={bucket} state={plain} />
-            <LatencyChart data={latency.data} bucket={bucket} state={latency} />
-          </>
-        )}
       </div>
-
-      {compact ? null : <TopLists top={top} workspaceId={workspaceId} filter={filter} isAdmin={isAdmin} />}
-      {isAdmin && !compact ? <Budgets state={budgets} workspaceId={workspaceId} /> : null}
     </div>
-  )
-}
-
-function TopLists({ top, workspaceId, filter, isAdmin }) {
-  const data = top.data
-  const open = (changes) => filter.set({ tab: 'turns', ...changes }, { push: true })
-  const lists = [
-    {
-      id: 'agents',
-      title: 'Busiest agents',
-      empty: 'No agent took a turn.',
-      rows: (data?.agents || []).map((item) => ({
-        key: item.key,
-        label: item.label,
-        hint: item.machine,
-        value: `${formatCount(item.calls)} turns`,
-        to: isAdmin && item.key ? `/w/${workspaceId}/activity/${item.key}` : null,
-        onClick: () => open({ agent: [item.key || '~'] }),
-      })),
-    },
-    {
-      id: 'threads',
-      title: 'Threads that used the most tokens',
-      empty: 'No agent reported tokens.',
-      rows: (data?.threads || []).map((item, index) => ({
-        key: index,
-        label:
-          item.thread.kind === 'comment'
-            ? `Comment #${item.commentNumber}`
-            : item.thread.kind === 'chat'
-              ? 'A private chat'
-              : 'The board’s chat',
-        hint: `${item.project.name} · ${item.boardId}`,
-        value: `${formatCount(item.tokens)} tokens`,
-        onClick: item.thread.id ? () => open({ q: item.thread.id, project: [item.project.id] }) : null,
-      })),
-    },
-    {
-      id: 'slowest',
-      title: 'Slowest turns',
-      empty: 'No turn has finished.',
-      rows: (data?.slowest || []).map((item) => ({
-        key: item.id,
-        label: `${KIND_LABEL[item.kind] || item.kind} by ${item.agent?.name || 'no agent'}`,
-        hint: `${item.project.name} · ${formatTime(item.startedAt)}`,
-        value: formatDuration(item.durationMs),
-        onClick: () => filter.set({ row: item.id }),
-      })),
-    },
-    {
-      id: 'denied',
-      title: 'Most denied approvals',
-      empty: 'No approval was denied.',
-      rows: (data?.denied || []).map((item) => ({
-        key: item.key,
-        label: item.label,
-        hint: `${formatCount(item.asked)} asked`,
-        value: `${formatCount(item.denied)} denied`,
-        onClick: () => open({ agent: [item.key || '~'], kind: ['fix', 'push'] }),
-      })),
-    },
-  ]
-  return (
-    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4" data-sw-usage-top>
-      {lists.map((item) => (
-        <Card key={item.id} className="min-w-0" data-sw-top={item.id}>
-          <h2 className="border-b border-line px-4 py-2.5 text-ui font-semibold text-fg">{item.title}</h2>
-          {top.isLoading ? (
-            <p className="px-4 py-6 text-center text-xs text-muted" role="status">
-              Loading
-            </p>
-          ) : item.rows.length ? (
-            <ol className="py-1">
-              {item.rows.map((row, index) => (
-                <li key={row.key}>
-                  <button
-                    type="button"
-                    onClick={row.onClick || undefined}
-                    disabled={!row.onClick}
-                    className="flex w-full items-center gap-2.5 px-4 py-1.5 text-left outline-none enabled:hover:bg-surface-2 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
-                  >
-                    <span className="tabular w-3 shrink-0 text-xs text-faint">{index + 1}</span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-xs font-medium text-fg">{row.label}</span>
-                      {row.hint ? <span className="block truncate text-caption text-muted">{row.hint}</span> : null}
-                    </span>
-                    <span className="tabular shrink-0 text-xs text-fg">{row.value}</span>
-                  </button>
-                </li>
-              ))}
-            </ol>
-          ) : (
-            <p className="px-4 py-6 text-center text-xs text-muted">{item.empty}</p>
-          )}
-        </Card>
-      ))}
-    </div>
-  )
-}
-
-// Each project's daily budgets from its agent policy, with today's use.
-function Budgets({ state, workspaceId }) {
-  const projects = state.data?.projects || []
-  if (state.isLoading || !projects.length) return null
-  return (
-    <Card data-sw-usage-budgets>
-      <CardHeader
-        icon={Gauge}
-        title="Budgets today"
-        description="Each project's agent policy caps chat turns and fixes per day (the day is UTC). A forecast shows once enough of the day has passed."
-      />
-      <ul className="divide-y divide-line">
-        {projects.map(({ project, budgets }) => (
-          <li
-            key={project.id}
-            className="grid gap-x-6 gap-y-2 px-4 py-3 sm:grid-cols-[minmax(0,12rem)_repeat(2,minmax(0,1fr))] sm:px-5"
-            data-sw-budget={project.name}
-          >
-            <Link
-              to={`/w/${workspaceId}/projects/${project.id}`}
-              className="truncate text-sm font-medium text-fg underline-offset-2 hover:underline"
-            >
-              {project.name}
-            </Link>
-            {budgets.map((budget) => {
-              const share = budget.limit ? Math.min(1, budget.used / budget.limit) : 0
-              const over = budget.limit > 0 && budget.used >= budget.limit
-              const near = !over && share >= 0.8
-              const willPass = budget.forecast !== null && budget.limit > 0 && budget.forecast > budget.limit && !over
-              return (
-                <div key={budget.id} className="min-w-0">
-                  <p className="flex items-baseline justify-between gap-2 text-xs">
-                    <span className="truncate text-muted">{budget.label}</span>
-                    <span className="tabular shrink-0 font-medium text-fg">
-                      {formatCount(budget.used, { exact: true })} of{' '}
-                      {budget.limit ? formatCount(budget.limit, { exact: true }) : 'none allowed'}
-                    </span>
-                  </p>
-                  <div
-                    className="mt-1 h-2 overflow-hidden rounded-full bg-surface-2"
-                    role="meter"
-                    aria-label={`${budget.label} for ${project.name}`}
-                    aria-valuemin={0}
-                    aria-valuemax={budget.limit || 0}
-                    aria-valuenow={budget.used}
-                  >
-                    <div
-                      className={cn('h-full rounded-full', over ? 'bg-bad' : near ? 'bg-warn' : 'bg-accent')}
-                      style={{ width: `${share * 100}%` }}
-                    />
-                  </div>
-                  <p className="mt-1 truncate text-caption text-muted">
-                    {over ? 'Used up for today. ' : near ? 'Nearly used up. ' : ''}
-                    {budget.forecast !== null
-                      ? `On course for ${formatCount(budget.forecast)} by the end of the day${willPass ? ', over the budget' : ''}. `
-                      : ''}
-                    Daily average last week: {budget.average}.
-                  </p>
-                </div>
-              )
-            })}
-          </li>
-        ))}
-      </ul>
-    </Card>
   )
 }
 

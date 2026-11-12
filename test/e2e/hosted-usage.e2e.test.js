@@ -4,7 +4,11 @@
 // and real browsers for an owner, a member and a viewer. Totals agree with
 // the API, a filter round-trips through the address, the grid sorts, groups,
 // pages and opens a turn, exports download, empty states show, the pages
-// work on a phone, and a local board shows its own usage.
+// work on a phone, and a local board shows its own usage. The overview is a
+// dashboard each person arranges: widgets are dragged, resized, hidden,
+// added, duplicated and reset, by pointer, by touch and by keyboard; each
+// widget keeps its options; a view can carry a layout; an owner sets the
+// default; a phone gets one column; printing follows reading order.
 // Set SHAPEWALL_SHOTS=<dir> to keep screenshots.
 import { after, before, test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -16,6 +20,7 @@ import { localUsageRow, recordLocalTurn } from '../../src/agent/usage-log.js'
 import * as helpers from '../hosted-helpers.js'
 import { seedActivity, seedUsage, seedWorkspace } from '../fixtures/usage-seed.js'
 import { demoSetup, listen } from './helpers.js'
+import { defaultLayout, moveItem, readingOrder } from '../../src/hosted/usage-layout.js'
 
 const SHOTS = process.env.SHAPEWALL_SHOTS ? path.resolve(process.env.SHAPEWALL_SHOTS) : null
 let hosted
@@ -27,6 +32,11 @@ const shot = async (page, name) =>
 const api = (rest) => `/api/workspaces/${s.ws}${rest}`
 const url = (rest) => `${hosted.origin}/w/${s.ws}${rest}`
 const number = (text) => Number(String(text).replace(/[^0-9.-]/g, ''))
+// The widgets of the default dashboard in reading order, as a member sees them (the budgets are for admins).
+const defaultOrder = () =>
+  readingOrder(defaultLayout().items)
+    .map((item) => item.id)
+    .filter((id) => id !== 'budgets')
 
 async function open(user, { width = 1440, height = 900, phone = false } = {}) {
   const context = await browser.newContext({
@@ -102,10 +112,15 @@ test('the overview: tiles agree with the API, charts draw, each has a table, swi
   await page.getByRole('option', { name: 'Tokens', exact: true }).click()
   await page.locator('[data-sw-time-chart="tokens"]').waitFor()
   await page.locator('[data-sw-chart="time"] [data-sw-option="week"]').click()
-  await page.waitForFunction(() => window.location.search.includes('metric=tokens') && window.location.search.includes('bucket=week'))
+  // They are this person's saved options for that chart, not part of the address.
+  await page.locator('[data-sw-layout-state="saved"]').waitFor()
+  assert.equal(new URL(page.url()).search, '')
+  const kept = (await s.ada.browser.get(api('/usage/layout'))).json.layout.items.find((item) => item.id === 'time').options
+  assert.deepEqual([kept.metric, kept.bucket], ['tokens', 'week'])
   assert.match(await page.locator('[data-sw-chart="time"] h2').textContent(), /Tokens over time/)
   // An agent that reports no tokens says so in the legend, not "0".
   assert.match(await page.locator('[data-sw-chart="time"] [data-sw-chart-legend]').textContent(), /Builder \(docs\)\s*Not reported/)
+  await s.ada.browser.call('DELETE', api('/usage/layout'))
   assert.deepEqual(errors, [])
 })
 
@@ -737,4 +752,1106 @@ test('a local board: the owner’s Usage view shows the turns of this computer; 
     await new Promise((resolve) => server.close(resolve))
     await setup.close()
   }
+})
+
+// ---- The dashboard's layout ----
+
+// A page whose console is watched for anything at all about ResizeObserver, warnings included.
+async function openDashboard(user, options = {}) {
+  const { page, errors } = await open(user, options)
+  page.on('console', (message) => {
+    if (message.type() !== 'error' && /ResizeObserver/i.test(message.text())) errors.push(`${message.type()}: ${message.text()}`)
+  })
+  return { page, errors }
+}
+const resetLayout = (user) => user.browser.call('DELETE', api('/usage/layout'))
+// Each of these tests starts from nothing: no page of an earlier test left open (one could still save), nobody's own layout,
+// no workspace default.
+async function freshLayouts() {
+  for (const context of contexts.splice(0)) await context.close().catch(() => {})
+  for (const person of [s.ada, s.ben, s.cyd]) await resetLayout(person)
+  await s.ada.browser.call('DELETE', api('/usage/layout/default'))
+}
+const storedLayout = async (user) => (await user.browser.get(api('/usage/layout'))).json
+const widget = (page, id) => page.locator(`[data-sw-widget="${id}"]`)
+const placeOf = async (page, id) => (await widget(page, id).getAttribute('data-sw-widget-place')).split(',').map(Number)
+const itemOf = (layout, id) => layout.items.find((item) => item.id === id)
+const layoutSaved = (page) => page.locator('[data-sw-layout-state="saved"]').waitFor()
+async function dashboard(page, path = '/usage') {
+  await page.goto(url(path))
+  await page.locator('[data-sw-usage-overview]').waitFor()
+  await page.locator('[data-sw-tile="calls"] [data-sw-tile-value]').waitFor()
+}
+async function editLayout(page) {
+  await page.locator('[data-sw-layout-edit="off"]').click()
+  await page.locator('[data-sw-layout-bar]').waitFor()
+}
+// Drags from the middle of `from` by a distance, as a person does: press, a first nudge, then the way there.
+async function dragBy(page, from, dx, dy) {
+  await from.scrollIntoViewIfNeeded()
+  const box = await from.boundingBox()
+  const x = box.x + Math.min(30, box.width / 2)
+  const y = box.y + box.height / 2
+  await page.mouse.move(x, y)
+  await page.mouse.down()
+  await page.mouse.move(x + Math.sign(dx || 1) * 8, y + Math.sign(dy) * 8, { steps: 2 })
+  await page.mouse.move(x + dx, y + dy, { steps: 10 })
+  return { drop: () => page.mouse.up() }
+}
+const liveText = (page) => page.locator('[data-sw-layout-live]').textContent()
+// What the live region announced: waits for it, and says what was heard instead when it never comes.
+const said = (page, pattern) =>
+  page
+    .waitForFunction(
+      (source) => new RegExp(source).test(document.querySelector('[data-sw-layout-live]')?.textContent || ''),
+      pattern.source,
+      {
+        timeout: 15000,
+      },
+    )
+    .catch(async () => assert.fail(`expected to hear ${pattern}, heard "${await liveText(page)}"`))
+
+test('the dashboard by default: every widget in its place, nothing to drag, the same page as before it could be arranged', async () => {
+  await freshLayouts()
+  const { page, errors } = await openDashboard(s.ada)
+  await dashboard(page)
+  assert.equal(await page.locator('[data-sw-layout-cols]').getAttribute('data-sw-layout-cols'), '12')
+  assert.equal(await page.locator('[data-sw-widget]').count(), 16)
+  // Three tiles to a row, the chart over time across the page, charts in pairs, four lists, the budgets.
+  assert.deepEqual(await placeOf(page, 'tile_fixes'), [4, 2, 4, 2])
+  assert.deepEqual(await placeOf(page, 'time'), [0, 4, 12, 6])
+  assert.deepEqual(await placeOf(page, 'latency'), [6, 15, 6, 5])
+  assert.deepEqual(await placeOf(page, 'top_denied'), [9, 20, 3, 4])
+  // The page reads in the order it is laid out.
+  const order = await page.locator('[data-sw-widget]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-sw-widget')))
+  assert.deepEqual(order.slice(0, 8), [
+    'tile_calls',
+    'tile_tokens',
+    'tile_duration',
+    'tile_cost',
+    'tile_fixes',
+    'tile_failed',
+    'time',
+    'breakdown',
+  ])
+  // Nothing overlaps and every card is inside the page.
+  const boxes = await page.locator('[data-sw-widget]').evaluateAll((nodes) =>
+    nodes.map((node) => {
+      const box = node.getBoundingClientRect()
+      return { id: node.getAttribute('data-sw-widget'), left: box.left, right: box.right, top: box.top, bottom: box.bottom }
+    }),
+  )
+  for (const a of boxes)
+    for (const b of boxes)
+      if (a.id < b.id)
+        assert.ok(
+          a.right <= b.left + 1 || b.right <= a.left + 1 || a.bottom <= b.top + 1 || b.bottom <= a.top + 1,
+          `${a.id} and ${b.id} overlap`,
+        )
+  // Outside "Edit layout" there is nothing to hold a widget by, and a drag does nothing.
+  assert.equal(await page.locator('[data-sw-widget-handle]').count(), 0)
+  assert.equal(await page.locator('[data-sw-widget-resize]:visible').count(), 0)
+  assert.equal(await page.locator('[data-sw-widget][tabindex]').count(), 0)
+  const drag = await dragBy(page, widget(page, 'tile_calls'), 400, 0)
+  await drag.drop()
+  assert.deepEqual(await placeOf(page, 'tile_calls'), [0, 0, 4, 2])
+  assert.equal((await storedLayout(s.ada)).layout, null, 'nothing was saved')
+  // A chart fills its card: the plot is as wide as the card allows and its legend is inside it.
+  for (const id of ['time', 'outcomes', 'approvals', 'latency']) {
+    const fit = await widget(page, id).evaluate((node) => {
+      const card = node.getBoundingClientRect()
+      const plot = node.querySelector('.recharts-wrapper').getBoundingClientRect()
+      const legend = node.querySelector('[data-sw-chart-legend]').getBoundingClientRect()
+      return {
+        inside: plot.bottom <= legend.top + 1 && legend.bottom <= card.bottom + 1 && legend.right <= card.right + 1,
+        height: plot.height,
+      }
+    })
+    assert.ok(fit.inside && fit.height >= 150, `${id}: ${JSON.stringify(fit)}`)
+  }
+  assert.deepEqual(errors, [])
+})
+
+test('edit layout: drag a widget by its bar and reload, resize it from its corner and reload', async () => {
+  await freshLayouts()
+  const { page, errors } = await openDashboard(s.ada)
+  await dashboard(page)
+  await editLayout(page)
+  assert.equal(await page.locator('[data-sw-widget-handle]').count(), 16)
+  assert.equal(await page.locator('[data-sw-widget-resize]').count(), 16)
+  const column = (await widget(page, 'tile_tokens').boundingBox()).x - (await widget(page, 'tile_calls').boundingBox()).x
+  // The first tile to the right end of its row: while it is held, a placeholder shows where it will land.
+  const drag = await dragBy(page, widget(page, 'tile_calls').locator('[data-sw-widget-handle]'), column * 2, 0)
+  await page.locator('.react-grid-placeholder').waitFor()
+  // (Only what is on screen: a picture of the whole page would resize the window under the drag.)
+  if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'e2e-layout-mid-drag.png') })
+  await drag.drop()
+  await said(page, /Turns moved to row 1, column 9; 4 wide, 2 tall/)
+  assert.deepEqual(await placeOf(page, 'tile_calls'), [8, 0, 4, 2])
+  await layoutSaved(page)
+  const afterDrag = (await storedLayout(s.ada)).layout
+  assert.deepEqual([itemOf(afterDrag, 'tile_calls').x, itemOf(afterDrag, 'tile_calls').y], [8, 0])
+  assert.equal(afterDrag.items.length, 16)
+  await page.reload()
+  await page.locator('[data-sw-tile="calls"] [data-sw-tile-value]').waitFor()
+  assert.deepEqual(await placeOf(page, 'tile_calls'), [8, 0, 4, 2], 'the move survived a reload')
+  assert.equal(await page.locator('[data-sw-layout-bar]').count(), 0, 'a reload is not in edit mode')
+
+  // Resize: the duration chart two columns narrower and a row shorter.
+  await editLayout(page)
+  const step = column / 4
+  const before = await widget(page, 'latency').locator('.recharts-wrapper').boundingBox()
+  const resize = await dragBy(page, widget(page, 'latency').locator('[data-sw-widget-resize]'), -step * 2, -72)
+  await page.locator('.react-grid-item.resizing').waitFor()
+  await resize.drop()
+  await said(page, /Turn duration resized: row \d+, column 7; 4 wide, 4 tall/)
+  assert.deepEqual((await placeOf(page, 'latency')).slice(2), [4, 4])
+  await layoutSaved(page)
+  // The chart redrew at its new size, inside its card.
+  await page.waitForFunction(
+    ([width, height]) => {
+      const plot = document.querySelector('[data-sw-widget="latency"] .recharts-wrapper')?.getBoundingClientRect()
+      return plot && plot.width < width * 0.75 && plot.width > width * 0.5 && plot.height < height - 40 && plot.height > 96
+    },
+    [before.width, before.height],
+  )
+  // A chart cannot be made too small to read: pulled far in, it stops at four columns and four rows.
+  const least = await dragBy(page, widget(page, 'latency').locator('[data-sw-widget-resize]'), -step * 5, -400)
+  await least.drop()
+  await page.waitForFunction(() => document.querySelector('[data-sw-widget="latency"]:not(.resizing)'))
+  assert.deepEqual((await placeOf(page, 'latency')).slice(2), [4, 4])
+  // A tile has three widths and one height: pulled as far in as it goes it stops at two columns.
+  const shrink = await dragBy(page, widget(page, 'tile_tokens').locator('[data-sw-widget-resize]'), -step * 9, 200)
+  await shrink.drop()
+  await said(page, /Tokens resized: row \d+, column \d+; 2 wide, 2 tall/)
+  await layoutSaved(page)
+  await page.reload()
+  await page.locator('[data-sw-chart="latency"] .recharts-line-curve').first().waitFor()
+  assert.deepEqual((await placeOf(page, 'latency')).slice(2), [4, 4], 'the size survived a reload')
+  assert.deepEqual((await placeOf(page, 'tile_tokens')).slice(2), [2, 2])
+  // At its smallest a tile still shows its number whole.
+  const value = page.locator('[data-sw-tile="tokens"] [data-sw-tile-value]')
+  assert.ok(await value.evaluate((node) => node.scrollWidth <= node.clientWidth + 1), 'the number is not cut off')
+  await shot(page, 'e2e-layout-resized')
+  assert.deepEqual(errors, [])
+})
+
+test('edit layout: hide a widget and add it back, duplicate a chart with other options, undo, reset', async () => {
+  await freshLayouts()
+  const { page, errors } = await openDashboard(s.ada)
+  await dashboard(page)
+  await editLayout(page)
+  // Nothing is hidden yet.
+  await page.locator('[data-sw-layout-add]').click()
+  await page.locator('[data-sw-layout-add-none]').waitFor()
+  await page.keyboard.press('Escape')
+  await page.locator('[data-sw-layout-add-menu]').waitFor({ state: 'detached' })
+  assert.equal(await page.locator('[data-sw-layout-bar]').count(), 1, 'Escape closed the menu, not edit mode')
+
+  // Hide the approvals chart and a tile: gone, the rest closes up, and "Add widget" lists exactly those.
+  await widget(page, 'approvals').locator('[data-sw-widget-hide]').click()
+  await widget(page, 'approvals').waitFor({ state: 'detached' })
+  assert.match(await page.locator('[data-sw-layout-toast]').textContent(), /Approvals is hidden/)
+  await widget(page, 'tile_fixes').locator('[data-sw-widget-hide]').click()
+  await widget(page, 'tile_fixes').waitFor({ state: 'detached' })
+  assert.equal(await page.locator('[data-sw-chart="approvals"]').count(), 0)
+  // The duration chart keeps its place; the two lists that were under the hidden chart move up into the gap.
+  assert.deepEqual(await placeOf(page, 'latency'), [6, 15, 6, 5])
+  assert.deepEqual(await placeOf(page, 'top_agents'), [0, 15, 3, 4])
+  assert.deepEqual(await placeOf(page, 'top_slowest'), [6, 20, 3, 4])
+  await layoutSaved(page)
+  await page.locator('[data-sw-layout-add]').click()
+  assert.deepEqual(
+    await page
+      .locator('[data-sw-layout-add-item]')
+      .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-sw-layout-add-item'))),
+    ['tile_fixes', 'approvals'],
+  )
+  await shot(page, 'e2e-layout-add-menu')
+  // Add the chart back: it comes back at the bottom, focused, and is announced.
+  await page.locator('[data-sw-layout-add-item="approvals"]').click()
+  await widget(page, 'approvals').waitFor()
+  await said(page, /Approvals added at row \d+, column 1; 6 wide, 5 tall/)
+  assert.ok(await widget(page, 'approvals').evaluate((node) => node === document.activeElement), 'the new widget has the focus')
+  const places = await page
+    .locator('[data-sw-widget]')
+    .evaluateAll((nodes) => nodes.map((node) => Number(node.getAttribute('data-sw-widget-place').split(',')[1])))
+  assert.equal((await placeOf(page, 'approvals'))[1], Math.max(...places), 'at the bottom')
+  await page.locator('[data-sw-chart="approvals"] .recharts-bar-rectangle').first().waitFor({ state: 'attached' })
+  await layoutSaved(page)
+  // The toast's Undo takes the last change back (the chart is hidden again); the bar's Undo the one before (the tile returns).
+  await page.locator('[data-sw-layout-toast-undo]').click()
+  await widget(page, 'approvals').waitFor({ state: 'detached' })
+  await page.locator('[data-sw-layout-undo]').click()
+  await widget(page, 'tile_fixes').waitFor()
+  await layoutSaved(page)
+  assert.deepEqual(
+    (await storedLayout(s.ada)).layout.items.filter((item) => ['approvals', 'tile_fixes'].includes(item.id)).map((item) => item.id),
+    ['tile_fixes'],
+  )
+
+  // Two charts over time side by side, each with its own measure, split, bucket and style.
+  await widget(page, 'time').focus()
+  for (let n = 0; n < 6; n += 1) await page.keyboard.press('Shift+ArrowLeft')
+  await said(page, /Usage over time resized: row 5, column 1; 6 wide, 6 tall/)
+  await widget(page, 'time').locator('[data-sw-widget-duplicate]').click()
+  await widget(page, 'time-2').waitFor()
+  assert.deepEqual(await placeOf(page, 'time'), [0, 4, 6, 6])
+  assert.deepEqual(await placeOf(page, 'time-2'), [6, 4, 6, 6])
+  assert.match(await widget(page, 'time-2').locator('[data-sw-widget-bar]').textContent(), /Usage over time 2/)
+  await widget(page, 'time-2').locator('[data-sw-widget-options]').click()
+  const panel = page.locator('[data-sw-widget-options-panel="time-2"]')
+  for (const [key, name] of [
+    ['metric', 'Tokens'],
+    ['by', 'By model'],
+    ['bucket', 'Week'],
+    ['style', 'Lines'],
+  ]) {
+    await panel.locator(`[data-sw-pick="option-${key}"]`).click()
+    await page.getByRole('option', { name, exact: true }).click()
+  }
+  await panel.locator('[data-sw-widget-option="legend"] [data-sw-switch]').click()
+  await page.keyboard.press('Escape')
+  await panel.waitFor({ state: 'detached' })
+  assert.equal(await page.locator('[data-sw-layout-bar]').count(), 1)
+  await layoutSaved(page)
+  await page.locator('[data-sw-layout-done]').click()
+  await page.locator('[data-sw-layout-mode="view"]').waitFor()
+  const check = async () => {
+    await page
+      .locator('[data-sw-widget="time"] [data-sw-time-chart="calls"][data-sw-time-style="stacked"] .recharts-bar-rectangle')
+      .first()
+      .waitFor()
+    await page
+      .locator('[data-sw-widget="time-2"] [data-sw-time-chart="tokens"][data-sw-time-style="lines"] .recharts-line-curve')
+      .first()
+      .waitFor()
+    assert.match(await widget(page, 'time').locator('h2').textContent(), /Turns over time/)
+    assert.match(await widget(page, 'time-2').locator('h2').textContent(), /Tokens over time/)
+    assert.equal(await widget(page, 'time').locator('[data-sw-legend-item]').count(), 5, 'the first chart keeps its legend, by agent')
+    assert.equal(await widget(page, 'time-2').locator('[data-sw-chart-legend]').count(), 0, 'the second has its legend off')
+    assert.ok((await widget(page, 'time-2').locator('.recharts-line-curve').count()) >= 3, 'a line per model')
+    // Weekly: a handful of points, not thirty.
+    assert.ok((await widget(page, 'time-2').locator('.recharts-xAxis .recharts-cartesian-axis-tick').count()) <= 6)
+    const left = await widget(page, 'time').boundingBox()
+    const right = await widget(page, 'time-2').boundingBox()
+    assert.ok(Math.abs(left.y - right.y) < 2 && right.x > left.x + left.width, 'side by side')
+  }
+  await check()
+  await shot(page, 'e2e-layout-two-charts')
+  await page.reload()
+  await check()
+  const kept = (await storedLayout(s.ada)).layout
+  assert.deepEqual(
+    [
+      itemOf(kept, 'time-2').options.metric,
+      itemOf(kept, 'time-2').options.by,
+      itemOf(kept, 'time-2').options.bucket,
+      itemOf(kept, 'time-2').options.legend,
+    ],
+    ['tokens', 'model', 'week', false],
+  )
+  assert.equal(itemOf(kept, 'time').options.metric, 'calls')
+
+  // Reset to default: everything back, the copy gone, nothing of the person's own stored.
+  await editLayout(page)
+  await page.locator('[data-sw-layout-reset-menu]').click()
+  await page.locator('[data-sw-layout-reset]').click()
+  await widget(page, 'time-2').waitFor({ state: 'detached' })
+  await widget(page, 'approvals').waitFor()
+  assert.deepEqual(await placeOf(page, 'time'), [0, 4, 12, 6])
+  assert.equal(await page.locator('[data-sw-widget]').count(), 16)
+  await layoutSaved(page)
+  assert.equal((await storedLayout(s.ada)).layout, null)
+  // And the reset can be undone.
+  await page.locator('[data-sw-layout-toast-undo]').click()
+  await widget(page, 'time-2').waitFor()
+  await layoutSaved(page)
+  assert.ok((await storedLayout(s.ada)).layout)
+  await resetLayout(s.ada)
+  assert.deepEqual(errors, [])
+})
+
+test('edit layout by keyboard: every widget takes the focus, arrows move, Shift and arrows resize, each change is announced, Escape leaves', async () => {
+  await freshLayouts()
+  const { page, errors } = await openDashboard(s.ada)
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await dashboard(page)
+  // The button is reachable and says what it does.
+  await page.locator('[data-sw-layout-edit]').focus()
+  await page.keyboard.press('Enter')
+  await page.locator('[data-sw-layout-bar]').waitFor()
+  assert.equal(await page.locator('[data-sw-layout-edit]').getAttribute('aria-pressed'), 'true')
+  assert.equal(await page.locator('[data-sw-widget][tabindex="0"][role="group"]').count(), 16, 'every widget is focusable')
+  assert.equal(await widget(page, 'latency').getAttribute('aria-label'), 'Turn duration: row 16, column 7; 6 wide, 5 tall')
+  assert.match(await page.locator('#sw-layout-help').textContent(), /arrow keys/)
+  // With reduced motion nothing glides.
+  assert.match(await widget(page, 'latency').evaluate((node) => getComputedStyle(node).transitionDuration), /^0s/)
+  // The focus is visible.
+  await widget(page, 'latency').focus()
+  const ring = await widget(page, 'latency').evaluate(
+    (node) => getComputedStyle(node).outlineStyle + ' ' + getComputedStyle(node).outlineWidth,
+  )
+  assert.equal(ring, 'solid 2px')
+  // Nothing inside a widget takes the focus or a press while the layout is edited.
+  assert.ok(
+    await widget(page, 'latency')
+      .locator('.sw-widget-body')
+      .evaluate((node) => node.inert),
+  )
+
+  // Up: past the chart above it.
+  await page.keyboard.press('ArrowUp')
+  await said(page, /^Turn duration moved to row 11, column 7; 6 wide, 5 tall/)
+  assert.deepEqual(await placeOf(page, 'latency'), [6, 10, 6, 5])
+  assert.deepEqual(await placeOf(page, 'outcomes'), [6, 15, 6, 5])
+  assert.ok(await widget(page, 'latency').evaluate((node) => node === document.activeElement), 'the focus stays on the widget')
+  // Narrower, then a column to the left; shorter and taller.
+  await page.keyboard.press('Shift+ArrowLeft')
+  await said(page, /^Turn duration resized: row 11, column 7; 5 wide, 5 tall/)
+  await page.keyboard.press('ArrowRight')
+  await said(page, /^Turn duration moved to row 11, column 8; 5 wide, 5 tall/)
+  await page.keyboard.press('Shift+ArrowUp')
+  await said(page, /^Turn duration resized: row 11, column 8; 5 wide, 4 tall/)
+  await page.keyboard.press('Shift+ArrowUp')
+  await said(page, /^Turn duration is as small as it goes/)
+  await page.keyboard.press('ArrowRight')
+  await said(page, /^Turn duration cannot move further right/)
+  assert.deepEqual(await placeOf(page, 'latency'), [7, 10, 5, 4])
+  // A tile at the top left has nowhere to go up or left.
+  await widget(page, 'tile_calls').focus()
+  await page.keyboard.press('ArrowUp')
+  await said(page, /^Turns cannot move further up/)
+  await page.keyboard.press('ArrowLeft')
+  await said(page, /^Turns cannot move further left/)
+  await page.keyboard.press('ArrowDown')
+  await said(page, /^Turns moved to row 3, column 1; 4 wide, 2 tall/)
+  await layoutSaved(page)
+  // One Undo takes back a whole run of steps on one widget.
+  const stored = (await storedLayout(s.ada)).layout
+  assert.deepEqual(
+    [itemOf(stored, 'latency').x, itemOf(stored, 'latency').y, itemOf(stored, 'latency').w, itemOf(stored, 'latency').h],
+    [7, 10, 5, 4],
+  )
+  assert.deepEqual([itemOf(stored, 'tile_calls').x, itemOf(stored, 'tile_calls').y], [0, 2])
+  // Tab reaches the widget's own buttons; its × hides it.
+  await widget(page, 'tile_calls').focus()
+  await page.keyboard.press('Tab')
+  assert.match(await page.evaluate(() => document.activeElement.getAttribute('aria-label')), /Options for Turns/)
+  await page.keyboard.press('Tab')
+  assert.match(await page.evaluate(() => document.activeElement.getAttribute('aria-label')), /Hide Turns/)
+  // Escape leaves edit mode; the layout stays.
+  await widget(page, 'latency').focus()
+  await page.keyboard.press('Escape')
+  await page.locator('[data-sw-layout-mode="view"]').waitFor()
+  assert.equal(await page.locator('[data-sw-layout-bar]').count(), 0)
+  assert.equal(await page.locator('[data-sw-widget][tabindex]').count(), 0)
+  assert.deepEqual(await placeOf(page, 'latency'), [7, 10, 5, 4])
+  await page.reload()
+  await page.locator('[data-sw-chart="latency"] .recharts-line-curve').first().waitFor()
+  assert.deepEqual(await placeOf(page, 'latency'), [7, 10, 5, 4])
+  assert.match(await liveText(page), /^\s*$/)
+  await resetLayout(s.ada)
+  assert.deepEqual(errors, [])
+})
+
+test('each widget’s options are saved with it: charts, the breakdown, lists and tiles, from the header switches or the options button', async () => {
+  await freshLayouts()
+  const { page, errors } = await openDashboard(s.ben)
+  await dashboard(page)
+  const optionsOf = async (id) => itemOf((await storedLayout(s.ben)).layout, id).options
+  const openOptions = async (id) => {
+    await page.locator(`[data-sw-widget-options="${id}"]`).click()
+    const panel = page.locator(`[data-sw-widget-options-panel="${id}"]`)
+    await panel.waitFor()
+    return panel
+  }
+  const close = async (panel) => {
+    await page.keyboard.press('Escape')
+    await panel.waitFor({ state: 'detached' })
+  }
+  const choose = async (panel, key, name) => {
+    await panel.locator(`[data-sw-pick="option-${key}"]`).click()
+    await page.getByRole('option', { name, exact: true }).click()
+  }
+
+  // The header switches of the chart over time write its saved options, not the address.
+  await page.locator('[data-sw-chart="time"] [data-sw-pick="metric"]').click()
+  await page.getByRole('option', { name: 'Reported cost', exact: true }).click()
+  await page.locator('[data-sw-time-chart="cost"]').waitFor()
+  await page.locator('[data-sw-chart="time"] [data-sw-option="month"]').click()
+  await page.locator('[data-sw-chart="time"] [data-sw-option="table"]').click()
+  await page.locator('[data-sw-chart="time"] [data-sw-chart-table]').waitFor()
+  await layoutSaved(page)
+  assert.equal(new URL(page.url()).search, '')
+  assert.deepEqual(await optionsOf('time'), {
+    metric: 'cost',
+    by: 'agent',
+    bucket: 'month',
+    style: 'stacked',
+    legend: true,
+    brush: true,
+    view: 'table',
+  })
+  // The breakdown follows the chart's measure until it is given its own.
+  assert.match(await page.locator('[data-sw-chart="breakdown"] h2').textContent(), /Reported cost by project/)
+  let panel = await openOptions('time')
+  assert.equal(await panel.locator('[data-sw-widget-option]').count(), 7)
+  await shot(page, 'e2e-layout-options')
+  await panel.locator('[data-sw-widget-option="view"] [data-sw-option="chart"]').click()
+  await choose(panel, 'style', 'Grouped bars')
+  await page.locator('[data-sw-time-style="grouped"] .recharts-bar-rectangle').first().waitFor()
+  await choose(panel, 'bucket', 'Automatic')
+  await panel.locator('[data-sw-widget-option="brush"] [data-sw-switch="on"]').click()
+  await page.locator('[data-sw-chart="time"] .recharts-brush').waitFor({ state: 'detached' })
+  await panel.locator('[data-sw-widget-option="brush"] [data-sw-switch="off"]').click()
+  await page.locator('[data-sw-chart="time"] .recharts-brush').waitFor()
+  await close(panel)
+
+  // The breakdown: its own measure, fewer rows, no share.
+  panel = await openOptions('breakdown')
+  await choose(panel, 'by', 'By agent')
+  await choose(panel, 'metric', 'Tokens')
+  await choose(panel, 'rows', 'Top 5')
+  await page.locator('[data-sw-breakdown="agent"] [data-sw-breakdown-row]').first().waitFor()
+  assert.equal(await page.locator('[data-sw-breakdown-share]').count(), 5)
+  await panel.locator('[data-sw-widget-option="share"] [data-sw-switch]').click()
+  await page.locator('[data-sw-breakdown-share]').first().waitFor({ state: 'detached' })
+  await close(panel)
+  assert.match(await page.locator('[data-sw-chart="breakdown"] h2').textContent(), /Tokens by agent/)
+  // Outcomes as counts; approvals side by side.
+  panel = await openOptions('outcomes')
+  await panel.locator('[data-sw-widget-option="mode"] [data-sw-option="counts"]').click()
+  await page.locator('[data-sw-outcomes-mode="counts"]').waitFor()
+  assert.doesNotMatch((await page.locator('[data-sw-chart="outcomes"] .recharts-yAxis').textContent()) || '', /%/)
+  await close(panel)
+  panel = await openOptions('approvals')
+  await panel.locator('[data-sw-widget-option="mode"] [data-sw-option="separate"]').click()
+  await page.locator('[data-sw-approvals-mode="separate"]').waitFor()
+  await close(panel)
+  // Duration: all four percentiles on a logarithmic axis; the last line cannot be taken away.
+  assert.equal(
+    await page.locator('[data-sw-latency-scale]').getAttribute('data-sw-latency-scale'),
+    'linear',
+    'the log scale is off by default',
+  )
+  panel = await openOptions('latency')
+  await panel.locator('[data-sw-widget-option-item="p90"]').check()
+  await panel.locator('[data-sw-widget-option-item="p99"]').check()
+  await page.waitForFunction(() => document.querySelectorAll('[data-sw-chart="latency"] .recharts-line-curve').length === 4)
+  await panel.locator('[data-sw-widget-option="log"] [data-sw-switch]').click()
+  await page.locator('[data-sw-latency-scale="log"]').waitFor()
+  for (const id of ['p50', 'p90', 'p95']) await panel.locator(`[data-sw-widget-option-item="${id}"]`).uncheck()
+  assert.ok(await panel.locator('[data-sw-widget-option-item="p99"]').isDisabled(), 'one line always stays')
+  await panel.locator('[data-sw-widget-option-item="p50"]').check()
+  await close(panel)
+  assert.equal(await page.locator('[data-sw-latency-lines]').getAttribute('data-sw-latency-lines'), 'p50 p99')
+  assert.match(await page.locator('[data-sw-chart="latency"] [data-sw-chart-legend]').textContent(), /Median.*99th percentile/s)
+  // A top list: ten rows, then three.
+  panel = await openOptions('top_slowest')
+  await choose(panel, 'rows', 'Top 10')
+  await page.locator('[data-sw-top="slowest"] [data-sw-top-rows="10"]').waitFor()
+  await choose(panel, 'rows', 'Top 3')
+  await page.locator('[data-sw-top="slowest"] [data-sw-top-rows="3"]').waitFor()
+  await close(panel)
+  assert.equal(await page.locator('[data-sw-top="agents"] li').count(), 5, 'the other lists keep their five')
+  // Tiles: the trend line and the comparison line turn off and on.
+  assert.equal(await page.locator('[data-sw-tile="calls"] [data-sw-tile-spark]').count(), 1)
+  panel = await openOptions('tile_calls')
+  await panel.locator('[data-sw-widget-option="spark"] [data-sw-switch]').click()
+  await page.locator('[data-sw-tile="calls"] [data-sw-tile-spark]').waitFor({ state: 'detached' })
+  await panel.locator('[data-sw-widget-option="compare"] [data-sw-switch]').click()
+  await page.locator('[data-sw-tile="calls"] [data-sw-tile-compare]').waitFor({ state: 'hidden' })
+  await close(panel)
+  panel = await openOptions('tile_cost')
+  await panel.locator('[data-sw-widget-option="spark"] [data-sw-switch]').click()
+  await page.locator('[data-sw-tile="cost"] [data-sw-tile-spark] svg').waitFor()
+  await close(panel)
+  assert.equal(await page.locator('[data-sw-widget-options="tile_fixes"]').count(), 1)
+  assert.equal(await page.locator('[data-sw-widget-options="budgets"]').count(), 0, 'the budgets have no options')
+  await layoutSaved(page)
+
+  // All of it is this person's saved layout, and a reload draws it again.
+  assert.deepEqual(await optionsOf('time'), {
+    metric: 'cost',
+    by: 'agent',
+    bucket: 'auto',
+    style: 'grouped',
+    legend: true,
+    brush: true,
+    view: 'chart',
+  })
+  assert.deepEqual(await optionsOf('breakdown'), { by: 'agent', metric: 'tokens', rows: 5, share: false, view: 'chart' })
+  assert.deepEqual(await optionsOf('outcomes'), { mode: 'counts', view: 'chart' })
+  assert.deepEqual(await optionsOf('approvals'), { mode: 'separate', view: 'chart' })
+  assert.deepEqual(await optionsOf('latency'), { percentiles: ['p50', 'p99'], log: true, view: 'chart' })
+  assert.deepEqual(await optionsOf('top_slowest'), { rows: 3 })
+  assert.deepEqual(await optionsOf('tile_calls'), { spark: false, compare: false })
+  assert.deepEqual(await optionsOf('tile_cost'), { spark: true, compare: true })
+  await page.reload()
+  await page.locator('[data-sw-time-chart="cost"][data-sw-time-style="grouped"] .recharts-bar-rectangle').first().waitFor()
+  await page.locator('[data-sw-latency-scale="log"][data-sw-latency-lines="p50 p99"] .recharts-line-curve').first().waitFor()
+  await page.locator('[data-sw-outcomes-mode="counts"]').waitFor()
+  await page.locator('[data-sw-approvals-mode="separate"]').waitFor()
+  await page.locator('[data-sw-top="slowest"] [data-sw-top-rows="3"]').waitFor()
+  await page.locator('[data-sw-breakdown="agent"]').waitFor()
+  assert.equal(await page.locator('[data-sw-tile="calls"] [data-sw-tile-spark]').count(), 0)
+  await shot(page, 'e2e-layout-options-applied')
+  // The chart-or-table switch of a card is saved too.
+  await page.locator('[data-sw-chart="latency"] [data-sw-option="table"]').click()
+  await layoutSaved(page)
+  assert.equal((await optionsOf('latency')).view, 'table')
+  assert.match(
+    await page.locator('[data-sw-chart="latency"] [data-sw-chart-table] thead').textContent(),
+    /Median.*99th percentile.*Longest/s,
+  )
+  // Copy as CSV still copies the chart's numbers.
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+  await page.locator('[data-sw-chart="outcomes"] [data-sw-chart-csv]').click()
+  assert.match(await page.evaluate(() => navigator.clipboard.readText()), /^"?Day"?,.*Completed/)
+
+  // A link from before the dashboard could be arranged still sets the first chart, until its switch is used.
+  await page.goto(url('/usage?metric=tokens&bucket=week&by=model&bd=kind'))
+  await page.locator('[data-sw-time-chart="tokens"] .recharts-bar-rectangle').first().waitFor()
+  await page.locator('[data-sw-breakdown="kind"]').waitFor()
+  assert.equal((await optionsOf('time')).metric, 'cost', 'opening a link saves nothing')
+  await page.locator('[data-sw-chart="time"] [data-sw-pick="metric"]').click()
+  await page.getByRole('option', { name: 'Turns', exact: true }).click()
+  await page.locator('[data-sw-time-chart="calls"]').waitFor()
+  await page.waitForFunction(() => !window.location.search.includes('metric='))
+  assert.match(page.url(), /bucket=week/)
+  await resetLayout(s.ben)
+  assert.deepEqual(errors, [])
+})
+
+test('saving: a failed save keeps the change on the page and says so; "Try again" saves it', async () => {
+  await freshLayouts()
+  const { page, errors } = await openDashboard(s.cyd)
+  await dashboard(page)
+  // A member has no budgets, and cannot set the workspace's default.
+  assert.equal(await page.locator('[data-sw-widget]').count(), 15)
+  assert.equal(await page.locator('[data-sw-usage-budgets]').count(), 0)
+  await editLayout(page)
+  await page.locator('[data-sw-layout-reset-menu]').click()
+  await page.locator('[data-sw-layout-reset]').waitFor()
+  assert.equal(await page.locator('[data-sw-layout-set-default]').count(), 0)
+  assert.ok(await page.locator('[data-sw-layout-reset]').isDisabled(), 'nothing to reset yet')
+  await page.keyboard.press('Escape')
+  // The server is unreachable for a moment.
+  let refuse = true
+  await page.route('**/usage/layout', (route) => (refuse && route.request().method() === 'PUT' ? route.abort() : route.continue()))
+  await widget(page, 'tile_tokens').locator('[data-sw-widget-hide]').click()
+  await page.locator('[data-sw-layout-toast="failed"]').waitFor()
+  assert.match(await page.locator('[data-sw-layout-toast="failed"]').textContent(), /could not be saved.*Your change is kept on this page/s)
+  assert.equal(await page.locator('[data-sw-layout-status]').getAttribute('data-sw-layout-status'), 'failed')
+  assert.equal(await widget(page, 'tile_tokens').count(), 0, 'the change is still on the page')
+  assert.equal((await storedLayout(s.cyd)).layout, null, 'and not on the server')
+  // A second change while it cannot save is kept too.
+  await widget(page, 'tile_cost').locator('[data-sw-widget-hide]').click()
+  await widget(page, 'tile_cost').waitFor({ state: 'detached' })
+  await page.locator('[data-sw-layout-toast="failed"]').waitFor()
+  refuse = false
+  await page.locator('[data-sw-layout-retry]').click()
+  await layoutSaved(page)
+  await page.locator('[data-sw-layout-toast="failed"]').waitFor({ state: 'detached' })
+  assert.deepEqual(
+    (await storedLayout(s.cyd)).layout.items
+      .filter((item) => item.type.startsWith('tile_'))
+      .map((item) => item.id)
+      .sort(),
+    ['tile_calls', 'tile_duration', 'tile_failed', 'tile_fixes'],
+  )
+  await page.unroute('**/usage/layout')
+  await resetLayout(s.cyd)
+  // The only errors are the two requests that were cut off on purpose.
+  assert.ok(errors.length <= 3 && errors.every((text) => /Failed to load resource|net::ERR_FAILED/.test(text)), errors.join('\n'))
+})
+
+test('a saved view can carry a layout: its link shows it to whoever opens it, and only "Use this layout" makes it theirs', async () => {
+  await freshLayouts()
+  const { page, errors } = await openDashboard(s.cyd)
+  await dashboard(page, '/usage?range=7d')
+  // Cyd arranges the dashboard: no tiles but one, the duration chart on top.
+  await editLayout(page)
+  for (const id of ['tile_tokens', 'tile_duration', 'tile_cost', 'tile_fixes', 'tile_failed'])
+    await widget(page, id).locator('[data-sw-widget-hide]').click()
+  await widget(page, 'tile_failed').waitFor({ state: 'detached' })
+  await layoutSaved(page)
+  await page.locator('[data-sw-layout-done]').click()
+  // Saved as a view with "Include this layout".
+  await page.locator('[data-sw-views]').click()
+  await page.locator('[data-sw-view-save]').click()
+  await page.getByLabel('Name this view').fill('One tile')
+  // A view of the overview keeps the layout and the widgets' options unless the box is unticked.
+  assert.ok(await page.locator('[data-sw-view-with-layout]').isChecked(), 'ticked to begin with')
+  await page.locator('[data-sw-view-form] button[type="submit"]').click()
+  await page.waitForFunction(() => document.querySelector('[data-sw-views]')?.textContent.includes('One tile'))
+  const view = (await s.cyd.browser.get(api('/views?page=usage'))).json.views.find((item) => item.name === 'One tile')
+  assert.equal(view.hasLayout, true)
+  assert.equal(view.query, 'range=7d', 'the view’s filters do not name the view')
+  await page.locator('[data-sw-views]').click()
+  await page.locator('[data-sw-view-has-layout]').waitFor()
+  // The link to it carries the view.
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+  await page.locator('[data-sw-view-link]').click()
+  const link = await page.evaluate(() => navigator.clipboard.readText())
+  assert.equal(link, url(`/usage?range=7d&view=${view.id}`))
+  // Cyd goes back to the default: the view keeps the layout it was saved with.
+  await resetLayout(s.cyd)
+
+  // Ben opens the link: the view's layout, with a banner, and his own untouched.
+  const other = await openDashboard(s.ben)
+  await other.page.goto(link)
+  await other.page.locator('[data-sw-layout-preview]').waitFor()
+  assert.match(
+    await other.page.locator('[data-sw-layout-preview]').textContent(),
+    /layout of the view One tile.*Your own layout is unchanged/s,
+  )
+  await other.page.locator('[data-sw-tile="calls"] [data-sw-tile-value]').waitFor()
+  assert.equal(await other.page.locator('[data-sw-tile]').count(), 1)
+  assert.equal(await other.page.locator('[data-sw-usage-budgets]').count(), 1, 'what he may see of it: an admin has the budgets')
+  assert.match(other.page.url(), /range=7d/, 'with the view’s filters')
+  assert.ok(await other.page.locator('[data-sw-layout-edit]').isDisabled(), 'a layout on show is not edited')
+  assert.equal((await storedLayout(s.ben)).layout, null)
+  await shot(other.page, 'e2e-layout-shared-view')
+  // A switch he presses while looking changes what he sees, and saves nothing.
+  await other.page.locator('[data-sw-chart="time"] [data-sw-option="week"]').click()
+  await other.page.waitForFunction(
+    () => document.querySelectorAll('[data-sw-chart="time"] .recharts-xAxis .recharts-cartesian-axis-tick').length <= 3,
+  )
+  assert.equal((await storedLayout(s.ben)).layout, null)
+  // "Back to my layout": his own again, the filters stay.
+  await other.page.locator('[data-sw-layout-dismiss]').click()
+  await other.page.locator('[data-sw-layout-preview]').waitFor({ state: 'detached' })
+  await other.page.waitForFunction(() => document.querySelectorAll('[data-sw-tile]').length === 6)
+  assert.match(other.page.url(), /range=7d/)
+  assert.doesNotMatch(other.page.url(), /view=/)
+  assert.equal((await storedLayout(s.ben)).layout, null)
+  // Again, and this time "Use this layout".
+  await other.page.goto(link)
+  await other.page.locator('[data-sw-layout-adopt]').click()
+  await other.page.locator('[data-sw-layout-preview]').waitFor({ state: 'detached' })
+  await layoutSaved(other.page)
+  assert.equal(await other.page.locator('[data-sw-tile]').count(), 1)
+  const adopted = (await storedLayout(s.ben)).layout
+  assert.deepEqual(
+    adopted.items.filter((item) => item.type.startsWith('tile_')).map((item) => item.id),
+    ['tile_calls'],
+  )
+  assert.equal((await storedLayout(s.cyd)).layout, null, 'nobody else’s changed')
+  // A link to a view that is gone: the filters hold, the dashboard is the reader's own, and he is told.
+  await s.cyd.browser.call('DELETE', api(`/views/${view.id}`))
+  await resetLayout(s.ben)
+  await other.page.goto(link)
+  await other.page.waitForFunction(() => !window.location.search.includes('view='))
+  await other.page.waitForFunction(() => document.querySelectorAll('[data-sw-tile]').length === 6)
+  assert.match(await other.page.locator('[data-sw-toast="bad"]').textContent(), /no longer carries a layout/)
+  assert.deepEqual(errors, [])
+  assert.ok(
+    other.errors.every((text) => /404/.test(text)),
+    other.errors.join('\n'),
+  )
+})
+
+test('the workspace default: an owner sets it for everyone, someone who joins starts from it, and their own change is theirs', async () => {
+  await freshLayouts()
+  const { page, errors } = await openDashboard(s.ada)
+  await dashboard(page)
+  await editLayout(page)
+  // The owner's layout: the top lists hidden, the duration chart across the page.
+  for (const id of ['top_agents', 'top_threads', 'top_slowest', 'top_denied'])
+    await widget(page, id).locator('[data-sw-widget-hide]').click()
+  await widget(page, 'top_denied').waitFor({ state: 'detached' })
+  await layoutSaved(page)
+  await page.locator('[data-sw-layout-reset-menu]').click()
+  assert.equal(await page.locator('[data-sw-layout-clear-default]').count(), 0)
+  await page.locator('[data-sw-layout-set-default]').click()
+  await page.waitForFunction(() =>
+    /Everyone without a layout of their own/.test(document.querySelector('[data-sw-layout-toast]')?.textContent || ''),
+  )
+  const stored = await storedLayout(s.ada)
+  assert.equal(stored.default.items.length, 12)
+  assert.deepEqual(stored.default, stored.layout)
+  // It is in the audit log, with who did it.
+  await helpers.reauth(s.ada)
+  const audit = (await s.ada.browser.get(api('/activity?group=settings&limit=20'))).json.entries.find(
+    (entry) => entry.action === 'usage_layout_default_set',
+  )
+  assert.equal(audit.actor.id, s.ada.user.id)
+  await helpers.reauth(s.ada)
+
+  // Someone who joins now starts from it.
+  // A member who has not asked an agent anything yet: no turns of their own, and still the dashboard, since the
+  // workspace has a layout. Its widgets say there is nothing yet, and it can be arranged.
+  const gil = await helpers.signUp(hosted, { handle: 'gil', displayName: 'Gil', invite: await helpers.invite(s.ada, s.ws, 'member') })
+  const fresh = await openDashboard(gil)
+  await fresh.page.goto(url('/usage'))
+  await fresh.page.locator('[data-sw-usage-overview]').waitFor()
+  await fresh.page.locator('[data-sw-widget="time"]').waitFor()
+  assert.equal(await fresh.page.locator('[data-sw-usage-empty]').count(), 0, 'not the page-level empty state')
+  assert.equal(number(await fresh.page.locator('[data-sw-tile="calls"] [data-sw-tile-value]').textContent()), 0)
+  await fresh.page.locator('[data-sw-chart="time"] [data-sw-chart-empty]').waitFor()
+  assert.ok(await fresh.page.locator('[data-sw-layout-edit]').isEnabled())
+  assert.equal(await fresh.page.locator('[data-sw-top]').count(), 0, 'no top lists, as the owner set')
+  assert.equal(await fresh.page.locator('[data-sw-widget]').count(), 11, 'and no budgets: they are for admins')
+  await shot(fresh.page, 'e2e-layout-member-no-turns')
+  assert.equal((await storedLayout(gil)).layout, null, 'nothing of their own: it is the workspace’s')
+  // So does a member who had not changed anything.
+  assert.equal((await storedLayout(s.cyd)).default.items.length, 12)
+  // Their own change is theirs: the default and the owner's layout stay.
+  await editLayout(fresh.page)
+  await widget(fresh.page, 'tile_calls').locator('[data-sw-widget-hide]').click()
+  await layoutSaved(fresh.page)
+  assert.equal((await storedLayout(gil)).layout.items.length, 11)
+  assert.equal((await storedLayout(s.ada)).default.items.length, 12)
+  // "Reset to default" is the workspace's default for them.
+  await fresh.page.locator('[data-sw-layout-reset-menu]').click()
+  assert.equal(await fresh.page.locator('[data-sw-layout-set-default]').count(), 0, 'only an owner sets it')
+  await fresh.page.locator('[data-sw-layout-reset]').click()
+  await widget(fresh.page, 'tile_calls').waitFor()
+  await layoutSaved(fresh.page)
+  assert.equal(await fresh.page.locator('[data-sw-top]').count(), 0)
+  assert.equal((await storedLayout(gil)).layout, null)
+
+  // The owner removes it: people without their own see the built-in layout again.
+  await page.locator('[data-sw-layout-reset-menu]').click()
+  await page.locator('[data-sw-layout-clear-default]').click()
+  await page.waitForFunction(() => /no layout of its own/.test(document.querySelector('[data-sw-layout-toast]')?.textContent || ''))
+  // With no default and no layout of their own, someone with no turns sees the plain empty state again.
+  await fresh.page.reload()
+  await fresh.page.locator('[data-sw-usage-empty]').waitFor()
+  assert.equal(await fresh.page.locator('[data-sw-widget]').count(), 0)
+  // Unless they arrange the dashboard: then it is theirs to keep looking at.
+  await editLayout(fresh.page)
+  await widget(fresh.page, 'top_denied').waitFor()
+  assert.equal(await fresh.page.locator('[data-sw-widget]').count(), 15)
+  await widget(fresh.page, 'tile_cost').locator('[data-sw-widget-hide]').click()
+  await layoutSaved(fresh.page)
+  await fresh.page.locator('[data-sw-layout-done]').click()
+  await fresh.page.locator('[data-sw-layout-mode="view"]').waitFor()
+  await fresh.page.reload()
+  await fresh.page.locator('[data-sw-widget="time"]').waitFor()
+  assert.equal(await fresh.page.locator('[data-sw-widget]').count(), 14)
+  assert.equal(await fresh.page.locator('[data-sw-usage-empty]').count(), 0)
+  await resetLayout(s.ada)
+  assert.deepEqual(errors, [])
+  assert.deepEqual(fresh.errors, [])
+})
+
+test('narrower screens: 6 columns on a small window, one column on a phone with tiles in pairs, reordered with up and down, never resized', async () => {
+  await freshLayouts()
+  // A small window: the same layout on six columns.
+  const small = await openDashboard(s.cyd, { width: 1024, height: 768 })
+  await dashboard(small.page)
+  assert.equal(await small.page.locator('[data-sw-layout-cols]').getAttribute('data-sw-layout-cols'), '6')
+  assert.deepEqual(await placeOf(small.page, 'tile_tokens'), [2, 0, 2, 2])
+  assert.deepEqual((await placeOf(small.page, 'time')).slice(2), [6, 6])
+  assert.deepEqual((await placeOf(small.page, 'outcomes')).slice(0, 3), [0, 15, 6])
+  assert.deepEqual(await placeOf(small.page, 'top_threads'), [3, 30, 3, 4])
+  await editLayout(small.page)
+  assert.match(await small.page.locator('#sw-layout-help').textContent(), /Resize on a wider screen/)
+  assert.equal(await small.page.locator('[data-sw-widget-resize]:visible').count(), 0)
+  assert.equal(await small.page.locator('[data-sw-widget-up]').count(), 15)
+  await shot(small.page, 'e2e-layout-1024-edit')
+  await small.page.locator('[data-sw-layout-done]').click()
+  assert.deepEqual(small.errors, [])
+  await small.page.context().close()
+
+  // A phone.
+  const { page, errors } = await openDashboard(s.cyd, { width: 390, height: 844, phone: true })
+  await dashboard(page)
+  await page.locator('[data-sw-chart="time"] .recharts-bar-rectangle').first().waitFor()
+  assert.equal(await page.locator('[data-sw-layout-cols]').getAttribute('data-sw-layout-cols'), '2')
+  const order = () => page.locator('[data-sw-widget]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-sw-widget')))
+  const saved = defaultOrder()
+  assert.deepEqual(await order(), saved, 'the saved order')
+  // One column: every widget but a tile is as wide as the page, each under the one before; tiles go two to a row.
+  const boxes = await page.locator('[data-sw-widget]').evaluateAll((nodes) =>
+    nodes.map((node) => {
+      const box = node.getBoundingClientRect()
+      return {
+        id: node.getAttribute('data-sw-widget'),
+        type: node.getAttribute('data-sw-widget-type'),
+        x: box.x,
+        y: box.y + window.scrollY,
+        w: box.width,
+        h: box.height,
+      }
+    }),
+  )
+  const rest = boxes.filter((box) => !box.type.startsWith('tile_'))
+  for (const [index, box] of rest.entries()) {
+    assert.ok(box.w > 340 && box.x < 30, `${box.id} is as wide as the page`)
+    if (index) assert.ok(box.y >= rest[index - 1].y + rest[index - 1].h, `${box.id} is under ${rest[index - 1].id}`)
+  }
+  assert.ok(boxes.filter((box) => box.type.startsWith('tile_')).every((box) => box.w > 150 && box.w < 200))
+  assert.ok(await page.evaluate(() => document.scrollingElement.scrollWidth <= window.innerWidth + 1), 'nothing scrolls sideways')
+  // A chart on a phone keeps a plot that can be read, with its legend under it.
+  const plot = await page.locator('[data-sw-chart="time"] .recharts-wrapper').boundingBox()
+  assert.ok(plot.height >= 150 && plot.width >= 300, JSON.stringify(plot))
+
+  // Edit: up and down buttons, no grip, no corner.
+  await editLayout(page)
+  assert.match(await page.locator('#sw-layout-help').textContent(), /arrows to move it up or down/)
+  assert.equal(await page.locator('[data-sw-widget-handle]').count(), 0)
+  assert.equal(await page.locator('[data-sw-widget-resize]:visible').count(), 0)
+  assert.ok(await widget(page, 'tile_calls').locator('[data-sw-widget-up]').isDisabled(), 'the first cannot go up')
+  assert.ok(await widget(page, 'top_denied').locator('[data-sw-widget-down]').isDisabled(), 'the last cannot go down')
+  // The bar of a tile fits its half of the screen.
+  const bar = await widget(page, 'tile_tokens').locator('[data-sw-widget-bar]').boundingBox()
+  assert.ok(bar.x + bar.width <= 390)
+  await shot(page, 'e2e-layout-phone-edit')
+  // The chart over time moves up, over the tile before it.
+  await widget(page, 'time').locator('[data-sw-widget-up]').tap()
+  await said(page, /Usage over time moved to row \d+, column 1; 2 wide, 6 tall/)
+  const moved = [...saved]
+  moved.splice(5, 2, 'time', 'tile_failed')
+  assert.deepEqual(await order(), moved)
+  // And the breakdown down, under the outcomes.
+  await widget(page, 'breakdown').locator('[data-sw-widget-down]').tap()
+  await page.waitForFunction(() => {
+    const ids = [...document.querySelectorAll('[data-sw-widget]')].map((node) => node.getAttribute('data-sw-widget'))
+    return ids.indexOf('breakdown') === ids.indexOf('outcomes') + 1
+  })
+  await layoutSaved(page)
+  const afterMoves = await order()
+  // Shift and an arrow say why nothing was resized.
+  await widget(page, 'breakdown').focus()
+  await page.keyboard.press('Shift+ArrowRight')
+  await said(page, /resized on a wider screen/)
+  await page.locator('[data-sw-layout-done]').tap()
+  await page.reload()
+  await page.locator('[data-sw-chart="time"] .recharts-bar-rectangle').first().waitFor()
+  assert.deepEqual(await order(), afterMoves, 'the order survived a reload')
+  // The same order is what a desktop shows, on its 12 columns.
+  const wide = await openDashboard(s.cyd)
+  await dashboard(wide.page)
+  assert.deepEqual(
+    await wide.page.locator('[data-sw-widget]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-sw-widget'))),
+    afterMoves,
+  )
+  assert.equal(await wide.page.locator('[data-sw-layout-cols]').getAttribute('data-sw-layout-cols'), '12')
+  await resetLayout(s.cyd)
+  assert.deepEqual(errors, [])
+  assert.deepEqual(wide.errors, [])
+})
+
+test('a tablet: a finger on a widget’s bar drags it, a finger anywhere else scrolls the page', async () => {
+  await freshLayouts()
+  const { page, errors } = await openDashboard(s.cyd, { width: 1180, height: 820, phone: true })
+  await dashboard(page)
+  assert.equal(await page.locator('[data-sw-layout-cols]').getAttribute('data-sw-layout-cols'), '12')
+  await editLayout(page)
+  const handle = widget(page, 'tile_calls').locator('[data-sw-widget-handle]')
+  assert.equal(await handle.evaluate((node) => getComputedStyle(node).touchAction), 'none')
+  assert.notEqual(
+    await widget(page, 'tile_calls')
+      .locator('.sw-widget-body')
+      .evaluate((node) => getComputedStyle(node).touchAction),
+    'none',
+  )
+  const from = await handle.boundingBox()
+  const to = await widget(page, 'tile_duration').boundingBox()
+  const client = await page.context().newCDPSession(page)
+  const touch = (type, x, y) =>
+    client.send('Input.dispatchTouchEvent', {
+      type,
+      touchPoints: type === 'touchEnd' ? [] : [{ x: Math.round(x), y: Math.round(y), id: 1 }],
+    })
+  const start = { x: from.x + 40, y: from.y + from.height / 2 }
+  await touch('touchStart', start.x, start.y)
+  for (let step = 1; step <= 12; step += 1)
+    await touch('touchMove', start.x + ((to.x - from.x) * step) / 12, start.y + (step < 3 ? step * 3 : 6))
+  await page.locator('.react-grid-placeholder').waitFor()
+  await touch('touchEnd')
+  await said(page, /Turns moved to row 1, column 9; 4 wide, 2 tall/)
+  assert.deepEqual(await placeOf(page, 'tile_calls'), [8, 0, 4, 2])
+  await layoutSaved(page)
+  await resetLayout(s.cyd)
+  assert.deepEqual(errors, [])
+})
+
+test('print: the widgets one after another in reading order, each whole; copy as an image still makes one', async () => {
+  await freshLayouts()
+  await s.ada.browser.call('PUT', api('/usage/layout'), { body: { layout: moveItem(defaultLayout(), 'latency', 0, 4) } })
+  const { page, errors } = await openDashboard(s.ada)
+  await dashboard(page)
+  await page.locator('[data-sw-chart="latency"] .recharts-line-curve').first().waitFor()
+  // The image of a chart, as before (copied where the browser allows, saved where it does not).
+  await page.locator('[data-sw-chart="latency"] [data-sw-chart-image]').click()
+  await page.waitForFunction(() => /as an image/.test(document.querySelector('[data-sw-toasts]')?.textContent || ''))
+  await page.emulateMedia({ media: 'print' })
+  // On paper a chart no longer follows its widget's height.
+  await page.locator('[data-sw-plot]').first().waitFor({ state: 'detached' })
+  const printed = await page.locator('[data-sw-widget]').evaluateAll((nodes) =>
+    nodes.map((node) => {
+      const box = node.getBoundingClientRect()
+      const style = getComputedStyle(node)
+      const inner = node.firstElementChild.firstElementChild.firstElementChild
+      return {
+        id: node.getAttribute('data-sw-widget'),
+        top: box.top + window.scrollY,
+        left: box.left,
+        bottom: box.bottom + window.scrollY,
+        position: style.position,
+        transform: style.transform,
+        whole: inner.scrollHeight <= inner.clientHeight + 1,
+      }
+    }),
+  )
+  assert.ok(
+    printed.every((item) => item.position === 'static' && item.transform === 'none'),
+    'placed by the page, not by the grid',
+  )
+  // Reading order: each widget starts at or below the one before, or beside it on the same line.
+  for (let index = 1; index < printed.length; index += 1) {
+    const [before, here] = [printed[index - 1], printed[index]]
+    assert.ok(
+      here.top > before.top + 1 || (Math.abs(here.top - before.top) <= 1 && here.left > before.left),
+      `${here.id} follows ${before.id}`,
+    )
+  }
+  assert.deepEqual(
+    printed.slice(0, 8).map((item) => item.id),
+    ['tile_calls', 'tile_tokens', 'tile_duration', 'tile_cost', 'tile_fixes', 'tile_failed', 'latency', 'time'],
+    'the order of the saved layout',
+  )
+  assert.ok(
+    printed.every((item) => item.whole),
+    `nothing is cut off on paper: ${printed.filter((item) => !item.whole).map((item) => item.id)}`,
+  )
+  // Nothing of the edit chrome or the options prints.
+  assert.equal(await page.locator('[data-sw-widget-options]:visible, [data-sw-layout-edit]:visible').count(), 0)
+  await page.locator('[data-sw-chart="latency"] .recharts-line-curve').first().waitFor()
+  await page.emulateMedia({ media: 'screen' })
+  await resetLayout(s.ada)
+  assert.deepEqual(errors, [])
+})
+
+test('nothing is cut off at the default sizes, looking or editing; lists and the budgets are as tall as what they hold', async () => {
+  await freshLayouts()
+  const { page, errors } = await openDashboard(s.ada)
+  // (Reduced motion: a widget is at its new size at once, so what is measured is where it ends up.)
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await dashboard(page)
+  await page.locator('[data-sw-top="denied"] ol').waitFor()
+  await page.locator('[data-sw-budget]').first().waitFor()
+  // Whatever scrolls inside a widget, or is clipped by it, at this moment.
+  const clipped = () =>
+    page.evaluate(() => {
+      const out = []
+      const cut = (node) => node.scrollHeight > node.clientHeight + 1
+      for (const tile of document.querySelectorAll('[data-sw-tile]')) {
+        const box = tile.getBoundingClientRect()
+        const last = [...tile.querySelectorAll('p')].at(-1).getBoundingClientRect()
+        if (cut(tile) || last.bottom > box.bottom - 2) out.push(`tile ${tile.getAttribute('data-sw-tile')}`)
+      }
+      for (const list of document.querySelectorAll('[data-sw-top] ol'))
+        if (cut(list)) out.push(`list ${list.closest('[data-sw-top]').getAttribute('data-sw-top')}`)
+      for (const list of document.querySelectorAll('[data-sw-usage-budgets] ul')) if (cut(list)) out.push('budgets')
+      for (const card of document.querySelectorAll('[data-sw-chart]')) {
+        const box = card.getBoundingClientRect()
+        const legend = card.querySelector('[data-sw-chart-legend]')?.getBoundingClientRect()
+        const plot = card.querySelector('.recharts-wrapper, [data-sw-breakdown]')?.getBoundingClientRect()
+        if ((legend && legend.bottom > box.bottom + 1) || (plot && plot.bottom > box.bottom + 1) || (plot && plot.height < 120))
+          out.push(`chart ${card.getAttribute('data-sw-chart')}`)
+      }
+      return out
+    })
+  assert.deepEqual(await clipped(), [], 'looking at the default dashboard')
+  assert.equal(await page.locator('[data-sw-top] li').count(), 20, 'five rows in each of the four lists')
+  // The budgets of three projects: every row, and no blank band under the last.
+  assert.deepEqual((await placeOf(page, 'budgets')).slice(2), [12, 4])
+  const band = await page
+    .locator('[data-sw-usage-budgets]')
+    .evaluate((card) => card.getBoundingClientRect().bottom - card.querySelector('li:last-child').getBoundingClientRect().bottom)
+  assert.ok(band >= 0 && band < 24, `${band} px under the last project`)
+
+  // Editing: the bar is the widget's heading (its name is there once), and everything still fits under it.
+  await editLayout(page)
+  await page.locator('[data-sw-widget="tile_calls"] [data-sw-widget-bar]').waitFor()
+  assert.equal(await page.locator('[data-sw-chart-header]:visible').count(), 0, 'no second title on a chart')
+  assert.equal(
+    await page.locator('[data-sw-top] h2:visible, [data-sw-usage-budgets] h2:visible').count(),
+    0,
+    'nor on a list or the budgets',
+  )
+  for (const [id, title] of [
+    ['latency', 'Turn duration'],
+    ['top_agents', 'Busiest agents'],
+    ['tile_tokens', 'Tokens'],
+    ['budgets', 'Budgets today'],
+  ]) {
+    const text = await widget(page, id).evaluate((node) => node.innerText)
+    assert.equal(text.split(title).length - 1, 1, `${title} is named once: ${text.slice(0, 80)}`)
+  }
+  // (A chart takes a moment to redraw at the height its bar leaves it.)
+  await page.waitForFunction(() =>
+    [...document.querySelectorAll('[data-sw-chart]')].every((card) => {
+      const plot = card.querySelector('.recharts-wrapper')
+      return !plot || plot.getBoundingClientRect().bottom <= card.getBoundingClientRect().bottom + 1
+    }),
+  )
+  assert.deepEqual(await clipped(), [], 'editing the default dashboard')
+  assert.match(await page.locator('[data-sw-tile="tokens"]').textContent(), /of [\d,]+ turns reported/, 'a tile keeps its third line')
+  await shot(page, 'e2e-layout-edit-fits')
+
+  // A list set to ten rows grows to hold them; to three, shrinks. What is under it moves with it.
+  const under = (await placeOf(page, 'budgets'))[1]
+  await widget(page, 'top_agents').locator('[data-sw-widget-options]').click()
+  let panel = page.locator('[data-sw-widget-options-panel="top_agents"]')
+  await panel.locator('[data-sw-pick="option-rows"]').click()
+  await page.getByRole('option', { name: 'Top 3', exact: true }).click()
+  await page.locator('[data-sw-top="agents"] [data-sw-top-rows="3"]').waitFor()
+  assert.deepEqual(await placeOf(page, 'top_agents'), [0, 20, 3, 3])
+  await panel.locator('[data-sw-pick="option-rows"]').click()
+  await page.getByRole('option', { name: 'Top 10', exact: true }).click()
+  await page.waitForFunction(
+    () => document.querySelector('[data-sw-widget="top_agents"]')?.getAttribute('data-sw-widget-place') === '0,20,3,7',
+  )
+  assert.equal((await placeOf(page, 'budgets'))[1], under + 3)
+  await page.keyboard.press('Escape')
+  await panel.waitFor({ state: 'detached' })
+  assert.deepEqual(await clipped(), [])
+  // A list sized by hand keeps the height it was given, whatever its rows: it scrolls inside itself.
+  await widget(page, 'top_threads').focus()
+  await page.keyboard.press('Shift+ArrowDown')
+  await said(page, /Threads that used the most tokens resized: row 21, column 4; 3 wide, 5 tall/)
+  await widget(page, 'top_threads').locator('[data-sw-widget-options]').click()
+  panel = page.locator('[data-sw-widget-options-panel="top_threads"]')
+  await panel.locator('[data-sw-pick="option-rows"]').click()
+  await page.getByRole('option', { name: 'Top 10', exact: true }).click()
+  await page.locator('[data-sw-top="threads"] [data-sw-top-rows="10"]').waitFor()
+  await page.keyboard.press('Escape')
+  await panel.waitFor({ state: 'detached' })
+  assert.deepEqual(await placeOf(page, 'top_threads'), [3, 20, 3, 5])
+  assert.deepEqual(await clipped(), ['list threads'])
+  await layoutSaved(page)
+  const stored = (await storedLayout(s.ada)).layout
+  assert.deepEqual(
+    [itemOf(stored, 'top_agents').auto, itemOf(stored, 'top_threads').auto, itemOf(stored, 'top_threads').h],
+    [true, false, 5],
+  )
+  await page.locator('[data-sw-layout-done]').click()
+  await page.reload()
+  await page.locator('[data-sw-top="threads"] [data-sw-top-rows="10"]').waitFor()
+  assert.deepEqual(await placeOf(page, 'top_agents'), [0, 20, 3, 7])
+  assert.deepEqual(await placeOf(page, 'top_threads'), [3, 20, 3, 5])
+  assert.deepEqual(await clipped(), ['list threads'])
+
+  // More projects, taller budgets, while nobody sized them by hand; from six on the list scrolls.
+  await helpers.reauth(s.ada)
+  for (const name of ['Help centre', 'Status page']) await helpers.createProject(s.ada, s.ws, name)
+  await page.reload()
+  await page.waitForFunction(() => document.querySelectorAll('[data-sw-budget]').length === 5)
+  await page.waitForFunction(() =>
+    document.querySelector('[data-sw-widget="budgets"]')?.getAttribute('data-sw-widget-place').endsWith(',12,6'),
+  )
+  assert.ok(!(await clipped()).includes('budgets'), 'five projects fit')
+  for (const name of ['Blog', 'Changelog']) await helpers.createProject(s.ada, s.ws, name)
+  await page.reload()
+  await page.waitForFunction(() => document.querySelectorAll('[data-sw-budget]').length === 7)
+  assert.deepEqual((await placeOf(page, 'budgets')).slice(2), [12, 6])
+  assert.ok((await clipped()).includes('budgets'), 'seven scroll inside the card')
+  assert.deepEqual(errors, [])
 })

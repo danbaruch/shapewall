@@ -56,8 +56,8 @@ export function useAddress() {
 // The filter keys of the Usage pages, as the address and the API name them.
 export const FILTER_KEYS = ['agent', 'project', 'person', 'kind', 'model', 'outcome']
 export const RANGE_KEYS = ['tokensMin', 'tokensMax', 'durationMin', 'durationMax']
-// What a saved view keeps: everything but the open row.
-export const VIEW_SKIP = ['row']
+// What a saved view keeps: everything but the open row (and which view's layout is on show).
+export const VIEW_SKIP = ['row', 'view']
 
 // The period and filters of the address, as API parameters.
 export function useUsageFilter() {
