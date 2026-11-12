@@ -68,7 +68,7 @@ commands from the board in this release. See [the hosted guide](/docs/hosted#edi
 On a new branch, never in the checked-out tree. The agent works in a fresh copy of the base commit, in a folder outside the
 project on its own machine. Shapewall commits the result on a branch named `shapewall/comment-<n>-<slug>`, and keeps the commit
 only if it is exactly what was allowed. The branch is pushed when that machine has the remote and the change touches nothing that
-runs in CI, and a pull request is opened when [GitHub connect](/docs/github) is set up there. Otherwise the thread says "Fix ready
+runs on install, build, test or CI and a person saw every edit, and a pull request is opened when [GitHub connect](/docs/github) is set up there. Otherwise the thread says "Fix ready
 on branch" with the name to copy. The folder is removed afterwards; the branch stays. You review and merge it like any other.
 
 ## Who can approve an agent's edit?

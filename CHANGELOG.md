@@ -96,6 +96,28 @@ go back, restore the backup with 0.5.0, or run 0.5.0 on the upgraded database: i
 cannot be started from it. Details and the SQL to remove the schema are in
 [Migration 14 and rollback](docs/hosted.md#migration-14-and-rollback).
 
+### After the security review
+
+- **Files that run something.** One list (dotfiles, manifests and lockfiles, build and tool configuration, package scripts,
+  container and CI files, makefiles, test files) decides both what a connected agent may be asked to edit and what is pushed. An
+  edit to one is refused unless the machine names it with `--allow-path`; a named one is always answered by a person; a fix that
+  changes one is never pushed from the machine.
+- **Push this fix.** A fix with an edit that went without asking (`--auto edits`) is committed on its branch on the machine and
+  held there. It is pushed, and a pull request opened, only after someone who may answer cards allows one card that shows the
+  whole diff, with a fresh passkey. It can be asked again.
+- **Only the connecting person switches "Allow without asking" on** when their machine says `--approvals owner`.
+- **Stop stops the commit, the push and the pull request.** A push that had already finished is said in the thread.
+- **The commit check compares bytes and file mode**, and fails when an allowed file is missing from the commit. Edits to files
+  Git ignores, to `node_modules` and to `.gitattributes` / `.gitmodules` are refused when they are asked.
+- **The policy file fails narrow**: an unknown value reads as the narrowest setting, by name, and the file's owner and mode are
+  checked before it is read.
+- **Cards wait a length of time**, counted on each side's own clock. An answer the machine did not take shows as expired.
+- **Diffs on cards go to the agent's audience** (and whoever may answer or asked). Other members read which file and the outcome.
+- **Fix on a comment whose run needs approval**: an admin's Fix approves and starts; a member's really sends it for approval.
+- **Leftover fix copies are swept** at connect and around every fix; the fix folder is never inside the project.
+- A fix's status is written with its own claim; a pull request link must be a pull request URL (a link only on github.com);
+  cards count against the storage quota; comment text in a commit subject or pull request title pings and closes nothing.
+
 ## 0.5.0 - 2026-11-12
 
 Connected agents: your Claude Code on a hosted board, to chat with. It reads and answers only. Nothing changes on a local board.

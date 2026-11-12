@@ -21,6 +21,7 @@ import { after, before, test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
+import { execFileSync } from 'node:child_process'
 import { chromium } from 'playwright'
 import { createRemote, pushDefinition, pushFiles } from '../../src/remote/remote.js'
 import { createProject, invite, reauth, signUp, startHostedServer, writeLocalCaptures } from '../hosted-helpers.js'
@@ -590,4 +591,79 @@ test('the Agents panel and the console say which mode each agent is in, and why 
   assert.equal(refused.status, 409, refused.text)
   assert.equal(refused.json.error.code, 'approval_auto_unavailable')
   assert.deepEqual(realErrors(errors), [])
+})
+
+test('a fix made without asking is held: "Push this fix" shows its whole diff, Deny keeps it on the machine, asking again and Allow pushes it', async () => {
+  // A machine with a remote, whose connector let edits go without asking.
+  const dir = tempDir('hosted-fix-e2e-pusher')
+  const pusherGit = gitRepo(dir)
+  const bare = tempDir('hosted-fix-e2e-pusher-bare')
+  execFileSync('git', ['init', '-q', '--bare', bare])
+  pusherGit('remote', 'add', 'origin', bare)
+  const onRemote = () => execFileSync('git', ['--git-dir', bare, 'branch', '--format=%(refname:short)'], { encoding: 'utf8' }).trim()
+  hosted.db.prepare('UPDATE sessions SET verified_at = ?').run(new Date().toISOString())
+  const dee = await signUp(hosted, { handle: 'dee', displayName: 'Dee', invite: await invite(ada, ws, 'admin') })
+  const pusher = await connectAgent(hosted, dee, {
+    workspaceId: ws,
+    projectId: project.id,
+    name: 'Pusher',
+    kind: 'claude',
+    audience: 'trusted',
+  })
+  assert.equal(pusher.status, 200, JSON.stringify(pusher.error))
+  const link = startLink(hosted, pusher.token, { cwd: dir, edits: { approvals: 'admins', auto: ['edits'], remote: 'origin' } })
+  links.push(link)
+  assert.ok(await link.ready, link.failure()?.message)
+  hosted.db.prepare("UPDATE agents SET approval_rule = 'auto', approval_rule_by = created_by WHERE id = ?").run(pusher.agentId)
+
+  const made = await comment(ada, `Make the heading teal. ${fixScript([['edit', 'styles.css', 'blue', 'teal']])}`)
+  const adas = await views(ada)
+  const one = adas[0]
+  await each(adas, async (page, view) => {
+    await page.goto(boardPage(`&c=${made.id}`))
+    await page.waitForSelector(`[data-sw-hosted-fix-split="${made.id}"]`)
+    if (view !== one) return
+    await press(view, `[data-sw-hosted-fix-choose="${made.id}"]`)
+    await press(view, `[data-sw-hosted-fix-menu="${made.id}"] [data-sw-agent-option="${pusher.agentId}"]`)
+  })
+  // The edit went without asking; the fix is committed on the machine and waits to be looked at.
+  const pushCard = (page) => page.locator('[data-sw-chat-card="permission"][data-state="pending"]', { hasText: 'Push this fix' }).last()
+  await pushCard(one.page).waitFor({ timeout: 60_000 })
+  await each(adas.slice(1), async (page) => {
+    await page.goto(boardPage(chatOf(made.id)))
+    await pushCard(page).waitFor({ timeout: 30_000 })
+  })
+  const asked = pushCard(one.page)
+  assert.match(await asked.locator('[data-sw-chat-diff]').textContent(), /teal/, 'the whole diff of the fix')
+  assert.match(await asked.textContent(), /This is the whole fix\. No answer in 10 minutes: it stays on the agent's machine, not pushed\./)
+  assert.match(await asked.textContent(), /shapewall\/comment-/)
+  assert.equal(onRemote(), '', 'nothing is pushed yet')
+  await shots(adas, 'chat-card-push')
+  // Deny: it stays where it is, and the result says so, with a way to ask again.
+  await press(one, '[data-sw-chat-card="permission"][data-state="pending"] [data-sw-chat-permission-option="deny"]')
+  await each(adas, (page) => page.waitForSelector('[data-sw-chat-branch-push]', { timeout: 60_000 }))
+  const summary = one.page.locator('[data-sw-chat-summary="remote-branch"]').last()
+  assert.match(
+    await summary.locator('[data-sw-chat-branch-pushed="false"]').textContent(),
+    /On the agent's machine, not pushed: its edits went without asking, so someone has to look at the whole diff first/,
+  )
+  assert.equal(onRemote(), '')
+  await shots(adas, 'chat-fix-held')
+  // Ask again, look, allow: now it is pushed. (The passkey step of Allow is in the test above:
+  // this person's passkey was used in another browser there, and a passkey counts its uses.)
+  hosted.db.prepare('UPDATE sessions SET verified_at = ?').run(new Date().toISOString())
+  await press(one, '[data-sw-chat-branch-push]')
+  await pushCard(one.page).waitFor({ timeout: 60_000 })
+  await press(one, '[data-sw-chat-card="permission"][data-state="pending"] [data-sw-chat-permission-option="allow"]')
+  await one.page.waitForSelector('[data-sw-chat-branch-pushed="true"]', { timeout: 60_000 })
+  assert.match(await one.page.locator('[data-sw-chat-branch-pushed="true"]').last().textContent(), /Pushed to origin/)
+  assert.match(onRemote(), /^shapewall\/comment-/)
+  assert.equal(await one.page.locator('[data-sw-chat-summary="remote-branch"]').last().locator('[data-sw-chat-branch-push]').count(), 0)
+  assert.equal(pusherGit('status', '--porcelain'), '')
+  await each(adas.slice(1), async (page) => {
+    await page.goto(boardPage(chatOf(made.id)))
+    await page.waitForSelector('[data-sw-chat-branch-pushed="true"]')
+  })
+  await shots(adas, 'chat-fix-pushed')
+  for (const view of adas) assert.deepEqual(realErrors(view.errors), [])
 })

@@ -181,7 +181,8 @@ export function PermissionCard({ card, onAnswer, live, touch }) {
     >
       {pending ? (
         <p className="flex items-center gap-1.5 border-b border-warn/30 bg-warn/10 px-3 py-1.5 text-xs font-medium text-fg">
-          <ShieldQuestion size={13} className="shrink-0 text-warn" aria-hidden="true" /> The agent asks before it acts
+          <ShieldQuestion size={13} className="shrink-0 text-warn" aria-hidden="true" />{' '}
+          {card.name === 'push' ? 'Nobody has looked at this fix yet' : 'The agent asks before it acts'}
         </p>
       ) : null}
       <div className="space-y-1.5 px-3 py-2">

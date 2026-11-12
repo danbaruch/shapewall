@@ -528,9 +528,13 @@ Commands
                             the list; "none" empties it). Default: no commands at all. Not for Claude Code in
                             this release: with its shell tool it runs read-only commands without asking
       --auto none|edits|commands|edits,commands  what the server's "allow without asking" rule may apply to
-                            (default none). Still only inside the project, and only the listed commands
-      --allow-path FILE     a settings file (a dotfile, package.json, a Makefile, CI config) the agent may ask to
-                            edit; such edits are refused otherwise (adds to the list; "none" empties it)
+                            (default none). Never a file that runs something. Such a fix stays on this machine:
+                            it is pushed only after a person allows "Push this fix" on its whole diff. With
+                            --approvals owner, only the person who connected it can switch the rule on
+      --allow-path FILE     a file that runs on install, build, test or CI (a dotfile, package.json, a Makefile,
+                            a *.config.js, a script, a test, CI config) the agent may ask to edit; such edits are
+                            refused otherwise, a named one is always asked, and a fix that changes one is never
+                            pushed (adds to the list; "none" empties it)
       --base BRANCH         the branch a fix starts from (default "head": the commit this checkout is on, and
                             then only while it has no uncommitted changes)
       --git-remote NAME     where a finished fix is pushed (default origin; "none": never pushed). A pull request
