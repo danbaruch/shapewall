@@ -55,7 +55,7 @@ export function createApiTokens({ iso, auditOf, agentsFor = null }) {
     if (scopes.includes('claim') && agentsFor)
       agentsFor(req.t).create(
         { userId: req.user.id, role: req.role, audit: (action, target, detail) => auditOf(req, action, target, detail) },
-        { projectId: req.project.id, tokenId: id, machine },
+        { projectId: req.project.id, tokenId: id, name, machine },
       )
     const info = listTokens(req.t, { projectId: req.project.id, now: iso() }).find((item) => item.id === id)
     return { token, info }

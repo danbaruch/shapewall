@@ -61,8 +61,11 @@ export function createAgentPresence({ now = () => new Date(), ttlMs = AGENT_PRES
       const id = agentKey(workspaceId, agentId)
       const entry = seenAt.get(id)
       seenAt.delete(id)
-      if (entry && latest.get(projectKey(entry.workspaceId, entry.projectId)) === id)
-        latest.delete(projectKey(entry.workspaceId, entry.projectId))
+      if (!entry || latest.get(projectKey(entry.workspaceId, entry.projectId)) !== id) return
+      // The project's summary falls back to the agent heard from before it.
+      const project = projectKey(entry.workspaceId, entry.projectId)
+      latest.delete(project)
+      for (const [key, other] of seenAt) if (projectKey(other.workspaceId, other.projectId) === project) latest.set(project, key)
     },
     forget(workspaceId, projectId) {
       for (const [id, entry] of [...seenAt]) if (entry.workspaceId === workspaceId && entry.projectId === projectId) seenAt.delete(id)

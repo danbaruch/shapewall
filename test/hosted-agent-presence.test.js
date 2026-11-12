@@ -1,6 +1,7 @@
-// "Is an agent listening?" on hosted boards (src/hosted/agent-presence.js):
-// a claim-scoped token heard from within the last 90 seconds, per project,
-// told to members as a display name and a time and nothing else.
+// "Which agents are listening?" on hosted boards (src/hosted/agent-presence.js):
+// a claim-scoped token heard from within the last 90 seconds is its agent
+// online; the project as a whole is still told to members as a display name
+// and a time and nothing else (`agentListening`, as boards read since 0.3.3).
 import { after, before, test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -14,7 +15,7 @@ test('presence: online for 90 seconds after a claim-scoped token was heard from,
   let at = Date.parse('2026-11-11T10:00:00.000Z')
   const presence = createAgentPresence({ now: () => new Date(at) })
   assert.deepEqual(presence.of('ws_a', 'pr_a'), { online: false, name: null, lastSeenAt: null })
-  presence.seen('ws_a', 'pr_a', 'Build box')
+  presence.seen('ws_a', 'pr_a', 'ag_1', 'Build box')
   assert.deepEqual(presence.of('ws_a', 'pr_a'), { online: true, name: 'Build box', lastSeenAt: '2026-11-11T10:00:00.000Z' })
   assert.equal(presence.of('ws_a', 'pr_b').online, false, 'another project of the workspace')
   assert.equal(presence.of('ws_b', 'pr_a').online, false, 'another workspace')
@@ -23,10 +24,38 @@ test('presence: online for 90 seconds after a claim-scoped token was heard from,
   at += 1
   // Gone quiet: offline, and it still says who was last heard and when.
   assert.deepEqual(presence.of('ws_a', 'pr_a'), { online: false, name: 'Build box', lastSeenAt: '2026-11-11T10:00:00.000Z' })
-  presence.seen('ws_a', 'pr_a', 'x'.repeat(200))
+  presence.seen('ws_a', 'pr_a', 'ag_1', 'x'.repeat(200))
   assert.equal(presence.of('ws_a', 'pr_a').name.length, 80)
   presence.forget('ws_a', 'pr_a')
   assert.equal(presence.of('ws_a', 'pr_a').lastSeenAt, null)
+})
+
+test('presence is per agent: each has its own clock, the project summary names the one heard last, and a save is due once a minute', () => {
+  let at = Date.parse('2026-11-11T10:00:00.000Z')
+  const presence = createAgentPresence({ now: () => new Date(at) })
+  assert.deepEqual(presence.ofAgent('ws_a', 'ag_1'), { online: false, lastSeenAt: null })
+  assert.deepEqual(presence.seen('ws_a', 'pr_a', 'ag_1', 'Builder'), { cameOnline: true, save: true })
+  at += 30_000
+  assert.deepEqual(presence.seen('ws_a', 'pr_a', 'ag_2', 'Fixer'), { cameOnline: true, save: true })
+  // Heard again half a minute later: still online, nothing to write yet.
+  assert.deepEqual(presence.seen('ws_a', 'pr_a', 'ag_1', 'Builder'), { cameOnline: false, save: false })
+  assert.equal(presence.of('ws_a', 'pr_a').name, 'Builder')
+  at += 30_000
+  assert.deepEqual(presence.seen('ws_a', 'pr_a', 'ag_1', 'Builder'), { cameOnline: false, save: true }, 'a minute since the last save')
+  // Fixer goes quiet, Builder keeps calling.
+  at += AGENT_PRESENCE_TTL_MS - 30_000 + 1
+  presence.seen('ws_a', 'pr_a', 'ag_1', 'Builder')
+  assert.equal(presence.ofAgent('ws_a', 'ag_1').online, true)
+  assert.deepEqual(presence.ofAgent('ws_a', 'ag_2'), { online: false, lastSeenAt: '2026-11-11T10:00:30.000Z' })
+  assert.equal(presence.ofAgent('ws_b', 'ag_1').online, false, 'another workspace')
+  assert.equal(presence.seen('ws_a', 'pr_a', 'ag_2', 'Fixer').cameOnline, true, 'back after going quiet')
+  // A revoked agent is forgotten; the project summary falls back to the other.
+  presence.forgetAgent('ws_a', 'ag_2')
+  assert.deepEqual(presence.ofAgent('ws_a', 'ag_2'), { online: false, lastSeenAt: null })
+  assert.equal(presence.of('ws_a', 'pr_a').name, 'Builder')
+  presence.forgetAgent('ws_a', 'ag_1')
+  assert.equal(presence.of('ws_a', 'pr_a').name, null)
+  assert.deepEqual(presence.seen('ws_a', 'pr_a', null, 'nobody'), { cameOnline: false, save: false })
 })
 
 let hosted

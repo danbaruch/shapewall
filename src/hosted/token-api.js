@@ -104,7 +104,8 @@ export function mountTokenApi({
     // build ran on this database becomes an agent here, on first sight.
     req.agent = req.token.scopes.includes('claim')
       ? agentsFor(req.t).forToken(row.project_id, row.id, {
-          onFirstSight: (agent) => auditOf(req, 'agent_first_seen', agent.id, { project: row.project_id, token: row.id, kind: agent.kind }),
+          onFirstSight: (agent) =>
+            auditOf(req, 'agent_first_seen', agent.id, { project: row.project_id, token: row.id, name: row.name, kind: agent.kind }),
         })
       : null
     if (req.agent) agentsFor(req.t).seen(req.agent)

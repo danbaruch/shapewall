@@ -69,6 +69,10 @@ export function mountHostedApprovals({
         throw error(400, 'invalid_command', 'Command: 1 to 8000 characters.')
       const ctx = boardContext(req.t, req.project, req.params.bid)
       const comment = ctx.comments.get(req.params.cid)
+      // A comment sent to another agent does not exist for this token, here
+      // as on every other route.
+      if (agentsFor && !agentsFor(req.t).claimCheck(req.agent, req.project.id, comment).ok)
+        throw error(404, 'unknown_comment', 'No dispatched comment at that id.')
       const at = now().toISOString()
       const id = `sa_${randomBytes(10).toString('hex')}`
       const claim = req.t.get(

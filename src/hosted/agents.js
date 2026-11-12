@@ -128,9 +128,19 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
   }
   // A new token with the claim scope: its agent, for the person who made it
   // only until they say otherwise. `machine`: the label `shapewall login` sent.
-  function create(actor, { projectId, tokenId, machine = null, kind = 'watcher' }) {
-    const id = insert({ projectId, tokenId, userId: actor.userId, machine: cleanMachine(machine), kind })
-    actor.audit('agent_created', id, { project: projectId, token: tokenId, kind, audience: 'owner', ...(machine ? { machine } : {}) })
+  // Audit entries about an agent carry its name: the log reads without a
+  // lookup, and still makes sense after the agent is gone.
+  function create(actor, { projectId, tokenId, name = null, machine = null, kind = 'watcher' }) {
+    const label = cleanMachine(machine)
+    const id = insert({ projectId, tokenId, userId: actor.userId, machine: label, kind })
+    actor.audit('agent_created', id, {
+      project: projectId,
+      token: tokenId,
+      name,
+      kind,
+      audience: 'owner',
+      ...(label ? { machine: label } : {}),
+    })
     return id
   }
   const rows = (projectId = null) =>
@@ -334,7 +344,13 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
         { project: projectId, board: boardId, number: row.number },
       )
     forget()
-    if (from) actor.audit('agent_queue_released', `${boardId}#${row.number}`, { project: projectId, from, to: null })
+    if (from)
+      actor.audit('agent_queue_released', `${boardId}#${row.number}`, {
+        project: projectId,
+        from,
+        fromName: get(projectId, from)?.name || null,
+        to: null,
+      })
     return from
   }
   // May this agent take this comment? The two rules a token cannot get
@@ -554,7 +570,7 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
         ...look(next),
         id: row.id,
       })
-      actor.audit('agent_identity_changed', row.id, { project: projectId, before: look(before), after: look(next) })
+      actor.audit('agent_identity_changed', row.id, { project: projectId, name: next.name, before: look(before), after: look(next) })
     }
     return after(projectId, agentId)
   }
@@ -571,7 +587,12 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
         project: projectId,
         agent: row?.id || null,
       })
-      actor.audit('agent_default_changed', projectId, { before, after: row?.id || null })
+      actor.audit('agent_default_changed', projectId, {
+        before,
+        beforeName: get(projectId, before)?.name || null,
+        after: row?.id || null,
+        afterName: row?.name || null,
+      })
       forget()
     }
     return row?.id || null
@@ -607,7 +628,7 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
           id: row.id,
         },
       )
-      actor.audit('agent_audience_changed', row.id, { project: projectId, before, after: next })
+      actor.audit('agent_audience_changed', row.id, { project: projectId, name: row.name, before, after: next })
     }
     return after(projectId, agentId)
   }
@@ -646,7 +667,7 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
         'UPDATE agents SET approval_rule = :rule, approval_change_role = :changeRole, approval_answer_role = :answerRole WHERE workspace_id = :ws AND id = :id',
         { ...next, id: row.id },
       )
-      actor.audit('agent_approval_rule_changed', row.id, { project: projectId, before, after: next })
+      actor.audit('agent_approval_rule_changed', row.id, { project: projectId, name: row.name, before, after: next })
     }
     return after(projectId, agentId)
   }
