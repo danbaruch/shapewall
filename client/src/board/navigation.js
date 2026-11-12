@@ -7,6 +7,8 @@
 // - Ctrl or Cmd+wheel, and trackpad pinch (a wheel event with ctrlKey):
 //   zoom, keeping the point under the cursor still
 // - Space+drag and middle-button drag: pan, with a grab cursor
+// - the Hand tool (`handRef.current`): a plain left drag pans the same way,
+//   on pages and pins too, and its click opens nothing
 //
 // Touch (one-finger pan, two-finger pinch) is left to React Flow.
 import { useEffect, useMemo, useRef } from 'react'
@@ -111,7 +113,7 @@ export function spaceCanPan(element, { clicked = null } = {}) {
 // instance; `onRest(viewport)` runs once the camera stops after a wheel or a
 // drag (React Flow's onMoveEnd fires on every step we take, so the board
 // ignores it while `moving()` is true).
-export function useCanvasNavigation({ canvasRef, flow, minZoom, maxZoom, onRest, enabled = true }) {
+export function useCanvasNavigation({ canvasRef, flow, minZoom, maxZoom, onRest, enabled = true, handRef = null }) {
   const state = useRef({ moving: false })
   const onRestRef = useRef(onRest)
   useEffect(() => {
@@ -224,7 +226,7 @@ export function useCanvasNavigation({ canvasRef, flow, minZoom, maxZoom, onRest,
     const onPointerDown = (event) => {
       if (event.pointerType !== 'mouse') return
       const middle = event.button === 1
-      if (!middle && !(event.button === 0 && space)) return
+      if (!middle && !(event.button === 0 && (space || handRef?.current))) return
       if (!inRenderer(event.target)) return
       event.preventDefault()
       event.stopPropagation()
@@ -345,7 +347,7 @@ export function useCanvasNavigation({ canvasRef, flow, minZoom, maxZoom, onRest,
       window.removeEventListener('pointerdown', onPress, capture)
       window.removeEventListener('focusin', onFocusIn, capture)
     }
-  }, [canvasRef, enabled, flow, maxZoom, minZoom])
+  }, [canvasRef, enabled, flow, handRef, maxZoom, minZoom])
 
   return useMemo(() => ({ moving: () => state.current.moving }), [])
 }

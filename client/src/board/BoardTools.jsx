@@ -1,7 +1,10 @@
 // The board's tools: a small floating toolbar at the bottom centre of the
 // canvas, the way FigJam, Miro and tldraw do it. It holds what you do TO the
 // board, one tool at a time:
-//   Select       the default pointer: pan, zoom, open pages (Esc comes back to it)
+//   Select       the default pointer: click a page or a pin, drag empty
+//                canvas to pan (V; Esc comes back to it)
+//   Hand         drag anywhere to pan, pages and pins too; a click opens
+//                nothing (H; holding Space is a temporary hand). Desktop only
 //   Comment      click a page to pin a comment (C)
 //   Draw         click a page to draw on it: a box, an arrow or the pen. A
 //                drawing is part of a comment, so with a comment or a reply
@@ -9,22 +12,25 @@
 //   Select text  on the selected live page (desktop)
 // The board toolbar at the top keeps what you look AT (the board, the screen
 // sizes, Views, the side panels). The tools a person may not use are not
-// shown; with only Select left there is no toolbar at all.
+// shown; with only Select left there is no toolbar at all. Someone who may
+// not comment gets Select and Select text only while a page is live.
 //
 // The dock is one column along the bottom of the canvas, so nothing in it
 // can overlap: the toast, the journey bar, the note for the tool in use (the
 // comment hint, "Commenting on ...", the drawing bar, the select-text note)
 // and the tools last. toolDock.js keeps the tools clear of the zoom controls
 // and the minimap.
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { Brush, MessageSquarePlus, MousePointer2, TextSelect } from 'lucide-react'
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Brush, Hand, MessageSquarePlus, MousePointer2, TextSelect } from 'lucide-react'
 import { cn } from '../lib/utils'
 import { Button, Tooltip } from '../components/ui'
 import { useBoardView } from './boardView'
 import { KeyTip } from './KeyTip'
+import { POINTER_TOOLS, hasDivider } from './tools'
 
 export const TOOLS = {
-  select: { label: 'Select', tip: 'Select: move around, open pages', keys: ['Esc'], shortcut: 'Escape', icon: MousePointer2 },
+  select: { label: 'Select', tip: 'Select: click a page or a pin', keys: ['V'], shortcut: 'V', icon: MousePointer2 },
+  hand: { label: 'Hand', tip: 'Hand: drag anywhere to move, opens nothing', keys: ['H'], shortcut: 'H', icon: Hand },
   comment: { label: 'Comment', tip: 'Comment: click a page to pin a note', keys: ['C'], shortcut: 'C', icon: MessageSquarePlus },
   draw: { label: 'Draw', tip: 'Draw on a page: box, arrow or pen', keys: [], icon: Brush },
   text: { label: 'Select text', tip: 'Select text on the selected live page', keys: [], icon: TextSelect },
@@ -52,6 +58,7 @@ export function ToolDock({ touch, children }) {
 // arrow keys, Home and End move between its tools.
 export function BoardTools({ tools, active, onTool, touch, shift = 0 }) {
   const bar = useRef(null)
+  const divided = hasDivider(tools)
   const onKeyDown = (event) => {
     if (event.altKey || event.ctrlKey || event.metaKey) return
     const buttons = Array.from(bar.current?.querySelectorAll('button[data-sw-tool]') || [])
@@ -85,12 +92,22 @@ export function BoardTools({ tools, active, onTool, touch, shift = 0 }) {
       {tools.map((id) => {
         const tool = TOOLS[id]
         const on = id === active
+        // Select and Hand in use are quiet: the neutral fill of a chosen
+        // segment (the screen-size switch). The filled accent is for the
+        // tools that change what a click does: Comment, Draw, Select text.
+        const quiet = on && POINTER_TOOLS.has(id)
         const button = (
           <Button
             key={id}
-            variant={on ? 'default' : 'ghost'}
+            variant={on && !quiet ? 'default' : 'ghost'}
             size={touch ? 'icon' : 'icon-sm'}
-            className={cn('shadow-none focus-visible:outline-offset-1', touch && 'rounded-lg', !on && 'text-fg/80 hover:text-fg')}
+            className={cn(
+              'shadow-none focus-visible:outline-offset-1',
+              touch && 'rounded-lg',
+              !on && 'text-fg/80 hover:text-fg',
+              quiet && 'bg-surface-2 text-fg ring-1 ring-line-strong/70 ring-inset hover:bg-surface-2',
+            )}
+            data-sw-tool-look={on ? (quiet ? 'quiet' : 'accent') : undefined}
             aria-label={tool.label}
             aria-pressed={on}
             aria-keyshortcuts={tool.shortcut}
@@ -104,12 +121,21 @@ export function BoardTools({ tools, active, onTool, touch, shift = 0 }) {
           </Button>
         )
         // Touch screens have no hover (and a tap would leave the tip up).
-        return touch ? (
+        const item = touch ? (
           button
         ) : (
           <Tooltip key={id} content={<KeyTip label={tool.tip} keys={tool.keys} />} side="top">
             {button}
           </Tooltip>
+        )
+        // A hairline between moving around (Select, Hand) and the rest.
+        return id === 'hand' && divided ? (
+          <Fragment key={id}>
+            {item}
+            <span className="mx-0.5 h-5 w-px shrink-0 bg-line" aria-hidden="true" data-sw-tools-divider="true" />
+          </Fragment>
+        ) : (
+          item
         )
       })}
     </div>

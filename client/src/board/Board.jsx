@@ -45,6 +45,8 @@ import { CanvasNotes } from './CanvasNotes'
 import { DrawingBar, DrawingMode, useDrawingMode } from './DrawingMode'
 import { BoardTools, ToolDock, ToolNote, useCanvasWidth, useKeyboardUp } from './BoardTools'
 import { DOCK, NOTE_ROOM, placeTools, toolsWidth } from './toolDock'
+import { activeTool as toolInUse, hasDivider, toolForKey, toolList } from './tools'
+import { isIgnoredTypeahead } from '../components/ui'
 import { drawing } from './drawing'
 import { nudgeComposer } from './composerNudge'
 import { BoardToast, NoticeBar, useToast } from './Toast'
@@ -839,7 +841,11 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   )
   // Wheel, Space+drag and middle-drag move the camera in many small steps;
   // the camera rests once, when they stop (navigation.js).
-  const navigation = useCanvasNavigation({ canvasRef, flow, minZoom: MIN_ZOOM, maxZoom: MAX_ZOOM, onRest: cameraRested })
+  // The Hand tool (desktop): a drag anywhere pans and a click opens nothing
+  // (navigation.js reads the ref when a press starts).
+  const [hand, setHand] = useState(false)
+  const handRef = useRef(false)
+  const navigation = useCanvasNavigation({ canvasRef, flow, minZoom: MIN_ZOOM, maxZoom: MAX_ZOOM, onRest: cameraRested, handRef })
   const onMoveEnd = useCallback(
     (event, viewport) => {
       if (!navigation.moving()) cameraRested(viewport)
@@ -1270,21 +1276,37 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
         (data?.variants || []).some((variant) => Object.values(variant.files || {}).some((file) => file?.live))),
     [comparePair, data?.captures, data?.variants],
   )
-  const tools = ['select', commenting && 'comment', commenting && commentMedia.draw && 'draw', wide && hasLive && 'text'].filter(Boolean)
-  const activeTool =
-    drawingOn || (commentMode && drawArmed && commenting)
-      ? 'draw'
-      : commentMode && commenting
-        ? 'comment'
-        : selectingKey && wide
-          ? 'text'
-          : 'select'
+  // Select text: beside Comment and Draw whenever the board has live pages;
+  // for someone who may not comment, only while a page is live (a pointer
+  // and a tool that cannot be used yet would be noise).
+  const tools = toolList({
+    wide,
+    commenting,
+    draw: commentMedia.draw,
+    liveBoard: hasLive,
+    livePage: liveKeys.size > 0 || Boolean(selectingKey),
+  })
+  const activeTool = toolInUse({
+    drawing: drawingOn,
+    commentMode: commentMode && commenting,
+    drawArmed,
+    selecting: Boolean(selectingKey) && wide,
+    hand: hand && wide,
+  })
+  handRef.current = activeTool === 'hand'
+  // One tool at a time: Comment, Draw or Select text takes over from Hand.
+  useEffect(() => {
+    if (commentMode || selectingKey || drawingOn) setHand(false)
+  }, [commentMode, selectingKey, drawingOn])
   const pickTool = (id) => {
     const session = drawing.get()
-    if (id === 'select') {
+    if (id === 'select' || id === 'hand') {
       if (session?.tool) drawing.set({ tool: null })
       setSelectingKey(null)
       setCommentMode(false)
+      setHand(id === 'hand')
+      // Hand selects nothing: the selected card lets go.
+      if (id === 'hand') clearFocus()
     } else if (id === 'comment') {
       // From drawing: one step back, to the comment. From Draw with no page
       // picked: the same click now pins a comment. Else on and off, as C.
@@ -1320,17 +1342,38 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   // Esc leaves "Select text" (back to Select), unless it closes something
   // first. Read in the capture phase and used up, as comment mode's Esc is
   // (useCommentModeKeys), so the same key does not also leave a journey.
+  // Esc from Hand goes to Select the same way.
   useEffect(() => {
-    if (!selectingKey || commentMode) return undefined
+    if ((!selectingKey && !hand) || commentMode) return undefined
     const onKey = (event) => {
       if (event.key !== 'Escape' || event.defaultPrevented || isEditable(event.target)) return
       if (document.querySelector('[role="dialog"], [role="menu"], [role="listbox"]')) return
       event.preventDefault()
       setSelectingKey(null)
+      setHand(false)
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [selectingKey, commentMode])
+  }, [selectingKey, hand, commentMode])
+  // V is Select, H is Hand (tools.js: not while typing or with a dialog,
+  // menu or list open; the same guard as C).
+  const pickToolRef = useRef(pickTool)
+  pickToolRef.current = pickTool
+  const toolKeys = tools.join(',')
+  useEffect(() => {
+    const onKey = (event) => {
+      const tool = toolForKey(event, {
+        tools: toolKeys.split(','),
+        busy: Boolean(document.querySelector('[role="dialog"]:not([data-sw-thread-popover]), [role="menu"], [role="listbox"]')),
+        handled: event.defaultPrevented && !isIgnoredTypeahead(event),
+      })
+      if (!tool) return
+      event.preventDefault()
+      pickToolRef.current(tool)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [toolKeys])
   // The note for the tool in use, above the tools: one at a time.
   const toolNote = drawingOn
     ? 'drawing'
@@ -1356,7 +1399,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     : wide
       ? placeTools({
           width: canvasWidth,
-          tools: toolsWidth(tools.length),
+          tools: toolsWidth(tools.length, false, hasDivider(tools)),
           left: [DOCK.zoomFull, DOCK.zoomCompact, 0],
           right: minimapWanted ? DOCK.minimap : 0,
         })
@@ -1615,7 +1658,11 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
               <div
                 ref={canvasRef}
                 tabIndex={-1}
-                className={cn('relative min-w-0 flex-1 outline-none', commentState === 'picking' && 'sw-commenting')}
+                className={cn(
+                  'relative min-w-0 flex-1 outline-none',
+                  commentState === 'picking' && 'sw-commenting',
+                  activeTool === 'hand' && 'sw-hand',
+                )}
                 onKeyDown={onCanvasKeyDown}
                 data-sw-canvas="true"
                 data-sw-comment-flow={commentState}
@@ -1705,7 +1752,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                     nodesDraggable={false}
                     nodesConnectable={false}
                     elementsSelectable={false}
-                    zoomOnDoubleClick={!commentMode}
+                    zoomOnDoubleClick={!commentMode && activeTool !== 'hand'}
                     onMoveEnd={onMoveEnd}
                     onPaneClick={() => {
                       clearFocus()

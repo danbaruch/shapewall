@@ -549,14 +549,18 @@ body {
   cursor: crosshair;
 }
 
-/* Space held over the canvas: a hand everywhere on it, closed while dragging
-   (Space or middle button). Beats comment mode's crosshair; a live page being
-   selected lets go of the mouse so the drag reaches the canvas. */
+/* Space held over the canvas, or the Hand tool: a hand everywhere on it,
+   closed while dragging (Space, Hand or the middle button). Beats comment
+   mode's crosshair; a live page being selected lets go of the mouse so the
+   drag reaches the canvas. */
 .sw-space-pan .react-flow__renderer,
-.sw-space-pan .react-flow__renderer * {
+.sw-space-pan .react-flow__renderer *,
+.sw-hand .react-flow__renderer,
+.sw-hand .react-flow__renderer * {
   cursor: grab !important;
 }
 .sw-space-pan iframe,
+.sw-hand iframe,
 .sw-panning iframe {
   pointer-events: none !important;
 }

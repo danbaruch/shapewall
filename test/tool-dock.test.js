@@ -25,6 +25,8 @@ test('the tools pill is as wide as its buttons: 32 px on desktop, 44 px on touch
   assert.equal(toolsWidth(1), 38)
   assert.equal(toolsWidth(4), 6 + 4 * 32 + 3 * 2)
   assert.equal(toolsWidth(3, true), 6 + 3 * 44 + 2 * 2)
+  // With the hairline after Hand: 1 px, 2 px each side, and one more gap.
+  assert.equal(toolsWidth(5, false, true), 6 + 5 * 32 + 4 * 2 + 5 + 2)
 })
 
 test('with room, the tools are centred on the canvas and nothing gives way', () => {
@@ -53,9 +55,9 @@ test('narrower: the tools shift off centre first, then the zoom controls compact
 })
 
 test('from the narrowest canvas up, nothing on the bottom row overlaps or leaves the canvas', () => {
-  for (const count of [2, 3, 4]) {
-    const tools = toolsWidth(count)
-    for (let width = 180; width <= 2600; width += 1) {
+  for (const count of [2, 3, 4, 5]) {
+    const tools = toolsWidth(count, false, count > 2)
+    for (let width = 206; width <= 2600; width += 1) {
       for (const right of [0, DOCK.minimap]) {
         const boxes = row({ width, tools, right })
         const label = count + ' tools at ' + width + (right ? ' with the minimap' : '')

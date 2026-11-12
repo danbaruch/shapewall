@@ -85,10 +85,15 @@ A fix for connected agents on the current Claude Code adapter.
 Board tools: the tools you use on the board moved out of the top bar.
 
 - **A floating toolbar at the bottom centre of the canvas,** like FigJam, Miro and tldraw. It holds what you do to the board:
-  **Select** (the default pointer: pan, zoom, open pages), **Comment** (C), **Draw** and, on desktop when the board has live
-  pages, **Select text**. One tool is in use at a time; Esc goes back a step at a time and ends on Select. The top bar keeps what
+  **Select** (V), **Hand** (H), then after a thin divider **Comment** (C), **Draw** and, on desktop when the board has live
+  pages, **Select text**. One tool is in use at a time (Comment, Draw and Select text fill with the accent colour; Select
+  and Hand in use are a quiet neutral chip); Esc goes back a step at a time and ends on Select. The top bar keeps what
   you look at: the board, the screen sizes, Views and the Comments, Agent and Checks panels. The Comment button is no longer in
   the top bar.
+- **Select and Hand.** Select is the default pointer: a click selects a page and shows its actions or opens a comment's pin,
+  and a drag on empty canvas still pans. Hand is for moving around a dense board: a drag anywhere pans, on pages and pins
+  too, and a click selects and opens nothing. Holding Space in any tool is a temporary Hand, as before, and so is a
+  middle-button drag. V and H do nothing while you type. Desktop only: on a phone a finger already pans.
 - **Draw is a tool of its own.** Pick Draw and click a page: a comment starts on that page and you draw at once (a box, an arrow
   or the pen, as before). With a comment or a reply open, Draw draws on that comment's page. A drawing is still part of a
   comment, and the Box, Arrow and Pen buttons under a comment work as they did.
@@ -100,7 +105,8 @@ Board tools: the tools you use on the board moved out of the top bar.
 - **Phones:** the tools are the bottom bar (44 px targets, above the safe-area inset) and the comment button left the top row.
   They step aside while a sheet or the keyboard is up. Draw, then a tap on a page, opens the page full screen to draw on.
 - **Permissions are unchanged.** A viewer, a read-only share link or an export without comments has no Comment or Draw tool;
-  a guest who may comment has both. Compare mode has neither, as before.
+  a guest who may comment has both. Compare mode has neither, as before. Someone who may not comment has Select and Hand on a
+  desktop (and Select text while a page is live), and no toolbar on a phone.
 - **Keyboard and screen readers:** the tools are a labelled toolbar with one tab stop; the arrow keys, Home and End move between
   them, and each says whether it is in use. Tooltips show the shortcuts.
 - **Esc goes back one step at a time.** With a journey open, Esc leaves comment mode (or Select text) first and the next Esc

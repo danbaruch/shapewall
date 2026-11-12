@@ -39,10 +39,11 @@ export const DOCK = {
 // a note shows.
 export const NOTE_ROOM = 600 + 2 * (DOCK.minimap + DOCK.margin + DOCK.gap)
 
-// The tools pill's width for `count` tools.
-export function toolsWidth(count, touch = false) {
+// The tools pill's width for `count` tools. `divider`: the hairline between
+// Select and Hand and the rest (1 px with 2 px each side, and its own gap).
+export function toolsWidth(count, touch = false, divider = false) {
   if (count <= 0) return 0
-  return DOCK.frame + count * (touch ? DOCK.touchButton : DOCK.button) + (count - 1) * DOCK.between
+  return DOCK.frame + count * (touch ? DOCK.touchButton : DOCK.button) + (count - 1) * DOCK.between + (divider ? 5 + DOCK.between : 0)
 }
 
 // width: the canvas's width. tools: the pill's width. left: the widths the

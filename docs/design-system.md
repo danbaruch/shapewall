@@ -146,13 +146,16 @@ the attention colour when an agent needs a person, green for a moment when the l
 ### The board tools
 
 The tools you use on the board float at the bottom centre of the canvas, the way FigJam, Miro and tldraw do it
-(`client/src/board/BoardTools.jsx`): **Select** (the default pointer: pan, zoom, open pages), **Comment** (C), **Draw** (click a
-page to draw on it; with a comment or a reply open it draws on that comment's page) and, on desktop when the board has live
-pages, **Select text**. One tool is in use at a time, the filled accent button (`aria-pressed`); Esc goes back a step at a time
-and ends on Select. The pill is the zoom controls' pill (`rounded-lg border border-line bg-surface/95 p-0.5 shadow-pop
+(`client/src/board/BoardTools.jsx`, their state in `tools.js`): **Select** (V, the default pointer: a click selects a page or
+opens a pin, a drag on empty canvas pans), **Hand** (H: a drag anywhere pans, a click opens nothing; desktop only), a hairline,
+then **Comment** (C), **Draw** (click a page to draw on it; with a comment or a reply open it draws on that comment's page)
+and, on desktop when the board has live pages, **Select text**. One tool is in use at a time (`aria-pressed`): Comment, Draw
+and Select text are the filled accent button, because they change what a click does; Select and Hand in use are quiet, the
+neutral fill of a chosen segment (`bg-surface-2` with an inset hairline). Esc goes back a step at a time and ends on Select. The pill is the zoom controls' pill (`rounded-lg border border-line bg-surface/95 p-0.5 shadow-pop
 backdrop-blur`, 32 px icon buttons), a labelled `role="toolbar"` with one tab stop: the arrow keys, Home and End move between
 the tools, and each has a tooltip with its shortcut. A person who may not comment has no Comment or Draw tool, and with only
-Select left there is no toolbar.
+Select left there is no toolbar (a viewer on a phone). On a desktop they keep Select and Hand, and Select text while a page
+is live.
 
 The note for the tool in use sits just above the tools, one at a time: the comment hint ("Click a page to comment ..."),
 "Commenting on ..." while the composer is open, the drawing bar, or the select-text note. Select has none. The tools, their note,

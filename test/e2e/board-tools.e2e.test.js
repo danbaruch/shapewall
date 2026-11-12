@@ -1,8 +1,8 @@
 // End to end, the board's tools: a floating toolbar at the bottom centre of
-// the canvas (Select, Comment, Draw, Select text) instead of a Comment button
+// the canvas (Select, Hand, Comment, Draw, Select text) instead of a Comment button
 // in the top bar. One tool at a time, Esc ends on Select, the note for the
 // tool in use sits just above the tools, the arrow keys move between them,
-// nothing overlaps at any width, compare mode has no tools, and on a phone
+// nothing overlaps at any width, compare mode keeps Select and Hand only, and on a phone
 // they are the bottom bar and step aside for a sheet.
 // Set SHAPEWALL_SHOTS=<dir> to keep screenshots of each step.
 import { after, before, test } from 'node:test'
@@ -159,6 +159,7 @@ test('desktop: the tools float at the bottom centre of the canvas, the top bar h
       ),
       [
         ['select', 'Select'],
+        ['hand', 'Hand'],
         ['comment', 'Comment'],
         ['draw', 'Draw'],
         ['text', 'Select text'],
@@ -167,6 +168,30 @@ test('desktop: the tools float at the bottom centre of the canvas, the top bar h
     assert.equal(await active(page), 'select')
     assert.deepEqual(await pressedTools(page), ['select'])
     assert.equal(await page.locator('[data-sw-tool-note]').count(), 0, 'Select has no note')
+    // Select, Hand, a thin divider, then the tools that change what a click does.
+    assert.equal(
+      await page.$eval(`${TOOLS} [data-sw-tools-divider]`, (node) => node.previousElementSibling?.getAttribute('data-sw-tool')),
+      'hand',
+    )
+    // Select at rest is quiet (a neutral chip, the same fill as nothing else on
+    // the accent); the accent is for the tools that change what a click does.
+    const paint = (id) =>
+      page.$eval(tool(id), (node) => {
+        const style = getComputedStyle(node)
+        return { look: node.getAttribute('data-sw-tool-look'), background: style.backgroundColor, color: style.color }
+      })
+    const accent = await page.evaluate(() => {
+      const probe = document.createElement('span')
+      probe.className = 'bg-accent'
+      document.body.append(probe)
+      const value = getComputedStyle(probe).backgroundColor
+      probe.remove()
+      return value
+    })
+    const resting = await paint('select')
+    assert.equal(resting.look, 'quiet')
+    assert.notEqual(resting.background, accent, 'Select at rest is not the accent')
+    assert.notEqual(resting.background, 'rgba(0, 0, 0, 0)', 'but it is marked: a fill')
 
     // Centred on the canvas (not the window: the side panel is open), above its bottom edge.
     const row = await bottomRow(page)
@@ -201,6 +226,14 @@ test('desktop: the tools float at the bottom centre of the canvas, the top bar h
     assert.equal(await active(page), 'comment')
     assert.deepEqual(await pressedTools(page), ['comment'])
     assert.equal(await page.getAttribute('[data-sw-canvas]', 'data-sw-comment-flow'), 'picking')
+    assert.equal((await paint('comment')).look, 'accent')
+    // (The pointer off it: hover lightens the fill; and the colour fades in.)
+    await page.mouse.move(600, 300)
+    await page.waitForFunction(
+      ([selector, want]) => getComputedStyle(document.querySelector(selector)).backgroundColor === want,
+      [tool('comment'), accent],
+    )
+    assert.equal((await paint('select')).look, null, 'and Select is plain again')
     const hinted = await bottomRow(page)
     assertClear(hinted, 'in comment mode')
     assert.deepEqual(hinted.canvas, row.canvas, 'the canvas did not move')
@@ -273,6 +306,8 @@ test('keyboard: the tools are one tab stop; the arrows, Home and End move betwee
     const camera = () => page.evaluate(() => document.querySelector('.react-flow__viewport').style.transform)
     const before = await camera()
     await page.keyboard.press('ArrowRight')
+    assert.equal(await focused(), 'hand')
+    await page.keyboard.press('ArrowRight')
     assert.equal(await focused(), 'comment')
     await page.keyboard.press('ArrowRight')
     assert.equal(await focused(), 'draw')
@@ -285,7 +320,9 @@ test('keyboard: the tools are one tab stop; the arrows, Home and End move betwee
     await page.keyboard.press('Home')
     assert.equal(await focused(), 'select')
     assert.equal(await camera(), before, 'the arrows did not move the board')
-    // A visible focus ring.
+    // A visible focus ring, on the quiet Select chip too.
+    assert.equal(await page.$eval(tool('select'), (node) => getComputedStyle(node).outlineStyle), 'solid')
+    await page.keyboard.press('ArrowRight')
     await page.keyboard.press('ArrowRight')
     const ring = await page.$eval(tool('comment'), (node) => getComputedStyle(node).outlineStyle)
     assert.equal(ring, 'solid', 'the focused tool has a focus ring')
@@ -397,7 +434,7 @@ test('desktop: Draw, then a page, goes straight to drawing with the bar above th
   }
 })
 
-test('desktop: Select text is offered on a live page and says so otherwise; compare mode has no tools', async () => {
+test('desktop: Select text is offered on a live page and says so otherwise; compare mode keeps only Select and Hand', async () => {
   const { context, page, errors } = await openBoard(DESKTOP)
   try {
     await page.waitForSelector(TOOLS)
@@ -446,15 +483,161 @@ test('desktop: Select text is offered on a live page and says so otherwise; comp
     // (The selected card keeps its own history entry: nothing to wait for but the tool.)
     await page.waitForSelector(`${TOOLS}[data-sw-tools="select"]`)
 
-    // Compare shows screenshots only and takes no comments: no tools at all.
+    // Compare shows screenshots only and takes no comments: Select and Hand are left.
     await page.click('[data-sw-view-menu]')
     await page.click('[role="menu"] [data-sw-compare-toggle]')
     await page.waitForSelector('[data-sw-compare-bar]')
-    await page.waitForSelector(TOOLS, { state: 'detached' })
-    assert.equal(await page.locator('[data-sw-comment-mode]').count(), 0)
-    await shot(page, 'tools-8-compare-no-tools')
+    await page.waitForSelector('[data-sw-comment-mode]', { state: 'detached' })
+    assert.deepEqual(
+      await page.$eval('[data-sw-tools] [data-sw-tool]', (nodes) => nodes.map((node) => node.getAttribute('data-sw-tool'))),
+      ['select', 'hand'],
+    )
+    assert.equal(await page.locator('[data-sw-tools-divider]').count(), 0, 'no divider with nothing after it')
+    await shot(page, 'tools-8-compare-select-and-hand')
     await page.click('[data-sw-compare-close]')
+    await page.waitForSelector('[data-sw-comment-mode]')
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})
+
+test('desktop: Hand pans over pages and pins and opens nothing; Space is a temporary hand in any tool; V and H are ignored while typing', async () => {
+  const { context, page, errors } = await openBoard(DESKTOP)
+  try {
     await page.waitForSelector(TOOLS)
+    const camera = () =>
+      page.evaluate(() => {
+        const match = /translate\(([-\d.]+)px, ([-\d.]+)px\) scale\(([-\d.]+)\)/.exec(
+          document.querySelector('.react-flow__viewport').style.transform,
+        )
+        return match.slice(1).map(Number)
+      })
+    const opened = () =>
+      page.locator('[data-sw-frame-bar], [data-sw-frame-bar-toggle], [data-sw-thread-popover], [data-sw-composer-popover]').count()
+    const cursorOn = (selector) => page.$eval(selector, (node) => getComputedStyle(node).cursor)
+    const frameSel = '[data-sw-frame="features:desktop"]'
+    const dragFrom = async (x, y, dx, dy) => {
+      await page.mouse.move(x, y)
+      await page.mouse.down()
+      await page.mouse.move(x + dx / 2, y + dy / 2, { steps: 4 })
+      await page.mouse.move(x + dx, y + dy, { steps: 4 })
+      await page.mouse.up()
+    }
+
+    // Select: an arrow, and a click on a page selects it (its actions show).
+    assert.notEqual(await cursorOn(frameSel), 'grab')
+    let frame = await rect(page, frameSel)
+    await page.mouse.click(frame.left + frame.width / 2, frame.top + 80)
+    await page.waitForSelector('[data-sw-frame-bar="features|desktop"]')
+
+    // H: Hand. The selected card lets go; the cursor is a hand.
+    await page.keyboard.press('h')
+    await page.waitForSelector(`${TOOLS}[data-sw-tools="hand"]`)
+    assert.deepEqual(await pressedTools(page), ['hand'])
+    assert.equal(await page.getAttribute(tool('hand'), 'data-sw-tool-look'), 'quiet', 'Hand in use is the quiet chip, like Select')
+    assert.equal(await opened(), 0, 'nothing stays selected in Hand')
+    assert.equal(await cursorOn(frameSel), 'grab')
+    await shot(page, 'tools-9-hand')
+
+    // A drag that starts on a page pans the board, and opens nothing.
+    let before = await camera()
+    await dragFrom(frame.left + frame.width / 2, frame.top + 80, 120, 60)
+    let after = await camera()
+    assert.ok(
+      Math.abs(after[0] - before[0] - 120) <= 2 && Math.abs(after[1] - before[1] - 60) <= 2,
+      `panned by the drag: ${before} to ${after}`,
+    )
+    assert.equal(after[2], before[2], 'no zoom')
+    assert.equal(await opened(), 0, 'the drag opened nothing')
+    // A plain click on a page selects nothing.
+    frame = await rect(page, frameSel)
+    await page.mouse.click(frame.left + frame.width / 2, frame.top + 80)
+    await page.waitForTimeout(250)
+    assert.equal(await opened(), 0, 'a click in Hand selects nothing')
+    // A drag that starts on a comment's pin pans too; a click on it does not open the thread.
+    const pin = `[data-sw-pin="${pinned.id}"]`
+    let pinBox = await rect(page, pin)
+    before = await camera()
+    await dragFrom(pinBox.left + pinBox.width / 2, pinBox.top + pinBox.height / 2, -80, -40)
+    after = await camera()
+    assert.ok(Math.abs(after[0] - before[0] + 80) <= 2 && Math.abs(after[1] - before[1] + 40) <= 2, 'a drag on a pin pans')
+    pinBox = await rect(page, pin)
+    await page.mouse.click(pinBox.left + pinBox.width / 2, pinBox.top + pinBox.height / 2)
+    await page.waitForTimeout(250)
+    assert.equal(await page.locator('[data-sw-thread-popover]').count(), 0, 'a click on a pin in Hand opens nothing')
+    assert.equal(await active(page), 'hand')
+
+    // Esc from Hand: Select (not Hand again). A pin opens there, as ever.
+    await page.keyboard.press('Escape')
+    await page.waitForSelector(`${TOOLS}[data-sw-tools="select"]`)
+    assert.notEqual(await cursorOn(frameSel), 'grab')
+    await page.click(pin)
+    await page.waitForSelector('[data-sw-thread-popover]')
+    await page.keyboard.press('Escape')
+    await page.waitForSelector('[data-sw-thread-popover]', { state: 'detached' })
+    // Select still pans by a drag on empty canvas.
+    const canvas = await rect(page, '[data-sw-canvas]')
+    before = await camera()
+    await dragFrom(canvas.left + 30, canvas.top + 300, 0, 50)
+    after = await camera()
+    assert.ok(Math.abs(after[1] - before[1] - 50) <= 2, 'Select: a drag on empty canvas pans')
+
+    // V and H while typing a comment are letters, not tools.
+    await page.keyboard.press('c')
+    await page.waitForSelector(`${TOOLS}[data-sw-tools="comment"]`)
+    frame = await rect(page, frameSel)
+    await page.mouse.click(frame.left + frame.width / 2, frame.top + 80)
+    const input = '[data-sw-composer-popover] [data-sw-comment-input]'
+    await page.waitForSelector(input)
+    await page.keyboard.type('Have a very heavy hero')
+    assert.equal(await page.inputValue(input), 'Have a very heavy hero')
+    assert.equal(await active(page), 'comment', 'still commenting')
+    await page.fill(input, '')
+    await page.keyboard.press('Escape')
+    await page.waitForSelector('[data-sw-composer-popover]', { state: 'detached' })
+    assert.equal(await active(page), 'comment')
+
+    // Space held in comment mode: a temporary hand. The drag pans, pins no
+    // comment, and letting go is comment mode again.
+    frame = await rect(page, frameSel)
+    await page.mouse.move(frame.left + frame.width / 2, frame.top + 100)
+    await page.keyboard.down('Space')
+    await page.waitForSelector('[data-sw-canvas].sw-space-pan')
+    assert.equal(await cursorOn(frameSel), 'grab')
+    before = await camera()
+    await dragFrom(frame.left + frame.width / 2, frame.top + 100, 90, 30)
+    await page.keyboard.up('Space')
+    after = await camera()
+    assert.ok(Math.abs(after[0] - before[0] - 90) <= 2 && Math.abs(after[1] - before[1] - 30) <= 2, 'Space+drag pans in comment mode')
+    await page.waitForSelector('[data-sw-canvas]:not(.sw-space-pan)')
+    assert.equal(await active(page), 'comment', 'back in comment mode')
+    assert.equal(await page.locator('[data-sw-composer-popover]').count(), 0, 'the drag pinned nothing')
+    assert.equal(await cursorOn(frameSel), 'crosshair')
+    // And the next click pins, as before.
+    frame = await rect(page, frameSel)
+    await page.mouse.click(frame.left + frame.width / 2, frame.top + 100)
+    await page.waitForSelector(input)
+    await page.keyboard.press('Escape')
+    await page.waitForSelector('[data-sw-composer-popover]', { state: 'detached' })
+
+    // H from comment mode is Hand (one tool at a time); V is Select; C from Hand is Comment.
+    await page.keyboard.press('h')
+    await page.waitForSelector(`${TOOLS}[data-sw-tools="hand"]`)
+    await page.waitForSelector('[data-sw-comment-hint]', { state: 'detached' })
+    await page.keyboard.press('c')
+    await page.waitForSelector(`${TOOLS}[data-sw-tools="comment"]`)
+    assert.deepEqual(await pressedTools(page), ['comment'])
+    await page.keyboard.press('v')
+    await page.waitForSelector(`${TOOLS}[data-sw-tools="select"]`)
+    // The toolbar's own button, and its tooltip with the shortcut.
+    await page.hover(tool('hand'))
+    await page.waitForSelector('[role="tooltip"]')
+    assert.match(await page.textContent('[role="tooltip"]'), /Hand: drag anywhere to move, opens nothing\s*H/)
+    await page.click(tool('hand'))
+    await page.waitForSelector(`${TOOLS}[data-sw-tools="hand"]`)
+    await page.click(tool('select'))
+    await page.waitForSelector(`${TOOLS}[data-sw-tools="select"]`)
     assert.deepEqual(errors, [])
   } finally {
     await context.close()
