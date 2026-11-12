@@ -65,6 +65,10 @@ hosted boards and static exports always use an opaque frame. Hosted live HTML ca
 - **Who reads usage is decided by the server on every request.** Owners and admins see the workspace. A member sees their own
   turns and every turn of an agent they connected. Viewers, share link guests and project tokens see nothing. Exports, a turn
   opened by its id and saved views follow the same rule: a link carries filters, never access.
+- **A dashboard layout is its maker's own.** How a person arranges the Usage dashboard is saved for that person in that
+  workspace, and no route reads or writes anyone else's. A layout says which widgets go where and nothing about usage; the
+  server checks it before storing it and again before handing it back, and drops what it does not know. A saved view may carry
+  a layout for whoever opens its link, and only an owner sets the layout a workspace starts from (audited).
 - **Activity is the audit log, read by person.** Settings with the value before and after, agents, approvals, tokens and
   exports. Admins and owners read everyone's; anyone else only their own.
 - **Sign-ins and devices are each person's own.** They cover every workspace a person is in, so no owner or admin sees them
