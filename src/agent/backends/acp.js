@@ -58,6 +58,9 @@ export const ACP_DEFAULTS = {
 // to change a file or run a command.
 export const READ_ONLY_REFUSAL = 'Refused: this agent reads and answers only. It cannot change files or run commands from a hosted board.'
 
+// The same on the refused request's card, in a few words.
+export const READ_ONLY_NOTE = 'Refused: read and answer only'
+
 const STDERR_KEEP = 4000
 // The most an approval card shows (and so the most that can be approved).
 export const DETAIL_MAX = 4096
@@ -854,7 +857,7 @@ class AcpProcess {
         id: `perm_${randomBytes(6).toString('hex')}`,
         title: cut(title, 120),
         kind,
-        detail: `${detail ? `${cut(detail, 300)}\n` : ''}[${READ_ONLY_REFUSAL}]`,
+        detail: `${detail ? `${cut(detail, 300)}\n` : ''}[${READ_ONLY_NOTE}]`,
         diff: null,
         options: [],
         expiresAt: null,

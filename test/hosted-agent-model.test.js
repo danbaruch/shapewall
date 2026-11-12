@@ -1222,7 +1222,8 @@ test('migration 12: the claim tokens of a 0.3.4 database become watcher agents t
   old.close()
 
   let db = await openDatabase(file)
-  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 12)
+  // Migration 13 (connected agents) was applied before and stays.
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 13)
   const rows = db.prepare('SELECT a.*, k.name FROM agents a JOIN api_tokens k ON k.id = a.token_id').all()
   assert.deepEqual(
     rows.map((row) => row.name),

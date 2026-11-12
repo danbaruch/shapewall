@@ -145,13 +145,14 @@ export function mountDeviceApprovals(consoleApi, deps) {
           ...(agent ? { agent } : {}),
         })
         if (!approved) throw new HttpError(404, 'unknown_code', 'That code was already used, or it expired. Run shapewall login again.')
-        return token
+        return { ...token, agent }
       })
       res.json({
         ok: true,
         info: made.info,
         workspace: { id: ws, name: workspace.name },
         project: { id: req.project.id, name: req.project.name },
+        ...(made.agent ? { agent: made.agent } : {}),
       })
     }),
   )

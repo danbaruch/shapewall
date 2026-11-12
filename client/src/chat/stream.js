@@ -63,6 +63,13 @@ export async function sendMessage(boardId, threadId, body, { onEvent, signal } =
     }
     throw responseError(response.status, data)
   }
+  await readEventStream(response, onEvent)
+}
+
+// Reads a turn's server-sent events to the end, calling onEvent(name, data)
+// for each (the answer to a sent message, or a hosted board's running turn
+// that this tab joins: useHostedTurn.js).
+export async function readEventStream(response, onEvent) {
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''

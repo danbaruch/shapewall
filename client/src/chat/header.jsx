@@ -115,6 +115,14 @@ export function AgentDestination({ agent, className }) {
       </p>
     )
   }
+  if (agent?.hosted) {
+    return (
+      <p className={cn('text-xs text-muted', className)} data-sw-chat-host="connected">
+        <span className="text-fg">{agent.label}</span> runs on its own computer{agent.machine ? ` (${agent.machine})` : ''}, where the
+        project's code is. It reads the project and answers. It does not change files or run commands from here.
+      </p>
+    )
+  }
   if (agent?.local) {
     return (
       <p className={cn('text-xs text-muted', className)} data-sw-chat-host="local">
@@ -249,6 +257,8 @@ const AGENT_STATES = {
 }
 function agentTip(agent) {
   if (agent?.demo) return 'Scripted answers that run in this browser. Nothing is sent anywhere and nothing is changed.'
+  if (agent?.hosted)
+    return `Runs on its own computer${agent.machine ? ` (${agent.machine})` : ''}. Reads the project and answers; no edits, no commands.`
   if (agent?.local) return 'Runs on the server’s computer, with its own login.'
   if (agent?.host) return `Messages go to ${agent.host}${agent.sendsKey ? ", with the server's API key" : ''}.`
   return null

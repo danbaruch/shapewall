@@ -49,7 +49,6 @@ import { roleAtLeast } from './permissions.js'
 import { LIMITS } from './ratelimit.js'
 
 const MENTIONS_MAX = 8
-const STOP_GRACE_MS = 15_000
 export const READ_ONLY_NOTE =
   'This agent reads the project and answers. It does not change files or run commands from the board; send a comment to an agent that runs "shapewall watch --exec" for a fix.'
 
@@ -447,15 +446,13 @@ export function mountChatRoutes(
           board: at.ctx.board.id,
           thread: CHAT_RE.test(at.threadId) ? 'chat' : at.threadId,
         })
+        live.cancelAt = Date.now()
         hub.push(live, 'status', { text: 'Stopping' })
-        // With no machine to hear it, the turn ends here; a machine that
-        // does not let go in time is not waited for either.
-        const stopNow = () => {
-          const current = at.store.turn(live.id)
-          if (current && hub.get(live.id)) chat.interrupt(req.t, current, { state: 'stopped', agentName: agent?.name || null })
-        }
-        if (!links.send(req.t.workspaceId, live.agentId, 'cancel', { turn: live.id })) stopNow()
-        else setTimeout(stopNow, STOP_GRACE_MS).unref()
+        // With no machine to hear it, the turn ends here. A machine that
+        // does not let go in time is not waited for either (the sweep in
+        // agent-link.js ends it as stopped).
+        if (!links.send(req.t.workspaceId, live.agentId, 'cancel', { turn: live.id }) && row)
+          chat.interrupt(req.t, row, { state: 'stopped', agentName: agent?.name || null })
       }
       res.json({ ok: true, running: Boolean(hub.get(live.id)), turn: row?.id || live.id })
     }),

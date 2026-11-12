@@ -432,14 +432,20 @@ export async function runAgentLink({
 
   async function connectOnce() {
     const controller = new AbortController()
-    const onAbort = () => controller.abort()
+    let reader = null
+    // Native fetch can lose an abort while a stream read is pending: the
+    // reader is cancelled as well as the request (as waitForChange does).
+    const hangUp = () => {
+      controller.abort()
+      Promise.resolve(reader?.cancel()).catch(() => {})
+    }
+    const onAbort = () => hangUp()
     signal?.addEventListener('abort', onAbort, { once: true })
     let idle = null
     const touch = () => {
       clearTimeout(idle)
-      idle = setTimeout(() => controller.abort(), limit.idleMs)
+      idle = setTimeout(hangUp, limit.idleMs)
     }
-    let reader = null
     try {
       const said = await api.hello(
         { ...hello, maxTurns, capabilities: { chat: true }, policy: { audience: policy.audience } },
@@ -531,6 +537,13 @@ export async function runAgentLink({
     waiting.length = 0
     for (const entry of running.values()) entry.controller.abort('shutdown')
     // Each turn posts what it has (a stopped answer) before this returns.
-    await Promise.race([Promise.allSettled([...running.values()].map((entry) => entry.done)), pause(8000)])
+    let timer
+    await Promise.race([
+      Promise.allSettled([...running.values()].map((entry) => entry.done)),
+      new Promise((resolve) => {
+        timer = setTimeout(resolve, 8000)
+      }),
+    ])
+    clearTimeout(timer)
   }
 }

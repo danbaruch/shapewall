@@ -43,6 +43,8 @@ export const LINK_LIMITS = {
   // Turns waiting for a busy agent, on top of the ones it runs.
   queued: 5,
   keepaliveMs: 15_000,
+  // After Stop: how long the agent's machine has to finish the turn itself.
+  stopGraceMs: 15_000,
 }
 
 // The open links, in memory: `${workspace}:${agent}` -> Set of streams.
@@ -126,8 +128,16 @@ export function createChatService({ db, hub, links, events, chatFor, now = () =>
   function interruptAgent(t, agent, reason) {
     for (const row of chatFor(t).openTurnsOf(agent.id)) interrupt(t, row, { message: reason, agentName: agent.name })
   }
-  // Turns whose machine went quiet with no link, or that ran too long.
+  // Turns whose machine went quiet with no link, or that ran too long; and
+  // turns a person stopped whose machine did not let go in time.
   function sweep() {
+    for (const turn of hub.all()) {
+      if (!turn.cancel || Date.now() - (turn.cancelAt || 0) < LINK_LIMITS.stopGraceMs) continue
+      const t = tenant(db, turn.workspaceId)
+      const row = chatFor(t).turn(turn.id)
+      if (row) interrupt(t, row, { state: 'stopped' })
+      else hub.close(turn)
+    }
     for (const turn of hub.stale((item) => Boolean(links.of(item.workspaceId, item.agentId)))) {
       const t = tenant(db, turn.workspaceId)
       const row = chatFor(t).turn(turn.id)

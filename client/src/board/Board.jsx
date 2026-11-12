@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Background, ReactFlow, useNodesInitialized, useNodesState, useReactFlow } from '@xyflow/react'
-import { BROWSER_COMMENTS, fileUrl, STATIC } from '../lib/api'
+import { api, BROWSER_COMMENTS, fileUrl, STATIC } from '../lib/api'
 import { resetBrowserComments } from '../lib/browserComments'
 import { useMediaQuery, useOverlayEntry, useParams, useResource } from '../lib/hooks'
 import { cn, savedAuthor } from '../lib/utils'
@@ -20,7 +20,7 @@ import { ComposerPopover, ThreadPopover } from './ThreadPopover'
 import { isUnread, useSeen } from '../lib/unread'
 import { canDeleteComment, canEditComment } from '../../../src/hosted/permissions.js'
 import { boardPeople } from '../../../src/mentions.js'
-import { threadForComment } from '../chat/threads'
+import { newChatId, threadForComment } from '../chat/threads'
 import { useAgentFocus } from '../chat/agentFocus'
 import { AppUpdates } from '../components/app-updates'
 import { BoardLoadError } from '../components/app-states'
@@ -924,15 +924,37 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     setViewportNotice(null)
     updateParams({ vp: value === defaultMode ? null : value })
   }
-  // Hosted boards have no chat, but people who can send comments to the
-  // agent get the Agent control all the same: it opens a small panel that
-  // lists the project's agents, their state and what each is doing
-  // (HostedAgentPanel.jsx): beside the canvas on desktop, a sheet from the
-  // More menu on a phone; `ha=1` in the address.
-  const hostedAgent = Boolean(info?.hosted && !DEMO && data?.agentDispatch && !chatAvailable)
+  // Hosted boards: people who can send comments to an agent get the Agent
+  // control, which opens a panel that lists the project's agents, their
+  // state and what each is doing (HostedAgentPanel.jsx): beside the canvas
+  // on desktop, a sheet from the More menu on a phone; `ha=1` in the
+  // address. An agent connected with `shapewall agent connect` can be
+  // chatted with from there: the chat (`chat=`) then takes the panel's
+  // place, and closing it comes back to the list.
+  const hostedAgent = Boolean(info?.hosted && !DEMO && data?.agentDispatch)
   const hostedAgentOpen = hostedAgent && wide && params.get('ha') === '1' && !checksOpen
-  const hostedAgentSheet = hostedAgent && !wide && params.get('ha') === '1' && !checksOpen
+  const hostedAgentSheet = hostedAgent && !wide && params.get('ha') === '1' && !checksOpen && !chatThread
   const openHostedAgent = () => updateParams({ ha: '1', checks: null, cv: null })
+  // A new chat of this person's own with one connected agent.
+  const openHostedChat = async (agent) => {
+    const threadId = newChatId()
+    try {
+      await api.post(`/api/agent/boards/${encodeURIComponent(boardId)}/threads/${threadId}/profile`, { profileId: agent.id })
+      openChat(threadId)
+    } catch (error) {
+      setToast({ at: Date.now(), text: error.message || `Could not open a chat with ${agent.name}.` })
+    }
+  }
+  // The server says a shared chat or the agents changed (presence): the list follows.
+  const refetchAgents = agentsQuery.refetch
+  useEffect(() => {
+    if (!hostedMember) return undefined
+    const onChange = (event) => {
+      if (!event.detail?.thread) refetchAgents()
+    }
+    window.addEventListener('shapewall:hosted-agents', onChange)
+    return () => window.removeEventListener('shapewall:hosted-agents', onChange)
+  }, [hostedMember, refetchAgents])
   const allOpen = comments.filter((item) => item.status === 'open').length
   // What the agents are doing, board-wide, for the toolbar (agentActivity.js):
   // from the comments' agent statuses (the events stream and the comments
@@ -971,6 +993,10 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
           if (!wide) updateParams({ ha: null })
           focusComment(comment)
         },
+        // Chat with a connected agent (only where the server offers it).
+        onChat: chatAvailable ? openHostedChat : null,
+        onBoardChat: chatAvailable ? () => openChat('board') : null,
+        admin: ['admin', 'owner'].includes(info?.role),
       }
     : null
   // Batch fixes: offered only when Fix with agent is, and turned on in Agents.
@@ -1367,7 +1393,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
               {...(wide && hostedAgent
                 ? {
                     chatAvailable: true,
-                    chatThread: hostedAgentOpen ? 'hosted' : null,
+                    chatThread: chatThread || (hostedAgentOpen ? 'hosted' : null),
                     reopenChat: openHostedAgent,
                     openAgentThread: openHostedAgent,
                   }
@@ -1734,7 +1760,13 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
             draftDescription={draftDescription}
             composerProps={composerProps}
           />
-          <BoardMenu {...barProps} menuOpen={menuOpen} hostedAgents={hostedAgent ? { open: openHostedAgent, list: agentList } : null} />
+          <BoardMenu
+            {...barProps}
+            // The Agents entry leads to the chat on a hosted board.
+            chatAvailable={hostedAgent ? false : chatAvailable}
+            menuOpen={menuOpen}
+            hostedAgents={hostedAgent ? { open: openHostedAgent, list: agentList } : null}
+          />
         </>
       ) : null}
 

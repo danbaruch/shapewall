@@ -42,7 +42,7 @@ import {
   Time,
 } from '../components'
 import { api, serverOrigin, wsUrl } from '../lib/api'
-import { ROLE_LABEL } from '../lib/format'
+import { ROLE_LABEL, formatDateTime } from '../lib/format'
 import { Link } from '../lib/router'
 import { canChangeApprovalRoles, canChangeApprovalRule } from '../../../../src/hosted/permissions.js'
 import { useAction, useLoad, useToast } from '../state'
@@ -67,6 +67,29 @@ const AUDIENCE_CHOICES = [
 ]
 // The scopes an agent needs to take comments and answer them.
 const AGENT_SCOPES = ['read', 'reply', 'status', 'claim']
+
+// A connected agent (`shapewall agent connect`): what it said it can do,
+// and since when its link is open.
+function LinkLine({ agent }) {
+  const link = agent.link
+  if (!link?.connected) return null
+  return (
+    <p className="mt-0.5 text-xs text-muted" data-sw-agent-link={link.connectedAt ? 'open' : 'closed'}>
+      <span className="text-fg">Connected agent.</span> {link.chats ? 'Chats on the board' : 'No chat'}, reads and answers only (no edits,
+      no commands)
+      {link.connectedAt ? (
+        <>
+          {' '}
+          · connected since <time dateTime={link.connectedAt}>{formatDateTime(link.connectedAt)}</time>
+        </>
+      ) : (
+        ' · link closed'
+      )}
+      {link.version ? ` · Shapewall ${link.version}` : ''}
+      {link.policy?.audience === 'owner' ? ' · its machine takes questions from its connector only' : ''}
+    </p>
+  )
+}
 
 const personName = (person) => person?.displayName || (person?.handle ? `@${person.handle}` : 'someone who left')
 
@@ -143,7 +166,11 @@ export function AgentsOverview() {
                             </Badge>
                           ) : null}
                         </p>
-                        {agent.machine ? <p className="truncate text-xs text-muted">{agent.machine}</p> : null}
+                        <p className="truncate text-xs text-muted" data-sw-overview-kind={agent.kind}>
+                          {KIND_LABEL[agent.kind] || agent.kind}
+                          {agent.machine ? ` on ${agent.machine}` : ''}
+                          {agent.link?.connected ? (agent.link.chats ? ' · chats' : '') : ''}
+                        </p>
                       </div>
                     </div>
                     <div role="cell" className="min-w-0 truncate text-fg">
@@ -153,7 +180,13 @@ export function AgentsOverview() {
                     <div role="cell" className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted md:block">
                       <StateBadge agent={agent} />
                       <p className="md:mt-0.5">
-                        <LastSeen agent={agent} />
+                        {agent.link?.connectedAt ? (
+                          <span data-sw-overview-connected>
+                            since <time dateTime={agent.link.connectedAt}>{formatDateTime(agent.link.connectedAt)}</time>
+                          </span>
+                        ) : (
+                          <LastSeen agent={agent} />
+                        )}
                       </p>
                     </div>
                     <div role="cell" className="min-w-0 text-xs text-muted" data-sw-overview-audience={agent.audience.kind}>
@@ -270,7 +303,7 @@ export function ProjectAgentsPage({ projectId }) {
       </Link>
       <PageHeader
         title={`Agents of ${project.name}`}
-        description="The machines that pick up comments sent to an agent in this project. Each one runs where the code is; this server never runs an agent."
+        description="The coding agents of this project: the ones members chat with on the board, and the ones that pick up comments. Each runs where the code is; this server never runs an agent."
         actions={
           <Button asChild size="touch" className="lg:h-9">
             <Link to={`/w/${workspaceId}/projects/${projectId}`}>Project page</Link>
@@ -312,6 +345,7 @@ export function ProjectAgentsPage({ projectId }) {
                           {agent.machine ? ` on ${agent.machine}` : ''} · <LastSeen agent={agent} /> · connected by{' '}
                           {personName(agent.createdBy)}
                         </p>
+                        <LinkLine agent={agent} />
                         {agent.counts.working || agent.counts.queued ? (
                           <p className="mt-0.5 text-xs text-muted" data-sw-agent-counts>
                             {[
@@ -365,7 +399,7 @@ export function ProjectAgentsPage({ projectId }) {
                     <dl className="grid gap-2 text-xs sm:grid-cols-2">
                       <div className="rounded-lg border border-line bg-surface-2/50 p-3" data-sw-agent-audience={agent.audience.kind}>
                         <dt className="flex items-center gap-1.5 font-medium text-fg">
-                          <Users size={13} aria-hidden="true" /> Who may send it work
+                          <Users size={13} aria-hidden="true" /> {agent.link?.connected ? 'Who may use it' : 'Who may send it work'}
                         </dt>
                         <dd className="mt-1 text-muted">
                           <span className="text-fg">{agent.audience.text}.</span>{' '}
@@ -394,8 +428,17 @@ export function ProjectAgentsPage({ projectId }) {
                           <ShieldCheck size={13} aria-hidden="true" /> Approvals
                         </dt>
                         <dd className="mt-1 text-muted">
-                          <span className="text-fg">Always ask.</span> {ROLE_LABEL[agent.approval.answerRole]}s and up answer;{' '}
-                          {ROLE_LABEL[agent.approval.changeRole].toLowerCase()}s and up change this rule.
+                          {agent.link?.connected ? (
+                            <>
+                              <span className="text-fg">Nothing to approve.</span> A connected agent reads and answers only: its machine
+                              refuses edits and commands. The rule below applies once it can ask.
+                            </>
+                          ) : (
+                            <>
+                              <span className="text-fg">Always ask.</span> {ROLE_LABEL[agent.approval.answerRole]}s and up answer;{' '}
+                              {ROLE_LABEL[agent.approval.changeRole].toLowerCase()}s and up change this rule.
+                            </>
+                          )}
                         </dd>
                         <dd className="mt-2">
                           <Button
@@ -518,13 +561,29 @@ function ConnectCard({ project, onNewToken }) {
       <CardHeader
         icon={Plug}
         title="Connect an agent"
-        description={`On a machine that has the code of ${project.name}. The agent runs there; this server only hands it comments.`}
+        description={`On a machine that has the code of ${project.name}. The agent runs there; this server only passes messages.`}
         actions={
           <Button size="touch" variant="secondary" className="lg:h-9" onClick={onNewToken} data-sw-connect-agent-token>
             <Plus size={16} aria-hidden="true" /> New agent token
           </Button>
         }
       />
+      <div className="space-y-2 border-b border-line px-4 py-4 text-sm text-muted sm:px-5" data-sw-connect-agent-chat>
+        <p className="font-medium text-fg">Chat with your coding agent on the board</p>
+        <p>
+          Run this in the project's folder, on the machine that has Claude Code, Codex or goose. It shows a code; approve it on{' '}
+          <Link to="/device" className="font-medium text-accent underline-offset-2 hover:underline">
+            the approval page
+          </Link>
+          , where you name the agent and choose who may use it.
+        </p>
+        <CopyField value={`shapewall agent connect --remote ${origin}`} testId="connect-agent" />
+        <p className="text-xs">
+          Members then chat with it from the board's Agents panel. It reads the project and answers; it does not change files or run
+          commands. Leave it running (or run it as a service); Ctrl+C disconnects it.
+        </p>
+      </div>
+      <p className="px-4 pt-4 text-sm font-medium text-fg sm:px-5">An agent that fixes comments</p>
       <ol className="space-y-4 px-4 py-4 text-sm text-muted sm:px-5">
         <li className={step}>
           <span className={number}>1</span>

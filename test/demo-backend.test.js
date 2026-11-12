@@ -171,7 +171,9 @@ test('the demo offers the same choices as the server', () => {
   assert.deepEqual(SHARE_DAYS, SERVER_SHARE_DAYS)
   assert.deepEqual(
     TOKEN_SCOPES,
-    SERVER_SCOPES.filter((scope) => scope !== 'import'),
+    // Not in the demo: moving a project, and the link of a connected agent
+    // (granted by approving `shapewall agent connect`, never ticked).
+    SERVER_SCOPES.filter((scope) => !['import', 'agent'].includes(scope)),
   )
 })
 

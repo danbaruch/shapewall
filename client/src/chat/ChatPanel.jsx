@@ -33,6 +33,7 @@ import { Composer } from './composer'
 import { commentOfThread, mergeBy, ownerOnlyError, useChatTurn } from './useChatTurn'
 import { useAutoAllow } from './useAutoAllow'
 import { useAgentOptions, useOnScreen } from './agentOptions'
+import { useHostedTurn } from './useHostedTurn'
 import { excerpt } from './text'
 import { ChatHistory, exportThread, restoreVersion } from './history'
 import { fallbackTitle, isChatThread, newChatId, threadKind } from './threads'
@@ -109,7 +110,14 @@ export default function ChatPanel({
   // A turn the server is running in this thread that this tab did not start
   // (another tab or person, or this tab before a reload): poll until it ends.
   const [remoteBusy, setRemoteBusy] = useState(false)
-  const thread = useResource(defaultAgent ? threadPath(boardId, threadId) : null, { pollMs: starterBusy || remoteBusy ? 3000 : 0 })
+  // A hosted board's connected agent (src/hosted/chat-routes.js): the turn
+  // runs on the server and the agent's machine, other members share the
+  // board's threads, and the agent only reads and answers.
+  const hosted = Boolean(defaultAgent?.hosted)
+  const thread = useResource(defaultAgent ? threadPath(boardId, threadId) : null, {
+    // Hosted: a look every few seconds finds a turn another member started.
+    pollMs: starterBusy || remoteBusy ? 3000 : hosted ? 5000 : 0,
+  })
   const threads = useResource(defaultAgent ? `/api/agent/boards/${encodeURIComponent(boardId)}/threads` : null)
   // useResource loads the thread; a changed agent (connected, settings saved)
   // loads it again.
@@ -206,6 +214,8 @@ export default function ChatPanel({
       ),
     )
   }, [messages])
+  // Hosted: a turn this tab did not start is joined live (useHostedTurn.js).
+  useHostedTurn({ enabled: hosted, boardId, threadId, thread, run })
   const remoteRunning = Boolean(selectedThread?.running) && !run
   useEffect(() => setRemoteBusy(remoteRunning), [remoteRunning])
   const running = Boolean(run) || selectingProfile || remoteRunning
@@ -583,6 +593,9 @@ export default function ChatPanel({
   const focusedPage = focused ? pages.find((page) => page.id === focused.pageId) : null
   const vision = agent?.vision !== false
   const needsOwner = Boolean(defaultAgent?.chatNeedsOwner || agent?.chatNeedsOwner || ownerRefused)
+  // Hosted: this person cannot message the thread's agent right now (it is
+  // offline, or it is not theirs to use): said in place of the composer.
+  const hostedBlocked = hosted && configured && selectedThread && agent?.composer && !agent.composer.ok && !run ? agent.composer : null
   // The turn in flight, until the refetched thread has it (by id, no doubles).
   // Only in its own thread: a comment's Ask agent can switch threads mid-turn.
   const liveRun = run?.threadId === threadId ? run : null
@@ -603,7 +616,10 @@ export default function ChatPanel({
   const profileChoice = pickerProfiles(selectedThread)
   const agentSettingsHref = agent?.settingsUrl || (onOpenSettings ? '/console?section=agents' : null)
   const picker =
-    agent?.ownerWrites && selectedThread && profileChoice.options.length && (profileChoice.show || onOpenSettings || agent?.settingsUrl)
+    (agent?.ownerWrites || hosted) &&
+    selectedThread &&
+    profileChoice.options.length &&
+    (profileChoice.show || hosted || onOpenSettings || agent?.settingsUrl)
       ? {
           options: profileChoice.known
             ? profileChoice.options
@@ -615,8 +631,8 @@ export default function ChatPanel({
             const label = profileChoice.options.find((option) => option.id === next)?.label || 'the agent'
             if (await chooseProfile(next)) setNotice({ tone: 'info', text: switchedNote(label) })
           },
-          onConnect: onOpenSettings,
-          settingsHref: agentSettingsHref,
+          onConnect: hosted ? null : onOpenSettings,
+          settingsHref: hosted ? null : agentSettingsHref,
           disabledReason: running
             ? 'Wait for the answer or stop it to switch'
             : agent?.state === 'testing' || profileChoice.options.some((option) => option.state === 'testing')
@@ -780,7 +796,7 @@ export default function ChatPanel({
             setReadAloud(saveReadAloud(next))
           }}
           onClear={clear}
-          canClear={!running && messages.length > 0}
+          canClear={!running && messages.length > 0 && (!hosted || isChatThread(threadId))}
           onOpenSettings={onOpenSettings}
           settingsHint={settingsHint}
           onClose={onClose}
@@ -820,7 +836,11 @@ export default function ChatPanel({
         />
       ) : null}
 
-      {!configured ? (
+      {!configured && hosted ? (
+        <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-muted" data-sw-chat-empty="hosted">
+          No agent that chats is connected to this project right now.
+        </div>
+      ) : !configured ? (
         <ConnectAgent
           agent={agent}
           touch={touch}
@@ -881,12 +901,12 @@ export default function ChatPanel({
                 onBranch={running ? null : onBranch}
                 onRecapture={onRecapture}
                 versions={selectedThread?.versions || null}
-                onEdit={editMessage}
+                onEdit={hosted ? null : editMessage}
                 onVersion={chooseVersion}
                 editDisabled={running || dictation.listening}
                 ratings={answerRatings.ratings}
-                onRate={answerRatings.rate}
-                onRegenerate={(message, request) => submit('', false, { regenerate: { message, request } })}
+                onRate={hosted ? null : answerRatings.rate}
+                onRegenerate={hosted ? null : (message, request) => submit('', false, { regenerate: { message, request } })}
                 regenerateDisabled={running || dictation.listening}
                 otherAgent={agent?.ownerWrites && otherAgent ? otherAgent : null}
                 onTryOther={tryOther}
@@ -894,7 +914,20 @@ export default function ChatPanel({
               />
             </RefsContext.Provider>
           </AllowForChat.Provider>
-          {needsOwner ? (
+          {hostedBlocked ? (
+            <div className="shrink-0 p-3" data-sw-chat-blocked={hostedBlocked.code || 'true'}>
+              <p
+                className="flex items-start gap-2 rounded-lg border border-line bg-surface-2/60 px-3 py-2.5 text-ui text-muted"
+                role="note"
+              >
+                <Lock size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
+                <span>
+                  {hostedBlocked.reason || 'You cannot message this agent right now.'}
+                  {hostedBlocked.code === 'agent_offline' ? ' Chat needs it online; a comment sent to it waits until it is back.' : ''}
+                </span>
+              </p>
+            </div>
+          ) : needsOwner ? (
             <div className="shrink-0 p-3" data-sw-chat-needs-owner="true">
               <p
                 className="flex items-start gap-2 rounded-lg border border-line bg-surface-2/60 px-3 py-2.5 text-ui text-muted"
