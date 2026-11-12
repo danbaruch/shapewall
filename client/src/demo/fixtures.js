@@ -313,7 +313,7 @@ export function seedState(now = Date.now(), { fixturesAt = null } = {}) {
     usageRuns: [],
     views: [
       ['usage', 'Fixes that failed or stopped', 'kind=fix&outcome=failed&outcome=stopped&tab=turns'],
-      ['usage', 'Tokens by model, week by week', 'range=90d&metric=tokens&by=model&bucket=week'],
+      ['usage', 'Tokens by model, week by week', 'metric=tokens&by=model&bucket=week'],
       ['activity', 'Security-relevant changes', 'sensitive=1'],
     ].map(([page, name, query], index) => ({
       id: fixedId('vw', index + 1),
