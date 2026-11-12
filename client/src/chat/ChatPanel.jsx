@@ -926,6 +926,20 @@ export default function ChatPanel({
                   {hostedBlocked.code === 'agent_offline' ? ' Chat needs it online; a comment sent to it waits until it is back.' : ''}
                 </span>
               </p>
+              {/* Never switched for the person: another agent only when they choose it. */}
+              {['agent_offline', 'agent_gone'].includes(hostedBlocked.code) && otherAgent ? (
+                <button
+                  type="button"
+                  disabled={selectingProfile}
+                  onClick={async () => {
+                    if (await chooseProfile(otherAgent.id)) setNotice({ tone: 'info', text: switchedNote(otherAgent.label) })
+                  }}
+                  className="mt-2 inline-flex min-h-11 items-center rounded-md border border-line bg-surface px-3 text-sm font-medium text-fg outline-none hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-60 lg:min-h-8"
+                  data-sw-chat-ask-other={otherAgent.id}
+                >
+                  Ask {otherAgent.label} instead
+                </button>
+              ) : null}
             </div>
           ) : needsOwner ? (
             <div className="shrink-0 p-3" data-sw-chat-needs-owner="true">

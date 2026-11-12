@@ -75,7 +75,7 @@ const realErrors = (errors) => errors.filter((text) => !/Failed to load resource
 function startCli(extra = []) {
   const bin = tempDir('hosted-chat-e2e-bin')
   const adapter = path.join(bin, 'claude-agent-acp')
-  fs.writeFileSync(adapter, `#!/bin/sh\nexec "${process.execPath}" "${ACP_STUB}" "$@"\n`, { mode: 0o755 })
+  fs.writeFileSync(adapter, `#!/bin/sh\nexec "${process.execPath}" "${ACP_STUB}" --ro-modes "$@"\n`, { mode: 0o755 })
   const child = spawn(process.execPath, [CLI, 'agent', 'connect', '--remote', hosted.origin, '--agent', 'claude', ...extra], {
     cwd: projectDir,
     env: {
@@ -413,4 +413,26 @@ test('offline: stopping the command takes the agent offline at once, and chat sa
   const sent = await ada.browser.post(`/w/${ws}/p/${project.id}/api/agent/boards/sample/threads/board/messages`, { text: 'hello' })
   assert.equal(sent.status, 409, sent.text)
   assert.equal(sent.json.error.code, 'agent_offline')
+  // Never handed to another agent silently: Scout (online, Ada's own) is offered, and choosing it is said in the thread.
+  await say2(page)
 })
+// In a chat with messages whose agent went offline: "Ask Scout instead", then the switch shows and Scout answers.
+async function say2(page) {
+  await page.goto(boardPage('&chat=board&ha=1'))
+  await page.waitForSelector('[data-sw-chat-blocked="agent_offline"]')
+  assert.equal(await page.getAttribute('[data-sw-chat-label]', 'data-sw-chat-label'), 'Builder', "still Builder's chat")
+  const other = page.locator('[data-sw-chat-ask-other]')
+  assert.match(await other.textContent(), /Ask Scout instead/)
+  await shot(page, 'board-chat-offline-ask-other-1440-light')
+  await other.click()
+  await page.waitForSelector('[data-sw-chat-input]')
+  assert.equal(await page.getAttribute('[data-sw-chat-label]', 'data-sw-chat-label'), 'Scout')
+  await until(
+    async () => /Ada switched this chat from Builder to Scout/.test(await page.textContent('[data-sw-chat]')),
+    'the line that says the agent changed',
+  )
+  await say(page, 'stream')
+  await answered(page, /Hello from the stream/)
+  await idle(page)
+  await shot(page, 'board-chat-switched-1440-light')
+}

@@ -417,7 +417,13 @@ test('chat history: rename, archive, search and delete follow who owns the threa
 test('the link: batches are numbered, a repeat is dropped, a gap is refused; a finished turn stays finished', async () => {
   // A second agent whose machine is this test, speaking the frames by hand.
   const made = await connectAgent(hosted, ada, { workspaceId: ws, projectId: project.id, name: 'Manual', kind: 'custom' })
-  const call = (method, route, body) => tokenCall(hosted, made.token, method, `/api/v1/agent${route}`, body === undefined ? {} : { body })
+  // This test is the agent's machine: one process, with a name of its own.
+  const LINK = 'a1'.repeat(16)
+  const call = (method, route, body, link = LINK) =>
+    tokenCall(hosted, made.token, method, `/api/v1/agent${route}`, {
+      ...(body === undefined ? {} : { body }),
+      headers: { 'X-Shapewall-Link': link },
+    })
   const hello = await call('POST', '/hello', {
     kind: 'custom',
     machine: 'bench',
@@ -431,7 +437,7 @@ test('the link: batches are numbered, a repeat is dropped, a gap is refused; a f
   // Holding the link is what makes it online.
   const controller = new AbortController()
   const stream = await fetch(`http://127.0.0.1:${hosted.port}/api/v1/agent/link`, {
-    headers: { Authorization: `Bearer ${made.token}` },
+    headers: { Authorization: `Bearer ${made.token}`, 'X-Shapewall-Link': LINK },
     signal: controller.signal,
   })
   assert.equal(stream.status, 200)
@@ -556,15 +562,18 @@ test('the link: batches are numbered, a repeat is dropped, a gap is refused; a f
   assert.equal((await events(4, [{ name: 'text', data: { text: 'late' } }])).status, 410)
   assert.equal((await ada.browser.get(chatUrl(thread))).json.messages.length, 2)
 
-  // A third stream for one token is refused; two are the limit.
-  const two = await fetch(`http://127.0.0.1:${hosted.port}/api/v1/agent/link`, {
-    headers: { Authorization: `Bearer ${made.token}` },
-    signal: controller.signal,
-  })
-  assert.equal(two.status, 200)
-  const three = await tokenCall(hosted, made.token, 'GET', '/api/v1/agent/link')
-  assert.equal(three.status, 429)
-  two.body.cancel().catch(() => {})
+  // One process per agent: a second one is refused, and told which machine holds the link since when.
+  const OTHER = 'b2'.repeat(16)
+  const second = await call('POST', '/hello', { kind: 'custom', machine: 'laptop', capabilities: { chat: true } }, OTHER)
+  assert.equal(second.status, 409, second.text)
+  assert.equal(second.json.error.code, 'already_connected')
+  assert.match(second.json.error.message, /Manual is already connected from bench since \d{4}-\d\d-\d\dT/)
+  assert.match(second.json.error.message, /--takeover/)
+  assert.equal((await stateOf(made.agentId)).machine, 'bench', 'the refused one did not rename the machine')
+  const refusedLink = await call('GET', '/link', undefined, OTHER)
+  assert.equal(refusedLink.status, 409)
+  // A call without a link name is not a link.
+  assert.equal((await tokenCall(hosted, made.token, 'GET', '/api/v1/agent/link')).status, 400)
 
   // Revoked: the stream closes at once, the token stops working, a waiting turn ends.
   const waiting = ada.browser.post(chatUrl(thread, '/messages'), { text: 'still there?' })
@@ -581,8 +590,13 @@ test('the link: batches are numbered, a repeat is dropped, a gap is refused; a f
   assert.ok(log.some((row) => row.action === 'agent_link_disconnected' && row.target === made.agentId && row.detail.reason === 'revoked'))
   assert.ok(log.some((row) => row.action === 'agent_revoked' && row.target === made.agentId))
   controller.abort()
-  // A thread whose agent is gone falls back to one that is there.
-  assert.equal((await ada.browser.get(chatUrl(thread))).json.agent.label, 'Builder')
+  // A thread whose agent is gone stays that agent's: it says so, and is never handed to another one silently.
+  const orphan = (await ada.browser.get(chatUrl(thread))).json
+  assert.equal(orphan.agent.composer.code, 'agent_gone')
+  assert.notEqual(orphan.agent.label, 'Builder')
+  const sent = await chat(ada, chatUrl(thread, '/messages'), 'anyone?')
+  assert.equal(sent.status, 409)
+  assert.equal(sent.json.error.code, 'agent_gone')
 })
 
 test('the machine goes away mid-answer: the turn is interrupted, what it wrote is kept, and the agent is offline at once', async () => {

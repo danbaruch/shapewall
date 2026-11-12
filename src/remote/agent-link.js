@@ -23,6 +23,7 @@
 // server no longer has is stopped. Batches the server did not acknowledge
 // are sent again; a repeated batch is harmless (the server drops it).
 
+import { randomBytes } from 'node:crypto'
 import { redact } from '../agent/backends/openai.js'
 import { runTurn } from '../agent/run.js'
 import { JobError, TURN_ID_RE, cleanJob, jobConversation } from './agent-job.js'
@@ -51,6 +52,8 @@ export const LINK_DEFAULTS = {
 export function fatalLinkError(error) {
   if (!(error instanceof RemoteError)) return false
   if (error.status === 401) return true
+  // Another process already holds this agent's link (it says which machine, since when).
+  if (error.status === 409 && error.code === 'already_connected') return true
   return error.status === 403 && ['missing_scope', 'not_an_agent', 'forbidden'].includes(error.code)
 }
 
@@ -67,12 +70,15 @@ const pause = (ms, signal) =>
   })
 
 // The token API calls of the link, on one origin, with the agent's token.
-export function createLinkClient({ origin, token, source = null, fetchImpl = fetch }) {
+// `linkId`: the name this process gives itself, sent with every call, so the
+// server tells its reconnects from a second process on the same token.
+export function createLinkClient({ origin, token, source = null, fetchImpl = fetch, linkId = randomBytes(16).toString('hex') }) {
   async function call(method, pathname, { json, signal, limit = 4 * 1024 * 1024 } = {}) {
     const response = await fetchImpl(`${origin}${pathname}`, {
       method,
       headers: {
         Authorization: `Bearer ${token}`,
+        'X-Shapewall-Link': linkId,
         Accept: 'application/json',
         ...(json !== undefined ? { 'Content-Type': 'application/json' } : {}),
       },
@@ -107,9 +113,9 @@ export function createLinkClient({ origin, token, source = null, fetchImpl = fet
     finish: (id, body, signal) => call('POST', `${turn(id)}/finish`, { json: body, signal }),
     openTurn: (body, signal) => call('POST', '/api/v1/agent/turns', { json: body, signal }),
     // The stream itself: resolves to the response (its body is read by the caller).
-    link: (signal) =>
-      fetchImpl(`${origin}/api/v1/agent/link`, {
-        headers: { Authorization: `Bearer ${token}`, Accept: 'text/event-stream' },
+    link: (signal, { takeover = false } = {}) =>
+      fetchImpl(`${origin}/api/v1/agent/link${takeover ? '?takeover=1' : ''}`, {
+        headers: { Authorization: `Bearer ${token}`, 'X-Shapewall-Link': linkId, Accept: 'text/event-stream' },
         redirect: 'error',
         signal,
       }),
@@ -131,6 +137,8 @@ export async function runAgentLink({
   hello,
   policy = { audience: 'server' },
   remote = null,
+  // Close a link another process holds for this agent, and take its place.
+  takeover = false,
   signal = null,
   fetchImpl = fetch,
   log = () => {},
@@ -148,6 +156,10 @@ export async function runAgentLink({
   let stopping = false
   // The error that ends the command (the token stopped working).
   let fatal = null
+  // The server said another process took this agent's link: this one stops, cleanly.
+  let takenOver = false
+  // Only the first connect takes over; a reconnect is this same process.
+  let taking = Boolean(takeover)
 
   const clean = (value) => redact(value, token)
 
@@ -359,6 +371,8 @@ export async function runAgentLink({
       // Queued: ours to start. Running without us: this process restarted
       // mid-answer and cannot pick it up; say so, so the person asks again.
       if (turn.state === 'queued' && !turn.cancel) start(turn.id)
+      // Another process's turn (before a takeover, say) is not this one's to end.
+      else if (turn.mine === false) continue
       else
         await api
           .finish(turn.id, {
@@ -448,13 +462,13 @@ export async function runAgentLink({
     }
     try {
       const said = await api.hello(
-        { ...hello, maxTurns, capabilities: { chat: true }, policy: { audience: policy.audience } },
+        { ...hello, maxTurns, capabilities: { chat: true }, policy: { audience: policy.audience }, ...(taking ? { takeover: true } : {}) },
         controller.signal,
       )
       agent = said?.agent && typeof said.agent.id === 'string' ? said.agent : null
       if (!agent) throw new Error('The server did not say which agent this is.')
       touch()
-      const response = await api.link(controller.signal)
+      const response = await api.link(controller.signal, { takeover: taking })
       if (response.status === 401) throw new RemoteError(401, 'bad_token', badTokenMessage(origin, source))
       if (!response.ok || !String(response.headers.get('content-type')).includes('text/event-stream')) {
         let data = null
@@ -470,6 +484,7 @@ export async function runAgentLink({
         )
       }
       reader = response.body.getReader()
+      taking = false
       onReady(said)
       await reconcile(controller.signal)
       scanComments()
@@ -498,6 +513,10 @@ export async function runAgentLink({
           if (name === 'work') start(data?.turn)
           else if (name === 'cancel') running.get(String(data?.turn || ''))?.controller.abort('stopped')
           else if (name === 'change') scanComments()
+          else if (name === 'bye') {
+            takenOver = true
+            return
+          }
         }
         if (fatal) throw fatal
       }
@@ -520,6 +539,7 @@ export async function runAgentLink({
       try {
         await connectOnce()
         if (fatal) throw fatal
+        if (takenOver) break
         if (!signal?.aborted) log('link closed by the server; reconnecting')
       } catch (error) {
         if (fatalLinkError(error)) throw error
@@ -546,4 +566,5 @@ export async function runAgentLink({
     ])
     clearTimeout(timer)
   }
+  return { takenOver }
 }

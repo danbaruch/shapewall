@@ -7,8 +7,10 @@
 //
 //   audience   "server": whoever the agent's audience on the server names
 //              (set when the connection is approved, and on its Agents page)
-//              "owner": only the person who connected it, whatever the
-//              server says
+//              "owner": the server is told to keep it to the person who
+//              connected it, and this machine refuses a job the server
+//              labels as someone else's. The machine cannot check that
+//              label: this does not protect against a server that lies
 //   approvals  "none": nobody answers a permission request from the board.
 //              The only value: a connected agent reads and answers only.
 //   commands   "never": likewise.

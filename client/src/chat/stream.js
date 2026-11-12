@@ -90,7 +90,8 @@ export async function readEventStream(response, onEvent) {
       } catch {
         continue // a malformed event is skipped
       }
-      onEvent?.(name, data)
+      // The event's number, when the server gives one (a hosted board's turn).
+      onEvent?.(name, data, Number(/^id: (\d+)$/m.exec(block)?.[1]) || null)
     }
   }
 }

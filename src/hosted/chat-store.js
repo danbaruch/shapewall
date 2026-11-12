@@ -35,8 +35,10 @@ import { HttpError } from './http.js'
 export const CHAT_LIMITS = {
   // Per thread: the oldest messages go.
   messages: 200,
-  // Per board.
-  threads: 500,
+  // A member's own chats on one board (the shared threads are apart).
+  privateChats: 50,
+  // Threads read for a snippet in one search.
+  searchRead: 40,
   text: 8000,
 }
 export const TURN_ENDED = ['done', 'stopped', 'error', 'interrupted']
@@ -80,12 +82,21 @@ export function createChatStore(t, { now = () => new Date() } = {}) {
            AND n.project_id = chat_threads.project_id AND n.board_id = chat_threads.board_id AND n.thread_id = chat_threads.thread_id)`,
         { project: projectId, board: boardId, user: userId, cutoff: new Date(now().getTime() - 60 * 60_000).toISOString() },
       )
-    const count = t.get('SELECT COUNT(*) AS n FROM chat_threads WHERE workspace_id = :ws AND project_id = :project AND board_id = :board', {
-      project: projectId,
-      board: boardId,
-    }).n
-    if (count >= CHAT_LIMITS.threads)
-      throw new HttpError(409, 'too_many_threads', `This board has ${CHAT_LIMITS.threads} chats. Delete some from the chat history first.`)
+    // A member's own chats on a board are capped apart from the shared
+    // threads (the board's and one per comment), so one person cannot use
+    // up what everyone shares.
+    if (CHAT_RE.test(threadId)) {
+      const mine = t.get(
+        "SELECT COUNT(*) AS n FROM chat_threads WHERE workspace_id = :ws AND project_id = :project AND board_id = :board AND owner_user_id = :user AND thread_id LIKE 'chat-%'",
+        { project: projectId, board: boardId, user: userId || '' },
+      ).n
+      if (mine >= CHAT_LIMITS.privateChats)
+        throw new HttpError(
+          409,
+          'too_many_threads',
+          `You have ${CHAT_LIMITS.privateChats} chats of your own on this board. Delete some from the chat history first.`,
+        )
+    }
     const at = iso()
     t.run(
       `INSERT INTO chat_threads (workspace_id, project_id, board_id, thread_id, agent_id, owner_user_id, created_by, created_at, updated_at)
@@ -195,27 +206,65 @@ export function createChatStore(t, { now = () => new Date() } = {}) {
   // searches titles and messages.
   function list(projectId, boardId, { userId, query = '' }) {
     const needle = searchNeedle(query)
-    const all = t.all(
-      'SELECT * FROM chat_threads WHERE workspace_id = :ws AND project_id = :project AND board_id = :board ORDER BY updated_at DESC',
-      { project: projectId, board: boardId },
+    const key = { project: projectId, board: boardId }
+    // Titles, counts and last activity only: no message is loaded for the list.
+    const all = t
+      .all(
+        `SELECT c.thread_id, c.agent_id, c.owner_user_id, c.title, c.archived, c.created_at,
+           (SELECT COUNT(*) FROM chat_messages m WHERE m.workspace_id = c.workspace_id AND m.project_id = c.project_id
+              AND m.board_id = c.board_id AND m.thread_id = c.thread_id) AS n,
+           (SELECT MAX(m.created_at) FROM chat_messages m WHERE m.workspace_id = c.workspace_id AND m.project_id = c.project_id
+              AND m.board_id = c.board_id AND m.thread_id = c.thread_id) AS last_at
+         FROM chat_threads c WHERE c.workspace_id = :ws AND c.project_id = :project AND c.board_id = :board ORDER BY c.updated_at DESC`,
+        key,
+      )
+      .filter((row) => row.n > 0 && visible(row, row.thread_id, userId))
+    const entry = (row, match = null) => {
+      const kind = threadKind(row.thread_id)
+      return {
+        id: row.thread_id,
+        kind,
+        ...(kind === 'comment' ? { commentId: Number(row.thread_id.slice(8)) } : {}),
+        title: row.title || null,
+        count: row.n,
+        createdAt: row.created_at,
+        updatedAt: row.last_at,
+        archived: row.archived === 1,
+        shared: kind !== 'chat',
+        ...(match ? { match } : {}),
+        agentId: row.agent_id || null,
+      }
+    }
+    if (!needle) return all.map((row) => entry(row)).sort(newestFirst)
+    // A search: titles first; then only the threads whose stored text holds
+    // the words are read for a snippet (a bounded number of them).
+    const like = `%${needle.replace(/[\\%_]/g, (char) => `\\${char}`)}%`
+    const holding = new Set(
+      t
+        .all(
+          "SELECT DISTINCT thread_id FROM chat_messages WHERE workspace_id = :ws AND project_id = :project AND board_id = :board AND lower(body) LIKE :like ESCAPE '\\'",
+          { ...key, like },
+        )
+        .map((row) => row.thread_id),
     )
     const out = []
+    let read = 0
     for (const row of all) {
-      if (!visible(row, row.thread_id, userId)) continue
-      const stored = messages(projectId, boardId, row.thread_id)
-      if (!stored.length) continue
+      if (
+        String(row.title || '')
+          .toLowerCase()
+          .includes(needle)
+      ) {
+        out.push(entry(row))
+        continue
+      }
+      if (!holding.has(row.thread_id) || read >= CHAT_LIMITS.searchRead) continue
+      read += 1
       const summary = threadSummary(
-        {
-          id: row.thread_id,
-          messages: stored,
-          title: row.title || undefined,
-          archived: row.archived === 1,
-          createdAt: row.created_at,
-          branches: [],
-        },
+        { id: row.thread_id, messages: messages(projectId, boardId, row.thread_id), title: row.title || undefined, branches: [] },
         needle,
       )
-      if (summary) out.push({ ...summary, agentId: row.agent_id || null })
+      if (summary?.match) out.push(entry(row, summary.match))
     }
     return out.sort(newestFirst)
   }
@@ -276,11 +325,15 @@ export function createChatStore(t, { now = () => new Date() } = {}) {
         agent: agentId,
       },
     )
+  // Today's turns of a project, from the usage records: they stay when a
+  // thread is deleted, so deleting one never gives turns back.
   const turnsToday = (projectId) =>
-    t.get('SELECT COUNT(*) AS n FROM chat_turns WHERE workspace_id = :ws AND project_id = :project AND created_at >= :start', {
-      project: projectId,
-      start: `${iso().slice(0, 10)}T00:00:00.000Z`,
-    }).n
+    t.get(
+      "SELECT COUNT(*) AS n FROM agent_runs WHERE workspace_id = :ws AND project_id = :project AND kind IN ('chat', 'review') AND started_at >= :start",
+      { project: projectId, start: `${iso().slice(0, 10)}T00:00:00.000Z` },
+    ).n
+  // Every turn the database still calls open (after a restart: none is).
+  const openTurns = () => t.all("SELECT * FROM chat_turns WHERE workspace_id = :ws AND state IN ('queued', 'running') ORDER BY created_at")
   function setRunning(turnId) {
     t.run("UPDATE chat_turns SET state = 'running' WHERE workspace_id = :ws AND id = :id AND state = 'queued'", { id: turnId })
   }
@@ -373,6 +426,7 @@ export function createChatStore(t, { now = () => new Date() } = {}) {
     createTurn,
     openTurn,
     openTurnsOf,
+    openTurns,
     turnsToday,
     setRunning,
     ack,

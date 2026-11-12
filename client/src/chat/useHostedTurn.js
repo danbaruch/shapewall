@@ -18,6 +18,7 @@ export const HOSTED_AGENTS_EVENT = 'shapewall:hosted-agents'
 
 // One join per board at a time (the turn store holds one turn per board).
 const joining = new Set()
+const REJOIN_MAX = 40
 
 async function join(boardId, threadId, lastUser) {
   if (joining.has(boardId) || runOf(boardId) || isSending(boardId)) return
@@ -31,21 +32,36 @@ async function join(boardId, threadId, lastUser) {
   }
   const frame = createFrameBatcher(show)
   try {
-    const response = await fetch(`${threadPath(boardId, threadId)}/events?after=0`, {
-      headers: { Accept: 'text/event-stream' },
-      cache: 'no-store',
-      signal: controller.signal,
-    })
-    // 204: it ended between the thread saying so and now.
-    if (response.status !== 200 || !String(response.headers.get('content-type')).includes('text/event-stream')) return
-    setAbort(boardId, controller)
-    show()
-    await readEventStream(response, (name, data) => {
-      const result = applyTurnEvent(pending, name, data)
-      pending = result.pending
-      if (result.stream) frame.queue()
-      else frame.now()
-    })
+    // The number of the last event this tab has. A stream that drops (a
+    // proxy, a slow moment) is picked up from there, never from the start:
+    // nothing is shown twice and nothing is missed.
+    let last = 0
+    for (let attempt = 0; attempt < REJOIN_MAX && !pending.final; attempt += 1) {
+      if (attempt) await new Promise((resolve) => setTimeout(resolve, 400))
+      const response = await fetch(`${threadPath(boardId, threadId)}/events?after=${last}`, {
+        headers: { Accept: 'text/event-stream' },
+        cache: 'no-store',
+        signal: controller.signal,
+      })
+      // 204: it ended (between the thread saying so and now, or while this tab was reconnecting).
+      if (response.status !== 200 || !String(response.headers.get('content-type')).includes('text/event-stream')) break
+      setAbort(boardId, controller)
+      show()
+      const before = last
+      await readEventStream(response, (name, data, id) => {
+        if (id) {
+          // Already seen (a replay that overlaps): skipped.
+          if (id <= last) return
+          last = id
+        }
+        const result = applyTurnEvent(pending, name, data)
+        pending = result.pending
+        if (result.stream) frame.queue()
+        else frame.now()
+      })
+      // A stream that brought nothing new twice running is not coming back.
+      if (last === before && attempt > 2) break
+    }
   } catch {
     // A dropped stream: the thread's own poll picks the turn up again.
   } finally {

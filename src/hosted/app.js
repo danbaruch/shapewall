@@ -546,6 +546,14 @@ export function createHostedApp({
   if (!guestOnly) sweep()
   const sweepTimer = !guestOnly && sweepEveryMs ? setInterval(sweep, sweepEveryMs) : null
   sweepTimer?.unref()
+  // No turn survives a restart: what the database still calls running ends here.
+  if (!guestOnly) {
+    try {
+      chat.sweepStale()
+    } catch (error) {
+      log(`turn sweep at start: ${error.message}`)
+    }
+  }
   // Chat turns whose machine went away end as interrupted (unref'd too).
   const turnTimer = guestOnly
     ? null
@@ -589,6 +597,7 @@ export function createHostedApp({
     for (const check of [...streams]) check(true)
     if (sweepTimer) clearInterval(sweepTimer)
     if (turnTimer) clearInterval(turnTimer)
+    chat.close()
     links.closeAll()
     await cleaner.close()
   }

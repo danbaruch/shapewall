@@ -14,7 +14,9 @@ import { fileURLToPath } from 'node:url'
 import { createBackend } from '../src/agent/backends/index.js'
 import { REMOTE_PREAMBLE } from '../src/agent/context.js'
 import { parseArgs } from '../src/cli.js'
-import { connectSettings, profileWarnings } from '../src/remote/agent-connect.js'
+import { CONNECT_PROVEN, connectSettings, profileProblems } from '../src/remote/agent-connect.js'
+import { READ_ONLY_MODES, readOnlyEnv, readOnlySession } from '../src/agent/backends/acp.js'
+import { commandHelp } from '../src/cli.js'
 import { COMMENT_PROMPT, JobError, cleanJob, jobConversation } from '../src/remote/agent-job.js'
 import { fatalLinkError } from '../src/remote/agent-link.js'
 import { policyFile, readMachinePolicy, saveMachinePolicy } from '../src/remote/agent-policy-file.js'
@@ -41,7 +43,7 @@ const TURN = `turn_${'a'.repeat(24)}`
 // A PATH folder with a "claude-agent-acp" that is the stub ACP agent.
 function stubBin(name = 'claude-agent-acp') {
   const bin = tempDir('agent-connect-bin')
-  fs.writeFileSync(path.join(bin, name), `#!/bin/sh\nexec "${process.execPath}" "${ACP_STUB}" "$@"\n`, { mode: 0o755 })
+  fs.writeFileSync(path.join(bin, name), `#!/bin/sh\nexec "${process.execPath}" "${ACP_STUB}" --ro-modes "$@"\n`, { mode: 0o755 })
   return bin
 }
 const job = (changes = {}) => ({
@@ -70,9 +72,32 @@ test('which agent runs is this machine’s choice: a known agent found on PATH, 
   // Without --agent: the first known agent found.
   assert.equal(connectSettings(config, {}, env).label, 'Claude Code')
   // Not installed, an unknown saved id, nothing at all: said plainly.
-  assert.throws(() => connectSettings(config, { agent: 'codex' }, env), /Codex is not installed on this machine/)
+  // Only an agent proven read-only by its own controls is offered: Claude Code.
+  assert.deepEqual(CONNECT_PROVEN, ['claude'])
+  assert.throws(
+    () => connectSettings(config, { agent: 'codex' }, env),
+    /Codex cannot be connected in this release.*runs shell commands and reads files outside the project/,
+  )
+  assert.throws(() => connectSettings(config, { agent: 'goose' }, env), /goose cannot be connected in this release/)
+  assert.throws(() => connectSettings(config, { agent: 'gemini' }, env), /Gemini CLI cannot be connected in this release/)
+  // Another agent found on PATH is passed over, never picked by default.
+  const both = stubBin('codex-acp')
+  assert.throws(() => connectSettings(config, {}, { ...env, PATH: both }), /No agent that can be connected was found/)
+  // An operator command that is not a proven agent is refused too.
+  assert.throws(
+    () =>
+      connectSettings(
+        config,
+        {},
+        { ...env, PATH: tempDir('agent-connect-empty0'), SHAPEWALL_AGENT_ACP: `${process.execPath} ${ACP_STUB}` },
+      ),
+    /cannot be connected in this release/,
+  )
   assert.throws(() => connectSettings(config, { agent: 'my-profile' }, env), /no longer saved/)
-  assert.throws(() => connectSettings(config, {}, { ...env, PATH: tempDir('agent-connect-empty') }), /No coding agent was found/)
+  assert.throws(
+    () => connectSettings(config, {}, { ...env, PATH: tempDir('agent-connect-empty') }),
+    /No agent that can be connected was found/,
+  )
   // The command line takes the flags it documents, and no command for the agent.
   const parsed = parseArgs(
     [
@@ -136,23 +161,63 @@ test('the agent’s token and this machine’s policy are files of their own, pr
   }
 })
 
-test('a profile that runs tools without asking is called out before connecting', () => {
+test('the agent’s own controls: a Claude Code session leaves the settings files out and keeps only reading tools; managed rules refuse the start', () => {
+  // What goes with session/new and into the environment, per agent.
+  const options = readOnlySession('claude')._meta.claudeCode.options
+  assert.deepEqual(options.settingSources, [], 'no user, project or local settings: their allow rules and hooks do not apply')
+  assert.equal(options.strictMcpConfig, true)
+  assert.deepEqual(options.tools, ['Read', 'Grep', 'Glob'])
+  for (const tool of ['Bash', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'WebFetch', 'Task'])
+    assert.ok(options.disallowedTools.includes(tool), tool)
+  assert.equal(options.allowDangerouslySkipPermissions, false)
+  assert.deepEqual(readOnlySession('custom'), {})
+  assert.deepEqual(readOnlyEnv('codex'), { INITIAL_AGENT_MODE: 'read-only' })
+  assert.deepEqual(readOnlyEnv('goose'), { GOOSE_MODE: 'chat' }, 'whatever GOOSE_MODE the person set')
+  assert.deepEqual(READ_ONLY_MODES.claude, ['default', 'plan'])
+  assert.deepEqual(READ_ONLY_MODES.codex, ['read-only'])
+
   const home = tempDir('agent-connect-claude-home')
   const root = tempDir('agent-connect-claude-root')
-  assert.deepEqual(profileWarnings('claude', root, { HOME: home }), [])
+  const none = path.join(tempDir('agent-connect-managed'), 'none.json')
+  assert.deepEqual(profileProblems('claude', root, { HOME: home }, { managedFile: none }), { refuse: [], notes: [] })
+  // The person's and the project's rules are left out of the session: said, not refused.
   fs.mkdirSync(path.join(home, '.claude'))
   fs.writeFileSync(
     path.join(home, '.claude', 'settings.json'),
-    JSON.stringify({ permissions: { defaultMode: 'bypassPermissions', allow: ['Bash(npm test:*)', 'Read(**)', 'Edit'] } }),
+    JSON.stringify({
+      permissions: { defaultMode: 'bypassPermissions', allow: ['Bash(npm test:*)', 'mcp__files__write', 'WebFetch'] },
+      hooks: { Stop: [] },
+    }),
   )
   fs.mkdirSync(path.join(root, '.claude'))
   fs.writeFileSync(path.join(root, '.claude', 'settings.local.json'), JSON.stringify({ permissions: { allow: ['Write'] } }))
-  const lines = profileWarnings('claude', root, { HOME: home })
-  assert.equal(lines.length, 3)
-  assert.match(lines[0], /~\/\.claude\/settings\.json sets the default mode "bypassPermissions"/)
-  assert.match(lines[1], /run 2 tools without asking/)
-  assert.match(lines[2], /\.claude\/settings\.local\.json lets Claude Code run 1 tool without asking/)
-  assert.deepEqual(profileWarnings('codex', root, { HOME: home }), [])
+  const left = profileProblems('claude', root, { HOME: home }, { managedFile: none })
+  assert.deepEqual(left.refuse, [])
+  assert.match(
+    left.notes[0],
+    /Left out of this session: the allow rules, hooks and default mode in ~\/\.claude\/settings\.json, \.claude\/settings\.local\.json/,
+  )
+  // Managed settings cannot be left out: acting rules or hooks there refuse the start.
+  const managed = path.join(tempDir('agent-connect-managed2'), 'managed-settings.json')
+  for (const rule of ['Bash', 'Edit', 'Write', 'mcp__shell__run', 'WebFetch', 'Read(//etc/**)', 'Read(~/.ssh/**)']) {
+    fs.writeFileSync(managed, JSON.stringify({ permissions: { allow: [rule] } }))
+    assert.equal(profileProblems('claude', root, { HOME: home }, { managedFile: managed }).refuse.length, 1, rule)
+  }
+  fs.writeFileSync(managed, JSON.stringify({ permissions: { allow: ['Read(src/**)', 'Grep'] } }))
+  assert.equal(
+    profileProblems('claude', root, { HOME: home }, { managedFile: managed }).refuse.length,
+    0,
+    'reading inside the project is fine',
+  )
+  fs.writeFileSync(managed, JSON.stringify({ hooks: { PreToolUse: [{ hooks: [{ type: 'command', command: 'x' }] }] } }))
+  assert.match(profileProblems('claude', root, { HOME: home }, { managedFile: managed }).refuse[0], /runs hooks/)
+
+  // The help says what --audience owner is, and does not promise more.
+  const help = commandHelp('agent')
+  assert.match(help, /--takeover/)
+  assert.match(help, /no protection from a server that lies/)
+  assert.doesNotMatch(help, /whatever the server says/)
+  assert.match(help, /Codex, goose and Gemini CLI are not\s+offered in this release/)
 })
 
 test('a job is checked on the machine, and every piece of board text is quoted as data', () => {
@@ -254,6 +319,7 @@ test('read only: a session set to act without asking is switched to one that ask
     )
     const events = []
     try {
+      // (Thrown errors come back as { error }.)
       for await (const event of backend.stream({
         messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
         signal: new AbortController().signal,
@@ -267,10 +333,16 @@ test('read only: a session set to act without asking is switched to one that ask
           .map((event) => event.text)
           .join(''),
       }
+    } catch (error) {
+      return { error, events, text: '' }
     } finally {
       backend.close()
     }
   }
+  // Fail closed: an agent that reports no mode at all is not started read-only.
+  const silent = await run([], 'stream')
+  assert.equal(silent.error?.code, 'agent_unsafe_mode')
+  assert.match(silent.error.message, /reports no session mode/)
   // Modes the older way: started in "bypassPermissions", switched to "ask".
   assert.equal((await run(['--modes', '--start-mode=bypassPermissions'], 'mode')).text, 'ask')
   // As a config option: started in "yolo", switched.
@@ -278,12 +350,45 @@ test('read only: a session set to act without asking is switched to one that ask
   // A mode that asks is left alone.
   assert.equal((await run(['--modes', '--start-mode=architect'], 'mode')).text, 'architect')
   // A permission request is refused with a card nobody can answer.
-  const asked = await run([], 'permission')
+  const asked = await run(['--ro-modes'], 'permission')
   assert.match(asked.text, /Permission: reject/)
   const card = asked.events.find((event) => event.type === 'permission')
   assert.equal(card.state, 'denied')
   assert.deepEqual(card.options, [])
   assert.ok(!asked.events.some((event) => event.type === 'permission' && event.state === 'pending'))
+  // Claude Code by name: its session gets the options that leave the person's rules out, and only
+  // "default" or "plan" is a mode it may run in ("acceptEdits" is switched, not kept).
+  const asClaude = async (args, prompt) => {
+    const backend = createBackend(
+      {
+        configured: true,
+        backend: 'acp',
+        label: 'Claude Code',
+        acp: { argv: [path.join(stubBin(), 'claude-agent-acp'), ...args] },
+        readOnly: true,
+        vision: false,
+      },
+      { env: { PATH: process.env.PATH, HOME: os.homedir() }, root: tempDir('agent-connect-claude'), log: () => {} },
+    )
+    let text = ''
+    try {
+      for await (const event of backend.stream({
+        messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
+        signal: new AbortController().signal,
+        thread: 'sample/board',
+      }))
+        if (event.type === 'text') text += event.text
+    } finally {
+      backend.close()
+    }
+    return text
+  }
+  const sent = JSON.parse(await asClaude([], 'newparams'))
+  assert.deepEqual(sent._meta.claudeCode.options.settingSources, [])
+  assert.deepEqual(sent._meta.claudeCode.options.tools, ['Read', 'Grep', 'Glob'])
+  assert.equal(await asClaude(['--start-mode=acceptEdits'], 'mode'), 'default')
+  assert.equal(await asClaude(['--start-mode=plan'], 'mode'), 'plan')
+  // The local board's backend, not read-only, is unchanged: nothing is added to its session.
   // The local board's backend, not read-only, is unchanged: it still offers writes and terminals.
   const local = createBackend(
     { configured: true, backend: 'acp', label: 'Stub', acp: { argv: [process.execPath, ACP_STUB] } },
@@ -369,11 +474,27 @@ test('the command: approved once in the browser, the token saved and never print
   const second = connect(env, ['--agent', 'claude', '--audience', 'owner'])
   await until(() => /Connected: Builder/.test(second.state.err), `the second link\n${second.state.out}${second.state.err}`)
   assert.equal(codeOf(second), undefined)
-  assert.match(second.state.err, /takes questions from the person who connected it only/)
+  assert.match(second.state.err, /refuses questions the server says are not from the person who connected it/)
   assert.equal(readMachinePolicy(hosted.origin, 'default', env).audience, 'owner', 'the flag is remembered')
   assert.equal((await named('Builder')).link.policy.audience, 'owner')
   second.child.kill('SIGINT')
   assert.deepEqual(await second.exited, { code: 0, signal: null })
+
+  // A second process on the same token: refused, with the machine that holds the link; --takeover replaces it.
+  const holder = connect(env, ['--agent', 'claude'])
+  await until(() => /Connected: Builder/.test(holder.state.err), `the holder\n${holder.state.err}`)
+  const late = connect(env, ['--agent', 'claude'])
+  assert.equal((await late.exited).code, 1)
+  assert.match(late.state.err, /Builder is already connected from .+ since .+--takeover/)
+  assert.equal(holder.child.exitCode, null, 'the first one is untouched')
+  const taker = connect(env, ['--agent', 'claude', '--takeover'])
+  await until(() => /Connected: Builder/.test(taker.state.err), `the taker\n${taker.state.err}`)
+  assert.deepEqual(await holder.exited, { code: 0, signal: null })
+  assert.match(holder.state.err, /took over this agent/)
+  assert.equal((await named('Builder')).state, 'online')
+  taker.child.kill('SIGTERM')
+  assert.deepEqual(await taker.exited, { code: 0, signal: null })
+  hosted.rateLimiter.reset()
 
   // As a service: the token from a file, a clean environment, no saved login, no browser.
   const tokenFile = path.join(tempDir('agent-connect-token'), 'token')
@@ -417,7 +538,7 @@ test('the command refuses what is not an agent’s: a plain token, a bad flag, a
     [['--audience', 'everyone'], /--audience/],
     [['--concurrency', '9'], /--concurrency must be 1 to 4/],
     [['--as', 'Bad Name'], /--as/],
-    [['--agent', 'codex'], /Codex is (not installed|here, but its ACP adapter is not)/],
+    [['--agent', 'codex'], /Codex cannot be connected in this release/],
   ]) {
     const bad = connect(env, flags)
     assert.equal((await bad.exited).code, 1)

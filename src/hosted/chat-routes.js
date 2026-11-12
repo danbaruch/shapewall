@@ -49,6 +49,9 @@ import { roleAtLeast } from './permissions.js'
 import { LIMITS } from './ratelimit.js'
 
 const MENTIONS_MAX = 8
+// One viewer's stream of a turn: how much may wait for a slow reader, and
+// how long a blocked socket is waited for.
+export const FOLLOW = { queueBytes: 4 * 1024 * 1024, stuckMs: 30_000 }
 export const READ_ONLY_NOTE =
   'This agent reads the project and answers. It does not change files or run commands from the board; send a comment to an agent that runs "shapewall watch --exec" for a fix.'
 
@@ -167,7 +170,20 @@ export function mountChatRoutes(
     if (stale) chat.interrupt(req.t, stale)
     return null
   }
-  const agentOfThread = (found, row) => (row?.agent_id && found.agents.find((agent) => agent.id === row.agent_id)) || defaultOf(found)
+  // The agent a thread talks to: the one it was given, and no other. A
+  // thread nobody chose an agent for gets the default. A thread whose agent
+  // is offline, revoked or no longer chats stays that agent's: it is never
+  // handed to another one without a person choosing it (`gone`).
+  function agentOfThread(found, row) {
+    if (!row?.agent_id) return { agent: defaultOf(found), gone: false }
+    const agent = found.agents.find((item) => item.id === row.agent_id) || null
+    return { agent, gone: !agent }
+  }
+  const GONE = {
+    ok: false,
+    code: 'agent_gone',
+    reason: "This chat's agent is no longer connected to this project. Choose another agent for this chat.",
+  }
 
   router.get(
     '/boards/:bid/threads',
@@ -185,7 +201,7 @@ export function mountChatRoutes(
       const { ctx, threadId, store, row } = at
       const live = runningOf(req, at)
       const found = chatAgents(req, ctx.board.id)
-      const agent = agentOfThread(found, row)
+      const { agent, gone } = agentOfThread(found, row)
       res.json({
         id: threadId,
         messages: store.messages(req.project.id, ctx.board.id, threadId),
@@ -197,7 +213,8 @@ export function mountChatRoutes(
         // The thread's own agent; "default" while nobody chose one.
         profileId: row?.agent_id && found.agents.some((item) => item.id === row.agent_id) ? row.agent_id : 'default',
         profiles: profilesOf(found),
-        agent: agentInfo(agent),
+        // A thread whose agent is gone says so; it does not show another agent's name.
+        agent: gone ? { ...agentInfo(null), configured: true, label: 'Agent', composer: GONE } : agentInfo(agent),
         running: Boolean(live),
         // A turn to join (GET .../events): its id and who may stop it.
         turn: live
@@ -266,27 +283,69 @@ export function mountChatRoutes(
     res.flushHeaders()
     let unsubscribe = () => {}
     let done = false
+    let ending = false
+    // What this viewer has not been sent yet. The socket's own buffer fills
+    // while a replay is written or a reader is slow: the rest waits here for
+    // `drain`, in order. Only a viewer that stays stuck is let go (too much
+    // waiting, or no progress for too long); it comes back with the id of
+    // the last event it has (`after`), and misses nothing.
+    const queue = []
+    let queued = 0
+    let blocked = false
+    let stuck = null
     const finish = () => {
       if (done) return
       done = true
       clearInterval(timer)
+      clearTimeout(stuck)
       unsubscribe()
       res.end()
     }
-    const timer = setInterval(() => res.write(': keepalive\n\n'), 15_000)
+    const pump = () => {
+      while (queue.length && !blocked && !done) {
+        const text = queue.shift()
+        queued -= text.length
+        if (!res.write(text)) {
+          blocked = true
+          stuck = setTimeout(finish, FOLLOW.stuckMs)
+          stuck.unref()
+          res.once('drain', () => {
+            clearTimeout(stuck)
+            blocked = false
+            pump()
+          })
+        }
+      }
+      if (ending && !queue.length && !blocked) finish()
+    }
+    const send = (text) => {
+      if (done) return
+      queue.push(text)
+      queued += text.length
+      if (queued > FOLLOW.queueBytes) return finish()
+      pump()
+    }
+    const timer = setInterval(() => send(': keepalive\n\n'), 15_000)
     timer.unref()
     const subscribed = hub.subscribe(live, after, (event) => {
       if (done) return
-      if (event.name === 'end') return finish()
-      if (!res.write(`id: ${event.seq}\nevent: ${event.name}\ndata: ${JSON.stringify(event.data)}\n\n`)) finish()
+      if (event.name === 'end') {
+        ending = true
+        return pump()
+      }
+      send(`id: ${event.seq}\nevent: ${event.name}\ndata: ${JSON.stringify(event.data)}\n\n`)
     })
     if (!subscribed) {
-      res.write(`event: status\ndata: ${JSON.stringify({ text: 'Too many people are watching this answer. Reload in a moment.' })}\n\n`)
-      return finish()
+      send(`event: status\ndata: ${JSON.stringify({ text: 'Too many people are watching this answer. Reload in a moment.' })}\n\n`)
+      ending = true
+      return pump()
     }
     unsubscribe = subscribed
     // The turn may have ended while its events were replayed.
-    if (!hub.get(live.id)) return finish()
+    if (!hub.get(live.id)) {
+      ending = true
+      pump()
+    }
     res.once('close', finish)
   }
 
@@ -324,7 +383,8 @@ export function mountChatRoutes(
       // Which agent, and whether this person may use it now.
       const agents = agentsFor(req.t)
       const found = chatAgents(req, ctx.board.id)
-      const agent = agentOfThread(found, at.row)
+      const { agent, gone } = agentOfThread(found, at.row)
+      if (gone) throw new HttpError(409, GONE.code, GONE.reason)
       if (!agent) throw new HttpError(409, 'no_agent', 'No agent that chats is connected to this project.')
       if (!agent.chat.ok)
         throw new HttpError(agent.chat.code === 'agent_audience' ? 403 : 409, agent.chat.code || 'agent_unavailable', agent.chat.reason)
@@ -415,7 +475,8 @@ export function mountChatRoutes(
       return fail(res, 500, 'server_error', 'Something went wrong on the server.')
     }
     if (!live) return res.status(204).end()
-    const after = Number(req.query.after)
+    // Where this viewer is: the id of the last event it has (never 0 again after a dropped stream).
+    const after = Number(req.query.after ?? req.headers['last-event-id'])
     follow(req, res, live, Number.isSafeInteger(after) && after > 0 ? after : 0)
   })
 
@@ -476,8 +537,37 @@ export function mountChatRoutes(
       if (!agent.chat.ok && agent.chat.code !== 'agent_offline')
         throw new HttpError(403, agent.chat.code || 'agent_audience', agent.chat.reason)
       transaction(db, () => {
-        const { created } = store.ensure(req.project.id, ctx.board.id, threadId, { userId: req.user.id, agentId: agent.id })
+        const { row: before, created } = store.ensure(req.project.id, ctx.board.id, threadId, { userId: req.user.id, agentId: agent.id })
+        const from = before.agent_id && before.agent_id !== agent.id ? before.agent_id : null
         store.setAgent(req.project.id, ctx.board.id, threadId, agent.id)
+        // A chat with messages changes hands in the open: a line in the
+        // thread says who switched it, from which agent to which. (It
+        // belongs to no agent, so it is never sent to one.)
+        if (from && store.messages(req.project.id, ctx.board.id, threadId).length) {
+          const old = agentsFor(req.t).get(req.project.id, from)
+          store.append(req.project.id, ctx.board.id, threadId, {
+            role: 'assistant',
+            body: {
+              text: '',
+              status: 'done',
+              switched: { from: old?.name || null, to: agent.name, by: req.user.display_name },
+              cards: [
+                {
+                  id: 'note-switch',
+                  kind: 'note',
+                  name: 'note',
+                  label: `${req.user.display_name} switched this chat ${old?.name ? `from ${old.name} ` : ''}to ${agent.name}. ${agent.name} gets the messages of people it takes work from, and none of ${old?.name || 'the other agent'}'s answers.`,
+                },
+              ],
+              agent: { id: agent.id, name: agent.name },
+            },
+          })
+          said(req)('chat_thread_agent_changed', `${ctx.board.id}/${CHAT_RE.test(threadId) ? 'chat' : threadId}`, {
+            project: req.project.id,
+            from,
+            to: agent.id,
+          })
+        }
         if (created)
           said(req)('chat_thread_created', `${ctx.board.id}/${CHAT_RE.test(threadId) ? 'chat' : threadId}`, {
             project: req.project.id,

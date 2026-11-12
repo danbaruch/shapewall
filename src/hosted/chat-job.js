@@ -7,6 +7,12 @@
 //
 // What never enters a job:
 //   - a share link guest's comment or reply (untrusted text from outside)
+//   - a comment by someone outside the agent's audience, or one the token
+//     API would hide from this agent's token (not sent to an agent, or
+//     sent to another one), unless the person asking wrote it themself:
+//     the open comments, the thread's own comment, and what a mention
+//     stands for all go through the same check (`commentVisible`), and a
+//     mention of a comment the agent may not read keeps only its number
 //   - a chat message by someone outside the agent's audience: a person the
 //     agent does not take work from cannot steer it by writing in a shared
 //     thread before someone it does take work from asks a question
@@ -112,10 +118,12 @@ function mentionData(ctx, comments, mention) {
 // `inAudience(userId)`: whether the agent takes work from that person.
 // `commentItem(number)`: the thread's comment as this agent's token may
 // read it (replies filtered to its audience), or null.
-export function buildJob({ ctx, turn, agent, rows, inAudience, asker, commentItem }) {
+// `commentVisible(comment)`: whether this agent may read that comment.
+export function buildJob({ ctx, turn, agent, rows, inAudience, asker, commentItem, commentVisible }) {
   const board = ctx.board
   const all = ctx.comments.list({})
-  const comments = all.filter((comment) => !comment.authorGuest)
+  const comments = all.filter((comment) => !comment.authorGuest && commentVisible(comment))
+  const readable = new Set(comments.map((comment) => comment.id))
   const parse = (row) => {
     try {
       return JSON.parse(row.body)
@@ -144,7 +152,11 @@ export function buildJob({ ctx, turn, agent, rows, inAudience, asker, commentIte
       mentions: (Array.isArray(body.mentions) ? body.mentions : []).slice(0, 8).map((mention) => ({
         kind: mention.kind,
         id: mention.id,
-        label: cut(mention.label || mention.id, 80),
+        // The label of a comment is its text: only for a comment the agent may read.
+        label:
+          ['comment', 'element'].includes(mention.kind) && !readable.has(Number(mention.id))
+            ? `#${Number(mention.id) || ''}`
+            : cut(mention.label || mention.id, 80),
         ...(full.has(row.id) ? { data: mentionData(ctx, comments, mention) } : {}),
       })),
       files: (Array.isArray(body.files) ? body.files : []).slice(0, 3).map((file) => ({
@@ -155,7 +167,7 @@ export function buildJob({ ctx, turn, agent, rows, inAudience, asker, commentIte
     }
   })
   const commentNumber = /^comment-(\d+)$/.exec(turn.thread_id)?.[1]
-  const comment = commentNumber ? commentItem(Number(commentNumber)) : null
+  const comment = commentNumber && readable.has(Number(commentNumber)) ? commentItem(Number(commentNumber)) : null
   const open = comments.filter((item) => item.status === 'open' && item.id !== Number(commentNumber || 0)).sort((a, b) => b.id - a.id)
   return {
     turn: { id: turn.id, kind: turn.kind, board: board.id, thread: turn.thread_id, comment: commentNumber ? Number(commentNumber) : null },

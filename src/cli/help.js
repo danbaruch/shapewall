@@ -135,12 +135,15 @@ export const SECTIONS = {
   agent: `  agent connect             make this machine's coding agent an agent of a hosted project: members chat with it
                             on the board, and it reads this folder and answers. Read and answer only: no edits, no
                             commands. The first run is approved in the browser by an admin.   --remote URL
-      --agent NAME          which agent: claude, codex, goose, gemini, or a saved agent's id (default: this
-                            project's agent, else the first one found). Never a command from the server
+      --agent NAME          which agent: claude, or a saved agent's id that runs Claude Code (default: this
+                            project's agent, else Claude Code when found). Codex, goose and Gemini CLI are not
+                            offered in this release. Never a command from the server
       --name "Builder"      the name to suggest on the approval page (the approver has the last word)
       --as NAME             a second connection from this machine (its own token; default "default")
-      --audience owner|server  "owner": only the person who connects it may ask, whatever the server says;
-                            "server" (default): whoever its audience on the server names
+      --audience owner|server  "owner": the server keeps it to the person who connects it even if its audience
+                            there is widened, and this machine refuses a job the server says is someone else's
+                            (no protection from a server that lies); "server" (default): its audience on the server
+      --takeover            close the link another machine holds for this agent, and take its place
       --concurrency N       answers at once, 1 to 4 (default 2)
       --token-file FILE     for a service: the agent's own token, no browser (docs/hosted.md)
   agent run --comment ID    the sandboxed starter agent on one comment: a container with only a fresh

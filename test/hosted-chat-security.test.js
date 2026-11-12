@@ -379,11 +379,16 @@ test('limits: one person, one project and one agent can only ask so much', async
     kind: 'custom',
     audience: 'trusted',
   })
-  const call = (method, route, body) => tokenCall(hosted, busy.token, method, `/api/v1/agent${route}`, body === undefined ? {} : { body })
+  const LINK = 'c3'.repeat(16)
+  const call = (method, route, body) =>
+    tokenCall(hosted, busy.token, method, `/api/v1/agent${route}`, {
+      ...(body === undefined ? {} : { body }),
+      headers: { 'X-Shapewall-Link': LINK },
+    })
   await call('POST', '/hello', { kind: 'custom', capabilities: { chat: true }, maxTurns: 1 })
   const controller = new AbortController()
   const stream = await fetch(`http://127.0.0.1:${hosted.port}/api/v1/agent/link`, {
-    headers: { Authorization: `Bearer ${busy.token}` },
+    headers: { Authorization: `Bearer ${busy.token}`, 'X-Shapewall-Link': LINK },
     signal: controller.signal,
   })
   assert.equal(stream.status, 200)

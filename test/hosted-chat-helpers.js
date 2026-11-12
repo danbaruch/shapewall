@@ -84,7 +84,8 @@ export function startLink(
         configured: true,
         backend: 'acp',
         label: 'Stub agent',
-        acp: { argv: [process.execPath, ACP_STUB, ...args] },
+        // The modes Claude Code's adapter lists: a read-only session needs a mode that asks.
+        acp: { argv: [process.execPath, ACP_STUB, '--ro-modes', ...args] },
         readOnly: true,
         preamble: REMOTE_PREAMBLE,
         vision: false,

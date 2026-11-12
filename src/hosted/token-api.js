@@ -327,6 +327,7 @@ export function mountTokenApi({
       handle,
       agentsFor,
       agentPresence,
+      rateLimiter,
       chatFor,
       hub,
       links,

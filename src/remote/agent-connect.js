@@ -41,11 +41,26 @@ function projectFor(flags, cwd) {
 // Which local agent runs: --agent names a known one (claude, codex, goose,
 // gemini) or a saved agent's id; without it, this project's saved agent,
 // else the first known agent found on PATH. Always this machine's command.
+// The agents `agent connect` offers: the ones whose own controls were
+// proven, with the real adapter, to keep a read-only session from editing,
+// running commands and reading outside the project (docs/agent-hardening.md
+// says how). An agent that could not be proven that way is not offered:
+// refusing what it asks for is not enough when it does not ask.
+export const CONNECT_PROVEN = ['claude']
+const NOT_PROVEN = {
+  codex:
+    'Codex cannot be connected in this release. Started read-only it changes no files, but its sandbox still runs shell commands and reads files outside the project without asking, and what it reads can leave this machine in an answer.',
+  goose: 'goose cannot be connected in this release: its chat-only mode could not be verified to keep every tool off.',
+  gemini: 'Gemini CLI cannot be connected in this release: its read-only behaviour has not been verified.',
+}
+
 export function connectSettings(config, flags, env = process.env) {
   const wanted = typeof flags.agent === 'string' ? flags.agent.trim() : ''
   const known = KNOWN_AGENTS.find((agent) => agent.id === wanted)
   const found = detectAgents(env)
   const fromKnown = (agent) => {
+    if (!CONNECT_PROVEN.includes(agent.id))
+      throw new Error(`${NOT_PROVEN[agent.id]} Connect Claude Code (--agent claude), or use "shapewall watch --remote" for this agent.`)
     const here = found.find((item) => item.id === agent.id)
     if (!here)
       throw new Error(
@@ -63,10 +78,11 @@ export function connectSettings(config, flags, env = process.env) {
   else {
     settings = agentSettings(config, env)
     if (!(settings.configured && settings.backend === 'acp')) {
-      const first = found.find((item) => item.state === 'ready')
+      // Only an agent that is offered: another one found first is passed over.
+      const first = found.find((item) => item.state === 'ready' && CONNECT_PROVEN.includes(item.id))
       if (!first)
         throw new Error(
-          'No coding agent was found on this machine. Install Claude Code, Codex, goose or Gemini CLI with its ACP adapter (docs/agents.md), or name one: --agent claude|codex|goose|gemini.',
+          'No agent that can be connected was found on this machine. Install Claude Code with its ACP adapter (npm install -g @agentclientprotocol/claude-agent-acp, docs/agents.md). Codex, goose and Gemini CLI are not offered by agent connect in this release.',
         )
       settings = fromKnown(KNOWN_AGENTS.find((agent) => agent.id === first.id))
     }
@@ -74,44 +90,63 @@ export function connectSettings(config, flags, env = process.env) {
   if (settings.backend !== 'acp')
     throw new Error('agent connect runs a coding agent on this machine (Claude Code, Codex, goose, Gemini CLI), not a model endpoint.')
   if (!settings.configured) throw new Error(settings.problem || 'That agent is not set up on this machine.')
+  // A saved agent or this project's own: the same rule, by what its command starts.
+  const kind = acpAgentKind(settings.acp.argv)
+  if (!CONNECT_PROVEN.includes(kind))
+    throw new Error(
+      `${NOT_PROVEN[kind] || `${settings.label} cannot be connected in this release: Shapewall cannot make an agent it does not know read-only by the agent's own controls.`} Connect Claude Code (--agent claude).`,
+    )
   return settings
 }
 
-// What this machine can tell about the agent's own settings: a connected
-// agent is only as read-only as its profile. Shapewall refuses every request
-// the agent makes; a tool the agent is set up to run without asking never
-// asks. Lines to print before connecting (empty: nothing found).
-export function profileWarnings(kind, root, env = process.env) {
-  const lines = []
-  if (kind !== 'claude') return lines
+// What stands in the way of a read-only session, in the agent's own
+// settings. A connected Claude Code session is started without the person's
+// and the project's settings files (their allow rules, hooks and MCP servers
+// do not apply) and with only its reading tools. What Shapewall cannot leave
+// out is the machine's managed settings: when those allow acting tools or
+// run hooks, the agent is not started. Returns { refuse: [...], notes: [...] }.
+const ACTING_RULE_RE = /^(Bash|Edit|Write|MultiEdit|NotebookEdit|WebFetch|WebSearch|Task|Agent|mcp__|Read\(\s*(\/|~))/
+export function profileProblems(kind, root, env = process.env, { managedFile = '/etc/claude-code/managed-settings.json' } = {}) {
+  const out = { refuse: [], notes: [] }
+  if (kind !== 'claude') return out
+  const read = (file) => {
+    try {
+      return JSON.parse(fs.readFileSync(file, 'utf8'))
+    } catch {
+      return null
+    }
+  }
+  const acting = (data) =>
+    Array.isArray(data?.permissions?.allow) ? data.permissions.allow.filter((rule) => ACTING_RULE_RE.test(String(rule))) : []
+  const hooks = (data) => (data?.hooks && typeof data.hooks === 'object' ? Object.keys(data.hooks).length : 0)
+  const managed = read(managedFile)
+  if (managed) {
+    if (acting(managed).length)
+      out.refuse.push(
+        `${managedFile} lets Claude Code use ${acting(managed).length} acting tool rule${acting(managed).length === 1 ? '' : 's'} without asking (permissions.allow), and a session cannot leave managed settings out.`,
+      )
+    if (hooks(managed))
+      out.refuse.push(`${managedFile} runs hooks (commands) around every session, and a session cannot leave managed settings out.`)
+    if (/bypass|accept|dontask|auto/i.test(String(managed.permissions?.defaultMode || '')))
+      out.notes.push(
+        `${managedFile} sets the default mode "${managed.permissions.defaultMode}": this session is switched to one that asks, or it does not start.`,
+      )
+  }
   const home = env.HOME || os.homedir()
   const files = [
-    path.join(home, '.claude', 'settings.json'),
+    path.join(env.CLAUDE_CONFIG_DIR || path.join(home, '.claude'), 'settings.json'),
     path.join(root, '.claude', 'settings.json'),
     path.join(root, '.claude', 'settings.local.json'),
   ]
-  for (const file of files) {
-    let data
-    try {
-      data = JSON.parse(fs.readFileSync(file, 'utf8'))
-    } catch {
-      continue
-    }
-    const permissions = data?.permissions && typeof data.permissions === 'object' ? data.permissions : {}
-    const shown = file.startsWith(root) ? path.relative(root, file) : `~/${path.relative(home, file)}`
-    if (typeof permissions.defaultMode === 'string' && /bypass|accept|dontask|auto/i.test(permissions.defaultMode))
-      lines.push(
-        `${shown} sets the default mode "${permissions.defaultMode}": this session is switched to one that asks, or it does not start.`,
-      )
-    const allowed = Array.isArray(permissions.allow)
-      ? permissions.allow.filter((rule) => /^(Bash|Edit|Write|MultiEdit|NotebookEdit)\b/.test(String(rule)))
-      : []
-    if (allowed.length)
-      lines.push(
-        `${shown} lets Claude Code run ${allowed.length} tool${allowed.length === 1 ? '' : 's'} without asking (permissions.allow). Shapewall cannot refuse what is never asked: remove those rules, or give this agent a config folder of its own (docs/agent-hardening.md).`,
-      )
-  }
-  return lines
+  const found = files.filter((file) => {
+    const data = read(file)
+    return data && (acting(data).length || hooks(data) || data.permissions?.defaultMode)
+  })
+  if (found.length)
+    out.notes.push(
+      `Left out of this session: the allow rules, hooks and default mode in ${found.map((file) => (file.startsWith(root) ? path.relative(root, file) : file.replace(home, '~'))).join(', ')}.`,
+    )
+  return out
 }
 
 export async function agentConnect(
@@ -128,7 +163,9 @@ export async function agentConnect(
   const concurrency = flags.concurrency === undefined ? 2 : Number(flags.concurrency)
   if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 4) throw new Error('--concurrency must be 1 to 4')
   if (flags.audience !== undefined && !POLICY_AUDIENCES.includes(flags.audience))
-    throw new Error('--audience: "owner" (only the person who connects it, whatever the server says) or "server" (as set on the server)')
+    throw new Error(
+      '--audience: "owner" (ask the server to keep it to the person who connects it, and refuse other jobs here) or "server" (as set on the server)',
+    )
 
   const config = projectFor(flags, cwd)
   const settings = connectSettings(config, flags, env)
@@ -192,7 +229,10 @@ export async function agentConnect(
   // ---- This machine's own rules ----
   const policy =
     flags.audience !== undefined ? saveMachinePolicy(origin, slug, { audience: flags.audience }, env) : readMachinePolicy(origin, slug, env)
-  for (const line of profileWarnings(kind, config.dir, env)) log(`Warning: ${line}`)
+  const profile = profileProblems(kind, config.dir, env)
+  if (profile.refuse.length)
+    throw new Error(`${label} is not started read-only on this machine. ${profile.refuse.join(' ')} See docs/agent-hardening.md.`)
+  for (const line of profile.notes) log(line)
 
   const backend = createBackend(
     // Read and answer only (src/agent/backends/acp.js readOnly), with the
@@ -215,8 +255,9 @@ export async function agentConnect(
   process.once('SIGINT', stop)
   process.once('SIGTERM', stop)
   const remote = createRemote({ origin, token, source, fetchImpl })
+  let ended = null
   try {
-    await runAgentLink({
+    ended = await runAgentLink({
       origin,
       token,
       source,
@@ -224,6 +265,7 @@ export async function agentConnect(
       hello: { kind, machine: os.hostname().split('.')[0] || 'this computer', version: VERSION, maxTurns: concurrency },
       policy,
       remote,
+      takeover: Boolean(flags.takeover),
       signal: controller.signal,
       fetchImpl,
       log: (line) => log(line),
@@ -235,12 +277,15 @@ export async function agentConnect(
         log(
           `Reads ${config.dir} and answers. No edits, no commands. Used by: ${terminalSafe(agent.audience || 'the person who connected it')}.`,
         )
-        if (policy.audience === 'owner') log(`This machine takes questions from the person who connected it only (${policyFile(env)}).`)
+        if (policy.audience === 'owner')
+          log(`This machine refuses questions the server says are not from the person who connected it (${policyFile(env)}).`)
         log('Members chat with it from the Agents panel of the board. Ctrl+C stops it.')
       },
     })
   } catch (error) {
     if (!fatalLinkError(error)) throw error
+    // Another process holds this agent's link: the server says which machine, since when.
+    if (error.code === 'already_connected') throw new Error(terminalSafe(error.message), { cause: error })
     // A saved token the server refuses is of no more use: the next run asks for a new approval.
     const forgot = error.status === 401 && source === 'agent' && forgetAgentCredential(origin, slug, env)
     throw new Error(
@@ -255,6 +300,6 @@ export async function agentConnect(
     signal?.removeEventListener('abort', stop)
     backend.close?.()
   }
-  log('Disconnected.')
+  log(ended?.takenOver ? 'Another "shapewall agent connect" took over this agent (--takeover). This one stopped.' : 'Disconnected.')
   return 0
 }

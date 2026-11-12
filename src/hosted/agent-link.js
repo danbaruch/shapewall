@@ -34,11 +34,16 @@ import { LINK_KINDS, LINK_TURNS_MAX } from './agents.js'
 import { rowToComment } from './comments.js'
 import { transaction } from './db.js'
 import { HttpError, fail } from './http.js'
-import { findApiToken, tenant } from './tenancy.js'
+import { LIMITS } from './ratelimit.js'
+import { findApiToken, tenant, workspacesWithOpenTurns } from './tenancy.js'
 import { TURN_LIMITS } from './turn-hub.js'
 
 export const LINK_LIMITS = {
-  streamsPerToken: 2,
+  // One process holds an agent's link (a second is refused, or takes over).
+  streamsPerToken: 1,
+  // agent.changed per agent, and link audit rows per agent and kind.
+  changedEveryMs: 3000,
+  auditEveryMs: 60_000,
   streams: 500,
   // Turns waiting for a busy agent, on top of the ones it runs.
   queued: 5,
@@ -51,6 +56,7 @@ export const LINK_LIMITS = {
 export function createAgentLinks({ hub = null } = {}) {
   const open = new Map()
   const key = (workspaceId, agentId) => `${workspaceId}:${agentId}`
+  const list = (workspaceId, agentId) => [...(open.get(key(workspaceId, agentId)) || [])]
   return {
     add(workspaceId, agentId, stream) {
       const id = key(workspaceId, agentId)
@@ -66,22 +72,27 @@ export function createAgentLinks({ hub = null } = {}) {
       if (!set.size) open.delete(id)
       return set.size
     },
-    // { connectedAt, streams } while the agent holds a link, else null.
+    // { connectedAt, streams, machine } while the agent holds a link, else null.
     of(workspaceId, agentId) {
-      const set = open.get(key(workspaceId, agentId))
-      if (!set?.size) return null
-      return { connectedAt: [...set].map((stream) => stream.connectedAt).sort()[0], streams: set.size }
+      const streams = list(workspaceId, agentId)
+      if (!streams.length) return null
+      const first = streams.sort((x, y) => String(x.connectedAt).localeCompare(String(y.connectedAt)))[0]
+      return { connectedAt: first.connectedAt, streams: streams.length, machine: first.machine || null }
     },
+    // The agent's streams (one process holds one: `linkId` names the process).
+    streamsOf: list,
+    // Whether the process that calls itself `linkId` holds a stream for the agent.
+    holds: (workspaceId, agentId, linkId) => list(workspaceId, agentId).some((stream) => stream.linkId === linkId),
     turns: (workspaceId, agentId) => hub?.ofAgent(workspaceId, agentId).length || 0,
-    // Sends one event to every stream of the agent. False: it has none.
+    // Sends one event to the agent's stream. False: it has none.
     send(workspaceId, agentId, event, data) {
-      const set = open.get(key(workspaceId, agentId))
-      if (!set?.size) return false
-      for (const stream of [...set]) stream.send(event, data)
+      const streams = list(workspaceId, agentId)
+      if (!streams.length) return false
+      // One process per agent holds the link: work goes to exactly one stream.
+      streams.at(-1).send(event, data)
       return true
     },
     count: () => [...open.values()].reduce((sum, set) => sum + set.size, 0),
-    countOf: (tokenId) => [...open.values()].reduce((sum, set) => sum + [...set].filter((stream) => stream.tokenId === tokenId).length, 0),
     closeAll() {
       for (const set of [...open.values()]) for (const stream of [...set]) stream.close('shutdown')
     },
@@ -107,6 +118,45 @@ export function partialOf(turn) {
 // What ends a turn from the server's side (the machine went away, Stop with
 // no machine to hear it, a revoked agent, a restart), in one place.
 export function createChatService({ db, hub, links, events, chatFor, now = () => new Date() }) {
+  // "An agent came or went", for the boards of its project: at most once
+  // every few seconds per agent, however fast its link flaps. The last
+  // change always goes out (a trailing publish).
+  const changed = new Map()
+  const timers = new Set()
+  function agentChanged(workspaceId, projectId, agentId) {
+    const id = `${workspaceId}:${agentId}`
+    const publish = () => {
+      changed.set(id, Date.now())
+      // Ids only: which agent of which project.
+      events.publish({ type: 'agent.changed', workspace: workspaceId, project: projectId, agent: agentId })
+    }
+    const since = Date.now() - (changed.get(id) || 0)
+    if (since >= LINK_LIMITS.changedEveryMs) return publish()
+    if (changed.get(`${id}:pending`)) return
+    changed.set(`${id}:pending`, true)
+    const timer = setTimeout(() => {
+      timers.delete(timer)
+      changed.delete(`${id}:pending`)
+      publish()
+    }, LINK_LIMITS.changedEveryMs - since)
+    timer.unref()
+    timers.add(timer)
+    if (changed.size > 20_000) changed.clear()
+  }
+  // Link audit rows: a link that flaps writes one "connected" and one
+  // "disconnected" a minute, not one per attempt. True: write this one.
+  const audited = new Map()
+  function auditDue(action, agentId) {
+    const id = `${action}:${agentId}`
+    const due = Date.now() - (audited.get(id) || 0) >= LINK_LIMITS.auditEveryMs
+    if (due) audited.set(id, Date.now())
+    if (audited.size > 20_000) audited.clear()
+    return due
+  }
+  const close = () => {
+    for (const timer of timers) clearTimeout(timer)
+    timers.clear()
+  }
   const notify = (workspaceId, projectId, boardId, threadId) =>
     // Ids only; a private chat's id never goes to the board's room.
     events.publish({
@@ -138,18 +188,39 @@ export function createChatService({ db, hub, links, events, chatFor, now = () =>
       if (row) interrupt(t, row, { state: 'stopped' })
       else hub.close(turn)
     }
-    for (const turn of hub.stale((item) => Boolean(links.of(item.workspaceId, item.agentId)))) {
+    // "Linked": the process that took the turn still holds its link (a turn
+    // nobody took yet: the agent holds any link).
+    const linked = (item) =>
+      item.linkId ? links.holds(item.workspaceId, item.agentId, item.linkId) : Boolean(links.of(item.workspaceId, item.agentId))
+    for (const turn of hub.stale(linked)) {
       const t = tenant(db, turn.workspaceId)
       const row = chatFor(t).turn(turn.id)
       if (row) interrupt(t, row)
       else hub.close(turn)
     }
   }
-  return { notify, interrupt, interruptAgent, sweep, now }
+  // At server start nothing is running: every turn the database still calls
+  // queued or running was cut off by the stop, whether or not anyone opens
+  // its thread again. Each ends as interrupted, with its usage record.
+  function sweepStale() {
+    let ended = 0
+    for (const workspaceId of workspacesWithOpenTurns(db)) {
+      const t = tenant(db, workspaceId)
+      for (const row of chatFor(t).openTurns()) {
+        if (hub.get(row.id)) continue
+        if (interrupt(t, row, { message: 'The server restarted before the agent finished. Ask again.' })) ended += 1
+      }
+    }
+    return ended
+  }
+  return { notify, interrupt, interruptAgent, sweep, sweepStale, agentChanged, auditDue, close, now }
 }
 
 const VERSION_RE = /^\d{1,4}\.\d{1,4}\.\d{1,4}(?:[-+][0-9A-Za-z.-]{1,40})?$/
 const TURN_ID_RE = /^turn_[a-f0-9]{24}$/
+// The name a connect process gives itself (random, per process): it tells
+// a reconnect of the same process from a second process on the same token.
+const LINK_ID_RE = /^[a-f0-9]{16,64}$/
 
 // What hello may say, cleaned. A connected agent reads and answers only:
 // whatever a machine claims about edits or commands is recorded as "no".
@@ -189,6 +260,7 @@ export function mountAgentLink(
     handle,
     agentsFor,
     agentPresence,
+    rateLimiter,
     chatFor,
     hub,
     links,
@@ -211,6 +283,31 @@ export function mountAgentLink(
   const final = express.json({ limit: 1024 * 1024 })
   const said = (req) => (action, target, detail) => auditOf(req, action, target, detail)
 
+  const linkIdOf = (req) => {
+    const value = String(req.headers['x-shapewall-link'] || '')
+    return LINK_ID_RE.test(value) ? value : null
+  }
+  // One process per agent. Another process already holds this agent's
+  // link: refused, with which machine and since when; or, with `takeover`,
+  // the other is told and closed first. The same process reconnecting
+  // replaces its own old stream quietly.
+  function onlyOne(req, linkId, takeover) {
+    const others = links.streamsOf(req.t.workspaceId, req.agent.id).filter((stream) => stream.linkId !== linkId)
+    if (!others.length) return
+    if (!takeover) {
+      const held = others[0]
+      throw new HttpError(
+        409,
+        'already_connected',
+        `${req.agent.name} is already connected from ${held.machine || 'another machine'} since ${held.connectedAt}. Stop "shapewall agent connect" there, or run this again with --takeover.`,
+      )
+    }
+    for (const stream of others) {
+      stream.send('bye', { reason: 'taken_over' })
+      stream.close('taken_over')
+    }
+  }
+
   // This agent's own open turn, or 404 (another agent's, another project's,
   // an ended one and a made-up id all look the same).
   function ownTurn(req) {
@@ -229,11 +326,22 @@ export function mountAgentLink(
     throw new HttpError(410, 'turn_ended', 'This turn is over.')
   }
 
+  // A turn another process of this agent took is not this one's to write in.
+  function notAnothers(req, live) {
+    const linkId = linkIdOf(req)
+    if (live.linkId && linkId && live.linkId !== linkId)
+      throw new HttpError(409, 'not_your_turn', 'Another process of this agent is answering this turn.')
+  }
+
   router.post(
     '/hello',
     small,
     handle((req, res) => {
       const hello = cleanHello(req.body)
+      const linkId = linkIdOf(req)
+      if (!linkId) throw new HttpError(400, 'invalid_hello', 'Send X-Shapewall-Link: the name this process gave itself.')
+      // Before anything is written: a second process does not rename the machine of the first.
+      onlyOne(req, linkId, req.body?.takeover === true)
       const agents = agentsFor(req.t)
       const row = transaction(db, () => agents.hello(req.agent, hello))
       res.json({
@@ -261,8 +369,22 @@ export function mountAgentLink(
   )
 
   router.get('/link', (req, res) => {
-    if (links.count() >= LINK_LIMITS.streams || links.countOf(req.token.id) >= LINK_LIMITS.streamsPerToken)
-      return fail(res, 429, 'stream_budget', 'This agent already holds its links. Stop the other "shapewall agent connect" first.')
+    const linkId = linkIdOf(req)
+    if (!linkId) return fail(res, 400, 'invalid_link', 'Send X-Shapewall-Link: the name this process gave itself.')
+    if (links.count() >= LINK_LIMITS.streams) return fail(res, 429, 'stream_budget', 'Too many agents are connected to this server.')
+    // A link that opens over and over is held back: each open is a write.
+    const opens = rateLimiter.hit('agentLinkOpen', req.token.id, LIMITS.agentLinkOpen)
+    if (!opens.ok) {
+      res.setHeader('Retry-After', String(opens.retryAfter))
+      return fail(res, 429, 'rate_limited', 'This agent reconnects too often. It may try again in a moment.')
+    }
+    try {
+      onlyOne(req, linkId, req.query.takeover === '1')
+    } catch (error) {
+      return fail(res, error.statusCode || 409, error.code || 'already_connected', error.message)
+    }
+    // The same process again (it reconnected before its old stream was noticed gone).
+    for (const old of links.streamsOf(req.t.workspaceId, req.agent.id)) old.close('replaced')
     res.setHeader('Content-Type', 'text/event-stream')
     res.setHeader('X-Accel-Buffering', 'no')
     res.flushHeaders()
@@ -278,6 +400,8 @@ export function mountAgentLink(
     }
     const stream = {
       tokenId: req.token.id,
+      linkId,
+      machine: req.agent.machine || null,
       connectedAt: iso(),
       send: (event, data) => write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`),
       close: (reason) => close(reason),
@@ -293,10 +417,12 @@ export function mountAgentLink(
       // A fresh handle: this runs long after the request's own.
       const t = tenant(db, workspaceId)
       if (!left) agentPresence?.gone(workspaceId, agent.id)
-      auditOf(req, 'agent_link_disconnected', agent.id, { project: req.project.id, name: agent.name, reason }, t)
+      // Always said when it matters (revoked, taken over); a flapping link is said once a minute.
+      if (['revoked', 'taken_over'].includes(reason) || chat.auditDue('agent_link_disconnected', agent.id))
+        auditOf(req, 'agent_link_disconnected', agent.id, { project: req.project.id, name: agent.name, reason }, t)
       // A revoked agent answers nothing more: what it was answering ends now.
       if (reason === 'revoked' && !left) chat.interruptAgent(t, agent, `${agent.name} was revoked before it finished.`)
-      events.publish({ type: 'agent.changed', workspace: workspaceId, project: req.project.id })
+      chat.agentChanged(workspaceId, req.project.id, agent.id)
     }
     const check = (force = false) => {
       if (force) return close('shutdown')
@@ -308,14 +434,16 @@ export function mountAgentLink(
     links.add(workspaceId, agent.id, stream)
     agentsFor(req.t).seen(agent)
     const caps = agentsFor(req.t).linkView(agent)
-    auditOf(req, 'agent_link_connected', agent.id, {
-      project: req.project.id,
-      name: agent.name,
-      kind: agent.kind,
-      machine: agent.machine || null,
-      version: caps.version || null,
-    })
-    events.publish({ type: 'agent.changed', workspace: workspaceId, project: req.project.id })
+    if (chat.auditDue('agent_link_connected', agent.id) || req.query.takeover === '1')
+      auditOf(req, 'agent_link_connected', agent.id, {
+        project: req.project.id,
+        name: agent.name,
+        kind: agent.kind,
+        machine: agent.machine || null,
+        version: caps.version || null,
+        ...(req.query.takeover === '1' ? { takeover: true } : {}),
+      })
+    chat.agentChanged(workspaceId, req.project.id, agent.id)
     unsubscribe = events.subscribe((event) => {
       if (event.type === 'close') return close('shutdown')
       if (closed || event.workspace !== workspaceId || event.project !== req.project.id) return
@@ -348,8 +476,10 @@ export function mountAgentLink(
           chat.interrupt(req.t, row, { agentName: req.agent.name })
           continue
         }
-        hub.heard(live)
-        turns.push({ id: row.id, state: live.state, cancel: live.cancel, ack: live.acked })
+        // `mine`: this process took it (it fetched its job). Another process's turn is not this one's to end.
+        const mine = !live.linkId || live.linkId === linkIdOf(req)
+        if (mine) hub.heard(live)
+        turns.push({ id: row.id, state: live.state, cancel: live.cancel, ack: live.acked, mine })
       }
       res.json({ turns })
     }),
@@ -389,6 +519,28 @@ export function mountAgentLink(
           handle: person?.handle || null,
           owner: Boolean(row.started_by) && row.started_by === req.agent.created_by,
         },
+        // A comment reaches this agent only when the person asking wrote it,
+        // or the agent holds it, or its author is in the agent's audience
+        // and the token API would show it to this agent's token (sent to an
+        // agent, and not to another one). Never a guest's, an imported one
+        // or another agent's.
+        commentVisible: (comment) => {
+          let stored
+          try {
+            stored = ctx.comments.get(comment.id)
+          } catch {
+            return false
+          }
+          if (stored.author_share_id || !stored.author_user_id) return false
+          if (row.started_by && stored.author_user_id === row.started_by) return true
+          if (agents.holds(req.agent, req.project.id, stored)) return true
+          if (!agents.inAudience(req.agent, stored.author_user_id) || !agents.trusted(req.project.id, row.board_id, stored.author_user_id))
+            return false
+          return (
+            policyFor(req.t).state(req.project.id, ctx.board.id, { ...stored, status: 'open' }).dispatchable &&
+            agents.workCheck(req.agent, req.project.id, stored).ok
+          )
+        },
         // The thread's comment as this token reads it: never a guest's, its
         // replies only from people in the agent's audience, and no file URLs.
         commentItem: (number) => {
@@ -411,6 +563,10 @@ export function mountAgentLink(
       })
       if (Buffer.byteLength(JSON.stringify(job)) > FRAME_LIMITS.jobBytes)
         throw new HttpError(413, 'job_too_large', 'This conversation is too large to send to the agent. Start a new chat.')
+      // The process that fetches the job is the one that answers it.
+      if (live.linkId && live.linkId !== linkIdOf(req))
+        throw new HttpError(409, 'not_your_turn', 'Another process of this agent is answering this turn.')
+      live.linkId = linkIdOf(req)
       if (live.state === 'queued') {
         live.state = 'running'
         store.setRunning(row.id)
@@ -426,6 +582,7 @@ export function mountAgentLink(
     handle((req, res) => {
       const row = ownTurn(req)
       const live = liveTurn(req, row)
+      notAnothers(req, live)
       const seq = req.body?.seq
       const list = req.body?.events
       if (!Number.isSafeInteger(seq) || seq < 1) throw new HttpError(400, 'invalid_batch', 'seq: a whole number from 1.')
@@ -455,6 +612,7 @@ export function mountAgentLink(
       // Already stored (our answer was lost on the way): fine.
       if (!['queued', 'running'].includes(row.state)) return res.json({ ok: true, already: true })
       const live = liveTurn(req, row)
+      notAnothers(req, live)
       const reply = cleanReply(req.body?.message)
       // A turn the board stopped ends as stopped, whatever the machine says.
       if (live.cancel && reply.status === 'done') reply.status = 'stopped'
