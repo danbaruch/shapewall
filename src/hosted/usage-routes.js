@@ -25,7 +25,9 @@ import {
   cleanBucket,
   cleanDimension,
   cleanMetric,
+  cleanTopLimit,
   cleanUsageFilter,
+  createLayouts,
   createUsage,
   createViews,
   usageCsvHeader,
@@ -91,7 +93,8 @@ export function mountUsageRoutes(
     const bucket = cleanBucket(req.query.bucket)
     return { bucket, buckets: store.latency(filterOf(req), scope, bucket) }
   })
-  usage('/top', (req, store, scope) => store.top(filterOf(req), scope))
+  // ?limit=: how many entries each list holds (5 unless asked, at most 10).
+  usage('/top', (req, store, scope) => store.top(filterOf(req), scope, { limit: cleanTopLimit(req.query.limit) }))
   usage('/budgets', (req, store, scope) => ({ projects: store.budgets(scope) }))
   usage('/rows', (req, store, scope) =>
     store.rows(filterOf(req), scope, {
@@ -190,6 +193,76 @@ export function mountUsageRoutes(
     handle((req, res) => {
       createViews(req.t, { now }).remove(req.user.id, req.params.id)
       res.json({ ok: true })
+    }),
+  )
+
+  // The layout a view carries, for whoever was handed the view's link:
+  // anyone in this workspace who has the Usage page. A view that carries
+  // none, a view of another workspace and an unknown id all answer 404.
+  consoleApi.get(
+    '/workspaces/:ws/views/:id/layout',
+    inWorkspace(NEEDS.usage),
+    handle((req, res) => {
+      const view = createViews(req.t, { now }).layoutOf(req.params.id)
+      if (!view) throw new HttpError(404, 'unknown_view', 'No such saved view, or it carries no layout.')
+      res.json({ view })
+    }),
+  )
+
+  // ---- The layout of the Usage dashboard ----
+
+  // A person reads and writes their own layout and nobody else's: there is
+  // no user id in these addresses, only the session's. `default`: what the
+  // workspace's owners set for everyone to start from (null: the built-in
+  // layout). Saving checks the layout (src/hosted/usage-layout.js): unknown
+  // widgets and sizes out of range are dropped, never stored.
+  const layoutsOf = (req) => createLayouts(req.t, { now })
+  const layoutAnswer = (req, store = layoutsOf(req)) => ({
+    layout: store.mine(req.user.id),
+    default: store.shared(),
+    canSetDefault: roleAtLeast(req.role, NEEDS.usageDefaultLayout),
+  })
+  consoleApi.get(
+    '/workspaces/:ws/usage/layout',
+    inWorkspace(NEEDS.usage),
+    handle((req, res) => res.json(layoutAnswer(req))),
+  )
+  consoleApi.put(
+    '/workspaces/:ws/usage/layout',
+    inWorkspace(NEEDS.usage),
+    handle((req, res) => {
+      const layout = transaction(db, () => layoutsOf(req).save(req.user.id, req.body?.layout))
+      res.json({ layout })
+    }),
+  )
+  // "Reset to default": forgets the person's own layout.
+  consoleApi.delete(
+    '/workspaces/:ws/usage/layout',
+    inWorkspace(NEEDS.usage),
+    handle((req, res) => {
+      layoutsOf(req).reset(req.user.id)
+      res.json(layoutAnswer(req))
+    }),
+  )
+  // "Set as default for everyone": owners. Audited.
+  consoleApi.put(
+    '/workspaces/:ws/usage/layout/default',
+    inWorkspace(NEEDS.usageDefaultLayout),
+    handle((req, res) => {
+      const layout = transaction(db, () =>
+        layoutsOf(req).setDefault(req.user.id, req.body?.layout, {
+          audit: (action, target, detail) => auditOf(req, action, target, detail),
+        }),
+      )
+      res.json({ default: layout })
+    }),
+  )
+  consoleApi.delete(
+    '/workspaces/:ws/usage/layout/default',
+    inWorkspace(NEEDS.usageDefaultLayout),
+    handle((req, res) => {
+      transaction(db, () => layoutsOf(req).clearDefault({ audit: (action, target, detail) => auditOf(req, action, target, detail) }))
+      res.json({ default: null })
     }),
   )
 

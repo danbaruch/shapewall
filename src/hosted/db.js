@@ -670,6 +670,24 @@ const MIGRATIONS = [
   CREATE INDEX audit_workspace_user ON audit_log(workspace_id, user_id, id);
   CREATE INDEX audit_account_user ON audit_log(user_id, id) WHERE workspace_id IS NULL;
   `,
+  // 16: layouts of the Usage dashboard (0.7.0). One row per layout: a
+  // person's own (kind 'person', subject their user id), the workspace's
+  // default that people start from (kind 'default', subject ''), and the
+  // layout a saved view carries (kind 'view', subject the view's id). The
+  // layout is JSON, checked on the way in and again on the way out
+  // (src/hosted/usage-layout.js). One new table and nothing else: an older
+  // build ignores it (docs/hosted.md, "Migration 16 and rollback").
+  `
+  CREATE TABLE usage_layouts (
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK (kind IN ('person', 'default', 'view')),
+    subject TEXT NOT NULL,
+    layout TEXT NOT NULL,
+    updated_by TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (workspace_id, kind, subject)
+  );
+  `,
 ]
 
 export async function openDatabase(file) {

@@ -152,6 +152,8 @@ export const ACTION_GROUPS = {
     'share_links_disabled',
     'agent_policy_changed',
     'usage_retention_changed',
+    'usage_layout_default_set',
+    'usage_layout_default_removed',
     'project_made_public',
     'project_made_private',
   ],

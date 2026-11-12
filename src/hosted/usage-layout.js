@@ -1,0 +1,547 @@
+// The layout of the Usage dashboard, as plain values with no imports beyond
+// the usage shape: the widgets there are, what each may be sized to and
+// which options it takes, and every change a person can make to a layout
+// (move, resize, hide, add, duplicate, reorder, reset). The server
+// (usage.js), the console and the public demo all go through this file, so
+// a stored layout is checked the same way wherever it is read or written.
+//
+// A layout is { v, items }: one item per widget on a grid of 12 columns,
+// { id, type, x, y, w, h, options }. Rows are a fixed height; a widget is
+// `h` rows tall. Nothing overlaps and nothing floats: items always compact
+// upward. Narrower screens show the same layout reflowed to fewer columns
+// (reflow), never a second stored layout.
+//
+// A list, a breakdown and the budgets are as tall as what they hold (so many
+// rows, so many projects) until someone sizes them by hand: such an item
+// carries `auto: true`, and fitLayout gives it its height.
+//
+// Nothing here trusts what it is given. cleanLayout drops any item whose
+// type is unknown or whose size or place is out of range, and any option
+// that is not one of the listed values; what is left is safe to draw.
+
+import { USAGE_BUCKETS, USAGE_DIMENSIONS, USAGE_METRICS } from './usage-shape.js'
+
+export const LAYOUT_VERSION = 1
+export const LAYOUT_COLS = 12
+export const LAYOUT_LIMITS = {
+  // The stored JSON, in characters.
+  bytes: 16_000,
+  // Widgets on one dashboard.
+  items: 40,
+  // Copies of one chart.
+  copies: 4,
+  // The lowest row a widget may start on.
+  rows: 400,
+}
+// The grid in pixels: a row's height and the gap between widgets.
+export const LAYOUT_ROW = 56
+export const LAYOUT_GAP = 16
+// Columns by the width of the dashboard itself: 12 on a desktop or a
+// tablet held sideways, 6 on a narrow window, 2 on a phone (tiles side by
+// side, everything else one under the other).
+export const LAYOUT_MODES = [
+  { cols: 12, min: 840 },
+  { cols: 6, min: 560 },
+  { cols: 2, min: 0 },
+]
+export const colsFor = (width) => LAYOUT_MODES.find((mode) => width >= mode.min).cols
+
+const clamp = (value, low, high) => Math.min(Math.max(value, low), high)
+const bool = (fallback) => ({ kind: 'bool', fallback })
+const pick = (values, fallback) => ({ kind: 'enum', values, fallback })
+const some = (values, fallback) => ({ kind: 'set', values, fallback })
+
+const TILE = { w: 4, h: 2, minW: 2, maxW: 4, minH: 2, maxH: 2 }
+const CHART = { w: 6, h: 5, minW: 4, maxW: 12, minH: 4, maxH: 8 }
+const LIST = { w: 3, h: 4, minW: 3, maxW: 6, minH: 3, maxH: 9 }
+const VIEW = pick(['chart', 'table'], 'chart')
+const tile = (title, spark) => ({
+  title,
+  group: 'tile',
+  size: TILE,
+  options: { ...(spark === null ? {} : { spark: bool(spark) }), compare: bool(true) },
+})
+// `auto(options, facts)`: the rows a widget needs for what it holds.
+const list = (title) => ({
+  title,
+  group: 'list',
+  size: LIST,
+  options: { rows: pick([3, 5, 10], 5) },
+  auto: (options) => ({ 3: 3, 5: 4, 10: 7 })[options.rows],
+})
+
+export const TIME_STYLES = ['stacked', 'grouped', 'lines']
+export const PERCENTILES = ['p50', 'p90', 'p95', 'p99']
+// Every widget type. `many`: a chart that may be on the dashboard more than
+// once, each copy with its own options. `admin`: drawn for admins and
+// owners only.
+export const WIDGETS = {
+  tile_calls: tile('Turns', true),
+  tile_tokens: tile('Tokens', false),
+  tile_duration: tile('Agent time', false),
+  tile_cost: tile('Reported cost', false),
+  tile_fixes: tile('Fixes ready', null),
+  tile_failed: tile('Failed or stopped', false),
+  time: {
+    title: 'Usage over time',
+    group: 'chart',
+    many: true,
+    size: { w: 12, h: 6, minW: 4, maxW: 12, minH: 4, maxH: 10 },
+    options: {
+      metric: pick(USAGE_METRICS, 'calls'),
+      by: pick([...USAGE_DIMENSIONS, 'none'], 'agent'),
+      // "auto": the bucket that suits the period.
+      bucket: pick(['auto', ...USAGE_BUCKETS], 'auto'),
+      style: pick(TIME_STYLES, 'stacked'),
+      legend: bool(true),
+      brush: bool(true),
+      view: VIEW,
+    },
+  },
+  breakdown: {
+    title: 'Breakdown',
+    group: 'chart',
+    many: true,
+    size: { w: 6, h: 5, minW: 3, maxW: 12, minH: 3, maxH: 10 },
+    options: {
+      by: pick(USAGE_DIMENSIONS, 'project'),
+      // "chart": the measure of the first "over time" chart.
+      metric: pick(['chart', ...USAGE_METRICS], 'chart'),
+      rows: pick([5, 8, 12, 20], 8),
+      share: bool(true),
+      view: VIEW,
+    },
+    auto: (options) => ({ 5: 4, 8: 5, 12: 7, 20: 10 })[options.rows],
+  },
+  outcomes: {
+    title: 'How turns ended',
+    group: 'chart',
+    many: true,
+    size: CHART,
+    options: { mode: pick(['share', 'counts'], 'share'), view: VIEW },
+  },
+  approvals: {
+    title: 'Approvals',
+    group: 'chart',
+    many: true,
+    size: CHART,
+    options: { mode: pick(['stacked', 'separate'], 'stacked'), view: VIEW },
+  },
+  latency: {
+    title: 'Turn duration',
+    group: 'chart',
+    many: true,
+    size: CHART,
+    options: { percentiles: some(PERCENTILES, ['p50', 'p95']), log: bool(false), view: VIEW },
+  },
+  top_agents: list('Busiest agents'),
+  top_threads: list('Threads that used the most tokens'),
+  top_slowest: list('Slowest turns'),
+  top_denied: list('Most denied approvals'),
+  budgets: {
+    title: 'Budgets today',
+    group: 'budgets',
+    admin: true,
+    size: { w: 12, h: 4, minW: 4, maxW: 12, minH: 3, maxH: 10 },
+    options: {},
+    // A row per project under the heading; from six projects on the list scrolls.
+    auto: (_options, facts) =>
+      Number.isInteger(facts?.budgets) ? clamp(Math.ceil((89 + Math.max(facts.budgets, 1) * 65) / 72), 3, 6) : null,
+  },
+}
+export const WIDGET_TYPES = Object.keys(WIDGETS)
+const known = (type) => typeof type === 'string' && Object.hasOwn(WIDGETS, type)
+const ID = /^[a-z][a-z0-9_]{0,23}(?:-[1-9][0-9]?)?$/
+
+export class LayoutError extends Error {
+  constructor(code, message) {
+    super(message)
+    this.code = code
+  }
+}
+
+// ---- Options ----
+
+// A widget's options with every key present: what was stored where it is
+// one of the listed values, the default where it is not. Unknown keys go.
+export function cleanOptions(type, given) {
+  const out = {}
+  if (!known(type)) return out
+  const source = given && typeof given === 'object' && !Array.isArray(given) ? given : {}
+  for (const [key, spec] of Object.entries(WIDGETS[type].options)) {
+    const value = Object.hasOwn(source, key) ? source[key] : undefined
+    if (spec.kind === 'bool') out[key] = typeof value === 'boolean' ? value : spec.fallback
+    else if (spec.kind === 'enum') out[key] = spec.values.includes(value) ? value : spec.fallback
+    else {
+      // A set: listed values only, in the listed order, never empty.
+      const chosen = Array.isArray(value) ? spec.values.filter((item) => value.includes(item)) : []
+      out[key] = chosen.length ? chosen : [...spec.fallback]
+    }
+  }
+  return out
+}
+
+// ---- Geometry ----
+
+const whole = (value) => Number.isInteger(value)
+export const collides = (a, b) => a.id !== b.id && a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+const byPlace = (a, b) => a.y - b.y || a.x - b.x || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+const firstHit = (placed, item) => placed.find((other) => collides(other, item))
+// The widgets from the top left, row by row: the order a narrow screen, a
+// printed page and a screen reader take them in.
+export const readingOrder = (items) => [...items].sort(byPlace)
+
+// Every item as far up as it goes, in reading order: no overlaps, no gaps.
+export function compact(items) {
+  const placed = []
+  for (const given of readingOrder(items)) {
+    const item = { ...given }
+    while (item.y > 0 && !firstHit(placed, { ...item, y: item.y - 1 })) item.y -= 1
+    let hit
+    while ((hit = firstHit(placed, item))) item.y = hit.y + hit.h
+    placed.push(item)
+  }
+  // Always in reading order, so the same arrangement is the same stored text.
+  return readingOrder(placed)
+}
+// One item put where it was asked to go; whatever was there moves down.
+function settle(items, id) {
+  const pinned = items.find((item) => item.id === id)
+  if (!pinned) return compact(items)
+  const placed = [{ ...pinned }]
+  for (const given of readingOrder(items)) {
+    if (given.id === id) continue
+    const item = { ...given }
+    let hit
+    while ((hit = firstHit(placed, item))) item.y = hit.y + hit.h
+    placed.push(item)
+  }
+  return compact(placed)
+}
+
+const sizeOf = (type) => WIDGETS[type].size
+// A size inside what the widget's type allows, and inside the grid.
+export function fitSize(type, w, h, x = 0) {
+  const size = sizeOf(type)
+  return { w: clamp(w, size.minW, Math.min(size.maxW, LAYOUT_COLS - x)), h: clamp(h, size.minH, size.maxH) }
+}
+
+// ---- Reading a stored layout ----
+
+// Older shapes of a stored layout, brought to the current one. Before a
+// layout carried a version it was a bare list of grid items keyed `i`.
+// A version this build does not know reads as no layout at all.
+export function migrateLayout(stored) {
+  if (Array.isArray(stored))
+    return {
+      v: LAYOUT_VERSION,
+      items: stored.map((item) =>
+        item && typeof item === 'object'
+          ? {
+              id: item.i,
+              type: typeof item.i === 'string' ? item.i.replace(/-[0-9]+$/, '') : undefined,
+              x: item.x,
+              y: item.y,
+              w: item.w,
+              h: item.h,
+              options: item.options,
+            }
+          : item,
+      ),
+    }
+  if (!stored || typeof stored !== 'object') return null
+  if (stored.v !== LAYOUT_VERSION) return null
+  return stored
+}
+
+function cleanItem(given, seen, counts) {
+  if (!given || typeof given !== 'object' || Array.isArray(given)) return null
+  const { id, type, x, y, w, h } = given
+  if (!known(type) || typeof id !== 'string' || !ID.test(id) || seen.has(id)) return null
+  const size = sizeOf(type)
+  if (![x, y, w, h].every(whole)) return null
+  if (w < size.minW || w > size.maxW || h < size.minH || h > size.maxH) return null
+  if (x < 0 || x + w > LAYOUT_COLS || y < 0 || y > LAYOUT_LIMITS.rows) return null
+  const count = counts.get(type) || 0
+  if (count >= (WIDGETS[type].many ? LAYOUT_LIMITS.copies : 1)) return null
+  counts.set(type, count + 1)
+  seen.add(id)
+  const item = { id, type, x, y, w, h, options: cleanOptions(type, given.options) }
+  // Whether its height still follows what it holds. A layout stored before this was kept: it does while it has the default height.
+  if (WIDGETS[type].auto) item.auto = typeof given.auto === 'boolean' ? given.auto : h === size.h
+  return item
+}
+
+// A layout as it may be stored and drawn, from anything at all. Throws a
+// LayoutError for something that is not a layout (or is too large to be
+// one); drops the items and options it does not know.
+export function cleanLayout(given) {
+  let size
+  try {
+    size = JSON.stringify(given)?.length ?? 0
+  } catch {
+    throw new LayoutError('invalid_layout', 'layout: an object with its widgets.')
+  }
+  if (size > LAYOUT_LIMITS.bytes) throw new LayoutError('layout_too_large', `A layout holds at most ${LAYOUT_LIMITS.bytes} characters.`)
+  const layout = migrateLayout(given)
+  if (!layout || !Array.isArray(layout.items)) throw new LayoutError('invalid_layout', 'layout: { v, items } as the page saves it.')
+  const seen = new Set()
+  const counts = new Map()
+  const items = []
+  for (const item of layout.items) {
+    if (items.length >= LAYOUT_LIMITS.items) break
+    const clean = cleanItem(item, seen, counts)
+    if (clean) items.push(clean)
+  }
+  return { v: LAYOUT_VERSION, items: compact(items) }
+}
+// The same, for a reader: anything that is not a layout reads as none.
+export function readLayout(given) {
+  try {
+    return given === null || given === undefined ? null : cleanLayout(given)
+  } catch {
+    return null
+  }
+}
+
+// ---- The default ----
+
+const at = (type, x, y, extra = {}) => ({
+  id: type,
+  type,
+  x,
+  y,
+  w: sizeOf(type).w,
+  h: sizeOf(type).h,
+  options: cleanOptions(type, {}),
+  ...(WIDGETS[type].auto ? { auto: true } : {}),
+  ...extra,
+})
+// The dashboard as it is before anyone changes it: six tiles, usage over
+// time, four charts in pairs, the top lists, the budgets.
+export function defaultLayout() {
+  return {
+    v: LAYOUT_VERSION,
+    items: [
+      at('tile_calls', 0, 0),
+      at('tile_tokens', 4, 0),
+      at('tile_duration', 8, 0),
+      at('tile_cost', 0, 2),
+      at('tile_fixes', 4, 2),
+      at('tile_failed', 8, 2),
+      at('time', 0, 4),
+      at('breakdown', 0, 10),
+      at('outcomes', 6, 10),
+      at('approvals', 0, 15),
+      at('latency', 6, 15),
+      at('top_agents', 0, 20),
+      at('top_threads', 3, 20),
+      at('top_slowest', 6, 20),
+      at('top_denied', 9, 20),
+      at('budgets', 0, 24),
+    ],
+  }
+}
+export const sameLayout = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+
+// What a reader may see of a layout: the admin-only widgets leave (and the
+// rest close up) for everyone else.
+export function visibleItems(layout, { admin = false } = {}) {
+  const items = layout.items.filter((item) => admin || !WIDGETS[item.type].admin)
+  return items.length === layout.items.length ? layout.items : compact(items)
+}
+
+// The layout with every widget whose height follows its content at the
+// height that content needs now. `facts`: what only the page knows
+// ({ budgets: how many projects have budgets }); a height that cannot be
+// worked out yet stays as stored. The same layout when nothing changes.
+export function fitLayout(layout, facts = {}) {
+  let changed = false
+  const items = layout.items.map((item) => {
+    if (!item.auto) return item
+    const wanted = WIDGETS[item.type].auto(item.options, facts)
+    const size = sizeOf(item.type)
+    const h = Number.isInteger(wanted) ? clamp(wanted, size.minH, size.maxH) : item.h
+    if (h === item.h) return item
+    changed = true
+    return { ...item, h }
+  })
+  return changed ? { v: LAYOUT_VERSION, items: compact(items) } : layout
+}
+
+// ---- Changes ----
+
+const withItems = (layout, items) => ({ v: LAYOUT_VERSION, items })
+const find = (layout, id) => layout.items.find((item) => item.id === id)
+
+// Puts a widget at a column and a row. What was there moves down.
+export function moveItem(layout, id, x, y) {
+  const item = find(layout, id)
+  if (!item) return layout
+  const next = { ...item, x: clamp(Math.round(x), 0, LAYOUT_COLS - item.w), y: clamp(Math.round(y), 0, LAYOUT_LIMITS.rows) }
+  return withItems(
+    layout,
+    settle(
+      layout.items.map((other) => (other.id === id ? next : other)),
+      id,
+    ),
+  )
+}
+// Sizes a widget, inside what its type allows.
+export function resizeItem(layout, id, w, h) {
+  const item = find(layout, id)
+  if (!item) return layout
+  const next = { ...item, ...fitSize(item.type, Math.round(w), Math.round(h), item.x) }
+  // A height set by hand stays as it was set.
+  if (item.auto && next.h !== item.h) next.auto = false
+  return withItems(
+    layout,
+    settle(
+      layout.items.map((other) => (other.id === id ? next : other)),
+      id,
+    ),
+  )
+}
+const overlapsColumns = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w
+// One step with an arrow key. Left and right: one column. Up and down: past
+// the widget above or below (one row would only fall back into place).
+export function stepMove(layout, id, direction) {
+  const item = find(layout, id)
+  if (!item) return layout
+  if (direction === 'left' || direction === 'right') return moveItem(layout, id, item.x + (direction === 'left' ? -1 : 1), item.y)
+  const others = layout.items.filter((other) => other.id !== id && overlapsColumns(other, item))
+  if (direction === 'up') {
+    const above = others.filter((other) => other.y + other.h <= item.y).sort((a, b) => b.y + b.h - (a.y + a.h) || a.x - b.x)[0]
+    return above ? moveItem(layout, id, item.x, above.y) : layout
+  }
+  const below = others.filter((other) => other.y >= item.y + item.h).sort((a, b) => a.y - b.y || a.x - b.x)[0]
+  return below ? moveItem(layout, id, item.x, below.y + below.h) : layout
+}
+// One step with Shift and an arrow key: a column wider or narrower, a row
+// taller or shorter.
+export function stepResize(layout, id, direction) {
+  const item = find(layout, id)
+  if (!item) return layout
+  const dw = direction === 'right' ? 1 : direction === 'left' ? -1 : 0
+  const dh = direction === 'down' ? 1 : direction === 'up' ? -1 : 0
+  return resizeItem(layout, id, item.w + dw, item.h + dh)
+}
+
+export function setOptions(layout, id, changes) {
+  return withItems(
+    layout,
+    layout.items.map((item) => (item.id === id ? { ...item, options: cleanOptions(item.type, { ...item.options, ...changes }) } : item)),
+  )
+}
+export const removeItem = (layout, id) => withItems(layout, compact(layout.items.filter((item) => item.id !== id)))
+const bottomOf = (items) => items.reduce((low, item) => Math.max(low, item.y + item.h), 0)
+function freeId(layout, type) {
+  if (!find(layout, type)) return type
+  for (let n = 2; n < 100; n += 1) if (!find(layout, `${type}-${n}`)) return `${type}-${n}`
+  return null
+}
+// How many more of a type the dashboard takes.
+export function roomFor(layout, type) {
+  if (!known(type) || layout.items.length >= LAYOUT_LIMITS.items) return 0
+  const have = layout.items.filter((item) => item.type === type).length
+  return Math.max(0, (WIDGETS[type].many ? LAYOUT_LIMITS.copies : 1) - have)
+}
+// The types not on the dashboard: what "Add widget" lists.
+export const hiddenTypes = (layout, { admin = false } = {}) =>
+  WIDGET_TYPES.filter((type) => (admin || !WIDGETS[type].admin) && !layout.items.some((item) => item.type === type))
+
+// Adds a widget at the bottom, at its default size. Returns { layout, id }
+// (the same layout and no id when there is no room for one).
+export function addItem(layout, type, options = {}) {
+  const id = roomFor(layout, type) ? freeId(layout, type) : null
+  if (!id) return { layout, id: null }
+  const item = { ...at(type, 0, bottomOf(layout.items)), id, options: cleanOptions(type, options) }
+  return { layout: withItems(layout, compact([...layout.items, item])), id }
+}
+// A second copy of a chart, with the same options, beside the first where
+// there is room and under it where there is not.
+export function duplicateItem(layout, id) {
+  const item = find(layout, id)
+  if (!item || !WIDGETS[item.type].many || !roomFor(layout, item.type)) return { layout, id: null }
+  const copy = { ...item, id: freeId(layout, item.type), options: cleanOptions(item.type, item.options) }
+  const beside = item.x + item.w + item.w <= LAYOUT_COLS
+  copy.x = beside ? item.x + item.w : item.x
+  copy.y = beside ? item.y : item.y + item.h
+  return { layout: withItems(layout, settle([...layout.items, copy], copy.id)), id: copy.id }
+}
+
+// ---- Narrower screens ----
+
+// How wide a widget is on a grid of fewer columns.
+function narrowWidth(item, cols) {
+  if (cols >= LAYOUT_COLS) return item.w
+  const group = WIDGETS[item.type].group
+  if (cols === 2) return group === 'tile' ? 1 : 2
+  const least = group === 'tile' ? 2 : group === 'list' ? 3 : cols
+  return clamp(Math.round((item.w * cols) / LAYOUT_COLS), least, cols)
+}
+// Widgets in a given order, each at a given width, filled in like words on
+// a line: a widget that does not fit the line starts the next one.
+function flow(items, cols) {
+  const out = []
+  let x = 0
+  let y = 0
+  let tall = 0
+  for (const item of items) {
+    if (x + item.w > cols) {
+      y += tall
+      x = 0
+      tall = 0
+    }
+    out.push({ ...item, x, y })
+    x += item.w
+    tall = Math.max(tall, item.h)
+  }
+  return compact(out)
+}
+// The layout on a grid of `cols` columns: the same widgets in reading
+// order, at the widths that grid allows. 12 columns: the layout itself.
+export function reflow(items, cols = LAYOUT_COLS) {
+  if (cols >= LAYOUT_COLS) return items
+  return flow(
+    readingOrder(items).map((item) => ({ ...item, w: narrowWidth(item, cols) })),
+    cols,
+  )
+}
+
+// Moves a widget to a place in the reading order (what the up and down
+// buttons of a narrow screen do). It takes the place of the widget it now
+// comes before; where that would not give the order asked for, the whole
+// layout is filled in again in that order.
+export function reorder(layout, id, index) {
+  const order = readingOrder(layout.items).map((item) => item.id)
+  const from = order.indexOf(id)
+  if (from < 0) return layout
+  const to = clamp(index, 0, order.length - 1)
+  if (to === from) return layout
+  order.splice(from, 1)
+  order.splice(to, 0, id)
+  const item = find(layout, id)
+  const next = find(layout, order[to + 1])
+  const moved = next
+    ? moveItem(layout, id, Math.min(next.x, LAYOUT_COLS - item.w), next.y)
+    : moveItem(layout, id, 0, bottomOf(layout.items))
+  if (
+    readingOrder(moved.items)
+      .map((other) => other.id)
+      .join() === order.join()
+  )
+    return moved
+  return withItems(
+    layout,
+    flow(
+      order.map((key) => find(layout, key)),
+      LAYOUT_COLS,
+    ),
+  )
+}
+
+// What a screen reader hears after a move or a resize.
+export function describeItem(item) {
+  return `row ${item.y + 1}, column ${item.x + 1}; ${item.w} wide, ${item.h} tall`
+}
