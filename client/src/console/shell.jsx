@@ -61,6 +61,46 @@ function SecurityNotice({ notice, onSeen }) {
   )
 }
 
+// On every page while it lasts: a passkey that a tailnet session added (with
+// no passkey check: it was the account's first) is still on hold. Whoever
+// runs as you on one of your tailnet devices could have added it, so any of
+// your tailnet sessions may take it away again.
+function HeldPasskeyNotice({ passkey, onRemoved }) {
+  const { run, busy, error } = useAction()
+  const toast = useToast()
+  useEffect(() => {
+    if (error) toast(error, 'bad')
+  }, [error, toast])
+  const remove = () =>
+    run(async () => {
+      await api.delete(`/auth/passkeys/${encodeURIComponent(passkey.id)}`)
+      await onRemoved()
+      toast('Passkey removed. Other devices were signed out.')
+    })
+  return (
+    <div className="mx-auto max-w-6xl px-3 pt-4 sm:px-6" data-sw-held-passkey={passkey.id}>
+      <Notice
+        tone="warn"
+        title={`A passkey was added from ${passkey.device || 'a tailnet device'}`}
+        action={
+          passkey.canRemove ? (
+            <Button size="touch" variant="secondary" onClick={remove} disabled={busy} className="lg:h-8" data-sw-held-passkey-remove>
+              Not you? Remove it
+            </Button>
+          ) : null
+        }
+      >
+        {formatDateTime(passkey.addedAt)}
+        {passkey.nickname ? `, named “${passkey.nickname}”` : ''}. It is your account’s first passkey, added while your tailnet signed you
+        in, so it confirms nothing sensitive until {formatDateTime(passkey.onHoldUntil)}.{' '}
+        {passkey.canRemove
+          ? 'If you did not add it, remove it now: something on one of your tailnet devices did.'
+          : 'If you did not add it, open this server from one of your tailnet devices and remove it there.'}
+      </Notice>
+    </div>
+  )
+}
+
 // The page's own sections for the sidebar (a workspace's members, settings,
 // ...; the account's profile, passkeys, ...): the page publishes them with
 // <SidebarSections>, the shell shows them under the places.
@@ -215,6 +255,9 @@ export function AppShell({ children }) {
             </div>
           ) : null}
           {me.securityNotice ? <SecurityNotice notice={me.securityNotice} onSeen={refresh} /> : null}
+          {(me.heldPasskeys || []).map((passkey) => (
+            <HeldPasskeyNotice key={passkey.id} passkey={passkey} onRemoved={refresh} />
+          ))}
           {demo?.storageFull ? (
             <div className="mx-auto max-w-6xl px-3 pt-4 sm:px-6" data-sw-demo-storage-full>
               <Notice

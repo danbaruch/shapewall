@@ -25,21 +25,23 @@ SSRF surface. You capture on your machine or in CI (it can reach `localhost` and
 shapewall hosted --data /var/lib/shapewall-hosted --origin https://app.example.com --port 4700 --trust-proxy
 ```
 
-| Flag                    | Env                                      | Default                   | What                                                                                                                                              |
-| ----------------------- | ---------------------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--data DIR`            | `SHAPEWALL_HOSTED_DATA`                  | `./shapewall-hosted-data` | Database, secret, pushed files                                                                                                                    |
-| `--origin URL`          | `SHAPEWALL_HOSTED_ORIGIN`                | `http://HOST:PORT`        | The public origin. Passkeys are bound to its host name (the RP ID).                                                                               |
-| `--port`/`--host`       |                                          | `4700` on `127.0.0.1`     | Keep it on loopback behind a reverse proxy                                                                                                        |
-| `--signup`              | `SHAPEWALL_HOSTED_SIGNUP`                | `invite`                  | `invite`: only invite links (and the setup link). `open`: anyone                                                                                  |
-| `--trust-proxy`         | `SHAPEWALL_HOSTED_TRUST_PROXY=1`         | off                       | Client IPs from `X-Forwarded-For` (only from a proxy on this host)                                                                                |
-|                         | `SHAPEWALL_HOSTED_SECRET`                | `<data>/secret.key`       | Key for signed live-HTML URLs (made on first start, mode 0600)                                                                                    |
-|                         | `RESEND_API_KEY`                         | unset                     | With `SHAPEWALL_EMAIL_FROM`: invite emails through Resend                                                                                         |
-|                         | `SHAPEWALL_EMAIL_FROM`                   | unset                     | Sender for invite emails, e.g. `Shapewall <invites@example.com>`                                                                                  |
-| `--previous-origin URL` | `SHAPEWALL_HOSTED_PREVIOUS_ORIGIN`       | unset                     | The old origin during a move ([Moving to a new origin](#moving-to-a-new-origin))                                                                  |
-| `--report-email ADDR`   | `SHAPEWALL_HOSTED_REPORT_EMAIL`          | unset                     | "Report this board" on public projects opens a mail to this address                                                                               |
-| `--owners-see-sign-ins` | `SHAPEWALL_HOSTED_OWNERS_SEE_SIGN_INS=1` | off                       | Workspace owners see their members' sign-ins, passkey events and devices in Activity. For a server with one team ([Activity](#the-activity-page)) |
-|                         | `SHAPEWALL_TURNSTILE_SITE_KEY`           | unset                     | With `SHAPEWALL_TURNSTILE_SECRET`: a Cloudflare Turnstile check on open sign-up and comment share links                                           |
-|                         | `SHAPEWALL_TURNSTILE_SECRET`             | unset                     | Turnstile secret key. Both keys or neither (one alone is a warning and stays off)                                                                 |
+| Flag                    | Env                                      | Default                   | What                                                                                                                                                       |
+| ----------------------- | ---------------------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--data DIR`            | `SHAPEWALL_HOSTED_DATA`                  | `./shapewall-hosted-data` | Database, secret, pushed files                                                                                                                             |
+| `--origin URL`          | `SHAPEWALL_HOSTED_ORIGIN`                | `http://HOST:PORT`        | The public origin. Passkeys are bound to its host name (the RP ID).                                                                                        |
+| `--port`/`--host`       |                                          | `4700` on `127.0.0.1`     | Keep it on loopback behind a reverse proxy                                                                                                                 |
+| `--signup`              | `SHAPEWALL_HOSTED_SIGNUP`                | `invite`                  | `invite`: only invite links (and the setup link). `open`: anyone                                                                                           |
+| `--trust-proxy`         | `SHAPEWALL_HOSTED_TRUST_PROXY=1`         | off                       | Client IPs from `X-Forwarded-For` (only from a proxy on this host)                                                                                         |
+|                         | `SHAPEWALL_HOSTED_SECRET`                | `<data>/secret.key`       | Key for signed live-HTML URLs (made on first start, mode 0600)                                                                                             |
+|                         | `RESEND_API_KEY`                         | unset                     | With `SHAPEWALL_EMAIL_FROM`: invite emails through Resend                                                                                                  |
+|                         | `SHAPEWALL_EMAIL_FROM`                   | unset                     | Sender for invite emails, e.g. `Shapewall <invites@example.com>`                                                                                           |
+| `--previous-origin URL` | `SHAPEWALL_HOSTED_PREVIOUS_ORIGIN`       | unset                     | The old origin during a move ([Moving to a new origin](#moving-to-a-new-origin))                                                                           |
+| `--report-email ADDR`   | `SHAPEWALL_HOSTED_REPORT_EMAIL`          | unset                     | "Report this board" on public projects opens a mail to this address                                                                                        |
+| `--tailnet-sign-in`     | `SHAPEWALL_HOSTED_TAILNET_SIGN_IN=1`     | off                       | With `--tailscale`: a tailnet user is signed in as the account linked to their tailnet login, no passkey ([Tailnet sign-in](#tailnet-sign-in)). Linux only |
+| `--tailnet-passkeys`    | `SHAPEWALL_HOSTED_TAILNET_PASSKEYS=1`    | off                       | With `--tailnet-sign-in`: also allow passkeys ([With passkeys also allowed](#with-passkeys-also-allowed)); `hosted admin passkeys on\|off` wins over it    |
+| `--owners-see-sign-ins` | `SHAPEWALL_HOSTED_OWNERS_SEE_SIGN_INS=1` | off                       | Workspace owners see their members' sign-ins, passkey events and devices in Activity. For a server with one team ([Activity](#the-activity-page))          |
+|                         | `SHAPEWALL_TURNSTILE_SITE_KEY`           | unset                     | With `SHAPEWALL_TURNSTILE_SECRET`: a Cloudflare Turnstile check on open sign-up and comment share links                                                    |
+|                         | `SHAPEWALL_TURNSTILE_SECRET`             | unset                     | Turnstile secret key. Both keys or neither (one alone is a warning and stays off)                                                                          |
 
 It needs Node 22.13 or newer (it uses the built-in `node:sqlite`). Passkeys need a secure context: `https://`, or `http://localhost`
 for trying it on your own machine (`--origin http://localhost:4700`; not `127.0.0.1`, which is not a valid passkey RP ID).
@@ -59,6 +61,554 @@ that origin to the console CSP. Off by default.
 Deployment examples: [examples/hosted/shapewall-hosted.service](../examples/hosted/shapewall-hosted.service)
 (systemd, hardened) and [examples/hosted/Caddyfile](../examples/hosted/Caddyfile).
 
+## Signing in
+
+Four ways to reach Shapewall, side by side. Pick by who has to reach the board.
+
+| How you reach it              | Command                                             | How people sign in                                                                                    | Who can reach it               |
+| ----------------------------- | --------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------ |
+| Local board, on your machine  | `shapewall serve`                                   | Nothing: it is your board                                                                             | This machine                   |
+| Over an SSH tunnel            | `ssh -L 4700:127.0.0.1:4700 server`                 | A local board: nothing, as if you sat at that machine. A hosted server: a passkey each                | Whoever can SSH to the machine |
+| Your tailnet, tailnet sign-in | `shapewall hosted --tailscale --tailnet-sign-in`    | Your Tailscale account, from every tailnet device of yours. No passkey, no password. An admin invites | People on your tailnet         |
+| Your own domain               | `shapewall hosted --origin https://app.example.com` | A passkey each                                                                                        | Anyone you invite              |
+
+A tailnet server can also run with passkeys instead of tailnet sign-in (`shapewall hosted --tailscale`: a passkey each), or
+with both (`--tailnet-sign-in --tailnet-passkeys`). Everything after the sign-in is the same on every hosted server: accounts,
+workspaces, roles, invites, the audit log.
+
+### Over SSH
+
+For people who do not use Tailscale: an SSH tunnel carries one port of the server's machine to your own.
+
+```sh
+# On the server (once): a hosted server for the address your browser will use. No TLS, no proxy, loopback only.
+shapewall hosted --data ./hosted-data --port 4700 --origin http://shapewall.localhost:4700
+
+# On your machine, each time:
+ssh -L 4700:127.0.0.1:4700 you@server
+# then open http://shapewall.localhost:4700
+```
+
+- **Give the tunnel a host name of its own: `shapewall.localhost`.** Browsers send every name that ends in `.localhost` to
+  your own machine and treat it as a secure context, so passkeys work without a certificate, and the name keeps the server's
+  cookies and passkeys to itself. Tested in Chromium (sign-up and sign-in with a passkey; the passkey belongs to
+  `shapewall.localhost`, the session cookie is sent to that name only).
+- **Plain `http://localhost:4700` works too** (`--origin http://localhost:4700`), for a browser or a tool that does not
+  resolve `.localhost` names. Know what it means: **cookies are not kept apart by port.** At plain `localhost` the session
+  cookie is also sent to any other web server on your machine's `localhost` (a dev server on another port), and that server
+  could use it against Shapewall while you have the tunnel open. With `shapewall.localhost` it is not. Not `127.0.0.1`: not a
+  valid passkey host.
+- **Accounts are passkey accounts** for that origin. The origin is part of the passkey: keep the same host name and the same
+  port on both ends. Everyone who tunnels in uses the same address and has their own account, role and passkey.
+- **Everyone arrives from 127.0.0.1.** The server sees the SSH daemon's end of the tunnel, so all tunnelled people share one
+  address: the rate limits that count per address (sign-in attempts, recovery codes, invite lookups) are shared between
+  them, and the audit log and the device list show `127.0.0.1` for everyone. Who did what is still each person's account.
+- **The first account** is made with the setup link, as on any server: `shapewall hosted setup-link --data ./hosted-data` on
+  the server prints `http://shapewall.localhost:4700/signup#setup=...`; open it through the tunnel.
+- **The server listens on 127.0.0.1 only.** Nothing is open to the network; SSH is the way in, and whoever has an SSH login on
+  the machine can reach the port. Sign-in still decides who is who.
+- **Share links** made there point at the tunnel's address too, so they work only for people with a tunnel. For links
+  anyone can open, use a tailnet with `--funnel` or your own domain.
+- **A local board over a tunnel** (`shapewall serve --port 4600` on the remote machine, `ssh -L 4600:127.0.0.1:4600 ...`):
+  the board sees a connection from its own machine, so you are treated as the person sitting at it. There is no sign-in and no
+  pairing; comments, chat with the agent and approvals work as they do locally, and settings still need the private owner
+  link the terminal printed. That is right for your own machine over your own SSH login. It also means that every OS user on
+  that machine, and anyone you forward the port to, is that same person: do not tunnel a local board for other people; run
+  the hosted server for them.
+
+Tested in the suite with the real command and a real browser at `http://shapewall.localhost:<port>` and at
+`http://localhost:<port>` (sign-up, sign-out, sign-in with a passkey, and which of the two sends its session cookie to
+another server on localhost; `test/e2e/hosted-ssh.e2e.test.js`). The tunnel itself is SSH's.
+
+### When Shapewall asks for the passkey again
+
+This section is about servers where passkeys are the sign-in. On a tailnet sign-in server without passkeys (the default
+there) the fixed core below asks for a typed name instead, and nothing else asks: [Tailnet sign-in](#tailnet-sign-in).
+
+Once you are signed in, your role decides what you may do, and that is all: approving an agent or a machine, agent settings,
+tokens, share links, exports, an agent's edit and push cards, members and roles, deleting a project. No second prompt.
+
+Two things ask for the passkey again ("Confirm it's you"):
+
+**1. A small fixed core, always, on every server** (a passkey check in the last 10 minutes). These guard the account itself or
+cannot be undone for everyone:
+
+- adding or removing a passkey (`POST /auth/passkeys/options`, `POST /auth/passkeys/verify`, `DELETE /auth/passkeys/:id`);
+- new recovery codes (`POST /auth/recovery-codes`);
+- linking or unlinking a tailnet login (`POST` and `DELETE /auth/tailnet/link`; ticking the box at sign-up is the one way to
+  link without it);
+- deleting your account (`DELETE /auth/me`);
+- deleting a workspace (`DELETE /api/workspaces/:ws`);
+- owners: making someone an owner, changing or removing an owner, inviting an owner (`PATCH` and `DELETE
+/api/workspaces/:ws/members/:user`, `POST /api/workspaces/:ws/invites` with role `owner`);
+- moving your sign-in to the server's new address (`POST /auth/rebind/start`);
+- making the setting below weaker (`PATCH /api/workspaces/:ws/step-up`).
+
+The list is one table in the code (`FIXED_CORE` in `src/hosted/step-up.js`), enforced in one place before any route runs.
+"Sign out other devices" is not in it, but it is not free either: it needs a session that passed a passkey check at some
+point (any passkey sign-in has), so a session someone merely holds cannot sign you out everywhere.
+
+**2. What a workspace's owner switches on.** Settings, "Ask for a passkey again". Everything is off by default. One switch per
+group:
+
+| Group                  | Asks before                                                                                                                             |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Agent edits and pushes | Allow on an agent's edit or command, Push this fix, approving an agent run or a shell command                                           |
+| Agents and machines    | approving a machine or an agent (`shapewall login`, `agent connect`), who may use an agent, its approval rule, the project agent policy |
+| Tokens and share links | new API tokens, new share links, turning share links or public projects on, making a project public                                     |
+| Members and roles      | inviting an admin, making someone an admin, changing or removing an admin                                                               |
+| Exports and deletes    | exporting the workspace, deleting a project or a board                                                                                  |
+
+With them: how long one check counts (5, 15, 30 or 60 minutes; 15 by default), and the admin idle rule (admin pages ask once more
+after 12 hours without opening one). Only an owner changes these. Switching something on needs nothing more; switching it off or
+choosing a longer time is part of the fixed core. Every change is in the audit log with the value before and after
+(`step_up_changed`), and Activity's "Worth a look" filter marks it.
+
+The server decides, route by route: it answers 403 `reauth_required` with a message that says which rule asked (and `stepUp` in the
+error: `always`, the group's id, `adminIdle` or `restricted`), and only then does the console show the prompt. The console never
+asks on its own.
+
+A session that started with a recovery code, or with a passkey that was added with one in the last 24 hours, keeps the strict
+rules whatever the workspace chose: everything in the groups above, and signing out other devices, needs a passkey check it cannot
+give yet ([Accounts](#accounts)).
+
+The audit log is unchanged: every action above is recorded as before, whether or not a passkey was asked for.
+
+The settings as an API, one setting per request (owners): `PATCH /api/workspaces/:ws/step-up` with `{ "group": "tokens", "on":
+true }`, `{ "windowMinutes": 30 }`, `{ "adminIdle": true }` or `{ "cliApproval": true }`. `GET /api/workspaces/:ws` carries them as
+`workspace.settings.stepUp`.
+
+### Tailnet sign-in
+
+```sh
+shapewall hosted --data ./hosted-data --tailscale --tailnet-sign-in     # or SHAPEWALL_HOSTED_TAILNET_SIGN_IN=1
+```
+
+On your tailnet, your Tailscale account is the sign-in: one identity, your different machines, and they all reach the server
+with no second credential. `tailscale serve` adds the identity of the person behind each request (`Tailscale-User-Login`,
+`Tailscale-User-Name`), and the server signs that person in as the account linked to their login.
+
+**No passkeys, by default.** On a server started with `--tailnet-sign-in` no passkey is asked for or offered: the sign-in page
+shows "Continue as ada@example.com" (or the invited and not-invited states) and nothing else, the Account page has no passkeys
+and no recovery codes, and every passkey route answers 403 `passkeys_off`. What that means, plainly:
+
+- **The tailnet is the trust boundary.** Anything running as you on one of your tailnet devices can act as you on this
+  server: a script, a coding agent, a browser extension. Tailscale says which device a request came from and whose device it
+  is, not that you are at the keyboard. Lock your devices, and keep the tailnet to people and machines you trust.
+- **The few things Shapewall always asks about ask you to type a name.** Deleting a workspace or your account, making,
+  changing or removing an owner (leaving as one too), inviting an owner: the console asks you to type the workspace's name
+  (your handle for the account), and the server refuses the request until it carries that name (403 `confirm_required`;
+  the header `X-Shapewall-Confirm`). On the command line the same things need `--yes`, and the command names what it
+  confirms. This is deliberateness, not proof: the identity is already proven, and a program acting as you can type too.
+  The header is no secret and no token: the request is refused from another site exactly as every other write is (the same
+  origin and JSON are required, and no other origin is allowed to send the header). When you are in more than one workspace
+  with the same name, the name would not say which, so the prompt asks for the workspace's id instead and shows it.
+- **Nothing else asks.** A workspace's "Ask for a passkey again" switches have nothing to ask for; Settings shows
+  "Confirming changes" in their place.
+- **Passkeys are an opt-in hardening.** Start the server with `--tailnet-passkeys` (or
+  `SHAPEWALL_HOSTED_TAILNET_PASSKEYS=1`), or switch them on a running server: `shapewall hosted admin passkeys on --data DIR`
+  (`off`, `status`; kept in the database, and it wins over the flag). Then anyone may add a passkey on the Account page, an
+  account that has one confirms the fixed core with it, and everything under
+  [With passkeys also allowed](#with-passkeys-also-allowed) applies. Switched off again, passkeys are kept and not used, and the switch does three things and says them: every session that a
+  passkey or a recovery code started is ended (deleted, so switching on later does not bring one back); a passkey that was
+  still on hold stays on hold, stays removable with "Not you? Remove it", and starts its 24 hours again when passkeys come
+  back; and each workspace that asks for a passkey somewhere ("Ask for a passkey again", the command line switch) gets an
+  audit entry and a line in Settings, "Switched on here, and not asked while this server has passkeys off": its settings are
+  kept and asked again when passkeys are. An account with no tailnet login cannot sign in until they are on again (the
+  command says how many). In this mode a tailnet session ends the account's other sessions with no further question.
+
+**Each tailnet login is its own account, and an admin still decides who is in a workspace.** Being on the tailnet alone gives
+nothing. Why:
+
+- **Who did what.** Comments, approvals, the audit log and usage name a person. One shared identity for "the tailnet" would make
+  all of that anonymous.
+- **Roles.** A viewer, a member, an admin and an owner are different things; agents have audiences. None of it works without
+  accounts.
+- **A tailnet is wider than a team.** It holds family devices, a contractor's laptop, a build machine, nodes shared in from
+  someone else's tailnet. They can reach the server; that should not put them in your workspace.
+
+How people get in:
+
+- **The first owner** claims the server with the setup link, as on any server. Opened through the tailnet, the page offers
+  "Continue as ada@example.com" and links that login. From the command line:
+  `shapewall hosted claim --data DIR --login LOGIN` on the server's machine ([From your coding agent](#from-your-coding-agent)).
+  Opened from the server's own machine, the tailnet address links nothing: [why](#on-the-servers-own-machine).
+- **Someone the server does not know** sees "Ask an admin of a workspace here to invite ada@example.com", and nothing else. The
+  admins of every workspace see them under Members, "Arrived through the tailnet", and can invite them with a role or take them
+  off the list (kept 30 days, at most 200).
+- **An invite can be for one tailnet login** (Invite people, "Tailnet login"; `POST /invites` with `tailnetLogin`). Only that
+  login can use it, whoever has the link. They join the next time they open the server, with the role of the invite.
+- **One login, one account.** (With passkeys allowed, an account that has a passkey links or unlinks its login on the
+  Account page; without them there is nothing to link or unlink.)
+- **Tagged devices and nodes shared in without a user** carry no login. They are never signed in.
+
+Good to know:
+
+- **A tailnet session is bound to the identity.** It works only on requests that arrive as that login. Its cookie is worth
+  nothing off the tailnet, on another person's device, or through Funnel. It is marked "Signed in by tailnet" in the device list,
+  `via: tailnet` in the account's log, and `signedInBy: tailnet` on what it does in the workspace's audit log (Activity shows a
+  "tailnet" mark).
+- **Signing out** keeps that browser signed out until you press "Continue as ada@example.com" on the sign-in page. Arriving again
+  would otherwise sign you straight back in; the page says so.
+- **Share links, public boards and `--funnel`** work as on any server. The public listener never reads an identity.
+
+### With passkeys also allowed
+
+Only on a tailnet server where the operator switched passkeys on (`--tailnet-passkeys`, or `hosted admin passkeys on`). An
+account may then add a passkey; one that has a passkey confirms the fixed core with it (a passkey check in the last 10
+minutes) and no longer by typing a name, and a workspace's "Ask for a passkey again" switches work.
+
+- **The fixed core without a passkey.** An account that only its tailnet signs in has no passkey to confirm with. For the few
+  things that always need one it is told to add a passkey first (403 `passkey_required`). Adding the first passkey needs no
+  passkey check (there is nothing stronger to check it against). What it does need, and what follows:
+  - **A browser and a named device.** The request must come from the Account page in a browser (not from the command line's
+    tailnet session, not from another site), and you confirm a step that names the device: "Add a passkey from Chrome on
+    Linux?". A program on your device can imitate both; they keep the command line and other sites out, and they put the
+    device's name on the passkey.
+  - **The passkey is on hold for 24 hours.** It signs in at once, and it cannot confirm the fixed core until the day is over,
+    exactly like a passkey added after a recovery code. It cannot add a second passkey or make recovery codes either.
+  - **Every page says so, on every device.** While it is on hold, each page of your account shows "A passkey was added from
+    Chrome on Linux" with the time, and **"Not you? Remove it"**. Any tailnet session of your account removes it with that
+    button: no passkey check (the only passkey there is to check with is the one in question), and it goes though it is your
+    only passkey and you have no recovery codes. The sessions that passkey signed in end, every other passkey still on hold
+    starts its 24 hours again, and the account is as it was before. Adding it is in the account's log and "Worth a look" in
+    Activity ("First passkey added in a tailnet session"); so is the removal.
+  - **After the 24 hours** it is an ordinary passkey: removing it needs a passkey check. If you find a passkey that is not
+    yours then, or cannot reach the server from a tailnet device, the server's operator removes it:
+    `shapewall hosted admin passkeys list|remove` ([Operator commands](#operator-commands-and-quotas)).
+
+  A tailnet identity is per device, so whatever runs as you on one of your devices could add a passkey of its own; the hold,
+  the notice and the removal are what stand between that and your account. So add your passkey before you need it, and look
+  at the notice when you did not. We chose this over "ask the proxy again": a second request through the proxy proves nothing
+  the first did not.
+
+- **Ending your other sessions** ("Sign out other devices") needs a session that passed a passkey check at some point, or an
+  account with no passkey at all. A tailnet session of an account that has a passkey confirms with it once.
+- **Signing up with a passkey while you arrive through the tailnet does not link your login.** The sign-up page has a box,
+  "Also sign me in from this tailnet login", off by default. Ticked, the link is in the account's log (`tailnet_linked`).
+- **`shapewall login` and `agent connect`** are approved in the browser by a tailnet-signed-in admin with no passkey, or with no
+  browser at all ([From your coding agent](#from-your-coding-agent)), unless the workspace switched on "Approve command line
+  logins in the browser": then the server takes an approval only from a session with a passkey check in the last 10 minutes,
+  whatever the client is and whatever it sends. The same switch keeps a session that only a tailnet identity stands behind
+  from making an API token and from inviting or making an admin (an admin could do the first two); it covers those three
+  things and nothing else that session's role allows.
+- **People from another tailnet who accepted a share of this machine** do carry a login (Tailscale sets the headers for them).
+  They are visitors like anyone else: listed for the admins, in nothing until invited.
+
+### How the server knows a request came through tailscale serve
+
+The identity headers are only as good as the path they came by. `tailscale serve` removes any `Tailscale-User-*` header a client
+sent and sets its own, for traffic from tailnet users only: none for tagged devices, none for Funnel
+([Tailscale: identity headers](https://tailscale.com/kb/1312/serve#identity-headers)). But the server listens on `127.0.0.1`, and
+other things can open that port and write the same headers:
+
+- any program on the machine, directly;
+- any program on the machine, through tailscaled: it asks for the server's own tailnet address
+  (`https://board.example.ts.net/`), and serve answers its own machine like any other device, with the machine owner's login;
+- a tailnet device, when tailscaled runs in userspace-networking mode: its netstack forwards a raw TCP connection to the
+  machine's tailnet address, on a port serve does not handle, to `127.0.0.1:<same port>`, and tailscaled itself dials it;
+- a local user through tailscaled's own dialler (`tailscale nc`, before Tailscale 1.98), or through tailscaled's SOCKS5 or
+  outbound HTTP proxy.
+
+The last three arrive from a socket that tailscaled owns. So no single check is proof, and an identity is believed only when
+**all** of these hold:
+
+1. **The secret.** At each start the server makes a random secret and points its serve entry at
+   `http://127.0.0.1:<port>/_ts/<secret>`. Serve puts the path of its target in front of every request it proxies; a raw
+   forward, a dial or a proxy passes the client's own path. A request without the secret is never asked who it is. This stops a
+   tailnet device, and anything else that cannot read this machine's serve config. **It does not stop a local user:** any local
+   user can read the serve config (`tailscale serve status` works for a user who is not the Tailscale operator; checked), secret
+   included. The secret is in no log line, error or response; a wrong one gets a plain 404.
+2. **The peer.** The connection's other end must be a socket owned by root, the user tailscaled runs as. On Linux the kernel
+   lists every TCP socket with its owner in `/proc/net/tcp`, and the server looks the peer up for each connection. This stops
+   a local program that connects to the port itself, though it has the secret: its socket is its own. It does not stop a local
+   program that asks tailscaled for the serve address (check 4 does). There is no setting to name another user.
+3. **tailscaled vouches.** For each request the server asks tailscaled who owns the address in `X-Forwarded-For` (which serve
+   sets to the tailnet address the request came from): `tailscale whois`. It must be a user's device, not tagged, with a key
+   that has not expired, of the same login as the header, and the answer must name the user by Tailscale's id. Kept for a minute per connection and address. Not proof alone (the address is a header too), required
+   in addition.
+4. **Not this machine.** A request whose source is the server's own machine is never taken by its tailnet identity. Any
+   program there, under any user, can ask tailscaled for the serve address; serve then sets the machine owner's login, adds the
+   secret and dials the server from a root socket, and whois agrees. Nothing in such a request says which local user or
+   program made it. So the server refuses when the address in `X-Forwarded-For` is one of this node's own tailnet addresses
+   (IPv4 or IPv6, from `tailscale status --json`, read again every 30 seconds), or when whois says the address belongs to this
+   node (compared by the node's stable id, not by a name). The machine's network interfaces are read on every request as
+   well, so an address tailscaled was given a moment ago counts at once. If the server cannot tell which node it is, nobody
+   is believed.
+   What this means for the owner: [On the server's own machine](#on-the-servers-own-machine).
+5. **The headers are clean.** Exactly one `Tailscale-User-Login`, no `Tailscale-Funnel-Request`, a value that is plain ASCII or
+   RFC 2047 encoded UTF-8 (what Tailscale sends for non-ASCII names) and reads as `user@domain`. Twice, empty, another
+   character set, a broken escape: nobody.
+6. **The request is from this origin.** The proxy adds the identity to every request a device makes, also one that a page on
+   another site made the browser send. So the identity alone only answers `GET /auth/me` with `Sec-Fetch-Site: same-origin`
+   and the `POST /auth/tailnet/*` routes (same-origin and JSON, as for every write). Everything else needs the session cookie
+   as before. `GET /auth/me` never makes a session: for a linked login it answers `"tailnet":{"state":"linked"}`, and the
+   console and the command line then sign in with `POST /auth/tailnet/sign-in` (rate limited per login). An account keeps at
+   most 20 tailnet sessions per login; signing in again past that ends the oldest.
+
+**The feature refuses to turn on, and the server does not start,** when the peer check would not mean what it must. While the
+server runs the same is checked every 30 seconds, and nobody is signed in by tailnet identity until it is right again (tailnet
+sessions stop counting and their open live streams are cut; passkey sessions go on; the log says why):
+
+- not Linux (macOS and Windows have no such table), `/proc/net/tcp` unreadable, or a test connection from the server itself not
+  recognised;
+- tailscaled in **userspace-networking mode** (`tailscale status --json` says `TUN: false`, or it was started with
+  `--tun=userspace-networking`);
+- **Tailscale older than 1.98**;
+- tailscaled running a **SOCKS5 or outbound HTTP proxy** (`--socks5-server`, `--outbound-http-proxy-listen`, read from its
+  command line in `/proc`);
+- no tailscaled of root found, more than one, or its command line not readable. Which process is tailscaled: where systemd
+  runs it, the main process of `tailscaled.service` (`systemctl show -p MainPID`) and no other, whatever else on the machine
+  is called `tailscaled`; without systemd, a process named `tailscaled` (where `/proc/<pid>/exe` can be read, the program
+  file itself must be). In both cases only a process that is root in all four of its ids (the `Uid:` line of
+  `/proc/<pid>/status`): a setuid-root program that an ordinary user started under that name is ignored, cannot be mistaken
+  for the daemon, and cannot switch the feature off;
+- tailscaled started with `TS_DEBUG_NETSTACK_LOOPBACK_PORT` or `TS_DEBUG_NETSTACK_SUBNETS` in its environment (debugging
+  switches that make tailscaled forward tailnet connections to loopback), when the server can read that environment;
+- the server cannot tell which node it is (`tailscale status --json` without `Self.ID` or without its tailnet addresses);
+- the server in a **container or a user namespace**, where "root" may not be the machine's root (a `/.dockerenv` or
+  `/run/.containerenv` file, a container cgroup, `container` or `KUBERNETES_SERVICE_HOST` in the environment, or a uid map
+  that is not the machine's own);
+- the serve config not the one entry the server added: a raw TCP forward to its port (under any spelling of loopback), another
+  serve entry to it, Funnel on its port, or its own entry gone or changed.
+
+Run with passkeys in those cases (`--tailscale` without `--tailnet-sign-in`).
+
+**What is still trusted.** Root on the server's machine, and whoever may change tailscaled's serve config there (the Tailscale
+operator). Either can pretend to be anyone. Nothing else on the machine is trusted, and nothing on the tailnet. tailscaled's
+environment is part of that root configuration: `/proc/<pid>/environ` of a root process is readable only by root, so a server
+that runs as an ordinary user (as it should) cannot see the two debugging switches above and trusts root not to have set them.
+
+### On the server's own machine
+
+The server's own machine is never signed in by its tailnet identity, in the browser or from the command line: a request from
+there proves only that something on the machine made it. What to use there instead:
+
+- **Hosted server: two ways.**
+  1. **Another tailnet device of yours.** Your phone or laptop opens the server and is you. The sign-in page on the server's
+     machine says so: "This is the server's own machine: the server never takes a tailnet identity from here".
+  2. **The operator's commands on the machine, with the data folder.** Being able to read and write the data folder is the
+     proof, as for `hosted claim`. They cover what an owner needs there:
+
+     ```sh
+     shapewall hosted claim --data ./hosted-data --login ada@example.com          # the first account
+     shapewall hosted admin members list --data ./hosted-data
+     shapewall hosted admin members add --login ben@example.com --role admin --data ./hosted-data
+     shapewall hosted admin members remove --handle ben --data ./hosted-data
+     shapewall hosted admin members relink --handle ben [--login ben@new.example] --data ./hosted-data
+     shapewall hosted admin members unlink --handle ben --data ./hosted-data
+     shapewall hosted admin invites list|create --login cyd@example.com|revoke ID --data ./hosted-data
+     shapewall hosted admin projects list --data ./hosted-data
+     shapewall hosted admin passkeys status|on|off --data ./hosted-data
+     shapewall hosted admin passkeys list|remove ID --login ada@example.com --data ./hosted-data
+     ```
+
+     `members add` puts an existing account in at once (or changes its role); a tailnet login with no account yet gets an
+     invite that only that login can take. `members remove` also revokes the invites, share links and API tokens that person made. With
+     several workspaces add `--workspace ID`. Every one of these is in the operator log and in the workspace's audit log as
+     "Server operator".
+
+  `shapewall login` and `shapewall agent connect` on the server's machine fall back to the code (approve it in a browser on
+  another device); `shapewall join` and `shapewall admin` say to run them on another tailnet device. Where passkeys are
+  allowed, a passkey session works from the machine as from anywhere.
+
+- **Local board** (`shapewall serve --tailscale`). On the machine itself open `http://localhost:<port>`: the board's own
+  machine is the owner there by the settings token, as without Tailscale. The tailnet address opened from the machine itself
+  asks to pair, and the pairing page says why. On a local board a peer check that fails its self test at start keeps
+  identity off until the board is started again; the 30 second watch never switches it back on.
+
+One consequence to know: an owner who works only on the server's machine and has no second tailnet device cannot open the
+console of a tailnet sign-in server from there. The operator's commands above are for that; for the console itself, use a
+second device, or run the server with passkeys and reach it [over SSH](#over-ssh) instead.
+
+**An identity is per device, not per person.** Tailscale says which device a request came from and whose device it is. It
+cannot say that the person is at the keyboard. Anything running as you on a tailnet device of yours (a script, a coding agent,
+a browser extension, malware) can act as you here, as far as a tailnet session goes. That is why the fixed core asks for a
+passkey, why a first passkey is on hold for a day, and why a workspace can require a passkey for approving machines and for making
+tokens ("Approve command line logins in the browser": with it on, a session that only a tailnet identity stands behind can
+neither approve a command line login nor make an API token on a project's page; alone, the first would be no barrier, since
+a token is what a command line works with). If that is not acceptable for your team, use passkeys.
+
+**An account is held to the tailnet user, not to the login's spelling.** A login is a name (`ada@example.com`), and a name can
+be given to someone else later, or a node shared in from another tailnet can carry one that reads the same. So when a login is
+linked the server keeps Tailscale's own id of the user (from `tailscale whois`, `UserProfile.ID`), and every later request must
+carry the same id: a request with the right login and another id is nobody ("This tailnet login belongs to someone else here"),
+and so is a whois answer with no user id at all. If that happens to your own account (Tailscale gave you a new user id:
+the tailnet moved to another identity provider, or you were removed and added again), the page shows the command for
+whoever runs the server: `shapewall hosted admin members relink --login you@example.com --data DIR` forgets the stored id,
+so the next arrival as that login is taken as the account's person. `members relink --handle HANDLE --login NEW` links the
+account to another login, and `members unlink --handle HANDLE` takes the login off. The operator decides because nobody
+in the product can tell a new id for the same person from the same name given to someone else; each is in the operator log
+and in the account's own log. A link made by `hosted claim --login` knows only the name: it takes the id of
+the first proven request that arrives as that login, so open the server from your own device soon after claiming. A device
+whose key has expired is nobody.
+
+**"Root on this machine" is what the peer check proves, and no more.** It shows that the connection was opened by a process of
+this machine's root. That this process is tailscaled's serve proxy follows from the other checks (the secret, the refusal
+list below it, the serve config). And Tailscale's identity is the device's: **several OS users of one tailnet device all count
+as that device's owner**. A family computer signed in to Tailscale as Ada signs every one of its users in as Ada. Tailscale's
+serve documentation does not spell this out; it follows from how the identity headers are made (from the connection's source
+device).
+
+### What was and was not checked against real Tailscale
+
+Checked on a real machine (Tailscale 1.104.2, Linux), read-only:
+
+- `tailscaled` runs as root, and its command line is readable in `/proc` by an ordinary user;
+- `tailscale status --json` has `TUN` (true there) and `Version` ("1.104.2-...");
+- `tailscale serve status --json` has the shape the server reads for an HTTPS entry (`TCP`, `Web`, `Handlers`, `Proxy`), and
+  **a user who is not the operator can read it** (run as `nobody`): the secret is not secret from local users;
+- `tailscale whois --json <address>` answers `Node` and `UserProfile.LoginName` for this machine's own tailnet address, and
+  "peer not found" for an address that is nobody's;
+- `tailscale status --json` has `Self.ID` and `Self.TailscaleIPs` (IPv4 and IPv6), and whois on one of those addresses
+  answers `Node.StableID` equal to `Self.ID`;
+- one capture of real requests through an existing serve entry, made from the machine itself: the request arrived from a
+  root-owned socket, with the entry's path in front, the identity headers set to the machine owner's login, and exactly one
+  `X-Forwarded-For` holding one of the machine's own tailnet addresses. That is the request check 4 refuses;
+- the `/proc/net/tcp` lookup names the right owner for a real loopback connection (a test in the suite, on Linux).
+
+**Run against a real tailscaled** (Tailscale 1.102.5, Linux, kernel mode, other serve entries on the machine, and a second
+tailnet device), with a build of this release from before the last review round:
+
+- the serve entry with the `/_ts/<secret>` target was accepted, and requests arrived with the secret path in front;
+- a visitor from the other device was recognised by login, over IPv4 and IPv6, with the real whois;
+- forged `Tailscale-User-Login`, `Tailscale_User_Login` and `X-Forwarded-For` headers sent by that visitor were ignored;
+- a guessed secret path got 404, and the server's local port was not reachable from the tailnet;
+- the server's own machine got "This is the server's own machine" by the server's name, by its own IPv4 and by its IPv6;
+- a direct loopback request with a forged header was nobody, without the secret and with the real one;
+- `hosted claim --login`, then from the other device `admin projects create` and `list`, `admin members list`, `admin agents
+list` and `login --project` with no code; `admin` from the server's own machine was refused with its message;
+- stopping the server removed its serve entry, and Tailscale 1.94 was refused at start with its message.
+
+That run was made before four things in this release existed, so they are covered by the suite's stand-in only: holding an
+account to Tailscale's id of the user (`UserProfile.ID` in whois), finding tailscaled by its systemd unit, reading the
+machine's network interfaces on every request, and the server without passkeys (typed confirmation, the operator's
+commands).
+
+Read in Tailscale's source (`ipn/ipnlocal/serve.go`, `wgengine/netstack`, `cmd/tailscaled`), not run: that the userspace
+netstack forwards raw TCP to loopback; the proxy flags; the debug switches.
+
+**Not checked against a live serve:**
+
+- **a tagged device** (how `tailscale whois --json` marks it on your version; the code reads `Node.Tags`), and a device
+  shared in from another tailnet;
+- **the suspension within 30 seconds** when the serve config changes under a running server (a raw TCP forward, Funnel, the
+  entry changed), and that sign-in comes back when it is put right;
+- **a sign-in in a real browser** through the tailnet (the browser tests send the headers themselves);
+- and, smaller: whether the server can read `/proc/<pid>/environ` of tailscaled anywhere it is meant to run (as an ordinary
+  user it cannot), and the time `tailscale whois` takes per new connection under load.
+
+[Checking it on your own tailnet](#checking-it-on-your-own-tailnet) below goes through all of it, these three included.
+
+### Checking it on your own tailnet
+
+The tests run without a tailnet, against a stand-in for `tailscale serve`. Before you rely on tailnet sign-in, check it on
+yours. You need the server's machine, a second tailnet device of your own, and if you can a tagged device and a device of
+another person. Nothing here changes any setting except starting the server.
+
+1. **Start it and read what it says.** `shapewall hosted --data ./hosted-data --tailscale --tailnet-sign-in`. It either prints
+   the private address or refuses and says why ([the list](#how-the-server-knows-a-request-came-through-tailscale-serve)).
+   A refusal is the feature working: run with passkeys there.
+2. **The serve entry.** `tailscale serve status --json` on the server's machine shows one HTTPS entry whose `Proxy` is
+   `http://127.0.0.1:<port>/_ts/<a long secret>`, no `TCP` forward to that port and no Funnel.
+3. **Claim, from the server's machine:** `shapewall hosted claim --data ./hosted-data --login <your tailnet login>`. It prints
+   the owner account and the login it linked.
+4. **From your second device, open the address.** You are signed in as that account with no passkey. Account, "Devices"
+   shows a session marked tailnet. This is the one check that needs a real request from another device; the suite cannot
+   make it.
+5. **From the server's own machine, open the same address.** You must not be signed in: the page says "This is the server's
+   own machine". `curl -s https://<name>.ts.net/auth/me -H 'Sec-Fetch-Site: same-origin'` there answers
+   `"tailnet":{"state":"self"}`. If it signs you in, stop and report it.
+6. **Forge it.** On the server's machine: `curl -s http://127.0.0.1:<port>/auth/me -H 'Tailscale-User-Login: <your login>'
+-H 'Sec-Fetch-Site: same-origin'` must answer `"user":null` and never `"state":"linked"` (a `GET` makes no session anywhere; `linked` would mean the forged login was believed), and so must the same request with the `/_ts/<secret>` path
+   from the serve config in front and `-H 'X-Forwarded-For: <your second device's tailnet address>'`. The server log has
+   "ignored identity headers" with the check that failed (the connection did not come from tailscaled).
+7. **A tagged device, and another person's device,** if you have them: the first sees "Your tailnet did not say who you
+   are", the second "Ask an admin of a workspace here to invite ..." and appears under Members, "Arrived through the
+   tailnet". Neither is in anything.
+8. **The first passkey, if you allowed passkeys** (`shapewall hosted admin passkeys on`; without it the Account page has no
+   passkeys and step 8 does not apply). On the second device add a passkey on the Account page: it asks you to confirm the device by name,
+   then every page shows "A passkey was added from ...". Press "Not you? Remove it" from a third device or the same one: it
+   is gone, with no passkey prompt. `shapewall hosted admin passkeys list --login <your login> --data ./hosted-data` on the
+   server shows the same.
+9. **Break it and watch it stop.** `tailscale serve --tcp=<port> tcp://127.0.0.1:<port>` on the server's machine (a raw
+   forward to the server's port); within 30 seconds the log says tailnet sign-in is suspended and the second device is
+   signed out. Remove the forward (`tailscale serve --tcp=<port> off`): sign-in comes back. Do this only on a machine whose
+   serve config is yours to change.
+10. **Which tailscaled.** `systemctl show -p MainPID --value tailscaled.service` is the process the server checks; its
+    `Uid:` line in `/proc/<pid>/status` is `0 0 0 0`. Without systemd the server goes by the process name.
+
+What to send us if a step fails: the Tailscale version, the step, and the "ignored identity headers" line. Not the serve
+config: it holds the secret.
+
+### From your coding agent
+
+On a server with tailnet sign-in, an agent or a terminal on a tailnet machine is already known to the server as that machine's
+tailnet user. Nothing below needs a browser unless it says so. Each command asks the server who it is (through `tailscale
+serve`, by the same rule as the browser), gets a session that works only with that identity, uses the console's own API with it
+(the same role checks, the same audit entries, marked as a tailnet session from "Shapewall CLI"), and signs out when it ends.
+No admin token is stored anywhere.
+
+**1. An owner sets up a server and a first project.** On the machine that runs the server:
+
+```sh
+shapewall hosted --data ./hosted-data --tailscale --tailnet-sign-in &        # needs Tailscale, MagicDNS and HTTPS certificates
+shapewall hosted claim --data ./hosted-data --login ada@example.com --workspace-name "Team"   # no browser
+```
+
+Then on another tailnet device of the owner's (the server's own machine is never signed in by its tailnet identity:
+[why](#on-the-servers-own-machine)):
+
+```sh
+shapewall admin projects create "My site" --remote https://board.example.ts.net
+shapewall login --remote https://board.example.ts.net                        # no code, no browser: a token for the project
+shapewall push --remote https://board.example.ts.net
+shapewall admin invites create --login ben@example.com --role admin --remote https://board.example.ts.net
+```
+
+`hosted claim` reads the one-time setup link from the data folder: being able to read that folder is the proof, as it is for
+`hosted setup-link`. It does not ask the tailnet who you are, because on the server's own machine the tailnet cannot say.
+`--login` names the owner's tailnet login and is required; it must read as a login (`ada@example.com`), it is taken on your
+word, and the command prints what it linked: the server's address, the owner account and its handle, the tailnet login, the
+workspace. A server is claimed once: with an account already there, or the setup link used or replaced, the command refuses.
+The audit log records the account and the link as made by "hosted claim on the server". From another tailnet device, with the
+setup link in hand, `shapewall hosted claim --setup-link URL` asks the server who is asking instead, and `--login` there only
+refuses anyone else. No passkey is made and none is needed: the Tailscale account is the sign-in. The few things Shapewall
+always asks about need `--yes` on the command line (`shapewall admin invites create --role owner --yes`), which names what
+it confirms. Where the operator allowed passkeys, an account that has one confirms those in the browser instead.
+
+**2. A member joins and connects their machine.** On their own tailnet machine, after an admin invited their login:
+
+```sh
+shapewall join --remote https://board.example.ts.net                         # takes the invite made for your login
+shapewall agent connect --remote https://board.example.ts.net --project my-site --name "Builder"
+```
+
+`join` reports the workspace, your role and its projects. With an invite link instead: `shapewall join --remote URL --invite
+LINK`. The role is always the invite's; there is no way to choose one, and no way into a workspace that did not invite you.
+`agent connect` (and `shapewall login`) is approved by your own tailnet identity when your role may make tokens (admin or owner),
+with the scopes the browser's approval page gives; the audit entry says "approved by tailnet identity" with the machine's name.
+A member or viewer gets the usual code, for an admin to approve in the browser. **Needs a browser:** nothing, for an admin.
+
+The rules of those commands:
+
+- **Which project.** `--project <slug>` (and `--workspace <name>` when you are in several). With one project it is picked.
+  Otherwise the command lists the projects with the exact flags to add and exits with an error. It never prompts.
+- **An agent's look and audience** come from flags: `--name`, `--icon`, `--tint`, `--used-by owner|trusted` (default `owner`:
+  only you). Named members are picked in the console.
+- **A workspace can require the browser and a passkey:** Settings, "Approve command line logins in the browser" (owners). The
+  server then refuses an approval from any session that only a tailnet identity stands behind (no passkey check in the last 10
+  minutes): `login` and `agent connect` show the code, and whoever approves it confirms with a passkey. Such a session can
+  then not make an API token or invite or make an admin either (`shapewall admin invites create --role admin` says so). This is decided by the
+  server from the session; nothing the command line or a browser sends changes it. A workspace that asks for a passkey for
+  "Agents and machines" gets the code too.
+- **When it does not apply** (the server has no tailnet sign-in, the request did not come through the tailnet, a tagged device, a
+  login with no account): `login` and `agent connect` use the code and the browser, unchanged. `join` says that an account
+  needs a passkey, which is made in the browser, and gives the link. `admin` says it would need an admin token, which does not
+  exist yet, and points at the console.
+- **The admin commands** are these and no more: `admin projects list|create NAME`, `admin invites create --login LOGIN | --link
+[--role ROLE] [--days N]`, `admin members list`, `admin agents list` (`--json` for scripts).
+
 ## Accounts
 
 - **Passkeys only.** No email, no passwords. Sign-up and sign-in use discoverable credentials with user verification required, so
@@ -71,7 +621,7 @@ Deployment examples: [examples/hosted/shapewall-hosted.service](../examples/host
   has not used before is marked "Signed in on a new device" in Account activity.
 - **Recovery codes.** Ten one-time codes (about 128 bits each), stored as SHA-256 hashes, shown once. A code plus your handle signs you
   in and ends every other session of the account (a stolen device loses its session). That session is never "fresh": in its first 30
-  minutes it can add a passkey, and nothing sensitive. A passkey added that way signs in, but is on hold for 24 hours before it can
+  minutes it can add a passkey, and nothing that ever asked for a passkey check. A passkey added that way signs in, but is on hold for 24 hours before it can
   confirm sensitive actions, so someone with one stolen code cannot lock the owner out: the owner's own passkey still removes theirs
   (which ends their sessions) and makes new codes. Making new codes voids the old ones. Lose every passkey and every code and the
   account is gone, but its work is not: projects belong to workspaces, so an admin removes the old member and invites the new account.
@@ -80,19 +630,19 @@ Deployment examples: [examples/hosted/shapewall-hosted.service](../examples/host
   90 days at most. Signing in replaces the browser's previous session. The Account page lists your signed-in devices (browser and OS
   from the user agent, IP, last used); sign one out, or "Sign out other devices" for all of them. Removing a passkey also ends the
   other sessions. The list carries a session id, never the cookie or its hash.
-- **Admin idle expiry.** For an admin or owner, workspace pages and APIs need a passkey check after 12 hours without using any of
-  them (403 `reauth_required`; the console shows "Confirm it's you" and loads again). The session itself stays signed in.
-- **Re-auth.** Creating API tokens or share links, turning share links on, adding or removing a passkey, new recovery codes, deleting
-  a project or the workspace, signing out devices, changing or removing an admin or owner, making someone an admin or owner and
-  inviting an admin or owner, turning public projects on, making a project public and starting a move of your sign-in to a new origin
-  need a passkey check (not on hold) in the last 10 minutes; the console asks for it ("Confirm it's you")
-  when needed. In a recovery-code session, which has no passkey to confirm with, it says "Add a passkey first" and links to adding
-  one (or lets you use a passkey you still have, which turns the session into a passkey session).
+- **Asking for the passkey again.** By default a signed-in session with the right role is enough. A small fixed core always asks
+  (passkeys, recovery codes, deleting the account or a workspace, owners, moving the server), and a workspace's owner can switch
+  more on: [When Shapewall asks for the passkey again](#when-shapewall-asks-for-the-passkey-again). In a recovery-code session,
+  which has no passkey to confirm with, the prompt says "Add a passkey first" and links to adding one (or lets you use a passkey
+  you still have, which turns the session into a passkey session). Such a session, and one started by a passkey that is still on
+  hold, is asked for everything the workspace settings cover, whatever they are set to.
+- **Tailnet sign-in.** On a server run with `--tailscale --tailnet-sign-in`, an account can be linked to a tailnet login and is
+  then signed in without a passkey: [Tailnet sign-in](#tailnet-sign-in).
 - **Account activity.** The Account page lists your own security events, newest first: sign-ins (passkey or recovery code, with the
   device and IP), passkeys added and removed, new recovery codes, devices signed out (`GET /auth/security-log?before=`). After a
   recovery code was used on your account, the next passkey sign-in shows a banner until you dismiss it ("That was me",
   `POST /auth/security-notice/seen`); `GET /auth/me` carries it as `securityNotice`.
-- **Deleting your account.** Account page, "Delete account": a fresh passkey check and your handle typed back
+- **Deleting your account.** Account page, "Delete account": a fresh passkey check (always) and your handle typed back
   (`DELETE /auth/me` with `{ confirm, revokeTokens }`; `POST /auth/delete-account/preview` shows the plan first). Workspaces where you
   are the only member are deleted with it; in the others you leave (your pending invites and share links are revoked, and your API
   tokens unless you untick that). It is refused while you are the only owner of a workspace that has other people in it: make one of
@@ -146,7 +696,7 @@ token has a creator. An admin removing someone may keep their tokens (`{ revokeT
 kept tokens are `inactive` and refused until the creator is an admin here again, so revoke them and make new ones.
 
 **Share links** let an admin share one project's boards with someone who has no account. They are off for every workspace until an
-admin turns them on (Settings, which asks for a passkey check); turning them off stops every link at once, and turning them back on
+admin turns them on (Settings); turning them off stops every link at once, and turning them back on
 restores the ones that are not revoked or expired.
 
 - A link reaches exactly one project. It is **view-only** or **comment** (guests give a display name, 1 to 40 characters), expires
@@ -182,7 +732,7 @@ restores the ones that are not revoked or expired.
   passcodes collapse into one row per link and hour, with a count (and up to 10 guest names).
 
 **Public projects** put one project on the open web, view-only. They are off in every workspace until an owner turns them on
-(Settings, with a passkey check). Then an owner makes a project public on its page (again with a passkey check): it gets a public
+(Settings). Then an owner makes a project public on its page: it gets a public
 id of 128 random bits and the URL `/p/<public id>/`, shown there to copy.
 
 - Anyone with the URL sees the project's boards and comments as a view-only share link guest does, except that every guest is
@@ -202,7 +752,8 @@ Projects and Members; admins and owners see everything.
 
 - **Members.** Everyone with their role, when they joined and when they were last active (updated at most every 5 minutes). Change a
   role from the picker or remove someone from the row menu; both ask first. Admins manage members and viewers; only an owner changes
-  or removes an admin or an owner, and that needs a fresh passkey check, as does making someone an admin or owner. The last owner
+  or removes an admin or an owner. Anything that makes, changes or removes an owner always asks for the passkey; the same for
+  an admin when the workspace asks for it (Settings, "Members and roles"). The last owner
   cannot be demoted, removed or leave. Removing, or demoting below admin, revokes the person's pending invites, share links and API
   tokens (the confirm dialog says so). When the person made API tokens that still work, the remove dialog lists them with "Revoke"
   checked; unchecking it keeps them, inactive (`DELETE /members/:user` with `{ revokeTokens: false }`); the audit entry says whose
@@ -233,7 +784,7 @@ Projects and Members; admins and owners see everything.
 - **Settings.** Rename (admins), share links on or off (admins), public projects on (owners) or off (admins), export (admins), leave, and delete the workspace (the owner, with a
   passkey check and the workspace name typed back). Deleting removes every project, board, file, comment, token, invite, share link and
   audit entry, and writes one `workspace_deleted` entry to the account log.
-- **Export.** "Download a copy" (admins, with a fresh passkey check; `POST /export`; one at a time per workspace, 409 while one runs,
+- **Export.** "Download a copy" (admins; `POST /export`; one at a time per workspace, 409 while one runs,
   and 5 an hour per person) streams a zip: `workspace.json` (the workspace,
   members, projects, tokens without their secrets, share links without theirs), `audit.json`, and per board `board.json`,
   `comments.json` and its files (captures, variants, versions, live HTML), and `chats.json` when the board has chat with a
@@ -284,7 +835,9 @@ shapewall push --remote https://app.example.com    # and comments, watch, mcp --
 It prints a short code (like `BCDF-GHJK`) and opens `/device` in the browser (a URL the CLI builds from `--remote`, never one the
 server sends; on Windows through `rundll32 url.dll,FileProtocolHandler`, no shell). Someone with the admin role there types the code,
 checks that the page shows the same code, the address the login came from and how long ago it started, picks the workspace,
-project, scopes and expiry (30 or 90 days, or none), and approves with a passkey check. The machine name is shown as reported by the
+project, scopes and expiry (30 or 90 days, or none), and approves (with a passkey check when the workspace asks for one
+before "Agents and machines"). On a server with tailnet sign-in the command needs no code at all:
+[From your coding agent](#from-your-coding-agent). The machine name is shown as reported by the
 terminal (unchecked), and the page warns when the login came from another address than the approver's. The CLI, polling `POST /api/v1/device/poll` every 3 seconds, receives the token once and saves it
 in `$XDG_CONFIG_HOME/shapewall/credentials.json` (or `~/.config/...`): the folder 0700, the file 0600, one entry per server origin.
 It never prints the token. The token is named `<machine> (shapewall login)` and listed with the others; revoke it there. A code
@@ -323,7 +876,7 @@ The server treats every upload as untrusted, even from our CLI:
   never to share link guests or public viewers. After a restart every agent reads offline, with the last time it was seen, until
   its next call.
 - **Removing a board.** A board pushed by mistake, or one you retired, comes off the server on the project page: "Remove board"
-  on its row in the Boards list, for the same people who may delete the project (admins and owners, with a fresh passkey check).
+  on its row in the Boards list, for the same people who may delete the project (admins and owners).
   It deletes that board's captures, page history, variants, checks, comments, replies and comment images, and frees their storage;
   the project, its other boards, its tokens and its share links stay. A later push of the same board id starts a new board: the
   captures are back, the comments are not. The audit log records who removed which board, and people who have the board open are
@@ -459,13 +1012,13 @@ comment, with a state and rules about who may use it. Nothing changes on the mac
   does not take work from never reaches its token, however trusted they are by the agent policy. An audience governs new work: a
   comment the agent already holds stays its own until it finishes, even if the audience is narrowed meanwhile, and sending a comment
   again while an agent works on it changes nothing. On the board, an agent you may not use is listed, greyed, with the reason ("Only
-  Ada can send work to Builder. Ask them, or an admin, to share it."). Changing an audience asks for a fresh passkey check.
+  Ada can send work to Builder. Ask them, or an admin, to share it.").
   **Tokens that already had the `claim` scope before 0.4.0 keep the behaviour they had**: everyone the agent policy trusts. The
   console marks them "kept from before 0.4.0".
 
 - **Approvals.** Each agent has an approval rule and two roles: who may answer its approvals, and who may change the rule (admins and
   owners, or owners only; only an owner changes those two). The rule in effect is **Ask every time** unless the agent's own machine
-  says otherwise: what an agent asks to do waits for a person with that role and a fresh passkey check. **Allow without asking** is
+  says otherwise: what an agent asks to do waits for a person with that role (and their passkey again when the workspace asks for it). **Allow without asking** is
   listed as not available until the agent's own machine names what may go without asking (`shapewall agent connect --approvals
 owner --auto edits`, on that machine). It is never the default and is never possible on the server's say alone. A
   [connected agent](#connected-agents) reads and answers only until its machine switches edits on
@@ -524,7 +1077,8 @@ shapewall agent connect --remote https://wall.example.com
 1. **The first run asks for an approval.** The command prints a short code and the address of the server's `/device` page. An admin
    or owner of the workspace opens it, types the code, and sees "Connect an agent": the machine's name, the address it asked from,
    and which agent it says it runs. They give the agent a name and an icon, choose the project, and choose who may use it. **Only
-   me** is the default. Approving asks for a fresh passkey check.
+   me** is the default. (On a server with tailnet sign-in, run on a tailnet machine by an admin, there is no code and no
+   browser: [From your coding agent](#from-your-coding-agent).)
 2. **The machine gets the agent's own token.** It is saved on that machine and never printed. The next run of the same command needs
    no approval.
 3. **The agent comes online.** It shows in the board's Agents panel and on the project's Agents page for as long as the command
@@ -867,7 +1421,8 @@ passes is shown in the comment's chat thread as a card:
 - **A card is answered once.** Stop cancels the cards that wait.
 - **Everyone with the thread open sees the state change live**: waiting, allowed and by whom, denied, expired, cancelled. The strip
   above the board lists the cards that wait for you, and opens the comment's chat, where the diff is.
-- **Allow needs a passkey check in the last 10 minutes.** The browser asks for it. Deny does not: it only ever stops something.
+- **Allow asks for a passkey again only when the workspace says so** (Settings, "Agent edits and pushes"; off by default). The
+  browser asks when the server does. Deny never does: it only ever stops something.
 
 **Who may answer.** Someone with the agent's answer role (admin by default), who is also in the agent's audience and trusted by
 the project's agent policy. When the agent's machine says `--approvals owner`: only the person who connected it. Everyone else
@@ -895,8 +1450,8 @@ without asking**.
   branch, and the commit is still kept only when it is exactly what was allowed.
 - **Nothing reaches a remote without a person having seen the diff.** A fix with an edit that went without asking is committed
   on its branch on the machine and held there. It is not pushed and no pull request is opened. The thread shows one
-  **Push this fix** card with the whole changed-files diff. Someone who may answer the agent's cards allows it, with a fresh
-  passkey, under the same rules as any card (the hash, once, the machine's own recheck); it waits 10 minutes. Denied or not
+  **Push this fix** card with the whole changed-files diff. Someone who may answer the agent's cards allows it,
+  under the same rules as any card (the hash, once, the machine's own recheck); it waits 10 minutes. Denied or not
   answered, the fix stays on the machine and the result offers **Push this fix** again, as often as needed. A fix too large to
   show in full cannot be pushed from the board at all.
 - **If the machine connects again without it**, the stored rule is set back to "ask" at once, and that is in the audit log.
@@ -1415,6 +1970,16 @@ Old-host passkeys show "For old.example" on the Account page.
   API, signed URLs and tokens.
 - **CSRF.** Cookie-authenticated writes need JSON and an `Origin` (or `Sec-Fetch-Site: same-origin`) equal to the configured origin,
   on top of SameSite=Lax. The token API ignores cookies.
+- **Tailnet identity** (only with `--tailnet-sign-in`). The `Tailscale-User-*` headers are believed only on a request that
+  carries the secret path of the serve entry this server made, on a connection whose other end is owned by root, for an address
+  tailscaled's own whois gives to that login, with exactly one clean login header and no Funnel mark, and never for a request
+  from the server's own machine (any program there can ask tailscaled for the serve address). On direct loopback requests, raw
+  TCP forwards, Funnel traffic and with the flag off they are ignored. The secret is taken off the request before the
+  application sees it and is in no response; a test crawls the hosted server and the local board for it. The server refuses to start with the flag
+  (and suspends it while running) under userspace networking, Tailscale before 1.98, tailscaled's own proxies, in a container,
+  or when the serve config is not its one entry. Root and the Tailscale operator on the machine are trusted; nothing else on
+  the machine or the tailnet is. An identity is per device, not per person
+  ([how](#how-the-server-knows-a-request-came-through-tailscale-serve)).
 - **Rate limits** (in memory, per process): passkey ceremonies 30 a minute per IP; wrong recovery codes 5 per 15 minutes per handle and
   IP, and 30 an hour per IP (right codes do not count, and nobody can use up another address's attempts); invite lookups 30 a minute
   per IP; bad tokens 20 a minute per IP; 1200 requests a minute per token; 20 pushes an hour per
@@ -1530,13 +2095,14 @@ shapewall hosted --data ./hosted-data --tailscale --tailscale-port 8443 --funnel
 
 These commands change Tailscale Serve/Funnel configuration. Run them only when you intend to expose this server. Install Tailscale,
 connect the machine, enable MagicDNS and HTTPS certificates, and authorize your unprivileged user as a Tailscale operator first.
+Add `--tailnet-sign-in` to sign tailnet users in by their tailnet login instead of a passkey ([Tailnet sign-in](#tailnet-sign-in)).
 The console and passkey origin come from this machine's `*.ts.net` hostname. Do not also pass `--origin` or a non-loopback `--host`.
 An occupied HTTPS port is refused, including an existing mapping to the same target. SIGINT/SIGTERM removes mappings this process
 added only while they still match; after a crash inspect `tailscale serve status` and remove the stale mapping explicitly.
 
 Funnel uses a second loopback listener and a different HTTPS port. It serves guest share pages, guest APIs, signed live HTML,
 static assets, legal/report routes and health only. Console, sign-in, signup, device login, invitations, member APIs and token APIs
-answer 404. Member session/ceremony cookies are discarded at that listener. Share links still require the secret in the link and
+answer 404. Member session/ceremony cookies and any `Tailscale-*` header are discarded at that listener. Share links still require the secret in the link and
 any passcode configured by the workspace. Funnel makes those guest paths public. Ports are not cookie boundaries, so never add
 member routes to this listener. Tailscale policy/ACL configuration remains the operator's responsibility.
 
@@ -1575,9 +2141,19 @@ shapewall hosted admin export ws_ID --out ./workspace.zip --data ./hosted-data
 shapewall hosted admin reports --data ./hosted-data
 shapewall hosted admin reports close rp_ID --note "Reviewed" --data ./hosted-data
 shapewall hosted admin log --data ./hosted-data
+# An account's passkeys (by handle, or by the tailnet login it is linked to):
+shapewall hosted admin passkeys list --login ada@example.com --data ./hosted-data
+shapewall hosted admin passkeys remove PASSKEY_ID --handle ada --data ./hosted-data
 # Destructive, requires the workspace's exact name:
 shapewall hosted admin delete ws_ID --confirm "Workspace name" --data ./hosted-data
 ```
+
+`passkeys remove` is for the case nobody in the product can solve: an account whose only passkey is not its owner's, or is
+lost with no recovery codes, most of all on a server with tailnet sign-in after a first passkey's 24 hours have passed. Being
+able to read and write the data folder is the proof, as for every operator command. It removes any passkey, also the last
+one, and ends the account's passkey sessions (tailnet sessions go on); an account with a tailnet login then signs in through
+the tailnet and can add a passkey again, and one without signs in with a recovery code if it has one. It is in the operator
+log and in the account's own security log ("removed by the server's operator").
 
 Suspension immediately refuses existing API tokens, new device approvals, invitations and guest links. Members can read and export
 but writes return `workspace_suspended`. Resume restores the previous grants. Operator actions, including listing workspaces/reports and reading the log, are recorded in the
@@ -1785,7 +2361,53 @@ on the upgraded database also works, since it ignores the table, but:
 FROM memberships WHERE workspace_id = usage_layouts.workspace_id);` clears them.
 
 To remove the schema as well, with the server stopped: `DROP TABLE usage_layouts; DELETE FROM schema_migrations WHERE version =
-16; PRAGMA user_version = 15;`. Never reset the ledger any other way. Test a rollback on a copy first.
+16;`, then set `PRAGMA user_version` to the highest version left in `schema_migrations` (17 where migration 17 is there, else
+15). Never reset the ledger any other way. Test a rollback on a copy first.
+
+### Migration 17 and rollback
+
+Migration 17 (0.7.0) adds what the passkey settings and tailnet sign-in need ([Signing in](#signing-in)). It is additive and
+runs once:
+
+- column `workspaces.step_up` (the "Ask for a passkey again" settings as JSON; `{}` is all off);
+- columns `users.tailnet_login`, `users.tailnet_linked_at` and `users.tailnet_user_id` (Tailscale's id of the linked user), with
+  the unique index `users_tailnet_login`;
+- column `passkeys.tailnet_added_from` (the device a first passkey was added from in a tailnet session);
+- table `server_settings` (what the operator switched for the whole server: passkeys on a tailnet sign-in server);
+- column `sessions.tailnet_login` (set on a session that came in by tailnet identity);
+- column `invites.tailnet_login` (an invite for one login);
+- table `tailnet_visitors` (logins that arrived and are in no workspace).
+
+**What changes on upgrade, with no setting touched:** the passkey prompts before workspace actions are gone. A signed-in session
+with the right role is enough. If you want them back, an owner switches the groups on in Settings, per workspace.
+
+For rollback, prefer the pre-upgrade backup in a fresh data folder with the previous release. Running the previous build on the
+upgraded database also works, but:
+
+- **The old passkey rules are back for everyone,** whatever the workspaces chose.
+- **Delete tailnet sessions** (`DELETE FROM sessions WHERE tailnet_login IS NOT NULL;`). An older build cannot use them in any
+  case: they are stored under the hash of `tailnet:<token>`, and an older build looks a cookie up by the hash of the token
+  alone, so it finds nothing. Deleting them is tidiness, and the documented step.
+- **Accounts made by tailnet sign-in have no passkey** and no recovery codes, so they cannot sign in to an older build.
+- **Invites made for a tailnet login** work for anyone who has their link on an older build. Revoke the pending ones first.
+
+To remove the schema as well (SQLite 3.35+), with the server stopped: `DROP TABLE tailnet_visitors; DROP INDEX
+users_tailnet_login; ALTER TABLE users DROP COLUMN tailnet_login; ALTER TABLE users DROP COLUMN tailnet_linked_at; ALTER TABLE
+users DROP COLUMN tailnet_user_id; ALTER TABLE passkeys DROP COLUMN tailnet_added_from; DROP TABLE server_settings; ALTER TABLE
+sessions DROP COLUMN tailnet_login; ALTER TABLE invites DROP COLUMN tailnet_login; ALTER TABLE workspaces DROP COLUMN step_up;
+DELETE FROM schema_migrations WHERE version = 17;`, then set `PRAGMA user_version` to the highest version left in
+`schema_migrations` (16 where the saved Usage layouts are there, else 15).
+
+**A database from a build of this release before it was released.** While 0.7.0 was being made, the sign-in migration was
+numbered 16 for a while. A database such a build opened says "16 ran" in its ledger, which now means the Usage layouts. The
+server recognises it (the sign-in tables are there, `usage_layouts` is not, 17 is not marked), adds what that early build
+did not have yet, and corrects the ledger to "17 ran, 16 did not", so both end applied once. Nothing to do by hand.
+
+**Migrations 16 and 17.** Number 16 is the Usage layouts (table `usage_layouts`) and 17 is sign-in; they were made separately
+and do not depend on each other. The server keeps a ledger of what ran (`schema_migrations`), so they can reach a database in
+either order: a database that ran only 16 runs 17 on the next start, and one that ran only 17 runs 16. `PRAGMA user_version` is
+the highest number applied, not a count. Rolling one back does not touch the other; remove only its own row from
+`schema_migrations`.
 
 ## Secrets, logs and legal review
 
@@ -1806,7 +2428,7 @@ The server never runs a model or an agent process. Capture and execution stay
 on the developer's machine or CI. In a project's console, **Agent policy**
 sets trusted workspace roles or handles, board overrides, `onlyMentions`,
 claims per UTC day (50 by default), and open claims (3 by default). Zero stops
-new claims. Policy changes require a fresh passkey. Removed members and changed
+new claims. Removed members and changed
 trust policy invalidate vouches immediately.
 
 Use project tokens with `read, reply, status, claim` for runners. `reply` posts
@@ -1824,7 +2446,7 @@ vouches for the exact current text and anchor. Editing clears it, and both
 after you opened it: reload and read it again. Only admins set an agent status
 from the board. Approvals and denials of an agent's commands are in the audit
 log. Non-admin
-requests need **Approve agent run**, with a trusted admin's fresh passkey, by
+requests need **Approve agent run** by a trusted admin, by
 default. Guest and agent-written comments can never be dispatched, including
 with `--include-guests`. Imported comments start inert and need an explicit
 trusted vouch. Claim tokens see only dispatched comments, including direct-id
@@ -1847,7 +2469,7 @@ returns HTTP 429 `agent_budget`; another token cannot take over a live claim.
 An operator suspension, token revocation, membership loss, changed trust or an
 edited comment prevents subsequent requests. Shell approvals bind one exact
 command and one claim generation, expire after two minutes and need a trusted
-admin's fresh passkey. They cannot be reused on a later run of identical text.
+admin (and their passkey again when the workspace asks for it). They cannot be reused on a later run of identical text.
 
 `shapewall watch --remote` uses bearer-authenticated SSE at `/api/v1/events`,
 with bounded polling fallback when a proxy does not support streams. Events

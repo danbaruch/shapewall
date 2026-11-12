@@ -40,8 +40,12 @@ export function createMembership({ db, quotas, iso, auditOf, agentsFor = null })
     return id
   }
 
-  function acceptInvite(t, invite, userId, ip) {
+  // `tailnetLogin`: the tailnet login the accepting account is linked to and
+  // arrives with. An invite made for a login is that login's alone.
+  function acceptInvite(t, invite, userId, ip, { tailnetLogin = null } = {}) {
     return transaction(db, () => {
+      if (invite.tailnet_login && invite.tailnet_login !== tailnetLogin)
+        throw new AuthError(403, 'invalid_invite', 'This invite link is used, expired or revoked.')
       if (t.get('SELECT role FROM memberships WHERE workspace_id = :ws AND user_id = :user', { user: userId })) {
         throw new HttpError(409, 'already_member', 'You are already in this workspace.')
       }
@@ -66,7 +70,14 @@ export function createMembership({ db, quotas, iso, auditOf, agentsFor = null })
         role: invite.role,
         at: iso(),
       })
-      audit(t, { userId, action: 'invite_accepted', target: invite.id, ip, at: iso(), detail: { role: invite.role } })
+      audit(t, {
+        userId,
+        action: 'invite_accepted',
+        target: invite.id,
+        ip,
+        at: iso(),
+        detail: { role: invite.role, ...(invite.tailnet_login ? { tailnet: invite.tailnet_login } : {}) },
+      })
     })
   }
 

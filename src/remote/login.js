@@ -6,6 +6,12 @@
 // over once; it goes into the credentials file (0600, see credentials.js)
 // and is never printed. `push`, `comments`, `watch` and `mcp --remote` use
 // it from then on.
+//
+// On a server with tailnet sign-in, run on a tailnet machine: the server
+// already knows the machine's user, and that account approves the login
+// itself, with no code and no browser (src/remote/tailnet-cli.js). The
+// project comes from --project (and --workspace); the code below is the
+// fallback whenever that does not apply.
 
 import os from 'node:os'
 import { spawn } from 'node:child_process'
@@ -90,6 +96,8 @@ export async function login(
     // in place of saving it as this server's login.
     agent = null,
     onApproved = null,
+    // false: never ask the server who this machine's tailnet user is (tests of the code flow).
+    tailnet = true,
     // The command that was run, for "run it again" (`shapewall agent connect`, `shapewall import`).
     command = 'shapewall login',
   } = {},
@@ -113,18 +121,30 @@ export async function login(
   // The page is ours to build: the server's verificationUrl is not used.
   const page = deviceLoginUrl(origin)
   if (!page) throw new Error(`Cannot build a login page for ${origin}; open its /device page yourself.`)
-  out(`${purpose === 'agent' ? 'To connect this agent' : 'To log in'}, open ${page} and enter this code:`)
-  out('')
-  out(`    ${userCode}`)
-  out('')
-  out(`Check that the console shows the same code and "${machine}". It expires in ${Math.round(Number(expiresIn) / 60) || 10} minutes.`)
-  if (open(page, env)) out('(Opened it in your browser.)')
+  // Tailnet sign-in: approved by this machine's tailnet user, when the server knows one who may.
+  const { approveByTailnet } = await import('./tailnet-cli.js')
+  const approvedHere = tailnet
+    ? await approveByTailnet({ origin, userCode, flags, purpose, agent, out, fetchImpl, machine }).catch((error) => {
+        // A choice only flags can make (which project): that is the answer, not a fallback.
+        throw error
+      })
+    : false
+  if (!approvedHere) {
+    out(`${purpose === 'agent' ? 'To connect this agent' : 'To log in'}, open ${page} and enter this code:`)
+    out('')
+    out(`    ${userCode}`)
+    out('')
+    out(`Check that the console shows the same code and "${machine}". It expires in ${Math.round(Number(expiresIn) / 60) || 10} minutes.`)
+    if (open(page, env)) out('(Opened it in your browser.)')
+  }
+  let first = approvedHere
   const deadline = Date.now() + Math.min(Math.max(Number(expiresIn) || 600, 1), 3600) * 1000
   for (;;) {
     if (signal?.aborted) throw new Error('Login cancelled.')
     if (Date.now() > deadline) throw new Error(`The code expired before anyone approved it. Run ${command} again for a new one.`)
     // 1 to 30 seconds whatever the server says (NaN would poll in a tight loop).
-    await sleep(Math.min(Math.max(Number(interval) || 3, 1), 30) * 1000)
+    if (!first) await sleep(Math.min(Math.max(Number(interval) || 3, 1), 30) * 1000)
+    first = false
     let polled
     try {
       polled = await post(fetchImpl, origin, '/api/v1/device/poll', { deviceCode })

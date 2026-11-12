@@ -10,6 +10,7 @@ import { PUBLIC_ID_RE, readPublic } from './public.js'
 import { createProjectStore } from './projects.js'
 import { roleIn, tenant } from './tenancy.js'
 import { guestCookieName, sessionCookieName } from './cookies.js'
+import { sessionReader } from './tailnet.js'
 import { ID_PATTERNS, SHARE_ID_RE } from './crypto.js'
 import { ID_RE } from '../config.js'
 
@@ -75,10 +76,21 @@ function cookie(req, name) {
 }
 
 // Re-run for every message and heartbeat. No cached membership or share grant.
-export function presenceAuthorizer({ db, dataDir, origin, auth, now = () => new Date(), guestOnly = false }) {
+export function presenceAuthorizer({
+  db,
+  dataDir,
+  origin,
+  auth,
+  now = () => new Date(),
+  guestOnly = false,
+  tailnet = null,
+  passkeys = null,
+}) {
   const url = new URL(origin)
   const secure = url.protocol === 'https:'
   const iso = () => now().toISOString()
+  // A tailnet session counts only with its identity, here as on every request.
+  const readSession = sessionReader({ auth, tailnet, passkeys })
   return (req) => {
     if (
       req.headers.origin !== url.origin ||
@@ -100,7 +112,7 @@ export function presenceAuthorizer({ db, dataDir, origin, auth, now = () => new 
     let access
     if (member && !guestOnly) {
       const token = cookie(req, sessionCookieName(secure))
-      const session = token && auth.readSession(token)
+      const session = token && readSession(req, token)
       if (!session || !roleIn(db, session.user.id, member[1])) return null
       access = {
         workspace: member[1],

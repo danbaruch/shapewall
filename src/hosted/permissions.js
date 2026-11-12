@@ -130,11 +130,9 @@ export const canInvite = (actorRole, role) =>
   can(actorRole, 'invites') && ROLES.includes(role) && (role !== 'owner' || actorRole === 'owner')
 export const invitableRoles = (actorRole) => ROLES.filter((role) => canInvite(actorRole, role))
 
-// Changes that need a passkey check in the last 10 minutes.
-export const inviteNeedsFresh = (role) => role === 'owner' || role === 'admin'
-export const roleChangeNeedsFresh = (targetRole, newRole) =>
-  newRole === 'owner' || newRole === 'admin' || (['owner', 'admin'].includes(targetRole) && targetRole !== newRole)
-export const removalNeedsFresh = (targetRole, { self = false } = {}) => !self && ['owner', 'admin'].includes(targetRole)
+// Which of these ask for the passkey again is in src/hosted/step-up.js:
+// anything that makes, changes or removes an owner always does; the same
+// for an admin only when the workspace's owner switched that on.
 
 // A workspace always keeps an owner.
 export const leavesNoOwner = ({ targetRole, newRole = null, owners }) => targetRole === 'owner' && newRole !== 'owner' && owners <= 1

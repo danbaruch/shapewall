@@ -549,7 +549,7 @@ export function ProjectAgentsPage({ projectId }) {
                             </>
                           ) : (
                             <>
-                              <span className="text-fg">{MODE_TITLE.ask}.</span> {answerers(agent)}, each time with a passkey check.
+                              <span className="text-fg">{MODE_TITLE.ask}.</span> {answerers(agent)}.
                             </>
                           )}
                         </dd>
@@ -868,7 +868,7 @@ function AudienceDialog({ agent, members, url, onClose, onSaved }) {
       open={Boolean(agent)}
       onClose={() => (save.busy ? null : onClose())}
       title={`Who may send work to ${agent?.name || 'this agent'}`}
-      description="Work sent to an agent runs on the machine of the person who connected it. Saving asks for your passkey."
+      description="Work sent to an agent runs on the machine of the person who connected it."
       wrapDescription
       size="md"
       footer={
@@ -1040,7 +1040,7 @@ function ApprovalDialog({ agent, role, url, onClose, onSaved }) {
       open={Boolean(agent)}
       onClose={() => (save.busy ? null : onClose())}
       title={`Approvals for ${agent?.name || 'this agent'}`}
-      description="Whether what the agent asks to do waits for a person, and who decides. Saving asks for your passkey."
+      description="Whether what the agent asks to do waits for a person, and who decides."
       wrapDescription
       size="md"
       footer={
@@ -1135,9 +1135,7 @@ function ApprovalDialog({ agent, role, url, onClose, onSaved }) {
             </Notice>
           )}
           <div className="grid items-start gap-4 sm:grid-cols-2">
-            <Field label="Who may answer its approvals" hint="They also need a fresh passkey check for each answer.">
-              {roleSelect(answerRole, setAnswerRole, 'answer')}
-            </Field>
+            <Field label="Who may answer its approvals">{roleSelect(answerRole, setAnswerRole, 'answer')}</Field>
             <Field label="Who may change this rule" hint="Only an owner changes these two.">
               {roleSelect(changeRole, setChangeRole, 'change')}
             </Field>

@@ -677,6 +677,8 @@ const MIGRATIONS = [
   // layout is JSON, checked on the way in and again on the way out
   // (src/hosted/usage-layout.js). One new table and nothing else: an older
   // build ignores it (docs/hosted.md, "Migration 16 and rollback").
+  // The ledger below runs 16 and 17 in whichever order they reach a database: one made on the tailnet
+  // sign-in branch (17 ran, 16 absent) runs 16 later, and one that ran 16 first runs 17 next.
   `
   CREATE TABLE usage_layouts (
     workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -688,6 +690,42 @@ const MIGRATIONS = [
     PRIMARY KEY (workspace_id, kind, subject)
   );
   `,
+  // 17. Step-up as a workspace's choice (step_up: a JSON object, '{}' is all off;
+  // src/hosted/step-up.js), and tailnet sign-in (src/hosted/tailnet.js): the
+  // tailnet login an account is linked to, the one a session came in with
+  // (such a session works only on requests that carry that identity), the
+  // one an invite is for, and the logins that arrived and belong to nobody
+  // yet. users.tailnet_user_id: Tailscale's own id of the user behind the
+  // linked login (a login string can be given to someone else later; the id
+  // cannot). passkeys.tailnet_added_from: set (to the device's label) on a
+  // passkey that a tailnet session added with no passkey check, the first
+  // of its account; with recovery_added_at as its 24 hour clock.
+  // server_settings: what the operator switched for the whole server
+  // (src/hosted/passkey-policy.js: passkeys on a tailnet sign-in server).
+  // Additive; an older build ignores all of it (docs/hosted.md,
+  // "Rolling back").
+  `
+  ALTER TABLE workspaces ADD COLUMN step_up TEXT NOT NULL DEFAULT '{}';
+  ALTER TABLE users ADD COLUMN tailnet_login TEXT;
+  ALTER TABLE users ADD COLUMN tailnet_linked_at TEXT;
+  ALTER TABLE users ADD COLUMN tailnet_user_id TEXT;
+  ALTER TABLE passkeys ADD COLUMN tailnet_added_from TEXT;
+  CREATE TABLE server_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE UNIQUE INDEX users_tailnet_login ON users(tailnet_login) WHERE tailnet_login IS NOT NULL;
+  ALTER TABLE sessions ADD COLUMN tailnet_login TEXT;
+  ALTER TABLE invites ADD COLUMN tailnet_login TEXT;
+  CREATE TABLE tailnet_visitors (
+    login TEXT PRIMARY KEY,
+    name TEXT NOT NULL DEFAULT '',
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    visits INTEGER NOT NULL DEFAULT 1
+  );
+  `,
 ]
 
 export async function openDatabase(file) {
@@ -697,6 +735,36 @@ export async function openDatabase(file) {
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000; PRAGMA synchronous = NORMAL;')
   migrate(db)
   return db
+}
+
+// A database made by a build of 0.7.0 from before it was released, when the
+// sign-in migration still had the number 16 (now 17; 16 is the saved Usage
+// layouts'). Its ledger says "16 ran", which now means something else: the
+// real 16 would never run, and 17 would run on top of its own tables and
+// fail. Told apart by what is there: the ledger has 16 and not 17, the
+// sign-in tables exist and usage_layouts does not. Repaired in place: what
+// that early build did not have yet is added (each piece only if missing),
+// and the ledger is corrected to "17 ran, 16 did not", so that both end
+// applied once. A database where 16 is really the layouts' is left alone.
+function repairEarlySignIn(db) {
+  const has = (version) => Boolean(db.prepare('SELECT 1 FROM schema_migrations WHERE version = ?').get(version))
+  const table = (name) => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name))
+  const column = (name, col) =>
+    db
+      .prepare(`PRAGMA table_info(${name})`)
+      .all()
+      .some((row) => row.name === col)
+  if (!has(16) || has(17) || table('usage_layouts') || !table('tailnet_visitors') || !column('users', 'tailnet_login')) return
+  if (!column('workspaces', 'step_up')) db.exec("ALTER TABLE workspaces ADD COLUMN step_up TEXT NOT NULL DEFAULT '{}'")
+  if (!column('users', 'tailnet_linked_at')) db.exec('ALTER TABLE users ADD COLUMN tailnet_linked_at TEXT')
+  if (!column('users', 'tailnet_user_id')) db.exec('ALTER TABLE users ADD COLUMN tailnet_user_id TEXT')
+  if (!column('passkeys', 'tailnet_added_from')) db.exec('ALTER TABLE passkeys ADD COLUMN tailnet_added_from TEXT')
+  if (!column('sessions', 'tailnet_login')) db.exec('ALTER TABLE sessions ADD COLUMN tailnet_login TEXT')
+  if (!column('invites', 'tailnet_login')) db.exec('ALTER TABLE invites ADD COLUMN tailnet_login TEXT')
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_tailnet_login ON users(tailnet_login) WHERE tailnet_login IS NOT NULL')
+  db.exec('CREATE TABLE IF NOT EXISTS server_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)')
+  db.prepare('DELETE FROM schema_migrations WHERE version = 16').run()
+  db.prepare('INSERT INTO schema_migrations(version) VALUES (17)').run()
 }
 
 // A ledger allows reserved workstreams to land out of order. user_version is
@@ -712,6 +780,7 @@ export function migrate(db, migrations = MIGRATIONS) {
         throw new Error('Database has untracked migrations newer than version 4; restore its pre-upgrade backup before continuing.')
       for (let version = 1; version <= current; version += 1) db.prepare('INSERT INTO schema_migrations(version) VALUES (?)').run(version)
     }
+    if (migrations === MIGRATIONS) repairEarlySignIn(db)
     for (let index = 0; index < migrations.length; index += 1) {
       if (!migrations[index] || db.prepare('SELECT 1 FROM schema_migrations WHERE version = ?').get(index + 1)) continue
       db.exec(migrations[index])

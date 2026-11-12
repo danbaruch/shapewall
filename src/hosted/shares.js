@@ -149,7 +149,7 @@ const SHARE_SELECT = `SELECT s.*, p.name AS project_name, c.handle AS creator_ha
 
 // Console routes for admins: list, create and revoke a project's links.
 export function mountShareAdmin(router, deps) {
-  const { iso, handle, inWorkspace, inProject, needFresh, auditOf, HttpError, publicOrigin } = deps
+  const { iso, handle, inWorkspace, inProject, stepUp, auditOf, HttpError, publicOrigin } = deps
 
   router.get(
     '/workspaces/:ws/shares',
@@ -178,7 +178,7 @@ export function mountShareAdmin(router, deps) {
   router.post(
     '/workspaces/:ws/projects/:pid/shares',
     inWorkspace(NEEDS.shares),
-    needFresh,
+    stepUp('tokens'),
     inProject,
     handle(async (req, res) => {
       const workspace = req.t.get('SELECT share_links FROM workspaces WHERE workspace_id = :ws')

@@ -15,6 +15,7 @@ import { HttpError, fail, cleanWorkspaceName } from './http.js'
 import { LIMITS } from './ratelimit.js'
 import { moveInfo } from './rebind.js'
 import { removeSetupLink } from './setup-link.js'
+import { mountTailnetAuth } from './tailnet-routes.js'
 import {
   accountEvents,
   auditAccount,
@@ -52,20 +53,31 @@ export function mountAuthRoutes(authRouter, deps) {
     needSession,
     needFresh,
     needFreshOrRecovery,
+    passkeys,
+    needFreshOrHeldRemoval,
+    removesHeldPasskey,
+    noPasskey,
+    needPasskeyBacked,
     auditOf,
     publicUser,
     createWorkspace,
     acceptInvite,
     revokeGrantsOf,
     ownerCount,
+    tailnetAccounts,
   } = deps
+
+  // Tailnet sign-in (src/hosted/tailnet-routes.js); `tailnet.on` false when the server runs without it.
+  const tailnet = mountTailnetAuth(authRouter, deps)
 
   // What the sign-up ceremony keeps (in challenges.data) is the SHA-256 of
   // the invite or setup token, never the token itself.
-  function signupAllowed({ invite, setup }) {
+  function signupAllowed({ invite, setup }, req) {
     if (typeof invite === 'string' && invite) {
       const row = findInviteByHash(db, sha256(invite))
-      if (!inviteUsable(row, iso())) throw new AuthError(403, 'invalid_invite', 'This invite link is used, expired or revoked.')
+      // An invite made for a tailnet login is that login's alone.
+      if (!inviteUsable(row, iso()) || (row.tailnet_login && row.tailnet_login !== tailnet.identityOf(req)?.login))
+        throw new AuthError(403, 'invalid_invite', 'This invite link is used, expired or revoked.')
       return { inviteHash: sha256(invite) }
     }
     if (typeof setup === 'string' && setup) {
@@ -85,6 +97,7 @@ export function mountAuthRoutes(authRouter, deps) {
     const token = auth.createSession(userId, { ...options, device: deviceLabel(req.headers['user-agent']), ip: clientIp(req) })
     setCookie(res, SESSION_COOKIE, token, 30 * 86400)
     setCookie(res, CEREMONY_COOKIE, '', 0)
+    if (tailnet.on) tailnet.clearSignedOut(res)
     return sha256(token)
   }
   const ceremonyCookie = (req) => parseCookies(req.headers.cookie)[CEREMONY_COOKIE]
@@ -94,7 +107,14 @@ export function mountAuthRoutes(authRouter, deps) {
     limit('ceremony'),
     handle(async (req, res) => {
       const { handle: name, displayName, invite, setup, workspaceName } = req.body || {}
-      const allowed = signupAllowed({ invite, setup })
+      // "Also sign me in from this tailnet login": asked for on the sign-up
+      // page, never assumed. Kept with the ceremony as the login it was said for.
+      const wantsLink = req.body?.linkTailnet === true ? tailnet.identityOf(req)?.login || null : null
+      if (req.body?.linkTailnet === true && !wantsLink)
+        throw new HttpError(403, 'tailnet_required', 'Linking a tailnet login works only when you arrive through the tailnet.')
+      if (wantsLink && tailnetAccounts.userFor(wantsLink))
+        throw new HttpError(409, 'tailnet_login_taken', 'That tailnet login is linked to another account here.')
+      const allowed = signupAllowed({ invite, setup }, req)
       // Without an invite the account gets a workspace of its own: its name
       // can be picked now (the setup page asks for it).
       let ownWorkspace = null
@@ -114,7 +134,7 @@ export function mountAuthRoutes(authRouter, deps) {
       const { options, ceremony } = await auth.registrationOptions({
         handle: name,
         displayName,
-        data: { ...allowed, ...(ownWorkspace ? { workspaceName: ownWorkspace } : {}) },
+        data: { ...allowed, ...(ownWorkspace ? { workspaceName: ownWorkspace } : {}), ...(wantsLink ? { linkTailnet: wantsLink } : {}) },
       })
       setCookie(res, CEREMONY_COOKIE, ceremony, 300)
       res.json({ options })
@@ -128,8 +148,16 @@ export function mountAuthRoutes(authRouter, deps) {
     limit('ceremony'),
     handle(async (req, res) => {
       const ip = clientIp(req)
+      // Signing up while arriving through the tailnet links the new account
+      // to that login only when the person asked for it on the sign-up page,
+      // and the request that finishes the sign-up still arrives as that login.
+      const identity = tailnet.identityOf(req)
       const { user, extra } = await auth.finishSignUp(ceremonyCookie(req), req.body?.response, (created, data) => {
         let workspaceId
+        const linked =
+          identity && data.linkTailnet === identity.login ? tailnetAccounts.link(created.id, identity.login, identity.userId) : null
+        if (linked)
+          auditAccount(db, { userId: created.id, action: 'tailnet_linked', ip, at: iso(), detail: { tailnet: linked, atSignUp: true } })
         // Ceremonies started before hashes were kept carry the raw token.
         const inviteHash = data.inviteHash || (data.invite ? sha256(data.invite) : null)
         const setupHash = data.setupHash || (data.setup ? sha256(data.setup) : null)
@@ -137,7 +165,7 @@ export function mountAuthRoutes(authRouter, deps) {
           const invite = findInviteByHash(db, inviteHash)
           if (!inviteUsable(invite, iso())) throw new AuthError(403, 'invalid_invite', 'This invite link is used, expired or revoked.')
           const t = tenant(db, invite.workspace_id)
-          acceptInvite(t, invite, created.id, ip)
+          acceptInvite(t, invite, created.id, ip, { tailnetLogin: linked })
           workspaceId = invite.workspace_id
         } else {
           if (setupHash) {
@@ -154,7 +182,11 @@ export function mountAuthRoutes(authRouter, deps) {
           action: 'account_created',
           ip,
           at: iso(),
-          detail: { via: inviteHash ? 'invite' : setupHash ? 'setup' : 'open', device: deviceLabel(req.headers['user-agent']) },
+          detail: {
+            via: inviteHash ? 'invite' : setupHash ? 'setup' : 'open',
+            device: deviceLabel(req.headers['user-agent']),
+            ...(linked ? { tailnet: linked } : {}),
+          },
         })
         return { workspaceId, recoveryCodes: auth.newRecoveryCodes(created.id), setup: Boolean(setupHash) }
       })
@@ -252,6 +284,7 @@ export function mountAuthRoutes(authRouter, deps) {
     '/logout',
     handle(async (req, res) => {
       const current = sessionOf(req)
+      const viaTailnet = current?.session.via === 'tailnet'
       if (current) {
         auth.deleteSession(current.session.hash)
         auditAccount(db, {
@@ -259,17 +292,22 @@ export function mountAuthRoutes(authRouter, deps) {
           action: 'signed_out',
           ip: clientIp(req),
           at: iso(),
-          detail: { device: deviceLabel(req.headers['user-agent']) },
+          detail: { device: deviceLabel(req.headers['user-agent']), ...(viaTailnet ? { via: 'tailnet' } : {}) },
         })
       }
       setCookie(res, SESSION_COOKIE, '', 0)
-      res.json({ ok: true })
+      // The tailnet would sign this browser straight back in: it stays
+      // signed out until the person presses "Continue as ...".
+      if (viaTailnet) tailnet.markSignedOut(res)
+      res.json({ ok: true, ...(viaTailnet ? { tailnet: current.session.tailnet_login } : {}) })
     }),
   )
 
   authRouter.get(
     '/me',
     // Signed out is an answer here, not an error (the console asks on every page).
+    // A GET makes no session: a linked tailnet login is answered 'linked', and the client signs in with
+    // POST /auth/tailnet/sign-in (tailnet-routes.js).
     (req, res, next) =>
       sessionOf(req)
         ? next()
@@ -279,6 +317,9 @@ export function mountAuthRoutes(authRouter, deps) {
             rpId: siteOf(req).auth.rpId,
             ...(turnstile && signup === 'open' ? { turnstile: turnstile.siteKey } : {}),
             ...moveInfo(sites, req),
+            ...tailnet.anonInfo(req),
+            // Tailscale is the only sign-in here: no passkey is asked for or offered.
+            ...(passkeys.on() ? {} : { passkeysOff: true }),
           }),
     needSession,
     handle(async (req, res) => {
@@ -293,7 +334,15 @@ export function mountAuthRoutes(authRouter, deps) {
         recoveryCodesLeft: auth.recoveryRemaining(req.user.id),
         fresh: auth.isFresh(req.auth.session),
         viaRecovery: req.auth.session.via === 'recovery',
+        // How this session came in: passkey, recovery or tailnet.
+        via: req.auth.session.via,
+        ...tailnet.memberInfo(req),
         securityNotice: securityNoticeFor(req),
+        ...(passkeys.on() ? {} : { passkeysOff: true }),
+        // Passkeys a tailnet session added that are still on hold: shown on every page ("Not you? Remove it").
+        heldPasskeys: auth
+          .heldPasskeys(req.user.id, passkeys.holdsAt?.() || null)
+          .map((key) => ({ ...key, canRemove: req.auth.session.via === 'tailnet' })),
         signup,
       })
     }),
@@ -447,7 +496,7 @@ export function mountAuthRoutes(authRouter, deps) {
           'This passkey was added with a recovery code; it can confirm this 24 hours after it was added. Use another passkey.',
         )
       }
-      if (req.auth.session.via !== 'passkey') {
+      if (req.auth.session.via === 'recovery') {
         // A recovery session becomes a passkey session once a trusted passkey confirms it.
         q.run("UPDATE sessions SET via = 'passkey' WHERE token_hash = :hash", { hash: req.auth.session.hash })
       }
@@ -456,12 +505,49 @@ export function mountAuthRoutes(authRouter, deps) {
     }),
   )
 
+  // The first passkey of an account that its tailnet signs in is added with
+  // no passkey check. Two conditions on top of the 24 hour hold, both cheap
+  // for a person and both honest about what they are:
+  //   - the request comes from a page of this site in a browser (the fetch
+  //     metadata a browser sets and a page cannot change), and not from a
+  //     command line session. A program on the person's device can forge
+  //     those headers; this is not a barrier against it. It keeps the
+  //     command line's own tailnet sessions and cross-site requests out.
+  //   - the person confirmed a step that names the device ("Add a passkey
+  //     from Chrome on Linux?"): the request carries that name, the server
+  //     compares it with the device it sees, and the passkey is stored with
+  //     it, so the notice on the person's other devices can say where the
+  //     passkey came from.
+  // What protects the account is the hold, the notice on every page and
+  // "Not you? Remove it" from any of the person's tailnet devices.
+  function firstByTailnetOrThrow(req) {
+    if (!noPasskey(req)) return null
+    const device = deviceLabel(req.headers['user-agent'])
+    const inBrowser =
+      req.headers['sec-fetch-site'] === 'same-origin' &&
+      ['cors', 'same-origin'].includes(req.headers['sec-fetch-mode']) &&
+      req.headers['sec-fetch-dest'] === 'empty' &&
+      device !== 'Shapewall CLI'
+    if (!inBrowser) {
+      throw new AuthError(403, 'browser_required', 'A first passkey is added in a browser, on the Account page of this server.')
+    }
+    if (req.body?.confirmDevice !== device) {
+      throw new HttpError(
+        409,
+        'confirm_device',
+        'Confirm adding a passkey from ' + device + '. It is your account’s first passkey: it will be on hold for 24 hours.',
+        { device },
+      )
+    }
+    return device
+  }
   authRouter.post(
     '/passkeys/options',
     limit('ceremony'),
     needSession,
     needFreshOrRecovery,
     handle(async (req, res) => {
+      firstByTailnetOrThrow(req)
       const { options, ceremony } = await auth.registrationOptions({ userId: req.user.id })
       setCookie(res, CEREMONY_COOKIE, ceremony, 300)
       res.json({ options })
@@ -473,9 +559,29 @@ export function mountAuthRoutes(authRouter, deps) {
     needSession,
     needFreshOrRecovery,
     handle(async (req, res) => {
-      const viaRecovery = !auth.isFresh(req.auth.session)
-      const { id } = await auth.finishAddPasskey(ceremonyCookie(req), req.body?.response, req.user.id, req.body?.nickname, { viaRecovery })
-      auditAccount(db, { userId: req.user.id, action: 'passkey_added', ip: clientIp(req), at: iso(), detail: { viaRecovery } })
+      // On hold for 24 hours (it signs in at once, it cannot confirm the
+      // fixed core until then) when it was added without a passkey check: by
+      // a recovery-code session, or as the first passkey of an account that
+      // only its tailnet signs in. A tailnet identity is per device: whatever
+      // runs as that person on one of their devices could add a passkey of
+      // its own, and without the hold use it at once for everything.
+      const tailnetFrom = firstByTailnetOrThrow(req)
+      const firstByTailnet = Boolean(tailnetFrom)
+      const viaRecovery = (req.auth.session.via === 'recovery' || firstByTailnet) && !auth.isFresh(req.auth.session)
+      const { id } = await auth.finishAddPasskey(ceremonyCookie(req), req.body?.response, req.user.id, req.body?.nickname, {
+        viaRecovery,
+        tailnetFrom: firstByTailnet && viaRecovery ? tailnetFrom : null,
+      })
+      auditAccount(db, {
+        userId: req.user.id,
+        action: 'passkey_added',
+        ip: clientIp(req),
+        at: iso(),
+        detail: {
+          viaRecovery: viaRecovery && !firstByTailnet,
+          ...(firstByTailnet ? { viaTailnet: true, onHold: viaRecovery, device: tailnetFrom } : {}),
+        },
+      })
       setCookie(res, CEREMONY_COOKIE, '', 0)
       res.status(201).json({ id, passkeys: auth.listPasskeys(req.user.id) })
     }),
@@ -491,8 +597,32 @@ export function mountAuthRoutes(authRouter, deps) {
   authRouter.delete(
     '/passkeys/:id',
     needSession,
-    needFresh,
+    needFreshOrHeldRemoval,
     handle(async (req, res) => {
+      // "Not you? Remove it": a tailnet session takes away a passkey that a
+      // tailnet session added and that is still on hold (guards.js).
+      if (!auth.isFresh(req.auth.session) && removesHeldPasskey(req, req.params.id)) {
+        const key = auth.removeHeldPasskey(req.user.id, req.params.id, passkeys.holdsAt?.() || null)
+        auth.deleteOtherSessions(req.user.id, req.auth.session.hash)
+        auditAccount(db, {
+          userId: req.user.id,
+          action: 'passkey_removed',
+          ip: clientIp(req),
+          at: iso(),
+          detail: {
+            otherSessionsEnded: true,
+            onHold: true,
+            via: 'tailnet',
+            device: deviceLabel(req.headers['user-agent']),
+            addedFrom: key.tailnet_added_from,
+            addedAt: key.created_at,
+          },
+        })
+        return res.json({
+          passkeys: auth.listPasskeys(req.user.id),
+          heldPasskeys: auth.heldPasskeys(req.user.id, passkeys.holdsAt?.() || null),
+        })
+      }
       auth.removePasskey(req.user.id, req.params.id)
       // A session signed in with that passkey must not outlive it.
       auth.deleteOtherSessions(req.user.id, req.auth.session.hash)
@@ -519,7 +649,7 @@ export function mountAuthRoutes(authRouter, deps) {
   authRouter.post(
     '/sessions/revoke-others',
     needSession,
-    needFresh,
+    needPasskeyBacked,
     handle(async (req, res) => {
       auth.deleteOtherSessions(req.user.id, req.auth.session.hash)
       auditAccount(db, { userId: req.user.id, action: 'sessions_revoked', ip: clientIp(req), at: iso(), detail: {} })
@@ -537,7 +667,7 @@ export function mountAuthRoutes(authRouter, deps) {
   authRouter.delete(
     '/sessions/:id',
     needSession,
-    needFresh,
+    needPasskeyBacked,
     handle(async (req, res) => {
       const id = String(req.params.id)
       if (!SESSION_ID_RE.test(id)) throw new AuthError(404, 'unknown_session', 'No such session.')

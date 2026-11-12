@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { ArrowRight, Building2, Plus } from 'lucide-react'
 import { Button, Dialog, EmptyState, Input, Spinner, initials } from '../../components/ui'
 import { Card, Field, FormError, PageHeader, RoleBadge } from '../components'
+import { TailnetInvites } from './tailnet'
 import { api } from '../lib/api'
 import { Link, currentHash, navigate, navigateSoon } from '../lib/router'
 import { useAction, useSession } from '../state'
@@ -29,6 +30,7 @@ export function Home() {
           </Button>
         }
       />
+      <TailnetInvites />
       {me.workspaces.length ? (
         <div className="grid animate-fade-in gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {me.workspaces.map((item) => (

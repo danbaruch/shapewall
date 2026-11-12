@@ -26,6 +26,7 @@ import {
   startHostedServer,
   tokenCall,
   writeLocalCaptures,
+  askAgain,
 } from './hosted-helpers.js'
 import { sampleConfig, tempDir } from './helpers.js'
 
@@ -80,6 +81,8 @@ before(async () => {
   hosted = await startHostedServer('hosted-admin-review', { now: () => new Date(clock), mailer })
   owner = await signUp(hosted, { handle: 'olga', displayName: 'Olga Owner' })
   ws = owner.workspaceId
+  // These tests are about the passkey checks: the workspace asks for them (off by default).
+  askAgain(hosted, ws)
   project = await createProject(owner, ws, 'Site')
   token = await createToken(owner, ws, project.id)
   await pushSample(token)

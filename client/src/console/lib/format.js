@@ -113,7 +113,7 @@ export function describeAudit(entry) {
         .split('/')
         .pop()}${d.project ? ` from ${d.project}` : ''}${d.comments ? ` (${count(d.comments, 'comment', 'comments')})` : ''}`
     case 'token_created':
-      return `created the API token ${target}${Array.isArray(d.scopes) ? ` (${d.scopes.join(', ')})` : ''}${d.via === 'login' ? ' with shapewall login' : ''}`
+      return `created the API token ${target}${Array.isArray(d.scopes) ? ` (${d.scopes.join(', ')})` : ''}${d.via === 'login' ? ' with shapewall login' : ''}${d.approvedBy ? `, approved by ${d.approvedBy}${d.machine ? ` from ${d.machine}` : ''}` : ''}`
     case 'token_revoked':
       return `revoked the API token ${target}`
     case 'token_renamed':
@@ -174,13 +174,38 @@ export function describeAudit(entry) {
         : `let any agent take comment ${String(entry.target || '').replace(/^.*#/, '#')}${d.fromName ? ` (it was waiting for ${d.fromName})` : ''}`
     // Sign-in and passkeys (account events of the workspace's members).
     case 'signed_in':
-      return `signed in${d.via === 'recovery_code' ? ' with a recovery code' : ''}${d.device ? ` on ${d.device}` : ''}${d.newDevice ? ' (a new device)' : ''}`
+      return `signed in${d.via === 'recovery_code' ? ' with a recovery code' : d.via === 'tailnet' ? ` by tailnet identity${d.tailnet ? ` (${d.tailnet})` : ''}` : ''}${d.device ? ` on ${d.device}` : ''}${d.newDevice ? ' (a new device)' : ''}`
     case 'signed_out':
       return `signed out${d.device ? ` on ${d.device}` : ''}`
     case 'account_created':
       return `created their account${d.device ? ` on ${d.device}` : ''}`
     case 'passkey_added':
-      return 'added a passkey'
+      return d.viaTailnet ? 'added their first passkey, in a tailnet session (on hold for 24 hours)' : 'added a passkey'
+    case 'tailnet_linked':
+      return `linked their tailnet login${d.tailnet ? ` ${d.tailnet}` : ''}${d.atSignUp ? ' when signing up' : ''}`
+    case 'tailnet_unlinked':
+      return `unlinked their tailnet login${d.tailnet ? ` ${d.tailnet}` : ''}`
+    case 'tailnet_visitor_dismissed':
+      return `took ${d.tailnet || 'a tailnet visitor'} off the list of tailnet visitors`
+    case 'step_up_changed': {
+      const names = {
+        cards: 'agent edits and pushes',
+        agents: 'agents and machines',
+        tokens: 'tokens and share links',
+        members: 'members and roles',
+        data: 'exports and deletes',
+      }
+      // The server's operator switched passkeys off or on for the whole server (a tailnet sign-in server).
+      if (d.setting === 'passkeys')
+        return d.after
+          ? 'allowed passkeys on this server again: what this workspace asks a passkey for is asked again'
+          : 'switched passkeys off on this server: what this workspace asks a passkey for is not asked until they are on again'
+      if (d.setting === 'windowMinutes') return `changed how long a passkey check counts from ${d.before} to ${d.after} minutes`
+      if (d.setting === 'adminIdle')
+        return `${d.after ? 'switched on' : 'switched off'} the passkey check for admin pages after 12 hours away`
+      if (d.setting === 'cliApproval') return `${d.after ? 'switched on' : 'switched off'} browser approval for command line logins`
+      return `${d.after ? 'switched on' : 'switched off'} asking for a passkey again before ${names[d.setting] || d.setting}`
+    }
     case 'passkey_removed':
       return 'removed a passkey'
     case 'recovery_codes_created':

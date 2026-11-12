@@ -53,7 +53,7 @@ export function DevicePage() {
   // An agent connection: how it will look and who may use it.
   const [look, setLook] = useState({ name: '', icon: null, tint: null, png: null })
   const [audience, setAudience] = useState('owner')
-  // Approve was held back because the sign-in is not fresh, and the passkey
+  // Approve was held back because the server asked for a passkey check first (its message), and the passkey
   // check that follows was closed: said on the page, so the button never
   // looks as if it did nothing.
   const [needsPasskey, setNeedsPasskey] = useState(false)
@@ -101,7 +101,7 @@ export function DevicePage() {
       } catch (failure) {
         // The passkey dialog opens next (useAction); if it is closed, this
         // note stays. Any other refusal shows its message below.
-        setNeedsPasskey(failure?.code === 'reauth_required')
+        setNeedsPasskey(failure?.code === 'reauth_required' ? failure.message : false)
         throw failure
       }
     })
@@ -442,7 +442,7 @@ export function DevicePage() {
             )}
             {needsPasskey && !decide.busy && !decide.error ? (
               <Notice tone="warn" title="Not approved yet: confirm with your passkey" data-sw-device-reauth-note>
-                Approving a login needs a fresh passkey check (once every 10 minutes). Press Approve again and use your passkey when asked.
+                {needsPasskey} Press Approve again and use your passkey when asked.
               </Notice>
             ) : null}
             <FormError error={decide.error} />

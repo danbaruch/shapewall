@@ -161,6 +161,10 @@ export async function startHostedServer(name, options = {}) {
     ...(options.turnstile ? { turnstile: options.turnstile } : {}),
     ...(options.reportEmail ? { reportEmail: options.reportEmail } : {}),
     ...(options.ownersSeeSignIns ? { ownersSeeSignIns: true } : {}),
+    // Tailnet sign-in with a gate the test made (the real start is test/tailnet-helpers.js).
+    ...(options.tailnet ? { tailnet: options.tailnet } : {}),
+    // With a tailnet gate: also allow passkeys (off by default there, as on a real server).
+    ...(options.tailnetPasskeys ? { tailnetPasskeys: true } : {}),
   })
   holder.app.locals.presence.attach(server)
   return {
@@ -186,7 +190,8 @@ export async function startHostedServer(name, options = {}) {
 }
 
 // Signs up a new account through the API with a software passkey.
-export async function signUp(hosted, { handle, displayName = handle, invite, setup } = {}) {
+// `linkTailnet`: the sign-up page's "Also sign me in from this tailnet login" (off unless asked).
+export async function signUp(hosted, { handle, displayName = handle, invite, setup, linkTailnet = false } = {}) {
   const browser = createBrowser(hosted.port, hosted.origin)
   const authenticator = createAuthenticator({ origin: hosted.origin })
   if (!invite && !setup)
@@ -196,6 +201,7 @@ export async function signUp(hosted, { handle, displayName = handle, invite, set
     displayName,
     ...(invite ? { invite } : {}),
     ...(setup ? { setup } : {}),
+    ...(linkTailnet ? { linkTailnet: true } : {}),
   })
   if (start.status !== 200) throw new Error(`register/options ${start.status} ${start.text}`)
   const done = await browser.post('/auth/register/verify', { response: authenticator.register(start.json.options) })
@@ -290,6 +296,15 @@ function chunk(type, data) {
   const tail = Buffer.alloc(4)
   tail.writeUInt32BE((crc ^ 0xffffffff) >>> 0, 0)
   return Buffer.concat([head, data, tail])
+}
+
+// Switches on a workspace's "Ask for a passkey again" settings
+// (src/hosted/step-up.js), straight in the database: every group and the
+// admin idle rule, one check counting for 5 minutes. Tests of the opt-in
+// start here; without it a signed-in session with the right role is enough.
+export function askAgain(hosted, workspaceId, settings = {}) {
+  const value = { cards: true, agents: true, tokens: true, members: true, data: true, adminIdle: true, windowMinutes: 5, ...settings }
+  hosted.db.prepare('UPDATE workspaces SET step_up = ? WHERE id = ?').run(JSON.stringify(value), workspaceId)
 }
 
 // A fresh passkey check for a signed-up user (the console's re-auth).

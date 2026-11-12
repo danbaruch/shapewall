@@ -2,7 +2,7 @@
 // person's OK, so an admin sees it with every panel closed.
 //
 //   - shell commands an agent that takes comments asked to run (answered
-//     here, with a passkey);
+//     here; with a passkey when the server asks for one);
 //   - requests of a connected agent in the middle of a fix (edit a file, run
 //     a command): each is a card in its comment's chat, where the diff is.
 //     The strip names it and opens that chat; the answer is given there.
@@ -109,9 +109,16 @@ export function HostedApprovals({ boardId, onRows = null, onOpenThread = null, o
     setBusy(true)
     setError(null)
     try {
-      // Always request a fresh passkey before approving a shell command.
-      await confirmHostedPasskey()
-      await api.post(`${url}/${row.id}`, { state, hash: row.command_hash })
+      // The server says when this workspace wants the passkey again (403
+      // reauth_required): then it is asked for, and the answer goes once more.
+      const send = () => api.post(`${url}/${row.id}`, { state, hash: row.command_hash })
+      try {
+        await send()
+      } catch (failure) {
+        if (failure?.code !== 'reauth_required') throw failure
+        await confirmHostedPasskey()
+        await send()
+      }
       setRows((rows) => rows.filter((r) => r.id !== row.id))
     } catch (error) {
       setError(error.message)
@@ -167,7 +174,7 @@ export function HostedApprovals({ boardId, onRows = null, onOpenThread = null, o
           <pre className="overflow-auto rounded bg-surface-2 p-2 break-words whitespace-pre-wrap">{plain(row.command)}</pre>
           <p>{row.reason}</p>
           <Button size="touch" variant="default" className="lg:h-8" disabled={busy} onClick={() => answer(row, 'approved')}>
-            Approve once with passkey
+            Approve once
           </Button>{' '}
           <Button size="touch" variant="danger" className="lg:h-8" disabled={busy} onClick={() => answer(row, 'denied')}>
             Deny

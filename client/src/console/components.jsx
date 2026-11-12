@@ -283,7 +283,8 @@ export function Loading({ label = 'Loading', rows = 3 }) {
 export function LoadError({ error, onRetry }) {
   // Outside the signed-in console there is no re-auth dialog.
   const withReauth = useReauth()
-  // An admin page after a long idle: confirm with a passkey, then load again.
+  // The server asked for a passkey check before this page (a workspace's
+  // admin idle rule): confirm, then load again.
   if (error?.code === 'reauth_required' && onRetry && withReauth) {
     const confirm = () => {
       let first = true

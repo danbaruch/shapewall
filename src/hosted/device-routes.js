@@ -15,7 +15,21 @@ import { roleAtLeast, roleIn, tenant, workspacesForUser } from './tenancy.js'
 import { TOKEN_SCOPES } from './tokens.js'
 
 export function mountDeviceApprovals(consoleApi, deps) {
-  const { db, dataDir, now, quotas, deviceLogins, clientIp, limit, handle, needFresh, auditOf, createApiToken, agentsFor } = deps
+  const {
+    db,
+    dataDir,
+    now,
+    quotas,
+    deviceLogins,
+    clientIp,
+    limit,
+    handle,
+    stepUpOrThrow,
+    machineTokensOrThrow,
+    auditOf,
+    createApiToken,
+    agentsFor,
+  } = deps
 
   // ---- `shapewall login`: approving a login in the console ----
   // The CLI side (start, poll) is on /api/v1/device, without a session.
@@ -57,7 +71,7 @@ export function mountDeviceApprovals(consoleApi, deps) {
           name: item.name,
           projects: createProjectStore(tenant(db, item.id), { db, dataDir })
             .list()
-            .map((project) => ({ id: project.id, name: project.name })),
+            .map((project) => ({ id: project.id, name: project.name, slug: project.slug })),
         }))
       res.json({
         login: devicePublic(found, req),
@@ -74,7 +88,6 @@ export function mountDeviceApprovals(consoleApi, deps) {
   consoleApi.post(
     '/device/approve',
     limit('deviceLookup', (req) => req.user.id),
-    needFresh,
     handle(async (req, res) => {
       const found = deviceFound(req)
       const ws = String(req.body?.workspaceId || '')
@@ -82,6 +95,13 @@ export function mountDeviceApprovals(consoleApi, deps) {
       if (!role) throw new HttpError(404, 'unknown_workspace', 'No such workspace.')
       if (!roleAtLeast(role, NEEDS.tokens)) throw new HttpError(403, 'forbidden', `This needs the ${NEEDS.tokens} role or higher.`)
       req.t = tenant(db, ws)
+      // Approving a machine or an agent: the passkey again only when this workspace asks ("Agents and machines").
+      stepUpOrThrow(req, 'agents')
+      // A session that only a tailnet identity stands behind may approve by
+      // default (src/remote/tailnet-cli.js does, with no code); a workspace
+      // that switched on "Approve command line logins in the browser" wants
+      // the code and a passkey check (src/hosted/guards.js machineTokensOrThrow).
+      const identityOnly = machineTokensOrThrow(req)
       if (workspaceSuspended(req.t))
         throw new HttpError(403, 'workspace_suspended', 'This workspace is suspended by the server operator; it takes no new tokens.')
       req.role = role
@@ -116,6 +136,7 @@ export function mountDeviceApprovals(consoleApi, deps) {
           {
             via: agentLogin ? 'agent' : found.entry.purpose === 'import' ? 'import' : 'login',
             machine: found.entry.name,
+            ...(identityOnly ? { approvedBy: 'tailnet identity' } : {}),
             ...(agentLogin ? { agent: { kind: found.entry.agent?.kind || 'custom', icon: look.icon, tint: look.tint } } : {}),
           },
         )
@@ -132,6 +153,7 @@ export function mountDeviceApprovals(consoleApi, deps) {
             kind: found.entry.agent?.kind || 'custom',
             machine: found.entry.name,
             audience: look.audience,
+            ...(identityOnly ? { approvedBy: 'tailnet identity' } : {}),
           })
           agent = { id: token.agentId, name: look.name, audience: look.audience }
         }

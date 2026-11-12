@@ -3,7 +3,7 @@ import { ShieldCheck, Trash2 } from 'lucide-react'
 import { Button } from '../../../components/ui'
 import { Card, CardHeader, ConfirmDialog, LoadError, Loading, Notice, demoNote } from '../../components'
 import { DEMO } from '../../../lib/demo'
-import { api } from '../../lib/api'
+import { api, saying } from '../../lib/api'
 import { useAction, useSession } from '../../state'
 import { leaveTo } from '../../lib/router'
 
@@ -69,7 +69,7 @@ export function DeleteAccount() {
         confirmText={plan && !blocked ? me.user.handle : null}
         onConfirm={() =>
           run(async () => {
-            await api.delete('/auth/me', { confirm: me.user.handle })
+            await saying(me.user.handle, () => api.delete('/auth/me', { confirm: me.user.handle }))
             leaveTo('/signin')
           })
         }
@@ -97,7 +97,7 @@ export function DeleteAccount() {
                 there are revoked.
               </p>
             ) : null}
-            {!blocked ? <p className="text-bad">This cannot be undone. A fresh passkey check is needed.</p> : null}
+            {!blocked ? <p className="text-bad">This cannot be undone. Shapewall asks you to confirm it.</p> : null}
           </div>
         ) : null}
       </ConfirmDialog>

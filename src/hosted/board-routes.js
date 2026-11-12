@@ -44,7 +44,7 @@ export function mountBoardRoutes(
     inWorkspace,
     inProject,
     handle,
-    freshOrThrow,
+    stepUpOrThrow,
     auditOf,
     clientIp,
     policyFor,
@@ -166,7 +166,7 @@ export function mountBoardRoutes(
         const current = ctx.comments.get(req.params.cid)
         if (approve) {
           if (!roleAtLeast(req.role, 'admin')) throw new HttpError(403, 'forbidden', 'Only trusted admins approve runs.')
-          freshOrThrow(req)
+          stepUpOrThrow(req, 'cards')
         }
         const agents = agentsFor(req.t)
         const going = agents.addressOf(req.project.id, current)
@@ -232,7 +232,7 @@ export function mountBoardRoutes(
           quotas,
           workspaceQuota,
           policyFor,
-          freshOrThrow,
+          stepUpOrThrow,
           now,
         })
       : null

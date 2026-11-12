@@ -135,6 +135,8 @@ export const ACTION_GROUPS = {
     'recovery_codes_created',
     'session_revoked',
     'sessions_revoked',
+    'tailnet_linked',
+    'tailnet_unlinked',
   ],
   members: [
     'invite_created',
@@ -144,6 +146,7 @@ export const ACTION_GROUPS = {
     'member_removed',
     'member_left',
     'member_grants_revoked',
+    'tailnet_visitor_dismissed',
   ],
   settings: [
     'workspace_created',
@@ -156,6 +159,7 @@ export const ACTION_GROUPS = {
     'usage_layout_default_removed',
     'project_made_public',
     'project_made_private',
+    'step_up_changed',
   ],
   projects: ['project_created', 'project_deleted', 'board_removed', 'push_committed'],
   sharing: ['share_created', 'share_revoked', 'share_opened', 'share_passcode_failed', 'guest_commented', 'guest_replied', 'guest_ended'],
@@ -228,6 +232,8 @@ export const ACCOUNT_ACTIONS = [
   'recovery_codes_created',
   'session_revoked',
   'sessions_revoked',
+  'tailnet_linked',
+  'tailnet_unlinked',
 ]
 // Changes worth a second look in a security review.
 export const SENSITIVE_ACTIONS = [
@@ -242,5 +248,9 @@ export const SENSITIVE_ACTIONS = [
   'usage_exported',
   'audit_exported',
   'access_exported',
+  'passkey_added',
   'passkey_removed',
+  // When the workspace asks for a passkey again, and who a tailnet login signs in as.
+  'step_up_changed',
+  'tailnet_linked',
 ]

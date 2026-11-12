@@ -104,6 +104,8 @@ export function activityEntry(entry, names, { account = false } = {}) {
     source: entry.actor.type === 'user' ? 'person' : entry.actor.type,
     sensitive: SENSITIVE_ACTIONS.includes(entry.action),
     device: typeof detail.device === 'string' ? detail.device : null,
+    // Done in a session the person's tailnet signed in (src/hosted/tailnet.js).
+    tailnetSession: detail.signedInBy === 'tailnet' || detail.via === 'tailnet',
     agent: agentId ? { id: agentId, name: detail.agentName || detail.name || names().agent.get(agentId) || 'Removed agent' } : null,
     project: projectId ? { id: projectId, name: names().project.get(projectId) || detail.project_name || 'Removed project' } : null,
     change: changeOf(entry.action, detail),

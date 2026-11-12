@@ -28,6 +28,7 @@ import { createProjectStore } from './projects.js'
 import { ZIP_MAX_BYTES } from './zip.js'
 import { accounts, allWorkspaces, audit, auditAccount, findShareById, tenant } from './tenancy.js'
 import { setUsageRetention } from './usage.js'
+import { cleanTailnetLogin } from '../tailnet-proof.js'
 
 export const REPORT_REASONS = {
   copyright: 'Copyright or trademark',
@@ -83,13 +84,97 @@ function clean(value, max) {
     .slice(0, max)
 }
 
-function logOperator(db, { operator, action, target = null, detail = {}, at }) {
+export function logOperator(db, { operator, action, target = null, detail = {}, at }) {
   accounts(db).run('INSERT INTO operator_log (operator, action, target, detail, at) VALUES (:operator, :action, :target, :detail, :at)', {
     operator,
     action,
     target,
     detail: JSON.stringify(detail),
     at,
+  })
+}
+
+// ---- An account's passkeys (shapewall hosted admin passkeys) ----
+//
+// For the case nobody in the product can solve: an account whose only
+// passkey is not its owner's (or is lost) and that cannot be asked for
+// anything else. Being able to read and write the data folder is the proof,
+// as for every operator command. One account, named by its handle or by the
+// tailnet login it is linked to.
+function accountOf(db, { handle = null, login = null }) {
+  const q = accounts(db)
+  const byHandle = typeof handle === 'string' && handle ? handle.trim().toLowerCase().replace(/^@/, '') : null
+  // The login as the server keeps it (the same cleaning as everywhere a login is read).
+  const byLogin = typeof login === 'string' && login ? cleanTailnetLogin(login) : null
+  if (typeof login === 'string' && login && !byLogin) throw new OperatorError('--login: a tailnet login, like ada@example.com')
+  if (Boolean(byHandle) === Boolean(byLogin))
+    throw new OperatorError('say whose passkeys: --handle HANDLE or --login TAILNET_LOGIN (one of them)')
+  const user = byHandle
+    ? q.get('SELECT id, handle, display_name, tailnet_login FROM users WHERE handle = :handle', { handle: byHandle })
+    : q.get('SELECT id, handle, display_name, tailnet_login FROM users WHERE tailnet_login = :login', { login: byLogin })
+  if (!user) throw new OperatorError(byHandle ? 'no account with that handle' : 'no account is linked to that tailnet login')
+  return user
+}
+const HOLD_MS = 24 * 3_600_000
+const passkeyRows = (db, userId, now) =>
+  accounts(db)
+    .all(
+      'SELECT id, nickname, created_at, last_used_at, recovery_added_at, tailnet_added_from FROM passkeys WHERE user_id = :user ORDER BY created_at',
+      { user: userId },
+    )
+    .map((row) => ({
+      id: row.id,
+      nickname: row.nickname || '',
+      createdAt: row.created_at,
+      lastUsedAt: row.last_used_at || null,
+      addedFrom: row.tailnet_added_from || null,
+      onHoldUntil:
+        row.recovery_added_at && now.getTime() - Date.parse(row.recovery_added_at) < HOLD_MS
+          ? new Date(Date.parse(row.recovery_added_at) + HOLD_MS).toISOString()
+          : null,
+    }))
+
+export function listPasskeysOf(db, { handle, login, operator, now = new Date() }) {
+  const user = accountOf(db, { handle, login })
+  logOperator(db, { operator, action: 'passkeys_list', target: user.id, detail: { handle: user.handle }, at: now.toISOString() })
+  return { user: { id: user.id, handle: user.handle, tailnetLogin: user.tailnet_login || null }, passkeys: passkeyRows(db, user.id, now) }
+}
+
+// Removes one passkey, whatever it is (the last one too), and ends every
+// session of the account that is not a tailnet session: one of them may have
+// been signed in with that passkey. In the operator log, and in the
+// account's own security log as the operator's doing.
+export function removePasskeyOf(db, { handle, login, id, operator, now = new Date() }) {
+  const user = accountOf(db, { handle, login })
+  const at = now.toISOString()
+  return transaction(db, () => {
+    const q = accounts(db)
+    const key = passkeyRows(db, user.id, now).find((row) => row.id === String(id || ''))
+    if (!key) throw new OperatorError('that account has no passkey with that id (see: shapewall hosted admin passkeys list)')
+    q.run('DELETE FROM passkeys WHERE id = :id AND user_id = :user', { id: key.id, user: user.id })
+    const ended = q.run('DELETE FROM sessions WHERE user_id = :user AND tailnet_login IS NULL', { user: user.id }).changes
+    const left = passkeyRows(db, user.id, now).length
+    const detail = {
+      handle: user.handle,
+      passkey: key.id.slice(0, 12),
+      nickname: key.nickname,
+      addedFrom: key.addedFrom,
+      sessionsEnded: ended,
+      left,
+    }
+    logOperator(db, { operator, action: 'passkey_remove', target: user.id, detail, at })
+    auditAccount(db, {
+      userId: user.id,
+      action: 'passkey_removed',
+      at,
+      detail: { by: 'operator', operator, nickname: key.nickname, otherSessionsEnded: true },
+    })
+    return {
+      user: { id: user.id, handle: user.handle, tailnetLogin: user.tailnet_login || null },
+      removed: key,
+      sessionsEnded: ended,
+      left,
+    }
   })
 }
 

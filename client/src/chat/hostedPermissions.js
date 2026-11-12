@@ -40,8 +40,8 @@ export function settledWords(card, state) {
 // The line a waiting card shows someone who may not answer it.
 export const waitingWords = (answer) => answer?.reason || WAITING_FALLBACK
 
-// Sends the answer with the hash of the card as it was read. Allow needs a
-// passkey check from the last few minutes: when the server asks for one
+// Sends the answer with the hash of the card as it was read. A workspace
+// may ask for the passkey again before Allow: when the server asks for one
 // (403 reauth_required), `confirmPasskey()` runs it and the answer goes
 // again, once. Rejects with the server's error otherwise.
 export async function answerHostedPermission({ boardId, threadId, card, optionId, confirmPasskey, send = answerPermission }) {

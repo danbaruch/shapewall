@@ -173,9 +173,7 @@ function PolicyForm({ policy, url, onSaved }) {
           </div>
         </CollapsibleContent>
       </Collapsible>
-      <Notice>
-        The agent never acts on guest comments or its own comments. Editing a comment clears its approval. Saving asks for your passkey.
-      </Notice>
+      <Notice>The agent never acts on guest comments or its own comments. Editing a comment clears its approval.</Notice>
       <FormError error={action.error} />
       <div className="flex justify-end">
         <Button type="submit" size="touch" variant="default" className="lg:h-9" disabled={action.busy || invalid}>

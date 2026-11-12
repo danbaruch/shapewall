@@ -1,16 +1,19 @@
 // Small HTTP and input helpers shared by the hosted app's routes
 // (src/hosted/app.js and the modules it mounts).
 
+// `extra`: more fields for the error object the client reads (a refusal that
+// asks for a passkey says which rule asked: { stepUp }).
 export class HttpError extends Error {
-  constructor(status, code, message) {
+  constructor(status, code, message, extra = null) {
     super(message)
     this.statusCode = status
     this.code = code
+    this.extra = extra
   }
 }
 
-export function fail(res, status, code, message) {
-  res.status(status).json({ error: { code, message } })
+export function fail(res, status, code, message, extra = null) {
+  res.status(status).json({ error: { ...(extra || {}), code, message } })
 }
 
 // A share link visitor as the board names them: "Ada (guest)", or just

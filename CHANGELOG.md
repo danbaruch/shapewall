@@ -78,6 +78,107 @@ a Usage view on a local board.
   only the last one: each press wrote the list the menu was drawn with. A press is now applied to the address as it is when it
   lands. The same goes for removing filter chips, pressing a chart to filter, and "Worth a look" on Activity.
 
+Signing in to a team server: fewer passkey prompts, and your tailnet login as the sign-in.
+
+- **Signed in with the right role is enough.** A team server no longer asks for the passkey again before workspace actions:
+  approving an agent or a machine (`shapewall login`, `agent connect`), agent settings, API tokens, share links and public
+  projects, exports, Allow on an agent's edit and "Push this fix", admins and their roles, deleting a project or a board. The
+  12-hour admin idle rule is off too. This changes the default on upgrade.
+- **A small fixed core always asks** (a passkey check in the last 10 minutes): adding or removing a passkey, new recovery codes,
+  linking or unlinking a tailnet login, deleting your account, deleting a workspace, making, changing, removing or inviting an
+  owner, moving your sign-in to the server's new address, and making the setting below weaker.
+- **"Ask for a passkey again" is a workspace setting** (Settings; owners; off by default), one switch per group: agent edits and
+  pushes; agents and machines; tokens and share links; members and roles; exports and deletes. With them how long one check
+  counts (5, 15, 30 or 60 minutes) and the admin idle rule. Changes are audited with the value before and after
+  (`step_up_changed`, marked "Worth a look"), and asking for less needs a passkey check itself.
+- **The server decides, and says why.** The console no longer asks on its own: it shows "Confirm it's you" only when a route
+  answers `reauth_required`, with the server's message naming the rule that asked (the fixed core, or which setting). The board's
+  "Approve once" for a shell command follows the same rule.
+- **Recovery-code sessions keep their restrictions,** and every action is in the audit log as before.
+- **Tailnet sign-in** (`shapewall hosted --tailscale --tailnet-sign-in`, or `SHAPEWALL_HOSTED_TAILNET_SIGN_IN=1`; opt-in, Linux).
+  A tailnet user who arrives through `tailscale serve` is signed in as the account linked to their tailnet login: no passkey, no
+  password. **Tailscale is then the only sign-in:** one identity, your different machines, no second credential. No passkey is
+  asked for or offered (the sign-in page shows only "Continue as ..."; passkey routes answer `passkeys_off`), and the few
+  things that always ask take a typed name in the console (the workspace's, or your handle) and `--yes` on the command
+  line. The tailnet is the trust boundary: anything running as you on one of your tailnet devices can act as you. Passkeys are
+  an opt-in hardening there: `--tailnet-passkeys`, or `shapewall hosted admin passkeys on|off|status --data DIR`; with them
+  on, what this section says about passkeys on a tailnet server applies. Each login is its own account, so roles, audiences, the audit log and usage work unchanged, and an admin still
+  decides who is in a workspace: an unknown login sees who to ask and is listed for the admins under Members; an invite can be
+  made for one tailnet login, and only that login can use it. An account with a passkey links or unlinks its login on the
+  Account page. Tagged devices and shared nodes without a user are never signed in.
+- **Where the identity is believed.** Only when all of this holds: the request carries a secret path that only the serve entry
+  the server made adds (new at each start, in no log); the connection's other end is a socket owned by root, from the kernel's
+  socket table; tailscaled's own whois gives the request's tailnet address to the same login, on a user's untagged device;
+  the request does not come from the server's own machine; exactly one clean login header and no Funnel mark. Never on direct loopback requests, raw TCP forwards, Funnel traffic, or
+  without the flag. The server refuses to start with the flag, says why, and suspends it while running: not Linux, tailscaled
+  in userspace-networking mode, Tailscale before 1.98, tailscaled running a SOCKS5 or outbound HTTP proxy or started with a
+  loopback-forwarding debug switch (`TS_DEBUG_NETSTACK_LOOPBACK_PORT`, `TS_DEBUG_NETSTACK_SUBNETS`, where its environment
+  can be read), no tailscaled of root visible (a process an ordinary user named tailscaled is ignored), the node unable to say
+  which node it is, the server in a container, or a serve config that is not its one entry. Root and the Tailscale operator
+  on the server's machine are trusted; nothing else on the machine or the tailnet is. The secret is taken off before the
+  application sees the request, on the hosted server and the local board, and is in no response.
+- **The server's own machine is never signed in by its tailnet identity.** Any program on that machine can ask tailscaled for
+  the server's own address and arrives through the proxy with the machine owner's login. A request from one of the node's own
+  tailnet addresses, or one that whois gives to this node, is refused, in the browser ("This is the server's own machine") and
+  from the command line. There: a passkey or another tailnet device on a hosted server, `localhost` on a local board.
+- **An identity is per device, not per person,** and the product says so: anything running as you on a tailnet device of yours
+  can act as you in a tailnet session. So: a tailnet session works only with the identity it was made for (and is stored so
+  that an older build cannot use it); it is marked in the device list, the audit log and Activity; signing out keeps that
+  browser signed out until "Continue as"; for the fixed core an account with no passkey is asked to add one, and that first
+  passkey is on hold for 24 hours (audited, "Worth a look"); a passkey account is linked to a tailnet login at sign-up only
+  when the box "Also sign me in from this tailnet login" is ticked; and "Sign out other devices" needs a session that passed a
+  passkey check, or an account that has no passkey.
+- **The local board uses the same proof.** `shapewall serve --tailscale` let any program on the machine pass as the owner by
+  sending `Tailscale-User-Login` to the loopback port, and so approve an agent's command. The owner's other devices are now let
+  in by identity only with the proof above (where it is not possible they pair, and the board says why), and approving a
+  command or an edit needs the host's settings token, a paired device, or that proof.
+- **From the command line, with no browser** (on a server with tailnet sign-in, from a tailnet machine). `shapewall hosted
+  claim --data DIR --login LOGIN` makes the first account on the server's machine: reading the data folder is the proof, the
+  login is taken on your word, and the command prints what it linked (`--setup-link URL` from another tailnet device checks
+  the identity instead). On the server's own machine `login` and `agent connect` fall back to the code, and `join` and
+  `admin` say to use another device. `shapewall login` and `shapewall agent connect` are approved by
+  your tailnet identity when your role may make tokens (`--project`, `--workspace`; `--name`, `--icon`, `--tint`, `--used-by`
+  for an agent); with several projects the command lists the flags to add and never prompts. `shapewall join` takes the invite
+  made for your login, or an invite link. `shapewall admin projects list|create`, `admin invites create`, `admin members list`
+  and `admin agents list` do a few admin jobs; the server checks the role and writes the audit entry. A workspace can require
+  the code, the browser and a passkey for approving machines (Settings, "Approve command line logins in the browser"): the
+  server then refuses a session that only a tailnet identity stands behind, whatever the client sends, and refuses the same
+  session an API token made on a project's page. On any other server these commands behave as before or say what they
+  need.
+- **Upgrade notes.** Migration 17 is additive (the settings, tailnet logins on accounts, sessions and invites, the list of
+  tailnet visitors); see [Migration 17 and rollback](docs/hosted.md#migration-17-and-rollback). If you want the passkey prompts
+  back, an owner switches the groups on in each workspace's Settings.
+- **The fixed core matches paths as the router does** (any case, a trailing slash, an encoded parameter). An owner who
+  leaves a workspace passes it too, like any other owner removed.
+- **A first passkey added in a tailnet session can be taken away again.** Adding it needs a browser and a step that names
+  the device. While it is on hold (24 hours), every page of the account shows "A passkey was added from ..." with "Not you?
+  Remove it": any tailnet session of the account removes it with no passkey check, though it is the only passkey, and every
+  other passkey on hold starts its day again. A held passkey cannot add a second one. After the hold, or for any account,
+  the operator has `shapewall hosted admin passkeys list|remove --handle HANDLE | --login LOGIN --data DIR` (audited).
+- **"Approve command line logins in the browser" covers three things:** approving a login or an agent, making an API token,
+  and inviting or making an admin. The settings card says exactly that.
+- **An account is held to the tailnet user, not to the login's spelling.** The server keeps Tailscale's id of the user with
+  a linked login (migration 17, `users.tailnet_user_id`) and requires it on every request; a link made by `hosted claim
+  --login` takes the id of the first proven request. A device with an expired key is nobody. The machine's own addresses
+  are also read from its network interfaces on every request.
+- **Which process is tailscaled:** the main process of `tailscaled.service` where systemd runs it, else by name; root in all
+  four ids in both cases. On a local board a failed self test of the peer check keeps identity off until a restart.
+- **For the person at the server's own machine** (never signed in by its tailnet identity): `shapewall hosted admin members
+  list|add|remove`, `invites list|create|revoke`, `projects list` and `passkeys status|on|off|list|remove`, with the data
+  folder as the proof, each in the operator log and in the workspace's audit log as "Server operator".
+- **Over SSH.** A hosted server started with `--origin http://shapewall.localhost:<port>` (no TLS, loopback) and reached
+  through `ssh -L` works with passkey accounts; the name keeps the session cookie from other servers on your localhost, which
+  plain `http://localhost:<port>` (also supported) does not. Documented with what a local board over a tunnel means, and
+  tested with the real command and a real browser at both.
+- **Switching passkeys off or on** (`hosted admin passkeys off|on`) ends the sessions a passkey started, keeps a held passkey
+  removable and restarts its hold, and tells each workspace that asks for a passkey somewhere (audit log, Settings).
+  `hosted admin members relink|unlink` repairs an account whose tailnet user id changed; the page shows the command.
+- **Not in this release:** tailnet sign-in on macOS or Windows servers, in containers, or with a userspace-networking
+  tailscaled (no way there to prove a request came through tailscale serve), more admin commands or MCP tools for
+  administration, admin tokens, and profile pictures from the tailnet. The proof is tested with a stand-in for tailscale
+  serve and was run against a real tailscaled with a second device; a tagged device, the suspension on a changed serve
+  config and a browser sign-in were not checked live: [what was and was not checked](docs/hosted.md#what-was-and-was-not-checked-against-real-tailscale).
+
 - **The panel buttons are the panel's header.** With a side panel open, Comments, Agent and Checks in the top bar are exactly as
   wide as the panel under them (the same inset as the panel's own rows), share that width, and follow the panel as you drag its
   edge. With no panel open they go back to their own width at the right of the bar; so do they in a window too narrow to fit
