@@ -566,7 +566,7 @@ export function ColumnChooser({ columns, layout, onLayout, onReset }) {
   const pin = (id) =>
     onLayout({ ...layout, pinned: layout.pinned.includes(id) ? layout.pinned.filter((item) => item !== id) : [...layout.pinned, id] })
   return (
-    <Popover>
+    <Popover history={false}>
       <PopoverTrigger asChild>
         <Button size="sm" variant="secondary" className="h-9" data-sw-grid-columns>
           <Columns3 size={14} aria-hidden="true" /> Columns

@@ -18,6 +18,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '../../components/ui'
+import { useMediaQuery } from '../../lib/hooks'
 import { cn } from '../../lib/utils'
 import { DIMENSION_LABEL, KIND_LABEL, OUTCOME_GROUP_IDS, OUTCOME_GROUP_LABEL, USAGE_KINDS } from '../../../../src/hosted/usage-shape.js'
 import { useToast } from '../state'
@@ -47,7 +48,7 @@ export function PeriodPicker({ period, onChange }) {
   }
   const valid = from && to && from <= to
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={setOpen} history={false}>
       <PopoverTrigger asChild>
         <button type="button" className={cn(chip, chipOff)} data-sw-period>
           <CalendarDays size={14} className="text-muted" aria-hidden="true" />
@@ -132,7 +133,7 @@ export function MultiFilter({ id, label, options, values, onChange }) {
   }
   const first = options.find((option) => picked.has(option.key))
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={setOpen} history={false}>
       <PopoverTrigger asChild>
         <button type="button" className={cn(chip, picked.size ? chipOn : chipOff)} data-sw-filter={id}>
           <span className="truncate">
@@ -238,7 +239,7 @@ function RangeFilter({ get, set }) {
     </label>
   )
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={setOpen} history={false}>
       <PopoverTrigger asChild>
         <button type="button" className={cn(chip, active ? chipOn : chipOff)} data-sw-filter="ranges">
           <SlidersHorizontal size={14} className="text-muted" aria-hidden="true" />
@@ -336,6 +337,7 @@ export function useFilterOptions(options) {
 export function FilterBar({ filter, options, children }) {
   const { period, get, list, set, active } = filter
   const lists = useFilterOptions(options)
+  const phone = useMediaQuery('(max-width: 639px)')
   const labelOf = (dimension, key) =>
     lists[dimension].find((option) => option.key === fromParam(key))?.label || (key === '~' ? 'None' : key)
   const chips = []
@@ -369,15 +371,19 @@ export function FilterBar({ filter, options, children }) {
           />
         ))}
         <RangeFilter get={get} set={(changes) => set(changes, { push: true })} />
-        <span className="hidden sm:contents">
+        {phone ? null : (
+          <>
+            <IdSearch value={get('q')} onChange={(text) => set({ q: text || null })} />
+            <span className="ml-auto flex items-center gap-1.5">{children}</span>
+          </>
+        )}
+      </div>
+      {phone ? (
+        <div className="mt-1.5 flex items-center gap-1.5">
           <IdSearch value={get('q')} onChange={(text) => set({ q: text || null })} />
-          <span className="ml-auto flex items-center gap-1.5">{children}</span>
-        </span>
-      </div>
-      <div className="mt-1.5 flex items-center gap-1.5 sm:hidden">
-        <IdSearch value={get('q')} onChange={(text) => set({ q: text || null })} />
-        <span className="flex shrink-0 items-center gap-1.5">{children}</span>
-      </div>
+          <span className="flex shrink-0 items-center gap-1.5">{children}</span>
+        </div>
+      ) : null}
       {chips.length ? (
         <ul className="mt-2 flex flex-wrap items-center gap-1.5" aria-label="Filters in effect" data-sw-usage-chips>
           {chips.map((item) => (

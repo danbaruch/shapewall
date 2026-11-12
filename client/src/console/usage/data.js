@@ -9,6 +9,7 @@
 
 import { useCallback, useMemo } from 'react'
 import { QueryClient, keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { leavePage } from '../../lib/hooks'
 import { api, wsUrl } from '../lib/api'
 import { currentSearch, setSearch as replaceSearch, useSearch } from '../lib/router'
 import { periodOf, zone } from './format'
@@ -28,8 +29,10 @@ export const queryClient = new QueryClient({
 // ---- The address ----
 
 export { useSearch }
-// Replaces (or with `push`, adds to the history) the query string of this page.
-export const setSearch = (params, options) => replaceSearch(params.toString(), options)
+// Replaces (or with `push`, adds to the history) the query string of this
+// page. A menu or a select that is closing goes Back over its own history
+// entry first; the change waits for that to land (lib/hooks.js leavePage).
+export const setSearch = (params, options) => leavePage(() => replaceSearch(params.toString(), options))
 
 // The address as an object, with one setter: set({ key: value }) replaces
 // keys (null, '' or an empty list removes one). List values are comma lists.
@@ -39,13 +42,16 @@ export function useAddress() {
   const get = useCallback((key, fallback = '') => params.get(key) ?? fallback, [params])
   const list = useCallback((key) => (params.get(key) ? params.get(key).split(',').filter(Boolean) : []), [params])
   const set = useCallback((changes, options) => {
-    const next = new URLSearchParams(currentSearch())
-    for (const [key, value] of Object.entries(changes)) {
-      const text = Array.isArray(value) ? value.join(',') : value
-      if (text === null || text === undefined || text === '' || text === false) next.delete(key)
-      else next.set(key, String(text))
-    }
-    setSearch(next, options)
+    // Read when the change lands, so two changes in a row both hold.
+    leavePage(() => {
+      const next = new URLSearchParams(currentSearch())
+      for (const [key, value] of Object.entries(changes)) {
+        const text = Array.isArray(value) ? value.join(',') : value
+        if (text === null || text === undefined || text === '' || text === false) next.delete(key)
+        else next.set(key, String(text))
+      }
+      replaceSearch(next.toString(), options)
+    })
   }, [])
   return { params, search, get, list, set }
 }

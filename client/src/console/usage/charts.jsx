@@ -51,6 +51,16 @@ export const OUTCOME_ICON = {
   running: LoaderCircle,
 }
 
+// A finger that lands on a chart shows the values under it at once (the
+// chart itself follows a finger that moves): the touch is handed on as a
+// pointer position.
+function showAtTouch(event) {
+  const touch = event.touches[0]
+  const target = touch && document.elementFromPoint(touch.clientX, touch.clientY)
+  if (!target?.closest?.('.recharts-wrapper')) return
+  target.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: touch.clientX, clientY: touch.clientY }))
+}
+
 // ---- The card around a chart ----
 
 // `table`: { columns: [label], rows: [[cell]] } with the chart's exact
@@ -124,6 +134,7 @@ export function ChartCard({
           state?.isPlaceholderData && state?.isFetching && 'opacity-60',
         )}
         aria-busy={Boolean(state?.isFetching)}
+        onTouchStart={showAtTouch}
       >
         {loading ? (
           <ChartSkeleton />
