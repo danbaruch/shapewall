@@ -21,6 +21,7 @@ import { AuditSection } from './audit'
 import { SettingsSection } from './settings'
 import { AgentFeedbackView } from './agent-feedback'
 import { AgentsSection } from './local-agents'
+import { AgentsOverview, ProjectAgentsPage } from './agents'
 import { DEMO } from '../../lib/demo'
 
 const WorkspaceContext = createContext(null)
@@ -33,9 +34,10 @@ const SECTIONS = [
   ['access', 'Access', ShieldCheck, 'admin'],
   ['tokens', 'API tokens', KeyRound, 'admin'],
   ['audit', 'Audit log', ScrollText, 'admin'],
-  // The demo only: the local console's Agents page, read-only. A team server
-  // (`shapewall hosted`) has its own agent model (pages/agent.jsx).
-  ['agents', 'Agents', Bot, 'viewer'],
+  // A team server: every agent of the workspace (pages/agents.jsx), for
+  // admins. The demo shows the local console's Agents page here instead,
+  // read-only, to everyone.
+  ['agents', 'Agents', Bot, DEMO ? 'viewer' : 'admin'],
   // Only where the server's boards have chat (features.agentFeedback).
   ['feedback', 'Agent feedback', MessageSquareText, 'admin'],
   ['settings', 'Settings', Settings, 'viewer'],
@@ -47,8 +49,11 @@ export function WorkspacePage({ workspaceId, section, projectId }) {
   const wide = useMediaQuery('(min-width: 1024px)')
   // The tab says which page of which workspace: "Members -- Acme -- Shapewall".
   const loaded = detail.data
+  const projectName = projectId ? loaded?.projects.find((item) => item.id === projectId)?.name || 'Project' : null
   const pageName = projectId
-    ? loaded?.projects.find((item) => item.id === projectId)?.name || 'Project'
+    ? section === 'agents' && !DEMO
+      ? `Agents of ${projectName}`
+      : projectName
     : SECTIONS.find(([id]) => id === section)?.[1] || 'Projects'
   const workspaceName = loaded?.workspace.name
   useEffect(() => {
@@ -78,22 +83,25 @@ export function WorkspacePage({ workspaceId, section, projectId }) {
     isAdmin: roleAtLeast(role, 'admin'),
     isOwner: role === 'owner',
   }
-  const sections = SECTIONS.filter(([id]) => (id !== 'feedback' || data.features?.agentFeedback) && (id !== 'agents' || DEMO))
+  const sections = SECTIONS.filter(([id]) => id !== 'feedback' || data.features?.agentFeedback)
   const visible = sections.filter(([, , , least]) => roleAtLeast(role, least))
   // A section this role cannot see (a link from an admin, an old bookmark)
   // says so instead of quietly showing the projects.
   const needs = sections.find(([id]) => id === section && !visible.some(([seen]) => seen === id))
   const current = needs ? section : visible.some(([id]) => id === section) ? section : 'projects'
-  const active = projectId ? 'projects' : current
+  // A project's Agents page (/w/:ws/agents/:pid) belongs to Agents.
+  const projectAgents = Boolean(projectId) && section === 'agents' && !DEMO
+  const active = projectAgents ? 'agents' : projectId ? 'projects' : current
   let body
   if (needs) body = <NeedsRole section={needs[1]} least={needs[3]} role={role} workspaceId={workspaceId} />
+  else if (projectAgents) body = <ProjectAgentsPage key={projectId} projectId={projectId} />
   else if (projectId) body = <ProjectPage projectId={projectId} />
   else if (current === 'members') body = <MembersSection />
   else if (current === 'invites') body = <InvitesSection />
   else if (current === 'access') body = <AccessSection />
   else if (current === 'tokens') body = <TokensSection />
   else if (current === 'audit') body = <AuditSection />
-  else if (current === 'agents') body = <AgentsSection />
+  else if (current === 'agents') body = DEMO ? <AgentsSection /> : <AgentsOverview />
   else if (current === 'settings') body = <SettingsSection />
   else if (current === 'feedback') body = <AgentFeedbackView baseUrl={wsUrl(workspaceId, '/agent-feedback')} get={api.get} />
   else body = <ProjectsSection />

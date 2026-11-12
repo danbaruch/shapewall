@@ -311,17 +311,19 @@ export function TokenList({ tokens, onChanged, showProject = false }) {
   )
 }
 
-export function CreateToken({ open, onClose, projects, projectId = null, onCreated }) {
+// `defaultScopes`: what a new token starts with (the Agents page starts with
+// the scopes an agent needs).
+export function CreateToken({ open, onClose, projects, projectId = null, onCreated, defaultScopes = DEFAULT_SCOPES }) {
   const { workspaceId } = useWorkspace()
   const [project, setProject] = useState(projectId || '')
   const [name, setName] = useState('')
-  const [scopes, setScopes] = useState(DEFAULT_SCOPES)
+  const [scopes, setScopes] = useState(defaultScopes)
   const [expiry, setExpiry] = useState('90')
   const { run, busy, error, setError } = useAction()
   const [result, setResult] = useSecretResult(open, () => {
     setProject(projectId || projects[0]?.id || '')
     setName('')
-    setScopes(DEFAULT_SCOPES)
+    setScopes(defaultScopes)
     setExpiry('90')
     setError(null)
   })

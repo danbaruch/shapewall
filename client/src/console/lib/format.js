@@ -61,6 +61,13 @@ export { initials } from '../../components/ui/avatar'
 const days = (n) => `${n} ${n === 1 ? 'day' : 'days'}`
 export const expiryLabel = (n) => (n === 1 ? '1 day' : n === 7 ? '1 week' : n === 14 ? '2 weeks' : n === 30 ? '30 days' : days(n))
 
+// An agent's audience (who may send it work), in a few words.
+export const AGENT_AUDIENCE_LABEL = {
+  owner: 'only the person who connected it',
+  members: 'named members',
+  trusted: 'everyone the agent policy trusts',
+}
+
 // Audit actions as a sentence fragment after the actor's name.
 export function describeAudit(entry) {
   const d = entry.detail || {}
@@ -137,6 +144,29 @@ export function describeAudit(entry) {
       return `stopped an agent from running a command (comment ${String(entry.target || '').replace(/^.*#/, '#')})`
     case 'guest_replied':
       return `replied as a guest (${String(entry.target || '').replace(/^.*#/, '#')})`
+    case 'comment_vouched':
+      return `${d.approve ? 'approved the agent run for' : 'sent'} comment ${String(entry.target || '').replace(/^.*#/, '#')}${d.approve ? '' : ' to an agent'}`
+    // Agents (src/hosted/agents.js): each entry carries the agent's name.
+    case 'agent_created':
+      return `connected the agent ${d.name || target}${d.machine ? ` (${d.machine})` : ''}, for themselves only`
+    case 'agent_first_seen':
+      return `was first seen as the agent ${d.name || target}`
+    case 'agent_renamed':
+      return `renamed the agent ${d.from ? `${d.from} to ` : ''}${d.to || target}`
+    case 'agent_identity_changed':
+      return `changed how the agent ${d.name || target} looks`
+    case 'agent_default_changed':
+      return d.after
+        ? `made ${d.afterName || 'an agent'} the default agent of ${target}`
+        : `cleared the default agent of ${target}${d.beforeName ? ` (it was ${d.beforeName})` : ''}`
+    case 'agent_audience_changed':
+      return `changed who may send work to ${d.name || target}: from ${AGENT_AUDIENCE_LABEL[d.before?.audience] || 'unknown'} to ${AGENT_AUDIENCE_LABEL[d.after?.audience] || 'unknown'}`
+    case 'agent_approval_rule_changed':
+      return `changed the approval settings of ${d.name || target}`
+    case 'agent_revoked':
+      return `revoked the agent ${d.name || target}${d.released ? ` (${count(d.released, 'waiting comment', 'waiting comments')} went to any agent)` : ''}`
+    case 'agent_queue_released':
+      return `let any agent take comment ${String(entry.target || '').replace(/^.*#/, '#')}${d.fromName ? ` (it was waiting for ${d.fromName})` : ''}`
     default:
       return entry.action.replace(/_/g, ' ')
   }
