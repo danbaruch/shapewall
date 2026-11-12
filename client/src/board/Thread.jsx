@@ -45,6 +45,7 @@ import { Reactions } from './Reactions'
 import { viewportIcon } from './viewports'
 import SendToAgent from './SendToAgent'
 import FixWithAgent from './FixWithAgent'
+import HostedFix from './HostedFix'
 import { MentionText, MentionTextarea } from './Mentions'
 import {
   AgentStatusChip,
@@ -561,6 +562,17 @@ export function ThreadView({
       <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-3">
         {comment.orphanReason ? <p className="pt-2 text-xs text-muted">{comment.orphanReason}</p> : null}
         {comment.imported && comment.agentStatus ? <p className="pt-2 text-xs text-muted">Imported agent status (history)</p> : null}
+        {/* Hosted: "Fix with <agent>" (a fix on a branch, each edit allowed on a card), then "Send to agent". */}
+        {actions.onHostedFix ? (
+          <HostedFix
+            comment={comment}
+            list={agents}
+            busy={busy}
+            touch={touch}
+            onFix={actions.onHostedFix}
+            onOpenChat={actions.onAskAgent || null}
+          />
+        ) : null}
         {actions.onSendToAgent && comment.status === 'open' ? (
           <SendToAgent
             comment={comment}
@@ -570,6 +582,17 @@ export function ThreadView({
             touch={touch}
             onSend={actions.onSendToAgent}
             onRelease={actions.onReleaseAgent || null}
+          />
+        ) : null}
+        {actions.onHostedFix ? (
+          <HostedFix
+            slot="status"
+            comment={comment}
+            list={agents}
+            busy={busy}
+            touch={touch}
+            onFix={actions.onHostedFix}
+            onOpenChat={actions.onAskAgent || null}
           />
         ) : null}
         <ol className="divide-y divide-line/60" aria-label={`Comment ${comment.id} and replies`}>

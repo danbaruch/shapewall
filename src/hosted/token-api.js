@@ -338,6 +338,7 @@ export function mountTokenApi({
       dispatchView,
       remoteItem,
       contextFor,
+      quotaOf: (t) => workspaceQuota ?? quotas.of(t.workspaceId).storageBytes,
     })
 
   v1.get(
@@ -555,6 +556,13 @@ export function mountTokenApi({
     v1Json,
     v1Comment((req, res, ctx) => {
       const { agentStatus = null, onlyFrom = null } = req.body || {}
+      // While a fix the server opened runs on this comment, where the comment
+      // stands is written with that turn, by the server (src/hosted/agent-link.js
+      // releaseFix). A write from the token, late from an earlier fix or not,
+      // would end the running fix's claim: it is not taken.
+      const fixing = hub?.ofThread(req.t.workspaceId, req.project.id, ctx.board.id, `comment-${Number(req.params.cid)}`)
+      if (fixing?.kind === 'fix')
+        throw new HttpError(409, 'fix_running', 'A fix is running on this comment: its status is written when that fix ends.')
       const result = transaction(db, () => {
         const row = ctx.comments.get(req.params.cid)
         const taking = ['queued', 'working'].includes(agentStatus) && !['queued', 'working'].includes(row.agent_status)

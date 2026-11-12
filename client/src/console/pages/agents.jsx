@@ -12,7 +12,7 @@
 // change; these pages only hide what it would refuse. Admins and owners.
 
 import { useEffect, useId, useState } from 'react'
-import { ArrowLeft, ArrowUpRight, Bot, Check, Pencil, Plug, Plus, ShieldCheck, Star, Users } from 'lucide-react'
+import { ArrowLeft, ArrowUpRight, Bot, Check, Laptop, Pencil, Plug, Plus, ShieldCheck, Star, Users } from 'lucide-react'
 import {
   Badge,
   Button,
@@ -25,6 +25,7 @@ import {
   SelectValue,
   Spinner,
 } from '../../components/ui'
+import { cn } from '../../lib/utils'
 import { AgentFace } from '../../chat/agentIcons'
 import { IconPicker, NameField, nameProblem } from '../../settings/AgentIdentity'
 import {
@@ -68,6 +69,109 @@ const AUDIENCE_CHOICES = [
 // The scopes an agent needs to take comments and answer them.
 const AGENT_SCOPES = ['read', 'reply', 'status', 'claim']
 
+// ---- Edits from the board: the mode, in words ---------------------------------
+//
+// `agent.approval` (src/hosted/agents.js consoleView): `mode` is what is in
+// effect ('none': reads and answers, 'ask': each edit allowed by a person,
+// 'auto': allowed without asking); `machine` is what the agent's own machine
+// allows, the ceiling for everything set here; `rules` says, per kind,
+// whether a request is asked or allowed.
+
+const modeOf = (agent) => agent?.approval?.mode || 'none'
+const LINK_MODE = {
+  none: 'reads and answers only (no edits, no commands)',
+  ask: 'makes fixes on a branch, each edit allowed by a person',
+  auto: 'makes fixes on a branch, allowed without asking',
+}
+export const MODE_TITLE = {
+  none: 'Reads and answers',
+  ask: 'Edits on a branch, asking every time',
+  auto: 'Edits on a branch, allowed without asking',
+}
+// What "without asking" covers: "edits", "the listed commands", or both.
+const kindsWords = (kinds) => {
+  const words = [kinds.includes('edits') ? 'edits' : null, kinds.includes('commands') ? 'the listed commands' : null].filter(Boolean)
+  return words.join(' and ')
+}
+const autoKinds = (agent) => ['edits', 'commands'].filter((kind) => agent?.approval?.rules?.[kind] === 'auto')
+// Who answers its requests on the board.
+const answerers = (agent) =>
+  agent?.approval?.machine?.approvals === 'owner'
+    ? `Only ${agent.createdBy ? personName(agent.createdBy) : 'the person who connected it'} answers`
+    : `${ROLE_LABEL[agent?.approval?.answerRole || 'admin']}s and up answer`
+// The command that lets an agent's machine allow things without asking.
+export const AUTO_COMMAND = 'shapewall agent connect --approvals owner --auto edits'
+// Why "Allow without asking" cannot be chosen (null: it can).
+function autoBlocked(agent) {
+  if (!agent || agent.approval.autoAvailable) return null
+  if (!agent.link?.connected)
+    return 'This agent takes comments on its own and asks before each command. Nothing here can go without asking.'
+  if (agent.approval.machine.approvals === 'none')
+    return `${agent.name}'s machine takes no approvals from the board, so there is nothing to allow. This is switched on on the agent's machine, never from here.`
+  return `${agent.name}'s machine did not say anything may go without asking. This is switched on on the agent's machine, never from here.`
+}
+
+// What the agent's machine allows, as facts: set there, shown here.
+function MachineFacts({ agent }) {
+  const machine = agent.approval.machine
+  const rows = [
+    [
+      'Approvals from the board',
+      machine.approvals === 'none'
+        ? 'None. It reads and answers only.'
+        : machine.approvals === 'owner'
+          ? `Only ${agent.createdBy ? personName(agent.createdBy) : 'the person who connected it'} may answer.`
+          : 'Admins of this project may answer.',
+      'approvals',
+      machine.approvals,
+    ],
+    [
+      'Commands it may ask to run',
+      machine.commands.length ? null : machine.approvals === 'none' ? 'None.' : 'None. It only asks to edit files.',
+      'commands',
+      String(machine.commands.length),
+    ],
+    [
+      'May go without asking',
+      machine.auto.length ? `${kindsWords(machine.auto).replace(/^./, (c) => c.toUpperCase())}, when the rule below says so.` : 'Nothing.',
+      'auto',
+      machine.auto.join(',') || 'none',
+    ],
+  ]
+  return (
+    <section className="rounded-lg border border-line bg-surface-2/50 p-3" data-sw-agent-machine={machine.approvals}>
+      <h3 className="flex items-center gap-1.5 text-xs font-semibold text-fg">
+        <Laptop size={13} aria-hidden="true" /> Set on the agent's machine
+      </h3>
+      <dl className="mt-2 space-y-2 text-xs">
+        {rows.map(([label, text, hook, value]) => (
+          <div key={hook} className="grid gap-x-3 gap-y-0.5 sm:grid-cols-[11rem_1fr]" data-sw-agent-machine-fact={hook} data-value={value}>
+            <dt className="text-muted">{label}</dt>
+            <dd className="min-w-0 text-fg">
+              {text}
+              {hook === 'commands' && machine.commands.length ? (
+                <ul className="flex flex-wrap gap-1">
+                  {machine.commands.map((command) => (
+                    <li key={command} className="max-w-full">
+                      <code className="block truncate rounded border border-line bg-surface px-1.5 py-0.5 font-mono text-[11px]">
+                        {command}
+                      </code>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      <p className="mt-2 text-xs text-muted">
+        These are read from the machine each time it connects. Change them there with{' '}
+        <code className="font-mono">shapewall agent connect</code>; nothing on this page can widen them.
+      </p>
+    </section>
+  )
+}
+
 // A connected agent (`shapewall agent connect`): what it said it can do,
 // and since when its link is open.
 function LinkLine({ agent }) {
@@ -75,8 +179,7 @@ function LinkLine({ agent }) {
   if (!link?.connected) return null
   return (
     <p className="mt-0.5 text-xs text-muted" data-sw-agent-link={link.connectedAt ? 'open' : 'closed'}>
-      <span className="text-fg">Connected agent.</span> {link.chats ? 'Chats on the board' : 'No chat'}, reads and answers only (no edits,
-      no commands)
+      <span className="text-fg">Connected agent.</span> {link.chats ? 'Chats on the board' : 'No chat'}, {LINK_MODE[modeOf(agent)]}
       {link.connectedAt ? (
         <>
           {' '}
@@ -427,16 +530,26 @@ export function ProjectAgentsPage({ projectId }) {
                         <dt className="flex items-center gap-1.5 font-medium text-fg">
                           <ShieldCheck size={13} aria-hidden="true" /> Approvals
                         </dt>
-                        <dd className="mt-1 text-muted">
-                          {agent.link?.connected ? (
+                        <dd className="mt-1 text-muted" data-sw-agent-mode={agent.link?.connected ? modeOf(agent) : 'watch'}>
+                          {!agent.link?.connected ? (
                             <>
-                              <span className="text-fg">Nothing to approve.</span> A connected agent reads and answers only: its machine
-                              refuses edits and commands. The rule below applies once it can ask.
+                              <span className="text-fg">Ask every time.</span> It asks before each command it runs for a comment.{' '}
+                              {ROLE_LABEL[agent.approval.answerRole]}s and up answer; {ROLE_LABEL[agent.approval.changeRole].toLowerCase()}s
+                              and up change this rule.
+                            </>
+                          ) : modeOf(agent) === 'none' ? (
+                            <>
+                              <span className="text-fg">{MODE_TITLE.none}.</span> Nothing to approve: its machine takes no edits or commands
+                              from the board. That is switched on on the machine itself.
+                            </>
+                          ) : modeOf(agent) === 'auto' ? (
+                            <>
+                              <span className="text-fg">{MODE_TITLE.auto}.</span> Applies to {kindsWords(autoKinds(agent))}. Anything else
+                              waits for an answer on the board.
                             </>
                           ) : (
                             <>
-                              <span className="text-fg">Always ask.</span> {ROLE_LABEL[agent.approval.answerRole]}s and up answer;{' '}
-                              {ROLE_LABEL[agent.approval.changeRole].toLowerCase()}s and up change this rule.
+                              <span className="text-fg">{MODE_TITLE.ask}.</span> {answerers(agent)}, each time with a passkey check.
                             </>
                           )}
                         </dd>
@@ -834,14 +947,58 @@ function AudienceDialog({ agent, members, url, onClose, onSaved }) {
   )
 }
 
-// The approval rule and who decides it. "Automatic" is listed and not
-// offered: it needs the agent's machine to opt in, which no agent can yet.
+// The approval rule and who decides it. The agent's own machine has the
+// last word: what it allows is shown as facts, and "Allow without asking"
+// can be chosen only when the machine itself said something may go without
+// asking.
+function RuleOption({ value, checked, disabled, onChoose, title, children, ...rest }) {
+  return (
+    <div
+      role="radio"
+      aria-checked={checked ? 'true' : 'false'}
+      aria-disabled={disabled ? 'true' : undefined}
+      tabIndex={disabled ? -1 : 0}
+      onClick={disabled ? undefined : () => onChoose(value)}
+      onKeyDown={
+        disabled
+          ? undefined
+          : (event) => {
+              if (event.key !== ' ' && event.key !== 'Enter') return
+              event.preventDefault()
+              onChoose(value)
+            }
+      }
+      className={cn(
+        'flex items-start gap-3 rounded-lg border px-3 py-2.5 text-sm outline-none focus-visible:outline-2 focus-visible:outline-accent',
+        checked ? 'border-accent/50 bg-accent/10' : 'border-line',
+        disabled ? (checked ? '' : 'bg-surface-2/40') : 'cursor-pointer hover:border-accent/50',
+      )}
+      data-sw-agent-approval-option={value}
+      {...rest}
+    >
+      {checked ? (
+        <span className="mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-accent bg-accent text-accent-fg">
+          <Check size={11} aria-hidden="true" />
+        </span>
+      ) : (
+        <span className="mt-0.5 inline-flex h-4 w-4 shrink-0 rounded-full border border-line bg-surface" aria-hidden="true" />
+      )}
+      <div className="min-w-0 flex-1">
+        <span className={cn('block font-medium', disabled && !checked ? 'text-muted' : 'text-fg')}>{title}</span>
+        {children}
+      </div>
+    </div>
+  )
+}
+
 function ApprovalDialog({ agent, role, url, onClose, onSaved }) {
+  const [rule, setRule] = useState('ask')
   const [changeRole, setChangeRole] = useState('admin')
   const [answerRole, setAnswerRole] = useState('admin')
   const save = useAction()
   useEffect(() => {
     if (!agent) return
+    setRule(agent.approval.effectiveRule)
     setChangeRole(agent.approval.changeRole)
     setAnswerRole(agent.approval.answerRole)
     save.setError(null)
@@ -849,10 +1006,20 @@ function ApprovalDialog({ agent, role, url, onClose, onSaved }) {
   const current = agent ? { approvalChangeRole: agent.approval.changeRole, approvalAnswerRole: agent.approval.answerRole } : null
   const mayRule = canChangeApprovalRule(role, current)
   const mayRoles = canChangeApprovalRoles(role)
-  const changed = agent ? changeRole !== agent.approval.changeRole || answerRole !== agent.approval.answerRole : false
+  const blocked = autoBlocked(agent)
+  const linked = Boolean(agent?.link?.connected)
+  const mode = modeOf(agent)
+  // Nothing to ask about: the rule is not a choice for an agent that only reads.
+  const ruleOff = !mayRule || save.busy
+  const ruleChanged = agent ? rule !== agent.approval.effectiveRule : false
+  const changed = agent ? ruleChanged || changeRole !== agent.approval.changeRole || answerRole !== agent.approval.answerRole : false
   const submit = () =>
     save.run(async () => {
-      await api.put(url, { changeRole, answerRole })
+      await api.put(url, {
+        ...(ruleChanged ? { rule } : {}),
+        ...(changeRole !== agent.approval.changeRole ? { changeRole } : {}),
+        ...(answerRole !== agent.approval.answerRole ? { answerRole } : {}),
+      })
       await onSaved()
       onClose()
     })
@@ -867,6 +1034,7 @@ function ApprovalDialog({ agent, role, url, onClose, onSaved }) {
       </SelectContent>
     </Select>
   )
+  const machineAuto = agent ? kindsWords(agent.approval.machine.auto) : ''
   return (
     <Dialog
       open={Boolean(agent)}
@@ -878,9 +1046,9 @@ function ApprovalDialog({ agent, role, url, onClose, onSaved }) {
       footer={
         <>
           <Button size="touch" className="lg:h-9" onClick={onClose} disabled={save.busy}>
-            {mayRoles ? 'Cancel' : 'Close'}
+            {mayRoles || mayRule ? 'Cancel' : 'Close'}
           </Button>
-          {mayRoles ? (
+          {mayRoles || mayRule ? (
             <Button
               size="touch"
               variant="default"
@@ -895,56 +1063,88 @@ function ApprovalDialog({ agent, role, url, onClose, onSaved }) {
         </>
       }
     >
-      <div className="space-y-4 p-5" data-sw-agent-approval-dialog>
-        <div role="radiogroup" aria-label="Approval rule" className="space-y-2">
-          <div
-            role="radio"
-            aria-checked="true"
-            tabIndex={0}
-            className="flex items-start gap-3 rounded-lg border border-accent/50 bg-accent/10 px-3 py-2.5 text-sm outline-none focus-visible:outline-2 focus-visible:outline-accent"
-            data-sw-agent-approval-option="ask"
-          >
-            <span className="mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-accent bg-accent text-accent-fg">
-              <Check size={11} aria-hidden="true" />
-            </span>
-            <span>
-              <span className="block font-medium text-fg">Always ask</span>
-              <span className="block text-xs text-muted">Every command the agent asks to run waits for a person with the role below.</span>
-            </span>
-          </div>
-          <div
-            role="radio"
-            aria-checked="false"
-            aria-disabled="true"
-            className="flex items-start gap-3 rounded-lg border border-line px-3 py-2.5 text-sm opacity-70"
-            data-sw-agent-approval-option="auto"
-            data-sw-agent-approval-unavailable
-          >
-            <span className="mt-0.5 inline-flex h-4 w-4 shrink-0 rounded-full border border-line bg-surface" aria-hidden="true" />
-            <span>
-              <span className="block font-medium text-fg">Approve automatically (not available)</span>
-              <span className="block text-xs text-muted">
-                Needs the agent's own machine to allow approvals from the board first. No connected agent can do that yet, so every agent
-                always asks.
+      {agent ? (
+        <div className="space-y-4 p-5" data-sw-agent-approval-dialog>
+          <p className="flex items-start gap-2 text-sm" data-sw-agent-approval-mode={linked ? mode : 'watch'}>
+            <ShieldCheck size={15} className="mt-0.5 shrink-0 text-muted" aria-hidden="true" />
+            <span className="min-w-0">
+              <span className="text-muted">Now: </span>
+              <span className="font-medium text-fg">{linked ? MODE_TITLE[mode] : 'Asks before each command'}.</span>{' '}
+              <span className="text-muted">
+                {!linked
+                  ? 'It takes comments on its own (shapewall watch) and makes its changes where it runs.'
+                  : mode === 'none'
+                    ? 'It makes no changes from the board.'
+                    : mode === 'auto'
+                      ? `A fix is made on a branch on its machine. Without asking: ${kindsWords(autoKinds(agent))}.`
+                      : 'A fix is made on a branch on its machine, and each edit waits for an answer on the board.'}
               </span>
             </span>
+          </p>
+          {linked ? <MachineFacts agent={agent} /> : null}
+          <div role="radiogroup" aria-label="Approval rule" className="space-y-2">
+            <RuleOption value="ask" checked={rule === 'ask'} disabled={ruleOff} onChoose={setRule} title="Ask every time">
+              <span className="block text-xs text-muted">
+                {linked && mode === 'none'
+                  ? 'Once its machine takes edits from the board, each one waits for a person with the role below.'
+                  : agent.approval.machine.approvals === 'owner'
+                    ? `Everything the agent asks to do waits for ${agent.createdBy ? personName(agent.createdBy) : 'the person who connected it'}: its machine takes answers from nobody else.`
+                    : 'Everything the agent asks to do waits for a person with the role below.'}
+              </span>
+            </RuleOption>
+            <RuleOption
+              value="auto"
+              checked={rule === 'auto'}
+              disabled={ruleOff || Boolean(blocked)}
+              onChoose={setRule}
+              title={blocked ? 'Allow without asking (not available)' : 'Allow without asking'}
+              {...(blocked ? { 'data-sw-agent-approval-unavailable': true } : {})}
+            >
+              {blocked ? (
+                <>
+                  <span className="block text-xs text-muted" data-sw-agent-approval-why>
+                    {blocked}
+                  </span>
+                  {linked ? (
+                    <>
+                      <span className="mt-1.5 block text-xs text-muted">
+                        To allow it, run this on the agent's machine, in the project's folder:
+                      </span>
+                      <CopyField value={AUTO_COMMAND} testId="approval-auto" className="mt-1" />
+                    </>
+                  ) : null}
+                </>
+              ) : (
+                <span className="block text-xs text-muted" data-sw-agent-approval-applies>
+                  Applies to {machineAuto}, as its machine allows. Files that run something (settings, scripts, tests, CI) and anything else
+                  still wait for an answer. A fix is always made on a branch, and one made without asking is not pushed until someone looks
+                  at its whole diff on the board.
+                  {agent.approval.autoBy === 'owner' ? (
+                    <span className="mt-1 block" data-sw-agent-approval-owner-only>
+                      Only {agent.createdBy ? personName(agent.createdBy) : 'the person who connected it'} can switch this on: its machine
+                      takes approvals from them alone.
+                    </span>
+                  ) : null}
+                </span>
+              )}
+            </RuleOption>
           </div>
+          {mayRule ? null : (
+            <Notice tone="info">
+              Changing this agent's approval rule needs the {ROLE_LABEL[agent.approval.changeRole || 'owner'].toLowerCase()} role.
+            </Notice>
+          )}
+          <div className="grid items-start gap-4 sm:grid-cols-2">
+            <Field label="Who may answer its approvals" hint="They also need a fresh passkey check for each answer.">
+              {roleSelect(answerRole, setAnswerRole, 'answer')}
+            </Field>
+            <Field label="Who may change this rule" hint="Only an owner changes these two.">
+              {roleSelect(changeRole, setChangeRole, 'change')}
+            </Field>
+          </div>
+          <FormError error={save.error} />
         </div>
-        {mayRule ? null : (
-          <Notice tone="info">
-            Changing this agent's approval rule needs the {ROLE_LABEL[agent?.approval.changeRole || 'owner'].toLowerCase()} role.
-          </Notice>
-        )}
-        <div className="grid items-start gap-4 sm:grid-cols-2">
-          <Field label="Who may answer its approvals" hint="They also need a fresh passkey check for each answer.">
-            {roleSelect(answerRole, setAnswerRole, 'answer')}
-          </Field>
-          <Field label="Who may change this rule" hint="Only an owner changes these two.">
-            {roleSelect(changeRole, setChangeRole, 'change')}
-          </Field>
-        </div>
-        <FormError error={save.error} />
-      </div>
+      ) : null}
     </Dialog>
   )
 }

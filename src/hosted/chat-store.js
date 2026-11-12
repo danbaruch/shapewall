@@ -147,6 +147,7 @@ export function createChatStore(t, { now = () => new Date() } = {}) {
   // The thread and everything in it. Its usage records stay (they are history).
   function remove(projectId, boardId, threadId) {
     const key = { project: projectId, board: boardId, thread: threadId }
+    t.run(`DELETE FROM chat_permissions WHERE ${KEY}`, key)
     t.run(`DELETE FROM chat_messages WHERE ${KEY}`, key)
     t.run(`DELETE FROM chat_turns WHERE ${KEY}`, key)
     t.run(`DELETE FROM chat_threads WHERE ${KEY}`, key)
@@ -272,7 +273,20 @@ export function createChatStore(t, { now = () => new Date() } = {}) {
   // ---- Turns ----
 
   const turn = (turnId) => t.get('SELECT * FROM chat_turns WHERE workspace_id = :ws AND id = :id', { id: String(turnId || '') }) || null
-  function createTurn({ projectId, boardId, threadId, agentId, kind = 'chat', userId = null, userMessageId = null, commentNumber = null }) {
+  // `kind`: "chat", "comment" (a comment sent to the agent, which it answers)
+  // or "fix" (Fix with agent: the server took the comment in the agent's
+  // name, `claimId`, and the agent may ask to edit).
+  function createTurn({
+    projectId,
+    boardId,
+    threadId,
+    agentId,
+    kind = 'chat',
+    userId = null,
+    userMessageId = null,
+    commentNumber = null,
+    claimId = null,
+  }) {
     const id = newId('turn')
     const runId = newId('run')
     const at = iso()
@@ -296,12 +310,13 @@ export function createChatStore(t, { now = () => new Date() } = {}) {
     )
     // The usage record: who asked which agent, where and when. No text.
     t.run(
-      `INSERT INTO agent_runs (workspace_id, project_id, id, kind, agent_id, board_id, comment_number, thread_id, asked_by, started_at)
-       VALUES (:ws, :project, :id, :kind, :agent, :board, :number, :thread, :asked, :at)`,
+      `INSERT INTO agent_runs (workspace_id, project_id, id, kind, agent_id, claim_id, board_id, comment_number, thread_id, asked_by, started_at)
+       VALUES (:ws, :project, :id, :kind, :agent, :claim, :board, :number, :thread, :asked, :at)`,
       {
         project: projectId,
         id: runId,
-        kind: kind === 'comment' ? 'review' : 'chat',
+        claim: claimId,
+        kind: kind === 'fix' ? 'fix' : kind === 'push' ? 'push' : kind === 'comment' ? 'review' : 'chat',
         agent: agentId,
         board: boardId,
         number: commentNumber,
@@ -351,7 +366,8 @@ export function createChatStore(t, { now = () => new Date() } = {}) {
     if (!Number(result.changes)) return false
     t.run(
       `UPDATE agent_runs SET ended_at = :at, outcome = :outcome, model = :model, effort = :effort, input_tokens = :input,
-         output_tokens = :output, cached_tokens = :cached, cost_micros = :cost, steps = :steps
+         output_tokens = :output, cached_tokens = :cached, cost_micros = :cost, steps = :steps,
+         approvals_asked = :asked, approvals_allowed = :allowed, approvals_denied = :denied
        WHERE workspace_id = :ws AND id = :run AND ended_at IS NULL`,
       {
         run: row.run_id,
@@ -364,6 +380,9 @@ export function createChatStore(t, { now = () => new Date() } = {}) {
         cached: usage.cachedTokens ?? null,
         cost: usage.costMicros ?? null,
         steps: usage.steps ?? null,
+        asked: usage.approvals?.asked ?? null,
+        allowed: usage.approvals?.allowed ?? null,
+        denied: usage.approvals?.denied ?? null,
       },
     )
     return true
@@ -409,7 +428,9 @@ export function createChatStore(t, { now = () => new Date() } = {}) {
   }
 
   // Bytes of every stored chat message of the workspace, for the storage quota.
-  const bytes = () => t.get('SELECT COALESCE(SUM(bytes), 0) AS n FROM chat_messages WHERE workspace_id = :ws').n
+  const bytes = () =>
+    t.get('SELECT COALESCE(SUM(bytes), 0) AS n FROM chat_messages WHERE workspace_id = :ws').n +
+    t.get('SELECT COALESCE(SUM(length(card)), 0) AS n FROM chat_permissions WHERE workspace_id = :ws').n
 
   return {
     validThread,

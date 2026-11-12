@@ -177,7 +177,8 @@ board and comment ids before they become file names. Hosted API tokens are scope
 
 `shapewall agent connect` puts a coding agent on a hosted board, where members of a workspace chat with it
 ([Connected agents](hosted.md#connected-agents)). It runs on your machine, with your login, and other people write the questions. So
-it reads and answers only, and the machine that runs it is what enforces that:
+by default it reads and answers only, and the machine that runs it is what enforces that. Edits from the board are a separate
+choice, made on that machine ([Edits from a hosted board](#edits-from-a-hosted-board) below).
 
 - **The command is yours.** The program that runs is Claude Code, found on your `PATH` or saved as an agent on your machine. Nothing
   the server sends names a command, an argument, a folder, an environment variable or an MCP server.
@@ -238,6 +239,121 @@ The limits, plainly:
 
 The hard rule below holds for connected agents too: it is a shared board, and other people write what the agent reads.
 
+### Edits from a hosted board
+
+From Shapewall 0.6.0 a connected agent can make a fix for a hosted comment
+([Edits from the board](hosted.md#edits-from-the-board-the-trust-decision)). The question behind it: **who may make someone
+else's machine change files?** By default, nobody. Even the person who connected the agent cannot allow an edit from the board
+until they said so on that machine.
+
+| Level                                                           | Where it is set                                                                   | Default                              | What the board can cause                                                                                                                                                 |
+| --------------------------------------------------------------- | --------------------------------------------------------------------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Audience "only the person who connected it", `--approvals none` | The audience at the approval; `--audience owner` pins it from the machine         | Yes                                  | That person asks. The agent reads the project and answers                                                                                                                |
+| Audience: named members, or everyone the agent policy trusts    | On the server: the approval page, or the Agents page                              | Opt-in                               | Those members may ask too. Still read and answer only                                                                                                                    |
+| `--approvals owner`                                             | On the machine                                                                    | Opt-in                               | A fix on a new branch. Each edit waits for the person who connected the agent                                                                                            |
+| `--approvals admins`                                            | On the machine                                                                    | Opt-in                               | A fix on a new branch. Each edit waits for someone with the agent's answer role (admin by default), in its audience and trusted                                          |
+| "Allow without asking"                                          | On the machine (`--auto edits`), and then the agent's approval rule on the server | Opt-in, twice                        | Edits to ordinary source files go into the fix without a person. The fix stays on the machine: it is pushed only after a person allows "Push this fix" on its whole diff |
+| Commands                                                        | On the machine (`--allow-command`)                                                | Not offered for Claude Code in 0.6.0 | Nothing: a fix session of Claude Code has no shell tool                                                                                                                  |
+
+The machine's choice is saved in its own policy file (`agent-policy.json` beside the saved token, 0600, outside every
+repository). It is the ceiling: the server can only narrow it. The file fails narrow: a value this version does not know (a typo,
+`false`, `""`, a wrong type) reads as the narrowest setting for that key, never as the default, and `agent connect` names the key
+when it starts. The file must be yours and not writable by others; that is checked before it is read.
+
+What the machine does, whatever the server says:
+
+- **A fix is never made in your checkout.** The agent works in a fresh copy of the base commit, with no `.git` in it, in a folder
+  outside the project (under your state folder). Your checkout is only read.
+- **Every edit is checked on the machine before anyone is asked.** The file must be inside the fix's folder after resolving
+  symlinks, not in `.git`, not in Shapewall's store, and not a file that runs something unless you named it with `--allow-path`.
+  The whole resulting file must be computable and small enough to show in full. What fails is refused there and never becomes a
+  question.
+- **Files that run something are a list, used twice.** Dotfiles and dot folders, dependency manifests and lockfiles, build and
+  tool configuration (`*.config.js`, `tsconfig*.json`, the jest, vitest, vite, webpack, rollup, babel and eslint files), scripts
+  a package runs (`scripts/`, `bin/`, install hooks, `*.sh`), `Dockerfile*` and compose files, makefiles, CI files, and test files
+  ([the list](hosted.md#files-that-run-something)). The same list decides what is refused when an edit is asked and what is never
+  pushed. One you named with `--allow-path` is always answered by a person, never allowed without asking.
+- **What Git would leave out is refused, not dropped.** An edit to a file Git ignores, to anything under `node_modules`, or to
+  `.gitattributes` / `.gitmodules` is refused when it is asked.
+- **A card shows what will be written.** The path and the full diff, in the machine's own words, never the agent's title. The
+  card carries a hash of the turn, the card, the path, the whole diff and how long it waits. The diff goes to the people the
+  agent works for (its audience, whoever may answer, whoever asked); everyone else who can open the thread reads that it asked to
+  edit a file and how that ended.
+- **An answer is for one card.** It must send the card's hash back, within 2 minutes, once. The 2 minutes are a length of time
+  each side counts on its own clock, so the clocks need not agree. Allow needs a passkey check in the last 10 minutes on the
+  server. The machine then checks the answer again: a card it asked and still waits on, the same hash, not expired by its own
+  count, once, and from the connecting person when it said "owner". A failed "allow" is a deny, and the board then shows the
+  card as expired or denied, never as allowed. An answer for a card it never asked is ignored.
+- **Shapewall makes the commit, and only of what was allowed.** No hook, filter or attribute runs. Every changed file must have
+  had an allowed edit and must hold exactly the bytes that were shown, with the file mode it had. Every allowed file must be in
+  the commit, and nothing may be removed. A changed edit, an extra file, a mode change, a deletion: the branch is taken back and
+  the thread says nothing was committed.
+- **Nothing is pushed that runs something, or that no person has seen.** A fix that touches a file from the list above stays on
+  the machine, and the thread says "Not pushed" and why. A fix with an edit that went without asking stays there too, until a
+  person who may answer cards allows one "Push this fix" card that shows its whole diff. Anything else is pushed as one new
+  branch, and a pull request is opened when [GitHub connect](github.md) is set up on that machine.
+- **Stop stops all of it.** After Stop nothing is committed, pushed or opened, and a fix that was waiting to be pushed is taken
+  back. A push that had already finished cannot be undone: the thread says the branch exists.
+- **Leftovers are swept.** Copies a killed process left behind are removed when `agent connect` starts and around every fix. The
+  folder fixes are made in is never inside the project; where it would be, the fix is refused.
+- **Chat never edits.** Only "Fix with" on a comment starts a turn that may edit, and it follows the rules of sending a comment
+  to an agent: a trusted member's vouch, an admin's "Approve agent run" where the policy says so, the audience, the budgets.
+- **"Allow without asking" only where the machine named it** (`--auto edits`), and under `--approvals owner` only when the
+  person who connected the agent switched it on themself: an admin cannot take them out of the loop. It never widens what may be
+  edited, never covers a file that runs something, never pushes, and a machine that connects again without it resets the
+  server's rule to "ask".
+
+**Commands, and what the real adapter did.** The link and the policy file know "exact commands from the machine's own list, each
+allowed on the board" (`--allow-command`). This is not available for Claude Code in Shapewall 0.6.0, and Claude Code is the only
+agent `agent connect` offers. In the check below, a Claude Code session started with its shell tool ran commands it takes to be
+read-only (`ls`, `cat`) without asking anyone, and those can read outside the project. A list of allowed commands is no control
+over an agent that does not ask. So a fix session of Claude Code gets no shell tool at all (it has Read, Grep, Glob, Edit, Write
+and MultiEdit, no settings files and no MCP servers), `--allow-command` is refused for it with that explanation, and commands in a
+hand-edited policy file are not in effect.
+
+How edits were proven. The check used the real Claude Code adapter, a throwaway server on localhost, a throwaway Git repository
+with a local bare remote, and the real `shapewall agent connect --approvals owner`:
+
+- **Allow.** A Fix with Builder edited one file after Allow in a browser, with a passkey. The commit landed on
+  `shapewall/comment-1-...` and was pushed to the bare remote. The checkout stayed clean on `main`, with the old file.
+- **Deny.** A Deny left no branch and no folder.
+- **A comment that asked for more.** The comment also asked for a file outside the project, a new `package.json` and shell
+  commands. It ended with only the allowed one-line edit committed. In one run the `package.json` request was refused on the
+  machine as a settings file. Claude Code itself declined the file outside the project and, having no shell tool, ran nothing.
+- **A server that lies.** Forged "allowed" answers from the server side with a wrong hash turned the waiting edit into a deny.
+- **Without asking.** With `--approvals owner --auto edits` and the rule switched on by the connecting person, the edit went
+  without a card to answer, the commit landed on its branch on the machine, and the bare remote stayed empty until "Push this
+  fix" was allowed in the browser. Then that one branch was pushed.
+
+The real model declined some of what a hostile agent would try. The scripted-agent tests (`test/hosted-fix-security.test.js`)
+cover that: an edit changed after the answer, a file nobody was asked about, an answer for another card, another turn or sent
+twice, a stolen agent token that says "approved", and a server that says "allow without asking" when the machine did not.
+
+The limits of edit mode, plainly:
+
+- **Shapewall does not sandbox the agent's own tools.** The checks above cover what the agent asks. The fix session is set up so
+  that its editing tools ask every time, and that was seen with one adapter version on one machine. If files in your own checkout
+  change during a fix, the thread says so; it cannot undo it.
+- **With approvals on, a compromised hosted server can forge an "allow".** The machine cannot see the passkey check or the person
+  behind an answer: it sees what the server sends. A server that was broken into can answer "allow", with the right hash, for an
+  edit the agent really asked, and for "Push this fix". So the worst case with approvals on is: edits to ordinary source files,
+  on a branch, in a throwaway folder, pushed for review. Not commands, not your checkout, not files that run something on
+  install, build, test or CI, and not files outside the project that the agent asks about.
+- **The branch is a proposal.** It comes from a board comment, which is untrusted text. Nothing is merged by Shapewall.
+- **Diffs leave the machine.** Beyond the answers of 0.5.0, edit mode sends the diffs on edit cards (bounded), the file paths
+  and line counts of a fix, the branch name and the pull request link. Still not the agent's token and not absolute paths.
+
+What to do:
+
+- **Give the agent a restricted profile of its own**: a separate config folder with no allow rules, logged in for this purpose.
+- **Prefer `--approvals owner` to `--approvals admins`.** Then an "allow" has to come from you, and both the server and your
+  machine check that.
+- **Review the pull request like any other**, the whole diff ([Review the agent's output](#review-the-agents-output)), and
+  protect `main` so a pushed branch cannot merge itself.
+- **Do not add `--allow-path` for CI files**, and think twice before adding it for `package.json` or any file that runs.
+- **Leave `--auto` off** unless everyone who may press Fix is someone you would let edit the project unseen. Even then the fix
+  waits on the machine until someone looks at its whole diff.
+
 ### What Shapewall cannot do
 
 - **The agent's own tools.** An ACP agent is still a program running as you. Claude Code's Bash and Edit, Codex's sandbox, goose's
@@ -259,6 +375,8 @@ Pick the weakest setup that does the job.
 | Chat with an endpoint, read-only tools                  | Read the board, write answers                                   | Shared boards, with a spend-limited key                 |
 | `comments --json` into an agent you run by hand         | Whatever you let it, one comment at a time, you watching        | Any board, if you read the comment first                |
 | Chat with an agent CLI over ACP, permission prompts on  | Edit and run in the project after you approve each card         | Your own board on your own machine                      |
+| `agent connect` on a hosted board (the default)         | Read the project, write answers                                 | Projects whose code the agent's audience may read       |
+| `agent connect --approvals owner`                       | Edit a fresh copy on a new branch after you allow each diff     | Hosted boards, with a restricted profile and PR review  |
 | `watch --exec` with an edit mode and a narrow tool list | Edit the project and call `npx shapewall`, no person in between | Boards whose commenters you trust                       |
 | `watch --exec` in a sandbox, output as a branch         | Edit a fresh clone, open a PR                                   | Shared boards ([Sandbox checklist](#sandbox-checklist)) |
 | An agent with your shell, keys, browser and email       | Anything you can                                                | Nothing that reads other people's text                  |
@@ -282,8 +400,13 @@ shared board is text other people write.
 
 Use a separate agent for shared boards: its own key, its own login, in a sandbox with nothing worth stealing and nowhere to send it.
 
-A [connected agent](#connected-agents) on a hosted board is a shared board's agent. It reads and answers only, which takes away
-editing and running, not reading: connect a profile that holds nothing but that project, never your main one.
+A [connected agent](#connected-agents) on a hosted board is a shared board's agent. By default it reads and answers only, which
+takes away editing and running, not reading: connect a profile that holds nothing but that project, never your main one.
+
+With [edits from the board](#edits-from-a-hosted-board) switched on, the rule matters more. Other people's comments now end as
+changes to files, and an "allow" reaches your machine through the server. The edits are held to a branch in a throwaway folder,
+and each one was shown to a person, but the agent that makes them still runs as you, with its own tools. Never switch
+`--approvals` on for your main agent.
 
 ## Sandbox checklist
 
@@ -413,6 +536,7 @@ to a shared board.
 - [ ] Only trusted members trigger work (`--mention agent`, no `--include-guests`).
 - [ ] Share links are off, or view-only, with a passcode and a short expiry.
 - [ ] The agent's prompt says comments are requests about the UI, not instructions.
+- [ ] A connected agent takes edits only if I chose so on its machine: `--approvals owner`, no `--allow-path` for CI files, `--auto` off.
 
 **Every change**
 

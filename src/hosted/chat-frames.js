@@ -25,13 +25,77 @@ const str = (value, max) => (typeof value === 'string' ? value.slice(0, max) : '
 const optional = (value, max) => (typeof value === 'string' && value ? value.slice(0, max) : null)
 const count = (value) => (Number.isFinite(Number(value)) && Number(value) >= 0 ? Math.min(Math.round(Number(value)), 1e12) : null)
 
+// The run summary of a fix (src/remote/agent-fix.js): the branch, whether it
+// was pushed, the pull request, and the files with their line counts. Never
+// a diff: the cards showed those.
+const BRANCH_RE = /^[A-Za-z0-9][A-Za-z0-9_-]*(?:\/[A-Za-z0-9][A-Za-z0-9_-]*)*$/
+const SHA_RE = /^[0-9a-f]{40}([0-9a-f]{24})?$/
+export function cleanSummary(summary) {
+  if (!summary || typeof summary !== 'object' || summary.kind !== 'remote-branch') return null
+  const branch = summary.branch && typeof summary.branch === 'object' ? summary.branch : {}
+  const name = typeof branch.name === 'string' && branch.name.length <= 120 && BRANCH_RE.test(branch.name) ? branch.name : null
+  if (!name) return null
+  const lines = (value) => (Number.isSafeInteger(value) && value >= 0 ? Math.min(value, 1e7) : null)
+  const files = (Array.isArray(summary.files) ? summary.files : []).slice(0, 50).map((file) => ({
+    path: str(file?.path, 300),
+    status: ['added', 'modified'].includes(file?.status) ? file.status : 'modified',
+    added: lines(file?.added),
+    removed: lines(file?.removed),
+    diff: null,
+  }))
+  // A pull request: only a URL shaped like one (https://host/owner/repo/pull/7).
+  // It is a link only on github.com; on any other host it is shown as text,
+  // since this server cannot know which host the project's GitHub is on.
+  let pr = null
+  try {
+    const url = new URL(String(summary.pr?.url || ''))
+    if (
+      url.protocol === 'https:' &&
+      url.href.length <= 300 &&
+      !url.username &&
+      !url.password &&
+      !url.search &&
+      !url.hash &&
+      /^\/[\w.-]+\/[\w.-]+\/pull\/\d+$/.test(url.pathname)
+    )
+      pr = {
+        url: url.href,
+        number: Number(url.pathname.split('/').at(-1)),
+        link: url.hostname === 'github.com',
+      }
+  } catch {
+    pr = null
+  }
+  return {
+    kind: 'remote-branch',
+    files,
+    added: files.reduce((sum, file) => sum + (file.added || 0), 0),
+    removed: files.reduce((sum, file) => sum + (file.removed || 0), 0),
+    more: lines(summary.more) || 0,
+    branch: {
+      name,
+      commit: SHA_RE.test(String(branch.commit || '')) ? branch.commit : null,
+      baseName:
+        typeof branch.baseName === 'string' && branch.baseName.length <= 120 && /^[\w./-]+$/.test(branch.baseName) ? branch.baseName : null,
+      pushed: branch.pushed === true,
+      // Committed on the agent's machine and held there: an edit in it went
+      // without asking, so it is pushed only after "Push this fix".
+      held: branch.pushed !== true && branch.held === true,
+      remote: branch.pushed === true && typeof branch.remote === 'string' && /^[\w.-]{1,60}$/.test(branch.remote) ? branch.remote : null,
+    },
+    pr: branch.pushed === true ? pr : null,
+  }
+}
+
 const TOOL_STATES = ['running', 'done', 'error']
 const PERMISSION_STATES = ['denied', 'expired', 'cancelled']
 
 // A card of the answer: a tool step, the plan, a note, or a request the
-// machine refused. A permission card never arrives pending or approved: a
-// connected agent reads and answers only, and its machine denies on the spot
-// (a pending or approved state from the machine is shown as denied).
+// machine refused. A permission card is never taken as pending or approved
+// on the machine's word here: one that was asked on the board comes from the
+// server's own record of it (src/hosted/chat-permissions.js, put in its
+// place by the caller), and anything else the machine calls pending or
+// approved is shown as denied.
 export function cleanCard(card) {
   if (!card || typeof card !== 'object' || Array.isArray(card)) return null
   const id = str(card.id, 120)
@@ -135,6 +199,8 @@ export function cleanReply(message) {
     cards,
     status,
   }
+  const summary = cleanSummary(input.summary)
+  if (summary && status === 'done' && !input.error) reply.summary = summary
   const reasoning = str(input.reasoning, FRAME_LIMITS.reasoning)
   if (reasoning) reply.reasoning = reasoning
   const model = optional(input.model, 120)
@@ -177,7 +243,8 @@ export function cleanReply(message) {
 export function usageOf(reply) {
   const find = (category) => reply.options?.find((item) => item.category === category)?.value || null
   return {
-    outcome: reply.status === 'done' ? 'answered' : reply.status === 'stopped' ? 'stopped' : 'failed',
+    // A fix that left a branch is "fix_ready".
+    outcome: reply.status === 'done' ? (reply.summary ? 'fix_ready' : 'answered') : reply.status === 'stopped' ? 'stopped' : 'failed',
     model: find('model') || reply.model || null,
     effort: find('thought_level'),
     inputTokens: reply.usage?.input ?? null,

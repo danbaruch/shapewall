@@ -455,10 +455,12 @@ comment, with a state and rules about who may use it. Nothing changes on the mac
   console marks them "kept from before 0.4.0".
 
 - **Approvals.** Each agent has an approval rule and two roles: who may answer its approvals, and who may change the rule (admins and
-  owners, or owners only; only an owner changes those two). The rule in effect is always **Always ask**: a command an agent asks to
-  run waits for a person with that role and a fresh passkey check. **Approve automatically** is listed as not available: it needs the
-  agent's own machine to allow approvals from the board first, and no agent can say so: a [connected agent](#connected-agents) reads
-  and answers only, and has nothing to approve. It is never the default and is never possible on the server's say alone.
+  owners, or owners only; only an owner changes those two). The rule in effect is **Ask every time** unless the agent's own machine
+  says otherwise: what an agent asks to do waits for a person with that role and a fresh passkey check. **Allow without asking** is
+  listed as not available until the agent's own machine names what may go without asking (`shapewall agent connect --approvals
+owner --auto edits`, on that machine). It is never the default and is never possible on the server's say alone. A
+  [connected agent](#connected-agents) reads and answers only until its machine switches edits on
+  ([Edits from the board](#edits-from-the-board-the-trust-decision)).
 - **Revoke.** Revoking an agent revokes its token (and revoking the token on the Tokens page revokes the agent). What it was working
   on loses its "working" status and goes to any agent, with what waited for it; its usage records close as "revoked"; the project
   loses it as default. The same happens when an agent stops working by another road (its token expired, its maker was removed or is
@@ -474,13 +476,14 @@ comment, with a state and rules about who may use it. Nothing changes on the mac
   groundwork of a usage page; there is nothing to look at yet, and the rows go with their project.
 
 There are two ways to connect one, on the machine that has the code. An agent members **chat with** (it reads the project and
-answers; [Connected agents](#connected-agents)):
+answers; when its machine says so, it also makes a fix on a branch, each edit allowed on the board;
+[Connected agents](#connected-agents)):
 
 ```sh
 shapewall agent connect --remote https://wall.example.com   # approve in the console: name it, choose the project and who may use it
 ```
 
-An agent that **fixes comments** (a watcher: it runs your command once for each comment sent to it):
+An agent that **fixes comments by itself** (a watcher: it runs your command once for each comment sent to it):
 
 ```sh
 shapewall login --remote https://wall.example.com     # approve in the console, choose the project, tick "Take agent work"
@@ -520,13 +523,20 @@ shapewall agent connect --remote https://wall.example.com
 4. **Members chat with it.** The Agent button on the board opens the Agents panel. **Chat** on a connected agent opens a chat with
    it in the same panel a local board has: the answer streams in, with the agent's steps.
 
-**A connected agent reads and answers. It does not change files and it runs no commands.** The machine that runs it enforces this,
-whatever the server sends, in two ways. The agent's own controls are set so that it cannot act: its session starts without your
-settings files and with only its reading tools ([read-only by the agent's own controls](#read-only-by-the-agents-own-controls)).
-And Shapewall offers it no way to write a file or open a terminal, and refuses every permission request it makes on the spot. The
-answer then shows what was refused ("Refused: read and answer only"), and nobody is asked. If the session cannot be made
-read-only, the agent is not started. When a change is needed, the agent says what to change and where. Edits, commands and
-approvals from the board are not in this release. For fixes, keep using `shapewall watch --remote --exec`, as before.
+**By default a connected agent reads and answers. It does not change files and it runs no commands.** The machine that runs it
+enforces this, whatever the server sends, in two ways. The agent's own controls are set so that it cannot act: its session starts
+without your settings files and with only its reading tools
+([read-only by the agent's own controls](#read-only-by-the-agents-own-controls)). And Shapewall offers it no way to write a file
+or open a terminal, and refuses every permission request it makes on the spot. The answer then shows what was refused ("Refused:
+read and answer only"), and nobody is asked. If the session cannot be made read-only, the agent is not started. When a change is
+needed, the agent says what to change and where.
+
+**Edits are switched on only on the machine that has the code** (Shapewall 0.6.0). Started with `--approvals owner` or
+`--approvals admins`, the agent can make a fix for a comment: on a new branch, in a folder of its own, never in the checkout, and
+each edit is a card with the full diff that a person allows or denies on the board
+([Edits from the board](#edits-from-the-board-the-trust-decision)). Chat stays read and answer only either way. A connected Claude
+Code runs no commands from the board in this release. `shapewall watch --remote --exec` is unchanged, and stays the way for an
+agent that fixes comments with nobody in between.
 
 The server still never runs an agent. It stores the conversation and passes messages between the browser and the agent's machine.
 
@@ -547,17 +557,31 @@ The same rule holds for an agent saved on the machine: it can be connected only 
 goose and Gemini CLI, `shapewall watch --remote` stays the way to work on a hosted board. How the check was done is in
 [agent-hardening.md](agent-hardening.md#connected-agents).
 
+The same test decided what a fix session gets. A Claude Code session for a fix has its reading tools and its editing tools, and
+no shell tool: started with the shell tool, Claude Code ran commands it takes to be read-only (`ls`, `cat`) without asking anyone,
+and those can read outside the project. So commands from the board are not offered for Claude Code in this release
+([Commands](#commands-are-not-offered-for-claude-code)).
+
 ### The connect command
 
-| Flag                       | Default                                           | Meaning                                                                                                                                                                                                                |
-| -------------------------- | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--agent NAME`             | This project's agent, else Claude Code when found | `claude`, or the id of an agent saved on this machine that runs Claude Code. Never a command from the server                                                                                                           |
-| `--name "Builder"`         | The agent's own name                              | The name to suggest on the approval page. The approver has the last word, and an admin can rename it later                                                                                                             |
-| `--as NAME`                | `default`                                         | A second connection from this machine, with a token of its own                                                                                                                                                         |
-| `--audience owner\|server` | `server`                                          | `owner`: the server is asked to keep it to the person who connected it even if its audience there is widened, and this machine refuses a job the server labels as someone else's. `server`: its audience on the server |
-| `--takeover`               |                                                   | Close the link another process holds for this agent, and take its place                                                                                                                                                |
-| `--concurrency N`          | 2                                                 | Answers at once, 1 to 4                                                                                                                                                                                                |
-| `--token-file FILE`        |                                                   | For a service: the agent's own token from a file, no browser                                                                                                                                                           |
+| Flag                              | Default                                           | Meaning                                                                                                                                                                                                                            |
+| --------------------------------- | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--agent NAME`                    | This project's agent, else Claude Code when found | `claude`, or the id of an agent saved on this machine that runs Claude Code. Never a command from the server                                                                                                                       |
+| `--name "Builder"`                | The agent's own name                              | The name to suggest on the approval page. The approver has the last word, and an admin can rename it later                                                                                                                         |
+| `--as NAME`                       | `default`                                         | A second connection from this machine, with a token of its own                                                                                                                                                                     |
+| `--audience owner\|server`        | `server`                                          | `owner`: the server is asked to keep it to the person who connected it even if its audience there is widened, and this machine refuses a job the server labels as someone else's. `server`: its audience on the server             |
+| `--approvals none\|owner\|admins` | `none`                                            | Edits from the board. `none`: never, the agent reads and answers only. `owner`: the person who connected it may allow each edit. `admins`: whoever the server lets answer (admins by default)                                      |
+| `--auto none\|edits`              | `none`                                            | What the server's "Allow without asking" rule may apply to. `none`: every request waits for a person. Needs `--approvals owner` or `admins`                                                                                        |
+| `--allow-path FILE`               | None                                              | A file that runs something, which the agent may ask to edit (a dotfile, `package.json`, a `Makefile`, a `Dockerfile`, CI config). Such an edit is refused on the machine otherwise. Adds one file per run; `none` empties the list |
+| `--base BRANCH`                   | `head`                                            | The branch a fix starts from. `head`: the commit the checkout is on, and then only while the checkout has no uncommitted changes to tracked files                                                                                  |
+| `--git-remote NAME`               | `origin`                                          | Where a finished fix is pushed. `none`: never pushed                                                                                                                                                                               |
+| `--takeover`                      |                                                   | Close the link another process holds for this agent, and take its place                                                                                                                                                            |
+| `--concurrency N`                 | 2                                                 | Answers at once, 1 to 4                                                                                                                                                                                                            |
+| `--token-file FILE`               |                                                   | For a service: the agent's own token from a file, no browser                                                                                                                                                                       |
+
+`--approvals`, `--auto`, `--allow-path`, `--base` and `--git-remote` are saved for the connection, so the next run without them
+keeps what was set. They are explained under [Switching edits on](#switching-edits-on). `--allow-command` is listed by
+`shapewall --help` and is refused for Claude Code ([Commands](#commands-are-not-offered-for-claude-code)).
 
 - **Which program runs** is the machine's choice: an agent saved for this project on that machine, or Claude Code found on its
   `PATH` with its ACP adapter, the same detection a local board uses ([agents.md](agents.md)). Codex, goose, Gemini CLI, a saved
@@ -575,8 +599,9 @@ goose and Gemini CLI, `shapewall watch --remote` stays the way to work on a host
   agent's token: the login saved by `shapewall login` is never used, and a plain project token is refused with a message.
 - **Files on the machine.** The token is kept in `credentials.json` in Shapewall's config folder (`$XDG_CONFIG_HOME/shapewall`, by
   default `.config/shapewall` in your home folder), under `agents`, by server and `--as` name, apart from the login `push` and
-  `watch` use. `--audience` is remembered in `agent-policy.json` beside it. Both files are readable by you only (0600), and the
-  server cannot change either.
+  `watch` use. What the machine allows (`--audience`, `--approvals` and the flags that go with it) is remembered in
+  `agent-policy.json` beside it, one entry per server and `--as` name. Both files are readable by you only (0600), are outside
+  every repository, and the server cannot change either.
 - **Ending.** Ctrl+C or SIGTERM stops the answers in progress, closes the agent and exits 0. A token the server refuses (revoked,
   expired, or its maker is no longer an admin) ends the command with exit 1; a saved token is then removed, so the next run asks for
   a new approval.
@@ -617,6 +642,8 @@ watcher) is an agent as before, with no link and no chat.
 - **"@" mentions and text files** work as on a local board: a page, a comment, an element, a journey or a person, and up to three
   text files with a message. Images are not sent to a connected agent yet. Editing a sent message, asking again for an answer, answer
   ratings and the model and effort menus are not on hosted boards yet either.
+- **A chat message never edits.** Whatever a message says, and whatever the agent's machine allows, a chat turn is read and answer
+  only. Only **Fix with** on a comment starts a turn that may edit ([Fix with an agent](#fix-with-an-agent)).
 
 ### Who may use a connected agent
 
@@ -641,17 +668,257 @@ project's agent policy still decides who may use any agent at all. On top of the
 
 A comment sent to a connected agent **by name** (Send to agent, or the project's default agent) is read and answered by it: it
 takes the comment, answers in the comment's chat thread where everyone can watch, posts the answer as a reply signed with its name,
-and sets the agent status to done. It never resolves a comment and never edits. When it cannot answer, it says so in a reply and
-marks the comment as needing a person.
+and sets the agent status to done. It never resolves a comment, and Send to agent never edits. When it cannot answer, it says so
+in a reply and marks the comment as needing a person. For a change to the code, press **Fix with** on the comment
+([Fix with an agent](#fix-with-an-agent)), when the agent's machine takes edits.
 
-A comment sent to **any agent** is left alone by connected agents: it stays with the `watch --remote --exec` watchers that can fix
-it. Fixes stay with watchers in this release. So do not make a connected agent the project's default agent while you rely on
-watchers to fix new comments: every trusted member's new comment would go to an agent that can only answer.
+A comment sent to **any agent** is left alone by connected agents: it stays with the `watch --remote --exec` watchers that fix
+comments by themselves. So do not make a connected agent the project's default agent while you rely on watchers to fix new
+comments: every trusted member's new comment would go to an agent that answers it and waits for someone to press Fix.
+
+### Edits from the board: the trust decision
+
+A fix runs on someone's machine, with their login, for a comment other people wrote. So the question is: **who may make someone
+else's machine change files?** By default, nobody. Even the person who connected the agent cannot allow an edit from the board
+until they said so on that machine.
+
+| Level                                                           | Where it is set                                                                   | Default                              | What the board can cause                                                                                                                                                 |
+| --------------------------------------------------------------- | --------------------------------------------------------------------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Audience "only the person who connected it", `--approvals none` | The audience at the approval; `--audience owner` pins it from the machine         | Yes                                  | That person asks. The agent reads the project and answers                                                                                                                |
+| Audience: named members, or everyone the agent policy trusts    | On the server: the approval page, or the Agents page                              | Opt-in                               | Those members may ask too. Still read and answer only                                                                                                                    |
+| `--approvals owner`                                             | On the machine                                                                    | Opt-in                               | A fix on a new branch. Each edit waits for the person who connected the agent                                                                                            |
+| `--approvals admins`                                            | On the machine                                                                    | Opt-in                               | A fix on a new branch. Each edit waits for someone with the agent's answer role (admin by default), in its audience and trusted                                          |
+| "Allow without asking"                                          | On the machine (`--auto edits`), and then the agent's approval rule on the server | Opt-in, twice                        | Edits to ordinary source files go into the fix without a person. The fix stays on the machine: it is pushed only after a person allows "Push this fix" on its whole diff |
+| Commands                                                        | On the machine (`--allow-command`)                                                | Not offered for Claude Code in 0.6.0 | Nothing: a fix session of Claude Code has no shell tool                                                                                                                  |
+
+The machine's choice is the ceiling. The server can only narrow it: an audience, an answer role, a rule that asks. It can never
+widen it.
+
+### Switching edits on
+
+On the machine that has the code, in the project's folder:
+
+```sh
+shapewall agent connect --remote https://wall.example.com --approvals owner     # the person who connected it allows each edit
+shapewall agent connect --remote https://wall.example.com --approvals admins    # whoever the server lets answer
+shapewall agent connect --remote https://wall.example.com --approvals none      # back to read and answer only
+```
+
+- **`--approvals owner`** takes an "allow" only from the person who connected the agent. The server enforces it, and the machine
+  checks it again on every answer.
+- **`--approvals admins`** takes it from whoever the server lets answer: the agent's answer role (admin by default; an owner can
+  make it owner), who is also in the agent's audience and trusted by the project's agent policy.
+- **The choice is saved** for this connection in `agent-policy.json` on the machine, beside the saved token. A service that runs
+  the plain command keeps it. `--approvals none` switches it off again.
+- **`--auto edits`** names what the server's "Allow without asking" rule may apply to. Without it every request waits for a
+  person ([Allow without asking](#allow-without-asking)).
+- **`--allow-path FILE`** lets the agent ask to edit one file that runs something. Without it, an edit to such a file is refused
+  on the machine and never becomes a question ([Files that run something](#files-that-run-something)). Each run adds one file;
+  `--allow-path none` empties the list. `.git` and Shapewall's own store can never be named. An allowed path always gets a card
+  a person answers, whatever the approval rule says, and a fix that changes it is not pushed from the machine.
+- **`--base BRANCH`** is where a fix starts. Without it a fix starts from the commit the checkout is on, and a checkout with
+  uncommitted changes to tracked files refuses the fix, because the fix would silently leave them out. `--base main` always starts
+  from that branch, whatever the checkout holds. `--base head` goes back to the default.
+- **`--git-remote NAME`** is where a finished fix is pushed (`origin` by default). `--git-remote none`: never pushed.
+
+`agent connect` prints what is in effect when it starts. The console's Agents page and the board's Agents panel say which mode an
+agent is in: "Reads and answers", "Edits on a branch, each allowed by the person who connected it" (or "an admin", or "an
+owner"), or "Edits on a branch, allowed without asking".
+
+### Commands are not offered for Claude Code
+
+The link and the machine's policy file know a third thing an agent could ask: to run one exact command from the machine's own
+list, each run allowed on the board (`--allow-command`). **This is not available for Claude Code in Shapewall 0.6.0, and Claude
+Code is the only agent `agent connect` offers.** So no connected agent runs a command from the board in this release.
+
+The reason was found with the real adapter. Started with its shell tool, Claude Code runs commands it takes to be read-only
+(`ls`, `cat`) without asking anyone, and those can read outside the project. A list of allowed commands does not help when the
+agent does not ask. So:
+
+- a fix session of Claude Code gets no shell tool at all;
+- `--allow-command` is refused for it, with that explanation;
+- commands written by hand into `agent-policy.json` are not in effect, and `agent connect` says so when it starts.
+
+### Fix with an agent
+
+On a hosted comment, **Fix with Builder** is offered when Builder's machine takes edits and you may use Builder. The agent must be
+online: a fix cannot be queued for an offline agent (Send to agent still queues). For an agent that reads and answers only the
+button is not offered, and one line says why: "Builder reads and answers only. Edits are switched on on its own machine".
+
+Pressing it takes the comment in the agent's name and opens a turn in the comment's chat thread, where everyone can watch. The
+rules are the ones for sending a comment to an agent, unchanged:
+
+- a trusted member vouches for the text they saw (a comment that changed since you opened it is refused: read it again);
+- a non-admin's run still needs an admin's **Approve agent run** where the agent policy says so. Fix makes that one flow: an
+  admin's Fix is also their approval (with their passkey) and starts at once; a member's Fix sends the comment for approval,
+  where admins see **Approve agent run** on it, and says to press Fix again once it is approved;
+- the agent's audience decides whose comment it takes;
+- the project's daily runs and its open-claims limit count a fix like any other claim;
+- one agent at a time: a comment that is already with an agent is refused.
+
+The agent reads the comment as quoted, untrusted data, as always. Stop ends the fix, and cancels any card that waits.
+
+### Where a fix is made
+
+**Never in the checked-out tree.** The checkout is only read (`git status`, `git rev-parse`).
+
+1. **A fresh copy of the base commit**, with no `.git` in it, in a folder outside the project: under your state folder,
+   `$XDG_STATE_HOME/shapewall/agent-fixes/` (by default `.local/state/shapewall/agent-fixes/` in your home folder). It is made by
+   the same code as a local board's [Work on a branch](agents.md#work-on-a-branch). That folder is never inside the project: when
+   it would be (the project is your home folder, say), `agent connect` and the fix refuse and say to set `XDG_STATE_HOME` to a
+   folder outside it. A relative `XDG_STATE_HOME` is ignored.
+2. **The agent edits that copy**, one allowed edit at a time ([Permission cards](#permission-cards)).
+3. **Shapewall itself commits the result** on a new branch, `shapewall/comment-<n>-<slug>`, with the repository's own author. No
+   hook, filter or attribute runs. The comment's text in the commit subject is made inert first: no "@name" pings anyone and no
+   "Fixes #12" closes anything.
+4. **The commit is kept only if it is exactly what was allowed.** Every changed file must have had an allowed edit and must hold
+   exactly the bytes that were shown, with the file mode it had (a new file is not executable). Every allowed file must be in the
+   commit. Nothing may be removed. A changed edit, an extra file, a mode change, a deletion, an allowed file Git left out: the
+   branch is taken back and the thread says "Nothing was committed", with the files.
+5. **The branch is pushed** to the machine's remote when three things hold: the machine has that remote, the change touches no
+   file that runs something ([Files that run something](#files-that-run-something)), and a person saw every edit. Otherwise it
+   stays on the machine and the thread says why: "Not pushed", or, for a fix with an edit that went without asking, a
+   **Push this fix** card ([Allow without asking](#allow-without-asking)).
+6. **A pull request is opened** when [GitHub connect](github.md) is set up on that machine. Otherwise the thread and the comment
+   say "Fix ready on branch" with the name to copy. The link is shown as a link only when it is a pull request URL on github.com;
+   on another GitHub host it is shown as text.
+7. **The folder is removed.** The branch stays.
+
+A fix is refused before it starts, with a clear sentence in the thread and on the comment, when the project folder is not a Git
+repository, has no commit yet, has a merge in progress, or has uncommitted changes and no `--base`. A fix whose edits were all
+denied leaves no branch and no folder, and the comment is marked as needing a person.
+
+**Stop stops all of it.** Stop is honoured between every step: after it nothing is committed, nothing is pushed, no pull request
+is opened, and the agent's reply on the comment says the fix was stopped, not "Fix ready". A fix that was waiting for
+"Push this fix" is taken back, branch and all. The one thing Stop cannot undo is a push that had already finished: then the
+thread says the branch exists on the remote, and no pull request follows.
+
+**Copies a dead process left behind are swept.** When `agent connect` starts, and around every fix, the copies whose process is
+gone are removed with their records, so their branch names are free again. Ctrl+C during a fix removes its copy on the way out.
+
+If files in the person's own checkout changed while the fix ran, the thread says so: "Files in the agent's own checkout changed
+during this fix. Check git status on its machine." Shapewall does not sandbox the agent's own tools
+([agent-hardening.md](agent-hardening.md#connected-agents)).
+
+### Files that run something
+
+Some files of a project run something once they change: on install, on build, in a test run, in CI, or the moment a branch is
+pushed. Shapewall keeps one list of them, used both when an edit is asked and before a push:
+
+- dotfiles and everything in a dot folder (`.env`, `.npmrc`, `.github/`, `.husky/`, editor and agent settings);
+- dependency manifests and lockfiles (`package.json`, `package-lock.json`, `pnpm-lock.yaml`, `requirements*.txt`, `go.mod`,
+  `Cargo.toml` and the like);
+- build, task and tool configuration (`Makefile`, `GNUmakefile`, `*.config.js` / `.ts` / `.mjs` / `.cjs`, `tsconfig*.json`, the
+  jest, vitest, vite, webpack, rollup, babel, eslint and prettier files, `shapewall.config.json`);
+- scripts a package runs (`scripts/`, `bin/`, `tools/`, install hooks, `*.sh`);
+- container files (`Dockerfile*`, compose files) and CI files;
+- test files (`*.test.*`, `*.spec.*`, `test/`, `tests/`, `__tests__/`, `e2e/`): CI runs them.
+
+For a connected agent's fix:
+
+- an edit to one of them is **refused on the machine** unless the machine named that file with `--allow-path`;
+- a named one is **always asked**: it gets a card a person answers, even when the rule is "Allow without asking";
+- a fix that changes one is **never pushed from the machine**. The branch stays there for review.
+
+Three more kinds are never part of a fix, named or not, because Shapewall's own commit leaves them out: files Git ignores,
+anything under `node_modules`, and `.gitattributes` / `.gitmodules`. An edit to one is refused when it is asked, with that reason.
+It is never allowed and then silently dropped.
+
+### Permission cards
+
+Each edit the agent asks for is checked on the machine first. It becomes a question only when all of this holds:
+
+- the file is inside the fix's folder, after resolving symlinks;
+- it is not in `.git` and not in Shapewall's store;
+- it is not a file that runs something, unless the machine named it with `--allow-path`, and not a file Git would leave out of
+  the commit ([Files that run something](#files-that-run-something));
+- the whole resulting file can be worked out, and the diff is small enough to show in full.
+
+What fails is refused there, with the reason in the answer ("Refused on the agent's machine: ..."), and nobody is asked. What
+passes is shown in the comment's chat thread as a card:
+
+- **The path and the full diff**, with **Allow** and **Deny**, in the machine's own words ("Edit src/app.css", "Create
+  src/new.css"). The agent's own title for the request is never shown.
+- **A hash ties the answer to the card.** The card carries a hash of the turn, the card, the path, the whole diff and how long it
+  waits. An answer must send that hash back. An answer for other content, another card or another turn is not this card's
+  answer.
+- **A card waits 2 minutes** ("Push this fix": 10). That is a length of time, not a moment: the machine and the server each count
+  it on their own clock, so the two clocks need not agree. No answer is a no. The machine's count is the one that decides: when
+  it did not take an answer (it came too late there), the card shows as expired, never as "Allowed by", and is counted as not
+  allowed.
+- **Who reads the diff.** The diff is a piece of the project's code. It is shown, live and in the stored thread, to the people
+  the agent works for: those in its audience whom the project trusts, whoever may answer its cards, and whoever asked for the
+  fix. Everyone else who can open the thread reads that the agent asked to edit a file, which file, and how that ended.
+- **A card is answered once.** Stop cancels the cards that wait.
+- **Everyone with the thread open sees the state change live**: waiting, allowed and by whom, denied, expired, cancelled. The strip
+  above the board lists the cards that wait for you, and opens the comment's chat, where the diff is.
+- **Allow needs a passkey check in the last 10 minutes.** The browser asks for it. Deny does not: it only ever stops something.
+
+**Who may answer.** Someone with the agent's answer role (admin by default), who is also in the agent's audience and trusted by
+the project's agent policy. When the agent's machine says `--approvals owner`: only the person who connected it. Everyone else
+sees the card and who it waits for.
+
+**The machine checks every answer again.** It counts an "allow" only for a card it asked and still waits on, with the same hash,
+not expired, once, and from the connecting person when it said "owner". A failed "allow" is a deny. An answer for a card it never
+asked is ignored. In the other direction, the server never takes "approved" from the machine: only a person's answer on the board
+makes a card allowed.
+
+### Allow without asking
+
+Each agent has an approval rule, in the console's approvals dialog on the project's Agents page: **Ask every time** or **Allow
+without asking**.
+
+- **Only when the agent's own machine named a kind** with `--auto` (`--auto edits`). Otherwise the option is listed as not
+  available, with the command to run on that machine.
+- **Who may switch it on.** When the machine says `--approvals owner`: only the person who connected the agent, nobody else,
+  whatever their role. An admin cannot take that person out of the loop; the server refuses, and the machine itself only goes
+  without asking when the server says the rule is that person's own. When the machine says `--approvals admins`: the role in the
+  agent's "who may change the rule" setting (admin by default; an owner can make it owner).
+- **Only for the kinds the machine named, and only for ordinary source files.** A file that runs something
+  ([Files that run something](#files-that-run-something)) always waits for a person, named or not.
+- **It never widens what may be edited.** The machine's checks above run on every edit all the same. The fix is still made on a
+  branch, and the commit is still kept only when it is exactly what was allowed.
+- **Nothing reaches a remote without a person having seen the diff.** A fix with an edit that went without asking is committed
+  on its branch on the machine and held there. It is not pushed and no pull request is opened. The thread shows one
+  **Push this fix** card with the whole changed-files diff. Someone who may answer the agent's cards allows it, with a fresh
+  passkey, under the same rules as any card (the hash, once, the machine's own recheck); it waits 10 minutes. Denied or not
+  answered, the fix stays on the machine and the result offers **Push this fix** again, as often as needed. A fix too large to
+  show in full cannot be pushed from the board at all.
+- **If the machine connects again without it**, the stored rule is set back to "ask" at once, and that is in the audit log.
+
+An edit that went without asking is still a card in the thread, marked "Allowed automatically", and is counted and audited.
+
+### What the machine enforces whatever the server says
+
+- **The command is the machine's.** The server cannot name, change or add a command, an argument, a folder, an environment
+  variable or an MCP server.
+- **No edits unless this machine said so.** With `--approvals none`, nobody's answer is taken and no fix starts.
+- **A fix is never made in the checkout.** A fresh copy, a new branch, a folder that is removed afterwards.
+- **Every edit is checked here first**: inside the fix's folder, not `.git`, not Shapewall's store, not a file that runs something
+  unless named with `--allow-path`, not a file Git would leave out, the whole diff shown.
+- **A file that runs something is never allowed without asking**, and a fix that changes one is never pushed.
+- **The policy file fails narrow.** A value in `agent-policy.json` that this version does not know (a typo, `false`, `""`, a
+  wrong type) reads as the narrowest setting for that key, never as the default: no approvals, only the person who connected it,
+  never pushed, nothing without asking. `agent connect` names each such key when it starts. The file must be yours and not
+  writable by others, which is checked before it is read.
+- **Every answer is checked here again**: a card this machine asked, the same hash, in time, once, and from the connecting person
+  under `--approvals owner`.
+- **"Allow without asking" only for what `--auto` named**, and under `--approvals owner` only when the server says the
+  connecting person set that rule themself.
+- **The commit is exactly what was allowed**, byte for byte and mode for mode, or there is no commit.
+- **Nothing is pushed that runs something, or that no person has seen.**
+- **After Stop, nothing more happens**: no commit, no push, no pull request.
+- **No commands for Claude Code.** Its fix session has no shell tool.
+- **The agent never holds its token.** Its process gets a small environment with no `SHAPEWALL_*` variable.
+
+What the machine cannot do is in [agent-hardening.md](agent-hardening.md#connected-agents): it does not sandbox the agent's own
+tools, and with approvals on, a server that was broken into can forge an "allow" for an edit the agent really asked.
 
 ### When a connected agent is offline
 
 - **Chat is refused.** The composer gives way to "Builder is offline. Chat needs it online; a comment sent to it waits until it is
   back." A conversation that silently queues is worse than a clear no.
+- **A fix cannot be asked.** Fix with an agent needs the agent online, and is not queued.
 - **The thread does not move by itself.** A thread whose agent is offline, or was revoked, stays with it. When another agent you
   may use is online, the panel offers **Ask Scout instead**. Choosing it switches the thread in the open, with the line described
   under [Chat with a connected agent](#chat-with-a-connected-agent).
@@ -677,18 +944,20 @@ watchers to fix new comments: every trusted member's new comment would go to an 
 
 ### Limits of chat
 
-| What                                | Limit                                                                  |
-| ----------------------------------- | ---------------------------------------------------------------------- |
-| Messages one person sends           | 20 a minute                                                            |
-| Chat turns in a project             | 200 a day (`dailyTurns` in the agent policy)                           |
-| Answers one agent gives at once     | `--concurrency` (1 to 4), plus 5 waiting; after that it answers "busy" |
-| A message                           | 8,000 characters, 8 mentions, 3 text files of 100 KB                   |
-| An answer                           | 100,000 characters                                                     |
-| What the machine sends at once      | 256 KB and 100 events in a batch                                       |
-| What the machine fetches for a turn | 2 MB                                                                   |
-| Links one agent token holds         | 1 (a second is refused, or takes over with `--takeover`)               |
-| Link opens by one agent token       | 6 a minute                                                             |
-| Chats of your own on one board      | 50 (the shared threads are apart)                                      |
+| What                                | Limit                                                                                                        |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Messages one person sends           | 20 a minute                                                                                                  |
+| Chat turns in a project             | 200 a day (`dailyTurns` in the agent policy)                                                                 |
+| Answers one agent gives at once     | `--concurrency` (1 to 4), plus 5 waiting; after that it answers "busy"                                       |
+| A message                           | 8,000 characters, 8 mentions, 3 text files of 100 KB                                                         |
+| An answer                           | 100,000 characters                                                                                           |
+| What the machine sends at once      | 256 KB and 100 events in a batch                                                                             |
+| What the machine fetches for a turn | 2 MB                                                                                                         |
+| Links one agent token holds         | 1 (a second is refused, or takes over with `--takeover`)                                                     |
+| Link opens by one agent token       | 6 a minute                                                                                                   |
+| Chats of your own on one board      | 50 (the shared threads are apart)                                                                            |
+| A permission card                   | Waits 2 minutes ("Push this fix": 10); the whole diff must fit in the card; counts against the storage quota |
+| Cards one fix may ask               | 60, and 5 waiting at the same time                                                                           |
 
 The daily budget is counted from the usage records, so deleting a thread gives no turns back. `dailyTurns` is part of the
 project's agent policy. The console's form has no field for it yet (and keeps the value when you save
@@ -741,7 +1010,11 @@ WantedBy=default.target
   agent's own token from anything it sends; neither is a guarantee. Connect only a project whose code the agent's audience may
   read, and keep secrets out of the folder or out of the agent's reach.
 - **It cannot act, by its own controls.** The session has only its reading tools and none of your settings files, and it is not
-  started when that cannot be set up ([read-only by the agent's own controls](#read-only-by-the-agents-own-controls)).
+  started when that cannot be set up ([read-only by the agent's own controls](#read-only-by-the-agents-own-controls)). A fix
+  session, on a machine that switched edits on, also has its editing tools, in a folder of its own.
+- **What leaves the machine when edits are on**, beyond the answers: the diffs on edit cards (bounded: a diff too large to show
+  in full is refused), the file paths and line counts of a fix, the branch name and the pull request link. Still not the agent's
+  token, which is never in the agent's environment, and not absolute paths.
 - **What the machine sends back** is cleaned by the server field by field before anything is shown or stored. A stolen agent token
   can pose as the agent (read what was sent to it, post answers); it cannot reach the machine.
 
@@ -767,6 +1040,11 @@ session is started in a way that leaves it nothing to act with, and anything tha
 - **What this costs you.** Settings that live in those files, such as an `apiKeyHelper` or `env`, do not apply to the connected
   session either. The login itself is not in those files.
 
+**A fix session** (a machine started with `--approvals owner` or `admins`) is set up the same way, with one difference: it keeps
+Edit, Write and MultiEdit beside Read, Grep and Glob. It has no settings files, no MCP servers, no Bash, no web tools and no
+bypass. Each edit it makes asks first, and the request goes through the machine's checks and a card
+([Permission cards](#permission-cards)). Chat turns on the same machine keep the read-only session.
+
 This was shown on one machine with one adapter version ([agent-hardening.md](agent-hardening.md#connected-agents) says how). It
 is still a good idea to give a connected agent a profile of its own: a separate config folder, logged in for this purpose.
 
@@ -777,10 +1055,31 @@ how it ended (answered, stopped, failed, interrupted). The model, the effort and
 reports them, and a cost only when the agent itself reports one: nothing is estimated, and "not reported" is not zero. A record
 never holds a message or an answer. There is no page for them yet.
 
+A fix is one usage record of kind "fix": its steps, how it ended (fix ready, answered, stopped, failed, interrupted), and how many
+requests it asked and how many were allowed and denied.
+
 The audit log gains `agent_connected` (who approved which agent, on which machine, for whom), `agent_link_connected` and
 `agent_link_disconnected` (with the reason; at most one of each a minute per agent, except a revoked or taken-over link, which is
 always written), `chat_thread_created`, `chat_thread_deleted`, `chat_thread_agent_changed` (who switched a thread from which agent
 to which), `agent_turn_started` and `agent_turn_stopped` (who, which agent, which board and thread). No entry holds message text.
+
+For edits (Shapewall 0.6.0) it gains:
+
+| Entry                                                  | What it records                                                                                                      |
+| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| `agent_edit_mode_changed`                              | What the agent's machine allows changed (approvals, how many commands, what may go without asking), before and after |
+| `agent_turn_started` with kind "fix"                   | Who pressed Fix, for which agent, board and comment thread                                                           |
+| `agent_permission_asked`                               | A card arrived: the agent, the thread, the path, the card's hash                                                     |
+| `agent_permission_approved`, `agent_permission_denied` | Who answered, the path, the card's hash                                                                              |
+| `agent_permission_expired`                             | Nobody answered in time                                                                                              |
+| `agent_permission_auto`                                | An edit went without asking, under the agent's rule                                                                  |
+| `agent_permission_not_taken`                           | The machine did not take a person's "allow" (it came too late there): who answered, and what the card became         |
+| `agent_fix_branch_ready`                               | The branch name and how many files, as the agent's machine reported them                                             |
+| `agent_branch_pushed`, `agent_pull_request_opened`     | The remote, or the pull request's link, as the agent's machine reported them                                         |
+| `agent_approval_rule_changed`                          | The rule or its roles changed, by a person, or reset to "ask" because the machine no longer allows "without asking"  |
+
+A command would be recorded only as a hash. No entry ever holds file content or a diff. The server sees no repository: what it
+writes about a branch, a push or a pull request is the machine's own account.
 
 ### The link and chat APIs
 
@@ -794,7 +1093,12 @@ Chat is on the board API for members and up (`/w/:ws/p/:pid/api`): `GET agent/st
 `GET|PATCH|DELETE agent/boards/:board/threads/:thread`, `POST .../threads/:thread/messages` (answers with server-sent events),
 `GET .../threads/:thread/events?after=<n>` (a running turn, for a second viewer), `POST .../threads/:thread/stop` and
 `POST .../threads/:thread/profile` (`{ profileId }`: the thread's agent). The board's agent list (`GET /api/boards/:board/agents`)
-says for each agent whether it is connected, whether it chats, and whether you may chat with it now.
+says for each agent whether it is connected, whether it chats, and whether you may chat with it now. It also says which edit mode
+the agent is in, and whether you may press Fix and answer its cards, with the reason when not.
+
+Fix with an agent is `POST .../threads/comment-<n>/messages` with `{ fix: true }` (and `agentId` for an agent other than the
+thread's, `dispatchHash` for the text you saw). A card is answered with `POST .../threads/:thread/permissions/:id`
+(`{ optionId: "allow" | "deny", hash }`), and `GET agent/boards/:board/permissions` lists the cards that wait for you.
 
 ## Moving to a new origin
 
@@ -1114,6 +1418,35 @@ also works, since it ignores the new tables, but:
 To remove the schema as well (SQLite 3.35+), with the server stopped: `DROP TABLE chat_turns; DROP TABLE chat_messages; DROP TABLE
 chat_threads; ALTER TABLE device_logins DROP COLUMN meta; DELETE FROM schema_migrations WHERE version = 13; PRAGMA user_version =
 12;`. Never reset the ledger any other way. Test a rollback on a copy first.
+
+### Migration 14 and rollback
+
+Migration 14 (0.6.0) adds approvals and edits from a hosted board
+([Edits from the board](#edits-from-the-board-the-trust-decision)). It is additive and runs once:
+
+- table `chat_permissions` (one row per permission card a connected agent asked during a fix: what it asked, as hashed, its
+  state, who answered and when);
+- columns `agent_runs.approvals_asked`, `agent_runs.approvals_allowed` and `agent_runs.approvals_denied` (how many requests a
+  fix asked and how they ended).
+
+Nothing existing is rewritten: no token gains a scope, no agent changes its audience or its approval rule, and a connected agent
+reads and answers only until its own machine says more. `watch --remote` and `mcp --remote` work with the same tokens. Back up
+before upgrading.
+
+For rollback, prefer the pre-upgrade backup in a fresh data folder with the previous release. Running 0.5.0 on the upgraded
+database also works, since it ignores the new table and columns, but:
+
+- **A fix cannot be started.** 0.5.0 has no Fix with an agent on hosted comments and relays no cards. Connected agents chat and
+  answer comments as they did in 0.5.0.
+- **Cards and their answers are not shown.** They are still there when you upgrade again, and the audit entries stay in the
+  audit log.
+- **A machine started with `--approvals`** keeps its own setting in its policy file. It takes no edits while the server is
+  0.5.0, because that server never asks for a fix.
+
+To remove the schema as well (SQLite 3.35+), with the server stopped: `DROP TABLE chat_permissions; ALTER TABLE agent_runs DROP
+COLUMN approvals_asked; ALTER TABLE agent_runs DROP COLUMN approvals_allowed; ALTER TABLE agent_runs DROP COLUMN
+approvals_denied; DELETE FROM schema_migrations WHERE version = 14; PRAGMA user_version = 13;`. Never reset the ledger any other
+way. Test a rollback on a copy first.
 
 ## Secrets, logs and legal review
 

@@ -185,7 +185,7 @@ test('the console: a project with no agent says how to connect one; then each ag
   assert.equal(await row.locator('[data-sw-agent-state]').first().getAttribute('data-sw-agent-state'), 'offline')
   assert.match(await row.textContent(), /Never connected/)
   assert.match(await row.locator('[data-sw-agent-audience]').textContent(), /Only Ada/)
-  assert.match(await row.locator('[data-sw-agent-approval]').textContent(), /Always ask/)
+  assert.match(await row.locator('[data-sw-agent-approval]').textContent(), /Ask every time/)
   // A watcher whose command is unknown wears its initials.
   assert.equal(await row.locator('[data-sw-agent-avatar]').first().getAttribute('data-sw-agent-avatar'), 'initials')
 
@@ -216,7 +216,8 @@ test('the console: a project with no agent says how to connect one; then each ag
   await page.waitForSelector('[data-sw-agent-approval-dialog]')
   assert.equal(await page.getAttribute('[data-sw-agent-approval-option="ask"]', 'aria-checked'), 'true')
   assert.equal(await page.getAttribute('[data-sw-agent-approval-option="auto"]', 'aria-disabled'), 'true')
-  assert.match(await page.textContent('[data-sw-agent-approval-unavailable]'), /Needs the agent's own machine to allow approvals/)
+  assert.match(await page.textContent('[data-sw-agent-approval-unavailable]'), /Allow without asking \(not available\)/)
+  assert.match(await page.textContent('[data-sw-agent-approval-why]'), /takes comments on its own and asks before each command/)
   await shot(page, 'console-agents-4-approval-1440-light')
   await page.keyboard.press('Escape')
 

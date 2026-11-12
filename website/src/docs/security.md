@@ -80,12 +80,22 @@ What these protections do not cover:
 - **Comment text can try to steer an agent.** Anyone who can comment can write text aimed at the agent. On shared boards, let only
   people you trust dispatch work to an agent.
 - **A connected agent can read the whole project.** An agent connected to a hosted board with `shapewall agent connect` reads and
-  answers only. Only Claude Code is offered in this release, and its session is made read-only by its own controls: it starts
+  answers only, by default. Only Claude Code is offered in this release, and its session is made read-only by its own controls: it starts
   without your settings files (their allow rules, hooks and MCP servers do not apply), with only its reading tools, and anything
   it asks permission for is refused. If that cannot be set up, the agent is not started. The server never runs anything on the
   machine. But the agent reads every file in the project folder, a `.env` file included, and its answers go to whoever may ask.
   This was checked on one machine with one adapter version. Connect only projects whose code the audience may read, and give the
   agent a profile of its own. See [the hosted guide](/docs/hosted#what-a-connected-agent-can-reach).
+- **Edits from a hosted board are a choice made on the code machine.** Who may make someone else's machine change files? By
+  default, nobody. `shapewall agent connect --approvals owner` (or `admins`) switches it on, on that machine only, and the server
+  can only narrow it. A fix is then made on a new branch in a folder of its own, never in the checkout. Each edit is checked on
+  the machine, shown on the board as a card with the full diff, and allowed by a person with a recent passkey check. The machine
+  checks every answer again, and keeps the commit only if it is exactly what was allowed. Commands are not offered for Claude
+  Code in this release: its fix session has no shell tool. The limit: Shapewall does not sandbox the agent's own tools, and with
+  approvals on, a compromised server can forge an "allow" for an edit the agent really asked. The worst case is then edits to
+  project files, on a branch, in a throwaway folder, pushed for review. Not commands, and not the checkout. Give the agent a
+  restricted profile, prefer `--approvals owner`, review the pull request like any other, and do not add `--allow-path` for CI
+  files. See [agent hardening](/docs/agent-hardening#edits-from-a-hosted-board).
 - **Images on comments are checked, not understood.** Shapewall checks an attached image's type by its bytes, re-encodes or strips its
   metadata and serves it only as an image, but the picture itself can still show text aimed at an agent, and an image decoder bug in a
   browser or a model is outside its reach. Agents get images inside the same untrusted framing as comment text.

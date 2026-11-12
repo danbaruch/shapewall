@@ -727,7 +727,7 @@ test('migration 5 adds its tables and columns on top of a version 4 database', a
     DROP TABLE comment_files; ALTER TABLE comments DROP COLUMN images; ALTER TABLE comments DROP COLUMN drawing;
     ALTER TABLE comments DROP COLUMN import_author_kind; ALTER TABLE comments DROP COLUMN imported_by; ALTER TABLE comments DROP COLUMN imported_at;
     ALTER TABLE comments DROP COLUMN import_orphan; ALTER TABLE comments DROP COLUMN imported_reactions;
-    DROP TABLE chat_turns; DROP TABLE chat_messages; DROP TABLE chat_threads;
+    DROP TABLE chat_permissions; DROP TABLE chat_turns; DROP TABLE chat_messages; DROP TABLE chat_threads;
     DROP TABLE agent_runs; DROP TABLE agents;
     ALTER TABLE projects DROP COLUMN default_agent_id; ALTER TABLE comments DROP COLUMN agent_id;
     DROP TABLE schema_migrations;
@@ -735,13 +735,13 @@ test('migration 5 adds its tables and columns on top of a version 4 database', a
   `)
   old.close()
   const db = await openDatabase(path.join(dataDir, 'shapewall.db'))
-  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 13)
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 14)
   assert.deepEqual(
     db
       .prepare('SELECT version FROM schema_migrations ORDER BY version')
       .all()
       .map((row) => row.version),
-    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
   )
   assert.equal(db.prepare('SELECT handle FROM users WHERE id = ?').get(owner.user.id).handle, 'mira')
   assert.equal(db.prepare('SELECT name FROM projects WHERE id = ?').get(project.id).name, 'Existing site')

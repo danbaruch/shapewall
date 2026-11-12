@@ -597,6 +597,36 @@ const MIGRATIONS = [
   CREATE INDEX chat_turns_thread ON chat_turns(workspace_id, project_id, board_id, thread_id, created_at);
   CREATE INDEX chat_turns_agent ON chat_turns(workspace_id, agent_id, state);
   `,
+  // 14: approvals and edits from a hosted board (0.6.0). chat_permissions is
+  // one row per permission card a connected agent asked during a fix: what
+  // it asked (the card, as hashed), its state, who answered and when. The
+  // usage record of a run gains how many requests it asked and how they
+  // ended. Additive; an older build ignores all of it.
+  `
+  CREATE TABLE chat_permissions (
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    board_id TEXT NOT NULL,
+    thread_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    card TEXT NOT NULL,
+    card_hash TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    answered_by TEXT,
+    answered_at TEXT,
+    PRIMARY KEY (workspace_id, turn_id, id)
+  );
+  CREATE INDEX chat_permissions_board ON chat_permissions(workspace_id, project_id, board_id, state);
+  ALTER TABLE agent_runs ADD COLUMN approvals_asked INTEGER;
+  ALTER TABLE agent_runs ADD COLUMN approvals_allowed INTEGER;
+  ALTER TABLE agent_runs ADD COLUMN approvals_denied INTEGER;
+  ALTER TABLE agents ADD COLUMN approval_rule_by TEXT;
+  `,
 ]
 
 export async function openDatabase(file) {

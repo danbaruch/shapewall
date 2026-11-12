@@ -145,7 +145,18 @@ test('a token that may take work is an agent from the moment it is made, for its
   assert.equal(agent.audience.kind, 'owner')
   assert.equal(agent.audience.text, 'Only Ada')
   assert.equal(agent.audience.inherited, false)
-  assert.deepEqual(agent.approval, { rule: 'ask', effectiveRule: 'ask', autoAvailable: false, changeRole: 'admin', answerRole: 'admin' })
+  assert.deepEqual(agent.approval, {
+    rule: 'ask',
+    effectiveRule: 'ask',
+    autoAvailable: false,
+    changeRole: 'admin',
+    answerRole: 'admin',
+    // A watcher's machine takes no approvals from the board.
+    mode: 'none',
+    machine: { approvals: 'none', commands: [], auto: [] },
+    rules: { edits: 'ask', commands: 'ask' },
+    autoBy: 'role',
+  })
   assert.equal(agent.createdBy.handle, 'ada')
   assert.deepEqual(agent.token.scopes, [...AGENT_SCOPES].sort())
   assert.deepEqual(options.audiences, ['owner', 'members', 'trusted'])
@@ -714,6 +725,10 @@ test('approval rule: a role-gated setting; "always ask" is the only rule in effe
     autoAvailable: false,
     changeRole: 'owner',
     answerRole: 'owner',
+    mode: 'none',
+    machine: { approvals: 'none', commands: [], auto: [] },
+    rules: { edits: 'ask', commands: 'ask' },
+    autoBy: 'role',
   })
   const entry = (await audit('agent_approval_rule_changed'))[0]
   assert.deepEqual(entry.detail.before, { rule: 'ask', changeRole: 'admin', answerRole: 'admin' })
@@ -1222,8 +1237,8 @@ test('migration 12: the claim tokens of a 0.3.4 database become watcher agents t
   old.close()
 
   let db = await openDatabase(file)
-  // Migration 13 (connected agents) was applied before and stays.
-  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 13)
+  // Migrations 13 (connected agents) and 14 (approvals from the board) were applied before and stay.
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 14)
   const rows = db.prepare('SELECT a.*, k.name FROM agents a JOIN api_tokens k ON k.id = a.token_id').all()
   assert.deepEqual(
     rows.map((row) => row.name),

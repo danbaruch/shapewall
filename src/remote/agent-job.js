@@ -53,9 +53,15 @@ export function cleanJob(raw) {
   if (!TURN_ID_RE.test(String(turn.id || ''))) throw new JobError('The server sent an invalid turn id.')
   if (!ID_RE.test(String(turn.board || ''))) throw new JobError('The server sent an invalid board id.')
   if (!THREAD_RE.test(String(turn.thread || ''))) throw new JobError('The server sent an invalid thread id.')
-  const kind = turn.kind === 'comment' ? 'comment' : 'chat'
+  const kind = ['comment', 'fix', 'push'].includes(turn.kind) ? turn.kind : 'chat'
   const comment = Number.isSafeInteger(turn.comment) && turn.comment > 0 ? turn.comment : null
-  if (kind === 'comment' && !comment) throw new JobError('The server sent a comment turn without a comment.')
+  if (kind !== 'chat' && !comment) throw new JobError('The server sent a comment turn without a comment.')
+  // A fix is always about its own comment's thread.
+  if (['fix', 'push'].includes(kind) && turn.thread !== `comment-${comment}`)
+    throw new JobError('The server sent a fix for another thread.')
+  // The server's approval rule for this agent, per kind: "auto" only ever
+  // counts where this machine's own policy says so too (agent-link.js).
+  const rule = (value) => (value === 'auto' ? 'auto' : 'ask')
   const list = Array.isArray(raw.messages) ? raw.messages.slice(-HISTORY_MAX) : []
   const messages = list
     .filter((message) => message && (message.role === 'user' || message.role === 'assistant'))
@@ -89,6 +95,8 @@ export function cleanJob(raw) {
     turn: { id: turn.id, board: turn.board, thread: turn.thread, kind, comment },
     agent: { name: text(raw.agent?.name, 60) || null },
     asker: { name: text(raw.asker?.name, 80) || null, handle: text(raw.asker?.handle, 40) || null, owner: raw.asker?.owner === true },
+    // `byOwner`: the server says the person who connected this agent set the rule themself.
+    approvals: { edits: rule(raw.approvals?.edits), commands: rule(raw.approvals?.commands), byOwner: raw.approvals?.byOwner === true },
     messages,
     context: {
       board: {
@@ -110,6 +118,10 @@ export function cleanJob(raw) {
 // this machine's own: the server's stand-in message is never used.
 export const COMMENT_PROMPT =
   'A reviewer sent you the comment quoted in the board context above. Read it, and the code it is about, then answer in a few short paragraphs: what the comment asks for, where in the project the change belongs (file and line when you can tell), and exactly what to change. You cannot change files or run commands from here, so do not try; end with one line saying the change still has to be made by a person or by an agent that can edit. Your answer is posted as a reply on the comment.'
+
+// What the agent is asked for "Fix with <agent>". Again this machine's own words.
+export const FIX_PROMPT =
+  'A reviewer asked you to fix the comment quoted in the board context above. Read it, find the code it is about, and make the change in the files of your working folder: the smallest edit that does what the comment asks. Each edit is shown to a person on the board, who allows or denies it; do not retry one that was denied or refused. Do not commit or push. Finish with two or three sentences saying what you changed and in which files, or why you changed nothing. Your answer is posted as a reply on the comment.'
 
 const page = (board, id) => {
   const found = board.pages.find((item) => item?.id === id)
@@ -195,7 +207,8 @@ export function jobConversation(job) {
       })
     }
     // A comment that was sent to the agent: this machine's own request.
-    if (last && job.turn.kind === 'comment') content.push({ type: 'text', text: COMMENT_PROMPT })
+    if (last && job.turn.kind === 'fix') content.push({ type: 'text', text: FIX_PROMPT })
+    else if (last && job.turn.kind === 'comment') content.push({ type: 'text', text: COMMENT_PROMPT })
     else if (message.text) content.push({ type: 'text', text: message.text })
     else if (!message.mentions.length && !message.files.length) content.push({ type: 'text', text: '(empty message)' })
     return { role: 'user', content }

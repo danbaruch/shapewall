@@ -231,6 +231,9 @@ export function mountBoardRoutes(
           rateLimiter,
           quotas,
           workspaceQuota,
+          policyFor,
+          freshOrThrow,
+          now,
         })
       : null
 

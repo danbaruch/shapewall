@@ -2,10 +2,13 @@
 // connect` through the real device login, running the link in this process
 // against the stub ACP agent (test/fixtures/acp-stub.mjs), and reading a
 // chat turn's event stream as the board does.
+import fs from 'node:fs'
 import path from 'node:path'
+import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { createBackend } from '../src/agent/backends/index.js'
-import { REMOTE_PREAMBLE } from '../src/agent/context.js'
+import { REMOTE_FIX_PREAMBLE, REMOTE_PREAMBLE } from '../src/agent/context.js'
+import { cleanMachinePolicy } from '../src/remote/agent-policy-file.js'
 import { runAgentLink } from '../src/remote/agent-link.js'
 import { createRemote } from '../src/remote/remote.js'
 import { reauth } from './hosted-helpers.js'
@@ -13,6 +16,40 @@ import { tempDir } from './helpers.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 export const ACP_STUB = path.join(HERE, 'fixtures', 'acp-stub.mjs')
+export const FIX_STUB = path.join(HERE, 'fixtures', 'acp-remote-fix.mjs')
+
+// What the scripted fix agent does (test/fixtures/acp-remote-fix.mjs), as
+// the marker to put in a comment's text.
+export const fixScript = (steps) => `[[stub:${Buffer.from(JSON.stringify(steps)).toString('base64')}]]`
+
+// A throwaway git repository in `dir` with one commit of `files` ({ name: text }).
+export function gitRepo(dir, files = { 'index.html': '<h1>Hello</h1>\n', 'styles.css': 'h1 { color: blue; }\n' }) {
+  fs.mkdirSync(dir, { recursive: true })
+  const git = (...args) =>
+    execFileSync('git', args, {
+      cwd: dir,
+      encoding: 'utf8',
+      env: {
+        PATH: process.env.PATH,
+        HOME: dir,
+        GIT_CONFIG_NOSYSTEM: '1',
+        GIT_AUTHOR_NAME: 'Ada',
+        GIT_AUTHOR_EMAIL: 'ada@example.com',
+        GIT_COMMITTER_NAME: 'Ada',
+        GIT_COMMITTER_EMAIL: 'ada@example.com',
+      },
+    }).trim()
+  git('init', '-q', '-b', 'main')
+  git('config', 'user.name', 'Ada')
+  git('config', 'user.email', 'ada@example.com')
+  for (const [name, text] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(dir, name)), { recursive: true })
+    fs.writeFileSync(path.join(dir, name), text)
+  }
+  git('add', '-A')
+  git('commit', '-q', '-m', 'first')
+  return git
+}
 
 export async function until(check, label, ms = 15_000) {
   const end = Date.now() + ms
@@ -73,6 +110,12 @@ export function startLink(
     backend: given = null,
     fetchImpl = fetch,
     remote = true,
+    // Edits from the board: this machine's policy for them ({ approvals,
+    // commands, auto, allowPaths, base, remote }), with `cwd` a git
+    // repository. The scripted fix agent (FIX_STUB) makes the fixes.
+    edits = null,
+    fixArgs = [],
+    stateDir = tempDir('hosted-fix-state'),
   } = {},
 ) {
   const logs = []
@@ -97,14 +140,35 @@ export function startLink(
         log: (line) => logs.push(line),
       },
     )
+  const machinePolicy = cleanMachinePolicy({ remote: null, ...policy, ...(edits || {}) })
+  const fixEnv = { PATH: process.env.PATH, HOME: process.env.HOME, XDG_STATE_HOME: stateDir, ...env }
+  const editBackend =
+    edits && machinePolicy.approvals !== 'none'
+      ? createBackend(
+          {
+            configured: true,
+            backend: 'acp',
+            label: 'Stub agent',
+            acp: { argv: [process.execPath, FIX_STUB, ...fixArgs] },
+            remoteEdit: { commands: machinePolicy.commands, allowPaths: machinePolicy.allowPaths },
+            preamble: REMOTE_FIX_PREAMBLE,
+            vision: false,
+          },
+          { env: fixEnv, root: cwd, protect: [path.join(cwd, '.shapewall')], log: (line) => logs.push(line) },
+        )
+      : null
   let ready
   const whenReady = new Promise((resolve) => (ready = resolve))
   const done = runAgentLink({
     origin: hosted.origin,
     token,
     backend,
+    editBackend,
+    fix: editBackend
+      ? { config: { dir: cwd, outputDir: path.join(cwd, '.shapewall'), agent: null, boards: [] }, env: fixEnv, fetchImpl }
+      : null,
     hello: { kind, machine: 'studio', version: '0.5.0', maxTurns },
-    policy,
+    policy: edits ? machinePolicy : policy,
     remote: remote ? createRemote({ origin: hosted.origin, token }) : null,
     fetchImpl,
     signal: controller.signal,
@@ -120,6 +184,8 @@ export function startLink(
   return {
     logs,
     backend,
+    editBackend,
+    stateDir,
     cwd,
     ready: whenReady,
     done,
@@ -128,6 +194,7 @@ export function startLink(
       controller.abort()
       await done.catch(() => {})
       backend.close?.()
+      editBackend?.close?.()
     },
   }
 }

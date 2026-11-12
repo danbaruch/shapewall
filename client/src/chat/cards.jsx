@@ -20,6 +20,7 @@ import { cn } from '../lib/utils'
 import { DiffView, NoteCard } from './DiffCards'
 import { useAllowForChat } from './allowForChat'
 import { allowForChatLabel } from './composerModel.js'
+import { settledWords, useHostedAnswer, waitingWords } from './hostedPermissions.js'
 
 // The run summary after a turn that changed something (RunSummary.jsx).
 export { default as RunSummary } from './RunSummary'
@@ -113,11 +114,19 @@ export function PermissionCard({ card, onAnswer, live, touch }) {
   const state = card.state === 'pending' && answered ? answered : card.state
   // A starter agent's command card is answered from the stored thread (no stream).
   const pending = state === 'pending' && (live || card.answerable === true)
-  const done = PERMISSION_STATES[state]
+  // A hosted board (hostedPermissions.js): the card is the same for everyone
+  // with the thread open, and only some of them may answer it. The others
+  // read who is waited for. How it ended names the person who answered.
+  const hosted = card.hosted === true
+  const hostedAnswer = useHostedAnswer()
+  const mayAnswer = !hosted || hostedAnswer?.ok === true
+  const settled = PERMISSION_STATES[state]
+  const done = settled ? { ...settled, text: hosted ? settledWords(card, state) || settled.text : settled.text } : null
   const answer = async (optionId) => {
     setBusy(true)
     try {
-      await onAnswer(card.id, optionId)
+      // false: the answer was not taken (said beside the composer).
+      if ((await onAnswer(card.id, optionId)) === false) return
       const kind = (card.options || []).find((option) => option.optionId === optionId)?.kind || 'reject'
       setAnswered(kind.startsWith('allow') ? 'approved' : 'denied')
     } finally {
@@ -128,9 +137,10 @@ export function PermissionCard({ card, onAnswer, live, touch }) {
   const options = card.options || []
   // "Allow for this chat" (composerModel.js canAutoAllow): allow this one,
   // and the same request again in this chat without asking. Only where the
-  // agent offers no "always" option of its own.
+  // agent offers no "always" option of its own. Never on a hosted board:
+  // every card there is answered.
   const allowOnce = options.find((option) => option.kind === 'allow_once')
-  const chatRule = pending && allowOnce && allowForChat.can(card)
+  const chatRule = pending && !hosted && allowOnce && allowForChat.can(card)
   const buttons = [
     ...options.map((option) => ({
       key: option.optionId,
@@ -171,7 +181,8 @@ export function PermissionCard({ card, onAnswer, live, touch }) {
     >
       {pending ? (
         <p className="flex items-center gap-1.5 border-b border-warn/30 bg-warn/10 px-3 py-1.5 text-xs font-medium text-fg">
-          <ShieldQuestion size={13} className="shrink-0 text-warn" aria-hidden="true" /> The agent asks before it acts
+          <ShieldQuestion size={13} className="shrink-0 text-warn" aria-hidden="true" />{' '}
+          {card.name === 'push' ? 'Nobody has looked at this fix yet' : 'The agent asks before it acts'}
         </p>
       ) : null}
       <div className="space-y-1.5 px-3 py-2">
@@ -196,7 +207,8 @@ export function PermissionCard({ card, onAnswer, live, touch }) {
             </Badge>
           ) : null}
         </p>
-        {card.detail ? (
+        {/* A detail that only repeats the path in the heading says nothing more. */}
+        {card.detail && !(split && card.detail === split.path) ? (
           looksLikeCode(card.detail) ? (
             <code className="block max-h-48 overflow-y-auto rounded-md bg-sunken px-2 py-1.5 font-mono text-[11px] leading-4 break-all whitespace-pre-wrap text-muted">
               {card.detail}
@@ -212,8 +224,21 @@ export function PermissionCard({ card, onAnswer, live, touch }) {
           </p>
         ) : null}
         <DiffView diff={card.diff} />
+        {card.diffHidden ? (
+          <p className="text-xs leading-5 text-muted" data-sw-chat-permission-diff-hidden="true">
+            The change itself is shown to the people this agent works for.
+          </p>
+        ) : null}
       </div>
-      {pending ? (
+      {pending && !mayAnswer ? (
+        <p
+          className="flex items-start gap-1.5 border-t border-line px-3 py-2 text-xs leading-5 text-muted"
+          role="status"
+          data-sw-chat-permission-waiting="true"
+        >
+          <Clock size={12} className="mt-1 shrink-0" aria-hidden="true" /> <span className="min-w-0">{waitingWords(hostedAnswer)}</span>
+        </p>
+      ) : pending ? (
         <div className="space-y-1.5 border-t border-line px-3 py-2">
           <div className={cn('gap-1.5', touch ? 'grid grid-cols-2' : 'flex flex-wrap')}>
             {buttons.map((item) => (
@@ -234,7 +259,10 @@ export function PermissionCard({ card, onAnswer, live, touch }) {
             ))}
           </div>
           <p className="flex items-center gap-1 text-xs text-muted">
-            <Clock size={12} className="shrink-0" aria-hidden="true" /> No answer in 2 minutes counts as Deny.
+            <Clock size={12} className="shrink-0" aria-hidden="true" />{' '}
+            {card.name === 'push'
+              ? "This is the whole fix. No answer in 10 minutes: it stays on the agent's machine, not pushed."
+              : 'No answer in 2 minutes counts as Deny.'}
           </p>
         </div>
       ) : null}

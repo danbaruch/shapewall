@@ -226,7 +226,7 @@ test('chat: pick the agent in the Agents panel, ask, and the answer streams in; 
   const row = page.locator('[data-sw-hosted-agent-name="Builder"]')
   await row.waitFor()
   assert.equal(await row.getAttribute('data-sw-agent-state'), 'online')
-  assert.match(await row.textContent(), /Reads the project and answers\. No edits, no commands\./)
+  assert.match(await row.textContent(), /Reads and answers\. No edits, no commands\./)
   await shot(page, 'board-agents-panel-1440-light')
   await row.locator('[data-sw-hosted-agent-chat]').click()
   await page.waitForSelector('[data-sw-chat-input]')

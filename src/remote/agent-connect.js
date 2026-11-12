@@ -20,11 +20,24 @@ import { KNOWN_AGENTS, detectAgents } from '../agent/acp/detect.js'
 import { acpAgentKind } from '../agent/acp/command.js'
 import { createBackend } from '../agent/backends/index.js'
 import { agentSettings } from '../agent/config.js'
-import { REMOTE_PREAMBLE } from '../agent/context.js'
+import { REMOTE_FIX_PREAMBLE, REMOTE_PREAMBLE } from '../agent/context.js'
 import { authFiles, findConfigFile, loadConfig } from '../config.js'
 import { AGENT_SLUG_RE, forgetAgentCredential, readAgentCredential, saveAgentCredential } from './credentials.js'
+import { fixRoot, sweepFixes } from './agent-fix.js'
 import { fatalLinkError, runAgentLink } from './agent-link.js'
-import { POLICY_AUDIENCES, policyFile, readMachinePolicy, saveMachinePolicy } from './agent-policy-file.js'
+import {
+  POLICY_APPROVALS,
+  POLICY_AUDIENCES,
+  POLICY_AUTO_KINDS,
+  cleanAllowPath,
+  cleanBase,
+  cleanCommand,
+  cleanRemote,
+  describeMachinePolicy,
+  policyFile,
+  readMachinePolicy,
+  saveMachinePolicy,
+} from './agent-policy-file.js'
 import { createRemote, remoteOrigin } from './remote.js'
 import { safeOut, terminalSafe } from './terminal.js'
 
@@ -149,6 +162,81 @@ export function profileProblems(kind, root, env = process.env, { managedFile = '
   return out
 }
 
+// What the flags change in this machine's policy for the connection:
+// { changes } to save, or throws with how to say it. Lists grow one entry a
+// run ("none" empties one), so a service file carries no policy: the file does.
+// Agents whose listed commands were proven, with the real adapter, to be
+// the only commands they run. None yet: Claude Code, started with its shell
+// tool, runs commands it takes to be read-only without asking (acp.js).
+export const COMMANDS_PROVEN = []
+const NO_COMMANDS =
+  'Commands cannot be allowed for Claude Code in this release: started with its shell tool it runs commands it takes to be read-only (ls, cat) without asking, and those can read outside the project. Edits work without it.'
+
+export function policyChanges(flags, saved, kind = null) {
+  const changes = {}
+  const commandsOk = kind === null || COMMANDS_PROVEN.includes(kind)
+  if (flags.audience !== undefined) {
+    if (!POLICY_AUDIENCES.includes(flags.audience))
+      throw new Error(
+        '--audience: "owner" (ask the server to keep it to the person who connects it, and refuse other jobs here) or "server" (as set on the server)',
+      )
+    changes.audience = flags.audience
+  }
+  if (flags.approvals !== undefined) {
+    if (!POLICY_APPROVALS.includes(flags.approvals))
+      throw new Error(
+        '--approvals: "none" (read and answer only, the default), "owner" (the person who connected it may allow edits from the board) or "admins" (whoever the server lets answer, admins by default)',
+      )
+    changes.approvals = flags.approvals
+  }
+  const approvals = changes.approvals ?? saved.approvals
+  const needsApprovals = (flag) => {
+    if (approvals === 'none') throw new Error(`--${flag} needs --approvals owner or --approvals admins: this agent reads and answers only.`)
+  }
+  if (flags['allow-command'] !== undefined) {
+    needsApprovals('allow-command')
+    if (flags['allow-command'] === 'none') changes.commands = []
+    else if (!commandsOk) throw new Error(`--allow-command: ${NO_COMMANDS}`)
+    else {
+      const command = cleanCommand(flags['allow-command'])
+      if (!command)
+        throw new Error(
+          '--allow-command: one exact command on one line, at most 200 characters, such as "npm test" ("none" removes them all)',
+        )
+      changes.commands = [...new Set([...saved.commands, command])]
+    }
+  }
+  if (flags['allow-path'] !== undefined) {
+    needsApprovals('allow-path')
+    if (flags['allow-path'] === 'none') changes.allowPaths = []
+    else {
+      const file = cleanAllowPath(flags['allow-path'])
+      if (!file) throw new Error('--allow-path: a file path inside the project, such as package.json ("none" removes them all)')
+      changes.allowPaths = [...new Set([...saved.allowPaths, file])]
+    }
+  }
+  if (flags.auto !== undefined) {
+    const kinds = flags.auto === 'none' ? [] : String(flags.auto).split(',')
+    if (kinds.some((kind) => !POLICY_AUTO_KINDS.includes(kind)))
+      throw new Error('--auto: "none" (every request waits for a person, the default), "edits", "commands" or "edits,commands"')
+    if (kinds.length) needsApprovals('auto')
+    if (kinds.includes('commands') && !(changes.commands ?? saved.commands).length)
+      throw new Error('--auto commands needs at least one --allow-command: there is no command to allow.')
+    changes.auto = kinds
+  }
+  if (flags.base !== undefined) {
+    if (flags.base !== 'head' && !cleanBase(flags.base))
+      throw new Error('--base: a branch name, such as main ("head": the commit the checkout is on)')
+    changes.base = flags.base === 'head' ? null : flags.base
+  }
+  if (flags['git-remote'] !== undefined) {
+    if (flags['git-remote'] !== 'none' && !cleanRemote(flags['git-remote']))
+      throw new Error('--git-remote: a remote name, such as origin ("none": never push)')
+    changes.remote = flags['git-remote'] === 'none' ? null : flags['git-remote']
+  }
+  return changes
+}
+
 export async function agentConnect(
   flags,
   print,
@@ -162,15 +250,16 @@ export async function agentConnect(
   if (!AGENT_SLUG_RE.test(slug)) throw new Error('--as: a short name for this connection (lower-case letters, digits and dashes)')
   const concurrency = flags.concurrency === undefined ? 2 : Number(flags.concurrency)
   if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 4) throw new Error('--concurrency must be 1 to 4')
-  if (flags.audience !== undefined && !POLICY_AUDIENCES.includes(flags.audience))
-    throw new Error(
-      '--audience: "owner" (ask the server to keep it to the person who connects it, and refuse other jobs here) or "server" (as set on the server)',
-    )
-
   const config = projectFor(flags, cwd)
   const settings = connectSettings(config, flags, env)
   const kind = acpAgentKind(settings.acp.argv) || 'custom'
   const label = terminalSafe(settings.label)
+  // Checked before anything is asked of anyone: a wrong flag changes nothing.
+  // A value in the file that is not understood reads as the narrowest setting, and is said.
+  const policyNow = readMachinePolicy(origin, slug, env, {
+    warn: (text) => log(`Not understood, so read as the narrowest setting: ${text}`),
+  })
+  const changes = policyChanges(flags, policyNow, kind)
 
   // ---- The agent's token: its own, never the saved login's ----
   let token = env.SHAPEWALL_TOKEN || ''
@@ -227,8 +316,22 @@ export async function agentConnect(
     throw new Error('That is not a project token (swp_...). Run "shapewall agent connect" without it to get one approved.')
 
   // ---- This machine's own rules ----
-  const policy =
-    flags.audience !== undefined ? saveMachinePolicy(origin, slug, { audience: flags.audience }, env) : readMachinePolicy(origin, slug, env)
+  const saved = Object.keys(changes).length ? saveMachinePolicy(origin, slug, changes, env) : policyNow
+  // Commands in the file (written by hand, or for another agent) are not in effect for an agent they were not proven with.
+  const policy = COMMANDS_PROVEN.includes(kind) ? saved : { ...saved, commands: [], auto: saved.auto.filter((item) => item !== 'commands') }
+  if (saved.commands.length && !policy.commands.length) log(`Not in effect: the commands in ${policyFile(env)}. ${NO_COMMANDS}`)
+  const edits = policy.approvals !== 'none'
+  if (edits) {
+    // Said now rather than at the first fix: where fixes are made must be outside the project.
+    try {
+      fixRoot(config.dir, env)
+    } catch (error) {
+      throw new Error(error.message.replace(/^On the agent's machine, t/, 'T').replace(/ there /, ' '), { cause: error })
+    }
+    // What an earlier run left behind (it was killed mid-fix): removed, and its branch names are free again.
+    const swept = sweepFixes(config.dir, env)
+    if (swept.length) log(`Removed ${swept.length} unfinished fix cop${swept.length === 1 ? 'y' : 'ies'} an earlier run left behind.`)
+  }
   const profile = profileProblems(kind, config.dir, env)
   if (profile.refuse.length)
     throw new Error(`${label} is not started read-only on this machine. ${profile.refuse.join(' ')} See docs/agent-hardening.md.`)
@@ -248,6 +351,29 @@ export async function agentConnect(
     },
   )
   if (!backend) throw new Error('That agent could not be set up on this machine.')
+  // The same agent, started for fixes: it may ask to edit files of the
+  // project (and to run the listed commands), each request checked here and
+  // answered on the board (acp.js remoteEdit). Only when this machine said so.
+  const editBackend = edits
+    ? createBackend(
+        {
+          ...settings,
+          readOnly: false,
+          remoteEdit: { commands: policy.commands, allowPaths: policy.allowPaths },
+          preamble: REMOTE_FIX_PREAMBLE,
+          vision: false,
+        },
+        {
+          env,
+          // Each fix gives its own folder (a worktree) as the turn's workdir; this root is never written.
+          root: config.dir,
+          protect: [config.outputDir],
+          sensitivePaths: () => authFiles(config),
+          limits: { processesMax: Math.max(concurrency, 2) },
+          log: (line) => log(line),
+        },
+      )
+    : null
 
   const controller = new AbortController()
   const stop = () => controller.abort()
@@ -262,6 +388,8 @@ export async function agentConnect(
       token,
       source,
       backend,
+      editBackend,
+      fix: edits ? { config, env, fetchImpl } : null,
       hello: { kind, machine: os.hostname().split('.')[0] || 'this computer', version: VERSION, maxTurns: concurrency },
       policy,
       remote,
@@ -274,9 +402,8 @@ export async function agentConnect(
         log(
           `Connected: ${terminalSafe(agent.name || label)} (${label}) is online for ${terminalSafe(agent.workspace?.name || 'the workspace')} / ${terminalSafe(agent.project?.name || 'the project')}.`,
         )
-        log(
-          `Reads ${config.dir} and answers. No edits, no commands. Used by: ${terminalSafe(agent.audience || 'the person who connected it')}.`,
-        )
+        log(`Works in ${config.dir}. Used by: ${terminalSafe(agent.audience || 'the person who connected it')}.`)
+        for (const line of describeMachinePolicy(policy)) log(terminalSafe(line))
         if (policy.audience === 'owner')
           log(`This machine refuses questions the server says are not from the person who connected it (${policyFile(env)}).`)
         log('Members chat with it from the Agents panel of the board. Ctrl+C stops it.')
@@ -299,6 +426,7 @@ export async function agentConnect(
     process.removeListener('SIGTERM', stop)
     signal?.removeEventListener('abort', stop)
     backend.close?.()
+    editBackend?.close?.()
   }
   log(ended?.takenOver ? 'Another "shapewall agent connect" took over this agent (--takeover). This one stopped.' : 'Disconnected.')
   return 0

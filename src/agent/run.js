@@ -117,6 +117,10 @@ export async function runTurn({
   choices = null,
   // Agent branch mode: the folder this turn's agent works in (acp.js stream).
   workdir = null,
+  // A turn that takes edits from a hosted board: who decides its requests (acp.js stream).
+  gate = null,
+  // The agent's first words for this turn's session, when not the backend's own.
+  preamble = null,
   // What the owner called this agent (identity.js): the author of its replies.
   agentName = null,
   // The neutral messages, already built (a connected agent's turn, whose
@@ -199,6 +203,8 @@ export async function runTurn({
         ...(modelOverride ? { model: modelOverride } : {}),
         ...(choices ? { choices } : {}),
         ...(workdir ? { workdir } : {}),
+        ...(gate ? { gate } : {}),
+        ...(preamble ? { preamble } : {}),
         signal,
         thread,
       })) {
