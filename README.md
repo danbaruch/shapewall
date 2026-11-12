@@ -506,8 +506,9 @@ Commands
                             a command that exits 0 must reply or set a status itself, else the
                             comment becomes needs-human (docs/agent-workflow.md)
   agent connect             make this machine's coding agent an agent of a hosted project: members chat with it
-                            on the board, and it reads this folder and answers. Read and answer only: no edits, no
-                            commands. The first run is approved in the browser by an admin.   --remote URL
+                            on the board, and it reads this folder and answers. Read and answer only unless this
+                            machine says more (--approvals). The first run is approved in the browser by an admin.
+                            --remote URL
       --agent NAME          which agent: claude, or a saved agent's id that runs Claude Code (default: this
                             project's agent, else Claude Code when found). Codex, goose and Gemini CLI are not
                             offered in this release. Never a command from the server
@@ -516,6 +517,21 @@ Commands
       --audience owner|server  "owner": the server keeps it to the person who connects it even if its audience
                             there is widened, and this machine refuses a job the server says is someone else's
                             (no protection from a server that lies); "server" (default): its audience on the server
+      --approvals none|owner|admins  edits from the board. "none" (default): never. "owner": the person who
+                            connected it may allow each edit on the board. "admins": whoever the server lets
+                            answer (admins by default). A fix is made on a new branch in a folder of its own,
+                            never in this checkout. Saved for this connection; the server cannot widen it
+      --allow-command "CMD" one exact command the agent may ask to run, each time allowed on the board (adds to
+                            the list; "none" empties it). Default: no commands at all. Not for Claude Code in
+                            this release: with its shell tool it runs read-only commands without asking
+      --auto none|edits|commands|edits,commands  what the server's "allow without asking" rule may apply to
+                            (default none). Still only inside the project, and only the listed commands
+      --allow-path FILE     a settings file (a dotfile, package.json, a Makefile, CI config) the agent may ask to
+                            edit; such edits are refused otherwise (adds to the list; "none" empties it)
+      --base BRANCH         the branch a fix starts from (default "head": the commit this checkout is on, and
+                            then only while it has no uncommitted changes)
+      --git-remote NAME     where a finished fix is pushed (default origin; "none": never pushed). A pull request
+                            is opened when GitHub connect is set up here (docs/github.md)
       --takeover            close the link another machine holds for this agent, and take its place
       --concurrency N       answers at once, 1 to 4 (default 2)
       --token-file FILE     for a service: the agent's own token, no browser (docs/hosted.md)

@@ -164,8 +164,16 @@ export function profileProblems(kind, root, env = process.env, { managedFile = '
 // What the flags change in this machine's policy for the connection:
 // { changes } to save, or throws with how to say it. Lists grow one entry a
 // run ("none" empties one), so a service file carries no policy: the file does.
-export function policyChanges(flags, saved) {
+// Agents whose listed commands were proven, with the real adapter, to be
+// the only commands they run. None yet: Claude Code, started with its shell
+// tool, runs commands it takes to be read-only without asking (acp.js).
+export const COMMANDS_PROVEN = []
+const NO_COMMANDS =
+  'Commands cannot be allowed for Claude Code in this release: started with its shell tool it runs commands it takes to be read-only (ls, cat) without asking, and those can read outside the project. Edits work without it.'
+
+export function policyChanges(flags, saved, kind = null) {
   const changes = {}
+  const commandsOk = kind === null || COMMANDS_PROVEN.includes(kind)
   if (flags.audience !== undefined) {
     if (!POLICY_AUDIENCES.includes(flags.audience))
       throw new Error(
@@ -187,6 +195,7 @@ export function policyChanges(flags, saved) {
   if (flags['allow-command'] !== undefined) {
     needsApprovals('allow-command')
     if (flags['allow-command'] === 'none') changes.commands = []
+    else if (!commandsOk) throw new Error(`--allow-command: ${NO_COMMANDS}`)
     else {
       const command = cleanCommand(flags['allow-command'])
       if (!command)
@@ -240,14 +249,13 @@ export async function agentConnect(
   if (!AGENT_SLUG_RE.test(slug)) throw new Error('--as: a short name for this connection (lower-case letters, digits and dashes)')
   const concurrency = flags.concurrency === undefined ? 2 : Number(flags.concurrency)
   if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 4) throw new Error('--concurrency must be 1 to 4')
-  // Checked before anything is asked of anyone: a wrong flag changes nothing.
-  const policyNow = readMachinePolicy(origin, slug, env)
-  const changes = policyChanges(flags, policyNow)
-
   const config = projectFor(flags, cwd)
   const settings = connectSettings(config, flags, env)
   const kind = acpAgentKind(settings.acp.argv) || 'custom'
   const label = terminalSafe(settings.label)
+  // Checked before anything is asked of anyone: a wrong flag changes nothing.
+  const policyNow = readMachinePolicy(origin, slug, env)
+  const changes = policyChanges(flags, policyNow, kind)
 
   // ---- The agent's token: its own, never the saved login's ----
   let token = env.SHAPEWALL_TOKEN || ''
@@ -304,7 +312,10 @@ export async function agentConnect(
     throw new Error('That is not a project token (swp_...). Run "shapewall agent connect" without it to get one approved.')
 
   // ---- This machine's own rules ----
-  const policy = Object.keys(changes).length ? saveMachinePolicy(origin, slug, changes, env) : policyNow
+  const saved = Object.keys(changes).length ? saveMachinePolicy(origin, slug, changes, env) : policyNow
+  // Commands in the file (written by hand, or for another agent) are not in effect for an agent they were not proven with.
+  const policy = COMMANDS_PROVEN.includes(kind) ? saved : { ...saved, commands: [], auto: saved.auto.filter((item) => item !== 'commands') }
+  if (saved.commands.length && !policy.commands.length) log(`Not in effect: the commands in ${policyFile(env)}. ${NO_COMMANDS}`)
   const edits = policy.approvals !== 'none'
   const profile = profileProblems(kind, config.dir, env)
   if (profile.refuse.length)

@@ -28,6 +28,7 @@
 import { randomBytes } from 'node:crypto'
 import { redact } from '../agent/backends/openai.js'
 import { cardHash } from '../agent/card-hash.js'
+import { tokensToText } from '../agent/plain-text.js'
 import { runTurn } from '../agent/run.js'
 import { FixRefusal, dropFixFolder, finishFix, prepareFix } from './agent-fix.js'
 import { JobError, TURN_ID_RE, cleanJob, jobConversation } from './agent-job.js'
@@ -479,7 +480,8 @@ export async function runAgentLink({
     const ok = message?.status === 'done' && !message.error && message.text?.trim()
     const ready = fixing && fixed?.status === 'branch-ready'
     const lines = []
-    if (ok) lines.push(message.text.slice(0, 8000))
+    // A comment shows text as typed: the chat's reference tokens become words.
+    if (ok) lines.push(tokensToText(message.text).slice(0, 8000))
     if (fixing) {
       if (ready) lines.push(fixed.line)
       else if (why) lines.push(`I could not start this fix. ${why}`)

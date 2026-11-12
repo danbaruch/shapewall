@@ -180,10 +180,20 @@ test('a session that takes edits: the agent’s own settings left out, only read
   assert.deepEqual(edits.tools, ['Read', 'Grep', 'Glob', 'Edit', 'Write', 'MultiEdit'])
   for (const tool of ['Bash', 'WebFetch', 'WebSearch', 'Task', 'Agent', 'NotebookEdit', 'Skill'])
     assert.ok(edits.disallowedTools.includes(tool), tool)
+  // Claude Code never gets its shell tool, whatever commands a machine lists: with it, it runs
+  // commands it takes to be read-only without asking (seen with the real adapter).
   const withCommands = tools(remoteEditSession('claude', { commands: ['npm test'] }))
-  assert.ok(withCommands.tools.includes('Bash'))
-  assert.ok(!withCommands.disallowedTools.includes('Bash'))
+  assert.ok(!withCommands.tools.includes('Bash'))
+  assert.ok(withCommands.disallowedTools.includes('Bash'))
   assert.ok(withCommands.disallowedTools.includes('WebFetch'))
+  // So `agent connect` refuses to list a command for it, and says why.
+  assert.throws(
+    () => policyChanges({ 'allow-command': 'npm test' }, { ...DEFAULT_MACHINE_POLICY, approvals: 'owner' }, 'claude'),
+    /Commands cannot be allowed for Claude Code in this release/,
+  )
+  assert.deepEqual(policyChanges({ 'allow-command': 'none' }, { ...DEFAULT_MACHINE_POLICY, approvals: 'owner' }, 'claude'), {
+    commands: [],
+  })
   // Read only is unchanged.
   assert.deepEqual(tools(readOnlySession('claude')).tools, ['Read', 'Grep', 'Glob'])
   const env = agentEnv({

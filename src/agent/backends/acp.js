@@ -135,11 +135,18 @@ export function readOnlyEnv(kind) {
 // both say so, is allowed at once), through the turn's `gate`. A turn with no
 // gate changes nothing. The agent's own settings are left out as for a
 // read-only session, and it keeps only its reading and editing tools.
+//
+// Claude Code never gets its shell tool here, whatever commands the machine
+// lists: with it, Claude Code runs commands it takes to be read-only (ls,
+// cat, ...) without asking anyone, and those read outside the project. That
+// was seen with the real adapter (docs/agent-hardening.md), so
+// `agent connect` does not offer commands for Claude Code at all. Listed
+// commands reach an agent only through Shapewall's own terminal
+// (onTerminalCreate) or a permission request, both checked here.
 const CLAUDE_EDIT_TOOLS = ['Edit', 'Write', 'MultiEdit']
-const CLAUDE_COMMAND_TOOLS = ['Bash', 'BashOutput', 'KillShell']
-export function remoteEditSession(kind, { commands = [] } = {}) {
+export function remoteEditSession(kind) {
   if (kind !== 'claude') return {}
-  const tools = [...CLAUDE_READ_TOOLS, ...CLAUDE_EDIT_TOOLS, ...(commands.length ? CLAUDE_COMMAND_TOOLS : [])]
+  const tools = [...CLAUDE_READ_TOOLS, ...CLAUDE_EDIT_TOOLS]
   return {
     _meta: {
       claudeCode: {
@@ -736,11 +743,7 @@ class AcpProcess {
         cwd: this.root,
         mcpServers: this.mcpServers,
         // Read only: the agent's own controls are set so that it cannot act (readOnlySession).
-        ...(this.readOnly
-          ? readOnlySession(acpAgentKind(this.argv))
-          : this.remoteEdit
-            ? remoteEditSession(acpAgentKind(this.argv), this.remoteEdit)
-            : {}),
+        ...(this.readOnly ? readOnlySession(acpAgentKind(this.argv)) : this.remoteEdit ? remoteEditSession(acpAgentKind(this.argv)) : {}),
       })
       this.sessionId = session.sessionId
       this.choices = sessionChoices(session)
