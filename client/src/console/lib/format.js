@@ -172,6 +172,75 @@ export function describeAudit(entry) {
             'is gone'
           }${d.was === 'working' ? ' while working on it' : ''}`
         : `let any agent take comment ${String(entry.target || '').replace(/^.*#/, '#')}${d.fromName ? ` (it was waiting for ${d.fromName})` : ''}`
+    // Sign-in and passkeys (account events of the workspace's members).
+    case 'signed_in':
+      return `signed in${d.via === 'recovery_code' ? ' with a recovery code' : ''}${d.device ? ` on ${d.device}` : ''}${d.newDevice ? ' (a new device)' : ''}`
+    case 'signed_out':
+      return `signed out${d.device ? ` on ${d.device}` : ''}`
+    case 'account_created':
+      return `created their account${d.device ? ` on ${d.device}` : ''}`
+    case 'passkey_added':
+      return 'added a passkey'
+    case 'passkey_removed':
+      return 'removed a passkey'
+    case 'recovery_codes_created':
+      return 'made new recovery codes'
+    case 'session_revoked':
+      return 'signed out one of their devices'
+    case 'sessions_revoked':
+      return 'signed out their other devices'
+    // Agents at work (src/hosted/agent-link.js, chat-routes.js).
+    case 'agent_connected':
+      return `approved the connection of the agent ${d.name || target}${d.machine ? ` (${d.machine})` : ''}`
+    case 'agent_link_connected':
+      return `${d.agentName || d.name || 'an agent'} connected${d.machine ? ` from ${d.machine}` : ''}`
+    case 'agent_link_disconnected':
+      return `${d.agentName || d.name || 'an agent'} disconnected`
+    case 'agent_edit_mode_changed':
+      return `${d.agentName || d.name || 'an agent'} changed what its machine allows`
+    case 'agent_turn_started':
+      return `asked ${d.agentName || 'an agent'}${d.kind === 'fix' ? ' for a fix' : d.kind === 'comment' ? ' to answer a comment' : ''}${d.board ? ` on ${d.board}` : ''}`
+    case 'agent_turn_stopped':
+      return `stopped ${d.agentName || 'an agent'}`
+    case 'agent_fix_branch_ready':
+      return `${d.agentName || 'an agent'} left a fix on the branch ${d.branch || ''}${d.files ? ` (${count(d.files, 'file', 'files')})` : ''}`
+    case 'agent_branch_pushed':
+      return `${d.agentName || 'an agent'} pushed the branch ${d.branch || ''}`
+    case 'agent_pull_request_opened':
+      return `${d.agentName || 'an agent'} opened a pull request for ${d.branch || 'its branch'}`
+    case 'agent_permission_asked':
+      return `${d.agentName || 'an agent'} asked to ${d.kind === 'edit' ? `edit ${d.path || 'a file'}` : d.kind === 'push' ? `push ${d.branch || 'a branch'}` : 'run a command'}`
+    case 'agent_permission_approved':
+      return `allowed ${d.agentName || 'an agent'} to ${d.kind === 'edit' ? `edit ${d.path || 'a file'}` : d.kind === 'push' ? `push ${d.branch || 'a branch'}` : 'run a command'}`
+    case 'agent_permission_denied':
+      return `denied ${d.agentName || 'an agent'}'s request to ${d.kind === 'edit' ? `edit ${d.path || 'a file'}` : d.kind === 'push' ? `push ${d.branch || 'a branch'}` : 'run a command'}`
+    case 'agent_permission_auto':
+      return `${d.agentName || 'an agent'} was allowed without asking to ${d.kind === 'edit' ? `edit ${d.path || 'a file'}` : 'run a command'}`
+    case 'agent_permission_expired':
+      return `a request of ${d.agentName || 'an agent'} waited too long and expired`
+    case 'agent_permission_not_taken':
+      return `${d.agentName || 'an agent'}'s machine did not take an answer (${d.became || 'refused'})`
+    case 'chat_thread_created':
+      return `started a chat${d.board ? ` on ${d.board}` : ''}`
+    case 'chat_thread_deleted':
+      return 'deleted a chat'
+    case 'chat_thread_agent_changed':
+      return 'changed the agent of a chat'
+    // Settings and exports.
+    case 'agent_policy_changed':
+      return `changed the agent policy of ${d.name || target}${Array.isArray(d.changed) && d.changed.length ? ` (${d.changed.join(', ')})` : ''}`
+    case 'usage_retention_changed':
+      return `set how long usage records are kept${d.after ? ` to ${d.after} days` : ' back to the default'}`
+    case 'project_made_public':
+      return `made the project ${d.name || target} public`
+    case 'project_made_private':
+      return `made the project ${d.name || target} private again`
+    case 'usage_exported':
+      return `exported usage (${count(d.rows || 0, 'turn', 'turns')}, ${d.format || 'csv'}${d.scope === 'own' ? ', their own' : ''})`
+    case 'audit_exported':
+      return `exported the ${d.view === 'activity' ? 'activity' : 'audit'} log (${count(d.rows || 0, 'entry', 'entries')}${d.scope === 'own' ? ', their own' : ''})`
+    case 'access_exported':
+      return 'exported the access review'
     default:
       return entry.action.replace(/_/g, ' ')
   }

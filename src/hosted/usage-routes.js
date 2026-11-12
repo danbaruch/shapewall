@@ -16,6 +16,7 @@
 
 import { exportFileName } from './admin.js'
 import { ACTIVITY_LIMITS, activityCsv, activityViewer, cleanActivityFilter, createActivity, reviewCsv } from './activity.js'
+import { deviceLabel } from './auth.js'
 import { transaction } from './db.js'
 import { HttpError } from './http.js'
 import { NEEDS } from './permissions.js'
@@ -227,7 +228,9 @@ export function mountUsageRoutes(consoleApi, { db, auth, now, iso, handle, limit
     inWorkspace(NEEDS.activity),
     handle((req, res) => {
       const person = activityOf(req).person(String(req.params.uid), viewerOf(req), {
-        sessionsOf: (userId) => auth.listSessions(userId, null),
+        // A label ("Chrome on macOS"), not the browser's whole user agent string.
+        sessionsOf: (userId) =>
+          auth.listSessions(userId, null).map((session) => ({ ...session, device: session.device ? deviceLabel(session.device) : null })),
       })
       if (!person) throw new HttpError(404, 'unknown_member', 'No such member.')
       res.json({ person })

@@ -28,7 +28,9 @@ import { newId } from './crypto.js'
 import { HttpError } from './http.js'
 import { roleAtLeast } from './permissions.js'
 import {
+  KIND_LABEL,
   OUTCOME_GROUPS,
+  OUTCOME_GROUP_LABEL,
   OUTCOME_GROUP_IDS,
   USAGE_BUCKETS,
   USAGE_DIMENSIONS,
@@ -441,6 +443,8 @@ export function createUsage(t, { now = () => new Date() } = {}) {
     if (dimension === 'project') return loadNames().project.get(key) || { label: 'Removed project' }
     if (dimension === 'person') return key ? loadNames().person.get(key) || { label: 'Former member' } : { label: 'Nobody (automatic)' }
     if (dimension === 'model') return { label: key || 'Not reported' }
+    if (dimension === 'kind') return { label: KIND_LABEL[key] || key }
+    if (dimension === 'outcome') return { label: OUTCOME_GROUP_LABEL[key] || key }
     return { label: key }
   }
 

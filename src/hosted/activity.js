@@ -83,9 +83,11 @@ function changeOf(action, detail) {
       value === null || value === undefined
         ? 'none'
         : typeof value === 'object'
-          ? Object.entries(value)
-              .map(([key, item]) => `${key}: ${Array.isArray(item) ? item.length : (item ?? 'none')}`)
-              .join(', ')
+          ? Object.keys(value).length === 1 && typeof Object.values(value)[0] !== 'object'
+            ? String(Object.values(value)[0] ?? 'none')
+            : Object.entries(value)
+                .map(([key, item]) => `${key}: ${Array.isArray(item) ? item.length : (item ?? 'none')}`)
+                .join(', ')
           : String(value)
     return { before: text(detail.beforeName ?? detail.before), after: text(detail.afterName ?? detail.after) }
   }
