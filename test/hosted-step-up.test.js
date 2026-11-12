@@ -281,3 +281,33 @@ test('a session made by a recovery code keeps its restrictions, whatever the wor
   assert.equal((await rescued.post(`${base}/invites`, { role: 'member' })).status, 201)
   assert.equal((await rescued.post('/auth/passkeys/options', {})).status, 200)
 })
+
+test('the fixed core is one table: every line with a route is enforced before the route, for its own people only', async () => {
+  const { FIXED_CORE, STEP_UP_ALWAYS } = await import('../src/hosted/step-up.js')
+  const hosted = await serve('step-up-table')
+  const ada = await signUp(hosted, { handle: 'ada' })
+  const ben = await signUp(hosted, { handle: 'ben', invite: await invite(ada, ada.workspaceId, 'admin') })
+  hosted.advance(11 * MIN)
+  hosted.rateLimiter.reset()
+  const routes = FIXED_CORE.filter((line) => line.method)
+  assert.ok(routes.length >= 8)
+  assert.ok(FIXED_CORE.filter((line) => line.inRoute).length >= 3, 'the ones that depend on the change are listed too')
+  assert.deepEqual(STEP_UP_ALWAYS, [...new Set(FIXED_CORE.map((line) => line.says))])
+  for (const line of routes) {
+    const url = line.path.replace(':ws', ada.workspaceId).replace(':id', 'anything')
+    const refused = await call(ada, line.method, url, line.method === 'DELETE' ? undefined : {})
+    // (Linking a tailnet login does not exist on this server: its 403 says that instead.)
+    if (line.path === '/auth/tailnet/link' && refused.json?.error?.code !== 'reauth_required') continue
+    assert.equal(refused.status, 403, `${line.method} ${line.path}: ${refused.text}`)
+    assert.equal(refused.json.error.code, 'reauth_required', `${line.method} ${line.path}`)
+    assert.equal(refused.json.error.stepUp, 'always')
+  }
+  // Someone who may not do it gets the route's own answer, never a passkey prompt.
+  assert.equal((await call(ben, 'DELETE', `/api/workspaces/${ada.workspaceId}`, { confirm: 'x' })).json.error.code, 'forbidden')
+  assert.equal(
+    (await call(ben, 'DELETE', '/api/workspaces/ws_000000000000000000000000', { confirm: 'x' })).json.error.code,
+    'unknown_workspace',
+  )
+  // Ending my other sessions: a session that passed a passkey check may, however long ago.
+  assert.equal((await ada.browser.post('/auth/sessions/revoke-others', {})).status, 200)
+})

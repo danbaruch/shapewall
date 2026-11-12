@@ -180,9 +180,9 @@ export function describeAudit(entry) {
     case 'account_created':
       return `created their account${d.device ? ` on ${d.device}` : ''}`
     case 'passkey_added':
-      return 'added a passkey'
+      return d.viaTailnet ? 'added their first passkey, in a tailnet session (on hold for 24 hours)' : 'added a passkey'
     case 'tailnet_linked':
-      return `linked their tailnet login${d.tailnet ? ` ${d.tailnet}` : ''}`
+      return `linked their tailnet login${d.tailnet ? ` ${d.tailnet}` : ''}${d.atSignUp ? ' when signing up' : ''}`
     case 'tailnet_unlinked':
       return `unlinked their tailnet login${d.tailnet ? ` ${d.tailnet}` : ''}`
     case 'tailnet_visitor_dismissed':

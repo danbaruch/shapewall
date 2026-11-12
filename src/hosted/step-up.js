@@ -49,17 +49,34 @@ export const STEP_UP_GROUP_BEFORE = {
 export const STEP_UP_WINDOWS = [5, 15, 30, 60]
 export const STEP_UP_WINDOW_DEFAULT = 15
 
-// What always needs a fresh passkey check (10 minutes), on every server.
-export const STEP_UP_ALWAYS = [
-  'adding or removing a passkey',
-  'new recovery codes',
-  'linking a tailnet login to an account',
-  'deleting your account',
-  'deleting a workspace',
-  'making someone an owner, changing or removing an owner, inviting an owner',
-  "moving your account to the server's new address",
-  'making these settings weaker',
+// The fixed core: what always needs a fresh passkey check (10 minutes), on
+// every server. ONE TABLE: to add a route to the core, add a line here.
+//
+// A line with `method` and `path` is enforced for every request by one
+// middleware (src/hosted/guards.js fixedCore), before the route runs:
+//   path   the full path, `:name` for one segment
+//   role   only for members of the workspace (`:ws`) with at least this
+//          role; anyone else gets the route's own 404 or 403
+//   first  true: the first passkey of an account that has none may be added
+//          without a check (a recovery session in its first 30 minutes, an
+//          account that only its tailnet signs in)
+// A line with `inRoute` depends on what the request changes, or on which
+// host it arrives at, so its route asks itself (coreFreshOrThrow / needFresh).
+// `says`: the words Settings lists; lines with the same words are one item.
+export const FIXED_CORE = [
+  { method: 'POST', path: '/auth/passkeys/options', first: true, says: 'adding or removing a passkey' },
+  { method: 'POST', path: '/auth/passkeys/verify', first: true, says: 'adding or removing a passkey' },
+  { method: 'DELETE', path: '/auth/passkeys/:id', says: 'adding or removing a passkey' },
+  { method: 'POST', path: '/auth/recovery-codes', says: 'new recovery codes' },
+  { method: 'POST', path: '/auth/tailnet/link', says: 'linking or unlinking a tailnet login' },
+  { method: 'DELETE', path: '/auth/tailnet/link', says: 'linking or unlinking a tailnet login' },
+  { method: 'DELETE', path: '/auth/me', says: 'deleting your account' },
+  { method: 'DELETE', path: '/api/workspaces/:ws', role: 'owner', says: 'deleting a workspace' },
+  { inRoute: 'console-routes.js roleStepUp', says: 'making someone an owner, changing or removing an owner, inviting an owner' },
+  { inRoute: 'rebind.js POST /auth/rebind/start', says: "moving your account to the server's new address" },
+  { inRoute: 'step-up-settings.js change', says: 'making these settings weaker' },
 ]
+export const STEP_UP_ALWAYS = [...new Set(FIXED_CORE.map((line) => line.says))]
 
 export const STEP_UP_DEFAULTS = Object.freeze({
   cards: false,

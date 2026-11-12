@@ -16,6 +16,12 @@
 // role checks, the same audit entries (marked as a tailnet session), and it
 // signs out when the command ends. No token is stored for this.
 //
+// A tailnet identity is per device, not per person: whatever runs as you on
+// a tailnet device of yours gets the same answer from the server as this
+// command does. A workspace that wants more for approving machines switches
+// on "Approve command line logins in the browser"; the server then refuses
+// a session that only an identity stands behind, whatever the client sends.
+//
 // On any other server, and when the request did not come through the
 // tailnet, nothing here applies: `login` and `agent connect` use the code
 // and the browser as before, and the other commands say what they need.
@@ -194,10 +200,12 @@ export async function approveByTailnet({ origin, userCode, flags, purpose, agent
       return true
     }
     const code = approved.data?.error?.code
+    // The server decides (from the session, not from anything this command sends) whether a tailnet
+    // identity alone may approve: a workspace can want the code, the browser and a passkey.
     if (['browser_approval_required', 'reauth_required', 'passkey_required'].includes(code)) {
       out(
-        code === 'browser_approval_required'
-          ? 'This workspace approves logins and agent connections in the browser, also from a tailnet machine:'
+        approved.data.error.stepUp === 'cliApproval' || code === 'browser_approval_required'
+          ? 'This workspace approves logins and agent connections in the browser, with a passkey, also from a tailnet machine:'
           : 'This workspace asks for a passkey before it approves a machine, so it is approved in the browser:',
       )
       return false
@@ -334,8 +342,12 @@ export async function claimServer({ setupUrl, flags, out: print, fetchImpl = fet
     const detail = await client.get(`/api/workspaces/${answer.data.workspaceId}`)
     if (detail.ok) out(`  Workspace: ${terminalSafe(detail.data.workspace.name)} (you are its owner).`)
     out('  The setup link is used up.')
-    out(`No passkey was made. Add one later in the browser (${origin}/account): deleting a workspace, changing owners and a few other`)
-    out('things always ask for one. Next: shapewall admin projects create "My site" --remote ' + origin)
+    out(
+      `No passkey was made. Add one in the browser (${origin}/account) before you need it: deleting a workspace, changing owners and a few`,
+    )
+    out('other things always ask for one, and a first passkey can confirm them 24 hours after it is added (it signs in at once).')
+    out('Anything that runs as you on a tailnet device of yours can act as you here: your tailnet identity is per device, not per person.')
+    out(`Next: shapewall admin projects create "My site" --remote ${origin}`)
     return 0
   } finally {
     await client.signOut()

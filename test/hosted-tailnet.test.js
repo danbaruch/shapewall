@@ -7,22 +7,28 @@
 
 import assert from 'node:assert/strict'
 import net from 'node:net'
+import { createHash } from 'node:crypto'
+import { EventEmitter } from 'node:events'
 import test, { after } from 'node:test'
 import { startHosted } from '../src/hosted/server.js'
-import { serveProblem } from '../src/hosted/tailscale.js'
+import { reachesLocalPort, serveProblem } from '../src/hosted/tailscale.js'
 import {
   cleanTailnetLogin,
   createTailnetGate,
   decodeHeaderValue,
+  forwardedTailnetAddress,
+  hostFacts,
   parseIdentity,
   peerOwner,
   procAddress,
   procPeerProof,
+  tailscaledProblem,
+  whoisAnswer,
 } from '../src/hosted/tailnet-identity.js'
 import { handleFromLogin } from '../src/hosted/tailnet.js'
 import { createProject, invite, reauth, signUp } from './hosted-helpers.js'
 import { tempDir } from './helpers.js'
-import { TAILNET_HOST, TAILNET_ORIGIN, fakeTailscale, me, qEncode, startTailnet } from './tailnet-helpers.js'
+import { TAILNET_HOST, TAILNET_ORIGIN, fakeTailscale, me, plainFacts, qEncode, startTailnet } from './tailnet-helpers.js'
 
 const servers = []
 after(async () => {
@@ -38,9 +44,9 @@ const BEN = { login: 'ben@example.com', name: 'Ben' }
 const CYD = { login: 'cyd@example.com', name: 'Cyd' }
 const call = (browser, method, url, body) => browser.call(method, url, body === undefined ? {} : { body })
 
-// The first account: the setup link, opened through the tailnet, with a passkey.
+// The first account: the setup link, opened through the tailnet, with a passkey, and "Also sign me in from this tailnet login" ticked.
 async function claimWithPasskey(server, device, handle = 'ada') {
-  return signUp(server.as(device), { handle, displayName: handle })
+  return signUp(server.as(device), { handle, displayName: handle, linkTailnet: true })
 }
 // A tailnet login joins by an invite made for it; returns its browser.
 async function joinByInvite(server, owner, device, role = 'member') {
@@ -174,7 +180,7 @@ test('the peer of a loopback connection: its owner comes from /proc/net/tcp, by 
   assert.equal(peerOwner(`${PROC_TABLE}\n${PROC_TABLE.split('\n')[2]}`, { ...ours, remotePort: 0xc350 }, 'LE'), null, 'two rows: nobody')
 
   const socket = (remotePort, more = {}) => ({ remoteFamily: 'IPv4', ...ours, remotePort, ...more })
-  const proof = procPeerProof({ uids: [0], read: () => PROC_TABLE, platform: 'linux' })
+  const proof = procPeerProof({ read: () => PROC_TABLE, platform: 'linux' })
   assert.equal(proof.problem(), null)
   // The table above is little-endian; skip the lookups on a big-endian machine.
   if (procAddress('127.0.0.1', 1) === '0100007F:0001') {
@@ -206,12 +212,8 @@ test('on Linux the real check sees who opened a loopback connection', { skip: pr
   try {
     const mine = process.getuid()
     assert.equal(procPeerProof().ownerOf(socket), mine, 'this process opened it')
-    assert.equal(procPeerProof({ uids: [mine] }).trusted(socket), true)
-    assert.equal(
-      procPeerProof({ uids: [mine + 1] }).trusted(socket),
-      false,
-      'tailscaled runs as someone else: a local program is not believed',
-    )
+    // Only root's sockets are tailscaled's: there is no way to name another user.
+    assert.equal(procPeerProof().trusted(socket), mine === 0, 'a local program of an ordinary user is not believed')
   } finally {
     client.destroy()
     socket.destroy()
@@ -219,31 +221,217 @@ test('on Linux the real check sees who opened a loopback connection', { skip: pr
   }
 })
 
-test('the gate: a proven connection and clean headers, or nobody; suspended means nobody', () => {
-  const trusted = { remotePort: 1 }
-  const other = { remotePort: 2 }
+test('the gate: the secret, a connection from tailscaled, tailscaled’s own whois and clean headers, all of them, or nobody', async () => {
+  const secret = 's'.repeat(43)
+  const tailscaled = { remotePort: 1 }
+  const local = { remotePort: 2 }
   const lines = []
+  const asked = []
   let clock = 0
-  const gate = createTailnetGate({ proof: { trusted: (socket) => socket === trusted }, log: (line) => lines.push(line), now: () => clock })
-  const request = (socket, pairs) => ({ ...fakeRequest(pairs), socket })
-  const login = [['Tailscale-User-Login', 'ada@example.com']]
-  assert.deepEqual(gate.identityOf(request(trusted, login)), { login: 'ada@example.com', name: 'ada' })
-  assert.equal(gate.identityOf(request(other, login)), null)
-  assert.equal(gate.identityOf(request(trusted, [])), null)
-  assert.equal(gate.identityOf(request(undefined, login)), null)
+  const owners = new Map([
+    ['100.64.0.7', { login: 'ada@example.com', tagged: false }],
+    ['100.64.0.8', { login: 'ben@example.com', tagged: false }],
+    ['100.64.0.9', { login: 'ada@example.com', tagged: true }],
+  ])
+  const gate = createTailnetGate({
+    secret,
+    proof: { trusted: (socket) => socket?.remotePort === 1 },
+    whois: async (address) => {
+      asked.push(address)
+      if (address === '100.64.0.66') throw new Error('tailscale is not answering')
+      return owners.get(address) || null
+    },
+    log: (line) => lines.push(line),
+    now: () => clock,
+  })
+  assert.throws(() => createTailnetGate({ secret: 'short', proof: {}, whois: async () => null }), /serve secret/)
+  const request = (socket, url, pairs) => ({ ...fakeRequest(pairs), socket, url })
+  const ada = (address = '100.64.0.7') => [
+    ['Tailscale-User-Login', 'ada@example.com'],
+    ['X-Forwarded-For', address],
+  ]
+  const who = async (req) => {
+    assert.equal(await gate.admit(req), true)
+    return gate.identityOf(req)
+  }
+  const through = `/_ts/${secret}`
+  // Everything in place: believed, and the secret is gone from the path the application sees.
+  const good = request(tailscaled, `${through}/auth/me?x=1`, ada())
+  assert.deepEqual(await who(good), { login: 'ada@example.com', name: 'ada' })
+  assert.equal(good.url, '/auth/me?x=1')
+  const root = request(tailscaled, through, ada())
+  await who(root)
+  assert.equal(root.url, '/', 'the mount point itself is the root')
+  // 1. No secret: a raw TCP forward that tailscaled itself dialled, or any direct request. Never asked who it is.
+  const forwarded = request(tailscaled, '/auth/me', ada())
+  assert.equal(await who(forwarded), null)
+  assert.equal(forwarded.url, '/auth/me')
+  // 2. The secret, from a socket that is not tailscaled's: a local user who read the serve config.
+  assert.equal(await who(request(local, `${through}/auth/me`, ada())), null)
+  assert.equal(await who(request(undefined, `${through}/auth/me`, ada())), null)
+  // 3. tailscaled does not vouch: another person's device, a tagged device, an unknown address,
+  //    no address, two addresses, an address outside the tailnet, or tailscaled not answering.
+  for (const [label, pairs] of [
+    ['the address is ben’s device', ada('100.64.0.8')],
+    ['a tagged device', ada('100.64.0.9')],
+    ['nobody’s address', ada('100.64.0.10')],
+    ['whois fails', ada('100.64.0.66')],
+    ['no X-Forwarded-For', [['Tailscale-User-Login', 'ada@example.com']]],
+    ['two X-Forwarded-For', [...ada(), ['X-Forwarded-For', '100.64.0.7']]],
+    ['a list in X-Forwarded-For', ada('100.64.0.7, 100.64.0.7')],
+    ['not a tailnet address', ada('127.0.0.1')],
+    ['not a tailnet address (public)', ada('203.0.113.9')],
+  ])
+    assert.equal(await who(request({ ...tailscaled, proven: label }, `${through}/x`, pairs)), null, label)
+  // 4. The headers: twice, with a Funnel mark.
+  assert.equal(await who(request(tailscaled, `${through}/x`, [...ada(), ['Tailscale-User-Login', 'ada@example.com']])), null)
+  assert.equal(await who(request(tailscaled, `${through}/x`, [...ada(), ['Tailscale-Funnel-Request', '?1']])), null)
+  assert.equal(await who(request(tailscaled, `${through}/x`, [])), null, 'no identity headers: anonymous, quietly')
   assert.equal(gate.identityOf(null), null)
-  assert.equal(lines.length, 1, 'ignored headers are logged, once a minute at most')
-  assert.match(lines[0], /did not come from tailscaled/)
+  assert.equal(gate.identityOf(request(tailscaled, `${through}/x`, ada())), null, 'a request that was never admitted is nobody')
+  // A wrong secret is answered 404 and nothing more; no line anywhere holds the real one.
+  for (const url of [`/_ts/${'x'.repeat(43)}/auth/me`, `/_ts/${secret}x/auth/me`, `/_ts/${secret.slice(1)}`, '/_ts/', '/_ts/x?y']) {
+    const answer = { status: 0, body: '' }
+    const res = { writeHead: (status) => (answer.status = status), end: (body) => (answer.body = body) }
+    assert.equal(await gate.admit(request(tailscaled, url, ada()), res), false, url)
+    assert.deepEqual(answer, { status: 404, body: 'Not found' })
+  }
+  let destroyed = false
+  assert.equal(await gate.admit({ ...request(tailscaled, '/_ts/nope', ada()), socket: { destroy: () => (destroyed = true) } }), false)
+  assert.equal(destroyed, true, 'an upgrade with a wrong secret is dropped')
+  assert.ok(lines.length >= 1 && lines.length <= 2, 'ignored headers are logged, once a minute at most')
+  assert.ok(lines.every((line) => !line.includes(secret)))
+  // whois is asked once per connection and address for a minute, then again.
+  const before = asked.filter((address) => address === '100.64.0.7').length
+  await who(request(tailscaled, `${through}/a`, ada()))
+  assert.equal(asked.filter((address) => address === '100.64.0.7').length, before)
   clock += 61_000
-  gate.identityOf(request(other, login))
-  assert.equal(lines.length, 2)
-  const asked = request(trusted, login)
-  assert.ok(gate.identityOf(asked))
+  owners.delete('100.64.0.7')
+  assert.equal(
+    await who(request(tailscaled, `${through}/a`, ada())),
+    null,
+    'the device left the tailnet: not believed on the open connection either',
+  )
+  owners.set('100.64.0.7', { login: 'ada@example.com', tagged: false })
+  clock += 61_000
+  // Suspended: nobody, also for a request admitted before.
+  const earlier = request(tailscaled, `${through}/a`, ada())
+  assert.ok(await who(earlier))
   gate.suspend('a raw TCP forward')
-  assert.equal(gate.identityOf(asked), null, 'also for a request that was answered before')
+  assert.equal(gate.identityOf(earlier), null)
+  assert.equal(await who(request(tailscaled, `${through}/a`, ada())), null)
   assert.equal(gate.suspended(), 'a raw TCP forward')
   gate.resume()
-  assert.ok(gate.identityOf(asked))
+  assert.ok(gate.identityOf(earlier))
+})
+
+test('a tailscaled whose connections cannot be believed: userspace networking, an old version, its own proxies, a container, or one that cannot be read', () => {
+  const status = { TUN: true, Version: '1.104.2-t1' }
+  const facts = (argv = [], more = {}) => ({
+    ...plainFacts(),
+    tailscaled: [{ pid: 9, uid: 0, argv: ['/usr/sbin/tailscaled', ...argv] }],
+    ...more,
+  })
+  assert.equal(tailscaledProblem(status, plainFacts()), null)
+  assert.equal(tailscaledProblem(status, facts(['--tun=tailscale0', '--socket=/run/tailscale/tailscaled.sock'])), null)
+  assert.equal(tailscaledProblem({ ...status, Version: '1.98.0' }, plainFacts()), null)
+  assert.equal(tailscaledProblem({ ...status, Version: '2.1.0' }, plainFacts()), null)
+  for (const [label, problem, pattern] of [
+    ['status says no TUN', tailscaledProblem({ ...status, TUN: false }, plainFacts()), /userspace-networking/],
+    ['status says nothing about TUN', tailscaledProblem({ Version: status.Version }, plainFacts()), /userspace-networking/],
+    ['--tun=userspace-networking', tailscaledProblem(status, facts(['--tun=userspace-networking'])), /userspace-networking/],
+    ['--tun userspace-networking', tailscaledProblem(status, facts(['--tun', 'userspace-networking'])), /userspace-networking/],
+    ['-tun=userspace-networking', tailscaledProblem(status, facts(['-tun=userspace-networking'])), /userspace-networking/],
+    ['1.96', tailscaledProblem({ ...status, Version: '1.96.4' }, plainFacts()), /Tailscale 1\.96 is too old: before 1\.98/],
+    ['0.x', tailscaledProblem({ ...status, Version: '0.100.0' }, plainFacts()), /too old/],
+    ['no version', tailscaledProblem({ TUN: true }, plainFacts()), /version cannot be read/],
+    ['--socks5-server', tailscaledProblem(status, facts(['--socks5-server=localhost:1055'])), /SOCKS5 proxy/],
+    ['--socks5-server VALUE', tailscaledProblem(status, facts(['--socks5-server', 'localhost:1055'])), /SOCKS5 proxy/],
+    [
+      '--outbound-http-proxy-listen',
+      tailscaledProblem(status, facts(['--outbound-http-proxy-listen=localhost:1055'])),
+      /outbound HTTP proxy/,
+    ],
+    [
+      'not root',
+      tailscaledProblem(status, { ...plainFacts(), tailscaled: [{ pid: 9, uid: 1000, argv: ['tailscaled'] }] }),
+      /does not run as root/,
+    ],
+    ['none visible', tailscaledProblem(status, { ...plainFacts(), tailscaled: [] }), /no tailscaled process is visible/],
+    [
+      'two',
+      tailscaledProblem(status, { ...plainFacts(), tailscaled: [...plainFacts().tailscaled, ...plainFacts().tailscaled] }),
+      /more than one tailscaled/,
+    ],
+    ['unreadable', tailscaledProblem(status, facts([], { unreadable: 1 })), /cannot be read in \/proc/],
+    ['a container', tailscaledProblem(status, facts([], { container: 'it runs in a container' })), /cannot tell whose "root"/],
+  ])
+    assert.match(String(problem), pattern, label)
+
+  // What the machine says, read from a /proc that is given here.
+  const files = {
+    '/proc/1/comm': 'systemd\n',
+    '/proc/40/comm': 'tailscaled\n',
+    '/proc/40/cmdline': '/usr/sbin/tailscaled\0--state=/var/lib/tailscale/tailscaled.state\0--port=41641\0',
+    '/proc/77/comm': 'node\n',
+    '/proc/self/uid_map': '         0          0 4294967295\n',
+    '/proc/1/cgroup': '0::/init.scope\n',
+  }
+  const fakeFs = (overrides = {}, uid = 0) => {
+    const all = { ...files, ...overrides }
+    const missing = (file) => Object.assign(new Error(`ENOENT ${file}`), { code: 'ENOENT' })
+    return {
+      readdirSync: () => ['1', '40', '77', 'self', 'net'],
+      readFileSync(file) {
+        if (all[file] === undefined || all[file] === null) throw missing(file)
+        return all[file]
+      },
+      statSync(file) {
+        if (file === '/proc/40') return { uid }
+        if (all[file] === undefined || all[file] === null) throw missing(file)
+        return { uid: 0 }
+      },
+    }
+  }
+  assert.deepEqual(hostFacts({ read: fakeFs(), env: {} }), {
+    tailscaled: [{ pid: 40, uid: 0, argv: ['/usr/sbin/tailscaled', '--state=/var/lib/tailscale/tailscaled.state', '--port=41641'] }],
+    unreadable: 0,
+    container: null,
+  })
+  assert.equal(hostFacts({ read: fakeFs({}, 1000), env: {} }).tailscaled[0].uid, 1000)
+  assert.equal(
+    hostFacts({ read: fakeFs({ '/proc/40/cmdline': null }), env: {} }).unreadable,
+    1,
+    'its command line is hidden: cannot be determined',
+  )
+  assert.equal(hostFacts({ read: fakeFs({ '/proc/40/cmdline': '' }), env: {} }).unreadable, 1)
+  assert.deepEqual(hostFacts({ read: fakeFs({ '/proc/40/comm': 'bash\n' }), env: {} }).tailscaled, [])
+  for (const [label, read, env] of [
+    ['a user namespace', fakeFs({ '/proc/self/uid_map': '         0     100000      65536\n' }), {}],
+    ['no uid_map', fakeFs({ '/proc/self/uid_map': null }), {}],
+    ['/.dockerenv', fakeFs({ '/.dockerenv': '' }), {}],
+    ['/run/.containerenv', fakeFs({ '/run/.containerenv': '' }), {}],
+    ['container=', fakeFs(), { container: 'podman' }],
+    ['kubernetes', fakeFs(), { KUBERNETES_SERVICE_HOST: '10.0.0.1' }],
+    ['a docker cgroup', fakeFs({ '/proc/1/cgroup': '0::/docker/abc\n' }), {}],
+  ])
+    assert.ok(hostFacts({ read, env }).container, label)
+  // tailscaled's own answer about an address.
+  assert.deepEqual(whoisAnswer(JSON.stringify({ Node: { ID: 1 }, UserProfile: { LoginName: 'Ada@Example.com' } })), {
+    login: 'ada@example.com',
+    tagged: false,
+  })
+  assert.equal(
+    whoisAnswer(JSON.stringify({ Node: { ID: 1, Tags: ['tag:ci'] }, UserProfile: { LoginName: 'ada@example.com' } })).tagged,
+    true,
+  )
+  assert.equal(whoisAnswer(JSON.stringify({ Node: { ID: 1, Tags: ['tag:ci'] }, UserProfile: { LoginName: 'tagged-devices' } })), null)
+  assert.equal(whoisAnswer(JSON.stringify({ UserProfile: { LoginName: 'ada@example.com' } })), null, 'no node')
+  assert.equal(whoisAnswer('peer not found'), null)
+  assert.equal(forwardedTailnetAddress(fakeRequest([['X-Forwarded-For', '100.100.1.2']])), '100.100.1.2')
+  assert.equal(forwardedTailnetAddress(fakeRequest([['X-Forwarded-For', 'FD7A:115C:A1E0::1']])), 'fd7a:115c:a1e0::1')
+  for (const bad of ['100.63.0.1', '100.128.0.1', '10.0.0.1', '100.64.0.1, 100.64.0.2', '100.64.0.256', 'fd7a:115c:a1e1::1', ''])
+    assert.equal(forwardedTailnetAddress(fakeRequest([['X-Forwarded-For', bad]])), null, bad)
 })
 
 test('the serve config must be the one entry this server added: a TCP forward, another entry or Funnel is a problem', () => {
@@ -286,12 +474,60 @@ test('the serve config must be the one entry this server added: a TCP forward, a
     serveProblem({ ...ours, Web: { [`${TAILNET_HOST}:443`]: { Handlers: { '/': { Proxy: 'http://127.0.0.1:4700/sub' } } } } }, at),
     /another tailscale serve entry|gone or was changed/,
   )
+  // With tailnet sign-in the entry is the one with the secret path, exactly.
+  const secret = { ...at, target: 'http://127.0.0.1:4700/_ts/abc' }
+  assert.match(serveProblem(ours, secret), /another tailscale serve entry/, 'an entry without the secret is not ours')
+  assert.equal(
+    serveProblem({ ...ours, Web: { [`${TAILNET_HOST}:443`]: { Handlers: { '/': { Proxy: 'http://127.0.0.1:4700/_ts/abc' } } } } }, secret),
+    null,
+  )
+  // Every spelling of "this machine's loopback, this port" counts as reaching the server.
+  for (const spelled of [
+    '127.0.0.1:4700',
+    'http://127.0.0.1:4700',
+    'http://localhost:4700/x',
+    'https+insecure://localhost:4700',
+    'LOCALHOST:4700',
+    'localhost.:4700',
+    'app.localhost:4700',
+    '127.0.0.2:4700',
+    '127.1:4700',
+    '[::1]:4700',
+    'http://[::1]:4700/',
+    'http://[0:0:0:0:0:0:0:1]:4700',
+    'http://[::ffff:127.0.0.1]:4700',
+    '0.0.0.0:4700',
+    'http://[::]:4700',
+    ':4700',
+    '4700',
+    'tcp://127.0.0.1:4700',
+    'http://0x7f.0.0.1:4700',
+    'http://2130706433:4700',
+    'http://this-machine:4700',
+  ]) {
+    assert.equal(reachesLocalPort(spelled, 4700), true, spelled)
+    assert.match(serveProblem({ ...ours, TCP: { ...ours.TCP, 9000: { TCPForward: spelled } } }, at), /raw TCP forward/, spelled)
+  }
+  for (const other of [
+    '127.0.0.1:4701',
+    'http://localhost:47000',
+    'http://10.0.0.5:4700',
+    'http://192.168.1.9:4700',
+    'http://[fd7a::2]:4700',
+    'http://localhost',
+    'unix:/run/app.sock',
+    '',
+    '80',
+  ])
+    assert.equal(reachesLocalPort(other, 4700), false, other)
+  assert.equal(reachesLocalPort('http://localhost', 80), true, 'the default port of the scheme')
+  assert.equal(reachesLocalPort('https://localhost', 443), true)
 })
 
 // ---- Refusing to turn on -------------------------------------------------------------
 
 test('the feature refuses to turn on, and says why, when it cannot prove where a request came from', async () => {
-  const base = () => ({ dataDir: tempDir('tailnet-refuse'), port: 0, env: {}, out: () => {}, exitOnStop: false })
+  const base = () => ({ dataDir: tempDir('tailnet-refuse'), port: 0, env: {}, out: () => {}, exitOnStop: false, tailnetFacts: plainFacts })
   await assert.rejects(startHosted({ ...base(), tailnetSignIn: true }), /--tailnet-sign-in goes with --tailscale/)
   const ts = () => ({ httpsPort: 443, funnel: null, run: fakeTailscale().run, watchMs: 0 })
   await assert.rejects(
@@ -313,7 +549,7 @@ test('the feature refuses to turn on, and says why, when it cannot prove where a
   const run = async (command, args) => {
     const result = await fake.run(command, args)
     if (args[0] === 'serve' && args.includes('--bg')) {
-      const port = /:(\d+)$/.exec(args.at(-1))[1]
+      const port = /127\.0\.0\.1:(\d+)/.exec(args.at(-1))[1]
       fake.state.config.TCP[9000] = { TCPForward: `127.0.0.1:${port}` }
     }
     return result
@@ -328,10 +564,50 @@ test('the feature refuses to turn on, and says why, when it cannot prove where a
     /raw TCP forward on tailnet port 9000/,
   )
   assert.ok(fake.state.calls.includes('serve --https=443 off'), 'and what it added to tailscale serve is removed again')
-  await assert.rejects(
-    startHosted({ ...base(), tailscale: ts(), tailnetSignIn: true, env: { SHAPEWALL_TAILSCALED_UID: 'root' } }),
-    /SHAPEWALL_TAILSCALED_UID/,
-  )
+  // tailscaled itself: userspace networking, too old, its own proxy, a container. Nothing is put on the tailnet.
+  const trusting = { trusted: () => true }
+  for (const [pattern, change] of [
+    [/userspace-networking mode/, (fake) => (fake.state.status.TUN = false)],
+    [/Tailscale 1\.96 is too old/, (fake) => (fake.state.status.Version = '1.96.1')],
+  ]) {
+    const fake = fakeTailscale()
+    change(fake)
+    await assert.rejects(
+      startHosted({
+        ...base(),
+        tailscale: { httpsPort: 443, funnel: null, run: fake.run, watchMs: 0 },
+        tailnetSignIn: true,
+        tailnetProof: trusting,
+      }),
+      pattern,
+    )
+    assert.ok(!fake.state.calls.some((call) => call.startsWith('serve --bg')), 'refused before anything was served')
+  }
+  for (const [pattern, facts] of [
+    [/SOCKS5 proxy/, () => ({ ...plainFacts(), tailscaled: [{ pid: 1, uid: 0, argv: ['tailscaled', '--socks5-server=localhost:1055'] }] })],
+    [/cannot tell whose "root"/, () => ({ ...plainFacts(), container: 'it runs in a container' })],
+    [/no tailscaled process is visible/, () => ({ ...plainFacts(), tailscaled: [] })],
+  ])
+    await assert.rejects(
+      startHosted({ ...base(), tailscale: ts(), tailnetSignIn: true, tailnetProof: trusting, tailnetFacts: facts }),
+      pattern,
+    )
+  // There is no way to name another user for tailscaled any more.
+  const fake2 = fakeTailscale()
+  const started = await startHosted({
+    ...base(),
+    tailscale: { httpsPort: 443, funnel: null, run: fake2.run, watchMs: 0 },
+    tailnetSignIn: true,
+    tailnetProof: trusting,
+    env: { SHAPEWALL_TAILSCALED_UID: String(process.getuid?.() ?? 1000) },
+  })
+  try {
+    // The serve entry carries a secret path, new at each start, and no output line holds it.
+    const target = fake2.state.config.Web[`${TAILNET_HOST}:443`].Handlers['/'].Proxy
+    assert.match(target, /^http:\/\/127\.0\.0\.1:\d+\/_ts\/[A-Za-z0-9_-]{43}$/)
+  } finally {
+    await started.stop()
+  }
 })
 
 // ---- Signing in ------------------------------------------------------------------------
@@ -482,6 +758,41 @@ test('forged identity headers are ignored on direct loopback requests, on Funnel
   }
   // 1. A program on the server's machine, straight to the port.
   await nobody(server.direct(), 'direct loopback')
+  // 1b. A raw TCP forward that tailscaled itself dialled (userspace networking, `serve --tcp`, the
+  //     LocalAPI dial): the connection is tailscaled's, the bytes are the attacker's. No serve secret: nobody.
+  const forwardDevice = await server.device({}, { forward: true })
+  server.tailscale.state.whois.set(forwardDevice.address, ADA)
+  await nobody(forwardDevice.browser(), 'a raw forward dialled by tailscaled')
+  const withAddress = await forwardDevice
+    .browser()
+    .get('/auth/me', { headers: { ...forged, 'X-Forwarded-For': (await server.device(ADA)).address } })
+  assert.equal(withAddress.json.user, null, 'also when it names the victim’s real tailnet address')
+  // 1c. A local user who read the secret from `tailscale serve status`: it has the path, its socket is its own.
+  const secretPath = new URL(server.tailscale.state.config.Web[`${TAILNET_HOST}:443`].Handlers['/'].Proxy).pathname
+  assert.match(secretPath, /^\/_ts\/[A-Za-z0-9_-]{43}$/)
+  const adaAddress = (await server.device(ADA)).address
+  const insider = await server.direct().get(`${secretPath}/auth/me`, { headers: { ...forged, 'X-Forwarded-For': adaAddress } })
+  assert.equal(insider.status, 200)
+  assert.equal(insider.json.user, null, 'the secret alone is not enough')
+  // 1d. A wrong secret: a plain 404, whoever asks.
+  const wrong = await server.direct().get(`/_ts/${'x'.repeat(43)}/auth/me`, { headers: forged })
+  assert.equal(wrong.status, 404)
+  assert.equal(wrong.text, 'Not found')
+  // 1e. Through the real proxy path, but tailscaled's whois says the address is someone else's, tagged, or nobody's.
+  for (const [label, who] of [
+    ['another person’s address', BEN],
+    ['a tagged device’s address', { tagged: true }],
+    ['an address tailscaled does not know', null],
+  ]) {
+    const lying = await server.device(ADA)
+    if (who) server.tailscale.state.whois.set(lying.address, who)
+    else server.tailscale.state.whois.delete(lying.address)
+    const asked = await me(lying.browser())
+    assert.equal(asked.json.user, null, label)
+    assert.equal(asked.json.tailnet.state, 'none', label)
+  }
+  // No output line of the server holds the secret.
+  assert.ok(server.lines.every((line) => !line.includes(secretPath.slice(5))))
   // 2. Through tailscaled, as Funnel traffic: the proxy drops what the client sent and marks the request.
   await nobody((await server.device({ funnel: true })).browser(), 'funnel on the tailnet port')
   // 3. A Funnel mark together with identity headers (a proxy that did not strip): still nobody.
@@ -526,7 +837,9 @@ test('duplicate, conflicting, empty and oddly encoded headers name nobody, even 
   const server = await tailnet('tailnet-headers')
   await claimWithPasskey(server, await server.device(ADA))
   // A proxy that passes headers through as they are (what a raw forward would do), on a believed connection.
-  const raw = (await server.device({}, { raw: true })).browser()
+  const rawDevice = await server.device({}, { raw: true })
+  server.tailscale.state.whois.set(rawDevice.address, ADA)
+  const raw = rawDevice.browser()
   const ask = async (headers) => (await raw.get('/auth/me', { headers: { 'Sec-Fetch-Site': 'same-origin', ...headers } })).json
   assert.equal(
     (await ask({ 'Tailscale-User-Login': 'ada@example.com' })).user.handle,
@@ -552,9 +865,22 @@ test('duplicate, conflicting, empty and oddly encoded headers name nobody, even 
   // Encoded as Tailscale encodes: the login is still the login, the name is decoded.
   const ok = await ask({ 'Tailscale-User-Login': '=?utf-8?q?ada=40example.com?=', 'Tailscale-User-Name': qEncode('Adá') })
   assert.equal(ok.user.handle, 'ada')
-  const visitor = await ask({ 'Tailscale-User-Login': 'dee@example.com', 'Tailscale-User-Name': qEncode('Dée Ünïcode') })
+  // Another login than the one tailscaled says owns that address: nobody.
+  const other = await ask({ 'Tailscale-User-Login': 'dee@example.com', 'Tailscale-User-Name': 'Dee' })
+  assert.equal(other.tailnet.state, 'none')
+  const deeDevice = await server.device({}, { raw: true })
+  server.tailscale.state.whois.set(deeDevice.address, { login: 'dee@example.com' })
+  const visitor = (
+    await deeDevice.browser().get('/auth/me', {
+      headers: {
+        'Sec-Fetch-Site': 'same-origin',
+        'Tailscale-User-Login': 'dee@example.com',
+        'Tailscale-User-Name': qEncode('Dée Ünïcode'),
+      },
+    })
+  ).json
   assert.equal(visitor.tailnet.name, 'Dée Ünïcode')
-  assert.ok(server.lines.some((line) => /tailnet sign-in: ignored identity headers/.test(line)))
+  assert.ok(server.lines.some((line) => /tailnet identity: ignored identity headers/.test(line)))
 })
 
 test('one tailnet login cannot become another account: a session counts only with the identity it was made for', async () => {
@@ -643,8 +969,9 @@ test('linking needs a fresh passkey check; unlinking ends the tailnet sessions; 
   // An account that only the tailnet signs in cannot unlink: it would be locked out.
   const { browser: ben } = await joinByInvite(server, ada, await server.device(BEN))
   const refused = await ben.call('DELETE', '/auth/tailnet/link')
-  assert.equal(refused.status, 409)
-  assert.equal(refused.json.error.code, 'no_passkey')
+  assert.equal(refused.status, 403)
+  assert.equal(refused.json.error.code, 'passkey_required', 'the fixed core: a passkey first')
+  assert.equal((await me(ben)).json.tailnet.linked, 'ben@example.com')
 })
 
 test('an invite for one login is that login’s alone: by link, by join, by passkey sign-up, and by an account linked to another login', async () => {
@@ -767,7 +1094,7 @@ test('workspaces stay apart: a tailnet member of one sees nothing of another', a
 
 // ---- The fixed core without a passkey, and the CLI's device approval ---------------------------
 
-test('a tailnet account with no passkey: everything in the workspace, a passkey first for the fixed core, and the first passkey is its own', async () => {
+test('a tailnet account with no passkey: everything in the workspace, a passkey first for the fixed core, and the first passkey is on hold for a day', async () => {
   const server = await tailnet('tailnet-core')
   const ada = await claimWithPasskey(server, await server.device(ADA))
   const ws = ada.workspaceId
@@ -810,19 +1137,39 @@ test('a tailnet account with no passkey: everything in the workspace, a passkey 
     assert.equal(refused.json.error.code, 'passkey_required', `${method} ${url}`)
     assert.match(refused.json.error.message, /Add a passkey in Account and security/)
   }
-  // Adding the first passkey needs nothing more: the tailnet identity is all the account has.
+  // With no passkey on the account this session is as strong as the account gets: it may end the others.
+  assert.equal((await ben.post('/auth/sessions/revoke-others', {})).status, 200)
+  // Adding the first passkey needs no check: the tailnet identity is all the account has.
   const { createAuthenticator } = await import('./hosted-helpers.js')
   const authenticator = createAuthenticator({ origin: TAILNET_ORIGIN })
   const options = await ben.post('/auth/passkeys/options', {})
   assert.equal(options.status, 200, options.text)
   const added = await ben.post('/auth/passkeys/verify', { response: authenticator.register(options.json.options), nickname: 'Laptop' })
   assert.equal(added.status, 201, added.text)
-  assert.equal(added.json.passkeys[0].onHoldUntil, null, 'not on hold: there was nothing stronger before it')
-  // From now on the core asks for that passkey, and a second passkey needs it too.
+  // It signs in at once, but it is on hold for 24 hours for the fixed core: a tailnet identity is per
+  // device, and whatever runs as ben on one of his devices could have added it.
+  assert.ok(Date.parse(added.json.passkeys[0].onHoldUntil) > Date.now() + 23 * 3_600_000, 'on hold for 24 hours')
+  const event = (await ben.get('/auth/security-log')).json.events.find((entry) => entry.action === 'passkey_added')
+  assert.deepEqual(event.detail, { viaRecovery: false, viaTailnet: true, onHold: true })
+  const laptop = (await import('./hosted-helpers.js')).createBrowser(server.localPort, TAILNET_ORIGIN)
+  const start = await laptop.post('/auth/login/options', {})
+  const signedIn = await laptop.post('/auth/login/verify', { response: authenticator.assert(start.json.options) })
+  assert.equal(signedIn.status, 200, 'the new passkey signs in')
+  assert.equal((await call(laptop, 'DELETE', `/api/workspaces/${ws}`, { confirm: 'x' })).json.error.code, 'reauth_required')
+  // The core asks for the passkey, and that passkey cannot confirm yet; a second passkey needs it too.
   const asked = await call(ben, 'DELETE', `/api/workspaces/${ws}`, { confirm: 'x' })
   assert.equal(asked.json.error.code, 'reauth_required')
   assert.equal((await ben.post('/auth/passkeys/options', {})).json.error.code, 'reauth_required')
+  const early = await ben.post('/auth/reauth/options', {})
+  const held = await ben.post('/auth/reauth/verify', { response: authenticator.assert(early.json.options) })
+  assert.equal(held.json.error.code, 'passkey_on_hold')
+  assert.equal((await call(ben, 'DELETE', `/api/workspaces/${ws}`, { confirm: 'x' })).json.error.code, 'reauth_required')
+  // With a passkey on the account, ending the other sessions needs that passkey once.
+  assert.equal((await ben.post('/auth/sessions/revoke-others', {})).json.error.stepUp, 'sessions')
+  // A day later the hold is over.
+  server.db.prepare("UPDATE passkeys SET recovery_added_at = '2000-01-01T00:00:00.000Z' WHERE recovery_added_at IS NOT NULL").run()
   await reauth({ browser: ben, authenticator })
+  assert.equal((await ben.post('/auth/sessions/revoke-others', {})).status, 200)
   assert.equal((await me(ben)).json.via, 'tailnet', 'still a tailnet session, now with a fresh passkey check')
   assert.equal((await me(ben)).json.fresh, true)
   assert.equal((await ben.post('/auth/recovery-codes', {})).status, 200)
@@ -851,4 +1198,177 @@ test('while the serve config is not as this server made it, nobody is signed in 
   await server.tailnetWatch()
   assert.ok(server.lines.some((line) => /^Tailnet sign-in is back/.test(line)))
   assert.equal((await phone.get(`/api/workspaces/${ada.workspaceId}`)).status, 200)
+})
+
+// ---- After the security review -----------------------------------------------------------------
+
+test('signing up with a passkey through the tailnet does not link the login unless the person asks', async () => {
+  const server = await tailnet('tailnet-signup-link')
+  const adaDevice = await server.device(ADA)
+  // The setup link, a passkey, the box not ticked.
+  const ada = await signUp(server.as(adaDevice), { handle: 'ada' })
+  const mine = await me(ada.browser)
+  assert.deepEqual({ here: mine.json.tailnet.here, linked: mine.json.tailnet.linked }, { here: 'ada@example.com', linked: null })
+  assert.equal((await me(adaDevice.browser())).json.tailnet.state, 'unknown', 'arriving again signs nobody in')
+  assert.equal(server.db.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'tailnet_linked'").get().n, 0)
+  // Ticked: linked, and said so in the account's log.
+  const benDevice = await server.device(BEN)
+  const ben = await signUp(server.as(benDevice), { handle: 'ben', invite: await invite(ada, ada.workspaceId, 'member'), linkTailnet: true })
+  assert.equal((await me(ben.browser)).json.tailnet.linked, 'ben@example.com')
+  const events = (await ben.browser.get('/auth/security-log')).json.events
+  assert.deepEqual(events.find((event) => event.action === 'tailnet_linked').detail, { tailnet: 'ben@example.com', atSignUp: true })
+  assert.equal((await me(benDevice.browser())).json.via, 'tailnet')
+  // Asked for where there is no identity, or for a login that is taken: refused before any passkey is made.
+  const token = await invite(ada, ada.workspaceId, 'member')
+  const off = await server.direct().post('/auth/register/options', { handle: 'cyd', displayName: 'Cyd', invite: token, linkTailnet: true })
+  assert.equal(off.json.error.code, 'tailnet_required')
+  const taken = await benDevice
+    .browser()
+    .post('/auth/register/options', { handle: 'cyd', displayName: 'Cyd', invite: token, linkTailnet: true })
+  assert.equal(taken.json.error.code, 'tailnet_login_taken')
+  // The login is the one the sign-up was started with: finishing from another person's device links nothing.
+  const cydDevice = await server.device(CYD)
+  const { createAuthenticator } = await import('./hosted-helpers.js')
+  const browser = cydDevice.browser()
+  const start = await browser.post('/auth/register/options', { handle: 'cyd', displayName: 'Cyd', invite: token, linkTailnet: true })
+  assert.equal(start.status, 200, start.text)
+  const elsewhere = (await server.device({ login: 'dee@example.com', name: 'Dee' })).browser()
+  for (const [name, value] of browser.jar) elsewhere.jar.set(name, value)
+  const done = await elsewhere.post('/auth/register/verify', {
+    response: createAuthenticator({ origin: TAILNET_ORIGIN }).register(start.json.options),
+  })
+  assert.equal(done.status, 201, done.text)
+  assert.equal(server.db.prepare("SELECT tailnet_login FROM users WHERE handle = 'cyd'").get().tailnet_login, null)
+})
+
+test('"Approve command line logins in the browser" is decided by the server: a session that only a tailnet identity stands behind cannot approve, whatever it sends', async () => {
+  const server = await tailnet('tailnet-cli-barrier')
+  const ada = await claimWithPasskey(server, await server.device(ADA))
+  const ws = ada.workspaceId
+  const project = (await ada.browser.post(`/api/workspaces/${ws}/projects`, { name: 'Site' })).json.project
+  const benDevice = await server.device(BEN)
+  const { browser: ben } = await joinByInvite(server, ada, benDevice, 'admin')
+  const startLogin = async () =>
+    (
+      await fetch(`http://127.0.0.1:${server.localPort}/api/v1/device/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'laptop' }),
+      })
+    ).json()
+  const approve = async (browser, headers = {}, code = null) =>
+    browser.post(
+      '/api/device/approve',
+      { code: code || (await startLogin()).userCode, workspaceId: ws, projectId: project.id, scopes: ['read'] },
+      { headers },
+    )
+  // Off (the default): the identity is enough, and the audit entry says how it was approved.
+  assert.equal((await approve(ben)).status, 200)
+  const entry = JSON.parse(server.db.prepare("SELECT detail FROM audit_log WHERE action = 'token_created' ORDER BY id DESC").get().detail)
+  assert.deepEqual(
+    { approvedBy: entry.approvedBy, signedInBy: entry.signedInBy },
+    { approvedBy: 'tailnet identity', signedInBy: 'tailnet' },
+  )
+  // On: no header, any header, as a browser or as the command line: refused.
+  assert.equal((await call(ada.browser, 'PATCH', `/api/workspaces/${ws}/step-up`, { cliApproval: true })).status, 200)
+  const waiting = (await startLogin()).userCode
+  for (const headers of [
+    {},
+    { 'X-Shapewall-Client': 'cli' },
+    { 'X-Shapewall-Client': 'browser' },
+    { 'User-Agent': 'Mozilla/5.0 Chrome/140' },
+  ]) {
+    const refused = await approve(ben, headers, waiting)
+    assert.equal(refused.status, 403, JSON.stringify(headers))
+    assert.equal(refused.json.error.code, 'passkey_required')
+    assert.equal(refused.json.error.stepUp, 'cliApproval')
+  }
+  // The owner's passkey session approves; her own tailnet session asks for the passkey, and with it approves.
+  assert.equal((await approve(ada.browser, {}, waiting)).status, 200)
+  const adaTailnet = (await server.device(ADA)).browser()
+  await me(adaTailnet)
+  const second = (await startLogin()).userCode
+  const asked = await approve(adaTailnet, {}, second)
+  assert.equal(asked.json.error.code, 'reauth_required')
+  assert.match(asked.json.error.message, /in the browser, with a passkey/)
+  await reauth({ browser: adaTailnet, authenticator: ada.authenticator })
+  assert.equal((await approve(adaTailnet, {}, second)).status, 200)
+  const last = JSON.parse(server.db.prepare("SELECT detail FROM audit_log WHERE action = 'token_created' ORDER BY id DESC").get().detail)
+  assert.equal(last.approvedBy, undefined, 'a passkey stood behind that one')
+})
+
+test('a tailnet session is stored so that a build from before tailnet sign-in cannot use it, and what it has open is cut when it ends', async () => {
+  const server = await tailnet('tailnet-downgrade')
+  const adaDevice = await server.device(ADA)
+  const ada = await claimWithPasskey(server, adaDevice)
+  const phone = adaDevice.browser()
+  await me(phone)
+  const sha = (value) => createHash('sha256').update(value).digest('hex')
+  const token = phone.jar.get('__Host-sw_session')
+  const rows = server.db.prepare('SELECT token_hash, tailnet_login FROM sessions ORDER BY tailnet_login').all()
+  // An older build looks a cookie up by the hash of the token (its readSession): it finds the passkey session only.
+  const olderBuildFinds = (cookie) => rows.find((row) => row.token_hash === sha(cookie)) || null
+  assert.equal(olderBuildFinds(token), null)
+  assert.ok(olderBuildFinds(ada.browser.jar.get('__Host-sw_session')))
+  assert.ok(rows.some((row) => row.token_hash === sha(`tailnet:${token}`) && row.tailnet_login === 'ada@example.com'))
+  // Nor can a row be read the other way round in this build: the login column and the hash must agree.
+  server.db.prepare('UPDATE sessions SET tailnet_login = NULL WHERE token_hash = ?').run(sha(`tailnet:${token}`))
+  assert.equal((await phone.get(`/api/workspaces/${ada.workspaceId}`)).status, 401)
+  server.db
+    .prepare("UPDATE sessions SET tailnet_login = 'ada@example.com' WHERE token_hash = ?")
+    .run(sha(ada.browser.jar.get('__Host-sw_session')))
+  assert.equal((await ada.browser.get(`/api/workspaces/${ada.workspaceId}`)).status, 401)
+
+  // Open responses of tailnet sessions (live streams) are cut: by person on unlink, all of them when trust is suspended.
+  const { createGuards } = await import('../src/hosted/guards.js')
+  const session = (id) => ({
+    user: { id, tailnet_login: `${id}@example.com` },
+    session: { via: 'tailnet', tailnet_login: `${id}@example.com` },
+  })
+  const guards = createGuards({
+    db: server.db,
+    auth: { readSession: (cookie) => (cookie ? session(cookie) : null) },
+    tailnet: { identityOf: (req) => ({ login: `${req.who}@example.com` }) },
+    SESSION_COOKIE: 'sw_session',
+    siteOf: () => ({ origin: TAILNET_ORIGIN }),
+    rateLimiter: null,
+    quotas: null,
+    now: () => new Date(),
+    iso: () => new Date().toISOString(),
+    log: () => {},
+  })
+  const open = (who) => {
+    const res = new EventEmitter()
+    res.destroyed = false
+    res.destroy = () => {
+      res.destroyed = true
+      res.emit('close')
+    }
+    const req = { who, headers: { cookie: `sw_session=${who}`, 'tailscale-user-login': `${who}@example.com` } }
+    res.req = req
+    guards.needSession(req, res, () => {})
+    return res
+  }
+  const [one, two, three] = [open('ada'), open('ben'), open('ada')]
+  three.emit('close') // answered and done: nothing to cut
+  guards.cutTailnetSessions('ben')
+  assert.deepEqual([one.destroyed, two.destroyed, three.destroyed], [false, true, false])
+  guards.cutTailnetSessions()
+  assert.deepEqual([one.destroyed, two.destroyed, three.destroyed], [true, true, false])
+  // The watch cuts them when the serve config goes wrong.
+  let cuts = 0
+  server.app.locals.cutTailnetSessions = () => (cuts += 1)
+  server.tailscale.state.status.TUN = false
+  await server.tailnetWatch()
+  assert.equal(cuts, 1)
+  assert.ok(server.lines.some((line) => /^Tailnet sign-in is suspended: tailscaled runs in userspace-networking mode/.test(line)))
+  await server.tailnetWatch()
+  assert.equal(cuts, 1, 'once, when it is suspended')
+  server.tailscale.state.status.TUN = true
+  server.facts.now = { ...plainFacts(), tailscaled: [{ pid: 1, uid: 0, argv: ['tailscaled', '--socks5-server=localhost:1055'] }] }
+  await server.tailnetWatch()
+  assert.equal(server.tailnet.suspended().includes('SOCKS5'), false, 'the first reason stays until it is right again')
+  server.facts.now = plainFacts()
+  await server.tailnetWatch()
+  assert.equal(server.tailnet.suspended(), null)
 })

@@ -53,6 +53,7 @@ export function mountTailnetAuth(authRouter, deps) {
     publicUser,
     createWorkspace,
     acceptInvite,
+    cutTailnetSessions = () => {},
   } = deps
   const OUT_COOKIE = tailnetOutCookie(secure)
   const on = Boolean(tailnet)
@@ -266,6 +267,8 @@ export function mountTailnetAuth(authRouter, deps) {
     handle(async (req, res) => {
       const viaTailnet = req.auth.session.via === 'tailnet'
       const login = tailnetAccounts.unlink(req.user.id)
+      // What those sessions still had open (live streams) ends with them.
+      if (login) cutTailnetSessions(req.user.id)
       if (login)
         auditAccount(db, { userId: req.user.id, action: 'tailnet_unlinked', ip: clientIp(req), at: iso(), detail: { tailnet: login } })
       if (viaTailnet) setCookie(res, SESSION_COOKIE, '', 0)

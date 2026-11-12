@@ -723,8 +723,9 @@ Hosted Shapewall (docs/hosted.md)
                             (share pages only, never the console), on --funnel-port 8443|443|10000
       --tailnet-sign-in     with --tailscale: a tailnet user is signed in as the account linked to their tailnet
                             login, no passkey (or $SHAPEWALL_HOSTED_TAILNET_SIGN_IN=1). An admin still decides
-                            who is in a workspace. Linux only; refuses to start where it cannot prove that a
-                            request came through tailscale serve
+                            who is in a workspace. Needs Linux and Tailscale 1.98+ in its normal (TUN) mode, not
+                            in a container; refuses to start where it cannot prove that a request came through
+                            tailscale serve. An identity is per device: what runs as you there can act as you
       --quotas FILE         per-workspace quotas (default <data>/quotas.json when it exists)
       --retention-hours N   prune old versions every N hours (default 6, 0 = off); --retention-keep N (2)
   hosted setup-link         print the first account's one-time link (it is not in the log)

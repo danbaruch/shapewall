@@ -15,8 +15,13 @@
 // An occupied port is never taken over, even if its target happens to match.
 
 import { execFile } from 'node:child_process'
+import { SECRET_PREFIX, hostFacts, serveProblem, serveTarget, tailscaledProblem, whoisAnswer } from '../tailnet-proof.js'
+
+export { reachesLocalPort, serveProblem } from '../tailnet-proof.js'
 
 export class TailscaleError extends Error {}
+// Tailnet sign-in cannot be switched on with this tailscaled (the message says why).
+export class TailnetSignInRefused extends Error {}
 
 // Funnel only publishes these HTTPS ports.
 export const FUNNEL_PORTS = [443, 8443, 10000]
@@ -83,7 +88,7 @@ export async function tailscaleStatus({ run = runCommand } = {}) {
     throw new TailscaleError(
       `HTTPS certificates are off for this tailnet, so ${dnsName} cannot serve https. Turn on "HTTPS Certificates" in the admin console, DNS page.`,
     )
-  return { dnsName: dnsName.toLowerCase(), version: status.Version || null }
+  return { dnsName: dnsName.toLowerCase(), version: status.Version || null, status }
 }
 
 // What `tailscale serve` already does on `port`: null (free), or the local
@@ -109,12 +114,19 @@ export async function servedOn(port, { run = runCommand, dnsName } = {}) {
 
 const localTarget = (port) => `http://127.0.0.1:${port}`
 
-async function claim(kind, httpsPort, localPort, { run, dnsName }) {
+// A target as an error message may show it: never the secret path of a serve entry.
+const shown = (target) => {
+  const at = String(target).indexOf(SECRET_PREFIX)
+  return at < 0 ? target : `${String(target).slice(0, at + SECRET_PREFIX.length)}...`
+}
+
+async function claim(kind, httpsPort, localPort, { run, dnsName, secret = null }) {
   const current = await servedOn(httpsPort, { run, dnsName })
-  const target = localTarget(localPort)
+  // With tailnet sign-in the entry points at a secret path (src/tailnet-proof.js).
+  const target = secret ? serveTarget(localPort, secret) : localTarget(localPort)
   if (current) {
     throw new TailscaleError(
-      `Tailscale already serves port ${httpsPort} on this machine (${current.targets.join(', ') || 'another service'}${current.funnel ? ', public through Funnel' : ''}). ` +
+      `Tailscale already serves port ${httpsPort} on this machine (${current.targets.map(shown).join(', ') || 'another service'}${current.funnel ? ', public through Funnel' : ''}). ` +
         `Pick another port (${kind === 'funnel' ? `--funnel-port, one of ${FUNNEL_PORTS.join(', ')}` : '--tailscale-port 8443'}) or remove it first: tailscale ${kind} --https=${httpsPort} off`,
     )
   }
@@ -131,8 +143,16 @@ async function claim(kind, httpsPort, localPort, { run, dnsName }) {
 
 // Puts the server on the tailnet. Returns { origin, shareOrigin, stop }:
 // `stop()` removes what was added.
-export async function startTailscale({ localPort, httpsPort = 443, funnel = null, run = runCommand }) {
-  const { dnsName } = await tailscaleStatus({ run })
+// `secret`: tailnet sign-in; the serve entry then carries it, and `verify`
+// and `whois` are what the identity proof asks while the server runs.
+// `facts`: what the machine says about tailscaled (tests).
+export async function startTailscale({ localPort, httpsPort = 443, funnel = null, run = runCommand, secret = null, facts = hostFacts }) {
+  const { dnsName, status } = await tailscaleStatus({ run })
+  if (secret) {
+    // Before anything is put on the tailnet.
+    const problem = tailscaledProblem(status, facts())
+    if (problem) throw new TailnetSignInRefused(problem)
+  }
   if (!Number.isInteger(httpsPort) || httpsPort < 1 || httpsPort > 65535) throw new TailscaleError('--tailscale-port: a port number')
   if (funnel) {
     if (!FUNNEL_PORTS.includes(funnel.httpsPort))
@@ -147,7 +167,7 @@ export async function startTailscale({ localPort, httpsPort = 443, funnel = null
     return results.every(Boolean)
   }
   try {
-    undo.push(await claim('serve', httpsPort, localPort, { run, dnsName }))
+    undo.push(await claim('serve', httpsPort, localPort, { run, dnsName, secret }))
     let shareOrigin = null
     if (funnel) {
       undo.push(await claim('funnel', funnel.httpsPort, funnel.localPort, { run, dnsName }))
@@ -158,58 +178,37 @@ export async function startTailscale({ localPort, httpsPort = 443, funnel = null
     const verify = async () => {
       const result = await run('tailscale', ['serve', 'status', '--json'])
       if (result.missing || result.code !== 0) return 'tailscale serve status could not be read'
+      let problem
       try {
-        return serveProblem(JSON.parse(result.stdout || '{}') || {}, { dnsName, httpsPort, localPort })
+        problem = serveProblem(JSON.parse(result.stdout || '{}') || {}, {
+          dnsName,
+          httpsPort,
+          localPort,
+          ...(secret ? { target: serveTarget(localPort, secret) } : {}),
+        })
       } catch {
         return 'tailscale serve status did not answer JSON'
       }
+      if (problem || !secret) return problem
+      // And tailscaled itself: still one whose connections can be believed.
+      const now = await run('tailscale', ['status', '--json'])
+      if (now.missing || now.code !== 0) return 'tailscale status could not be read'
+      try {
+        return tailscaledProblem(JSON.parse(now.stdout), facts())
+      } catch {
+        return 'tailscale status did not answer JSON'
+      }
     }
-    return { origin: originFor(dnsName, httpsPort), shareOrigin, dnsName, stop, verify }
+    // tailscaled's own word on who owns a tailnet address (LocalAPI whois, through the CLI).
+    const whois = async (address) => {
+      const result = await run('tailscale', ['whois', '--json', address])
+      return result.missing || result.code !== 0 ? null : whoisAnswer(result.stdout)
+    }
+    return { origin: originFor(dnsName, httpsPort), shareOrigin, dnsName, stop, verify, whois }
   } catch (error) {
     await stop()
     throw error
   }
-}
-
-// Tailnet sign-in believes the identity headers only on requests that
-// tailscaled's HTTP proxy sent (src/hosted/tailnet-identity.js). The proxy
-// removes whatever identity headers a client sent and sets its own; a raw
-// TCP forward does neither, so a tailnet device could write any login
-// through one. This says what in a serve config (`tailscale serve status
-// --json`) breaks that, or null when the only thing that reaches this
-// server's local port is the one HTTPS entry this process added:
-//   - a TCP forward (plain or TLS-terminated) to the local port;
-//   - any other serve entry that proxies to it (another port or path, a
-//     foreground session, a service);
-//   - Funnel switched on for the tailnet port;
-//   - the entry itself gone or changed.
-export function serveProblem(config, { dnsName, httpsPort, localPort }) {
-  const target = localTarget(localPort)
-  const reachesUs = (value) => {
-    const text = String(value || '')
-      .toLowerCase()
-      .replace(/^[a-z+]+:\/\//, '')
-      .replace(/\/.*$/, '')
-    return [`127.0.0.1:${localPort}`, `localhost:${localPort}`, `[::1]:${localPort}`].includes(text) || text === String(localPort)
-  }
-  const own = `${dnsName}:${httpsPort}`
-  let ours = 0
-  const entries = [config, ...Object.values(config?.Foreground || {}), ...Object.values(config?.Services || {})]
-  for (const entry of entries) {
-    if (!entry || typeof entry !== 'object') continue
-    for (const [port, tcp] of Object.entries(entry.TCP || {}))
-      if (tcp?.TCPForward && reachesUs(tcp.TCPForward))
-        return `a raw TCP forward on tailnet port ${port} points at this server, and a TCP forward passes identity headers through unchecked`
-    for (const [key, web] of Object.entries(entry.Web || {}))
-      for (const [mount, handler] of Object.entries(web?.Handlers || {})) {
-        if (!handler?.Proxy || !reachesUs(handler.Proxy)) continue
-        if (entry === config && key === own && mount === '/' && handler.Proxy === target) ours += 1
-        else return `another tailscale serve entry (${key}${mount}) points at this server`
-      }
-    for (const [key, on] of Object.entries(entry.AllowFunnel || {})) if (on && key === own) return `Funnel is on for ${own}`
-  }
-  if (ours !== 1) return 'the tailscale serve entry this server added is gone or was changed'
-  return null
 }
 
 export const originFor = (dnsName, port) => `https://${dnsName}${port === 443 ? '' : `:${port}`}`

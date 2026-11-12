@@ -144,7 +144,8 @@ export function Passkeys() {
       ) : keys.some((key) => key.onHoldUntil) ? (
         <div className="px-4 pb-4 sm:px-5">
           <Notice tone="info">
-            A passkey added after a recovery-code sign-in signs you in at once, but confirms sensitive changes only after 24 hours.
+            A passkey added after a recovery-code sign-in, or as the first passkey of an account your tailnet signs in, signs you in at
+            once, but confirms sensitive changes only after 24 hours.
           </Notice>
         </div>
       ) : null}

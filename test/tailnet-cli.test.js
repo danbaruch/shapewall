@@ -131,7 +131,9 @@ test('an owner sets up a tailnet server and a first project from the command lin
   assert.match(result.text, /Claimed https:\/\/board\.example\.ts\.net\./)
   assert.match(result.text, /Owner: ada@example\.com \(account @ada\), signed in by tailnet identity\./)
   assert.match(result.text, /Workspace: Team \(you are its owner\)\./)
-  assert.match(result.text, /No passkey was made\. Add one later in the browser/)
+  assert.match(result.text, /No passkey was made\. Add one in the browser .* before you need it/)
+  assert.match(result.text, /a first passkey can confirm them 24 hours after it is added/)
+  assert.match(result.text, /Anything that runs as you on a tailnet device of yours can act as you here/)
   assert.equal(readSetupLink(server.dataDir), null, 'the setup link is used up')
   assert.equal(server.db.prepare('SELECT COUNT(*) AS n FROM passkeys').get().n, 0)
   assert.equal(server.db.prepare('SELECT COUNT(*) AS n FROM sessions').get().n, 0, 'the command signed out again')
@@ -309,13 +311,16 @@ test('a workspace can keep the browser approval; and a workspace that asks for a
     },
   }
   const asked = await cliLogin(owner.device, {}, stop)
-  assert.match(asked.text, /This workspace approves logins and agent connections in the browser, also from a tailnet machine:/)
+  assert.match(
+    asked.text,
+    /This workspace approves logins and agent connections in the browser, with a passkey, also from a tailnet machine:/,
+  )
   assert.match(asked.text, /enter this code/)
   assert.equal(server.db.prepare('SELECT COUNT(*) AS n FROM api_tokens').get().n, 0)
   // Switching it off is a weaker setting: the fixed core (a passkey first).
   const off = await owner.browser.call('PATCH', `/api/workspaces/${ws}/step-up`, { body: { cliApproval: false } })
   assert.equal(off.json.error.code, 'passkey_required')
-  // In the browser the same person still approves (a tailnet session, the console's own request).
+  // A workspace that asks for a passkey before "Agents and machines": the same fallback, said in its own words.
   server.db.prepare('UPDATE workspaces SET step_up = \'{"agents":true}\'').run()
   polls = 0
   const stepUp = await cliLogin(owner.device, {}, stop)

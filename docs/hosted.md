@@ -85,13 +85,18 @@ cannot be undone for everyone:
 
 - adding or removing a passkey (`POST /auth/passkeys/options`, `POST /auth/passkeys/verify`, `DELETE /auth/passkeys/:id`);
 - new recovery codes (`POST /auth/recovery-codes`);
-- linking or unlinking a tailnet login (`POST` and `DELETE /auth/tailnet/link`);
+- linking or unlinking a tailnet login (`POST` and `DELETE /auth/tailnet/link`; ticking the box at sign-up is the one way to
+  link without it);
 - deleting your account (`DELETE /auth/me`);
 - deleting a workspace (`DELETE /api/workspaces/:ws`);
 - owners: making someone an owner, changing or removing an owner, inviting an owner (`PATCH` and `DELETE
 /api/workspaces/:ws/members/:user`, `POST /api/workspaces/:ws/invites` with role `owner`);
 - moving your sign-in to the server's new address (`POST /auth/rebind/start`);
 - making the setting below weaker (`PATCH /api/workspaces/:ws/step-up`).
+
+The list is one table in the code (`FIXED_CORE` in `src/hosted/step-up.js`), enforced in one place before any route runs.
+"Sign out other devices" is not in it, but it is not free either: it needs a session that passed a passkey check at some
+point (any passkey sign-in has), so a session someone merely holds cannot sign you out everywhere.
 
 **2. What a workspace's owner switches on.** Settings, "Ask for a passkey again". Everything is off by default. One switch per
 group:
@@ -166,12 +171,21 @@ Good to know:
 - **Signing out** keeps that browser signed out until you press "Continue as ada@example.com" on the sign-in page. Arriving again
   would otherwise sign you straight back in; the page says so.
 - **The fixed core without a passkey.** An account that only its tailnet signs in has no passkey to confirm with. For the few
-  things that always need one it is told to add a passkey first (403 `passkey_required`). Adding the first passkey needs nothing
-  more: the tailnet identity is all the account ever had, so there is nothing stronger to check it against, and the passkey is
-  not put on hold. From then on the core asks for that passkey, and adding or removing another one does too. We chose this over
-  "ask the proxy again": a second request through the proxy proves nothing the first did not.
+  things that always need one it is told to add a passkey first (403 `passkey_required`). Adding the first passkey needs no
+  check (there is nothing stronger to check it against), but **that passkey is on hold for 24 hours**: it signs in at once, and
+  it cannot confirm the fixed core until the day is over, exactly like a passkey added after a recovery code. A tailnet
+  identity is per device, so whatever runs as you on one of your devices could add a passkey of its own; the hold gives you a
+  day to see it (Account activity says "First passkey added in a tailnet session", and Activity marks it "Worth a look") and
+  remove it. So add your passkey before you need it. We chose this over "ask the proxy again": a second request through the
+  proxy proves nothing the first did not.
+- **Ending your other sessions** ("Sign out other devices") needs a session that passed a passkey check at some point, or an
+  account with no passkey at all. A tailnet session of an account that has a passkey confirms with it once.
+- **Signing up with a passkey while you arrive through the tailnet does not link your login.** The sign-up page has a box,
+  "Also sign me in from this tailnet login", off by default. Ticked, the link is in the account's log (`tailnet_linked`).
 - **`shapewall login` and `agent connect`** are approved in the browser by a tailnet-signed-in admin with no passkey, or with no
-  browser at all ([From your coding agent](#from-your-coding-agent)).
+  browser at all ([From your coding agent](#from-your-coding-agent)), unless the workspace switched on "Approve command line
+  logins in the browser": then the server takes an approval only from a session with a passkey check in the last 10 minutes,
+  whatever the client is and whatever it sends.
 - **Share links, public boards and `--funnel`** are as before. The public listener never reads an identity.
 - **People from another tailnet who accepted a share of this machine** do carry a login (Tailscale sets the headers for them).
   They are visitors like anyone else: listed for the admins, in nothing until invited.
@@ -181,49 +195,103 @@ Good to know:
 The identity headers are only as good as the path they came by. `tailscale serve` removes any `Tailscale-User-*` header a client
 sent and sets its own, for traffic from tailnet users only: none for tagged devices, none for Funnel
 ([Tailscale: identity headers](https://tailscale.com/kb/1312/serve#identity-headers)). But the server listens on `127.0.0.1`, and
-any program on that machine can open the port and write the same headers. Tailscale's advice is to listen on localhost, which
-"limits tampering to other services running on the Serve device". Shapewall goes one step further and believes a header only
-when all of this holds:
+other things can open that port and write the same headers:
 
-1. **The connection's other end belongs to tailscaled.** On Linux the kernel lists every TCP socket with its owner in
-   `/proc/net/tcp`. For each new connection the server finds the socket at the other end and checks that its owner is the user
-   tailscaled runs as (root; set `SHAPEWALL_TAILSCALED_UID` if yours runs as someone else). A program run by any other user
-   fails this check, and its headers are ignored. A program that already runs as root, or as the server's own user when
-   tailscaled does, could read the database and the session secret directly: it was never outside.
-2. **The serve entry this server added is the only thing pointing at its port.** A raw TCP forward (`tailscale serve --tcp`)
-   passes bytes through untouched, so a tailnet device could write its own headers. The server reads `tailscale serve status`
-   at start and every 30 seconds; a TCP forward to its port, another serve entry to it, Funnel on its port, or its own entry
-   gone, and nobody is signed in by tailnet identity until it is fixed (tailnet sessions stop counting, passkey sessions go on).
-   The log says why.
-3. **The headers are clean.** Exactly one `Tailscale-User-Login`, no `Tailscale-Funnel-Request`, a value that is plain ASCII or
+- any program on the machine;
+- a tailnet device, when tailscaled runs in userspace-networking mode: its netstack forwards a raw TCP connection to the
+  machine's tailnet address, on a port serve does not handle, to `127.0.0.1:<same port>`, and tailscaled itself dials it;
+- a local user through tailscaled's own dialler (`tailscale nc`, before Tailscale 1.98), or through tailscaled's SOCKS5 or
+  outbound HTTP proxy.
+
+The last two arrive from a socket that tailscaled owns. So no single check is proof, and an identity is believed only when
+**all** of these hold:
+
+1. **The secret.** At each start the server makes a random secret and points its serve entry at
+   `http://127.0.0.1:<port>/_ts/<secret>`. Serve puts the path of its target in front of every request it proxies; a raw
+   forward, a dial or a proxy passes the client's own path. A request without the secret is never asked who it is. This stops a
+   tailnet device, and anything else that cannot read this machine's serve config. **It does not stop a local user:** any local
+   user can read the serve config (`tailscale serve status` works for a user who is not the Tailscale operator; checked), secret
+   included. The secret is in no log line, error or response; a wrong one gets a plain 404.
+2. **The peer.** The connection's other end must be a socket owned by root, the user tailscaled runs as. On Linux the kernel
+   lists every TCP socket with its owner in `/proc/net/tcp`, and the server looks the peer up for each connection. This stops
+   local users, who have the secret: their sockets are their own. There is no setting to name another user.
+3. **tailscaled vouches.** For each request the server asks tailscaled who owns the address in `X-Forwarded-For` (which serve
+   sets to the tailnet address the request came from): `tailscale whois`. It must be a user's device, not tagged, of the same
+   login as the header. Kept for a minute per connection and address. Not proof alone (the address is a header too), required
+   in addition.
+4. **The headers are clean.** Exactly one `Tailscale-User-Login`, no `Tailscale-Funnel-Request`, a value that is plain ASCII or
    RFC 2047 encoded UTF-8 (what Tailscale sends for non-ASCII names) and reads as `user@domain`. Twice, empty, another
    character set, a broken escape: nobody.
-4. **The request is from this origin.** The proxy adds the identity to every request a device makes, also one that a page on
+5. **The request is from this origin.** The proxy adds the identity to every request a device makes, also one that a page on
    another site made the browser send. So the identity alone only answers `GET /auth/me` with `Sec-Fetch-Site: same-origin`
    and the `POST /auth/tailnet/*` routes (same-origin and JSON, as for every write). Everything else needs the session cookie
    as before.
 
-**Where the first check cannot be made, the feature refuses to turn on** and the server does not start: not Linux (macOS and
-Windows have no such table), `/proc/net/tcp` unreadable or hidden, or a test connection from the server itself not recognised.
-The message says which. Run with passkeys there (`--tailscale` without `--tailnet-sign-in`).
+**The feature refuses to turn on, and the server does not start,** when the peer check would not mean what it must. While the
+server runs the same is checked every 30 seconds, and nobody is signed in by tailnet identity until it is right again (tailnet
+sessions stop counting and their open live streams are cut; passkey sessions go on; the log says why):
 
-What was checked against a real `tailscale serve`, and what was not: see
-[the note at the end of this section](#what-was-and-was-not-checked-against-real-tailscale).
+- not Linux (macOS and Windows have no such table), `/proc/net/tcp` unreadable, or a test connection from the server itself not
+  recognised;
+- tailscaled in **userspace-networking mode** (`tailscale status --json` says `TUN: false`, or it was started with
+  `--tun=userspace-networking`);
+- **Tailscale older than 1.98**;
+- tailscaled running a **SOCKS5 or outbound HTTP proxy** (`--socks5-server`, `--outbound-http-proxy-listen`, read from its
+  command line in `/proc`);
+- tailscaled not found in `/proc`, more than one, not readable, or not running as root;
+- the server in a **container or a user namespace**, where "root" may not be the machine's root (a `/.dockerenv` or
+  `/run/.containerenv` file, a container cgroup, `container` or `KUBERNETES_SERVICE_HOST` in the environment, or a uid map
+  that is not the machine's own);
+- the serve config not the one entry the server added: a raw TCP forward to its port (under any spelling of loopback), another
+  serve entry to it, Funnel on its port, or its own entry gone or changed.
+
+Run with passkeys in those cases (`--tailscale` without `--tailnet-sign-in`).
+
+**What is still trusted.** Root on the server's machine, and whoever may change tailscaled's serve config there (the Tailscale
+operator). Either can pretend to be anyone. Nothing else on the machine is trusted, and nothing on the tailnet.
+
+**An identity is per device, not per person.** Tailscale says which device a request came from and whose device it is. It
+cannot say that the person is at the keyboard. Anything running as you on a tailnet device of yours (a script, a coding agent,
+a browser extension, malware) can act as you here, as far as a tailnet session goes. That is why the fixed core asks for a
+passkey, why a first passkey is on hold for a day, and why a workspace can require a passkey for approving machines
+("Approve command line logins in the browser"). If that is not acceptable for your team, use passkeys.
+
+**Logins are taken as Tailscale reports them.** `ada@example.com` is one account here whichever identity provider the tailnet
+uses. If a tailnet changes provider, or a shared-in user from another tailnet has a login that reads the same as a member's,
+this server cannot tell them apart; whois would have to agree as well, and an admin still has to invite the login.
 
 ### What was and was not checked against real Tailscale
 
-Checked on a real machine (Tailscale 1.104, Linux): `tailscaled` runs as root, which is what the socket-owner check expects;
-the `/proc/net/tcp` lookup names the right owner for a real loopback connection (a test in the suite, on Linux); `tailscale
-serve status --json` has the shape the server reads for an HTTPS entry (`TCP`, `Web`, `Handlers`, `Proxy`); the header
-names, the stripping of client-sent headers, the RFC 2047 encoding and "none for tagged devices or Funnel" are as Tailscale's
-documentation and source (`ipn/ipnlocal/serve.go`) say.
+Checked on a real machine (Tailscale 1.104.2, Linux), read-only:
 
-Not checked against a real `tailscale serve`, because the tests run without a tailnet: that a request through serve arrives
-from a socket tailscaled owns (it is tailscaled's own HTTP proxy, so it should); the exact shape of `tailscale serve status
---json` for a TCP forward, a service or a foreground session on your version; that `shapewall hosted claim` on the server's own
-machine reaches the server through serve with your identity. The tests use a stand-in proxy that follows the documented
-behaviour. Before you rely on it, open the server from two tailnet devices of different people and from a tagged device, and
-look at the server log for "ignored identity headers".
+- `tailscaled` runs as root, and its command line is readable in `/proc` by an ordinary user;
+- `tailscale status --json` has `TUN` (true there) and `Version` ("1.104.2-...");
+- `tailscale serve status --json` has the shape the server reads for an HTTPS entry (`TCP`, `Web`, `Handlers`, `Proxy`), and
+  **a user who is not the operator can read it** (run as `nobody`): the secret is not secret from local users;
+- `tailscale whois --json <address>` answers `Node` and `UserProfile.LoginName` for this machine's own tailnet address, and
+  "peer not found" for an address that is nobody's;
+- the `/proc/net/tcp` lookup names the right owner for a real loopback connection (a test in the suite, on Linux).
+
+Read in Tailscale's source (`ipn/ipnlocal/serve.go`, `wgengine/netstack`, `cmd/tailscaled`), not run: that serve joins its
+target's path in front of the request path, sets `X-Forwarded-For` to the tailnet source address, strips and sets the identity
+headers; that the userspace netstack forwards raw TCP to loopback; the proxy flags.
+
+**Not checked against a live proxied request**, because the tests run without a tailnet and this work did not change any
+machine's serve config:
+
+- that `tailscale serve --bg --https=443 http://127.0.0.1:<port>/_ts/<secret>` is accepted, and that requests then arrive as
+  `/_ts/<secret>/<path>` (also for `/`, and for WebSocket upgrades);
+- that such a request arrives from a root-owned socket, with exactly one `X-Forwarded-For` holding a `100.64.0.0/10` or
+  `fd7a:115c:a1e0::/48` address, and that `tailscale whois` on it returns the same login as the header;
+- how `tailscale whois` marks a tagged device and a shared-in user's device in `--json` on your version (the code reads
+  `Node.Tags` and `UserProfile.LoginName`);
+- the shape of `tailscale serve status --json` for a TCP forward, a service or a foreground session;
+- that `shapewall hosted claim` on the server's own machine reaches the server through serve with your identity;
+- the time `tailscale whois` takes per new connection under load.
+
+The tests use a stand-in proxy that follows the behaviour read in the source. The first real test: start the server, open it
+from two tailnet devices of different people and from a tagged device, run `shapewall hosted claim`, and look at the server log
+for "ignored identity headers" (it says which check failed).
 
 ### From your coding agent
 
@@ -247,7 +315,8 @@ shapewall admin invites create --login ben@example.com --role admin --remote htt
 `hosted claim` reads the one-time setup link from the data folder (so only someone who can read that folder can run it) and asks
 the server through the tailnet who is asking. That login becomes the owner. `--login ada@example.com` refuses anyone else; it
 never names the owner by itself. No passkey is made. **Needs a browser later:** adding a passkey (Account and security), which
-the fixed core asks for: deleting a workspace, changing owners, inviting an owner, making the passkey settings weaker.
+the fixed core asks for: deleting a workspace, changing owners, inviting an owner, making the passkey settings weaker. A first
+passkey can confirm those 24 hours after it is added, so add it before you need it; the command says so.
 
 **2. A member joins and connects their machine.** On their own tailnet machine, after an admin invited their login:
 
@@ -268,10 +337,11 @@ The rules of those commands:
   Otherwise the command lists the projects with the exact flags to add and exits with an error. It never prompts.
 - **An agent's look and audience** come from flags: `--name`, `--icon`, `--tint`, `--used-by owner|trusted` (default `owner`:
   only you). Named members are picked in the console.
-- **A workspace can keep the browser approval:** Settings, "Approve command line logins in the browser" (owners). Then `login`
-  and `agent connect` show the code as on any server. So does a workspace that asks for a passkey for "Agents and machines".
-  This is a workspace's policy that the command line follows; it is not a wall against the account's own owner, who could
-  approve the same code in the browser.
+- **A workspace can require the browser and a passkey:** Settings, "Approve command line logins in the browser" (owners). The
+  server then refuses an approval from any session that only a tailnet identity stands behind (no passkey check in the last 10
+  minutes): `login` and `agent connect` show the code, and whoever approves it confirms with a passkey. This is decided by the
+  server from the session; nothing the command line or a browser sends changes it. A workspace that asks for a passkey for
+  "Agents and machines" gets the code too.
 - **When it does not apply** (the server has no tailnet sign-in, the request did not come through the tailnet, a tagged device, a
   login with no account): `login` and `agent connect` use the code and the browser, unchanged. `join` says that an account
   needs a passkey, which is made in the browser, and gives the link. `admin` says it would need an admin token, which does not
@@ -954,7 +1024,13 @@ shapewall agent connect --remote https://wall.example.com --approvals none      
   from that branch, whatever the checkout holds. `--base head` goes back to the default.
 - **`--git-remote NAME`** is where a finished fix is pushed (`origin` by default). `--git-remote none`: never pushed.
 
-`agent connect` prints what is in effect when it starts. The console's Agents page and the board's Agents panel say which mode an
+`agent connect` prints what is in effect when it starts, and it says the same to the server with the code: the approval page
+shows what that machine asked for (read and answer only, or edits on a branch and who may allow them, "without asking" if it
+asked for `--auto edits`, the base branch, and that it never runs a command), marked "Reported by the terminal". The machine
+enforces its own rules; the server decides nothing by that report. Before it goes online, `agent connect` also opens a session
+with the agent (no prompt is sent) and prints which adapter version answered ([tested versions](agents.md#claude-code)).
+
+The console's Agents page and the board's Agents panel say which mode an
 agent is in: "Reads and answers", "Edits on a branch, each allowed by the person who connected it" (or "an admin", or "an
 owner"), or "Edits on a branch, allowed without asking".
 
@@ -1540,11 +1616,14 @@ Old-host passkeys show "For old.example" on the Account page.
   API, signed URLs and tokens.
 - **CSRF.** Cookie-authenticated writes need JSON and an `Origin` (or `Sec-Fetch-Site: same-origin`) equal to the configured origin,
   on top of SameSite=Lax. The token API ignores cookies.
-- **Tailnet identity** (only with `--tailnet-sign-in`). The `Tailscale-User-*` headers are believed only on a connection whose
-  other end is owned by tailscaled, while the serve entry this server added is the only way to its port, with exactly one clean
-  login header and no Funnel mark; on direct loopback requests, on Funnel traffic and with the flag off they are ignored. The
-  identity alone only ever answers same-origin requests, and a tailnet session counts only together with it. Where the first
-  check cannot be made the server refuses to start with the flag ([how](#how-the-server-knows-a-request-came-through-tailscale-serve)).
+- **Tailnet identity** (only with `--tailnet-sign-in`). The `Tailscale-User-*` headers are believed only on a request that
+  carries the secret path of the serve entry this server made, on a connection whose other end is owned by root, for an address
+  tailscaled's own whois gives to that login, with exactly one clean login header and no Funnel mark. On direct loopback
+  requests, raw TCP forwards, Funnel traffic and with the flag off they are ignored. The server refuses to start with the flag
+  (and suspends it while running) under userspace networking, Tailscale before 1.98, tailscaled's own proxies, in a container,
+  or when the serve config is not its one entry. Root and the Tailscale operator on the machine are trusted; nothing else on
+  the machine or the tailnet is. An identity is per device, not per person
+  ([how](#how-the-server-knows-a-request-came-through-tailscale-serve)).
 - **Rate limits** (in memory, per process): passkey ceremonies 30 a minute per IP; wrong recovery codes 5 per 15 minutes per handle and
   IP, and 30 an hour per IP (right codes do not count, and nobody can use up another address's attempts); invite lookups 30 a minute
   per IP; bad tokens 20 a minute per IP; 1200 requests a minute per token; 20 pushes an hour per
@@ -1910,8 +1989,9 @@ For rollback, prefer the pre-upgrade backup in a fresh data folder with the prev
 upgraded database also works, but:
 
 - **The old passkey rules are back for everyone,** whatever the workspaces chose.
-- **End tailnet sessions first** (`DELETE FROM sessions WHERE tailnet_login IS NOT NULL;`). An older build does not know they are
-  bound to a tailnet identity and would read them as ordinary sessions that never passed a passkey check.
+- **Delete tailnet sessions** (`DELETE FROM sessions WHERE tailnet_login IS NOT NULL;`). An older build cannot use them in any
+  case: they are stored under the hash of `tailnet:<token>`, and an older build looks a cookie up by the hash of the token
+  alone, so it finds nothing. Deleting them is tidiness, and the documented step.
 - **Accounts made by tailnet sign-in have no passkey** and no recovery codes, so they cannot sign in to an older build.
 - **Invites made for a tailnet login** work for anyone who has their link on an older build. Revoke the pending ones first.
 

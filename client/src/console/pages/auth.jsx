@@ -431,6 +431,8 @@ export function SignUp() {
   // yet: the tailnet is the sign-in, and a passkey is optional.
   const visitor = anon?.tailnet && ['unknown', 'invited'].includes(anon.tailnet.state) ? anon.tailnet : null
   const visitorLogin = visitor?.login || null
+  // "Also sign me in from this tailnet login": off unless the person says so.
+  const [linkTailnet, setLinkTailnet] = useState(false)
   useEffect(() => {
     if (!visitor) return
     setHandle((current) => current || visitor.suggested?.handle || '')
@@ -478,6 +480,8 @@ export function SignUp() {
         ...(tokens.setup ? { setup: tokens.setup } : {}),
         ...(!tokens.invite && workspaceValue.trim() ? { workspaceName: workspaceValue.trim() } : {}),
         ...(needsCheck ? { turnstileToken } : {}),
+        // Only when the person ticked it: a passkey account is not linked to the device's tailnet login by itself.
+        ...(visitor && linkTailnet ? { linkTailnet: true } : {}),
       })
       const response = await createPasskey(options)
       const result = await api.post('/auth/register/verify', { response })
@@ -603,7 +607,7 @@ export function SignUp() {
             <>
               <Notice tone="info" title={`Your tailnet signs you in as ${visitor.login}`} data-sw-signup-tailnet>
                 No passkey is needed here. You can add one later in Account and security; a few things, like deleting a workspace, always
-                ask for one.
+                ask for one, and a first passkey can confirm them 24 hours after it is added.
               </Notice>
               <Button
                 type="button"
@@ -618,6 +622,17 @@ export function SignUp() {
                 Continue as {visitor.login}
               </Button>
             </>
+          ) : null}
+          {visitor ? (
+            <div className="space-y-1" data-sw-signup-link-tailnet>
+              <CheckToggle checked={linkTailnet} onChange={setLinkTailnet} id="link-tailnet">
+                Also sign me in from this tailnet login: {visitor.login}
+              </CheckToggle>
+              <p className="text-xs text-muted">
+                With a passkey account this is off unless you tick it. Ticked, anything that runs as you on a tailnet device of yours can
+                act as you here, without the passkey.
+              </p>
+            </div>
           ) : null}
           <Button
             type="submit"

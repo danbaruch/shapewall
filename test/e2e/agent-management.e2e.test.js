@@ -14,6 +14,7 @@ import { openDatabase } from '../../src/hosted/db.js'
 import { registerProject, projectsFile } from '../../src/local-projects.js'
 import { writeServeState } from '../../src/serve-state.js'
 import { ROOT_DIR, demoSetup } from './helpers.js'
+import { believedGate } from '../tailnet-helpers.js'
 
 test(
   'Tailscale account enrollment, isolated host profile setup and phone chat preserve the protected board',
@@ -33,7 +34,7 @@ test(
       ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', key, '-out', cert, '-days', '1', '-subj', '/CN=fixture.example.ts.net'],
       { stdio: 'ignore' },
     )
-    const tailscale = { host: 'fixture.example.ts.net', ownerLogin: 'owner@example.test' }
+    const tailscale = { host: 'fixture.example.ts.net', ownerLogin: 'owner@example.test', gate: believedGate() }
     const holder = {}
     const server = https.createServer({ key: fs.readFileSync(key), cert: fs.readFileSync(cert) }, (req, res) => {
       req.headers['tailscale-user-login'] = tailscale.ownerLogin

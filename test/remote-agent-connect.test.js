@@ -521,7 +521,7 @@ test('the command: approved once in the browser, the token saved and never print
   assert.ok(first.state.out.includes(`open ${hosted.origin}/device`), 'the page is built here, never taken from the server')
   const lookup = await ada.browser.post('/api/device/lookup', { code: codeOf(first) })
   assert.equal(lookup.json.login.purpose, 'agent')
-  assert.deepEqual(lookup.json.login.agent, { kind: 'claude', name: 'Builder' })
+  assert.deepEqual(lookup.json.login.agent, { kind: 'claude', name: 'Builder', asks: { approvals: 'none', auto: false, base: null } })
   assert.deepEqual(lookup.json.scopes, ['read', 'reply', 'status', 'claim', 'agent'])
   assert.equal((await approve(codeOf(first))).status, 200)
   await until(() => /Connected: Builder/.test(first.state.err), `the link\n${first.state.out}${first.state.err}`)

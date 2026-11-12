@@ -16,7 +16,22 @@ import { roleAtLeast, roleIn, tenant, workspacesForUser } from './tenancy.js'
 import { TOKEN_SCOPES } from './tokens.js'
 
 export function mountDeviceApprovals(consoleApi, deps) {
-  const { db, dataDir, now, quotas, deviceLogins, clientIp, limit, handle, stepUpOrThrow, auditOf, createApiToken, agentsFor } = deps
+  const {
+    db,
+    dataDir,
+    now,
+    quotas,
+    deviceLogins,
+    clientIp,
+    limit,
+    handle,
+    stepUpOrThrow,
+    passkeyOrThrow,
+    auditOf,
+    createApiToken,
+    agentsFor,
+    auth,
+  } = deps
 
   // ---- `shapewall login`: approving a login in the console ----
   // The CLI side (start, poll) is on /api/v1/device, without a session.
@@ -84,15 +99,20 @@ export function mountDeviceApprovals(consoleApi, deps) {
       req.t = tenant(db, ws)
       // Approving a machine or an agent: the passkey again only when this workspace asks ("Agents and machines").
       stepUpOrThrow(req, 'agents')
-      // From the command line, by the tailnet identity of the machine's user
-      // (src/remote/tailnet-cli.js): the same approval, unless this workspace
-      // wants it looked at in the browser.
-      const byCli = req.headers['x-shapewall-client'] === 'cli' && req.auth.session.via === 'tailnet'
-      if (byCli && stepUpSettings(req.t).get().cliApproval)
-        throw new HttpError(
-          403,
-          'browser_approval_required',
-          'This workspace approves logins and agent connections in the browser. Open the page below and enter the code.',
+      // A session that only a tailnet identity stands behind (no passkey
+      // check in the last 10 minutes). That identity is per device: anything
+      // that runs as the person on one of their tailnet devices has it, the
+      // command line and an agent included. By default it may approve
+      // (src/remote/tailnet-cli.js does, with no code). A workspace that
+      // switched on "Approve command line logins in the browser" does not
+      // take it: the approval then needs the code and a passkey check. This
+      // is decided here, from the session; nothing the client sends changes it.
+      const identityOnly = req.auth.session.via === 'tailnet' && !auth.isFresh(req.auth.session)
+      if (identityOnly && stepUpSettings(req.t).get().cliApproval)
+        passkeyOrThrow(
+          req,
+          'This workspace approves logins and agent connections in the browser, with a passkey (Settings, "Approve command line logins in the browser"). Enter the code there and confirm with your passkey.',
+          { stepUp: 'cliApproval' },
         )
       if (workspaceSuspended(req.t))
         throw new HttpError(403, 'workspace_suspended', 'This workspace is suspended by the server operator; it takes no new tokens.')
@@ -128,7 +148,7 @@ export function mountDeviceApprovals(consoleApi, deps) {
           {
             via: agentLogin ? 'agent' : found.entry.purpose === 'import' ? 'import' : 'login',
             machine: found.entry.name,
-            ...(byCli ? { approvedBy: 'tailnet identity' } : {}),
+            ...(identityOnly ? { approvedBy: 'tailnet identity' } : {}),
             ...(agentLogin ? { agent: { kind: found.entry.agent?.kind || 'custom', icon: look.icon, tint: look.tint } } : {}),
           },
         )
@@ -145,7 +165,7 @@ export function mountDeviceApprovals(consoleApi, deps) {
             kind: found.entry.agent?.kind || 'custom',
             machine: found.entry.name,
             audience: look.audience,
-            ...(byCli ? { approvedBy: 'tailnet identity' } : {}),
+            ...(identityOnly ? { approvedBy: 'tailnet identity' } : {}),
           })
           agent = { id: token.agentId, name: look.name, audience: look.audience }
         }

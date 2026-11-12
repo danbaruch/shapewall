@@ -183,7 +183,10 @@ test('connect: the command shows a code, an admin names the agent and approves i
   assert.equal(await page.getAttribute('[data-sw-device-agent-kind]', 'data-sw-device-agent-kind'), 'claude')
   assert.equal(await page.inputValue('[data-sw-agent-name-input]'), 'Builder', 'the name the command suggested')
   assert.equal(await page.isChecked('[data-sw-device-agent-audience="owner"]'), true, 'only the approver, by default')
-  assert.match(await page.textContent('[data-sw-device-agent]'), /does not change files and runs no commands/)
+  // The command was run without --approvals: the page says what that machine asked for, as its terminal reported it.
+  assert.equal(await page.getAttribute('[data-sw-device-agent-asks]', 'data-sw-device-agent-asks'), 'read')
+  assert.match(await page.textContent('[data-sw-device-agent-asks]'), /Reported by the terminal/)
+  assert.match(await page.textContent('[data-sw-device-agent]'), /Does not change files and runs no commands/)
   await page.click('[data-sw-agent-icon-option="owl"]', { force: true })
   await shot(page, 'device-agent-1440-light')
   // Everyone the agent policy trusts, so a second person can use it below.
@@ -374,7 +377,12 @@ test('dark, and the phone: the Agents sheet, then the chat in its sheet', async 
     await fetch(`${hosted.origin}/api/v1/device/start`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'studio', purpose: 'agent', agent: { kind: 'codex', name: 'Scout' } }),
+      // This machine asked for edits (`--approvals owner --auto edits --base main`): the approver must see that.
+      body: JSON.stringify({
+        name: 'studio',
+        purpose: 'agent',
+        agent: { kind: 'codex', name: 'Scout', asks: { approvals: 'owner', auto: true, base: 'main' } },
+      }),
     })
   ).json()
   for (const [view, name] of [
@@ -386,8 +394,51 @@ test('dark, and the phone: the Agents sheet, then the chat in its sheet', async 
     await view.click('[data-sw-device-lookup]')
     await view.waitForSelector('[data-sw-device-agent]')
     assert.equal(await view.inputValue('[data-sw-agent-name-input]'), 'Scout')
+    const box = view.locator('[data-sw-device-agent-asks]')
+    assert.equal(await box.getAttribute('data-sw-device-agent-asks'), 'edits')
+    assert.equal(await box.getAttribute('data-sw-device-agent-auto'), 'true')
+    const asked = (await box.textContent()).replace(/\s+/g, ' ')
+    assert.match(asked, /This machine asked to edit files/)
+    assert.match(asked, /Reported by the terminal/)
+    assert.match(asked, /Each edit is shown on the board and waits for you, the person who connects it/)
+    assert.match(asked, /on a new branch, never in that machine's checkout/)
+    assert.match(asked, /Asked to allow edits without asking: that stays off until you switch it on/)
+    assert.match(asked, /A fix starts from the branch main\./)
+    assert.match(asked, /Never runs a command for the board/)
+    assert.doesNotMatch(asked, /does not change files/i, 'never the read-only promise for a machine that asked for edits')
+    await box.scrollIntoViewIfNeeded()
     await shot(view, name)
   }
+  // Admins may answer, no auto, no base; and a terminal that did not say (an older shapewall).
+  const more = async (agent) =>
+    (
+      await fetch(`${hosted.origin}/api/v1/device/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'studio', purpose: 'agent', agent }),
+      })
+    ).json()
+  const lookAt = async (code) => {
+    await dark.page.goto(`${hosted.origin}/device`)
+    await dark.page.fill('[data-sw-device-code]', code)
+    await dark.page.click('[data-sw-device-lookup]')
+    await dark.page.waitForSelector('[data-sw-device-agent-asks]')
+    return {
+      mode: await dark.page.getAttribute('[data-sw-device-agent-asks]', 'data-sw-device-agent-asks'),
+      text: (await dark.page.textContent('[data-sw-device-agent-asks]')).replace(/\s+/g, ' '),
+    }
+  }
+  const admins = await lookAt(
+    (await more({ kind: 'claude', name: 'Fixer', asks: { approvals: 'admins', auto: false, base: null } })).userCode,
+  )
+  assert.equal(admins.mode, 'edits')
+  assert.match(admins.text, /waits for whoever this server lets answer \(admins by default\)/)
+  assert.match(admins.text, /A fix starts from the commit that machine's checkout is on/)
+  assert.doesNotMatch(admins.text, /without asking/)
+  const silent = await lookAt((await more({ kind: 'claude', name: 'Older' })).userCode)
+  assert.equal(silent.mode, 'unknown')
+  assert.match(silent.text, /Not reported by the terminal/)
+  assert.match(silent.text, /did not say whether it also takes edits/)
   assert.equal(
     await device.page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     true,

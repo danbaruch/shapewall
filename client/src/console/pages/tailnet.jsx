@@ -205,8 +205,9 @@ export function TailnetAccount() {
         {viaTailnet ? (
           <p>
             {noPasskey
-              ? 'You have no passkey. That is fine for everything in a workspace. A few things always need one: deleting a workspace or your account, changing owners, recovery codes. Add a passkey above when you need them.'
+              ? 'You have no passkey. That is fine for everything in a workspace. A few things always need one: deleting a workspace or your account, changing owners, recovery codes. Add a passkey above before you need them: a first passkey signs in at once, and can confirm those things 24 hours after it is added.'
               : 'A tailnet session works only on requests that arrive as your login: its cookie is worth nothing off the tailnet.'}{' '}
+            Your tailnet identity is per device, not per person: anything running as you on a tailnet device of yours can act as you here.
             Signing out keeps this browser signed out until you press Continue on the sign-in page.
           </p>
         ) : null}

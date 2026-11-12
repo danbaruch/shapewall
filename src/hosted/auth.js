@@ -430,7 +430,7 @@ export function createAuth({ db, origin, rpId, rpName = 'Shapewall', now = () =>
       `INSERT INTO sessions (token_hash, id, user_id, created_at, last_seen_at, expires_at, verified_at, via, user_agent, ip, tailnet_login)
        VALUES (:hash, :id, :user, :at, :at, :expires, :verified, :via, :device, :ip, :tailnet)`,
       {
-        hash: sha256(token),
+        hash: sessionHash(token, tailnetLogin),
         id: newId('se'),
         user: userId,
         at: iso(),
@@ -444,6 +444,12 @@ export function createAuth({ db, origin, rpId, rpName = 'Shapewall', now = () =>
     )
     return token
   }
+
+  // A tailnet session is stored under the hash of "tailnet:<token>", not of
+  // the token: a build from before tailnet sign-in looks a cookie up by the
+  // hash of the token alone (readSession there), finds nothing, and so can
+  // never use such a session as an ordinary one after a downgrade.
+  const sessionHash = (token, tailnetLogin) => sha256(tailnetLogin ? `tailnet:${token}` : token)
 
   // How a session came in, as the API and the audit log say it.
   const viaOf = (row) => (row.tailnet_login ? 'tailnet' : row.via)
@@ -477,8 +483,14 @@ export function createAuth({ db, origin, rpId, rpName = 'Shapewall', now = () =>
   // at most once an hour).
   function readSession(token) {
     if (typeof token !== 'string' || token.length < 20 || token.length > 100) return null
-    const hash = sha256(token)
-    const session = q.get('SELECT * FROM sessions WHERE token_hash = :hash', { hash })
+    // An ordinary session by the token's hash; a tailnet session by its own
+    // (never the other way round: the login column must agree with the hash).
+    let hash = sha256(token)
+    let session = q.get('SELECT * FROM sessions WHERE token_hash = :hash AND tailnet_login IS NULL', { hash })
+    if (!session) {
+      hash = sessionHash(token, true)
+      session = q.get('SELECT * FROM sessions WHERE token_hash = :hash AND tailnet_login IS NOT NULL', { hash })
+    }
     if (!session) return null
     if (session.expires_at <= iso() || Date.parse(session.created_at) + SESSION_MAX_DAYS * DAY <= now().getTime()) {
       q.run('DELETE FROM sessions WHERE token_hash = :hash', { hash })
@@ -523,6 +535,8 @@ export function createAuth({ db, origin, rpId, rpName = 'Shapewall', now = () =>
   // confirm sensitive actions then (added with a recovery code in the last 24
   // hours) and that no trusted passkey has confirmed since.
   const restricted = (session) => session.via === 'recovery' || (session.via === 'passkey' && session.verified_at === NEVER_VERIFIED)
+  // Whether this session itself ever passed a passkey check (at sign-in or since).
+  const passedPasskey = (session) => session.via !== 'recovery' && session.verified_at !== NEVER_VERIFIED
   const deleteTailnetSessions = (userId) =>
     q.run('DELETE FROM sessions WHERE user_id = :user AND tailnet_login IS NOT NULL', { user: userId })
   // A recovery session may add a passkey for a short while after signing in.
@@ -552,6 +566,7 @@ export function createAuth({ db, origin, rpId, rpName = 'Shapewall', now = () =>
     touchAdmin,
     isFresh,
     restricted,
+    passedPasskey,
     deleteTailnetSessions,
     passkeyCount: (userId) => passkeysOf(userId).length,
     canAddAfterRecovery,

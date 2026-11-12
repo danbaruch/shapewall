@@ -1,11 +1,13 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import http from 'node:http'
 import path from 'node:path'
 import { Devices, PAIR_MS, DEVICE_IDLE_MS, DEVICE_MAX_MS } from '../src/server/devices.js'
 import { createApp, stopChildren } from '../src/server/app.js'
 import { ownerIdentity } from '../src/server/pairing-routes.js'
 import { lanAccess, tailscaleAccess } from '../src/server/tailscale.js'
+import { believedGate } from './tailnet-helpers.js'
 import { devicesCommand } from '../src/devices-cli.js'
 import { parseArgs } from '../src/cli.js'
 import { createApproval, readApproval } from '../src/agent/starter/approvals.js'
@@ -95,7 +97,7 @@ test('device capabilities stay hashed/private/project-isolated, slide 30 days, s
 })
 
 test('Tailscale owner identity is exact, loopback-only, never a settings capability', () => {
-  const tailscale = { host: 'fixture.example.ts.net', ownerLogin: 'owner@example.test' }
+  const tailscale = { host: 'fixture.example.ts.net', ownerLogin: 'owner@example.test', gate: believedGate() }
   const req = {
     socket: { remoteAddress: '127.0.0.1' },
     headers: { host: 'fixture.example.ts.net:4600', 'tailscale-user-login': 'owner@example.test' },
@@ -219,7 +221,7 @@ test('unpaired remote APIs and files are closed; host approval grants owner righ
 
 test('remote chat and approval switches deny the whole boundary; Tailscale owner cannot change settings', async (t) => {
   const { config, env, devices } = fixture('remote-flags')
-  const tail = { host: 'fixture.example.ts.net', ownerLogin: 'owner@example.test' }
+  const tail = { host: 'fixture.example.ts.net', ownerLogin: 'owner@example.test', gate: believedGate() }
   const app = createApp({
     config,
     env,
@@ -339,4 +341,138 @@ test('LAN hosts are explicit, remote flags parse without stealing arguments', ()
   assert.throws(() => lanAccess('evil.test', { interfaces }), /local interface/)
   assert.deepEqual(parseArgs(['serve', '--tailscale', '--no-identity'], { strict: true }).flags, { tailscale: true, 'no-identity': true })
   assert.equal(parseArgs(['serve', '--lan=eth0'], { strict: true }).flags.lan, 'eth0')
+})
+
+// ---- The owner by tailnet identity: only with the proof (src/tailnet-proof.js) ----
+
+test('serve --tailscale: a Tailscale-User-Login header counts only through the serve entry, from tailscaled, with its whois; a local program cannot approve a command', async (t) => {
+  const { config, env, devices } = fixture('tailnet-proof-local')
+  const facts = () => ({ tailscaled: [{ pid: 1, uid: 0, argv: ['/usr/sbin/tailscaled'] }], unreadable: 0, container: null })
+  const base = fakeTail()
+  let served = null
+  const believed = new Set()
+  const run = async (command, args) => {
+    if (args[0] === 'status') return { stdout: JSON.stringify({ ...tailStatus, TUN: true, Version: '1.104.2' }) }
+    if (args[0] === 'serve' && args.includes('--bg')) {
+      served = args.at(-1)
+      return { stdout: '' }
+    }
+    if (args[0] === 'serve' && args[1] === 'status' && served)
+      return {
+        stdout: JSON.stringify({
+          TCP: { 4600: { HTTPS: true } },
+          Web: { 'fixture.example.ts.net:4600': { Handlers: { '/': { Proxy: served } } } },
+        }),
+      }
+    if (args[0] === 'whois') {
+      if (args.at(-1) !== '100.64.0.1') throw new Error('peer not found')
+      return base.run(command, args)
+    }
+    return base.run(command, args)
+  }
+  const options = {
+    port: 4600,
+    command: '/fixture/tailscale',
+    run,
+    facts,
+    proof: { problem: () => null, trusted: (socket) => believed.has(socket.remotePort) },
+  }
+  // Where the proof is not possible the board still serves, and every device pairs.
+  for (const refused of [
+    { ...options, proof: { problem: () => 'this needs Linux', trusted: () => true } },
+    { ...options, facts: () => ({ ...facts(), tailscaled: [{ pid: 1, uid: 0, argv: ['tailscaled', '--tun=userspace-networking'] }] }) },
+    { ...options, facts: () => ({ ...facts(), container: 'it runs in a container' }) },
+  ]) {
+    const off = await tailscaleAccess(refused)
+    assert.equal(off.gate, null)
+    assert.ok(off.identityOff)
+    assert.equal(off.command, 'tailscale serve --bg --https=4600 http://127.0.0.1:4600')
+  }
+
+  const tail = await tailscaleAccess(options)
+  assert.ok(tail.gate, 'the proof is possible: identity is on')
+  assert.equal(
+    tail.command,
+    'tailscale serve --bg --https=4600 http://127.0.0.1:4600/_ts/<a secret made at each start>',
+    'print never shows the secret',
+  )
+  await tail.start(null, { watchMs: 0 })
+  t.after(() => tail.stop())
+  assert.match(served, /^http:\/\/127\.0\.0\.1:4600\/_ts\/[A-Za-z0-9_-]{43}$/)
+  const secretPath = new URL(served).pathname
+  const app = createApp({
+    config,
+    env,
+    clientDir: tempDir('tailnet-proof-client'),
+    settingsToken: 'token',
+    allowedHosts: new Set([tail.host, '127.0.0.1']),
+    remote: { devices, tailscale: tail },
+  })
+  const server = await new Promise((resolve) => {
+    const value = app.listen(0, '127.0.0.1', () => resolve(value))
+  })
+  t.after(() => {
+    stopChildren(app)
+    server.close()
+  })
+  const port = server.address().port
+  const owner = { Host: tail.host, Origin: `https://${tail.host}`, 'Tailscale-User-Login': tail.ownerLogin }
+  const approval = createApproval(config, 'sample', { threadId: 'board', command: 'npm test', messageId: null })
+  const permission = `/api/agent/boards/sample/threads/board/permissions/${approval.id}`
+  // A local program (the agent whose command is waiting, say) dresses its request up as the owner's.
+  const forged = await request(port, 'POST', permission, { headers: owner, body: { optionId: 'run' } })
+  assert.equal(forged.status, 403, forged.text)
+  assert.equal(forged.json.error.code, 'host_only')
+  assert.equal((await request(port, 'GET', '/api/info', { headers: owner })).status, 401, 'and it is nobody for everything else')
+  // With the secret it read from `tailscale serve status`, and the owner's address: its socket is still its own.
+  const withSecret = await request(port, 'POST', `${secretPath}${permission}`, {
+    headers: { ...owner, 'X-Forwarded-For': '100.64.0.1' },
+    body: { optionId: 'run' },
+  })
+  assert.equal(withSecret.status, 403, withSecret.text)
+  assert.equal(readApproval(config, 'sample', approval.id).state, 'pending')
+  assert.equal((await request(port, 'GET', `/_ts/${'x'.repeat(43)}/api/info`, { headers: owner })).status, 404, 'a wrong secret')
+  // The host itself needs its settings token for an approval, as before.
+  const local = { Host: `127.0.0.1:${port}`, Origin: `http://127.0.0.1:${port}` }
+  assert.equal((await request(port, 'POST', permission, { headers: local, body: { optionId: 'run' } })).status, 403)
+  // Through the serve entry, from tailscaled, from the owner's device: the owner.
+  const viaServe = (method, url, { headers = {}, body } = {}) =>
+    new Promise((resolve, reject) => {
+      const data = body === undefined ? null : Buffer.from(JSON.stringify(body))
+      const req = http.request(
+        {
+          host: '127.0.0.1',
+          port,
+          method,
+          path: `${secretPath}${url}`,
+          agent: false,
+          headers: {
+            ...owner,
+            'X-Forwarded-For': '100.64.0.1',
+            ...headers,
+            ...(data ? { 'Content-Type': 'application/json', 'Content-Length': data.length } : {}),
+          },
+        },
+        (res) => {
+          let text = ''
+          res.on('data', (chunk) => (text += chunk))
+          res.on('end', () => resolve({ status: res.statusCode, text, json: JSON.parse(text || 'null') }))
+        },
+      )
+      req.on('socket', (socket) => socket.once('connect', () => believed.add(socket.localPort)))
+      req.on('error', reject)
+      req.end(data || undefined)
+    })
+  assert.equal((await viaServe('GET', '/api/info')).json.remote.kind, 'identity')
+  assert.equal((await viaServe('GET', '/api/info', { headers: { 'Tailscale-User-Login': 'attacker@example.test' } })).status, 401)
+  assert.equal(
+    (await viaServe('GET', '/api/info', { headers: { 'X-Forwarded-For': '100.64.0.9' } })).status,
+    401,
+    'tailscaled does not vouch for that address',
+  )
+  const approved = await viaServe('POST', permission, { body: { optionId: 'run' } })
+  assert.equal(approved.status, 200, approved.text)
+  // A serve config that is no longer the one entry: nobody is the owner by identity.
+  served = 'http://127.0.0.1:4600'
+  await tail.stop()
 })

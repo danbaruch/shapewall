@@ -187,6 +187,13 @@ export function createApp({
   if (buzzBridge) requireCleanBuzzEnvironment()
   const chatOn = chat && !readOnly
   const app = express()
+  // `serve --tailscale`: first, how the request came in. The serve entry's
+  // secret comes off its path here, and whether it is the owner by tailnet
+  // identity is worked out (src/tailnet-proof.js).
+  if (remote?.tailscale?.gate)
+    app.use((req, res, next) => {
+      remote.tailscale.gate.admit(req, res).then((ok) => ok && next(), next)
+    })
   app.disable('x-powered-by')
   app.set('trust proxy', false)
   const children = new Set()

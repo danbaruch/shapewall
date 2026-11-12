@@ -246,6 +246,7 @@ export const SENSITIVE_ACTIONS = [
   'usage_exported',
   'audit_exported',
   'access_exported',
+  'passkey_added',
   'passkey_removed',
   // When the workspace asks for a passkey again, and who a tailnet login signs in as.
   'step_up_changed',

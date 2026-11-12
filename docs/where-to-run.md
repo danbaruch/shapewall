@@ -60,9 +60,12 @@ On the hosted server, being signed in with the right role is enough for everythi
 passkey (your passkeys and recovery codes, deleting an account or a workspace, changing owners, moving the server), and a
 workspace's owner can switch on more in Settings. Details: [Signing in](hosted.md#signing-in).
 
-With tailnet sign-in the server believes Tailscale's identity headers only on requests that provably came through `tailscale
-serve`, never on direct loopback requests or Funnel traffic, and each tailnet login is its own account: being on the tailnet
-alone puts nobody in a workspace. It needs Linux. See [Tailnet sign-in](hosted.md#tailnet-sign-in).
+With tailnet sign-in the server believes Tailscale's identity headers only on requests that provably came through the serve
+entry it made (a secret path, a connection owned by tailscaled, tailscaled's own whois), never on direct loopback requests,
+raw forwards or Funnel traffic, and each tailnet login is its own account: being on the tailnet alone puts nobody in a
+workspace. It needs Linux, Tailscale 1.98 or newer in its normal (TUN) mode, and a server that is not in a container. A
+tailnet identity is per device, not per person: anything running as you on a tailnet device of yours can act as you there.
+See [Tailnet sign-in](hosted.md#tailnet-sign-in).
 
 ### From your coding agent
 
@@ -80,7 +83,8 @@ shapewall capture && shapewall push --remote https://board.example.ts.net
 shapewall admin invites create --login ben@example.com --role admin --remote https://board.example.ts.net
 ```
 
-Needs a browser: nothing now. Later, adding a passkey, for the few things that always ask for one.
+Needs a browser: nothing now. Later, adding a passkey, for the few things that always ask for one (a first passkey can confirm
+them 24 hours after it is added, so add it early).
 
 A member, on their own tailnet machine, after an admin invited their login:
 
@@ -89,7 +93,8 @@ shapewall join --remote https://board.example.ts.net                         # t
 shapewall agent connect --remote https://board.example.ts.net --project my-site --name "Builder"
 ```
 
-Needs a browser: nothing for an admin. A member or viewer may not connect a machine by themselves: `agent connect` shows a code
+Needs a browser: nothing for an admin, unless the workspace switched on "Approve command line logins in the browser" (then the
+code, the browser and a passkey). A member or viewer may not connect a machine by themselves: `agent connect` shows a code
 for an admin to approve, as on any server.
 
 On a server without tailnet sign-in these commands change nothing: `login` and `agent connect` use the code and the browser,

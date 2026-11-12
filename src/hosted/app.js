@@ -264,6 +264,10 @@ export function createHostedApp({
     needFresh,
     needFreshOrRecovery,
     needUnrestricted,
+    needPasskeyBacked,
+    fixedCore,
+    cutTailnetSessions,
+    passkeyOrThrow,
     coreFreshOrThrow,
     stepUp,
     stepUpOrThrow,
@@ -287,6 +291,8 @@ export function createHostedApp({
   app.use(usercontent.gate)
   // While moving: which origin a request is for; the old one serves only the move.
   app.use(previousHostGate(sites))
+  // The fixed core: what always asks for a fresh passkey check (one table, src/hosted/step-up.js).
+  app.use(fixedCore)
 
   const { publicUser, createWorkspace, acceptInvite, revokeGrantsOf, ownerCount } = createMembership({
     db,
@@ -335,6 +341,8 @@ export function createHostedApp({
     needFresh,
     needFreshOrRecovery,
     needUnrestricted,
+    needPasskeyBacked,
+    cutTailnetSessions,
     auditOf,
     publicUser,
     createWorkspace,
@@ -426,6 +434,7 @@ export function createHostedApp({
     inProject,
     needFresh,
     coreFreshOrThrow,
+    passkeyOrThrow,
     stepUp,
     stepUpOrThrow,
     auditOf,
@@ -562,6 +571,7 @@ export function createHostedApp({
     return mintSetupLink(db, publicOrigin, now())
   }
   app.locals.deviceLogins = deviceLogins
+  app.locals.cutTailnetSessions = cutTailnetSessions
   app.locals.sites = sites
 
   // Staging sweep at start and on a timer (unref'd: it never keeps the

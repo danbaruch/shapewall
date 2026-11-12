@@ -13,7 +13,7 @@ import { PushError } from './push.js'
 import { LIMITS } from './ratelimit.js'
 import { TenancyError, audit, roleAtLeast, roleIn, tenant } from './tenancy.js'
 import { CommentError } from '../store.js'
-import { STEP_UP_GROUP_BEFORE, stepUpWindowLabel } from './step-up.js'
+import { FIXED_CORE, STEP_UP_GROUP_BEFORE, stepUpWindowLabel } from './step-up.js'
 import { stepUpSettings } from './step-up-settings.js'
 import { sessionReader } from './tailnet.js'
 
@@ -73,9 +73,23 @@ export function createGuards({
     next()
   }
 
+  // Responses of tailnet sessions that are still open (a live stream): cut
+  // when the identity can no longer be believed, or its login is unlinked.
+  const tailnetOpen = new Set()
+  function cutTailnetSessions(userId = null) {
+    for (const res of [...tailnetOpen]) {
+      if (userId && res.req?.auth?.user?.id !== userId) continue
+      tailnetOpen.delete(res)
+      res.destroy()
+    }
+  }
   const needSession = (req, res, next) => {
     if (!sessionOf(req)) return fail(res, 401, 'signed_out', 'Sign in first.')
     req.user = req.auth.user
+    if (req.auth.session.via === 'tailnet' && !tailnetOpen.has(res)) {
+      tailnetOpen.add(res)
+      res.once('close', () => tailnetOpen.delete(res))
+    }
     next()
   }
   // ---- Asking for the passkey again (src/hosted/step-up.js) ----
@@ -148,12 +162,59 @@ export function createGuards({
     }
   const needFresh = asMiddleware(coreRefusal)
   const coreFreshOrThrow = asThrow(coreRefusal)
+  // A passkey check in the last 10 minutes for a rule of its own: passkeyOrThrow(req, message, { stepUp }).
+  const passkeyOrThrow = asThrow((req, message, extra) => notFresh(req, REAUTH_MS, message, extra))
   // After inWorkspace (req.t): stepUp('tokens').
   const stepUp = (group) => asMiddleware((req) => groupRefusal(req, group))
   // stepUpOrThrow(req, 'cards'), or with a tenant handle the route made itself.
   const stepUpOrThrow = asThrow(groupRefusal)
   // Account routes outside the core that a restricted session still may not use.
   const needUnrestricted = asMiddleware(restrictedRefusal)
+  // Ending my other sessions (one, or all the others). Not part of the fixed
+  // core, but not free either: whoever merely holds a session must not be
+  // able to sign the real person out everywhere unchallenged. The rule: this
+  // session itself passed a passkey check at some point (at sign-in, or
+  // since), or the account has no passkey at all, so that this session is
+  // as strong as the account gets (its tailnet signs it in). A tailnet
+  // session of an account that has a passkey confirms with it first.
+  const needPasskeyBacked = asMiddleware((req) => {
+    const restricted = restrictedRefusal(req)
+    if (restricted) return restricted
+    if (auth.passedPasskey(req.auth.session) || noPasskey(req)) return null
+    return new HttpError(
+      403,
+      'reauth_required',
+      'Confirm with your passkey first: this session was signed in by your tailnet, and ending your other sessions needs your passkey once.',
+      {
+        stepUp: 'sessions',
+      },
+    )
+  })
+
+  // The fixed core's table (src/hosted/step-up.js FIXED_CORE), enforced in
+  // one place for every request, before its route.
+  const coreLines = FIXED_CORE.filter((line) => line.method && line.path).map((line) => ({
+    ...line,
+    pattern: new RegExp(`^${line.path.replace(/:[a-z]+/g, '([^/]+)')}/?$`),
+    params: [...line.path.matchAll(/:([a-z]+)/g)].map((match) => match[1]),
+  }))
+  const fixedCore = (req, res, next) => {
+    for (const line of coreLines) {
+      if (line.method !== req.method) continue
+      const match = line.pattern.exec(req.path)
+      if (!match || !sessionOf(req)) continue
+      if (line.role) {
+        const ws = decodeURIComponent(match[1 + line.params.indexOf('ws')] || '')
+        const role = ID_PATTERNS.workspace.test(ws) ? roleIn(db, req.auth.user.id, ws) : null
+        // Not theirs to do: the route says so (404 or 403), as for anyone.
+        if (!role || !roleAtLeast(role, line.role)) continue
+      }
+      if (line.first && (auth.canAddAfterRecovery(req.auth.session) || noPasskey(req))) continue
+      const error = coreRefusal(req)
+      if (error) return refuse(res, error)
+    }
+    next()
+  }
   // Adding a passkey: a fresh check, or shortly after a recovery sign-in, or
   // the first passkey of an account that signs in by its tailnet identity
   // (it has nothing stronger to be checked with yet).
@@ -253,6 +314,10 @@ export function createGuards({
     needFresh,
     needFreshOrRecovery,
     needUnrestricted,
+    needPasskeyBacked,
+    fixedCore,
+    cutTailnetSessions,
+    passkeyOrThrow,
     coreFreshOrThrow,
     stepUp,
     stepUpOrThrow,

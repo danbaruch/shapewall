@@ -99,8 +99,10 @@ export function StepUpCard() {
               'Approve command line logins in the browser',
             )}
           >
-            Off: shapewall login and agent connect on a tailnet machine are approved by that machine’s tailnet user, with no code. On: they
-            show a code that is approved here in the console, as on any other server.
+            Off: shapewall login and agent connect on a tailnet machine are approved by that machine’s tailnet user, with no code. A tailnet
+            identity is per device, not per person: anything running as you on a tailnet device of yours can act as you here. On: approving
+            a machine needs the code, this console and a passkey check; the server refuses a session that only a tailnet identity stands
+            behind.
           </Row>
         ) : null}
         <Row

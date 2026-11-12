@@ -188,7 +188,8 @@ export async function startHostedServer(name, options = {}) {
 }
 
 // Signs up a new account through the API with a software passkey.
-export async function signUp(hosted, { handle, displayName = handle, invite, setup } = {}) {
+// `linkTailnet`: the sign-up page's "Also sign me in from this tailnet login" (off unless asked).
+export async function signUp(hosted, { handle, displayName = handle, invite, setup, linkTailnet = false } = {}) {
   const browser = createBrowser(hosted.port, hosted.origin)
   const authenticator = createAuthenticator({ origin: hosted.origin })
   if (!invite && !setup)
@@ -198,6 +199,7 @@ export async function signUp(hosted, { handle, displayName = handle, invite, set
     displayName,
     ...(invite ? { invite } : {}),
     ...(setup ? { setup } : {}),
+    ...(linkTailnet ? { linkTailnet: true } : {}),
   })
   if (start.status !== 200) throw new Error(`register/options ${start.status} ${start.text}`)
   const done = await browser.post('/auth/register/verify', { response: authenticator.register(start.json.options) })

@@ -94,7 +94,7 @@ export async function serve(flags, out) {
   const port = flags.port === undefined ? DEFAULT_PORT : Number(flags.port)
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('--port must be a port number')
   if (flags.tailscale && port === 0) throw new Error('--tailscale needs a fixed --port, not 0.')
-  const tail = flags.tailscale ? await tailscaleAccess({ port, noIdentity: Boolean(flags['no-identity']) }) : null
+  const tail = flags.tailscale ? await tailscaleAccess({ port, noIdentity: Boolean(flags['no-identity']), log: out }) : null
   if (flags.tailscale === 'print') {
     out(tail.command)
     out(tail.url)
@@ -173,7 +173,7 @@ export async function serve(flags, out) {
     }
   }
   try {
-    await tail?.start()
+    await tail?.start(server)
   } catch (error) {
     server.close()
     hostServer?.close()
@@ -188,6 +188,10 @@ export async function serve(flags, out) {
     `Shapewall is serving ${config.boards.length} board${config.boards.length === 1 ? '' : 's'} at ${accountUrl || `${tls ? 'https' : 'http'}://${shown}:${address.port}/`}`,
   )
   if (tail) out(`Private Tailscale board: ${tail.url}${tail.ownerLogin ? '' : ' (pairing required; node has no owner identity)'}`)
+  if (tail?.ownerLogin && !tail.gate)
+    out(
+      `Your other tailnet devices pair like any other device: this machine cannot prove that a request came through tailscale serve (${tail.identityOff}).`,
+    )
   if (lan)
     out(
       'LAN pairing is on. Plain HTTP on Wi-Fi exposes the device cookie to sniffing and replay; use --tailscale or --tls-cert/--tls-key. HTTP installs only as a bookmark.',

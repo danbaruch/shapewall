@@ -71,14 +71,23 @@ hosted boards and static exports always use an opaque frame. Hosted live HTML ca
 serve` is signed in as the account linked to their tailnet login, with no passkey. Each login is its own account, and an admin
   still invites each one with a role: being on the tailnet alone gives nothing, because a tailnet also holds family devices,
   contractors and shared nodes, and because roles and the audit log need to know who did what.
-- **The identity headers are believed only where they can be.** Only on a connection whose other end is owned by tailscaled (read
-  from the kernel's socket table, on Linux), only while the serve entry the server added is the one way to its port, with exactly
-  one clean login header. Never on direct loopback requests, on Funnel traffic, or with the flag off. Where the server cannot
-  make that check it refuses to start with the flag. A tailnet session works only together with the identity it was made for;
-  its cookie is worth nothing off the tailnet. Tagged devices and shared nodes without a user are never signed in.
-- **The limit.** A program that already runs as root on the server's machine can pretend to be tailscaled; it could also read the
-  database directly. The checks were proven with a stand-in proxy that follows Tailscale's documented behaviour, not against a
-  live tailnet: [what was and was not checked](/docs/hosted#what-was-and-was-not-checked-against-real-tailscale).
+- **The identity headers are believed only where they can be.** Every one of these must hold: the request carries a secret path
+  that only the serve entry the server made adds; the connection's other end is a socket owned by root (read from the kernel's
+  socket table, on Linux); tailscaled's own whois gives the request's tailnet address to that login, on a user's untagged
+  device; exactly one clean login header. Never on direct loopback requests, raw TCP forwards, Funnel traffic, or with the flag
+  off. The server refuses to start with the flag, and suspends it while running, when tailscaled is in userspace-networking
+  mode, older than 1.98, runs its own SOCKS5 or HTTP proxy, or when the server is in a container. A tailnet session works only
+  together with the identity it was made for; its cookie is worth nothing off the tailnet. Tagged devices and shared nodes
+  without a user are never signed in.
+- **An identity is per device, not per person.** Anything running as you on a tailnet device of yours can act as you in a
+  tailnet session. So the fixed core asks for a passkey, a first passkey is on hold for 24 hours, a passkey account is linked
+  to a tailnet login only when you tick the box, and a workspace can require a passkey for approving machines.
+- **The local board uses the same proof.** `shapewall serve --tailscale` lets the owner's other devices in by tailnet identity
+  only with it, and approving an agent's command needs the host's settings token, a paired device or that proof: a local
+  program cannot approve its own command with a forged header.
+- **The limit.** Root on the server's machine, and whoever may change tailscaled's serve config there, are trusted: either can
+  pretend to be anyone. The checks were proven with a stand-in proxy that follows Tailscale's documented behaviour and source,
+  not against a live proxied request: [what was and was not checked](/docs/hosted#what-was-and-was-not-checked-against-real-tailscale).
 
 Details: [Signing in](/docs/hosted#signing-in).
 

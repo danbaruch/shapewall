@@ -10,7 +10,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import test, { after, before } from 'node:test'
 import { chromium } from 'playwright'
-import { createTailnetGate } from '../../src/hosted/tailnet-identity.js'
+import { believedGate } from '../tailnet-helpers.js'
 import { startHostedServer } from '../hosted-helpers.js'
 import { ROOT_DIR } from './helpers.js'
 
@@ -21,7 +21,7 @@ const contexts = []
 
 before(async () => {
   assert.ok(fs.existsSync(path.join(ROOT_DIR, 'dist', 'console', 'console.html')), 'run "npm run build" before the tailnet e2e test')
-  hosted = await startHostedServer('hosted-tailnet-e2e', { tailnet: createTailnetGate({ proof: { trusted: () => true } }) })
+  hosted = await startHostedServer('hosted-tailnet-e2e', { tailnet: believedGate() })
   browser = await chromium.launch()
   if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true })
 })

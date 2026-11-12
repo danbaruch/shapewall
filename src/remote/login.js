@@ -98,6 +98,8 @@ export async function login(
     onApproved = null,
     // false: never ask the server who this machine's tailnet user is (tests of the code flow).
     tailnet = true,
+    // The command that was run, for "run it again" (`shapewall agent connect`, `shapewall import`).
+    command = 'shapewall login',
   } = {},
 ) {
   out = safeOut(out)
@@ -139,7 +141,7 @@ export async function login(
   const deadline = Date.now() + Math.min(Math.max(Number(expiresIn) || 600, 1), 3600) * 1000
   for (;;) {
     if (signal?.aborted) throw new Error('Login cancelled.')
-    if (Date.now() > deadline) throw new Error('The code expired before anyone approved it. Run shapewall login again.')
+    if (Date.now() > deadline) throw new Error(`The code expired before anyone approved it. Run ${command} again for a new one.`)
     // 1 to 30 seconds whatever the server says (NaN would poll in a tight loop).
     if (!first) await sleep(Math.min(Math.max(Number(interval) || 3, 1), 30) * 1000)
     first = false
@@ -155,6 +157,9 @@ export async function login(
       continue
     }
     if (polled.status !== 200 || polled.data?.status !== 'approved') {
+      // The server's words name "shapewall login"; an expired code names the command that was run.
+      if (polled.status === 410 && polled.data?.error?.code === 'login_expired')
+        throw new Error(`The code expired before anyone approved it. Run ${command} again for a new one.`)
       throw new Error(terminalSafe(polled.data?.error?.message) || `The login did not finish (${polled.status}).`)
     }
     const result = polled.data

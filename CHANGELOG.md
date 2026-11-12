@@ -79,25 +79,66 @@ Signing in to a team server: fewer passkey prompts, and your tailnet login as th
   decides who is in a workspace: an unknown login sees who to ask and is listed for the admins under Members; an invite can be
   made for one tailnet login, and only that login can use it. An account with a passkey links or unlinks its login on the
   Account page. Tagged devices and shared nodes without a user are never signed in.
-- **Where the identity is believed.** Only on a connection whose other end is owned by tailscaled (from the kernel's socket
-  table), only while the serve entry the server added is the one way to its port, with exactly one clean login header and no
-  Funnel mark. Never on direct loopback requests, on Funnel traffic, or without the flag. Where the server cannot make that
-  check it refuses to start with the flag, and says why. A tailnet session works only with the identity it was made for, is
-  marked as such in the device list, the audit log and Activity, and signing out keeps that browser signed out until "Continue
-  as". For the fixed core, an account with no passkey is asked to add one first.
+- **Where the identity is believed.** Only when all of this holds: the request carries a secret path that only the serve entry
+  the server made adds (new at each start, in no log); the connection's other end is a socket owned by root, from the kernel's
+  socket table; tailscaled's own whois gives the request's tailnet address to the same login, on a user's untagged device;
+  exactly one clean login header and no Funnel mark. Never on direct loopback requests, raw TCP forwards, Funnel traffic, or
+  without the flag. The server refuses to start with the flag, says why, and suspends it while running: not Linux, tailscaled
+  in userspace-networking mode, Tailscale before 1.98, tailscaled running a SOCKS5 or outbound HTTP proxy, tailscaled not
+  visible or not root, the server in a container, or a serve config that is not its one entry. Root and the Tailscale operator
+  on the server's machine are trusted; nothing else on the machine or the tailnet is.
+- **An identity is per device, not per person,** and the product says so: anything running as you on a tailnet device of yours
+  can act as you in a tailnet session. So: a tailnet session works only with the identity it was made for (and is stored so
+  that an older build cannot use it); it is marked in the device list, the audit log and Activity; signing out keeps that
+  browser signed out until "Continue as"; for the fixed core an account with no passkey is asked to add one, and that first
+  passkey is on hold for 24 hours (audited, "Worth a look"); a passkey account is linked to a tailnet login at sign-up only
+  when the box "Also sign me in from this tailnet login" is ticked; and "Sign out other devices" needs a session that passed a
+  passkey check, or an account that has no passkey.
+- **The local board uses the same proof.** `shapewall serve --tailscale` let any program on the machine pass as the owner by
+  sending `Tailscale-User-Login` to the loopback port, and so approve an agent's command. The owner's other devices are now let
+  in by identity only with the proof above (where it is not possible they pair, and the board says why), and approving a
+  command or an edit needs the host's settings token, a paired device, or that proof.
 - **From the command line, with no browser** (on a server with tailnet sign-in, from a tailnet machine). `shapewall hosted
   claim` makes the first account from the server's machine. `shapewall login` and `shapewall agent connect` are approved by
   your tailnet identity when your role may make tokens (`--project`, `--workspace`; `--name`, `--icon`, `--tint`, `--used-by`
   for an agent); with several projects the command lists the flags to add and never prompts. `shapewall join` takes the invite
   made for your login, or an invite link. `shapewall admin projects list|create`, `admin invites create`, `admin members list`
-  and `admin agents list` do a few admin jobs; the server checks the role and writes the audit entry. A workspace can keep the
-  browser approval for command line logins (Settings). On any other server these commands behave as before or say what they
+  and `admin agents list` do a few admin jobs; the server checks the role and writes the audit entry. A workspace can require
+  the code, the browser and a passkey for approving machines (Settings, "Approve command line logins in the browser"): the
+  server then refuses a session that only a tailnet identity stands behind, whatever the client sends. On any other server these commands behave as before or say what they
   need.
 - **Upgrade notes.** Migration 16 is additive (the settings, tailnet logins on accounts, sessions and invites, the list of
   tailnet visitors); see [Migration 16 and rollback](docs/hosted.md#migration-16-and-rollback). If you want the passkey prompts
   back, an owner switches the groups on in each workspace's Settings.
-- **Not in this release:** tailnet sign-in on macOS or Windows servers (no way there to prove a request came from tailscaled),
-  more admin commands or MCP tools for administration, admin tokens, and profile pictures from the tailnet.
+- **Not in this release:** tailnet sign-in on macOS or Windows servers, in containers, or with a userspace-networking
+  tailscaled (no way there to prove a request came through tailscale serve), more admin commands or MCP tools for
+  administration, admin tokens, and profile pictures from the tailnet. The proof was tested with a stand-in for tailscale
+  serve, not against a live proxied request: [what was and was not checked](docs/hosted.md#what-was-and-was-not-checked-against-real-tailscale).
+
+### Fixes found on a real setup
+
+A fix for connected agents on the current Claude Code adapter.
+
+- **Connected agents work with `@agentclientprotocol/claude-agent-acp` 0.106.0.** With 0.6.0 and that adapter,
+  `shapewall agent connect` connected, and the first question then failed with only "Claude Code did not start." The cause:
+  0.106.0 starts a session in the mode "auto" and, when asked to switch, sends the new mode before its answer, in another place
+  than the one Shapewall read. The session looked as if it still acted without asking, so Shapewall stopped it. Now the mode the
+  agent names is the mode Shapewall checks, and the session is switched to "default" as intended. Nothing is loosened: a session
+  that moves itself to a mode that acts without asking is still stopped, and the mode it names is checked on its own as well.
+- **Tested adapter versions: 0.93.0 and 0.106.0.** The read-only and the edit provocations were run again on both with the real
+  adapter ([how](docs/agent-hardening.md#connected-agents)). `agent connect` now opens a session when it starts (no prompt is
+  sent) and prints which adapter answered. A version it was not tested with is used with a plain `Warning:` that names the tested
+  ones; a session that cannot be opened stops the command with the cause.
+- **A start that fails says why.** The chat and the machine's log both get the adapter's error or its last output, the adapter's
+  name and version, and what to try. A turn that fails is also written to the machine's log. Never a bare "did not start".
+- **The approval page shows what the machine asked for.** The box on the "Connect an agent" page said "does not change files"
+  even for a machine started with `--approvals owner` or `--auto edits`. The terminal now reports its rules with the code, and
+  the page says them: edits on a branch and who may allow them, "without asking" if asked, the base branch, and that commands are
+  never run. It is marked "Reported by the terminal"; an older shapewall that reports nothing is said to have said nothing.
+- **"Sign in a terminal" reads cleanly.** The two commands on `/device` are each in a code block on a line of their own, instead
+  of one sentence that wrapped into narrow columns.
+- **An expired code names the command that was run.** `shapewall agent connect` no longer says "Run shapewall login again".
+
 
 ## 0.6.0 - 2026-11-12
 

@@ -74,10 +74,29 @@ export function cleanMachineName(value) {
 // ("import"), or connecting an agent ("agent", `shapewall agent connect`).
 export const DEVICE_PURPOSES = ['import', 'agent']
 const AGENT_META_KINDS = ['claude', 'codex', 'goose', 'gemini', 'custom']
-// What `shapewall agent connect` says about the agent it will run: its kind
-// and the name it suggests. The machine's own claim, shown on the approval
-// page and never trusted for anything else.
+// What `shapewall agent connect` says its machine takes from the board (its
+// own rules: --approvals, --auto, --base): { approvals, auto, base }, or null
+// when the terminal did not say (an older shapewall). Shown to the approver
+// as the terminal's report; the machine enforces its rules itself, and the
+// server decides nothing by this.
+const ASKS_APPROVALS = ['none', 'owner', 'admins']
+const ASKS_BASE_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$/
+export function cleanAgentAsks(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const approvals = ASKS_APPROVALS.includes(value.approvals) ? value.approvals : 'none'
+  return {
+    approvals,
+    // Edits allowed without asking, once switched on in the console. Never without edits.
+    auto: approvals !== 'none' && value.auto === true,
+    base: approvals !== 'none' && typeof value.base === 'string' && ASKS_BASE_RE.test(value.base) ? value.base : null,
+  }
+}
+// What `shapewall agent connect` says about the agent it will run: its kind,
+// the name it suggests and what its machine takes from the board. The
+// machine's own claim, shown on the approval page and never trusted for
+// anything else.
 export function cleanAgentMeta(value) {
+  const asks = cleanAgentAsks(value?.asks)
   const kind = AGENT_META_KINDS.includes(value?.kind) ? value.kind : 'custom'
   const name =
     typeof value?.name === 'string'
@@ -88,7 +107,7 @@ export function cleanAgentMeta(value) {
           .trim()
           .slice(0, 40)
       : ''
-  return { kind, name: name || null }
+  return { kind, name: name || null, ...(asks ? { asks } : {}) }
 }
 const parseMeta = (text) => {
   try {

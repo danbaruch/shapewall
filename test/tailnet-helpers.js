@@ -20,6 +20,25 @@ import { tempDir } from './helpers.js'
 
 quietSqliteWarning()
 
+// A gate that believes the identity headers of every request: it stands for
+// "this request passed the proof" in tests that are about what an identity
+// may do (pages in a real browser, the local board's access rules). The
+// proof itself is tested with the real gate (hosted-tailnet.test.js).
+export function believedGate() {
+  return {
+    admit: async () => true,
+    identityOf(req) {
+      const login = req?.headers?.['tailscale-user-login']
+      if (typeof login !== 'string' || !login) return null
+      const name = req.headers['tailscale-user-name']
+      return { login: login.toLowerCase(), name: typeof name === 'string' && name ? name : login.split('@')[0] }
+    },
+    suspend() {},
+    resume() {},
+    suspended: () => null,
+  }
+}
+
 export const TAILNET_HOST = 'board.example.ts.net'
 export const TAILNET_ORIGIN = `https://${TAILNET_HOST}`
 
@@ -40,9 +59,22 @@ export function qEncode(value) {
 }
 
 export function fakeTailscale() {
-  const state = { config: {}, calls: [] }
+  // whois: tailnet address -> { login, name, tagged }; status: what `tailscale status --json` adds.
+  const state = { config: {}, calls: [], whois: new Map(), status: { TUN: true, Version: '1.104.2-fixture' } }
   const run = async (_, args) => {
-    state.calls.push(args.join(' '))
+    // The serve target carries the server's secret: kept out of the recorded calls, as it is out of every log.
+    state.calls.push(args.map((arg) => arg.replace(/\/_ts\/.*$/, '/_ts/...')).join(' '))
+    if (args[0] === 'whois') {
+      const who = state.whois.get(args.at(-1))
+      if (!who) return { code: 1, stdout: '', stderr: 'peer not found' }
+      return {
+        code: 0,
+        stdout: JSON.stringify({
+          Node: { ID: 1, Name: 'device.example.ts.net.', ...(who.tagged ? { Tags: ['tag:server'] } : {}) },
+          UserProfile: { LoginName: who.tagged ? 'tagged-devices' : who.login, DisplayName: who.name || '' },
+        }),
+      }
+    }
     if (args[0] === 'status')
       return {
         code: 0,
@@ -50,7 +82,7 @@ export function fakeTailscale() {
           BackendState: 'Running',
           Self: { DNSName: `${TAILNET_HOST}.` },
           CertDomains: [TAILNET_HOST],
-          Version: '1.104.2',
+          ...state.status,
         }),
       }
     if (args[1] === 'status') return { code: 0, stdout: JSON.stringify(state.config) }
@@ -70,11 +102,20 @@ export function fakeTailscale() {
   return { run, state }
 }
 
+// What a machine with one ordinary tailscaled says about it (src/tailnet-proof.js hostFacts).
+export const plainFacts = () => ({
+  tailscaled: [{ pid: 1163, uid: 0, argv: ['/usr/sbin/tailscaled', '--port=41641'] }],
+  unreadable: 0,
+  container: null,
+})
+
 // options: funnel (also a public share listener), signIn (false: --tailscale without --tailnet-sign-in), signup
 export async function startTailnet(name, { funnel = false, signIn = true, signup = 'invite' } = {}) {
   const dataDir = tempDir(name)
   const tailscale = fakeTailscale()
   const proxyPorts = new Set()
+  const facts = { now: plainFacts() }
+  let nextAddress = 10
   const lines = []
   const running = await startHosted({
     dataDir,
@@ -83,6 +124,7 @@ export async function startTailnet(name, { funnel = false, signIn = true, signup
     tailscale: { httpsPort: 443, funnel: funnel ? { httpsPort: 8443 } : null, run: tailscale.run, watchMs: 0 },
     tailnetSignIn: signIn,
     tailnetProof: { trusted: (socket) => proxyPorts.has(socket.remotePort), problem: () => null },
+    tailnetFacts: () => facts.now,
     env: {},
     out: (line) => lines.push(line),
     exitOnStop: false,
@@ -90,12 +132,23 @@ export async function startTailnet(name, { funnel = false, signIn = true, signup
   const localPort = running.server.address().port
   const proxies = []
 
-  // A tailnet device (or Funnel) in front of `target` (the server's port by default).
-  // who: { login, name } a person's device; { tagged: true }; { funnel: true }; `raw: true` forwards
-  // bytes like a TCP forward would (headers untouched).
-  async function device(who = {}, { target = localPort, raw = false } = {}) {
+  // A tailnet device (or Funnel) in front of the server, as serve is.
+  // who: { login, name } a person's device; { tagged: true }; { funnel: true }.
+  // `raw`: a proxy that passes the client's headers through as they are (what serve never does).
+  // `forward`: a raw TCP forward, as tailscaled's userspace netstack or a `serve --tcp` entry makes:
+  // tailscaled's own connection, the client's bytes, and no serve path.
+  // `address`: the device's tailnet address (its own by default; the fake whois knows it).
+  async function device(who = {}, { raw = false, forward = false, address = null } = {}) {
+    raw ||= forward
+    address ||= `100.64.0.${(nextAddress += 1)}`
+    if (who.login || who.tagged) tailscale.state.whois.set(address, who)
     const server = http.createServer((req, res) => {
       const headers = { ...req.headers }
+      // Where serve points now, path included.
+      const proxied = new URL(
+        tailscale.state.config.Web?.[`${TAILNET_HOST}:443`]?.Handlers?.['/']?.Proxy || `http://127.0.0.1:${localPort}`,
+      )
+      const prefix = forward ? '' : proxied.pathname.replace(/\/$/, '')
       if (!raw) {
         for (const header of Object.keys(headers)) if (/^tailscale[-_]/i.test(header)) delete headers[header]
         if (who.funnel) headers['tailscale-funnel-request'] = '?1'
@@ -106,9 +159,10 @@ export async function startTailnet(name, { funnel = false, signIn = true, signup
           headers['tailscale-headers-info'] = 'https://tailscale.com/s/serve-headers'
         }
       }
-      headers['x-forwarded-for'] = who.funnel ? '203.0.113.9' : '100.64.0.7'
+      if (!raw) headers['x-forwarded-for'] = who.funnel ? '203.0.113.9' : address
+      else if (!forward) headers['x-forwarded-for'] ??= address
       const upstream = http.request(
-        { host: '127.0.0.1', port: target, method: req.method, path: req.url, headers, agent: false },
+        { host: '127.0.0.1', port: localPort, method: req.method, path: `${prefix}${req.url}`, headers, agent: false },
         (answer) => {
           res.writeHead(answer.statusCode, answer.headers)
           answer.pipe(res)
@@ -128,7 +182,7 @@ export async function startTailnet(name, { funnel = false, signIn = true, signup
     proxies.push(server)
     const port = server.address().port
     const browser = () => createBrowser(port, TAILNET_ORIGIN)
-    return { port, browser, who }
+    return { port, browser, who, address }
   }
 
   return {
@@ -138,6 +192,7 @@ export async function startTailnet(name, { funnel = false, signIn = true, signup
     localPort,
     origin: TAILNET_ORIGIN,
     tailscale,
+    facts,
     device,
     // A browser that talks to the server's own port: not through any proxy.
     direct: () => createBrowser(localPort, TAILNET_ORIGIN),
