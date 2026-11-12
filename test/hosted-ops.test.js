@@ -625,3 +625,50 @@ test('secondary guest listener cannot mint setup codes', async () => {
     db.close()
   }
 })
+
+test('migration 17 (sign-in) and the reserved 16 reach a database in either order, and the documented rollback of 17 leaves 16 alone', async () => {
+  const versions = (db) =>
+    db
+      .prepare('SELECT version FROM schema_migrations ORDER BY version')
+      .all()
+      .map((row) => row.version)
+  const columns = (db, table) =>
+    db
+      .prepare(`PRAGMA table_info(${table})`)
+      .all()
+      .map((row) => row.name)
+  // What the other branch's migration 16 is here: a stand-in with its table's name.
+  const sixteen = [...Array(15).fill(null), 'CREATE TABLE usage_layouts (id TEXT PRIMARY KEY)']
+  const file = path.join(tempDir('migration-17'), 'shapewall.db')
+  // 17 first (this build), 16 later.
+  let db = await openDatabase(file)
+  assert.deepEqual(versions(db).slice(-2), [15, 17])
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 17)
+  migrate(db, sixteen)
+  migrate(db, sixteen)
+  assert.deepEqual(versions(db).slice(-3), [15, 16, 17])
+  assert.ok(columns(db, 'users').includes('tailnet_user_id'))
+  // The rollback of 17 as docs/hosted.md gives it ("Migration 17 and rollback"): 16 stays.
+  const docs = fs.readFileSync(new URL('../docs/hosted.md', import.meta.url), 'utf8')
+  const section = docs.slice(docs.indexOf('### Migration 17 and rollback'))
+  const sql = /To remove the schema as well[^`]*`([^`]+)`/.exec(section)[1].replace(/\s+/g, ' ')
+  assert.match(sql, /DELETE FROM schema_migrations WHERE version = 17;$/)
+  db.exec(sql)
+  db.exec('PRAGMA user_version = 16')
+  assert.deepEqual(versions(db).slice(-2), [15, 16])
+  for (const gone of ['tailnet_login', 'tailnet_linked_at', 'tailnet_user_id']) assert.ok(!columns(db, 'users').includes(gone), gone)
+  assert.ok(!columns(db, 'passkeys').includes('tailnet_added_from'))
+  assert.ok(!columns(db, 'workspaces').includes('step_up'))
+  for (const table of ['tailnet_visitors', 'server_settings'])
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = ?").get(table).n, 0, table)
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'usage_layouts'").get().n, 1)
+  db.close()
+  // 16 first (a database that already ran the other branch's), then this build: 17 runs, 16 is not run again.
+  db = await openDatabase(file)
+  assert.deepEqual(versions(db).slice(-3), [15, 16, 17])
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 17)
+  assert.ok(columns(db, 'users').includes('tailnet_user_id'))
+  assert.ok(columns(db, 'workspaces').includes('step_up'))
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'server_settings'").get().n, 1)
+  db.close()
+})

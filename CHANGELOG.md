@@ -134,8 +134,8 @@ Signing in to a team server: fewer passkey prompts, and your tailnet login as th
   server then refuses a session that only a tailnet identity stands behind, whatever the client sends, and refuses the same
   session an API token made on a project's page. On any other server these commands behave as before or say what they
   need.
-- **Upgrade notes.** Migration 16 is additive (the settings, tailnet logins on accounts, sessions and invites, the list of
-  tailnet visitors); see [Migration 16 and rollback](docs/hosted.md#migration-16-and-rollback). If you want the passkey prompts
+- **Upgrade notes.** Migration 17 is additive (the settings, tailnet logins on accounts, sessions and invites, the list of
+  tailnet visitors); see [Migration 17 and rollback](docs/hosted.md#migration-17-and-rollback). If you want the passkey prompts
   back, an owner switches the groups on in each workspace's Settings.
 - **The fixed core matches paths as the router does** (any case, a trailing slash, an encoded parameter). An owner who
   leaves a workspace passes it too, like any other owner removed.
@@ -147,7 +147,7 @@ Signing in to a team server: fewer passkey prompts, and your tailnet login as th
 - **"Approve command line logins in the browser" covers three things:** approving a login or an agent, making an API token,
   and inviting or making an admin. The settings card says exactly that.
 - **An account is held to the tailnet user, not to the login's spelling.** The server keeps Tailscale's id of the user with
-  a linked login (migration 16, `users.tailnet_user_id`) and requires it on every request; a link made by `hosted claim
+  a linked login (migration 17, `users.tailnet_user_id`) and requires it on every request; a link made by `hosted claim
   --login` takes the id of the first proven request. A device with an expired key is nobody. The machine's own addresses
   are also read from its network interfaces on every request.
 - **Which process is tailscaled:** the main process of `tailscaled.service` where systemd runs it, else by name; root in all
@@ -160,8 +160,9 @@ Signing in to a team server: fewer passkey prompts, and your tailnet login as th
   and a real browser.
 - **Not in this release:** tailnet sign-in on macOS or Windows servers, in containers, or with a userspace-networking
   tailscaled (no way there to prove a request came through tailscale serve), more admin commands or MCP tools for
-  administration, admin tokens, and profile pictures from the tailnet. The proof was tested with a stand-in for tailscale
-  serve, and not against a live request from a second tailnet device: [what was and was not checked](docs/hosted.md#what-was-and-was-not-checked-against-real-tailscale).
+  administration, admin tokens, and profile pictures from the tailnet. The proof is tested with a stand-in for tailscale
+  serve and was run against a real tailscaled with a second device; a tagged device, the suspension on a changed serve
+  config and a browser sign-in were not checked live: [what was and was not checked](docs/hosted.md#what-was-and-was-not-checked-against-real-tailscale).
 
 - **The panel buttons are the panel's header.** With a side panel open, Comments, Agent and Checks in the top bar are exactly as
   wide as the panel under them (the same inset as the panel's own rows), share that width, and follow the panel as you drag its

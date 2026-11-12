@@ -105,9 +105,9 @@ members|invites|projects|passkeys`), where reading the data folder is the proof.
   only with it, and approving an agent's command needs the host's settings token, a paired device or that proof: a local
   program cannot approve its own command with a forged header.
 - **The limit.** Root on the server's machine, and whoever may change tailscaled's serve config there, are trusted: either can
-  pretend to be anyone (tailscaled's environment, which an unprivileged server cannot read, is part of that). The checks were
-  proven with a stand-in proxy that follows Tailscale's documented behaviour and source,
-  not against a live proxied request: [what was and was not checked](/docs/hosted#what-was-and-was-not-checked-against-real-tailscale).
+  pretend to be anyone (tailscaled's environment, which an unprivileged server cannot read, is part of that). The checks are
+  tested with a stand-in proxy, and were run against a real tailscaled with a second device; a tagged device, the suspension
+  on a changed serve config and a browser sign-in were not: [what was and was not checked](/docs/hosted#what-was-and-was-not-checked-against-real-tailscale).
 
 Details: [Signing in](/docs/hosted#signing-in).
 

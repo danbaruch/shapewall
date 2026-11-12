@@ -434,35 +434,43 @@ Checked on a real machine (Tailscale 1.104.2, Linux), read-only:
   "peer not found" for an address that is nobody's;
 - `tailscale status --json` has `Self.ID` and `Self.TailscaleIPs` (IPv4 and IPv6), and whois on one of those addresses
   answers `Node.StableID` equal to `Self.ID`;
-- one capture of real requests through an existing serve entry, made from the machine itself (the security review's, not
-  part of the suite): the request arrived from a root-owned socket, with the entry's path in front, the identity headers set
-  to the machine owner's login, and exactly one `X-Forwarded-For` holding one of the machine's own tailnet addresses. That
-  is the request check 4 refuses;
+- one capture of real requests through an existing serve entry, made from the machine itself: the request arrived from a
+  root-owned socket, with the entry's path in front, the identity headers set to the machine owner's login, and exactly one
+  `X-Forwarded-For` holding one of the machine's own tailnet addresses. That is the request check 4 refuses;
 - the `/proc/net/tcp` lookup names the right owner for a real loopback connection (a test in the suite, on Linux).
 
-Read in Tailscale's source (`ipn/ipnlocal/serve.go`, `wgengine/netstack`, `cmd/tailscaled`), not run: that serve joins its
-target's path in front of the request path, sets `X-Forwarded-For` to the tailnet source address, strips and sets the identity
-headers; that the userspace netstack forwards raw TCP to loopback; the proxy flags.
+**Run against a real tailscaled** (Tailscale 1.102.5, Linux, kernel mode, other serve entries on the machine, and a second
+tailnet device), with a build of this release from before the last review round:
 
-**Not checked against a live proxied request**, because the tests run without a tailnet and this work did not change any
-machine's serve config:
+- the serve entry with the `/_ts/<secret>` target was accepted, and requests arrived with the secret path in front;
+- a visitor from the other device was recognised by login, over IPv4 and IPv6, with the real whois;
+- forged `Tailscale-User-Login`, `Tailscale_User_Login` and `X-Forwarded-For` headers sent by that visitor were ignored;
+- a guessed secret path got 404, and the server's local port was not reachable from the tailnet;
+- the server's own machine got "This is the server's own machine" by the server's name, by its own IPv4 and by its IPv6;
+- a direct loopback request with a forged header was nobody, without the secret and with the real one;
+- `hosted claim --login`, then from the other device `admin projects create` and `list`, `admin members list`, `admin agents
+list` and `login --project` with no code; `admin` from the server's own machine was refused with its message;
+- stopping the server removed its serve entry, and Tailscale 1.94 was refused at start with its message.
 
-- that `tailscale serve --bg --https=443 http://127.0.0.1:<port>/_ts/<secret>` is accepted, and that requests then arrive as
-  `/_ts/<secret>/<path>` (also for `/`, and for WebSocket upgrades);
-- that such a request arrives from a root-owned socket, with exactly one `X-Forwarded-For` holding a `100.64.0.0/10` or
-  `fd7a:115c:a1e0::/48` address, and that `tailscale whois` on it returns the same login as the header;
-- how `tailscale whois` marks a tagged device and a shared-in user's device in `--json` on your version (the code reads
-  `Node.Tags` and `UserProfile.LoginName`);
-- the shape of `tailscale serve status --json` for a TCP forward, a service or a foreground session;
-- a request from a second tailnet device (the capture above was made from the server's own machine only), and whether any
-  Tailscale version or setting gives a request from the machine itself a source address that is not one of
-  `Self.TailscaleIPs` and that whois does not give to this node;
-- whether the server can read `/proc/<pid>/environ` of tailscaled anywhere it is meant to run (as an ordinary user it cannot);
-- the time `tailscale whois` takes per new connection under load.
+That run was made before four things in this release existed, so they are covered by the suite's stand-in only: holding an
+account to Tailscale's id of the user (`UserProfile.ID` in whois), finding tailscaled by its systemd unit, reading the
+machine's network interfaces on every request, and the server without passkeys (typed confirmation, the operator's
+commands).
 
-The tests use a stand-in proxy that follows the behaviour read in the source. The first real test: start the server, open it
-from two tailnet devices of different people, from a tagged device and from the server's own machine (which must be refused),
-and look at the server log for "ignored identity headers" (it says which check failed).
+Read in Tailscale's source (`ipn/ipnlocal/serve.go`, `wgengine/netstack`, `cmd/tailscaled`), not run: that the userspace
+netstack forwards raw TCP to loopback; the proxy flags; the debug switches.
+
+**Not checked against a live serve:**
+
+- **a tagged device** (how `tailscale whois --json` marks it on your version; the code reads `Node.Tags`), and a device
+  shared in from another tailnet;
+- **the suspension within 30 seconds** when the serve config changes under a running server (a raw TCP forward, Funnel, the
+  entry changed), and that sign-in comes back when it is put right;
+- **a sign-in in a real browser** through the tailnet (the browser tests send the headers themselves);
+- and, smaller: whether the server can read `/proc/<pid>/environ` of tailscaled anywhere it is meant to run (as an ordinary
+  user it cannot), and the time `tailscale whois` takes per new connection under load.
+
+[Checking it on your own tailnet](#checking-it-on-your-own-tailnet) below goes through all of it, these three included.
 
 ### Checking it on your own tailnet
 
@@ -2212,9 +2220,9 @@ DROP COLUMN approvals_by; ALTER TABLE agent_runs DROP COLUMN window_used; ALTER 
 TABLE workspaces DROP COLUMN retention_usage_days; DELETE FROM schema_migrations WHERE version = 15; PRAGMA user_version = 14;`.
 Never reset the ledger any other way. Test a rollback on a copy first.
 
-### Migration 16 and rollback
+### Migration 17 and rollback
 
-Migration 16 (0.7.0) adds what the passkey settings and tailnet sign-in need ([Signing in](#signing-in)). It is additive and
+Migration 17 (0.7.0) adds what the passkey settings and tailnet sign-in need ([Signing in](#signing-in)). It is additive and
 runs once:
 
 - column `workspaces.step_up` (the "Ask for a passkey again" settings as JSON; `{}` is all off);
@@ -2243,7 +2251,14 @@ To remove the schema as well (SQLite 3.35+), with the server stopped: `DROP TABL
 users_tailnet_login; ALTER TABLE users DROP COLUMN tailnet_login; ALTER TABLE users DROP COLUMN tailnet_linked_at; ALTER TABLE
 users DROP COLUMN tailnet_user_id; ALTER TABLE passkeys DROP COLUMN tailnet_added_from; DROP TABLE server_settings; ALTER TABLE
 sessions DROP COLUMN tailnet_login; ALTER TABLE invites DROP COLUMN tailnet_login; ALTER TABLE workspaces DROP COLUMN step_up;
-DELETE FROM schema_migrations WHERE version = 16; PRAGMA user_version = 15;`.
+DELETE FROM schema_migrations WHERE version = 17;`, then set `PRAGMA user_version` to the highest version left in
+`schema_migrations` (16 where the saved Usage layouts are there, else 15).
+
+**Why 17, and migration 16.** Number 16 belongs to the saved Usage layouts (table `usage_layouts`), which are developed
+separately. The two do not depend on each other and the server keeps a ledger of what ran (`schema_migrations`), so they can
+reach a database in either order: a database that already ran 16 runs 17 on the next start, and one that ran 17 first runs 16
+when a build that has it starts. `PRAGMA user_version` is the highest number applied, not a count. Rolling one back does not
+touch the other; remove only its own row from `schema_migrations`.
 
 ## Secrets, logs and legal review
 

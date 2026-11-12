@@ -670,7 +670,11 @@ const MIGRATIONS = [
   CREATE INDEX audit_workspace_user ON audit_log(workspace_id, user_id, id);
   CREATE INDEX audit_account_user ON audit_log(user_id, id) WHERE workspace_id IS NULL;
   `,
-  // Step-up as a workspace's choice (step_up: a JSON object, '{}' is all off;
+  // 16: reserved for the saved Usage layouts (table usage_layouts), which land from another branch. The
+  // ledger below skips an absent migration and runs it when it arrives, in whichever order the two reach a
+  // database: one that already ran 16 runs 17 next, and one that ran 17 first runs 16 later.
+  null,
+  // 17. Step-up as a workspace's choice (step_up: a JSON object, '{}' is all off;
   // src/hosted/step-up.js), and tailnet sign-in (src/hosted/tailnet.js): the
   // tailnet login an account is linked to, the one a session came in with
   // (such a session works only on requests that carry that identity), the
