@@ -4,7 +4,7 @@
 // reads the same filter. Saved views sit at its end.
 
 import { useEffect, useMemo, useState } from 'react'
-import { Bookmark, CalendarDays, Check, ChevronDown, Link2, Search, SlidersHorizontal, Trash2, X } from 'lucide-react'
+import { Bookmark, CalendarDays, Check, ChevronDown, LayoutDashboard, Link2, Search, SlidersHorizontal, Trash2, X } from 'lucide-react'
 import {
   Button,
   DropdownMenu,
@@ -420,24 +420,42 @@ export function FilterBar({ filter, options, children }) {
 // A person's saved views of a page: open one, save the address as one,
 // remove one, or copy the address as a link. A view is the page's query
 // string; whoever opens the link sees what they themselves may see.
-export function ViewsMenu({ workspaceId, page, search, onOpen }) {
+//
+// `layout` (the Usage dashboard): a view can be saved with the dashboard's
+// layout ("Include this layout"). Opening such a view, or a link to it,
+// shows that layout without replacing the reader's own.
+export function ViewsMenu({ workspaceId, page, search, onOpen, layout = null }) {
   const { views, save, remove } = useViews(workspaceId, page)
   const toast = useToast()
   const [open, setOpen] = useState(false)
   const [naming, setNaming] = useState(false)
   const [name, setName] = useState('')
+  // A view of the dashboard keeps its layout and its widgets' options unless the box is unticked.
+  const [withLayout, setWithLayout] = useState(true)
+  // The view whose layout is on show, if the address names one.
+  const shownView = useMemo(() => new URLSearchParams(search).get('view'), [search])
   const current = useMemo(() => {
     const params = new URLSearchParams(search)
     for (const key of VIEW_SKIP) params.delete(key)
     return params.toString()
   }, [search])
-  const active = views.find((view) => view.query === current)
+  const active =
+    views.find((view) => view.query === current && (!shownView || view.id === shownView)) || views.find((view) => view.query === current)
+  // A view's query, with the view itself named when it carries a layout.
+  const addressOf = (view) => (view.hasLayout ? `${view.query}${view.query ? '&' : ''}view=${view.id}` : view.query)
   const copyLink = async () => {
     try {
       // The public demo keeps the route, and so the filters, in the fragment.
       const route = DEMO ? `#${currentPath()}` : ''
-      await navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}${route}${current ? `?${current}` : ''}`)
-      toast('Link copied. It carries the filters, not your access.')
+      // A layout travels with the link when one is on show, or when this is a saved view that carries one.
+      const carried = shownView || (active?.hasLayout ? active.id : null)
+      const query = [current, carried ? `view=${carried}` : ''].filter(Boolean).join('&')
+      await navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}${route}${query ? `?${query}` : ''}`)
+      toast(
+        carried
+          ? 'Link copied. It carries the filters and the layout, not your access.'
+          : 'Link copied. It carries the filters, not your access.',
+      )
     } catch {
       toast('This browser did not allow copying', 'bad')
     }
@@ -445,10 +463,11 @@ export function ViewsMenu({ workspaceId, page, search, onOpen }) {
   const submit = async (event) => {
     event.preventDefault()
     try {
-      await save.mutateAsync({ name, query: current })
-      toast(`Saved the view "${name.trim()}"`)
+      await save.mutateAsync({ name, query: current, layout: withLayout && layout ? layout : null })
+      toast(withLayout && layout ? `Saved the view "${name.trim()}" with this layout` : `Saved the view "${name.trim()}"`)
       setNaming(false)
       setName('')
+      setWithLayout(true)
     } catch (error) {
       toast(error.message, 'bad')
     }
@@ -468,8 +487,9 @@ export function ViewsMenu({ workspaceId, page, search, onOpen }) {
           {views.length ? (
             views.map((view) => (
               <div key={view.id} className="flex items-center">
-                <DropdownMenuItem className="min-w-0 flex-1" onSelect={() => onOpen(view.query)} data-sw-view={view.name}>
+                <DropdownMenuItem className="min-w-0 flex-1" onSelect={() => onOpen(addressOf(view))} data-sw-view={view.name}>
                   <span className="truncate">{view.name}</span>
+                  {view.hasLayout ? <LayoutDashboard size={13} aria-label="Carries a layout" data-sw-view-has-layout /> : null}
                   {active?.id === view.id ? <Check size={14} className="ml-auto text-accent" aria-hidden="true" /> : null}
                 </DropdownMenuItem>
                 <button
@@ -496,7 +516,7 @@ export function ViewsMenu({ workspaceId, page, search, onOpen }) {
         </DropdownMenuContent>
       </DropdownMenu>
       {naming ? (
-        <form onSubmit={submit} className="flex items-center gap-1.5" data-sw-view-form>
+        <form onSubmit={submit} className="flex flex-wrap items-center gap-1.5" data-sw-view-form>
           <Input
             autoFocus
             value={name}
@@ -508,6 +528,18 @@ export function ViewsMenu({ workspaceId, page, search, onOpen }) {
             wrapperClassName="w-40"
             onKeyDown={(event) => (event.key === 'Escape' ? setNaming(false) : null)}
           />
+          {layout ? (
+            <label className="inline-flex h-9 cursor-pointer items-center gap-1.5 text-xs text-fg">
+              <input
+                type="checkbox"
+                checked={withLayout}
+                onChange={(event) => setWithLayout(event.target.checked)}
+                className="h-4 w-4 accent-[var(--accent)]"
+                data-sw-view-with-layout
+              />
+              Include this layout
+            </label>
+          ) : null}
           <Button type="submit" size="md" variant="default" className="h-9" disabled={!name.trim() || save.isPending}>
             Save
           </Button>

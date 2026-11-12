@@ -37,6 +37,7 @@ export const TENANT_TABLES = [
   'chat_turns',
   'chat_permissions',
   'saved_views',
+  'usage_layouts',
 ]
 export { ROLES, roleAtLeast } from './permissions.js'
 
@@ -339,6 +340,11 @@ export function memberAccountEvents(
 
 // Account deletion: the person's saved views, in every workspace, go with them.
 export function deleteSavedViewsOf(db, userId) {
+  // With the layouts those views carry, and the person's own dashboard layouts.
+  prepare(db, "DELETE FROM usage_layouts WHERE kind = 'view' AND subject IN (SELECT id FROM saved_views WHERE user_id = :user)").run({
+    user: userId,
+  })
+  prepare(db, "DELETE FROM usage_layouts WHERE kind = 'person' AND subject = :user").run({ user: userId })
   prepare(db, 'DELETE FROM saved_views WHERE user_id = :user').run({ user: userId })
 }
 

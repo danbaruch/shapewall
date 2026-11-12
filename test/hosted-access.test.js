@@ -736,6 +736,7 @@ test('migration 5 adds its tables and columns on top of a version 4 database', a
     ALTER TABLE projects DROP COLUMN default_agent_id; ALTER TABLE comments DROP COLUMN agent_id;
     DROP TABLE saved_views; ALTER TABLE workspaces DROP COLUMN retention_usage_days;
     DROP INDEX audit_workspace_at; DROP INDEX audit_workspace_user; DROP INDEX audit_account_user;
+    DROP TABLE usage_layouts;
     ALTER TABLE workspaces DROP COLUMN step_up;
     DROP INDEX users_tailnet_login; ALTER TABLE users DROP COLUMN tailnet_login; ALTER TABLE users DROP COLUMN tailnet_linked_at;
     ALTER TABLE users DROP COLUMN tailnet_user_id; ALTER TABLE passkeys DROP COLUMN tailnet_added_from;
@@ -751,8 +752,7 @@ test('migration 5 adds its tables and columns on top of a version 4 database', a
       .prepare('SELECT version FROM schema_migrations ORDER BY version')
       .all()
       .map((row) => row.version),
-    // 16 is reserved for a migration from another branch: absent here, never marked applied.
-    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 17],
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17],
   )
   assert.equal(db.prepare('SELECT handle FROM users WHERE id = ?').get(owner.user.id).handle, 'mira')
   assert.equal(db.prepare('SELECT name FROM projects WHERE id = ?').get(project.id).name, 'Existing site')

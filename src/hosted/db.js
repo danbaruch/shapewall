@@ -670,10 +670,26 @@ const MIGRATIONS = [
   CREATE INDEX audit_workspace_user ON audit_log(workspace_id, user_id, id);
   CREATE INDEX audit_account_user ON audit_log(user_id, id) WHERE workspace_id IS NULL;
   `,
-  // 16: reserved for the saved Usage layouts (table usage_layouts), which land from another branch. The
-  // ledger below skips an absent migration and runs it when it arrives, in whichever order the two reach a
-  // database: one that already ran 16 runs 17 next, and one that ran 17 first runs 16 later.
-  null,
+  // 16: layouts of the Usage dashboard (0.7.0). One row per layout: a
+  // person's own (kind 'person', subject their user id), the workspace's
+  // default that people start from (kind 'default', subject ''), and the
+  // layout a saved view carries (kind 'view', subject the view's id). The
+  // layout is JSON, checked on the way in and again on the way out
+  // (src/hosted/usage-layout.js). One new table and nothing else: an older
+  // build ignores it (docs/hosted.md, "Migration 16 and rollback").
+  // The ledger below runs 16 and 17 in whichever order they reach a database: one made on the tailnet
+  // sign-in branch (17 ran, 16 absent) runs 16 later, and one that ran 16 first runs 17 next.
+  `
+  CREATE TABLE usage_layouts (
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK (kind IN ('person', 'default', 'view')),
+    subject TEXT NOT NULL,
+    layout TEXT NOT NULL,
+    updated_by TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (workspace_id, kind, subject)
+  );
+  `,
   // 17. Step-up as a workspace's choice (step_up: a JSON object, '{}' is all off;
   // src/hosted/step-up.js), and tailnet sign-in (src/hosted/tailnet.js): the
   // tailnet login an account is linked to, the one a session came in with

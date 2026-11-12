@@ -1723,7 +1723,8 @@ chart), never zero, and each total says how many of its turns reported the numbe
 
 The filters live in the page's address, so a link is a view and Back undoes a filter.
 
-**Overview** shows, for that filter:
+**Overview** is a dashboard of widgets, which each person arranges for themselves ([Arranging the
+dashboard](#arranging-the-dashboard)). Unless you change it, it shows, for that filter:
 
 - **Tiles:** turns, tokens, agent time, reported cost, fixes that ended ready, and the share that failed or was stopped, each with
   its change against the period to compare with, which the tile names: the same number of days just before (whole local days,
@@ -1734,9 +1735,9 @@ The filters live in the page's address, so a link is a view and Back undoes a fi
   page" to keep that range.
 - **A breakdown:** ranked bars with each group's share.
 - **How turns ended** as a share per day, **approvals** (allowed by a person, allowed without asking, denied), and **turn
-  duration** (the median and the 95th percentile).
+  duration** (the median and the 95th percentile; the 90th and 99th are an option).
 - **Top lists:** the busiest agents, the threads that used the most tokens, the slowest turns, the agents with the most denied
-  approvals.
+  approvals (five entries each; three or ten are an option).
 - **Budgets today** (admins and owners): each project's daily chat turns and fixes from its agent policy, with today's use, last
   week's daily average, and a forecast for the end of the day once a third of the day has passed and there are at least five
   turns to go by. The day is UTC, as the policy counts it. There are no per-agent budgets yet.
@@ -1754,12 +1755,90 @@ keeps the place it had when the first page was read, and turns that started late
 through the rows and Enter opens one. A turn opens in a drawer with everything in the table above, a link to its comment or board, and for
 admins a link to the activity around it. On a phone the grid is a list of cards and the drawer is a sheet.
 
-**Saved views** are yours alone: a name for the page's address (filters, chart switches, columns, sort). "Copy a link to this
-view" shares the address; whoever opens it sees what they themselves may see, so a link or a view never widens access.
+**Saved views** are yours alone: a name for the page's address (filters, columns, sort) and, for a view saved from the overview,
+the dashboard as you have it: its layout and every widget's options (measure, split, bucket and the rest). Untick **Include this
+layout** to save the filters alone. "Copy a link to this view" shares the address; whoever opens it sees what they themselves may
+see, so a link or a view never widens access. Opening a view that carries a layout only ever shows that layout; your own stays as
+it is. For one of your own views a small chip says which view you are looking at, with "Back to my layout". For a view somebody
+shared by link, a note says whose layout it is, with "Use this layout" (which makes it yours) and "Back to my layout". Links and
+views made before the dashboard could be arranged, which name a chart's measure, split or bucket in the address (`metric=`, `by=`,
+`bucket=`, `bd=`), still set the first chart over time and the first breakdown.
 
-**Print** prints the overview as a report (the period and filters at the top). **Export** downloads the turns of the filter as CSV
+**Print** prints the overview as a report (the period and filters at the top), the widgets one after another in reading order,
+each as tall as it needs, whatever sizes they have on screen. **Export** downloads the turns of the filter as CSV
 or JSON: streamed, newest first, at most 50,000 rows, with an audit entry (`usage_exported`: who, the format, how many rows, the
 period). There are no scheduled or emailed exports.
+
+### Arranging the dashboard
+
+**Edit layout** (in the page's header; **Done** or Escape leaves it) turns the overview into a grid you arrange. Every tile,
+chart and list is a widget on 12 columns:
+
+- **Move** a widget by dragging the bar it wears while you edit. What was in its way moves down; nothing overlaps and no gap is
+  left above a widget.
+- **Resize** it from its bottom right corner, inside what its kind allows: a tile is 2, 3 or 4 columns wide and always 2 rows
+  tall; the chart over time is 4 to 12 columns by 4 to 10 rows; a breakdown 3 to 12 by 3 to 10; the other charts 4 to 12 by 4
+  to 8; a top list 3 to 6 by 3 to 9; the budgets 4 to 12 by 3 to 10. A row is 56 px, so no chart can be made too small to read.
+- **Hide** a widget with its ×, and bring it back from **Add widget**, which lists everything that is hidden.
+- **Duplicate** a chart from its bar (up to four of one kind): two charts over time can sit side by side, one measuring turns by
+  agent and one cost by model. Each copy keeps its own options.
+- **Undo** takes back the last change (a run of arrow keys on one widget counts as one). **Reset to default** forgets your
+  layout: you see the workspace's default if it has one, else the built-in layout.
+
+Outside "Edit layout" nothing can be dragged, and until you change something the page is the layout it always was. While you
+edit, a widget's bar is its heading (its own title row steps aside), and at the default sizes nothing is cut off, editing or not.
+
+**Heights that follow the content.** A top list, a breakdown and the budgets are as tall as what they hold: a list set to ten
+rows grows and one set to three shrinks, and the budgets hold a row per project (from six projects on, the list scrolls inside
+its card). That stops for a widget once you size it by hand: its height is then the one you gave it.
+
+**With nothing to show yet.** A workspace where no agent has taken a turn in the period shows one plain "No agent turns" state.
+Someone who has arranged the dashboard, or whose workspace has a default layout, keeps the dashboard instead (a member who has
+not asked an agent anything yet, for one): each widget says there is nothing yet, and "Edit layout" works as ever.
+
+**From the keyboard:** while editing, every widget takes the focus (Tab). The arrow keys move it: a column left or right, and
+up or down past the widget above or below. Shift with an arrow key resizes it by a column or a row. Each change is spoken by a
+live region ("Turn duration moved to row 3, column 7; 6 wide, 2 tall"), and so is the reason when nothing can change. Tab goes
+on to the widget's own buttons (options, duplicate, hide). With "reduce motion" set, widgets do not glide to their places.
+
+**Each widget has options,** behind the "..." button on it (while editing, on its bar). They are saved with that widget, so two
+copies of a chart differ:
+
+| Widget          | Options                                                                                                              |
+| --------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Usage over time | measure, split, bucket (or automatic), stacked bars, grouped bars or lines, legend on or off, zoom brush on or off   |
+| Breakdown       | what to break down by, measure (its own, or the same as the first chart over time), 5, 8, 12 or 20 rows, show shares |
+| How turns ended | share of turns, or number of turns                                                                                   |
+| Approvals       | stacked, or side by side                                                                                             |
+| Turn duration   | which of the median, 90th, 95th and 99th percentile to draw; a logarithmic axis (off unless you turn it on)          |
+| Top lists       | 3, 5 or 10 rows                                                                                                      |
+| Tiles           | the trend line, and the line that compares with the period before                                                    |
+| Any chart       | chart or table, as what it opens with                                                                                |
+
+The switches in a chart's header (measure, split, bucket, chart or table) are the same options: pressing one saves it for that
+chart. A narrow chart keeps only its title and its options button. The outcomes, approvals and duration charts, and the tiles'
+trend lines, use the bucket of the first chart over time.
+
+**Narrower screens** show the same layout on fewer columns, worked out the same way every time: 6 columns below about 840 px
+of dashboard (tiles three to a row, charts one to a row, lists in pairs) and one column on a phone, in reading order, with the
+tiles in pairs as before. There you move a widget with the up and down buttons on its bar (or the arrow keys; on 6 columns a
+drag works too), and nothing is resized. One layout is stored, the 12-column one; a move made on a phone is a move in that
+layout. On a tablet held sideways the grid is the 12-column one, and a finger on a widget's bar drags it (a finger anywhere else
+scrolls the page).
+
+**Saving.** Every change is saved for you, in this workspace, a moment after you make it, with a note that offers Undo. If a
+save fails the change stays on the page and the page says so, with "Try again"; it is lost only if you leave before it is
+saved. Your layout is yours: nobody else sees or changes it, on any role.
+
+**A default for everyone.** An owner can press **Reset > Set as default for everyone**: people who have not arranged the
+dashboard, and everyone who joins later, start from that layout (their own changes are still their own). "Remove the workspace
+default" goes back to the built-in layout. Both leave an audit entry (`usage_layout_default_set` with the number of widgets,
+`usage_layout_default_removed`). The budgets are drawn for admins and owners only, whatever layout says so.
+
+**What is stored** is JSON, at most 16,000 characters and 40 widgets, checked on the way in and again on the way out
+(`src/hosted/usage-layout.js`): a widget of a kind this build does not know, a size or a place out of range, a repeated id or a
+second copy of a tile is dropped, an option that is not one of the listed values falls back to its default, and something that
+is not a layout at all is refused (400; 413 when too large). Nothing a stored layout says is drawn as it is.
 
 ### Who sees usage
 
@@ -1810,7 +1889,8 @@ removed, and exports.
 - **Export CSV** on the log downloads up to 10,000 entries of the filter (audited as `audit_exported`). The older Audit log page
   and its export are unchanged, and that export now leaves the same audit entry.
 
-New audit entries in 0.7.0: `signed_out`, `usage_exported`, `audit_exported`, `access_exported`, `usage_retention_changed`, and
+New audit entries in 0.7.0: `signed_out`, `usage_exported`, `audit_exported`, `access_exported`, `usage_retention_changed`,
+`usage_layout_default_set`, `usage_layout_default_removed`, and
 `agent_policy_changed` now says which settings changed, from what to what.
 
 **What the log does and does not prove.** The application has no route that edits or deletes an audit entry; entries are ordered
@@ -1843,7 +1923,16 @@ wall clock just before). `/usage/breakdown` takes `previous=1` for the same spli
 
 `GET /api/workspaces/:ws/activity?person=&agent=&project=&group=&action=&source=&sensitive=1&from=&to=&q=&before=&limit=`,
 `/activity/filters`, `/activity/export`, `/people/:user`, `/agents/:agent/profile`, `/access-review`, `/access-review/export`.
-`GET|POST /views` and `DELETE /views/:id` keep a person's saved views.
+`GET|POST /views` and `DELETE /views/:id` keep a person's saved views (`POST` takes `layout` to keep a dashboard layout with a
+view of the Usage page). `GET /views/:id/layout` answers a view's name and layout to anyone in the workspace who has the Usage
+page and the view's link (404 for a view that carries none).
+
+The dashboard's layout: `GET /usage/layout` answers `{ layout, default, canSetDefault }` (the caller's own layout or null, the
+workspace's default or null), `PUT /usage/layout` with `{ layout }` saves the caller's own, `DELETE /usage/layout` resets it,
+and `PUT` or `DELETE /usage/layout/default` sets or removes the workspace's default (owners; audited). There is no address for
+another person's layout. `/usage/top` takes `limit` (1 to 10, default 5); `/usage/latency` answers `p50`, `p90`, `p95` and
+`p99`. Members and up, like the rest of Usage; in `src/hosted/usage.js` these are `createLayouts` (one function per operation)
+and `createViews`.
 
 ## Moving to a new origin
 
@@ -2248,6 +2337,33 @@ DROP COLUMN approvals_by; ALTER TABLE agent_runs DROP COLUMN window_used; ALTER 
 TABLE workspaces DROP COLUMN retention_usage_days; DELETE FROM schema_migrations WHERE version = 15; PRAGMA user_version = 14;`.
 Never reset the ledger any other way. Test a rollback on a copy first.
 
+### Migration 16 and rollback
+
+Migration 16 (0.7.0) adds one table and changes nothing else:
+
+- table `usage_layouts`: the layouts of the Usage dashboard ([Arranging the dashboard](#arranging-the-dashboard)). One row per
+  layout: a person's own (`kind` `person`, `subject` their user id), the workspace's default (`default`, empty subject), and the
+  layout a saved view carries (`view`, the view's id). `layout` is the checked JSON; `updated_by` and `updated_at` say who saved
+  it and when. Rows go with their workspace, with a member who leaves or is removed, with a deleted account, and with a deleted
+  view.
+
+It is additive, and it does not touch `saved_views` or any other table of migration 15. Back up before upgrading.
+
+For rollback, prefer the pre-upgrade backup in a fresh data folder with the previous build. Running a build without migration 16
+on the upgraded database also works, since it ignores the table, but:
+
+- **Everyone sees the built-in dashboard,** fixed as it was. Layouts, the workspace's default and the layouts of saved views
+  stay in the table, unused, and are back when you upgrade again.
+- **Saved views keep working** as names for an address. A link that names a view (`view=`) opens the filters and ignores the
+  rest.
+- **A member removed or an account deleted meanwhile** leaves their rows behind. They are harmless (a layout holds no usage
+  data, only which widgets go where), and `DELETE FROM usage_layouts WHERE kind = 'person' AND subject NOT IN (SELECT user_id
+FROM memberships WHERE workspace_id = usage_layouts.workspace_id);` clears them.
+
+To remove the schema as well, with the server stopped: `DROP TABLE usage_layouts; DELETE FROM schema_migrations WHERE version =
+16;`, then set `PRAGMA user_version` to the highest version left in `schema_migrations` (17 where migration 17 is there, else
+15). Never reset the ledger any other way. Test a rollback on a copy first.
+
 ### Migration 17 and rollback
 
 Migration 17 (0.7.0) adds what the passkey settings and tailnet sign-in need ([Signing in](#signing-in)). It is additive and
@@ -2287,11 +2403,11 @@ numbered 16 for a while. A database such a build opened says "16 ran" in its led
 server recognises it (the sign-in tables are there, `usage_layouts` is not, 17 is not marked), adds what that early build
 did not have yet, and corrects the ledger to "17 ran, 16 did not", so both end applied once. Nothing to do by hand.
 
-**Why 17, and migration 16.** Number 16 belongs to the saved Usage layouts (table `usage_layouts`), which are developed
-separately. The two do not depend on each other and the server keeps a ledger of what ran (`schema_migrations`), so they can
-reach a database in either order: a database that already ran 16 runs 17 on the next start, and one that ran 17 first runs 16
-when a build that has it starts. `PRAGMA user_version` is the highest number applied, not a count. Rolling one back does not
-touch the other; remove only its own row from `schema_migrations`.
+**Migrations 16 and 17.** Number 16 is the Usage layouts (table `usage_layouts`) and 17 is sign-in; they were made separately
+and do not depend on each other. The server keeps a ledger of what ran (`schema_migrations`), so they can reach a database in
+either order: a database that ran only 16 runs 17 on the next start, and one that ran only 17 runs 16. `PRAGMA user_version` is
+the highest number applied, not a count. Rolling one back does not touch the other; remove only its own row from
+`schema_migrations`.
 
 ## Secrets, logs and legal review
 

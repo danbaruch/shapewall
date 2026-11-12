@@ -256,6 +256,10 @@ export function describeAudit(entry) {
       return `changed the agent policy of ${d.name || target}${Array.isArray(d.changed) && d.changed.length ? ` (${d.changed.join(', ')})` : ''}`
     case 'usage_retention_changed':
       return `set how long usage records are kept${d.after ? ` to ${d.after} days` : ' back to the default'}`
+    case 'usage_layout_default_set':
+      return `set the Usage layout everyone starts from (${count(d.widgets || 0, 'widget', 'widgets')})`
+    case 'usage_layout_default_removed':
+      return 'removed the Usage layout everyone starts from'
     case 'project_made_public':
       return `made the project ${d.name || target} public`
     case 'project_made_private':

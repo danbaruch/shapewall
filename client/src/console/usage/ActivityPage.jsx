@@ -673,7 +673,7 @@ function SubjectUsage({ title, filter, extra, to }) {
           </Link>
         </span>
       </div>
-      <Overview filter={filter} isAdmin={false} compact extraQuery={extra} />
+      <Overview filter={filter} extraQuery={extra} />
     </section>
   )
 }

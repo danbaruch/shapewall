@@ -26,6 +26,7 @@
 import { agentPolicy } from './agent-policy.js'
 import { newId } from './crypto.js'
 import { HttpError } from './http.js'
+import { readLayout } from './usage-layout.js'
 import { OUTCOME_GROUPS, USAGE_DIMENSIONS, USAGE_ROW_BYTES, USAGE_SORTS } from './usage-shape.js'
 import {
   USAGE_LIMITS,
@@ -33,7 +34,9 @@ import {
   aggregate,
   breakdownView,
   budgetDay,
+  checkedLayout,
   cleanView,
+  cleanViewLayout,
   dimensionLabel,
   latencyBuckets,
   latencyView,
@@ -58,6 +61,7 @@ export {
   cleanBucket,
   cleanDimension,
   cleanMetric,
+  cleanTopLimit,
   cleanUsageFilter,
   csvCell,
   localDate,
@@ -253,7 +257,9 @@ export function createUsage(t, { now = () => new Date() } = {}) {
     const by = bucket ? bucketSql(bucket, filter) : "''"
     const rows = t.all(
       `SELECT b, MAX(n) AS n, MAX(CASE WHEN rn = (n + 1) / 2 THEN d END) AS p50,
-         MAX(CASE WHEN rn = MAX(1, (n * 95 + 99) / 100) THEN d END) AS p95, MAX(d) AS longest
+         MAX(CASE WHEN rn = MAX(1, (n * 90 + 99) / 100) THEN d END) AS p90,
+         MAX(CASE WHEN rn = MAX(1, (n * 95 + 99) / 100) THEN d END) AS p95,
+         MAX(CASE WHEN rn = MAX(1, (n * 99 + 99) / 100) THEN d END) AS p99, MAX(d) AS longest
        FROM (SELECT ${by} AS b, r.duration_ms AS d, ROW_NUMBER() OVER (PARTITION BY ${by} ORDER BY r.duration_ms) AS rn,
                COUNT(*) OVER (PARTITION BY ${by}) AS n
              FROM agent_runs r WHERE ${sql} AND r.duration_ms IS NOT NULL)
@@ -360,7 +366,7 @@ export function createUsage(t, { now = () => new Date() } = {}) {
 
   // ---- The "top" lists ----
 
-  function top(filter, scope) {
+  function top(filter, scope, { limit = 5 } = {}) {
     const { sql, params } = where(filter, scope)
     const agents = breakdown(filter, scope, 'agent')
     const threads = t
@@ -369,15 +375,15 @@ export function createUsage(t, { now = () => new Date() } = {}) {
            COUNT(*) AS calls, SUM(${TOKENS}) AS tokens, p.name AS project_name
          FROM agent_runs r LEFT JOIN projects p ON p.id = r.project_id AND p.workspace_id = r.workspace_id
          WHERE ${sql} AND r.thread_id IS NOT NULL GROUP BY r.project_id, r.board_id, r.thread_id
-         HAVING SUM(${TOKENS}) IS NOT NULL ORDER BY tokens DESC LIMIT 5`,
-        params,
+         HAVING SUM(${TOKENS}) IS NOT NULL ORDER BY tokens DESC LIMIT :top`,
+        { ...params, top: limit },
       )
       .map((item) => topThread(item, scope))
-    const fromAgents = topAgents(agents)
+    const fromAgents = topAgents(agents, limit)
     return {
       agents: fromAgents.agents,
       threads,
-      slowest: rows(filter, scope, { sort: 'duration', dir: 'desc', limit: 5 }).rows.filter((item) => item.durationMs !== null),
+      slowest: rows(filter, scope, { sort: 'duration', dir: 'desc', limit }).rows.filter((item) => item.durationMs !== null),
       denied: fromAgents.denied,
     }
   }
@@ -475,17 +481,47 @@ export function setUsageRetention(t, days, { audit = null } = {}) {
 // scoped queries as typing the filters, so a view cannot show its reader
 // more than they may see. A view is its maker's; sharing one is sharing the
 // page's address.
+//
+// A view of the Usage page may carry a dashboard layout ("include this
+// layout"). Whoever opens such a view by its link sees that layout without
+// it replacing their own (layoutOf: anyone in the workspace who has the
+// Usage page, by the view's id).
 export function createViews(t, { now = () => new Date() } = {}) {
-  const view = (row) => ({ id: row.id, page: row.page, name: row.name, query: row.query, updatedAt: row.updated_at })
-  const listOf = (userId, page) =>
-    t
+  const layouts = createLayouts(t, { now })
+  const withLayout = () =>
+    new Set(t.all("SELECT subject FROM usage_layouts WHERE workspace_id = :ws AND kind = 'view'").map((row) => row.subject))
+  const view = (row, carrying = withLayout()) => ({
+    id: row.id,
+    page: row.page,
+    name: row.name,
+    query: row.query,
+    updatedAt: row.updated_at,
+    hasLayout: carrying.has(row.id),
+  })
+  const listOf = (userId, page) => {
+    const carrying = withLayout()
+    return t
       .all('SELECT * FROM saved_views WHERE workspace_id = :ws AND user_id = :user AND page = :page ORDER BY name, id', {
         user: userId,
         page,
       })
-      .map(view)
+      .map((row) => view(row, carrying))
+  }
+  // The layout a view carries, for anyone who was handed its link: the
+  // view's name and its layout, or nothing when it carries none. `mine`:
+  // whether the reader (`userId`) is the view's maker.
+  function layoutOf(id, userId = null) {
+    const row = t.get("SELECT id, name, user_id FROM saved_views WHERE workspace_id = :ws AND id = :id AND page = 'usage'", {
+      id: String(id || ''),
+    })
+    const layout = row ? layouts.ofView(row.id) : null
+    return layout ? { id: row.id, name: row.name, mine: row.user_id === userId, layout } : null
+  }
   function save(userId, given) {
     const { page, name: label, query } = cleanView(given)
+    // `layout`: the dashboard layout to keep with the view (null or absent: none).
+    const layout = cleanViewLayout(page, given?.layout)
+    const keep = (id) => (layout ? layouts.saveForView(id, userId, layout) : layouts.removeForView(id))
     const at = now().toISOString()
     // The same name again replaces that view.
     const same = t.get('SELECT id FROM saved_views WHERE workspace_id = :ws AND user_id = :user AND page = :page AND name = :name', {
@@ -500,6 +536,7 @@ export function createViews(t, { now = () => new Date() } = {}) {
         id: same.id,
         user: userId,
       })
+      keep(same.id)
       return view(t.get('SELECT * FROM saved_views WHERE workspace_id = :ws AND id = :id', { id: same.id }))
     }
     const mine = t.get('SELECT COUNT(*) AS n FROM saved_views WHERE workspace_id = :ws AND user_id = :user AND page = :page', {
@@ -512,6 +549,7 @@ export function createViews(t, { now = () => new Date() } = {}) {
       'INSERT INTO saved_views (workspace_id, id, user_id, page, name, query, created_at, updated_at) VALUES (:ws, :id, :user, :page, :name, :query, :at, :at)',
       { id, user: userId, page, name: label, query, at },
     )
+    keep(id)
     return view(t.get('SELECT * FROM saved_views WHERE workspace_id = :ws AND id = :id', { id }))
   }
   // Only its maker removes a view.
@@ -521,8 +559,83 @@ export function createViews(t, { now = () => new Date() } = {}) {
       user: userId,
     })
     if (!Number(result.changes)) throw new HttpError(404, 'unknown_view', 'No such saved view.')
+    layouts.removeForView(String(id))
   }
-  // When someone leaves the workspace, their views go with them.
-  const removeOf = (userId) => t.run('DELETE FROM saved_views WHERE workspace_id = :ws AND user_id = :user', { user: userId })
-  return { list: listOf, save, remove, removeOf }
+  // When someone leaves the workspace, their views go with them (and their layouts).
+  const removeOf = (userId) => {
+    layouts.removeOf(userId)
+    t.run('DELETE FROM saved_views WHERE workspace_id = :ws AND user_id = :user', { user: userId })
+  }
+  return { list: listOf, layoutOf, save, remove, removeOf }
+}
+
+// ---- Dashboard layouts ----
+
+// The layouts of the Usage dashboard (the model: usage-layout.js). A person
+// has at most one of their own per workspace; a workspace has at most one
+// default, which people without their own start from; a saved view may
+// carry one. One function per operation, so the routes, the public demo and
+// a later admin tool do the same thing. Every layout is checked before it
+// is stored and again when it is read: what a stored row holds is never
+// drawn as it is.
+//
+// Who may call what is the caller's to check (usage-routes.js): a person
+// reads and writes only their own; the default is read by everyone who has
+// the Usage page and set by owners (NEEDS.usageDefaultLayout).
+export function createLayouts(t, { now = () => new Date() } = {}) {
+  const read = (kind, subject) => {
+    const row = t.get('SELECT layout FROM usage_layouts WHERE workspace_id = :ws AND kind = :kind AND subject = :subject', {
+      kind,
+      subject,
+    })
+    if (!row) return null
+    try {
+      return readLayout(JSON.parse(row.layout))
+    } catch {
+      return null
+    }
+  }
+  const write = (kind, subject, given, by) => {
+    const layout = checkedLayout(given)
+    t.run(
+      `INSERT INTO usage_layouts (workspace_id, kind, subject, layout, updated_by, updated_at) VALUES (:ws, :kind, :subject, :layout, :by, :at)
+       ON CONFLICT (workspace_id, kind, subject) DO UPDATE SET layout = excluded.layout, updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
+      { kind, subject, layout: JSON.stringify(layout), by, at: now().toISOString() },
+    )
+    return layout
+  }
+  const drop = (kind, subject) =>
+    Number(t.run('DELETE FROM usage_layouts WHERE workspace_id = :ws AND kind = :kind AND subject = :subject', { kind, subject }).changes) >
+    0
+
+  // A person's own layout (null: they have not changed the dashboard).
+  const mine = (userId) => read('person', userId)
+  // The layout everyone in the workspace starts from (null: the built-in one).
+  const shared = () => read('default', '')
+  // Saves a person's own layout. Returns it as stored.
+  const save = (userId, layout) => write('person', userId, layout, userId)
+  // Back to the workspace's default: forgets a person's own layout.
+  const reset = (userId) => drop('person', userId)
+  // Sets the layout everyone starts from. `audit(action, target, detail)` hears it.
+  function setDefault(userId, layout, { audit = null } = {}) {
+    const stored = write('default', '', layout, userId)
+    audit?.('usage_layout_default_set', null, { widgets: stored.items.length })
+    return stored
+  }
+  // Removes it: people without their own layout see the built-in one again.
+  function clearDefault({ audit = null } = {}) {
+    if (drop('default', '')) audit?.('usage_layout_default_removed', null, {})
+  }
+  const ofView = (viewId) => read('view', viewId)
+  const saveForView = (viewId, userId, layout) => write('view', viewId, layout, userId)
+  const removeForView = (viewId) => drop('view', viewId)
+  // When someone leaves the workspace: their own layout, and the layouts of their views.
+  function removeOf(userId) {
+    t.run(
+      "DELETE FROM usage_layouts WHERE workspace_id = :ws AND kind = 'view' AND subject IN (SELECT id FROM saved_views WHERE workspace_id = :ws AND user_id = :user)",
+      { user: userId },
+    )
+    drop('person', userId)
+  }
+  return { mine, shared, save, reset, setDefault, clearDefault, ofView, saveForView, removeForView, removeOf }
 }

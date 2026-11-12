@@ -46,6 +46,8 @@ export const NEEDS = {
   // Activity: anyone in the workspace reads their own; admins and owners all of it.
   activity: 'viewer',
   accessReview: 'admin',
+  // The layout of the Usage dashboard that everyone in the workspace starts from.
+  usageDefaultLayout: 'owner',
   deleteWorkspace: 'owner',
 }
 export const can = (role, need) => roleAtLeast(role, NEEDS[need])
