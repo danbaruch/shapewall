@@ -512,15 +512,15 @@ test('identity: name, icon, tint and kind change through one function, show on t
   await take(fixer.token, before.id)
   await tokenCall(hosted, fixer.token, 'POST', `/api/v1/boards/sample/comments/${before.id}/replies`, { body: { body: 'On it' } })
 
-  const saved = await api(ada, 'PATCH', url, { name: 'Harry', icon: 'owl', tint: 'violet', kind: 'codex' })
+  const saved = await api(ada, 'PATCH', url, { name: 'Scout', icon: 'owl', tint: 'violet', kind: 'codex' })
   assert.equal(saved.status, 200, saved.text)
   assert.deepEqual(
     [saved.json.agent.name, saved.json.agent.icon, saved.json.agent.tint, saved.json.agent.kind, saved.json.agent.logo],
-    ['Harry', 'owl', 'violet', 'codex', 'openai'],
+    ['Scout', 'owl', 'violet', 'codex', 'openai'],
   )
   // The token is the same token under its new name.
   const tokens = (await ada.browser.get(consoleUrl('/tokens'))).json.tokens
-  assert.equal(tokens.find((token) => token.id === fixer.id).name, 'Harry')
+  assert.equal(tokens.find((token) => token.id === fixer.id).name, 'Scout')
   await tokenCall(hosted, fixer.token, 'POST', `/api/v1/boards/sample/comments/${before.id}/replies`, { body: { body: 'Done' } })
   await finish(fixer.token, before.id)
   const thread = await seen(ada, before.id)
@@ -528,19 +528,19 @@ test('identity: name, icon, tint and kind change through one function, show on t
     thread.replies.map((reply) => [reply.author, reply.agent, reply.agentId]),
     [
       ['Fixer', true, fixerAgent.id],
-      ['Harry', true, fixerAgent.id],
+      ['Scout', true, fixerAgent.id],
     ],
     'what it wrote keeps its name; both say which agent wrote them',
   )
   const onBoard = (await boardAgents(ada)).agents.find((agent) => agent.id === fixerAgent.id)
-  assert.deepEqual([onBoard.name, onBoard.icon, onBoard.tint, onBoard.logo], ['Harry', 'owl', 'violet', 'openai'])
+  assert.deepEqual([onBoard.name, onBoard.icon, onBoard.tint, onBoard.logo], ['Scout', 'owl', 'violet', 'openai'])
   const renamed = (await audit('agent_renamed'))[0]
-  assert.deepEqual([renamed.detail.from, renamed.detail.to], ['Fixer', 'Harry'])
+  assert.deepEqual([renamed.detail.from, renamed.detail.to], ['Fixer', 'Scout'])
   const look = (await audit('agent_identity_changed'))[0]
   assert.deepEqual(look.detail.before, { icon: null, tint: null, kind: 'watcher' })
   assert.deepEqual(look.detail.after, { icon: 'owl', tint: 'violet', kind: 'codex' })
   // Saving the same again writes nothing.
-  await api(ada, 'PATCH', url, { name: 'Harry', icon: 'owl' })
+  await api(ada, 'PATCH', url, { name: 'Scout', icon: 'owl' })
   assert.equal((await audit('agent_renamed')).length, 1)
   assert.equal((await audit('agent_identity_changed')).length, 1)
   // A token rename on the Tokens page is the same name.

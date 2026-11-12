@@ -31,7 +31,7 @@ let cyd // a member
 let ws
 let project
 let builder // { token, id, agentId }: shared with everyone the policy trusts
-let harry // { token, id, agentId }: Ada's own, first called Fixer
+let scout // { token, id, agentId }: Ada's own, first called Fixer
 const watchers = []
 const contexts = []
 const ranFile = path.join(tempDir('hosted-agents-e2e-ran'), 'ran.txt')
@@ -178,7 +178,7 @@ test('the console: a project with no agent says how to connect one; then each ag
   await shot(page, 'console-agents-1-empty-1440-light')
 
   builder = await makeAgent('Builder')
-  harry = await makeAgent('Fixer')
+  scout = await makeAgent('Fixer')
   await page.reload()
   await page.waitForSelector('[data-sw-agent-row="Builder"]')
   const row = page.locator('[data-sw-agent-row="Fixer"]')
@@ -192,12 +192,12 @@ test('the console: a project with no agent says how to connect one; then each ag
   // Rename it and give it a face, with the editor the local Agents page uses.
   await page.click('[data-sw-agent-edit="Fixer"]')
   await page.waitForSelector('[data-sw-agent-edit-dialog]')
-  await page.fill('[data-sw-agent-name-input]', 'Harry')
+  await page.fill('[data-sw-agent-name-input]', 'Scout')
   await page.click('[data-sw-agent-icon-option="owl"]', { force: true })
   await shot(page, 'console-agents-2-edit-1440-light')
   await page.click('[data-sw-agent-edit-save]')
-  await page.waitForSelector('[data-sw-agent-row="Harry"]')
-  assert.equal(await page.locator('[data-sw-agent-row="Harry"] [data-sw-agent-avatar]').first().getAttribute('data-sw-agent-avatar'), 'owl')
+  await page.waitForSelector('[data-sw-agent-row="Scout"]')
+  assert.equal(await page.locator('[data-sw-agent-row="Scout"] [data-sw-agent-avatar]').first().getAttribute('data-sw-agent-avatar'), 'owl')
 
   // Builder is for the team: everyone the agent policy trusts. Saving asks
   // for a passkey check in the last ten minutes (the session is fresh).
@@ -223,13 +223,13 @@ test('the console: a project with no agent says how to connect one; then each ag
   // The default agent.
   await page.click('[data-sw-agent-make-default="Builder"]')
   await page.waitForSelector('[data-sw-agent-row="Builder"] [data-sw-agent-default]')
-  assert.equal(await page.locator('[data-sw-agent-row="Harry"] [data-sw-agent-default]').count(), 0)
+  assert.equal(await page.locator('[data-sw-agent-row="Scout"] [data-sw-agent-default]').count(), 0)
   await shot(page, 'console-agents-5-list-1440-light')
   assert.doesNotMatch(await page.textContent('main'), /\bnull\b|\bundefined\b|NaN/)
 
   // The project page points here.
   await page.goto(`${hosted.origin}/w/${ws}/projects/${project.id}`)
-  await page.waitForSelector('[data-sw-project-agents-card] [data-sw-project-agent="Harry"]')
+  await page.waitForSelector('[data-sw-project-agents-card] [data-sw-project-agent="Scout"]')
   assert.match(await page.getAttribute('[data-sw-project-agents-open]', 'href'), new RegExp(`/w/${ws}/agents/${project.id}$`))
   assert.deepEqual(errors, [])
 })
@@ -240,7 +240,7 @@ test('the workspace overview: every agent, the project it serves, its state and 
   await page.goto(`${hosted.origin}/w/${ws}`)
   await page.click('[data-sw-nav="agents"]')
   await page.waitForSelector('[data-sw-agents-overview] [data-sw-overview-agent="Builder"]')
-  const row = page.locator('[data-sw-overview-agent="Harry"]')
+  const row = page.locator('[data-sw-overview-agent="Scout"]')
   assert.equal(await row.getAttribute('data-sw-overview-project'), 'Site')
   assert.match(await row.textContent(), /Only Ada/)
   assert.match(await row.textContent(), /Offline/)
@@ -248,8 +248,8 @@ test('the workspace overview: every agent, the project it serves, its state and 
   // A project nobody serves is listed too, with the way to connect one.
   assert.equal(await page.locator('[data-sw-agents-without] [data-sw-overview-connect="Docs"]').count(), 1)
   await shot(page, 'console-overview-1440-light')
-  await page.click('[data-sw-overview-manage="Harry"]')
-  await page.waitForSelector('[data-sw-agent-row="Harry"]')
+  await page.click('[data-sw-overview-manage="Scout"]')
+  await page.waitForSelector('[data-sw-agent-row="Scout"]')
   assert.ok(page.url().endsWith(`/w/${ws}/agents/${project.id}`))
   // A member has no Agents page.
   const member = await open(cyd)
@@ -275,7 +275,7 @@ test('the board lists the agents with their state; the toolbar says which are on
   const rows = page.locator('[data-sw-hosted-agent-row]')
   assert.deepEqual(await rows.evaluateAll((list) => list.map((item) => [item.dataset.swHostedAgentName, item.dataset.swAgentState])), [
     ['Builder', 'offline'],
-    ['Harry', 'offline'],
+    ['Scout', 'offline'],
   ])
   await shot(page, 'board-panel-1-offline-1440-light')
 
@@ -288,10 +288,10 @@ test('the board lists the agents with their state; the toolbar says which are on
   assert.match(await builderRow.textContent(), /Online/)
   assert.equal(await builderRow.locator('[data-sw-agent-default]').count(), 1)
   assert.match(await builderRow.locator('[data-sw-hosted-agent-audience]').textContent(), /everyone this project's agent policy trusts/)
-  const harryRow = page.locator('[data-sw-hosted-agent-name="Harry"]')
-  assert.match(await harryRow.textContent(), /Offline, never connected/)
-  assert.equal(await harryRow.locator('[data-sw-agent-avatar]').getAttribute('data-sw-agent-avatar'), 'owl')
-  assert.match(await page.getAttribute(agent, 'aria-label'), /Builder online, Harry offline/)
+  const scoutRow = page.locator('[data-sw-hosted-agent-name="Scout"]')
+  assert.match(await scoutRow.textContent(), /Offline, never connected/)
+  assert.equal(await scoutRow.locator('[data-sw-agent-avatar]').getAttribute('data-sw-agent-avatar'), 'owl')
+  assert.match(await page.getAttribute(agent, 'aria-label'), /Builder online, Scout offline/)
   assert.match(await page.getAttribute('[data-sw-hosted-agent-manage]', 'href'), new RegExp(`/w/${ws}/agents/${project.id}$`))
   // Nothing about a token reaches the board.
   assert.doesNotMatch(await page.content(), /swp_|tk_[a-f0-9]{24}/)
@@ -314,19 +314,19 @@ test('an audience keeps a member out and says why; Send to <default agent> runs 
   const options = page.locator('[data-sw-send-agent-option]')
   assert.deepEqual(
     await options.evaluateAll((list) => list.map((item) => item.dataset.swSendAgentName || item.dataset.swSendAgentOption)),
-    ['Builder', 'Harry', 'any'],
+    ['Builder', 'Scout', 'any'],
   )
-  const blocked = page.locator('[data-sw-send-agent-name="Harry"]')
+  const blocked = page.locator('[data-sw-send-agent-name="Scout"]')
   assert.equal(await blocked.getAttribute('data-sw-send-agent-blocked'), 'true')
   assert.equal(await blocked.getAttribute('aria-disabled'), 'true')
-  assert.match(await blocked.locator('[data-sw-send-agent-line]').textContent(), /Only Ada can send work to Harry/)
+  assert.match(await blocked.locator('[data-sw-send-agent-line]').textContent(), /Only Ada can send work to Scout/)
   assert.match(await page.locator('[data-sw-send-agent-name="Builder"]').textContent(), /Default/)
   assert.match(await page.locator('[data-sw-send-agent-name="Builder"] [data-sw-send-agent-line]').textContent(), /Online/)
   await shot(page, 'board-send-menu-1440-light')
   // The server refuses it as well, whatever the page offers.
   const forced = await cyd.browser.post(boardApi(`/comments/${mine.id}/send-to-agent`), {
     dispatchHash: (await cyd.browser.get(boardApi('/comments'))).json.comments.find((item) => item.id === mine.id).dispatchHash,
-    agentId: harry.agentId,
+    agentId: scout.agentId,
   })
   assert.equal(forced.status, 403)
   assert.equal(forced.json.error.code, 'agent_audience')
@@ -340,20 +340,20 @@ test('an audience keeps a member out and says why; Send to <default agent> runs 
 })
 
 test('a comment for an offline agent waits with a visible state; "Let any agent take it" hands it over', async () => {
-  const waiting = await unsent(ada, 'Harry should look at this', 40)
+  const waiting = await unsent(ada, 'Scout should look at this', 40)
   const { page, errors } = await open(ada)
   await page.goto(boardPage(`&c=${waiting.id}&ha=1`))
   await page.waitForSelector(`[data-sw-thread-popover="${waiting.id}"]`)
   await page.click(`[data-sw-send-agent-choose="${waiting.id}"]`)
-  await page.click('[data-sw-send-agent-name="Harry"]')
+  await page.click('[data-sw-send-agent-name="Scout"]')
   await page.waitForSelector('[data-sw-sent-agent="waiting"]')
-  assert.match(await page.textContent('[data-sw-sent-agent="waiting"]'), /^Waiting for Harry \(offline, never connected\)$/)
-  // The panel says the same under Harry.
-  const queued = page.locator('[data-sw-hosted-agent-name="Harry"] [data-sw-hosted-agent-comments="queued"]')
+  assert.match(await page.textContent('[data-sw-sent-agent="waiting"]'), /^Waiting for Scout \(offline, never connected\)$/)
+  // The panel says the same under Scout.
+  const queued = page.locator('[data-sw-hosted-agent-name="Scout"] [data-sw-hosted-agent-comments="queued"]')
   await queued.waitFor()
   assert.match(await queued.textContent(), new RegExp(`Waiting for it\\s*#${waiting.id}`))
   await shot(page, 'board-waiting-1440-light')
-  // Builder is online and does not take what was sent to Harry.
+  // Builder is online and does not take what was sent to Scout.
   await new Promise((resolve) => setTimeout(resolve, 3500))
   assert.equal((await seen(waiting.id)).agentStatus, null)
   assert.ok(!ran().some((line) => line.endsWith(`#${waiting.id}`)))
@@ -367,40 +367,40 @@ test('a comment for an offline agent waits with a visible state; "Let any agent 
 })
 
 test('sent to a named agent, only that watcher gets it; its reply wears its new name and icon; the default takes new comments', async () => {
-  // Harry's machine comes up, with a command that takes a few seconds.
-  await started(watch(harry, 'harry', { ms: 4000 }))
-  const forHarry = await unsent(ada, 'Only Harry', 50)
+  // Scout's machine comes up, with a command that takes a few seconds.
+  await started(watch(scout, 'scout', { ms: 4000 }))
+  const forScout = await unsent(ada, 'Only Scout', 50)
   const { page, errors } = await open(ada)
-  await page.goto(boardPage(`&c=${forHarry.id}&ha=1`))
-  await page.waitForSelector(`[data-sw-thread-popover="${forHarry.id}"]`)
-  await page.waitForSelector('[data-sw-hosted-agent-name="Harry"][data-sw-agent-state="online"]')
-  await page.click(`[data-sw-send-agent-choose="${forHarry.id}"]`)
-  await page.click('[data-sw-send-agent-name="Harry"]')
+  await page.goto(boardPage(`&c=${forScout.id}&ha=1`))
+  await page.waitForSelector(`[data-sw-thread-popover="${forScout.id}"]`)
+  await page.waitForSelector('[data-sw-hosted-agent-name="Scout"][data-sw-agent-state="online"]')
+  await page.click(`[data-sw-send-agent-choose="${forScout.id}"]`)
+  await page.click('[data-sw-send-agent-name="Scout"]')
   // While it works: the thread and the panel say who has it.
   await page.waitForSelector('[data-sw-sent-agent="working"]', { timeout: 20_000 })
-  assert.match(await page.textContent('[data-sw-sent-agent="working"]'), /Harry is working on this/)
-  await page.waitForSelector('[data-sw-hosted-agent-name="Harry"][data-sw-agent-state="busy"]', { timeout: 20_000 })
-  assert.match(await page.locator('[data-sw-hosted-agent-name="Harry"]').textContent(), new RegExp(`Working on #${forHarry.id}`))
+  assert.match(await page.textContent('[data-sw-sent-agent="working"]'), /Scout is working on this/)
+  await page.waitForSelector('[data-sw-hosted-agent-name="Scout"][data-sw-agent-state="busy"]', { timeout: 20_000 })
+  assert.match(await page.locator('[data-sw-hosted-agent-name="Scout"]').textContent(), new RegExp(`Working on #${forScout.id}`))
   await shot(page, 'board-panel-3-working-1440-light')
   // The agent answers on the thread (its token, as a wrapper script would).
-  const reply = await tokenCall(hosted, harry.token, 'POST', `/api/v1/boards/sample/comments/${forHarry.id}/replies`, {
+  const reply = await tokenCall(hosted, scout.token, 'POST', `/api/v1/boards/sample/comments/${forScout.id}/replies`, {
     body: { body: 'Fixed the heading.' },
   })
   assert.equal(reply.status, 201, reply.text)
-  await until(async () => (await seen(forHarry.id)).agentStatus === 'done', 'Harry to finish')
+  await until(async () => (await seen(forScout.id)).agentStatus === 'done', 'Scout to finish')
   assert.deepEqual(
-    ran().filter((line) => line.endsWith(`#${forHarry.id}`)),
-    [`harry sample#${forHarry.id}`],
+    ran().filter((line) => line.endsWith(`#${forScout.id}`)),
+    [`scout sample#${forScout.id}`],
     'the other watcher never ran it',
   )
   await page.reload()
-  const message = page.locator(`[data-sw-thread-popover="${forHarry.id}"] [data-sw-reply]`).first()
+  const message = page.locator(`[data-sw-thread-popover="${forScout.id}"] [data-sw-reply]`).first()
   await message.waitFor()
-  assert.match(await message.textContent(), /Harry/)
+  assert.match(await message.textContent(), /Scout/)
   assert.equal(await message.locator('[data-sw-agent-avatar]').getAttribute('data-sw-agent-avatar'), 'owl')
   await shot(page, 'board-reply-1440-light')
 
-  // The default agent: Ada's new comment goes to Builder, not to Harry.
+  // The default agent: Ada's new comment goes to Builder, not to Scout.
   const latest = await comment(ada, 'A new comment from a trusted member', 60)
   assert.equal(latest.agentId, builder.agentId)
   await until(() => ran().some((line) => line.endsWith(`#${latest.id}`)), 'the default agent to run it')
@@ -469,7 +469,7 @@ test('a phone: the More menu opens an Agents sheet, and a thread sends its comme
 test("a phone: the console's Agents page fits, with touch targets", async () => {
   const { page, errors } = await open(ada, { width: 390, height: 844, phone: true })
   await page.goto(`${hosted.origin}/w/${ws}/agents/${project.id}`)
-  await page.waitForSelector('[data-sw-agent-row="Harry"]')
+  await page.waitForSelector('[data-sw-agent-row="Scout"]')
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), 'no sideways scroll')
   const small = await page.evaluate(() =>
     [...document.querySelectorAll('main button, main a[href]')]
