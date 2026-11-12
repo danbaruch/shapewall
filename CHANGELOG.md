@@ -3,6 +3,51 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## 0.4.0 - 2026-11-12
+
+Agents on a hosted board are things you can see and choose. This is the first step towards connected agents and chat on hosted
+boards; nothing changes on a local board.
+
+- On a hosted server, every project token that may take work (the `claim` scope) is an **agent**: it has a name, an icon and a
+  colour, a state (online, working, offline with when it was last seen) and a line saying whose work it takes. The board's Agent
+  panel lists them with what each is working on and what waits for it, and the Agent button's tooltip names them ("Builder online,
+  Fixer offline"). `shapewall watch --remote` and `shapewall mcp --remote` are those agents: they need no new flag and no new token.
+- **Send to agent** on a thread is a split button, like "Fix with <agent>" on a local board. The main part names the project's
+  default agent; the menu lists every agent with its state, and **Any agent** for whichever takes it first. A comment sent to one
+  agent can only be taken by that agent: the project's other tokens do not see it, by list, by id or through MCP.
+- A comment sent to an agent that is offline waits for it and says so on its thread and in the panel ("Waiting for Builder
+  (offline, last seen 2 hours ago)"), with **Let any agent take it** and **Choose another**. Nothing is lost: when the agent is
+  back it takes what was sent to it.
+- Each agent says **who may send it work**: only the person who connected it, named members, or everyone the project's agent policy
+  trusts. The server checks it when a comment is sent and again when the agent takes it. On the board, an agent you may not use is
+  listed, greyed, with the reason. A new agent takes work only from the person who connected it, until an admin shares it.
+- A project has a **default agent**, picked by an admin or owner: the one Send to agent names, and where a trusted member's new
+  comment goes. Without one, comments go to any agent, as before.
+- The console has an **Agents** page for each project: every agent with its state, last seen, audience, approval settings and the
+  default; rename it and give it an icon and a colour (the editor the local Agents page uses); set the default; change who may use
+  it; revoke it; and a **Connect an agent** card with this server's exact commands. **Agents** in the workspace menu lists every
+  agent of the workspace with the project it serves and who connected it.
+- Each agent has an approval rule and two roles, who may answer its approvals and who may change the rule (admins and owners, or
+  owners only). The rule in effect is always "Always ask"; "Approve automatically" is listed as not available until an agent's own
+  machine can allow it.
+- An agent's replies on a thread show its icon. Renaming an agent renames its token: new replies use the new name, old ones keep
+  theirs.
+- Phones have the Agent panel now: **Agents** in the board's More menu opens it as a sheet, and a thread's sheet has the same Send
+  to agent control.
+- Every change is in the audit log with what it was before and after: an agent created or first seen, renamed, its look, the
+  default, its audience, its approval settings, revoked, and a waiting comment released to any agent.
+- The server now writes one usage record for each comment an agent takes (who asked, which agent, when, how it ended; never the
+  comment or the answer). There is no page for it yet.
+
+**Upgrading a hosted server.** Back up first (`shapewall hosted backup`). Migration 12 adds two tables and three columns and turns
+every token that already has the `claim` scope into an agent that behaves exactly as before: it takes work from everyone the agent
+policy trusts, and no project gets a default agent, so nothing is routed differently until you choose. Tokens made from this
+release on start narrower, with only the person who made them: share such an agent on the project's Agents page if teammates'
+comments should reach it. To go back, restore the backup with 0.3.4, or run 0.3.4 on the upgraded database: it ignores the new data,
+which means a comment sent to one agent can be taken by any watcher, audiences are not enforced, and default agents, icons and
+usage records are not shown until you upgrade again. Details and the SQL to remove the schema are in
+[Migration 12 and rollback](docs/hosted.md#migration-12-and-rollback).
+
 ## 0.3.4 - 2026-11-12
 
 - The agent's "Changed N files" card lists only the agent's work. Files Git ignores (by `.gitignore` as it is on disk, committed or
