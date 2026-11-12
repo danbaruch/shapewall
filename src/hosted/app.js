@@ -126,6 +126,10 @@ export function createHostedApp({
   turnstile = null,
   // Where "Report this board" on a public project goes (an email address).
   reportEmail = null,
+  // Whether a workspace's owners see their members' account events (sign-ins,
+  // passkeys, sessions) in Activity. Off: those are each person's own. For a
+  // server with one team; set by the operator (--owners-see-sign-ins).
+  ownersSeeSignIns = false,
 }) {
   const base = new URL(origin)
   if (!['http:', 'https:'].includes(base.protocol) || base.pathname !== '/' || base.search)
@@ -411,6 +415,7 @@ export function createHostedApp({
     ownerCount,
     createApiToken,
     agentsFor,
+    ownersSeeSignIns: ownersSeeSignIns === true,
   }
   mountInviteLinks(consoleApi, consoleDeps)
   // Share link preview and opening: no session, the link is the secret.

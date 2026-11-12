@@ -63,6 +63,7 @@ async function serve(flags, out) {
       usercontentOrigin: flags['usercontent-origin'] || env.SHAPEWALL_USERCONTENT_ORIGIN || env.SHAPEWALL_HOSTED_USERCONTENT_ORIGIN || null,
       previousOrigin: flags['previous-origin'] || env.SHAPEWALL_HOSTED_PREVIOUS_ORIGIN || null,
       reportEmail: flags['report-email'] || env.SHAPEWALL_HOSTED_REPORT_EMAIL || null,
+      ownersSeeSignIns: Boolean(flags['owners-see-sign-ins']) || env.SHAPEWALL_HOSTED_OWNERS_SEE_SIGN_INS === '1',
       signup: flags.signup || env.SHAPEWALL_HOSTED_SIGNUP || 'invite',
       trustProxy,
       tailscale,

@@ -144,7 +144,7 @@ test('the owner’s Usage view reads the log: totals against the days before, a 
   assert.equal(data.rows[0].outcomeGroup, 'completed')
 })
 
-test('the log: a fix, a viewer, a private chat, reported numbers, rotation, torn lines', () => {
+test('the log: a fix, a viewer, a private chat, reported numbers, rotation under the lock, torn lines, 0600', async () => {
   const local = sampleConfig('agent-usage-unit')
   const now = new Date(2026, 10, 10, 12, 0, 0).getTime()
   const reply = (extra = {}) => ({ status: 'done', text: 'SECRET', cards: [], ...extra })
@@ -185,10 +185,15 @@ test('the log: a fix, a viewer, a private chat, reported numbers, rotation, torn
   })
   assert.deepEqual([chat.askedBy, chat.thread, chat.outcome], ['viewer', 'chat', 'failed'])
   assert.doesNotMatch(JSON.stringify(chat), /0123456789abcdef|v:abc/)
-  assert.equal(recordLocalTurn(local, row), true)
-  assert.equal(recordLocalTurn(local, chat), true)
+  assert.equal(await recordLocalTurn(local, row), true)
+  assert.equal(await recordLocalTurn(local, chat), true)
+  // The owner's alone, like the event log; a log that was made wider is narrowed on the next write.
+  const logFile = path.join(local.outputDir, USAGE_FILE)
+  assert.equal(fs.statSync(logFile).mode & 0o777, 0o600)
+  fs.chmodSync(logFile, 0o644)
   // A turn from the days before the period.
-  recordLocalTurn(local, { ...chat, id: 'run_old', startedAt: new Date(now - 40 * 86_400_000).toISOString() })
+  await recordLocalTurn(local, { ...chat, id: 'run_old', startedAt: new Date(now - 40 * 86_400_000).toISOString() })
+  assert.equal(fs.statSync(logFile).mode & 0o777, 0o600)
   fs.appendFileSync(path.join(local.outputDir, USAGE_FILE), '{"torn": \n')
   assert.equal(readLocalUsage(local).length, 3)
   const data = summarizeLocalUsage(local, { days: 30, now })
@@ -201,8 +206,24 @@ test('the log: a fix, a viewer, a private chat, reported numbers, rotation, torn
   assert.equal(data.series.buckets.length, 30)
   // Past its size the log starts over and keeps one older file.
   fs.writeFileSync(path.join(local.outputDir, USAGE_FILE), `${JSON.stringify(row)}\n${' '.repeat(LOG_MAX_BYTES)}`)
-  recordLocalTurn(local, chat)
+  await recordLocalTurn(local, chat)
   assert.ok(fs.existsSync(path.join(local.outputDir, USAGE_ROTATED)))
+  assert.equal(fs.statSync(logFile).mode & 0o777, 0o600, 'the new file after a rotation too')
   assert.equal(fs.readFileSync(path.join(local.outputDir, USAGE_FILE), 'utf8').trim().split('\n').length, 1)
   assert.equal(readLocalUsage(local).length, 2, 'both files are read')
+  // Many writers at once, across a rotation: every line lands whole, in one file or the other, and none is lost.
+  const small = sampleConfig('agent-usage-lock')
+  const results = await Promise.all(
+    Array.from({ length: 40 }, (_, index) =>
+      recordLocalTurn(small, { ...chat, id: `run_${String(index).padStart(24, '0')}` }, { maxBytes: 4000 }),
+    ),
+  )
+  assert.ok(results.every(Boolean))
+  assert.ok(fs.existsSync(path.join(small.outputDir, USAGE_ROTATED)), 'it rotated')
+  assert.ok(fs.statSync(path.join(small.outputDir, USAGE_FILE)).size <= 4000)
+  const lines = [USAGE_FILE, USAGE_ROTATED].flatMap((name) => fs.readFileSync(path.join(small.outputDir, name), 'utf8').trim().split('\n'))
+  for (const line of lines) assert.doesNotThrow(() => JSON.parse(line))
+  // One older file is kept, so the lines on disk are the newest: none torn, none twice.
+  assert.equal(new Set(lines.map((line) => JSON.parse(line).id)).size, lines.length)
+  assert.ok(!fs.existsSync(`${path.join(small.outputDir, USAGE_FILE)}.lock`), 'the lock is let go')
 })

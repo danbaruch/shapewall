@@ -228,6 +228,8 @@ export const COMMAND_FLAGS = {
     'quotas',
     'retention-hours',
     'retention-keep',
+    'usage-days',
+    'owners-see-sign-ins',
     'setup',
     'domain',
     'usercontent-domain',

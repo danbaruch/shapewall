@@ -320,10 +320,15 @@ export function memberAccountEvents(
      WHERE m.workspace_id = :ws AND a.at >= m.created_at AND a.id < :before
        AND a.action IN (SELECT value FROM json_each(:actions))
        AND (:user IS NULL OR a.user_id = :user) AND (:from IS NULL OR a.at >= :from) AND (:to IS NULL OR a.at < :to)
-       AND (:q IS NULL OR instr(lower(replace(a.action, '_', ' ') || ' ' || coalesce(a.ip, '') || ' ' || a.detail || ' ' ||
+       AND (:q IS NULL OR instr(lower(replace(a.action, '_', ' ') || ' ' || coalesce(a.ip, '') || ' ' || coalesce(a.detail, '') || ' ' ||
          u.display_name || ' ' || u.handle), :q) > 0)
      ORDER BY a.id DESC LIMIT :limit`,
   ).all({ ws: workspaceId, actions: JSON.stringify(actions), user: userId, from, to, q, before, limit })
+}
+
+// Account deletion: the person's saved views, in every workspace, go with them.
+export function deleteSavedViewsOf(db, userId) {
+  prepare(db, 'DELETE FROM saved_views WHERE user_id = :user').run({ user: userId })
 }
 
 // Account deletion: the person's own account-level log goes with them.

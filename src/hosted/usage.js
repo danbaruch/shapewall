@@ -61,7 +61,7 @@ export const USAGE_RETENTION_DAYS = 400
 export const OTHER_KEY = '__other'
 
 const DAY = 86_400_000
-const ID_VALUE = /^[A-Za-z0-9_.:@/ -]{0,120}$/
+const ID_VALUE = /^[A-Za-z0-9_.:@/~-]{1,120}$/
 
 // ---- Who may read what ----
 
@@ -114,13 +114,13 @@ export function zoneOffset(tz, ms) {
   return Math.round((local - Math.floor(ms / 1000) * 1000) / 60_000)
 }
 // The offsets a zone has between two instants, in order: [{ until, offset }]
-// (`until`: the instant this offset ends, null for the last). At most three
-// are kept (a period of up to 400 days crosses two clock changes).
+// (`until`: the instant this offset ends, null for the last). Every clock
+// change inside the period is kept, however many there are.
 export function zoneSegments(tz, fromMs, toMs) {
   const out = []
   let at = fromMs
   let offset = zoneOffset(tz, at)
-  while (at < toMs && out.length < 2) {
+  while (at < toMs) {
     const next = Math.min(at + DAY, toMs)
     const after = zoneOffset(tz, next)
     if (after !== offset) {
@@ -139,6 +139,11 @@ export function zoneSegments(tz, fromMs, toMs) {
   }
   out.push({ until: null, offset })
   return out
+}
+// The instant a wall-clock time (as if it were UTC) is in a zone.
+function wallInstant(tz, wallMs) {
+  const guess = wallMs - zoneOffset(tz, wallMs) * 60_000
+  return wallMs - zoneOffset(tz, guess) * 60_000
 }
 const pad = (value) => String(value).padStart(2, '0')
 const dateKey = (ms) => {
@@ -177,13 +182,22 @@ export function bucketKeys(filter, bucket) {
 
 // ---- The filter ----
 
-const list = (value, allowed = null) => {
+// One filter's values. Ids come as a comma list or as the parameter repeated
+// (`split`); a model is whatever an agent reported (brackets, spaces,
+// parentheses, commas), so it comes only as the parameter repeated and is
+// never split. "~" is the empty value (nobody asked, no model reported).
+// eslint-disable-next-line no-control-regex
+const CONTROL = /[\u0000-\u001f\u007f]/
+const list = (value, { allowed = null, split = true } = {}) => {
   if (value === undefined || value === null || value === '') return null
-  const items = [...new Set((Array.isArray(value) ? value : String(value).split(',')).map((item) => String(item).trim()))]
+  const given = Array.isArray(value) ? value : [value]
+  const items = [
+    ...new Set(given.flatMap((item) => (split ? String(item).split(',') : [String(item)])).map((item) => (split ? item.trim() : item))),
+  ]
   if (items.length > USAGE_LIMITS.listValues) throw new HttpError(400, 'invalid_filter', 'Too many values in one filter.')
   for (const item of items) {
-    // "~": the empty value (nobody asked, no model reported).
-    if (item !== '~' && (!ID_VALUE.test(item) || !item)) throw new HttpError(400, 'invalid_filter', 'A filter value is not valid.')
+    const valid = split ? ID_VALUE.test(item) : item.length <= 200 && !CONTROL.test(item)
+    if (!item || !valid) throw new HttpError(400, 'invalid_filter', 'A filter value is not valid.')
     if (allowed && !allowed.includes(item))
       throw new HttpError(400, 'invalid_filter', `A filter value is not one of: ${allowed.join(', ')}.`)
   }
@@ -212,17 +226,25 @@ export function cleanUsageFilter(query = {}, { now = () => new Date() } = {}) {
   if (toMs - fromMs > USAGE_LIMITS.days * DAY)
     throw new HttpError(400, 'period_too_long', `A period covers at most ${USAGE_LIMITS.days} days.`)
   const q = typeof query.q === 'string' ? query.q.trim().toLowerCase().slice(0, 80) : ''
+  // The period to compare with, when the page names one (the previous
+  // calendar month for "this month"): it ends no later than this one starts.
+  const prevFromMs = instant(query.prevFrom, 'prevFrom')
+  const prevToMs = instant(query.prevTo, 'prevTo')
+  if ((prevFromMs === null) !== (prevToMs === null)) throw new HttpError(400, 'invalid_period', 'prevFrom and prevTo go together.')
+  if (prevFromMs !== null && (prevFromMs >= prevToMs || prevToMs > fromMs || prevToMs - prevFromMs > USAGE_LIMITS.days * DAY))
+    throw new HttpError(400, 'invalid_period', 'The period to compare with ends before this one starts, and covers at most 400 days.')
   return {
     tz,
     fromMs,
     toMs,
+    previous: prevFromMs === null ? null : { fromMs: prevFromMs, toMs: prevToMs },
     segments: zoneSegments(tz, fromMs, toMs),
     agents: list(query.agent),
     projects: list(query.project),
     people: list(query.person),
-    kinds: list(query.kind, USAGE_KINDS),
-    models: list(query.model),
-    outcomes: list(query.outcome, OUTCOME_GROUP_IDS),
+    kinds: list(query.kind, { allowed: USAGE_KINDS }),
+    models: list(query.model, { split: false }),
+    outcomes: list(query.outcome, { allowed: OUTCOME_GROUP_IDS }),
     tokensMin: whole(query.tokensMin, 'tokensMin'),
     tokensMax: whole(query.tokensMax, 'tokensMax'),
     durationMin: whole(query.durationMin, 'durationMin'),
@@ -230,11 +252,17 @@ export function cleanUsageFilter(query = {}, { now = () => new Date() } = {}) {
     q,
   }
 }
-// The same filter over the period just before it, of the same length.
+// The same filter over the period to compare with: the one the page named,
+// or the stretch just before this one that is as long on the wall clock
+// (the same local days and hours, whatever the clocks did in between).
 export function previousPeriod(filter) {
-  const span = filter.toMs - filter.fromMs
-  const fromMs = filter.fromMs - span
-  return { ...filter, fromMs, toMs: filter.fromMs, segments: zoneSegments(filter.tz, fromMs, filter.fromMs) }
+  let { fromMs, toMs } = filter.previous || {}
+  if (!filter.previous) {
+    const wall = (ms) => ms + zoneOffset(filter.tz, ms) * 60_000
+    toMs = filter.fromMs
+    fromMs = wallInstant(filter.tz, wall(filter.fromMs) - (wall(filter.toMs) - wall(filter.fromMs)))
+  }
+  return { ...filter, previous: null, fromMs, toMs, segments: zoneSegments(filter.tz, fromMs, toMs) }
 }
 const oneOf = (value, allowed, fallback, name) => {
   if (value === undefined || value === null || value === '') return fallback
@@ -275,21 +303,30 @@ const AGGREGATES = `COUNT(*) AS calls, SUM(CASE WHEN r.ended_at IS NULL THEN 1 E
   SUM(CASE WHEN r.kind = 'fix' THEN 1 ELSE 0 END) AS fixes,
   SUM(CASE WHEN r.kind = 'fix' AND r.outcome IN (${quoted(OUTCOME_GROUPS.completed)}) THEN 1 ELSE 0 END) AS fixes_done`
 // The local time of a row: its UTC instant moved by the zone's offset then.
-const LOCAL = 'CASE WHEN r.started_at < :z1 THEN :o0 WHEN r.started_at < :z2 THEN :o1 ELSE :o2 END'
-const BUCKET = {
-  day: `date(r.started_at, ${LOCAL})`,
-  week: `date(r.started_at, ${LOCAL}, 'weekday 0', '-6 days')`,
-  month: `strftime('%Y-%m-01', r.started_at, ${LOCAL})`,
+// One WHEN per clock change of the period (`segments`: how many offsets).
+const localSql = (segments) =>
+  segments === 1
+    ? ':o0'
+    : `CASE ${Array.from({ length: segments - 1 }, (_, index) => `WHEN r.started_at < :z${index + 1} THEN :o${index}`).join(' ')} ELSE :o${segments - 1} END`
+const bucketSql = (bucket, filter) => {
+  const local = localSql(filter.segments.length)
+  if (bucket === 'week') return `date(r.started_at, ${local}, 'weekday 0', '-6 days')`
+  if (bucket === 'month') return `strftime('%Y-%m-01', r.started_at, ${local})`
+  return `date(r.started_at, ${local})`
 }
+// What a table sorts by. A turn that is still running, or that finished after
+// the first page was read (`:asof`), sorts as it did then: with no value yet.
+// So a turn that ends while someone pages through the table does not move.
+const settled = (column) => `CASE WHEN r.ended_at IS NULL THEN -1 WHEN r.ended_at > :asof THEN -1 ELSE COALESCE(${column}, -1) END`
 const SORT = {
   started: 'r.started_at',
-  duration: 'COALESCE(r.duration_ms, -1)',
-  tokens: `COALESCE(${TOKENS}, -1)`,
-  input: 'COALESCE(r.input_tokens, -1)',
-  output: 'COALESCE(r.output_tokens, -1)',
-  cached: 'COALESCE(r.cached_tokens, -1)',
-  cost: 'COALESCE(r.cost_micros, -1)',
-  steps: 'COALESCE(r.steps, -1)',
+  duration: settled('r.duration_ms'),
+  tokens: settled(TOKENS),
+  input: settled('r.input_tokens'),
+  output: settled('r.output_tokens'),
+  cached: settled('r.cached_tokens'),
+  cost: settled('r.cost_micros'),
+  steps: settled('r.steps'),
 }
 // What the id search reads. A private chat's thread id is not in it.
 const HAYSTACK = `lower(r.id || ' ' || COALESCE(r.agent_id, '') || ' ' || COALESCE(r.claim_id, '') || ' ' || r.project_id || ' ' ||
@@ -298,16 +335,12 @@ const HAYSTACK = `lower(r.id || ' ' || COALESCE(r.agent_id, '') || ' ' || COALES
 
 const iso = (ms) => new Date(ms).toISOString()
 const zoneParams = (filter) => {
-  const [first, second, third] = filter.segments
-  const far = '9999-12-31T00:00:00.000Z'
-  const modifier = (segment) => `${segment.offset >= 0 ? '+' : '-'}${Math.abs(segment.offset)} minutes`
-  return {
-    z1: first.until === null ? far : iso(first.until),
-    z2: !second || second.until === null ? far : iso(second.until),
-    o0: modifier(first),
-    o1: modifier(second || first),
-    o2: modifier(third || second || first),
-  }
+  const out = {}
+  filter.segments.forEach((segment, index) => {
+    out[`o${index}`] = `${segment.offset >= 0 ? '+' : '-'}${Math.abs(segment.offset)} minutes`
+    if (segment.until !== null) out[`z${index + 1}`] = iso(segment.until)
+  })
+  return out
 }
 
 // The WHERE clause every usage query shares, and its parameters.
@@ -396,12 +429,20 @@ const parseJson = (text, fallback) => {
   }
 }
 const threadKind = (id) => (!id ? null : id.startsWith('chat-') ? 'chat' : id.startsWith('comment-') ? 'comment' : 'board')
-const encodeCursor = (key, id) => Buffer.from(JSON.stringify([key, id])).toString('base64url')
+// A cursor: the sort key and id of the last row, and when the first page was read.
+const encodeCursor = (key, id, asOf) => Buffer.from(JSON.stringify([key, id, asOf])).toString('base64url')
 function decodeCursor(text) {
   if (text === undefined || text === null || text === '') return null
   try {
     const value = JSON.parse(Buffer.from(String(text).slice(0, 400), 'base64url').toString('utf8'))
-    if (Array.isArray(value) && value.length === 2 && ['string', 'number'].includes(typeof value[0]) && typeof value[1] === 'string')
+    if (
+      Array.isArray(value) &&
+      value.length === 3 &&
+      ['string', 'number'].includes(typeof value[0]) &&
+      typeof value[1] === 'string' &&
+      typeof value[2] === 'string' &&
+      Number.isFinite(Date.parse(value[2]))
+    )
       return value
   } catch {
     /* not one of ours */
@@ -527,7 +568,7 @@ export function createUsage(t, { now = () => new Date() } = {}) {
   // (bucket null) for the whole period. Turns still running have none.
   function latency(filter, scope, bucket = null) {
     const { sql, params } = where(filter, scope)
-    const by = bucket ? BUCKET[bucket] : "''"
+    const by = bucket ? bucketSql(bucket, filter) : "''"
     const rows = t.all(
       `SELECT b, MAX(n) AS n, MAX(CASE WHEN rn = (n + 1) / 2 THEN d END) AS p50,
          MAX(CASE WHEN rn = MAX(1, (n * 95 + 99) / 100) THEN d END) AS p95, MAX(d) AS longest
@@ -552,8 +593,9 @@ export function createUsage(t, { now = () => new Date() } = {}) {
     }
   }
   // The period split by one dimension, largest first.
-  function breakdown(filter, scope, groupBy = 'agent') {
-    const { sql, params } = where(filter, scope)
+  // `previous`: the same split over the period to compare with.
+  function breakdown(filter, scope, groupBy = 'agent', { previous = false } = {}) {
+    const { sql, params } = where(previous ? previousPeriod(filter) : filter, scope)
     const rows = t.all(`SELECT ${DIMENSION[groupBy]} AS k, ${AGGREGATES} FROM agent_runs r WHERE ${sql} GROUP BY k`, params)
     return rows
       .map((row) => ({ key: row.k, ...labelOf(groupBy, row.k), ...aggregate(row) }))
@@ -565,7 +607,7 @@ export function createUsage(t, { now = () => new Date() } = {}) {
   function series(filter, scope, { bucket = 'day', groupBy = 'none', metric = 'calls' } = {}) {
     const { sql, params } = where(filter, scope)
     const rows = t.all(
-      `SELECT ${BUCKET[bucket]} AS b, ${DIMENSION[groupBy]} AS k, ${AGGREGATES} FROM agent_runs r WHERE ${sql} GROUP BY b, k`,
+      `SELECT ${bucketSql(bucket, filter)} AS b, ${DIMENSION[groupBy]} AS k, ${AGGREGATES} FROM agent_runs r WHERE ${sql} GROUP BY b, k`,
       { ...params, ...zoneParams(filter) },
     )
     const byKey = new Map()
@@ -609,8 +651,13 @@ export function createUsage(t, { now = () => new Date() } = {}) {
     if (!USAGE_SORTS.includes(sort)) throw new HttpError(400, 'invalid_sort', `sort: one of ${USAGE_SORTS.join(', ')}.`)
     if (!['asc', 'desc'].includes(dir)) throw new HttpError(400, 'invalid_sort', 'dir: asc or desc.')
     const size = Math.min(Math.max(Number.parseInt(limit, 10) || USAGE_LIMITS.page, 1), USAGE_LIMITS.pageMax)
-    const { sql, params } = where(filter, scope)
     const after = decodeCursor(cursor)
+    // The table as it stood when its first page was read: turns that started
+    // later are not in it, and a turn that ended later keeps its place.
+    const asOf = after ? new Date(Date.parse(after[2])).toISOString() : now().toISOString()
+    const base = where(filter, scope)
+    const sql = `${base.sql} AND r.started_at <= :asof`
+    const params = { ...base.params, asof: asOf }
     const key = SORT[sort]
     const compare = dir === 'desc' ? '<' : '>'
     const order = dir === 'desc' ? 'DESC' : 'ASC'
@@ -625,7 +672,7 @@ export function createUsage(t, { now = () => new Date() } = {}) {
     const last = shown.at(-1)
     return {
       rows: shown.map((row) => rowView(row, scope)),
-      next: more ? encodeCursor(last.sort_key, last.id) : null,
+      next: more ? encodeCursor(last.sort_key, last.id, asOf) : null,
       ...(after ? {} : { total: t.get(`SELECT COUNT(*) AS n FROM agent_runs r WHERE ${sql}`, params).n }),
     }
   }
@@ -860,7 +907,7 @@ export const usageCsvLine = (row) => `${USAGE_CSV_COLUMNS.map(([, read]) => csvC
 // more than they may see. A view is its maker's; sharing one is sharing the
 // page's address.
 const VIEW_PAGES = ['usage', 'activity']
-const VIEW_QUERY = /^[A-Za-z0-9_\-.,:%=&+~]*$/
+const VIEW_QUERY = /^[A-Za-z0-9_\-.,:%=&+~*]*$/
 export function createViews(t, { now = () => new Date() } = {}) {
   const view = (row) => ({ id: row.id, page: row.page, name: row.name, query: row.query, updatedAt: row.updated_at })
   const listOf = (userId, page) =>

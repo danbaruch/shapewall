@@ -330,7 +330,6 @@ test('activity: admins read everyone’s, with sign-ins and before/after; a memb
   assert.equal(all.scope, 'workspace')
   const actions = new Set(all.entries.map((entry) => entry.action))
   for (const action of [
-    'account_created',
     'invite_accepted',
     'token_created',
     'agent_created',
@@ -352,10 +351,28 @@ test('activity: admins read everyone’s, with sign-ins and before/after; a memb
   assert.deepEqual([policy.detail.before.dailyTurns, policy.detail.after.dailyTurns], [200, 150])
   assert.equal(policy.project.name, 'Marketing site')
   assert.equal(policy.sensitive, true)
-  // Sign-ins are account events of the workspace's members: a device label, never another workspace's people.
-  const created = all.entries.filter((entry) => entry.action === 'account_created')
-  assert.deepEqual(created.map((entry) => entry.actor.label).sort(), ['Ada', 'Ben', 'Cyd', 'Viewer'])
-  assert.ok(created.every((entry) => entry.scope === 'account'))
+  // Sign-ins, passkeys and sessions are account events: they belong to the person, across every workspace they
+  // are in. On a server as it comes, the workspace's log holds none of them, not even for an owner.
+  assert.deepEqual(
+    all.entries.filter((entry) => entry.scope === 'account'),
+    [],
+  )
+  for (const who of [s.ben, s.cyd, s.viewer]) {
+    const theirs = (await s.ada.browser.get(api(`/activity?limit=200&person=${who.user.id}`))).json.entries
+    assert.ok(theirs.length > 0)
+    assert.ok(
+      theirs.every((entry) => entry.scope === 'workspace' && entry.action !== 'account_created'),
+      who.user.handle,
+    )
+  }
+  assert.deepEqual((await s.ada.browser.get(api('/activity?limit=200&group=signin'))).json.entries, [])
+  // Her own are hers to see, on her own list.
+  const own = (await s.ada.browser.get(api(`/activity?limit=200&person=${s.ada.user.id}`))).json.entries
+  assert.deepEqual(
+    own.filter((entry) => entry.scope === 'account').map((entry) => [entry.action, entry.actor.label]),
+    [['account_created', 'Ada']],
+  )
+  assert.ok((await s.cyd.browser.get(api('/activity?limit=200'))).json.entries.some((entry) => entry.action === 'account_created'))
 
   // Filters.
   const list = async (browser, query) => (await browser.get(api(`/activity?limit=200&${query}`))).json.entries
@@ -405,8 +422,15 @@ test('activity: admins read everyone’s, with sign-ins and before/after; a memb
   const temp = createBrowser(hosted.port, hosted.origin)
   for (const [name, value] of s.viewer.browser.jar) temp.jar.set(name, value)
   assert.equal((await temp.post('/auth/logout', {})).status, 200)
-  const out = (await list(s.ada.browser, 'action=signed_out'))[0]
-  assert.deepEqual([out.actor.label, out.scope, out.group], ['Viewer', 'account', 'signin'])
+  const recorded = hosted.db.prepare("SELECT user_id, workspace_id, detail FROM audit_log WHERE action = 'signed_out'").all()
+  assert.deepEqual(
+    recorded.map((row) => [row.user_id, row.workspace_id]),
+    [[s.viewer.user.id, null]],
+  )
+  // It is the viewer's own: the workspace's owner does not see it, in the list or in the export.
+  assert.deepEqual(await list(s.ada.browser, 'action=signed_out'), [])
+  assert.deepEqual(await list(s.ada.browser, `person=${s.viewer.user.id}&group=signin`), [])
+  assert.doesNotMatch((await s.ada.browser.get(api('/activity/export'))).text, /signed_out|signed_in|account_created/)
 })
 
 test('a person’s page and an agent’s page: admins, or the person themselves; never text', async () => {
@@ -418,9 +442,12 @@ test('a person’s page and an agent’s page: admins, or the person themselves;
     ['Cyd', 'member', 'comment', 0, 0],
   )
   assert.equal(person.projects.length, 3)
-  assert.ok(person.sessions.length >= 1)
+  // Where someone is signed in is theirs alone (a session covers every workspace they are in).
+  assert.equal(person.sessions, null)
+  const mine = (await s.cyd.browser.get(api(`/people/${s.cyd.user.id}`))).json.person
+  assert.ok(mine.sessions.length >= 1)
   assert.deepEqual(
-    Object.keys(person.sessions[0]).sort(),
+    Object.keys(mine.sessions[0]).sort(),
     ['createdAt', 'device', 'lastSeenAt', 'via'],
     'a device and times: no address, no session id',
   )
@@ -435,6 +462,99 @@ test('a person’s page and an agent’s page: admins, or the person themselves;
   const agent = (await s.ben.browser.get(api(`/agents/${s.agents[0].id}/profile`))).json.agent
   assert.deepEqual([agent.name, agent.machine, agent.createdBy.displayName], ['Builder', 'studio-mac', 'Ada'])
   assert.equal((await s.ben.browser.get(api(`/agents/ag_${'0'.repeat(24)}/profile`))).status, 404)
+})
+
+test('the activity list keeps to its page, a search always has a start, and heavy queries have a per-person limit', async () => {
+  // However many entries are asked for, a page is at most 200.
+  const insert = hosted.db.prepare(
+    "INSERT INTO audit_log (workspace_id, user_id, action, target, ip, detail, at) VALUES (?, ?, 'comment_resolved', ?, '203.0.113.9', ?, ?)",
+  )
+  for (let index = 0; index < 260; index += 1)
+    insert.run(s.ws, s.ada.user.id, `sample#${index}`, '{"note":"bulk"}', new Date(Date.now() - 60_000 - index).toISOString())
+  insert.run(s.ws, s.ada.user.id, 'sample#old', '{"note":"needle-from-long-ago"}', new Date(Date.now() - 200 * 86_400_000).toISOString())
+  for (const limit of ['100000', '201', '-5', 'abc']) {
+    const page = (await s.ada.browser.get(api(`/activity?limit=${limit}`))).json
+    assert.ok(page.entries.length <= 200, `limit=${limit}: ${page.entries.length}`)
+  }
+  const big = (await s.ada.browser.get(api('/activity?limit=100000'))).json
+  assert.equal(big.entries.length, 200)
+  assert.ok(big.next > 0, 'the rest is the next page')
+  // The export still holds every entry of the filter, read a page at a time.
+  const csv = (await s.ada.browser.get(api('/activity/export?action=comment_resolved'))).text
+  assert.equal(csv.trim().split('\r\n').length - 1, 261)
+
+  // A text search with no period looks at the last 90 days, and says so.
+  const recent = (await s.ada.browser.get(api('/activity?q=needle-from-long-ago'))).json
+  assert.deepEqual(recent.entries, [])
+  assert.ok(Math.abs(Date.parse(recent.searchedFrom) - (Date.now() - 90 * 86_400_000)) < 60_000)
+  const old = (await s.ada.browser.get(api('/activity?q=needle-from-long-ago&from=2020-01-01T00:00:00Z'))).json
+  assert.deepEqual(
+    old.entries.map((entry) => entry.target),
+    ['sample#old'],
+  )
+  assert.equal(old.searchedFrom, null)
+  assert.equal((await s.ada.browser.get(api('/activity'))).json.searchedFrom, null, 'only a search is bounded')
+
+  // Searches and filters by agent or project are limited per person; plain paging is not.
+  hosted.rateLimiter.reset()
+  let refused = 0
+  for (let index = 0; index < 64; index += 1) refused += (await s.ada.browser.get(api(`/activity?q=bulk&limit=1`))).status === 429 ? 1 : 0
+  assert.equal(refused, 4, '60 a minute')
+  assert.equal((await s.ada.browser.get(api(`/activity?agent=${s.agents[0].id}`))).status, 429)
+  assert.equal((await s.ada.browser.get(api(`/activity?project=${s.projects[0].id}`))).status, 429)
+  assert.equal((await s.ada.browser.get(api('/activity?limit=5'))).status, 200)
+  assert.equal((await s.cyd.browser.get(api('/activity?q=bulk'))).status, 200, 'the limit is each person\u2019s own')
+  hosted.rateLimiter.reset()
+  hosted.db.prepare("DELETE FROM audit_log WHERE action = 'comment_resolved' AND target LIKE 'sample#%'").run()
+})
+
+test('where the operator said so (--owners-see-sign-ins), owners see their members\u2019 sign-ins and devices; admins and members still do not', async () => {
+  const team = await startHostedServer('usage-access-team', { signup: 'open', ownersSeeSignIns: true })
+  try {
+    const t = await seedWorkspace(team, helpers)
+    const at = (rest) => `/api/workspaces/${t.ws}${rest}`
+    // Someone who is in this workspace and also has one of their own: what they do for the other one stays there.
+    const elsewhere = await t.cyd.browser.post('/api/workspaces', { name: 'Cyd elsewhere' })
+    assert.equal(elsewhere.status, 201, elsewhere.text)
+    const owner = (await t.ada.browser.get(at('/activity?limit=200'))).json
+    const accounts = owner.entries.filter((entry) => entry.scope === 'account')
+    assert.deepEqual(accounts.map((entry) => `${entry.action}:${entry.actor.label}`).sort(), [
+      'account_created:Ada',
+      'account_created:Ben',
+      'account_created:Cyd',
+      'account_created:Viewer',
+    ])
+    assert.equal((await t.ada.browser.get(at('/activity/filters'))).json.accounts, 'members')
+    assert.match((await t.ada.browser.get(at('/activity/export?group=signin'))).text, /account_created/)
+    const cyd = (await t.ada.browser.get(at(`/people/${t.cyd.user.id}`))).json.person
+    assert.ok(cyd.sessions.length >= 1)
+    assert.deepEqual(Object.keys(cyd.sessions[0]).sort(), ['createdAt', 'device', 'lastSeenAt', 'via'])
+    assert.doesNotMatch(JSON.stringify(owner.entries), /Cyd elsewhere/, 'the other workspace is not here')
+    // An admin is not an owner: nobody else's account events, nobody else's devices.
+    const admin = (await t.ben.browser.get(at('/activity?limit=200'))).json
+    assert.deepEqual(
+      admin.entries.filter((entry) => entry.scope === 'account'),
+      [],
+    )
+    assert.equal((await t.ben.browser.get(at('/activity/filters'))).json.accounts, 'own')
+    assert.equal((await t.ben.browser.get(at(`/people/${t.cyd.user.id}`))).json.person.sessions, null)
+    assert.doesNotMatch((await t.ben.browser.get(at('/activity/export'))).text, /account_created/)
+    const benOwn = (await t.ben.browser.get(at(`/activity?person=${t.ben.user.id}`))).json.entries
+    assert.ok(benOwn.some((entry) => entry.action === 'account_created' && entry.actor.label === 'Ben'))
+    // A member: their own, as everywhere.
+    const member = (await t.cyd.browser.get(at(`/activity?limit=200&person=${t.ada.user.id}`))).json.entries
+    assert.ok(member.length > 0 && member.every((entry) => entry.actor.id === t.cyd.user.id))
+    // An owner of another workspace on the same server learns nothing about these people.
+    const mal = await signUp(team, { handle: 'mal', displayName: 'Mal' })
+    const theirs = (await mal.browser.get(`/api/workspaces/${mal.workspaceId}/activity?limit=200`)).json.entries
+    assert.deepEqual(
+      theirs.filter((entry) => entry.scope === 'account').map((entry) => entry.actor.label),
+      ['Mal'],
+    )
+    assert.equal((await mal.browser.get(`/api/workspaces/${mal.workspaceId}/people/${t.cyd.user.id}`)).status, 404)
+  } finally {
+    await team.close()
+  }
 })
 
 test('the access review lists every way in, flags what went unused, and its export is audited', async () => {
@@ -494,4 +614,32 @@ test('the person who connected an agent still reads everything that ran on it as
   const mine = (await ben.get(api('/activity?limit=200'))).json
   assert.equal(mine.scope, 'own')
   for (const entry of mine.entries) assert.equal(entry.actor.id, s.ben.user.id)
+})
+
+test('saved views: a viewer has them on Activity (their page) and not on Usage; an account that is deleted takes its views along', async () => {
+  // The viewer's session was signed out above: a new one, the way a person signs in.
+  const start = await s.viewer.browser.post('/auth/login/options', {})
+  const signedIn = await s.viewer.browser.post('/auth/login/verify', { response: s.viewer.authenticator.assert(start.json.options) })
+  assert.equal(signedIn.status, 200, signedIn.text)
+  assert.deepEqual((await s.viewer.browser.get(api('/views?page=activity'))).json.views, [])
+  const saved = await s.viewer.browser.post(api('/views'), { page: 'activity', name: 'My sign-ins', query: 'group=signin' })
+  assert.equal(saved.status, 201, saved.text)
+  assert.deepEqual(
+    (await s.viewer.browser.get(api('/views?page=activity'))).json.views.map((view) => view.name),
+    ['My sign-ins'],
+  )
+  assert.equal((await s.viewer.browser.get(api('/views?page=usage'))).status, 403)
+  assert.equal((await s.viewer.browser.get(api('/views'))).status, 403, 'no page named means Usage')
+  assert.equal((await s.viewer.browser.post(api('/views'), { page: 'usage', name: 'x', query: '' })).status, 403)
+  assert.equal((await s.viewer.browser.post(api('/views'), { name: 'x', query: '' })).status, 403)
+  assert.equal(hosted.db.prepare('SELECT COUNT(*) AS n FROM saved_views WHERE user_id = ?').get(s.viewer.user.id).n, 1)
+  // Deleting the account removes them, here and in any other workspace.
+  await reauth(s.viewer)
+  const gone = await s.viewer.browser.call('DELETE', '/auth/me', { body: { confirm: 'viewer' } })
+  assert.equal(gone.status, 200, gone.text)
+  assert.equal(hosted.db.prepare('SELECT COUNT(*) AS n FROM saved_views WHERE user_id = ?').get(s.viewer.user.id).n, 0)
+  assert.equal(
+    hosted.db.prepare('SELECT COUNT(*) AS n FROM saved_views').get().n,
+    hosted.db.prepare('SELECT COUNT(*) AS n FROM saved_views WHERE user_id != ?').get(s.viewer.user.id).n,
+  )
 })

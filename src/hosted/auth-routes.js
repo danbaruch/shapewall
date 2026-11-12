@@ -19,6 +19,7 @@ import {
   accountEvents,
   auditAccount,
   deleteAccountEvents,
+  deleteSavedViewsOf,
   findInviteByHash,
   inviteUsable,
   lastRecoverySignIn,
@@ -383,6 +384,7 @@ export function mountAuthRoutes(authRouter, deps) {
           revokeGrantsOf(req, user.id, null, { revokeTokens: true, t })
         }
         deleteAccountEvents(db, user.id)
+        deleteSavedViewsOf(db, user.id)
         q.run('DELETE FROM users WHERE id = :id', { id: user.id })
         auditAccount(db, {
           action: 'account_deleted',

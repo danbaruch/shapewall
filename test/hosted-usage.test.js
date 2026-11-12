@@ -6,6 +6,8 @@
 import { after, before, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { tenant } from '../src/hosted/tenancy.js'
+import { COMMAND_FLAGS } from '../src/cli/args.js'
+import { readZip } from '../src/hosted/zip.js'
 import { planWorkspaceExport, writeWorkspaceExport } from '../src/hosted/admin.js'
 import { commentFileBytes } from '../src/hosted/comment-files.js'
 import { runRetention } from '../src/hosted/retention.js'
@@ -14,6 +16,8 @@ import {
   bucketKeys,
   cleanUsageFilter,
   createUsage,
+  localDate,
+  previousPeriod,
   createViews,
   setUsageRetention,
   usageRetentionDays,
@@ -514,11 +518,252 @@ test('100,000 rows: every query the page makes stays fast, and deep pages cost w
     timed('export, 50,000 rows', () => {
       for (const page of store.pages(filter, ALL)) exported += page.length
     })
-    assert.equal(exported, USAGE_LIMITS.exportRows, 'an export is capped')
+    assert.equal(exported, USAGE_LIMITS.exportRows, 'a download from the page is capped')
+    // The workspace export is the whole workspace: every usage record, read a page at a time.
+    const bigT = tenant(big.db, world.ws)
+    const chunks = []
+    const iso = () => NOW.toISOString()
+    const projects = big.db.prepare('SELECT * FROM projects WHERE workspace_id = ?').all(world.ws)
+    const plan = planWorkspaceExport(bigT, { dataDir: big.dataDir, projects, iso })
+    const started = performance.now()
+    await writeWorkspaceExport(bigT, plan, { write: (buffer) => void chunks.push(Buffer.from(buffer)), now: NOW, iso, exportedBy: 'ada' })
+    timings['workspace export, 100,000 usage records'] = Math.round(performance.now() - started)
+    const files = readZip(Buffer.concat(chunks))
+    const records = JSON.parse(files['example-studio-export/usage.json'].toString('utf8'))
+    assert.equal(records.length, 100_000, 'not cut at 50,000')
+    assert.equal(new Set(records.map((record) => record.id)).size, 100_000)
+    assert.ok(records[0].startedAt >= records.at(-1).startedAt, 'newest first')
     console.log(`# usage at 100,000 rows (ms): ${JSON.stringify(timings)}`)
-    for (const [name, ms] of Object.entries(timings)) assert.ok(ms < (name.startsWith('export') ? 20_000 : 3000), `${name} took ${ms} ms`)
+    for (const [name, ms] of Object.entries(timings)) assert.ok(ms < (/export/.test(name) ? 30_000 : 3000), `${name} took ${ms} ms`)
     assert.ok(worst < 500, `a page by cursor took ${Math.round(worst)} ms`)
   } finally {
     await big.close()
   }
+})
+
+// A row at an instant, for the tests below (removed again by each).
+function addRow(id, at, extra = {}) {
+  const agent = seeded.agents[0]
+  hosted.db
+    .prepare(
+      `INSERT INTO agent_runs (workspace_id, project_id, id, kind, agent_id, started_at, ended_at, outcome, duration_ms, agent_owner, model,
+         input_tokens, output_tokens)
+       VALUES (?, ?, ?, 'chat', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      seeded.ws,
+      agent.projectId,
+      id,
+      agent.id,
+      at,
+      'ended' in extra ? extra.ended : at,
+      'outcome' in extra ? extra.outcome : 'answered',
+      'duration' in extra ? extra.duration : 1000,
+      agent.owner,
+      extra.model ?? null,
+      extra.tokens ?? null,
+      extra.tokens === undefined ? null : 0,
+    )
+}
+const removeRows = (prefix) => hosted.db.prepare('DELETE FROM agent_runs WHERE id LIKE ?').run(`${prefix}%`)
+const intlDate = (tz, ms) =>
+  new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ms))
+
+test('a period with three and more clock changes buckets every day right, north and south', () => {
+  // 400 days in Chicago: into summer time, out of it, and into it again.
+  // (`q` keeps the seeded turns of the other tests out of it.)
+  const range = { from: '2026-03-01T06:00:00.000Z', to: '2027-04-05T05:00:00.000Z', q: 'run_zone' }
+  const chicago = cleanUsageFilter({ ...range, tz: 'America/Chicago' })
+  assert.deepEqual(
+    chicago.segments.map((segment) => [segment.until && new Date(segment.until).toISOString(), segment.offset]),
+    [
+      ['2026-03-08T08:00:00.000Z', -360],
+      ['2026-11-01T07:00:00.000Z', -300],
+      ['2027-03-14T08:00:00.000Z', -360],
+      [null, -300],
+    ],
+  )
+  const rows = {
+    '2026-03-08T05:30:00.000Z': '2026-03-07', // 23:30 CST, the night before the first change
+    '2026-03-08T08:30:00.000Z': '2026-03-08', // 03:30 CDT, just after it
+    '2026-11-01T04:30:00.000Z': '2026-10-31', // 23:30 CDT
+    '2026-11-01T06:30:00.000Z': '2026-11-01', // 01:30 CDT, the hour that comes twice
+    '2026-11-01T07:30:00.000Z': '2026-11-01', // 01:30 CST, the same hour again
+    '2027-03-14T05:30:00.000Z': '2027-03-13', // 23:30 CST
+    '2027-03-21T04:30:00.000Z': '2027-03-20', // 23:30 CDT, after the third change
+    '2027-03-21T05:30:00.000Z': '2027-03-21', // 00:30 CDT
+    '2027-04-05T04:30:00.000Z': '2027-04-04', // 23:30 CDT, the last hour of the period
+  }
+  Object.keys(rows).forEach((at, index) => addRow(`run_zone${String(index).padStart(20, '0')}`, at))
+  const expected = {}
+  for (const day of Object.values(rows)) expected[day] = (expected[day] || 0) + 1
+  const byBucket = (filter, bucket) =>
+    Object.fromEntries(usage.series(filter, ALL, { bucket }).points.map((point) => [point.bucket, point.calls]))
+  assert.deepEqual(byBucket(chicago, 'day'), expected)
+  assert.equal(bucketKeys(chicago, 'day').length, 400)
+  assert.deepEqual(byBucket(chicago, 'month'), { '2026-03-01': 2, '2026-10-01': 1, '2026-11-01': 2, '2027-03-01': 3, '2027-04-01': 1 })
+  assert.deepEqual(byBucket(chicago, 'week'), {
+    '2026-03-02': 2,
+    '2026-10-26': 3,
+    '2027-03-08': 1,
+    '2027-03-15': 2,
+    '2027-03-29': 1,
+  })
+  assert.equal(
+    usage.latency(chicago, ALL, 'day').reduce((sum, bucket) => sum + bucket.turns, 0),
+    9,
+  )
+  // The same rows seen from the south, where the clocks go the other way (and by half an hour on Lord Howe).
+  for (const tz of ['America/Santiago', 'Australia/Lord_Howe', 'Africa/Casablanca', 'Pacific/Auckland']) {
+    const filter = cleanUsageFilter({ ...range, tz })
+    assert.ok(filter.segments.length >= 4, `${tz}: ${filter.segments.length} offsets in 400 days`)
+    const want = {}
+    for (const at of Object.keys(rows)) want[intlDate(tz, Date.parse(at))] = (want[intlDate(tz, Date.parse(at))] || 0) + 1
+    assert.deepEqual(byBucket(filter, 'day'), want, tz)
+    // And for every sixth hour of the period, the local day is the one the zone's own calendar says.
+    for (let ms = filter.fromMs; ms < filter.toMs; ms += 6 * 3_600_000 + 60_000)
+      assert.equal(localDate(ms, filter.segments), intlDate(tz, ms), `${tz} at ${new Date(ms).toISOString()}`)
+  }
+  removeRows('run_zone')
+})
+
+test('the period to compare with: the one the page names, or the same stretch on the wall clock across a clock change', () => {
+  // Two weeks in Chicago that begin in summer time and end in winter time: 14 local days, 337 hours.
+  const filter = cleanUsageFilter({ from: '2026-10-26T05:00:00.000Z', to: '2026-11-09T06:00:00.000Z', tz: 'America/Chicago' })
+  const before = previousPeriod(filter)
+  assert.deepEqual(
+    [new Date(before.fromMs).toISOString(), new Date(before.toMs).toISOString()],
+    ['2026-10-12T05:00:00.000Z', '2026-10-26T05:00:00.000Z'],
+    'the 14 local days before, midnight to midnight, not 337 hours',
+  )
+  assert.equal(bucketKeys(before, 'day').length, 14)
+  // And the other way: a period that starts in winter time after a summer-time one.
+  const winter = previousPeriod(
+    cleanUsageFilter({ from: '2026-11-09T06:00:00.000Z', to: '2026-11-16T06:00:00.000Z', tz: 'America/Chicago' }),
+  )
+  assert.deepEqual(
+    [new Date(winter.fromMs).toISOString(), new Date(winter.toMs).toISOString()],
+    ['2026-11-02T06:00:00.000Z', '2026-11-09T06:00:00.000Z'],
+  )
+  // A calendar period names its own: November to date against October to the same day.
+  const month = cleanUsageFilter({
+    from: '2026-11-01T05:00:00.000Z',
+    to: '2026-11-11T06:00:00.000Z',
+    prevFrom: '2026-10-01T05:00:00.000Z',
+    prevTo: '2026-10-11T05:00:00.000Z',
+    tz: 'America/Chicago',
+  })
+  const named = previousPeriod(month)
+  assert.deepEqual(
+    [new Date(named.fromMs).toISOString(), new Date(named.toMs).toISOString()],
+    ['2026-10-01T05:00:00.000Z', '2026-10-11T05:00:00.000Z'],
+  )
+  const summary = usage.summary(month, ALL)
+  assert.deepEqual([summary.previous.from, summary.previous.to], ['2026-10-01T05:00:00.000Z', '2026-10-11T05:00:00.000Z'])
+  assert.equal(summary.previous.calls, usage.totals(named, ALL).calls)
+  assert.equal(
+    usage.breakdown(month, ALL, 'agent', { previous: true }).reduce((sum, group) => sum + group.calls, 0),
+    summary.previous.calls,
+    'the grouped rows compare with the same period',
+  )
+  for (const bad of [
+    { prevFrom: '2026-10-01T05:00:00.000Z' },
+    { prevFrom: '2026-10-11T05:00:00.000Z', prevTo: '2026-10-01T05:00:00.000Z' },
+    { prevFrom: '2026-10-20T05:00:00.000Z', prevTo: '2026-11-05T05:00:00.000Z' },
+  ])
+    assert.throws(() => cleanUsageFilter({ from: '2026-11-01T05:00:00.000Z', to: '2026-11-11T06:00:00.000Z', ...bad }), /compare|together/)
+})
+
+test('any model name an agent reported can be filtered by: brackets, spaces, parentheses, commas', async () => {
+  const names = ['claude-opus-4-1[1m]', 'gpt-5 (preview)', 'local, quantized: q4_k_m', 'a/b+c~d', '~']
+  names.forEach((model, index) => addRow(`run_model${String(index).padStart(19, '0')}`, '2026-11-09T10:00:00.000Z', { model }))
+  const range = { from: '2026-11-09T00:00:00.000Z', to: '2026-11-10T00:00:00.000Z' }
+  for (const model of names.slice(0, 4)) {
+    const found = usage.rows(cleanUsageFilter({ ...range, model }), ALL).rows
+    assert.deepEqual(
+      found.map((row) => row.model),
+      [model],
+      model,
+    )
+    assert.equal(usage.totals(cleanUsageFilter({ ...range, model: [model] }), ALL).calls, 1)
+  }
+  // Several at once, as the parameter repeated: a comma inside a name is part of the name.
+  assert.equal(usage.totals(cleanUsageFilter({ ...range, model: ['claude-opus-4-1[1m]', 'local, quantized: q4_k_m'] }), ALL).calls, 2)
+  assert.equal(usage.totals(cleanUsageFilter({ ...range, model: 'gpt-5 (preview),claude-opus-4-1[1m]' }), ALL).calls, 0, 'not split')
+  // Through the API, as the page sends them.
+  const query = `from=${range.from}&to=${range.to}&${new URLSearchParams([
+    ['model', 'claude-opus-4-1[1m]'],
+    ['model', 'local, quantized: q4_k_m'],
+    ['model', 'gpt-5 (preview)'],
+  ])}`
+  const rows = await seeded.ada.browser.get(api(`/usage/rows?${query}`))
+  assert.equal(rows.status, 200, rows.text)
+  assert.deepEqual(rows.json.rows.map((row) => row.model).sort(), ['claude-opus-4-1[1m]', 'gpt-5 (preview)', 'local, quantized: q4_k_m'])
+  const groups = (await seeded.ada.browser.get(api(`/usage/breakdown?${query}&groupBy=model`))).json.groups
+  assert.deepEqual(groups.map((group) => group.key).sort(), ['claude-opus-4-1[1m]', 'gpt-5 (preview)', 'local, quantized: q4_k_m'])
+  const csv = await seeded.ada.browser.get(api(`/usage/export?${query}`))
+  assert.equal(csv.text.trim().split('\r\n').length - 1, 3)
+  // Ids still come as comma lists, and a control character or an over-long value is refused.
+  assert.equal(usage.totals(cleanUsageFilter({ ...range, kind: 'chat,fix' }), ALL).calls > 0, true)
+  assert.throws(() => cleanUsageFilter({ model: 'a\u0000b' }), /not valid/)
+  assert.throws(() => cleanUsageFilter({ model: 'x'.repeat(201) }), /not valid/)
+  assert.throws(() => cleanUsageFilter({ agent: 'ag_1 OR 1=1' }), /not valid/)
+  removeRows('run_model')
+})
+
+test('paging holds still while a turn finishes: it keeps the place it had when the first page was read', () => {
+  const range = { from: '2031-01-01T00:00:00.000Z', to: '2031-01-02T00:00:00.000Z' }
+  let clock = Date.parse('2031-01-01T12:00:00.000Z')
+  const live = createUsage(t, { now: () => new Date(clock) })
+  for (let index = 0; index < 9; index += 1)
+    addRow(`run_page${String(index).padStart(20, '0')}`, `2031-01-01T0${index}:00:00.000Z`, {
+      duration: 1000 * (index + 1),
+      tokens: 100 * (index + 1),
+    })
+  // One turn is still running: it has no duration and no tokens yet.
+  addRow('run_pagerunning000000000000', '2031-01-01T09:30:00.000Z', { ended: null, outcome: null, duration: null })
+  const filter = cleanUsageFilter(range)
+  for (const sort of ['duration', 'tokens']) {
+    for (const dir of ['desc', 'asc']) {
+      hosted.db
+        .prepare(
+          "UPDATE agent_runs SET ended_at = NULL, outcome = NULL, duration_ms = NULL, input_tokens = NULL, output_tokens = NULL WHERE id = 'run_pagerunning000000000000'",
+        )
+        .run()
+      clock = Date.parse('2031-01-01T12:00:00.000Z')
+      const first = live.rows(filter, ALL, { sort, dir, limit: 4 })
+      assert.equal(first.total, 10)
+      // It finishes between two pages, as the slowest and largest turn of all; and another turn starts.
+      clock += 60_000
+      hosted.db
+        .prepare(
+          "UPDATE agent_runs SET ended_at = '2031-01-01T12:00:30.000Z', outcome = 'answered', duration_ms = 999999, input_tokens = 999999, output_tokens = 0 WHERE id = 'run_pagerunning000000000000'",
+        )
+        .run()
+      addRow('run_pagelate00000000000000', '2031-01-01T12:00:40.000Z', { duration: 5, tokens: 5 })
+      const seen = first.rows.map((row) => row.id)
+      let cursor = first.next
+      while (cursor) {
+        const page = live.rows(filter, ALL, { sort, dir, cursor, limit: 4 })
+        seen.push(...page.rows.map((row) => row.id))
+        cursor = page.next
+      }
+      assert.equal(seen.length, 10, `${sort} ${dir}: every turn of the first page's table`)
+      assert.equal(new Set(seen).size, 10, `${sort} ${dir}: none twice`)
+      assert.ok(!seen.includes('run_pagelate00000000000000'), 'a turn that started later is not in this table')
+      // The running turn stays where it was: last of the largest-first order, first of the smallest-first.
+      assert.equal(seen.indexOf('run_pagerunning000000000000'), dir === 'desc' ? 9 : 0, `${sort} ${dir}`)
+      // A fresh table sees it where it now belongs, and the new turn too.
+      const fresh = live.rows(filter, ALL, { sort, dir, limit: 20 })
+      assert.equal(fresh.total, 11)
+      assert.equal(fresh.rows[dir === 'desc' ? 0 : 10].id, 'run_pagerunning000000000000')
+      hosted.db.prepare("DELETE FROM agent_runs WHERE id = 'run_pagelate00000000000000'").run()
+    }
+  }
+  assert.throws(() => live.rows(filter, ALL, { cursor: Buffer.from(JSON.stringify([1, 'run_x'])).toString('base64url') }), /cursor/)
+  removeRows('run_page')
+})
+
+test('the operator\u2019s flags are known to the command line', () => {
+  for (const flag of ['usage-days', 'owners-see-sign-ins', 'retention-hours']) assert.ok(COMMAND_FLAGS.hosted.includes(flag), flag)
 })

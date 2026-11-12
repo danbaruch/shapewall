@@ -24,7 +24,7 @@ import { memberAccountEvents } from './tenancy.js'
 import { csvCell } from './usage.js'
 import { ACCOUNT_ACTIONS, ACTION_GROUPS, ACTION_GROUP_IDS, SENSITIVE_ACTIONS, actionGroup } from './usage-shape.js'
 
-export const ACTIVITY_LIMITS = { page: 50, pageMax: 200, exportRows: 10_000, staleDays: 90 }
+export const ACTIVITY_LIMITS = { page: 50, pageMax: 200, exportRows: 10_000, staleDays: 90, searchDays: 90 }
 const DAY = 86_400_000
 const USER_ID = /^us_[a-f0-9]{24}$/
 const AGENT_ID = /^ag_[a-f0-9]{24}$/
@@ -32,9 +32,13 @@ const PROJECT_ID = /^pr_[a-f0-9]{24}$/
 const ACTION_RE = /^[a-z_]{1,40}$/
 
 // { all: true }: the workspace's log. { all: false }: their own entries.
-export function activityViewer(role, userId) {
+// `accounts`: whose account events (sign-ins, passkeys, sessions: they belong
+// to a person, not to a workspace) this reader may see. "own" unless the
+// server's operator switched on `ownersSeeSignIns` and the reader is an
+// owner: then "members" (the people of this workspace, since each joined).
+export function activityViewer(role, userId, { ownersSeeSignIns = false } = {}) {
   if (!role) return null
-  return { all: roleAtLeast(role, 'admin'), userId }
+  return { all: roleAtLeast(role, 'admin'), userId, accounts: ownersSeeSignIns && role === 'owner' ? 'members' : 'own' }
 }
 
 const instant = (value, name) => {
@@ -149,7 +153,10 @@ export function createActivity(t, { db, now = () => new Date() } = {}) {
   // One page, newest first. `before`: the last entry id of the page before.
   function list(filter, viewer, { before = null, limit = ACTIVITY_LIMITS.page } = {}) {
     if (!viewer) throw new HttpError(403, 'forbidden', 'Activity is for the people of this workspace.')
-    const size = Math.min(Math.max(Number.parseInt(limit, 10) || ACTIVITY_LIMITS.page, 1), ACTIVITY_LIMITS.exportRows)
+    const size = Math.min(Math.max(Number.parseInt(limit, 10) || ACTIVITY_LIMITS.page, 1), ACTIVITY_LIMITS.pageMax)
+    // A text search reads every entry it is given: it always has a start. Without one, the last 90 days.
+    const searchedFrom = filter.q && !filter.from ? iso(-ACTIVITY_LIMITS.searchDays * DAY) : null
+    if (searchedFrom) filter = { ...filter, from: searchedFrom }
     const cursor = Number.isSafeInteger(Number(before)) && Number(before) > 0 ? Number(before) : Number.MAX_SAFE_INTEGER
     // Anyone but an admin reads their own entries, whatever the filter says.
     const person = viewer.all ? filter.person : viewer.userId
@@ -189,10 +196,14 @@ export function createActivity(t, { db, now = () => new Date() } = {}) {
     // Account events are about a person, never an agent, a project or a
     // token: they join in only when the filter could match them.
     const accountActions = (wanted || ACCOUNT_ACTIONS).filter((item) => ACCOUNT_ACTIONS.includes(item))
+    // And they are the person's own: a reader gets their own (when the list
+    // is theirs alone), and an owner the members' only where the operator
+    // said so (activityViewer).
+    const accountsOf = viewer.accounts === 'members' && viewer.all ? person : person === viewer.userId ? viewer.userId : false
     const account =
-      !filter.agent && !filter.project && (!filter.source || filter.source === 'person') && accountActions.length
+      accountsOf !== false && !filter.agent && !filter.project && (!filter.source || filter.source === 'person') && accountActions.length
         ? memberAccountEvents(db, t.workspaceId, {
-            userId: person,
+            userId: accountsOf,
             actions: accountActions,
             from: filter.from,
             to: filter.to,
@@ -206,14 +217,27 @@ export function createActivity(t, { db, now = () => new Date() } = {}) {
       ...account.map((row) => ({ id: row.id, view: () => entryView(row, { account: true }) })),
     ].sort((a, b) => b.id - a.id)
     const page = merged.slice(0, size)
-    return { entries: page.map((item) => item.view()), next: merged.length > size ? page.at(-1).id : null }
+    return { entries: page.map((item) => item.view()), next: merged.length > size ? page.at(-1).id : null, searchedFrom }
+  }
+  // Every entry of a filter, newest first, up to `max`, a page at a time: for the export.
+  function all(filter, viewer, { max = ACTIVITY_LIMITS.exportRows } = {}) {
+    const entries = []
+    let before = null
+    while (entries.length < max) {
+      const page = list(filter, viewer, { before, limit: Math.min(ACTIVITY_LIMITS.pageMax, max - entries.length) })
+      entries.push(...page.entries)
+      if (!page.next) break
+      before = page.next
+    }
+    return entries
   }
 
   // What the filters offer: people, agents, projects, and the groups.
   function filters(viewer) {
     if (!viewer) throw new HttpError(403, 'forbidden', 'Activity is for the people of this workspace.')
-    if (!viewer.all) return { people: [], agents: [], projects: [], groups: ACTION_GROUP_IDS }
+    if (!viewer.all) return { people: [], agents: [], projects: [], groups: ACTION_GROUP_IDS, accounts: viewer.accounts }
     return {
+      accounts: viewer.accounts,
       people: t
         .all(
           'SELECT m.user_id, m.role, u.handle, u.display_name FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.workspace_id = :ws ORDER BY u.display_name',
@@ -327,12 +351,18 @@ export function createActivity(t, { db, now = () => new Date() } = {}) {
         approvalsAnswered: { count: approvals.n, lastAt: approvals.last || null },
       },
       // Devices they are signed in on: a label and when it was last seen.
-      sessions: sessionsOf(userId).map((session) => ({
-        device: session.device || null,
-        via: session.via,
-        createdAt: session.createdAt,
-        lastSeenAt: session.lastSeenAt,
-      })),
+      // Sessions are the person's own (they cover every workspace they are
+      // in): shown to them, and to an owner only where the operator said so.
+      // null: not this reader's to see.
+      sessions:
+        viewer.userId === userId || viewer.accounts === 'members'
+          ? sessionsOf(userId).map((session) => ({
+              device: session.device || null,
+              via: session.via,
+              createdAt: session.createdAt,
+              lastSeenAt: session.lastSeenAt,
+            }))
+          : null,
     }
   }
 
@@ -441,7 +471,7 @@ export function createActivity(t, { db, now = () => new Date() } = {}) {
     return { at, staleDays: ACTIVITY_LIMITS.staleDays, people, tokens, agents: agentRows, shares, publicProjects, invites }
   }
 
-  return { list, filters, person, review, entryView }
+  return { list, all, filters, person, review, entryView }
 }
 
 // ---- CSV ----

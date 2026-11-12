@@ -421,7 +421,7 @@ test('a local board: the owner’s Usage view shows the turns of this computer; 
   const setup = await demoSetup('usage-local')
   const now = Date.now()
   for (let index = 0; index < 40; index += 1)
-    recordLocalTurn(
+    await recordLocalTurn(
       setup.config,
       localUsageRow({
         reply: {

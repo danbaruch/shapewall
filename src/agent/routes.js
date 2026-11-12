@@ -956,7 +956,7 @@ export function agentRouter({
           }
         }
         // The usage record of this turn (usage-log.js): numbers and ids, never text.
-        recordLocalTurn(
+        await recordLocalTurn(
           config,
           localUsageRow({
             reply,

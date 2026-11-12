@@ -6,8 +6,9 @@
 // and the numbers the agent reported, each null when it reported none.
 // Never the question, the answer, a file or a diff.
 //
-// - Appended after each turn; a line that cannot be written is dropped (a
-//   turn never fails over its usage record).
+// - Appended after each turn, to a file only its owner reads (0600), under
+//   the same kind of file lock as the event log; a line that cannot be
+//   written is dropped (a turn never fails over its usage record).
 // - Bounded: past LOG_MAX_BYTES the file is renamed to agent-usage.1.jsonl
 //   (the one older file kept) and a new one starts.
 // - Read by the owner's Usage view (Console > Usage on a local board).
@@ -15,6 +16,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { randomBytes } from 'node:crypto'
+import { withFileLock } from '../lock.js'
 import { OUTCOME_GROUP_IDS, outcomeGroup, usageRecordOf } from '../hosted/usage-shape.js'
 
 export const USAGE_FILE = 'agent-usage.jsonl'
@@ -72,16 +74,31 @@ export function localUsageRow({
   }
 }
 
-export function recordLocalTurn(config, row) {
+// Appends one row. The file is the owner's alone (0600, like the event
+// log), and the size check, the rename and the append happen under the
+// file's lock, so two processes never rotate or write at once. Never throws.
+export async function recordLocalTurn(config, row, { maxBytes = LOG_MAX_BYTES } = {}) {
   try {
     const file = fileOf(config)
+    const data = Buffer.from(`${JSON.stringify(row)}\n`)
     fs.mkdirSync(config.outputDir, { recursive: true })
-    try {
-      if (fs.statSync(file).size > LOG_MAX_BYTES) fs.renameSync(file, fileOf(config, USAGE_ROTATED))
-    } catch (error) {
-      if (error.code !== 'ENOENT') throw error
-    }
-    fs.appendFileSync(file, `${JSON.stringify(row)}\n`)
+    await withFileLock(file, () => {
+      let size = 0
+      try {
+        size = fs.statSync(file).size
+      } catch {
+        /* a new log */
+      }
+      if (size > 0 && size + data.length > maxBytes) fs.renameSync(file, fileOf(config, USAGE_ROTATED))
+      const fd = fs.openSync(file, 'a', 0o600)
+      try {
+        // A log that was made wider is narrowed again.
+        fs.fchmodSync(fd, 0o600)
+        fs.writeSync(fd, data)
+      } finally {
+        fs.closeSync(fd)
+      }
+    })
     return true
   } catch {
     return false

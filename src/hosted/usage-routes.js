@@ -19,7 +19,7 @@ import { ACTIVITY_LIMITS, activityCsv, activityViewer, cleanActivityFilter, crea
 import { deviceLabel } from './auth.js'
 import { transaction } from './db.js'
 import { HttpError } from './http.js'
-import { NEEDS } from './permissions.js'
+import { NEEDS, roleAtLeast } from './permissions.js'
 import {
   USAGE_LIMITS,
   cleanBucket,
@@ -34,7 +34,10 @@ import {
   usageScope,
 } from './usage.js'
 
-export function mountUsageRoutes(consoleApi, { db, auth, now, iso, handle, limit, inWorkspace, auditOf, agentsFor }) {
+export function mountUsageRoutes(
+  consoleApi,
+  { db, auth, now, iso, handle, limit, inWorkspace, auditOf, agentsFor, ownersSeeSignIns = false },
+) {
   const usageOf = (req) => createUsage(req.t, { now })
   const scopeOf = (req) => usageScope(req.role, req.user.id)
   const filterOf = (req) => cleanUsageFilter(req.query, { now })
@@ -77,10 +80,12 @@ export function mountUsageRoutes(consoleApi, { db, auth, now, iso, handle, limit
       metric: cleanMetric(req.query.metric),
     }),
   )
+  // ?previous=1: the same split over the period to compare with.
   usage('/breakdown', (req, store, scope) => {
     const groupBy = cleanDimension(req.query.groupBy)
     if (groupBy === 'none') throw new HttpError(400, 'invalid_option', 'groupBy: a dimension.')
-    return { groupBy, groups: store.breakdown(filterOf(req), scope, groupBy) }
+    const previous = req.query.previous === '1'
+    return { groupBy, previous, groups: store.breakdown(filterOf(req), scope, groupBy, { previous }) }
   })
   usage('/latency', (req, store, scope) => {
     const bucket = cleanBucket(req.query.bucket)
@@ -155,25 +160,33 @@ export function mountUsageRoutes(consoleApi, { db, auth, now, iso, handle, limit
 
   // ---- Saved views (a person's own, per page) ----
 
+  // Views of the Activity page are for everyone who has that page (viewers
+  // too); views of the Usage page for those who have Usage.
+  const viewsFor = (req, page) => {
+    if (page !== 'activity' && !roleAtLeast(req.role, NEEDS.usage))
+      throw new HttpError(403, 'forbidden', 'Usage is for members, admins and owners.')
+  }
   consoleApi.get(
     '/workspaces/:ws/views',
-    inWorkspace(NEEDS.usage),
+    inWorkspace(NEEDS.activity),
     handle((req, res) => {
       const page = req.query.page === 'activity' ? 'activity' : 'usage'
+      viewsFor(req, page)
       res.json({ views: createViews(req.t, { now }).list(req.user.id, page) })
     }),
   )
   consoleApi.post(
     '/workspaces/:ws/views',
-    inWorkspace(NEEDS.usage),
+    inWorkspace(NEEDS.activity),
     handle((req, res) => {
+      viewsFor(req, req.body?.page)
       const view = transaction(db, () => createViews(req.t, { now }).save(req.user.id, req.body || {}))
       res.status(201).json({ view })
     }),
   )
   consoleApi.delete(
     '/workspaces/:ws/views/:id',
-    inWorkspace(NEEDS.usage),
+    inWorkspace(NEEDS.activity),
     handle((req, res) => {
       createViews(req.t, { now }).remove(req.user.id, req.params.id)
       res.json({ ok: true })
@@ -183,11 +196,15 @@ export function mountUsageRoutes(consoleApi, { db, auth, now, iso, handle, limit
   // ---- Activity ----
 
   const activityOf = (req) => createActivity(req.t, { db, now })
-  const viewerOf = (req) => activityViewer(req.role, req.user.id)
+  const viewerOf = (req) => activityViewer(req.role, req.user.id, { ownersSeeSignIns })
+  // A search, or a filter by agent or project, reads the log entry by entry: a per-person limit, as on the exports.
+  const heavy = limit('activitySearch', (req) => req.user.id)
+  const limitHeavy = (req, res, next) => (req.query.q || req.query.agent || req.query.project ? heavy(req, res, next) : next())
 
   consoleApi.get(
     '/workspaces/:ws/activity',
     inWorkspace(NEEDS.activity),
+    limitHeavy,
     handle((req, res) => {
       const viewer = viewerOf(req)
       res.json({
@@ -211,7 +228,7 @@ export function mountUsageRoutes(consoleApi, { db, auth, now, iso, handle, limit
     limit('usageExport', (req) => req.user.id),
     handle((req, res) => {
       const viewer = viewerOf(req)
-      const { entries } = activityOf(req).list(cleanActivityFilter(req.query), viewer, { limit: ACTIVITY_LIMITS.exportRows })
+      const entries = activityOf(req).all(cleanActivityFilter(req.query), viewer, { max: ACTIVITY_LIMITS.exportRows })
       auditOf(req, 'audit_exported', null, { rows: entries.length, scope: viewer.all ? 'workspace' : 'own', view: 'activity' })
       res.setHeader('Content-Type', 'text/csv; charset=utf-8')
       res.setHeader(

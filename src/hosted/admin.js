@@ -327,13 +327,14 @@ export async function writeWorkspaceExport(t, exported, { write, now, iso, expor
   await audit.write(count ? '\n]\n' : ']\n')
   await audit.end()
   // The usage records (src/hosted/usage.js): one row per agent turn, numbers
-  // and ids only, newest first, at most USAGE_LIMITS.exportRows.
+  // and ids only, newest first, all of them.
   const usage = zip.stream(`${root}usage.json`)
   await usage.write('[')
   let turns = 0
   const end = Date.now() + 86_400_000
   const store = createUsage(t)
-  for (const page of store.pages({ fromMs: 0, toMs: end }, { all: true, userId: null })) {
+  // Every record, a page at a time: an export is the whole workspace.
+  for (const page of store.pages({ fromMs: 0, toMs: end }, { all: true, userId: null }, { max: Infinity })) {
     let text = ''
     for (const row of page) text += `${turns++ ? ',' : ''}\n  ${JSON.stringify(row)}`
     await usage.write(text)
