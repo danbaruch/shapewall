@@ -131,13 +131,13 @@ export function canDrawInPlace(frameBox, viewport, box) {
 }
 
 // Drawing on a page (desktop), when it has to be fitted first (see
-// canDrawInPlace): the frame in the canvas below the drawing bar
-// and the card's title row (`top` screen pixels) and above the zoom
-// controls, at a size to draw on (`frameBox` is the part with content).
+// canDrawInPlace): the frame in the canvas below the card's title row (`top`
+// screen pixels) and above the drawing bar and the board's tools at the
+// bottom, at a size to draw on (`frameBox` is the part with content).
 // The whole of it fits, so the bar never covers it; only a page so long that
 // it would show narrower than DRAW_MIN_WIDTH is shown wider, from its top
 // (or around `focus`, 0 to 1 down the frame, when the pin is further down).
-export const DRAW_ROOM = { top: 100, bottom: 64, side: 24 }
+export const DRAW_ROOM = { top: 52, bottom: 112, side: 24 }
 const DRAW_MIN_WIDTH = 280
 const DRAW_MAX_ZOOM = 2
 export function drawingViewport(frameBox, box, focus = 0.5) {

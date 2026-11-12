@@ -1,4 +1,4 @@
-import { Bot, Camera, Flag, MessageSquare, MessageSquarePlus, MoreHorizontal, Rows2, Settings } from 'lucide-react'
+import { Bot, Camera, Flag, MessageSquare, MoreHorizontal, Rows2, Settings } from 'lucide-react'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { settles } from './agentActivity'
 import { leavePage } from '../lib/hooks'
@@ -20,7 +20,6 @@ import {
 } from '../components/ui'
 import { ProjectCrumb, ViewerNote } from './HostedNotes'
 import { ViewsMenu } from './ViewsMenu'
-import { KeyTip } from './KeyTip'
 import { CaptureStatus } from './CaptureStatus'
 import { BoardProfile } from './BoardProfile'
 import { viewportIcon } from './viewports'
@@ -236,25 +235,23 @@ function PanelSwitch({
   )
 }
 
-// The board toolbar. Desktop (lg and up): three zones holding four groups,
-// the canvas-tool way:
+// The board toolbar: what you look at. The tools you use on the board
+// (Select, Comment, Draw) float at the bottom of the canvas (BoardTools.jsx).
+// Desktop (lg and up): two zones, the canvas-tool way:
 //   left    identity: the project and board switcher with the capture
 //           status dot (when the board was captured, in its tooltip);
 //           then, after a hairline, the view controls: the screen-size
 //           switch, Views (journeys and what the canvas shows), and on a
 //           local board Capture with its status
-//   centre  find: "Go to page or journey" (Ctrl/Cmd+K), centred on the toolbar
-//   right   act and open panels: the viewer note, Comment (the one primary
-//           action and the one accent control: soft while comment mode is
-//           off, filled and aria-pressed while it is on); then, after a
-//           hairline, the side panel switch (Comments | Agent | Checks) and
-//           Agent settings last
-// Every control but the name and Comment is the same quiet box: 32 px tall,
-// the same radius, a hairline, the same tint (BOXED, TRACK). A chosen option
-// or an open panel is the raised chip on its track.
+//   right   open panels: the viewer note, the side panel switch (Comments |
+//           Agent | Checks) and Agent settings last
+// Every control but the name is the same quiet box: 32 px tall, the same
+// radius, a hairline, the same tint (BOXED, TRACK). A chosen option or an
+// open panel is the raised chip on its track.
 // toolbarFit.js decides which labels drop when the zones do not fit, from the
 // toolbar's width and what it shows (accessible names and tooltips stay).
-// Phone: a compact bar whose More button opens BoardMenu.
+// Phone: a compact bar (the board, Comments, More, the profile) whose More
+// button opens BoardMenu.
 export function BoardToolbar({
   wide,
   info,
@@ -277,8 +274,6 @@ export function BoardToolbar({
   viewportNotice,
   canComment,
   comparePair,
-  commentMode,
-  setCommentMode,
   setMenuOpen,
   showLinks,
   toggleLinks,
@@ -321,7 +316,6 @@ export function BoardToolbar({
   const boardTitle = boards.find((item) => item.id === boardId)?.title || data?.board?.title || boardId
   const project = info?.hosted && info?.project?.url && info.role !== 'guest' ? info.project : null
   const viewer = !canComment && info?.hosted && info?.role === 'viewer'
-  const commenting = canComment && !comparePair
   const headerRef = useRef(null)
   const toolbarWidth = useWidth(headerRef, wide)
   const statusKind = capture?.running ? 'running' : capture?.state === 'failed' && capture.error ? 'failed' : 'dot'
@@ -338,7 +332,6 @@ export function BoardToolbar({
           capture: Boolean(canCapture),
           status: { kind: statusKind, progress },
           viewer,
-          comment: commenting,
           panels: { comments: allOpen, agent: Boolean(chatAvailable), checks: Boolean(canChecks) },
           settings: Boolean(settingsAvailable),
           journey: journey?.name || null,
@@ -352,7 +345,6 @@ export function BoardToolbar({
       statusKind,
       progress,
       viewer,
-      commenting,
       allOpen,
       chatAvailable,
       canChecks,
@@ -442,19 +434,6 @@ export function BoardToolbar({
       <header className="flex shrink-0 items-center gap-1 border-b border-line bg-surface px-2 py-1.5" data-sw-toolbar="compact">
         <h1 className="sr-only">Shapewall</h1>
         {picker}
-        {canComment && !comparePair ? (
-          <IconButton
-            size="icon"
-            variant={commentMode ? 'default' : 'soft'}
-            className="shrink-0"
-            aria-pressed={commentMode}
-            onClick={() => setCommentMode((value) => !value)}
-            label={commentMode ? 'Stop commenting' : 'Comment: tap a page to pin'}
-            data-sw-comment-mode="true"
-          >
-            <MessageSquarePlus size={19} aria-hidden="true" />
-          </IconButton>
-        ) : null}
         {viewer ? <ViewerNote compact /> : null}
         <Button
           size="touch"
@@ -586,26 +565,6 @@ export function BoardToolbar({
 
       <div className={cn('flex min-w-0 items-center justify-end', innerGap)} data-sw-toolbar-zone="right">
         {viewer ? <ViewerNote /> : null}
-        {commenting ? (
-          <Tooltip
-            content={
-              <KeyTip label={commentMode ? 'Stop commenting' : 'Click a page to pin a comment'} keys={commentMode ? ['C', 'Esc'] : ['C']} />
-            }
-            side="bottom"
-          >
-            <Button
-              variant={commentMode ? 'default' : 'soft'}
-              className={cn('h-8 shrink-0 text-[13px]', off.comment ? 'w-8 px-0' : 'px-3', commentMode && 'ring-2 ring-accent/30')}
-              aria-pressed={commentMode}
-              onClick={() => setCommentMode((value) => !value)}
-              data-sw-comment-mode="true"
-            >
-              <MessageSquarePlus size={15} aria-hidden="true" />
-              {off.comment ? <span className="sr-only">Comment</span> : 'Comment'}
-            </Button>
-          </Tooltip>
-        ) : null}
-        {commenting && !off.viewport ? <Divider /> : null}
         <PanelSwitch
           labels={!off.panels}
           allOpen={allOpen}

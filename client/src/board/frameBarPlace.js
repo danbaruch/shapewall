@@ -3,9 +3,11 @@
 //
 // The bar sits outside the card: above it, else to its right, else to its
 // left; when none fits it collapses to one button. It must never cover the
-// notes along the top of the canvas (CanvasNotes: the comment-mode hint, the
-// links hints, the tip), so a spot that would overlap `avoid` (their union
-// rect, with a gap) is moved below them or given up for the next one.
+// notes along the top of the canvas (CanvasNotes: the links hints, the tip,
+// the viewport notice), so a spot that would overlap `avoid` (their union
+// rect, with a gap) is moved below them or given up for the next one. The
+// tool dock along the bottom is kept clear by a shorter `canvas.height`
+// (FrameBar.jsx).
 
 // Do two boxes overlap, with `gap` of air around `avoid`?
 export function overlaps(box, avoid, gap = 8) {

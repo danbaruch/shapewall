@@ -36,9 +36,13 @@ export function useCommentModeKeys({ commentMode, setCommentMode, canComment, co
     // close themselves and leave the page.
     // Not from a text field either (the comment search, the chat box): Escape
     // there is that field's.
+    // The key is used up here (preventDefault), so the same Esc does not also
+    // leave an open journey: one step at a time, back to Select first.
     const onKey = (event) => {
       if (event.key !== 'Escape' || isEditable(event.target)) return
-      if (!document.querySelector('[role="dialog"], [role="menu"], [role="listbox"]')) setCommentMode(false)
+      if (document.querySelector('[role="dialog"], [role="menu"], [role="listbox"]')) return
+      event.preventDefault()
+      setCommentMode(false)
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)

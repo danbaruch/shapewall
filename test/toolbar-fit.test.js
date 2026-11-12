@@ -20,7 +20,6 @@ const local = (title = 'Marketing site', journey = null) =>
     journey,
     viewports: ['Desktop', 'Tablet', 'Phone', 'All'],
     capture: true,
-    comment: true,
     panels: { comments: 20, agent: true, checks: true },
     settings: true,
   })
@@ -31,7 +30,6 @@ const demo = (journey = null) =>
     journey,
     title: 'Acme storefront',
     viewports: ['Desktop', 'Tablet', 'Phone', 'All'],
-    comment: true,
     panels: { comments: 20, agent: true, checks: true },
   })
 
@@ -61,27 +59,30 @@ const layout = (items, width) => {
 
 test('the steps drop labels in order: panel toggles, Views, screen size, then tight; there is no search in the bar', () => {
   assert.deepEqual(FIT_STEPS, ['full', 'panels', 'view', 'viewport', 'tight'])
-  const none = { panels: false, view: false, viewport: false, comment: false, tight: false }
+  const none = { panels: false, view: false, viewport: false, tight: false }
   assert.deepEqual(collapsed(0), none)
   assert.deepEqual(collapsed(1), { ...none, panels: true })
   assert.deepEqual(collapsed(2), { ...none, panels: true, view: true })
   assert.deepEqual(collapsed(3), { ...none, panels: true, view: true, viewport: true })
-  assert.deepEqual(collapsed(4), { panels: true, view: true, viewport: true, comment: true, tight: true })
+  assert.deepEqual(collapsed(4), { panels: true, view: true, viewport: true, tight: true })
   // Each item collapses at its own step.
   const items = local()
   const at = Object.fromEntries([...items.left, ...items.right].map((item) => [item.id, item.at || null]))
   assert.deepEqual(at, {
     divider: null,
-    'panels-divider': null,
     viewport: 'viewport',
     view: 'view',
     capture: null,
     'capture-status': null,
-    comment: 'comment',
     panels: 'panels',
     settings: null,
   })
   assert.equal('searchIcon' in items, false)
+  // Comment is a tool on the canvas now (BoardTools.jsx), not a toolbar control.
+  assert.equal(
+    items.right.some((item) => item.id === 'comment'),
+    false,
+  )
 })
 
 test('narrowing the toolbar only ever drops more labels, never brings one back', () => {

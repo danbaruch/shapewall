@@ -415,8 +415,8 @@ function ItemList({ items, expanded, link, label, flyouts, flush }) {
 }
 
 // The open flyout, if any, for the whole rail: one at a time.
-// `disabled`: none opens (the board's drawing mode: the docked drawing bar
-// keeps the top of the canvas to itself); one that is open closes.
+// `disabled`: none opens (the board's drawing mode: the page being drawn
+// on keeps the canvas to itself); one that is open closes.
 function useFlyouts(expanded, width, disabled = false) {
   const [state, setState] = useState(() => ({ id: null, pinned: false, via: null, swap: false }))
   const intent = useRef(null)
