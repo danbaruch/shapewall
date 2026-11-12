@@ -205,7 +205,7 @@ export function useCommentActions({
       const result = await api.post(`${commentsUrl}/${comment.id}/send-to-agent`, {
         dispatchHash,
         approve,
-        ...(agentId !== undefined && !approve ? { agentId } : {}),
+        ...(agentId !== undefined ? { agentId } : {}),
       })
       applyComment(result.comment)
       onAgentsChanged?.()

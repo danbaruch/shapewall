@@ -199,7 +199,8 @@ export function PhoneSheets({
       ) : null}
       {hostedAgent ? (
         <Dialog open onClose={() => updateParams({ ha: null })} title="Agents" size="md">
-          <div className="flex max-h-[78dvh] min-h-0 flex-col" data-sw-hosted-agent-sheet="true">
+          {/* Read first: focus goes to the sheet, not to its first link. */}
+          <div className="flex max-h-[78dvh] min-h-0 flex-col outline-none" tabIndex={-1} data-autofocus data-sw-hosted-agent-sheet="true">
             <HostedAgentPanel {...hostedAgent} heading={false} />
           </div>
         </Dialog>

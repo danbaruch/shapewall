@@ -593,6 +593,8 @@ Try these on the real server, at its real address, before the team depends on it
    re-capture plus push. The local project picker is desktop-only navigation, not a phone hub or a team workspace.
 4. **Verify the agent boundary.** Use a project-scoped token on the developer machine or CI. Confirm trusted dispatch and shell
    approval work, imported/guest comments stay inert, and revocation ends access. The hosted server does not run your agent or capture browser.
+   On the project's Agents page, check each agent's audience: a teammate outside it should see the agent greyed on the board with
+   the reason, and a comment sent to one agent should run only on that machine.
 5. **Check operation and recovery.** Give the server a lifecycle independent of an interactive shell or coding-agent session. The
    foreground command stops when its process stops; example service/Compose files need deliberate operator setup. Probe `/api/health`
    from a second device, choose monitoring and backup arrangements, and restore a backup to a separate folder before relying on it.

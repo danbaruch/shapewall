@@ -107,13 +107,38 @@ export default function SendToAgent({ comment, list = null, role = null, busy = 
   const known = Boolean(list)
   const hasAgents = Boolean(list?.agents?.length)
 
-  // A run someone else asked for: an admin approves it (as before).
+  // A run someone else asked for: an admin approves it (as before). It
+  // keeps going where it was sent; an admin that agent does not take work
+  // from can send it to another one, or to any.
   if (comment.needsRunApproval && !comment.dispatchable) {
+    const target = (list?.agents || []).find((agent) => agent.id === comment.agentId) || null
     return (
-      <div className="py-2" data-sw-send-agent-block={comment.id}>
-        <Button size={size} disabled={busy || !admin} onClick={() => onSend(comment)} data-sw-send-agent={comment.id}>
-          {admin ? 'Approve agent run' : 'Awaiting run approval'}
-        </Button>
+      <div className="space-y-1.5 py-2" data-sw-send-agent-block={comment.id}>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Button size={size} disabled={busy || !admin} onClick={() => onSend(comment)} data-sw-send-agent={comment.id}>
+            {admin ? 'Approve agent run' : 'Awaiting run approval'}
+          </Button>
+          {admin && hasAgents ? (
+            <AgentMenu
+              comment={comment}
+              list={list}
+              onChoose={(id) => onSend(comment, id)}
+              touch={touch}
+              align="start"
+              heading="Approve it and send it to"
+            >
+              <Button size={size} variant="ghost" disabled={busy} data-sw-send-agent-choose={comment.id}>
+                Choose another <ChevronDown size={13} aria-hidden="true" />
+              </Button>
+            </AgentMenu>
+          ) : null}
+        </div>
+        {known ? (
+          <p className="text-xs text-muted" data-sw-send-agent-asked={target ? target.id : 'any'}>
+            {target ? `Asked for ${target.name}.` : 'Asked for any agent.'}
+            {target && !target.canSend && admin ? ` ${target.reason}` : ''}
+          </p>
+        ) : null}
       </div>
     )
   }
