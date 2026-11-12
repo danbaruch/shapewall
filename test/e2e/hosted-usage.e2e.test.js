@@ -1398,11 +1398,31 @@ test('a saved view can carry a layout: its link shows it to whoever opens it, an
   assert.equal(link, url(`/usage?range=7d&view=${view.id}`))
   // Cyd goes back to the default: the view keeps the layout it was saved with.
   await resetLayout(s.cyd)
+  await page.reload()
+  await page.waitForFunction(() => document.querySelectorAll('[data-sw-tile]').length === 6)
+  // Opening their own view shows its layout quietly: a small chip, no note, and their own layout untouched.
+  await page.locator('[data-sw-views]').click()
+  await page.locator('[data-sw-view="One tile"]').click()
+  await page.locator('[data-sw-layout-view-chip]').waitFor()
+  assert.match(await page.locator('[data-sw-layout-view-chip]').textContent(), /View: One tile.*Back to my layout/s)
+  await page.waitForFunction(() => document.querySelectorAll('[data-sw-tile]').length === 1)
+  assert.equal(await page.locator('[data-sw-layout-preview]').count(), 0)
+  assert.equal(await page.locator('[data-sw-layout-adopt]').count(), 0)
+  const chip = await page.locator('[data-sw-layout-view-chip]').boundingBox()
+  assert.ok(chip.height <= 40 && chip.width < 420, `a chip, not a banner: ${JSON.stringify(chip)}`)
+  assert.equal((await storedLayout(s.cyd)).layout, null, 'nothing of theirs was overwritten')
+  await page.waitForFunction((id) => window.location.search.includes(`view=${id}`), view.id)
+  await shot(page, 'e2e-layout-own-view')
+  await page.locator('[data-sw-layout-dismiss]').click()
+  await page.locator('[data-sw-layout-view-chip]').waitFor({ state: 'detached' })
+  await page.waitForFunction(() => document.querySelectorAll('[data-sw-tile]').length === 6)
+  assert.equal((await storedLayout(s.cyd)).layout, null)
 
   // Ben opens the link: the view's layout, with a banner, and his own untouched.
   const other = await openDashboard(s.ben)
   await other.page.goto(link)
   await other.page.locator('[data-sw-layout-preview]').waitFor()
+  assert.equal(await other.page.locator('[data-sw-layout-view-chip]').count(), 0, 'somebody else’s view comes with the note, not the chip')
   assert.match(
     await other.page.locator('[data-sw-layout-preview]').textContent(),
     /layout of the view One tile.*Your own layout is unchanged/s,
@@ -1793,6 +1813,11 @@ test('nothing is cut off at the default sizes, looking or editing; lists and the
     }),
   )
   assert.deepEqual(await clipped(), [], 'editing the default dashboard')
+  // The budgets' rows share the room its heading left: no blank strip under the last one.
+  const strip = await page
+    .locator('[data-sw-usage-budgets]')
+    .evaluate((card) => card.getBoundingClientRect().bottom - card.querySelector('li:last-child').getBoundingClientRect().bottom)
+  assert.ok(strip >= 0 && strip < 4, 'no strip under the last project while editing: ' + strip)
   assert.match(await page.locator('[data-sw-tile="tokens"]').textContent(), /of [\d,]+ turns reported/, 'a tile keeps its third line')
   await shot(page, 'e2e-layout-edit-fits')
 

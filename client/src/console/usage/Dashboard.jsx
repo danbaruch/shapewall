@@ -391,7 +391,23 @@ export function Dashboard({ filter, isAdmin, board, editing, onEditing }) {
       data-sw-layout-state={board.status}
       className={cn(editing && 'sw-layout-editing')}
     >
-      {board.preview ? (
+      {/* A view's layout is only ever shown: the reader's own layout stays as it is until they say otherwise. Their own
+          view says so with a small chip; a view somebody shared, with a note and the choice to make it theirs. */}
+      {board.preview?.mine ? (
+        <p
+          className="mb-3 inline-flex max-w-full items-center gap-2 rounded-full border border-line bg-surface-2 py-1 pr-1 pl-3 text-xs text-fg print:hidden"
+          role="status"
+          data-sw-layout-view-chip={board.preview.id}
+        >
+          <LayoutDashboard size={13} className="shrink-0 text-muted" aria-hidden="true" />
+          <span className="min-w-0 truncate">
+            View: <strong className="font-semibold">{board.preview.name}</strong>
+          </span>
+          <Button size="xs" variant="ghost" className="rounded-full" onClick={() => set({ view: null })} data-sw-layout-dismiss>
+            Back to my layout
+          </Button>
+        </p>
+      ) : board.preview ? (
         <div
           className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-accent/40 bg-accent/8 px-4 py-2.5 text-sm text-fg print:hidden"
           role="status"

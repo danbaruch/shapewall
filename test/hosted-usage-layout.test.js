@@ -362,7 +362,8 @@ test('a saved view can carry a layout: its link shows the layout to whoever open
   for (const person of [s.ada, s.ben, s.cyd]) {
     const shown = await person.browser.get(api(`/views/${id}/layout`))
     assert.equal(shown.status, 200, shown.text)
-    assert.deepEqual(shown.json, { view: { id, name: 'Weekly tokens', layout: twoCharts() } })
+    // `mine`: its maker sees it quietly; anyone else is told whose layout it is.
+    assert.deepEqual(shown.json, { view: { id, name: 'Weekly tokens', mine: person === s.cyd, layout: twoCharts() } })
   }
   // Reading it changed nobody's own layout, and the view is still only its maker's.
   assert.deepEqual((await layoutOf(s.ada)).layout, tall())

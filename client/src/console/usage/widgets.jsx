@@ -597,11 +597,15 @@ function BudgetsWidget({ ctx, editing }) {
           Loading
         </p>
       ) : projects.length ? (
-        <ul className="min-h-0 flex-1 divide-y divide-line overflow-y-auto">
+        // (While the layout is edited the heading is on the widget's bar: the rows share the room it leaves.)
+        <ul className={cn('min-h-0 flex-1 divide-y divide-line overflow-y-auto', editing && 'flex flex-col')}>
           {projects.map(({ project, budgets }) => (
             <li
               key={project.id}
-              className="grid gap-x-6 gap-y-2 px-4 py-2 sm:grid-cols-[minmax(0,12rem)_repeat(2,minmax(0,1fr))] sm:px-5"
+              className={cn(
+                'grid gap-x-6 gap-y-2 px-4 py-2 sm:grid-cols-[minmax(0,12rem)_repeat(2,minmax(0,1fr))] sm:px-5',
+                editing && 'flex-[1_0_auto] content-center',
+              )}
               data-sw-budget={project.name}
             >
               <Link

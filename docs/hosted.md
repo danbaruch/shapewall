@@ -1200,13 +1200,14 @@ keeps the place it had when the first page was read, and turns that started late
 through the rows and Enter opens one. A turn opens in a drawer with everything in the table above, a link to its comment or board, and for
 admins a link to the activity around it. On a phone the grid is a list of cards and the drawer is a sheet.
 
-**Saved views** are yours alone: a name for the page's address (filters, columns, sort) and, for a view saved from the
-overview, the dashboard as you have it: its layout and every widget's options (measure, split, bucket and the rest). Untick
-**Include this layout** to save the filters alone. "Copy a link to this view" shares the address; whoever opens it sees what
-they themselves may see, so a link or a view never widens access. Opening a view that carries a layout, or its link, shows that
-layout with a note saying which view it belongs to. Nothing of the reader's own changes unless they press "Use this layout";
-"Back to my layout" drops it. Links and views made before the dashboard could be arranged, which name a chart's measure, split or
-bucket in the address (`metric=`, `by=`, `bucket=`, `bd=`), still set the first chart over time and the first breakdown.
+**Saved views** are yours alone: a name for the page's address (filters, columns, sort) and, for a view saved from the overview,
+the dashboard as you have it: its layout and every widget's options (measure, split, bucket and the rest). Untick **Include this
+layout** to save the filters alone. "Copy a link to this view" shares the address; whoever opens it sees what they themselves may
+see, so a link or a view never widens access. Opening a view that carries a layout only ever shows that layout; your own stays as
+it is. For one of your own views a small chip says which view you are looking at, with "Back to my layout". For a view somebody
+shared by link, a note says whose layout it is, with "Use this layout" (which makes it yours) and "Back to my layout". Links and
+views made before the dashboard could be arranged, which name a chart's measure, split or bucket in the address (`metric=`, `by=`,
+`bucket=`, `bd=`), still set the first chart over time and the first breakdown.
 
 **Print** prints the overview as a report (the period and filters at the top), the widgets one after another in reading order,
 each as tall as it needs, whatever sizes they have on screen. **Export** downloads the turns of the filter as CSV

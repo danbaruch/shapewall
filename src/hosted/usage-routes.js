@@ -203,7 +203,7 @@ export function mountUsageRoutes(
     '/workspaces/:ws/views/:id/layout',
     inWorkspace(NEEDS.usage),
     handle((req, res) => {
-      const view = createViews(req.t, { now }).layoutOf(req.params.id)
+      const view = createViews(req.t, { now }).layoutOf(req.params.id, req.user.id)
       if (!view) throw new HttpError(404, 'unknown_view', 'No such saved view, or it carries no layout.')
       res.json({ view })
     }),

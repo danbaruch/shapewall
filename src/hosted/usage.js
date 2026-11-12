@@ -508,11 +508,14 @@ export function createViews(t, { now = () => new Date() } = {}) {
       .map((row) => view(row, carrying))
   }
   // The layout a view carries, for anyone who was handed its link: the
-  // view's name and its layout, or nothing when it carries none.
-  function layoutOf(id) {
-    const row = t.get("SELECT id, name FROM saved_views WHERE workspace_id = :ws AND id = :id AND page = 'usage'", { id: String(id || '') })
+  // view's name and its layout, or nothing when it carries none. `mine`:
+  // whether the reader (`userId`) is the view's maker.
+  function layoutOf(id, userId = null) {
+    const row = t.get("SELECT id, name, user_id FROM saved_views WHERE workspace_id = :ws AND id = :id AND page = 'usage'", {
+      id: String(id || ''),
+    })
     const layout = row ? layouts.ofView(row.id) : null
-    return layout ? { id: row.id, name: row.name, layout } : null
+    return layout ? { id: row.id, name: row.name, mine: row.user_id === userId, layout } : null
   }
   function save(userId, given) {
     const { page, name: label, query } = cleanView(given)

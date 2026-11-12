@@ -622,11 +622,11 @@ export function usageRoutes(ctx) {
       'GET',
       /^\/api\/workspaces\/([a-z0-9_]+)\/views\/([a-z0-9_]+)\/layout$/,
       ({ params }) => {
-        inWorkspace(params[0], 'usage')
+        const { user } = inWorkspace(params[0], 'usage')
         const view = viewsOf().find((item) => item.workspaceId === params[0] && item.id === params[1] && item.page === 'usage')
         const layout = view ? readLayout(layoutsOf().view[view.id]) : null
         if (!layout) fail(404, 'unknown_view', 'No such saved view, or it carries no layout.')
-        return { view: { id: view.id, name: view.name, layout } }
+        return { view: { id: view.id, name: view.name, mine: view.userId === user.id, layout } }
       },
     ],
 

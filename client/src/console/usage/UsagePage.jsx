@@ -93,7 +93,13 @@ export function UsagePage() {
                 editing={arranging}
                 onEditing={setEditing}
                 disabled={!board.ready || Boolean(board.preview)}
-                why={board.preview ? 'Choose "Use this layout" or "Back to my layout" first' : null}
+                why={
+                  board.preview
+                    ? board.preview.mine
+                      ? 'Choose "Back to my layout" first'
+                      : 'Choose "Use this layout" or "Back to my layout" first'
+                    : null
+                }
               />
             ) : null}
             <Button size="touch" variant="secondary" className="lg:h-9" onClick={() => window.print()} data-sw-usage-print>

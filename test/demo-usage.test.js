@@ -949,7 +949,7 @@ test('the dashboard’s layout in the demo: kept in the demo’s state, checked 
   // Another role is another person: their own layout (none), the same default, the view's layout by its link.
   state.viewAs = 'member'
   assert.deepEqual(await get(ws('/usage/layout')), { layout: null, default: half, canSetDefault: false })
-  assert.deepEqual((await get(ws(`/views/${view.id}/layout`))).view, { id: view.id, name: 'Two charts', layout: mine })
+  assert.deepEqual((await get(ws(`/views/${view.id}/layout`))).view, { id: view.id, name: 'Two charts', mine: false, layout: mine })
   assert.equal((await call('GET', ws('/views/vw_nothing/layout'))).status, 404)
   assert.equal((await call('PUT', ws('/usage/layout/default'), { layout: mine })).status, 403)
   assert.equal((await call('DELETE', ws('/usage/layout/default'))).status, 403)
@@ -973,6 +973,7 @@ test('the dashboard’s layout in the demo: kept in the demo’s state, checked 
   state.viewAs = 'owner'
   assert.equal((await call('GET', '/api/workspaces/ws_elsewhere/usage/layout')).status, 404)
   assert.deepEqual((await get(ws('/usage/layout'))).layout, mine, 'the owner’s layout is still theirs')
+  assert.equal((await get(ws(`/views/${view.id}/layout`))).view.mine, true, 'and the view is their own')
 
   // Removing the view removes its layout; removing the default is logged once.
   assert.equal((await call('DELETE', ws(`/views/${view.id}`))).status, 200)

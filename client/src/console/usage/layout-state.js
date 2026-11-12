@@ -96,7 +96,11 @@ export function useDashboardLayout(workspaceId, { viewId = null } = {}) {
     }
   }, [send])
 
-  const preview = useMemo(() => (shared.data?.view ? { id: shared.data.view.id, name: shared.data.view.name } : null), [shared.data])
+  // `mine`: the reader's own view (it is shown quietly), or one somebody shared.
+  const preview = useMemo(
+    () => (shared.data?.view ? { id: shared.data.view.id, name: shared.data.view.name, mine: Boolean(shared.data.view.mine) } : null),
+    [shared.data],
+  )
   const sharedLayout = useMemo(() => (shared.data?.view ? readLayout(shared.data.view.layout) : null), [shared.data])
   const base = own ?? fallback
   const layout = preview && sharedLayout ? (tried ?? sharedLayout) : base
