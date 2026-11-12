@@ -18,90 +18,19 @@
 // before/after values of settings.
 
 import { AUDIT_HAYSTACK, AUDIT_SELECT, auditEntry, listTokens } from './admin.js'
+import { ACTION_RE, ACTIVITY_LIMITS, USER_ID, activityEntry, staleSince, wantedActions } from './activity-core.js'
 import { HttpError } from './http.js'
-import { ROLE_ACCESS, roleAtLeast } from './permissions.js'
+import { ROLE_ACCESS } from './permissions.js'
 import { memberAccountEvents } from './tenancy.js'
-import { csvCell } from './usage.js'
-import { ACCOUNT_ACTIONS, ACTION_GROUPS, ACTION_GROUP_IDS, SENSITIVE_ACTIONS, actionGroup } from './usage-shape.js'
+import { ACCOUNT_ACTIONS, ACTION_GROUP_IDS } from './usage-shape.js'
 
-export const ACTIVITY_LIMITS = { page: 50, pageMax: 200, exportRows: 10_000, staleDays: 90, searchDays: 90 }
+// Everything that is not SQL lives in activity-core.js (the public demo's
+// in-browser backend shares it); callers keep importing it from here.
+export { ACTIVITY_LIMITS, activityCsv, activityViewer, cleanActivityFilter, reviewCsv } from './activity-core.js'
+
 const DAY = 86_400_000
-const USER_ID = /^us_[a-f0-9]{24}$/
-const AGENT_ID = /^ag_[a-f0-9]{24}$/
-const PROJECT_ID = /^pr_[a-f0-9]{24}$/
-const ACTION_RE = /^[a-z_]{1,40}$/
-
-// { all: true }: the workspace's log. { all: false }: their own entries.
-// `accounts`: whose account events (sign-ins, passkeys, sessions: they belong
-// to a person, not to a workspace) this reader may see. "own" unless the
-// server's operator switched on `ownersSeeSignIns` and the reader is an
-// owner: then "members" (the people of this workspace, since each joined).
-export function activityViewer(role, userId, { ownersSeeSignIns = false } = {}) {
-  if (!role) return null
-  return { all: roleAtLeast(role, 'admin'), userId, accounts: ownersSeeSignIns && role === 'owner' ? 'members' : 'own' }
-}
-
-const instant = (value, name) => {
-  if (value === undefined || value === null || value === '') return null
-  const ms = typeof value === 'string' && value.length <= 40 ? Date.parse(value) : NaN
-  if (!Number.isFinite(ms)) throw new HttpError(400, 'invalid_date', `${name}: an ISO date and time.`)
-  return new Date(ms).toISOString()
-}
-const id = (value, pattern, name) => {
-  if (value === undefined || value === null || value === '') return null
-  if (typeof value !== 'string' || !pattern.test(value)) throw new HttpError(400, 'invalid_filter', `${name}: not a valid id.`)
-  return value
-}
-
-export function cleanActivityFilter(query = {}) {
-  const group = query.group === undefined || query.group === '' ? null : query.group
-  if (group !== null && !ACTION_GROUP_IDS.includes(group))
-    throw new HttpError(400, 'invalid_filter', `group: one of ${ACTION_GROUP_IDS.join(', ')}.`)
-  const action = query.action === undefined || query.action === '' ? null : query.action
-  if (action !== null && (typeof action !== 'string' || !ACTION_RE.test(action)))
-    throw new HttpError(400, 'invalid_action', 'action: an action name.')
-  const source = query.source === undefined || query.source === '' ? null : query.source
-  if (source !== null && !['person', 'token', 'guest', 'system'].includes(source))
-    throw new HttpError(400, 'invalid_filter', 'source: person, token, guest or system.')
-  return {
-    person: id(query.person, USER_ID, 'person'),
-    agent: id(query.agent, AGENT_ID, 'agent'),
-    project: id(query.project, PROJECT_ID, 'project'),
-    group,
-    action,
-    source,
-    sensitive: query.sensitive === '1' || query.sensitive === 'true',
-    from: instant(query.from, 'from'),
-    to: instant(query.to, 'to'),
-    q: typeof query.q === 'string' ? query.q.trim().toLowerCase().slice(0, 100) : '',
-  }
-}
 
 const quoted = (values) => values.map((value) => `'${value}'`).join(', ')
-// Settings whose audit entry says what changed: before and after, as text.
-function changeOf(action, detail) {
-  if (detail.from !== undefined && detail.to !== undefined && typeof detail.from !== 'object' && typeof detail.to !== 'object')
-    return { before: String(detail.from ?? ''), after: String(detail.to ?? '') }
-  if (detail.before !== undefined || detail.after !== undefined) {
-    const text = (value) =>
-      value === null || value === undefined
-        ? 'none'
-        : typeof value === 'object'
-          ? Object.keys(value).length === 1 && typeof Object.values(value)[0] !== 'object'
-            ? String(Object.values(value)[0] ?? 'none')
-            : Object.entries(value)
-                .map(([key, item]) => `${key}: ${Array.isArray(item) ? item.length : (item ?? 'none')}`)
-                .join(', ')
-          : String(value)
-    return { before: text(detail.beforeName ?? detail.before), after: text(detail.afterName ?? detail.after) }
-  }
-  if (action === 'share_links_enabled') return { before: 'off', after: 'on' }
-  if (action === 'share_links_disabled') return { before: 'on', after: 'off' }
-  if (action === 'project_made_public') return { before: 'private', after: 'public' }
-  if (action === 'project_made_private') return { before: 'public', after: 'private' }
-  return null
-}
-
 export function createActivity(t, { db, now = () => new Date() } = {}) {
   const iso = (offset = 0) => new Date(now().getTime() + offset).toISOString()
   let lookup = null
@@ -119,36 +48,8 @@ export function createActivity(t, { db, now = () => new Date() } = {}) {
   // An audit entry as the Activity page shows it: the audit view, plus its
   // group, where it came from, the agent and project it is about, and what
   // changed for a setting.
-  function entryView(row, { account = false } = {}) {
-    const entry = auditEntry({ token_id: null, share_id: null, ...row })
-    const detail = entry.detail
-    const agentId = [entry.target, detail.agent, detail.from].find((value) => typeof value === 'string' && AGENT_ID.test(value)) || null
-    const projectId =
-      [entry.target?.slice?.(0, 27), detail.project].find((value) => typeof value === 'string' && PROJECT_ID.test(value)) || null
-    return {
-      ...entry,
-      group: actionGroup(entry.action),
-      scope: account ? 'account' : 'workspace',
-      source: entry.actor.type === 'user' ? 'person' : entry.actor.type,
-      sensitive: SENSITIVE_ACTIONS.includes(entry.action),
-      device: typeof detail.device === 'string' ? detail.device : null,
-      agent: agentId ? { id: agentId, name: detail.agentName || detail.name || names().agent.get(agentId) || 'Removed agent' } : null,
-      project: projectId ? { id: projectId, name: names().project.get(projectId) || detail.project_name || 'Removed project' } : null,
-      change: changeOf(entry.action, detail),
-    }
-  }
-
-  // The actions a filter asks for (null: all of them).
-  function actionsOf(filter) {
-    let wanted = null
-    const narrow = (values) => {
-      wanted = wanted ? wanted.filter((item) => values.includes(item)) : [...values]
-    }
-    if (filter.group) narrow(ACTION_GROUPS[filter.group])
-    if (filter.action) narrow([filter.action])
-    if (filter.sensitive) narrow(SENSITIVE_ACTIONS)
-    return wanted
-  }
+  const entryView = (row, { account = false } = {}) =>
+    activityEntry(auditEntry({ token_id: null, share_id: null, ...row }), names, { account })
 
   // One page, newest first. `before`: the last entry id of the page before.
   function list(filter, viewer, { before = null, limit = ACTIVITY_LIMITS.page } = {}) {
@@ -160,7 +61,7 @@ export function createActivity(t, { db, now = () => new Date() } = {}) {
     const cursor = Number.isSafeInteger(Number(before)) && Number(before) > 0 ? Number(before) : Number.MAX_SAFE_INTEGER
     // Anyone but an admin reads their own entries, whatever the filter says.
     const person = viewer.all ? filter.person : viewer.userId
-    const wanted = actionsOf(filter)
+    const wanted = wantedActions(filter)
     const clauses = ['a.workspace_id = :ws', 'a.id < :before']
     const params = { before: cursor, limit: size + 1 }
     if (person) {
@@ -375,8 +276,7 @@ export function createActivity(t, { db, now = () => new Date() } = {}) {
   // agents (src/hosted/agents.js consoleList).
   function review({ agents = [] } = {}) {
     const at = iso()
-    const cutoff = iso(-ACTIVITY_LIMITS.staleDays * DAY)
-    const stale = (lastUsed, created) => (lastUsed ? lastUsed < cutoff : Boolean(created) && created < cutoff)
+    const stale = staleSince(at)
     const people = t
       .all(
         `SELECT m.user_id, m.role, m.created_at, m.last_active_at, u.handle, u.display_name FROM memberships m JOIN users u ON u.id = m.user_id
@@ -472,104 +372,4 @@ export function createActivity(t, { db, now = () => new Date() } = {}) {
   }
 
   return { list, all, filters, person, review, entryView }
-}
-
-// ---- CSV ----
-
-const who = (person) => (person ? `${person.displayName || 'Former member'}${person.handle ? ` (@${person.handle})` : ''}` : '')
-// The access review as one CSV: a row per person, token, agent, share link
-// and open invite.
-export function reviewCsv(data) {
-  const lines = [['type', 'name', 'reaches', 'access', 'made_by', 'made_at', 'last_used', 'expires', 'stale', 'id']]
-  for (const item of data.people)
-    lines.push([
-      'person',
-      who(item),
-      item.reaches,
-      item.role,
-      '',
-      item.joinedAt,
-      item.lastActiveAt,
-      '',
-      item.stale ? 'yes' : '',
-      item.userId,
-    ])
-  for (const item of data.tokens)
-    lines.push([
-      'token',
-      item.name,
-      item.projectName,
-      `${item.scopes.join(' ')}${item.status === 'inactive' ? ' (inactive)' : ''}`,
-      who(item.createdBy),
-      item.createdAt,
-      item.lastUsedAt,
-      item.expiresAt,
-      item.stale ? 'yes' : '',
-      item.id,
-    ])
-  for (const item of data.agents)
-    lines.push([
-      'agent',
-      `${item.name}${item.machine ? ` (${item.machine})` : ''}`,
-      item.projectName,
-      `audience: ${item.audienceLabel || item.audience || ''}; approvals: ${item.approvalRule}`,
-      who(item.createdBy),
-      item.createdAt,
-      item.lastSeenAt,
-      '',
-      item.stale ? 'yes' : '',
-      item.id,
-    ])
-  for (const item of data.shares)
-    lines.push([
-      'share link',
-      item.name,
-      item.projectName,
-      `${item.mode}${item.passcode ? ' (passcode)' : ''}`,
-      who(item.createdBy),
-      item.createdAt,
-      item.lastUsedAt,
-      item.expiresAt,
-      item.stale ? 'yes' : '',
-      item.id,
-    ])
-  for (const item of data.publicProjects)
-    lines.push(['public project', item.name, item.name, 'anyone with the address', '', item.publicAt, '', '', '', item.id])
-  for (const item of data.invites)
-    lines.push([
-      'open invite',
-      item.note || '',
-      'Every project',
-      item.role,
-      who(item.createdBy),
-      item.createdAt,
-      '',
-      item.expiresAt,
-      '',
-      item.id,
-    ])
-  return `${lines.map((line) => line.map(csvCell).join(',')).join('\r\n')}\r\n`
-}
-export function activityCsv(entries) {
-  const lines = [
-    ['time', 'who', 'handle', 'source', 'action', 'group', 'target', 'agent', 'project', 'before', 'after', 'address', 'device', 'detail'],
-  ]
-  for (const entry of entries)
-    lines.push([
-      entry.at,
-      entry.actor.label,
-      entry.actor.handle || '',
-      entry.source,
-      entry.action,
-      entry.group,
-      entry.targetLabel || entry.target || '',
-      entry.agent?.name || '',
-      entry.project?.name || '',
-      entry.change?.before ?? '',
-      entry.change?.after ?? '',
-      entry.ip || '',
-      entry.device || '',
-      JSON.stringify(entry.detail),
-    ])
-  return `${lines.map((line) => line.map(csvCell).join(',')).join('\r\n')}\r\n`
 }
