@@ -537,6 +537,66 @@ const MIGRATIONS = [
   CREATE INDEX agent_runs_person ON agent_runs(workspace_id, asked_by, started_at);
   CREATE INDEX agent_runs_claim ON agent_runs(workspace_id, claim_id);
   `,
+  // 13: connected agents and chat (0.5.0). `shapewall agent connect` holds a
+  // link to the server and members chat with the agent on the board. A
+  // thread belongs to a board ("board" and "comment-<n>" are shared, a
+  // "chat-..." is its starter's own) and names the agent it talks to. Its
+  // messages are stored here (the person's text, the agent's answer with its
+  // cards in their final state); a turn is one question on its way through
+  // an agent, whose live events stay in memory. A device login remembers
+  // what the machine said it runs (meta), for the approval page.
+  `
+  ALTER TABLE device_logins ADD COLUMN meta TEXT;
+  CREATE TABLE chat_threads (
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    board_id TEXT NOT NULL,
+    thread_id TEXT NOT NULL,
+    agent_id TEXT,
+    owner_user_id TEXT,
+    title TEXT,
+    title_source TEXT,
+    archived INTEGER NOT NULL DEFAULT 0,
+    created_by TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (workspace_id, project_id, board_id, thread_id)
+  );
+  CREATE TABLE chat_messages (
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    board_id TEXT NOT NULL,
+    thread_id TEXT NOT NULL,
+    id TEXT PRIMARY KEY,
+    role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+    author_user_id TEXT,
+    agent_id TEXT,
+    turn_id TEXT,
+    body TEXT NOT NULL,
+    bytes INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX chat_messages_thread ON chat_messages(workspace_id, project_id, board_id, thread_id, created_at);
+  CREATE TABLE chat_turns (
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    id TEXT PRIMARY KEY,
+    board_id TEXT NOT NULL,
+    thread_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'chat',
+    state TEXT NOT NULL DEFAULT 'queued',
+    acked_seq INTEGER NOT NULL DEFAULT 0,
+    started_by TEXT,
+    user_message_id TEXT,
+    run_id TEXT,
+    comment_number INTEGER,
+    created_at TEXT NOT NULL,
+    ended_at TEXT
+  );
+  CREATE INDEX chat_turns_thread ON chat_turns(workspace_id, project_id, board_id, thread_id, created_at);
+  CREATE INDEX chat_turns_agent ON chat_turns(workspace_id, agent_id, state);
+  `,
 ]
 
 export async function openDatabase(file) {

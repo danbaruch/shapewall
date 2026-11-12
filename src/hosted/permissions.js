@@ -83,9 +83,11 @@ export const canChangeApprovalRule = (role, agent) => canManageAgents(role) && r
 export const canChangeApprovalRoles = (role) => role === 'owner'
 export const canAnswerApproval = (role, agent) => roleAtLeast(role, agent?.approvalAnswerRole || 'admin')
 // Automatic approval needs the agent's own machine to have opted in to
-// approvals from the board. No agent can say so yet (that arrives with
-// `shapewall agent connect`), so "always ask" is the only rule in effect.
-export const approvalAutoAvailable = () => false
+// approvals from the board (`agent.machineApprovals`, what a connected agent
+// reported: "none", "owner" or "admins"). A connected agent reads and
+// answers only for now and always reports "none", so "always ask" is the
+// only rule in effect.
+export const approvalAutoAvailable = (agent) => ['owner', 'admins'].includes(agent?.machineApprovals)
 export const effectiveApprovalRule = (agent) => (agent?.approvalRule === 'auto' && approvalAutoAvailable(agent) ? 'auto' : 'ask')
 
 // Roles: admins manage members and viewers (and may make admins); only

@@ -16,6 +16,11 @@
 // - The client side Shapewall offers: text files inside the project root only
 //   (src/agent/acp/sandbox.js), and terminals where every command needs the
 //   person's approval in the panel. Nothing else.
+// - Read only (`readOnly`, what `shapewall agent connect` runs for a hosted
+//   board): no writes and no terminals are offered, every request for
+//   permission is refused on the spot with a note in the answer, and a
+//   session whose mode acts without asking is switched to one that asks, or
+//   not started at all. Nobody is asked: there is nobody at this machine.
 
 import fs from 'node:fs'
 import os from 'node:os'
@@ -47,6 +52,73 @@ export const ACP_DEFAULTS = {
   runMs: 20 * 60 * 1000,
   terminalsMax: 4,
   terminalBytesMax: 1024 * 1024,
+}
+
+// What a read-only agent is told, and what its answer shows, when it asks
+// to change a file or run a command.
+export const READ_ONLY_REFUSAL = 'Refused: this agent reads and answers only. It cannot change files or run commands from a hosted board.'
+
+// The same on the refused request's card, in a few words.
+export const READ_ONLY_NOTE = 'Refused: read and answer only'
+
+// ---- Read only, by the agent's own controls ---------------------------------
+// Refusing what an agent asks for is not enough: a tool it is set up to run
+// without asking never asks. So each known agent is also started in a way
+// that makes its own sandbox refuse edits and commands, and that leaves the
+// person's allow rules out. What each adapter takes was read from its source
+// (docs/agent-hardening.md says which agents were proven this way).
+
+// The session modes a known agent may run in, read only: modes known to ask
+// before acting, or enforced read-only by the agent itself.
+export const READ_ONLY_MODES = {
+  claude: ['default', 'plan'],
+  codex: ['read-only'],
+  goose: ['chat'],
+}
+// Claude Code's tools that only read. Everything else is removed from the
+// session, so no allow rule and no mode can run it.
+const CLAUDE_READ_TOOLS = ['Read', 'Grep', 'Glob']
+const CLAUDE_ACTING_TOOLS = [
+  'Bash',
+  'BashOutput',
+  'KillShell',
+  'Edit',
+  'MultiEdit',
+  'Write',
+  'NotebookEdit',
+  'Agent',
+  'Task',
+  'WebFetch',
+  'WebSearch',
+  'Skill',
+]
+// What goes with session/new.
+export function readOnlySession(kind) {
+  if (kind !== 'claude') return {}
+  return {
+    _meta: {
+      claudeCode: {
+        options: {
+          // No settings files: the person's and the project's allow rules,
+          // hooks and plugins do not apply to this session.
+          settingSources: [],
+          // No MCP servers from .mcp.json, settings or plugins.
+          strictMcpConfig: true,
+          tools: CLAUDE_READ_TOOLS,
+          disallowedTools: CLAUDE_ACTING_TOOLS,
+          allowDangerouslySkipPermissions: false,
+        },
+      },
+    },
+  }
+}
+// What goes in the agent's environment.
+export function readOnlyEnv(kind) {
+  // Codex: its read-only sandbox (no writes, no network), with approvals on request.
+  if (kind === 'codex') return { INITIAL_AGENT_MODE: 'read-only' }
+  // goose: chat only, no tool calls, whatever GOOSE_MODE the person set.
+  if (kind === 'goose') return { GOOSE_MODE: 'chat' }
+  return {}
 }
 
 const STDERR_KEEP = 4000
@@ -431,11 +503,11 @@ export function authError(label, argv) {
 
 // What the person's turn looks like to the agent: on a new session, the
 // preamble and the thread so far (as quoted data); then the new message.
-export function promptBlocks({ messages, fresh, image, thread }) {
+export function promptBlocks({ messages, fresh, image, thread, preamble = null }) {
   const blocks = []
   const last = messages.at(-1)
   if (fresh) {
-    blocks.push({ type: 'text', text: ACP_PREAMBLE })
+    blocks.push({ type: 'text', text: preamble || ACP_PREAMBLE })
     const earlier = messages
       .slice(0, -1)
       .map((message) => ({
@@ -493,11 +565,25 @@ function shownPath(root, file) {
 
 // One agent process and its ACP session (one chat thread).
 class AcpProcess {
-  constructor({ argv, label, env, sandbox, limits, log, thread, onGone, mcpServers = [], extraEnv = {} }) {
-    Object.assign(this, { argv, label, sandbox, limits, log, thread, onGone, mcpServers })
+  constructor({
+    argv,
+    label,
+    env,
+    sandbox,
+    limits,
+    log,
+    thread,
+    onGone,
+    mcpServers = [],
+    extraEnv = {},
+    readOnly = false,
+    preamble = null,
+  }) {
+    Object.assign(this, { argv, label, sandbox, limits, log, thread, onGone, mcpServers, readOnly, preamble })
     // `extraEnv`: set by Shapewall itself, never by the agent (branch mode's
     // GIT_CEILING_DIRECTORIES), for the agent and the terminals it runs.
-    this.env = { ...agentEnv(env), ...extraEnv }
+    // Read only: the variables that put the agent's own sandbox in force win over the person's.
+    this.env = { ...agentEnv(env), ...extraEnv, ...(readOnly ? readOnlyEnv(acpAgentKind(argv)) : {}) }
     this.root = sandbox.root
     this.state = 'starting'
     this.stderr = ''
@@ -576,13 +662,19 @@ class AcpProcess {
     try {
       const init = await this.connection.agent.request('initialize', {
         protocolVersion: PROTOCOL_VERSION,
-        clientCapabilities: { fs: { readTextFile: true, writeTextFile: true }, terminal: true },
+        // Read only: the agent is offered no way to write or run through Shapewall.
+        clientCapabilities: { fs: { readTextFile: true, writeTextFile: !this.readOnly }, terminal: !this.readOnly },
         clientInfo: { name: 'shapewall', title: 'Shapewall', version: VERSION },
       })
       this.agentInfo = init?.agentInfo || null
       this.image = Boolean(init?.agentCapabilities?.promptCapabilities?.image)
       this.authMethods = Array.isArray(init?.authMethods) ? init.authMethods : []
-      const session = await this.connection.agent.request('session/new', { cwd: this.root, mcpServers: this.mcpServers })
+      const session = await this.connection.agent.request('session/new', {
+        cwd: this.root,
+        mcpServers: this.mcpServers,
+        // Read only: the agent's own controls are set so that it cannot act (readOnlySession).
+        ...(this.readOnly ? readOnlySession(acpAgentKind(this.argv)) : {}),
+      })
       this.sessionId = session.sessionId
       this.choices = sessionChoices(session)
       this.configOptions = Array.isArray(session.configOptions) ? session.configOptions : []
@@ -590,6 +682,7 @@ class AcpProcess {
       // As the session started, before any chat's choices: what a new chat starts from.
       this.startOptions = sessionOptions(this.configOptions, this.modes)
       this.state = 'ready'
+      if (this.readOnly) await this.askingMode()
     } catch (error) {
       throw this.startError(error)
     } finally {
@@ -605,6 +698,8 @@ class AcpProcess {
       return new AgentError('agent_start', `${this.label} did not answer within ${Math.round(this.limits.startMs / 1000)} seconds.`)
     }
     this.kill('start_failed')
+    // Read only, and the agent's mode cannot be trusted to ask: said as it is.
+    if (error instanceof AgentError && error.code === 'agent_unsafe_mode') return error
     if (authFailure(error)) return this.authError()
     if (this.exited) return this.exitError()
     return new AgentError('agent_start', `${this.label} did not start an ACP session (${cut(errorText(error) || 'no answer', 300)}).`)
@@ -773,6 +868,102 @@ class AcpProcess {
     turn.killTimer.unref?.()
   }
 
+  // Read only: the session's mode, when it has one, must be one that asks
+  // before it acts (the requests are then refused here). A session set to
+  // act without asking (bypass, accept edits, auto, ...) is switched to the
+  // first mode that asks; if there is none, it does not start.
+  // The session's mode as the agent reports it: { id, current, values }, or
+  // null when it reports none (neither a "mode" config option nor modes).
+  modeState() {
+    const config = this.configOptions.find((option) => option?.category === 'mode' && typeof option.currentValue === 'string')
+    const current = config ? config.currentValue : this.modes?.currentModeId
+    if (typeof current !== 'string') return null
+    const values = config
+      ? optionValues(config.options)
+      : optionValues((this.modes?.availableModes || []).map((item) => ({ value: item?.id, name: item?.name })))
+    return { id: config ? config.id : MODE_OPTION_ID, current, values }
+  }
+  // Read only: is this mode one a connected agent may run in? A known
+  // agent: exactly the modes known to ask (or to be read-only by the
+  // agent's own sandbox). Any other: a mode whose name does not say it acts
+  // without asking.
+  modeAllowed(item) {
+    const wanted = READ_ONLY_MODES[acpAgentKind(this.argv)]
+    return wanted ? wanted.includes(item.value) : !UNSAFE_VALUE_RE.test(`${item.value} ${item.name}`)
+  }
+  // The mode when it is not allowed (see modeAllowed), else null.
+  unsafeMode() {
+    const state = this.modeState()
+    if (!state) return null
+    const name = state.values.find((item) => item.value === state.current)?.name || state.current
+    return this.modeAllowed({ value: state.current, name }) ? null : state
+  }
+  // Read only, fail closed: the session must report a mode, and it must be
+  // one that asks. Anything else is switched to one, or the agent does not
+  // start. Nothing is assumed about an agent that says nothing.
+  async askingMode() {
+    if (!this.modeState())
+      throw new AgentError(
+        'agent_unsafe_mode',
+        `${this.label} reports no session mode, so Shapewall cannot tell that it asks before it acts. It is not started read-only.`,
+      )
+    const unsafe = this.unsafeMode()
+    if (!unsafe) return
+    const safe = unsafe.values.filter((item) => this.modeAllowed(item))
+    const wanted = READ_ONLY_MODES[acpAgentKind(this.argv)] || []
+    // The agent's own asking mode first; never "plan" by choice: a planning
+    // mode answers with a plan to approve, not an answer.
+    const pick =
+      wanted.map((value) => safe.find((item) => item.value === value)).find(Boolean) ||
+      safe.find((item) => /^(default|ask)$/i.test(item.value)) ||
+      safe.find((item) => !/plan/i.test(item.value)) ||
+      safe[0]
+    const refuse = () =>
+      new AgentError(
+        'agent_unsafe_mode',
+        `${this.label} is set to act without asking on this machine (mode "${cut(unsafe.current, 40)}"), and could not be switched to a mode that asks. A connected agent reads and answers only: it is not started.`,
+      )
+    if (!pick) throw refuse()
+    try {
+      if (unsafe.id === MODE_OPTION_ID) {
+        await this.connection.agent.request('session/set_mode', { sessionId: this.sessionId, modeId: pick.value })
+        this.modes = { ...this.modes, currentModeId: pick.value }
+      } else {
+        const result = await this.connection.agent.request('session/set_config_option', {
+          sessionId: this.sessionId,
+          configId: unsafe.id,
+          value: pick.value,
+        })
+        if (Array.isArray(result?.configOptions)) this.configOptions = result.configOptions
+        else this.configOptions = this.configOptions.map((item) => (item.id === unsafe.id ? { ...item, currentValue: pick.value } : item))
+      }
+    } catch {
+      throw refuse()
+    }
+    if (this.unsafeMode()) throw refuse()
+    this.log(`acp: ${this.label} switched from mode "${cut(unsafe.current, 40)}" to "${cut(pick.value, 40)}" (read only)`)
+  }
+
+  // Read only: what the agent asked for is refused here, and the answer
+  // says so (a card nobody can answer). Returns the card's state.
+  refuse({ title, kind, detail = null }) {
+    const turn = this.turn
+    if (turn && !turn.cancelled)
+      turn.queue.push({
+        type: 'permission',
+        id: `perm_${randomBytes(6).toString('hex')}`,
+        title: cut(title, 120),
+        kind,
+        detail: `${detail ? `${cut(detail, 300)}\n` : ''}[${READ_ONLY_NOTE}]`,
+        diff: null,
+        options: [],
+        expiresAt: null,
+        state: 'denied',
+        chosen: null,
+      })
+    return 'denied'
+  }
+
   // The composer's option menus, as sessionOptions lists them.
   options() {
     return sessionOptions(this.configOptions, this.modes)
@@ -840,11 +1031,14 @@ class AcpProcess {
     if (params?.sessionId === this.sessionId && params.update?.sessionUpdate === 'config_option_update') {
       // The agent changed its own model or effort (or confirmed ours): the composer shows it.
       if (Array.isArray(params.update.configOptions)) this.configOptions = params.update.configOptions
+      if (this.readOnly && this.unsafeMode()) this.kill('unsafe_mode')
       return
     }
     if (params?.sessionId === this.sessionId && params.update?.sessionUpdate === 'current_mode_update') {
       if (this.modes && typeof params.update.currentModeId === 'string')
         this.modes = { ...this.modes, currentModeId: params.update.currentModeId }
+      // Read only: an agent that switches itself to a mode that acts without asking stops.
+      if (this.readOnly && this.unsafeMode()) this.kill('unsafe_mode')
       return
     }
     const turn = this.turn
@@ -979,6 +1173,13 @@ class AcpProcess {
     if (detail && target && outsideProject(this.root, target)) {
       detail = `${detail}\n[Outside the project: ${showable(path.resolve(this.root, target))}]`
     }
+    // Read only: refused here, whatever it is. The agent hears its own
+    // "reject" option (or a cancel) and goes on answering.
+    if (this.readOnly) {
+      this.refuse({ title: call.title || known.title || 'Use a tool', kind: call.kind || known.kind || 'other', detail })
+      const reject = options.find((item) => item.kind === 'reject_once') || options.find((item) => item.kind === 'reject_always')
+      return reject ? { outcome: { outcome: 'selected', optionId: reject.optionId } } : { outcome: { outcome: 'cancelled' } }
+    }
     const { state, option } = await this.ask(
       {
         title: call.title || known.title || 'Use a tool',
@@ -1065,6 +1266,10 @@ class AcpProcess {
 
   async onWrite(params, signal) {
     this.ownSession(params)
+    if (this.readOnly) {
+      this.refuse({ title: 'Write a file', kind: 'edit', detail: showable(relativeTo(this.root, String(params?.path || ''))) })
+      throw new RequestError(-32000, READ_ONLY_REFUSAL)
+    }
     const turn = this.turn
     let target
     try {
@@ -1116,6 +1321,14 @@ class AcpProcess {
 
   async onTerminalCreate(params, signal) {
     this.ownSession(params)
+    if (this.readOnly) {
+      this.refuse({
+        title: 'Run a command',
+        kind: 'execute',
+        detail: showable(formatCommand([String(params?.command || ''), ...(Array.isArray(params?.args) ? params.args.map(String) : [])])),
+      })
+      throw new RequestError(-32000, READ_ONLY_REFUSAL)
+    }
     const turn = this.turn
     if (this.terminals.size >= this.limits.terminalsMax) throw new RequestError(-32000, 'Too many terminals are open; release one first.')
     const command = typeof params.command === 'string' ? params.command : ''
@@ -1311,6 +1524,8 @@ export function createAcpBackend(
       limits: limit,
       log,
       thread,
+      // Read only (settings.readOnly, `shapewall agent connect`): see the top of this file.
+      readOnly: settings.readOnly === true,
       mcpServers: mcpServersFor?.(thread) || [],
       onGone: (item) => {
         if (item.stopped || !item.pid) processPool?.agents.delete(item)
@@ -1390,7 +1605,7 @@ export function createAcpBackend(
       yield { type: 'status', text: `${settings.label} is working` }
       const image = agent.image && settings.vision !== false
       if (!image && messages.at(-1)?.content?.some((part) => part.type === 'image')) yield { type: 'notice', text: NO_IMAGES_NOTE }
-      const turn = agent.prompt(promptBlocks({ messages, fresh: agent.fresh, image, thread }), signal)
+      const turn = agent.prompt(promptBlocks({ messages, fresh: agent.fresh, image, thread, preamble: settings.preamble || null }), signal)
       try {
         for await (const event of turn.events) yield event
       } catch (error) {

@@ -56,6 +56,8 @@ The hosted server never captures a page and never edits code. Those happen on a 
   shapewall capture   ->  shapewall push  ->     stores the board, shows it to everyone
   agent fixes the code  <-  shapewall watch  <-  a comment someone left
   recapture, push, reply  ->                     the thread shows the fix
+  agent reads the code  <-  shapewall agent connect  <-  a question in the board's chat
+  the answer, as it is written  ->               everyone with the thread open sees it
 ```
 
 1. **Sign the machine in once.** `shapewall login --remote https://your-server` shows a code; approve it in the console and choose the
@@ -67,7 +69,14 @@ The hosted server never captures a page and never edits code. Those happen on a 
    code; a wrapper around it recaptures, pushes and replies. [Agent recipes](agent-recipes.md) has commands for Claude Code, Codex and
    goose.
 
-Each machine that watches is an **agent** of the project, with a name. The board lists them in its Agent panel ("Builder: online",
+4. **Chat with your coding agent on the board (optional).** `shapewall agent connect --remote https://your-server`, run in the
+   project's folder, connects that machine's Claude Code. An admin approves it in the console (a name, an icon, who may use it),
+   and members then ask it questions from the board's Agents panel. It reads the project and answers; it does not change files or
+   run commands from the board, so fixes stay with `watch`. Codex, goose and Gemini CLI are not offered by `agent connect` in this
+   release: for them, `watch` is the way. Leave it running, or run it as a service.
+   [Connected agents](hosted.md#connected-agents) has the details.
+
+Each machine that watches or connects is an **agent** of the project, with a name. The board lists them in its Agent panel ("Builder: online",
 "Fixer: offline, last seen 2 hours ago") and **Send to agent** on a comment names the one it goes to: the project's default agent on
 the button, the others and **Any agent** in its menu. In the console, **Agents** is where an admin names each one, gives it an icon,
 picks the default and says who may send it work: a new agent only takes comments from the person who connected it, until they share
@@ -75,7 +84,8 @@ it with named members or with everyone the project trusts. [Agents on a hosted b
 whole of it.
 
 While a watching machine is off, comments still save on the server and wait: a comment sent to that agent says "Waiting for Builder
-(offline ...)" with **Let any agent take it**. Nothing is lost; nothing is fixed until an agent is back.
+(offline ...)" with **Let any agent take it**. Nothing is lost; nothing is fixed until an agent is back. Chat does not wait: a
+connected agent that is offline says so, and takes no message until it is back.
 
 ### One machine, several projects
 
@@ -84,6 +94,10 @@ in the console, keep it in a file only you can read, and pass it: `--token-file 
 `SHAPEWALL_TOKEN`). A watcher that runs as a service should use a token file of its own, so a later `login` cannot change what it
 talks to. Each token is its own agent on its project's board, so one machine can be "Builder" in one project and "Docs bot" in
 another; the workspace's **Agents** page lists them all.
+
+`shapewall agent connect` keeps a token of its own for each server, apart from the login, and serves the project whose folder it
+runs in. For a second project on the same server, run it in that project's folder with `--as NAME` (its own approval, its own token).
+One process holds an agent's link: a second `agent connect` on the same token is refused, unless it is started with `--takeover`.
 
 ## Which one should I start with?
 

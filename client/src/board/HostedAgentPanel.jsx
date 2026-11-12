@@ -1,14 +1,17 @@
 // Hosted boards: the Agent panel in the side rail (a sheet on a phone). A
-// hosted server runs no agent itself and has no chat: each machine that runs
-// `shapewall watch --remote` with a project token that may take work is an
-// agent of the project (src/hosted/agents.js). This panel lists them: face,
+// hosted server runs no agent itself: each machine that runs `shapewall
+// agent connect` (an agent members can chat with, read and answer only) or
+// `shapewall watch --remote` (one that takes comments) with its own project
+// token is an agent of the project (src/hosted/agents.js). This panel lists them: face,
 // name, machine, state, what each is working on and what waits for it, and
 // who may send it work. Below: what waits for a person. Only for people who
 // can send comments to an agent (never a share link guest or a public
 // viewer).
-import { Bot, Settings2 } from 'lucide-react'
+import { Bot, MessageSquare, Settings2 } from 'lucide-react'
+import { Button } from '../components/ui'
 import { PanelHeader } from '../components/panel-header'
 import { AgentMark } from '../chat/AgentPicker'
+import { useState } from 'react'
 import { cn, formatRelative } from '../lib/utils'
 import { STATE_MARK, stateWords } from './hostedAgents'
 
@@ -61,8 +64,11 @@ function Chips({ label, ids, nameOf, onOpen, hook, tone }) {
   )
 }
 
-function AgentRow({ agent, nameOf, onOpen }) {
+function AgentRow({ agent, nameOf, onOpen, onChat }) {
   const waiting = agent.state === 'offline' && agent.queued.length > 0
+  // Connected with `shapewall agent connect`: it chats.
+  const chats = Boolean(onChat && agent.link?.connected && agent.link.chats)
+  const [opening, setOpening] = useState(false)
   const elsewhere = (agent.elsewhere?.working || 0) + (agent.elsewhere?.queued || 0)
   return (
     <li
@@ -97,7 +103,37 @@ function AgentRow({ agent, nameOf, onOpen }) {
             {agent.machine ? ` · ${agent.machine}` : ''}
           </p>
         </div>
+        {chats ? (
+          <Button
+            size="sm"
+            variant={agent.chat?.ok ? 'default' : 'secondary'}
+            className="min-h-11 shrink-0 lg:min-h-8"
+            disabled={!agent.chat?.ok || opening}
+            onClick={async () => {
+              setOpening(true)
+              try {
+                await onChat(agent)
+              } finally {
+                setOpening(false)
+              }
+            }}
+            aria-label={`Chat with ${agent.name}`}
+            data-sw-hosted-agent-chat={agent.id}
+          >
+            <MessageSquare size={14} aria-hidden="true" /> Chat
+          </Button>
+        ) : null}
       </div>
+      {/* Not theirs to use: the line about who it takes work from says so, once. */}
+      {chats && (agent.chat?.ok || agent.canSend) ? (
+        <p className="text-[11px] text-muted" data-sw-hosted-agent-chat-note={agent.chat?.ok ? 'ok' : agent.chat?.code || 'no'}>
+          {agent.chat?.ok
+            ? 'Reads the project and answers. No edits, no commands.'
+            : agent.chat?.code === 'agent_offline'
+              ? `${agent.name} is offline: chat needs it online. A comment sent to it waits.`
+              : agent.chat?.reason}
+        </p>
+      ) : null}
       <Chips
         label="Working on"
         ids={agent.working}
@@ -120,7 +156,11 @@ function AgentRow({ agent, nameOf, onOpen }) {
         </p>
       ) : null}
       <p className="text-[11px] text-muted" data-sw-hosted-agent-audience={agent.audience.kind}>
-        {agent.canSend ? `Takes work from: ${lowerFirst(agent.audience.text)}.` : agent.reason}
+        {agent.canSend
+          ? `Takes work from: ${lowerFirst(agent.audience.text)}.`
+          : chats
+            ? String(agent.reason || '').replace('can send work to', 'can use')
+            : agent.reason}
         {agent.canSend && agent.audience.inherited ? ' (As before 0.4.0.)' : ''}
       </p>
     </li>
@@ -143,6 +183,12 @@ export function HostedAgentPanel({
   onOpenComment,
   onClose,
   heading = true,
+  // Chat with a connected agent: (agent) => opens a chat of this person's
+  // own; onBoardChat opens the board's shared chat. null: no chat here.
+  onChat = null,
+  onBoardChat = null,
+  // An admin sees the command that connects an agent.
+  admin = false,
 }) {
   const list = agents?.agents || []
   const known = Boolean(agents)
@@ -185,9 +231,19 @@ export function HostedAgentPanel({
             {online ? null : <p className="text-xs text-muted">Comments sent to an agent wait until it is back. Nothing is lost.</p>}
             <ul className="space-y-1.5" data-sw-hosted-agent-rows>
               {list.map((agent) => (
-                <AgentRow key={agent.id} agent={agent} nameOf={nameOf} onOpen={onOpenComment} />
+                <AgentRow key={agent.id} agent={agent} nameOf={nameOf} onOpen={onOpenComment} onChat={onChat} />
               ))}
             </ul>
+            {onBoardChat && list.some((agent) => agent.link?.connected && agent.link.chats) ? (
+              <button
+                type="button"
+                onClick={onBoardChat}
+                className="inline-flex min-h-11 items-center gap-1.5 text-xs font-medium text-accent underline-offset-2 outline-none hover:underline focus-visible:outline-2 focus-visible:outline-accent lg:min-h-0"
+                data-sw-hosted-agent-board-chat="true"
+              >
+                <MessageSquare size={12} aria-hidden="true" /> Open the board chat (everyone in the workspace reads it)
+              </button>
+            ) : null}
           </section>
         ) : (
           <section
@@ -203,13 +259,35 @@ export function HostedAgentPanel({
               <p className="mt-1 text-xs text-muted">Last heard {formatRelative(listening.lastSeenAt)}.</p>
             ) : (
               <>
-                <p className="mt-1 text-xs text-muted">
-                  Comments sent to an agent wait until one connects. On the machine that has the code, with a project token that may take
-                  work, run:
-                </p>
-                <code className="mt-1.5 block rounded bg-surface px-2 py-1.5 font-mono text-xs break-all text-fg">
-                  shapewall watch --remote {origin}
-                </code>
+                {admin ? (
+                  <>
+                    <p className="mt-1 text-xs text-muted">
+                      Comments sent to an agent wait until one connects. To chat with your coding agent here, run this in the project's
+                      folder, on the machine that has the code:
+                    </p>
+                    <code
+                      className="mt-1.5 block rounded bg-surface px-2 py-1.5 font-mono text-xs break-all text-fg"
+                      data-sw-hosted-agent-command="connect"
+                    >
+                      shapewall agent connect --remote {origin}
+                    </code>
+                    <p className="mt-1.5 text-xs text-muted">
+                      It reads and answers only. For an agent that fixes the comments sent to it, with a project token that may take work,
+                      run:
+                    </p>
+                    <code
+                      className="mt-1.5 block rounded bg-surface px-2 py-1.5 font-mono text-xs break-all text-fg"
+                      data-sw-hosted-agent-command="watch"
+                    >
+                      shapewall watch --remote {origin}
+                    </code>
+                  </>
+                ) : (
+                  <p className="mt-1 text-xs text-muted">
+                    Comments sent to an agent wait until one connects. An admin of this workspace connects one from the machine that has the
+                    code.
+                  </p>
+                )}
                 <span className="mt-1.5 flex flex-wrap gap-x-3">
                   <a
                     href={DOCS_URL}

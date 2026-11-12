@@ -12,6 +12,7 @@ import { hostOf, isSending, queueOf, setAbort, setRun as storeRun, setSending, s
 import { FIX_PROMPT } from './messages'
 import { hideNextSteps } from '../../../src/agent/next-steps.js'
 import { MENTIONS_MAX, TEXT_FILES_MAX, mentionsForServer } from './composerModel.js'
+import { applyTurnEvent } from './turnEvents.js'
 
 export const commentOfThread = (threadId) => (/^comment-(\d+)$/.exec(threadId || '') ? Number(threadId.slice(8)) : null)
 
@@ -181,30 +182,12 @@ export function useChatTurn({
                 pending.reply.cards.some((card) => card.kind === 'permission' && card.state === 'pending') ? 'waiting' : 'working',
               ),
             )
-          const reply = pending.reply
-          if (name === 'text' || name === 'reasoning') {
-            pending = { ...pending, writing: name === 'text', reply: { ...reply, [name]: reply[name] + data.text } }
-            frame.queue()
-            return
-          }
-          if (name === 'user') {
-            accepted = true
-            pending = { ...pending, user: { ...data.message, attachments: pending.user.attachments } }
-          }
-          if (name === 'status') pending = { ...pending, status: data.text, writing: false }
-          if (name === 'usage') pending = { ...pending, reply: { ...reply, usage: data } }
-          if (name === 'tool') {
-            pending = { ...pending, writing: false }
-            const cards = reply.cards.some((card) => card.id === data.id)
-              ? reply.cards.map((card) => (card.id === data.id ? data : card))
-              : [...reply.cards, data]
-            pending = { ...pending, reply: { ...reply, cards } }
-          }
-          if (name === 'done') {
-            accepted = true
-            pending = { ...pending, final: data.message }
-          }
-          frame.now()
+          // What the event does to the turn on screen (turnEvents.js).
+          const result = applyTurnEvent(pending, name, data)
+          pending = result.pending
+          if (result.accepted) accepted = true
+          if (result.stream) frame.queue()
+          else frame.now()
         },
       })
       if (!pending.final) throw new Error('The response was interrupted. Try again.')

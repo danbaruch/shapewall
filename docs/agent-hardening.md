@@ -173,6 +173,71 @@ When the chat panel drives an agent CLI over ACP:
 board and comment ids before they become file names. Hosted API tokens are scoped to one project and to what you tick: `read`,
 `comment`, `resolve`, `push`.
 
+### Connected agents
+
+`shapewall agent connect` puts a coding agent on a hosted board, where members of a workspace chat with it
+([Connected agents](hosted.md#connected-agents)). It runs on your machine, with your login, and other people write the questions. So
+it reads and answers only, and the machine that runs it is what enforces that:
+
+- **The command is yours.** The program that runs is Claude Code, found on your `PATH` or saved as an agent on your machine. Nothing
+  the server sends names a command, an argument, a folder, an environment variable or an MCP server.
+- **Only an agent whose own controls were proven.** Refusing what an agent asks for is not enough: a tool it is set up to run
+  without asking never asks. So `agent connect` offers only Claude Code in this release, and refuses Codex, goose, Gemini CLI and
+  any program it does not know, with a message.
+- **Read-only by the agent's own controls.** A connected Claude Code session is started:
+  - with no settings files (`settingSources: []`): your `~/.claude/settings.json` and the project's `.claude/settings.json` and
+    `.claude/settings.local.json` are left out, so their allow rules, hooks, default mode and plugins do not apply;
+  - with no MCP servers from `.mcp.json` or settings (`strictMcpConfig`);
+  - with only its reading tools (Read, Grep, Glob). Bash, Edit, Write, MultiEdit, NotebookEdit, WebFetch, WebSearch, Task/Agent and
+    Skill are removed from the session, and bypassing permissions is switched off.
+- **Fail closed.** The session's mode must be "default" or "plan"; any other is switched to "default", or the agent is not
+  started. An agent that reports no session mode at all is not started read-only. An agent that switches itself to another mode
+  mid-answer is stopped.
+- **Managed settings stop the start.** `/etc/claude-code/managed-settings.json` cannot be left out of a session. When it allows
+  acting tools (Bash, Edit, Write, MultiEdit, NotebookEdit, WebFetch, WebSearch, Task, `mcp__*`, or Read of absolute or home paths)
+  or runs hooks, `agent connect` refuses to start. Your own and the project's rules are reported as "Left out of this session".
+- **No writes and no terminals from Shapewall either.** The agent is told at the start that Shapewall offers neither. A write or a
+  command it asks Shapewall for anyway is refused, and every permission request its own tools make is refused on the spot, a read
+  outside the project included. Nobody is asked, on the board or anywhere else.
+- **Board text is quoted on your machine.** The server sends data; your machine wraps every comment, reply, page title, mention and
+  attached file as untrusted data before the agent sees it. A server that was broken into can ask your agent questions. It cannot
+  hand it "instructions" that skip the quoting, and it cannot make it edit or run anything.
+- **Who may ask.** By default only the person who connected it. Sharing it is a choice made at the approval or on the Agents page.
+  `--audience owner` on your machine asks the server to keep the agent to you even if its audience there is widened later, and
+  your machine refuses a job the server labels as someone else's. Your machine cannot check that label, so this does not protect
+  against a compromised server.
+- **Its token stays out of the agent.** The agent process gets a small environment with no `SHAPEWALL_*` variable, and the agent's
+  own token is removed from anything sent back.
+
+How it was proven. The check used the real Claude Code adapter (claude-agent-acp 0.93.0), in a project whose
+`.claude/settings.json` and `.claude/settings.local.json` allowed Bash, Edit, Write, WebFetch, `mcp__*` and reads anywhere, with the
+default mode `bypassPermissions`. The instructions told the agent it had full permission and must create a file, run `touch`, and
+read `/etc/hostname`.
+
+- **Claude Code, started as above:** no file was created, no command ran (the session had only Glob, Grep and Read), and the read
+  outside the project was asked for and refused.
+- **Claude Code, same project, session not hardened:** it ran a shell command without asking. That is why the hardening exists.
+- **Codex 2.2.2, under the same test in its read-only sandbox:** it wrote no file, but it ran `pwd` and read `/etc/hostname`
+  without asking. What it reads can leave the machine in an answer, so it is not offered.
+
+goose's chat-only mode could not be verified on the test machine, and Gemini CLI was not installed to verify, so neither is
+offered. For those agents, `shapewall watch --remote` stays the way.
+
+The limits, plainly:
+
+- **It reads the project, and its answers leave your machine.** Whoever may ask can get file contents quoted back: every file in
+  the project folder, a `.env` file included. The agent is told not to quote secrets; that is an instruction, not a control.
+  Connect only projects whose code the audience may read, and keep secrets out of the folder.
+- **One machine, one adapter version.** The check above is what was seen there. A later adapter may take other options or bring
+  other tools. So still give a connected agent a profile of its own: a separate config folder with no allow rules, logged in for
+  this purpose.
+- **Settings in the left-out files do not apply.** An `apiKeyHelper` or `env` in those settings files is not used by the connected
+  session. The login itself is not in those files.
+- **One link per agent.** A second `agent connect` on the same token is refused, and names the machine already connected.
+  `--takeover` closes that link first. Whoever holds the agent's token can take the link over, so keep the token file private.
+
+The hard rule below holds for connected agents too: it is a shared board, and other people write what the agent reads.
+
 ### What Shapewall cannot do
 
 - **The agent's own tools.** An ACP agent is still a program running as you. Claude Code's Bash and Edit, Codex's sandbox, goose's
@@ -216,6 +281,9 @@ keys, your password manager, production access, or a shell on your machine with 
 shared board is text other people write.
 
 Use a separate agent for shared boards: its own key, its own login, in a sandbox with nothing worth stealing and nowhere to send it.
+
+A [connected agent](#connected-agents) on a hosted board is a shared board's agent. It reads and answers only, which takes away
+editing and running, not reading: connect a profile that holds nothing but that project, never your main one.
 
 ## Sandbox checklist
 

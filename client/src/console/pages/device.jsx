@@ -1,6 +1,10 @@
 // /device: approving a `shapewall login` from a terminal. You type the code
 // the terminal shows, pick the project the new token is for and what it may
 // do; the terminal picks up the token itself (it is never shown here).
+//
+// The same page approves `shapewall agent connect`: the terminal then says
+// which coding agent it will run, and the approver names the agent, picks
+// its icon, its project and who may use it. What its token may do is fixed.
 
 import { useState } from 'react'
 import { CheckCircle2, Terminal, XCircle } from 'lucide-react'
@@ -10,6 +14,8 @@ import { DEMO } from '../../lib/demo'
 import { api, serverOrigin } from '../lib/api'
 import { SCOPES, formatDateTime } from '../lib/format'
 import { Link } from '../lib/router'
+import { IconPicker, NameField, nameProblem } from '../../settings/AgentIdentity'
+import { logoForAgent } from '../../../../src/agent/agent-logos.js'
 import { useAction } from '../state'
 
 const EXPIRY = [
@@ -18,6 +24,13 @@ const EXPIRY = [
   ['never', 'No expiry', null],
 ]
 const CODE_RE = /^[A-Z]{4}-?[A-Z]{4}$/
+// What `shapewall agent connect` says it runs, in words.
+const AGENT_KIND = { claude: 'Claude Code', codex: 'Codex', goose: 'goose', gemini: 'Gemini CLI', custom: 'A coding agent' }
+// Who may use a new agent. The first is the default: least privilege.
+const AGENT_AUDIENCE = [
+  ['owner', 'Only me', 'You can share it later, on the Agents page.'],
+  ['trusted', "Everyone this project's agent policy trusts", 'The team case: whoever may send work to an agent here may use this one.'],
+]
 
 // How long ago the terminal started the login ("just now", "3 minutes ago").
 function ageLabel(seconds) {
@@ -36,6 +49,9 @@ export function DevicePage() {
   const [scopes, setScopes] = useState(['read', 'reply', 'status', 'resolve', 'push'])
   const [expiry, setExpiry] = useState('90')
   const [done, setDone] = useState(null) // { approved, workspace, project }
+  // An agent connection: how it will look and who may use it.
+  const [look, setLook] = useState({ name: '', icon: null, tint: null, png: null })
+  const [audience, setAudience] = useState('owner')
   // Approve was held back because the sign-in is not fresh, and the passkey
   // check that follows was closed: said on the page, so the button never
   // looks as if it did nothing.
@@ -49,12 +65,17 @@ export function DevicePage() {
       const data = await api.post('/api/device/lookup', { code })
       const first = data.workspaces.find((item) => item.projects.length) || data.workspaces[0]
       setFound(data)
+      setLook({ name: data.login.agent?.name || '', icon: null, tint: null, png: null })
+      setAudience('owner')
       setScopes((list) => list.filter((id) => id !== 'import'))
       setWorkspaceId(first?.id || '')
       setProjectId(first?.projects[0]?.id || '')
     })
   }
   const workspace = found?.workspaces.find((item) => item.id === workspaceId)
+  const agentLogin = found?.login.purpose === 'agent'
+  const agentKind = AGENT_KIND[found?.login.agent?.kind] || AGENT_KIND.custom
+  const lookProblem = agentLogin ? nameProblem(look.name) : null
   const pickWorkspace = (id) => {
     setWorkspaceId(id)
     setProjectId(found.workspaces.find((item) => item.id === id)?.projects[0]?.id || '')
@@ -68,7 +89,8 @@ export function DevicePage() {
           code,
           workspaceId,
           ...(projectId === '__create' ? { newProjectName } : { projectId }),
-          scopes,
+          // An agent's scopes are fixed by the server; its look and audience are chosen here.
+          ...(agentLogin ? { agent: { name: look.name.trim() || agentKind, icon: look.icon, tint: look.tint, audience } } : { scopes }),
           ...(days ? { expiresInDays: days } : {}),
         })
         setNeedsPasskey(false)
@@ -94,7 +116,14 @@ export function DevicePage() {
 
   return (
     <>
-      <PageHeader title="Sign in a terminal" description="Approve a shapewall login running on your computer." />
+      <PageHeader
+        title={agentLogin ? 'Connect an agent' : 'Sign in a terminal'}
+        description={
+          agentLogin
+            ? 'Approve a coding agent that a machine with your code wants to connect.'
+            : 'Approve a shapewall login, or an agent connection, running on your computer.'
+        }
+      />
       <Card className="max-w-xl p-5 sm:p-6" data-sw-device>
         {DEMO ? (
           <Notice tone="info" title="Not in the demo" data-sw-device-demo>
@@ -114,11 +143,21 @@ export function DevicePage() {
             </span>
             {done.approved ? (
               <>
-                <h2 className="text-lg font-semibold text-fg">Approved</h2>
-                <p className="text-sm text-muted">
-                  The terminal now has a token for {done.project.name} in {done.workspace.name}. Go back to it: it says when it is ready.
-                  You can revoke the token any time on the project's API tokens page.
-                </p>
+                <h2 className="text-lg font-semibold text-fg">
+                  {done.agent ? `${done.info?.name || 'The agent'} is connected` : 'Approved'}
+                </h2>
+                {done.agent ? (
+                  <p className="text-sm text-muted" data-sw-device-agent-done>
+                    It serves {done.project.name} in {done.workspace.name}, and shows as online on the board once the terminal says it is
+                    connected. It reads the project and answers; it does not change files or run commands. Rename it, change who may use it,
+                    or revoke it on the project's Agents page.
+                  </p>
+                ) : (
+                  <p className="text-sm text-muted">
+                    The terminal now has a token for {done.project.name} in {done.workspace.name}. Go back to it: it says when it is ready.
+                    You can revoke the token any time on the project's API tokens page.
+                  </p>
+                )}
               </>
             ) : (
               <>
@@ -129,7 +168,11 @@ export function DevicePage() {
             <div className="flex flex-wrap gap-2">
               {done.approved ? (
                 <Button asChild size="touch" variant="secondary" className="lg:h-10">
-                  <Link to={`/w/${done.workspace.id}/projects/${done.project.id}`}>Open {done.project.name}</Link>
+                  {done.agent ? (
+                    <Link to={`/w/${done.workspace.id}/agents/${done.project.id}`}>Agents of {done.project.name}</Link>
+                  ) : (
+                    <Link to={`/w/${done.workspace.id}/projects/${done.project.id}`}>Open {done.project.name}</Link>
+                  )}
                 </Button>
               ) : null}
               <Button size="touch" variant="ghost" onClick={restart} className="lg:h-10">
@@ -141,7 +184,9 @@ export function DevicePage() {
           <form onSubmit={find} className="space-y-4">
             <p className="flex items-start gap-2 text-sm text-muted">
               <Terminal size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
-              Run <code className="font-mono text-fg">shapewall login --remote {serverOrigin()}</code> and type the code it shows.
+              Run <code className="font-mono text-fg">shapewall agent connect --remote {serverOrigin()}</code> (to connect a coding agent)
+              or <code className="font-mono text-fg">shapewall login --remote {serverOrigin()}</code> (for a token), and type the code it
+              shows.
             </p>
             <Field label="Code from the terminal">
               {(props) => (
@@ -174,14 +219,22 @@ export function DevicePage() {
         ) : (
           <div className="space-y-5">
             <Notice tone="warn" title={`Code ${found.login.code}`}>
-              Approve only if you started this login yourself, just now, and the terminal shows the same code. It expires{' '}
-              {formatDateTime(found.login.expiresAt)}.
+              Approve only if you started this {agentLogin ? 'connection' : 'login'} yourself, just now, and the terminal shows the same
+              code. It expires {formatDateTime(found.login.expiresAt)}.
             </Notice>
             <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm" data-sw-device-details>
               <dt className="text-muted">Computer name</dt>
               <dd className="min-w-0 break-words text-fg">
                 {found.login.name} <span className="text-muted">(reported by the terminal, not checked)</span>
               </dd>
+              {agentLogin ? (
+                <>
+                  <dt className="text-muted">Runs</dt>
+                  <dd className="min-w-0 break-words text-fg" data-sw-device-agent-kind={found.login.agent?.kind || 'custom'}>
+                    {agentKind} <span className="text-muted">(reported by the terminal, not checked)</span>
+                  </dd>
+                </>
+              ) : null}
               <dt className="text-muted">Requested from</dt>
               <dd className="min-w-0 break-all font-mono text-fg" data-sw-device-ip>
                 {found.login.ip || 'unknown address'}
@@ -261,7 +314,56 @@ export function DevicePage() {
                     permission to import turns itself off when the move is done.
                   </Notice>
                 ) : null}
-                <fieldset>
+                {agentLogin ? (
+                  <div className="space-y-4" data-sw-device-agent>
+                    <NameField
+                      id="device-agent-name"
+                      value={look}
+                      onChange={setLook}
+                      builtIn={agentKind}
+                      touch
+                      problem={lookProblem}
+                      hint="What people call it on the board and in its replies. You can rename it later."
+                    />
+                    <IconPicker
+                      value={look}
+                      onChange={setLook}
+                      label={look.name || agentKind}
+                      logo={logoForAgent(found.login.agent?.kind)}
+                      upload={false}
+                    />
+                    <fieldset>
+                      <legend className="mb-1.5 block text-[13px] font-medium text-fg">Who may use it</legend>
+                      <div className="grid gap-2">
+                        {AGENT_AUDIENCE.map(([id, label, hint]) => (
+                          <label
+                            key={id}
+                            className="flex min-h-11 cursor-pointer items-start gap-2.5 rounded-lg border border-line bg-surface px-3 py-2 text-sm has-[:checked]:border-accent has-[:checked]:bg-accent/5"
+                          >
+                            <input
+                              type="radio"
+                              name="device-agent-audience"
+                              className="mt-1 accent-[var(--accent)]"
+                              checked={audience === id}
+                              onChange={() => setAudience(id)}
+                              data-sw-device-agent-audience={id}
+                            />
+                            <span>
+                              <span className="block font-medium text-fg">{label}</span>
+                              <span className="block text-xs text-muted">{hint}</span>
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                    </fieldset>
+                    <Notice tone="info" title="What a connected agent does">
+                      It reads the project on that machine and answers questions in the board's chat, and it reads and answers comments sent
+                      to it. It does not change files and runs no commands: that machine refuses both. Its token can read comments, reply,
+                      set agent statuses and take work; it cannot resolve comments or push.
+                    </Notice>
+                  </div>
+                ) : null}
+                <fieldset className={agentLogin ? 'hidden' : undefined}>
                   <legend className="mb-1.5 block text-[13px] font-medium text-fg">What the token can do</legend>
                   <div className="grid gap-2 sm:grid-cols-2">
                     {SCOPES.filter(([id]) => id !== 'import').map(([id, label, hint]) => (
@@ -318,11 +420,16 @@ export function DevicePage() {
                 size="touch"
                 variant="default"
                 onClick={approve}
-                disabled={decide.busy || !projectId || !scopes.length || (projectId === '__create' && !newProjectName.trim())}
+                disabled={
+                  decide.busy ||
+                  !projectId ||
+                  (agentLogin ? Boolean(lookProblem) : !scopes.length) ||
+                  (projectId === '__create' && !newProjectName.trim())
+                }
                 className="lg:h-10"
                 data-sw-device-approve
               >
-                {decide.busy ? <Spinner /> : null} Approve
+                {decide.busy ? <Spinner /> : null} {agentLogin ? 'Connect the agent' : 'Approve'}
               </Button>
             </div>
           </div>

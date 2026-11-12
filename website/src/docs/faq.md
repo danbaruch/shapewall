@@ -51,7 +51,9 @@ its own. Setups for each agent: [agent recipes](/docs/agent-recipes).
 ## Can my team use it together?
 
 Yes, on a server you run. The team server (beta), started with `shapewall hosted`, gives your team passkey sign-in, workspaces with
-roles, share links and shared boards. [The hosted guide](/docs/hosted) covers setup.
+roles, share links and shared boards. Teammates can also chat on the board with Claude Code, connected from the machine that
+has the code (`shapewall agent connect`): it reads the project and answers, and does not change files or run commands from the
+board. Other agents are not offered for chat in this release; they take comments through `shapewall watch --remote`. [The hosted guide](/docs/hosted) covers setup.
 
 ## What does it need to run?
 

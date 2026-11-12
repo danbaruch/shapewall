@@ -72,7 +72,13 @@ export function connectPresence({ boardId, canvasRef, flow, latest, sendRef, set
           update()
           send()
         } else if (value.type === 'count' && Number.isInteger(value.count) && value.count >= 0 && value.count <= 50) setCount(value.count)
-        else if (value.type === 'invalidate' && !countsOnly) {
+        else if (value.type === 'agents') {
+          // A hosted board: a shared chat thread got a turn or an answer, or an
+          // agent came or went. Ids only; whoever shows them refetches.
+          window.dispatchEvent(
+            new CustomEvent('shapewall:hosted-agents', { detail: typeof value.thread === 'string' ? { thread: value.thread } : {} }),
+          )
+        } else if (value.type === 'invalidate' && !countsOnly) {
           if (!invalidate)
             invalidate = window.setTimeout(() => {
               invalidate = null

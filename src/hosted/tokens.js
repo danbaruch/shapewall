@@ -6,7 +6,11 @@ import { expandScopes } from './agent-policy.js'
 import { newApiToken, newId } from './crypto.js'
 import { HttpError, cleanName } from './http.js'
 
-export const TOKEN_SCOPES = ['read', 'reply', 'status', 'claim', 'resolve', 'push', 'import']
+// "agent": may hold the link of a connected agent (`shapewall agent connect`,
+// src/hosted/agent-link.js). It opens the link routes only, and is granted
+// only by approving an agent connection (or by an admin, on purpose, for a
+// service's token); "claim" alone still means "may take dispatched comments".
+export const TOKEN_SCOPES = ['read', 'reply', 'status', 'claim', 'resolve', 'push', 'import', 'agent']
 const DAY = 86_400_000
 
 export function createApiTokens({ iso, auditOf, agentsFor = null }) {
@@ -15,7 +19,7 @@ export function createApiTokens({ iso, auditOf, agentsFor = null }) {
   // ("login" for `shapewall login`) in the audit log. A token that may take
   // work (the claim scope) is an agent from the start (src/hosted/agents.js),
   // for the person who made it only; `machine` is the label a login sent.
-  function createApiToken(req, body, { via = null, machine = null } = {}) {
+  function createApiToken(req, body, { via = null, machine = null, agent = null } = {}) {
     // A name too long is refused, not cut (as on a rename): it is what people will see.
     const name = cleanName(body.name, 61)
     if (!name || name.length > 60) throw new HttpError(400, 'invalid_name', 'Token name: 1 to 60 characters.')
@@ -23,6 +27,10 @@ export function createApiTokens({ iso, auditOf, agentsFor = null }) {
     if (!scopes.length || scopes.some((scope) => !TOKEN_SCOPES.includes(scope))) {
       throw new HttpError(400, 'invalid_scopes', `Scopes: ${TOKEN_SCOPES.join(', ')}.`)
     }
+    // The link scope is an agent's: it never stands without the scopes an
+    // agent works with (it reads comments and answers them as itself).
+    if (scopes.includes('agent') && !['read', 'reply', 'status', 'claim'].every((scope) => scopes.includes(scope)))
+      throw new HttpError(400, 'invalid_scopes', 'The agent scope goes with read, reply, status and claim.')
     if (scopes.includes('import') && via !== 'import')
       throw new HttpError(403, 'import_login_required', 'Import is a one-time grant from a moving-project device login.')
     const days = body.expiresInDays
@@ -52,13 +60,14 @@ export function createApiTokens({ iso, auditOf, agentsFor = null }) {
       },
     )
     auditOf(req, 'token_created', id, { project: req.project.id, scopes, ...(days ? { days } : {}), ...(via ? { via } : {}) })
+    let agentId = null
     if (scopes.includes('claim') && agentsFor)
-      agentsFor(req.t).create(
+      agentId = agentsFor(req.t).create(
         { userId: req.user.id, role: req.role, audit: (action, target, detail) => auditOf(req, action, target, detail) },
-        { projectId: req.project.id, tokenId: id, name, machine },
+        { projectId: req.project.id, tokenId: id, name, machine, ...(agent || {}) },
       )
     const info = listTokens(req.t, { projectId: req.project.id, now: iso() }).find((item) => item.id === id)
-    return { token, info }
+    return { token, info, agentId }
   }
 
   return createApiToken

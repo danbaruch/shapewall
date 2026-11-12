@@ -63,6 +63,9 @@ import { mountTokenApi } from './token-api.js'
 import { createAgentPresence } from './agent-presence.js'
 import { COMMENT_ROUTING, createAgentStore } from './agents.js'
 import { mountAgentRoutes } from './agent-routes.js'
+import { createAgentLinks, createChatService } from './agent-link.js'
+import { createChatStore } from './chat-store.js'
+import { createTurnHub } from './turn-hub.js'
 import { mountPages } from './pages.js'
 
 export { changeEventType, publicBoardView, TOKEN_SCOPES, INVITE_DAYS }
@@ -137,6 +140,11 @@ export function createHostedApp({
   // Which agents are listening right now (in memory only).
   const agentPresence = createAgentPresence({ now })
   const streams = new Set()
+  // Connected agents (`shapewall agent connect`): the chat turns in flight
+  // and the open links, in memory (src/hosted/turn-hub.js, agent-link.js).
+  const turnHub = createTurnHub({ now: () => now().getTime() })
+  const links = createAgentLinks({ hub: turnHub })
+  const chatFor = (t) => createChatStore(t, { now })
   const policyFor = (t) =>
     createAgentPolicy(t, { now, handleFor: (user) => q.get('SELECT handle FROM users WHERE id = :id', { id: user })?.handle || null })
   const handleFor = (user) => q.get('SELECT handle FROM users WHERE id = :id', { id: user })?.handle || null
@@ -145,7 +153,7 @@ export function createHostedApp({
   // a request is not read again.
   const agentStores = new WeakMap()
   const agentsFor = (t) => {
-    if (!agentStores.has(t)) agentStores.set(t, createAgentStore(t, { now, presence: agentPresence, handleFor }))
+    if (!agentStores.has(t)) agentStores.set(t, createAgentStore(t, { now, presence: agentPresence, handleFor, links }))
     return agentStores.get(t)
   }
   const dispatchView = (t, project, board, comment) => {
@@ -203,6 +211,10 @@ export function createHostedApp({
       : siteOf(req).auth
   const SESSION_COOKIE = sessionCookieName(secure)
   const CEREMONY_COOKIE = secure ? '__Host-sw_ceremony' : 'sw_ceremony'
+
+  // What ends a chat turn from the server's side (the machine went away, a
+  // revoked agent, a restart).
+  const chat = createChatService({ db, hub: turnHub, links, events, chatFor, now })
 
   const app = express()
   app.disable('x-powered-by')
@@ -439,6 +451,10 @@ export function createHostedApp({
     quotas,
     workspaceQuota,
     deps,
+    chatFor,
+    hub: turnHub,
+    links,
+    chat,
   })
 
   mountDeviceApi(app, consoleDeps)
@@ -467,6 +483,10 @@ export function createHostedApp({
     dispatchView,
     needFresh,
     approvalApi,
+    chatFor,
+    hub: turnHub,
+    links,
+    chat,
   })
   // The token API first: it never falls through to the cookie-based console API.
   mountMcpHttp(app, { tokenAuth, origin: publicOrigin, dataDir, db })
@@ -526,6 +546,25 @@ export function createHostedApp({
   if (!guestOnly) sweep()
   const sweepTimer = !guestOnly && sweepEveryMs ? setInterval(sweep, sweepEveryMs) : null
   sweepTimer?.unref()
+  // No turn survives a restart: what the database still calls running ends here.
+  if (!guestOnly) {
+    try {
+      chat.sweepStale()
+    } catch (error) {
+      log(`turn sweep at start: ${error.message}`)
+    }
+  }
+  // Chat turns whose machine went away end as interrupted (unref'd too).
+  const turnTimer = guestOnly
+    ? null
+    : setInterval(() => {
+        try {
+          chat.sweep()
+        } catch (error) {
+          log(`turn sweep: ${error.message}`)
+        }
+      }, 5000)
+  turnTimer?.unref()
   const ownsPresence = !presenceHub
   const hub = presenceHub || createPresenceHub({ events })
   // A WebSocket upgrade never passes through Express, so its address is
@@ -549,6 +588,7 @@ export function createHostedApp({
   app.locals.events = events
   app.locals.agentPresence = agentPresence
   app.locals.agentsFor = agentsFor
+  app.locals.chat = { hub: turnHub, links, service: chat, storeFor: chatFor }
   app.locals.sweep = sweep
   app.locals.close = async () => {
     presence.close()
@@ -556,6 +596,9 @@ export function createHostedApp({
     if (ownsEvents) events.close()
     for (const check of [...streams]) check(true)
     if (sweepTimer) clearInterval(sweepTimer)
+    if (turnTimer) clearInterval(turnTimer)
+    chat.close()
+    links.closeAll()
     await cleaner.close()
   }
   return app

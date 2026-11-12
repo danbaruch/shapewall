@@ -105,7 +105,7 @@ export function createProjectStore(t, { db, dataDir, maxProjects = PROJECTS_MAX 
     const project = get(projectId)
     if (!project) throw new ProjectError(404, 'unknown_project', 'No such project.')
     transaction(db, () => {
-      for (const table of ['comment_files', 'comments', 'boards', 'api_tokens', 'pushes']) {
+      for (const table of ['chat_turns', 'chat_messages', 'chat_threads', 'comment_files', 'comments', 'boards', 'api_tokens', 'pushes']) {
         t.run(`DELETE FROM ${table} WHERE workspace_id = :ws AND project_id = :id`, { id: project.id })
       }
       t.run('DELETE FROM projects WHERE workspace_id = :ws AND id = :id', { id: project.id })
@@ -130,7 +130,18 @@ export function createProjectStore(t, { db, dataDir, maxProjects = PROJECTS_MAX 
   // board id starts a new board (comment numbers from 1 again). The
   // workspace's storage count is a sum over these rows, so it drops by
   // itself. Returns what went: { board, comments, bytes }.
-  const BOARD_TABLES = ['comment_files', 'comment_imports', 'agent_approvals', 'agent_claims', 'comments', 'pushes', 'boards']
+  const BOARD_TABLES = [
+    'chat_turns',
+    'chat_messages',
+    'chat_threads',
+    'comment_files',
+    'comment_imports',
+    'agent_approvals',
+    'agent_claims',
+    'comments',
+    'pushes',
+    'boards',
+  ]
   function removeBoard(projectId, boardId) {
     const id = String(boardId || '')
     const project = get(projectId)

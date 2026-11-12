@@ -171,6 +171,23 @@ export function createPresenceHub({ events = null, limits = {}, now = () => Date
   }
   const unsubscribe = events?.subscribe((event) => {
     if (event.type === 'close') return close()
+    // Chat with connected agents (src/hosted/chat-routes.js) and agents
+    // coming and going: a nudge for signed-in members only, never a share
+    // link's guest. Ids of shared threads only; the board refetches.
+    if (event.type === 'chat.turn' || event.type === 'agent.changed') {
+      if (!event.workspace || !event.project) return
+      const prefix = `${event.workspace}:${event.project}:`
+      for (const [key, room] of rooms) {
+        if (!key.startsWith(prefix) || (event.board && key !== `${prefix}${event.board}`)) continue
+        for (const peer of [...room.peers])
+          if (peer.access.kind === 'member' && live(peer))
+            send(peer, {
+              type: 'agents',
+              ...(event.type === 'chat.turn' ? { thread: typeof event.thread === 'string' ? event.thread : null } : {}),
+            })
+      }
+      return
+    }
     if (!event.board || !event.workspace || !event.project) return
     const room = rooms.get(`${event.workspace}:${event.project}:${event.board}`)
     if (!room) return

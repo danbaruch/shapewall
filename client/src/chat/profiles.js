@@ -21,6 +21,9 @@ export function pickerProfiles(thread) {
       configured: profile.configured !== false,
       state: profile.configured === false ? 'unavailable' : profile.state || 'ready',
       loginHint: profile.loginHint || null,
+      // A hosted board's connected agent says its own line: where it runs,
+      // or why this person cannot use it (src/hosted/chat-routes.js).
+      line: typeof profile.line === 'string' && profile.line ? profile.line : null,
       isDefault: profile.id === defaultId,
       // How its owner made it look (src/agent/identity.js); `logo` is a
       // known agent's product mark, its default icon.
@@ -83,6 +86,7 @@ export function signInHint(loginHint) {
 
 // The one line under an agent's name.
 export function stateLine(option) {
+  if (option?.line) return option.line
   const text = STATE_TEXT[option?.state] || STATE_TEXT.ready
   if (option?.state === 'login' && option.loginHint) return `${text}. ${signInHint(option.loginHint)}`
   return text

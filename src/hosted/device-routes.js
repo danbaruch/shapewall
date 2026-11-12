@@ -8,13 +8,14 @@ import { ID_PATTERNS } from './crypto.js'
 import { transaction } from './db.js'
 import { HttpError, fail } from './http.js'
 import { workspaceSuspended } from './operator.js'
-import { NEEDS } from './permissions.js'
+import { cleanAgentName, isAgentTint, isBuiltInIcon } from '../agent/identity.js'
+import { AGENT_AUDIENCES, NEEDS } from './permissions.js'
 import { createProjectStore } from './projects.js'
 import { roleAtLeast, roleIn, tenant, workspacesForUser } from './tenancy.js'
 import { TOKEN_SCOPES } from './tokens.js'
 
 export function mountDeviceApprovals(consoleApi, deps) {
-  const { db, dataDir, now, quotas, deviceLogins, clientIp, limit, handle, needFresh, auditOf, createApiToken } = deps
+  const { db, dataDir, now, quotas, deviceLogins, clientIp, limit, handle, needFresh, auditOf, createApiToken, agentsFor } = deps
 
   // ---- `shapewall login`: approving a login in the console ----
   // The CLI side (start, poll) is on /api/v1/device, without a session.
@@ -27,6 +28,8 @@ export function mountDeviceApprovals(consoleApi, deps) {
     return {
       code: formatUserCode(found.code),
       purpose: found.entry.purpose,
+      // An agent connection: what the machine says it runs, and the name it suggests.
+      ...(found.entry.purpose === 'agent' ? { agent: found.entry.agent } : {}),
       name: found.entry.name,
       ip: found.entry.ip,
       approverIp,
@@ -59,7 +62,12 @@ export function mountDeviceApprovals(consoleApi, deps) {
       res.json({
         login: devicePublic(found, req),
         workspaces,
-        scopes: TOKEN_SCOPES.filter((scope) => scope !== 'import' || found.entry.purpose === 'import'),
+        // An agent connection gets a fixed set (AGENT_LOGIN_SCOPES): nothing to tick.
+        scopes:
+          found.entry.purpose === 'agent'
+            ? AGENT_LOGIN_SCOPES
+            : TOKEN_SCOPES.filter((scope) => scope !== 'agent' && (scope !== 'import' || found.entry.purpose === 'import')),
+        ...(found.entry.purpose === 'agent' ? { audiences: AGENT_AUDIENCES } : {}),
       })
     }),
   )
@@ -91,15 +99,42 @@ export function mountDeviceApprovals(consoleApi, deps) {
           req.project = projectStore.create({ name: req.body.newProjectName, userId: req.user.id, now: now() })
           auditOf(req, 'project_created', req.project.id)
         }
+        const agentLogin = found.entry.purpose === 'agent'
+        // Connecting an agent: the approver names it, picks its icon and who
+        // may use it. The scopes are fixed, whatever the request says: what
+        // an agent works with, plus the link.
+        const look = agentLogin ? agentLook(req.body?.agent, found.entry) : null
+        if (!agentLogin && Array.isArray(req.body?.scopes) && req.body.scopes.includes('agent'))
+          throw new HttpError(403, 'agent_login_required', 'The agent scope comes from "shapewall agent connect".')
         const token = createApiToken(
           req,
           {
-            name: `${found.entry.name} (shapewall login)`,
-            scopes: req.body?.scopes,
+            name: agentLogin ? look.name : `${found.entry.name} (shapewall login)`,
+            scopes: agentLogin ? AGENT_LOGIN_SCOPES : req.body?.scopes,
             expiresInDays: req.body?.expiresInDays ?? null,
           },
-          { via: found.entry.purpose === 'import' ? 'import' : 'login', machine: found.entry.name },
+          {
+            via: agentLogin ? 'agent' : found.entry.purpose === 'import' ? 'import' : 'login',
+            machine: found.entry.name,
+            ...(agentLogin ? { agent: { kind: found.entry.agent?.kind || 'custom', icon: look.icon, tint: look.tint } } : {}),
+          },
         )
+        let agent = null
+        if (agentLogin) {
+          const actor = { userId: req.user.id, role: req.role, audit: (action, target, detail) => auditOf(req, action, target, detail) }
+          // A new agent is its connector's own; widening it is said here, on
+          // the approval, and written to the audit log like any other change.
+          if (look.audience !== 'owner')
+            agentsFor(req.t).setAudience(actor, req.project.id, token.agentId, { audience: look.audience, users: look.users })
+          auditOf(req, 'agent_connected', token.agentId, {
+            project: req.project.id,
+            name: look.name,
+            kind: found.entry.agent?.kind || 'custom',
+            machine: found.entry.name,
+            audience: look.audience,
+          })
+          agent = { id: token.agentId, name: look.name, audience: look.audience }
+        }
         const approved = deviceLogins.approve(found.code, {
           token: token.token,
           tokenName: token.info.name,
@@ -107,15 +142,17 @@ export function mountDeviceApprovals(consoleApi, deps) {
           expiresAt: token.info.expiresAt,
           workspace: { id: ws, name: workspace.name },
           project: { id: req.project.id, name: req.project.name },
+          ...(agent ? { agent } : {}),
         })
         if (!approved) throw new HttpError(404, 'unknown_code', 'That code was already used, or it expired. Run shapewall login again.')
-        return token
+        return { ...token, agent }
       })
       res.json({
         ok: true,
         info: made.info,
         workspace: { id: ws, name: workspace.name },
         project: { id: req.project.id, name: req.project.name },
+        ...(made.agent ? { agent: made.agent } : {}),
       })
     }),
   )
@@ -128,6 +165,25 @@ export function mountDeviceApprovals(consoleApi, deps) {
       res.json({ ok: true })
     }),
   )
+}
+
+// What a connected agent's token may do: read dispatched comments, answer
+// them as itself, set statuses, take work, and hold the link. Never resolve
+// or push: those stay separate tokens.
+export const AGENT_LOGIN_SCOPES = ['read', 'reply', 'status', 'claim', 'agent']
+
+// The name, icon, tint and audience the approver chose for a new agent.
+function agentLook(input, entry) {
+  const wanted = typeof input?.name === 'string' && input.name.trim() ? input.name : entry.agent?.name || entry.name
+  const { name, problem } = cleanAgentName(wanted)
+  if (problem || !name) throw new HttpError(400, 'invalid_name', problem ? `Agent ${problem}.` : 'Agent name: 1 to 40 characters.')
+  const icon = input?.icon ?? null
+  if (icon !== null && !isBuiltInIcon(icon)) throw new HttpError(400, 'invalid_icon', 'Choose one of the built-in icons.')
+  const tint = input?.tint ?? null
+  if (tint !== null && !isAgentTint(tint)) throw new HttpError(400, 'invalid_tint', 'Choose one of the tints.')
+  const audience = input?.audience ?? 'owner'
+  if (!AGENT_AUDIENCES.includes(audience)) throw new HttpError(400, 'invalid_audience', `Audience: ${AGENT_AUDIENCES.join(', ')}.`)
+  return { name, icon, tint, audience, users: Array.isArray(input?.users) ? input.users : [] }
 }
 
 export function mountDeviceApi(app, deps) {
@@ -146,7 +202,7 @@ export function mountDeviceApi(app, deps) {
     '/start',
     limit('deviceStart'),
     handle(async (req, res) => {
-      const started = deviceLogins.start({ name: req.body?.name, ip: clientIp(req), purpose: req.body?.purpose })
+      const started = deviceLogins.start({ name: req.body?.name, ip: clientIp(req), purpose: req.body?.purpose, agent: req.body?.agent })
       if (started.refused)
         throw new HttpError(429, 'too_many_logins', 'Too many logins in progress from this address. Finish or wait out one (10 minutes).')
       res.status(201).json({

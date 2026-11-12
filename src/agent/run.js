@@ -119,6 +119,10 @@ export async function runTurn({
   workdir = null,
   // What the owner called this agent (identity.js): the author of its replies.
   agentName = null,
+  // The neutral messages, already built (a connected agent's turn, whose
+  // conversation comes from the hosted server: src/remote/agent-job.js).
+  // Without it they are built from this board's own store (modelMessages).
+  conversation: given = null,
 }) {
   const thread = `${board.id}/${threadId}`
   const runMs = backend.runMsMax || RUN_MS_MAX
@@ -179,7 +183,7 @@ export async function runTurn({
     note(text)
   }
   try {
-    const conversation = modelMessages({ config, board, threadId, messages, comments: backend.tools !== 'shapewall', ownerTurn })
+    const conversation = given || modelMessages({ config, board, threadId, messages, comments: backend.tools !== 'shapewall', ownerTurn })
     // A model that does not take images (Settings > Agent): the images are
     // dropped here, and the chat says so, instead of the endpoint's 400.
     if (backend.vision === false && withoutImages(conversation)) noteOnce(NO_IMAGES_NOTE)
