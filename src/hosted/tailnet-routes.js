@@ -67,7 +67,9 @@ export function mountTailnetAuth(authRouter, deps) {
       throw new HttpError(
         403,
         'tailnet_required',
-        on ? 'This works only when you arrive through the tailnet, from a device that belongs to a person.' : 'Tailnet sign-in is off on this server.',
+        on
+          ? 'This works only when you arrive through the tailnet, from a device that belongs to a person.'
+          : 'Tailnet sign-in is off on this server.',
       )
     return identity
   }
@@ -169,6 +171,11 @@ export function mountTailnetAuth(authRouter, deps) {
     limit('ceremony'),
     handle(async (req, res) => {
       const identity = arrived(req)
+      // The command line may say who it expects to be (`shapewall hosted claim
+      // --login`): a flag never names the login, it can only refuse another.
+      const expected = req.body?.expectLogin
+      if (expected !== undefined && expected !== null && cleanTailnetLogin(expected) !== identity.login)
+        throw new HttpError(409, 'other_login', `You arrive as ${identity.login}, not as the login that was named.`)
       const ip = clientIp(req)
       const current = sessionOf(req)
       if (current) {

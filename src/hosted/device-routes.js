@@ -11,6 +11,7 @@ import { workspaceSuspended } from './operator.js'
 import { cleanAgentName, isAgentTint, isBuiltInIcon } from '../agent/identity.js'
 import { AGENT_AUDIENCES, NEEDS } from './permissions.js'
 import { createProjectStore } from './projects.js'
+import { stepUpSettings } from './step-up-settings.js'
 import { roleAtLeast, roleIn, tenant, workspacesForUser } from './tenancy.js'
 import { TOKEN_SCOPES } from './tokens.js'
 
@@ -57,7 +58,7 @@ export function mountDeviceApprovals(consoleApi, deps) {
           name: item.name,
           projects: createProjectStore(tenant(db, item.id), { db, dataDir })
             .list()
-            .map((project) => ({ id: project.id, name: project.name })),
+            .map((project) => ({ id: project.id, name: project.name, slug: project.slug })),
         }))
       res.json({
         login: devicePublic(found, req),
@@ -83,6 +84,16 @@ export function mountDeviceApprovals(consoleApi, deps) {
       req.t = tenant(db, ws)
       // Approving a machine or an agent: the passkey again only when this workspace asks ("Agents and machines").
       stepUpOrThrow(req, 'agents')
+      // From the command line, by the tailnet identity of the machine's user
+      // (src/remote/tailnet-cli.js): the same approval, unless this workspace
+      // wants it looked at in the browser.
+      const byCli = req.headers['x-shapewall-client'] === 'cli' && req.auth.session.via === 'tailnet'
+      if (byCli && stepUpSettings(req.t).get().cliApproval)
+        throw new HttpError(
+          403,
+          'browser_approval_required',
+          'This workspace approves logins and agent connections in the browser. Open the page below and enter the code.',
+        )
       if (workspaceSuspended(req.t))
         throw new HttpError(403, 'workspace_suspended', 'This workspace is suspended by the server operator; it takes no new tokens.')
       req.role = role
@@ -117,6 +128,7 @@ export function mountDeviceApprovals(consoleApi, deps) {
           {
             via: agentLogin ? 'agent' : found.entry.purpose === 'import' ? 'import' : 'login',
             machine: found.entry.name,
+            ...(byCli ? { approvedBy: 'tailnet identity' } : {}),
             ...(agentLogin ? { agent: { kind: found.entry.agent?.kind || 'custom', icon: look.icon, tint: look.tint } } : {}),
           },
         )
@@ -133,6 +145,7 @@ export function mountDeviceApprovals(consoleApi, deps) {
             kind: found.entry.agent?.kind || 'custom',
             machine: found.entry.name,
             audience: look.audience,
+            ...(byCli ? { approvedBy: 'tailnet identity' } : {}),
           })
           agent = { id: token.agentId, name: look.name, audience: look.audience }
         }

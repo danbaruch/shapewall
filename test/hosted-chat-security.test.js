@@ -16,7 +16,17 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { createRemote, pushDefinition, pushFiles } from '../src/remote/remote.js'
-import { createBrowser, createProject, invite, reauth, signUp, startHostedServer, tokenCall, writeLocalCaptures, askAgain } from './hosted-helpers.js'
+import {
+  createBrowser,
+  createProject,
+  invite,
+  reauth,
+  signUp,
+  startHostedServer,
+  tokenCall,
+  writeLocalCaptures,
+  askAgain,
+} from './hosted-helpers.js'
 import { chat as send, connectAgent, parseEvents, startLink, until } from './hosted-chat-helpers.js'
 import { sampleConfig } from './helpers.js'
 

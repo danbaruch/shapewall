@@ -30,10 +30,29 @@ export async function hostedCommand(positional, flags, out, err = out) {
     await operatorCommand(sub, { dataDir: dataDirOf(flags), flags, env: process.env, out })
     return 0
   }
+  if (sub === 'claim') return claim(flags, out)
   if (sub === 'admin') return admin(rest, flags, out)
   if (sub === 'backup') return backupCommand(flags, out)
   if (sub === 'restore') return restoreCommand(flags, out, err)
-  throw new Error(`unknown hosted command "${show(sub).slice(0, 40)}" (admin, backup, restore; or no command to run the server)`)
+  throw new Error(`unknown hosted command "${show(sub).slice(0, 40)}" (claim, admin, backup, restore; or no command to run the server)`)
+}
+
+// ---- The first account, without the browser (tailnet sign-in) ----
+
+// `shapewall hosted claim --data DIR`: for whoever can read the data folder
+// (the one-time setup link is in it). The owner is the tailnet user the
+// server sees when this command asks through the tailnet; --login can only
+// refuse another answer (src/remote/tailnet-cli.js).
+async function claim(flags, out) {
+  const dir = dataDirOf(flags)
+  const { readSetupLink } = await import('./setup-link.js')
+  const setupUrl = readSetupLink(dir)
+  if (!setupUrl)
+    throw new Error(
+      `No setup link in ${dir}: the server there already has its first account, or it has not started yet (start it, or run "shapewall hosted setup-link --new").`,
+    )
+  const { claimServer } = await import('../remote/tailnet-cli.js')
+  return claimServer({ setupUrl, flags, out })
 }
 
 // ---- Run the server ----
@@ -67,6 +86,7 @@ async function serve(flags, out) {
       signup: flags.signup || env.SHAPEWALL_HOSTED_SIGNUP || 'invite',
       trustProxy,
       tailscale,
+      tailnetSignIn: Boolean(flags['tailnet-sign-in']) || env.SHAPEWALL_HOSTED_TAILNET_SIGN_IN === '1',
       quotasFile: flags.quotas || env.SHAPEWALL_HOSTED_QUOTAS || null,
       retentionHours: intFlag(flags, 'retention-hours', { min: 0, max: 24 * 30, fallback: undefined }),
       retentionKeep: intFlag(flags, 'retention-keep', { min: 0, max: 100, fallback: undefined }),
@@ -74,7 +94,8 @@ async function serve(flags, out) {
     })
   } catch (error) {
     const { TailscaleError } = await import('./tailscale.js')
-    if (error instanceof TailscaleError) {
+    const { TailnetSignInError } = await import('./server.js')
+    if (error instanceof TailscaleError || error instanceof TailnetSignInError) {
       out(error.message)
       return 1
     }

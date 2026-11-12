@@ -405,7 +405,23 @@ function isoOrNull(value) {
 }
 
 export function mountAdmin(router, deps) {
-  const { db, dataDir, iso, now, handle, inWorkspace, needFresh, stepUp, stepUpOrThrow, coreFreshOrThrow, auditOf, HttpError, listTokens, clientIp, limit } = deps
+  const {
+    db,
+    dataDir,
+    iso,
+    now,
+    handle,
+    inWorkspace,
+    needFresh,
+    stepUp,
+    stepUpOrThrow,
+    coreFreshOrThrow,
+    auditOf,
+    HttpError,
+    listTokens,
+    clientIp,
+    limit,
+  } = deps
   // Workspaces with an export being written: one at a time each.
   const exporting = new Set()
 
@@ -692,7 +708,7 @@ export function mountAdmin(router, deps) {
   )
 
   // When this workspace asks for the passkey again (src/hosted/step-up.js):
-  // one setting per request, { group, on } | { windowMinutes } | { adminIdle }.
+  // one setting per request, { group, on } | { windowMinutes } | { adminIdle } | { cliApproval }.
   // Owners only; asking for less needs a fresh passkey check itself.
   router.patch(
     '/workspaces/:ws/step-up',
@@ -705,14 +721,17 @@ export function mountAdmin(router, deps) {
         audit: (action, target, detail) => auditOf(req, action, target, detail),
       }
       const settings = stepUpSettings(req.t)
-      const named = ['group', 'windowMinutes', 'adminIdle'].filter((key) => Object.hasOwn(body, key))
-      if (named.length !== 1) throw new HttpError(400, 'invalid_settings', 'One setting at a time: group and on, windowMinutes, or adminIdle.')
+      const named = ['group', 'windowMinutes', 'adminIdle', 'cliApproval'].filter((key) => Object.hasOwn(body, key))
+      if (named.length !== 1)
+        throw new HttpError(400, 'invalid_settings', 'One setting at a time: group and on, windowMinutes, adminIdle or cliApproval.')
       const stepUpNow = transaction(db, () =>
         named[0] === 'group'
           ? settings.setGroup(actor, body.group, body.on)
           : named[0] === 'windowMinutes'
             ? settings.setWindow(actor, body.windowMinutes)
-            : settings.setAdminIdle(actor, body.adminIdle),
+            : named[0] === 'adminIdle'
+              ? settings.setAdminIdle(actor, body.adminIdle)
+              : settings.setCliApproval(actor, body.cliApproval),
       )
       res.json({ settings: { stepUp: stepUpNow } })
     }),

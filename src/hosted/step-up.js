@@ -69,6 +69,10 @@ export const STEP_UP_DEFAULTS = Object.freeze({
   data: false,
   // Admin pages ask again after 12 hours without a visit to one.
   adminIdle: false,
+  // On a server with tailnet sign-in: `shapewall login` and `agent connect`
+  // from a tailnet machine are approved in the browser anyway, as on any
+  // other server (off: the tailnet identity of the machine's user is enough).
+  cliApproval: false,
   windowMinutes: STEP_UP_WINDOW_DEFAULT,
 })
 
@@ -87,6 +91,7 @@ export function readStepUp(raw) {
   const out = { ...STEP_UP_DEFAULTS }
   for (const group of STEP_UP_GROUPS) out[group] = value[group] === true
   out.adminIdle = value.adminIdle === true
+  out.cliApproval = value.cliApproval === true
   out.windowMinutes = STEP_UP_WINDOWS.includes(value.windowMinutes) ? value.windowMinutes : STEP_UP_WINDOW_DEFAULT
   return out
 }
@@ -96,6 +101,7 @@ export function readStepUp(raw) {
 export function stepUpWeaker(before, after) {
   if (STEP_UP_GROUPS.some((group) => before[group] && !after[group])) return true
   if (before.adminIdle && !after.adminIdle) return true
+  if (before.cliApproval && !after.cliApproval) return true
   return after.windowMinutes > before.windowMinutes
 }
 

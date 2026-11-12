@@ -57,7 +57,7 @@ export function cleanTailnetLogin(value) {
 }
 
 // eslint-disable-next-line no-control-regex
-const CONTROL_RE = /[\u0000-\u001f\u007f-\u009f​-‏‪-‮⁦-⁩]/g
+const CONTROL_RE = new RegExp('[\\u0000-\\u001f\\u007f-\\u009f\\u200b-\\u200f\\u202a-\\u202e\\u2066-\\u2069]', 'g')
 const ENCODED_WORD = /^=\?([^?\s]+)\?([QqBb])\?([^?\s]*)\?=$/
 
 // A header value as text: plain ASCII as it is, or RFC 2047 encoded words
@@ -67,7 +67,6 @@ export function decodeHeaderValue(raw) {
   if (typeof raw !== 'string') return null
   const value = raw.trim()
   if (!value.includes('=?')) {
-    // eslint-disable-next-line no-control-regex
     return /^[ -~]*$/.test(value) ? value : null
   }
   const chunks = []
@@ -205,7 +204,7 @@ export function createTailnetGate({ proof, log = () => {}, now = () => Date.now(
   const proven = new WeakMap()
   const answers = new WeakMap()
   let suspendedFor = null
-  let loggedAt = 0
+  let loggedAt = -Infinity
   const refused = (why) => {
     // Forged headers are worth a line, but not one per request.
     if (now() - loggedAt < 60_000) return

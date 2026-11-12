@@ -10,6 +10,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import http from 'node:http'
+import net from 'node:net'
 import { randomBytes } from 'node:crypto'
 import { MIN_NODE, nodeSupportsSqlite, openDatabase, quietSqliteWarning } from './db.js'
 import { writeSetupLink } from './setup-link.js'
@@ -65,6 +66,38 @@ export function proxyWarning({ origin, host, trustProxy }) {
   return 'Warning: the origin is https but the server listens on loopback without --trust-proxy, so rate limits see every client as the proxy. Add --trust-proxy when a reverse proxy on this host forwards to it.'
 }
 
+// Why tailnet sign-in cannot be switched on (the CLI prints the message).
+export class TailnetSignInError extends Error {}
+
+// The user tailscaled runs as: root, unless the operator runs it as someone
+// else (userspace networking) and says so.
+function tailscaledUid(env) {
+  const raw = env.SHAPEWALL_TAILSCALED_UID
+  if (raw === undefined || raw === '') return 0
+  if (!/^\d{1,10}$/.test(raw)) throw new TailnetSignInError('SHAPEWALL_TAILSCALED_UID: the numeric user id tailscaled runs as.')
+  return Number(raw)
+}
+
+// The proof must see this process's own connection to the listener as this
+// process's: where it cannot (a container that hides /proc, another network
+// namespace), it could not tell tailscaled from anyone else either.
+async function proofSelfTest(server, proof) {
+  if (!proof.ownerOf || typeof process.getuid !== 'function') return null
+  const accepted = new Promise((resolve) => server.once('connection', resolve))
+  const client = net.connect(server.address().port, '127.0.0.1')
+  client.on('error', () => {})
+  try {
+    const socket = await accepted
+    const owner = proof.ownerOf(socket)
+    socket.destroy()
+    return owner === process.getuid()
+      ? null
+      : 'the check that tells tailscaled from other programs did not recognise a test connection from this process (is /proc/net/tcp hidden or from another network namespace?).'
+  } finally {
+    client.destroy()
+  }
+}
+
 function listen(handler, port, host) {
   const server = http.createServer(handler)
   return new Promise((resolve, reject) => {
@@ -89,6 +122,12 @@ export async function startHosted({
   ownersSeeSignIns = false,
   // Mode 1 (src/hosted/tailscale.js): { httpsPort, funnel: { httpsPort, localPort } | null, run }
   tailscale = null,
+  // Tailnet sign-in (--tailnet-sign-in, with --tailscale): a tailnet user who
+  // arrives through tailscale serve is signed in as the account linked to
+  // their login (src/hosted/tailnet-identity.js). `tailnetProof` replaces
+  // the check that a connection comes from tailscaled (tests).
+  tailnetSignIn = false,
+  tailnetProof = null,
   quotasFile = null,
   retentionHours = undefined,
   retentionKeep = undefined,
@@ -117,6 +156,10 @@ export async function startHosted({
   if (tailscale && host !== '127.0.0.1')
     throw new Error('--tailscale listens on 127.0.0.1 only (tailscale serve forwards to it); drop --host')
   if (tailscale && origin) throw new Error('--tailscale sets the origin itself (https://<machine>.<tailnet>.ts.net); drop --origin')
+  if (tailnetSignIn && !tailscale)
+    throw new TailnetSignInError(
+      '--tailnet-sign-in goes with --tailscale: it signs people in by the identity that tailscale serve adds, and this server would not be behind it.',
+    )
   const db = await openDatabase(path.join(dir, 'shapewall.db'))
   const cleanup = []
   const stopAll = async () => {
@@ -141,12 +184,23 @@ export async function startHosted({
     // Mode 1: listen on loopback first (port 0 picks one), then point
     // tailscale serve at it; the origin is only known after that.
     const holder = { app: null, share: null }
+    let tailnetWatch = null
     const server = await listen((req, res) => (holder.app ? holder.app(req, res) : res.writeHead(503).end()), port, host)
     cleanup.push(() => new Promise((resolve) => server.close(() => resolve())))
     const localPort = server.address().port
     let publicOrigin = origin || `http://${host.includes(':') ? `[${host}]` : host}:${localPort}`
     let shareOrigin = null
     let shareServer = null
+    // Tailnet sign-in: refuse to start when this machine cannot prove that a
+    // request came from tailscaled, before anything is put on the tailnet.
+    let gate = null
+    if (tailnetSignIn) {
+      const { createTailnetGate, procPeerProof } = await import('./tailnet-identity.js')
+      const proof = tailnetProof || procPeerProof({ uids: [tailscaledUid(env)] })
+      const problem = proof.problem?.() || (await proofSelfTest(server, proof))
+      if (problem) throw new TailnetSignInError(`Tailnet sign-in stays off, and the server did not start: ${problem}`)
+      gate = createTailnetGate({ proof, log: (line) => out(line) })
+    }
     if (tailscale) {
       const ts = await import('./tailscale.js')
       let funnel = null
@@ -174,6 +228,29 @@ export async function startHosted({
       trustProxy = true
       out(`On your tailnet: ${publicOrigin} (tailscale serve, not public)`)
       if (shareOrigin) out(`Share links are public through Tailscale Funnel: ${shareOrigin} (share pages only; the console is not there)`)
+      if (gate) {
+        // The serve entry must be the only way to this port, now and while
+        // the server runs: checked again every half minute, and nobody is
+        // believed while it is not so.
+        const first = await served.verify()
+        if (first) throw new TailnetSignInError(`Tailnet sign-in stays off, and the server did not start: ${first}.`)
+        const watch = async () => {
+          const problem = await served.verify().catch(() => 'tailscale serve status could not be read')
+          if (problem && !gate.suspended())
+            out(`Tailnet sign-in is suspended: ${problem}. Nobody is signed in by tailnet identity until this is fixed.`)
+          if (!problem && gate.suspended()) out('Tailnet sign-in is back: the tailscale serve entry is as this server made it.')
+          if (problem) gate.suspend(problem)
+          else gate.resume()
+        }
+        const every = tailscale.watchMs ?? 30_000
+        const timer = every ? setInterval(watch, every) : null
+        timer?.unref()
+        cleanup.push(() => timer && clearInterval(timer))
+        tailnetWatch = watch
+        out(
+          'Tailnet sign-in: on. A tailnet user who arrives through tailscale serve is signed in as the account linked to their login; an admin still decides who is in a workspace. Tagged devices and Funnel visitors are never signed in.',
+        )
+      }
     }
 
     const warning = proxyWarning({ origin: publicOrigin, host, trustProxy })
@@ -193,7 +270,14 @@ export async function startHosted({
       ownersSeeSignIns,
       log: (line) => out(line),
     }
-    const app = createHostedApp({ ...common, origin: publicOrigin, shareOrigin, previousOrigin, mailer: mailer.configured ? mailer : null })
+    const app = createHostedApp({
+      ...common,
+      origin: publicOrigin,
+      shareOrigin,
+      previousOrigin,
+      mailer: mailer.configured ? mailer : null,
+      tailnet: gate,
+    })
     app.locals.presence.attach(server)
     holder.app = app
     cleanup.push(() => app.locals.close())
@@ -253,7 +337,7 @@ export async function startHosted({
     }
     process.once('SIGINT', stop)
     process.once('SIGTERM', stop)
-    return { server, shareServer, app, db, origin: publicOrigin, shareOrigin, stop }
+    return { server, shareServer, app, db, origin: publicOrigin, shareOrigin, stop, tailnet: gate, tailnetWatch }
   } catch (error) {
     await stopAll().catch(() => {})
     db.close()

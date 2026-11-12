@@ -19,7 +19,7 @@ export function createApiTokens({ iso, auditOf, agentsFor = null }) {
   // ("login" for `shapewall login`) in the audit log. A token that may take
   // work (the claim scope) is an agent from the start (src/hosted/agents.js),
   // for the person who made it only; `machine` is the label a login sent.
-  function createApiToken(req, body, { via = null, machine = null, agent = null } = {}) {
+  function createApiToken(req, body, { via = null, machine = null, agent = null, approvedBy = null } = {}) {
     // A name too long is refused, not cut (as on a rename): it is what people will see.
     const name = cleanName(body.name, 61)
     if (!name || name.length > 60) throw new HttpError(400, 'invalid_name', 'Token name: 1 to 60 characters.')
@@ -59,7 +59,14 @@ export function createApiTokens({ iso, auditOf, agentsFor = null }) {
         expires: days ? iso(days * DAY) : null,
       },
     )
-    auditOf(req, 'token_created', id, { project: req.project.id, scopes, ...(days ? { days } : {}), ...(via ? { via } : {}) })
+    auditOf(req, 'token_created', id, {
+      project: req.project.id,
+      scopes,
+      ...(days ? { days } : {}),
+      ...(via ? { via } : {}),
+      // A login approved from the command line by tailnet identity says so, with the machine.
+      ...(approvedBy ? { approvedBy, machine } : {}),
+    })
     let agentId = null
     if (scopes.includes('claim') && agentsFor)
       agentId = agentsFor(req.t).create(

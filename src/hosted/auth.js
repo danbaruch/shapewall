@@ -65,6 +65,8 @@ export function cleanDisplayName(value) {
 export function deviceLabel(userAgent) {
   const ua = String(userAgent || '').slice(0, 512)
   if (!ua) return null
+  // The command line, signed in by tailnet identity (src/remote/tailnet-cli.js).
+  if (/^shapewall-cli\b/.test(ua)) return 'Shapewall CLI'
   const browser = /Edg\//.test(ua)
     ? 'Edge'
     : /OPR\//.test(ua)
@@ -521,7 +523,8 @@ export function createAuth({ db, origin, rpId, rpName = 'Shapewall', now = () =>
   // confirm sensitive actions then (added with a recovery code in the last 24
   // hours) and that no trusted passkey has confirmed since.
   const restricted = (session) => session.via === 'recovery' || (session.via === 'passkey' && session.verified_at === NEVER_VERIFIED)
-  const deleteTailnetSessions = (userId) => q.run('DELETE FROM sessions WHERE user_id = :user AND tailnet_login IS NOT NULL', { user: userId })
+  const deleteTailnetSessions = (userId) =>
+    q.run('DELETE FROM sessions WHERE user_id = :user AND tailnet_login IS NOT NULL', { user: userId })
   // A recovery session may add a passkey for a short while after signing in.
   const canAddAfterRecovery = (session) => session.via === 'recovery' && now().getTime() - Date.parse(session.created_at) <= RECOVERY_ADD_MS
   const deleteSession = (sessionHash) => q.run('DELETE FROM sessions WHERE token_hash = :hash', { hash: sessionHash })

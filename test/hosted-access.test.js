@@ -736,7 +736,7 @@ test('migration 5 adds its tables and columns on top of a version 4 database', a
     ALTER TABLE projects DROP COLUMN default_agent_id; ALTER TABLE comments DROP COLUMN agent_id;
     DROP TABLE saved_views; ALTER TABLE workspaces DROP COLUMN retention_usage_days;
     DROP INDEX audit_workspace_at; DROP INDEX audit_workspace_user; DROP INDEX audit_account_user;
-    ALTER TABLE workspaces DROP COLUMN step_up; ALTER TABLE workspaces DROP COLUMN cli_browser_approval;
+    ALTER TABLE workspaces DROP COLUMN step_up;
     DROP INDEX users_tailnet_login; ALTER TABLE users DROP COLUMN tailnet_login; ALTER TABLE users DROP COLUMN tailnet_linked_at;
     ALTER TABLE sessions DROP COLUMN tailnet_login; ALTER TABLE invites DROP COLUMN tailnet_login; DROP TABLE tailnet_visitors;
     DROP TABLE schema_migrations;

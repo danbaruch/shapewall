@@ -283,9 +283,11 @@ export function mountConsoleRoutes(consoleApi, deps) {
       // (or a first visit that arrives as it) can take it.
       let tailnetLogin = null
       if (req.body?.tailnetLogin !== undefined && req.body?.tailnetLogin !== null && req.body?.tailnetLogin !== '') {
-        if (!tailnet) throw new HttpError(409, 'tailnet_off', 'Tailnet sign-in is off on this server, so an invite cannot be for a tailnet login.')
+        if (!tailnet)
+          throw new HttpError(409, 'tailnet_off', 'Tailnet sign-in is off on this server, so an invite cannot be for a tailnet login.')
         tailnetLogin = cleanTailnetLogin(req.body.tailnetLogin)
-        if (!tailnetLogin) throw new HttpError(400, 'invalid_login', 'Tailnet login: the name the person signs in to Tailscale with, like ada@example.com.')
+        if (!tailnetLogin)
+          throw new HttpError(400, 'invalid_login', 'Tailnet login: the name the person signs in to Tailscale with, like ada@example.com.')
         const holder = tailnetAccounts.userFor(tailnetLogin)
         if (holder && roleIn(db, holder.id, req.t.workspaceId))
           throw new HttpError(409, 'already_member', `${tailnetLogin} is already in this workspace.`)

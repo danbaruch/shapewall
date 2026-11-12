@@ -151,7 +151,9 @@ export function createTailnetAccounts({ db, iso, now }) {
        ON CONFLICT(login) DO UPDATE SET name = excluded.name, last_seen_at = excluded.last_seen_at, visits = visits + 1`,
       { login: identity.login, name: identity.name || '', at },
     )
-    q.run('DELETE FROM tailnet_visitors WHERE last_seen_at < :cutoff', { cutoff: new Date(now().getTime() - TAILNET_VISITOR_DAYS * DAY).toISOString() })
+    q.run('DELETE FROM tailnet_visitors WHERE last_seen_at < :cutoff', {
+      cutoff: new Date(now().getTime() - TAILNET_VISITOR_DAYS * DAY).toISOString(),
+    })
     q.run(
       'DELETE FROM tailnet_visitors WHERE login NOT IN (SELECT login FROM tailnet_visitors ORDER BY last_seen_at DESC, login LIMIT :max)',
       { max: TAILNET_VISITORS_MAX },
@@ -160,8 +162,17 @@ export function createTailnetAccounts({ db, iso, now }) {
 
   const visitors = () =>
     q
-      .all('SELECT v.* FROM tailnet_visitors v WHERE v.login NOT IN (SELECT tailnet_login FROM users WHERE tailnet_login IS NOT NULL) ORDER BY v.last_seen_at DESC', {})
-      .map((row) => ({ login: row.login, name: row.name || null, firstSeenAt: row.first_seen_at, lastSeenAt: row.last_seen_at, visits: row.visits }))
+      .all(
+        'SELECT v.* FROM tailnet_visitors v WHERE v.login NOT IN (SELECT tailnet_login FROM users WHERE tailnet_login IS NOT NULL) ORDER BY v.last_seen_at DESC',
+        {},
+      )
+      .map((row) => ({
+        login: row.login,
+        name: row.name || null,
+        firstSeenAt: row.first_seen_at,
+        lastSeenAt: row.last_seen_at,
+        visits: row.visits,
+      }))
 
   const forgetVisitor = (login) => q.run('DELETE FROM tailnet_visitors WHERE login = :login', { login: String(login) }).changes > 0
 

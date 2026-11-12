@@ -167,6 +167,8 @@ test('login polls at a sane pace whatever interval the server sends', async () =
   const fetchImpl = async (url) => {
     const reply = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
     if (url.endsWith('/start')) return reply(201, { deviceCode: 'd', userCode: 'ABCD-EFGH', interval: 'soon', expiresIn: 600 })
+    // Not a server with tailnet sign-in: the code and the browser.
+    if (url.endsWith('/auth/me')) return reply(404, {})
     polls += 1
     if (polls < 2) return reply(202, {})
     return reply(200, { status: 'approved', token: TOKEN, scopes: ['read'] })

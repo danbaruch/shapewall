@@ -32,7 +32,17 @@ import {
 } from '../src/hosted/permissions.js'
 import { createRemote, pushDefinition, pushFiles } from '../src/remote/remote.js'
 import { createRemoteMcpServer } from '../src/remote/remote-mcp.js'
-import { createBrowser, createProject, invite, reauth, signUp, startHostedServer, tokenCall, writeLocalCaptures, askAgain } from './hosted-helpers.js'
+import {
+  createBrowser,
+  createProject,
+  invite,
+  reauth,
+  signUp,
+  startHostedServer,
+  tokenCall,
+  writeLocalCaptures,
+  askAgain,
+} from './hosted-helpers.js'
 import { sampleConfig, tempDir } from './helpers.js'
 import { stopChild } from './child-process-helpers.js'
 

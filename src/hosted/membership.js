@@ -70,7 +70,14 @@ export function createMembership({ db, quotas, iso, auditOf, agentsFor = null })
         role: invite.role,
         at: iso(),
       })
-      audit(t, { userId, action: 'invite_accepted', target: invite.id, ip, at: iso(), detail: { role: invite.role, ...(invite.tailnet_login ? { tailnet: invite.tailnet_login } : {}) } })
+      audit(t, {
+        userId,
+        action: 'invite_accepted',
+        target: invite.id,
+        ip,
+        at: iso(),
+        detail: { role: invite.role, ...(invite.tailnet_login ? { tailnet: invite.tailnet_login } : {}) },
+      })
     })
   }
 

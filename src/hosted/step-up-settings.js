@@ -11,6 +11,7 @@
 //   settings.setGroup(actor, 'tokens', true)
 //   settings.setWindow(actor, 30)
 //   settings.setAdminIdle(actor, true)
+//   settings.setCliApproval(actor, true)
 //
 // actor: { role, fresh, audit(action, target, detail) }
 //   fresh: true when the person passed a passkey check in the last 10
@@ -23,7 +24,8 @@ export function stepUpSettings(t) {
   const get = () => readStepUp(t.get('SELECT step_up FROM workspaces WHERE workspace_id = :ws')?.step_up)
 
   function change(actor, setting, next) {
-    if (actor?.role !== 'owner') throw new HttpError(403, 'forbidden', 'Only an owner changes when this workspace asks for a passkey again.')
+    if (actor?.role !== 'owner')
+      throw new HttpError(403, 'forbidden', 'Only an owner changes when this workspace asks for a passkey again.')
     const before = get()
     const after = readStepUp({ ...before, ...next })
     if (JSON.stringify(before) === JSON.stringify(after)) return after
@@ -56,6 +58,11 @@ export function stepUpSettings(t) {
     setAdminIdle(actor, on) {
       if (typeof on !== 'boolean') throw new HttpError(400, 'invalid_settings', 'adminIdle: true or false.')
       return change(actor, 'adminIdle', { adminIdle: on })
+    },
+    // Tailnet sign-in: CLI logins and agent connections wait for the browser anyway.
+    setCliApproval(actor, on) {
+      if (typeof on !== 'boolean') throw new HttpError(400, 'invalid_settings', 'cliApproval: true or false.')
+      return change(actor, 'cliApproval', { cliApproval: on })
     },
   }
 }
