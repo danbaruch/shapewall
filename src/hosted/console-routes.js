@@ -92,6 +92,7 @@ export function mountConsoleRoutes(consoleApi, deps) {
     inWorkspace,
     inProject,
     coreFreshOrThrow,
+    machineTokensOrThrow,
     stepUp,
     stepUpOrThrow,
     auditOf,
@@ -428,6 +429,8 @@ export function mountConsoleRoutes(consoleApi, deps) {
     stepUp('tokens'),
     inProject,
     handle(async (req, res) => {
+      // A token is what a command line or an agent works with: where the workspace wants a passkey for those, here too.
+      machineTokensOrThrow(req)
       res.status(201).json(createApiToken(req, req.body || {}))
     }),
   )

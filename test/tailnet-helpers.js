@@ -27,9 +27,11 @@ quietSqliteWarning()
 export function believedGate() {
   return {
     admit: async () => true,
+    // A browser that says it is on the server's own machine (a test header): nobody, and the page can say why.
+    ownMachine: (req) => req?.headers?.['x-fixture-own-machine'] === '1',
     identityOf(req) {
       const login = req?.headers?.['tailscale-user-login']
-      if (typeof login !== 'string' || !login) return null
+      if (typeof login !== 'string' || !login || this.ownMachine(req)) return null
       const name = req.headers['tailscale-user-name']
       return { login: login.toLowerCase(), name: typeof name === 'string' && name ? name : login.split('@')[0] }
     },
@@ -40,6 +42,9 @@ export function believedGate() {
 }
 
 export const TAILNET_HOST = 'board.example.ts.net'
+// The server's own node on the fake tailnet: its stable id and its own addresses.
+export const SELF_NODE = 'nSELFfixtureCNTRL'
+export const SELF_ADDRESSES = ['100.64.0.1', 'fd7a:115c:a1e0::1']
 export const TAILNET_ORIGIN = `https://${TAILNET_HOST}`
 
 // RFC 2047 "Q" encoding as Go's mime.QEncoding does it (what tailscaled sends for non-ASCII values).
@@ -70,7 +75,14 @@ export function fakeTailscale() {
       return {
         code: 0,
         stdout: JSON.stringify({
-          Node: { ID: 1, Name: 'device.example.ts.net.', ...(who.tagged ? { Tags: ['tag:server'] } : {}) },
+          // Which node: the server's own (a request from the server's machine itself) or a device of its own.
+          Node: {
+            ID: 1,
+            StableID: who.self ? SELF_NODE : `n-${args.at(-1)}`,
+            Name: 'device.example.ts.net.',
+            Addresses: [`${args.at(-1)}/32`],
+            ...(who.tagged ? { Tags: ['tag:server'] } : {}),
+          },
           UserProfile: { LoginName: who.tagged ? 'tagged-devices' : who.login, DisplayName: who.name || '' },
         }),
       }
@@ -80,7 +92,8 @@ export function fakeTailscale() {
         code: 0,
         stdout: JSON.stringify({
           BackendState: 'Running',
-          Self: { DNSName: `${TAILNET_HOST}.` },
+          Self: { DNSName: `${TAILNET_HOST}.`, ID: SELF_NODE, TailscaleIPs: SELF_ADDRESSES },
+          TailscaleIPs: SELF_ADDRESSES,
           CertDomains: [TAILNET_HOST],
           ...state.status,
         }),
@@ -104,7 +117,7 @@ export function fakeTailscale() {
 
 // What a machine with one ordinary tailscaled says about it (src/tailnet-proof.js hostFacts).
 export const plainFacts = () => ({
-  tailscaled: [{ pid: 1163, uid: 0, argv: ['/usr/sbin/tailscaled', '--port=41641'] }],
+  tailscaled: [{ pid: 1163, uid: 0, argv: ['/usr/sbin/tailscaled', '--port=41641'], env: null }],
   unreadable: 0,
   container: null,
 })

@@ -237,6 +237,7 @@ export const COMMAND_FLAGS = {
     'tailnet-sign-in',
     'workspace-name',
     'login',
+    'setup-link',
     'funnel-port',
     'quotas',
     'retention-hours',

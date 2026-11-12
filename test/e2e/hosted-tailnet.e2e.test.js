@@ -161,4 +161,26 @@ test('tailnet sign-in: the owner claims with no passkey, a visitor is admitted w
   assert.ok(await dee.page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), 'no sideways scroll at 390')
   await shot(dee.page, '8-unknown-phone')
   for (const who of [ada, ben, cyd, dee]) assert.deepEqual(who.errors, [])
+
+  // On the server's own machine the tailnet says who owns the machine, and the server does not take it: the
+  // page says why and offers the passkey. Desktop and phone width.
+  for (const [width, height, name] of [
+    [1440, 900, '9-own-machine'],
+    [390, 844, '10-own-machine-phone'],
+  ]) {
+    const context = await browser.newContext({
+      viewport: { width, height },
+      extraHTTPHeaders: { 'Tailscale-User-Login': 'ada@example.com', 'Tailscale-User-Name': 'Ada', 'X-Fixture-Own-Machine': '1' },
+    })
+    contexts.push(context)
+    const page = await context.newPage()
+    await page.goto(hosted.origin + '/')
+    const notice = page.locator('[data-sw-tailnet="self"]')
+    await notice.waitFor()
+    assert.match(await notice.innerText(), /This is the server’s own machine/)
+    assert.match(await notice.innerText(), /Sign in with a passkey here, or open the server from another of your tailnet devices/)
+    assert.equal(await page.locator('[data-sw-tailnet-continue]').count(), 0, 'no "Continue as" from here')
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), 'no sideways scroll')
+    await shot(page, name)
+  }
 })

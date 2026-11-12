@@ -101,8 +101,8 @@ export function StepUpCard() {
           >
             Off: shapewall login and agent connect on a tailnet machine are approved by that machine’s tailnet user, with no code. A tailnet
             identity is per device, not per person: anything running as you on a tailnet device of yours can act as you here. On: approving
-            a machine needs the code, this console and a passkey check; the server refuses a session that only a tailnet identity stands
-            behind.
+            a machine needs the code, this console and a passkey check, and so does making an API token (a token is what a command line or
+            an agent works with); the server refuses a session that only a tailnet identity stands behind, for both.
           </Row>
         ) : null}
         <Row

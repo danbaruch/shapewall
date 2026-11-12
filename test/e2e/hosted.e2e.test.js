@@ -662,6 +662,10 @@ test('admin loop: invite, accept on a phone, change the role, share a link, gues
     await guest.page.fill('[data-sw-share-passcode]', 'blue-door')
     await guest.page.click('[data-sw-share-open]')
     await guest.page.waitForSelector('[data-sw-node="home"]', { timeout: 20000 })
+    // A guest who may comment has the Comment and Draw tools, at the bottom of the canvas.
+    await guest.page.waitForSelector('[data-sw-tools] [data-sw-tool="comment"]')
+    assert.equal(await guest.page.locator('[data-sw-tools] [data-sw-tool="draw"]').count(), 1)
+    assert.equal(await guest.page.locator('[data-sw-toolbar] [data-sw-comment-mode]').count(), 0, 'not in the top bar')
     await shot(guest.page, '10-guest-board')
     const info = await guest.page.evaluate(async () => (await fetch('api/info')).json())
     assert.equal(info.user.name, 'Gia (guest)')
@@ -806,6 +810,8 @@ test('public projects: owner switches, an anonymous phone board and the kill swi
     await visitor.page.goto(url)
     await visitor.page.waitForSelector('[data-sw-node="home"]')
     assert.equal(await visitor.page.locator('[data-sw-comment-mode]').count(), 0)
+    // Read-only: no Comment or Draw tool, so no board tools at all on a phone.
+    assert.equal(await visitor.page.locator('[data-sw-tool="draw"], [data-sw-tools]').count(), 0)
     const info = await visitor.page.evaluate(async () => (await fetch('api/info')).json())
     assert.equal(info.public, true)
     assert.equal(info.readOnly, true)

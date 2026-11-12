@@ -8,7 +8,7 @@ import { Spinner } from '../components/ui'
 import { BoardContext, NODE_TYPES } from './nodes'
 import { EDGE_TYPES } from './edges'
 import { layoutBoard, nativeSize, pinPoint } from './layout'
-import { cardKeyDown, useCanvasNavigation } from './navigation'
+import { cardKeyDown, isEditable, useCanvasNavigation } from './navigation'
 import { COMMENT_STATES, beforeAfter, entryVersion, historyCount, pageChange } from './flow'
 import { FILTERS } from './CommentsPanel'
 import { JourneyBar, JourneyBuilder } from './JourneyBar'
@@ -42,7 +42,11 @@ import { BrokenLinks } from './BrokenLinks'
 import { BoardToolbar } from './BoardToolbar'
 import { BoardMenu } from './BoardMenu'
 import { CanvasNotes } from './CanvasNotes'
-import { DrawingMode, useDrawingMode } from './DrawingMode'
+import { DrawingBar, DrawingMode, useDrawingMode } from './DrawingMode'
+import { BoardTools, ToolDock, ToolNote, useCanvasWidth, useKeyboardUp } from './BoardTools'
+import { DOCK, NOTE_ROOM, placeTools, toolsWidth } from './toolDock'
+import { activeTool as toolInUse, hasDivider, toolForKey, toolList } from './tools'
+import { isIgnoredTypeahead } from '../components/ui'
 import { drawing } from './drawing'
 import { nudgeComposer } from './composerNudge'
 import { BoardToast, NoticeBar, useToast } from './Toast'
@@ -153,6 +157,12 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   const canvasRef = useRef(null)
 
   const [commentMode, setCommentMode] = useState(false)
+  // The Draw tool, before a page is picked: comment mode whose next click
+  // starts a comment on that page and goes straight to drawing on it.
+  const [drawArmed, setDrawArmed] = useState(false)
+  useEffect(() => {
+    if (!commentMode) setDrawArmed(false)
+  }, [commentMode])
   const [draft, setDraft] = useState(null)
   // Whether the comment being written has anything in it yet: text, an image
   // or a drawing. Read when a click or a key needs to know (never rendered).
@@ -549,6 +559,10 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   useEffect(() => {
     if (selectingKey && !liveKeys.has(selectingKey)) setSelectingKey(null)
   }, [liveKeys, selectingKey])
+  // One tool at a time: Comment or Draw (the tools, C, the palette) takes over from "Select text".
+  useEffect(() => {
+    if (commentMode) setSelectingKey(null)
+  }, [commentMode])
 
   // ---- Journeys ------------------------------------------------------------
   const { openJourney, closeJourney, goStep, chooseJourneyBranch, startBuilder, addBuilderStep, saveBuilder, removeJourney } =
@@ -801,6 +815,17 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     pageImage,
   })
 
+  // The Draw tool picked a page: its comment is open, so the drawing starts
+  // (after useCommentDraft's own effect, which makes the drawing). On a phone
+  // the composer opens its drawing sheet instead (`startDraw` below).
+  const [sheetDraw, setSheetDraw] = useState(false)
+  useEffect(() => {
+    if (!draft) setSheetDraw(false)
+    if (!drawArmed || !draft) return
+    setDrawArmed(false)
+    if (!wide) setSheetDraw(true)
+    else if (drawing.get()?.owner === 'composer') drawing.set({ tool: 'box' })
+  }, [drawArmed, draft, wide])
   const { captureConfirm, setCaptureConfirm, startCapture } = useCapture({ boardId, view, setBusy, setNotice, setPolling })
 
   const cameraRested = useCallback(
@@ -816,7 +841,11 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   )
   // Wheel, Space+drag and middle-drag move the camera in many small steps;
   // the camera rests once, when they stop (navigation.js).
-  const navigation = useCanvasNavigation({ canvasRef, flow, minZoom: MIN_ZOOM, maxZoom: MAX_ZOOM, onRest: cameraRested })
+  // The Hand tool (desktop): a drag anywhere pans and a click opens nothing
+  // (navigation.js reads the ref when a press starts).
+  const [hand, setHand] = useState(false)
+  const handRef = useRef(false)
+  const navigation = useCanvasNavigation({ canvasRef, flow, minZoom: MIN_ZOOM, maxZoom: MAX_ZOOM, onRest: cameraRested, handRef })
   const onMoveEnd = useCallback(
     (event, viewport) => {
       if (!navigation.moving()) cameraRested(viewport)
@@ -1237,6 +1266,149 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
       : commentMode && canComment && !comparePair
         ? 'picking'
         : 'off'
+  // ---- The board's tools (BoardTools.jsx) --------------------------------------
+  // Only what this person may use here; with Select alone there is no toolbar.
+  const commenting = canComment && !comparePair
+  const hasLive = useMemo(
+    () =>
+      !comparePair &&
+      (Object.values(data?.captures || {}).some((sizes) => Object.values(sizes || {}).some((image) => image?.live)) ||
+        (data?.variants || []).some((variant) => Object.values(variant.files || {}).some((file) => file?.live))),
+    [comparePair, data?.captures, data?.variants],
+  )
+  // Select text: beside Comment and Draw whenever the board has live pages;
+  // for someone who may not comment, only while a page is live (a pointer
+  // and a tool that cannot be used yet would be noise).
+  const tools = toolList({
+    wide,
+    commenting,
+    draw: commentMedia.draw,
+    liveBoard: hasLive,
+    livePage: liveKeys.size > 0 || Boolean(selectingKey),
+  })
+  const activeTool = toolInUse({
+    drawing: drawingOn,
+    commentMode: commentMode && commenting,
+    drawArmed,
+    selecting: Boolean(selectingKey) && wide,
+    hand: hand && wide,
+  })
+  handRef.current = activeTool === 'hand'
+  // One tool at a time: Comment, Draw or Select text takes over from Hand.
+  useEffect(() => {
+    if (commentMode || selectingKey || drawingOn) setHand(false)
+  }, [commentMode, selectingKey, drawingOn])
+  const pickTool = (id) => {
+    const session = drawing.get()
+    if (id === 'select' || id === 'hand') {
+      if (session?.tool) drawing.set({ tool: null })
+      setSelectingKey(null)
+      setCommentMode(false)
+      setHand(id === 'hand')
+      // Hand selects nothing: the selected card lets go.
+      if (id === 'hand') clearFocus()
+    } else if (id === 'comment') {
+      // From drawing: one step back, to the comment. From Draw with no page
+      // picked: the same click now pins a comment. Else on and off, as C.
+      if (session?.tool) {
+        drawing.set({ tool: null })
+        setDrawArmed(false)
+        setCommentMode(true)
+      } else if (commentMode && drawArmed) setDrawArmed(false)
+      else setCommentMode((value) => !value)
+    } else if (id === 'draw') {
+      // A comment or a reply is open: draw on its page (again: back to it).
+      if (wide && session) drawing.set({ tool: session.tool ? null : 'box' })
+      else if (commentMode && drawArmed) setCommentMode(false)
+      else if (!keepDraft()) {
+        setDraft(null)
+        setCommentMode(true)
+        setDrawArmed(true)
+      }
+    } else if (id === 'text') {
+      if (selectingKey) setSelectingKey(null)
+      else if (focusedKey && liveKeys.has(focusedKey) && readyKeys.has(focusedKey)) {
+        if (session?.tool) drawing.set({ tool: null })
+        setCommentMode(false)
+        setSelectingKey(focusedKey)
+      } else {
+        setToast({
+          at: Date.now(),
+          text: 'Select text works on a live page: click a page, then Open live (or zoom in until it goes live).',
+        })
+      }
+    }
+  }
+  // Esc leaves "Select text" (back to Select), unless it closes something
+  // first. Read in the capture phase and used up, as comment mode's Esc is
+  // (useCommentModeKeys), so the same key does not also leave a journey.
+  // Esc from Hand goes to Select the same way.
+  useEffect(() => {
+    if ((!selectingKey && !hand) || commentMode) return undefined
+    const onKey = (event) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || isEditable(event.target)) return
+      if (document.querySelector('[role="dialog"], [role="menu"], [role="listbox"]')) return
+      event.preventDefault()
+      setSelectingKey(null)
+      setHand(false)
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [selectingKey, hand, commentMode])
+  // V is Select, H is Hand (tools.js: not while typing or with a dialog,
+  // menu or list open; the same guard as C).
+  const pickToolRef = useRef(pickTool)
+  pickToolRef.current = pickTool
+  const toolKeys = tools.join(',')
+  useEffect(() => {
+    const onKey = (event) => {
+      const tool = toolForKey(event, {
+        tools: toolKeys.split(','),
+        busy: Boolean(document.querySelector('[role="dialog"]:not([data-sw-thread-popover]), [role="menu"], [role="listbox"]')),
+        handled: event.defaultPrevented && !isIgnoredTypeahead(event),
+      })
+      if (!tool) return
+      event.preventDefault()
+      pickToolRef.current(tool)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [toolKeys])
+  // The note for the tool in use, above the tools: one at a time.
+  const toolNote = drawingOn
+    ? 'drawing'
+    : commentState === 'composing'
+      ? 'composing'
+      : commentMode && commenting
+        ? 'picking'
+        : selectingKey && wide
+          ? 'text'
+          : null
+  // Phones: the tools are the bottom bar; they step aside for a sheet (the
+  // composer, a thread, the lists, the menu) and for the keyboard.
+  const keyboardUp = useKeyboardUp(!wide)
+  const phoneCovered =
+    !wide && (Boolean(draft) || threadSheet || sheetOpen || menuOpen || Boolean(checksOpen) || Boolean(chatThread) || hostedAgentSheet)
+  const toolsOffered = Boolean(data) && tools.length > 1
+  const toolsShown = toolsOffered && !phoneCovered && !keyboardUp
+  const canvasWidth = useCanvasWidth(canvasRef)
+  const noteSqueezed = Boolean(toolNote) && canvasWidth < NOTE_ROOM
+  const minimapWanted = wide && minimapOn && !liveKeys.size && !journey && !builder && !noteSqueezed
+  const toolsPlace = !toolsShown
+    ? { shift: 0, compact: 0, right: true }
+    : wide
+      ? placeTools({
+          width: canvasWidth,
+          tools: toolsWidth(tools.length, false, hasDivider(tools)),
+          left: [DOCK.zoomFull, DOCK.zoomCompact, 0],
+          right: minimapWanted ? DOCK.minimap : 0,
+        })
+      : placeTools({
+          width: canvasWidth,
+          tools: toolsWidth(tools.length, true),
+          left: journey || builder ? [] : [DOCK.fit],
+          margin: DOCK.touchMargin,
+        })
   const toggleLinks = () => updateParams({ links: showLinks ? null : '1' })
   const toggleMinimap = () => {
     const next = !minimapOn
@@ -1441,8 +1613,6 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
               setShareOpen={setShareOpen}
               viewportNotice={viewportNotice}
               canComment={canComment}
-              commentMode={commentMode}
-              setCommentMode={setCommentMode}
               minimapOn={minimapOn}
               toggleMinimap={toggleMinimap}
               linksTip={linksTip}
@@ -1488,7 +1658,11 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
               <div
                 ref={canvasRef}
                 tabIndex={-1}
-                className={cn('relative min-w-0 flex-1 outline-none', commentState === 'picking' && 'sw-commenting')}
+                className={cn(
+                  'relative min-w-0 flex-1 outline-none',
+                  commentState === 'picking' && 'sw-commenting',
+                  activeTool === 'hand' && 'sw-hand',
+                )}
                 onKeyDown={onCanvasKeyDown}
                 data-sw-canvas="true"
                 data-sw-comment-flow={commentState}
@@ -1502,7 +1676,6 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                     canvasRef={canvasRef}
                     targets={layout.targets}
                     focusFor={(owner) => ((owner === 'composer' ? draft?.y : selectedComment?.y) ?? 50) / 100}
-                    titleFor={(pageId, viewport) => `${targetTitle(pageId)} · ${viewportLabel(viewport)}`}
                     shotFor={(pageId, viewport) => {
                       const image = data.captures?.[pageId]?.[viewport]
                       return image?.file ? fileUrl(boardId, 'captures', image.thumb || image.file, imageVersion) : null
@@ -1514,23 +1687,12 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                     wide={wide}
                     commentMode={commentMode}
                     canComment={canComment}
-                    readyKeys={readyKeys}
-                    setCommentMode={setCommentMode}
-                    selectText={
-                      selectingKey && wide
-                        ? {
-                            title: `${targetTitle(splitFrameKey(selectingKey).targetId)} · ${viewportLabel(splitFrameKey(selectingKey).viewport)}`,
-                            onDone: () => setSelectingKey(null),
-                          }
-                        : null
-                    }
-                    composing={commentState === 'composing' ? draftTarget : null}
+                    composing={commentState === 'composing'}
                     parkedDraft={
                       draft && draftParked
                         ? { title: targetTitle(draft.pageId), onReopen: reopenDraft, onDiscard: () => setDraft(null) }
                         : null
                     }
-                    onCancelDraft={() => (busy ? null : setDraft(null))}
                     showLinks={showLinks}
                     activePage={activePage}
                     shownSteps={shownSteps}
@@ -1590,7 +1752,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                     nodesDraggable={false}
                     nodesConnectable={false}
                     elementsSelectable={false}
-                    zoomOnDoubleClick={!commentMode}
+                    zoomOnDoubleClick={!commentMode && activeTool !== 'hand'}
                     onMoveEnd={onMoveEnd}
                     onPaneClick={() => {
                       clearFocus()
@@ -1667,7 +1829,9 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                       liveKeys={liveKeys}
                       toggleMinimap={toggleMinimap}
                       hideFit={Boolean(journey || builder)}
-                      hideMinimap={Boolean(journey || builder)}
+                      hideMinimap={Boolean(journey || builder) || noteSqueezed || !toolsPlace.right}
+                      compact={toolsPlace.compact === 1}
+                      hideZoom={wide && toolsPlace.compact === 2}
                       fitBoard={fitBoard}
                     />
                   </ReactFlow>
@@ -1690,9 +1854,11 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                     }}
                   />
                 ) : null}
-                {tryOpen && data && !journey && !builder && !drawingOn && !(commentMode && !wide) ? (
+                {tryOpen && data && !journey && !builder && !drawingOn && !(commentMode && !wide) && !noteSqueezed ? (
                   <TryThis
                     touch={!wide}
+                    // A tool's note is up: the card folds to its chip, clear of it.
+                    chip={Boolean(toolNote)}
                     done={tryDone}
                     onOpenComment={() => {
                       const open = visibleComments.filter((item) => item.status === 'open')
@@ -1712,40 +1878,66 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                     onClose={closeTry}
                   />
                 ) : null}
-                <BoardToast toast={toast} setToast={setToast} onHold={holdToast} wide={wide} raised={Boolean(journey || builder)} />
                 {comparePair && changedOnly && compareData && !layoutPages.length ? (
                   <p className="absolute inset-x-0 top-1/3 mx-auto w-max max-w-[90%] rounded-lg bg-surface px-4 py-3 text-sm text-muted shadow-pop">
                     No visual changes between these two environments.
                   </p>
                 ) : null}
-                {builder ? (
-                  <JourneyBuilder
-                    draft={builder}
-                    pages={data?.board?.pages || []}
-                    onChange={setBuilder}
-                    onSave={saveBuilder}
-                    onCancel={() => setBuilder(null)}
-                    pageTitle={(pageId) => findPage(pageId)?.title || pageId}
-                    busy={busy}
-                    touch={!wide}
-                  />
-                ) : journey && !drawingOn ? (
-                  <JourneyBar
-                    key={journey.id}
-                    journey={journey}
-                    route={route}
-                    step={step}
-                    pageTitle={(pageId) => findPage(pageId)?.title || pageId}
-                    onStep={goStep}
-                    onChoose={chooseJourneyBranch}
-                    onClose={closeJourney}
-                    onEdit={() => startBuilder(journey)}
-                    onDelete={removeJourney}
-                    canEdit={canEditJourneys && journey.source === 'board'}
-                    busy={busy}
-                    touch={!wide}
-                  />
-                ) : null}
+                <ToolDock touch={!wide}>
+                  <BoardToast toast={toast} setToast={setToast} onHold={holdToast} wide={wide} />
+                  {builder ? (
+                    <JourneyBuilder
+                      draft={builder}
+                      pages={data?.board?.pages || []}
+                      onChange={setBuilder}
+                      onSave={saveBuilder}
+                      onCancel={() => setBuilder(null)}
+                      pageTitle={(pageId) => findPage(pageId)?.title || pageId}
+                      busy={busy}
+                      touch={!wide}
+                    />
+                  ) : journey && !drawingOn ? (
+                    <JourneyBar
+                      key={journey.id}
+                      journey={journey}
+                      route={route}
+                      step={step}
+                      pageTitle={(pageId) => findPage(pageId)?.title || pageId}
+                      onStep={goStep}
+                      onChoose={chooseJourneyBranch}
+                      onClose={closeJourney}
+                      onEdit={() => startBuilder(journey)}
+                      onDelete={removeJourney}
+                      canEdit={canEditJourneys && journey.source === 'board'}
+                      busy={busy}
+                      touch={!wide}
+                    />
+                  ) : null}
+                  {toolNote === 'drawing' ? (
+                    <DrawingBar titleFor={(pageId, viewport) => `${targetTitle(pageId)} · ${viewportLabel(viewport)}`} />
+                  ) : toolNote && !phoneCovered ? (
+                    <ToolNote
+                      wide={wide}
+                      composing={toolNote === 'composing' ? { target: draftTarget, onCancel: () => (busy ? null : setDraft(null)) } : null}
+                      picking={toolNote === 'picking' ? { live: readyKeys.size > 0, draw: drawArmed } : null}
+                      selectText={
+                        toolNote === 'text'
+                          ? {
+                              title: `${targetTitle(splitFrameKey(selectingKey).targetId)} · ${viewportLabel(splitFrameKey(selectingKey).viewport)}`,
+                              onDone: () => setSelectingKey(null),
+                            }
+                          : null
+                      }
+                      onDone={() => setCommentMode(false)}
+                    />
+                  ) : null}
+                  {toolsShown ? (
+                    <BoardTools tools={tools} active={activeTool} onTool={pickTool} touch={!wide} shift={toolsPlace.shift} />
+                  ) : toolsOffered && !wide ? (
+                    // Under a sheet or the keyboard: the room stays, so a toast keeps its place above the sheet's own controls.
+                    <div className="h-[52px] shrink-0" aria-hidden="true" />
+                  ) : null}
+                </ToolDock>
               </div>
               <SidePanel
                 wide={wide}
@@ -1788,6 +1980,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
             setDraft={setDraft}
             draftDescription={draftDescription}
             composerProps={composerProps}
+            startDraw={sheetDraw}
           />
           <BoardMenu
             {...barProps}

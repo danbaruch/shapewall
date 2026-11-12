@@ -682,6 +682,7 @@ test('static export: read-only board on a plain file server', async () => {
     await page.goto(`http://127.0.0.1:${fileServer.address().port}/`)
     await page.waitForSelector('[data-sw-node="home"]')
     assert.equal(await page.locator('[data-sw-comment-mode]').count(), 0, 'no commenting in a static export')
+    assert.equal(await page.locator('[data-sw-tool="draw"]').count(), 0, 'no Draw tool either')
     assert.equal(await page.locator('[data-sw-capture]').count(), 0)
     // Comments made earlier are in the export (filter: all).
     await page.click('button:has-text("All")')

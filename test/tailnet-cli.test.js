@@ -47,7 +47,7 @@ const cliLogin = (device, flags = {}, more = {}) => {
     login({ remote, ...flags }, out, { env, fetchImpl: fetchThrough(device), sleep: async () => {}, open: () => false, ...more }),
   ).then((result) => ({ ...result, env }))
 }
-// The owner claims the new server from its own machine, as `shapewall hosted claim` does.
+// The owner claims the new server from another tailnet device, as `shapewall hosted claim --setup-link` does.
 async function claimed(server, device = null, flags = {}) {
   device ||= await server.device(ADA)
   const result = await run((out) => claimServer({ setupUrl: readSetupLink(server.dataDir), flags, out, fetchImpl: fetchThrough(device) }))

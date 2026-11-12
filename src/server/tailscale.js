@@ -9,6 +9,7 @@ import {
   newServeSecret,
   procPeerProof,
   proofSelfTest,
+  selfFromStatus,
   serveProblem,
   serveTarget,
   tailscaledProblem,
@@ -88,7 +89,12 @@ export async function tailscaleAccess({
   // tailscaled's own whois, and a tailscaled that can be believed). Where it
   // cannot be proven the board still serves: every other device pairs.
   let identityOff = null
-  if (ownerLogin) identityOff = proof.problem?.() || tailscaledProblem(status, facts())
+  // This node: a request that comes from this machine itself is never the owner by identity
+  // (any local program can ask tailscaled for the serve URL; src/tailnet-proof.js).
+  let here = selfFromStatus(status)
+  if (ownerLogin)
+    identityOff =
+      proof.problem?.() || tailscaledProblem(status, facts()) || (here ? null : 'tailscale status does not say which node this machine is')
   const secret = ownerLogin && !identityOff ? newServeSecret() : null
   const target = secret ? serveTarget(port, secret) : `http://127.0.0.1:${port}`
   const whois = async (address) => {
@@ -101,13 +107,19 @@ export async function tailscaleAccess({
       return null
     }
   }
-  const gate = secret ? createTailnetGate({ secret, proof, whois, log }) : null
+  const gate = secret ? createTailnetGate({ secret, proof, whois, self: () => here, log }) : null
   const verify = async () => {
     try {
       const now = JSON.parse(await call(['status', '--json']))
       const config = JSON.parse((await call(['serve', 'status', '--json'])) || '{}')
-      return tailscaledProblem(now, facts()) || serveProblem(config, { dnsName: host, httpsPort: port, localPort: port, target })
+      here = selfFromStatus(now)
+      return (
+        tailscaledProblem(now, facts()) ||
+        (here ? null : 'tailscale status does not say which node this machine is') ||
+        serveProblem(config, { dnsName: host, httpsPort: port, localPort: port, target })
+      )
     } catch {
+      here = null
       return 'tailscale status could not be read'
     }
   }

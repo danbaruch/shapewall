@@ -3,6 +3,7 @@
 import fs from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { isLoopback } from '../net.js'
+import http from 'node:http'
 import https from 'node:https'
 import { lanAccess, tailscaleAccess } from '../server/tailscale.js'
 import { loadConfig } from '../config.js'
@@ -150,7 +151,17 @@ export async function serve(flags, out) {
     log: (line) => out(line),
   })
   const tls = flags['tls-cert'] ? { cert: fs.readFileSync(flags['tls-cert']), key: fs.readFileSync(flags['tls-key']) } : null
-  const server = tls ? https.createServer(tls, app).listen(port, host) : app.listen(port, host)
+  // With `--tailscale` and the identity proof, each request is first asked how it came in: the serve
+  // entry's secret comes off its path here, before Express and before anything can echo the URL.
+  const handler = tail?.gate
+    ? (req, res) => {
+        tail.gate.admit(req, res).then(
+          (ok) => ok && app(req, res),
+          () => res.writeHead(500).end(),
+        )
+      }
+    : app
+  const server = tls ? https.createServer(tls, handler).listen(port, host) : http.createServer(handler).listen(port, host)
   watchConfig(config, { log: out, server })
   await new Promise((resolve, reject) => {
     server.once('listening', resolve)
@@ -159,8 +170,8 @@ export async function serve(flags, out) {
   let hostServer = null
   if (lan && host !== '0.0.0.0') {
     hostServer = tls
-      ? https.createServer(tls, app).listen(server.address().port, '127.0.0.1')
-      : app.listen(server.address().port, '127.0.0.1')
+      ? https.createServer(tls, handler).listen(server.address().port, '127.0.0.1')
+      : http.createServer(handler).listen(server.address().port, '127.0.0.1')
     try {
       await new Promise((resolve, reject) => {
         hostServer.once('listening', resolve)

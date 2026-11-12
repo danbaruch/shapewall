@@ -29,6 +29,8 @@ import { tailnetOutCookie } from './tailnet.js'
 import { auditAccount, findInviteByHash, findInvitesForTailnetLogin, inviteUsable, roleIn, seenDevice, tenant } from './tenancy.js'
 
 const OUT_DAYS = 30
+const OWN_MACHINE =
+  'This is the server’s own machine: a tailnet identity is never taken from here, because any program on this machine could ask the same way. Use a passkey, or another tailnet device.'
 
 export function mountTailnetAuth(authRouter, deps) {
   const {
@@ -64,6 +66,7 @@ export function mountTailnetAuth(authRouter, deps) {
 
   function arrived(req) {
     const identity = identityOf(req)
+    if (!identity && on && tailnet.ownMachine?.(req)) throw new HttpError(403, 'tailnet_own_machine', OWN_MACHINE)
     if (!identity)
       throw new HttpError(
         403,
@@ -114,6 +117,8 @@ export function mountTailnetAuth(authRouter, deps) {
     const identity = sameOrigin(req) ? identityOf(req) : null
     // Tailnet sign-in is on, but this request names nobody: a tagged
     // device, a shared node without a user, or not through the tailnet.
+    // From the server's own machine: never signed in by identity (any program there could ask the same way).
+    if (!identity && sameOrigin(req) && tailnet.ownMachine?.(req)) return { tailnet: { state: 'self' } }
     if (!identity) return { tailnet: { state: 'none' } }
     if (tailnetAccounts.userFor(identity.login)) return { tailnet: { state: 'signed_out', login: identity.login, name: identity.name } }
     const invites = usableInvites(identity.login).map((row) => ({ workspace: row.workspace_name, role: row.role }))
@@ -138,6 +143,8 @@ export function mountTailnetAuth(authRouter, deps) {
       tailnet: {
         // The login this request arrives with (null: not through the tailnet).
         here: identity?.login || null,
+        // This browser is on the server's own machine: its tailnet identity is never taken.
+        ownMachine: Boolean(sameOrigin(req) && tailnet.ownMachine?.(req)),
         linked,
         linkedAt: req.user.tailnet_linked_at || null,
         // Invites made for this login that the account has not taken yet.

@@ -228,7 +228,13 @@ export async function startHosted({
         // while it is not so.
         const first = await served.verify()
         if (first) throw refuse(`${first}.`)
-        gate = proofModule.createTailnetGate({ secret: serveSecret, proof, whois: served.whois, log: (line) => out(line) })
+        gate = proofModule.createTailnetGate({
+          secret: serveSecret,
+          proof,
+          whois: served.whois,
+          self: served.self,
+          log: (line) => out(line),
+        })
         holder.gate = gate
         const watch = async () => {
           const problem = await served.verify().catch(() => 'tailscale serve status could not be read')

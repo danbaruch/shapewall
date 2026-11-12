@@ -48,6 +48,13 @@ export function PairingScreen() {
       <p className="text-sm text-muted">
         This board belongs to the person running Shapewall. Match the code and approve this device on that computer.
       </p>
+      {view?.ownMachine ? (
+        <p className="rounded-lg border border-line p-3 text-sm text-muted" data-sw-pairing-own-machine>
+          This is the computer that runs Shapewall. Its tailnet address never lets you in by itself, because any program on this computer
+          could ask the same way. Open the board at its localhost address instead (the terminal that started Shapewall printed it), with the
+          owner link for settings and approvals.
+        </p>
+      ) : null}
       {pairing?.state === 'pending' ? (
         <section className="space-y-3 rounded-lg border border-line p-4" aria-live="polite">
           <p className="text-sm text-fg">Waiting for approval: {pairing.name}</p>

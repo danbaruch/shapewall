@@ -33,6 +33,13 @@ export function TailnetArrival({ tailnet, signup, onSignedIn }) {
   const [handle, setHandle] = useState(tailnet.suggested?.handle || '')
   const [name, setName] = useState(tailnet.suggested?.displayName || tailnet.name || '')
   const go = useAction()
+  if (tailnet.state === 'self')
+    return (
+      <Notice tone="info" className="mt-4" title="This is the server’s own machine" data-sw-tailnet="self">
+        This server signs tailnet users in, but never from the machine it runs on: any program on this machine could ask the same way. Sign
+        in with a passkey here, or open the server from another of your tailnet devices.
+      </Notice>
+    )
   if (tailnet.state === 'none')
     return (
       <Notice tone="info" className="mt-4" title="Your tailnet did not say who you are" data-sw-tailnet="none">
@@ -197,6 +204,12 @@ export function TailnetAccount() {
         ) : (
           <p>Not linked. Open this page through the tailnet, from one of your own devices, to link your tailnet login.</p>
         )}
+        {tailnet.ownMachine ? (
+          <Notice tone="info" data-sw-tailnet-own-machine>
+            This browser is on the server’s own machine. Your tailnet identity is never taken from here (any program on this machine could
+            ask the same way), so linking and tailnet sign-in work from your other tailnet devices.
+          </Notice>
+        ) : null}
         {tailnet.linked && tailnet.here && tailnet.here !== tailnet.linked ? (
           <Notice tone="warn">
             This device arrives as {tailnet.here}, not as the login your account is linked to. Tailnet sign-in will not sign you in from it.

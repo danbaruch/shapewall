@@ -286,7 +286,11 @@ test('remote chat and approval switches deny the whole boundary; Tailscale owner
   )
 })
 
-const tailStatus = { BackendState: 'Running', Self: { DNSName: 'fixture.example.ts.net.' }, TailscaleIPs: ['100.64.0.1'] }
+const tailStatus = {
+  BackendState: 'Running',
+  Self: { DNSName: 'fixture.example.ts.net.', ID: 'nHOSTfixture', TailscaleIPs: ['100.64.0.1'] },
+  TailscaleIPs: ['100.64.0.1'],
+}
 function fakeTail({ serve = {}, funnel = {}, who = { UserProfile: { LoginName: 'owner@example.test' }, Node: {} } } = {}) {
   const calls = []
   return {
@@ -365,8 +369,15 @@ test('serve --tailscale: a Tailscale-User-Login header counts only through the s
         }),
       }
     if (args[0] === 'whois') {
-      if (args.at(-1) !== '100.64.0.1') throw new Error('peer not found')
-      return base.run(command, args)
+      // .1 is this host (its own node), .5 the owner's phone; nothing else is on the tailnet.
+      const node = { '100.64.0.1': 'nHOSTfixture', '100.64.0.5': 'nPHONEfixture' }[args.at(-1)]
+      if (!node) throw new Error('peer not found')
+      return {
+        stdout: JSON.stringify({
+          UserProfile: { LoginName: 'owner@example.test' },
+          Node: { StableID: node, Addresses: [`${args.at(-1)}/32`] },
+        }),
+      }
     }
     return base.run(command, args)
   }
@@ -426,7 +437,7 @@ test('serve --tailscale: a Tailscale-User-Login header counts only through the s
   assert.equal((await request(port, 'GET', '/api/info', { headers: owner })).status, 401, 'and it is nobody for everything else')
   // With the secret it read from `tailscale serve status`, and the owner's address: its socket is still its own.
   const withSecret = await request(port, 'POST', `${secretPath}${permission}`, {
-    headers: { ...owner, 'X-Forwarded-For': '100.64.0.1' },
+    headers: { ...owner, 'X-Forwarded-For': '100.64.0.5' },
     body: { optionId: 'run' },
   })
   assert.equal(withSecret.status, 403, withSecret.text)
@@ -448,7 +459,7 @@ test('serve --tailscale: a Tailscale-User-Login header counts only through the s
           agent: false,
           headers: {
             ...owner,
-            'X-Forwarded-For': '100.64.0.1',
+            'X-Forwarded-For': '100.64.0.5',
             ...headers,
             ...(data ? { 'Content-Type': 'application/json', 'Content-Length': data.length } : {}),
           },
@@ -470,6 +481,18 @@ test('serve --tailscale: a Tailscale-User-Login header counts only through the s
     401,
     'tailscaled does not vouch for that address',
   )
+  // THE HOST ITSELF, through its own tailnet name: any program on this computer can ask tailscaled for
+  // the serve URL. The source is the host's own tailnet address, whois names the owner, serve sets the
+  // owner's login and dials loopback as root with the secret. It is never the owner by identity.
+  const fromHost = { headers: { 'X-Forwarded-For': '100.64.0.1' } }
+  assert.equal((await viaServe('GET', '/api/info', fromHost)).status, 401)
+  const self = await viaServe('POST', permission, { ...fromHost, body: { optionId: 'run' } })
+  assert.equal(self.status, 403, 'a program on the host cannot approve its own command through the tailnet name')
+  assert.equal(self.json.error.code, 'host_only')
+  assert.equal(readApproval(config, 'sample', approval.id).state, 'pending')
+  const pairing = await viaServe('GET', '/api/pairing', fromHost)
+  assert.deepEqual({ access: pairing.json.access, ownMachine: pairing.json.ownMachine }, { access: 'nobody', ownMachine: true })
+  assert.equal((await viaServe('GET', '/api/pairing')).json.ownMachine, false)
   const approved = await viaServe('POST', permission, { body: { optionId: 'run' } })
   assert.equal(approved.status, 200, approved.text)
   // A serve config that is no longer the one entry: nobody is the owner by identity.

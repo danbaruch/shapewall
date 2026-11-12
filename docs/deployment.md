@@ -199,9 +199,15 @@ proves nothing: any program on the host (an agent whose command is waiting for
 approval included) can send it to the loopback port. The proof is the same as
 the hosted server's tailnet sign-in: the serve entry points at a secret path
 made at each start, the connection's other end must be a socket owned by root
-(tailscaled), and `tailscale whois` must give the request's tailnet address to
-the owner's login
+(tailscaled), `tailscale whois` must give the request's tailnet address to
+the owner's login, and the request must not come from this machine itself
 ([how](hosted.md#how-the-server-knows-a-request-came-through-tailscale-serve)).
+A program on the host can ask tailscaled for the board's tailnet address and
+would arrive with the owner's login, so the host's own tailnet address is
+never the owner: on the host, open `http://localhost:<port>` (the settings
+token makes you the owner there); the tailnet address opened on the host asks
+to pair and says why. The secret path is taken off before the application
+sees the request and is in no redirect or response.
 Other users, shared-in devices, tagged nodes, and missing or mismatched
 identity headers must pair. `--no-identity` disables it altogether. The node
 owner is determined at server start; restart Shapewall after changing the
@@ -210,8 +216,9 @@ node's owner.
 Where that cannot be proven, identity is off and every other device pairs; the
 board still starts and says why: not Linux, tailscaled in userspace-networking
 mode, Tailscale before 1.98, tailscaled running a SOCKS5 or outbound HTTP
-proxy, tailscaled not visible or not root, or Shapewall in a container. The
-same is checked every 30 seconds while the board runs.
+proxy or started with a loopback-forwarding debug switch, no tailscaled of
+root visible, the node unable to say which node it is, or Shapewall in a
+container. The same is checked every 30 seconds while the board runs.
 
 Approving an agent's command or edit (`/permissions/` routes) needs the
 settings token from the host's own terminal, unless the request is the owner by

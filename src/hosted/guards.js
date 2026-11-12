@@ -162,6 +162,29 @@ export function createGuards({
     }
   const needFresh = asMiddleware(coreRefusal)
   const coreFreshOrThrow = asThrow(coreRefusal)
+  // "Approve command line logins in the browser" (a workspace's switch): a
+  // token that a command line or an agent can use is made only by a session
+  // with a passkey check in the last 10 minutes. Without it the switch would
+  // be no barrier: a session that only a tailnet identity stands behind
+  // (which is per device: anything running as the person on a tailnet device
+  // of theirs has it) could not approve a waiting login, but could make the
+  // same token on the project's page. So both ways of making a token ask
+  // here: approving a login or an agent (device-routes.js) and a new project
+  // token (console-routes.js). Decided from the session; nothing a client
+  // sends changes it. Returns whether only an identity stands behind the
+  // session (for the audit entry).
+  const machineTokensOrThrow = (req, t = req.t) => {
+    const identityOnly = req.auth.session.via === 'tailnet' && !auth.isFresh(req.auth.session)
+    if (identityOnly && stepUpSettings(t).get().cliApproval) {
+      throw notFresh(
+        req,
+        REAUTH_MS,
+        'This workspace makes tokens for machines and agents only with a passkey, in the browser (Settings, "Approve command line logins in the browser"). Confirm with your passkey.',
+        { stepUp: 'cliApproval' },
+      )
+    }
+    return identityOnly
+  }
   // A passkey check in the last 10 minutes for a rule of its own: passkeyOrThrow(req, message, { stepUp }).
   const passkeyOrThrow = asThrow((req, message, extra) => notFresh(req, REAUTH_MS, message, extra))
   // After inWorkspace (req.t): stepUp('tokens').
@@ -195,7 +218,8 @@ export function createGuards({
   // one place for every request, before its route.
   const coreLines = FIXED_CORE.filter((line) => line.method && line.path).map((line) => ({
     ...line,
-    pattern: new RegExp(`^${line.path.replace(/:[a-z]+/g, '([^/]+)')}/?$`),
+    // As Express matches its routes: any letter case, an optional trailing slash.
+    pattern: new RegExp(`^${line.path.replace(/:[a-z]+/g, '([^/]+)')}/?$`, 'i'),
     params: [...line.path.matchAll(/:([a-z]+)/g)].map((match) => match[1]),
   }))
   const fixedCore = (req, res, next) => {
@@ -204,7 +228,13 @@ export function createGuards({
       const match = line.pattern.exec(req.path)
       if (!match || !sessionOf(req)) continue
       if (line.role) {
-        const ws = decodeURIComponent(match[1 + line.params.indexOf('ws')] || '')
+        // The parameter as Express hands it to the route: decoded (a malformed one is nobody's workspace).
+        let ws = ''
+        try {
+          ws = decodeURIComponent(match[1 + line.params.indexOf('ws')] || '')
+        } catch {
+          ws = ''
+        }
         const role = ID_PATTERNS.workspace.test(ws) ? roleIn(db, req.auth.user.id, ws) : null
         // Not theirs to do: the route says so (404 or 403), as for anyone.
         if (!role || !roleAtLeast(role, line.role)) continue
@@ -318,6 +348,7 @@ export function createGuards({
     fixedCore,
     cutTailnetSessions,
     passkeyOrThrow,
+    machineTokensOrThrow,
     coreFreshOrThrow,
     stepUp,
     stepUpOrThrow,

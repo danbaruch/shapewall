@@ -151,7 +151,8 @@ How people get in:
 
 - **The first owner** claims the server with the setup link, as on any server. Opened through the tailnet, that links their
   tailnet login (with a passkey, or with none: the sign-up page offers "Continue as ada@example.com"). From the command line:
-  `shapewall hosted claim` ([From your coding agent](#from-your-coding-agent)).
+  `shapewall hosted claim --data DIR --login LOGIN` on the server's machine ([From your coding agent](#from-your-coding-agent)).
+  Opened from the server's own machine, the tailnet address links nothing: [why](#on-the-servers-own-machine).
 - **Someone the server does not know** sees "Ask an admin of a workspace here to invite ada@example.com", and nothing else. The
   admins of every workspace see them under Members, "Arrived through the tailnet", and can invite them with a role or take them
   off the list (kept 30 days, at most 200).
@@ -197,13 +198,15 @@ sent and sets its own, for traffic from tailnet users only: none for tagged devi
 ([Tailscale: identity headers](https://tailscale.com/kb/1312/serve#identity-headers)). But the server listens on `127.0.0.1`, and
 other things can open that port and write the same headers:
 
-- any program on the machine;
+- any program on the machine, directly;
+- any program on the machine, through tailscaled: it asks for the server's own tailnet address
+  (`https://board.example.ts.net/`), and serve answers its own machine like any other device, with the machine owner's login;
 - a tailnet device, when tailscaled runs in userspace-networking mode: its netstack forwards a raw TCP connection to the
   machine's tailnet address, on a port serve does not handle, to `127.0.0.1:<same port>`, and tailscaled itself dials it;
 - a local user through tailscaled's own dialler (`tailscale nc`, before Tailscale 1.98), or through tailscaled's SOCKS5 or
   outbound HTTP proxy.
 
-The last two arrive from a socket that tailscaled owns. So no single check is proof, and an identity is believed only when
+The last three arrive from a socket that tailscaled owns. So no single check is proof, and an identity is believed only when
 **all** of these hold:
 
 1. **The secret.** At each start the server makes a random secret and points its serve entry at
@@ -214,15 +217,23 @@ The last two arrive from a socket that tailscaled owns. So no single check is pr
    included. The secret is in no log line, error or response; a wrong one gets a plain 404.
 2. **The peer.** The connection's other end must be a socket owned by root, the user tailscaled runs as. On Linux the kernel
    lists every TCP socket with its owner in `/proc/net/tcp`, and the server looks the peer up for each connection. This stops
-   local users, who have the secret: their sockets are their own. There is no setting to name another user.
+   a local program that connects to the port itself, though it has the secret: its socket is its own. It does not stop a local
+   program that asks tailscaled for the serve address (check 4 does). There is no setting to name another user.
 3. **tailscaled vouches.** For each request the server asks tailscaled who owns the address in `X-Forwarded-For` (which serve
    sets to the tailnet address the request came from): `tailscale whois`. It must be a user's device, not tagged, of the same
    login as the header. Kept for a minute per connection and address. Not proof alone (the address is a header too), required
    in addition.
-4. **The headers are clean.** Exactly one `Tailscale-User-Login`, no `Tailscale-Funnel-Request`, a value that is plain ASCII or
+4. **Not this machine.** A request whose source is the server's own machine is never taken by its tailnet identity. Any
+   program there, under any user, can ask tailscaled for the serve address; serve then sets the machine owner's login, adds the
+   secret and dials the server from a root socket, and whois agrees. Nothing in such a request says which local user or
+   program made it. So the server refuses when the address in `X-Forwarded-For` is one of this node's own tailnet addresses
+   (IPv4 or IPv6, from `tailscale status --json`, read again every 30 seconds), or when whois says the address belongs to this
+   node (compared by the node's stable id, not by a name). If the server cannot tell which node it is, nobody is believed.
+   What this means for the owner: [On the server's own machine](#on-the-servers-own-machine).
+5. **The headers are clean.** Exactly one `Tailscale-User-Login`, no `Tailscale-Funnel-Request`, a value that is plain ASCII or
    RFC 2047 encoded UTF-8 (what Tailscale sends for non-ASCII names) and reads as `user@domain`. Twice, empty, another
    character set, a broken escape: nobody.
-5. **The request is from this origin.** The proxy adds the identity to every request a device makes, also one that a page on
+6. **The request is from this origin.** The proxy adds the identity to every request a device makes, also one that a page on
    another site made the browser send. So the identity alone only answers `GET /auth/me` with `Sec-Fetch-Site: same-origin`
    and the `POST /auth/tailnet/*` routes (same-origin and JSON, as for every write). Everything else needs the session cookie
    as before.
@@ -238,7 +249,12 @@ sessions stop counting and their open live streams are cut; passkey sessions go 
 - **Tailscale older than 1.98**;
 - tailscaled running a **SOCKS5 or outbound HTTP proxy** (`--socks5-server`, `--outbound-http-proxy-listen`, read from its
   command line in `/proc`);
-- tailscaled not found in `/proc`, more than one, not readable, or not running as root;
+- no tailscaled of root found in `/proc`, more than one, or its command line not readable. Only a process of uid 0 whose
+  program is called `tailscaled` counts (where `/proc/<pid>/exe` can be read, the program file itself must be); a process an
+  ordinary user named `tailscaled` is ignored and cannot switch the feature off;
+- tailscaled started with `TS_DEBUG_NETSTACK_LOOPBACK_PORT` or `TS_DEBUG_NETSTACK_SUBNETS` in its environment (debugging
+  switches that make tailscaled forward tailnet connections to loopback), when the server can read that environment;
+- the server cannot tell which node it is (`tailscale status --json` without `Self.ID` or without its tailnet addresses);
 - the server in a **container or a user namespace**, where "root" may not be the machine's root (a `/.dockerenv` or
   `/run/.containerenv` file, a container cgroup, `container` or `KUBERNETES_SERVICE_HOST` in the environment, or a uid map
   that is not the machine's own);
@@ -248,13 +264,35 @@ sessions stop counting and their open live streams are cut; passkey sessions go 
 Run with passkeys in those cases (`--tailscale` without `--tailnet-sign-in`).
 
 **What is still trusted.** Root on the server's machine, and whoever may change tailscaled's serve config there (the Tailscale
-operator). Either can pretend to be anyone. Nothing else on the machine is trusted, and nothing on the tailnet.
+operator). Either can pretend to be anyone. Nothing else on the machine is trusted, and nothing on the tailnet. tailscaled's
+environment is part of that root configuration: `/proc/<pid>/environ` of a root process is readable only by root, so a server
+that runs as an ordinary user (as it should) cannot see the two debugging switches above and trusts root not to have set them.
+
+### On the server's own machine
+
+The server's own machine is never signed in by its tailnet identity, in the browser or from the command line: a request from
+there proves only that something on the machine made it. What to use there instead:
+
+- **Hosted server.** A passkey (the passkey session works from the machine as from anywhere), or another tailnet device of
+  yours. The sign-in page says so: "This is the server's own machine: the server never takes a tailnet identity from here".
+  `shapewall login` and `shapewall agent connect` fall back to the code (approve it in a browser on another device, or here
+  with a passkey); `shapewall join` and `shapewall admin` say to run them on another tailnet device or to use the console. The
+  first account is made with `shapewall hosted claim --data DIR --login LOGIN`, which rests on the data folder, not on the
+  tailnet ([From your coding agent](#from-your-coding-agent)).
+- **Local board** (`shapewall serve --tailscale`). On the machine itself open `http://localhost:<port>`: the board's own
+  machine is the owner there by the settings token, as without Tailscale. The tailnet address opened from the machine itself
+  asks to pair, and the pairing page says why.
+
+One consequence to know: an owner who works only on the server's machine and has no passkey and no second tailnet device has
+no way to sign in to a hosted server. Add a passkey from another device first, or run the server with passkeys.
 
 **An identity is per device, not per person.** Tailscale says which device a request came from and whose device it is. It
 cannot say that the person is at the keyboard. Anything running as you on a tailnet device of yours (a script, a coding agent,
 a browser extension, malware) can act as you here, as far as a tailnet session goes. That is why the fixed core asks for a
-passkey, why a first passkey is on hold for a day, and why a workspace can require a passkey for approving machines
-("Approve command line logins in the browser"). If that is not acceptable for your team, use passkeys.
+passkey, why a first passkey is on hold for a day, and why a workspace can require a passkey for approving machines and for making
+tokens ("Approve command line logins in the browser": with it on, a session that only a tailnet identity stands behind can
+neither approve a command line login nor make an API token on a project's page; alone, the first would be no barrier, since
+a token is what a command line works with). If that is not acceptable for your team, use passkeys.
 
 **Logins are taken as Tailscale reports them.** `ada@example.com` is one account here whichever identity provider the tailnet
 uses. If a tailnet changes provider, or a shared-in user from another tailnet has a login that reads the same as a member's,
@@ -270,6 +308,12 @@ Checked on a real machine (Tailscale 1.104.2, Linux), read-only:
   **a user who is not the operator can read it** (run as `nobody`): the secret is not secret from local users;
 - `tailscale whois --json <address>` answers `Node` and `UserProfile.LoginName` for this machine's own tailnet address, and
   "peer not found" for an address that is nobody's;
+- `tailscale status --json` has `Self.ID` and `Self.TailscaleIPs` (IPv4 and IPv6), and whois on one of those addresses
+  answers `Node.StableID` equal to `Self.ID`;
+- one capture of real requests through an existing serve entry, made from the machine itself (the security review's, not
+  part of the suite): the request arrived from a root-owned socket, with the entry's path in front, the identity headers set
+  to the machine owner's login, and exactly one `X-Forwarded-For` holding one of the machine's own tailnet addresses. That
+  is the request check 4 refuses;
 - the `/proc/net/tcp` lookup names the right owner for a real loopback connection (a test in the suite, on Linux).
 
 Read in Tailscale's source (`ipn/ipnlocal/serve.go`, `wgengine/netstack`, `cmd/tailscaled`), not run: that serve joins its
@@ -286,12 +330,15 @@ machine's serve config:
 - how `tailscale whois` marks a tagged device and a shared-in user's device in `--json` on your version (the code reads
   `Node.Tags` and `UserProfile.LoginName`);
 - the shape of `tailscale serve status --json` for a TCP forward, a service or a foreground session;
-- that `shapewall hosted claim` on the server's own machine reaches the server through serve with your identity;
+- a request from a second tailnet device (the capture above was made from the server's own machine only), and whether any
+  Tailscale version or setting gives a request from the machine itself a source address that is not one of
+  `Self.TailscaleIPs` and that whois does not give to this node;
+- whether the server can read `/proc/<pid>/environ` of tailscaled anywhere it is meant to run (as an ordinary user it cannot);
 - the time `tailscale whois` takes per new connection under load.
 
 The tests use a stand-in proxy that follows the behaviour read in the source. The first real test: start the server, open it
-from two tailnet devices of different people and from a tagged device, run `shapewall hosted claim`, and look at the server log
-for "ignored identity headers" (it says which check failed).
+from two tailnet devices of different people, from a tagged device and from the server's own machine (which must be refused),
+and look at the server log for "ignored identity headers" (it says which check failed).
 
 ### From your coding agent
 
@@ -305,16 +352,27 @@ No admin token is stored anywhere.
 
 ```sh
 shapewall hosted --data ./hosted-data --tailscale --tailnet-sign-in &        # needs Tailscale, MagicDNS and HTTPS certificates
-shapewall hosted claim --data ./hosted-data --workspace-name "Team"          # no browser: you become the owner
+shapewall hosted claim --data ./hosted-data --login ada@example.com --workspace-name "Team"   # no browser
+```
+
+Then on another tailnet device of the owner's (the server's own machine is never signed in by its tailnet identity:
+[why](#on-the-servers-own-machine)):
+
+```sh
 shapewall admin projects create "My site" --remote https://board.example.ts.net
 shapewall login --remote https://board.example.ts.net                        # no code, no browser: a token for the project
 shapewall push --remote https://board.example.ts.net
 shapewall admin invites create --login ben@example.com --role admin --remote https://board.example.ts.net
 ```
 
-`hosted claim` reads the one-time setup link from the data folder (so only someone who can read that folder can run it) and asks
-the server through the tailnet who is asking. That login becomes the owner. `--login ada@example.com` refuses anyone else; it
-never names the owner by itself. No passkey is made. **Needs a browser later:** adding a passkey (Account and security), which
+`hosted claim` reads the one-time setup link from the data folder: being able to read that folder is the proof, as it is for
+`hosted setup-link`. It does not ask the tailnet who you are, because on the server's own machine the tailnet cannot say.
+`--login` names the owner's tailnet login and is required; it must read as a login (`ada@example.com`), it is taken on your
+word, and the command prints what it linked: the server's address, the owner account and its handle, the tailnet login, the
+workspace. A server is claimed once: with an account already there, or the setup link used or replaced, the command refuses.
+The audit log records the account and the link as made by "hosted claim on the server". From another tailnet device, with the
+setup link in hand, `shapewall hosted claim --setup-link URL` asks the server who is asking instead, and `--login` there only
+refuses anyone else. No passkey is made. **Needs a browser later:** adding a passkey (Account and security), which
 the fixed core asks for: deleting a workspace, changing owners, inviting an owner, making the passkey settings weaker. A first
 passkey can confirm those 24 hours after it is added, so add it before you need it; the command says so.
 
@@ -1618,8 +1676,10 @@ Old-host passkeys show "For old.example" on the Account page.
   on top of SameSite=Lax. The token API ignores cookies.
 - **Tailnet identity** (only with `--tailnet-sign-in`). The `Tailscale-User-*` headers are believed only on a request that
   carries the secret path of the serve entry this server made, on a connection whose other end is owned by root, for an address
-  tailscaled's own whois gives to that login, with exactly one clean login header and no Funnel mark. On direct loopback
-  requests, raw TCP forwards, Funnel traffic and with the flag off they are ignored. The server refuses to start with the flag
+  tailscaled's own whois gives to that login, with exactly one clean login header and no Funnel mark, and never for a request
+  from the server's own machine (any program there can ask tailscaled for the serve address). On direct loopback requests, raw
+  TCP forwards, Funnel traffic and with the flag off they are ignored. The secret is taken off the request before the
+  application sees it and is in no response; a test crawls the hosted server and the local board for it. The server refuses to start with the flag
   (and suspends it while running) under userspace networking, Tailscale before 1.98, tailscaled's own proxies, in a container,
   or when the serve config is not its one entry. Root and the Tailscale operator on the machine are trusted; nothing else on
   the machine or the tailnet is. An identity is per device, not per person

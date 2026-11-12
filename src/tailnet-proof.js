@@ -36,8 +36,10 @@
 //      through the LocalAPI (`tailscale serve status`), secret included.
 //   2. THE PEER. The connection's other end is a socket owned by root (the
 //      user tailscaled runs as), read from the kernel's socket table,
-//      /proc/net/tcp. This stops local users, who have the secret: their
-//      sockets are their own. It is only meaningful while tailscaled gives
+//      /proc/net/tcp. This stops a local user who connects to the port
+//      directly with the secret: that socket is their own. (It does not stop
+//      one who goes through tailscaled's own serve listener: see 5.) It is
+//      only meaningful while tailscaled gives
 //      nobody a way to make it dial loopback for them, so the feature is off
 //      (the server refuses to start, and trust is suspended while it runs)
 //      when tailscaled is in userspace-networking mode, is older than 1.98,
@@ -50,6 +52,18 @@
 //      Not proof alone (the address is a header too), required in addition.
 //   4. THE HEADERS. Exactly one Tailscale-User-Login, no
 //      Tailscale-Funnel-Request, a value that decodes to a plain login.
+//   5. NOT THIS MACHINE. Any program on the server's machine can ask for
+//      the serve URL itself (https://<machine>.ts.net/...). tailscaled
+//      answers same-machine connections too: the source is the machine's own
+//      tailnet address, whois names the machine's owner, serve sets the
+//      owner's login and dials loopback as root, with the secret. Checks 1
+//      to 4 all pass, for any local user. So an identity whose source is
+//      this node is never honoured: X-Forwarded-For must not be one of this
+//      node's own tailnet addresses, and the node whois names must not be
+//      this node (by its stable id and its addresses, never by a name).
+//      When this node cannot be determined, nobody is believed. The owner
+//      at the server's own machine uses what does not rest on the tailnet:
+//      the settings token on localhost (a local board), a passkey (hosted).
 //
 // What is still trusted: root on the machine, and whoever may change
 // tailscaled's serve config there (the Tailscale operator). Nothing else on
@@ -257,8 +271,21 @@ export async function proofSelfTest(server, proof) {
 
 // ---- Is tailscaled one whose connections can be believed? -----------------------
 
+// tailscaled's debug switches that make its netstack forward connections to
+// loopback (wgengine/netstack): with either, a peer's raw connection can be
+// dialled by tailscaled itself.
+const DEBUG_SWITCHES = ['TS_DEBUG_NETSTACK_LOOPBACK_PORT', 'TS_DEBUG_NETSTACK_SUBNETS']
+
 // What this machine says about tailscaled and about where this process runs.
-// { tailscaled: [{ pid, uid, argv }], unreadable: n, container: reason | null }
+// { tailscaled: [{ pid, uid, argv, env }], unreadable: n, container: reason | null }
+// Only processes of root count. Anyone can start a program called
+// "tailscaled"; one that is not root's is no tailscaled this server would
+// believe anyway, and must not be able to switch the feature off for
+// everyone. Where this process may read it (it is root itself), the
+// executable must also be a file called tailscaled that root owns.
+// `env`: the names of the debug switches found in its environment, or null
+// when that cannot be read (normal for a server that is not root: what root
+// put in tailscaled's environment is then trusted root configuration).
 export function hostFacts({ proc = '/proc', read = fs, env = process.env } = {}) {
   const facts = { tailscaled: [], unreadable: 0, container: null }
   let pids = []
@@ -275,11 +302,39 @@ export function hostFacts({ proc = '/proc', read = fs, env = process.env } = {})
       continue // gone, or hidden
     }
     if (comm !== 'tailscaled') continue
+    let uid
+    try {
+      uid = read.statSync(`${proc}/${pid}`).uid
+    } catch {
+      continue
+    }
+    // Someone else's program with that name: ignored.
+    if (uid !== 0) continue
+    try {
+      const exe = read.readlinkSync(`${proc}/${pid}/exe`)
+      if (!/(^|\/)tailscaled(?: \(deleted\))?$/.test(exe)) continue
+      try {
+        if (read.statSync(exe.replace(/ \(deleted\)$/, '')).uid !== 0) continue
+      } catch {
+        /* replaced by an update while it runs: the name is what there is */
+      }
+    } catch {
+      /* not readable by this user: root's process with that name is taken as it is */
+    }
     try {
       const argv = read.readFileSync(`${proc}/${pid}/cmdline`, 'utf8').split('\0').filter(Boolean)
-      const uid = read.statSync(`${proc}/${pid}`).uid
       if (!argv.length) throw new Error('empty')
-      facts.tailscaled.push({ pid: Number(pid), uid, argv })
+      let env = null
+      try {
+        const names = read
+          .readFileSync(`${proc}/${pid}/environ`, 'utf8')
+          .split('\0')
+          .map((pair) => pair.split('=')[0])
+        env = DEBUG_SWITCHES.filter((name) => names.includes(name))
+      } catch {
+        env = null
+      }
+      facts.tailscaled.push({ pid: Number(pid), uid, argv, env })
     } catch {
       facts.unreadable += 1
     }
@@ -327,9 +382,11 @@ export function tailscaledProblem(status, facts) {
   if (facts.tailscaled.length !== 1)
     return facts.tailscaled.length
       ? 'more than one tailscaled runs on this machine'
-      : 'no tailscaled process is visible to this server (another machine, container or process namespace?)'
+      : 'no tailscaled process of root is visible to this server (userspace tailscaled, another machine, container or process namespace?)'
   const daemon = facts.tailscaled[0]
   if (daemon.uid !== 0) return 'tailscaled does not run as root here'
+  if (daemon.env?.length)
+    return `tailscaled runs with ${daemon.env.join(' and ')} set, which makes it forward connections to this machine’s loopback itself`
   const tun = flagValue(daemon.argv, 'tun')
   if (tun === 'userspace-networking' || status?.TUN !== true)
     return 'tailscaled runs in userspace-networking mode, where it forwards any tailnet device’s raw TCP connection to this machine’s loopback ports itself'
@@ -346,7 +403,8 @@ export function tailscaledProblem(status, facts) {
 }
 
 // whois from the answer of `tailscale whois --json <address>`: { login,
-// tagged } or null (no such peer, or an answer that names no user).
+// tagged, stableId, addresses } or null (no such peer, or an answer that
+// names no user). stableId and addresses say which node it is.
 export function whoisAnswer(stdout) {
   let data
   try {
@@ -357,7 +415,50 @@ export function whoisAnswer(stdout) {
   if (!data || typeof data !== 'object' || !data.Node || typeof data.Node !== 'object') return null
   const login = cleanTailnetLogin(data.UserProfile?.LoginName)
   if (!login) return null
-  return { login, tagged: Array.isArray(data.Node.Tags) && data.Node.Tags.length > 0 }
+  return {
+    login,
+    tagged: Array.isArray(data.Node.Tags) && data.Node.Tags.length > 0,
+    stableId: typeof data.Node.StableID === 'string' && data.Node.StableID ? data.Node.StableID : null,
+    addresses: (Array.isArray(data.Node.Addresses) ? data.Node.Addresses : [])
+      .map((value) => canonicalAddress(String(value).replace(/\/\d+$/, '')))
+      .filter(Boolean),
+  }
+}
+
+// An address in one spelling, to compare: IPv4 as it is, IPv6 as eight
+// groups without leading zeros. null when it is neither.
+export function canonicalAddress(value) {
+  const text = String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/%.*$/, '')
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(text))
+    return text.split('.').every((part) => Number(part) <= 255) ? text.split('.').map(Number).join('.') : null
+  if (!/^[0-9a-f:]+$/.test(text) || !text.includes(':')) return null
+  const halves = text.split('::')
+  if (halves.length > 2) return null
+  const head = halves[0] ? halves[0].split(':') : []
+  const tail = halves.length === 2 && halves[1] ? halves[1].split(':') : []
+  const missing = 8 - head.length - tail.length
+  if (halves.length === 1 ? missing !== 0 : missing < 1) return null
+  const groups = [...head, ...Array(halves.length === 2 ? missing : 0).fill('0'), ...tail]
+  if (groups.some((group) => !/^[0-9a-f]{1,4}$/.test(group))) return null
+  return groups.map((group) => Number.parseInt(group, 16).toString(16)).join(':')
+}
+
+// This node, from `tailscale status --json`: its stable id and its own
+// tailnet addresses (IPv4 and IPv6). null when either is missing: then
+// nobody is believed.
+export function selfFromStatus(status) {
+  const stableId = typeof status?.Self?.ID === 'string' && status.Self.ID ? status.Self.ID : null
+  const addresses = [
+    ...(Array.isArray(status?.Self?.TailscaleIPs) ? status.Self.TailscaleIPs : []),
+    ...(Array.isArray(status?.TailscaleIPs) ? status.TailscaleIPs : []),
+  ]
+    .map(canonicalAddress)
+    .filter(Boolean)
+  if (!stableId || !addresses.length) return null
+  return { stableId, addresses: [...new Set(addresses)] }
 }
 
 // ---- The serve config ------------------------------------------------------------
@@ -452,13 +553,19 @@ const WHOIS_TTL_MS = 60_000
 //                      every check, else null. Synchronous.
 //   suspend(reason) / resume() / suspended()
 //
-// whois(address): async, { login, tagged } | null (see whoisAnswer).
-export function createTailnetGate({ secret, proof, whois, log = () => {}, now = () => Date.now() }) {
+//   ownMachine(req)    true when the request named someone but came from this
+//                      machine itself (so the page can say why it is nobody)
+//
+// whois(address): async, { login, tagged, stableId, addresses } | null (see
+// whoisAnswer). self(): this node now, { stableId, addresses } | null (see
+// selfFromStatus); without it nobody is believed.
+export function createTailnetGate({ secret, proof, whois, self = () => null, log = () => {}, now = () => Date.now() }) {
   if (typeof secret !== 'string' || secret.length < 32) throw new Error('the serve secret: at least 32 characters')
   const marked = Buffer.from(`${SECRET_PREFIX}${secret}`)
   const proven = new WeakMap()
   const vouched = new WeakMap() // socket -> Map(address -> { at, answer })
   const answers = new WeakMap()
+  const fromHere = new WeakSet()
   let suspendedFor = null
   let loggedAt = -Infinity
   const refused = (why) => {
@@ -494,10 +601,18 @@ export function createTailnetGate({ secret, proof, whois, log = () => {}, now = 
       entry = { at: now(), answer }
       known.set(address, entry)
     }
-    return Boolean(entry.answer && !entry.answer.tagged && entry.answer.login === login)
+    const answer = entry.answer
+    if (!answer || answer.tagged || answer.login !== login) return 'no'
+    // Which node: without that it cannot be told from this one.
+    const here = self()
+    if (!here || !answer.stableId) return 'unknown'
+    if (answer.stableId === here.stableId || answer.addresses.some((item) => here.addresses.includes(item))) return 'self'
+    return 'yes'
   }
 
   async function admit(req, res = null) {
+    // Once per request (the listener asks first; an application may ask again).
+    if (answers.has(req)) return true
     const secretState = takeSecret(req)
     if (secretState === 'wrong') {
       // Never say more: not that the path exists, not what was wrong with it.
@@ -521,8 +636,23 @@ export function createTailnetGate({ secret, proof, whois, log = () => {}, now = 
           if (parsed.problem) {
             if (parsed.problem !== 'funnel') refused(`header ${parsed.problem}`)
           } else if (!address) refused('no tailnet address in X-Forwarded-For')
-          else if (!(await vouch(socket, address, parsed.login))) refused('tailscaled does not say that address is that person’s device')
-          else answer = parsed
+          else {
+            const here = self()
+            const source = canonicalAddress(address)
+            if (!here) refused('this machine’s own tailnet addresses are not known')
+            else if (here.addresses.includes(source)) {
+              fromHere.add(req)
+              refused('the request came from this machine itself')
+            } else {
+              const vouched = await vouch(socket, address, parsed.login)
+              if (vouched === 'yes') answer = parsed
+              else if (vouched === 'self') {
+                fromHere.add(req)
+                refused('the request came from this machine itself')
+              } else if (vouched === 'unknown') refused('tailscaled does not say which device that address is')
+              else refused('tailscaled does not say that address is that person’s device')
+            }
+          }
         }
       }
     }
@@ -534,6 +664,7 @@ export function createTailnetGate({ secret, proof, whois, log = () => {}, now = 
     admit,
     // Suspended: nobody is believed, also on a request admitted before.
     identityOf: (req) => (suspendedFor || !req ? null : answers.get(req) || null),
+    ownMachine: (req) => Boolean(req && fromHere.has(req)),
     suspend(reason) {
       suspendedFor = String(reason || 'suspended')
     },

@@ -25,6 +25,7 @@ import {
   tailscaledProblem,
   whoisAnswer,
 } from '../src/hosted/tailnet-identity.js'
+import { selfFromStatus } from '../src/tailnet-proof.js'
 import { handleFromLogin } from '../src/hosted/tailnet.js'
 import { createProject, invite, reauth, signUp } from './hosted-helpers.js'
 import { tempDir } from './helpers.js'
@@ -229,10 +230,20 @@ test('the gate: the secret, a connection from tailscaled, tailscaled’s own who
   const asked = []
   let clock = 0
   const owners = new Map([
-    ['100.64.0.7', { login: 'ada@example.com', tagged: false }],
-    ['100.64.0.8', { login: 'ben@example.com', tagged: false }],
-    ['100.64.0.9', { login: 'ada@example.com', tagged: true }],
+    ['100.64.0.7', { login: 'ada@example.com', tagged: false, stableId: 'nADA', addresses: ['100.64.0.7'] }],
+    ['100.64.0.8', { login: 'ben@example.com', tagged: false, stableId: 'nBEN', addresses: ['100.64.0.8'] }],
+    ['100.64.0.9', { login: 'ada@example.com', tagged: true, stableId: 'nTAG', addresses: ['100.64.0.9'] }],
+    // The server's own node, under an address the server did not list, and a node that also holds one of its addresses.
+    ['100.64.0.20', { login: 'ada@example.com', tagged: false, stableId: 'nSELF', addresses: ['100.64.0.20'] }],
+    [
+      '100.64.0.21',
+      { login: 'ada@example.com', tagged: false, stableId: 'nOTHER', addresses: ['100.64.0.21', 'fd7a:115c:a1e0:0:0:0:0:1'] },
+    ],
+    ['100.64.0.22', { login: 'ada@example.com', tagged: false, stableId: null, addresses: [] }],
+    ['100.64.0.1', { login: 'ada@example.com', tagged: false, stableId: 'nSELF', addresses: ['100.64.0.1'] }],
+    ['fd7a:115c:a1e0::1', { login: 'ada@example.com', tagged: false, stableId: 'nSELF', addresses: [] }],
   ])
+  let here = { stableId: 'nSELF', addresses: ['100.64.0.1', 'fd7a:115c:a1e0:0:0:0:0:1'] }
   const gate = createTailnetGate({
     secret,
     proof: { trusted: (socket) => socket?.remotePort === 1 },
@@ -241,6 +252,7 @@ test('the gate: the secret, a connection from tailscaled, tailscaled’s own who
       if (address === '100.64.0.66') throw new Error('tailscale is not answering')
       return owners.get(address) || null
     },
+    self: () => here,
     log: (line) => lines.push(line),
     now: () => clock,
   })
@@ -283,6 +295,31 @@ test('the gate: the secret, a connection from tailscaled, tailscaled’s own who
     ['not a tailnet address (public)', ada('203.0.113.9')],
   ])
     assert.equal(await who(request({ ...tailscaled, proven: label }, `${through}/x`, pairs)), null, label)
+  // 5. THIS MACHINE. A program on the server's machine asks for the serve URL itself: tailscaled's own
+  //    listener answers, the source is the machine's own tailnet address, whois names its owner, serve
+  //    sets the owner's login and dials loopback as root with the secret. Everything above passes.
+  for (const [label, address] of [
+    ['its own IPv4 address', '100.64.0.1'],
+    ['its own IPv6 address', 'fd7a:115c:a1e0::1'],
+    ['its own IPv6 address, spelled out', 'FD7A:115C:A1E0:0:0:0:0:1'],
+    ['an address whois gives to this very node', '100.64.0.20'],
+    ['a node that holds one of this machine’s addresses', '100.64.0.21'],
+    ['a node whois gives no id for', '100.64.0.22'],
+  ]) {
+    const fromHere = request({ remotePort: 1, label }, `${through}/x`, ada(address))
+    assert.equal(await who(fromHere), null, label)
+    assert.equal(gate.ownMachine(fromHere), !label.includes('no id'), label)
+  }
+  assert.equal(gate.ownMachine(good), false)
+  // When this node cannot be determined, nobody is believed.
+  here = null
+  assert.equal(await who(request({ remotePort: 1 }, `${through}/x`, ada())), null, 'fail closed')
+  here = { stableId: 'nSELF', addresses: ['100.64.0.1', 'fd7a:115c:a1e0:0:0:0:0:1'] }
+  assert.ok(await who(request({ remotePort: 1 }, `${through}/x`, ada())))
+  const bare = createTailnetGate({ secret, proof: { trusted: () => true }, whois: async (address) => owners.get(address) })
+  const unknownSelf = request({ remotePort: 1 }, `${through}/x`, ada())
+  assert.equal(await bare.admit(unknownSelf), true)
+  assert.equal(bare.identityOf(unknownSelf), null, 'a gate that was not told which node this is believes nobody')
   // 4. The headers: twice, with a Funnel mark.
   assert.equal(await who(request(tailscaled, `${through}/x`, [...ada(), ['Tailscale-User-Login', 'ada@example.com']])), null)
   assert.equal(await who(request(tailscaled, `${through}/x`, [...ada(), ['Tailscale-Funnel-Request', '?1']])), null)
@@ -312,7 +349,7 @@ test('the gate: the secret, a connection from tailscaled, tailscaled’s own who
     null,
     'the device left the tailnet: not believed on the open connection either',
   )
-  owners.set('100.64.0.7', { login: 'ada@example.com', tagged: false })
+  owners.set('100.64.0.7', { login: 'ada@example.com', tagged: false, stableId: 'nADA', addresses: ['100.64.0.7'] })
   clock += 61_000
   // Suspended: nobody, also for a request admitted before.
   const earlier = request(tailscaled, `${through}/a`, ada())
@@ -357,7 +394,12 @@ test('a tailscaled whose connections cannot be believed: userspace networking, a
       tailscaledProblem(status, { ...plainFacts(), tailscaled: [{ pid: 9, uid: 1000, argv: ['tailscaled'] }] }),
       /does not run as root/,
     ],
-    ['none visible', tailscaledProblem(status, { ...plainFacts(), tailscaled: [] }), /no tailscaled process is visible/],
+    ['none visible', tailscaledProblem(status, { ...plainFacts(), tailscaled: [] }), /no tailscaled process of root is visible/],
+    [
+      'a debug switch',
+      tailscaledProblem(status, facts([], { tailscaled: [{ pid: 9, uid: 0, argv: ['tailscaled'], env: ['TS_DEBUG_NETSTACK_SUBNETS'] }] })),
+      /TS_DEBUG_NETSTACK_SUBNETS set/,
+    ],
     [
       'two',
       tailscaledProblem(status, { ...plainFacts(), tailscaled: [...plainFacts().tailscaled, ...plainFacts().tailscaled] }),
@@ -388,17 +430,55 @@ test('a tailscaled whose connections cannot be believed: userspace networking, a
       },
       statSync(file) {
         if (file === '/proc/40') return { uid }
+        if (file === '/proc/90') return { uid: 1000 }
+        if (file === '/usr/sbin/tailscaled') return { uid: all['exe-owner'] ?? 0 }
         if (all[file] === undefined || all[file] === null) throw missing(file)
         return { uid: 0 }
+      },
+      // The executable of root's process: not readable by an ordinary user.
+      readlinkSync(file) {
+        if (all[`${file}->`] === undefined) throw Object.assign(new Error('EACCES'), { code: 'EACCES' })
+        return all[`${file}->`]
       },
     }
   }
   assert.deepEqual(hostFacts({ read: fakeFs(), env: {} }), {
-    tailscaled: [{ pid: 40, uid: 0, argv: ['/usr/sbin/tailscaled', '--state=/var/lib/tailscale/tailscaled.state', '--port=41641'] }],
+    tailscaled: [
+      { pid: 40, uid: 0, argv: ['/usr/sbin/tailscaled', '--state=/var/lib/tailscale/tailscaled.state', '--port=41641'], env: null },
+    ],
     unreadable: 0,
     container: null,
   })
-  assert.equal(hostFacts({ read: fakeFs({}, 1000), env: {} }).tailscaled[0].uid, 1000)
+  // Anyone can run a program called tailscaled. One that is not root's is ignored: it is not a second
+  // tailscaled, not an unreadable one, and cannot switch tailnet sign-in off for everyone.
+  const impostor = { '/proc/90/comm': 'tailscaled\n', '/proc/90/cmdline': null }
+  const withImpostor = { ...fakeFs(impostor), readdirSync: () => ['1', '40', '77', '90'] }
+  assert.deepEqual(
+    hostFacts({ read: withImpostor, env: {} }).tailscaled.map((item) => item.pid),
+    [40],
+  )
+  assert.equal(hostFacts({ read: withImpostor, env: {} }).unreadable, 0)
+  assert.equal(tailscaledProblem(status, hostFacts({ read: withImpostor, env: {} })), null)
+  assert.deepEqual(hostFacts({ read: fakeFs({}, 1000), env: {} }).tailscaled, [], 'a tailscaled that is not root’s does not count at all')
+  // Where the executable can be read (this server is root): it must be a file called tailscaled that root owns.
+  assert.equal(hostFacts({ read: fakeFs({ '/proc/40/exe->': '/usr/sbin/tailscaled' }), env: {} }).tailscaled.length, 1)
+  assert.equal(hostFacts({ read: fakeFs({ '/proc/40/exe->': '/usr/sbin/tailscaled (deleted)' }), env: {} }).tailscaled.length, 1)
+  assert.equal(hostFacts({ read: fakeFs({ '/proc/40/exe->': '/usr/bin/python3' }), env: {} }).tailscaled.length, 0)
+  assert.equal(hostFacts({ read: fakeFs({ '/proc/40/exe->': '/usr/sbin/tailscaled', 'exe-owner': 1000 }), env: {} }).tailscaled.length, 0)
+  // Its environment, where it can be read: the debug switches that make it forward to loopback.
+  const withEnv = (text) => hostFacts({ read: fakeFs({ '/proc/40/environ': text }), env: {} })
+  assert.deepEqual(withEnv('PATH=/usr/bin\0LANG=C\0').tailscaled[0].env, [])
+  assert.deepEqual(withEnv('PATH=/usr/bin\0TS_DEBUG_NETSTACK_LOOPBACK_PORT=4700\0').tailscaled[0].env, ['TS_DEBUG_NETSTACK_LOOPBACK_PORT'])
+  assert.match(
+    tailscaledProblem(status, withEnv('TS_DEBUG_NETSTACK_SUBNETS=1\0TS_DEBUG_NETSTACK_LOOPBACK_PORT=1\0')),
+    /TS_DEBUG_NETSTACK_LOOPBACK_PORT and TS_DEBUG_NETSTACK_SUBNETS set/,
+  )
+  assert.equal(tailscaledProblem(status, withEnv('PATH=/usr/bin\0')), null)
+  assert.equal(
+    hostFacts({ read: fakeFs(), env: {} }).tailscaled[0].env,
+    null,
+    'not readable (the usual case): root’s configuration is trusted',
+  )
   assert.equal(
     hostFacts({ read: fakeFs({ '/proc/40/cmdline': null }), env: {} }).unreadable,
     1,
@@ -417,9 +497,41 @@ test('a tailscaled whose connections cannot be believed: userspace networking, a
   ])
     assert.ok(hostFacts({ read, env }).container, label)
   // tailscaled's own answer about an address.
+  assert.deepEqual(
+    whoisAnswer(
+      JSON.stringify({
+        Node: { ID: 1, StableID: 'nADA', Addresses: ['100.64.0.7/32', 'FD7A:115C:A1E0::7/128'] },
+        UserProfile: { LoginName: 'Ada@Example.com' },
+      }),
+    ),
+    {
+      login: 'ada@example.com',
+      tagged: false,
+      stableId: 'nADA',
+      addresses: ['100.64.0.7', 'fd7a:115c:a1e0:0:0:0:0:7'],
+    },
+  )
+  assert.deepEqual(
+    selfFromStatus({ Self: { ID: 'nSELF', TailscaleIPs: ['100.64.0.1'] }, TailscaleIPs: ['100.64.0.1', 'fd7a:115c:a1e0::1'] }),
+    {
+      stableId: 'nSELF',
+      addresses: ['100.64.0.1', 'fd7a:115c:a1e0:0:0:0:0:1'],
+    },
+  )
+  for (const unknown of [
+    {},
+    { Self: {} },
+    { Self: { ID: 'nSELF' } },
+    { Self: { TailscaleIPs: ['100.64.0.1'] } },
+    { Self: { ID: 7, TailscaleIPs: ['100.64.0.1'] } },
+    null,
+  ])
+    assert.equal(selfFromStatus(unknown), null)
   assert.deepEqual(whoisAnswer(JSON.stringify({ Node: { ID: 1 }, UserProfile: { LoginName: 'Ada@Example.com' } })), {
     login: 'ada@example.com',
     tagged: false,
+    stableId: null,
+    addresses: [],
   })
   assert.equal(
     whoisAnswer(JSON.stringify({ Node: { ID: 1, Tags: ['tag:ci'] }, UserProfile: { LoginName: 'ada@example.com' } })).tagged,
@@ -586,7 +698,7 @@ test('the feature refuses to turn on, and says why, when it cannot prove where a
   for (const [pattern, facts] of [
     [/SOCKS5 proxy/, () => ({ ...plainFacts(), tailscaled: [{ pid: 1, uid: 0, argv: ['tailscaled', '--socks5-server=localhost:1055'] }] })],
     [/cannot tell whose "root"/, () => ({ ...plainFacts(), container: 'it runs in a container' })],
-    [/no tailscaled process is visible/, () => ({ ...plainFacts(), tailscaled: [] })],
+    [/no tailscaled process of root is visible/, () => ({ ...plainFacts(), tailscaled: [] })],
   ])
     await assert.rejects(
       startHosted({ ...base(), tailscale: ts(), tailnetSignIn: true, tailnetProof: trusting, tailnetFacts: facts }),
@@ -1290,7 +1402,7 @@ test('"Approve command line logins in the browser" is decided by the server: a s
   const second = (await startLogin()).userCode
   const asked = await approve(adaTailnet, {}, second)
   assert.equal(asked.json.error.code, 'reauth_required')
-  assert.match(asked.json.error.message, /in the browser, with a passkey/)
+  assert.match(asked.json.error.message, /only with a passkey, in the browser/)
   await reauth({ browser: adaTailnet, authenticator: ada.authenticator })
   assert.equal((await approve(adaTailnet, {}, second)).status, 200)
   const last = JSON.parse(server.db.prepare("SELECT detail FROM audit_log WHERE action = 'token_created' ORDER BY id DESC").get().detail)

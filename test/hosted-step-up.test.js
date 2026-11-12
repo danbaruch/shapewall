@@ -302,6 +302,33 @@ test('the fixed core is one table: every line with a route is enforced before th
     assert.equal(refused.json.error.code, 'reauth_required', `${line.method} ${line.path}`)
     assert.equal(refused.json.error.stepUp, 'always')
   }
+  // The table matches a path as the router does: any case, a trailing slash, an encoded parameter. No spelling
+  // of a line's path reaches its route without the passkey.
+  const shout = (path) =>
+    path
+      .split('/')
+      .map((part) => (part.startsWith(':') ? part : part.toUpperCase()))
+      .join('/')
+  const encodedWs = '%77' + ada.workspaceId.slice(1)
+  let walked = 0
+  for (const line of routes) {
+    if (line.path === '/auth/tailnet/link') continue
+    const fill = (path, ws = ada.workspaceId) => path.replace(':ws', ws).replace(':id', 'anything')
+    const plain = fill(line.path)
+    const loud = fill(shout(line.path))
+    const spellings = [loud, plain + '/', loud + '/', plain + '?x=1']
+    if (line.path.includes(':ws')) spellings.push(fill(line.path, encodedWs), fill(shout(line.path), encodedWs) + '/')
+    for (const url of spellings) {
+      const refused = await call(ada, line.method, url, line.method === 'DELETE' ? undefined : {})
+      const what = line.method + ' ' + url
+      assert.equal(refused.status, 403, what + ': ' + refused.text)
+      assert.equal(refused.json.error.code, 'reauth_required', what)
+      assert.equal(refused.json.error.stepUp, 'always', what)
+      walked += 1
+    }
+  }
+  assert.ok(walked >= 24)
+  assert.ok(hosted.db.prepare('SELECT id FROM workspaces WHERE id = ?').get(ada.workspaceId), 'and nothing was deleted')
   // Someone who may not do it gets the route's own answer, never a passkey prompt.
   assert.equal((await call(ben, 'DELETE', `/api/workspaces/${ada.workspaceId}`, { confirm: 'x' })).json.error.code, 'forbidden')
   assert.equal(

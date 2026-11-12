@@ -74,19 +74,27 @@ serve` is signed in as the account linked to their tailnet login, with no passke
 - **The identity headers are believed only where they can be.** Every one of these must hold: the request carries a secret path
   that only the serve entry the server made adds; the connection's other end is a socket owned by root (read from the kernel's
   socket table, on Linux); tailscaled's own whois gives the request's tailnet address to that login, on a user's untagged
-  device; exactly one clean login header. Never on direct loopback requests, raw TCP forwards, Funnel traffic, or with the flag
+  device; the request does not come from the server's own machine; exactly one clean login header. Never on direct loopback
+  requests, raw TCP forwards, Funnel traffic, or with the flag
   off. The server refuses to start with the flag, and suspends it while running, when tailscaled is in userspace-networking
   mode, older than 1.98, runs its own SOCKS5 or HTTP proxy, or when the server is in a container. A tailnet session works only
   together with the identity it was made for; its cookie is worth nothing off the tailnet. Tagged devices and shared nodes
   without a user are never signed in.
+- **The server's own machine is never signed in by its tailnet identity.** Any program on that machine can ask tailscaled for
+  the server's address and would arrive with the machine owner's login, through the proxy, with nothing to tell it from the
+  owner. So a request from the machine's own tailnet addresses is refused, and the page says why. There the owner uses a
+  passkey or another tailnet device; the first account is made with `shapewall hosted claim --data DIR --login LOGIN`, where
+  reading the data folder is the proof. On a local board the host uses `localhost`.
 - **An identity is per device, not per person.** Anything running as you on a tailnet device of yours can act as you in a
   tailnet session. So the fixed core asks for a passkey, a first passkey is on hold for 24 hours, a passkey account is linked
-  to a tailnet login only when you tick the box, and a workspace can require a passkey for approving machines.
+  to a tailnet login only when you tick the box, and a workspace can require a passkey for approving machines and making
+  API tokens (one switch covers both, because a token is what a command line works with).
 - **The local board uses the same proof.** `shapewall serve --tailscale` lets the owner's other devices in by tailnet identity
   only with it, and approving an agent's command needs the host's settings token, a paired device or that proof: a local
   program cannot approve its own command with a forged header.
 - **The limit.** Root on the server's machine, and whoever may change tailscaled's serve config there, are trusted: either can
-  pretend to be anyone. The checks were proven with a stand-in proxy that follows Tailscale's documented behaviour and source,
+  pretend to be anyone (tailscaled's environment, which an unprivileged server cannot read, is part of that). The checks were
+  proven with a stand-in proxy that follows Tailscale's documented behaviour and source,
   not against a live proxied request: [what was and was not checked](/docs/hosted#what-was-and-was-not-checked-against-real-tailscale).
 
 Details: [Signing in](/docs/hosted#signing-in).

@@ -93,8 +93,9 @@ owner can switch on more in Settings.
 
 ## Can I set up a team server and join one from my coding agent, without a browser?
 
-Yes, on a server with tailnet sign-in. The owner runs `shapewall hosted claim` on the server's machine, then `shapewall admin
-projects create` and `shapewall login`. A teammate runs `shapewall join` and `shapewall agent connect`. The server knows each
+Yes, on a server with tailnet sign-in. The owner runs `shapewall hosted claim --login <their tailnet login>` on the server's
+machine, then, on another tailnet device, `shapewall admin projects create` and `shapewall login` (the server's own machine is
+never signed in by its tailnet identity). A teammate runs `shapewall join` and `shapewall agent connect`. The server knows each
 machine's tailnet user, checks their role and writes the audit entry. See
 [From your coding agent](/docs/hosted#from-your-coding-agent).
 

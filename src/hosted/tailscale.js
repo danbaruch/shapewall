@@ -15,13 +15,15 @@
 // An occupied port is never taken over, even if its target happens to match.
 
 import { execFile } from 'node:child_process'
-import { SECRET_PREFIX, hostFacts, serveProblem, serveTarget, tailscaledProblem, whoisAnswer } from '../tailnet-proof.js'
+import { SECRET_PREFIX, hostFacts, selfFromStatus, serveProblem, serveTarget, tailscaledProblem, whoisAnswer } from '../tailnet-proof.js'
 
 export { reachesLocalPort, serveProblem } from '../tailnet-proof.js'
 
 export class TailscaleError extends Error {}
 // Tailnet sign-in cannot be switched on with this tailscaled (the message says why).
 export class TailnetSignInRefused extends Error {}
+const NO_SELF =
+  'tailscale status does not say which node this machine is (its id and own tailnet addresses), so a request from this machine itself could not be told apart'
 
 // Funnel only publishes these HTTPS ports.
 export const FUNNEL_PORTS = [443, 8443, 10000]
@@ -153,10 +155,13 @@ async function claim(kind, httpsPort, localPort, { run, dnsName, secret = null }
 // `facts`: what the machine says about tailscaled (tests).
 export async function startTailscale({ localPort, httpsPort = 443, funnel = null, run = runCommand, secret = null, facts = hostFacts }) {
   const { dnsName, status } = await tailscaleStatus({ run })
+  // This node (its stable id and own tailnet addresses): an identity that comes from it is never honoured.
+  let here = selfFromStatus(status)
   if (secret) {
     // Before anything is put on the tailnet.
     const problem = tailscaledProblem(status, facts())
     if (problem) throw new TailnetSignInRefused(problem)
+    if (!here) throw new TailnetSignInRefused(NO_SELF)
   }
   if (!Number.isInteger(httpsPort) || httpsPort < 1 || httpsPort > 65535) throw new TailscaleError('--tailscale-port: a port number')
   if (funnel) {
@@ -199,8 +204,11 @@ export async function startTailscale({ localPort, httpsPort = 443, funnel = null
       const now = await run('tailscale', ['status', '--json'])
       if (now.missing || now.code !== 0) return 'tailscale status could not be read'
       try {
-        return tailscaledProblem(JSON.parse(now.stdout), facts())
+        const status = JSON.parse(now.stdout)
+        here = selfFromStatus(status)
+        return tailscaledProblem(status, facts()) || (here ? null : NO_SELF)
       } catch {
+        here = null
         return 'tailscale status did not answer JSON'
       }
     }
@@ -209,7 +217,7 @@ export async function startTailscale({ localPort, httpsPort = 443, funnel = null
       const result = await run('tailscale', ['whois', '--json', address])
       return result.missing || result.code !== 0 ? null : whoisAnswer(result.stdout)
     }
-    return { origin: originFor(dnsName, httpsPort), shareOrigin, dnsName, stop, verify, whois }
+    return { origin: originFor(dnsName, httpsPort), shareOrigin, dnsName, stop, verify, whois, self: () => here }
   } catch (error) {
     await stop()
     throw error

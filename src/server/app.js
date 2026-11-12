@@ -8,6 +8,7 @@ import { spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import express from 'express'
+import { SECRET_PREFIX } from '../tailnet-proof.js'
 import { boardViewports, frameScale, joinUrl, thumbScale } from '../config.js'
 import {
   CommentError,
@@ -192,7 +193,14 @@ export function createApp({
   // identity is worked out (src/tailnet-proof.js).
   if (remote?.tailscale?.gate)
     app.use((req, res, next) => {
-      remote.tailscale.gate.admit(req, res).then((ok) => ok && next(), next)
+      remote.tailscale.gate.admit(req, res).then((ok) => {
+        if (!ok) return
+        // The listener takes the secret off before Express sees the request (src/cli/serve.js). Should this
+        // application be mounted another way, nothing after this line may see it either: Express kept the
+        // first URL as originalUrl, and redirects are built from that.
+        if (String(req.originalUrl || '').startsWith(SECRET_PREFIX)) req.originalUrl = req.url
+        next()
+      }, next)
     })
   app.disable('x-powered-by')
   app.set('trust proxy', false)

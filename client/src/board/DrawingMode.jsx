@@ -1,6 +1,7 @@
 // Desktop drawing mode: while a drawing tool is on, the comment's page is
 // the drawing surface. The composer or thread steps aside and a labelled bar
-// docked at the top of the canvas says so and holds the tools. The view
+// just above the board's tools (BoardTools.jsx) says so and holds the drawing
+// tools. The view
 // stays exactly where it was (wheel, Space and middle-drag still move it),
 // unless the page cannot be drawn on as it stands: most of it off screen, or
 // drawn too small (camera.js canDrawInPlace). Then it is fitted, and the
@@ -25,8 +26,8 @@ export function useDrawingMode(enabled) {
 
 // `focusFor(owner)`: where the pin is down its frame (0 to 1). `shotFor(pageId,
 // viewport)`: the capture's URL, to fit the page's content rather than the
-// empty rest of a fixed frame. `titleFor(pageId, viewport)`: the bar's label.
-export function DrawingMode({ flow, canvasRef, targets, focusFor, shotFor, titleFor }) {
+// empty rest of a fixed frame. Renders nothing: the bar is DrawingBar.
+export function DrawingMode({ flow, canvasRef, targets, focusFor, shotFor }) {
   const active = useDrawing(activeOf)
   const saved = useRef(null)
   const latest = useRef({ targets, focusFor, shotFor, active })
@@ -62,11 +63,18 @@ export function DrawingMode({ flow, canvasRef, targets, focusFor, shotFor, title
       stale = true
     }
   }, [active, flow, canvasRef])
+  return null
+}
+
+// The drawing bar, while a tool is on (a child of the tool dock).
+// `titleFor(pageId, viewport)`: the bar's label.
+export function DrawingBar({ titleFor }) {
+  const active = useDrawing(activeOf)
   if (!active) return null
   const [owner, key] = active.split('\n')
   const { targetId, viewport } = splitFrameKey(key)
   return (
-    <div className="pointer-events-none absolute inset-x-0 top-3 z-30 flex justify-center px-2" data-sw-drawing-mode="true">
+    <div className="pointer-events-none relative z-30 flex max-w-full justify-center" data-sw-drawing-mode="true">
       <DrawBar owner={owner} title={titleFor?.(targetId, viewport) || ''} />
     </div>
   )

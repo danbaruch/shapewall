@@ -32,6 +32,11 @@ import { safeOut, terminalSafe } from './terminal.js'
 
 const machineName = () => os.hostname().split('.')[0] || 'this computer'
 
+// Any program on the server's machine can ask the server through its tailnet name and be answered as
+// the machine's owner, so the server never takes an identity from its own machine.
+const OWN_MACHINE =
+  'This is the server’s own machine: the server never takes a tailnet identity from here (any program on this machine could ask the same way).'
+
 // One CLI run's conversation with the server: keeps the cookies it is given.
 export function tailnetClient(origin, { fetchImpl = fetch, machine = machineName() } = {}) {
   const jar = new Map()
@@ -82,6 +87,7 @@ export function tailnetClient(origin, { fetchImpl = fetch, machine = machineName
 // Who the server says this machine's user is.
 //   { mode: 'off' }                         no tailnet sign-in on this server (or it is not a Shapewall server)
 //   { mode: 'none' }                        tailnet sign-in, but this request names no person
+//   { mode: 'self' }                        this is the server's own machine: never taken by identity
 //   { mode: 'visitor', login, invites }     a login without an account here
 //   { mode: 'account', login, me }          signed in as the linked account
 export async function whoAmI(client) {
@@ -97,6 +103,7 @@ export async function whoAmI(client) {
   const state = me.tailnet?.state
   if (state === 'unknown' || state === 'invited')
     return { mode: 'visitor', login: terminalSafe(me.tailnet.login), invites: Array.isArray(me.tailnet.invites) ? me.tailnet.invites : [] }
+  if (state === 'self') return { mode: 'self' }
   if (state === 'none' || state === 'signed_out') return { mode: 'none' }
   return { mode: 'off' }
 }
@@ -164,6 +171,11 @@ export const LOGIN_SCOPES = ['read', 'reply', 'status', 'resolve', 'push']
 export async function approveByTailnet({ origin, userCode, flags, purpose, agent, out, fetchImpl = fetch, machine = machineName() }) {
   const client = tailnetClient(origin, { fetchImpl, machine })
   const who = await whoAmI(client)
+  if (who.mode === 'self') {
+    out(OWN_MACHINE)
+    out('So this login is approved with the code, by someone signed in with a passkey or from another tailnet device:')
+    return false
+  }
   if (who.mode === 'off' || who.mode === 'none') return false
   if (who.mode === 'visitor') {
     out(`This server signs tailnet users in, and ${who.login} has no account on it yet (shapewall join --remote ${origin}).`)
@@ -249,6 +261,13 @@ export async function joinCommand(flags, print, { env = process.env, fetchImpl =
     out(`Open ${invite ? `${origin}/invite#${invite}` : `the invite link an admin sent you (or ${origin}/signin if you have an account)`}.`)
     return 1
   }
+  if (who.mode === 'self') {
+    out(OWN_MACHINE)
+    out(
+      `Run shapewall join on another tailnet device of yours, or open ${invite ? `${origin}/invite#${invite}` : origin} in a browser and use a passkey.`,
+    )
+    return 1
+  }
   if (who.mode === 'none') {
     out('The server could not tell who you are: this request did not come through the tailnet from a device that belongs to a person')
     out('(a tagged device and a node shared in without a user are never signed in). Use the invite link in a browser instead.')
@@ -311,6 +330,13 @@ export async function claimServer({ setupUrl, flags, out: print, fetchImpl = fet
   if (who.mode === 'off') {
     out(`The server at ${origin} does not sign people in by tailnet identity (or it is not running).`)
     out('Start it with --tailscale --tailnet-sign-in, or open the setup link in a browser and make the first account with a passkey.')
+    return 1
+  }
+  if (who.mode === 'self') {
+    out(OWN_MACHINE)
+    out(
+      'On the server’s machine the data folder is the proof instead: shapewall hosted claim --data <dir> --login <the owner’s tailnet login>',
+    )
     return 1
   }
   if (who.mode === 'none') {
@@ -389,6 +415,9 @@ export async function adminCommand(positional, flags, print, { env = process.env
         `${origin} does not sign people in by tailnet identity, so these commands would need an admin token, and admin tokens do not exist yet.`,
       )
       out(`Use the console: ${origin}/`)
+    } else if (who.mode === 'self') {
+      out(OWN_MACHINE)
+      out(`Run this on another tailnet device of yours, or use the console: ${origin}/`)
     } else if (who.mode === 'visitor') out(`${who.login} has no account on ${origin} yet: shapewall join --remote ${origin}`)
     else out('The server could not tell who you are: this request did not come through the tailnet from a device that belongs to a person.')
     return 1

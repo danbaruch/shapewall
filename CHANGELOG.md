@@ -82,11 +82,18 @@ Signing in to a team server: fewer passkey prompts, and your tailnet login as th
 - **Where the identity is believed.** Only when all of this holds: the request carries a secret path that only the serve entry
   the server made adds (new at each start, in no log); the connection's other end is a socket owned by root, from the kernel's
   socket table; tailscaled's own whois gives the request's tailnet address to the same login, on a user's untagged device;
-  exactly one clean login header and no Funnel mark. Never on direct loopback requests, raw TCP forwards, Funnel traffic, or
+  the request does not come from the server's own machine; exactly one clean login header and no Funnel mark. Never on direct loopback requests, raw TCP forwards, Funnel traffic, or
   without the flag. The server refuses to start with the flag, says why, and suspends it while running: not Linux, tailscaled
-  in userspace-networking mode, Tailscale before 1.98, tailscaled running a SOCKS5 or outbound HTTP proxy, tailscaled not
-  visible or not root, the server in a container, or a serve config that is not its one entry. Root and the Tailscale operator
-  on the server's machine are trusted; nothing else on the machine or the tailnet is.
+  in userspace-networking mode, Tailscale before 1.98, tailscaled running a SOCKS5 or outbound HTTP proxy or started with a
+  loopback-forwarding debug switch (`TS_DEBUG_NETSTACK_LOOPBACK_PORT`, `TS_DEBUG_NETSTACK_SUBNETS`, where its environment
+  can be read), no tailscaled of root visible (a process an ordinary user named tailscaled is ignored), the node unable to say
+  which node it is, the server in a container, or a serve config that is not its one entry. Root and the Tailscale operator
+  on the server's machine are trusted; nothing else on the machine or the tailnet is. The secret is taken off before the
+  application sees the request, on the hosted server and the local board, and is in no response.
+- **The server's own machine is never signed in by its tailnet identity.** Any program on that machine can ask tailscaled for
+  the server's own address and arrives through the proxy with the machine owner's login. A request from one of the node's own
+  tailnet addresses, or one that whois gives to this node, is refused, in the browser ("This is the server's own machine") and
+  from the command line. There: a passkey or another tailnet device on a hosted server, `localhost` on a local board.
 - **An identity is per device, not per person,** and the product says so: anything running as you on a tailnet device of yours
   can act as you in a tailnet session. So: a tailnet session works only with the identity it was made for (and is stored so
   that an older build cannot use it); it is marked in the device list, the audit log and Activity; signing out keeps that
@@ -99,21 +106,32 @@ Signing in to a team server: fewer passkey prompts, and your tailnet login as th
   in by identity only with the proof above (where it is not possible they pair, and the board says why), and approving a
   command or an edit needs the host's settings token, a paired device, or that proof.
 - **From the command line, with no browser** (on a server with tailnet sign-in, from a tailnet machine). `shapewall hosted
-  claim` makes the first account from the server's machine. `shapewall login` and `shapewall agent connect` are approved by
+  claim --data DIR --login LOGIN` makes the first account on the server's machine: reading the data folder is the proof, the
+  login is taken on your word, and the command prints what it linked (`--setup-link URL` from another tailnet device checks
+  the identity instead). On the server's own machine `login` and `agent connect` fall back to the code, and `join` and
+  `admin` say to use another device. `shapewall login` and `shapewall agent connect` are approved by
   your tailnet identity when your role may make tokens (`--project`, `--workspace`; `--name`, `--icon`, `--tint`, `--used-by`
   for an agent); with several projects the command lists the flags to add and never prompts. `shapewall join` takes the invite
   made for your login, or an invite link. `shapewall admin projects list|create`, `admin invites create`, `admin members list`
   and `admin agents list` do a few admin jobs; the server checks the role and writes the audit entry. A workspace can require
   the code, the browser and a passkey for approving machines (Settings, "Approve command line logins in the browser"): the
-  server then refuses a session that only a tailnet identity stands behind, whatever the client sends. On any other server these commands behave as before or say what they
+  server then refuses a session that only a tailnet identity stands behind, whatever the client sends, and refuses the same
+  session an API token made on a project's page. On any other server these commands behave as before or say what they
   need.
 - **Upgrade notes.** Migration 16 is additive (the settings, tailnet logins on accounts, sessions and invites, the list of
   tailnet visitors); see [Migration 16 and rollback](docs/hosted.md#migration-16-and-rollback). If you want the passkey prompts
   back, an owner switches the groups on in each workspace's Settings.
+- **The fixed core matches paths as the router does** (any case, a trailing slash, an encoded parameter).
 - **Not in this release:** tailnet sign-in on macOS or Windows servers, in containers, or with a userspace-networking
   tailscaled (no way there to prove a request came through tailscale serve), more admin commands or MCP tools for
   administration, admin tokens, and profile pictures from the tailnet. The proof was tested with a stand-in for tailscale
-  serve, not against a live proxied request: [what was and was not checked](docs/hosted.md#what-was-and-was-not-checked-against-real-tailscale).
+  serve, and not against a live request from a second tailnet device: [what was and was not checked](docs/hosted.md#what-was-and-was-not-checked-against-real-tailscale).
+
+- **The panel buttons are the panel's header.** With a side panel open, Comments, Agent and Checks in the top bar are exactly as
+  wide as the panel under them (the same inset as the panel's own rows), share that width, and follow the panel as you drag its
+  edge. With no panel open they go back to their own width at the right of the bar; so do they in a window too narrow to fit
+  them stretched. Agent settings now sits left of them, in the same place either way. The panel's default width is unchanged
+  (384 px); the narrowest it drags to is now 368 px (was 280), so it is never narrower than its buttons need. Phones are unchanged.
 
 ### Fixes found on a real setup
 
@@ -138,6 +156,40 @@ A fix for connected agents on the current Claude Code adapter.
 - **"Sign in a terminal" reads cleanly.** The two commands on `/device` are each in a code block on a line of their own, instead
   of one sentence that wrapped into narrow columns.
 - **An expired code names the command that was run.** `shapewall agent connect` no longer says "Run shapewall login again".
+
+### The board's tools move to the bottom of the canvas
+
+Board tools: the tools you use on the board moved out of the top bar.
+
+- **A floating toolbar at the bottom centre of the canvas,** like FigJam, Miro and tldraw. It holds what you do to the board:
+  **Select** (V), **Hand** (H), then after a thin divider **Comment** (C), **Draw** and, on desktop when the board has live
+  pages, **Select text**. One tool is in use at a time (Comment, Draw and Select text fill with the accent colour; Select
+  and Hand in use are a quiet neutral chip); Esc goes back a step at a time and ends on Select. The top bar keeps what
+  you look at: the board, the screen sizes, Views and the Comments, Agent and Checks panels. The Comment button is no longer in
+  the top bar.
+- **Select and Hand.** Select is the default pointer: a click selects a page and shows its actions or opens a comment's pin,
+  and a drag on empty canvas still pans. Hand is for moving around a dense board: a drag anywhere pans, on pages and pins
+  too, and a click selects and opens nothing. Holding Space in any tool is a temporary Hand, as before, and so is a
+  middle-button drag. V and H do nothing while you type. Desktop only: on a phone a finger already pans.
+- **Draw is a tool of its own.** Pick Draw and click a page: a comment starts on that page and you draw at once (a box, an arrow
+  or the pen, as before). With a comment or a reply open, Draw draws on that comment's page. A drawing is still part of a
+  comment, and the Box, Arrow and Pen buttons under a comment work as they did.
+- **The note for the tool in use sits just above the tools:** the comment hint, "Commenting on ...", the drawing bar and the
+  select-text note moved there from the top of the canvas. The tip, the links notes and the viewport notice stay at the top.
+- **Nothing overlaps.** The tools are centred on the canvas (not the window), so they move when the sidebar or the side panel
+  opens or is resized. On a narrow canvas they shift clear of the zoom controls, then the zoom controls compact (Fit and the
+  minimap switch stay in the zoom menu), then the minimap steps aside. An open journey's bar and the toast sit above the tools.
+- **Phones:** the tools are the bottom bar (44 px targets, above the safe-area inset) and the comment button left the top row.
+  They step aside while a sheet or the keyboard is up. Draw, then a tap on a page, opens the page full screen to draw on.
+- **Permissions are unchanged.** A viewer, a read-only share link or an export without comments has no Comment or Draw tool;
+  a guest who may comment has both. Compare mode has neither, as before. Someone who may not comment has Select and Hand on a
+  desktop (and Select text while a page is live), and no toolbar on a phone.
+- **Keyboard and screen readers:** the tools are a labelled toolbar with one tab stop; the arrow keys, Home and End move between
+  them, and each says whether it is in use. Tooltips show the shortcuts.
+- **Esc goes back one step at a time.** With a journey open, Esc leaves comment mode (or Select text) first and the next Esc
+  leaves the journey; one press used to do both. Turning comment mode on ends Select text, so one tool is in use at a time.
+- **Comments keep clear of the tools.** A thread or a new-comment card near the bottom of the canvas sits above the tools, and
+  above their note while one shows.
 
 
 ## 0.6.0 - 2026-11-12

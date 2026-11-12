@@ -147,7 +147,7 @@ export function SignIn() {
       <Card className="p-6 sm:p-8">
         <h1 className="text-xl font-semibold text-fg">Sign in</h1>
         <p className="mt-1 text-sm text-muted">
-          {!me && session?.tailnet && session.tailnet.state !== 'none'
+          {!me && session?.tailnet && !['none', 'self'].includes(session.tailnet.state)
             ? 'On this server your tailnet login is the sign-in. A passkey works too, if you made one.'
             : 'Use the passkey you made for Shapewall: on this device, in a password manager or on your phone.'}
         </p>
@@ -176,11 +176,13 @@ export function SignIn() {
             onSignedIn={(result) => (result?.workspaceId && next === '/' ? window.location.assign(`/w/${result.workspaceId}`) : finish())}
           />
         ) : null}
-        {!me && session?.tailnet && session.tailnet.state !== 'none' ? (
+        {!me && session?.tailnet && !['none', 'self'].includes(session.tailnet.state) ? (
           <p className="mt-6 text-xs font-medium tracking-wide text-muted uppercase">Or with a passkey</p>
         ) : null}
         {!recovery ? (
-          <div className={!me && session?.tailnet && session.tailnet.state !== 'none' ? 'mt-3 space-y-3' : 'mt-6 space-y-3'}>
+          <div
+            className={!me && session?.tailnet && !['none', 'self'].includes(session.tailnet.state) ? 'mt-3 space-y-3' : 'mt-6 space-y-3'}
+          >
             {can ? (
               <>
                 {autofill ? (

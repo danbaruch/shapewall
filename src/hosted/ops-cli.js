@@ -39,20 +39,21 @@ export async function hostedCommand(positional, flags, out, err = out) {
 
 // ---- The first account, without the browser (tailnet sign-in) ----
 
-// `shapewall hosted claim --data DIR`: for whoever can read the data folder
-// (the one-time setup link is in it). The owner is the tailnet user the
-// server sees when this command asks through the tailnet; --login can only
-// refuse another answer (src/remote/tailnet-cli.js).
+// `shapewall hosted claim --data DIR --login LOGIN` on the server's own
+// machine: whoever can read the data folder controls the server, and says
+// whose it is (src/hosted/access-cli.js claimCommand; the server never
+// takes a tailnet identity from its own machine). `shapewall hosted claim
+// --setup-link URL` from another tailnet device: the server sees who asks,
+// and --login can only refuse another answer (src/remote/tailnet-cli.js).
 async function claim(flags, out) {
-  const dir = dataDirOf(flags)
-  const { readSetupLink } = await import('./setup-link.js')
-  const setupUrl = readSetupLink(dir)
-  if (!setupUrl)
-    throw new Error(
-      `No setup link in ${dir}: the server there already has its first account, or it has not started yet (start it, or run "shapewall hosted setup-link --new").`,
-    )
-  const { claimServer } = await import('../remote/tailnet-cli.js')
-  return claimServer({ setupUrl, flags, out })
+  // From another tailnet device, with the setup link itself: the server sees who asks.
+  if (typeof flags['setup-link'] === 'string') {
+    const { claimServer } = await import('../remote/tailnet-cli.js')
+    return claimServer({ setupUrl: flags['setup-link'], flags, out })
+  }
+  // On the server's own machine: the data folder is the proof, --login says whose it is.
+  const { operatorCommand } = await import('./access-cli.js')
+  return operatorCommand('claim', { dataDir: dataDirOf(flags), flags, env: process.env, out })
 }
 
 // ---- Run the server ----

@@ -286,8 +286,11 @@ export const SECTIONS = {
       --quotas FILE         per-workspace quotas (default <data>/quotas.json when it exists)
       --retention-hours N   prune old versions every N hours (default 6, 0 = off); --retention-keep N (2)
   hosted setup-link         print the first account's one-time link (it is not in the log)
-  hosted claim --data DIR   with --tailnet-sign-in: make the first account from this machine, no browser. The
-                            owner is your tailnet user; --login LOGIN refuses anyone else; --workspace-name NAME
+  hosted claim --data DIR --login LOGIN
+                            with --tailnet-sign-in: make the first account on the server's own machine, no
+                            browser. Whoever can read the data folder says whose server it is: --login is the
+                            owner's tailnet login (ada@example.com); --workspace-name NAME. From another tailnet
+                            device: hosted claim --setup-link URL (the server then sees who asks)
       --data DIR | --new    --new: make a new link (the old one stops working)
   hosted move-origin --to URL   move the server to a new origin (passkeys move with a rebind)
       --data DIR | --days N | --status   window 1 to 30 days (default 30)

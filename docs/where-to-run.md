@@ -62,7 +62,8 @@ workspace's owner can switch on more in Settings. Details: [Signing in](hosted.m
 
 With tailnet sign-in the server believes Tailscale's identity headers only on requests that provably came through the serve
 entry it made (a secret path, a connection owned by tailscaled, tailscaled's own whois), never on direct loopback requests,
-raw forwards or Funnel traffic, and each tailnet login is its own account: being on the tailnet alone puts nobody in a
+raw forwards or Funnel traffic, never for a request from the server's own machine (use a passkey or another device there),
+and each tailnet login is its own account: being on the tailnet alone puts nobody in a
 workspace. It needs Linux, Tailscale 1.98 or newer in its normal (TUN) mode, and a server that is not in a container. A
 tailnet identity is per device, not per person: anything running as you on a tailnet device of yours can act as you there.
 See [Tailnet sign-in](hosted.md#tailnet-sign-in).
@@ -72,11 +73,17 @@ See [Tailnet sign-in](hosted.md#tailnet-sign-in).
 On a server with tailnet sign-in, a terminal or a coding agent on a tailnet machine needs no browser: the server knows the
 machine's tailnet user.
 
-An owner, on the machine that runs the server, from nothing to a first project:
+An owner, from nothing to a first project. On the machine that runs the server (the data folder is the proof; `--login`
+says whose server it is):
 
 ```sh
 shapewall hosted --data ./hosted-data --tailscale --tailnet-sign-in &
-shapewall hosted claim --data ./hosted-data --workspace-name "Team"          # you become the owner; no browser
+shapewall hosted claim --data ./hosted-data --login ada@example.com --workspace-name "Team"   # no browser
+```
+
+Then on another tailnet device of the owner's (the server's own machine is never signed in by its tailnet identity):
+
+```sh
 shapewall admin projects create "My site" --remote https://board.example.ts.net
 shapewall login --remote https://board.example.ts.net                        # no code, no browser
 shapewall capture && shapewall push --remote https://board.example.ts.net

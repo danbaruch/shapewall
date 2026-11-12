@@ -90,7 +90,15 @@ export function remoteAccess({
   router.get('/api/pairing', (req, res) => {
     const pairing = devices.poll(cookieValue(req, devices.pairCookie))
     if (pairing.state === 'approved') cookie(req, res, devices.cookie, cookieValue(req, devices.pairCookie), DEVICE_IDLE_MS)
-    res.json({ enabled: true, secure: secure(req), access: req.shapewallAccess.kind, pairing })
+    res.json({
+      enabled: true,
+      secure: secure(req),
+      access: req.shapewallAccess.kind,
+      pairing,
+      // This browser is on the computer that runs Shapewall and came in through its tailnet name:
+      // the tailnet identity is never taken from here (src/tailnet-proof.js).
+      ownMachine: Boolean(tailscale?.gate?.ownMachine?.(req)),
+    })
   })
   router.post('/api/pairing', protectedWrite, express.json({ limit: '2kb' }), (req, res) => {
     try {

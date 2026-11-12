@@ -157,7 +157,7 @@ npm run demo                                     # captures the bundled demo sit
 npm run demo -- --full                           # the whole fictional product, as in the live demo (26 pages)
 ```
 
-Open http://127.0.0.1:4600/ and try it: zoom in on a page, click **Comment**, click a button on the page, write a note.
+Open http://127.0.0.1:4600/ and try it: zoom in on a page, pick **Comment** in the tools at the bottom of the board (or press C), click a button on the page, write a note.
 
 ## How it works
 
@@ -668,8 +668,11 @@ Hosted Shapewall (docs/hosted.md)
       --quotas FILE         per-workspace quotas (default <data>/quotas.json when it exists)
       --retention-hours N   prune old versions every N hours (default 6, 0 = off); --retention-keep N (2)
   hosted setup-link         print the first account's one-time link (it is not in the log)
-  hosted claim --data DIR   with --tailnet-sign-in: make the first account from this machine, no browser. The
-                            owner is your tailnet user; --login LOGIN refuses anyone else; --workspace-name NAME
+  hosted claim --data DIR --login LOGIN
+                            with --tailnet-sign-in: make the first account on the server's own machine, no
+                            browser. Whoever can read the data folder says whose server it is: --login is the
+                            owner's tailnet login (ada@example.com); --workspace-name NAME. From another tailnet
+                            device: hosted claim --setup-link URL (the server then sees who asks)
       --data DIR | --new    --new: make a new link (the old one stops working)
   hosted move-origin --to URL   move the server to a new origin (passkeys move with a rebind)
       --data DIR | --days N | --status   window 1 to 30 days (default 30)

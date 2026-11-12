@@ -62,7 +62,8 @@ export function AccessLostBanner() {
   )
 }
 
-// Where the Comment button would be, for a viewer on a hosted board: a
+// In the board toolbar, for a viewer on a hosted board (who has no Comment
+// or Draw tool): a
 // one-line "Viewer" chip; the sentence is its tooltip (and its accessible
 // name), so it never wraps over the canvas.
 export const VIEWER_TEXT = "You're a viewer. Ask an admin for member access to comment."
