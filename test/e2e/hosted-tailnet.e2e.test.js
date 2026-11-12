@@ -231,6 +231,17 @@ test('tailnet sign-in as it is by default: Tailscale is the only sign-in, no pas
   await ada.page.waitForSelector('[data-sw-settings-step-up="tailnet-only"]')
   assert.equal(await ada.page.locator('[data-sw-step-up-row]').count(), 0)
   assert.match(await ada.page.textContent('[data-sw-settings-step-up="tailnet-only"]'), /asks you to type the workspace’s name/)
+  assert.equal(await ada.page.locator('[data-sw-step-up-not-asked]').count(), 0, 'nothing was switched on: nothing to say')
+  // A workspace that had switched something on when the server had passkeys: kept, not asked, and said.
+  plain.db.prepare('UPDATE workspaces SET step_up = ? WHERE id = ?').run(JSON.stringify({ tokens: true, cliApproval: true }), ws)
+  await ada.page.reload()
+  await ada.page.waitForSelector('[data-sw-step-up-not-asked]')
+  assert.match(
+    await ada.page.textContent('[data-sw-step-up-not-asked]'),
+    /not asked while this server has passkeys off.*Tokens and share links; Approve command line logins in the browser/s,
+  )
+  await shot(ada.page, 'only-3b-settings-not-asked')
+  plain.db.prepare("UPDATE workspaces SET step_up = '{}' WHERE id = ?").run(ws)
 
   // ---- Inviting an owner: the server asks, the dialog takes the workspace's name ----
   await ada.page.goto(plain.origin + '/w/' + ws + '/invites')

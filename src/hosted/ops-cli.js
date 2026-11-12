@@ -184,6 +184,10 @@ const ADMIN_HELP = `shapewall hosted admin <command> --data DIR   (on the server
   members add --login TAILNET_LOGIN | --handle HANDLE [--role ROLE]   put someone in, or change their role
                                (a tailnet login with no account yet gets an invite only it can take)
   members remove --login TAILNET_LOGIN | --handle HANDLE     take someone out; what they made to let others in is revoked
+  members relink --handle HANDLE [--login TAILNET_LOGIN]     their tailnet login again: the next arrival as it is taken as
+                               them (for "This tailnet login belongs to someone else here"); --login links another login.
+                               Or: members relink --login TAILNET_LOGIN (the account linked to it now)
+  members unlink --handle HANDLE                             take the tailnet login off an account
   invites list | invites revoke ID
   invites create --login TAILNET_LOGIN [--role ROLE] [--days N]   or a link: --link --origin https://the.server
   projects list
@@ -355,7 +359,32 @@ async function admin(positional, flags, out) {
               `Revoked: ${invites} invites, ${shares} share links, ${tokens} API tokens they made.`,
           )
         }
-        throw new ops.OperatorError('usage: hosted admin members list|add|remove --login TAILNET_LOGIN | --handle HANDLE [--role ROLE]')
+        if (target === 'relink') {
+          const result = access.relinkMember(db, { handle: flags.handle, login: flags.login, operator })
+          if (flags.json) return json(result)
+          out(
+            `@${show(result.user.handle)} is linked to ${show(result.login)}${result.was && result.was !== result.login ? ` (was ${show(result.was)})` : ''}. ` +
+              'Whoever next arrives through the tailnet as that login, from a device of theirs, is taken as this account from then on.',
+          )
+          return say(
+            `${result.sessionsEnded} tailnet session${result.sessionsEnded === 1 ? '' : 's'} of the account ended. Make sure it is the right person who opens the server next.`,
+          )
+        }
+        if (target === 'unlink') {
+          const result = access.unlinkMember(db, { handle: flags.handle, login: flags.login, operator })
+          if (flags.json) return json(result)
+          out(
+            `@${show(result.user.handle)} is no longer linked to ${show(result.was)}; ${result.sessionsEnded} tailnet session${result.sessionsEnded === 1 ? '' : 's'} ended.`,
+          )
+          return say(
+            result.passkeys
+              ? 'The account signs in with its passkey, where this server allows passkeys.'
+              : 'The account has no passkey: nothing signs it in until it is linked again (hosted admin members relink --handle ... --login ...).',
+          )
+        }
+        throw new ops.OperatorError(
+          'usage: hosted admin members list|add|remove|relink|unlink --login TAILNET_LOGIN | --handle HANDLE [--role ROLE]',
+        )
       }
       case 'invites': {
         const access = await import('./operator-access.js')
@@ -418,6 +447,19 @@ async function admin(positional, flags, out) {
                 : 'Passkeys are OFF for a server with tailnet sign-in: the Tailscale account is the only sign-in, and nobody is asked for a passkey.',
           )
           out('A running server follows this at once. A server without --tailnet-sign-in always uses passkeys, whatever this says.')
+          if (result.sessionsEnded)
+            out(
+              `${result.sessionsEnded} session${result.sessionsEnded === 1 ? '' : 's'} that a passkey or a recovery code started ${result.sessionsEnded === 1 ? 'was' : 'were'} ended.`,
+            )
+          if (result.holdsRestarted)
+            out(
+              `${result.holdsRestarted} passkey${result.holdsRestarted === 1 ? '' : 's'} that ${result.holdsRestarted === 1 ? 'was' : 'were'} on hold start${result.holdsRestarted === 1 ? 's its' : ' their'} 24 hours again.`,
+            )
+          for (const workspace of result.workspaces || [])
+            out(
+              `${show(workspace.name)} (${workspace.id}) asks for a passkey in its settings (${workspace.settings.join(', ')}): ` +
+                (result.setting ? 'asked again from now.' : 'not asked while passkeys are off. Its audit log says so.'),
+            )
           if (result.setting === false && result.passkeyOnly)
             out(
               `${result.passkeyOnly} account${result.passkeyOnly === 1 ? ' is' : 's are'} not linked to a tailnet login: with passkeys off ${result.passkeyOnly === 1 ? 'it' : 'they'} cannot sign in.`,

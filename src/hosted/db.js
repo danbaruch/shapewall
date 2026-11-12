@@ -721,6 +721,36 @@ export async function openDatabase(file) {
   return db
 }
 
+// A database made by a build of 0.7.0 from before it was released, when the
+// sign-in migration still had the number 16 (now 17; 16 is the saved Usage
+// layouts'). Its ledger says "16 ran", which now means something else: the
+// real 16 would never run, and 17 would run on top of its own tables and
+// fail. Told apart by what is there: the ledger has 16 and not 17, the
+// sign-in tables exist and usage_layouts does not. Repaired in place: what
+// that early build did not have yet is added (each piece only if missing),
+// and the ledger is corrected to "17 ran, 16 did not", so that both end
+// applied once. A database where 16 is really the layouts' is left alone.
+function repairEarlySignIn(db) {
+  const has = (version) => Boolean(db.prepare('SELECT 1 FROM schema_migrations WHERE version = ?').get(version))
+  const table = (name) => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name))
+  const column = (name, col) =>
+    db
+      .prepare(`PRAGMA table_info(${name})`)
+      .all()
+      .some((row) => row.name === col)
+  if (!has(16) || has(17) || table('usage_layouts') || !table('tailnet_visitors') || !column('users', 'tailnet_login')) return
+  if (!column('workspaces', 'step_up')) db.exec("ALTER TABLE workspaces ADD COLUMN step_up TEXT NOT NULL DEFAULT '{}'")
+  if (!column('users', 'tailnet_linked_at')) db.exec('ALTER TABLE users ADD COLUMN tailnet_linked_at TEXT')
+  if (!column('users', 'tailnet_user_id')) db.exec('ALTER TABLE users ADD COLUMN tailnet_user_id TEXT')
+  if (!column('passkeys', 'tailnet_added_from')) db.exec('ALTER TABLE passkeys ADD COLUMN tailnet_added_from TEXT')
+  if (!column('sessions', 'tailnet_login')) db.exec('ALTER TABLE sessions ADD COLUMN tailnet_login TEXT')
+  if (!column('invites', 'tailnet_login')) db.exec('ALTER TABLE invites ADD COLUMN tailnet_login TEXT')
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_tailnet_login ON users(tailnet_login) WHERE tailnet_login IS NOT NULL')
+  db.exec('CREATE TABLE IF NOT EXISTS server_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)')
+  db.prepare('DELETE FROM schema_migrations WHERE version = 16').run()
+  db.prepare('INSERT INTO schema_migrations(version) VALUES (17)').run()
+}
+
 // A ledger allows reserved workstreams to land out of order. user_version is
 // still the highest applied number, but an absent reserved migration is never
 // marked applied. Legacy databases (before the ledger) have contiguous 1..4.
@@ -734,6 +764,7 @@ export function migrate(db, migrations = MIGRATIONS) {
         throw new Error('Database has untracked migrations newer than version 4; restore its pre-upgrade backup before continuing.')
       for (let version = 1; version <= current; version += 1) db.prepare('INSERT INTO schema_migrations(version) VALUES (?)').run(version)
     }
+    if (migrations === MIGRATIONS) repairEarlySignIn(db)
     for (let index = 0; index < migrations.length; index += 1) {
       if (!migrations[index] || db.prepare('SELECT 1 FROM schema_migrations WHERE version = ?').get(index + 1)) continue
       db.exec(migrations[index])

@@ -398,7 +398,7 @@ test('the gate: the secret, a connection from tailscaled, tailscaled’s own who
   assert.ok(gate.identityOf(earlier))
 })
 
-test('a tailscaled whose connections cannot be believed: userspace networking, an old version, its own proxies, a container, or one that cannot be read', () => {
+test('a tailscaled whose connections cannot be believed: userspace networking, an old version, its own proxies, a container, or one that cannot be read', async () => {
   const status = { TUN: true, Version: '1.104.2-t1' }
   const facts = (argv = [], more = {}) => ({
     ...plainFacts(),
@@ -552,21 +552,32 @@ test('a tailscaled whose connections cannot be believed: userspace networking, a
   )
   assert.deepEqual(hostFacts({ mainPid: () => 4242, read: two, env: {} }).tailscaled, [], 'a MainPID that is not there: no daemon')
   assert.deepEqual(hostFacts({ mainPid: () => 90, read: withSetuid, env: {} }).tailscaled, [], 'nor one that is not root in every id')
+  // systemd is asked without blocking (at start and in the watch), and anything but a pid is "not known".
+  const systemd = (error, stdout) => (command, args, options, done) => {
+    assert.deepEqual([command, args], ['systemctl', ['show', '--property=MainPID', '--value', 'tailscaled.service']])
+    setImmediate(() => done(error, stdout))
+  }
+  assert.equal(await systemdMainPid('tailscaled.service', systemd(null, '1163\n')), 1163)
+  for (const answer of ['0\n', '', 'x', '-4']) assert.equal(await systemdMainPid('tailscaled.service', systemd(null, answer)), null, answer)
+  assert.equal(await systemdMainPid('tailscaled.service', systemd(new Error('no systemd'), '')), null)
   assert.equal(
-    systemdMainPid('tailscaled.service', () => '1163\n'),
-    1163,
-  )
-  for (const answer of ['0\n', '', 'x', '-4'])
-    assert.equal(
-      systemdMainPid('tailscaled.service', () => answer),
-      null,
-      JSON.stringify(answer),
-    )
-  assert.equal(
-    systemdMainPid('tailscaled.service', () => {
-      throw new Error('no systemd')
+    await systemdMainPid('tailscaled.service', () => {
+      throw new Error('cannot start it')
     }),
     null,
+  )
+  let asked = 0
+  const stillRunning = systemdMainPid('tailscaled.service', (command, args, options, done) => {
+    asked += 1
+    setTimeout(() => done(null, '7\n'), 20)
+  })
+  assert.equal(asked, 1)
+  assert.ok(stillRunning instanceof Promise, 'the caller goes on while systemctl answers')
+  assert.equal(await stillRunning, 7)
+  assert.deepEqual(
+    hostFacts({ read: fakeFs(), env: {} }).tailscaled.length,
+    1,
+    'hostFacts itself runs nothing: by name unless a pid is given',
   )
   // Where the executable can be read (this server is root): it must be a file called tailscaled that root owns.
   assert.equal(hostFacts({ mainPid: null, read: fakeFs({ '/proc/40/exe->': '/usr/sbin/tailscaled' }), env: {} }).tailscaled.length, 1)
@@ -1920,10 +1931,18 @@ test('an account is held to the tailnet user it was linked for, not to a login t
   const stranger = other.browser()
   const asked = await me(stranger)
   assert.equal(asked.json.user, null)
-  assert.deepEqual(asked.json.tailnet, { state: 'changed', login: 'ben@example.com' })
+  assert.deepEqual(asked.json.tailnet, {
+    state: 'changed',
+    login: 'ben@example.com',
+    fix: "shapewall hosted admin members relink --login ben@example.com --data <the server's data folder>",
+  })
   const signIn = await stranger.post('/auth/tailnet/sign-in', {})
   assert.deepEqual([signIn.status, signIn.json.error.code], [403, 'tailnet_user_changed'])
   assert.match(signIn.json.error.message, /for a different tailnet user than the one asking/)
+  assert.match(
+    signIn.json.error.message,
+    /ask whoever runs this server to run: shapewall hosted admin members relink --login ben@example\.com/,
+  )
   assert.equal((await stranger.post('/auth/tailnet/join', {})).json.error.code, 'tailnet_user_changed')
   stranger.jar.set('__Host-sw_session', ben.jar.get('__Host-sw_session'))
   assert.equal((await stranger.get(`/api/workspaces/${ws}`)).status, 401, 'ben’s session is worth nothing to the other user')

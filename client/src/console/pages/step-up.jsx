@@ -7,7 +7,7 @@
 
 import { KeyRound } from 'lucide-react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui'
-import { Card, CardHeader, FormError, Switch } from '../components'
+import { Card, CardHeader, FormError, Notice, Switch } from '../components'
 import { api, wsUrl } from '../lib/api'
 import { useAction, useToast } from '../state'
 import { useWorkspace } from './workspace'
@@ -48,7 +48,13 @@ export function StepUpCard() {
   const settings = data.workspace.settings.stepUp
   // An older server (and the demo) has no such setting.
   if (!settings) return null
-  // Tailscale is the only sign-in on this server: there is no passkey to ask for again.
+  // Tailscale is the only sign-in on this server: there is no passkey to ask for again. What this
+  // workspace had switched on is not lost and not asked: said plainly.
+  const notAsked = [
+    ...STEP_UP_GROUPS.filter((group) => settings[group]).map((group) => STEP_UP_GROUP_LABEL[group]),
+    ...(settings.adminIdle ? ['Admin pages after 12 hours away'] : []),
+    ...(settings.cliApproval ? ['Approve command line logins in the browser'] : []),
+  ]
   if (data.features?.passkeys === false)
     return (
       <Card data-sw-settings-step-up="tailnet-only">
@@ -67,6 +73,12 @@ export function StepUpCard() {
             can also allow passkeys (shapewall hosted admin passkeys on); then an account that adds one confirms with it, and the switches
             for asking again appear here.
           </p>
+          {notAsked.length ? (
+            <Notice tone="warn" title="Switched on here, and not asked while this server has passkeys off" data-sw-step-up-not-asked>
+              {notAsked.join('; ')}. These were switched on in this workspace when the server had passkeys. They are kept, and asked again
+              when whoever runs the server allows passkeys again.
+            </Notice>
+          ) : null}
         </div>
       </Card>
     )

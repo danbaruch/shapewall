@@ -15,7 +15,7 @@
 // An occupied port is never taken over, even if its target happens to match.
 
 import { execFile } from 'node:child_process'
-import { SECRET_PREFIX, hostFacts, selfFromStatus, serveProblem, serveTarget, tailscaledProblem, whoisAnswer } from '../tailnet-proof.js'
+import { SECRET_PREFIX, machineFacts, selfFromStatus, serveProblem, serveTarget, tailscaledProblem, whoisAnswer } from '../tailnet-proof.js'
 
 export { reachesLocalPort, serveProblem } from '../tailnet-proof.js'
 
@@ -153,13 +153,13 @@ async function claim(kind, httpsPort, localPort, { run, dnsName, secret = null }
 // `secret`: tailnet sign-in; the serve entry then carries it, and `verify`
 // and `whois` are what the identity proof asks while the server runs.
 // `facts`: what the machine says about tailscaled (tests).
-export async function startTailscale({ localPort, httpsPort = 443, funnel = null, run = runCommand, secret = null, facts = hostFacts }) {
+export async function startTailscale({ localPort, httpsPort = 443, funnel = null, run = runCommand, secret = null, facts = machineFacts }) {
   const { dnsName, status } = await tailscaleStatus({ run })
   // This node (its stable id and own tailnet addresses): an identity that comes from it is never honoured.
   let here = selfFromStatus(status)
   if (secret) {
     // Before anything is put on the tailnet.
-    const problem = tailscaledProblem(status, facts())
+    const problem = tailscaledProblem(status, await facts())
     if (problem) throw new TailnetSignInRefused(problem)
     if (!here) throw new TailnetSignInRefused(NO_SELF)
   }
@@ -206,7 +206,7 @@ export async function startTailscale({ localPort, httpsPort = 443, funnel = null
       try {
         const status = JSON.parse(now.stdout)
         here = selfFromStatus(status)
-        return tailscaledProblem(status, facts()) || (here ? null : NO_SELF)
+        return tailscaledProblem(status, await facts()) || (here ? null : NO_SELF)
       } catch {
         here = null
         return 'tailscale status did not answer JSON'

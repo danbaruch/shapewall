@@ -12,9 +12,11 @@
 import { newId, randomToken, sha256, ID_PATTERNS } from './crypto.js'
 import { transaction } from './db.js'
 import { OperatorError, logOperator } from './operator.js'
-import { setTailnetPasskeys, tailnetPasskeysSetting } from './passkey-policy.js'
+import { setTailnetPasskeys, tailnetPasskeysOffAt, tailnetPasskeysSetting } from './passkey-policy.js'
+import { STEP_UP_GROUPS } from './step-up.js'
+import { stepUpSettings } from './step-up-settings.js'
 import { ROLES } from './permissions.js'
-import { accounts, allWorkspaces, audit, tenant } from './tenancy.js'
+import { accounts, allWorkspaces, audit, auditAccount, tenant } from './tenancy.js'
 import { cleanTailnetLogin } from '../tailnet-proof.js'
 
 const DAY = 86_400_000
@@ -292,9 +294,125 @@ export function passkeysStatus(db) {
   }
 }
 
+// What a workspace switched on in "Ask for a passkey again" (and the command line switch): none of it is
+// asked while the server has no passkeys.
+const stepUpOn = (settings) => [...STEP_UP_GROUPS, 'adminIdle', 'cliApproval'].filter((key) => settings[key])
+
+const HOLD_MS = 24 * 3_600_000
+
+// Switching passkeys off or on for a server with tailnet sign-in. More than a flag:
+//   off  - every session that a passkey or a recovery code started is deleted (not hidden: switching on
+//          later must not bring an old session back);
+//        - each workspace that asks for a passkey somewhere gets an audit entry saying that this is not
+//          asked for now (its Settings page says the same while it lasts);
+//   on   - every passkey whose 24 hour hold had not ended when they were switched off starts its hold
+//          again: nobody could see or use it in between;
+//        - the same workspaces get an entry saying their settings are asked for again.
 export function setPasskeys(db, { on, operator, now = new Date() }) {
-  const before = tailnetPasskeysSetting(db)
-  setTailnetPasskeys(db, Boolean(on), now.toISOString())
-  logOperator(db, { operator, action: on ? 'passkeys_on' : 'passkeys_off', detail: { before }, at: now.toISOString() })
-  return { ...passkeysStatus(db), before }
+  const at = now.toISOString()
+  return transaction(db, () => {
+    const q = accounts(db)
+    const before = tailnetPasskeysSetting(db)
+    const offAt = tailnetPasskeysOffAt(db)
+    let sessionsEnded = 0
+    let holdsRestarted = 0
+    if (on) {
+      if (before === false && offAt && Number.isFinite(Date.parse(offAt)))
+        holdsRestarted = q.run(
+          'UPDATE passkeys SET recovery_added_at = :at WHERE recovery_added_at IS NOT NULL AND recovery_added_at > :since',
+          {
+            at,
+            since: new Date(Date.parse(offAt) - HOLD_MS).toISOString(),
+          },
+        ).changes
+    } else sessionsEnded = q.run('DELETE FROM sessions WHERE tailnet_login IS NULL', {}).changes
+    setTailnetPasskeys(db, Boolean(on), at)
+    const workspaces = []
+    if (before !== Boolean(on))
+      for (const workspace of allWorkspaces(db)) {
+        const t = tenant(db, workspace.id)
+        const asked = stepUpOn(stepUpSettings(t).get())
+        if (!asked.length) continue
+        workspaces.push({ id: workspace.id, name: workspace.name, settings: asked })
+        audit(t, {
+          action: 'step_up_changed',
+          at,
+          detail: { setting: 'passkeys', after: Boolean(on), settings: asked, by: 'operator', operator },
+        })
+      }
+    logOperator(db, {
+      operator,
+      action: on ? 'passkeys_on' : 'passkeys_off',
+      detail: { before, sessionsEnded, holdsRestarted, workspaces: workspaces.map((item) => item.id) },
+      at,
+    })
+    return { ...passkeysStatus(db), before, sessionsEnded, holdsRestarted, workspaces }
+  })
+}
+
+// ---- A member's tailnet login (src/hosted/tailnet.js accountOf) ----
+//
+// An account is held to Tailscale's own id of the user behind its login. When Tailscale gives the person a
+// new id (the tailnet moved to another identity provider, the user was removed and added again), their own
+// login no longer signs them in: "This tailnet login belongs to someone else here". Nobody in the product
+// can tell that case from a login that was given to somebody else, so the operator decides:
+//   relink  forgets the id, so the next proven arrival as the login is taken as the account's person
+//           (and with --login, links the account to another login);
+//   unlink  takes the login off the account.
+// Both end the account's tailnet sessions.
+function memberOf(db, { handle = null, login = null }) {
+  const who = accountBy(db, { handle, login })
+  if (!who.user) throw new OperatorError(who.handle ? 'no account with that handle' : 'no account is linked to that tailnet login')
+  return who.user
+}
+
+export function relinkMember(db, { handle, login = null, operator, now = new Date() }) {
+  const at = now.toISOString()
+  // --handle names the account, and --login (optional) the login it is to have. Without --handle, --login
+  // names the account that is linked to it now.
+  const user = memberOf(db, handle ? { handle } : { login })
+  const wanted = handle && login ? cleanTailnetLogin(login) : user.tailnet_login
+  if (handle && login && !wanted) throw new OperatorError('--login: a tailnet login, like ada@example.com')
+  if (!wanted) throw new OperatorError(`@${user.handle} is not linked to a tailnet login: give one with --login`)
+  return transaction(db, () => {
+    const q = accounts(db)
+    const holder = q.get('SELECT id, handle FROM users WHERE tailnet_login = :login', { login: wanted })
+    if (holder && holder.id !== user.id) throw new OperatorError(`${wanted} is linked to @${holder.handle}: unlink that account first`)
+    q.run('UPDATE users SET tailnet_login = :login, tailnet_linked_at = :at, tailnet_user_id = NULL WHERE id = :id', {
+      login: wanted,
+      at,
+      id: user.id,
+    })
+    q.run('DELETE FROM tailnet_visitors WHERE login = :login', { login: wanted })
+    const sessionsEnded = q.run('DELETE FROM sessions WHERE user_id = :user AND tailnet_login IS NOT NULL', { user: user.id }).changes
+    const detail = {
+      tailnet: wanted,
+      ...(user.tailnet_login && user.tailnet_login !== wanted ? { was: user.tailnet_login } : {}),
+      relinked: true,
+    }
+    auditAccount(db, { userId: user.id, action: 'tailnet_linked', at, detail: { ...detail, by: 'operator', operator } })
+    logOperator(db, { operator, action: 'member_relink', target: user.id, detail: { handle: user.handle, ...detail, sessionsEnded }, at })
+    return { user: { handle: user.handle }, login: wanted, was: user.tailnet_login || null, sessionsEnded }
+  })
+}
+
+export function unlinkMember(db, { handle, login = null, operator, now = new Date() }) {
+  const at = now.toISOString()
+  const user = memberOf(db, handle ? { handle } : { login })
+  if (!user.tailnet_login) throw new OperatorError(`@${user.handle} is not linked to a tailnet login`)
+  return transaction(db, () => {
+    const q = accounts(db)
+    q.run('UPDATE users SET tailnet_login = NULL, tailnet_linked_at = NULL, tailnet_user_id = NULL WHERE id = :id', { id: user.id })
+    const sessionsEnded = q.run('DELETE FROM sessions WHERE user_id = :user AND tailnet_login IS NOT NULL', { user: user.id }).changes
+    const passkeys = q.get('SELECT COUNT(*) AS n FROM passkeys WHERE user_id = :user', { user: user.id }).n
+    auditAccount(db, { userId: user.id, action: 'tailnet_unlinked', at, detail: { tailnet: user.tailnet_login, by: 'operator', operator } })
+    logOperator(db, {
+      operator,
+      action: 'member_unlink',
+      target: user.id,
+      detail: { handle: user.handle, tailnet: user.tailnet_login, sessionsEnded },
+      at,
+    })
+    return { user: { handle: user.handle }, was: user.tailnet_login, sessionsEnded, passkeys }
+  })
 }

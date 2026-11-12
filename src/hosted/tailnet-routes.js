@@ -32,8 +32,13 @@ const OUT_DAYS = 30
 const OWN_MACHINE =
   'This is the server’s own machine: a tailnet identity is never taken from here, because any program on this machine could ask the same way. Use a passkey, or another tailnet device.'
 
-const USER_CHANGED =
-  'This tailnet login is linked to an account here for a different tailnet user than the one asking (the name was given to someone else, or comes from another tailnet). Sign in with a passkey, or ask whoever runs this server.'
+// What the server's operator runs when a person's own login stopped signing them in because Tailscale gave
+// them a new user id (src/hosted/operator-access.js relinkMember). The login is one the server made safe.
+const relinkCommand = (login) => `shapewall hosted admin members relink --login ${login} --data <the server's data folder>`
+const userChanged = (login) =>
+  'This tailnet login is linked to an account here for a different tailnet user than the one asking (the name was given to someone else, it comes from another tailnet, or Tailscale gave you a new user id). ' +
+  'If the account is yours, ask whoever runs this server to run: ' +
+  relinkCommand(login)
 
 export function mountTailnetAuth(authRouter, deps) {
   const {
@@ -124,7 +129,8 @@ export function mountTailnetAuth(authRouter, deps) {
     if (!identity && sameOrigin(req) && tailnet.ownMachine?.(req)) return { tailnet: { state: 'self' } }
     if (!identity) return { tailnet: { state: 'none' } }
     // The login is linked here, but for another tailnet user than this one: nobody, and the page says why.
-    if (tailnetAccounts.heldByAnother(identity)) return { tailnet: { state: 'changed', login: identity.login } }
+    if (tailnetAccounts.heldByAnother(identity))
+      return { tailnet: { state: 'changed', login: identity.login, fix: relinkCommand(identity.login) } }
     if (tailnetAccounts.userFor(identity.login)) return { tailnet: { state: 'signed_out', login: identity.login, name: identity.name } }
     const invites = usableInvites(identity.login).map((row) => ({ workspace: row.workspace_name, role: row.role }))
     // Listed for the admins until someone invites it (or it stops coming).
@@ -168,7 +174,7 @@ export function mountTailnetAuth(authRouter, deps) {
     limit('ceremony'),
     handle(async (req, res) => {
       const identity = arrived(req)
-      if (tailnetAccounts.heldByAnother(identity)) throw new HttpError(403, 'tailnet_user_changed', USER_CHANGED)
+      if (tailnetAccounts.heldByAnother(identity)) throw new HttpError(403, 'tailnet_user_changed', userChanged(identity.login))
       const user = tailnetAccounts.accountOf(identity)
       if (!user) throw new HttpError(404, 'no_account', `No account here is linked to ${identity.login}.`)
       signIn(req, res, user, identity)
@@ -205,7 +211,7 @@ export function mountTailnetAuth(authRouter, deps) {
         )
         return res.json({ joined, workspaceId: joined[0] || null })
       }
-      if (tailnetAccounts.heldByAnother(identity)) throw new HttpError(403, 'tailnet_user_changed', USER_CHANGED)
+      if (tailnetAccounts.heldByAnother(identity)) throw new HttpError(403, 'tailnet_user_changed', userChanged(identity.login))
       if (tailnetAccounts.userFor(identity.login))
         throw new HttpError(409, 'has_account', `${identity.login} already has an account here. Continue as that account instead.`)
       const { invite, setup, handle: wantedHandle, displayName, workspaceName } = req.body || {}

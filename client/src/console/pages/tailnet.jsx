@@ -47,7 +47,14 @@ export function TailnetArrival({ tailnet, signup, onSignedIn, passkeysOff = fals
       <Notice tone="warn" className="mt-4" title="This tailnet login belongs to someone else here" data-sw-tailnet="changed">
         An account on this server is linked to {tailnet.login}, but for a different tailnet user than the one your device is signed in as:
         the name was given to someone else, or your device is shared in from another tailnet.{' '}
-        {passkeysOff ? 'Ask whoever runs this server.' : 'Sign in with a passkey, or ask whoever runs this server.'}
+        {passkeysOff
+          ? 'If the account is yours, ask whoever runs this server.'
+          : 'Sign in with a passkey, or ask whoever runs this server.'}
+        {tailnet.fix ? (
+          <span className="mt-2 block" data-sw-tailnet-fix>
+            They run, on the server: <code className="font-mono text-[12px] break-all text-fg">{tailnet.fix}</code>
+          </span>
+        ) : null}
       </Notice>
     )
   if (tailnet.state === 'none')

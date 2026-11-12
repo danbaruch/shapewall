@@ -235,14 +235,23 @@ export function ReauthProvider({ children }) {
           {typed ? (
             <form onSubmit={confirmTyped} className="space-y-3" data-sw-confirm-required={typed.confirms || ''}>
               <p>
-                Shapewall always asks before this. Type {typed.confirms === 'workspace' ? 'the workspace’s name' : 'your handle'},{' '}
-                <span className="font-medium text-fg">{typed.confirm}</span>, to confirm.
+                Shapewall always asks before this.{' '}
+                {typed.confirms === 'workspace-id' ? 'You are in more than one workspace with this name, so type the id of this one' : null}
+                {typed.confirms === 'workspace' ? 'Type the workspace’s name' : null}
+                {typed.confirms === 'account' || !typed.confirms ? 'Type your handle' : null},{' '}
+                <span className="font-medium break-all text-fg">{typed.confirm}</span>, to confirm.
               </p>
               <Input
                 size="touch"
                 value={typedValue}
                 onChange={(event) => setTypedValue(event.target.value)}
-                aria-label={typed.confirms === 'workspace' ? 'The workspace’s name' : 'Your handle'}
+                aria-label={
+                  typed.confirms === 'workspace-id'
+                    ? 'The workspace’s id'
+                    : typed.confirms === 'workspace'
+                      ? 'The workspace’s name'
+                      : 'Your handle'
+                }
                 autoCapitalize="none"
                 autoComplete="off"
                 spellCheck={false}

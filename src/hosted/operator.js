@@ -28,6 +28,7 @@ import { createProjectStore } from './projects.js'
 import { ZIP_MAX_BYTES } from './zip.js'
 import { accounts, allWorkspaces, audit, auditAccount, findShareById, tenant } from './tenancy.js'
 import { setUsageRetention } from './usage.js'
+import { cleanTailnetLogin } from '../tailnet-proof.js'
 
 export const REPORT_REASONS = {
   copyright: 'Copyright or trademark',
@@ -103,7 +104,9 @@ export function logOperator(db, { operator, action, target = null, detail = {}, 
 function accountOf(db, { handle = null, login = null }) {
   const q = accounts(db)
   const byHandle = typeof handle === 'string' && handle ? handle.trim().toLowerCase().replace(/^@/, '') : null
-  const byLogin = typeof login === 'string' && login ? login.trim().toLowerCase() : null
+  // The login as the server keeps it (the same cleaning as everywhere a login is read).
+  const byLogin = typeof login === 'string' && login ? cleanTailnetLogin(login) : null
+  if (typeof login === 'string' && login && !byLogin) throw new OperatorError('--login: a tailnet login, like ada@example.com')
   if (Boolean(byHandle) === Boolean(byLogin))
     throw new OperatorError('say whose passkeys: --handle HANDLE or --login TAILNET_LOGIN (one of them)')
   const user = byHandle

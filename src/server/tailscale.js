@@ -5,7 +5,7 @@ import { promisify } from 'node:util'
 import { absoluteProgram } from '../which.js'
 import {
   createTailnetGate,
-  hostFacts,
+  machineFacts,
   newServeSecret,
   procPeerProof,
   proofSelfTest,
@@ -52,7 +52,7 @@ export async function tailscaleAccess({
   command = absoluteProgram('tailscale', env),
   // The identity proof's parts (tests): the peer check and what the machine says about tailscaled.
   proof = procPeerProof(),
-  facts = hostFacts,
+  facts = machineFacts,
   log = () => {},
 } = {}) {
   if (!command) throw new Error('Tailscale is not installed. Install it, sign in, then run serve --tailscale again.')
@@ -97,7 +97,9 @@ export async function tailscaleAccess({
   let here = selfFromStatus(status)
   if (ownerLogin)
     identityOff =
-      proof.problem?.() || tailscaledProblem(status, facts()) || (here ? null : 'tailscale status does not say which node this machine is')
+      proof.problem?.() ||
+      tailscaledProblem(status, await facts()) ||
+      (here ? null : 'tailscale status does not say which node this machine is')
   const secret = ownerLogin && !identityOff ? newServeSecret() : null
   const target = secret ? serveTarget(port, secret) : `http://127.0.0.1:${port}`
   const whois = async (address) => {
@@ -117,7 +119,7 @@ export async function tailscaleAccess({
       const config = JSON.parse((await call(['serve', 'status', '--json'])) || '{}')
       here = selfFromStatus(now)
       return (
-        tailscaledProblem(now, facts()) ||
+        tailscaledProblem(now, await facts()) ||
         (here ? null : 'tailscale status does not say which node this machine is') ||
         serveProblem(config, { dnsName: host, httpsPort: port, localPort: port, target })
       )

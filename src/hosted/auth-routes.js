@@ -339,7 +339,9 @@ export function mountAuthRoutes(authRouter, deps) {
         securityNotice: securityNoticeFor(req),
         ...(passkeys.on() ? {} : { passkeysOff: true }),
         // Passkeys a tailnet session added that are still on hold: shown on every page ("Not you? Remove it").
-        heldPasskeys: auth.heldPasskeys(req.user.id).map((key) => ({ ...key, canRemove: req.auth.session.via === 'tailnet' })),
+        heldPasskeys: auth
+          .heldPasskeys(req.user.id, passkeys.holdsAt?.() || null)
+          .map((key) => ({ ...key, canRemove: req.auth.session.via === 'tailnet' })),
         signup,
       })
     }),
@@ -599,7 +601,7 @@ export function mountAuthRoutes(authRouter, deps) {
       // "Not you? Remove it": a tailnet session takes away a passkey that a
       // tailnet session added and that is still on hold (guards.js).
       if (!auth.isFresh(req.auth.session) && removesHeldPasskey(req, req.params.id)) {
-        const key = auth.removeHeldPasskey(req.user.id, req.params.id)
+        const key = auth.removeHeldPasskey(req.user.id, req.params.id, passkeys.holdsAt?.() || null)
         auth.deleteOtherSessions(req.user.id, req.auth.session.hash)
         auditAccount(db, {
           userId: req.user.id,
@@ -615,7 +617,10 @@ export function mountAuthRoutes(authRouter, deps) {
             addedAt: key.created_at,
           },
         })
-        return res.json({ passkeys: auth.listPasskeys(req.user.id), heldPasskeys: auth.heldPasskeys(req.user.id) })
+        return res.json({
+          passkeys: auth.listPasskeys(req.user.id),
+          heldPasskeys: auth.heldPasskeys(req.user.id, passkeys.holdsAt?.() || null),
+        })
       }
       auth.removePasskey(req.user.id, req.params.id)
       // A session signed in with that passkey must not outlive it.

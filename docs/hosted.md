@@ -82,22 +82,32 @@ For people who do not use Tailscale: an SSH tunnel carries one port of the serve
 
 ```sh
 # On the server (once): a hosted server for the address your browser will use. No TLS, no proxy, loopback only.
-shapewall hosted --data ./hosted-data --port 4700 --origin http://localhost:4700
+shapewall hosted --data ./hosted-data --port 4700 --origin http://shapewall.localhost:4700
 
 # On your machine, each time:
 ssh -L 4700:127.0.0.1:4700 you@server
-# then open http://localhost:4700
+# then open http://shapewall.localhost:4700
 ```
 
-- **Accounts are passkey accounts** for the origin `http://localhost:4700`. A browser treats `http://localhost` as a secure
-  context, so passkeys work without a certificate. Use `localhost`, not `127.0.0.1` (not a valid passkey host), and the same
-  port on both ends: the origin is part of the passkey. Everyone who tunnels in uses the same address and has their own
-  account, role and passkey.
+- **Give the tunnel a host name of its own: `shapewall.localhost`.** Browsers send every name that ends in `.localhost` to
+  your own machine and treat it as a secure context, so passkeys work without a certificate, and the name keeps the server's
+  cookies and passkeys to itself. Tested in Chromium (sign-up and sign-in with a passkey; the passkey belongs to
+  `shapewall.localhost`, the session cookie is sent to that name only).
+- **Plain `http://localhost:4700` works too** (`--origin http://localhost:4700`), for a browser or a tool that does not
+  resolve `.localhost` names. Know what it means: **cookies are not kept apart by port.** At plain `localhost` the session
+  cookie is also sent to any other web server on your machine's `localhost` (a dev server on another port), and that server
+  could use it against Shapewall while you have the tunnel open. With `shapewall.localhost` it is not. Not `127.0.0.1`: not a
+  valid passkey host.
+- **Accounts are passkey accounts** for that origin. The origin is part of the passkey: keep the same host name and the same
+  port on both ends. Everyone who tunnels in uses the same address and has their own account, role and passkey.
+- **Everyone arrives from 127.0.0.1.** The server sees the SSH daemon's end of the tunnel, so all tunnelled people share one
+  address: the rate limits that count per address (sign-in attempts, recovery codes, invite lookups) are shared between
+  them, and the audit log and the device list show `127.0.0.1` for everyone. Who did what is still each person's account.
 - **The first account** is made with the setup link, as on any server: `shapewall hosted setup-link --data ./hosted-data` on
-  the server prints `http://localhost:4700/signup#setup=...`; open it through the tunnel.
+  the server prints `http://shapewall.localhost:4700/signup#setup=...`; open it through the tunnel.
 - **The server listens on 127.0.0.1 only.** Nothing is open to the network; SSH is the way in, and whoever has an SSH login on
   the machine can reach the port. Sign-in still decides who is who.
-- **Share links** made there point at `http://localhost:4700` too, so they work only for people with a tunnel. For links
+- **Share links** made there point at the tunnel's address too, so they work only for people with a tunnel. For links
   anyone can open, use a tailnet with `--funnel` or your own domain.
 - **A local board over a tunnel** (`shapewall serve --port 4600` on the remote machine, `ssh -L 4600:127.0.0.1:4600 ...`):
   the board sees a connection from its own machine, so you are treated as the person sitting at it. There is no sign-in and no
@@ -106,8 +116,9 @@ ssh -L 4700:127.0.0.1:4700 you@server
   that machine, and anyone you forward the port to, is that same person: do not tunnel a local board for other people; run
   the hosted server for them.
 
-Tested in the suite with the real command and a real browser at `http://localhost:<port>` (sign-up, sign-out, sign-in with a
-passkey; `test/e2e/hosted-ssh.e2e.test.js`). The tunnel itself is SSH's.
+Tested in the suite with the real command and a real browser at `http://shapewall.localhost:<port>` and at
+`http://localhost:<port>` (sign-up, sign-out, sign-in with a passkey, and which of the two sends its session cookie to
+another server on localhost; `test/e2e/hosted-ssh.e2e.test.js`). The tunnel itself is SSH's.
 
 ### When Shapewall asks for the passkey again
 
@@ -189,15 +200,22 @@ and no recovery codes, and every passkey route answers 403 `passkeys_off`. What 
   (your handle for the account), and the server refuses the request until it carries that name (403 `confirm_required`;
   the header `X-Shapewall-Confirm`). On the command line the same things need `--yes`, and the command names what it
   confirms. This is deliberateness, not proof: the identity is already proven, and a program acting as you can type too.
+  The header is no secret and no token: the request is refused from another site exactly as every other write is (the same
+  origin and JSON are required, and no other origin is allowed to send the header). When you are in more than one workspace
+  with the same name, the name would not say which, so the prompt asks for the workspace's id instead and shows it.
 - **Nothing else asks.** A workspace's "Ask for a passkey again" switches have nothing to ask for; Settings shows
   "Confirming changes" in their place.
 - **Passkeys are an opt-in hardening.** Start the server with `--tailnet-passkeys` (or
   `SHAPEWALL_HOSTED_TAILNET_PASSKEYS=1`), or switch them on a running server: `shapewall hosted admin passkeys on --data DIR`
   (`off`, `status`; kept in the database, and it wins over the flag). Then anyone may add a passkey on the Account page, an
   account that has one confirms the fixed core with it, and everything under
-  [With passkeys also allowed](#with-passkeys-also-allowed) applies. Switched off again, passkeys are kept and not used: a
-  session a passkey started stops counting, and an account with no tailnet login cannot sign in until they are on again
-  (the command says how many).
+  [With passkeys also allowed](#with-passkeys-also-allowed) applies. Switched off again, passkeys are kept and not used, and the switch does three things and says them: every session that a
+  passkey or a recovery code started is ended (deleted, so switching on later does not bring one back); a passkey that was
+  still on hold stays on hold, stays removable with "Not you? Remove it", and starts its 24 hours again when passkeys come
+  back; and each workspace that asks for a passkey somewhere ("Ask for a passkey again", the command line switch) gets an
+  audit entry and a line in Settings, "Switched on here, and not asked while this server has passkeys off": its settings are
+  kept and asked again when passkeys are. An account with no tailnet login cannot sign in until they are on again (the
+  command says how many). In this mode a tailnet session ends the account's other sessions with no further question.
 
 **Each tailnet login is its own account, and an admin still decides who is in a workspace.** Being on the tailnet alone gives
 nothing. Why:
@@ -375,6 +393,8 @@ there proves only that something on the machine made it. What to use there inste
      shapewall hosted admin members list --data ./hosted-data
      shapewall hosted admin members add --login ben@example.com --role admin --data ./hosted-data
      shapewall hosted admin members remove --handle ben --data ./hosted-data
+     shapewall hosted admin members relink --handle ben [--login ben@new.example] --data ./hosted-data
+     shapewall hosted admin members unlink --handle ben --data ./hosted-data
      shapewall hosted admin invites list|create --login cyd@example.com|revoke ID --data ./hosted-data
      shapewall hosted admin projects list --data ./hosted-data
      shapewall hosted admin passkeys status|on|off --data ./hosted-data
@@ -411,7 +431,13 @@ a token is what a command line works with). If that is not acceptable for your t
 be given to someone else later, or a node shared in from another tailnet can carry one that reads the same. So when a login is
 linked the server keeps Tailscale's own id of the user (from `tailscale whois`, `UserProfile.ID`), and every later request must
 carry the same id: a request with the right login and another id is nobody ("This tailnet login belongs to someone else here"),
-and so is a whois answer with no user id at all. A link made by `hosted claim --login` knows only the name: it takes the id of
+and so is a whois answer with no user id at all. If that happens to your own account (Tailscale gave you a new user id:
+the tailnet moved to another identity provider, or you were removed and added again), the page shows the command for
+whoever runs the server: `shapewall hosted admin members relink --login you@example.com --data DIR` forgets the stored id,
+so the next arrival as that login is taken as the account's person. `members relink --handle HANDLE --login NEW` links the
+account to another login, and `members unlink --handle HANDLE` takes the login off. The operator decides because nobody
+in the product can tell a new id for the same person from the same name given to someone else; each is in the operator log
+and in the account's own log. A link made by `hosted claim --login` knows only the name: it takes the id of
 the first proven request that arrives as that login, so open the server from your own device soon after claiming. A device
 whose key has expired is nobody.
 
@@ -2253,6 +2279,11 @@ users DROP COLUMN tailnet_user_id; ALTER TABLE passkeys DROP COLUMN tailnet_adde
 sessions DROP COLUMN tailnet_login; ALTER TABLE invites DROP COLUMN tailnet_login; ALTER TABLE workspaces DROP COLUMN step_up;
 DELETE FROM schema_migrations WHERE version = 17;`, then set `PRAGMA user_version` to the highest version left in
 `schema_migrations` (16 where the saved Usage layouts are there, else 15).
+
+**A database from a build of this release before it was released.** While 0.7.0 was being made, the sign-in migration was
+numbered 16 for a while. A database such a build opened says "16 ran" in its ledger, which now means the Usage layouts. The
+server recognises it (the sign-in tables are there, `usage_layouts` is not, 17 is not marked), adds what that early build
+did not have yet, and corrects the ledger to "17 ran, 16 did not", so both end applied once. Nothing to do by hand.
 
 **Why 17, and migration 16.** Number 16 belongs to the saved Usage layouts (table `usage_layouts`), which are developed
 separately. The two do not depend on each other and the server keeps a ledger of what ran (`schema_migrations`), so they can

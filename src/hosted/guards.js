@@ -11,7 +11,7 @@ import { suspendedWrite } from './operator.js'
 import { ProjectError, createProjectStore } from './projects.js'
 import { PushError } from './push.js'
 import { LIMITS } from './ratelimit.js'
-import { TenancyError, audit, roleAtLeast, roleIn, tenant } from './tenancy.js'
+import { TenancyError, audit, roleAtLeast, roleIn, tenant, workspacesForUser } from './tenancy.js'
 import { CommentError } from '../store.js'
 import { FIXED_CORE, STEP_UP_GROUP_BEFORE, stepUpWindowLabel } from './step-up.js'
 import { stepUpSettings } from './step-up-settings.js'
@@ -65,8 +65,23 @@ export function createGuards({
     return req.auth
   }
   // Passkey routes on a server where passkeys are off: a clear answer, before anything else looks at them.
-  const passkeysGate = (req, res, next) =>
-    isPasskeyRoute(req.path) && !passkeys.on() ? fail(res, 403, 'passkeys_off', PASSKEYS_OFF_MESSAGE) : next()
+  // One of them stays open: taking away a passkey that a tailnet session added and that is still on hold
+  // ("Not you? Remove it", shown on every page). The person must be able to do that whatever the switch says.
+  const HELD_REMOVAL = /^\/auth\/passkeys\/([^/]+)\/?$/i
+  const passkeysGate = (req, res, next) => {
+    if (!isPasskeyRoute(req.path) || passkeys.on()) return next()
+    const removal = req.method === 'DELETE' ? HELD_REMOVAL.exec(req.path) : null
+    if (removal && sessionOf(req)) {
+      let id = ''
+      try {
+        id = decodeURIComponent(removal[1])
+      } catch {
+        id = ''
+      }
+      if (removesHeldPasskey(req, id)) return next()
+    }
+    return fail(res, 403, 'passkeys_off', PASSKEYS_OFF_MESSAGE)
+  }
   // ---- The fixed core without passkeys: a typed confirmation ----
   //
   // On a tailnet sign-in server with passkeys off, a session is a proven
@@ -83,6 +98,28 @@ export function createGuards({
   function confirmRefusal(req, workspaceId = null) {
     const ws = workspaceId || req.t?.workspaceId || null
     const name = ws ? tenant(db, ws).get('SELECT name FROM workspaces WHERE workspace_id = :ws')?.name : null
+    // A name says which workspace only while it is the person's only one of that name. With two "Team"s the
+    // name would confirm either, so the request must say this workspace's id, and the prompt says so.
+    const sameName = name ? workspacesForUser(db, req.auth.user.id).filter((item) => item.name.trim() === name.trim()).length > 1 : false
+    if (sameName) {
+      let saidId = ''
+      try {
+        saidId = decodeURIComponent(String(req.headers[CONFIRM_HEADER] || '')).trim()
+      } catch {
+        saidId = ''
+      }
+      if (saidId === ws) return null
+      return new HttpError(
+        403,
+        'confirm_required',
+        'You are in more than one workspace named ' +
+          name +
+          '. Type the id of this one, ' +
+          ws +
+          ', to confirm. Shapewall always asks before this.',
+        { stepUp: 'always', confirm: ws, confirms: 'workspace-id', workspace: name },
+      )
+    }
     const phrase = name || req.auth.user.handle
     let said = ''
     try {
@@ -260,6 +297,9 @@ export function createGuards({
   // as strong as the account gets (its tailnet signs it in). A tailnet
   // session of an account that has a passkey confirms with it first.
   const needPasskeyBacked = asMiddleware((req) => {
+    // No passkeys on this server: the tailnet identity is the account, also when a passkey from before the
+    // switch is still stored. It could not be asked for, so it is not.
+    if (tailnetOnly(req)) return null
     const restricted = restrictedRefusal(req)
     if (restricted) return restricted
     if (auth.passedPasskey(req.auth.session) || noPasskey(req)) return null
@@ -298,7 +338,9 @@ export function createGuards({
   // hold, a tailnet session of the same account (the same proven identity
   // that could add it) may remove it. That gives the identity nothing it did
   // not have: the account ends as it was before the passkey.
-  const removesHeldPasskey = (req, id) => req.auth.session.via === 'tailnet' && auth.isHeldByTailnet(req.auth.user.id, String(id || ''))
+  function removesHeldPasskey(req, id) {
+    return req.auth.session.via === 'tailnet' && auth.isHeldByTailnet(req.auth.user.id, String(id || ''), passkeys.holdsAt?.() || null)
+  }
   const needFreshOrHeldRemoval = (req, res, next) => (removesHeldPasskey(req, req.params.id) ? next() : needFresh(req, res, next))
   const fixedCore = (req, res, next) => {
     for (const line of coreLines) {

@@ -20,6 +20,8 @@
 import { accounts } from './tenancy.js'
 
 const KEY = 'tailnet_passkeys'
+// When the operator last switched them off: holds of passkeys stand still from then (see holdsAt).
+const OFF_AT = 'tailnet_passkeys_off_at'
 
 export function serverSetting(db, key) {
   return accounts(db).get('SELECT value FROM server_settings WHERE key = :key', { key })?.value ?? null
@@ -38,7 +40,12 @@ export const tailnetPasskeysSetting = (db) => {
   const value = serverSetting(db, KEY)
   return value === null ? null : value === '1'
 }
-export const setTailnetPasskeys = (db, on, at) => setServerSetting(db, KEY, on ? '1' : '0', at)
+export const setTailnetPasskeys = (db, on, at) => {
+  setServerSetting(db, KEY, on ? '1' : '0', at)
+  if (on) accounts(db).run('DELETE FROM server_settings WHERE key = :key', { key: OFF_AT })
+  else if (!serverSetting(db, OFF_AT)) setServerSetting(db, OFF_AT, at, at)
+}
+export const tailnetPasskeysOffAt = (db) => serverSetting(db, OFF_AT)
 
 // tailnet: the tailnet gate of this server, or null (no tailnet sign-in).
 export function createPasskeyPolicy({ db, tailnet = null, flag = false }) {
@@ -47,7 +54,15 @@ export function createPasskeyPolicy({ db, tailnet = null, flag = false }) {
     const set = tailnetPasskeysSetting(db)
     return set === null ? Boolean(flag) : set
   }
-  return { on, tailnetSignIn: Boolean(tailnet) }
+  // The moment a passkey's 24 hour hold is judged at. While passkeys are off nobody can use one, so a hold
+  // does not run out behind the account's back: it stands as it was when they were switched off (and starts
+  // again when they are switched on, src/hosted/operator-access.js). null: now.
+  const holdsAt = () => {
+    if (on()) return null
+    const at = tailnetPasskeysOffAt(db)
+    return at && Number.isFinite(Date.parse(at)) ? new Date(at) : null
+  }
+  return { on, holdsAt, tailnetSignIn: Boolean(tailnet) }
 }
 
 // Every route that makes, uses or manages a passkey or a recovery code, or

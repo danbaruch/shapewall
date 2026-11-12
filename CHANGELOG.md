@@ -155,9 +155,13 @@ Signing in to a team server: fewer passkey prompts, and your tailnet login as th
 - **For the person at the server's own machine** (never signed in by its tailnet identity): `shapewall hosted admin members
   list|add|remove`, `invites list|create|revoke`, `projects list` and `passkeys status|on|off|list|remove`, with the data
   folder as the proof, each in the operator log and in the workspace's audit log as "Server operator".
-- **Over SSH.** A hosted server started with `--origin http://localhost:<port>` (no TLS, loopback) and reached through `ssh
-  -L` works with passkey accounts; documented with what a local board over a tunnel means, and tested with the real command
-  and a real browser.
+- **Over SSH.** A hosted server started with `--origin http://shapewall.localhost:<port>` (no TLS, loopback) and reached
+  through `ssh -L` works with passkey accounts; the name keeps the session cookie from other servers on your localhost, which
+  plain `http://localhost:<port>` (also supported) does not. Documented with what a local board over a tunnel means, and
+  tested with the real command and a real browser at both.
+- **Switching passkeys off or on** (`hosted admin passkeys off|on`) ends the sessions a passkey started, keeps a held passkey
+  removable and restarts its hold, and tells each workspace that asks for a passkey somewhere (audit log, Settings).
+  `hosted admin members relink|unlink` repairs an account whose tailnet user id changed; the page shows the command.
 - **Not in this release:** tailnet sign-in on macOS or Windows servers, in containers, or with a userspace-networking
   tailscaled (no way there to prove a request came through tailscale serve), more admin commands or MCP tools for
   administration, admin tokens, and profile pictures from the tailnet. The proof is tested with a stand-in for tailscale

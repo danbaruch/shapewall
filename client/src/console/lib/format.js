@@ -195,6 +195,11 @@ export function describeAudit(entry) {
         members: 'members and roles',
         data: 'exports and deletes',
       }
+      // The server's operator switched passkeys off or on for the whole server (a tailnet sign-in server).
+      if (d.setting === 'passkeys')
+        return d.after
+          ? 'allowed passkeys on this server again: what this workspace asks a passkey for is asked again'
+          : 'switched passkeys off on this server: what this workspace asks a passkey for is not asked until they are on again'
       if (d.setting === 'windowMinutes') return `changed how long a passkey check counts from ${d.before} to ${d.after} minutes`
       if (d.setting === 'adminIdle')
         return `${d.after ? 'switched on' : 'switched off'} the passkey check for admin pages after 12 hours away`

@@ -387,3 +387,273 @@ test('the operator’s commands on the server’s own machine: members, invites 
   assert.equal((await admin(server, ['members', 'list'], { workspace: ws })).code, 0)
   assert.match((await admin(server, ['projects', 'list'], { workspace: 'Second' })).text, /Second has no project yet/)
 })
+
+// ---- After the fourth review -------------------------------------------------------------------------
+
+async function addHeldPasskey(browser, nickname = 'Laptop') {
+  const authenticator = createAuthenticator({ origin: TAILNET_ORIGIN })
+  const options = await browser.post('/auth/passkeys/options', { confirmDevice: 'Chrome on Linux' }, PAGE)
+  assert.equal(options.status, 200, options.text)
+  const added = await browser.post(
+    '/auth/passkeys/verify',
+    { response: authenticator.register(options.json.options), nickname, confirmDevice: 'Chrome on Linux' },
+    PAGE,
+  )
+  assert.equal(added.status, 201, added.text)
+  return { authenticator, id: added.json.id }
+}
+async function passkeySession(server, authenticator) {
+  const browser = createBrowser(server.localPort, TAILNET_ORIGIN)
+  const start = await browser.post('/auth/login/options', {})
+  assert.equal((await browser.post('/auth/login/verify', { response: authenticator.assert(start.json.options) })).status, 200)
+  return browser
+}
+
+test('switching passkeys off and on: passkey sessions are deleted, not hidden; a stored passkey does not stop a tailnet session from ending the others; a held passkey stays removable and its day starts again', async () => {
+  const server = await tailnet('tailnet-only-switch-effects', { passkeys: true })
+  const ada = await claim(server)
+  const ws = ada.workspaceId
+  const { authenticator, id } = await addHeldPasskey(ada.browser)
+  const laptop = await passkeySession(server, authenticator)
+  assert.equal((await laptop.get(`/api/workspaces/${ws}`)).status, 200)
+  // The hold is nearly over when the operator switches passkeys off.
+  const almost = new Date(Date.now() - 23 * 3_600_000).toISOString()
+  server.db.prepare('UPDATE passkeys SET recovery_added_at = ? WHERE id = ?').run(almost, id)
+  const off = await admin(server, ['passkeys', 'off'])
+  assert.match(off.text, /1 session that a passkey or a recovery code started was ended/)
+  assert.equal(server.db.prepare('SELECT COUNT(*) AS n FROM sessions WHERE tailnet_login IS NULL').get().n, 0, 'deleted')
+  assert.ok(server.db.prepare('SELECT COUNT(*) AS n FROM sessions WHERE tailnet_login IS NOT NULL').get().n >= 1, 'tailnet sessions go on')
+  assert.equal((await laptop.get(`/api/workspaces/${ws}`)).status, 401)
+  // The account still has a stored passkey. A proven tailnet session ends its other sessions all the same:
+  // it could not be asked for the passkey.
+  const phone = (await server.device(ADA)).browser()
+  assert.equal((await me(phone)).json.via, 'tailnet')
+  const sessions = (await phone.get('/auth/sessions')).json.sessions
+  const other = sessions.find((session) => !session.current)
+  assert.ok(other, 'another session of hers')
+  const one = await call(phone, 'DELETE', `/auth/sessions/${other.id}`)
+  assert.equal(one.status, 200, one.text)
+  const all = await phone.post('/auth/sessions/revoke-others', {})
+  assert.equal(all.status, 200, all.text)
+  // Two hours pass while passkeys are off: the hold would have run out by the clock. It stands still
+  // instead, so the notice is still there, and "Not you? Remove it" works though passkeys are off.
+  server.db
+    .prepare("UPDATE server_settings SET value = ? WHERE key = 'tailnet_passkeys_off_at'")
+    .run(new Date(Date.now() - 2 * 3_600_000).toISOString())
+  server.db.prepare('UPDATE passkeys SET recovery_added_at = ? WHERE id = ?').run(new Date(Date.now() - 25 * 3_600_000).toISOString(), id)
+  const shown = (await me(phone)).json
+  assert.deepEqual(
+    shown.heldPasskeys.map((key) => [key.id, key.canRemove]),
+    [[id, true]],
+  )
+  assert.equal(shown.passkeysOff, true)
+  // Every other passkey route is still off, and so is removing a passkey that is not on hold.
+  assert.equal((await call(phone, 'DELETE', '/auth/passkeys/not-a-passkey')).json.error.code, 'passkeys_off')
+  assert.equal((await phone.post('/auth/passkeys/options', { confirmDevice: 'Chrome on Linux' }, PAGE)).json.error.code, 'passkeys_off')
+  // On again: the passkey's 24 hours start again, and the session that was ended does not come back.
+  const on = await admin(server, ['passkeys', 'on'])
+  assert.match(on.text, /1 passkey that was on hold starts its 24 hours again/)
+  const restarted = Date.parse(server.db.prepare('SELECT recovery_added_at FROM passkeys WHERE id = ?').get(id).recovery_added_at)
+  assert.ok(restarted > Date.now() - 60_000)
+  assert.equal((await laptop.get(`/api/workspaces/${ws}`)).status, 401, 'not revived')
+  assert.ok(Date.parse((await me(phone)).json.heldPasskeys[0].onHoldUntil) > Date.now() + 23 * 3_600_000)
+  // Off once more, and she removes it while it is off.
+  await admin(server, ['passkeys', 'off'])
+  const removed = await call(phone, 'DELETE', `/AUTH/passkeys/${encodeURIComponent(id)}/`)
+  assert.equal(removed.status, 200, removed.text)
+  assert.equal(server.db.prepare('SELECT COUNT(*) AS n FROM passkeys').get().n, 0)
+  // A passkey whose hold was long over when they were switched off is not put back on hold by switching on.
+  await admin(server, ['passkeys', 'on'])
+  const old = await addHeldPasskey(phone, 'Old')
+  server.db.prepare("UPDATE passkeys SET recovery_added_at = '2020-01-01T00:00:00.000Z' WHERE id = ?").run(old.id)
+  await admin(server, ['passkeys', 'off'])
+  const again = await admin(server, ['passkeys', 'on'])
+  assert.doesNotMatch(again.text, /24 hours again/)
+  assert.equal(
+    server.db.prepare('SELECT recovery_added_at FROM passkeys WHERE id = ?').get(old.id).recovery_added_at,
+    '2020-01-01T00:00:00.000Z',
+  )
+})
+
+test('when the operator switches passkeys off, a workspace that asks for a passkey somewhere is told: its audit log, the command’s output, and its settings stay as they were', async () => {
+  const server = await tailnet('tailnet-only-not-asked', { passkeys: true })
+  const ada = await claim(server)
+  const ws = ada.workspaceId
+  const quiet = (await ada.browser.post('/api/workspaces', { name: 'Quiet' })).json.workspace.id
+  for (const body of [{ group: 'tokens', on: true }, { cliApproval: true }, { adminIdle: true }])
+    assert.equal((await call(ada.browser, 'PATCH', `/api/workspaces/${ws}/step-up`, body)).status, 200)
+  const off = await admin(server, ['passkeys', 'off'])
+  assert.match(
+    off.text,
+    /Team \(ws_[0-9a-f]+\) asks for a passkey in its settings \(tokens, adminIdle, cliApproval\): not asked while passkeys are off/,
+  )
+  assert.doesNotMatch(off.text, /Quiet/)
+  // The settings are kept (and the page shows them as not asked: features.passkeys false with them still on).
+  const workspace = (await ada.browser.get(`/api/workspaces/${ws}`)).json
+  assert.equal(workspace.features.passkeys, false)
+  assert.deepEqual(
+    [
+      workspace.workspace.settings.stepUp.tokens,
+      workspace.workspace.settings.stepUp.cliApproval,
+      workspace.workspace.settings.stepUp.adminIdle,
+    ],
+    [true, true, true],
+  )
+  // Not asked: a token is made with no question, though the switch is on.
+  const project = (await ada.browser.post(`/api/workspaces/${ws}/projects`, { name: 'Site' })).json.project
+  assert.equal(
+    (await ada.browser.post(`/api/workspaces/${ws}/projects/${project.id}/tokens`, { name: 'ci', scopes: ['read'] })).status,
+    201,
+  )
+  // One audit entry in the workspace that is affected, none in the other; "Worth a look"; by the operator.
+  const entries = (id) =>
+    server.db
+      .prepare("SELECT detail FROM audit_log WHERE workspace_id = ? AND action = 'step_up_changed' ORDER BY id")
+      .all(id)
+      .map((row) => JSON.parse(row.detail))
+  const told = entries(ws).filter((detail) => detail.setting === 'passkeys')
+  assert.deepEqual(told, [
+    { setting: 'passkeys', after: false, settings: ['tokens', 'adminIdle', 'cliApproval'], by: 'operator', operator: 'op@fixture' },
+  ])
+  assert.deepEqual(entries(quiet), [])
+  const shown = (await ada.browser.get(`/api/workspaces/${ws}/audit?limit=20`)).json.entries.find(
+    (entry) => entry.detail?.setting === 'passkeys',
+  )
+  assert.equal(shown.actor.label, 'Server operator')
+  // Switching off twice says it once; on again says they are asked again.
+  await admin(server, ['passkeys', 'off'])
+  assert.equal(entries(ws).filter((detail) => detail.setting === 'passkeys').length, 1)
+  const on = await admin(server, ['passkeys', 'on'])
+  assert.match(on.text, /asked again from now/)
+  assert.deepEqual(
+    entries(ws)
+      .filter((detail) => detail.setting === 'passkeys')
+      .map((detail) => detail.after),
+    [false, true],
+  )
+})
+
+test('two workspaces with the same name: the typed confirmation is the id of the one meant, and the prompt says so', async () => {
+  const server = await tailnet('tailnet-only-same-name')
+  const ada = await claim(server)
+  const first = ada.workspaceId
+  const second = (await ada.browser.post('/api/workspaces', { name: 'Team' })).json.workspace.id
+  const other = (await ada.browser.post('/api/workspaces', { name: 'Other' })).json.workspace.id
+  // "Team" would confirm either: it confirms neither.
+  for (const ws of [first, second]) {
+    const byName = await call(ada.browser, 'DELETE', `/api/workspaces/${ws}`, { confirm: 'Team' }, saying('Team'))
+    assert.equal(byName.status, 403, byName.text)
+    assert.deepEqual(
+      [byName.json.error.code, byName.json.error.confirm, byName.json.error.confirms, byName.json.error.workspace],
+      ['confirm_required', ws, 'workspace-id', 'Team'],
+    )
+    assert.match(
+      byName.json.error.message,
+      new RegExp(`You are in more than one workspace named Team\\. Type the id of this one, ${ws}, to confirm`),
+    )
+  }
+  // Nor does the id of the other one.
+  assert.equal(
+    (await call(ada.browser, 'DELETE', `/api/workspaces/${second}`, { confirm: 'Team' }, saying(first))).json.error.code,
+    'confirm_required',
+  )
+  assert.equal(
+    (await call(ada.browser, 'POST', `/api/workspaces/${second}/invites`, { role: 'owner' }, saying('Team'))).json.error.confirms,
+    'workspace-id',
+  )
+  assert.equal(server.db.prepare('SELECT COUNT(*) AS n FROM workspaces').get().n, 3)
+  // Its own id does, and only that workspace goes.
+  const gone = await call(ada.browser, 'DELETE', `/api/workspaces/${second}`, { confirm: 'Team' }, saying(second))
+  assert.equal(gone.status, 200, gone.text)
+  assert.deepEqual(
+    server.db
+      .prepare('SELECT id FROM workspaces ORDER BY id')
+      .all()
+      .map((row) => row.id)
+      .sort(),
+    [first, other].sort(),
+  )
+  // A name that is hers once is confirmed by the name, as before: "Team" again now, and "Other".
+  assert.equal((await call(ada.browser, 'POST', `/api/workspaces/${first}/invites`, { role: 'owner' })).json.error.confirms, 'workspace')
+  assert.equal((await call(ada.browser, 'POST', `/api/workspaces/${other}/invites`, { role: 'owner' }, saying('Other'))).status, 201)
+  // Someone else's workspace of the same name does not count: only her own memberships do.
+  const ben = await join(server, { browser: ada.browser, workspaceId: first }, BEN, 'admin')
+  await ben.browser.post('/api/workspaces', { name: 'Other' })
+  assert.equal((await call(ada.browser, 'POST', `/api/workspaces/${other}/invites`, { role: 'owner' })).json.error.confirms, 'workspace')
+})
+
+test('Tailscale gave the person a new user id: the page says what to ask for, and the operator relinks or unlinks, audited', async () => {
+  const server = await tailnet('tailnet-only-relink')
+  const ada = await claim(server)
+  const ws = ada.workspaceId
+  const ben = await join(server, ada, BEN, 'admin')
+  // Ben's tailnet user id changes (the tailnet moved to another identity provider, say). His own login no
+  // longer signs him in, and he is told exactly what to ask for.
+  const moved = { ...BEN, userId: 424242 }
+  const stuck = (await server.device(moved)).browser()
+  const asked = (await me(stuck)).json
+  assert.equal(asked.tailnet.state, 'changed')
+  assert.equal(asked.tailnet.fix, "shapewall hosted admin members relink --login ben@example.com --data <the server's data folder>")
+  const refused = await stuck.post('/auth/tailnet/sign-in', {})
+  assert.match(
+    refused.json.error.message,
+    /If the account is yours, ask whoever runs this server to run: shapewall hosted admin members relink --login ben@example\.com/,
+  )
+  // The operator's commands refuse what they cannot mean.
+  for (const [args, flags, why] of [
+    [['members', 'relink'], {}, /--handle HANDLE or --login TAILNET_LOGIN/],
+    [['members', 'relink'], { handle: 'nobody' }, /no account with that handle/],
+    [['members', 'relink'], { login: 'nobody@example.com' }, /no account is linked to that tailnet login/],
+    [['members', 'relink'], { handle: 'ben', login: 'not a login' }, /--login: a tailnet login/],
+    [['members', 'relink'], { handle: 'ben', login: 'ada@example.com' }, /ada@example\.com is linked to @ada: unlink that account first/],
+    [['members', 'unlink'], { handle: 'nobody' }, /no account with that handle/],
+    [['passkeys', 'list'], { login: 'Not A Login' }, /--login: a tailnet login/],
+  ]) {
+    const no = await admin(server, args, flags)
+    assert.equal(no.code, 1, JSON.stringify([args, flags]))
+    assert.match(no.text, why, JSON.stringify([args, flags]))
+  }
+  // Relink by the login it has now: the stored id is forgotten, his tailnet sessions end.
+  const relinked = await admin(server, ['members', 'relink'], { login: 'Ben@Example.com' })
+  assert.equal(relinked.code, 0, relinked.text)
+  assert.match(relinked.text, /@ben is linked to ben@example\.com\. Whoever next arrives through the tailnet as that login/)
+  assert.match(relinked.text, /1 tailnet session of the account ended/)
+  assert.equal(server.db.prepare("SELECT tailnet_user_id FROM users WHERE handle = 'ben'").get().tailnet_user_id, null)
+  assert.equal((await ben.browser.get(`/api/workspaces/${ws}`)).status, 401, 'the session of the old id ended')
+  // The next arrival as that login is taken as him, and held to the new id from then on.
+  const back = (await server.device(moved)).browser()
+  assert.equal((await me(back)).json.user.handle, 'ben')
+  assert.equal(server.db.prepare("SELECT tailnet_user_id FROM users WHERE handle = 'ben'").get().tailnet_user_id, '424242')
+  assert.equal((await me((await server.device(BEN)).browser())).json.tailnet.state, 'changed', 'the old id is now the stranger')
+  // Relink to another login.
+  const renamed = await admin(server, ['members', 'relink'], { handle: 'ben', login: 'benjamin@example.com' })
+  assert.match(renamed.text, /@ben is linked to benjamin@example\.com \(was ben@example\.com\)/)
+  assert.equal((await me((await server.device({ login: 'benjamin@example.com', name: 'Ben' })).browser())).json.user.handle, 'ben')
+  assert.equal((await me((await server.device(moved)).browser())).json.tailnet.state, 'unknown', 'the old login is nobody’s now')
+  // Unlink: nothing signs the account in until it is linked again; the command says so.
+  const unlinked = await admin(server, ['members', 'unlink'], { handle: '@ben' })
+  assert.match(unlinked.text, /@ben is no longer linked to benjamin@example\.com/)
+  assert.match(unlinked.text, /The account has no passkey: nothing signs it in until it is linked again/)
+  assert.match((await admin(server, ['members', 'unlink'], { handle: 'ben' })).text, /is not linked to a tailnet login/)
+  assert.match(
+    (await admin(server, ['members', 'relink'], { handle: 'ben' })).text,
+    /is not linked to a tailnet login: give one with --login/,
+  )
+  // In the operator log, and in the account's own log as the operator's doing.
+  const logged = server.db
+    .prepare("SELECT action FROM operator_log WHERE action LIKE 'member_%link' ORDER BY id")
+    .all()
+    .map((row) => row.action)
+  assert.deepEqual(logged, ['member_relink', 'member_relink', 'member_unlink'])
+  const account = server.db
+    .prepare(
+      "SELECT action, detail FROM audit_log WHERE workspace_id IS NULL AND user_id = (SELECT id FROM users WHERE handle = 'ben') AND action LIKE 'tailnet_%' ORDER BY id",
+    )
+    .all()
+    .map((row) => [row.action, JSON.parse(row.detail).by || null, JSON.parse(row.detail).tailnet])
+  assert.deepEqual(account.slice(-3), [
+    ['tailnet_linked', 'operator', 'ben@example.com'],
+    ['tailnet_linked', 'operator', 'benjamin@example.com'],
+    ['tailnet_unlinked', 'operator', 'benjamin@example.com'],
+  ])
+})

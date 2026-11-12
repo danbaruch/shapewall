@@ -323,14 +323,16 @@ export function createAuth({ db, origin, rpId, rpName = 'Shapewall', now = () =>
     return { ...user, trusted: !onHold(key), passkeyId: key.id }
   }
 
-  const onHold = (key) => Boolean(key.recovery_added_at) && now().getTime() - Date.parse(key.recovery_added_at) < RECOVERY_HOLD_MS
+  // `at`: the moment to judge the hold at (now, unless passkeys are off on this server and holds stand still).
+  const onHold = (key, at = null) =>
+    Boolean(key.recovery_added_at) && (at || now()).getTime() - Date.parse(key.recovery_added_at) < RECOVERY_HOLD_MS
   // On hold, and added by a tailnet session with no passkey check (the first
   // passkey of an account its tailnet signs in). Until the hold ends, any
   // tailnet session of the account may take it away again (removeHeldPasskey).
-  const heldByTailnet = (key) => Boolean(key.tailnet_added_from) && onHold(key)
-  const heldPasskeys = (userId) =>
+  const heldByTailnet = (key, at = null) => Boolean(key.tailnet_added_from) && onHold(key, at)
+  const heldPasskeys = (userId, at = null) =>
     passkeysOf(userId)
-      .filter(heldByTailnet)
+      .filter((key) => heldByTailnet(key, at))
       .map((key) => ({
         id: key.id,
         nickname: key.nickname,
@@ -393,11 +395,11 @@ export function createAuth({ db, origin, rpId, rpName = 'Shapewall', now = () =>
   // of the person's devices made. Every other passkey still on hold starts
   // its 24 hours again: someone objected, so nothing added around then is
   // trusted sooner. Returns the removed passkey's row.
-  function removeHeldPasskey(userId, id) {
+  function removeHeldPasskey(userId, id, at = null) {
     return transaction(db, () => {
       const key = passkeysOf(userId).find((item) => item.id === id)
       if (!key) throw new AuthError(404, 'unknown_passkey', 'No such passkey.')
-      if (!heldByTailnet(key))
+      if (!heldByTailnet(key, at))
         throw new AuthError(409, 'passkey_not_held', 'That passkey is no longer on hold. Removing it needs a passkey check.')
       q.run('DELETE FROM passkeys WHERE id = :id AND user_id = :user', { id, user: userId })
       q.run(
@@ -610,7 +612,7 @@ export function createAuth({ db, origin, rpId, rpName = 'Shapewall', now = () =>
     removeHeldPasskey,
     removePasskeyAsOperator,
     heldPasskeys,
-    isHeldByTailnet: (userId, id) => passkeysOf(userId).some((key) => key.id === id && heldByTailnet(key)),
+    isHeldByTailnet: (userId, id, at = null) => passkeysOf(userId).some((key) => key.id === id && heldByTailnet(key, at)),
     newRecoveryCodes,
     recoveryRemaining,
     useRecoveryCode,

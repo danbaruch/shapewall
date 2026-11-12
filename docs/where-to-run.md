@@ -67,14 +67,17 @@ tailnet server can also allow passkeys (`--tailnet-passkeys`). Details: [Signing
 No Tailscale? Tunnel one port over SSH.
 
 ```sh
-shapewall hosted --data ./hosted-data --port 4700 --origin http://localhost:4700     # on the server; loopback, no TLS
-ssh -L 4700:127.0.0.1:4700 you@server                                               # on your machine
-# then open http://localhost:4700
+shapewall hosted --data ./hosted-data --port 4700 --origin http://shapewall.localhost:4700   # on the server; loopback, no TLS
+ssh -L 4700:127.0.0.1:4700 you@server                                                     # on your machine
+# then open http://shapewall.localhost:4700
 ```
 
-A hosted server reached this way uses passkey accounts (`http://localhost` is a secure context, so passkeys work). A local
-board reached this way (`shapewall serve` on the remote machine, the same kind of tunnel) sees you as the person at that
-machine: no sign-in, and so not something to tunnel for other people. More: [Over SSH](hosted.md#over-ssh).
+A hosted server reached this way uses passkey accounts. `shapewall.localhost` is a name browsers send to your own machine and
+treat as a secure context, so passkeys work, and it keeps the server's cookies to itself; plain `http://localhost:4700` works
+too, but there the session cookie is also sent to any other web server on your machine's localhost. Everyone who tunnels in
+shares `127.0.0.1` for rate limits and in the audit log. A local board reached this way (`shapewall serve` on the remote
+machine, the same kind of tunnel) sees you as the person at that machine: no sign-in, and so not something to tunnel for
+other people. More: [Over SSH](hosted.md#over-ssh).
 
 With tailnet sign-in the server believes Tailscale's identity headers only on requests that provably came through the serve
 entry it made (a secret path, a connection owned by tailscaled, tailscaled's own whois), never on direct loopback requests,

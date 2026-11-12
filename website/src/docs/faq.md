@@ -99,8 +99,8 @@ as you. Whoever runs the server can also allow passkeys (`shapewall hosted admin
 
 ## Can I reach a server over SSH instead of Tailscale?
 
-Yes. Start it with `--origin http://localhost:4700`, run `ssh -L 4700:127.0.0.1:4700 you@server` and open
-`http://localhost:4700`: passkeys work there. See [Over SSH](/docs/hosted#over-ssh).
+Yes. Start it with `--origin http://shapewall.localhost:4700`, run `ssh -L 4700:127.0.0.1:4700 you@server` and open
+`http://shapewall.localhost:4700`: passkeys work there. See [Over SSH](/docs/hosted#over-ssh).
 
 ## Can I set up a team server and join one from my coding agent, without a browser?
 

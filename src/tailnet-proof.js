@@ -74,7 +74,7 @@
 // one with a plain 404).
 
 import fs from 'node:fs'
-import { execFileSync } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import os from 'node:os'
 import net from 'node:net'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
@@ -278,21 +278,28 @@ export async function proofSelfTest(server, proof) {
 const DEBUG_SWITCHES = ['TS_DEBUG_NETSTACK_LOOPBACK_PORT', 'TS_DEBUG_NETSTACK_SUBNETS']
 
 // The pid systemd runs tailscaled.service as, or null (no systemd, no such
-// unit, or it is not running). Any user may ask.
-export function systemdMainPid(unit = 'tailscaled.service', run = execFileSync) {
-  try {
-    const text = String(
-      run('systemctl', ['show', '--property=MainPID', '--value', unit], {
-        encoding: 'utf8',
-        timeout: 3000,
-        stdio: ['ignore', 'pipe', 'ignore'],
-      }),
-    )
-    const pid = Number.parseInt(text.trim(), 10)
-    return Number.isSafeInteger(pid) && pid > 0 ? pid : null
-  } catch {
-    return null
-  }
+// unit, or it is not running). Any user may ask. Asynchronous: this is asked
+// at start and by the half-minute watch of a running server, and a server
+// must not stand still while systemctl answers.
+export function systemdMainPid(unit = 'tailscaled.service', run = execFile) {
+  return new Promise((resolve) => {
+    const done = (error, stdout) => {
+      const pid = error ? Number.NaN : Number.parseInt(String(stdout).trim(), 10)
+      resolve(Number.isSafeInteger(pid) && pid > 0 ? pid : null)
+    }
+    try {
+      run('systemctl', ['show', '--property=MainPID', '--value', unit], { encoding: 'utf8', timeout: 3000 }, done)
+    } catch {
+      resolve(null)
+    }
+  })
+}
+
+// hostFacts for a real machine: asks systemd which process tailscaled is
+// (without blocking), then reads /proc. What the servers call at start and
+// in their watch; never on the path of a request.
+export async function machineFacts(options = {}) {
+  return hostFacts({ ...options, mainPid: await systemdMainPid() })
 }
 
 // What this machine says about tailscaled and about where this process runs.
@@ -315,7 +322,8 @@ export function systemdMainPid(unit = 'tailscaled.service', run = execFileSync) 
 // `env`: the names of the debug switches found in its environment, or null
 // when that cannot be read (normal for a server that is not root: what root
 // put in tailscaled's environment is then trusted root configuration).
-export function hostFacts({ proc = '/proc', read = fs, env = process.env, mainPid = systemdMainPid } = {}) {
+// `mainPid`: the unit's main process when the caller asked systemd (machineFacts); null: go by name.
+export function hostFacts({ proc = '/proc', read = fs, env = process.env, mainPid = null } = {}) {
   const facts = { tailscaled: [], unreadable: 0, container: null }
   let pids = []
   try {

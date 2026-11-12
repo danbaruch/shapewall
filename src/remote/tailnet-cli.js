@@ -483,7 +483,7 @@ export async function adminCommand(positional, flags, print, { env = process.env
       )
       if (made.needsYes)
         throw new Error(
-          `This invites ${role === 'owner' ? 'an owner' : `someone as ${role}`} to ${terminalSafe(made.needsYes)}. Shapewall always asks before that: run the command again with --yes.`,
+          `This invites ${role === 'owner' ? 'an owner' : `someone as ${role}`} to ${terminalSafe(workspace.name)}. Shapewall always asks before that: run the command again with --yes.`,
         )
       if (!made.ok) refuse(made)
       if (flags.json) out(JSON.stringify({ invite: made.data.invite, ...(login ? {} : { url: made.data.url }) }, null, 2))
