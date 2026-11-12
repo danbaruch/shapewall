@@ -131,7 +131,12 @@ async function claim(kind, httpsPort, localPort, { run, dnsName, secret = null }
     )
   }
   const result = await run('tailscale', [kind, '--bg', `--https=${httpsPort}`, target])
-  if (result.code !== 0) throw explain(result, `tailscale ${kind} --https=${httpsPort}`)
+  if (result.code !== 0) {
+    const error = explain(result, `tailscale ${kind} --https=${httpsPort}`)
+    // tailscale may quote its arguments back: the secret never reaches a log.
+    if (secret) error.message = error.message.split(secret).join('...')
+    throw error
+  }
   return async () => {
     const active = await servedOn(httpsPort, { run, dnsName })
     if (!active) return true

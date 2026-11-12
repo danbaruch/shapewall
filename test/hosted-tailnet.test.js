@@ -1372,3 +1372,29 @@ test('a tailnet session is stored so that a build from before tailnet sign-in ca
   await server.tailnetWatch()
   assert.equal(server.tailnet.suspended(), null)
 })
+
+test('the serve secret is in no error either: tailscale quoting its arguments back does not leak it', async () => {
+  const fake = fakeTailscale()
+  let secret = null
+  const run = async (command, args) => {
+    if (args[0] === 'serve' && args.includes('--bg')) {
+      secret = /\/_ts\/(.+)$/.exec(args.at(-1))[1]
+      return { code: 1, stdout: '', stderr: `invalid argument: ${args.at(-1)}` }
+    }
+    return fake.run(command, args)
+  }
+  const failure = await startHosted({
+    dataDir: tempDir('tailnet-secret-error'),
+    port: 0,
+    env: {},
+    out: () => {},
+    exitOnStop: false,
+    tailscale: { httpsPort: 443, funnel: null, run, watchMs: 0 },
+    tailnetSignIn: true,
+    tailnetProof: { trusted: () => true },
+    tailnetFacts: plainFacts,
+  }).catch((error) => error)
+  assert.match(failure.message, /tailscale serve --https=443 failed/)
+  assert.ok(secret && secret.length === 43)
+  assert.equal(failure.message.includes(secret), false)
+})
