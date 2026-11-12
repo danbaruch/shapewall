@@ -171,6 +171,12 @@ and a clear button), and nothing else moves or collapses for it. When it gets na
 in a fixed order (the panel toggles, Views (an open journey's name shortens first), then the screen-size toggle to icons with
 tooltips, where the hairlines go too) and the board name truncates a little at each step, never below about 8 characters.
 Accessible names, shortcuts and tooltips never change.
+While a side panel is open its toggles are the panel's header: their track is exactly as wide as the panel under it, inside the
+bar's 12 px padding on both sides (the panel's own inset), the three sharing the width, and it follows the panel's drag handle with
+no transition (`sidePanelWidth.js` carries the width from the panel to the bar). Everything else in the right zone (the viewer
+note, Agent settings) stays to their left. The left zone drops words sooner to make the room; when no step fits, the toggles keep
+their own width. The panel is never narrower than its toggles need (`SIDE_PANEL` in `toolbarFit.js`: 384 px by default, 368 px at
+least, 560 px or 40% of the window at most).
 `test/toolbar-fit.test.js` checks the order and that nothing overlaps from a 1024 px window with the widest sidebar up. The phone
 toolbar is a separate compact bar. `ToggleGroup` options take a `tooltip` for icon-only labels.
 

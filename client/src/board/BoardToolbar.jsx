@@ -23,6 +23,7 @@ import { ViewsMenu } from './ViewsMenu'
 import { CaptureStatus } from './CaptureStatus'
 import { BoardProfile } from './BoardProfile'
 import { viewportIcon } from './viewports'
+import { useSidePanelWidth } from './sidePanelWidth'
 import { FIT_STEPS, TOOLBAR, collapsed, fitToolbar, toolbarItems } from './toolbarFit'
 
 // Text widths for the toolbar fit, measured on a canvas in the page's font.
@@ -146,8 +147,12 @@ const activityWords = (shown, activity) => (shown === 'done' ? ['Agent done', ac
 // track, the open panel's one raised (Toggle `segment`, the same chip as the
 // chosen screen size), none raised while the panel is closed. Each also
 // opens its own entry point (unchanged hooks).
+// `stretched`: a panel is open and the track is its header, as wide as the
+// panel, the buttons sharing the width equally (a button whose words need
+// more than its share keeps them, and the others share the rest).
 function PanelSwitch({
   labels,
+  stretched,
   allOpen,
   panelHidden,
   chatAvailable,
@@ -168,9 +173,9 @@ function PanelSwitch({
   const onComments = !chatAvailable && Boolean(words)
   const activityHooks = { 'data-sw-agent-activity': shown, 'data-sw-agent-activity-count': activity.count || undefined }
   // Each button keeps one name; aria-pressed says whether its panel is open.
-  const segment = cn(SEGMENT, !labels && 'px-2')
+  const segment = cn(SEGMENT, !labels && 'px-2', stretched && 'flex-1 basis-0')
   return (
-    <div className={TRACK} role="group" aria-label="Side panel" data-sw-panel-switch="true">
+    <div className={cn(TRACK, stretched && 'w-full')} role="group" aria-label="Side panel" data-sw-panel-switch="true">
       <Tooltip content={`${commentsOn ? 'Hide' : 'Show'} comments (${allOpen} open)${onComments ? `. ${words}` : ''}`} side="bottom">
         <Toggle
           variant="segment"
@@ -243,8 +248,12 @@ function PanelSwitch({
 //           then, after a hairline, the view controls: the screen-size
 //           switch, Views (journeys and what the canvas shows), and on a
 //           local board Capture with its status
-//   right   open panels: the viewer note, the side panel switch (Comments |
-//           Agent | Checks) and Agent settings last
+//   right   open panels: the viewer note, Agent settings, and last the side
+//           panel switch (Comments | Agent | Checks). While a panel is open
+//           the switch is its header: exactly as wide as the panel under it
+//           (inside the bar's padding on both sides), following the panel as
+//           it is dragged, with no transition. Everything else stays to its
+//           left, in the same order whether a panel is open or not.
 // Every control but the name is the same quiet box: 32 px tall, the same
 // radius, a hairline, the same tint (BOXED, TRACK). A chosen option or an
 // open panel is the raised chip on its track.
@@ -318,6 +327,7 @@ export function BoardToolbar({
   const viewer = !canComment && info?.hosted && info?.role === 'viewer'
   const headerRef = useRef(null)
   const toolbarWidth = useWidth(headerRef, wide)
+  const panelWidth = useSidePanelWidth()
   const statusKind = capture?.running ? 'running' : capture?.state === 'failed' && capture.error ? 'failed' : 'dot'
   const progress = capture?.running && capture.total ? `${capture.done || 0}/${capture.total}` : 'Capturing'
   const viewportLabels = modes.map((item) => item.label).join('\n')
@@ -325,6 +335,7 @@ export function BoardToolbar({
     () =>
       fitToolbar({
         width: toolbarWidth,
+        panel: panelWidth,
         ...toolbarItems({
           text: textWidth,
           title: boardTitle,
@@ -339,6 +350,7 @@ export function BoardToolbar({
       }),
     [
       toolbarWidth,
+      panelWidth,
       boardTitle,
       viewportLabels,
       canCapture,
@@ -353,6 +365,7 @@ export function BoardToolbar({
     ],
   )
   const off = collapsed(fit.step)
+  const stretched = Boolean(wide && fit.stretched)
   const profile = (
     <BoardProfile
       info={info}
@@ -565,22 +578,6 @@ export function BoardToolbar({
 
       <div className={cn('flex min-w-0 items-center justify-end', innerGap)} data-sw-toolbar-zone="right">
         {viewer ? <ViewerNote /> : null}
-        <PanelSwitch
-          labels={!off.panels}
-          allOpen={allOpen}
-          panelHidden={panelHidden}
-          chatAvailable={chatAvailable}
-          chatThread={chatThread}
-          reopenChat={reopenChat}
-          checksOpen={checksOpen}
-          canChecks={canChecks}
-          openChecks={openChecks}
-          closeChecks={closeChecks}
-          updateParams={updateParams}
-          activity={activity}
-          shown={shown}
-          openAgentThread={openAgentThread}
-        />
         {settingsAvailable ? (
           <IconButton
             variant="ghost"
@@ -594,6 +591,31 @@ export function BoardToolbar({
             <Settings size={16} aria-hidden="true" />
           </IconButton>
         ) : null}
+        {/* The panel's column of the bar while a panel is open: out to the
+            bar's right edge, with the bar's padding on both sides of the track. */}
+        <div
+          className={cn('shrink-0', stretched && '-mr-3 px-3')}
+          style={stretched ? { width: panelWidth } : undefined}
+          data-sw-panel-tabs={stretched ? 'stretched' : 'compact'}
+        >
+          <PanelSwitch
+            labels={stretched || !off.panels}
+            stretched={stretched}
+            allOpen={allOpen}
+            panelHidden={panelHidden}
+            chatAvailable={chatAvailable}
+            chatThread={chatThread}
+            reopenChat={reopenChat}
+            checksOpen={checksOpen}
+            canChecks={canChecks}
+            openChecks={openChecks}
+            closeChecks={closeChecks}
+            updateParams={updateParams}
+            activity={activity}
+            shown={shown}
+            openAgentThread={openAgentThread}
+          />
+        </div>
       </div>
     </header>
   )

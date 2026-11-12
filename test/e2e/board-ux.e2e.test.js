@@ -409,7 +409,7 @@ test('desktop: the side panel stops at 560 px or 40% of the window, a wider stor
     await page.keyboard.press('Shift+ArrowLeft')
     assert.equal(await width(), 560)
     for (let presses = 0; presses < 8; presses += 1) await page.keyboard.press('Shift+ArrowRight')
-    assert.equal(await width(), 280)
+    assert.equal(await width(), 368, "never narrower than the top bar's panel toggles need")
     await page.keyboard.press('Home')
     assert.equal(await width(), 384)
 
@@ -1184,6 +1184,119 @@ test('desktop: an open thread stays while you look around and closes when you go
     assert.deepEqual(errors, [])
   } finally {
     await context.close()
+  }
+})
+
+test("desktop: with a side panel open the top bar's panel toggles span exactly the panel, follow a resize, and go back to their own width when it closes", async () => {
+  for (const viewport of [
+    { width: 1280, height: 800 },
+    { width: 1440, height: 900 },
+  ]) {
+    const { context, page, errors } = await openBoard({ viewport })
+    try {
+      const at = `at ${viewport.width}`
+      const bar = '[data-sw-toolbar="full"]'
+      const places = () =>
+        page.evaluate((sel) => {
+          const box = (name) => {
+            const r = document.querySelector(name)?.getBoundingClientRect()
+            return r ? { left: r.left, right: r.right, width: r.width } : null
+          }
+          const toggles = [...document.querySelectorAll(`${sel} [data-sw-panel-switch] button`)]
+          return {
+            state: document.querySelector(`${sel} [data-sw-panel-tabs]`).getAttribute('data-sw-panel-tabs'),
+            tabs: box(`${sel} [data-sw-panel-tabs]`),
+            track: box(`${sel} [data-sw-panel-switch]`),
+            panel: box('[data-sw-rail]'),
+            bar: box(sel),
+            left: box(`${sel} [data-sw-toolbar-zone="left"]`),
+            buttons: toggles.map((node) => node.getBoundingClientRect().width),
+            words: toggles.map((node) => node.textContent.replace(/[\d\s]+$/, '')),
+            scroll: document.documentElement.scrollWidth - window.innerWidth,
+            transition: toggles.map((node) => getComputedStyle(node).transitionProperty).join(' '),
+          }
+        }, bar)
+      // The toggles are the panel's header: the same left and right edge, the
+      // track inside the bar's padding (12 px) on both sides.
+      const spans = async (label) => {
+        const now = await places()
+        const where = `${label} ${at}`
+        assert.equal(now.state, 'stretched', where)
+        assert.ok(Math.abs(now.tabs.left - now.panel.left) <= 1, `${where}: left ${now.tabs.left} against ${now.panel.left}`)
+        assert.ok(Math.abs(now.tabs.right - now.panel.right) <= 1, `${where}: right ${now.tabs.right} against ${now.panel.right}`)
+        assert.ok(Math.abs(now.track.left - (now.panel.left + 12)) <= 1, `${where}: track left ${now.track.left}`)
+        assert.ok(Math.abs(now.track.right - (now.panel.right - 12)) <= 1, `${where}: track right ${now.track.right}`)
+        assert.ok(now.left.right < now.tabs.left, `${where}: the left zone ends before the toggles`)
+        assert.equal(now.scroll, 0, `${where}: nothing leaves the window`)
+        assert.ok(
+          now.words.every((word) => word.length > 0),
+          `${where}: every toggle keeps its word`,
+        )
+        const inner = now.buttons.reduce((sum, width) => sum + width, 0)
+        assert.ok(Math.abs(inner - (now.track.width - 6)) <= 1, `${where}: the toggles fill the track`)
+        return now
+      }
+      await page.waitForSelector('[data-sw-rail="comments"]')
+      const first = await spans('comments')
+      assert.equal(Math.round(first.panel.width), 384, 'the default width stays')
+      assert.doesNotMatch(first.transition, /width|flex|all/, 'no width transition: a drag is followed, not animated')
+
+      // Dragged wider: on every move, not only on release.
+      const handle = await rect(page, '[data-sw-rail-handle]')
+      await page.mouse.move(handle.left + handle.width / 2, 400)
+      await page.mouse.down()
+      await page.mouse.move(handle.left - 60, 400, { steps: 3 })
+      const mid = await spans('mid drag')
+      assert.ok(mid.panel.width > first.panel.width + 40)
+      await page.mouse.move(handle.left - 120, 400, { steps: 3 })
+      await page.mouse.up()
+      const wide = await spans('dragged wider')
+      // With the room the toggles share the width equally.
+      if (wide.buttons.length > 1) {
+        assert.ok(Math.max(...wide.buttons) - Math.min(...wide.buttons) <= 1, `equal shares ${at}: ${wide.buttons.join(' ')}`)
+      }
+      assert.deepEqual([wide.left.left, wide.left.width], [first.left.left, first.left.width], `the left zone did not move ${at}`)
+      await shot(page, `ux-panel-tabs-${viewport.width}-wide`)
+
+      // As narrow as it goes: still the panel's width, the words kept.
+      await page.focus('[data-sw-rail-handle]')
+      for (let presses = 0; presses < 8; presses += 1) await page.keyboard.press('Shift+ArrowRight')
+      const narrow = await spans('at its narrowest')
+      assert.equal(Math.round(narrow.panel.width), 368)
+      await shot(page, `ux-panel-tabs-${viewport.width}-narrow`)
+      await page.keyboard.press('Home')
+      await spans('back at the default')
+      await page.evaluate(() => document.activeElement?.blur())
+
+      // Another panel: the same width, so nothing moves.
+      if (await page.locator(`${bar} [data-sw-checks-toggle]`).count()) {
+        await page.click(`${bar} [data-sw-checks-toggle]`)
+        await page.waitForSelector('[data-sw-rail="checks"]')
+        const checks = await spans('checks')
+        assert.deepEqual([checks.track.left, checks.track.right], [first.track.left, first.track.right])
+        await page.click(`${bar} [data-sw-checks-toggle]`)
+        await page.waitForSelector('[data-sw-rail="comments"]')
+      }
+
+      // Closed: the toggles' own width, at the right of the bar; the left zone has not moved.
+      await page.click(`${bar} [data-sw-panel-toggle]`)
+      await page.waitForSelector('[data-sw-rail]', { state: 'detached' })
+      const closed = await places()
+      assert.equal(closed.state, 'compact')
+      assert.ok(closed.track.width < first.track.width, `compact ${at}: ${closed.track.width}`)
+      assert.ok(Math.abs(closed.track.right - (closed.bar.right - 12)) <= 1, `compact ${at}: at the right of the bar`)
+      assert.ok(Math.abs(closed.track.right - first.track.right) <= 1, `the right edge does not move ${at}`)
+      assert.deepEqual([closed.left.left, closed.left.width], [first.left.left, first.left.width])
+      // The panel is never narrower than these need.
+      assert.ok(closed.track.width + 24 <= 368, `the least panel width fits the toggles (${closed.track.width})`)
+      await shot(page, `ux-panel-tabs-${viewport.width}-closed`)
+      await page.click(`${bar} [data-sw-panel-toggle]`)
+      await page.waitForSelector('[data-sw-rail="comments"]')
+      await spans('opened again')
+      assert.deepEqual(errors, [])
+    } finally {
+      await context.close()
+    }
   }
 })
 
