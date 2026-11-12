@@ -179,11 +179,19 @@ for local `serve --tailscale` or `serve --lan`, separate from hosted workspace a
 ## shapewall agent
 
 ```text
+shapewall agent connect --remote URL [--agent claude|codex|goose|gemini] [--name NAME] [--as NAME]
+                        [--audience owner|server] [--concurrency N] [--token-file FILE]
 shapewall agent build-image [--runtime podman|docker] [--image NAME]
 shapewall agent doctor [--no-egress]
 shapewall agent run --comment ID
 shapewall agent watch [--once]
 ```
+
+`agent connect` makes the coding agent on this machine (Claude Code, Codex, goose or Gemini CLI) an agent of a project on a
+[team server](/docs/hosted#connected-agents). Run it in the project's folder. The first run prints a code that an admin approves in
+the server's console, where they name the agent and choose who may use it; its token is saved privately and never printed. Members
+then chat with it from the board's Agents panel. It reads the project and answers: it does not change files or run commands from
+the board. Ctrl+C disconnects it.
 
 The sandboxed starter agent is separate from native ACP board chat. Its [guide](/docs/starter-agent) explains the container, model and
 trusted-author prerequisites, budgets and approval limits. `shapewall agent --help` lists current run/watch policy flags.
@@ -364,7 +372,8 @@ These are the hosted v0: a server you run yourself with `shapewall hosted` (pass
 tokens), and the clients that talk to it. Its console covers user management: invites (copy the link, or email it when
 `RESEND_API_KEY` and `SHAPEWALL_EMAIL_FROM` are set), members and roles (owner, admin, member, viewer), an access overview of who
 reaches which project, API tokens, an audit log, signed-in devices, and share links that give one project's boards to people without
-an account (view-only or with guest comments, off until an admin turns them on). There is no hosted Shapewall service to sign up for
+an account (view-only or with guest comments, off until an admin turns them on). `shapewall agent connect --remote URL` connects a
+coding agent for chat on a hosted board ([shapewall agent](#shapewall-agent)). There is no hosted Shapewall service to sign up for
 yet. The local commands work the same without any of this.
 
 The [hosted operator guide](/docs/hosted) covers `hosted setup-link`, `move-origin`, Tailscale/Funnel and own-domain setup,
@@ -529,6 +538,17 @@ Commands
       --no-claim            hand out every open comment once without claiming it (no agent status, beside other watchers)
                             a command that exits 0 must reply or set a status itself, else the
                             comment becomes needs-human (docs/agent-workflow.md)
+  agent connect             make this machine's coding agent an agent of a hosted project: members chat with it
+                            on the board, and it reads this folder and answers. Read and answer only: no edits, no
+                            commands. The first run is approved in the browser by an admin.   --remote URL
+      --agent NAME          which agent: claude, codex, goose, gemini, or a saved agent's id (default: this
+                            project's agent, else the first one found). Never a command from the server
+      --name "Builder"      the name to suggest on the approval page (the approver has the last word)
+      --as NAME             a second connection from this machine (its own token; default "default")
+      --audience owner|server  "owner": only the person who connects it may ask, whatever the server says;
+                            "server" (default): whoever its audience on the server names
+      --concurrency N       answers at once, 1 to 4 (default 2)
+      --token-file FILE     for a service: the agent's own token, no browser (docs/hosted.md)
   agent run --comment ID    the sandboxed starter agent on one comment: a container with only a fresh
                             worktree, egress to the package registry only (the model is called from here), a branch
       --pr                  also push the branch and open a pull request (GitHub connect); not when it

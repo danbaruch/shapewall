@@ -24,6 +24,18 @@ agent with a name, an icon and a state, and people send comments to it by name. 
 connected it until an admin shares it on the project's Agents page. See
 [Agents on a hosted board](hosted.md#agents-on-a-hosted-board).
 
+**Chat on a team server.** To let teammates ask your coding agent questions on the hosted board, run this in the project's folder,
+on the machine that has Claude Code, Codex, goose or Gemini CLI set up for the board chat (the ACP sections below):
+
+```sh
+shapewall agent connect --remote https://wall.example.com              # the first agent found; or --agent claude|codex|goose|gemini
+shapewall agent connect --remote https://wall.example.com --as fixer --agent codex --name "Fixer"   # a second one
+```
+
+An admin approves the code it prints, names the agent and chooses who may use it. It reads the project and answers; it does not
+change files or run commands from the board, so keep a `watch` recipe for fixes.
+See [Connected agents](hosted.md#connected-agents).
+
 ## Claude Code
 
 ### MCP in your session

@@ -3,6 +3,56 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## 0.5.0 - 2026-11-12
+
+Connected agents: your coding agent on a hosted board, to chat with. It reads and answers only. Nothing changes on a local board.
+
+- **`shapewall agent connect --remote <server>`**, run in a project's folder on the machine that has the code, makes that machine's
+  coding agent (Claude Code, Codex, goose or Gemini CLI, found the way a local board finds them) an agent of a hosted project. The
+  first run shows a code; an admin approves it on the server's `/device` page, where they name the agent, pick its icon, its project
+  and who may use it. The agent gets a token of its own, saved on the machine and never printed. Flags: `--agent`, `--name`, `--as`
+  (a second connection), `--audience owner|server`, `--concurrency`, `--token-file` (for a service).
+- **The agent is online while the command runs.** Its state on the board and in the console comes from its open link to the server.
+  The link reconnects by itself; Ctrl+C is a clean exit.
+- **Chat on hosted boards.** The Agents panel has a **Chat** button on each connected agent you may use. It opens the same chat
+  panel a local board has: the answer streams in with the agent's steps, Stop works, and the conversation is kept on the server.
+  A reload, or a second person with the same thread open, joins a running answer from its start. The board chat and each comment's
+  chat are shared with the workspace's members; a chat you start is yours alone. "@" mentions and text files work as they do locally.
+- **Read and answer only.** A connected agent does not change files and runs no commands. The machine that runs it enforces this
+  whatever the server sends: it offers the agent no way to write or run, refuses every permission request on the spot, and the
+  answer says what was refused. A session set to act without asking is switched to a mode that asks, or not started. Edits,
+  commands and approvals from the board are not in this release; for fixes, keep using `shapewall watch --remote --exec`.
+- **Who may use it** follows the agent's audience, as for comments, and the machine has the last word: `--audience owner` keeps it
+  to the person who connected it whatever the server says, and the board shows what is in effect. A message by someone outside an
+  agent's audience never reaches that agent, even in a shared thread, and a share link guest's text never does. Viewers, guests and
+  public visitors have no chat.
+- **Comments.** A comment sent to a connected agent by name is read and answered by it, in the comment's chat thread and as a reply
+  on the comment. Comments sent to any agent stay with watchers, which can fix them.
+- **Offline.** Chat to an agent that is offline is refused, with the reason in place of the message box. Comments sent to it wait,
+  as before.
+- **The console.** A project's Agents page says what each connected agent is (what runs, on which machine, since when it is
+  connected, that it reads and answers only), and its Connect card leads with this server's `shapewall agent connect` command. The
+  workspace overview shows the same.
+- **Usage records and the audit log.** Every chat turn writes a usage record: who asked which agent, where, when, how it ended, and
+  the model, effort and token counts only when the agent reports them (a cost only when the agent itself reports one; never message
+  text). The audit log gains an agent connected, its link opened and closed, a chat thread created or deleted, and a turn started or
+  stopped.
+
+Not in this release: edits, commands and approvals from the board; "Fix with <agent>" through chat; images in chat; editing or
+regenerating a message; answer ratings; the model and effort menus; connecting one agent to every project at once (one connection
+serves one project; connect again with `--as` for another).
+
+**Compatibility.** `shapewall watch --remote` and `shapewall mcp --remote` work as before, with the same tokens. The token API now
+tells a token that may take work which agent each comment was sent to (`agentId`: its own agent's id, or `null` for any agent).
+There is a new token scope, `agent`: it opens the link of a connected agent and nothing else, and is granted only by approving
+`shapewall agent connect`. The agent policy has a new number, `dailyTurns` (200 chat turns a day for a project by default).
+
+**Upgrading a hosted server.** Back up first (`shapewall hosted backup`). Migration 13 adds three tables for chat (threads, messages,
+turns) and one column, and changes nothing that exists: no token gains a scope and no agent changes its audience. To go back, restore
+the backup with 0.4.0, or run 0.4.0 on the upgraded database: it ignores the new tables, so chat is gone from the board until you
+upgrade again, and a connected agent shows as an ordinary agent whose token still works for comments. Details and the SQL to remove
+the schema are in [Migration 13 and rollback](docs/hosted.md#migration-13-and-rollback).
+
 ## 0.4.0 - 2026-11-12
 
 Agents on a hosted board are things you can see and choose. This is the first step towards connected agents and chat on hosted

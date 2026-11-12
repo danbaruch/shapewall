@@ -79,6 +79,11 @@ What these protections do not cover:
   mode, and use the [sandboxed starter agent](/docs/starter-agent) for shared boards. See [agent hardening](/docs/agent-hardening).
 - **Comment text can try to steer an agent.** Anyone who can comment can write text aimed at the agent. On shared boards, let only
   people you trust dispatch work to an agent.
+- **A connected agent can read what its own tools can read.** An agent connected to a hosted board with `shapewall agent connect`
+  reads and answers only: its machine refuses every edit, command and permission request, and the server never runs anything
+  there. But it reads the project with its own tools, a `.env` file included, and its answers go to whoever may ask. A tool the
+  agent is set up to run without asking is never asked about either. Connect only projects whose code the audience may read, and
+  give the agent a restricted profile. See [the hosted guide](/docs/hosted#what-a-connected-agent-can-reach).
 - **Images on comments are checked, not understood.** Shapewall checks an attached image's type by its bytes, re-encodes or strips its
   metadata and serves it only as an image, but the picture itself can still show text aimed at an agent, and an image decoder bug in a
   browser or a model is outside its reach. Agents get images inside the same untrusted framing as comment text.

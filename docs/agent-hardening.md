@@ -173,6 +173,41 @@ When the chat panel drives an agent CLI over ACP:
 board and comment ids before they become file names. Hosted API tokens are scoped to one project and to what you tick: `read`,
 `comment`, `resolve`, `push`.
 
+### Connected agents
+
+`shapewall agent connect` puts a coding agent on a hosted board, where members of a workspace chat with it
+([Connected agents](hosted.md#connected-agents)). It runs on your machine, with your login, and other people write the questions. So
+it reads and answers only, and the machine that runs it is what enforces that:
+
+- **The command is yours.** The program that runs is an agent saved on your machine or a known one found on your `PATH`. Nothing the
+  server sends names a command, an argument, a folder, an environment variable or an MCP server.
+- **No writes and no terminals.** The agent is told at the start that Shapewall offers neither. A write or a command it asks
+  Shapewall for anyway is refused, and every permission request its own tools make is refused on the spot. Nobody is asked, on the
+  board or anywhere else.
+- **A mode that acts without asking does not stand.** A session that starts in a mode that accepts edits or skips permissions is
+  switched to one that asks, or is not started. An agent that switches itself to such a mode mid-answer is stopped.
+- **Board text is quoted on your machine.** The server sends data; your machine wraps every comment, reply, page title, mention and
+  attached file as untrusted data before the agent sees it. A server that was broken into can ask your agent questions. It cannot
+  hand it "instructions" that skip the quoting, and it cannot make it edit or run anything.
+- **Who may ask.** By default only the person who connected it. Sharing it is a choice made at the approval or on the Agents page,
+  and `--audience owner` on your machine pins it to you whatever the server says.
+- **Its token stays out of the agent.** The agent process gets a small environment with no `SHAPEWALL_*` variable, and the agent's
+  own token is removed from anything sent back.
+
+The limits, plainly:
+
+- **It reads the project, and its answers leave your machine.** Whoever may ask can get file contents quoted back, a `.env` file
+  included. The agent is told not to quote secrets; that is an instruction, not a control. Connect only projects whose code the
+  audience may read, and keep secrets out of the folder.
+- **It is only as read-only as its own profile.** Shapewall refuses what the agent asks for. A tool the agent is set up to run
+  without asking never asks: an allow rule in Claude Code's settings (`permissions.allow` with `Bash(...)`, `Edit` or `Write`), a
+  default mode that bypasses permissions. `agent connect` warns about such allow rules when it finds them, and handles the mode as
+  above. Give a connected agent a profile of its own: a separate config folder with no allow rules, logged in for this purpose.
+- **Its own read tools are not sandboxed by Shapewall.** What the agent's tools can read on your machine without asking, they can
+  read. Most agents ask before reading outside the project folder, and that request is refused like any other.
+
+The hard rule below holds for connected agents too: it is a shared board, and other people write what the agent reads.
+
 ### What Shapewall cannot do
 
 - **The agent's own tools.** An ACP agent is still a program running as you. Claude Code's Bash and Edit, Codex's sandbox, goose's
@@ -216,6 +251,9 @@ keys, your password manager, production access, or a shell on your machine with 
 shared board is text other people write.
 
 Use a separate agent for shared boards: its own key, its own login, in a sandbox with nothing worth stealing and nowhere to send it.
+
+A [connected agent](#connected-agents) on a hosted board is a shared board's agent. It reads and answers only, which takes away
+editing and running, not reading: connect a profile that holds nothing but that project, never your main one.
 
 ## Sandbox checklist
 

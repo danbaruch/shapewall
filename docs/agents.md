@@ -125,8 +125,11 @@ the agent picker's **Agent settings** item link to the Agents page.
 
 Connecting, removing, testing and choosing the default run commands as the machine's owner, so they need the settings token (the owner
 link `shapewall serve` prints). Without it the card is read-only and says how to open that link; it asks nothing of the agent routes.
-Self-hosted multiplayer (`shapewall hosted`) has its own Agents pages, for the machines that watch a hosted project
-([Agents on a hosted board](hosted.md#agents-on-a-hosted-board)): they list and name agents, and never start a program on the server.
+Self-hosted multiplayer (`shapewall hosted`) has its own Agents pages, for the machines that watch a hosted project or connect a
+coding agent to it ([Agents on a hosted board](hosted.md#agents-on-a-hosted-board)): they list and name agents, and never start a
+program on the server. The chat panel described here is also on hosted boards, for an agent connected with `shapewall agent
+connect`: the same panel, with an agent that reads the project and answers and does not edit
+([Connected agents](hosted.md#connected-agents)).
 The public demo shows this card read-only on its console's Agents page.
 
 ## Name and icon
@@ -963,8 +966,9 @@ Older thread files need no migration: a file with only `messages` (and `profileI
 its title. The fields added since (`owner`, `title`, `titleSource`, `createdAt`, `archived`, `branches`) are written only when something
 sets them. A board keeps at most 500 New chat threads; delete old ones to start more.
 
-There are no share links for chats: chat runs only on a local `shapewall serve` board, and hosted boards (which have share links) have no
-agent chat. Export a chat as Markdown to share it.
+There are no share links for chats. On a hosted board, chat is for signed-in members with a
+[connected agent](hosted.md#connected-agents); a share link's guests and a public project's visitors never get it. Export a chat as
+Markdown to share it.
 
 ## Board tools
 
