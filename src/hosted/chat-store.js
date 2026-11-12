@@ -69,6 +69,17 @@ export function createChatStore(t, { now = () => new Date() } = {}) {
   function ensure(projectId, boardId, threadId, { userId, agentId = null }) {
     const found = thread(projectId, boardId, threadId)
     if (found) return { row: found, created: false }
+    // A chat this person opened and never wrote in is forgotten after an
+    // hour, so opening chats never fills the board's allowance.
+    if (CHAT_RE.test(threadId) && userId)
+      t.run(
+        `DELETE FROM chat_threads WHERE workspace_id = :ws AND project_id = :project AND board_id = :board AND owner_user_id = :user
+           AND created_at < :cutoff AND NOT EXISTS (SELECT 1 FROM chat_messages m WHERE m.workspace_id = chat_threads.workspace_id
+           AND m.project_id = chat_threads.project_id AND m.board_id = chat_threads.board_id AND m.thread_id = chat_threads.thread_id)
+           AND NOT EXISTS (SELECT 1 FROM chat_turns n WHERE n.workspace_id = chat_threads.workspace_id
+           AND n.project_id = chat_threads.project_id AND n.board_id = chat_threads.board_id AND n.thread_id = chat_threads.thread_id)`,
+        { project: projectId, board: boardId, user: userId, cutoff: new Date(now().getTime() - 60 * 60_000).toISOString() },
+      )
     const count = t.get('SELECT COUNT(*) AS n FROM chat_threads WHERE workspace_id = :ws AND project_id = :project AND board_id = :board', {
       project: projectId,
       board: boardId,
@@ -322,6 +333,28 @@ export function createChatStore(t, { now = () => new Date() } = {}) {
     })
   }
 
+  // The shared threads of a board (the board's and its comments') with
+  // their messages, for a workspace export. A member's own chats are theirs:
+  // only how many there are.
+  function shared(projectId, boardId) {
+    const all = t.all(
+      'SELECT thread_id, agent_id, owner_user_id, title, created_at, updated_at FROM chat_threads WHERE workspace_id = :ws AND project_id = :project AND board_id = :board ORDER BY created_at, thread_id',
+      { project: projectId, board: boardId },
+    )
+    const threads = all
+      .filter((row) => !CHAT_RE.test(row.thread_id))
+      .map((row) => ({
+        id: row.thread_id,
+        title: row.title || null,
+        agentId: row.agent_id || null,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+        messages: messages(projectId, boardId, row.thread_id),
+      }))
+      .filter((thread) => thread.messages.length)
+    return { threads, privateChats: all.filter((row) => CHAT_RE.test(row.thread_id)).length }
+  }
+
   // Bytes of every stored chat message of the workspace, for the storage quota.
   const bytes = () => t.get('SELECT COALESCE(SUM(bytes), 0) AS n FROM chat_messages WHERE workspace_id = :ws').n
 
@@ -345,6 +378,7 @@ export function createChatStore(t, { now = () => new Date() } = {}) {
     ack,
     endTurn,
     interrupt,
+    shared,
     bytes,
     kindOf: threadKind,
   }

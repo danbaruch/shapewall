@@ -362,6 +362,39 @@ test('dark, and the phone: the Agents sheet, then the chat in its sheet', async 
   await device.page.goto(`${hosted.origin}/w/${ws}/agents/${project.id}`)
   await device.page.waitForSelector('[data-sw-agent-row="Builder"]')
   await shot(device.page, 'console-agents-connected-390-light')
+  await device.page.goto(`${hosted.origin}/w/${ws}/agents`)
+  await device.page.waitForSelector('[data-sw-overview-agent="Builder"]')
+  await shot(device.page, 'console-agents-overview-390-light')
+  await dark.page.goto(`${hosted.origin}/w/${ws}/agents`)
+  await dark.page.waitForSelector('[data-sw-overview-agent="Builder"]')
+  await shot(dark.page, 'console-agents-overview-1440-dark')
+
+  // The approval page for a connection, dark and on a phone (then denied).
+  const started = await (
+    await fetch(`${hosted.origin}/api/v1/device/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'studio', purpose: 'agent', agent: { kind: 'codex', name: 'Scout' } }),
+    })
+  ).json()
+  for (const [view, name] of [
+    [dark.page, 'device-agent-1440-dark'],
+    [device.page, 'device-agent-390-light'],
+  ]) {
+    await view.goto(`${hosted.origin}/device`)
+    await view.fill('[data-sw-device-code]', started.userCode)
+    await view.click('[data-sw-device-lookup]')
+    await view.waitForSelector('[data-sw-device-agent]')
+    assert.equal(await view.inputValue('[data-sw-agent-name-input]'), 'Scout')
+    await shot(view, name)
+  }
+  assert.equal(
+    await device.page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    true,
+    'no sideways scroll on a phone',
+  )
+  await device.page.click('[data-sw-device-deny]')
+  await device.page.waitForSelector('[data-sw-device-done="denied"]')
 })
 
 test('offline: stopping the command takes the agent offline at once, and chat says so instead of sending', async () => {

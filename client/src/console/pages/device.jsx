@@ -15,6 +15,7 @@ import { api, serverOrigin } from '../lib/api'
 import { SCOPES, formatDateTime } from '../lib/format'
 import { Link } from '../lib/router'
 import { IconPicker, NameField, nameProblem } from '../../settings/AgentIdentity'
+import { logoForAgent } from '../../../../src/agent/agent-logos.js'
 import { useAction } from '../state'
 
 const EXPIRY = [
@@ -328,7 +329,7 @@ export function DevicePage() {
                       value={look}
                       onChange={setLook}
                       label={look.name || agentKind}
-                      logo={found.login.agent?.kind}
+                      logo={logoForAgent(found.login.agent?.kind)}
                       upload={false}
                     />
                     <fieldset>

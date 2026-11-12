@@ -124,7 +124,8 @@ function AgentRow({ agent, nameOf, onOpen, onChat }) {
           </Button>
         ) : null}
       </div>
-      {chats ? (
+      {/* Not theirs to use: the line about who it takes work from says so, once. */}
+      {chats && (agent.chat?.ok || agent.canSend) ? (
         <p className="text-[11px] text-muted" data-sw-hosted-agent-chat-note={agent.chat?.ok ? 'ok' : agent.chat?.code || 'no'}>
           {agent.chat?.ok
             ? 'Reads the project and answers. No edits, no commands.'
@@ -155,7 +156,11 @@ function AgentRow({ agent, nameOf, onOpen, onChat }) {
         </p>
       ) : null}
       <p className="text-[11px] text-muted" data-sw-hosted-agent-audience={agent.audience.kind}>
-        {agent.canSend ? `Takes work from: ${lowerFirst(agent.audience.text)}.` : agent.reason}
+        {agent.canSend
+          ? `Takes work from: ${lowerFirst(agent.audience.text)}.`
+          : chats
+            ? String(agent.reason || '').replace('can send work to', 'can use')
+            : agent.reason}
         {agent.canSend && agent.audience.inherited ? ' (As before 0.4.0.)' : ''}
       </p>
     </li>
@@ -267,9 +272,15 @@ export function HostedAgentPanel({
                       shapewall agent connect --remote {origin}
                     </code>
                     <p className="mt-1.5 text-xs text-muted">
-                      It reads and answers only. For an agent that fixes comments, run{' '}
-                      <code className="font-mono">shapewall watch --remote</code> with a project token.
+                      It reads and answers only. For an agent that fixes the comments sent to it, with a project token that may take work,
+                      run:
                     </p>
+                    <code
+                      className="mt-1.5 block rounded bg-surface px-2 py-1.5 font-mono text-xs break-all text-fg"
+                      data-sw-hosted-agent-command="watch"
+                    >
+                      shapewall watch --remote {origin}
+                    </code>
                   </>
                 ) : (
                   <p className="mt-1 text-xs text-muted">

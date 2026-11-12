@@ -418,12 +418,13 @@ test('hosted board: the Agent control opens a panel that lists the agents and sa
   assert.equal(await page.getAttribute(listening, 'data-sw-hosted-agent-listening'), 'none')
   const said = await page.textContent(listening)
   assert.match(said, /No agent is connected to this project/)
-  assert.ok(said.includes(`shapewall watch --remote ${hosted.origin}`), 'how to connect one')
+  assert.ok(said.includes(`shapewall agent connect --remote ${hosted.origin}`), 'how to connect one to chat with')
+  assert.ok(said.includes(`shapewall watch --remote ${hosted.origin}`), 'how to connect one that fixes comments')
   assert.equal(
     await page.getAttribute('[data-sw-hosted-agent-docs]', 'href'),
     'https://shapewall.com/docs/where-to-run#where-the-work-happens',
   )
-  // No chat on a hosted board.
+  // No chat while no agent that chats is connected (the full flows: hosted-chat.e2e.test.js).
   assert.equal(await page.locator('[data-sw-chat], [data-sw-chat-input]').count(), 0)
   await shot(page, 'hosted-agent-1-none')
 

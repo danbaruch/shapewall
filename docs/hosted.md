@@ -227,7 +227,9 @@ Projects and Members; admins and owners see everything.
 - **Export.** "Download a copy" (admins, with a fresh passkey check; `POST /export`; one at a time per workspace, 409 while one runs,
   and 5 an hour per person) streams a zip: `workspace.json` (the workspace,
   members, projects, tokens without their secrets, share links without theirs), `audit.json`, and per board `board.json`,
-  `comments.json` and its files (captures, variants, versions, live HTML). Over 3.5 GB it answers 413 (no zip64 yet). `audit.json` holds
+  `comments.json` and its files (captures, variants, versions, live HTML), and `chats.json` when the board has chat with a
+  [connected agent](#connected-agents): the threads every member reads (the board's and each comment's) with their messages. A
+  member's own chats are not in the copy; the file says how many there are. Over 3.5 GB it answers 413 (no zip64 yet). `audit.json` holds
   up to 100,000 entries, newest first, read and written 1,000 at a time.
 - A member who opens an admin page (a link, a bookmark) sees "This page needs the admin role" instead of being sent back to Projects.
 - An empty project shows a four-step checklist (project, token, push, invite) that ticks itself off. The token dialog shows the

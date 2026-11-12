@@ -16,6 +16,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { createRemote, pushDefinition, pushFiles } from '../src/remote/remote.js'
 import { createRemoteMcpServer } from '../src/remote/remote-mcp.js'
 import { watchRemote } from '../src/remote/remote-watch.js'
+import { readZip } from '../src/hosted/zip.js'
 import { createProject, invite, reauth, signUp, startHostedServer, tokenCall, writeLocalCaptures } from './hosted-helpers.js'
 import { chat as send, connectAgent, parseEvents, startLink, until } from './hosted-chat-helpers.js'
 import { sampleConfig, tempDir } from './helpers.js'
@@ -380,6 +381,31 @@ test('chat history: rename, archive, search and delete follow who owns the threa
   assert.equal((await ada.browser.get(listUrl)).json.threads.find((item) => item.id === thread).archived, true)
   // Cyd never sees Ada's chat in the list.
   assert.ok(!(await cyd.browser.get(listUrl)).json.threads.some((item) => item.id === thread))
+  // A copy of the workspace holds the threads every member reads, never a member's own chat.
+  const marker = 'export-probe-private-4471'
+  const own = newChat()
+  await chat(cyd, chatUrl(own, '/messages'), marker)
+  await fresh(ada)
+  const made = await ada.browser.call('POST', `/api/workspaces/${ws}/export`, { body: {} })
+  assert.equal(made.status, 200, made.text)
+  const files = readZip(made.body)
+  const name = Object.keys(files).find((item) => item.endsWith('/boards/sample/chats.json'))
+  assert.ok(name, Object.keys(files).join('\n'))
+  const chats = JSON.parse(files[name])
+  assert.ok(chats.threads.some((item) => item.id === 'board' && item.messages.length >= 2))
+  assert.ok(chats.threads.every((item) => !item.id.startsWith('chat-')))
+  assert.ok(chats.privateChatsNotIncluded >= 1)
+  assert.ok(!Object.values(files).some((data) => data.toString().includes(marker)))
+  // A chat that was opened and never written in is forgotten after an hour; one with messages stays.
+  const empty = newChat()
+  assert.equal((await ada.browser.post(chatUrl(empty, '/profile'), { profileId: builder.agentId })).status, 200)
+  const count = () => hosted.db.prepare('SELECT COUNT(*) AS n FROM chat_threads WHERE thread_id = ?').get(empty).n
+  assert.equal(count(), 1)
+  skew += 2 * 60 * 60_000
+  await fresh(ada)
+  assert.equal((await ada.browser.post(chatUrl(newChat(), '/profile'), { profileId: builder.agentId })).status, 200)
+  assert.equal(count(), 0)
+  assert.equal(hosted.db.prepare('SELECT COUNT(*) AS n FROM chat_threads WHERE thread_id = ?').get(thread).n, 1)
   // The shared thread: a member cannot clear it, an admin can.
   assert.equal((await cyd.browser.call('DELETE', chatUrl('board'))).status, 403)
   assert.equal((await ada.browser.call('DELETE', chatUrl(thread))).status, 200)
