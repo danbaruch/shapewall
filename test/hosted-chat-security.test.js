@@ -69,21 +69,28 @@ async function pushSample(user, projectId, workspaceId) {
   const manifest = JSON.parse(fs.readFileSync(path.join(config.outputDir, 'sample', 'captures', 'manifest.json'), 'utf8'))
   await remote.commitPush(started.id, { manifest, variants: [] })
 }
+// While a token is in `held`, its own link does not fetch jobs: the test
+// reads the job itself, with no race against the agent answering it.
+const held = new Set()
+const gate = (token) => async (url, options) => {
+  if (/\/agent\/turns\/turn_[a-f0-9]+$/.test(String(url))) await until(() => !held.has(token), 'the test to let go', 30_000)
+  return fetch(url, options)
+}
 // The job the agent's machine would fetch for the turn a message started,
 // read with the agent's own token, then the turn is finished by hand.
 async function jobFor(agent, user, thread, text) {
   hosted.rateLimiter.reset()
-  const sending = user.browser.post(chatUrl(thread, '/messages'), { text })
-  let turnId = null
-  await until(async () => {
-    const work = await tokenCall(hosted, agent.token, 'GET', '/api/v1/agent/work')
-    turnId = work.json?.turns?.find((turn) => liveTurn(thread)?.id === turn.id)?.id || null
-    return turnId
-  }, 'the turn')
-  const job = (await tokenCall(hosted, agent.token, 'GET', `/api/v1/agent/turns/${turnId}`)).json.job
-  await tokenCall(hosted, agent.token, 'POST', `/api/v1/agent/turns/${turnId}/finish`, { body: { seq: 1, message: { text: 'ok' } } })
-  await sending
-  return job
+  held.add(agent.token)
+  try {
+    const sending = user.browser.post(chatUrl(thread, '/messages'), { text })
+    const live = await until(() => liveTurn(thread), 'the turn')
+    const job = (await tokenCall(hosted, agent.token, 'GET', `/api/v1/agent/turns/${live.id}`)).json.job
+    await tokenCall(hosted, agent.token, 'POST', `/api/v1/agent/turns/${live.id}/finish`, { body: { seq: 1, message: { text: 'ok' } } })
+    await sending
+    return job
+  } finally {
+    held.delete(agent.token)
+  }
 }
 
 before(async () => {
@@ -107,8 +114,8 @@ before(async () => {
   scout = await connectAgent(hosted, ada, { workspaceId: ws, projectId: project.id, name: 'Scout', kind: 'codex' })
   assert.equal(builder.status, 200)
   assert.equal(scout.status, 200)
-  assert.ok(await open(builder.token).ready)
-  assert.ok(await open(scout.token, { kind: 'codex' }).ready)
+  assert.ok(await open(builder.token, { fetchImpl: gate(builder.token) }).ready)
+  assert.ok(await open(scout.token, { kind: 'codex', fetchImpl: gate(scout.token) }).ready)
 })
 
 after(async () => {

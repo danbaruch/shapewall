@@ -351,7 +351,7 @@ export function mountChatRoutes(
         const { row: thread, created } = store.ensure(req.project.id, ctx.board.id, threadId, { userId: req.user.id, agentId: agent.id })
         if (!thread.agent_id || thread.agent_id !== agent.id) store.setAgent(req.project.id, ctx.board.id, threadId, agent.id)
         if (created)
-          said(req)('chat_thread_created', `${ctx.board.id}/${threadId}`, {
+          said(req)('chat_thread_created', `${ctx.board.id}/${CHAT_RE.test(threadId) ? 'chat' : threadId}`, {
             project: req.project.id,
             agent: agent.id,
             agentName: agent.name,
@@ -479,7 +479,7 @@ export function mountChatRoutes(
         const { created } = store.ensure(req.project.id, ctx.board.id, threadId, { userId: req.user.id, agentId: agent.id })
         store.setAgent(req.project.id, ctx.board.id, threadId, agent.id)
         if (created)
-          said(req)('chat_thread_created', `${ctx.board.id}/${threadId}`, {
+          said(req)('chat_thread_created', `${ctx.board.id}/${CHAT_RE.test(threadId) ? 'chat' : threadId}`, {
             project: req.project.id,
             agent: agent.id,
             agentName: agent.name,

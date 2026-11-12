@@ -365,7 +365,7 @@ test('usage records: one per turn, who asked which agent where and how it ended,
   assert.ok(!everything.includes('Hello from the stream'))
   // The audit trail names the thread kind, not a private chat's id.
   assert.ok(audit().some((row) => row.action === 'chat_thread_created'))
-  assert.ok(!JSON.stringify(audit().map((row) => row.detail)).includes(thread))
+  assert.ok(!JSON.stringify(audit()).includes(thread))
 })
 
 test('chat history: rename, archive, search and delete follow who owns the thread', async () => {
