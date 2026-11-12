@@ -570,7 +570,7 @@ const USAGE_COLUMNS = [
     align: 'right',
     sort: 'tokens',
     cell: (row) => orUnreported(row.totalTokens, (value) => formatCount(value, { exact: true }), 'Tokens'),
-    subtotal: (group) => (group.tokens === null ? 'Not reported' : formatCount(group.tokens)),
+    subtotal: (group) => (group.tokens === null ? <Unreported what="Tokens" /> : formatCount(group.tokens)),
   },
   {
     id: 'input',
@@ -610,7 +610,7 @@ const USAGE_COLUMNS = [
     align: 'right',
     sort: 'cost',
     cell: (row) => orUnreported(row.costMicros, formatCost, 'Cost'),
-    subtotal: (group) => (group.cost === null ? 'Not reported' : formatCost(group.cost)),
+    subtotal: (group) => (group.cost === null ? <Unreported what="Cost" /> : formatCost(group.cost)),
   },
   {
     id: 'steps',
@@ -649,7 +649,7 @@ const COMPARED_COLUMNS = [
   ...USAGE_COLUMNS,
   {
     id: 'before',
-    header: 'Turns before',
+    header: 'Before',
     title: 'Turns in the period before',
     width: 116,
     align: 'right',
@@ -670,15 +670,17 @@ const COMPARED_COLUMNS = [
     },
   },
 ]
-// They sit right after the columns the group row labels, whatever else is shown.
-const withCompare = (layout, comparing) =>
-  comparing
-    ? {
-        ...layout,
-        order: [...layout.order.filter((id) => !COMPARE_IDS.includes(id)), ...COMPARE_IDS],
-        hidden: layout.hidden.filter((id) => !COMPARE_IDS.includes(id)),
-      }
-    : layout
+// They sit right after the columns the group row labels (before the first subtotal), whatever else is shown.
+const withCompare = (layout, comparing) => {
+  if (!comparing) return layout
+  const order = layout.order.filter((id) => !COMPARE_IDS.includes(id))
+  const hidden = layout.hidden.filter((id) => !COMPARE_IDS.includes(id))
+  const first = order.findIndex(
+    (id, index) => index > 0 && !hidden.includes(id) && USAGE_COLUMNS.find((column) => column.id === id)?.subtotal,
+  )
+  order.splice(first < 0 ? order.length - hidden.length : first, 0, ...COMPARE_IDS)
+  return { ...layout, order, hidden }
+}
 const USAGE_DEFAULTS = {
   shown: ['started', 'kind', 'agent', 'project', 'person', 'outcome', 'duration', 'tokens', 'cost'],
   pinned: ['started'],
