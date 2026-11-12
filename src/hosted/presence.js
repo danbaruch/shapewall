@@ -76,12 +76,21 @@ function cookie(req, name) {
 }
 
 // Re-run for every message and heartbeat. No cached membership or share grant.
-export function presenceAuthorizer({ db, dataDir, origin, auth, now = () => new Date(), guestOnly = false, tailnet = null }) {
+export function presenceAuthorizer({
+  db,
+  dataDir,
+  origin,
+  auth,
+  now = () => new Date(),
+  guestOnly = false,
+  tailnet = null,
+  passkeys = null,
+}) {
   const url = new URL(origin)
   const secure = url.protocol === 'https:'
   const iso = () => now().toISOString()
   // A tailnet session counts only with its identity, here as on every request.
-  const readSession = sessionReader({ auth, tailnet })
+  const readSession = sessionReader({ auth, tailnet, passkeys })
   return (req) => {
     if (
       req.headers.origin !== url.origin ||

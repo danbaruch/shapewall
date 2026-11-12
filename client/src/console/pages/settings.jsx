@@ -7,7 +7,7 @@ import { DoorOpen, Download, Globe, Link2, PencilLine, Trash2 } from 'lucide-rea
 import { Button, Input, Spinner } from '../../components/ui'
 import { Card, CardHeader, ConfirmDialog, Field, FormError, Notice, PageHeader, Switch, demoNote } from '../components'
 import { DEMO } from '../../lib/demo'
-import { api, download, wsUrl } from '../lib/api'
+import { api, download, wsUrl, saying } from '../lib/api'
 import { useAction, useSession, useToast } from '../state'
 import { useWorkspace } from './workspace'
 import { leaveTo } from '../lib/router'
@@ -66,7 +66,7 @@ export function SettingsSection() {
     <>
       <PageHeader
         title="Settings"
-        description="The workspace name, sharing, when a passkey is asked for again, export, and leaving or deleting it."
+        description="The workspace name, sharing, what asks you to confirm again, export, and leaving or deleting it."
       />
       <div className="grid gap-5">
         <Card>
@@ -306,7 +306,7 @@ export function SettingsSection() {
         error={destroy.error}
         onConfirm={() =>
           destroy.run(async () => {
-            await api.delete(wsUrl(workspaceId), { confirm: data.workspace.name })
+            await saying(data.workspace.name, () => api.delete(wsUrl(workspaceId), { confirm: data.workspace.name }))
             leaveTo('/')
           })
         }

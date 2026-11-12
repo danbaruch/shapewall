@@ -54,7 +54,7 @@ export function createGuards({
   // ---- Sessions ----
   // A session that came in by tailnet identity counts only on a request that
   // carries that identity (src/hosted/tailnet.js sessionReader).
-  const readSession = sessionReader({ auth, tailnet })
+  const readSession = sessionReader({ auth, tailnet, passkeys })
   function sessionOf(req) {
     if (req.sessionChecked) return req.auth
     req.sessionChecked = true

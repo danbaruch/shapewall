@@ -247,7 +247,7 @@ export function ReauthProvider({ children }) {
                 autoComplete="off"
                 spellCheck={false}
                 autoFocus
-                data-sw-confirm-input
+                data-sw-confirm-typed-input
               />
               <p className="text-xs">
                 Your Tailscale account is the sign-in on this server, so there is no passkey to check. Anything running as you on one of

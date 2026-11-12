@@ -360,7 +360,7 @@ export function InviteDialog({ open, onClose, onCreated }) {
             <p className="text-xs text-muted">This server does not send email: you copy the link and send it yourself.</p>
           )}
           {role === 'owner' ? (
-            <Notice tone="warn">An owner can change or remove anyone, you included. Inviting one always asks for your passkey.</Notice>
+            <Notice tone="warn">An owner can change or remove anyone, you included. Inviting one always asks you to confirm.</Notice>
           ) : null}
           <FormError error={error} />
           <div className="flex justify-end gap-2">

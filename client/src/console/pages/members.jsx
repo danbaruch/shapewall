@@ -282,7 +282,7 @@ export function MembersSection() {
             ) : null}
             {change.member.role === 'owner' && change.role === 'admin' ? <p>Their pending owner invites are revoked.</p> : null}
             {change.role === 'owner' || change.member.role === 'owner' ? (
-              <p className="text-xs">Making, changing or removing an owner always asks for your passkey.</p>
+              <p className="text-xs">Making, changing or removing an owner always asks you to confirm.</p>
             ) : null}
           </>
         ) : null}

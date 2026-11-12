@@ -49,16 +49,32 @@ and sign-in stay private. When people outside your tailnet need accounts, put th
 
 ### How people sign in
 
-| Where it runs                | Sign-in                                                                               |
-| ---------------------------- | ------------------------------------------------------------------------------------- |
-| Local board                  | None. It is yours, on your machine                                                    |
-| Tailnet, `--tailnet-sign-in` | Your tailnet login. No passkey, no password. An admin invites each login, with a role |
-| Tailnet, passkeys            | A passkey each                                                                        |
-| Own domain                   | A passkey each                                                                        |
+| How you reach it             | Sign-in                                                                                    |
+| ---------------------------- | ------------------------------------------------------------------------------------------ |
+| Local board                  | None. It is yours, on your machine                                                         |
+| Over an SSH tunnel           | A local board: none, as if you sat at that machine. A hosted server: a passkey each        |
+| Tailnet, `--tailnet-sign-in` | Your Tailscale account, on every tailnet device of yours. No passkey. An admin invites you |
+| Own domain                   | A passkey each                                                                             |
 
-On the hosted server, being signed in with the right role is enough for everything in a workspace. A few things always ask for a
-passkey (your passkeys and recovery codes, deleting an account or a workspace, changing owners, moving the server), and a
-workspace's owner can switch on more in Settings. Details: [Signing in](hosted.md#signing-in).
+On the hosted server, being signed in with the right role is enough for everything in a workspace. A few things always ask
+(deleting an account or a workspace, changing owners): for a passkey where passkeys are the sign-in, and for a typed name on
+a tailnet sign-in server, where Tailscale is the only sign-in and the tailnet is the trust boundary (anything running as you
+on one of your tailnet devices can act as you; lock your devices and keep the tailnet to people and machines you trust). A
+tailnet server can also allow passkeys (`--tailnet-passkeys`). Details: [Signing in](hosted.md#signing-in).
+
+### Over SSH
+
+No Tailscale? Tunnel one port over SSH.
+
+```sh
+shapewall hosted --data ./hosted-data --port 4700 --origin http://localhost:4700     # on the server; loopback, no TLS
+ssh -L 4700:127.0.0.1:4700 you@server                                               # on your machine
+# then open http://localhost:4700
+```
+
+A hosted server reached this way uses passkey accounts (`http://localhost` is a secure context, so passkeys work). A local
+board reached this way (`shapewall serve` on the remote machine, the same kind of tunnel) sees you as the person at that
+machine: no sign-in, and so not something to tunnel for other people. More: [Over SSH](hosted.md#over-ssh).
 
 With tailnet sign-in the server believes Tailscale's identity headers only on requests that provably came through the serve
 entry it made (a secret path, a connection owned by tailscaled, tailscaled's own whois), never on direct loopback requests,

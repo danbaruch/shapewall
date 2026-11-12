@@ -67,6 +67,12 @@ hosted boards and static exports always use an opaque frame. Hosted live HTML ca
   agents and machines, tokens and share links, members and roles, exports and deletes; how long one check counts; and the admin
   idle rule. Off by default. Every change is in the audit log with the value before and after.
 - **Recovery-code sessions stay restricted** whatever a workspace chose, and every action is audited as before.
+- **On a tailnet sign-in server Tailscale is the only sign-in, and the tailnet is the trust boundary.** No passkey is asked
+  for or offered there by default. Anything running as you on one of your tailnet devices can act as you, so lock your
+  devices and keep the tailnet to people and machines you trust. The few things Shapewall always asks about (deleting a
+  workspace or an account, changing owners) take a typed name in the console and `--yes` on the command line: deliberateness,
+  not a second factor. An operator who wants one switches passkeys on (`--tailnet-passkeys`, or `shapewall hosted admin
+passkeys on`); the points below about passkeys on a tailnet server apply then.
 - **Tailnet sign-in is opt-in** (`shapewall hosted --tailscale --tailnet-sign-in`). A tailnet user who arrives through `tailscale
 serve` is signed in as the account linked to their tailnet login, with no passkey. Each login is its own account, and an admin
   still invites each one with a role: being on the tailnet alone gives nothing, because a tailnet also holds family devices,
@@ -82,9 +88,9 @@ serve` is signed in as the account linked to their tailnet login, with no passke
   without a user are never signed in.
 - **The server's own machine is never signed in by its tailnet identity.** Any program on that machine can ask tailscaled for
   the server's address and would arrive with the machine owner's login, through the proxy, with nothing to tell it from the
-  owner. So a request from the machine's own tailnet addresses is refused, and the page says why. There the owner uses a
-  passkey or another tailnet device; the first account is made with `shapewall hosted claim --data DIR --login LOGIN`, where
-  reading the data folder is the proof. On a local board the host uses `localhost`.
+  owner. So a request from the machine's own tailnet addresses is refused, and the page says why. There the owner uses
+  another tailnet device, or the operator's commands with the data folder (`shapewall hosted claim`, `shapewall hosted admin
+members|invites|projects|passkeys`), where reading the data folder is the proof. On a local board the host uses `localhost`.
 - **An identity is per device, not per person.** Anything running as you on a tailnet device of yours can act as you in a
   tailnet session. So the fixed core asks for a passkey, a first passkey is on hold for 24 hours, a passkey account is linked
   to a tailnet login only when you tick the box, and a workspace can require a passkey for approving machines, making API

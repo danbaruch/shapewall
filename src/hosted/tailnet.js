@@ -37,12 +37,15 @@ export const tailnetOutCookie = (secure) => (secure ? '__Host-sw_tailnet_out' : 
 // (req, token) -> { user, session } | null. A tailnet session needs the
 // request to carry the identity it was made for, and the account to be
 // linked to it still. With tailnet sign-in off no such session counts.
-export function sessionReader({ auth, tailnet = null }) {
+// `passkeys` ({ on() }, src/hosted/passkey-policy.js): on a server where
+// passkeys are off, a session that a passkey or a recovery code started
+// (from before they were switched off) does not count.
+export function sessionReader({ auth, tailnet = null, passkeys = null }) {
   return (req, token) => {
     const found = auth.readSession(token)
     if (!found) return null
     const bound = found.session.tailnet_login
-    if (!bound) return found
+    if (!bound) return passkeys && !passkeys.on() ? null : found
     const identity = tailnet ? tailnet.identityOf(req) : null
     if (!identity || identity.login !== bound || found.user.tailnet_login !== bound) return null
     // And the same tailnet user as the one the account is held to, not only the same login string.

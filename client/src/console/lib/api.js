@@ -15,6 +15,17 @@ export const setConfirmed = (value) => {
   confirmed = value || null
 }
 
+// Runs an action whose dialog already had the person type the name (deleting a workspace, deleting the
+// account), so the server's question is answered with what they typed and they are not asked twice.
+export async function saying(phrase, action) {
+  setConfirmed(phrase)
+  try {
+    return await action()
+  } finally {
+    setConfirmed(null)
+  }
+}
+
 export async function call(method, url, body) {
   let response
   try {

@@ -86,7 +86,12 @@ Signing in to a team server: fewer passkey prompts, and your tailnet login as th
 - **Recovery-code sessions keep their restrictions,** and every action is in the audit log as before.
 - **Tailnet sign-in** (`shapewall hosted --tailscale --tailnet-sign-in`, or `SHAPEWALL_HOSTED_TAILNET_SIGN_IN=1`; opt-in, Linux).
   A tailnet user who arrives through `tailscale serve` is signed in as the account linked to their tailnet login: no passkey, no
-  password. Each login is its own account, so roles, audiences, the audit log and usage work unchanged, and an admin still
+  password. **Tailscale is then the only sign-in:** one identity, your different machines, no second credential. No passkey is
+  asked for or offered (the sign-in page shows only "Continue as ..."; passkey routes answer `passkeys_off`), and the few
+  things that always ask take a typed name in the console (the workspace's, or your handle) and `--yes` on the command
+  line. The tailnet is the trust boundary: anything running as you on one of your tailnet devices can act as you. Passkeys are
+  an opt-in hardening there: `--tailnet-passkeys`, or `shapewall hosted admin passkeys on|off|status --data DIR`; with them
+  on, what this section says about passkeys on a tailnet server applies. Each login is its own account, so roles, audiences, the audit log and usage work unchanged, and an admin still
   decides who is in a workspace: an unknown login sees who to ask and is listed for the admins under Members; an invite can be
   made for one tailnet login, and only that login can use it. An account with a passkey links or unlinks its login on the
   Account page. Tagged devices and shared nodes without a user are never signed in.
@@ -147,6 +152,12 @@ Signing in to a team server: fewer passkey prompts, and your tailnet login as th
   are also read from its network interfaces on every request.
 - **Which process is tailscaled:** the main process of `tailscaled.service` where systemd runs it, else by name; root in all
   four ids in both cases. On a local board a failed self test of the peer check keeps identity off until a restart.
+- **For the person at the server's own machine** (never signed in by its tailnet identity): `shapewall hosted admin members
+  list|add|remove`, `invites list|create|revoke`, `projects list` and `passkeys status|on|off|list|remove`, with the data
+  folder as the proof, each in the operator log and in the workspace's audit log as "Server operator".
+- **Over SSH.** A hosted server started with `--origin http://localhost:<port>` (no TLS, loopback) and reached through `ssh
+  -L` works with passkey accounts; documented with what a local board over a tunnel means, and tested with the real command
+  and a real browser.
 - **Not in this release:** tailnet sign-in on macOS or Windows servers, in containers, or with a userspace-networking
   tailscaled (no way there to prove a request came through tailscale serve), more admin commands or MCP tools for
   administration, admin tokens, and profile pictures from the tailnet. The proof was tested with a stand-in for tailscale

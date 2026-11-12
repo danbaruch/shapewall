@@ -91,6 +91,17 @@ Rarely. Signed in with the right role is enough for the daily work: approving ag
 few things always ask (your passkeys and recovery codes, deleting an account or a workspace, changing owners), and a workspace's
 owner can switch on more in Settings.
 
+## Do I need a passkey on a tailnet server?
+
+No. A server started with `--tailnet-sign-in` signs you in by your Tailscale account, on every tailnet device of yours, and
+asks for no passkey. The tailnet is the trust boundary there: anything running as you on one of your tailnet devices can act
+as you. Whoever runs the server can also allow passkeys (`shapewall hosted admin passkeys on`).
+
+## Can I reach a server over SSH instead of Tailscale?
+
+Yes. Start it with `--origin http://localhost:4700`, run `ssh -L 4700:127.0.0.1:4700 you@server` and open
+`http://localhost:4700`: passkeys work there. See [Over SSH](/docs/hosted#over-ssh).
+
 ## Can I set up a team server and join one from my coding agent, without a browser?
 
 Yes, on a server with tailnet sign-in. The owner runs `shapewall hosted claim --login <their tailnet login>` on the server's

@@ -663,7 +663,7 @@ export function createHostedApp({
     while (i < hops.length - 1 && hops[i + 1] && trusted(hops[i], i)) i += 1
     return hops[i] || 'unknown'
   }
-  const presence = hub.listener(presenceAuthorizer({ db, dataDir, origin: publicOrigin, auth, now, guestOnly, tailnet }), {
+  const presence = hub.listener(presenceAuthorizer({ db, dataDir, origin: publicOrigin, auth, now, guestOnly, tailnet, passkeys }), {
     clientIp: upgradeIp,
   })
   app.locals.presence = { attach: presence.attach, close: presence.close, hub }

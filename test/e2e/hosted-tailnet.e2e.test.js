@@ -16,12 +16,16 @@ import { ROOT_DIR } from './helpers.js'
 
 const SHOTS = process.env.SHAPEWALL_SHOTS ? path.resolve(process.env.SHAPEWALL_SHOTS) : null
 let hosted
+let plain
 let browser
 const contexts = []
 
 before(async () => {
   assert.ok(fs.existsSync(path.join(ROOT_DIR, 'dist', 'console', 'console.html')), 'run "npm run build" before the tailnet e2e test')
-  hosted = await startHostedServer('hosted-tailnet-e2e', { tailnet: believedGate() })
+  // Two servers with tailnet sign-in: one where the operator also allowed passkeys, and one as it starts
+  // by default, where Tailscale is the only sign-in.
+  hosted = await startHostedServer('hosted-tailnet-e2e', { tailnet: believedGate(), tailnetPasskeys: true })
+  plain = await startHostedServer('hosted-tailnet-only-e2e', { tailnet: believedGate() })
   browser = await chromium.launch()
   if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true })
 })
@@ -29,6 +33,7 @@ after(async () => {
   for (const context of contexts) await context.close()
   await browser?.close()
   await hosted?.close()
+  await plain?.close()
 })
 
 const shot = async (page, name) =>
@@ -183,4 +188,75 @@ test('tailnet sign-in: the owner claims with no passkey, a visitor is admitted w
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), 'no sideways scroll')
     await shot(page, name)
   }
+})
+
+test('tailnet sign-in as it is by default: Tailscale is the only sign-in, no passkey anywhere, and the few things that always ask take a typed name', async () => {
+  // ---- The first owner: the setup link, opened through the tailnet. No passkey is offered. ----
+  const ada = await person('ada@example.com', 'Ada Lovelace')
+  await ada.page.goto(plain.app.locals.setupLink())
+  await ada.page.waitForSelector('[data-sw-signup-tailnet-submit]')
+  assert.match(await ada.page.textContent('[data-sw-signup-tailnet]'), /Your Tailscale account is the sign-in on this server/)
+  assert.equal(await ada.page.locator('[data-sw-signup-submit]').count(), 0, 'no "Create a passkey and sign up"')
+  assert.equal(await ada.page.locator('[data-sw-signup-link-tailnet]').count(), 0)
+  await ada.page.fill('[data-sw-signup-workspace]', 'Team')
+  await shot(ada.page, 'only-1-setup')
+  await ada.page.click('[data-sw-signup-tailnet-submit]')
+  await ada.page.waitForURL(/\/w\/ws_/)
+  const ws = /\/w\/(ws_[a-f0-9]+)/.exec(ada.page.url())[1]
+
+  // ---- Someone nobody invited: the sign-in page has no passkey form and no recovery link ----
+  const ben = await person('ben@example.com', 'Ben', { width: 390, height: 844 })
+  await ben.page.goto(plain.origin + '/signin')
+  await ben.page.waitForSelector('[data-sw-signin-tailnet-only] [data-sw-tailnet="unknown"]')
+  assert.match(await ben.page.textContent('[data-sw-signin-tailnet-only]'), /Your Tailscale account is the sign-in on this server/)
+  for (const gone of ['[data-sw-passkey-signin]', '[data-sw-signin-autofill]', '[data-sw-recovery-handle]'])
+    assert.equal(await ben.page.locator(gone).count(), 0, gone)
+  assert.doesNotMatch(await ben.page.textContent('main'), /recovery code|Sign in with a passkey/i)
+  assert.ok(await ben.page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), 'no sideways scroll at 390')
+  await shot(ben.page, 'only-2-sign-in-phone')
+
+  // ---- The account page: how you sign in, no passkeys, no recovery codes ----
+  await ada.page.goto(plain.origin + '/account')
+  await ada.page.waitForSelector('[data-sw-account-tailnet="only"]')
+  assert.match(
+    await ada.page.textContent('[data-sw-account-tailnet="only"]'),
+    /anything running as you on one of your tailnet devices can act as you here/,
+  )
+  for (const gone of ['[data-sw-passkeys]', '[data-sw-recovery]', '[data-sw-tailnet-unlink]'])
+    assert.equal(await ada.page.locator(gone).count(), 0, gone)
+  await shot(ada.page, 'only-3-account')
+
+  // ---- Settings: nothing to switch on; what still asks is said ----
+  await ada.page.goto(plain.origin + '/w/' + ws + '/settings')
+  await ada.page.waitForSelector('[data-sw-settings-step-up="tailnet-only"]')
+  assert.equal(await ada.page.locator('[data-sw-step-up-row]').count(), 0)
+  assert.match(await ada.page.textContent('[data-sw-settings-step-up="tailnet-only"]'), /asks you to type the workspace’s name/)
+
+  // ---- Inviting an owner: the server asks, the dialog takes the workspace's name ----
+  await ada.page.goto(plain.origin + '/w/' + ws + '/invites')
+  await ada.page.click('[data-sw-new-invite]')
+  await ada.page.click('[data-sw-invite-role]')
+  await ada.page.click('[role="option"][data-sw-option="owner"]')
+  await ada.page.click('[data-sw-invite-create]')
+  await ada.page.waitForSelector('[data-sw-confirm-required="workspace"]')
+  assert.match(await ada.page.textContent('[data-sw-confirm-required="workspace"]'), /Type the workspace’s name, Team, to confirm/)
+  assert.equal(await ada.page.locator('[data-sw-reauth], [data-sw-reauth-no-passkey], [data-sw-reauth-add-passkey]').count(), 0)
+  assert.equal(await ada.page.isDisabled('[data-sw-confirm-typed]'), true, 'Confirm stays off until the name is typed')
+  await ada.page.fill('[data-sw-confirm-typed-input]', 'team')
+  assert.equal(await ada.page.isDisabled('[data-sw-confirm-typed]'), true, 'not another spelling')
+  await ada.page.fill('[data-sw-confirm-typed-input]', 'Team')
+  await shot(ada.page, 'only-4-type-to-confirm')
+  await ada.page.click('[data-sw-confirm-typed]')
+  await ada.page.waitForSelector('[data-sw-copy-value="invite"]')
+  assert.equal(plain.db.prepare("SELECT COUNT(*) AS n FROM invites WHERE role = 'owner'").get().n, 1)
+
+  // ---- Deleting the workspace: its own dialog already takes the name, and that is the confirmation ----
+  await ada.page.goto(plain.origin + '/w/' + ws + '/settings')
+  await ada.page.click('[data-sw-delete-workspace]')
+  await ada.page.fill('[data-sw-confirm-input]', 'Team')
+  await ada.page.click('[data-sw-confirm]')
+  await ada.page.waitForURL((url) => !url.pathname.includes(ws))
+  assert.equal(plain.db.prepare('SELECT COUNT(*) AS n FROM workspaces').get().n, 0)
+  assert.equal(plain.db.prepare('SELECT COUNT(*) AS n FROM passkeys').get().n, 0)
+  for (const who of [ada, ben]) assert.deepEqual(who.errors, [])
 })
