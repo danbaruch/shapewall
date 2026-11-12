@@ -56,6 +56,31 @@ a Usage view on a local board.
 - **Not in this release:** scheduled or emailed exports, per-agent budgets, notifications for "worth a look" entries, and a
   tamper-evident (hash-chained) audit log. The public demo does not have the two pages.
 
+### Fixes found on a real setup
+
+A fix for connected agents on the current Claude Code adapter.
+
+- **Connected agents work with `@agentclientprotocol/claude-agent-acp` 0.106.0.** With 0.6.0 and that adapter,
+  `shapewall agent connect` connected, and the first question then failed with only "Claude Code did not start." The cause:
+  0.106.0 starts a session in the mode "auto" and, when asked to switch, sends the new mode before its answer, in another place
+  than the one Shapewall read. The session looked as if it still acted without asking, so Shapewall stopped it. Now the mode the
+  agent names is the mode Shapewall checks, and the session is switched to "default" as intended. Nothing is loosened: a session
+  that moves itself to a mode that acts without asking is still stopped, and the mode it names is checked on its own as well.
+- **Tested adapter versions: 0.93.0 and 0.106.0.** The read-only and the edit provocations were run again on both with the real
+  adapter ([how](docs/agent-hardening.md#connected-agents)). `agent connect` now opens a session when it starts (no prompt is
+  sent) and prints which adapter answered. A version it was not tested with is used with a plain `Warning:` that names the tested
+  ones; a session that cannot be opened stops the command with the cause.
+- **A start that fails says why.** The chat and the machine's log both get the adapter's error or its last output, the adapter's
+  name and version, and what to try. A turn that fails is also written to the machine's log. Never a bare "did not start".
+- **The approval page shows what the machine asked for.** The box on the "Connect an agent" page said "does not change files"
+  even for a machine started with `--approvals owner` or `--auto edits`. The terminal now reports its rules with the code, and
+  the page says them: edits on a branch and who may allow them, "without asking" if asked, the base branch, and that commands are
+  never run. It is marked "Reported by the terminal"; an older shapewall that reports nothing is said to have said nothing.
+- **"Sign in a terminal" reads cleanly.** The two commands on `/device` are each in a code block on a line of their own, instead
+  of one sentence that wrapped into narrow columns.
+- **An expired code names the command that was run.** `shapewall agent connect` no longer says "Run shapewall login again".
+
+
 ## 0.6.0 - 2026-11-12
 
 Connected agents, stage C: approvals and edits from a hosted board. A connected agent can make a fix for a comment, on a new

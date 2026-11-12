@@ -627,6 +627,19 @@ to the agent unless you name it (see [The agent's environment](#the-agents-envir
 replace your subscription. The old package names `@zed-industries/claude-code-acp` and `@zed-industries/claude-agent-acp` are
 deprecated; use `@agentclientprotocol/claude-agent-acp`.
 
+**Tested adapter versions.** Shapewall 0.7.0 was tested with `@agentclientprotocol/claude-agent-acp` **0.93.0** and **0.106.0**
+(the latest when 0.7.0 was released, with Claude Code 2.1.322). Both work as a connected agent (`shapewall agent connect`),
+read-only and for edits. The adapter changes between versions: 0.106.0 starts a session in the mode "auto" where 0.93.0 started
+in "default", and reports the mode in two places. So:
+
+- `shapewall agent connect` opens a session when it starts (no prompt is sent, nothing is spent) and prints which adapter
+  answered: `Claude Code answers through @agentclientprotocol/claude-agent-acp 0.106.0, a version this release was tested with.`
+- A version it was not tested with is used as it is, with a `Warning:` line that names the tested versions and the command to
+  install one (`npm install -g @agentclientprotocol/claude-agent-acp@0.106.0`). It is not refused.
+- A session that cannot be opened stops `agent connect` with the cause: the adapter's error, its version and its last output.
+- A start that fails later says the same in the chat and in the log of the machine that runs the agent, never just "did not
+  start". `shapewall doctor --agent-acp "claude-agent-acp"` repeats the handshake on its own.
+
 For headless Claude Code setups that already supply `CLAUDE_CODE_OAUTH_TOKEN`, explicitly allow that variable when starting the
 board:
 

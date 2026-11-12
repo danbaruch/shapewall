@@ -287,7 +287,7 @@ async function runShare(
         'This token has no one-time import scope. Unset SHAPEWALL_TOKEN/--token-file, then run shapewall share to approve a moving-project login.',
       )
     out('Sign in to move a local project. Pick or create its destination and check the one-time Import box.')
-    await loginImpl(flags, out, { env, fetchImpl, purpose: 'import', signal, ...(open ? { open } : {}) })
+    await loginImpl(flags, out, { env, fetchImpl, purpose: 'import', command: 'shapewall share', signal, ...(open ? { open } : {}) })
     settings = remoteSettings(flags, env)
     remote = createRemote({ ...settings, fetchImpl })
     project = await remote.project()
