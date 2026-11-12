@@ -309,9 +309,13 @@ export function createChatStore(t, { now = () => new Date() } = {}) {
       },
     )
     // The usage record: who asked which agent, where and when. No text.
+    // `agent_owner`: the person who connected the agent (they may read
+    // everything that ran on their machine, src/hosted/usage.js).
     t.run(
-      `INSERT INTO agent_runs (workspace_id, project_id, id, kind, agent_id, claim_id, board_id, comment_number, thread_id, asked_by, started_at)
-       VALUES (:ws, :project, :id, :kind, :agent, :claim, :board, :number, :thread, :asked, :at)`,
+      `INSERT INTO agent_runs (workspace_id, project_id, id, kind, agent_id, claim_id, board_id, comment_number, thread_id, asked_by, started_at,
+         agent_owner)
+       VALUES (:ws, :project, :id, :kind, :agent, :claim, :board, :number, :thread, :asked, :at,
+         (SELECT a.created_by FROM agents a WHERE a.id = :agent))`,
       {
         project: projectId,
         id: runId,
@@ -364,10 +368,15 @@ export function createChatStore(t, { now = () => new Date() } = {}) {
       { id: row.id, state, at },
     )
     if (!Number(result.changes)) return false
+    const started = t.get('SELECT started_at FROM agent_runs WHERE workspace_id = :ws AND id = :run', { run: row.run_id })?.started_at
+    const tools = usage.tools && Object.keys(usage.tools).length ? JSON.stringify(usage.tools) : null
+    const by = usage.approvals?.by && Object.keys(usage.approvals.by).length ? JSON.stringify(usage.approvals.by) : null
     t.run(
       `UPDATE agent_runs SET ended_at = :at, outcome = :outcome, model = :model, effort = :effort, input_tokens = :input,
          output_tokens = :output, cached_tokens = :cached, cost_micros = :cost, steps = :steps,
-         approvals_asked = :asked, approvals_allowed = :allowed, approvals_denied = :denied
+         approvals_asked = :asked, approvals_allowed = :allowed, approvals_denied = :denied, approvals_auto = :auto,
+         approvals_by = :by, duration_ms = :duration, agent_ms = :agent_ms, tools = :tools, window_used = :window_used,
+         window_size = :window_size
        WHERE workspace_id = :ws AND id = :run AND ended_at IS NULL`,
       {
         run: row.run_id,
@@ -383,6 +392,14 @@ export function createChatStore(t, { now = () => new Date() } = {}) {
         asked: usage.approvals?.asked ?? null,
         allowed: usage.approvals?.allowed ?? null,
         denied: usage.approvals?.denied ?? null,
+        auto: usage.approvals?.auto ?? null,
+        by,
+        // The server's own clock, from the question to the end of the turn.
+        duration: started ? Math.max(0, Date.parse(at) - Date.parse(started)) : null,
+        agent_ms: usage.agentMs ?? null,
+        tools,
+        window_used: usage.contextUsed ?? null,
+        window_size: usage.contextSize ?? null,
       },
     )
     return true

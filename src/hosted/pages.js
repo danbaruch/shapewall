@@ -65,6 +65,8 @@ export function mountPages(app, { db, dataDir, consoleDir, clientDir, turnstile,
     '/w/:ws/projects/:pid',
     // A project's Agents page.
     '/w/:ws/agents/:pid',
+    // A person's page and an agent's page, under Activity.
+    '/w/:ws/activity/:subject',
   ])
     app.get(route, (req, res) => sendConsole(req, res))
 

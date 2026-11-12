@@ -86,6 +86,7 @@ export async function startHosted({
   trustProxy = false,
   previousOrigin = null,
   reportEmail = null,
+  ownersSeeSignIns = false,
   // Mode 1 (src/hosted/tailscale.js): { httpsPort, funnel: { httpsPort, localPort } | null, run }
   tailscale = null,
   quotasFile = null,
@@ -189,6 +190,7 @@ export async function startHosted({
       usercontentOrigin,
       turnstile,
       reportEmail,
+      ownersSeeSignIns,
       log: (line) => out(line),
     }
     const app = createHostedApp({ ...common, origin: publicOrigin, shareOrigin, previousOrigin, mailer: mailer.configured ? mailer : null })

@@ -142,7 +142,8 @@ export async function init(flags, out, { fetch }) {
   const gitignore = path.join(path.dirname(file), '.gitignore')
   // .shapewall/agent-worktrees/ is inside .shapewall/; named too so it stays
   // ignored if someone narrows the first line (agent branch mode's checkouts).
-  const wanted = ['.shapewall/', 'shapewall-export/', '*.auth.json', '.shapewall/agent-worktrees/']
+  // The agent usage log (who used which agent, when) is named too, for the same reason.
+  const wanted = ['.shapewall/', 'shapewall-export/', '*.auth.json', '.shapewall/agent-worktrees/', '.shapewall/agent-usage*.jsonl']
   const current = fs.existsSync(gitignore) ? fs.readFileSync(gitignore, 'utf8') : ''
   const missing = wanted.filter((line) => !current.split(/\r?\n/).includes(line))
   if (missing.length) {

@@ -134,6 +134,28 @@ its checkout, and each edit is a card with the full diff that someone allows or 
 connected that way in this release, and it runs no commands from a hosted board ([Connected agents](hosted.md#connected-agents)).
 The public demo shows this card read-only on its console's Agents page.
 
+## Usage
+
+Every agent turn leaves one usage record: when, on which board, in which kind of thread (the board's chat, a comment's, or a chat
+of your own), who asked (the owner or a viewer; a local board has no accounts to name), which agent, whether it was a chat, a
+comment answer or a fix, how it ended, how long it took, its tool calls counted by type, and the numbers the agent reported:
+model, input, output and cached tokens, context used, and a cost only when the agent or its endpoint reported one. Nothing is
+estimated: an agent that reports no tokens shows "Not reported", never zero. A record never holds the question, the answer, a
+file's name or content, or a diff.
+
+- **On a local board** the records are lines in `.shapewall/agent-usage.jsonl` (past 5 MB the file is renamed to
+  `agent-usage.1.jsonl` and a new one starts). The file is readable by its owner only (0600) and is written under a file lock,
+  like the event log. It says who used which agent and when, so keep it out of git: `.shapewall/` is ignored by `shapewall
+init`, which from 0.7.0 also adds `.shapewall/agent-usage*.jsonl` by name. In a project set up earlier, check that your
+  `.gitignore` has `.shapewall/` (or add that line) before you commit. The Workspace Console's **Usage** page (`/console?section=usage`) shows them to the
+  owner: turns, tokens, agent time and reported cost for the last 7, 30 or 90 days against the days before, a chart by day and
+  agent (turns, tokens, time or cost), how turns ended, and a table of the newest 200 turns. It needs the owner link, like Agent
+  feedback: it says who used which agent on this computer. `GET /api/agent/usage?days=30` is the same data. The local view has no
+  filters, grouping or export; delete the two files to clear it.
+- **On a team server** the records are rows in its database and the console has the full Usage page: filters, breakdowns,
+  approvals, turn duration, a grid of every turn, saved views and CSV or JSON export, with a rule for who sees what
+  ([Usage and activity](hosted.md#usage-and-activity)).
+
 ## Name and icon
 
 Every connected agent has a name you choose and an icon, so a board with two agents reads "Harry" and "Fixer", not "Claude Code"
@@ -605,8 +627,8 @@ to the agent unless you name it (see [The agent's environment](#the-agents-envir
 replace your subscription. The old package names `@zed-industries/claude-code-acp` and `@zed-industries/claude-agent-acp` are
 deprecated; use `@agentclientprotocol/claude-agent-acp`.
 
-**Tested adapter versions.** Shapewall 0.6.1 was tested with `@agentclientprotocol/claude-agent-acp` **0.93.0** and **0.106.0**
-(the latest when 0.6.1 was released, with Claude Code 2.1.322). Both work as a connected agent (`shapewall agent connect`),
+**Tested adapter versions.** Shapewall 0.7.0 was tested with `@agentclientprotocol/claude-agent-acp` **0.93.0** and **0.106.0**
+(the latest when 0.7.0 was released, with Claude Code 2.1.322). Both work as a connected agent (`shapewall agent connect`),
 read-only and for edits. The adapter changes between versions: 0.106.0 starts a session in the mode "auto" where 0.93.0 started
 in "default", and reports the mode in two places. So:
 

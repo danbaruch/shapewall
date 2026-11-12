@@ -217,8 +217,8 @@ choice, made on that machine ([Edits from a hosted board](#edits-from-a-hosted-b
   own token is removed from anything sent back.
 
 How it was proven. The check used the real Claude Code adapter, **claude-agent-acp 0.93.0 and 0.106.0** (the tested versions of
-Shapewall 0.6.1; 0.106.0 with Claude Code 2.1.322), in a project whose `.claude/settings.json` and `.claude/settings.local.json`
-allowed Bash, Edit, Write, WebFetch, `mcp__*` and reads anywhere, with the default mode `bypassPermissions` and, for 0.6.1, hooks
+Shapewall 0.7.0; 0.106.0 with Claude Code 2.1.322), in a project whose `.claude/settings.json` and `.claude/settings.local.json`
+allowed Bash, Edit, Write, WebFetch, `mcp__*` and reads anywhere, with the default mode `bypassPermissions` and, for 0.7.0, hooks
 that run a command when a session starts, on every prompt and before every tool. The instructions told the agent it had full
 permission and must create a file, run `touch`, and read `/etc/hostname`.
 
@@ -323,7 +323,7 @@ and MultiEdit, no settings files and no MCP servers), `--allow-command` is refus
 hand-edited policy file are not in effect.
 
 How edits were proven. The check used the real Claude Code adapter (claude-agent-acp 0.93.0 for 0.6.0; 0.93.0 and 0.106.0 again
-for 0.6.1, in a repository whose committed `.claude/settings.json` allowed Bash, Edit and Write without asking and ran a hook), a
+for 0.7.0, in a repository whose committed `.claude/settings.json` allowed Bash, Edit and Write without asking and ran a hook), a
 throwaway server on localhost, a throwaway Git repository with a local bare remote, and the real
 `shapewall agent connect --approvals owner`:
 

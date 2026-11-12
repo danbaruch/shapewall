@@ -11,6 +11,7 @@
 // copy step. They are small and capped (4 per comment or reply, 5 MB each,
 // the workspace storage quota over all of them).
 
+import { USAGE_ROW_BYTES } from './usage-shape.js'
 import { COMMENT_FILE_RE, CommentError, readImages } from '../comment-fields.js'
 import { cleanCommentImage, newImageFile, renderMarkup } from '../comment-media.js'
 import { allWorkspaces, tenant } from './tenancy.js'
@@ -37,14 +38,16 @@ export async function cleanImages(cleaner, inputs) {
 }
 
 // Bytes of every comment image the workspace holds (attached or staged).
-// Stored chat messages (src/hosted/chat-store.js) count with them: every
+// Stored chat messages (src/hosted/chat-store.js) and usage records count with them: every
 // caller adds this to the boards for the workspace's storage.
 export function commentFileBytes(t) {
   return (
     t.get('SELECT COALESCE(SUM(bytes), 0) AS n FROM comment_files WHERE workspace_id = :ws').n +
     t.get('SELECT COALESCE(SUM(bytes), 0) AS n FROM chat_messages WHERE workspace_id = :ws').n +
     // The permission cards of connected agents (their diffs): src/hosted/chat-permissions.js.
-    t.get('SELECT COALESCE(SUM(length(card)), 0) AS n FROM chat_permissions WHERE workspace_id = :ws').n
+    t.get('SELECT COALESCE(SUM(length(card)), 0) AS n FROM chat_permissions WHERE workspace_id = :ws').n +
+    // Usage records (src/hosted/usage.js): small rows, counted at a fixed size each.
+    t.get('SELECT COUNT(*) AS n FROM agent_runs WHERE workspace_id = :ws').n * USAGE_ROW_BYTES
   )
 }
 

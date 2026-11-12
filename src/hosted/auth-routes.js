@@ -19,6 +19,7 @@ import {
   accountEvents,
   auditAccount,
   deleteAccountEvents,
+  deleteSavedViewsOf,
   findInviteByHash,
   inviteUsable,
   lastRecoverySignIn,
@@ -251,7 +252,16 @@ export function mountAuthRoutes(authRouter, deps) {
     '/logout',
     handle(async (req, res) => {
       const current = sessionOf(req)
-      if (current) auth.deleteSession(current.session.hash)
+      if (current) {
+        auth.deleteSession(current.session.hash)
+        auditAccount(db, {
+          userId: current.user.id,
+          action: 'signed_out',
+          ip: clientIp(req),
+          at: iso(),
+          detail: { device: deviceLabel(req.headers['user-agent']) },
+        })
+      }
       setCookie(res, SESSION_COOKIE, '', 0)
       res.json({ ok: true })
     }),
@@ -374,6 +384,7 @@ export function mountAuthRoutes(authRouter, deps) {
           revokeGrantsOf(req, user.id, null, { revokeTokens: true, t })
         }
         deleteAccountEvents(db, user.id)
+        deleteSavedViewsOf(db, user.id)
         q.run('DELETE FROM users WHERE id = :id', { id: user.id })
         auditAccount(db, {
           action: 'account_deleted',

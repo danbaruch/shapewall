@@ -160,6 +160,7 @@ export async function startHostedServer(name, options = {}) {
     ...(options.previousOrigin ? { previousOrigin: options.previousOrigin(port) } : {}),
     ...(options.turnstile ? { turnstile: options.turnstile } : {}),
     ...(options.reportEmail ? { reportEmail: options.reportEmail } : {}),
+    ...(options.ownersSeeSignIns ? { ownersSeeSignIns: true } : {}),
   })
   holder.app.locals.presence.attach(server)
   return {

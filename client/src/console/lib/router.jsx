@@ -47,6 +47,25 @@ export const currentSearch = () => (DEMO ? demoRoute().search : window.location.
 export function usePath() {
   return useSyncExternalStore(subscribe, currentPath, () => '/')
 }
+// The query string, for pages that keep their state in it (Usage, Activity).
+export function useSearch() {
+  return useSyncExternalStore(subscribe, currentSearch, () => '')
+}
+// Changes only the query string of the page that is open: no scroll, and by
+// default no new history entry (`push` adds one, so Back undoes the change).
+export function setSearch(search, { push = false } = {}) {
+  const text = String(search || '').replace(/^\?/, '')
+  if (DEMO) {
+    const next = `#${currentPath()}${text ? `?${text}` : ''}`
+    if (push) window.history.pushState(null, '', next)
+    else window.history.replaceState(null, '', next)
+  } else {
+    const next = `${window.location.pathname}${text ? `?${text}` : ''}`
+    if (push) window.history.pushState(window.history.state, '', next)
+    else window.history.replaceState(window.history.state, '', next)
+  }
+  notify()
+}
 
 const isAppPath = (pathname) => !/^\/(w\/[^/]+\/p|s)\//.test(pathname) && !pathname.startsWith('/_console/')
 // Demo: routes are absolute paths ("/w/..."); anything else (index.html?...) is the board.
