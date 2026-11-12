@@ -61,6 +61,7 @@ import {
   writeMeta,
 } from './branch-mode.js'
 import { createBackend } from './backends/index.js'
+import { localUsageRow, recordLocalTurn, summarizeLocalUsage } from './usage-log.js'
 import { AGENTS_EVENT, createSettingsEvents } from './settings-events.js'
 import { batchFixSettings, createBatchQueue } from './batch-fixes.js'
 import { FIX_PROMPT as BATCH_FIX_PROMPT } from './fix-prompt.js'
@@ -954,6 +955,20 @@ export function agentRouter({
             })
           }
         }
+        // The usage record of this turn (usage-log.js): numbers and ids, never text.
+        recordLocalTurn(
+          config,
+          localUsageRow({
+            reply,
+            boardId: board.id,
+            threadId,
+            commentId,
+            kind: fix ? 'fix' : commentId ? 'review' : 'chat',
+            viewer: res.locals.viewer,
+            agent: { id: current.profileId || 'default', label: current.label, backend: current.backend, model: current.model },
+            startedAt: Date.now() - (reply.durationMs || 0),
+          }),
+        )
         if (previous) await replaceAnswer(config, board.id, threadId, previous.id, reply)
         else await appendAssistantMessage(config, board.id, threadId, reply)
         emit('done', { message: reply })
@@ -1436,6 +1451,12 @@ export function agentRouter({
       ...reviewRatings(config, { rating, days, boardId }),
       boards: config.boards.map((board) => ({ id: board.id, title: board.title })),
     })
+  })
+  // The owner's Usage view (Console > Usage): the turns agents ran on this
+  // computer, from the usage log. An owner device only, like the feedback.
+  router.get('/usage', reviewAllowed, (req, res) => {
+    const days = Math.min(365, Math.max(1, Number.parseInt(req.query.days, 10) || 30))
+    res.json(summarizeLocalUsage(config, { days }))
   })
   router.get('/feedback/export', reviewAllowed, (req, res) => {
     const data = exportRatings(config)
