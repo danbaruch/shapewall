@@ -1232,13 +1232,17 @@ test('migration 12: the claim tokens of a 0.3.4 database become watcher agents t
     ALTER TABLE comments DROP COLUMN agent_id;
     ALTER TABLE agent_claims DROP COLUMN agent_id;
     DELETE FROM schema_migrations WHERE version = 12;
+    DROP TABLE saved_views; ALTER TABLE workspaces DROP COLUMN retention_usage_days;
+    DROP INDEX audit_workspace_at; DROP INDEX audit_workspace_user; DROP INDEX audit_account_user;
+    DELETE FROM schema_migrations WHERE version = 15;
     PRAGMA user_version = 11;
   `)
   old.close()
 
   let db = await openDatabase(file)
-  // Migrations 13 (connected agents) and 14 (approvals from the board) were applied before and stay.
-  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 14)
+  // Migrations 13 (connected agents) and 14 (approvals from the board) were applied before and stay;
+  // 15 (usage and activity) adds its columns to the usage records again.
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 15)
   const rows = db.prepare('SELECT a.*, k.name FROM agents a JOIN api_tokens k ON k.id = a.token_id').all()
   assert.deepEqual(
     rows.map((row) => row.name),

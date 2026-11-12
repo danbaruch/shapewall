@@ -258,6 +258,8 @@ export const SECTIONS = {
       --usercontent-origin URL  serve live HTML only from this other origin (or $SHAPEWALL_USERCONTENT_ORIGIN)
       --previous-origin URL while moving to a new origin: the old one (sign-in moves, up to 30 days)
       --report-email ADDR   where "Report this board" on public projects goes
+      --owners-see-sign-ins workspace owners see their members' sign-ins and devices in Activity
+                            (off: each person sees only their own; for a server with one team)
       --tailscale           on your tailnet through tailscale serve (https://<machine>.<tailnet>.ts.net)
       --tailscale-port N    default 443; --funnel: share links public through Tailscale Funnel
                             (share pages only, never the console), on --funnel-port 8443|443|10000

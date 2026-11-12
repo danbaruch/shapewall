@@ -3,6 +3,59 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## 0.7.0 - 2026-11-12
+
+Connected agents, stage E: the Usage dashboard, and people's activity. Two new pages in the Workspace Console of a team server, and
+a Usage view on a local board.
+
+- **Usage** (`/w/<workspace>/usage`). Every agent turn (a chat answer, a comment answer, a fix, a push) with the numbers the agent
+  reported. Tiles with the change against the period before (turns, tokens, agent time, reported cost, fixes ready, failed or
+  stopped). Usage over time as stacked bars by day, week or month, split by agent, project, person, kind, model or outcome,
+  measuring turns, tokens, time or reported cost, with a brush to zoom. A ranked breakdown with shares, how turns ended, approvals,
+  and the median and 95th percentile turn duration. Top lists, and each project's daily budgets with today's use. Hover or tap for
+  exact values; press a bar, a row or a legend entry to filter the whole page; every chart has a table, "copy as CSV" and "copy as
+  an image". One palette, checked for colour-blind readers in light and dark.
+- **Nothing is estimated, and "not reported" is not zero.** A cost appears only when the agent or its endpoint reported one. An
+  agent that reports no tokens shows "Not reported" (a dash, or a hatched area in a chart), and totals say how many turns reported.
+- **Turns: a real grid.** Sorted, filtered and paged by the server (fast at 100,000 rows, tested), virtual rows, column chooser
+  and reordering, pinned columns, grouping with subtotals, a density toggle, keyboard navigation, a drawer with the full record
+  and a link to the comment or board, and CSV or JSON export of the filtered set (streamed, at most 50,000 rows, audited).
+  Drag a header to move a column and its right edge to resize it (the header's menu does both from the keyboard). Grouped rows
+  can show the period before and the change beside each group. A sorted table holds still while a running turn finishes.
+- **Filters live in the address,** so a link is a view. Saved views are a person's own names for an address; a link or a view
+  never shows its reader more than they may see.
+- **Who sees usage:** owners and admins the workspace; a member their own turns and every turn of an agent they connected;
+  viewers, share link guests and project tokens nothing. Checked on every route, including exports and a turn opened by its id.
+- **What a turn records, completed.** Duration (the server's clock, and the agent's own when it says), tool calls counted by
+  type, approvals allowed without asking and who answered the others, the context window, and who connected the agent. Never the
+  question, the answer, a file or a diff.
+- **Activity** (`/w/<workspace>/activity`). People's activity, read from the audit log: sign-in and sign-out, settings with the
+  value before and after, agents connected, reconfigured and revoked, approval cards answered, tokens, exports. Filter by person,
+  kind of action, agent, project and period; "Worth a look" keeps the security-relevant changes. A page per person (role, what
+  they made, devices, their usage and activity) and per agent. Admins and owners read everyone's; anyone else their own.
+- **Sign-ins and devices stay each person's own.** They cover every workspace a person is in, so an owner or admin does not see
+  them for anyone else. On a server with one team the operator can let owners see them: `shapewall hosted
+  --owners-see-sign-ins` (off by default).
+- **Periods compare honestly.** The last N days against the N local days before, across clock changes; this week or month so
+  far against last week or month to the same day; last month against the month before. Any number of clock changes in a period
+  is bucketed right.
+- **Access review.** Every person, agent, API token, share link, public project and open invite in one place, with what it
+  reaches, who made it and when it was last used; unused for 90 days is marked. Exports as CSV.
+- **New audit entries:** `signed_out`, `usage_exported`, `audit_exported` (the old audit CSV leaves one too), `access_exported`,
+  `usage_retention_changed`; `agent_policy_changed` now records which settings changed, before and after.
+- **Retention, quota, export.** Usage records are kept 400 days by default (`shapewall hosted admin retention ws_ID --usage-days
+  N`), count toward the storage quota, and are all in the workspace export as `usage.json`.
+- **On a local board,** each agent turn is a line in `.shapewall/agent-usage.jsonl` (0600, written under a file lock; `shapewall
+  init` now names it in `.gitignore`, and a project set up earlier should make sure `.shapewall/` is ignored), and the console's Usage page shows the owner
+  totals, a chart by day and agent, how turns ended and the newest turns.
+- **Phones.** At 390 px the tiles stack, charts answer a tap, the grid is a list of cards and a turn opens as a sheet.
+- **Upgrade notes.** Migration 15 is additive (new columns on the usage records, saved views, indexes); see
+  [Migration 15 and rollback](docs/hosted.md#migration-15-and-rollback). The retention job starts removing finished usage records
+  older than 400 days. The console gains Recharts and TanStack Table, Virtual and Query, loaded only with these two pages; the
+  board's JavaScript is unchanged in size.
+- **Not in this release:** scheduled or emailed exports, per-agent budgets, notifications for "worth a look" entries, and a
+  tamper-evident (hash-chained) audit log. The public demo does not have the two pages.
+
 ## 0.6.0 - 2026-11-12
 
 Connected agents, stage C: approvals and edits from a hosted board. A connected agent can make a fix for a comment, on a new

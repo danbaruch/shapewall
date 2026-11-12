@@ -10,6 +10,7 @@ import path from 'node:path'
 import { ID_RE } from '../config.js'
 import { ID_PATTERNS, newId } from './crypto.js'
 import { transaction } from './db.js'
+import { RUN_DURATION } from './usage-shape.js'
 
 export const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,39}$/
 export const PROJECTS_MAX = 50
@@ -165,7 +166,7 @@ export function createProjectStore(t, { db, dataDir, maxProjects = PROJECTS_MAX 
       const images = t.get(`SELECT COALESCE(SUM(bytes), 0) AS n FROM comment_files ${where}`, key).n
       const open = t.all(`SELECT id FROM pushes ${where} AND status = 'open'`, key).map((push) => push.id)
       // The usage record of a run on this board stays (it is history), closed.
-      t.run(`UPDATE agent_runs SET ended_at = :at, outcome = 'removed' ${where} AND ended_at IS NULL`, {
+      t.run(`UPDATE agent_runs SET ended_at = :at, outcome = 'removed', ${RUN_DURATION} ${where} AND ended_at IS NULL`, {
         ...key,
         at: new Date().toISOString(),
       })

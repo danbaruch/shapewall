@@ -56,6 +56,26 @@ hosted boards and static exports always use an opaque frame. Hosted live HTML ca
   of a command line.
 - The MCP server takes ids only; no tool can read an arbitrary path. `--read-only` and `--no-capture` limit what an agent can do.
 
+## Usage and activity on a team server
+
+- **A usage record holds numbers and ids, never text.** Each agent turn records who asked, which agent on which machine, how it
+  ended, how long it took, tool calls counted by type, and the tokens and cost the agent itself reported. Never the question, the
+  answer, a file name from a step, file content or a diff. Nothing is estimated: a number an agent did not report shows as "Not
+  reported", not zero.
+- **Who reads usage is decided by the server on every request.** Owners and admins see the workspace. A member sees their own
+  turns and every turn of an agent they connected. Viewers, share link guests and project tokens see nothing. Exports, a turn
+  opened by its id and saved views follow the same rule: a link carries filters, never access.
+- **Activity is the audit log, read by person.** Settings with the value before and after, agents, approvals, tokens and
+  exports. Admins and owners read everyone's; anyone else only their own.
+- **Sign-ins and devices are each person's own.** They cover every workspace a person is in, so no owner or admin sees them
+  for someone else unless the server's operator switches that on for a single-team server (`--owners-see-sign-ins`), and then
+  only owners do. The access review lists every person, agent, token
+  and share link with who made it and when it was last used.
+- **What the log is not.** The application cannot edit or delete an entry, but the log is not tamper-evident against someone with
+  the database file. Keep backups if you need to compare.
+
+Details: [Usage and activity](/docs/hosted#usage-and-activity).
+
 ## What is up to you
 
 - **Capture with test data.** Screenshots show exactly what the page showed. Live HTML drops secrets it can recognise, but a screenshot

@@ -16,6 +16,10 @@
 // swaps board folders inside its own transaction, so the two never interleave,
 // also when the CLI runs it from another process.
 //
+// Usage records (agent_runs: one small row per agent turn) are pruned by age:
+// 400 days by default, or the workspace's own setting (`shapewall hosted admin
+// retention <ws> --usage-days N`). A turn still running is never removed.
+//
 // A later push brings back the versions the pushing machine still keeps; the
 // next run trims them again.
 
@@ -26,6 +30,7 @@ import { listVersions } from '../store.js'
 import { transaction } from './db.js'
 import { boardConfig } from './projects.js'
 import { allWorkspaces, tenant } from './tenancy.js'
+import { USAGE_RETENTION_DAYS, createUsage } from './usage.js'
 
 export const RETENTION_DEFAULT = 2
 export const RETENTION_EVERY_HOURS = 6
@@ -47,13 +52,23 @@ export function planBoardRetention(versions, referenced, keep) {
   return remove
 }
 
-export function runRetention({ db, dataDir, keepDefault = RETENTION_DEFAULT, dryRun = false, workspaceId = null }) {
-  const result = { workspaces: 0, boards: 0, files: 0, bytes: 0, dryRun }
+export function runRetention({
+  db,
+  dataDir,
+  keepDefault = RETENTION_DEFAULT,
+  usageDaysDefault = USAGE_RETENTION_DAYS,
+  dryRun = false,
+  workspaceId = null,
+  now = () => new Date(),
+}) {
+  const result = { workspaces: 0, boards: 0, files: 0, bytes: 0, usageRows: 0, dryRun }
   for (const workspace of allWorkspaces(db)) {
     if (workspaceId && workspace.id !== workspaceId) continue
     result.workspaces += 1
     const keep = workspace.retention_versions ?? keepDefault
     const t = tenant(db, workspace.id)
+    // Usage records (one row per agent turn) older than the workspace keeps them.
+    result.usageRows += transaction(db, () => createUsage(t, { now }).prune(workspace.retention_usage_days ?? usageDaysDefault, { dryRun }))
     for (const row of t.all('SELECT project_id, board_id FROM boards WHERE workspace_id = :ws ORDER BY project_id, board_id')) {
       if (!ID_RE.test(row.board_id)) continue
       const removed = pruneBoard(db, t, dataDir, row.project_id, row.board_id, keep, dryRun)
@@ -133,6 +148,7 @@ export function startRetention({ db, dataDir, hours = RETENTION_EVERY_HOURS, kee
   const run = () => {
     try {
       const result = runRetention({ db, dataDir, keepDefault })
+      if (result.usageRows) log(`retention: removed ${result.usageRows} old usage records`)
       if (result.files)
         log(`retention: removed ${result.files} old version files (${(result.bytes / 1048576).toFixed(1)} MB) from ${result.boards} boards`)
     } catch (error) {

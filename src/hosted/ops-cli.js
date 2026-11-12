@@ -63,6 +63,7 @@ async function serve(flags, out) {
       usercontentOrigin: flags['usercontent-origin'] || env.SHAPEWALL_USERCONTENT_ORIGIN || env.SHAPEWALL_HOSTED_USERCONTENT_ORIGIN || null,
       previousOrigin: flags['previous-origin'] || env.SHAPEWALL_HOSTED_PREVIOUS_ORIGIN || null,
       reportEmail: flags['report-email'] || env.SHAPEWALL_HOSTED_REPORT_EMAIL || null,
+      ownersSeeSignIns: Boolean(flags['owners-see-sign-ins']) || env.SHAPEWALL_HOSTED_OWNERS_SEE_SIGN_INS === '1',
       signup: flags.signup || env.SHAPEWALL_HOSTED_SIGNUP || 'invite',
       trustProxy,
       tailscale,
@@ -154,6 +155,7 @@ const ADMIN_HELP = `shapewall hosted admin <command> --data DIR   (on the server
   reports [--all]              abuse reports (open ones; --all with closed)
   reports close ID [--note TEXT]
   retention WS --keep N|default   older versions kept per page and viewport
+  retention WS --usage-days N|default   how long usage records are kept (400 days by default)
   retention --run [--dry-run]  prune now (the server also does it every 6 hours)
   log [--limit N]              the operator log
   --operator NAME              who you are in the operator log (default user@host)
@@ -258,10 +260,22 @@ async function admin(positional, flags, out) {
           out(
             `${dryRun ? 'Would remove' : 'Removed'} ${result.files} old version files (${mb(result.bytes)}) from ${result.boards} boards in ${result.workspaces} workspaces.`,
           )
+          if (result.usageRows) out(`${dryRun ? 'Would remove' : 'Removed'} ${result.usageRows} old usage records.`)
+          return 0
+        }
+        if (target && flags['usage-days'] !== undefined) {
+          const days = flags['usage-days'] === 'default' ? null : intFlag(flags, 'usage-days', { min: 1, max: 3650 })
+          const result = ops.setUsageRetentionFor(db, { workspaceId: target, days, operator })
+          if (flags.json) return json(result)
+          out(
+            `${result.id} (${show(result.name)}) keeps usage records for ${result.usageDays} days${result.own ? '' : ' (the server default)'}.`,
+          )
           return 0
         }
         if (!target || flags.keep === undefined)
-          throw new ops.OperatorError('usage: hosted admin retention WS --keep N|default, or hosted admin retention --run [--dry-run]')
+          throw new ops.OperatorError(
+            'usage: hosted admin retention WS --keep N|default, hosted admin retention WS --usage-days N|default, or hosted admin retention --run [--dry-run]',
+          )
         const keep = flags.keep === 'default' ? null : intFlag(flags, 'keep', { min: 0, max: 100 })
         const result = ops.setRetention(db, { workspaceId: target, keep, operator })
         if (flags.json) return json(result)

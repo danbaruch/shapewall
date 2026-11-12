@@ -50,6 +50,8 @@ test('init writes a valid config and keeps outputs out of git', async () => {
   assert.equal(loadConfig(file).boards[0].baseUrl, 'http://localhost:5173')
   const gitignore = fs.readFileSync(path.join(dir, '.gitignore'), 'utf8')
   assert.match(gitignore, /^node_modules\/\n# Shapewall\n\.shapewall\/\n/m)
+  // The agent usage log (who used which agent) is named too, should someone narrow the first line.
+  assert.match(gitignore, /^\.shapewall\/agent-usage\*\.jsonl$/m)
   await assert.rejects(run(['init', '--config', file]), /already exists/)
 })
 
