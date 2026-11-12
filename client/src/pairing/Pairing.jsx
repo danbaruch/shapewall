@@ -51,8 +51,8 @@ export function PairingScreen() {
       {view?.ownMachine ? (
         <p className="rounded-lg border border-line p-3 text-sm text-muted" data-sw-pairing-own-machine>
           This is the computer that runs Shapewall. Its tailnet address never lets you in by itself, because any program on this computer
-          could ask the same way. Open the board at its localhost address instead (the terminal that started Shapewall printed it), with the
-          owner link for settings and approvals.
+          could ask the same way. Use the private owner link instead: the terminal that started Shapewall printed it, and it opens the board
+          on this computer’s own address.
         </p>
       ) : null}
       {pairing?.state === 'pending' ? (
