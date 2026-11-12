@@ -16,11 +16,13 @@ function StepTip({ label, keyName }) {
 // split where the path chooses a branch. Long journeys scroll sideways.
 function StepRail({ route, step, pageTitle, onStep, touch }) {
   const forksAt = new Map(route.forks.map((fork, index) => [fork.afterStep, { ...fork, index }]))
-  // On touch each button is 44 px tall around its smaller dot.
-  const hit = touch ? 'h-11 min-w-8' : 'h-6 min-w-6'
+  // On touch each button is a 44 px target around its smaller dot (the dot
+  // keeps its size); with more steps than fit, the rail scrolls sideways
+  // inside the bar rather than shrinking the targets.
+  const hit = touch ? 'h-11 min-w-11' : 'h-6 min-w-6'
   return (
     <ol
-      className={cn('flex max-w-full min-w-0 items-center overflow-x-auto py-1', touch ? 'gap-0.5 px-1' : 'gap-0.5')}
+      className={cn('flex max-w-full min-w-0 items-center overflow-x-auto py-1', touch ? 'px-0.5' : 'gap-0.5')}
       aria-label="Steps"
       data-sw-journey-rail="true"
     >
@@ -32,7 +34,11 @@ function StepRail({ route, step, pageTitle, onStep, touch }) {
         return (
           <Fragment key={item.key || index}>
             {index > 0 ? (
-              <li aria-hidden="true" className={cn('h-0.5 w-3 shrink-0 rounded-full', number <= step ? 'bg-accent/60' : 'bg-line')} />
+              // Shorter on touch: the targets on either side already give the dots their spacing.
+              <li
+                aria-hidden="true"
+                className={cn('h-0.5 shrink-0 rounded-full', touch ? '-mx-1.5 w-3' : 'w-3', number <= step ? 'bg-accent/60' : 'bg-line')}
+              />
             ) : null}
             <li className="shrink-0">
               <Tooltip
@@ -83,7 +89,7 @@ function StepRail({ route, step, pageTitle, onStep, touch }) {
                       onClick={() => onStep(number)}
                       className={cn(
                         'inline-flex items-center gap-1 rounded-full border px-1.5 text-[11px] font-medium outline-none focus-visible:outline-2 focus-visible:outline-accent',
-                        touch ? 'h-11' : 'h-6',
+                        touch ? 'h-11 min-w-11 justify-center' : 'h-6',
                         number === step ? 'border-accent bg-accent/10 text-accent' : 'border-line bg-surface-2 text-muted hover:text-fg',
                       )}
                       aria-label={`Fork after step ${number}: ${fork.options.find((option) => option.id === fork.chosen)?.label || ''} taken`}

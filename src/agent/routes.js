@@ -78,7 +78,7 @@ import { readIcon } from './icon-store.js'
 import { finishFix, projectChanged, projectSnapshot, stopReason } from './feedback-loop.js'
 import { ownerMcpServers } from './owner-mcp.js'
 import { RUN_MS_MAX, commentIdOf, runTurn } from './run.js'
-import { beginTurnChanges, finishTurnChanges, starterSummary, undoFiles, undoStarterBranch } from './turn-changes.js'
+import { beginTurnChanges, finishTurnChanges, ignoredPaths, starterSummary, undoFiles, undoStarterBranch } from './turn-changes.js'
 import { latestChange, withUndoAvailability } from './undo-state.js'
 import { exportRatings, findAnswer, myRatings, raterOf, removeRating, reviewRatings, setRating } from './ratings.js'
 import { localRequest, sameOriginWrite, settingsRoutes, settingsTokenOk } from './settings-routes.js'
@@ -1622,7 +1622,7 @@ export function agentRouter({
               'Undo is no longer available for this answer: the board server restarted, or newer answers took its place.',
             )
           }
-          const files = undoFiles(config, record)
+          const files = undoFiles(config, record, { ignored: await ignoredPaths(config.dir) })
           undoRecords.delete(key)
           undone = { kind: 'files', files: files.length }
         } else if (summary.undo.kind === 'branch' && summary.undo.available) {

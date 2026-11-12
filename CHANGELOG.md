@@ -3,6 +3,28 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## 0.3.4 - 2026-11-12
+
+- The agent's "Changed N files" card lists only the agent's work. Files Git ignores (by `.gitignore` as it is on disk, committed or
+  not, `.git/info/exclude` and your global excludes) are never listed or counted, and Undo never touches them. Before, anything
+  another program wrote inside the project folder during the turn showed up in the card (a dev server's data, a log), and Undo could
+  have deleted those new files and rolled the changed ones back. Outside a Git repository the list works as before, and Shapewall's
+  own folders (`.shapewall*`) are always left out.
+- Hosted boards have the Agent button in the top bar, next to Comments and Checks, for people who can send comments to an agent. It
+  opens a small panel: whether an agent is listening ("Agent online: <token name>", or "No agent is listening" with the command to
+  connect one), what is running and what waits for you, each opening its comment. There is still no chat on hosted boards. Share
+  link guests and public viewers do not get it.
+- The sidebar has one search field on every board. On a board with no journeys the old "Filter pages" box was still shown under
+  "Search the board".
+- Esc is never swallowed by a tooltip. With the keyboard on a button inside a thread or a dialog (its tooltip showing), one Esc now
+  closes the thread or dialog; before, the first Esc only closed the tooltip.
+- Phone: in the drawing sheet every tool and ink is a full 44 px target; the tools are on one line and the inks, Undo and Clear on
+  the next. In the journey bar each step has a 44 px target around its dot, and a journey with many steps scrolls sideways inside
+  the bar.
+- "Fix ready on branch" wears the attention colour everywhere, the same as on the toolbar: it waits for you to apply it.
+- `shapewall settings` exits cleanly (code 0, after cleaning up) when it is stopped the moment it starts. Before, a Ctrl-C or a
+  script's signal that arrived right as it printed its address could kill it outright.
+
 ## 0.3.3 - 2026-11-11
 
 - Commenting goes one step at a time, and the board always says which step you are at. Pick: in comment mode the element under the

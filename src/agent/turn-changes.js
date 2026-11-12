@@ -6,7 +6,9 @@
 // or files that usually hold secrets, never through a symlink). After the
 // turn it compares: the files that were added, changed or deleted, each with
 // its +/- counts and a bounded diff, and an undo record kept in this
-// process's memory only. Nothing read here goes to the model or to a log;
+// process's memory only. Files Git ignores are not the agent's work and are
+// left out entirely (see ignoredPaths below): never read, listed, counted or
+// undone. Nothing read here goes to the model or to a log;
 // the stored summary holds diffs of the changed text files only, and never
 // of a file that looks like it holds secrets.
 //
@@ -32,6 +34,8 @@ import { diffForCard } from './text-diff.js'
 import { AGENT_AUTHOR, git, readEntry } from './starter/worktree.js'
 
 const SKIP = new Set(['.git', 'node_modules', 'dist', 'build', '.next', '.cache', 'coverage', '.output', '.shapewall'])
+// Shapewall's own folders, whatever they are called (.shapewall, .shapewall-export, ...).
+const skipped = (name) => SKIP.has(name) || name.startsWith('.shapewall')
 export const ENTRIES_MAX = 30000
 export const FILE_KEEP_MAX = 1024 * 1024
 export const BASELINE_BYTES_MAX = 32 * 1024 * 1024
@@ -65,9 +69,53 @@ function readFile(full, stat) {
   }
 }
 
+// What Git ignores in the project folder right now, by the working tree's own
+// rules: .gitignore files as they are on disk (committed or not),
+// .git/info/exclude and the person's global excludes. Another process on the
+// machine often writes there during a turn (a dev server's data, logs, a
+// cache): those files are not the agent's, so they are never listed or
+// counted, and above all never touched by Undo, which would otherwise
+// delete or roll back somebody else's data.
+// Returns { files: Set, dirs: Set } of paths relative to the project folder
+// (directories end in "/"), or null when Git cannot say: the folder is not
+// in a repository, or the folder itself is ignored by the repository around
+// it (then Git's rules say nothing useful about what is inside). Tracked
+// files are never "ignored", whatever .gitignore says.
+export async function ignoredPaths(dir) {
+  try {
+    const inside = await git(['check-ignore', '-q', '.'], { cwd: dir, timeoutMs: 10000, status: true })
+    // 1: not ignored. 0: the folder itself is ignored. 128: not a repository.
+    if (inside.code !== 1) return null
+    const out = await git(['ls-files', '--others', '--ignored', '--exclude-standard', '--directory', '-z'], { cwd: dir, timeoutMs: 20000 })
+    const ignored = { files: new Set(), dirs: new Set() }
+    for (const item of out.split('\0')) {
+      if (!item || item.startsWith('../')) continue
+      if (item.endsWith('/')) ignored.dirs.add(item)
+      else ignored.files.add(item)
+    }
+    return ignored
+  } catch {
+    return null
+  }
+}
+
+// Whether `rel` (a file) is ignored: itself, or any folder above it.
+export function isIgnored(ignored, rel) {
+  if (!ignored) return false
+  if (ignored.files.has(rel)) return true
+  const parts = rel.split('/')
+  let prefix = ''
+  for (let index = 0; index < parts.length - 1; index += 1) {
+    prefix += `${parts[index]}/`
+    if (ignored.dirs.has(prefix)) return true
+  }
+  return false
+}
+
 // The project's files: rel -> { stamp, mode, data? }. `keep`: read content
-// (bounded) for the files that may need restoring.
-export function scanProject(config, { keep = false, bytesMax = BASELINE_BYTES_MAX, entriesMax = ENTRIES_MAX } = {}) {
+// (bounded) for the files that may need restoring. `ignored` (ignoredPaths):
+// what Git ignores, skipped without being read or counted.
+export function scanProject(config, { keep = false, bytesMax = BASELINE_BYTES_MAX, entriesMax = ENTRIES_MAX, ignored = null } = {}) {
   const files = new Map()
   let visited = 0
   let bytes = 0
@@ -86,12 +134,15 @@ export function scanProject(config, { keep = false, bytesMax = BASELINE_BYTES_MA
         incomplete = true
         return
       }
-      if (entry.isSymbolicLink() || SKIP.has(entry.name)) continue
+      if (entry.isSymbolicLink() || skipped(entry.name)) continue
       const full = path.join(dir, entry.name)
+      const relPath = path.relative(config.dir, full).split(path.sep).join('/')
       if (entry.isDirectory()) {
+        if (ignored?.dirs.has(`${relPath}/`)) continue
         walk(full)
         continue
       }
+      if (ignored?.files.has(relPath)) continue
       if (!entry.isFile()) continue
       let stat
       try {
@@ -180,8 +231,10 @@ function fileEntry(rel, status, before, after, budget) {
 
 // Taken before an owner's turn. `comments`: the board's comments now.
 export async function beginTurnChanges(config, { comments = [], files = true } = {}) {
+  const ignored = files ? await ignoredPaths(config.dir) : null
   return {
-    scan: files ? scanProject(config, { keep: true }) : null,
+    ignored,
+    scan: files ? scanProject(config, { keep: true, ignored }) : null,
     head: files ? await gitHead(config.dir) : null,
     statuses: new Map(comments.map((comment) => [comment.id, comment.status])),
   }
@@ -211,11 +264,16 @@ export async function finishTurnChanges(
   let undoReason = null
   let commit = null
   if (baseline.scan) {
-    const after = scanProject(config)
+    // Ignored now or when the turn began: either way not the agent's to
+    // list or undo. (A file the turn itself made ignored, by editing
+    // .gitignore, would otherwise show as deleted.)
+    const ignored = await ignoredPaths(config.dir)
+    const after = scanProject(config, { ignored })
     const before = baseline.scan.files
     const budget = { files: 0, bytes: 0 }
     const paths = [...new Set([...before.keys(), ...after.files.keys()])].sort()
     for (const rel of paths) {
+      if (isIgnored(ignored, rel) || isIgnored(baseline.ignored, rel)) continue
       const was = before.get(rel)
       const now = after.files.get(rel)
       if (was && now && was.stamp === now.stamp) continue
@@ -316,14 +374,18 @@ const cleanRel = (rel) =>
   !rel.startsWith('/') &&
   !rel.includes('\\') &&
   !rel.includes('\0') &&
-  rel.split('/').every((part) => part && part !== '.' && part !== '..' && !SKIP.has(part))
+  rel.split('/').every((part) => part && part !== '.' && part !== '..' && !skipped(part))
 
 // Restores the files of an undo record, all or nothing. Returns the paths.
-export function undoFiles(config, record) {
+// `ignored` (ignoredPaths, read by the caller right before): a last check
+// that nothing Git ignores is about to be written or removed.
+export function undoFiles(config, record, { ignored = null } = {}) {
   const root = config.dir
   const files = record?.files || []
   if (!files.length) throw new AgentError('undo_unavailable', 'There is nothing to undo.', 409)
   for (const item of files) {
+    if (isIgnored(ignored, item.path))
+      throw new AgentError('undo_unavailable', `${item.path} is ignored by Git, so it is not the agent's to undo. Nothing was undone.`, 409)
     if (!cleanRel(item.path)) throw new AgentError('undo_unavailable', 'This change cannot be undone here.', 409)
     const current = readEntry(root, item.path)
     if (current.kind === 'refused' || (current.kind === 'entry' && current.mode === '120000'))

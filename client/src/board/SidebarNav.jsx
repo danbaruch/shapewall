@@ -37,7 +37,8 @@ export function SidebarNav({ groups, journeys = [], comments, activePage, journe
   const [tab, setTab] = useState(savedTab)
   const total = groups.reduce((sum, item) => sum + item.pages.length, 0)
   // No journeys and none can be made here: the page tree alone, as before.
-  if (!journeys.length && !canEditJourneys) return <PagesTree groups={groups} comments={comments} activePage={activePage} onPage={onPage} />
+  if (!journeys.length && !canEditJourneys)
+    return <PagesTree groups={groups} comments={comments} activePage={activePage} onPage={onPage} filter={false} />
   const choose = (value) => {
     setTab(value)
     try {

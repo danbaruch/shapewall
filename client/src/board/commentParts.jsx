@@ -85,7 +85,9 @@ const AGENT_LABELS = {
   done: { label: 'Agent done', tone: 'ok' },
   'needs-human': { label: 'Needs a person', tone: 'warn' },
   // Agent branch mode: the fix is committed on a branch, not in the checkout yet.
-  'branch-ready': { label: 'Fix ready on branch', tone: 'accent' },
+  // It waits on a person (Apply), so it wears the attention colour, like "Needs a person"
+  // and like the toolbar's agent activity mark.
+  'branch-ready': { label: 'Fix ready on branch', tone: 'warn' },
 }
 
 // `branch`: the branch a branch-ready fix waits on (local boards know it).
