@@ -240,8 +240,17 @@ export async function startTailnet(name, { funnel = false, signIn = true, signup
   }
 }
 
-// GET /auth/me as the console asks it (a page of this origin).
-export const me = (browser) => browser.get('/auth/me', { headers: { 'Sec-Fetch-Site': 'same-origin' } })
+// GET /auth/me as a page of this origin asks it. Never makes a session.
+export const askMe = (browser) => browser.get('/auth/me', { headers: { 'Sec-Fetch-Site': 'same-origin' } })
+
+// What the console does on every page (client/src/console/state.jsx): GET /auth/me, and for a linked tailnet
+// login ('linked') POST /auth/tailnet/sign-in once, then GET /auth/me again.
+export async function me(browser) {
+  const first = await askMe(browser)
+  if (first.json?.user || first.json?.tailnet?.state !== 'linked') return first
+  const signedIn = await browser.post('/auth/tailnet/sign-in', {}, { headers: { 'Sec-Fetch-Site': 'same-origin' } })
+  return signedIn.status === 200 ? askMe(browser) : first
+}
 
 // fetch for the command line in tests: requests to the tailnet origin go to a device's proxy.
 export function fetchThrough(deviceOrPort, origin = TAILNET_ORIGIN) {

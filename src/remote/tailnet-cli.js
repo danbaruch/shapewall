@@ -10,7 +10,8 @@
 // How: the CLI asks the server who it is (GET /auth/me). Tailscale's serve
 // proxy adds the identity of the machine's user to the request; the server
 // believes it only on a request that provably came through that proxy
-// (src/hosted/tailnet-identity.js), signs the linked account in and sets a
+// (src/hosted/tailnet-identity.js) and answers 'linked'. The CLI then signs in
+// (POST /auth/tailnet/sign-in; a GET never makes a session) and is given a
 // session cookie that works only together with that identity. The CLI then
 // uses the same console API the browser uses, with that session: the same
 // role checks, the same audit entries (marked as a tailnet session), and it
@@ -115,8 +116,16 @@ export async function whoAmI(client) {
   } catch {
     return { mode: 'off' }
   }
-  const me = answer.data
+  let me = answer.data
   if (!answer.ok || !me || typeof me !== 'object') return { mode: 'off' }
+  // A linked login: the server makes the session only for an explicit sign-in, never for the GET.
+  if (!me.user && me.tailnet?.state === 'linked') {
+    const signedIn = await client.post('/auth/tailnet/sign-in', {}).catch(() => null)
+    if (!signedIn?.ok) return { mode: 'none' }
+    const again = await client.get('/auth/me').catch(() => null)
+    if (!again?.ok || !again.data || typeof again.data !== 'object') return { mode: 'none' }
+    me = again.data
+  }
   if (me.user && me.via === 'tailnet') return { mode: 'account', login: terminalSafe(me.tailnet?.linked || ''), me }
   const state = me.tailnet?.state
   if (state === 'unknown' || state === 'invited')

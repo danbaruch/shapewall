@@ -29,7 +29,19 @@ import { selfFromStatus, systemdMainPid } from '../src/tailnet-proof.js'
 import { handleFromLogin } from '../src/hosted/tailnet.js'
 import { createProject, invite, reauth, signUp } from './hosted-helpers.js'
 import { tempDir } from './helpers.js'
-import { TAILNET_HOST, TAILNET_ORIGIN, fakeTailscale, me, plainFacts, qEncode, startTailnet, tailnetUserId } from './tailnet-helpers.js'
+import { TAILNET_SESSIONS } from '../src/hosted/tailnet-routes.js'
+import { tailnetClient, whoAmI } from '../src/remote/tailnet-cli.js'
+import {
+  TAILNET_HOST,
+  TAILNET_ORIGIN,
+  fakeTailscale,
+  fetchThrough,
+  me,
+  plainFacts,
+  qEncode,
+  startTailnet,
+  tailnetUserId,
+} from './tailnet-helpers.js'
 
 const servers = []
 after(async () => {
@@ -1097,8 +1109,8 @@ test('duplicate, conflicting, empty and oddly encoded headers name nobody, even 
   const raw = rawDevice.browser()
   const ask = async (headers) => (await raw.get('/auth/me', { headers: { 'Sec-Fetch-Site': 'same-origin', ...headers } })).json
   assert.equal(
-    (await ask({ 'Tailscale-User-Login': 'ada@example.com' })).user.handle,
-    'ada',
+    (await ask({ 'Tailscale-User-Login': 'ada@example.com' })).tailnet.state,
+    'linked',
     'the control: one clean header is believed here',
   )
   for (const [label, headers] of [
@@ -1119,7 +1131,9 @@ test('duplicate, conflicting, empty and oddly encoded headers name nobody, even 
   }
   // Encoded as Tailscale encodes: the login is still the login, the name is decoded.
   const ok = await ask({ 'Tailscale-User-Login': '=?utf-8?q?ada=40example.com?=', 'Tailscale-User-Name': qEncode('Adá') })
-  assert.equal(ok.user.handle, 'ada')
+  assert.equal(ok.tailnet.state, 'linked')
+  assert.equal(ok.tailnet.login, 'ada@example.com')
+  assert.equal(ok.tailnet.name, 'Adá')
   // Another login than the one tailscaled says owns that address: nobody.
   const other = await ask({ 'Tailscale-User-Login': 'dee@example.com', 'Tailscale-User-Name': 'Dee' })
   assert.equal(other.tailnet.state, 'none')
@@ -1967,4 +1981,54 @@ test('an account is held to the tailnet user it was linked for, not to a login t
   await reauth(ada)
   assert.equal((await call(ada.browser, 'DELETE', '/auth/tailnet/link')).status, 200)
   assert.equal(server.db.prepare("SELECT tailnet_user_id FROM users WHERE handle = 'ada'").get().tailnet_user_id, null)
+})
+
+test('GET /auth/me never makes a session: the console and the CLI sign in with a POST, and a loop cannot pile sessions up', async () => {
+  const server = await tailnet('tailnet-me-no-session')
+  const adaDevice = await server.device(ADA)
+  const ada = await claimWithPasskey(server, adaDevice)
+  const tailnetSessions = () =>
+    server.db.prepare('SELECT COUNT(*) AS n FROM sessions WHERE user_id = ? AND tailnet_login IS NOT NULL').get(ada.user.id).n
+  assert.equal(tailnetSessions(), 0)
+  // A script without cookies asking again and again (the live-test curl loop): never a session, never a cookie.
+  for (let i = 0; i < 7; i += 1) {
+    const asked = await adaDevice.browser().get('/auth/me', { headers: { 'Sec-Fetch-Site': 'same-origin' } })
+    assert.equal(asked.status, 200)
+    assert.equal(asked.json.user, null)
+    assert.equal(asked.json.tailnet.state, 'linked')
+    assert.equal(asked.json.tailnet.login, 'ada@example.com')
+    assert.equal(asked.headers['set-cookie'], undefined, 'a GET sets no cookie')
+  }
+  assert.equal(tailnetSessions(), 0, 'seven cookieless GETs made no session')
+
+  // The browser path (client/src/console/state.jsx): GET says 'linked', one POST signs in.
+  const browser = adaDevice.browser()
+  const signedIn = await me(browser)
+  assert.equal(signedIn.json.user.handle, 'ada')
+  assert.equal(signedIn.json.via, 'tailnet')
+  assert.equal(tailnetSessions(), 1)
+  // Every later page of that browser reuses its session.
+  for (let i = 0; i < 5; i += 1) assert.equal((await me(browser)).json.user.handle, 'ada')
+  assert.equal(tailnetSessions(), 1)
+
+  // The CLI path (src/remote/tailnet-cli.js whoAmI): the same, then it signs out when the command ends.
+  const client = tailnetClient(TAILNET_ORIGIN, { fetchImpl: fetchThrough(adaDevice), machine: 'laptop' })
+  const who = await whoAmI(client)
+  assert.equal(who.mode, 'account')
+  assert.equal(who.login, 'ada@example.com')
+  assert.equal(tailnetSessions(), 2)
+  await client.signOut()
+  assert.equal(tailnetSessions(), 1)
+
+  // Even an explicit sign-in in a loop keeps at most TAILNET_SESSIONS for the login; the newest still works.
+  let last = null
+  for (let i = 0; i < TAILNET_SESSIONS + 5; i += 1) {
+    last = adaDevice.browser()
+    const posted = await last.post('/auth/tailnet/sign-in', {})
+    assert.equal(posted.status, 200, posted.text)
+  }
+  assert.equal(tailnetSessions(), TAILNET_SESSIONS)
+  assert.equal((await me(last)).json.user.handle, 'ada')
+  // A passkey session of the account is not counted and not touched.
+  assert.equal((await ada.browser.get('/auth/me')).json.user.handle, 'ada')
 })

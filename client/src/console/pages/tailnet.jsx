@@ -64,13 +64,19 @@ export function TailnetArrival({ tailnet, signup, onSignedIn, passkeysOff = fals
         {passkeysOff ? 'Open it from one of your own tailnet devices.' : 'Sign in with a passkey instead.'}
       </Notice>
     )
-  if (tailnet.state === 'signed_out')
+  if (tailnet.state === 'signed_out' || tailnet.state === 'linked')
     return (
-      <div className="mt-4 space-y-3" data-sw-tailnet="signed_out">
-        <Notice tone="info" title="You signed out on this browser">
-          Your tailnet still says you are <span className="font-medium text-fg">{tailnet.login}</span>, and arriving here would sign you
-          straight back in. So this browser stays signed out until you continue.
-        </Notice>
+      <div className="mt-4 space-y-3" data-sw-tailnet={tailnet.state}>
+        {tailnet.state === 'linked' ? (
+          <Notice tone="info" title={`You arrive as ${tailnet.login}`}>
+            Your tailnet login is linked to an account here. Continue to sign in with it.
+          </Notice>
+        ) : (
+          <Notice tone="info" title="You signed out on this browser">
+            Your tailnet still says you are <span className="font-medium text-fg">{tailnet.login}</span>, and arriving here would sign you
+            straight back in. So this browser stays signed out until you continue.
+          </Notice>
+        )}
         <Button
           variant="default"
           size="touch"

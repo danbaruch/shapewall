@@ -1,8 +1,9 @@
 // Tailnet sign-in, the routes (src/hosted/tailnet.js has the rules, and
 // src/hosted/tailnet-identity.js the trust in the headers).
 //
-//   GET  /auth/me                 (auth-routes.js asks the helpers here)
-//   POST /auth/tailnet/sign-in    "Continue as <login>" after a sign-out
+//   GET  /auth/me                 (auth-routes.js asks the helpers here; never makes a session)
+//   POST /auth/tailnet/sign-in    the only way a linked login gets a session: the console and the
+//                                 CLI send it when /auth/me says 'linked', a person after a sign-out
 //   POST /auth/tailnet/join       a first visit: the account, and its invites
 //   POST /auth/tailnet/link       link my account to the login I arrive with
 //   DELETE /auth/tailnet/link     unlink it
@@ -29,6 +30,8 @@ import { tailnetOutCookie } from './tailnet.js'
 import { auditAccount, findInviteByHash, findInvitesForTailnetLogin, inviteUsable, roleIn, seenDevice, tenant } from './tenancy.js'
 
 const OUT_DAYS = 30
+// Live tailnet sessions an account keeps per login (each browser and each CLI run is one).
+export const TAILNET_SESSIONS = 20
 const OWN_MACHINE =
   'This is the server’s own machine: a tailnet identity is never taken from here, because any program on this machine could ask the same way. Use a passkey, or another tailnet device.'
 
@@ -94,6 +97,14 @@ export function mountTailnetAuth(authRouter, deps) {
     const device = deviceLabel(req.headers['user-agent'])
     const ip = clientIp(req)
     const token = auth.createSession(user.id, { via: 'tailnet', tailnetLogin: identity.login, device, ip })
+    // A client that signs in again and again (a script in a loop) never piles up sessions: an account keeps its
+    // newest TAILNET_SESSIONS for a login, and the oldest beyond that end.
+    q.run(
+      `DELETE FROM sessions WHERE token_hash IN (
+         SELECT token_hash FROM sessions WHERE user_id = :user AND tailnet_login = :login
+         ORDER BY last_seen_at DESC, created_at DESC LIMIT -1 OFFSET :keep)`,
+      { user: user.id, login: identity.login, keep: TAILNET_SESSIONS },
+    )
     setCookie(res, SESSION_COOKIE, token, 30 * 86400)
     setCookie(res, CEREMONY_COOKIE, '', 0)
     setCookie(res, OUT_COOKIE, '', 0)
@@ -109,17 +120,6 @@ export function mountTailnetAuth(authRouter, deps) {
     return req.auth
   }
 
-  // GET /auth/me without a session: signs a linked login in (unless this
-  // browser signed out), or says what a visitor's login may do here.
-  // Returns true when the request is signed in now.
-  function autoSignIn(req, res) {
-    const identity = sameOrigin(req) ? identityOf(req) : null
-    if (!identity || signedOutHere(req)) return false
-    const user = tailnetAccounts.accountOf(identity)
-    if (!user) return false
-    signIn(req, res, user, identity)
-    return true
-  }
   function anonInfo(req) {
     if (!on) return {}
     const identity = sameOrigin(req) ? identityOf(req) : null
@@ -131,7 +131,10 @@ export function mountTailnetAuth(authRouter, deps) {
     // The login is linked here, but for another tailnet user than this one: nobody, and the page says why.
     if (tailnetAccounts.heldByAnother(identity))
       return { tailnet: { state: 'changed', login: identity.login, fix: relinkCommand(identity.login) } }
-    if (tailnetAccounts.userFor(identity.login)) return { tailnet: { state: 'signed_out', login: identity.login, name: identity.name } }
+    // A linked login: GET never signs in (it makes no session). 'linked' says the client may sign in now with
+    // POST /auth/tailnet/sign-in; 'signed_out' says this browser signed out and waits for "Continue as ...".
+    if (tailnetAccounts.userFor(identity.login))
+      return { tailnet: { state: signedOutHere(req) ? 'signed_out' : 'linked', login: identity.login, name: identity.name } }
     const invites = usableInvites(identity.login).map((row) => ({ workspace: row.workspace_name, role: row.role }))
     // Listed for the admins until someone invites it (or it stops coming).
     if (!invites.length) tailnetAccounts.noteVisitor(identity)
@@ -169,9 +172,11 @@ export function mountTailnetAuth(authRouter, deps) {
     }
   }
 
+  // Its own bucket, per login: the console sends it on arrival, so it must not use up the passkey ceremonies of
+  // everyone behind the same proxy address.
   authRouter.post(
     '/tailnet/sign-in',
-    limit('ceremony'),
+    limit('tailnetSignIn', (req) => identityOf(req)?.login || clientIp(req)),
     handle(async (req, res) => {
       const identity = arrived(req)
       if (tailnetAccounts.heldByAnother(identity)) throw new HttpError(403, 'tailnet_user_changed', userChanged(identity.login))
@@ -301,7 +306,7 @@ export function mountTailnetAuth(authRouter, deps) {
   const markSignedOut = (res) => setCookie(res, OUT_COOKIE, '1', OUT_DAYS * 86400)
   const clearSignedOut = (res) => setCookie(res, OUT_COOKIE, '', 0)
 
-  return { on, identityOf, autoSignIn, anonInfo, memberInfo, markSignedOut, clearSignedOut }
+  return { on, identityOf, anonInfo, memberInfo, markSignedOut, clearSignedOut }
 }
 
 // The admins' side: who arrived and belongs to nobody. Inviting one is an

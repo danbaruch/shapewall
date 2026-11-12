@@ -342,7 +342,9 @@ The last three arrive from a socket that tailscaled owns. So no single check is 
 6. **The request is from this origin.** The proxy adds the identity to every request a device makes, also one that a page on
    another site made the browser send. So the identity alone only answers `GET /auth/me` with `Sec-Fetch-Site: same-origin`
    and the `POST /auth/tailnet/*` routes (same-origin and JSON, as for every write). Everything else needs the session cookie
-   as before.
+   as before. `GET /auth/me` never makes a session: for a linked login it answers `"tailnet":{"state":"linked"}`, and the
+   console and the command line then sign in with `POST /auth/tailnet/sign-in` (rate limited per login). An account keeps at
+   most 20 tailnet sessions per login; signing in again past that ends the oldest.
 
 **The feature refuses to turn on, and the server does not start,** when the peer check would not mean what it must. While the
 server runs the same is checked every 30 seconds, and nobody is signed in by tailnet identity until it is right again (tailnet
@@ -518,7 +520,7 @@ another person. Nothing here changes any setting except starting the server.
    own machine". `curl -s https://<name>.ts.net/auth/me -H 'Sec-Fetch-Site: same-origin'` there answers
    `"tailnet":{"state":"self"}`. If it signs you in, stop and report it.
 6. **Forge it.** On the server's machine: `curl -s http://127.0.0.1:<port>/auth/me -H 'Tailscale-User-Login: <your login>'
--H 'Sec-Fetch-Site: same-origin'` must answer `"user":null`, and so must the same request with the `/_ts/<secret>` path
+-H 'Sec-Fetch-Site: same-origin'` must answer `"user":null` and never `"state":"linked"` (a `GET` makes no session anywhere; `linked` would mean the forged login was believed), and so must the same request with the `/_ts/<secret>` path
    from the serve config in front and `-H 'X-Forwarded-For: <your second device's tailnet address>'`. The server log has
    "ignored identity headers" with the check that failed (the connection did not come from tailscaled).
 7. **A tagged device, and another person's device,** if you have them: the first sees "Your tailnet did not say who you

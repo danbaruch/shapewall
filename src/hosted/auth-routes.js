@@ -306,9 +306,10 @@ export function mountAuthRoutes(authRouter, deps) {
   authRouter.get(
     '/me',
     // Signed out is an answer here, not an error (the console asks on every page).
+    // A GET makes no session: a linked tailnet login is answered 'linked', and the client signs in with
+    // POST /auth/tailnet/sign-in (tailnet-routes.js).
     (req, res, next) =>
-      // A tailnet login that is linked to an account is signed in here.
-      sessionOf(req) || (tailnet.on && tailnet.autoSignIn(req, res))
+      sessionOf(req)
         ? next()
         : res.json({
             user: null,

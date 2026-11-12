@@ -19,7 +19,13 @@ export function SessionProvider({ children }) {
   const [state, setState] = useState({ me: null, anon: null, loading: true, error: null })
   const refresh = useCallback(async () => {
     try {
-      const me = await api.get('/auth/me')
+      let me = await api.get('/auth/me')
+      // A tailnet login linked to an account: GET /auth/me never signs in, so the console asks for the
+      // session with a POST, once. If that fails, the sign-in page shows "Continue as ...".
+      if (!me.user && me.tailnet?.state === 'linked') {
+        const signedIn = await api.post('/auth/tailnet/sign-in', {}).catch(() => null)
+        if (signedIn?.user) me = await api.get('/auth/me')
+      }
       setState({ me: me.user ? me : null, anon: me.user ? null : me, loading: false, error: null })
       return me.user ? me : null
     } catch (error) {
