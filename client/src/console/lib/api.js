@@ -7,6 +7,14 @@ import { ApiError, settingsTokenHeaders } from '../../lib/api.js'
 
 export { ApiError }
 
+// What the person typed to confirm one of the few things that always ask, on a server where Tailscale is
+// the only sign-in (the server answers confirm_required with what to type). Sent with the requests of the
+// action being retried, then cleared (state.jsx).
+let confirmed = null
+export const setConfirmed = (value) => {
+  confirmed = value || null
+}
+
 export async function call(method, url, body) {
   let response
   try {
@@ -18,6 +26,7 @@ export async function call(method, url, body) {
         ...(typeof document !== 'undefined' && document.querySelector('meta[name="shapewall-local-accounts"]') && url.startsWith('/auth/')
           ? settingsTokenHeaders()
           : {}),
+        ...(confirmed ? { 'X-Shapewall-Confirm': encodeURIComponent(confirmed) } : {}),
       },
       body: body === undefined ? undefined : JSON.stringify(body),
       cache: 'no-store',
@@ -42,7 +51,14 @@ export async function call(method, url, body) {
         retryAfter: response.status === 429 && retry > 0 ? retry : null,
         stepUp: data?.error?.stepUp || null,
         // confirm_device: the device the server sees, to name in the question.
-        details: data?.error?.device ? { device: String(data.error.device) } : null,
+        // confirm_required: what to type (a workspace's name, or your handle), and which of the two.
+        details:
+          data?.error?.device || data?.error?.confirm
+            ? {
+                ...(data.error.device ? { device: String(data.error.device) } : {}),
+                ...(data.error.confirm ? { confirm: String(data.error.confirm), confirms: data.error.confirms || null } : {}),
+              }
+            : null,
       },
     )
   }

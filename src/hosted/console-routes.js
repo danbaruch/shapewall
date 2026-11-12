@@ -104,6 +104,7 @@ export function mountConsoleRoutes(consoleApi, deps) {
     agentsFor,
     tailnet = null,
     tailnetAccounts = null,
+    passkeys = null,
   } = deps
   // Making, changing or removing an owner always asks for the passkey; the
   // same for an admin when the workspace asks for it ("Members and roles").
@@ -200,6 +201,8 @@ export function mountConsoleRoutes(consoleApi, deps) {
           guestSessions: true,
           // Invites for a tailnet login, and the list of tailnet visitors.
           tailnetSignIn: Boolean(tailnet),
+          // false: Tailscale is the only sign-in here (no passkeys, so nothing in "Ask for a passkey again" applies).
+          passkeys: passkeys ? passkeys.on() : true,
         },
       })
     }),

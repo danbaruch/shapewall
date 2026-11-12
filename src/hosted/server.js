@@ -99,6 +99,8 @@ export async function startHosted({
   // that a connection comes from tailscaled, and `tailnetFacts` what the
   // machine says about tailscaled (tests).
   tailnetSignIn = false,
+  // With tailnet sign-in: also allow passkeys (--tailnet-passkeys). Off by default: Tailscale is the sign-in.
+  tailnetPasskeys = false,
   tailnetProof = null,
   tailnetFacts = null,
   quotasFile = null,
@@ -228,6 +230,12 @@ export async function startHosted({
         // while it is not so.
         const first = await served.verify()
         if (first) throw refuse(`${first}.`)
+        out(
+          tailnetPasskeys
+            ? 'Sign-in: your Tailscale account, and passkeys for accounts that add one (--tailnet-passkeys).'
+            : 'Sign-in: your Tailscale account, on every tailnet device of yours. No passkeys (shapewall hosted admin passkeys on turns them on).',
+        )
+        out('This machine itself is never signed in by its tailnet identity: use another tailnet device, or shapewall hosted admin here.')
         gate = proofModule.createTailnetGate({
           secret: serveSecret,
           proof,
@@ -283,6 +291,7 @@ export async function startHosted({
       previousOrigin,
       mailer: mailer.configured ? mailer : null,
       tailnet: gate,
+      tailnetPasskeys,
     })
     if (gate) {
       // A WebSocket upgrade does not pass through the handler above: it is

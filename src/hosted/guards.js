@@ -16,6 +16,7 @@ import { CommentError } from '../store.js'
 import { FIXED_CORE, STEP_UP_GROUP_BEFORE, stepUpWindowLabel } from './step-up.js'
 import { stepUpSettings } from './step-up-settings.js'
 import { sessionReader } from './tailnet.js'
+import { PASSKEYS_OFF_MESSAGE, isPasskeyRoute } from './passkey-policy.js'
 
 const ACTIVE_EVERY_MS = 5 * 60_000
 
@@ -34,6 +35,8 @@ export function createGuards({
   log,
   // Tailnet sign-in ({ identityOf(req) }, src/hosted/tailnet-identity.js), or null.
   tailnet = null,
+  // Whether passkeys exist on this server ({ on() }, src/hosted/passkey-policy.js).
+  passkeys = { on: () => true },
 }) {
   const clientIp = (req) => (trustProxy ? req.ip : req.socket.remoteAddress) || 'unknown'
   const setCookie = (res, name, value, maxAgeSeconds) => {
@@ -56,7 +59,46 @@ export function createGuards({
     if (req.sessionChecked) return req.auth
     req.sessionChecked = true
     req.auth = readSession(req, parseCookies(req.headers.cookie)[SESSION_COOKIE]) || null
+    // With passkeys off (a tailnet sign-in server, the default there) only the tailnet signs anyone in:
+    // a session a passkey or a recovery code started, from before they were switched off, does not count.
+    if (req.auth && req.auth.session.via !== 'tailnet' && !passkeys.on()) req.auth = null
     return req.auth
+  }
+  // Passkey routes on a server where passkeys are off: a clear answer, before anything else looks at them.
+  const passkeysGate = (req, res, next) =>
+    isPasskeyRoute(req.path) && !passkeys.on() ? fail(res, 403, 'passkeys_off', PASSKEYS_OFF_MESSAGE) : next()
+  // ---- The fixed core without passkeys: a typed confirmation ----
+  //
+  // On a tailnet sign-in server with passkeys off, a session is a proven
+  // tailnet identity and there is nothing stronger to ask for. The tailnet
+  // is the trust boundary: anything running as the person on one of their
+  // tailnet devices can act as them, and no prompt here changes that. What
+  // the fixed core still gives is deliberateness: the request must name what
+  // it is about, typed by the person (the console's dialog) or passed with
+  // --yes on the command line. The name is the workspace's for something in
+  // a workspace, the account's handle otherwise; the request carries it in
+  // X-Shapewall-Confirm (URI-encoded). Stateless: every such request says it.
+  const tailnetOnly = (req) => req.auth.session.via === 'tailnet' && !passkeys.on()
+  const CONFIRM_HEADER = 'x-shapewall-confirm'
+  function confirmRefusal(req, workspaceId = null) {
+    const ws = workspaceId || req.t?.workspaceId || null
+    const name = ws ? tenant(db, ws).get('SELECT name FROM workspaces WHERE workspace_id = :ws')?.name : null
+    const phrase = name || req.auth.user.handle
+    let said = ''
+    try {
+      said = decodeURIComponent(String(req.headers[CONFIRM_HEADER] || '')).trim()
+    } catch {
+      said = ''
+    }
+    if (said && said === String(phrase).trim()) return null
+    return new HttpError(
+      403,
+      'confirm_required',
+      name
+        ? 'Type the workspace’s name, ' + phrase + ', to confirm. Shapewall always asks before this.'
+        : 'Type your handle, ' + phrase + ', to confirm. Shapewall always asks before this.',
+      { stepUp: 'always', confirm: phrase, confirms: name ? 'workspace' : 'account' },
+    )
   }
 
   // Cookie-authenticated writes: JSON only, from this origin.
@@ -100,6 +142,9 @@ export function createGuards({
   // is told to add a passkey first (`passkey_required`), never let through.
   const noPasskey = (req) => req.auth.session.via === 'tailnet' && auth.passkeyCount(req.auth.user.id) === 0
   function notFresh(req, windowMs, message, extra) {
+    // No passkeys on this server: the fixed core asks for a typed confirmation, and nothing else asks
+    // (a workspace's "Ask for a passkey again" groups have nothing to ask for; the card is not shown).
+    if (tailnetOnly(req)) return extra?.stepUp === 'always' ? confirmRefusal(req, extra.workspaceId) : null
     if (auth.isFresh(req.auth.session, windowMs)) return null
     if (noPasskey(req)) {
       const lead = extra.stepUp === 'always' ? 'This always needs a passkey' : 'This needs a passkey here'
@@ -114,12 +159,13 @@ export function createGuards({
   }
   const CORE_MINUTES = Math.round(REAUTH_MS / 60000)
   // The fixed core: always, on every server.
-  const coreRefusal = (req) =>
+  // workspaceId: the workspace the request is about, when the route has not said yet (the table's middleware).
+  const coreRefusal = (req, workspaceId = null) =>
     notFresh(
       req,
       REAUTH_MS,
       'Confirm with your passkey first. Shapewall always asks before this (once every ' + CORE_MINUTES + ' minutes).',
-      { stepUp: 'always' },
+      { stepUp: 'always', ...(workspaceId ? { workspaceId } : {}) },
     )
   // Recovery-code sessions, and sessions of a passkey still on hold, keep
   // the strict rules for everything that ever asked for a passkey.
@@ -179,7 +225,10 @@ export function createGuards({
   // session; nothing a client sends changes it.
   const identityOnly = (req) => req.auth.session.via === 'tailnet' && !auth.isFresh(req.auth.session)
   const cliApprovalOrThrow = (req, t, message) => {
-    if (identityOnly(req) && stepUpSettings(t).get().cliApproval) throw notFresh(req, REAUTH_MS, message, { stepUp: 'cliApproval' })
+    if (identityOnly(req) && stepUpSettings(t).get().cliApproval) {
+      const error = notFresh(req, REAUTH_MS, message, { stepUp: 'cliApproval' })
+      if (error) throw error
+    }
     return identityOnly(req)
   }
   // Returns whether only an identity stands behind the session (for the audit entry).
@@ -264,7 +313,7 @@ export function createGuards({
       }
       if (line.first && (auth.canAddAfterRecovery(req.auth.session) || noPasskey(req))) continue
       if (line.held && removesHeldPasskey(req, param(match, line, 'id'))) continue
-      const error = coreRefusal(req)
+      const error = coreRefusal(req, line.params.includes('ws') ? param(match, line, 'ws') : null)
       if (error) return refuse(res, error)
     }
     next()
@@ -367,6 +416,8 @@ export function createGuards({
     needSession,
     needFresh,
     needFreshOrRecovery,
+    passkeysGate,
+    tailnetOnly,
     needFreshOrHeldRemoval,
     removesHeldPasskey,
     noPasskey,

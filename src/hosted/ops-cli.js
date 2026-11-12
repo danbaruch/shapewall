@@ -88,6 +88,7 @@ async function serve(flags, out) {
       trustProxy,
       tailscale,
       tailnetSignIn: Boolean(flags['tailnet-sign-in']) || env.SHAPEWALL_HOSTED_TAILNET_SIGN_IN === '1',
+      tailnetPasskeys: Boolean(flags['tailnet-passkeys']) || env.SHAPEWALL_HOSTED_TAILNET_PASSKEYS === '1',
       quotasFile: flags.quotas || env.SHAPEWALL_HOSTED_QUOTAS || null,
       retentionHours: intFlag(flags, 'retention-hours', { min: 0, max: 24 * 30, fallback: undefined }),
       retentionKeep: intFlag(flags, 'retention-keep', { min: 0, max: 100, fallback: undefined }),
@@ -179,8 +180,17 @@ const ADMIN_HELP = `shapewall hosted admin <command> --data DIR   (on the server
   retention WS --keep N|default   older versions kept per page and viewport
   retention WS --usage-days N|default   how long usage records are kept (400 days by default)
   retention --run [--dry-run]  prune now (the server also does it every 6 hours)
+  members list                 who is in the workspace, with roles
+  members add --login TAILNET_LOGIN | --handle HANDLE [--role ROLE]   put someone in, or change their role
+                               (a tailnet login with no account yet gets an invite only it can take)
+  members remove --login TAILNET_LOGIN | --handle HANDLE     take someone out; what they made to let others in is revoked
+  invites list | invites revoke ID
+  invites create --login TAILNET_LOGIN [--role ROLE] [--days N]   or a link: --link --origin https://the.server
+  projects list
+  passkeys status|on|off       on a server with tailnet sign-in: whether anyone may add a passkey (off by default)
   passkeys list --handle HANDLE | --login TAILNET_LOGIN      an account's passkeys (ids, where added, on hold)
   passkeys remove ID --handle HANDLE | --login TAILNET_LOGIN   remove one, also the last; ends the account's passkey sessions
+  --workspace ID               which workspace, when the server has several (members, invites, projects)
   log [--limit N]              the operator log
   --operator NAME              who you are in the operator log (default user@host)
   --json                       machine-readable output`
@@ -308,7 +318,116 @@ async function admin(positional, flags, out) {
         )
         return 0
       }
+      case 'members': {
+        const access = await import('./operator-access.js')
+        const where = { workspaceId: flags.workspace, operator }
+        if (!target || target === 'list') {
+          const result = access.listMembers(db, where)
+          if (flags.json) return json(result)
+          out(`${show(result.workspace.name)} (${result.workspace.id}):`)
+          for (const member of result.members)
+            out(
+              `  @${show(member.handle)}  ${member.role}  ${show(member.name)}` +
+                `${member.tailnetLogin ? `  tailnet ${show(member.tailnetLogin)}` : ''}${member.passkeys ? `  ${member.passkeys} passkey${member.passkeys === 1 ? '' : 's'}` : ''}`,
+            )
+          return 0
+        }
+        if (target === 'add') {
+          const result = access.addMember(db, { ...where, handle: flags.handle, login: flags.login, role: flags.role })
+          if (flags.json) return json(result)
+          if (result.invited)
+            return say(
+              `${show(result.invite.tailnetLogin)} has no account here yet: invited to ${show(result.workspace.name)} as ${result.invite.role}. ` +
+                'Only that tailnet login can take it: they open the server from one of their tailnet devices.',
+            )
+          return say(
+            result.changedFrom
+              ? `@${show(result.member.handle)} is now ${result.member.role} in ${show(result.workspace.name)} (was ${result.changedFrom}).`
+              : `@${show(result.member.handle)} is in ${show(result.workspace.name)} as ${result.member.role}.`,
+          )
+        }
+        if (target === 'remove') {
+          const result = access.removeMember(db, { ...where, handle: flags.handle, login: flags.login })
+          if (flags.json) return json(result)
+          const { invites, shares, tokens } = result.revoked
+          return say(
+            `Removed @${show(result.removed.handle)} (${result.removed.role}) from ${show(result.workspace.name)}. ` +
+              `Revoked: ${invites} invites, ${shares} share links, ${tokens} API tokens they made.`,
+          )
+        }
+        throw new ops.OperatorError('usage: hosted admin members list|add|remove --login TAILNET_LOGIN | --handle HANDLE [--role ROLE]')
+      }
+      case 'invites': {
+        const access = await import('./operator-access.js')
+        const where = { workspaceId: flags.workspace, operator }
+        if (!target || target === 'list') {
+          const result = access.listInvites(db, where)
+          if (flags.json) return json(result)
+          if (!result.invites.length) return say(`No open invites to ${show(result.workspace.name)}.`)
+          out(`Open invites to ${show(result.workspace.name)}:`)
+          for (const invite of result.invites)
+            out(
+              `  ${invite.id}  ${invite.role}  ${invite.tailnetLogin ? `for ${show(invite.tailnetLogin)}` : 'a link'}  until ${invite.expiresAt.slice(0, 16).replace('T', ' ')}`,
+            )
+          return 0
+        }
+        if (target === 'create') {
+          const result = access.createInvite(db, {
+            ...where,
+            login: typeof flags.login === 'string' ? flags.login : null,
+            origin: flags.link && typeof flags.origin === 'string' ? flags.origin : null,
+            role: flags.role,
+            days: flags.days === undefined ? 7 : Number(flags.days),
+          })
+          if (flags.json) return json(result)
+          if (result.url) {
+            out(`An invite to ${show(result.workspace.name)} as ${result.invite.role}. Whoever has this link can use it once:`)
+            return say(`  ${result.url}`)
+          }
+          return say(
+            `Invited ${show(result.invite.tailnetLogin)} to ${show(result.workspace.name)} as ${result.invite.role}. Only that tailnet login can take it.`,
+          )
+        }
+        if (target === 'revoke') {
+          const result = access.revokeInvite(db, { ...where, id: extra })
+          if (flags.json) return json(result)
+          return say(`Revoked the invite ${result.revoked}.`)
+        }
+        throw new ops.OperatorError('usage: hosted admin invites list | create --login TAILNET_LOGIN [--role ROLE] | revoke ID')
+      }
+      case 'projects': {
+        const access = await import('./operator-access.js')
+        if (target && target !== 'list') throw new ops.OperatorError('usage: hosted admin projects list')
+        const result = access.listProjects(db, { workspaceId: flags.workspace, operator })
+        if (flags.json) return json(result)
+        if (!result.projects.length) return say(`${show(result.workspace.name)} has no project yet.`)
+        out(`Projects in ${show(result.workspace.name)}:`)
+        for (const project of result.projects) out(`  ${show(project.slug)}  ${show(project.name)}  (${project.id})`)
+        return 0
+      }
       case 'passkeys': {
+        if (['on', 'off', 'status'].includes(target)) {
+          const access = await import('./operator-access.js')
+          const result = target === 'status' ? access.passkeysStatus(db) : access.setPasskeys(db, { on: target === 'on', operator })
+          if (flags.json) return json(result)
+          out(
+            result.setting === null
+              ? 'Passkeys on a tailnet sign-in server: not set here. They are off unless the server runs with --tailnet-passkeys.'
+              : result.setting
+                ? 'Passkeys are ON for a server with tailnet sign-in: an account may add a passkey, and one that has a passkey confirms with it.'
+                : 'Passkeys are OFF for a server with tailnet sign-in: the Tailscale account is the only sign-in, and nobody is asked for a passkey.',
+          )
+          out('A running server follows this at once. A server without --tailnet-sign-in always uses passkeys, whatever this says.')
+          if (result.setting === false && result.passkeyOnly)
+            out(
+              `${result.passkeyOnly} account${result.passkeyOnly === 1 ? ' is' : 's are'} not linked to a tailnet login: with passkeys off ${result.passkeyOnly === 1 ? 'it' : 'they'} cannot sign in.`,
+            )
+          if (result.setting === false && result.withPasskey)
+            out(
+              `${result.withPasskey} account${result.withPasskey === 1 ? ' has' : 's have'} a passkey; it is kept and not used while passkeys are off.`,
+            )
+          return 0
+        }
         const who = { handle: flags.handle, login: flags.login, operator }
         if (target === 'list') {
           const result = ops.listPasskeysOf(db, who)
@@ -340,7 +459,9 @@ async function admin(positional, flags, out) {
             )
           return 0
         }
-        throw new ops.OperatorError('usage: hosted admin passkeys list|remove ID --handle HANDLE | --login TAILNET_LOGIN')
+        throw new ops.OperatorError(
+          'usage: hosted admin passkeys status|on|off, or passkeys list|remove ID --handle HANDLE | --login TAILNET_LOGIN',
+        )
       }
       case 'log': {
         ops.recordOperatorRead(db, { action: 'log', operator })

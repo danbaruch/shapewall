@@ -124,11 +124,12 @@ function claimCommand({ dir, db, flags, out }) {
   out(
     'That login was taken from --login on your word; it was not checked against the tailnet. If it is wrong, delete the data folder and start again.',
   )
-  out('This machine itself is never signed in by its tailnet identity: here, use a passkey.')
-  out(
-    `No passkey was made. Add one in the browser (${origin}/account, from another tailnet device) before you need it: deleting a workspace,`,
-  )
-  out('changing owners and a few other things always ask for one, and a first passkey can confirm them 24 hours after it is added.')
+  out('This machine itself is never signed in by its tailnet identity. Here, use another tailnet device of yours, or')
+  out('shapewall hosted admin with this data folder (members, invites, projects, passkeys; shapewall hosted admin help).')
+  out('Your Tailscale account is the sign-in: no passkey was made and none is asked for. Anything running as you on a tailnet')
+  out('device of yours can act as you there, so lock your devices and keep the tailnet to people and machines you trust.')
+  out('Deleting a workspace, changing owners and a few other things ask you to type a name to confirm.')
+  out('To also allow passkeys on this server: shapewall hosted admin passkeys on --data <dir>.')
   out('The server must run with --tailscale --tailnet-sign-in for that login to sign in.')
   return 0
 }

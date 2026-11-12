@@ -1811,7 +1811,7 @@ test('the operator’s escape hatch: shapewall hosted admin passkeys lists and r
     [['passkeys', 'remove'], { handle: 'ben' }, /usage: hosted admin passkeys remove ID/],
     [['passkeys', 'remove', 'nope'], { handle: 'ben' }, /no passkey with that id/],
     [['passkeys', 'remove', id], { handle: 'ada' }, /no passkey with that id/],
-    [['passkeys'], { handle: 'ben' }, /usage: hosted admin passkeys list\|remove/],
+    [['passkeys'], { handle: 'ben' }, /usage: hosted admin passkeys status\|on\|off/],
   ]) {
     const refused = await admin(args, flags)
     assert.equal(refused.code, 1, JSON.stringify(args))

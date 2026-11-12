@@ -40,6 +40,8 @@ const OWN_MACHINE =
 // One CLI run's conversation with the server: keeps the cookies it is given.
 export function tailnetClient(origin, { fetchImpl = fetch, machine = machineName() } = {}) {
   const jar = new Map()
+  // confirm: what to say to a server that asks for a typed confirmation (--yes; see confirmed()).
+  let confirm = null
   async function call(method, pathname, body) {
     const response = await fetchImpl(`${origin}${pathname}`, {
       method,
@@ -53,6 +55,7 @@ export function tailnetClient(origin, { fetchImpl = fetch, machine = machineName
         'User-Agent': `shapewall-cli (${machine.replace(/[^\w .-]/g, '').slice(0, 40)})`,
         ...(jar.size ? { Cookie: [...jar].map(([name, value]) => `${name}=${value}`).join('; ') } : {}),
         ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+        ...(confirm ? { 'X-Shapewall-Confirm': encodeURIComponent(confirm) } : {}),
       },
       body: body === undefined ? undefined : JSON.stringify(body),
       redirect: 'error',
@@ -74,9 +77,24 @@ export function tailnetClient(origin, { fetchImpl = fetch, machine = machineName
     }
     return { status: response.status, data, ok: response.status >= 200 && response.status < 300 }
   }
+  // One of the few things the server always asks about, on a server where Tailscale is the only sign-in:
+  // it answers confirm_required with the name to say (the workspace's, or the account's handle). With
+  // `yes` (--yes on the command line) the request is sent again saying it; without, the caller is told.
+  async function confirmed(send, { yes = false } = {}) {
+    const first = await send()
+    if (first.ok || first.data?.error?.code !== 'confirm_required' || typeof first.data.error.confirm !== 'string') return first
+    if (!yes) return { ...first, needsYes: first.data.error.confirm }
+    confirm = first.data.error.confirm
+    try {
+      return await send()
+    } finally {
+      confirm = null
+    }
+  }
   return {
     origin,
     call,
+    confirmed,
     get: (pathname) => call('GET', pathname),
     post: (pathname, body = {}) => call('POST', pathname, body),
     // Ends the session this run was given (best effort: it expires anyway).
@@ -174,7 +192,7 @@ export async function approveByTailnet({ origin, userCode, flags, purpose, agent
   const who = await whoAmI(client)
   if (who.mode === 'self') {
     out(OWN_MACHINE)
-    out('So this login is approved with the code, by someone signed in with a passkey or from another tailnet device:')
+    out('So this login is approved with the code, from another tailnet device (or with a passkey, where the server allows them):')
     return false
   }
   if (who.mode === 'off' || who.mode === 'none') return false
@@ -265,7 +283,7 @@ export async function joinCommand(flags, print, { env = process.env, fetchImpl =
   if (who.mode === 'self') {
     out(OWN_MACHINE)
     out(
-      `Run shapewall join on another tailnet device of yours, or open ${invite ? `${origin}/invite#${invite}` : origin} in a browser and use a passkey.`,
+      `Run shapewall join on another tailnet device of yours, or open ${invite ? `${origin}/invite#${invite}` : origin} in a browser there.`,
     )
     return 1
   }
@@ -301,7 +319,7 @@ export async function joinCommand(flags, print, { env = process.env, fetchImpl =
     }
     out(`Joined as ${who.login}:`)
     for (const id of joined) await describeWorkspace(client, id, out)
-    out('The role is the one the invite gave. A passkey is optional here; add one in the browser under Account and security.')
+    out('The role is the one the invite gave. Your Tailscale account is the sign-in here, from every tailnet device of yours.')
     return 0
   } finally {
     await client.signOut()
@@ -369,10 +387,16 @@ export async function claimServer({ setupUrl, flags, out: print, fetchImpl = fet
     const detail = await client.get(`/api/workspaces/${answer.data.workspaceId}`)
     if (detail.ok) out(`  Workspace: ${terminalSafe(detail.data.workspace.name)} (you are its owner).`)
     out('  The setup link is used up.')
-    out(
-      `No passkey was made. Add one in the browser (${origin}/account) before you need it: deleting a workspace, changing owners and a few`,
-    )
-    out('other things always ask for one, and a first passkey can confirm them 24 hours after it is added (it signs in at once).')
+    const signedIn = await client.get('/auth/me')
+    if (signedIn.data?.passkeysOff) {
+      out('Your Tailscale account is the sign-in: no passkey was made and none is asked for. Deleting a workspace, changing owners')
+      out('and a few other things ask you to type a name to confirm (--yes on the command line).')
+    } else {
+      out(
+        `No passkey was made. Add one in the browser (${origin}/account) before you need it: deleting a workspace, changing owners and a few`,
+      )
+      out('other things always ask for one, and a first passkey can confirm them 24 hours after it is added (it signs in at once).')
+    }
     out('Anything that runs as you on a tailnet device of yours can act as you here: your tailnet identity is per device, not per person.')
     out(`Next: shapewall admin projects create "My site" --remote ${origin}`)
     return 0
@@ -448,11 +472,19 @@ export async function adminCommand(positional, flags, print, { env = process.env
       if (Boolean(login) === Boolean(flags.link))
         throw new Error('admin invites create: --login LOGIN (for one tailnet login) or --link (a link anyone you send it to can use).')
       const days = flags.days === undefined ? undefined : Number(flags.days)
-      const made = await client.post(`${base}/invites`, {
-        role,
-        ...(login ? { tailnetLogin: login } : {}),
-        ...(days === undefined ? {} : { expiresInDays: days }),
-      })
+      const made = await client.confirmed(
+        () =>
+          client.post(`${base}/invites`, {
+            role,
+            ...(login ? { tailnetLogin: login } : {}),
+            ...(days === undefined ? {} : { expiresInDays: days }),
+          }),
+        { yes: Boolean(flags.yes) },
+      )
+      if (made.needsYes)
+        throw new Error(
+          `This invites ${role === 'owner' ? 'an owner' : `someone as ${role}`} to ${terminalSafe(made.needsYes)}. Shapewall always asks before that: run the command again with --yes.`,
+        )
       if (!made.ok) refuse(made)
       if (flags.json) out(JSON.stringify({ invite: made.data.invite, ...(login ? {} : { url: made.data.url }) }, null, 2))
       else if (login) {

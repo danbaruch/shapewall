@@ -680,6 +680,8 @@ const MIGRATIONS = [
   // cannot). passkeys.tailnet_added_from: set (to the device's label) on a
   // passkey that a tailnet session added with no passkey check, the first
   // of its account; with recovery_added_at as its 24 hour clock.
+  // server_settings: what the operator switched for the whole server
+  // (src/hosted/passkey-policy.js: passkeys on a tailnet sign-in server).
   // Additive; an older build ignores all of it (docs/hosted.md,
   // "Rolling back").
   `
@@ -688,6 +690,11 @@ const MIGRATIONS = [
   ALTER TABLE users ADD COLUMN tailnet_linked_at TEXT;
   ALTER TABLE users ADD COLUMN tailnet_user_id TEXT;
   ALTER TABLE passkeys ADD COLUMN tailnet_added_from TEXT;
+  CREATE TABLE server_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
   CREATE UNIQUE INDEX users_tailnet_login ON users(tailnet_login) WHERE tailnet_login IS NOT NULL;
   ALTER TABLE sessions ADD COLUMN tailnet_login TEXT;
   ALTER TABLE invites ADD COLUMN tailnet_login TEXT;

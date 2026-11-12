@@ -139,7 +139,9 @@ export const plainFacts = () => ({
 })
 
 // options: funnel (also a public share listener), signIn (false: --tailscale without --tailnet-sign-in), signup
-export async function startTailnet(name, { funnel = false, signIn = true, signup = 'invite' } = {}) {
+// passkeys: the operator also allowed passkeys (--tailnet-passkeys). Most tests here are about that mode;
+// false is a server as it starts by default, where Tailscale is the only sign-in.
+export async function startTailnet(name, { funnel = false, signIn = true, signup = 'invite', passkeys = true } = {}) {
   const dataDir = tempDir(name)
   const tailscale = fakeTailscale()
   const proxyPorts = new Set()
@@ -152,6 +154,7 @@ export async function startTailnet(name, { funnel = false, signIn = true, signup
     signup,
     tailscale: { httpsPort: 443, funnel: funnel ? { httpsPort: 8443 } : null, run: tailscale.run, watchMs: 0 },
     tailnetSignIn: signIn,
+    tailnetPasskeys: passkeys,
     tailnetProof: { trusted: (socket) => proxyPorts.has(socket.remotePort), problem: () => null },
     tailnetFacts: () => facts.now,
     env: {},

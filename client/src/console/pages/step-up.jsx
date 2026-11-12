@@ -20,6 +20,9 @@ import {
   stepUpWindowLabel,
 } from '../../../../src/hosted/step-up.js'
 
+// What still asks on a server without passkeys (the fixed core, less what is about passkeys themselves).
+const STEP_UP_ALWAYS_TAILNET = ['deleting a workspace or your account', 'making, changing or removing an owner', 'inviting an owner']
+
 function Row({ id, title, children, control }) {
   return (
     <li className="flex items-start gap-3 px-4 py-3 sm:px-5" data-sw-step-up-row={id}>
@@ -45,6 +48,28 @@ export function StepUpCard() {
   const settings = data.workspace.settings.stepUp
   // An older server (and the demo) has no such setting.
   if (!settings) return null
+  // Tailscale is the only sign-in on this server: there is no passkey to ask for again.
+  if (data.features?.passkeys === false)
+    return (
+      <Card data-sw-settings-step-up="tailnet-only">
+        <CardHeader
+          icon={KeyRound}
+          title="Confirming changes"
+          description="Your Tailscale account is the sign-in on this server, so there is no passkey to ask for again."
+        />
+        <div className="space-y-2 px-4 py-4 text-ui text-muted sm:px-5">
+          <p>
+            Being signed in with the right role is enough for everything in this workspace. Before {STEP_UP_ALWAYS_TAILNET.join('; ')},
+            Shapewall asks you to type the workspace’s name (or your handle) to confirm.
+          </p>
+          <p>
+            The tailnet is the boundary: anything running as you on one of your tailnet devices can act as you here. Whoever runs the server
+            can also allow passkeys (shapewall hosted admin passkeys on); then an account that adds one confirms with it, and the switches
+            for asking again appear here.
+          </p>
+        </div>
+      </Card>
+    )
   const anyOn = STEP_UP_GROUPS.some((group) => settings[group]) || settings.adminIdle
   const set = (body, done) =>
     change.run(async () => {

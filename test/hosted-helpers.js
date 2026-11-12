@@ -163,6 +163,8 @@ export async function startHostedServer(name, options = {}) {
     ...(options.ownersSeeSignIns ? { ownersSeeSignIns: true } : {}),
     // Tailnet sign-in with a gate the test made (the real start is test/tailnet-helpers.js).
     ...(options.tailnet ? { tailnet: options.tailnet } : {}),
+    // With a tailnet gate: also allow passkeys (off by default there, as on a real server).
+    ...(options.tailnetPasskeys ? { tailnetPasskeys: true } : {}),
   })
   holder.app.locals.presence.attach(server)
   return {

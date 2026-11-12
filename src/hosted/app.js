@@ -68,6 +68,7 @@ import { createAgentLinks, createChatService } from './agent-link.js'
 import { createChatStore } from './chat-store.js'
 import { createTurnHub } from './turn-hub.js'
 import { mountPages } from './pages.js'
+import { createPasskeyPolicy } from './passkey-policy.js'
 import { createTailnetAccounts } from './tailnet.js'
 import { mountTailnetAdmin } from './tailnet-routes.js'
 
@@ -137,8 +138,14 @@ export function createHostedApp({
   // provably came through it (src/hosted/tailnet-identity.js). null: off,
   // and the headers are never read.
   tailnet = null,
+  // With tailnet sign-in: also allow passkeys (--tailnet-passkeys). Off by
+  // default there; the operator's switch in the database wins
+  // (src/hosted/passkey-policy.js). Without tailnet sign-in passkeys are
+  // always the sign-in.
+  tailnetPasskeys = false,
 }) {
   if (guestOnly) tailnet = null
+  const passkeys = createPasskeyPolicy({ db, tailnet, flag: tailnetPasskeys })
   const base = new URL(origin)
   if (!['http:', 'https:'].includes(base.protocol) || base.pathname !== '/' || base.search)
     throw new Error('origin: an http(s) origin without a path')
@@ -263,6 +270,8 @@ export function createHostedApp({
     needSession,
     needFresh,
     needFreshOrRecovery,
+    passkeysGate,
+    tailnetOnly,
     needFreshOrHeldRemoval,
     removesHeldPasskey,
     noPasskey,
@@ -280,7 +289,22 @@ export function createHostedApp({
     inProject,
     handle,
     auditOf,
-  } = createGuards({ db, dataDir, auth, quotas, secure, trustProxy, rateLimiter, siteOf, SESSION_COOKIE, iso, now, log, tailnet })
+  } = createGuards({
+    db,
+    dataDir,
+    auth,
+    quotas,
+    secure,
+    trustProxy,
+    rateLimiter,
+    siteOf,
+    SESSION_COOKIE,
+    iso,
+    now,
+    log,
+    tailnet,
+    passkeys,
+  })
   const tailnetAccounts = createTailnetAccounts({ db, iso, now })
 
   // ---- Headers for everything ----
@@ -296,6 +320,8 @@ export function createHostedApp({
   app.use(usercontent.gate)
   // While moving: which origin a request is for; the old one serves only the move.
   app.use(previousHostGate(sites))
+  // Passkeys off (a tailnet sign-in server, by default): their routes say so.
+  app.use(passkeysGate)
   // The fixed core: what always asks for a fresh passkey check (one table, src/hosted/step-up.js).
   app.use(fixedCore)
 
@@ -345,6 +371,8 @@ export function createHostedApp({
     needSession,
     needFresh,
     needFreshOrRecovery,
+    tailnetOnly,
+    passkeys,
     needFreshOrHeldRemoval,
     removesHeldPasskey,
     noPasskey,
@@ -423,6 +451,7 @@ export function createHostedApp({
   const createApiToken = createApiTokens({ iso, auditOf, agentsFor })
   const consoleDeps = {
     db,
+    passkeys,
     dataDir,
     auth,
     iso,

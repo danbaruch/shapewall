@@ -53,6 +53,7 @@ export function mountAuthRoutes(authRouter, deps) {
     needSession,
     needFresh,
     needFreshOrRecovery,
+    passkeys,
     needFreshOrHeldRemoval,
     removesHeldPasskey,
     noPasskey,
@@ -316,6 +317,8 @@ export function mountAuthRoutes(authRouter, deps) {
             ...(turnstile && signup === 'open' ? { turnstile: turnstile.siteKey } : {}),
             ...moveInfo(sites, req),
             ...tailnet.anonInfo(req),
+            // Tailscale is the only sign-in here: no passkey is asked for or offered.
+            ...(passkeys.on() ? {} : { passkeysOff: true }),
           }),
     needSession,
     handle(async (req, res) => {
@@ -334,6 +337,7 @@ export function mountAuthRoutes(authRouter, deps) {
         via: req.auth.session.via,
         ...tailnet.memberInfo(req),
         securityNotice: securityNoticeFor(req),
+        ...(passkeys.on() ? {} : { passkeysOff: true }),
         // Passkeys a tailnet session added that are still on hold: shown on every page ("Not you? Remove it").
         heldPasskeys: auth.heldPasskeys(req.user.id).map((key) => ({ ...key, canRemove: req.auth.session.via === 'tailnet' })),
         signup,

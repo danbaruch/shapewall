@@ -282,7 +282,11 @@ export const SECTIONS = {
                             login, no passkey (or $SHAPEWALL_HOSTED_TAILNET_SIGN_IN=1). An admin still decides
                             who is in a workspace. Needs Linux and Tailscale 1.98+ in its normal (TUN) mode, not
                             in a container; refuses to start where it cannot prove that a request came through
-                            tailscale serve. An identity is per device: what runs as you there can act as you
+                            tailscale serve. An identity is per device: what runs as you there can act as you.
+                            Tailscale is then the only sign-in: no passkeys, and the few things that always ask
+                            take a typed confirmation
+      --tailnet-passkeys    with --tailnet-sign-in: also allow passkeys ($SHAPEWALL_HOSTED_TAILNET_PASSKEYS=1, or
+                            hosted admin passkeys on|off). An account that adds one confirms with it
       --quotas FILE         per-workspace quotas (default <data>/quotas.json when it exists)
       --retention-hours N   prune old versions every N hours (default 6, 0 = off); --retention-keep N (2)
   hosted setup-link         print the first account's one-time link (it is not in the log)
@@ -297,8 +301,9 @@ export const SECTIONS = {
   hosted --setup --domain HOST   write a Docker Compose + Caddy folder for your own domain
       --usercontent-domain HOST  live HTML on its own domain; --email (TLS); --dir (./shapewall-hosted)
       --source DIR          a Shapewall checkout to build from; --dry-run; --force; --start (build, start, setup link)
-  hosted admin list|suspend|resume|delete|export|reports|retention|passkeys|log   the operator's commands
-                            (passkeys list|remove ID --handle HANDLE | --login LOGIN: an account's passkeys)
+  hosted admin list|suspend|resume|delete|export|reports|retention|log   the operator's commands
+  hosted admin members|invites|projects|passkeys ...   who is in a workspace and how people sign in, from the
+                            server's own machine (shapewall hosted admin help lists them)
   hosted backup --to DIR [--keep-days N]   a consistent copy while the server runs
   hosted restore --from BACKUP --data NEW | --from BACKUP --check (the restore drill)`,
 }

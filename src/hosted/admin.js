@@ -783,5 +783,6 @@ export function actorOf(row, detail) {
       link: row.share_name || 'Share link',
     }
   }
-  return { type: 'system', id: null, label: 'System' }
+  // Done on the server's machine with `shapewall hosted admin` (src/hosted/operator-access.js).
+  return { type: 'system', id: null, label: detail?.by === 'operator' ? 'Server operator' : 'System' }
 }

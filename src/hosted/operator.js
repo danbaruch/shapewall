@@ -83,7 +83,7 @@ function clean(value, max) {
     .slice(0, max)
 }
 
-function logOperator(db, { operator, action, target = null, detail = {}, at }) {
+export function logOperator(db, { operator, action, target = null, detail = {}, at }) {
   accounts(db).run('INSERT INTO operator_log (operator, action, target, detail, at) VALUES (:operator, :action, :target, :detail, :at)', {
     operator,
     action,

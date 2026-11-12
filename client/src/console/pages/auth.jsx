@@ -38,6 +38,8 @@ export function SignIn() {
   const [code, setCode] = useState('')
   const [autofill, setAutofill] = useState(false)
   const can = supportsPasskeys()
+  // Tailscale is the only sign-in on this server (no passkey form, no autofill).
+  const passkeysOff = Boolean(session?.passkeysOff)
   // The pending autofill request: aborted before a modal prompt (the browser
   // allows one WebAuthn request at a time) and started again after it.
   const pending = useRef(null)
@@ -65,7 +67,7 @@ export function SignIn() {
 
   // Passkey autofill: the handle field offers this site's passkeys.
   useEffect(() => {
-    if (!can || recovery || me) return undefined
+    if (!can || recovery || me || passkeysOff) return undefined
     let stopped = false
     let timer = null
     ;(async () => {
@@ -101,7 +103,7 @@ export function SignIn() {
       window.clearTimeout(timer)
       stopAutofill()
     }
-  }, [can, recovery, me, restart, finish])
+  }, [can, recovery, me, restart, finish, passkeysOff])
 
   const signIn = async ({ related = false } = {}) => {
     manual.current = true
@@ -141,6 +143,35 @@ export function SignIn() {
       setBusy(false)
     }
   }
+
+  // Tailscale is the only sign-in on this server: no passkey is asked for or offered.
+  if (session?.passkeysOff || me?.passkeysOff)
+    return (
+      <AuthLayout>
+        <Card className="p-6 sm:p-8" data-sw-signin-tailnet-only>
+          <h1 className="text-xl font-semibold text-fg">Sign in</h1>
+          <p className="mt-1 text-sm text-muted">
+            Your Tailscale account is the sign-in on this server: open it from any of your tailnet devices. There is no password and no
+            passkey.
+          </p>
+          {me ? (
+            <Notice tone="info" className="mt-4">
+              You are signed in as @{me.user.handle}.{' '}
+              <Link to="/" className="font-medium text-accent underline-offset-2 hover:underline">
+                Go to your workspaces
+              </Link>
+            </Notice>
+          ) : session?.tailnet ? (
+            <TailnetArrival
+              tailnet={session.tailnet}
+              signup={session.signup}
+              passkeysOff
+              onSignedIn={(result) => (result?.workspaceId && next === '/' ? window.location.assign(`/w/${result.workspaceId}`) : finish())}
+            />
+          ) : null}
+        </Card>
+      </AuthLayout>
+    )
 
   return (
     <AuthLayout>
@@ -435,6 +466,8 @@ export function SignUp() {
   // yet: the tailnet is the sign-in, and a passkey is optional.
   const visitor = anon?.tailnet && ['unknown', 'invited'].includes(anon.tailnet.state) ? anon.tailnet : null
   const visitorLogin = visitor?.login || null
+  // Tailscale is the only sign-in on this server: no passkey sign-up.
+  const passkeysOff = Boolean(anon?.passkeysOff)
   // "Also sign me in from this tailnet login": off unless the person says so.
   const [linkTailnet, setLinkTailnet] = useState(false)
   useEffect(() => {
@@ -610,8 +643,9 @@ export function SignUp() {
           {visitor && (tokens.invite || tokens.setup || visitor.state === 'invited' || openSignup) ? (
             <>
               <Notice tone="info" title={`Your tailnet signs you in as ${visitor.login}`} data-sw-signup-tailnet>
-                No passkey is needed here. You can add one later in Account and security; a few things, like deleting a workspace, always
-                ask for one, and a first passkey can confirm them 24 hours after it is added.
+                {passkeysOff
+                  ? 'Your Tailscale account is the sign-in on this server, from every tailnet device of yours. There is no passkey and no password.'
+                  : 'No passkey is needed here. You can add one later in Account and security; a few things, like deleting a workspace, always ask for one, and a first passkey can confirm them 24 hours after it is added.'}
               </Notice>
               <Button
                 type="button"
@@ -627,7 +661,14 @@ export function SignUp() {
               </Button>
             </>
           ) : null}
-          {visitor ? (
+          {passkeysOff && !visitor ? (
+            <Notice tone="info" data-sw-signup-tailnet-only>
+              {anon?.tailnet?.state === 'self'
+                ? 'This is the server’s own machine, which is never signed in by its tailnet identity. Open this link from another of your tailnet devices, or make the account here with shapewall hosted claim.'
+                : 'Your Tailscale account is the sign-in on this server. Open this link from one of your own tailnet devices.'}
+            </Notice>
+          ) : null}
+          {visitor && !passkeysOff ? (
             <div className="space-y-1" data-sw-signup-link-tailnet>
               <CheckToggle checked={linkTailnet} onChange={setLinkTailnet} id="link-tailnet">
                 Also sign me in from this tailnet login: {visitor.login}
@@ -638,26 +679,30 @@ export function SignUp() {
               </p>
             </div>
           ) : null}
-          <Button
-            type="submit"
-            variant={visitor ? 'secondary' : 'default'}
-            size="touch"
-            className="w-full text-[15px]"
-            disabled={
-              busy ||
-              !handle ||
-              Boolean(problem) ||
-              !name ||
-              Boolean(previewError) ||
-              !supportsPasskeys() ||
-              (needsCheck && !turnstileToken)
-            }
-            data-sw-signup-submit
-          >
-            {busy ? <Spinner /> : <KeyRound size={17} aria-hidden="true" />}
-            Create a passkey and sign up
-          </Button>
-          <p className="text-xs text-muted">No email and no password: your device or password manager keeps a passkey for this site.</p>
+          {passkeysOff ? null : (
+            <Button
+              type="submit"
+              variant={visitor ? 'secondary' : 'default'}
+              size="touch"
+              className="w-full text-[15px]"
+              disabled={
+                busy ||
+                !handle ||
+                Boolean(problem) ||
+                !name ||
+                Boolean(previewError) ||
+                !supportsPasskeys() ||
+                (needsCheck && !turnstileToken)
+              }
+              data-sw-signup-submit
+            >
+              {busy ? <Spinner /> : <KeyRound size={17} aria-hidden="true" />}
+              Create a passkey and sign up
+            </Button>
+          )}
+          {passkeysOff ? null : (
+            <p className="text-xs text-muted">No email and no password: your device or password manager keeps a passkey for this site.</p>
+          )}
         </form>
       </Card>
       <p className="mt-5 text-center text-sm text-muted">
