@@ -8,7 +8,7 @@
 // this browser.
 // Only in the demo build; never a sales pitch (no sign-up or pricing links).
 import { useState } from 'react'
-import { ArrowUpRight, BarChart3, Bot, Check, ChevronDown, MessageSquare, MessageSquarePlus, Sparkles, X } from 'lucide-react'
+import { BarChart3, Bot, Check, ChevronDown, MessageSquare, MessageSquarePlus, Sparkles, X } from 'lucide-react'
 import { Button, IconButton } from '../components/ui'
 import { cn } from '../lib/utils'
 
@@ -59,7 +59,7 @@ export function TryThis({ touch, chip = false, done, onOpenComment, onComment, o
   ].filter(Boolean)
   // Not a step to tick off: it leaves the board for the console.
   const usage = onUsage
-    ? { id: 'usage', icon: BarChart3, label: 'See what the agents did', hint: 'Usage in the console: turns, tokens, charts', run: onUsage }
+    ? { id: 'usage', icon: BarChart3, label: 'See what the agents did', hint: 'Usage: turns, tokens, charts', run: onUsage }
     : null
   const finished = steps.filter((step) => done.has(step.id)).length
   // Above the zoom controls (desktop) or the Fit button (phone), left of the board's tools.
@@ -160,11 +160,10 @@ export function TryThis({ touch, chip = false, done, onOpenComment, onComment, o
               <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent/10 text-accent" aria-hidden="true">
                 <usage.icon size={13} />
               </span>
-              <span className="min-w-0 flex-1">
+              <span className="min-w-0">
                 <span className="block text-[13px] font-medium text-fg">{usage.label}</span>
                 <span className="block text-xs font-normal text-muted">{usage.hint}</span>
               </span>
-              <ArrowUpRight size={13} className="shrink-0 text-faint" aria-hidden="true" />
             </Button>
           </li>
         ) : null}

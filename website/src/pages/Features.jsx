@@ -21,6 +21,9 @@ import variant from '../assets/shots/variant.webp'
 import variant960 from '../assets/shots/variant-960.webp'
 import phoneComment from '../assets/shots/phone-comment.webp'
 
+// The workspace of the public demo (client/src/demo/fixtures.js WORKSPACE_ID), in its console.
+const DEMO_CONSOLE = '/demo/console.html#/w/ws_4c756d000000000000000001'
+
 const SECTIONS = [
   {
     id: 'capture',
@@ -174,12 +177,17 @@ const SECTIONS = [
     nav: 'Teams',
     badge: 'Beta',
     title: 'Workspaces, roles and share links',
-    text: 'Host the team server and people sign in with a passkey. Each workspace has owners, admins, members and viewers. Admins invite people, hand out expiring share links to clients, issue API tokens for agents and read an audit log of who changed what. A Usage page shows every agent turn with the tokens and cost each agent reported, and Activity shows who signed in, who changed which setting and who approved what. The live demo has the roles and links: switch who you are with View as.',
+    text: 'Host the team server and people sign in with a passkey. Each workspace has owners, admins, members and viewers. Admins invite people, hand out expiring share links to clients, issue API tokens for agents and read an audit log of who changed what. A Usage page shows every agent turn with the tokens and cost each agent reported, and Activity shows who signed in, who changed which setting and who approved what. The live demo has the roles, the links and both pages, with made-up numbers: switch who you are with View as.',
     points: [
       'Four roles, checked on every request',
       'Invites and share links that expire',
       'Agent usage as charts and a grid, never estimated',
       'People\u2019s activity and an access review',
+    ],
+    // The demo's console, with made-up numbers (client/src/demo/usage).
+    links: [
+      { href: `${DEMO_CONSOLE}/usage`, label: 'See Usage in the live demo' },
+      { href: `${DEMO_CONSOLE}/activity`, label: 'See Activity in the live demo' },
     ],
     art: <RolesIllustration />,
   },

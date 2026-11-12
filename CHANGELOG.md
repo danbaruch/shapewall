@@ -54,7 +54,14 @@ a Usage view on a local board.
   older than 400 days. The console gains Recharts and TanStack Table, Virtual and Query, loaded only with these two pages; the
   board's JavaScript is unchanged in size.
 - **Not in this release:** scheduled or emailed exports, per-agent budgets, notifications for "worth a look" entries, and a
-  tamper-evident (hash-chained) audit log. The public demo does not have the two pages.
+  tamper-evident (hash-chained) audit log.
+- **The live demo has Usage and Activity,** with made-up numbers. Its console shows both pages working in the browser: about sixty
+  days of a pretend team's agent turns (a few thousand, placed relative to today; busy weekdays, spikes, a quiet stretch, a day of
+  failures, agents that report a cost, tokens only, or nothing) and the activity that goes with them. Every chart, the grid, a
+  turn, saved views, CSV and JSON exports (made in the browser), a person's page, an agent's page and the access review work.
+  Asking the agent or running a fix on the demo board adds a turn and its activity; Reset puts everything back. The demo counts
+  rows in memory and shares the rest with the server (`src/hosted/usage-core.js`, `activity-core.js`); a test puts the same rows
+  into a real server and compares every answer. The charts still load only with these two pages.
 
 ### Fixes found on a real setup
 

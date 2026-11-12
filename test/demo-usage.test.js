@@ -13,12 +13,14 @@
 
 import { after, before, test } from 'node:test'
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
 import { tenant } from '../src/hosted/tenancy.js'
 import { cleanUsageFilter, createUsage, usageCsvLine, usageScope } from '../src/hosted/usage.js'
 import { OUTCOME_GROUP_IDS, USAGE_BUCKETS, USAGE_DIMENSIONS, USAGE_METRICS, USAGE_SORTS, outcomeGroup } from '../src/hosted/usage-shape.js'
 import { generateActivity, generateRuns, historyMarks } from '../client/src/demo/usage/generate.js'
 import { createMemoryUsage } from '../client/src/demo/usage/store.js'
 import { USAGE_WORLD } from '../client/src/demo/usage/world.js'
+import { consoleTitle } from '../client/src/demo/titles.js'
 import { createDemoBackend } from '../client/src/demo/backend.js'
 import { DEMO_AGENT_IDS, NOTES_PROJECT, SANDBOX_ID, USERS, WEBSITE_PROJECT, WORKSPACE_ID, seedState } from '../client/src/demo/fixtures.js'
 import * as helpers from './hosted-helpers.js'
@@ -794,4 +796,16 @@ test('using the demo feeds the pages: a chat turn and a fix add turns and activi
   ])
   // The newest turns only: the demo's state is kept in localStorage.
   assert.ok(state.usageRuns.length === 2)
+})
+
+test('the site and the docs link to the demo pages that show Usage and Activity', () => {
+  const read = (file) => fs.readFileSync(new URL(`../${file}`, import.meta.url), 'utf8')
+  const usage = `/demo/console.html#/w/${WORKSPACE_ID}/usage`
+  const activity = `/demo/console.html#/w/${WORKSPACE_ID}/activity`
+  assert.ok(read('website/src/pages/Features.jsx').includes(`'/demo/console.html#/w/${WORKSPACE_ID}'`))
+  for (const file of ['docs/hosted.md', 'website/src/docs/security.md'])
+    for (const link of [usage, activity]) assert.ok(read(file).includes(link), `${file} links to ${link}`)
+  // And those addresses are pages of the demo: the console's title names them.
+  assert.equal(consoleTitle(`#/w/${WORKSPACE_ID}/usage`, seedState(NOW.getTime())), 'Usage · Lumen · Shapewall demo')
+  assert.equal(consoleTitle(`#/w/${WORKSPACE_ID}/activity/${USERS[1].id}`, seedState(NOW.getTime())), 'Activity · Lumen · Shapewall demo')
 })
