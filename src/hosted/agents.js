@@ -4,9 +4,17 @@
 // (migration 12) hangs that on the token; the token keeps the secret, the
 // scopes, the name and revocation, exactly as before.
 //
-//   state     online (heard from in the last 90 seconds), busy (online and
-//             holding a comment it took), offline, revoked (its token was
-//             revoked, expired, or its maker is no longer an admin)
+//   state     online (heard from in the last 90 seconds; a connected
+//             agent: while its link is open), busy (online and holding a
+//             comment it took, or answering in a chat), offline, revoked
+//             (its token was revoked, expired, or its maker is no longer an
+//             admin)
+//   connected an agent whose token has the "agent" scope: a machine runs
+//             `shapewall agent connect` for it and holds a link
+//             (src/hosted/agent-link.js). It says what it is and can do
+//             when the link opens (hello): its kind, its machine, whether it
+//             chats, and what its own machine allows. That is display and a
+//             narrowing only: the server never widens anything from it.
 //   audience  who may send it work: "owner" (the person who connected it,
 //             the default for a new agent), "members" (the owner and named
 //             members) or "trusted" (everyone the project's agent policy
@@ -49,6 +57,9 @@ import {
 // `shapewall watch --remote` (or MCP client) whose command is unknown; the
 // known ones show their product mark (src/agent/agent-logos.js).
 export const AGENT_KINDS = ['watcher', 'claude', 'codex', 'goose', 'gemini', 'custom']
+// What a connected agent may say it is (hello): never "watcher".
+export const LINK_KINDS = ['claude', 'codex', 'goose', 'gemini', 'custom']
+export const LINK_TURNS_MAX = 4
 export const AUDIENCE_USERS_MAX = 50
 export const AGENT_ID_RE = /^ag_[a-f0-9]{24}$/
 // On a comment as the server hands it around (src/hosted/app.js
@@ -76,7 +87,20 @@ const parseList = (text) => {
 const personName = (person) => person?.displayName || person?.handle || 'someone who left'
 const listNames = (names) => (names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`)
 
-export function createAgentStore(t, { now = () => new Date(), presence = null, handleFor = () => null } = {}) {
+// What a connected agent reported about itself, cleaned: display only.
+const parseCaps = (text) => {
+  try {
+    const value = JSON.parse(text || '{}')
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+  } catch {
+    return {}
+  }
+}
+
+// `links`: the open links of connected agents (src/hosted/agent-link.js):
+// { of(workspaceId, agentId) -> { connectedAt, streams } | null,
+//   turns(workspaceId, agentId) -> how many chat turns it is answering }.
+export function createAgentStore(t, { now = () => new Date(), presence = null, handleFor = () => null, links = null } = {}) {
   const iso = () => now().toISOString()
   // Reads repeat within one request (a list of comments asks per comment);
   // every write starts over.
@@ -115,18 +139,31 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
     return made
   }
   // Returns the new agent's id, or null when the token already had one.
-  function insert({ projectId, tokenId, userId, at = iso(), inherited = false, machine = null, kind = 'watcher', lastSeenAt = null }) {
+  function insert({
+    projectId,
+    tokenId,
+    userId,
+    at = iso(),
+    inherited = false,
+    machine = null,
+    kind = 'watcher',
+    lastSeenAt = null,
+    icon = null,
+    tint = null,
+  }) {
     const id = newId('ag')
     const result = t.run(
-      `INSERT INTO agents (workspace_id, project_id, id, token_id, kind, machine, audience, audience_inherited, created_by, created_at,
-         approved_by, approved_at, last_seen_at)
-       VALUES (:ws, :project, :id, :token, :kind, :machine, :audience, :inherited, :user, :at, :user, :at, :seen)
+      `INSERT INTO agents (workspace_id, project_id, id, token_id, kind, icon, tint, machine, audience, audience_inherited, created_by,
+         created_at, approved_by, approved_at, last_seen_at)
+       VALUES (:ws, :project, :id, :token, :kind, :icon, :tint, :machine, :audience, :inherited, :user, :at, :user, :at, :seen)
        ON CONFLICT(token_id) DO NOTHING`,
       {
         project: projectId,
         id,
         token: tokenId,
         kind,
+        icon,
+        tint,
         machine,
         audience: inherited ? 'trusted' : 'owner',
         inherited: inherited ? 1 : 0,
@@ -142,9 +179,17 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
   // only until they say otherwise. `machine`: the label `shapewall login` sent.
   // Audit entries about an agent carry its name: the log reads without a
   // lookup, and still makes sense after the agent is gone.
-  function create(actor, { projectId, tokenId, name = null, machine = null, kind = 'watcher' }) {
+  function create(actor, { projectId, tokenId, name = null, machine = null, kind = 'watcher', icon = null, tint = null }) {
     const label = cleanMachine(machine)
-    const id = insert({ projectId, tokenId, userId: actor.userId, machine: label, kind })
+    const id = insert({
+      projectId,
+      tokenId,
+      userId: actor.userId,
+      machine: label,
+      kind: AGENT_KINDS.includes(kind) ? kind : 'custom',
+      icon: isBuiltInIcon(icon) ? icon : null,
+      tint: isAgentTint(tint) ? tint : null,
+    })
     actor.audit('agent_created', id, {
       project: projectId,
       token: tokenId,
@@ -238,12 +283,39 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
       }
       return out
     })
+  // A connected agent: its token may hold a link.
+  const linked = (row) => parseList(row.token_scopes).includes('agent')
+  // What it said about itself the last time its link opened (hello).
+  const capsOf = (row) => parseCaps(row.capabilities)
+  const linkOf = (row) => (linked(row) ? links?.of(t.workspaceId, row.id) || null : null)
   function stateOf(row) {
     if (!live(row)) return { state: 'revoked', lastSeenAt: latestOf(row.last_seen_at, row.token_last_used_at) }
     const heard = presence?.ofAgent(t.workspaceId, row.id) || { online: false, lastSeenAt: null }
     const lastSeenAt = latestOf(heard.lastSeenAt, row.last_seen_at, row.token_last_used_at)
-    if (!heard.online) return { state: 'offline', lastSeenAt }
-    return { state: held(row.project_id).get(row.token_id)?.length ? 'busy' : 'online', lastSeenAt }
+    // A connected agent is online exactly while its link is open: a call to
+    // the token API alone does not make it reachable.
+    const online = linked(row) ? Boolean(linkOf(row)) : heard.online
+    if (!online) return { state: 'offline', lastSeenAt }
+    const busy = held(row.project_id).get(row.token_id)?.length || (links?.turns(t.workspaceId, row.id) || 0) > 0
+    return { state: busy ? 'busy' : 'online', lastSeenAt }
+  }
+  // The link opened and the agent said what it is (POST /api/v1/agent/hello):
+  // kind, machine and capabilities, validated by the caller. Display, and
+  // what the machine's own policy narrows; never a widening.
+  function hello(row, { kind, machine, capabilities }) {
+    const label = cleanMachine(machine)
+    t.run(
+      'UPDATE agents SET kind = :kind, machine = :machine, capabilities = :caps, last_seen_at = :at WHERE workspace_id = :ws AND id = :id',
+      {
+        kind: LINK_KINDS.includes(kind) ? kind : 'custom',
+        machine: label || row.machine || null,
+        caps: JSON.stringify(capabilities || {}),
+        at: iso(),
+        id: row.id,
+      },
+    )
+    forget()
+    return get(row.project_id, row.id)
   }
   // A claim-scoped token was heard from: its agent is online, and its
   // last-seen time is written down at most once a minute.
@@ -269,8 +341,13 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
   // Whether this person is in the agent's audience. (Whether the agent
   // policy lets them send work to an agent at all is `trusted` below: both
   // must hold.)
+  // The agent's own machine said it takes work from its connector only
+  // (`shapewall agent connect --audience owner`): the last word, whatever
+  // the audience here says.
+  const machineOwnerOnly = (row) => linked(row) && capsOf(row).policy?.audience === 'owner'
   function inAudience(row, userId) {
     if (!row || !userId) return false
+    if (machineOwnerOnly(row)) return Boolean(row.created_by) && row.created_by === userId
     if (row.audience === 'trusted') return true
     if (row.created_by && row.created_by === userId) return true
     return row.audience === 'members' && namedUsers(row).includes(userId)
@@ -281,8 +358,18 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
     const owner = people().get(row.created_by) || null
     const named = row.audience === 'members' ? namedUsers(row).map((id) => people().get(id)) : []
     const names = [personName(owner), ...named.map(personName)]
+    // Narrowed on the agent's machine: what is in effect, said plainly.
+    if (machineOwnerOnly(row) && row.audience !== 'owner')
+      return {
+        kind: row.audience,
+        effective: 'owner',
+        inherited: false,
+        text: `Only ${personName(owner)} (set on the agent's own machine)`,
+        people: owner ? [{ handle: owner.handle, displayName: owner.displayName }] : [],
+      }
     return {
       kind: row.audience,
+      effective: row.audience,
       // Kept from before 0.4.0, never chosen.
       inherited: Boolean(row.audience_inherited) && row.audience === 'trusted',
       text:
@@ -311,6 +398,48 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
         row.audience === 'owner'
           ? `${audience.text} can send work to ${row.name}. Ask them, or an admin, to share it.`
           : `${row.name} takes work from ${audience.text} only. Ask an admin to add you.`,
+    }
+  }
+
+  // May this person chat with the agent right now, and if not, why (said
+  // in the picker and under the composer). Chat needs a connected agent
+  // that chats, the same rules as sending it work, and an open link.
+  function chatCheck(row, { userId, role, boardId = null }) {
+    if (!live(row)) return { ok: false, code: 'agent_revoked', reason: `${row.name} was revoked.` }
+    if (!linked(row) || capsOf(row).chat !== true)
+      return {
+        ok: false,
+        code: 'no_chat',
+        reason: `${row.name} takes comments only. Chat needs an agent connected with "shapewall agent connect".`,
+      }
+    const send = sendCheck(row, { userId, role, boardId })
+    if (!send.ok) return { ok: false, code: 'agent_audience', reason: send.reason.replace(/send work to/g, 'use') }
+    if (!linkOf(row)) return { ok: false, code: 'agent_offline', reason: `${row.name} is offline.` }
+    return { ok: true, code: null, reason: null }
+  }
+  // What a connected agent said it can do, for the board and the console.
+  function linkView(row) {
+    if (!linked(row)) return { connected: false }
+    const caps = capsOf(row)
+    const link = linkOf(row)
+    return {
+      connected: true,
+      connectedAt: link?.connectedAt || null,
+      chats: caps.chat === true,
+      version: typeof caps.version === 'string' ? caps.version : null,
+      // Read and answer only: the machine refuses edits and commands itself.
+      capabilities: {
+        chat: caps.chat === true,
+        edits: caps.edits === true,
+        commands: caps.commands === true,
+        images: caps.images === true,
+      },
+      policy: {
+        audience: caps.policy?.audience === 'owner' ? 'owner' : 'server',
+        approvals: 'none',
+        commands: 'never',
+      },
+      maxTurns: Number.isInteger(caps.maxTurns) ? caps.maxTurns : null,
     }
   }
 
@@ -598,6 +727,13 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
       audience: audienceOf(row),
       canSend: check.ok,
       reason: check.reason,
+      // A connected agent: whether it chats, and whether this person may
+      // chat with it right now (with the reason when not).
+      link: linkView(row),
+      chat: (() => {
+        const chat = chatCheck(row, { ...viewer, boardId })
+        return { ok: chat.ok, code: chat.code, reason: chat.reason }
+      })(),
       working: mine(working),
       queued: mine(queued),
       // What it holds on the project's other boards, as counts.
@@ -653,6 +789,7 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
         answerRole: row.approval_answer_role,
       },
       counts: { working: working.length, queued: queued.length },
+      link: { ...linkView(row), streams: linkOf(row)?.streams || 0 },
       createdAt: row.created_at,
       createdBy: row.created_by
         ? { userId: row.created_by, ...pick(people().get(row.created_by)), left: !people().has(row.created_by) }
@@ -871,6 +1008,11 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
     live,
     defaultAgent,
     stateOf,
+    linked,
+    capsOf,
+    hello,
+    chatCheck,
+    linkView,
     seen,
     inAudience,
     audienceOf,

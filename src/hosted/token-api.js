@@ -17,6 +17,7 @@ import { captureFiles, listVersions, readManifest, resolveFile, variantsWithFile
 import { agentPolicy, expandScopes, trustedMember } from './agent-policy.js'
 import { COMMENT_ROUTING } from './agents.js'
 import { mountHostedApprovals } from './agent-approvals.js'
+import { mountAgentLink } from './agent-link.js'
 import { sendPng } from './board-context.js'
 import { markupName } from '../comment-media.js'
 import { commentListsFile, createMarkupCache, readCommentFile, renderMarkupPng, sendImage } from './comment-files.js'
@@ -54,6 +55,13 @@ export function mountTokenApi({
   dispatchView,
   needFresh,
   approvalApi,
+  // Connected agents (src/hosted/agent-link.js): the chat store, the live
+  // turns, the open links and what ends a turn.
+  agentPresence = null,
+  chatFor = null,
+  hub = null,
+  links = null,
+  chat = null,
 }) {
   // ---- Token API ----
   const pushOptions = (t) => {
@@ -84,12 +92,16 @@ export function mountTokenApi({
         'This token was revoked or has expired, its maker is no longer an admin of the workspace, or it is wrong. Send a live project token: Authorization: Bearer swp_...',
       )
     }
-    const hits = rateLimiter.hit('token', row.id, LIMITS.token)
+    // A connected agent's link has a bucket of its own: an answer streams
+    // in many small batches, and must not use up the token's budget.
+    const scopes = expandScopes(JSON.parse(row.scopes))
+    const onLink = scopes.includes('agent') && /^\/agent\//.test(req.path)
+    const hits = onLink ? rateLimiter.hit('agentLink', row.id, LIMITS.agentLink) : rateLimiter.hit('token', row.id, LIMITS.token)
     if (!hits.ok) {
       res.setHeader('Retry-After', String(hits.retryAfter))
       return fail(res, 429, 'rate_limited', 'Too many requests for this token.')
     }
-    req.token = { id: row.id, name: row.name, scopes: expandScopes(JSON.parse(row.scopes)) }
+    req.token = { id: row.id, name: row.name, scopes }
     req.tokenHash = sha256(token)
     req.authTokenHash = row.token_hash
     req.t = tenant(db, row.workspace_id)
@@ -213,6 +225,9 @@ export function mountTokenApi({
       ...feedbackItem(context, { ...comment, replies: tokenReplies(req, ctx, comment.replies, comment.id) }),
       dispatchable: Boolean(comment.dispatchable),
       needsRunApproval: Boolean(comment.needsRunApproval),
+      // The agent it was sent to, for a token that may take work: its own
+      // agent's id, or null for any agent (one sent elsewhere is never listed).
+      ...(req.token.scopes.includes('claim') ? { agentId: comment.agentId || null } : {}),
     }
     // The capture a comment was made on can be an archived version (versions/).
     const url = (file) =>
@@ -301,6 +316,28 @@ export function mountTokenApi({
   const tokenAuthor = (req) => ({ name: cleanAuthor(req.token.name, 'agent'), agent: true })
 
   mountTokenEvents(v1, { db, iso, events, streams, scope, agentsFor })
+  if (chatFor && hub && links && chat)
+    mountAgentLink(v1, {
+      db,
+      iso,
+      now,
+      events,
+      streams,
+      scope,
+      handle,
+      agentsFor,
+      agentPresence,
+      chatFor,
+      hub,
+      links,
+      chat,
+      auditOf,
+      boardContext,
+      policyFor,
+      dispatchView,
+      remoteItem,
+      contextFor,
+    })
 
   v1.get(
     '/project',

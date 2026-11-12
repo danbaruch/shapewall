@@ -41,6 +41,8 @@ export function mountTokenEvents(v1, { db, iso, events, streams, scope, agentsFo
       // lookup; revocation is still caught here, by the keepalive and after
       // every mutating request.
       if (closed || event.workspace !== req.t.workspaceId || event.project !== req.project.id) return
+      // Chat turns and agents coming and going are the board's business, not a watcher's.
+      if (/^(chat|agent)\./.test(event.type)) return
       check()
       if (!closed) {
         if (

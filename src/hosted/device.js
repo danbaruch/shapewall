@@ -70,6 +70,34 @@ export function cleanMachineName(value) {
   return name || 'a computer'
 }
 
+// What a device login is for: a plain token (null), moving a local project
+// ("import"), or connecting an agent ("agent", `shapewall agent connect`).
+export const DEVICE_PURPOSES = ['import', 'agent']
+const AGENT_META_KINDS = ['claude', 'codex', 'goose', 'gemini', 'custom']
+// What `shapewall agent connect` says about the agent it will run: its kind
+// and the name it suggests. The machine's own claim, shown on the approval
+// page and never trusted for anything else.
+export function cleanAgentMeta(value) {
+  const kind = AGENT_META_KINDS.includes(value?.kind) ? value.kind : 'custom'
+  const name =
+    typeof value?.name === 'string'
+      ? value.name
+          // eslint-disable-next-line no-control-regex
+          .replace(/[\u0000-\u001f\u007f<>]/g, '')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 40)
+      : ''
+  return { kind, name: name || null }
+}
+const parseMeta = (text) => {
+  try {
+    return cleanAgentMeta(JSON.parse(text || '{}'))
+  } catch {
+    return cleanAgentMeta(null)
+  }
+}
+
 // ---- Sealing the token to the device code ----
 
 // PKCS#8 header of a raw 32-byte X25519 private key.
@@ -125,11 +153,13 @@ export function createDeviceLogins({ db, now = () => new Date(), maxPending = MA
       expiresAt: row.expires_at,
       status: row.status,
       purpose: row.purpose || null,
+      // What an agent login said it runs: { kind, name } (cleaned at start).
+      agent: row.purpose === 'agent' ? parseMeta(row.meta) : null,
     }
 
   // A new login, or { refused: 'per_ip' } when this address has too many
   // pending already.
-  function start({ name, ip, purpose }) {
+  function start({ name, ip, purpose, agent = null }) {
     return transaction(db, () => {
       sweep()
       const from = ip || null
@@ -154,11 +184,12 @@ export function createDeviceLogins({ db, now = () => new Date(), maxPending = MA
       const deviceCode = randomToken(32)
       const created = time()
       q.run(
-        `INSERT INTO device_logins (device_hash, user_code, name, ip, seal_key, created_at, expires_at, status, purpose)
-         VALUES (:hash, :code, :name, :ip, :seal, :created, :expires, 'pending', :purpose)`,
+        `INSERT INTO device_logins (device_hash, user_code, name, ip, seal_key, created_at, expires_at, status, purpose, meta)
+         VALUES (:hash, :code, :name, :ip, :seal, :created, :expires, 'pending', :purpose, :meta)`,
         {
           hash: sha256(deviceCode),
-          purpose: purpose === 'import' ? 'import' : null,
+          purpose: DEVICE_PURPOSES.includes(purpose) ? purpose : null,
+          meta: purpose === 'agent' ? JSON.stringify(cleanAgentMeta(agent)) : null,
           code: userCode,
           name: cleanMachineName(name),
           ip: from,

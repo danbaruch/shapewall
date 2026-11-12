@@ -23,7 +23,7 @@ export function createAgentPresence({ now = () => new Date(), ttlMs = AGENT_PRES
   const latest = new Map()
   const projectKey = (workspaceId, projectId) => `${workspaceId}:${projectId}`
   const agentKey = (workspaceId, agentId) => `${workspaceId}:${agentId}`
-  const fresh = (entry) => Boolean(entry) && now().getTime() - entry.at <= ttlMs
+  const fresh = (entry) => Boolean(entry) && !entry.gone && now().getTime() - entry.at <= ttlMs
   return {
     // A claim-scoped token of this project was just heard from. Returns
     // { cameOnline, save }: whether the agent was offline until now, and
@@ -55,6 +55,12 @@ export function createAgentPresence({ now = () => new Date(), ttlMs = AGENT_PRES
       const entry = seenAt.get(latest.get(projectKey(workspaceId, projectId)))
       if (!entry) return { online: false, name: null, lastSeenAt: null }
       return { online: fresh(entry), name: entry.name, lastSeenAt: new Date(entry.at).toISOString() }
+    },
+    // A connected agent's link closed (src/hosted/agent-link.js): it is
+    // offline now, not in 90 seconds. Its last-seen time stays.
+    gone(workspaceId, agentId) {
+      const entry = seenAt.get(agentKey(workspaceId, agentId))
+      if (entry) entry.gone = true
     },
     // A revoked agent is not listening any more.
     forgetAgent(workspaceId, agentId) {

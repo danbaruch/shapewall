@@ -18,6 +18,8 @@ export const DEFAULT_POLICY = {
   onlyMentions: false,
   dailyClaims: 50,
   maxOpenClaims: 3,
+  // Chat turns with connected agents, per project and day.
+  dailyTurns: 200,
   approveNonAdmin: true,
 }
 export const expandScopes = (scopes) => [...new Set(scopes.flatMap((scope) => (scope === 'comment' ? ['reply', 'status'] : [scope])))]
@@ -47,6 +49,7 @@ export function cleanPolicy(input) {
   for (const [key, max] of [
     ['dailyClaims', 10000],
     ['maxOpenClaims', 100],
+    ['dailyTurns', 100000],
   ]) {
     if (input[key] !== undefined && (!Number.isInteger(input[key]) || input[key] < 0 || input[key] > max))
       throw new AgentPolicyError(400, 'invalid_policy', `Invalid ${key}.`)

@@ -13,6 +13,7 @@ import { avatarUrl } from '../accounts/avatar.js'
 import { checksView, readReport } from '../checks/store.js'
 import { agentPolicy } from './agent-policy.js'
 import { hostedBoardView, sendPng } from './board-context.js'
+import { mountChatRoutes } from './chat-routes.js'
 import { guestView, rowToComment } from './comments.js'
 import { transaction } from './db.js'
 import { publicView } from './guest-view.js'
@@ -57,6 +58,11 @@ export function mountBoardRoutes(
     workspaceQuota = undefined,
     // What readGuest needs (the shared deps of src/hosted/app.js).
     deps,
+    // Chat with connected agents (src/hosted/chat-routes.js): members only.
+    chatFor = null,
+    hub = null,
+    links = null,
+    chat = null,
   },
 ) {
   // ---- Usercontent: live HTML through signed URLs ----
@@ -77,7 +83,8 @@ export function mountBoardRoutes(
   // New comments and replies may carry images (base64, 4 of 5 MB): their
   // body is read after the session and role checks, with its own limit
   // (mediaBody); every other route keeps 64 kB.
-  const MEDIA_POST_RE = /^\/boards\/[^/]+\/comments(?:\/[^/]+\/replies)?\/?$/
+  // A chat message to a connected agent has its own limit too (chat-routes.js).
+  const MEDIA_POST_RE = /^\/(?:boards\/[^/]+\/comments(?:\/[^/]+\/replies)?|agent\/boards\/[^/]+\/threads\/[^/]+\/messages)\/?$/
   const skipMedia = (parser) => (req, res, next) =>
     req.method === 'POST' && MEDIA_POST_RE.test(req.path) ? next() : parser(req, res, next)
   boardApi.use(skipMedia(express.json({ limit: '64kb' })))
@@ -205,6 +212,27 @@ export function mountBoardRoutes(
       res.json({ comment: dispatchView(req.t, req.project.id, ctx.board.id, rowToComment(ctx.comments.get(req.params.cid))) })
     }),
   )
+
+  // Chat with the project's connected agents: on the members' API only.
+  // A share link's guests and a public project's visitors have no such
+  // routes at all (their routers below never mount them).
+  const chatApi =
+    chatFor && hub && links && chat
+      ? mountChatRoutes(boardApi, {
+          db,
+          handle,
+          auditOf,
+          agentsFor,
+          chatFor,
+          hub,
+          links,
+          chat,
+          boardContext,
+          rateLimiter,
+          quotas,
+          workspaceQuota,
+        })
+      : null
 
   const shareApi = express.Router({ mergeParams: true })
   shareApi.use((req, res, next) => {
@@ -374,6 +402,16 @@ export function mountBoardRoutes(
   app.use('/s/:sid/api', shareApi)
   app.use('/p/:pubid/api', publicApi)
 
+  function hostedAgentInfo(req) {
+    try {
+      const found = chatApi.chatAgents(req, null)
+      if (!found.agents.length) return {}
+      return { agent: chatApi.agentInfo(chatApi.defaultOf(found)) }
+    } catch {
+      return {}
+    }
+  }
+
   function boardRoutes(router) {
     router.get('/info', (req, res) =>
       res.json({
@@ -389,6 +427,10 @@ export function mountBoardRoutes(
         consoleUrl: `/w/${req.t.workspaceId}`,
         // The board header's way back to the project's page in the console.
         project: { id: req.project.id, name: req.project.name, url: `/w/${req.t.workspaceId}/projects/${req.project.id}` },
+        // Chat with a connected agent: for members and up, once an agent
+        // that chats is connected to the project (online or not). Never for
+        // a share link's guest or a public visitor (their /info is their own).
+        ...(router === boardApi && chatApi && roleAtLeast(req.role, 'member') ? hostedAgentInfo(req) : {}),
       }),
     )
 
