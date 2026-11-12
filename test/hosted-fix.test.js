@@ -234,7 +234,7 @@ test('Fix with agent: a card with the diff, answered with a fresh passkey, ends 
     return item.agentStatus === 'branch-ready' ? item : null
   }, 'the comment to say branch-ready')
   assert.equal(after.replies.at(-1).author, 'Builder')
-  assert.match(after.replies.at(-1).body, new RegExp(`Fix ready on branch \`${branch}\``))
+  assert.match(after.replies.at(-1).body, new RegExp(`Fix ready on branch ${branch}\\.`))
 
   // Usage: one row for the fix, with its steps, its requests and how it ended. No text.
   const run = lastRun()

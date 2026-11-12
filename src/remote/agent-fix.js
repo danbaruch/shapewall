@@ -223,7 +223,7 @@ export async function finishFix({
     }
     out.summary = summary
     out.status = 'branch-ready'
-    out.line = `Fix ready on branch \`${meta.branch}\`.`
+    out.line = `Fix ready on branch ${meta.branch}.`
     // ---- Push, when this machine has somewhere to push ----
     const remote = policy.remote
     const hasRemote = remote ? (await git(['remote', 'get-url', remote], { cwd: config.dir }).catch(() => '')).trim() : ''
@@ -267,7 +267,7 @@ export async function finishFix({
           ...(fetchImpl ? { fetchImpl } : {}),
         })
         summary.pr = { number: pull.number, url: String(pull.url).slice(0, 300) }
-        out.line = `Fix ready: ${summary.pr.url} (branch \`${meta.branch}\`).`
+        out.line = `Fix ready: ${summary.pr.url} (branch ${meta.branch}).`
       } catch (error) {
         log(`fix: pull request: ${error.message}`)
         notes.push("The branch was pushed, but the pull request could not be opened from the agent's machine.")

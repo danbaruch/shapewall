@@ -51,7 +51,7 @@ import { MENTION_HANDLE_RE } from '../mentions.js'
 import { commentText } from '../comment-fields.js'
 import { validateFiles } from '../agent/composer.js'
 import { QUERY_MAX, THREAD_RE, CHAT_RE, threadKind } from '../agent/thread-history.js'
-import { agentPolicy } from './agent-policy.js'
+import { agentPolicy, dispatchHash } from './agent-policy.js'
 import { LINK_LIMITS } from './agent-link.js'
 import { LINK_TURNS_MAX } from './agents.js'
 import { CARD_HASH_RE, CARD_ID_RE, cardSubjectHash } from '../agent/card-hash.js'
@@ -434,6 +434,9 @@ export function mountChatRoutes(
       if (policy.state(req.project.id, ctx.board.id, comment).dispatchable) {
         if (!agents.trusted(req.project.id, ctx.board.id, req.user.id))
           throw new HttpError(403, 'untrusted_member', 'Only a trusted member may send work to an agent.')
+        // Still for the text this person saw.
+        if (expect !== undefined && expect !== dispatchHash(comment))
+          throw new HttpError(409, 'comment_changed', 'This comment changed since you opened it. Read it again, then send it.')
       } else {
         policy.vouch(req.project.id, ctx.board.id, comment, req.user.id, { role: req.role, approve: false, expect })
         said(req)('comment_vouched', `${ctx.board.id}#${number}`, { project: req.project.id, approve: false, agent: agent.id, fix: true })
