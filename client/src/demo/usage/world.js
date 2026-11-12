@@ -55,7 +55,7 @@ export const USAGE_AGENTS = [
     reports: 'none',
     models: [null],
     weight: 16,
-    audience: 'owner',
+    audience: 'trusted',
     rule: 'auto',
     connectedDays: 21,
     // The "Coding agent" token of the API tokens page.

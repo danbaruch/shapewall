@@ -702,10 +702,7 @@ export function AgentPage({ agentId }) {
           </Link>
         }
       />
-      <DemoNote testId="agent">
-        This is a demo: the machine, the models and the numbers of {agent.name} are made up. On the board it is a scripted agent that
-        answers in this browser.
-      </DemoNote>
+      <DemoNote testId="agent">This is a demo: the machine, the models and the numbers of {agent.name} are made up.</DemoNote>
       <Card className="mb-5">
         <Facts>
           <Fact label="Connected by">
