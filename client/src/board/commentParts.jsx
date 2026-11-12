@@ -85,7 +85,9 @@ const AGENT_LABELS = {
   done: { label: 'Agent done', tone: 'ok' },
   'needs-human': { label: 'Needs a person', tone: 'warn' },
   // Agent branch mode: the fix is committed on a branch, not in the checkout yet.
-  'branch-ready': { label: 'Fix ready on branch', tone: 'accent' },
+  // It waits on a person (Apply), so it wears the attention colour, like "Needs a person"
+  // and like the toolbar's agent activity mark.
+  'branch-ready': { label: 'Fix ready on branch', tone: 'warn' },
 }
 
 // `branch`: the branch a branch-ready fix waits on (local boards know it).
@@ -153,11 +155,12 @@ export function AuthorLabel({ name, handle, agent, className }) {
 export const personColorKey = ({ name, handle }) => String(name || handle || '').toLowerCase()
 
 // The avatar of a comment or reply author, in their colour.
-export function AuthorAvatar({ name, handle, agent, size = 'md', className }) {
+export function AuthorAvatar({ name, handle, agent, agentId = null, size = 'md', className }) {
   return (
     <Avatar
       person
       agent={isAgentAuthor({ name, handle, agent })}
+      agentId={agentId}
       name={name}
       colorKey={personColorKey({ name, handle })}
       size={size}
@@ -168,7 +171,8 @@ export function AuthorAvatar({ name, handle, agent, size = 'md', className }) {
 
 // The author of a comment as { name, handle, agent }.
 export const commentAuthor = (comment) => ({ name: comment.author, handle: comment.authorHandle, agent: comment.authorAgent })
-export const replyAuthor = (reply) => ({ name: reply.author, handle: reply.handle, agent: reply.agent })
+// `agentId`: hosted boards, which of the project's agents wrote it.
+export const replyAuthor = (reply) => ({ name: reply.author, handle: reply.handle, agent: reply.agent, agentId: reply.agentId || null })
 
 export const repliesLabel = (count) => `${count} ${count === 1 ? 'reply' : 'replies'}`
 

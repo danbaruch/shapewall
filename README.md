@@ -51,7 +51,11 @@ feedback, fix the code, and you recapture to check.
 - **Works on a phone.** 44 px touch targets, a bottom sheet for comments, and Back closes the topmost panel instead of leaving the board.
 - **Small and local.** Node 22, Playwright, Express, React Flow. Data is plain JSON files in `.shapewall/`. No account, no cloud.
 - **A team server when you want one.** `shapewall hosted` adds passkey accounts, workspaces with roles, share links and live presence
-  on a server you run. [Multiplayer (beta)](#multiplayer-on-your-own-server).
+  on a server you run. `shapewall agent connect` puts your Claude Code on the hosted board: teammates chat with it there, and it
+  reads the project and answers. When its own machine says so (`--approvals`), it also makes a fix for a comment on a new branch,
+  each edit allowed on the board. Each machine that watches a hosted board is an agent too, with a name, an
+  icon and a state; people send a comment to one by name, and each agent says whose work it takes.
+  [Multiplayer (beta)](#multiplayer-on-your-own-server).
 - **Switch local projects.** Serve each project on its own port; the site dropdown lists them together while keeping every project's
   agent and files separate. [Several local projects](docs/deployment.md#several-local-projects).
 
@@ -124,8 +128,15 @@ shapewall hosted --data ./hosted-data --tailscale --tailscale-port 8443
 
 Run that on one machine. Teammates open its HTTPS address over Tailscale, sign in with their own passkeys and join a workspace you
 invite them to. Captures still run on your machine: `shapewall share --remote URL` moves an existing project to the server, or `login`
-and `push` upload new captures. Comments, roles, scoped agents and live presence work on the shared server. You need no public domain
-and no Shapewall account.
+and `push` upload new captures. Comments, roles, scoped agents and live presence work on the shared server. A machine that runs
+`shapewall watch --remote URL` is an agent on that board, listed by name with its state; people send a comment to one agent or to
+any, and each agent takes work only from the people it is shared with. `shapewall agent connect --remote URL`, run in a project's
+folder, connects that machine's Claude Code for chat on the board: an admin approves it in the browser, members ask it questions
+from the Agents panel, and it reads the project and answers. By default it does not change files or run commands from the board.
+Edits are switched on only on the machine that has the code (`--approvals owner` or `admins`): **Fix with** on a comment then
+makes the fix on a new branch there, never in the checkout, and each edit is a card with the full diff that someone allows or
+denies on the board. It runs no commands from the board. Codex, goose and Gemini CLI are not offered by `agent connect` in this
+release; for them, `shapewall watch --remote` stays the way ([Connected agents](docs/hosted.md#connected-agents)). You need no public domain and no Shapewall account.
 
 The command runs in the foreground and sets up Tailscale Serve; running it as a service and backing it up are covered in
 [the hosted guide](docs/hosted.md), with a [checklist to walk through before you invite the team](docs/hosted.md#before-you-invite-the-team).
@@ -497,6 +508,40 @@ Commands
       --no-claim            hand out every open comment once without claiming it (no agent status, beside other watchers)
                             a command that exits 0 must reply or set a status itself, else the
                             comment becomes needs-human (docs/agent-workflow.md)
+  agent connect             make this machine's coding agent an agent of a hosted project: members chat with it
+                            on the board, and it reads this folder and answers. Read and answer only unless this
+                            machine says more (--approvals). The first run is approved in the browser by an admin.
+                            --remote URL
+      --agent NAME          which agent: claude, or a saved agent's id that runs Claude Code (default: this
+                            project's agent, else Claude Code when found). Codex, goose and Gemini CLI are not
+                            offered in this release. Never a command from the server
+      --name "Builder"      the name to suggest on the approval page (the approver has the last word)
+      --as NAME             a second connection from this machine (its own token; default "default")
+      --audience owner|server  "owner": the server keeps it to the person who connects it even if its audience
+                            there is widened, and this machine refuses a job the server says is someone else's
+                            (no protection from a server that lies); "server" (default): its audience on the server
+      --approvals none|owner|admins  edits from the board. "none" (default): never. "owner": the person who
+                            connected it may allow each edit on the board. "admins": whoever the server lets
+                            answer (admins by default). A fix is made on a new branch in a folder of its own,
+                            never in this checkout. Saved for this connection; the server cannot widen it
+      --allow-command "CMD" one exact command the agent may ask to run, each time allowed on the board (adds to
+                            the list; "none" empties it). Default: no commands at all. Not for Claude Code in
+                            this release: with its shell tool it runs read-only commands without asking
+      --auto none|edits|commands|edits,commands  what the server's "allow without asking" rule may apply to
+                            (default none). Never a file that runs something. Such a fix stays on this machine:
+                            it is pushed only after a person allows "Push this fix" on its whole diff. With
+                            --approvals owner, only the person who connected it can switch the rule on
+      --allow-path FILE     a file that runs on install, build, test or CI (a dotfile, package.json, a Makefile,
+                            a *.config.js, a script, a test, CI config) the agent may ask to edit; such edits are
+                            refused otherwise, a named one is always asked, and a fix that changes one is never
+                            pushed (adds to the list; "none" empties it)
+      --base BRANCH         the branch a fix starts from (default "head": the commit this checkout is on, and
+                            then only while it has no uncommitted changes)
+      --git-remote NAME     where a finished fix is pushed (default origin; "none": never pushed). A pull request
+                            is opened when GitHub connect is set up here (docs/github.md)
+      --takeover            close the link another machine holds for this agent, and take its place
+      --concurrency N       answers at once, 1 to 4 (default 2)
+      --token-file FILE     for a service: the agent's own token, no browser (docs/hosted.md)
   agent run --comment ID    the sandboxed starter agent on one comment: a container with only a fresh
                             worktree, egress to the package registry only (the model is called from here), a branch
       --pr                  also push the branch and open a pull request (GitHub connect); not when it
@@ -580,6 +625,7 @@ Hosted Shapewall (docs/hosted.md)
                             the same commands against a hosted board (--board ID picks one)
                             token: $SHAPEWALL_TOKEN or --token-file FILE (a project token, swp_...)
                             watch --exec commands get no token unless --pass-token
+                            watch and mcp show on the board as an agent, by the token's name
       --include-guests      comments and watch: also share link guests' comments (untrusted)
   hosted                    run the hosted server (accounts, workspaces, pushed boards)
       --data DIR            default ./shapewall-hosted-data (or $SHAPEWALL_HOSTED_DATA)

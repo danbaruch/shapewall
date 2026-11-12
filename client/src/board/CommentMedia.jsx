@@ -144,7 +144,8 @@ function useEscapeLeavesTool(active) {
 // (no hover, and a tap would leave the tip up) only its accessible name.
 // `narrow`: a slimmer button, so a whole row of tools fits on one line.
 function ToolButton({ touch, label, tooltip, narrow, className, ...props }) {
-  if (touch) return <Button variant="ghost" size="icon" aria-label={label} className={cn(narrow ? 'w-8' : 'w-10', className)} {...props} />
+  // Touch: every tool and ink is a full 44 by 44 px target (the row wraps to two lines, DrawTools).
+  if (touch) return <Button variant="ghost" size="icon" aria-label={label} className={className} {...props} />
   return <IconButton size="icon-sm" label={label} tooltip={tooltip} className={cn(narrow ? 'w-6' : 'w-7', className)} {...props} />
 }
 
@@ -164,7 +165,10 @@ export function DrawTools({ owner, touch, onTool = null, leading = null, compact
   const full = !compact || Boolean(mine?.tool) || count > 0
   return (
     <div
-      className={cn('flex min-w-0 flex-nowrap items-center', className)}
+      // Touch (the phone's drawing sheet): two lines on purpose, the tools
+      // on the first, the inks with Undo and Clear on the second, so every
+      // button keeps its 44 px.
+      className={cn('flex min-w-0 items-center', touch ? 'flex-wrap gap-y-0.5' : 'flex-nowrap', className)}
       role="group"
       aria-label="Draw on the page"
       data-sw-draw-tools={owner}
@@ -204,7 +208,7 @@ export function DrawTools({ owner, touch, onTool = null, leading = null, compact
       })}
       {full ? (
         <>
-          <Divider touch={touch} />
+          {touch ? <span className="h-0 basis-full" aria-hidden="true" data-sw-draw-tools-break="true" /> : <Divider touch={touch} />}
           {DRAWING_INKS.map((ink) => {
             const on = (mine?.ink || DRAWING_INKS[0]) === ink
             return (

@@ -125,8 +125,14 @@ the agent picker's **Agent settings** item link to the Agents page.
 
 Connecting, removing, testing and choosing the default run commands as the machine's owner, so they need the settings token (the owner
 link `shapewall serve` prints). Without it the card is read-only and says how to open that link; it asks nothing of the agent routes.
-Self-hosted multiplayer (`shapewall hosted`) has its own workspace Settings (project agent tokens) and no Agents page. The public demo
-shows the card read-only on its console's Agents page.
+Self-hosted multiplayer (`shapewall hosted`) has its own Agents pages, for the machines that watch a hosted project or connect a
+coding agent to it ([Agents on a hosted board](hosted.md#agents-on-a-hosted-board)): they list and name agents, and never start a
+program on the server. The chat panel described here is also on hosted boards, for an agent connected with `shapewall agent
+connect`: the same panel, with an agent that reads the project and answers. On a hosted comment, **Fix with** an agent is offered
+only when that agent's own machine switched edits on (`--approvals`): the fix is made on a new branch on that machine, never in
+its checkout, and each edit is a card with the full diff that someone allows or denies on the board. Only Claude Code can be
+connected that way in this release, and it runs no commands from a hosted board ([Connected agents](hosted.md#connected-agents)).
+The public demo shows this card read-only on its console's Agents page.
 
 ## Name and icon
 
@@ -169,8 +175,9 @@ fixed with `--agent-acp` or `SHAPEWALL_AGENT_ACP` still wins over which agent ru
 saved for that fixed agent (`fixedAgent` in `agents.json`) and the Agents page shows it with **Edit**. Everyone who can see the board
 gets the name, the icon's id and the colour in the agent info they already receive (`/api/agent/status`, `/api/info`); nothing else
 about the agent is added to it. In the public demo you can rename the two scripted agents and give them built-in icons (no upload);
-**Reset** puts them back. On a hosted board an agent is its API token: rename the token there ([hosted.md](hosted.md#workspaces-roles-and-invites));
-icons for hosted agents are not there yet.
+**Reset** puts them back. On a hosted board an agent is a project API token that may take work: an admin gives it a name, one of the
+same built-in icons and a colour on the project's Agents page in the console
+([Agents on a hosted board](hosted.md#agents-on-a-hosted-board)). Pictures are not uploaded there.
 
 ### While a connection test runs
 
@@ -961,8 +968,9 @@ Older thread files need no migration: a file with only `messages` (and `profileI
 its title. The fields added since (`owner`, `title`, `titleSource`, `createdAt`, `archived`, `branches`) are written only when something
 sets them. A board keeps at most 500 New chat threads; delete old ones to start more.
 
-There are no share links for chats: chat runs only on a local `shapewall serve` board, and hosted boards (which have share links) have no
-agent chat. Export a chat as Markdown to share it.
+There are no share links for chats. On a hosted board, chat is for signed-in members with a
+[connected agent](hosted.md#connected-agents); a share link's guests and a public project's visitors never get it. Export a chat as
+Markdown to share it.
 
 ## Board tools
 

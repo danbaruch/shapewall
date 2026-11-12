@@ -13,7 +13,9 @@ import { CreateShare, ShareList, SharesOff } from './shares'
 import { CreateToken, TokenList } from './tokens'
 import { useWorkspace } from './workspace'
 import { AgentPolicySection } from './agent'
+import { ProjectAgentsCard } from './agents'
 import { GettingStarted } from './getting-started'
+import { DEMO } from '../../lib/demo'
 
 export function ProjectPage({ projectId }) {
   const { workspaceId, data, isAdmin, isOwner, reload } = useWorkspace()
@@ -222,6 +224,8 @@ export function ProjectPage({ projectId }) {
             ) : null}
           </Card>
         ) : null}
+
+        {isAdmin && !DEMO ? <ProjectAgentsCard workspaceId={workspaceId} projectId={projectId} /> : null}
 
         {isAdmin ? <AgentPolicySection workspaceId={workspaceId} projectId={projectId} /> : null}
 

@@ -9,9 +9,12 @@ import { ROLE_LABEL } from '../lib/format'
 import { api, wsUrl } from '../lib/api'
 import { useAction, useLoad, useToast } from '../state'
 
+// [key, label, the most, what an older server that does not send it means]
 const LIMITS = [
-  ['dailyClaims', 'Runs per day (UTC)', 10000],
-  ['maxOpenClaims', 'Runs in progress at once', 100],
+  ['dailyClaims', 'Runs per day (UTC)', 10000, 50],
+  ['maxOpenClaims', 'Runs in progress at once', 100, 3],
+  // Chat with connected agents (`shapewall agent connect`).
+  ['dailyTurns', 'Chat turns per day (UTC)', 100000, 200],
 ]
 
 export function AgentPolicySection({ workspaceId, projectId }) {
@@ -43,7 +46,9 @@ function PolicyForm({ policy, url, onSaved }) {
   const [draft, setDraft] = useState(policy)
   const [handles, setHandles] = useState(policy.trustedHandles.join(', '))
   // Kept as typed: an emptied field is a mistake to point out, not a limit of 0.
-  const [limits, setLimits] = useState(() => Object.fromEntries(LIMITS.map(([key]) => [key, String(policy[key] ?? '')])))
+  const [limits, setLimits] = useState(() =>
+    Object.fromEntries(LIMITS.map(([key, , , fallback]) => [key, String(policy[key] ?? fallback)])),
+  )
   const [overrides, setOverrides] = useState(JSON.stringify(policy.boards || {}, null, 2))
   const action = useAction()
   const set = (key, value) => setDraft({ ...draft, [key]: value })
@@ -113,7 +118,12 @@ function PolicyForm({ policy, url, onSaved }) {
       </fieldset>
       <div className="grid items-start gap-4 sm:grid-cols-2">
         {LIMITS.map(([key, label, max]) => (
-          <Field key={key} label={label} hint="0 stops new runs." error={limitProblem(key, max)}>
+          <Field
+            key={key}
+            label={label}
+            hint={key === 'dailyTurns' ? '0 stops chat with connected agents.' : '0 stops new runs.'}
+            error={limitProblem(key, max)}
+          >
             {(field) => (
               <Input
                 {...field}

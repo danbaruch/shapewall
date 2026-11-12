@@ -20,19 +20,34 @@ export async function buzzBridge(flags, out) {
 
 export async function settings(flags, out, err) {
   const { startAgentManagement } = await import('../agent/manage.js')
-  const management = await startAgentManagement({ config: loadConfig(flags.config), port: Number(flags.port ?? 0), out })
-  if (flags.open) openBrowser(`${management.url}${management.app.locals.openLink()}`, out)
+  // The handlers go in before the server says it is ready. A script (or a
+  // quick Ctrl-C) may signal the moment it reads that line, and a signal
+  // with no handler yet kills the process outright: no cleanup, and an exit
+  // by signal where 0 is meant. A signal that lands while the server is
+  // still starting is remembered and acted on as soon as it is up.
+  let management = null
   let stopping = false
-  const stop = () => {
-    if (stopping) return
-    stopping = true
+  const close = () =>
     management.close().catch((error) => {
       err(`Agent settings cleanup failed: ${error.message}`)
       process.exitCode = 1
     })
+  const stop = () => {
+    if (stopping) return
+    stopping = true
+    if (management) close()
   }
   process.on('SIGINT', stop)
   process.on('SIGTERM', stop)
+  try {
+    management = await startAgentManagement({ config: loadConfig(flags.config), port: Number(flags.port ?? 0), out })
+  } catch (error) {
+    process.removeListener('SIGINT', stop)
+    process.removeListener('SIGTERM', stop)
+    throw error
+  }
+  if (stopping) close()
+  else if (flags.open) openBrowser(`${management.url}${management.app.locals.openLink()}`, out)
   return null
 }
 

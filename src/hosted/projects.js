@@ -105,7 +105,17 @@ export function createProjectStore(t, { db, dataDir, maxProjects = PROJECTS_MAX 
     const project = get(projectId)
     if (!project) throw new ProjectError(404, 'unknown_project', 'No such project.')
     transaction(db, () => {
-      for (const table of ['comment_files', 'comments', 'boards', 'api_tokens', 'pushes']) {
+      for (const table of [
+        'chat_permissions',
+        'chat_turns',
+        'chat_messages',
+        'chat_threads',
+        'comment_files',
+        'comments',
+        'boards',
+        'api_tokens',
+        'pushes',
+      ]) {
         t.run(`DELETE FROM ${table} WHERE workspace_id = :ws AND project_id = :id`, { id: project.id })
       }
       t.run('DELETE FROM projects WHERE workspace_id = :ws AND id = :id', { id: project.id })
@@ -130,7 +140,19 @@ export function createProjectStore(t, { db, dataDir, maxProjects = PROJECTS_MAX 
   // board id starts a new board (comment numbers from 1 again). The
   // workspace's storage count is a sum over these rows, so it drops by
   // itself. Returns what went: { board, comments, bytes }.
-  const BOARD_TABLES = ['comment_files', 'comment_imports', 'agent_approvals', 'agent_claims', 'comments', 'pushes', 'boards']
+  const BOARD_TABLES = [
+    'chat_permissions',
+    'chat_turns',
+    'chat_messages',
+    'chat_threads',
+    'comment_files',
+    'comment_imports',
+    'agent_approvals',
+    'agent_claims',
+    'comments',
+    'pushes',
+    'boards',
+  ]
   function removeBoard(projectId, boardId) {
     const id = String(boardId || '')
     const project = get(projectId)
@@ -142,6 +164,11 @@ export function createProjectStore(t, { db, dataDir, maxProjects = PROJECTS_MAX 
       const comments = t.get(`SELECT COUNT(*) AS n FROM comments ${where}`, key).n
       const images = t.get(`SELECT COALESCE(SUM(bytes), 0) AS n FROM comment_files ${where}`, key).n
       const open = t.all(`SELECT id FROM pushes ${where} AND status = 'open'`, key).map((push) => push.id)
+      // The usage record of a run on this board stays (it is history), closed.
+      t.run(`UPDATE agent_runs SET ended_at = :at, outcome = 'removed' ${where} AND ended_at IS NULL`, {
+        ...key,
+        at: new Date().toISOString(),
+      })
       for (const table of BOARD_TABLES) t.run(`DELETE FROM ${table} ${where}`, key)
       return { comments, bytes: row.bytes + images, open }
     })

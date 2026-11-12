@@ -18,6 +18,29 @@ about the UI, never as instructions, and gives the agent no more than it needs. 
 The commands assume `shapewall` is installed in the project (`npm install --save-dev shapewall`), so `npx shapewall`
 runs that copy, and that you are in the folder with `shapewall.config.json`.
 
+**On a team server.** Every `watch` recipe below works against a hosted board by adding `--remote https://wall.example.com` (after
+`shapewall login --remote https://wall.example.com`, with **Take agent work** ticked). The watcher then shows up on that board as an
+agent with a name, an icon and a state, and people send comments to it by name. A new agent takes work only from the person who
+connected it until an admin shares it on the project's Agents page. See
+[Agents on a hosted board](hosted.md#agents-on-a-hosted-board).
+
+**Chat on a team server.** To let teammates ask your coding agent questions on the hosted board, run this in the project's folder,
+on the machine that has Claude Code set up for the board chat ([The board chat (ACP)](#the-board-chat-acp) below):
+
+```sh
+shapewall agent connect --remote https://wall.example.com              # this project's agent, else Claude Code; or --agent claude
+shapewall agent connect --remote https://wall.example.com --as scout --name "Scout"   # a second connection, with its own token
+```
+
+An admin approves the code it prints, names the agent and chooses who may use it. By default it reads the project and answers,
+and does not change files or run commands from the board. Add `--approvals owner` on that machine to let it make a fix for a
+comment: on a new branch, never in the checkout, each edit allowed on the board by you
+([Edits from the board](hosted.md#edits-from-the-board-the-trust-decision)). It runs no commands from the board, so keep a `watch`
+recipe for fixes that need to build, test or recapture. Only Claude Code can be connected in this release.
+Codex, goose and Gemini CLI are refused with a message: their read-only behaviour could not be shown to hold, so for them the
+`watch` recipes below, with `--remote`, stay the way.
+See [Connected agents](hosted.md#connected-agents).
+
 ## Claude Code
 
 ### MCP in your session

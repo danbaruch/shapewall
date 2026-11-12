@@ -3,6 +3,7 @@ import { ChatSkeleton } from '../components/app-states'
 import { Dialog } from '../components/ui'
 import { cn } from '../lib/utils'
 import CommentsPanel from './CommentsPanel'
+import { HostedAgentPanel } from './HostedAgentPanel'
 import { railWidthSaved, rememberRailWidth } from './prefs'
 import { CommentComposer } from './CommentComposer'
 import { ThreadView } from './Thread'
@@ -10,7 +11,19 @@ const ChecksPanel = lazy(() => import('./ChecksPanel'))
 const BoardChat = lazy(() => import('../chat/BoardChat'))
 
 // Beside the canvas on desktop: checks, the agent chat or the comments.
-export function SidePanel({ wide, checksOpen, checksProps, chatThread, chatProps, panelHidden, panelProps, updateParams }) {
+// `hostedAgent`: a hosted board's Agent panel (who is listening, what runs,
+// what waits), where a local board has its chat.
+export function SidePanel({
+  wide,
+  checksOpen,
+  checksProps,
+  chatThread,
+  chatProps,
+  panelHidden,
+  panelProps,
+  updateParams,
+  hostedAgent = null,
+}) {
   return wide && checksOpen ? (
     <Rail key="checks" panel="checks" defaultWidth={384} aria-label="Checks">
       <Suspense fallback={<p className="p-4 text-sm text-muted">Loading checks…</p>}>
@@ -22,6 +35,10 @@ export function SidePanel({ wide, checksOpen, checksProps, chatThread, chatProps
       <Suspense fallback={<ChatSkeleton />}>
         <BoardChat {...chatProps} onClose={() => updateParams({ chat: null })} />
       </Suspense>
+    </Rail>
+  ) : wide && hostedAgent ? (
+    <Rail key="hosted-agent" panel="agent" defaultWidth={384} aria-label="Agent">
+      <HostedAgentPanel {...hostedAgent} onClose={() => updateParams({ ha: null })} />
     </Rail>
   ) : wide && !panelHidden ? (
     <Rail key="comments" panel="comments" defaultWidth={384} id="sw-comments" tabIndex={-1} className="outline-none" aria-label="Comments">
@@ -137,6 +154,8 @@ function Rail({ panel, defaultWidth, className, children, ...props }) {
 // The same on a phone, as sheets: checks, the agent chat, the comments, the
 // open thread and the comment being written.
 export function PhoneSheets({
+  // A hosted board's Agent panel (HostedAgentPanel's props), or null.
+  hostedAgent = null,
   checksOpen,
   closeChecks,
   checksProps,
@@ -175,6 +194,14 @@ export function PhoneSheets({
             <Suspense fallback={<ChatSkeleton heading={false} />}>
               <BoardChat {...chatProps} heading={false} />
             </Suspense>
+          </div>
+        </Dialog>
+      ) : null}
+      {hostedAgent ? (
+        <Dialog open onClose={() => updateParams({ ha: null })} title="Agents" size="md">
+          {/* Read first: focus goes to the sheet, not to its first link. */}
+          <div className="flex max-h-[78dvh] min-h-0 flex-col outline-none" tabIndex={-1} data-autofocus data-sw-hosted-agent-sheet="true">
+            <HostedAgentPanel {...hostedAgent} heading={false} />
           </div>
         </Dialog>
       ) : null}

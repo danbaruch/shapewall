@@ -1307,6 +1307,44 @@ test('desktop: a journey arrow whose next step is off screen stops at the edge i
   }
 })
 
+test('keyboard: a tooltip on a focused button never swallows Esc: one Esc closes the thread it is in', async () => {
+  const { context, page, errors } = await openBoard(DESKTOP)
+  try {
+    const robin = listComments(config, 'demo').find((item) => item.body === 'Covers feel heavy')
+    const thread = `[data-sw-thread-popover="${robin.id}"]`
+    await page.click(`[data-sw-rail="comments"] [data-sw-comment="${robin.id}"]`)
+    await page.waitForSelector(thread)
+    await settle(page)
+    await page.waitForFunction((sel) => document.activeElement?.matches(sel), thread)
+    // Tab to a header button: its tooltip opens for the keyboard.
+    await page.keyboard.press('Tab')
+    await page.waitForSelector('[role="tooltip"]')
+    assert.equal(await page.evaluate((sel) => Boolean(document.activeElement?.closest(sel)), thread), true)
+    await page.keyboard.press('Escape')
+    await page.waitForSelector(thread, { state: 'detached', timeout: 3000 })
+    assert.equal(await page.locator('[role="tooltip"]').count(), 0, 'the tooltip went with it')
+    assert.equal(new URL(page.url()).searchParams.get('c'), null)
+
+    // The same in a dialog: the search palette, focus on its field, is one Esc.
+    await page.keyboard.press('Control+k')
+    await page.waitForSelector('[data-sw-palette]')
+    await page.keyboard.press('Escape')
+    await page.waitForSelector('[data-sw-palette]', { state: 'detached' })
+    // And with no layer under it, Esc on a focused toolbar button just closes its tooltip.
+    await page.focus('[data-sw-toolbar="full"] [data-sw-view-menu]')
+    await page.keyboard.press('Tab')
+    await page.waitForTimeout(700)
+    await page.keyboard.press('Shift+Tab')
+    await page.waitForTimeout(700)
+    assert.equal(await page.locator('[role="tooltip"]:not([data-state="closed"])').count(), 1, 'the focused control has its tooltip')
+    await page.keyboard.press('Escape')
+    await page.waitForSelector('[role="tooltip"]', { state: 'detached' })
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})
+
 test('desktop: agents at work show on the toolbar with a count, stay still under reduced motion, and settle as done', async () => {
   const board = config.boards[0]
   const made = []

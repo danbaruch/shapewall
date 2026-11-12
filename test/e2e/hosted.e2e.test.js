@@ -345,6 +345,19 @@ test('remove one board in the console: its captures and comments go, the other b
   const folder = (board) => path.join(hosted.dataDir, 'files', workspaceId, projectId, board)
   assert.ok(fs.existsSync(folder('mistake')))
 
+  // A board with no journeys has no Pages / Journeys tabs in the sidebar: still one search field, not two.
+  await page.goto(`${hosted.origin}/w/${workspaceId}/p/${projectId}/?board=mistake`)
+  await page.waitForSelector('[data-sw-node="home"]')
+  const wasCollapsed = !(await page.locator('[data-sw-app-rail] [data-sw-pages-sidebar]').count())
+  if (wasCollapsed) await page.click('[data-sw-sidebar-toggle]')
+  await page.waitForSelector('[data-sw-app-rail] [data-sw-pages-sidebar]')
+  assert.match(await page.textContent('[data-sw-app-rail] button[data-sw-palette-trigger]'), /Search the board/)
+  assert.equal(await page.locator('[data-sw-app-rail] [data-sw-sidebar-tab]').count(), 0, 'no tabs on a board without journeys')
+  assert.equal(await page.locator('[data-sw-app-rail] [data-sw-pages-filter]').count(), 0, 'no second search box')
+  assert.equal(await page.locator('[data-sw-app-rail] input').count(), 0)
+  await shot(page, 'sidebar-no-journeys')
+  if (wasCollapsed) await page.click('[data-sw-sidebar-toggle]')
+
   await page.goto(`${hosted.origin}/w/${workspaceId}/projects/${projectId}`)
   await page.waitForSelector('[data-sw-project-board="mistake"]')
   assert.equal(await page.locator('[data-sw-project-board]').count(), 2)
@@ -385,6 +398,59 @@ test('remove one board in the console: its captures and comments go, the other b
     [],
   )
   errors.length = 0
+})
+
+test('hosted board: the Agent control opens a panel that lists the agents and says which are online', async () => {
+  const { page, errors } = owner
+  const projectId = hosted.db.prepare("SELECT id FROM projects WHERE name = 'Demo site'").get().id
+  await page.goto(`${hosted.origin}/w/${workspaceId}/p/${projectId}/?board=demo`)
+  await page.waitForSelector('[data-sw-node="home"]')
+  // A sibling of Comments and Checks, for someone who can send comments to the agent.
+  const agent = '[data-sw-toolbar="full"] [data-sw-panel-switch] [data-sw-chat-toggle]'
+  await page.waitForSelector(agent)
+  assert.equal(await page.getAttribute(agent, 'aria-pressed'), 'false')
+  assert.match(await page.getAttribute(agent, 'aria-label'), /No agent is connected/)
+  await page.click(agent)
+  await page.waitForSelector('[data-sw-rail="agent"] [data-sw-hosted-agent]')
+  assert.equal(await page.getAttribute(agent, 'aria-pressed'), 'true')
+  assert.equal(new URL(page.url()).searchParams.get('ha'), '1')
+  const listening = '[data-sw-hosted-agent-listening]'
+  assert.equal(await page.getAttribute(listening, 'data-sw-hosted-agent-listening'), 'none')
+  const said = await page.textContent(listening)
+  assert.match(said, /No agent is connected to this project/)
+  assert.ok(said.includes(`shapewall agent connect --remote ${hosted.origin}`), 'how to connect one to chat with')
+  assert.ok(said.includes(`shapewall watch --remote ${hosted.origin}`), 'how to connect one that fixes comments')
+  assert.equal(
+    await page.getAttribute('[data-sw-hosted-agent-docs]', 'href'),
+    'https://shapewall.com/docs/where-to-run#where-the-work-happens',
+  )
+  // No chat while no agent that chats is connected (the full flows: hosted-chat.e2e.test.js).
+  assert.equal(await page.locator('[data-sw-chat], [data-sw-chat-input]').count(), 0)
+  await shot(page, 'hosted-agent-1-none')
+
+  // A machine starts listening: a token that may take work calls the token API.
+  hosted.db.prepare('UPDATE sessions SET verified_at = ?').run(new Date().toISOString())
+  const made = await page.request.post(`${hosted.origin}/api/workspaces/${workspaceId}/projects/${projectId}/tokens`, {
+    data: { name: 'Build box', scopes: ['read', 'reply', 'status', 'claim'] },
+    headers: { Origin: hosted.origin },
+  })
+  assert.equal(made.status(), 201)
+  const called = await tokenCall(hosted, (await made.json()).token, 'GET', '/api/v1/project')
+  assert.equal(called.status, 200)
+  await page.reload()
+  await page.waitForSelector('[data-sw-hosted-agent-listening="online"]')
+  // Each agent by name, with its state (the full flows: hosted-agents.e2e.test.js).
+  const row = '[data-sw-hosted-agent-row][data-sw-hosted-agent-name="Build box"]'
+  assert.equal(await page.getAttribute(row, 'data-sw-agent-state'), 'online')
+  assert.match(await page.textContent(row), /Build box\s*Online/)
+  assert.match(await page.getAttribute(agent, 'aria-label'), /Build box online/)
+  assert.doesNotMatch(await page.textContent('[data-sw-hosted-agent]'), /swp_|tk_/)
+  await shot(page, 'hosted-agent-2-online')
+  // The same button closes it; Comments takes its place again.
+  await page.click(agent)
+  await page.waitForSelector('[data-sw-rail="comments"]')
+  assert.equal(new URL(page.url()).searchParams.get('ha'), null)
+  assert.deepEqual(errors, [])
 })
 
 test('admin loop: invite, accept on a phone, change the role, share a link, guest comments, revoke', async () => {

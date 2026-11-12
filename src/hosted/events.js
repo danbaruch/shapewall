@@ -21,7 +21,7 @@ export function createEventBus() {
 
 // The change event a successful write publishes (the SSE stream and board
 // presence refetch on it), or null. Only comment, approval, import, agent
-// policy and push-commit writes change what watchers see, and a board
+// policy, agent setting and push-commit writes change what watchers see, and a board
 // removed in the console (`method` DELETE on the board itself); a push's
 // file uploads, token and device approvals publish nothing.
 export function changeEventType(pathname, method = 'POST') {
@@ -31,10 +31,10 @@ export function changeEventType(pathname, method = 'POST') {
   if (/\/comments\/[1-9][0-9]*\/resolve$/.test(pathname)) return 'comment.resolved'
   if (/\/boards\/[^/]+\/comments$/.test(pathname)) return 'comment.created'
   if (
-    /\/boards\/[^/]+\/(?:comments\/[1-9][0-9]*(?:\/(?:replies|reactions|reopen|agent-status|approvals))?|approvals\/[^/]+|import)$/.test(
+    /\/boards\/[^/]+\/(?:comments\/[1-9][0-9]*(?:\/(?:replies|reactions|reopen|agent-status|approvals|release-agent))?|approvals\/[^/]+|import)$/.test(
       pathname,
     ) ||
-    /\/projects\/[^/]+\/agent$/.test(pathname)
+    /\/projects\/[^/]+\/(?:agent|default-agent|agents\/[^/]+(?:\/(?:audience|approval))?)$/.test(pathname)
   )
     return 'comment.updated'
   return null

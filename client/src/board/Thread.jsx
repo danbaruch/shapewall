@@ -43,7 +43,9 @@ import { hasCommentMedia } from '../../../src/comment-fields.js'
 import { COMMENT_MAX, sendsOnEnter } from './commentInput'
 import { Reactions } from './Reactions'
 import { viewportIcon } from './viewports'
+import SendToAgent from './SendToAgent'
 import FixWithAgent from './FixWithAgent'
+import HostedFix from './HostedFix'
 import { MentionText, MentionTextarea } from './Mentions'
 import {
   AgentStatusChip,
@@ -362,8 +364,9 @@ export function ThreadView({
   denial = null,
   role = null,
   hosted = null,
-  // Hosted: false when no agent is listening for the project (null: not known).
-  agentListening = null,
+  // Hosted: the project's agents as this person may use them (null: not
+  // known yet), for "Send to <agent>" (SendToAgent.jsx).
+  agents = null,
   onSaveName = null,
   media = null,
 }) {
@@ -559,31 +562,38 @@ export function ThreadView({
       <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-3">
         {comment.orphanReason ? <p className="pt-2 text-xs text-muted">{comment.orphanReason}</p> : null}
         {comment.imported && comment.agentStatus ? <p className="pt-2 text-xs text-muted">Imported agent status (history)</p> : null}
+        {/* Hosted: "Fix with <agent>" (a fix on a branch, each edit allowed on a card), then "Send to agent". */}
+        {actions.onHostedFix ? (
+          <HostedFix
+            comment={comment}
+            list={agents}
+            busy={busy}
+            touch={touch}
+            onFix={actions.onHostedFix}
+            onOpenChat={actions.onAskAgent || null}
+          />
+        ) : null}
         {actions.onSendToAgent && comment.status === 'open' ? (
-          <div className="py-2">
-            <Button
-              size={touch ? 'touch' : 'sm'}
-              disabled={busy || comment.dispatchable || (comment.needsRunApproval && !['admin', 'owner'].includes(role))}
-              onClick={() => actions.onSendToAgent(comment)}
-            >
-              {comment.dispatchable
-                ? 'Sent to agent'
-                : comment.needsRunApproval
-                  ? ['admin', 'owner'].includes(role)
-                    ? 'Approve agent run'
-                    : 'Awaiting run approval'
-                  : 'Send to agent'}
-            </Button>
-            {agentListening === false ? (
-              // Sent or not, nothing acts on it until an agent connects: say so
-              // instead of leaving the comment looking stuck.
-              <p className="mt-1.5 text-xs text-muted" role="status" data-sw-no-agent-listening="true">
-                {comment.dispatchable
-                  ? 'No agent is listening right now. This comment waits until one connects (shapewall watch --remote).'
-                  : 'No agent is listening right now: a comment sent to the agent waits until one connects.'}
-              </p>
-            ) : null}
-          </div>
+          <SendToAgent
+            comment={comment}
+            list={agents}
+            role={role}
+            busy={busy}
+            touch={touch}
+            onSend={actions.onSendToAgent}
+            onRelease={actions.onReleaseAgent || null}
+          />
+        ) : null}
+        {actions.onHostedFix ? (
+          <HostedFix
+            slot="status"
+            comment={comment}
+            list={agents}
+            busy={busy}
+            touch={touch}
+            onFix={actions.onHostedFix}
+            onOpenChat={actions.onAskAgent || null}
+          />
         ) : null}
         <ol className="divide-y divide-line/60" aria-label={`Comment ${comment.id} and replies`}>
           <Message

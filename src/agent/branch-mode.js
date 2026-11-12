@@ -372,10 +372,24 @@ export async function repoAuthor(cwd) {
 // (made when the turn's work is committed). -> { tree, meta, root }
 export async function createAgentBranch(
   config,
-  { prefix = DEFAULT_BRANCH_PREFIX, kind, boardId, threadId, commentId = null, text = '', n = 1, now = new Date() },
+  {
+    prefix = DEFAULT_BRANCH_PREFIX,
+    kind,
+    boardId,
+    threadId,
+    commentId = null,
+    text = '',
+    n = 1,
+    now = new Date(),
+    // A connected agent's fix (src/remote/agent-fix.js): a commit to start
+    // from other than HEAD, and a worktrees folder outside the project.
+    base = null,
+    root: givenRoot = null,
+  },
 ) {
   const repo = await checkRepo(config)
-  const root = agentWorktreeRoot(config, { create: true })
+  if (base !== null && !SHA_RE.test(String(base))) throw new BranchError('bad_base', 'The commit to start from is not valid.', 400)
+  const root = givenRoot || agentWorktreeRoot(config, { create: true })
   const first = agentBranchName({ prefix, kind, commentId, threadId, n, text })
   const taken = new Set(readAllMeta(root).map((item) => item.branch))
   let branch = first
@@ -384,7 +398,7 @@ export async function createAgentBranch(
     branch = `${first}-${count}`
   }
   const runId = newRunId(now)
-  const tree = await createWorktree({ projectDir: config.dir, root, runId, branch, base: repo.head })
+  const tree = await createWorktree({ projectDir: config.dir, root, runId, branch, base: base || repo.head })
   const meta = {
     version: 1,
     id: runId,

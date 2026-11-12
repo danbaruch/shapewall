@@ -462,6 +462,171 @@ const MIGRATIONS = [
   CREATE INDEX comment_files_comment ON comment_files(workspace_id, project_id, board_id, comment_number);
   CREATE INDEX comment_files_import ON comment_files(workspace_id, project_id, import_session, import_ref);
   `,
+  // 12: agents (0.4.0). A project API token that may take work (the claim
+  // scope) is an agent: this row gives it a face (kind, icon, tint, machine),
+  // an audience (who may send it work), an approval rule and who may change
+  // or answer it. The name stays the token's. A project has a default
+  // agent; a comment can be addressed to one agent (NULL: any agent); a
+  // claim remembers which agent took it. agent_runs is the usage record of
+  // each comment an agent took (who asked, which agent, when, how it ended;
+  // never comment or answer text), shaped for the usage dashboard, whose
+  // token and cost columns stay NULL until an agent reports them.
+  //
+  // Every token that already has the claim scope becomes an agent of kind
+  // "watcher" with the audience it had in effect before: everyone the
+  // project's agent policy trusts (audience_inherited marks that it was
+  // never chosen). Agents made from now on start with "owner".
+  `
+  CREATE TABLE agents (
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    id TEXT PRIMARY KEY,
+    token_id TEXT NOT NULL UNIQUE REFERENCES api_tokens(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL DEFAULT 'watcher',
+    icon TEXT,
+    tint TEXT,
+    machine TEXT,
+    capabilities TEXT NOT NULL DEFAULT '{}',
+    audience TEXT NOT NULL DEFAULT 'owner' CHECK (audience IN ('owner', 'members', 'trusted')),
+    audience_users TEXT NOT NULL DEFAULT '[]',
+    audience_inherited INTEGER NOT NULL DEFAULT 0,
+    approval_rule TEXT NOT NULL DEFAULT 'ask' CHECK (approval_rule IN ('ask', 'auto')),
+    approval_change_role TEXT NOT NULL DEFAULT 'admin' CHECK (approval_change_role IN ('admin', 'owner')),
+    approval_answer_role TEXT NOT NULL DEFAULT 'admin' CHECK (approval_answer_role IN ('admin', 'owner')),
+    created_by TEXT,
+    created_at TEXT NOT NULL,
+    approved_by TEXT,
+    approved_at TEXT,
+    last_seen_at TEXT
+  );
+  CREATE INDEX agents_project ON agents(workspace_id, project_id);
+  ALTER TABLE projects ADD COLUMN default_agent_id TEXT;
+  ALTER TABLE comments ADD COLUMN agent_id TEXT;
+  ALTER TABLE agent_claims ADD COLUMN agent_id TEXT;
+  INSERT INTO agents (workspace_id, project_id, id, token_id, kind, audience, audience_inherited, created_by, created_at,
+    approved_by, approved_at, last_seen_at)
+  SELECT workspace_id, project_id, 'ag_' || lower(hex(randomblob(12))), id, 'watcher', 'trusted', 1, created_by, created_at,
+    created_by, created_at, last_used_at
+  FROM api_tokens WHERE scopes LIKE '%"claim"%';
+  UPDATE agent_claims SET agent_id = (SELECT a.id FROM agents a WHERE a.token_id = agent_claims.token_id);
+  CREATE TABLE agent_runs (
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL DEFAULT 'fix',
+    agent_id TEXT,
+    claim_id TEXT,
+    board_id TEXT,
+    comment_number INTEGER,
+    thread_id TEXT,
+    asked_by TEXT,
+    started_at TEXT NOT NULL,
+    ended_at TEXT,
+    outcome TEXT,
+    model TEXT,
+    effort TEXT,
+    input_tokens INTEGER,
+    output_tokens INTEGER,
+    cached_tokens INTEGER,
+    cost_micros INTEGER,
+    steps INTEGER
+  );
+  CREATE INDEX agent_runs_time ON agent_runs(workspace_id, started_at);
+  CREATE INDEX agent_runs_project ON agent_runs(workspace_id, project_id, started_at);
+  CREATE INDEX agent_runs_agent ON agent_runs(workspace_id, agent_id, started_at);
+  CREATE INDEX agent_runs_person ON agent_runs(workspace_id, asked_by, started_at);
+  CREATE INDEX agent_runs_claim ON agent_runs(workspace_id, claim_id);
+  `,
+  // 13: connected agents and chat (0.5.0). `shapewall agent connect` holds a
+  // link to the server and members chat with the agent on the board. A
+  // thread belongs to a board ("board" and "comment-<n>" are shared, a
+  // "chat-..." is its starter's own) and names the agent it talks to. Its
+  // messages are stored here (the person's text, the agent's answer with its
+  // cards in their final state); a turn is one question on its way through
+  // an agent, whose live events stay in memory. A device login remembers
+  // what the machine said it runs (meta), for the approval page.
+  `
+  ALTER TABLE device_logins ADD COLUMN meta TEXT;
+  CREATE TABLE chat_threads (
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    board_id TEXT NOT NULL,
+    thread_id TEXT NOT NULL,
+    agent_id TEXT,
+    owner_user_id TEXT,
+    title TEXT,
+    title_source TEXT,
+    archived INTEGER NOT NULL DEFAULT 0,
+    created_by TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (workspace_id, project_id, board_id, thread_id)
+  );
+  CREATE TABLE chat_messages (
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    board_id TEXT NOT NULL,
+    thread_id TEXT NOT NULL,
+    id TEXT PRIMARY KEY,
+    role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+    author_user_id TEXT,
+    agent_id TEXT,
+    turn_id TEXT,
+    body TEXT NOT NULL,
+    bytes INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX chat_messages_thread ON chat_messages(workspace_id, project_id, board_id, thread_id, created_at);
+  CREATE TABLE chat_turns (
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    id TEXT PRIMARY KEY,
+    board_id TEXT NOT NULL,
+    thread_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'chat',
+    state TEXT NOT NULL DEFAULT 'queued',
+    acked_seq INTEGER NOT NULL DEFAULT 0,
+    started_by TEXT,
+    user_message_id TEXT,
+    run_id TEXT,
+    comment_number INTEGER,
+    created_at TEXT NOT NULL,
+    ended_at TEXT
+  );
+  CREATE INDEX chat_turns_thread ON chat_turns(workspace_id, project_id, board_id, thread_id, created_at);
+  CREATE INDEX chat_turns_agent ON chat_turns(workspace_id, agent_id, state);
+  `,
+  // 14: approvals and edits from a hosted board (0.6.0). chat_permissions is
+  // one row per permission card a connected agent asked during a fix: what
+  // it asked (the card, as hashed), its state, who answered and when. The
+  // usage record of a run gains how many requests it asked and how they
+  // ended. Additive; an older build ignores all of it.
+  `
+  CREATE TABLE chat_permissions (
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    board_id TEXT NOT NULL,
+    thread_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    card TEXT NOT NULL,
+    card_hash TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    answered_by TEXT,
+    answered_at TEXT,
+    PRIMARY KEY (workspace_id, turn_id, id)
+  );
+  CREATE INDEX chat_permissions_board ON chat_permissions(workspace_id, project_id, board_id, state);
+  ALTER TABLE agent_runs ADD COLUMN approvals_asked INTEGER;
+  ALTER TABLE agent_runs ADD COLUMN approvals_allowed INTEGER;
+  ALTER TABLE agent_runs ADD COLUMN approvals_denied INTEGER;
+  ALTER TABLE agents ADD COLUMN approval_rule_by TEXT;
+  `,
 ]
 
 export async function openDatabase(file) {

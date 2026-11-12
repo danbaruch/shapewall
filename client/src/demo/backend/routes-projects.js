@@ -11,6 +11,7 @@ const DEFAULT_AGENT_POLICY = {
   onlyMentions: false,
   dailyClaims: 50,
   maxOpenClaims: 3,
+  dailyTurns: 200,
   approveNonAdmin: true,
 }
 // The server's rules for an agent policy (src/hosted/agent-policy.js
@@ -36,6 +37,7 @@ function cleanAgentPolicy(input) {
   for (const [key, max] of [
     ['dailyClaims', 10000],
     ['maxOpenClaims', 100],
+    ['dailyTurns', 100000],
   ]) {
     if (input[key] === undefined) continue
     if (!Number.isInteger(input[key]) || input[key] < 0 || input[key] > max) bad(key)

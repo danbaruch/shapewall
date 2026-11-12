@@ -178,7 +178,7 @@ function PanelSwitch({
           className={segment}
           pressed={commentsOn}
           onPressedChange={() =>
-            updateParams({ panel: panelHidden || chatThread || checksOpen ? null : 'off', chat: null, checks: null, cv: null })
+            updateParams({ panel: panelHidden || chatThread || checksOpen ? null : 'off', chat: null, ha: null, checks: null, cv: null })
           }
           aria-label={`Comments, ${allOpen} open${onComments ? `. ${words}` : ''}`}
           data-sw-panel-toggle="true"
@@ -203,7 +203,7 @@ function PanelSwitch({
             aria-label={words ? `Agent. ${words}` : 'Agent'}
             // Exactly one thing needs the person: the panel opens on it.
             onPressedChange={() =>
-              chatThread ? updateParams({ chat: null }) : activity.target ? openAgentThread(activity.target) : reopenChat()
+              chatThread ? updateParams({ chat: null, ha: null }) : activity.target ? openAgentThread(activity.target) : reopenChat()
             }
             data-sw-chat-toggle="true"
             {...activityHooks}

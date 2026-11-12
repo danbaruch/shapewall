@@ -13,6 +13,7 @@ import { avatarUrl } from '../accounts/avatar.js'
 import { checksView, readReport } from '../checks/store.js'
 import { agentPolicy } from './agent-policy.js'
 import { hostedBoardView, sendPng } from './board-context.js'
+import { mountChatRoutes } from './chat-routes.js'
 import { guestView, rowToComment } from './comments.js'
 import { transaction } from './db.js'
 import { publicView } from './guest-view.js'
@@ -47,6 +48,7 @@ export function mountBoardRoutes(
     auditOf,
     clientIp,
     policyFor,
+    agentsFor,
     dispatchView,
     boardContext,
     // Cleans comment images off the event loop (src/hosted/cleaner.js).
@@ -56,6 +58,11 @@ export function mountBoardRoutes(
     workspaceQuota = undefined,
     // What readGuest needs (the shared deps of src/hosted/app.js).
     deps,
+    // Chat with connected agents (src/hosted/chat-routes.js): members only.
+    chatFor = null,
+    hub = null,
+    links = null,
+    chat = null,
   },
 ) {
   // ---- Usercontent: live HTML through signed URLs ----
@@ -76,7 +83,8 @@ export function mountBoardRoutes(
   // New comments and replies may carry images (base64, 4 of 5 MB): their
   // body is read after the session and role checks, with its own limit
   // (mediaBody); every other route keeps 64 kB.
-  const MEDIA_POST_RE = /^\/boards\/[^/]+\/comments(?:\/[^/]+\/replies)?\/?$/
+  // A chat message to a connected agent has its own limit too (chat-routes.js).
+  const MEDIA_POST_RE = /^\/(?:boards\/[^/]+\/comments(?:\/[^/]+\/replies)?|agent\/boards\/[^/]+\/threads\/[^/]+\/messages)\/?$/
   const skipMedia = (parser) => (req, res, next) =>
     req.method === 'POST' && MEDIA_POST_RE.test(req.path) ? next() : parser(req, res, next)
   boardApi.use(skipMedia(express.json({ limit: '64kb' })))
@@ -110,11 +118,45 @@ export function mountBoardRoutes(
     }),
   )
 
+  // The project's agents as this person may see and use them, for the
+  // board's Agent panel and "Send to agent": names, faces, states, what each
+  // holds on this board, and whether this person may send it work (with the
+  // reason when not). Members and viewers only: this router is never
+  // mounted for a share link's guests or a public project's visitors. No
+  // token ids, prefixes or scopes, and no account ids.
+  boardApi.get(
+    '/boards/:bid/agents',
+    handle((req, res) => {
+      const ctx = boardContext(req.t, req.project, req.params.bid)
+      // Reading the list is also where an agent that is gone lets go of its
+      // work, and where a token from an older build is first seen.
+      const audit = (action, target, detail) => auditOf(req, action, target, detail)
+      res.json(
+        transaction(db, () =>
+          agentsFor(req.t).boardList(req.project.id, { userId: req.user.id, role: req.role }, { boardId: ctx.board.id, audit }),
+        ),
+      )
+    }),
+  )
+  const actorOf = (req) => ({
+    userId: req.user.id,
+    role: req.role,
+    audit: (action, target, detail) => auditOf(req, action, target, detail),
+  })
+
+  // Sends a comment to an agent. `agentId` names one agent of the project
+  // (the sender must be in its audience), null means any agent, and without
+  // it the project's default agent is used when the sender may use it (any
+  // agent otherwise). An admin's approval of a run someone else asked for
+  // keeps where that comment was going.
   boardApi.post(
     '/boards/:bid/comments/:cid/send-to-agent',
     handle((req, res) => {
       const ctx = boardContext(req.t, req.project, req.params.bid)
       const approve = req.body?.approve === true
+      const named = Object.hasOwn(req.body || {}, 'agentId')
+      if (named && req.body.agentId !== null && typeof req.body.agentId !== 'string')
+        throw new HttpError(400, 'invalid_agent', 'agentId: an agent id, or null for any agent.')
       // The vouch covers the text its sender saw: the body carries the
       // comment's dispatchHash (from the board API), compared with the row
       // in the transaction that writes the vouch. Edited meanwhile: 409
@@ -126,13 +168,74 @@ export function mountBoardRoutes(
           if (!roleAtLeast(req.role, 'admin')) throw new HttpError(403, 'forbidden', 'Only trusted admins approve runs.')
           freshOrThrow(req)
         }
+        const agents = agentsFor(req.t)
+        const going = agents.addressOf(req.project.id, current)
+        const wanted = named ? req.body.agentId : approve && current.dispatch_hash ? going : undefined
+        // Work an agent already took stays with it, and so does the approval
+        // it was taken under: sending it again changes nothing (not who
+        // vouched for it, not where it goes), and sending it elsewhere is
+        // refused. Without a named agent (an older board) it is "again".
+        if (['queued', 'working'].includes(current.agent_status)) {
+          if (!roleAtLeast(req.role, 'member') || !agents.trusted(req.project.id, ctx.board.id, req.user.id))
+            throw new HttpError(403, 'untrusted_member', 'Only a trusted member may send work to an agent.')
+          if (named && wanted !== going) throw new HttpError(409, 'agent_working', 'An agent is already working on this comment.')
+          return current
+        }
         policyFor(req.t).vouch(req.project.id, ctx.board.id, current, req.user.id, { role: req.role, approve, expect })
-        auditOf(req, 'comment_vouched', `${ctx.board.id}#${current.number}`, { project: req.project.id, approve })
+        // After the vouch (which refuses people the agent policy does not
+        // trust): the audience of the agent it is sent to, checked for the
+        // sender, and for the admin who approves someone else's run.
+        const agent = agents.address(req.project.id, ctx.board.id, current, { userId: req.user.id, role: req.role }, wanted)
+        auditOf(req, 'comment_vouched', `${ctx.board.id}#${current.number}`, { project: req.project.id, approve, agent })
         return current
       })
       res.json({ comment: dispatchView(req.t, req.project.id, ctx.board.id, rowToComment(ctx.comments.get(row.number))) })
     }),
   )
+
+  // "Let any agent take it": a comment that waits for one agent (it is
+  // offline, say) goes to whichever agent takes it first. For the people who
+  // may send comments to an agent here; not once an agent has taken it.
+  boardApi.post(
+    '/boards/:bid/comments/:cid/release-agent',
+    handle((req, res) => {
+      const ctx = boardContext(req.t, req.project, req.params.bid)
+      const agents = agentsFor(req.t)
+      transaction(db, () => {
+        const current = ctx.comments.get(req.params.cid)
+        if (!roleAtLeast(req.role, 'member') || !agents.trusted(req.project.id, ctx.board.id, req.user.id))
+          throw new HttpError(403, 'untrusted_member', 'Only a trusted member may send work to an agent.')
+        if (['queued', 'working'].includes(current.agent_status))
+          throw new HttpError(409, 'agent_working', 'An agent is already working on this comment.')
+        agents.release(actorOf(req), req.project.id, ctx.board.id, current)
+      })
+      res.json({ comment: dispatchView(req.t, req.project.id, ctx.board.id, rowToComment(ctx.comments.get(req.params.cid))) })
+    }),
+  )
+
+  // Chat with the project's connected agents: on the members' API only.
+  // A share link's guests and a public project's visitors have no such
+  // routes at all (their routers below never mount them).
+  const chatApi =
+    chatFor && hub && links && chat
+      ? mountChatRoutes(boardApi, {
+          db,
+          handle,
+          auditOf,
+          agentsFor,
+          chatFor,
+          hub,
+          links,
+          chat,
+          boardContext,
+          rateLimiter,
+          quotas,
+          workspaceQuota,
+          policyFor,
+          freshOrThrow,
+          now,
+        })
+      : null
 
   const shareApi = express.Router({ mergeParams: true })
   shareApi.use((req, res, next) => {
@@ -302,6 +405,16 @@ export function mountBoardRoutes(
   app.use('/s/:sid/api', shareApi)
   app.use('/p/:pubid/api', publicApi)
 
+  function hostedAgentInfo(req) {
+    try {
+      const found = chatApi.chatAgents(req, null)
+      if (!found.agents.length) return {}
+      return { agent: chatApi.agentInfo(chatApi.defaultOf(found)) }
+    } catch {
+      return {}
+    }
+  }
+
   function boardRoutes(router) {
     router.get('/info', (req, res) =>
       res.json({
@@ -317,6 +430,10 @@ export function mountBoardRoutes(
         consoleUrl: `/w/${req.t.workspaceId}`,
         // The board header's way back to the project's page in the console.
         project: { id: req.project.id, name: req.project.name, url: `/w/${req.t.workspaceId}/projects/${req.project.id}` },
+        // Chat with a connected agent: for members and up, once an agent
+        // that chats is connected to the project (online or not). Never for
+        // a share link's guest or a public visitor (their /info is their own).
+        ...(router === boardApi && chatApi && roleAtLeast(req.role, 'member') ? hostedAgentInfo(req) : {}),
       }),
     )
 
@@ -436,7 +553,14 @@ export function mountBoardRoutes(
         const comment = transaction(db, () => {
           checkStorageQuota(req.t, imageBytes(media), quotaOf(req))
           const made = ctx.comments.create(ctx.config, ctx.board, req.body, authorOf(req), now(), media)
-          if (!req.guest) policyFor(req.t).autoVouch(req.project.id, ctx.board.id, ctx.comments.get(made.id), req.user.id, req.role)
+          if (!req.guest) {
+            policyFor(req.t).autoVouch(req.project.id, ctx.board.id, ctx.comments.get(made.id), req.user.id, req.role)
+            // Vouched for as it was written: it goes to the project's default
+            // agent when its author may use that agent, to any agent otherwise.
+            const vouched = ctx.comments.get(made.id)
+            if (vouched.dispatch_hash)
+              agentsFor(req.t).address(req.project.id, ctx.board.id, vouched, { userId: req.user.id, role: req.role }, undefined)
+          }
           if (req.guest) auditOf(req, 'guest_commented', `${ctx.board.id}#${made.id}`, { project: req.project.id, guest: req.guest.name })
           return made
         })

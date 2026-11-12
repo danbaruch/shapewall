@@ -51,7 +51,32 @@ its own. Setups for each agent: [agent recipes](/docs/agent-recipes).
 ## Can my team use it together?
 
 Yes, on a server you run. The team server (beta), started with `shapewall hosted`, gives your team passkey sign-in, workspaces with
-roles, share links and shared boards. [The hosted guide](/docs/hosted) covers setup.
+roles, share links and shared boards. Teammates can also chat on the board with Claude Code, connected from the machine that
+has the code (`shapewall agent connect`): by default it reads the project and answers, and does not change files or run commands
+from the board. Other agents are not offered for chat in this release; they take comments through `shapewall watch --remote`. [The hosted guide](/docs/hosted) covers setup.
+
+## Can an agent change my code from a hosted board?
+
+Only when the machine that has the code says so. A connected agent reads and answers by default. Edits are switched on there,
+with `shapewall agent connect --approvals owner` (the person who connected it allows each edit) or `--approvals admins`. Then
+**Fix with** on a comment starts a fix, and each edit the agent asks for is shown on the board as a card with the path and the
+full diff, with Allow and Deny. The server cannot switch this on, and chat messages never edit. A connected Claude Code runs no
+commands from the board in this release. See [the hosted guide](/docs/hosted#edits-from-the-board-the-trust-decision).
+
+## Where does a fix end up?
+
+On a new branch, never in the checked-out tree. The agent works in a fresh copy of the base commit, in a folder outside the
+project on its own machine. Shapewall commits the result on a branch named `shapewall/comment-<n>-<slug>`, and keeps the commit
+only if it is exactly what was allowed. The branch is pushed when that machine has the remote and the change touches nothing that
+runs on install, build, test or CI and a person saw every edit, and a pull request is opened when [GitHub connect](/docs/github) is set up there. Otherwise the thread says "Fix ready
+on branch" with the name to copy. The folder is removed afterwards; the branch stays. You review and merge it like any other.
+
+## Who can approve an agent's edit?
+
+Someone with the agent's answer role (admin by default), who is also in the agent's audience and trusted by the project's agent
+policy. When the agent's machine was started with `--approvals owner`, only the person who connected it. Allow needs a passkey
+check in the last 10 minutes; Deny does not. A card waits 2 minutes and is answered once, and the agent's machine checks every
+answer again before it counts.
 
 ## What does it need to run?
 

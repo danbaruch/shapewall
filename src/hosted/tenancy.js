@@ -30,6 +30,12 @@ export const TENANT_TABLES = [
   'import_batches',
   'comment_imports',
   'comment_files',
+  'agents',
+  'agent_runs',
+  'chat_threads',
+  'chat_messages',
+  'chat_turns',
+  'chat_permissions',
 ]
 export { ROLES, roleAtLeast } from './permissions.js'
 
@@ -114,6 +120,18 @@ export function tenant(db, workspaceId) {
 }
 
 // ---- Entry points (global lookups that yield a workspace) ----------------------
+
+// The workspaces that hold a chat turn the database still calls open. At
+// server start none is really running (live turns are memory): the caller
+// ends each one, through its own tenant handle (src/hosted/agent-link.js).
+export function workspacesWithOpenTurns(db) {
+  const has = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'chat_turns'").get()
+  if (!has) return []
+  return db
+    .prepare("SELECT DISTINCT workspace_id FROM chat_turns WHERE state IN ('queued', 'running')")
+    .all()
+    .map((row) => row.workspace_id)
+}
 
 // The token row for a SHA-256 hash, if it is live: not revoked, not
 // expired, and its maker is still a member who may hold tokens (an admin or

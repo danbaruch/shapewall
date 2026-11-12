@@ -12,6 +12,7 @@ import Loader from './Loader'
 import Markdown from './Markdown'
 import { revealLength, streamingMarkdown } from './livetext'
 import { activitySummary, currentActivity, formatElapsed, runningLabel, stepsOf } from './steps'
+import { useHostedAnswer } from './hostedPermissions.js'
 
 // Seconds since `startedAt` (ms), ticking once a second while `active`.
 function useElapsed(startedAt, active) {
@@ -74,8 +75,11 @@ export function LiveActivity({ cards, status, writing, startedAt, touch = false 
   const [open, setOpen] = useState(false)
   const elapsed = useElapsed(startedAt, true)
   const steps = stepsOf(cards)
-  const label = currentActivity({ cards, status, writing })
-  const waiting = label === 'Waiting for your answer'
+  const activity = currentActivity({ cards, status, writing })
+  const waiting = activity === 'Waiting for your answer'
+  // A hosted board: the card may be someone else's to answer (the card says who).
+  const hostedAnswer = useHostedAnswer()
+  const label = waiting && hostedAnswer && !hostedAnswer.ok ? 'Waiting for an answer' : activity
   const starting = /^Starting /.test(status || '') ? status : null
   return (
     <div className="min-w-0" data-sw-chat-activity="live" data-sw-chat-status="true">
@@ -120,7 +124,7 @@ export function LiveActivity({ cards, status, writing, startedAt, touch = false 
         ) : null}
       </button>
       <span className="sr-only" role="status">
-        {waiting ? 'Waiting for your answer' : 'Agent is responding'}
+        {waiting ? label : 'Agent is responding'}
       </span>
       {open && steps.length ? <StepList steps={steps} live /> : null}
     </div>

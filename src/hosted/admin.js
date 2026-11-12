@@ -18,6 +18,7 @@ import { NEEDS, ROLE_ACCESS, tokenCreatorOk } from './permissions.js'
 import { projectDir } from './projects.js'
 import { auditAccount } from './tenancy.js'
 import { ZIP_MAX_BYTES, createZip } from './zip.js'
+import { createChatStore } from './chat-store.js'
 
 const AUDIT_PAGE = 50
 const AUDIT_PAGE_MAX = 200
@@ -332,6 +333,12 @@ export async function writeWorkspaceExport(t, exported, { write, now, iso, expor
       JSON.stringify({ ...JSON.parse(row.definition), pushedAt: row.pushed_at, pushes: row.push_count }, null, 2),
     )
     await zip.add(`${base}comments.json`, JSON.stringify(comments, null, 2))
+    // Chat with connected agents: the threads every member reads (the
+    // board's and each comment's). A member's own chats are not in a copy
+    // an admin downloads; chats.json says how many there are.
+    const chats = createChatStore(t).shared(project.id, row.board_id)
+    if (chats.threads.length || chats.privateChats)
+      await zip.add(`${base}chats.json`, JSON.stringify({ threads: chats.threads, privateChatsNotIncluded: chats.privateChats }, null, 2))
     for (const [relative, file] of files) {
       let data
       try {

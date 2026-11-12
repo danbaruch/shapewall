@@ -11,7 +11,15 @@ import { execFileSync } from 'node:child_process'
 import { createApp, stopChildren } from '../src/server/app.js'
 import { loadConfig } from '../src/config.js'
 import { createComment, getComment, setAgentStatus } from '../src/store.js'
-import { beginTurnChanges, finishTurnChanges, starterSummary, undoFiles, undoStarterBranch } from '../src/agent/turn-changes.js'
+import {
+  beginTurnChanges,
+  finishTurnChanges,
+  ignoredPaths,
+  isIgnored,
+  starterSummary,
+  undoFiles,
+  undoStarterBranch,
+} from '../src/agent/turn-changes.js'
 import { AGENT_AUTHOR } from '../src/agent/starter/worktree.js'
 import { REFS_RULE, SYSTEM_PROMPT, ACP_PREAMBLE } from '../src/agent/context.js'
 import { SAMPLE, request, tempDir } from './helpers.js'
@@ -125,6 +133,107 @@ test('Undo changes nothing when a folder of a deleted file was replaced after th
   )
   assert.equal(read(config, 'a.txt'), 'a1\n', 'all or nothing')
   assert.deepEqual(fs.readdirSync(elsewhere), [])
+})
+
+// A real case: a dev server writing its data inside the project folder, in a
+// folder .gitignore names (the line on disk, not committed yet), while the
+// agent edits one file. Before, the card listed dozens of those files and
+// Undo would have deleted the new ones and rolled back the changed ones.
+test('files Git ignores are never listed, counted or undone: another process writing there during a turn is left alone', async () => {
+  const config = setup('summary-ignored')
+  gitIn(config.dir, ['init', '-q'])
+  write(config, 'src/page.html', '<h1>Old</h1>\n')
+  gitIn(config.dir, ['add', '.'])
+  gitIn(config.dir, ['-c', 'user.name=T', '-c', 'user.email=t@example.invalid', 'commit', '-q', '-m', 'first'])
+  // Ignore rules as they are on disk: .gitignore not committed, and .git/info/exclude.
+  write(config, '.gitignore', '.live-demo/\n*.log\n')
+  fs.appendFileSync(path.join(config.dir, '.git', 'info', 'exclude'), 'scratch/\n')
+  write(config, '.live-demo/data/kept.db', 'before the turn\n')
+  write(config, 'server.log', 'line 1\n')
+  write(config, 'scratch/notes.txt', 'mine\n')
+  assert.deepEqual([...(await ignoredPaths(config.dir)).dirs].sort(), ['.live-demo/', 'scratch/'])
+
+  const baseline = await beginTurnChanges(config)
+  // The agent's edit, and an untracked file of its own that is not ignored.
+  write(config, 'src/page.html', '<h1>New</h1>\n')
+  write(config, 'src/new.css', 'h1 { color: teal; }\n')
+  // Meanwhile, somebody else's files in ignored places: changed, added, deleted.
+  write(config, '.live-demo/data/kept.db', 'changed by the dev server\n')
+  write(config, '.live-demo/data/files/ws_1/new.bin', 'made during the turn\n')
+  write(config, 'server.log', 'line 1\nline 2\n')
+  fs.rmSync(path.join(config.dir, 'scratch/notes.txt'))
+  const { summary, undo } = await finishTurnChanges(config, baseline, { board: config.boards[0] })
+  assert.deepEqual(
+    summary.files.map((item) => [item.path, item.status]),
+    [
+      ['src/new.css', 'added'],
+      ['src/page.html', 'modified'],
+    ],
+    'only what is not ignored',
+  )
+  assert.deepEqual([summary.added, summary.removed], [2, 1])
+  assert.equal(summary.undo.available, true)
+  assert.deepEqual(undo.files.map((item) => item.path).sort(), ['src/new.css', 'src/page.html'])
+
+  // Undo puts the agent's files back and leaves the ignored ones byte for byte.
+  undoFiles(config, undo, { ignored: await ignoredPaths(config.dir) })
+  assert.equal(read(config, 'src/page.html'), '<h1>Old</h1>\n')
+  assert.equal(fs.existsSync(path.join(config.dir, 'src/new.css')), false)
+  assert.equal(read(config, '.live-demo/data/kept.db'), 'changed by the dev server\n')
+  assert.equal(read(config, '.live-demo/data/files/ws_1/new.bin'), 'made during the turn\n')
+  assert.equal(read(config, 'server.log'), 'line 1\nline 2\n')
+  assert.equal(fs.existsSync(path.join(config.dir, 'scratch/notes.txt')), false, "not brought back either: it was never the turn's")
+
+  // A record that names an ignored file (it could only come from an older build) is refused whole.
+  write(config, 'src/page.html', '<h1>Again</h1>\n')
+  const forged = { files: [{ path: '.live-demo/data/kept.db', before: Buffer.from('x'), existed: true, mode: 0o644, after: 'any' }] }
+  assert.throws(
+    () => undoFiles(config, forged, { ignored: { files: new Set(), dirs: new Set(['.live-demo/']) } }),
+    (error) => error.code === 'undo_unavailable' && /ignored by Git/.test(error.message),
+  )
+  assert.equal(read(config, '.live-demo/data/kept.db'), 'changed by the dev server\n')
+})
+
+test('a file the turn itself makes ignored is not reported as deleted; a tracked file stays listed whatever .gitignore says', async () => {
+  const config = setup('summary-ignored-midturn')
+  gitIn(config.dir, ['init', '-q'])
+  write(config, 'tracked.log', 'tracked\n')
+  write(config, 'notes.tmp', 'untracked\n')
+  gitIn(config.dir, ['add', 'tracked.log'])
+  gitIn(config.dir, ['-c', 'user.name=T', '-c', 'user.email=t@example.invalid', 'commit', '-q', '-m', 'first'])
+  const baseline = await beginTurnChanges(config)
+  write(config, '.gitignore', '*.log\n*.tmp\n')
+  write(config, 'tracked.log', 'tracked, edited\n')
+  const { summary } = await finishTurnChanges(config, baseline, { board: config.boards[0] })
+  assert.deepEqual(
+    summary.files.map((item) => [item.path, item.status]),
+    [
+      ['.gitignore', 'added'],
+      ['tracked.log', 'modified'],
+    ],
+  )
+})
+
+test("outside a Git repository, or in a folder its repository ignores: as before, minus Shapewall's own folders", async () => {
+  // The test folder sits under test/.output, which this repository ignores.
+  const config = setup('summary-no-git')
+  assert.equal(await ignoredPaths(config.dir), null)
+  write(config, 'a.txt', 'a0\n')
+  const baseline = await beginTurnChanges(config)
+  write(config, 'a.txt', 'a1\n')
+  write(config, 'server.log', 'listed here: no ignore rules to go by\n')
+  write(config, '.shapewall-export/index.html', 'never ours\n')
+  write(config, '.shapewall/store.json', '{}')
+  write(config, 'node_modules/dep/index.js', 'no')
+  const { summary } = await finishTurnChanges(config, baseline, { board: config.boards[0] })
+  assert.deepEqual(
+    summary.files.map((item) => item.path),
+    ['a.txt', 'server.log'],
+  )
+  assert.equal(isIgnored(null, 'anything'), false)
+  assert.equal(isIgnored({ files: new Set(['x.log']), dirs: new Set(['a/b/']) }, 'a/b/c/d.txt'), true)
+  assert.equal(isIgnored({ files: new Set(['x.log']), dirs: new Set(['a/b/']) }, 'a/bc/d.txt'), false)
+  assert.equal(isIgnored({ files: new Set(['x.log']), dirs: new Set(['a/b/']) }, 'x.log'), true)
 })
 
 test('secrets files are never diffed, and their change turns Undo off', async () => {

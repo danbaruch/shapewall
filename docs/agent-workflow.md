@@ -212,6 +212,11 @@ requires a claiming local `--exec`, so it is refused with `--remote`, `--no-clai
 command did not edit a file; inspect the before/after before resolving. To capture additional pages, the agent can use `recapture_pages`
 through MCP or the capture CLI. Variants still require manual capture.
 
+With `--remote`, the watcher is an **agent** of the hosted project: the board lists it by its token's name with its state (online,
+working, offline), and people choose it when they send a comment. It is handed the comments sent to it and the ones sent to any
+agent, from the people it takes work from; a comment sent to another agent never reaches it. Nothing changes in how you run it. See
+[Agents on a hosted board](hosted.md#agents-on-a-hosted-board).
+
 Options: `--concurrency N` (1 to 4, default 1; agents editing one repo at once usually step on each other), `--new-only` (ignore comments
 that exist when the watch starts), `--once` (hand out what is open now, wait for the commands, exit; handy in CI or a cron you run
 yourself), `--timeout MIN` (default 60), `--no-claim` (below).

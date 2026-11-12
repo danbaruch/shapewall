@@ -68,6 +68,14 @@ export const LIMITS = {
   sessionFiles: { limit: 6000, windowMs: 60_000 },
   token: { limit: 1200, windowMs: 60_000 },
   tokenBadAuth: { limit: 20, windowMs: 60_000 },
+  // A connected agent's link (src/hosted/agent-link.js): streamed answers
+  // arrive in small batches, in a bucket of their own so they never use up
+  // the token's budget for comments and pushes.
+  agentLink: { limit: 6000, windowMs: 60_000 },
+  // How often one agent's link may open (each open is a write and a broadcast).
+  agentLinkOpen: { limit: 6, windowMs: 60_000 },
+  // Chat messages a person sends to connected agents (src/hosted/chat-routes.js).
+  chatSend: { limit: 20, windowMs: 60_000 },
   push: { limit: 20, windowMs: 60 * 60_000 },
   // Invite emails per workspace (the link can always be copied instead).
   inviteEmail: { limit: 20, windowMs: 60 * 60_000 },

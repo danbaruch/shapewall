@@ -429,6 +429,28 @@ test('phone 390: draw in the full-sheet page, attach, post; 44 px targets', asyn
           .every((item) => item.playState === 'finished'),
       sheet,
     )
+    // Every tool and ink in the sheet is a full 44 by 44 px target, on two
+    // lines: the tools, then the inks with Undo and Clear.
+    const drawControls = await page.$$eval('[role="dialog"] [data-sw-draw-tools] button', (nodes) =>
+      nodes.map((node) => {
+        const box = node.getBoundingClientRect()
+        return {
+          name: node.getAttribute('aria-label'),
+          width: Math.round(box.width),
+          height: Math.round(box.height),
+          top: Math.round(box.top),
+        }
+      }),
+    )
+    assert.equal(drawControls.length, 8)
+    assert.deepEqual(
+      drawControls.filter((item) => item.width < 44 || item.height < 44),
+      [],
+      'no drawing control under 44 px',
+    )
+    assert.equal(new Set(drawControls.slice(0, 3).map((item) => item.top)).size, 1, 'the three tools share a line')
+    assert.equal(new Set(drawControls.slice(3).map((item) => item.top)).size, 1, 'inks, Undo and Clear share the next')
+    assert.ok(drawControls[3].top > drawControls[0].top, 'two lines')
     const area = await page.locator(sheet).boundingBox()
     await drag(page, [area.x + area.width * 0.2, area.y + area.height * 0.1], [area.x + area.width * 0.7, area.y + area.height * 0.2])
     await page.waitForSelector('[role="dialog"] [data-sw-draw-count="1"]')
@@ -439,10 +461,10 @@ test('phone 390: draw in the full-sheet page, attach, post; 44 px targets', asyn
       tools.every((rect) => rect.height >= 43.5),
       `44 px tall tools: ${JSON.stringify(tools)}`,
     )
-    // One line at 390, inside the screen.
+    // Inside the screen at 390 (two lines, checked above).
     assert.ok(
-      tools.every((rect) => Math.abs(rect.top - tools[0].top) < 1 && rect.right <= 390),
-      'the tools are one row',
+      tools.every((rect) => rect.right <= 390),
+      'no tool runs off the screen',
     )
     // The zoom-first hint toast never sits over a sheet.
     assert.equal(await page.locator('[data-sw-toast]').count(), 0)

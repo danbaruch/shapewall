@@ -33,11 +33,14 @@ import { Composer } from './composer'
 import { commentOfThread, mergeBy, ownerOnlyError, useChatTurn } from './useChatTurn'
 import { useAutoAllow } from './useAutoAllow'
 import { useAgentOptions, useOnScreen } from './agentOptions'
+import { useHostedTurn } from './useHostedTurn'
 import { excerpt } from './text'
 import { ChatHistory, exportThread, restoreVersion } from './history'
 import { fallbackTitle, isChatThread, newChatId, threadKind } from './threads'
 import { useAnswerRatings } from './actions'
 import { AllowForChat } from './allowForChat'
+import { HostedAnswer, HostedPush, answerHostedPermission } from './hostedPermissions.js'
+import { confirmHostedPasskey } from '../board/HostedApprovals'
 import { AutoAllowSettings } from './composerParts'
 import BranchModeToggle from './BranchModeToggle'
 import { BatchProgress } from '../board/BatchFixes'
@@ -109,7 +112,14 @@ export default function ChatPanel({
   // A turn the server is running in this thread that this tab did not start
   // (another tab or person, or this tab before a reload): poll until it ends.
   const [remoteBusy, setRemoteBusy] = useState(false)
-  const thread = useResource(defaultAgent ? threadPath(boardId, threadId) : null, { pollMs: starterBusy || remoteBusy ? 3000 : 0 })
+  // A hosted board's connected agent (src/hosted/chat-routes.js): the turn
+  // runs on the server and the agent's machine, other members share the
+  // board's threads, and the agent only reads and answers.
+  const hosted = Boolean(defaultAgent?.hosted)
+  const thread = useResource(defaultAgent ? threadPath(boardId, threadId) : null, {
+    // Hosted: a look every few seconds finds a turn another member started.
+    pollMs: starterBusy || remoteBusy ? 3000 : hosted ? 5000 : 0,
+  })
   const threads = useResource(defaultAgent ? `/api/agent/boards/${encodeURIComponent(boardId)}/threads` : null)
   // useResource loads the thread; a changed agent (connected, settings saved)
   // loads it again.
@@ -206,6 +216,8 @@ export default function ChatPanel({
       ),
     )
   }, [messages])
+  // Hosted: a turn this tab did not start is joined live (useHostedTurn.js).
+  useHostedTurn({ enabled: hosted, boardId, threadId, thread, run })
   const remoteRunning = Boolean(selectedThread?.running) && !run
   useEffect(() => setRemoteBusy(remoteRunning), [remoteRunning])
   const running = Boolean(run) || selectingProfile || remoteRunning
@@ -369,6 +381,8 @@ export default function ChatPanel({
   // One turn: send, stream, finish (useChatTurn.js).
   const submit = useChatTurn({
     optionChoices: () => optionsRef.current?.forMessage() || null,
+    hostedFix: () => (hosted && fixRequest?.hosted && fixRequest.commentId === commentId ? fixRequest.hosted : null),
+    confirmPasskey: hosted ? confirmHostedPasskey : null,
     boardId,
     threadId,
     draft,
@@ -400,13 +414,15 @@ export default function ChatPanel({
   const startedFix = useRef(null)
   useEffect(() => {
     if (!fixRequest || fixRequest.commentId !== commentId || !configured || startedFix.current === fixRequest.nonce) return
+    // A hosted fix names its agent; a thread still loading is not the one to send from.
+    if (fixRequest.hosted && !hosted) return
     const nonce = fixRequest.nonce
     startedFix.current = nonce
     // Not sent (a turn still running, dictation on): try again when that ends.
     submitRef.current('', true).then((started) => {
       if (!started && startedFix.current === nonce) startedFix.current = null
     })
-  }, [fixRequest, commentId, configured, running, dictation.listening])
+  }, [fixRequest, commentId, configured, hosted, running, dictation.listening])
 
   // The composer's send: while a turn runs (or a message is still going
   // out), the message waits in the queue instead.
@@ -505,13 +521,25 @@ export default function ChatPanel({
     }
   }
 
+  // Resolves false when the answer was not taken (the card stays as it was).
   const answer = async (permissionId, optionId, target = threadId) => {
+    // A hosted board's card goes back with its hash; Allow may ask for the passkey first.
+    const card = hosted
+      ? [...(run?.reply?.cards || []), ...messages.flatMap((message) => message.cards || [])].find(
+          (item) => item.id === permissionId && item.kind === 'permission' && item.hosted,
+        )
+      : null
     try {
-      await answerPermission(boardId, target, permissionId, optionId)
+      if (card) await answerHostedPermission({ boardId, threadId: target, card, optionId, confirmPasskey: confirmHostedPasskey })
+      else await answerPermission(boardId, target, permissionId, optionId)
       if (!running && target === threadRef.current) thread.refetch()
+      return true
     } catch (error) {
       if (ownerOnlyError(error)) setNotice({ tone: 'info', text: OWNER_ONLY })
-      else setNotice({ tone: 'bad', text: error.message })
+      else setNotice({ tone: 'bad', text: error.message || 'That answer was not taken.' })
+      // Answered meanwhile, expired or changed: show the card as it is now.
+      if (card && target === threadRef.current) thread.refetch()
+      return false
     }
   }
 
@@ -583,6 +611,22 @@ export default function ChatPanel({
   const focusedPage = focused ? pages.find((page) => page.id === focused.pageId) : null
   const vision = agent?.vision !== false
   const needsOwner = Boolean(defaultAgent?.chatNeedsOwner || agent?.chatNeedsOwner || ownerRefused)
+  // Hosted: this person cannot message the thread's agent right now (it is
+  // offline, or it is not theirs to use): said in place of the composer.
+  const hostedBlocked = hosted && configured && selectedThread && agent?.composer && !agent.composer.ok && !run ? agent.composer : null
+  // Hosted: whether this person may answer the agent's permission cards (cards.jsx).
+  const editsAnswer = agent?.edits?.answer
+  const hostedAnswer = useMemo(
+    () => (hosted ? { ok: editsAnswer?.ok === true, reason: editsAnswer?.reason || null } : null),
+    [hosted, editsAnswer?.ok, editsAnswer?.reason],
+  )
+  // "Push this fix" on a held fix: for people who may ask this agent for a fix.
+  const canPush = hosted && agent?.edits?.fix?.ok === true && !running
+  const hostedPush = useMemo(
+    () => (canPush ? () => submitRef.current('', false, { push: true }) : null),
+
+    [canPush],
+  )
   // The turn in flight, until the refetched thread has it (by id, no doubles).
   // Only in its own thread: a comment's Ask agent can switch threads mid-turn.
   const liveRun = run?.threadId === threadId ? run : null
@@ -603,7 +647,10 @@ export default function ChatPanel({
   const profileChoice = pickerProfiles(selectedThread)
   const agentSettingsHref = agent?.settingsUrl || (onOpenSettings ? '/console?section=agents' : null)
   const picker =
-    agent?.ownerWrites && selectedThread && profileChoice.options.length && (profileChoice.show || onOpenSettings || agent?.settingsUrl)
+    (agent?.ownerWrites || hosted) &&
+    selectedThread &&
+    profileChoice.options.length &&
+    (profileChoice.show || hosted || onOpenSettings || agent?.settingsUrl)
       ? {
           options: profileChoice.known
             ? profileChoice.options
@@ -615,8 +662,8 @@ export default function ChatPanel({
             const label = profileChoice.options.find((option) => option.id === next)?.label || 'the agent'
             if (await chooseProfile(next)) setNotice({ tone: 'info', text: switchedNote(label) })
           },
-          onConnect: onOpenSettings,
-          settingsHref: agentSettingsHref,
+          onConnect: hosted ? null : onOpenSettings,
+          settingsHref: hosted ? null : agentSettingsHref,
           disabledReason: running
             ? 'Wait for the answer or stop it to switch'
             : agent?.state === 'testing' || profileChoice.options.some((option) => option.state === 'testing')
@@ -780,7 +827,7 @@ export default function ChatPanel({
             setReadAloud(saveReadAloud(next))
           }}
           onClear={clear}
-          canClear={!running && messages.length > 0}
+          canClear={!running && messages.length > 0 && (!hosted || isChatThread(threadId))}
           onOpenSettings={onOpenSettings}
           settingsHint={settingsHint}
           onClose={onClose}
@@ -820,7 +867,11 @@ export default function ChatPanel({
         />
       ) : null}
 
-      {!configured ? (
+      {!configured && hosted ? (
+        <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-muted" data-sw-chat-empty="hosted">
+          No agent that chats is connected to this project right now.
+        </div>
+      ) : !configured ? (
         <ConnectAgent
           agent={agent}
           touch={touch}
@@ -855,46 +906,77 @@ export default function ChatPanel({
             </div>
           ) : null}
           <AllowForChat.Provider value={allowForChat}>
-            <RefsContext.Provider value={refs}>
-              <MessageList
-                listRef={listRef}
-                scroll={scroll}
-                onContinue={() => submit(CONTINUE_PROMPT)}
-                comment={comment}
-                loading={thread.loading}
-                messages={messages}
-                shown={shown}
-                liveRun={liveRun}
-                remoteRunning={remoteRunning}
-                boardId={boardId}
-                pages={pages}
-                agent={agent}
-                speaker={speaker}
-                readAloud={readAloudProps}
-                touch={touch}
-                onAnswer={answer}
-                onRead={readMessage}
-                onRetry={retry}
-                retryDisabled={running || Boolean(draft.trim() || attachments.length)}
-                owner={Boolean(agent?.ownerWrites)}
-                onUndo={running ? null : undo}
-                onBranch={running ? null : onBranch}
-                onRecapture={onRecapture}
-                versions={selectedThread?.versions || null}
-                onEdit={editMessage}
-                onVersion={chooseVersion}
-                editDisabled={running || dictation.listening}
-                ratings={answerRatings.ratings}
-                onRate={answerRatings.rate}
-                onRegenerate={(message, request) => submit('', false, { regenerate: { message, request } })}
-                regenerateDisabled={running || dictation.listening}
-                otherAgent={agent?.ownerWrites && otherAgent ? otherAgent : null}
-                onTryOther={tryOther}
-                onCheckAgain={agent?.ownerWrites ? checkAgain : null}
-              />
-            </RefsContext.Provider>
+            <HostedAnswer.Provider value={hostedAnswer}>
+              <HostedPush.Provider value={hostedPush}>
+                <RefsContext.Provider value={refs}>
+                  <MessageList
+                    listRef={listRef}
+                    scroll={scroll}
+                    onContinue={() => submit(CONTINUE_PROMPT)}
+                    comment={comment}
+                    loading={thread.loading}
+                    messages={messages}
+                    shown={shown}
+                    liveRun={liveRun}
+                    remoteRunning={remoteRunning}
+                    boardId={boardId}
+                    pages={pages}
+                    agent={agent}
+                    speaker={speaker}
+                    readAloud={readAloudProps}
+                    touch={touch}
+                    onAnswer={answer}
+                    onRead={readMessage}
+                    onRetry={retry}
+                    retryDisabled={running || Boolean(draft.trim() || attachments.length)}
+                    owner={Boolean(agent?.ownerWrites)}
+                    onUndo={running ? null : undo}
+                    onBranch={running ? null : onBranch}
+                    onRecapture={onRecapture}
+                    versions={selectedThread?.versions || null}
+                    onEdit={hosted ? null : editMessage}
+                    onVersion={chooseVersion}
+                    editDisabled={running || dictation.listening}
+                    ratings={answerRatings.ratings}
+                    onRate={hosted ? null : answerRatings.rate}
+                    onRegenerate={hosted ? null : (message, request) => submit('', false, { regenerate: { message, request } })}
+                    regenerateDisabled={running || dictation.listening}
+                    otherAgent={agent?.ownerWrites && otherAgent ? otherAgent : null}
+                    onTryOther={tryOther}
+                    onCheckAgain={agent?.ownerWrites ? checkAgain : null}
+                  />
+                </RefsContext.Provider>
+              </HostedPush.Provider>
+            </HostedAnswer.Provider>
           </AllowForChat.Provider>
-          {needsOwner ? (
+          {hostedBlocked ? (
+            <div className="shrink-0 p-3" data-sw-chat-blocked={hostedBlocked.code || 'true'}>
+              <p
+                className="flex items-start gap-2 rounded-lg border border-line bg-surface-2/60 px-3 py-2.5 text-ui text-muted"
+                role="note"
+              >
+                <Lock size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
+                <span>
+                  {hostedBlocked.reason || 'You cannot message this agent right now.'}
+                  {hostedBlocked.code === 'agent_offline' ? ' Chat needs it online; a comment sent to it waits until it is back.' : ''}
+                </span>
+              </p>
+              {/* Never switched for the person: another agent only when they choose it. */}
+              {['agent_offline', 'agent_gone'].includes(hostedBlocked.code) && otherAgent ? (
+                <button
+                  type="button"
+                  disabled={selectingProfile}
+                  onClick={async () => {
+                    if (await chooseProfile(otherAgent.id)) setNotice({ tone: 'info', text: switchedNote(otherAgent.label) })
+                  }}
+                  className="mt-2 inline-flex min-h-11 items-center rounded-md border border-line bg-surface px-3 text-sm font-medium text-fg outline-none hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-60 lg:min-h-8"
+                  data-sw-chat-ask-other={otherAgent.id}
+                >
+                  Ask {otherAgent.label} instead
+                </button>
+              ) : null}
+            </div>
+          ) : needsOwner ? (
             <div className="shrink-0 p-3" data-sw-chat-needs-owner="true">
               <p
                 className="flex items-start gap-2 rounded-lg border border-line bg-surface-2/60 px-3 py-2.5 text-ui text-muted"

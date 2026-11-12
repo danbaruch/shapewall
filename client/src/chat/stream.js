@@ -63,6 +63,13 @@ export async function sendMessage(boardId, threadId, body, { onEvent, signal } =
     }
     throw responseError(response.status, data)
   }
+  await readEventStream(response, onEvent)
+}
+
+// Reads a turn's server-sent events to the end, calling onEvent(name, data)
+// for each (the answer to a sent message, or a hosted board's running turn
+// that this tab joins: useHostedTurn.js).
+export async function readEventStream(response, onEvent) {
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
@@ -83,7 +90,8 @@ export async function sendMessage(boardId, threadId, body, { onEvent, signal } =
       } catch {
         continue // a malformed event is skipped
       }
-      onEvent?.(name, data)
+      // The event's number, when the server gives one (a hosted board's turn).
+      onEvent?.(name, data, Number(/^id: (\d+)$/m.exec(block)?.[1]) || null)
     }
   }
 }
@@ -92,8 +100,10 @@ export async function sendMessage(boardId, threadId, body, { onEvent, signal } =
 // null to deny. Rejects with ApiError when the card is no longer waiting.
 // The settings token goes with it (lib/api.js, every thread control route): a
 // starter agent's command card is answered only by the person at the machine.
-export const answerPermission = (boardId, threadId, permissionId, optionId) =>
-  api.post(`${threadPath(boardId, threadId)}/permissions/${enc(permissionId)}`, { optionId })
+// `hash`: a hosted board's card says which request the person read (the
+// server takes an answer to that request only).
+export const answerPermission = (boardId, threadId, permissionId, optionId, hash = undefined) =>
+  api.post(`${threadPath(boardId, threadId)}/permissions/${enc(permissionId)}`, { optionId, ...(hash ? { hash } : {}) })
 
 // Rejects with ApiError when the server refuses; the panel then drops the stream.
 export const stopThread = (boardId, threadId) => api.post(`${threadPath(boardId, threadId)}/stop`, {})

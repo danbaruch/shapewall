@@ -15,6 +15,7 @@
 //   "run CMD ARGS..."   -> terminal/create, wait_for_exit, output, release; then the output or the error
 //   "env"               -> the names of its environment variables, as JSON
 //   "caps"              -> the client capabilities it was given, as JSON
+//   "newparams"         -> the params of session/new, as JSON
 //   "pid"               -> its process id
 //   "cwd"               -> its working folder, what is in it, and the session cwd
 //   "runenv N=V CMD..."  -> like run, with env for the terminal
@@ -37,19 +38,33 @@
 // and session/set_config_option switches them. --modes: the older way, a
 // `modes` list in session/new switched with session/set_mode. --slow-new:
 // session/new takes 400 ms (the composer's "Loading options").
+// --start-mode=<id>: the session starts in that mode (yolo, bypassPermissions).
 
 import fs from 'node:fs'
 import process from 'node:process'
 
 const MODE = process.env.STUB_ACP_MODE || ''
 const OPTIONS = process.argv.includes('--options')
-const MODES = process.argv.includes('--modes')
+const RO_MODES = process.argv.includes('--ro-modes')
+const MODES = process.argv.includes('--modes') || RO_MODES
 const SLOW_NEW = process.argv.includes('--slow-new')
 // --slow-init=<ms>: the handshake takes that long, as a real agent's does (the stub's is instant).
 const SLOW_INIT = Number(process.argv.find((arg) => arg.startsWith('--slow-init='))?.slice(12)) || 0
 const config = { model: 'stub-fast', effort: 'medium' }
-let mode = 'ask'
-const modes = () => ({
+// --start-mode=<id>: the mode the session starts in (a profile set to act without asking).
+let mode = process.argv.find((arg) => arg.startsWith('--start-mode='))?.slice(13) || 'ask'
+// --ro-modes: the modes Claude Code's adapter lists (default, acceptEdits, plan, bypassPermissions).
+const roModes = () => ({
+  currentModeId: mode === 'ask' ? 'default' : mode,
+  availableModes: [
+    { id: 'default', name: 'Manual' },
+    { id: 'acceptEdits', name: 'Accept edits' },
+    { id: 'plan', name: 'Plan' },
+    { id: 'bypassPermissions', name: 'Bypass permissions' },
+  ],
+})
+const modes = () => (RO_MODES ? roModes() : plainModes())
+const plainModes = () => ({
   currentModeId: mode,
   availableModes: [
     { id: 'ask', name: 'Ask' },
@@ -112,6 +127,8 @@ let clientCapabilities = null
 let cancelled = new Set()
 let buffer = ''
 let sessionCwd = null
+// What session/new carried ("newparams" says it back).
+let newParams = null
 
 const send = (message) => process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`)
 const request = (method, params) =>
@@ -174,6 +191,7 @@ function handle(message) {
   if (message.method === 'session/new') {
     if (MODE === 'auth') return fail(-32000, 'Authentication required')
     sessionCwd = message.params.cwd
+    newParams = message.params
     const answer = () =>
       reply({
         sessionId: `stub-session-${process.pid}`,
@@ -327,6 +345,10 @@ async function prompt({ sessionId, prompt: blocks }) {
   }
   if (last === 'env') {
     say(sessionId, JSON.stringify(Object.keys(process.env).sort()))
+    return 'end_turn'
+  }
+  if (last === 'newparams') {
+    say(sessionId, JSON.stringify(newParams))
     return 'end_turn'
   }
   if (last === 'caps') {

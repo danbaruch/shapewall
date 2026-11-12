@@ -85,12 +85,21 @@ export async function login(
     sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
     signal = null,
     purpose = null,
+    // `shapewall agent connect`: what this machine will run ({ kind, name }),
+    // shown on the approval page, and what to do with the approved token
+    // in place of saving it as this server's login.
+    agent = null,
+    onApproved = null,
   } = {},
 ) {
   out = safeOut(out)
   const origin = remoteOrigin(flags, env)
   const machine = os.hostname().split('.')[0] || 'this computer'
-  const started = await post(fetchImpl, origin, '/api/v1/device/start', { name: machine, ...(purpose === 'import' ? { purpose } : {}) })
+  const started = await post(fetchImpl, origin, '/api/v1/device/start', {
+    name: machine,
+    ...(['import', 'agent'].includes(purpose) ? { purpose } : {}),
+    ...(purpose === 'agent' && agent ? { agent } : {}),
+  })
   if (started.status !== 201 || !started.data?.deviceCode) {
     throw new Error(
       terminalSafe(started.data?.error?.message) || `Could not start a login on ${origin} (${started.status}). Is it a Shapewall server?`,
@@ -102,7 +111,7 @@ export async function login(
   // The page is ours to build: the server's verificationUrl is not used.
   const page = deviceLoginUrl(origin)
   if (!page) throw new Error(`Cannot build a login page for ${origin}; open its /device page yourself.`)
-  out(`To log in, open ${page} and enter this code:`)
+  out(`${purpose === 'agent' ? 'To connect this agent' : 'To log in'}, open ${page} and enter this code:`)
   out('')
   out(`    ${userCode}`)
   out('')
@@ -130,6 +139,7 @@ export async function login(
     }
     const result = polled.data
     if (typeof result.token !== 'string' || !/^swp_[A-Za-z0-9_-]{43}$/.test(result.token)) throw new Error('The server sent no token.')
+    if (onApproved) return onApproved(result, { origin, machine })
     const file = saveCredential(
       origin,
       {

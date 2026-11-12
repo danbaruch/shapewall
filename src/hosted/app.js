@@ -31,7 +31,7 @@ import { listTokens, mountAdmin } from './admin.js'
 import { createDeviceLogins } from './device.js'
 import { cleanEmail } from './mail.js'
 import { mountShareAdmin, mountSharePublic } from './shares.js'
-import { createCommentStore } from './comments.js'
+import { REPLY_AUTHOR, createCommentStore } from './comments.js'
 import { createUsercontent } from './usercontent.js'
 import { mountRebind, prepareOrigins, previousHostGate } from './rebind.js'
 import { mountPublicAdmin } from './public.js'
@@ -61,6 +61,11 @@ import { createBoardContext } from './board-context.js'
 import { mountBoardRoutes } from './board-routes.js'
 import { mountTokenApi } from './token-api.js'
 import { createAgentPresence } from './agent-presence.js'
+import { COMMENT_ROUTING, createAgentStore } from './agents.js'
+import { mountAgentRoutes } from './agent-routes.js'
+import { createAgentLinks, createChatService } from './agent-link.js'
+import { createChatStore } from './chat-store.js'
+import { createTurnHub } from './turn-hub.js'
 import { mountPages } from './pages.js'
 
 export { changeEventType, publicBoardView, TOKEN_SCOPES, INVITE_DAYS }
@@ -132,16 +137,49 @@ export function createHostedApp({
   deviceLogins ||= createDeviceLogins({ db, now })
   const ownsEvents = !eventBus
   const events = eventBus || createEventBus()
-  // Which projects have an agent listening right now (in memory only).
+  // Which agents are listening right now (in memory only).
   const agentPresence = createAgentPresence({ now })
   const streams = new Set()
+  // Connected agents (`shapewall agent connect`): the chat turns in flight
+  // and the open links, in memory (src/hosted/turn-hub.js, agent-link.js).
+  const turnHub = createTurnHub({ now: () => now().getTime() })
+  const links = createAgentLinks({ hub: turnHub })
+  const chatFor = (t) => createChatStore(t, { now })
   const policyFor = (t) =>
     createAgentPolicy(t, { now, handleFor: (user) => q.get('SELECT handle FROM users WHERE id = :id', { id: user })?.handle || null })
+  const handleFor = (user) => q.get('SELECT handle FROM users WHERE id = :id', { id: user })?.handle || null
+  // The agents of a workspace (src/hosted/agents.js), one store per tenant
+  // handle: a handle lives for one request, so what the store read once in
+  // a request is not read again.
+  const agentStores = new WeakMap()
+  const agentsFor = (t) => {
+    if (!agentStores.has(t)) agentStores.set(t, createAgentStore(t, { now, presence: agentPresence, handleFor, links }))
+    return agentStores.get(t)
+  }
   const dispatchView = (t, project, board, comment) => {
     const row = createCommentStore(t, project, board).get(comment.id)
+    const agents = agentsFor(t)
     // dispatchHash: what "Send to agent" must send back, so a vouch covers
     // the text its sender saw (src/hosted/board-routes.js).
-    return { ...comment, ...policyFor(t).state(project, board, row), dispatchHash: dispatchHash(row) }
+    return {
+      ...comment,
+      ...policyFor(t).state(project, board, row),
+      dispatchHash: dispatchHash(row),
+      // The agent the comment was sent to (null: any agent), and which agent
+      // wrote each agent reply, for its face on the thread. Agent ids only.
+      agentId: agents.addressOf(project, row),
+      replies: comment.replies.map((reply) => {
+        const agentId = agents.idForToken(project, reply[REPLY_AUTHOR]?.token)
+        return agentId ? { ...reply, agentId } : reply
+      }),
+      // What decides whether a token may take it (never serialized).
+      [COMMENT_ROUTING]: {
+        agent_id: row.agent_id || null,
+        dispatch_by: row.dispatch_by || null,
+        board_id: row.board_id,
+        number: row.number,
+      },
+    }
   }
   const q = accounts(db)
   const iso = (offset = 0) => new Date(now().getTime() + offset).toISOString()
@@ -173,6 +211,10 @@ export function createHostedApp({
       : siteOf(req).auth
   const SESSION_COOKIE = sessionCookieName(secure)
   const CEREMONY_COOKIE = secure ? '__Host-sw_ceremony' : 'sw_ceremony'
+
+  // What ends a chat turn from the server's side (the machine went away, a
+  // revoked agent, a restart).
+  const chat = createChatService({ db, hub: turnHub, links, events, chatFor, now })
 
   const app = express()
   app.disable('x-powered-by')
@@ -229,7 +271,13 @@ export function createHostedApp({
   // While moving: which origin a request is for; the old one serves only the move.
   app.use(previousHostGate(sites))
 
-  const { publicUser, createWorkspace, acceptInvite, revokeGrantsOf, ownerCount } = createMembership({ db, quotas, iso, auditOf })
+  const { publicUser, createWorkspace, acceptInvite, revokeGrantsOf, ownerCount } = createMembership({
+    db,
+    quotas,
+    iso,
+    auditOf,
+    agentsFor,
+  })
 
   // ---- Health ----
   app.get('/api/health', (req, res) => res.json({ ok: true }))
@@ -333,7 +381,7 @@ export function createHostedApp({
   consoleApi.use(guardWrites)
   consoleApi.use(express.json({ limit: '64kb' }))
 
-  const createApiToken = createApiTokens({ iso, auditOf })
+  const createApiToken = createApiTokens({ iso, auditOf, agentsFor })
   const consoleDeps = {
     db,
     dataDir,
@@ -361,6 +409,7 @@ export function createHostedApp({
     revokeGrantsOf,
     ownerCount,
     createApiToken,
+    agentsFor,
   }
   mountInviteLinks(consoleApi, consoleDeps)
   // Share link preview and opening: no session, the link is the secret.
@@ -371,6 +420,7 @@ export function createHostedApp({
   consoleApi.use(needSession)
   consoleApi.use(limit('session', (req) => req.user.id))
   mountConsoleRoutes(consoleApi, consoleDeps)
+  mountAgentRoutes(consoleApi, consoleDeps)
   mountAdmin(consoleApi, deps)
   mountShareAdmin(consoleApi, deps)
   mountPublicAdmin(consoleApi, deps)
@@ -394,12 +444,17 @@ export function createHostedApp({
     auditOf,
     clientIp,
     policyFor,
+    agentsFor,
     dispatchView,
     boardContext,
     cleaner,
     quotas,
     workspaceQuota,
     deps,
+    chatFor,
+    hub: turnHub,
+    links,
+    chat,
   })
 
   mountDeviceApi(app, consoleDeps)
@@ -423,10 +478,15 @@ export function createHostedApp({
     auditOf,
     clientIp,
     policyFor,
+    agentsFor,
     boardContext,
     dispatchView,
     needFresh,
     approvalApi,
+    chatFor,
+    hub: turnHub,
+    links,
+    chat,
   })
   // The token API first: it never falls through to the cookie-based console API.
   mountMcpHttp(app, { tokenAuth, origin: publicOrigin, dataDir, db })
@@ -486,6 +546,25 @@ export function createHostedApp({
   if (!guestOnly) sweep()
   const sweepTimer = !guestOnly && sweepEveryMs ? setInterval(sweep, sweepEveryMs) : null
   sweepTimer?.unref()
+  // No turn survives a restart: what the database still calls running ends here.
+  if (!guestOnly) {
+    try {
+      chat.sweepStale()
+    } catch (error) {
+      log(`turn sweep at start: ${error.message}`)
+    }
+  }
+  // Chat turns whose machine went away end as interrupted (unref'd too).
+  const turnTimer = guestOnly
+    ? null
+    : setInterval(() => {
+        try {
+          chat.sweep()
+        } catch (error) {
+          log(`turn sweep: ${error.message}`)
+        }
+      }, 5000)
+  turnTimer?.unref()
   const ownsPresence = !presenceHub
   const hub = presenceHub || createPresenceHub({ events })
   // A WebSocket upgrade never passes through Express, so its address is
@@ -508,6 +587,8 @@ export function createHostedApp({
   app.locals.presence = { attach: presence.attach, close: presence.close, hub }
   app.locals.events = events
   app.locals.agentPresence = agentPresence
+  app.locals.agentsFor = agentsFor
+  app.locals.chat = { hub: turnHub, links, service: chat, storeFor: chatFor }
   app.locals.sweep = sweep
   app.locals.close = async () => {
     presence.close()
@@ -515,6 +596,9 @@ export function createHostedApp({
     if (ownsEvents) events.close()
     for (const check of [...streams]) check(true)
     if (sweepTimer) clearInterval(sweepTimer)
+    if (turnTimer) clearInterval(turnTimer)
+    chat.close()
+    links.closeAll()
     await cleaner.close()
   }
   return app

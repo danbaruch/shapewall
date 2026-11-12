@@ -37,8 +37,15 @@ export async function cleanImages(cleaner, inputs) {
 }
 
 // Bytes of every comment image the workspace holds (attached or staged).
+// Stored chat messages (src/hosted/chat-store.js) count with them: every
+// caller adds this to the boards for the workspace's storage.
 export function commentFileBytes(t) {
-  return t.get('SELECT COALESCE(SUM(bytes), 0) AS n FROM comment_files WHERE workspace_id = :ws').n
+  return (
+    t.get('SELECT COALESCE(SUM(bytes), 0) AS n FROM comment_files WHERE workspace_id = :ws').n +
+    t.get('SELECT COALESCE(SUM(bytes), 0) AS n FROM chat_messages WHERE workspace_id = :ws').n +
+    // The permission cards of connected agents (their diffs): src/hosted/chat-permissions.js.
+    t.get('SELECT COALESCE(SUM(length(card)), 0) AS n FROM chat_permissions WHERE workspace_id = :ws').n
+  )
 }
 
 // Everything the storage quota counts: pushed boards, open pushes and

@@ -18,6 +18,8 @@ export const DEFAULT_POLICY = {
   onlyMentions: false,
   dailyClaims: 50,
   maxOpenClaims: 3,
+  // Chat turns with connected agents, per project and day.
+  dailyTurns: 200,
   approveNonAdmin: true,
 }
 export const expandScopes = (scopes) => [...new Set(scopes.flatMap((scope) => (scope === 'comment' ? ['reply', 'status'] : [scope])))]
@@ -47,6 +49,7 @@ export function cleanPolicy(input) {
   for (const [key, max] of [
     ['dailyClaims', 10000],
     ['maxOpenClaims', 100],
+    ['dailyTurns', 100000],
   ]) {
     if (input[key] !== undefined && (!Number.isInteger(input[key]) || input[key] < 0 || input[key] > max))
       throw new AgentPolicyError(400, 'invalid_policy', `Invalid ${key}.`)
@@ -133,7 +136,9 @@ export function createAgentPolicy(t, { handleFor = () => null, now = () => new D
   function autoVouch(project, board, row, user, role) {
     if (trusted(agentPolicy(t, project, board), user)) vouch(project, board, row, user, { role })
   }
-  function claim(project, board, row, token) {
+  // `agent`: the id of the token's agent (src/hosted/agents.js), kept on
+  // the claim. Returns the claim's id.
+  function claim(project, board, row, token, agent = null) {
     if (!state(project, board, row).dispatchable)
       throw new AgentPolicyError(403, 'not_dispatchable', 'A trusted member must send the current comment to an agent first.')
     const policy = agentPolicy(t, project, board)
@@ -180,10 +185,12 @@ export function createAgentPolicy(t, { handleFor = () => null, now = () => new D
     }).n
     if (daily >= policy.dailyClaims || open >= policy.maxOpenClaims)
       throw new AgentPolicyError(429, 'agent_budget', 'The project agent budget is exhausted. Ask an admin to review Agent policy.')
+    const id = randomBytes(16).toString('hex')
     t.run(
-      'INSERT INTO agent_claims (workspace_id,id,project_id,board_id,comment_number,token_id,hash,created_at) VALUES (:ws,:id,:project,:board,:number,:token,:hash,:at)',
-      { project, board, number: row.number, token, id: randomBytes(16).toString('hex'), hash: dispatchHash(row), at },
+      'INSERT INTO agent_claims (workspace_id,id,project_id,board_id,comment_number,token_id,agent_id,hash,created_at) VALUES (:ws,:id,:project,:board,:number,:token,:agent,:hash,:at)',
+      { project, board, number: row.number, token, agent, id, hash: dispatchHash(row), at },
     )
+    return id
   }
   return { state, vouch, autoVouch, claim, trusted }
 }
