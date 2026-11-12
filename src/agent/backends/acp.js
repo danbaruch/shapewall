@@ -741,6 +741,12 @@ class AcpProcess {
     child.stderr.on('data', (chunk) => {
       this.stderr = (this.stderr + chunk.toString('utf8')).slice(-STDERR_KEEP)
     })
+    // Everything it wrote has been read (lastWords waits for this).
+    this.stderrClosed = new Promise((resolve) => {
+      child.stderr.once('end', resolve)
+      child.stderr.once('close', resolve)
+      child.stderr.once('error', resolve)
+    })
     child.stdin.on('error', () => {})
     // A later error (a failed kill) must not take the server down.
     child.on('error', () => {})
@@ -802,7 +808,12 @@ class AcpProcess {
       // Its output closed: the exit follows in a moment, and says more (the code, its last words) than the request that failed.
       if (!this.exited && !this.killedFor && (child.stdout.readableEnded || child.stdout.destroyed))
         await Promise.race([this.exitedPromise, new Promise((resolve) => setTimeout(resolve, 500))])
-      throw this.startError(error)
+      // What happened is settled now, before it is stopped: stopping it is an exit of our own making.
+      const was = { why: this.killedFor, exited: Boolean(this.exited) }
+      this.kill('start_failed')
+      // Its answer and its stderr are two pipes: the failed request can be read before the words that explain it.
+      await this.lastWords()
+      throw this.startError(error, was)
     } finally {
       clearTimeout(timer)
       signal?.removeEventListener('abort', onAbort)
@@ -810,8 +821,24 @@ class AcpProcess {
     return this
   }
 
-  startError(error) {
-    const why = this.killedFor
+  // Waits, for a bounded moment, until all of a stopped agent's stderr has
+  // been read: the pipe closes when the process is gone, and everything it
+  // wrote comes before that. An agent that does not stop (it ignores the
+  // signal) delays the error by `ms` at most.
+  async lastWords(ms = 750) {
+    if (!this.stderrClosed) return
+    let timer
+    await Promise.race([
+      this.stderrClosed,
+      new Promise((resolve) => {
+        timer = setTimeout(resolve, ms)
+      }),
+    ])
+    clearTimeout(timer)
+  }
+
+  // `was`: why it had been stopped, and whether it had exited, before start() stopped it itself.
+  startError(error, { why = null, exited = false } = {}) {
     this.kill('start_failed')
     if (why === 'start_timeout')
       return this.startFailure(`${this.label} did not answer within ${Math.round(this.limits.startMs / 1000)} seconds`)
@@ -824,7 +851,7 @@ class AcpProcess {
       return error
     }
     if (authFailure(error)) return this.authError()
-    if (this.exited) return this.exitError({ starting: true })
+    if (exited) return this.exitError({ starting: true })
     return this.startFailure(`${this.label} did not start an ACP session (${cut(errorText(error) || 'no answer', 300)})`)
   }
 
@@ -1980,8 +2007,12 @@ export function createAcpBackend(
     }
     if (agent.state !== 'ready') {
       // Ready a moment ago, and gone or stopped since: said with the cause.
-      const error = agent.exited ? agent.exitError({ starting: true }) : agent.stoppedError()
+      const gone = Boolean(agent.exited)
+      const why = agent.killedFor
       agent.kill('start_failed')
+      await agent.lastWords()
+      const error = gone ? agent.exitError({ starting: true }) : agent.stoppedError(why)
+
       startFailed(agent, error)
       throw error
     }
@@ -2151,7 +2182,13 @@ export async function acpHandshake(settings, { env = process.env, root, timeoutM
     await reserveProcessSlot(processPool, agent)
     await agent.start()
     // Stopped between its answer and now (a mode that acts without asking): not a session.
-    if (agent.state !== 'ready') throw agent.exited ? agent.exitError({ starting: true }) : agent.stoppedError()
+    if (agent.state !== 'ready') {
+      const gone = Boolean(agent.exited)
+      const why = agent.killedFor
+      agent.kill('doctor')
+      await agent.lastWords()
+      throw gone ? agent.exitError({ starting: true }) : agent.stoppedError(why)
+    }
     return { ok: true, agentInfo: agent.agentInfo, image: agent.image, choices: agent.choices, mode: agent.modeState()?.current ?? null }
   } catch (error) {
     return { ok: false, code: error.code, message: error.message, agentInfo: agent.agentInfo || null, stderr: agent.stderrTail(1500, 12) }
