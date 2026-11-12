@@ -69,27 +69,33 @@ export function startLink(
     maxTurns = 2,
     env = {},
     limits = {},
+    // A backend of the test's own in place of the stub ACP agent.
+    backend: given = null,
+    fetchImpl = fetch,
+    remote = true,
   } = {},
 ) {
   const logs = []
   const controller = new AbortController()
-  const backend = createBackend(
-    {
-      configured: true,
-      backend: 'acp',
-      label: 'Stub agent',
-      acp: { argv: [process.execPath, ACP_STUB, ...args] },
-      readOnly: true,
-      preamble: REMOTE_PREAMBLE,
-      vision: false,
-    },
-    {
-      env: { PATH: process.env.PATH, HOME: process.env.HOME, ...env },
-      root: cwd,
-      protect: [path.join(cwd, '.shapewall')],
-      log: (line) => logs.push(line),
-    },
-  )
+  const backend =
+    given ||
+    createBackend(
+      {
+        configured: true,
+        backend: 'acp',
+        label: 'Stub agent',
+        acp: { argv: [process.execPath, ACP_STUB, ...args] },
+        readOnly: true,
+        preamble: REMOTE_PREAMBLE,
+        vision: false,
+      },
+      {
+        env: { PATH: process.env.PATH, HOME: process.env.HOME, ...env },
+        root: cwd,
+        protect: [path.join(cwd, '.shapewall')],
+        log: (line) => logs.push(line),
+      },
+    )
   let ready
   const whenReady = new Promise((resolve) => (ready = resolve))
   const done = runAgentLink({
@@ -98,7 +104,8 @@ export function startLink(
     backend,
     hello: { kind, machine: 'studio', version: '0.5.0', maxTurns },
     policy,
-    remote: createRemote({ origin: hosted.origin, token }),
+    remote: remote ? createRemote({ origin: hosted.origin, token }) : null,
+    fetchImpl,
     signal: controller.signal,
     log: (line) => logs.push(line),
     limits: { backoffMinMs: 50, backoffMaxMs: 200, batchMs: 20, ...limits },

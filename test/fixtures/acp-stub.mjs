@@ -37,6 +37,7 @@
 // and session/set_config_option switches them. --modes: the older way, a
 // `modes` list in session/new switched with session/set_mode. --slow-new:
 // session/new takes 400 ms (the composer's "Loading options").
+// --start-mode=<id>: the session starts in that mode (yolo, bypassPermissions).
 
 import fs from 'node:fs'
 import process from 'node:process'
@@ -48,7 +49,8 @@ const SLOW_NEW = process.argv.includes('--slow-new')
 // --slow-init=<ms>: the handshake takes that long, as a real agent's does (the stub's is instant).
 const SLOW_INIT = Number(process.argv.find((arg) => arg.startsWith('--slow-init='))?.slice(12)) || 0
 const config = { model: 'stub-fast', effort: 'medium' }
-let mode = 'ask'
+// --start-mode=<id>: the mode the session starts in (a profile set to act without asking).
+let mode = process.argv.find((arg) => arg.startsWith('--start-mode='))?.slice(13) || 'ask'
 const modes = () => ({
   currentModeId: mode,
   availableModes: [
