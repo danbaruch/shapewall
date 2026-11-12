@@ -20,20 +20,62 @@
 import path from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
+import { generator } from '../../client/src/demo/usage/generate.js'
 
 const DAY = 86_400_000
 const hex = (bytes) => randomBytes(bytes).toString('hex')
 
-// A small seeded generator (mulberry32): the same data every run.
-export function generator(seed = 7) {
-  let a = seed >>> 0
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0
-    let t = a
-    t = Math.imul(t ^ (t >>> 15), t | 1)
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+// The seeded generator (mulberry32) is the public demo's (its fictional usage
+// history is made with it too): the same data every run.
+export { generator }
+
+// Usage rows as objects with the columns of agent_runs, straight into the
+// table. The demo's generated history goes in this way
+// (test/demo-usage.test.js), to compare its answers with the server's.
+const RUN_COLUMNS = [
+  'workspace_id',
+  'project_id',
+  'id',
+  'kind',
+  'agent_id',
+  'claim_id',
+  'board_id',
+  'comment_number',
+  'thread_id',
+  'asked_by',
+  'started_at',
+  'ended_at',
+  'outcome',
+  'model',
+  'effort',
+  'input_tokens',
+  'output_tokens',
+  'cached_tokens',
+  'cost_micros',
+  'steps',
+  'approvals_asked',
+  'approvals_allowed',
+  'approvals_denied',
+  'approvals_auto',
+  'approvals_by',
+  'agent_owner',
+  'duration_ms',
+  'agent_ms',
+  'tools',
+  'window_used',
+  'window_size',
+]
+export function insertRuns(db, rows) {
+  const insert = db.prepare(`INSERT INTO agent_runs (${RUN_COLUMNS.join(', ')}) VALUES (${RUN_COLUMNS.map(() => '?').join(', ')})`)
+  db.exec('BEGIN')
+  try {
+    for (const row of rows) insert.run(...RUN_COLUMNS.map((column) => row[column] ?? null))
+    db.exec('COMMIT')
+  } catch (error) {
+    db.exec('ROLLBACK')
+    throw error
   }
+  return rows.length
 }
 
 // The people, projects and agents, made through the server's own API (so

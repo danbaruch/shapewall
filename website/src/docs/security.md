@@ -117,7 +117,8 @@ Details: [Signing in](/docs/hosted#signing-in).
 - **What the log is not.** The application cannot edit or delete an entry, but the log is not tamper-evident against someone with
   the database file. Keep backups if you need to compare.
 
-Details: [Usage and activity](/docs/hosted#usage-and-activity).
+Details: [Usage and activity](/docs/hosted#usage-and-activity). The live demo shows both pages with made-up numbers:
+[Usage](/demo/console.html#/w/ws_4c756d000000000000000001/usage) and [Activity](/demo/console.html#/w/ws_4c756d000000000000000001/activity).
 
 ## What is up to you
 

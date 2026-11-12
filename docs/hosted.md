@@ -1475,6 +1475,11 @@ agent ran, with the numbers it reported. **Activity** is about people: who signe
 approval. Activity is read from the audit log, which stays the security record; the two pages link to each other and are never
 merged.
 
+To look before you install: the live demo has both pages, with about sixty days of made-up numbers
+([Usage](https://shapewall.com/demo/console.html#/w/ws_4c756d000000000000000001/usage),
+[Activity](https://shapewall.com/demo/console.html#/w/ws_4c756d000000000000000001/activity)). There the queries run in your browser over
+a fictional history; everything on this page describes a real server.
+
 ### What a usage record holds
 
 One row per agent turn: a chat answer, a comment an agent answered, a fix, or the push of a fix. It is written when the turn

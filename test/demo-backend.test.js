@@ -215,7 +215,7 @@ test('change a role: members and access follow, the audit log says so, and demot
   state.shares.push({ ...state.shares[0], id: 'sh_4c756d0000000000000000ff', createdBy: priya, revokedAt: null })
   const changed = await call('PATCH', ws(`/members/${priya}`), { role: 'member' })
   assert.equal(changed.status, 200)
-  assert.deepEqual(changed.json.revoked, { invites: 0, shares: 1, tokens: 0 })
+  assert.deepEqual(changed.json.revoked, { invites: 0, shares: 1, tokens: 1 }, "her agent's token goes with her admin role")
   const detail = await call('GET', ws())
   assert.equal(detail.json.members.find((item) => item.userId === priya).role, 'member')
   const access = await call('GET', ws('/access'))
