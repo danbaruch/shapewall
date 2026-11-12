@@ -1137,7 +1137,9 @@ class AcpProcess {
       throw refuse()
     }
     if (this.unsafeMode()) throw refuse()
-    this.log(`acp: ${this.label} switched from mode "${cut(unsafe.current, 40)}" to "${cut(pick.value, 40)}" (read only)`)
+    this.log(
+      `acp: ${this.label} switched from mode "${cut(unsafe.current, 40)}" to "${cut(pick.value, 40)}" (${this.readOnly ? 'read only' : 'edits are asked on the board'})`,
+    )
   }
 
   // Read only: what the agent asked for is refused here, and the answer

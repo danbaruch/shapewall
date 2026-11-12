@@ -199,7 +199,7 @@ export function DevicePage() {
                 <div key={command} className="min-w-0">
                   <p className="mb-1 text-[13px] font-medium text-fg">{label}</p>
                   <pre
-                    className="overflow-x-auto whitespace-pre rounded-lg border border-line bg-surface-2 px-3 py-2 font-mono text-[13px] leading-5 text-fg"
+                    className="overflow-x-auto whitespace-pre-wrap break-words rounded-lg sm:whitespace-pre border border-line bg-surface-2 px-3 py-2 font-mono text-[13px] leading-5 text-fg"
                     tabIndex={0}
                     data-sw-device-command
                   >

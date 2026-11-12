@@ -101,7 +101,9 @@ test('0.106.0: a session that starts in "auto" is switched to "default" and answ
     const said = await turn(['--v106', `--agent-info=${CLAUDE}@0.106.0`], 'mode', how)
     assert.equal(said.error, null, said.error?.message)
     assert.equal(said.text, 'default')
-    assert.deepEqual(said.log, ['acp: Claude Code switched from mode "auto" to "default" (read only)'])
+    assert.deepEqual(said.log, [
+      `acp: Claude Code switched from mode "auto" to "default" (${how.readOnly ? 'read only' : 'edits are asked on the board'})`,
+    ])
   }
   // The session options still leave the settings files out and keep the tools to reading ones.
   const sent = JSON.parse((await turn(['--v106'], 'newparams')).text)

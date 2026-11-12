@@ -1,6 +1,6 @@
 {
   "name": "shapewall",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Every page of your site on one zoomable wall: desktop and phone captures, sandboxed live HTML, and element-anchored comments your coding agent can read.",
   "license": "Apache-2.0 AND FSL-1.1-ALv2",
   "author": "Dan Baruch",

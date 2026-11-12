@@ -721,7 +721,13 @@ shapewall agent connect --remote https://wall.example.com --approvals none      
   from that branch, whatever the checkout holds. `--base head` goes back to the default.
 - **`--git-remote NAME`** is where a finished fix is pushed (`origin` by default). `--git-remote none`: never pushed.
 
-`agent connect` prints what is in effect when it starts. The console's Agents page and the board's Agents panel say which mode an
+`agent connect` prints what is in effect when it starts, and it says the same to the server with the code: the approval page
+shows what that machine asked for (read and answer only, or edits on a branch and who may allow them, "without asking" if it
+asked for `--auto edits`, the base branch, and that it never runs a command), marked "Reported by the terminal". The machine
+enforces its own rules; the server decides nothing by that report. Before it goes online, `agent connect` also opens a session
+with the agent (no prompt is sent) and prints which adapter version answered ([tested versions](agents.md#claude-code)).
+
+The console's Agents page and the board's Agents panel say which mode an
 agent is in: "Reads and answers", "Edits on a branch, each allowed by the person who connected it" (or "an admin", or "an
 owner"), or "Edits on a branch, allowed without asking".
 
