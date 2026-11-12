@@ -683,7 +683,7 @@ export function AgentPage({ agentId }) {
             )}
             <span className="text-muted"> on {formatDate(agent.createdAt)}</span>
           </Fact>
-          <Fact label="Who may send it work">{agent.audience.text || AGENT_AUDIENCE_LABEL[agent.audience.kind]}</Fact>
+          <Fact label="Who may use it">{agent.audience.text || AGENT_AUDIENCE_LABEL[agent.audience.kind]}</Fact>
           <Fact label="Edits and commands">
             {agent.approval.effectiveRule === 'auto' ? 'Allowed without asking, where its machine says so' : 'Always wait for a person'}
           </Fact>

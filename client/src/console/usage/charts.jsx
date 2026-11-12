@@ -9,7 +9,7 @@
 // gap, never a zero; text is ink, only marks wear the series colour.
 
 import { useId, useMemo, useRef, useState } from 'react'
-import { Bar, BarChart, Brush, CartesianGrid, Line, LineChart, ReferenceArea, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { Bar, BarChart, Brush, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import {
   BarChart3,
   Check,
@@ -398,7 +398,12 @@ export function TimeChart({ data, metric, bucket, dimension, state, onPick, pres
         row.total = (row.total ?? 0) + value
       }
     }
-    const rows = [...byBucket.values()].map((row) => ({ ...row, unknown: row.calls > 0 && row.total === null }))
+    const peak = Math.max(0, ...[...byBucket.values()].map((row) => row.total || 0)) || 1
+    const rows = [...byBucket.values()].map((row) => {
+      const unknown = row.calls > 0 && row.total === null
+      // The hatched column of an unknown bucket reaches the tallest known one.
+      return { ...row, unknown, ...(unknown ? { __unknown: peak } : {}) }
+    })
     return { rows, groups: data.groups, any: rows.some((row) => row.calls > 0), anyValue: rows.some((row) => row.total !== null) }
   }, [data, metric])
   const single = dimension === 'none'
@@ -464,6 +469,8 @@ export function TimeChart({ data, metric, bucket, dimension, state, onPick, pres
               {...axisProps(theme)}
               axisLine={false}
               domain={[0, model?.anyValue ? 'auto' : 1]}
+              // Nothing known to measure against: no numbers on the axis.
+              {...(model?.anyValue ? {} : { tick: false })}
             />
             <Tooltip
               cursor={{ fill: theme.track, opacity: 0.7 }}
@@ -499,19 +506,18 @@ export function TimeChart({ data, metric, bucket, dimension, state, onPick, pres
                 )
               }}
             />
-            {rows
-              .filter((row) => row.unknown)
-              .map((row) => (
-                <ReferenceArea
-                  key={row.bucket}
-                  x1={row.bucket}
-                  x2={row.bucket}
-                  fill={`url(#${hatchId})`}
-                  fillOpacity={1}
-                  stroke="none"
-                  ifOverflow="visible"
-                />
-              ))}
+            {/* Turns ran and none reported the measure: a hatched column as tall as the plot, never a zero. */}
+            {hasUnknown ? (
+              <Bar
+                dataKey="__unknown"
+                name="Not reported"
+                stackId="stack"
+                fill={`url(#${hatchId})`}
+                stroke="none"
+                maxBarSize={24}
+                isAnimationActive={false}
+              />
+            ) : null}
             {(single ? [{ key: 'total', label: METRIC_LABEL[metric] }] : groups).map((group, index, all) => (
               <Bar
                 key={group.key}
