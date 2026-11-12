@@ -63,6 +63,7 @@ import { mountTokenApi } from './token-api.js'
 import { createAgentPresence } from './agent-presence.js'
 import { COMMENT_ROUTING, createAgentStore } from './agents.js'
 import { mountAgentRoutes } from './agent-routes.js'
+import { mountUsageRoutes } from './usage-routes.js'
 import { createAgentLinks, createChatService } from './agent-link.js'
 import { createChatStore } from './chat-store.js'
 import { createTurnHub } from './turn-hub.js'
@@ -421,6 +422,7 @@ export function createHostedApp({
   consoleApi.use(limit('session', (req) => req.user.id))
   mountConsoleRoutes(consoleApi, consoleDeps)
   mountAgentRoutes(consoleApi, consoleDeps)
+  mountUsageRoutes(consoleApi, consoleDeps)
   mountAdmin(consoleApi, deps)
   mountShareAdmin(consoleApi, deps)
   mountPublicAdmin(consoleApi, deps)

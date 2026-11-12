@@ -6,8 +6,10 @@
 //
 //   viewer   sees projects, boards and comments
 //   member   + comments, replies, reactions, resolve and reopen; edits and deletes their own
+//   member   + their own agent usage (and that of agents they connected)
 //   admin    + projects, tokens, invites (up to admin), share links, members
-//              and viewers, any comment, the access overview, audit log, settings
+//              and viewers, any comment, the access overview, audit log, settings,
+//              the workspace's usage, everyone's activity, the access review
 //   owner    + admins and owners, owner invites, deleting the workspace
 //   guest    a share link visitor: one project; comments and replies on a
 //            comment link, nothing else
@@ -38,6 +40,12 @@ export const NEEDS = {
   access: 'admin',
   audit: 'admin',
   export: 'admin',
+  // Usage: a member reads their own turns and the agents they connected;
+  // admins and owners the workspace (src/hosted/usage.js usageScope).
+  usage: 'member',
+  // Activity: anyone in the workspace reads their own; admins and owners all of it.
+  activity: 'viewer',
+  accessReview: 'admin',
   deleteWorkspace: 'owner',
 }
 export const can = (role, need) => roleAtLeast(role, NEEDS[need])

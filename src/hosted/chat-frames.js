@@ -6,6 +6,8 @@
 // board renders only what its own components expect. Pure: no database, no
 // request.
 
+import { usageRecordOf } from './usage-shape.js'
+
 export const FRAME_LIMITS = {
   // One POST of events.
   batchBytes: 256 * 1024,
@@ -239,18 +241,6 @@ export function cleanReply(message) {
 }
 
 // What the usage record keeps of an answer (src/hosted/chat-store.js
-// endRun): how it ended and the numbers the agent reported. Never text.
-export function usageOf(reply) {
-  const find = (category) => reply.options?.find((item) => item.category === category)?.value || null
-  return {
-    // A fix that left a branch is "fix_ready".
-    outcome: reply.status === 'done' ? (reply.summary ? 'fix_ready' : 'answered') : reply.status === 'stopped' ? 'stopped' : 'failed',
-    model: find('model') || reply.model || null,
-    effort: find('thought_level'),
-    inputTokens: reply.usage?.input ?? null,
-    outputTokens: reply.usage?.output ?? null,
-    cachedTokens: reply.usage?.cached ?? null,
-    costMicros: reply.usage?.costMicros ?? null,
-    steps: reply.cards.filter((card) => card.kind === 'tool').length,
-  }
-}
+// endTurn): how it ended and the numbers the agent reported. Never text.
+// The rule itself is shared with the local board: usage-shape.js.
+export const usageOf = usageRecordOf

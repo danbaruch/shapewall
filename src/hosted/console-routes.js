@@ -24,6 +24,7 @@ import {
 import { projectPublic } from './public.js'
 import { LIMITS } from './ratelimit.js'
 import { SHARE_DAYS } from './shares.js'
+import { createViews } from './usage.js'
 import { ROLES, findInviteByHash, inviteUsable, roleAtLeast, roleIn, tenant, workspacesForUser } from './tenancy.js'
 
 export const INVITE_DAYS = [1, 3, 7, 14, 30]
@@ -223,6 +224,8 @@ export function mountConsoleRoutes(consoleApi, deps) {
           throw new HttpError(409, 'last_owner', 'A workspace needs an owner.')
         if (removalNeedsFresh(target.role, { self })) freshOrThrow(req)
         req.t.run('DELETE FROM memberships WHERE workspace_id = :ws AND user_id = :user', { user: userId })
+        // Their saved views on the Usage and Activity pages go with them.
+        createViews(req.t).removeOf(userId)
         auditOf(req, self ? 'member_left' : 'member_removed', userId, { role: target.role })
         // Their API tokens are revoked too, unless an admin asks to keep them
         // ({ revokeTokens: false }). Kept or not, they stop working: a token
@@ -392,11 +395,21 @@ export function mountConsoleRoutes(consoleApi, deps) {
     inProject,
     handle((req, res) => {
       const policy = cleanPolicy(req.body)
+      const before = agentPolicy(req.t, req.project.id)
       req.t.run('UPDATE projects SET agent_policy = :policy WHERE workspace_id = :ws AND id = :project', {
         project: req.project.id,
         policy: JSON.stringify(policy),
       })
-      auditOf(req, 'agent_policy_changed', req.project.id)
+      // What changed, setting by setting (names of settings and their values; the board overrides as a count).
+      const shown = (value) =>
+        Array.isArray(value) ? value.join(', ') || 'none' : value && typeof value === 'object' ? Object.keys(value).length : value
+      const changed = Object.keys(policy).filter((key) => JSON.stringify(policy[key]) !== JSON.stringify(before[key]))
+      auditOf(req, 'agent_policy_changed', req.project.id, {
+        name: req.project.name,
+        changed,
+        before: Object.fromEntries(changed.map((key) => [key, shown(before[key])])),
+        after: Object.fromEntries(changed.map((key) => [key, shown(policy[key])])),
+      })
       res.json({ policy })
     }),
   )

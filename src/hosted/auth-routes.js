@@ -251,7 +251,16 @@ export function mountAuthRoutes(authRouter, deps) {
     '/logout',
     handle(async (req, res) => {
       const current = sessionOf(req)
-      if (current) auth.deleteSession(current.session.hash)
+      if (current) {
+        auth.deleteSession(current.session.hash)
+        auditAccount(db, {
+          userId: current.user.id,
+          action: 'signed_out',
+          ip: clientIp(req),
+          at: iso(),
+          detail: { device: deviceLabel(req.headers['user-agent']) },
+        })
+      }
       setCookie(res, SESSION_COOKIE, '', 0)
       res.json({ ok: true })
     }),
