@@ -39,6 +39,16 @@
 // `modes` list in session/new switched with session/set_mode. --slow-new:
 // session/new takes 400 ms (the composer's "Loading options").
 // --start-mode=<id>: the session starts in that mode (yolo, bypassPermissions).
+// --v106: the session as claude-agent-acp 0.106.0 reports it. Its mode comes
+// both ways (`modes` and a "mode" config option: default, acceptEdits, plan,
+// auto) and starts in "auto"; a switch through session/set_config_option
+// sends current_mode_update BEFORE its answer, and one through
+// session/set_mode sends config_option_update before its answer. With it:
+//   "selfswitch ID"   -> the agent moves itself to mode ID and says so with
+//                        current_mode_update alone, then goes on talking
+// --agent-info=NAME@VERSION: what initialize says the adapter is.
+// --new-fails=TEXT: session/new writes "stub stderr: TEXT" to stderr and
+// fails with TEXT. --new-exits: it writes to stderr and exits with code 7.
 
 import fs from 'node:fs'
 import process from 'node:process'
@@ -46,8 +56,30 @@ import process from 'node:process'
 const MODE = process.env.STUB_ACP_MODE || ''
 const OPTIONS = process.argv.includes('--options')
 const RO_MODES = process.argv.includes('--ro-modes')
-const MODES = process.argv.includes('--modes') || RO_MODES
+const V106 = process.argv.includes('--v106')
+const MODES = process.argv.includes('--modes') || RO_MODES || V106
 const SLOW_NEW = process.argv.includes('--slow-new')
+const argOf = (name) => process.argv.find((arg) => arg.startsWith(`--${name}=`))?.slice(name.length + 3)
+const AGENT_INFO = argOf('agent-info')
+const NEW_FAILS = argOf('new-fails')
+const NEW_EXITS = process.argv.includes('--new-exits')
+const V106_MODES = [
+  { id: 'default', name: 'Manual', description: 'Always ask before making changes' },
+  { id: 'acceptEdits', name: 'Accept edits', description: 'Automatically accept all file edits' },
+  { id: 'plan', name: 'Plan', description: 'Create a plan before making changes' },
+  { id: 'auto', name: 'Auto', description: 'Claude handles permission decisions' },
+]
+const v106Mode = () => (mode === 'ask' ? 'auto' : mode)
+const v106Options = () => [
+  {
+    id: 'mode',
+    name: 'Mode',
+    category: 'mode',
+    type: 'select',
+    currentValue: v106Mode(),
+    options: V106_MODES.map((item) => ({ value: item.id, name: item.name, description: item.description })),
+  },
+]
 // --slow-init=<ms>: the handshake takes that long, as a real agent's does (the stub's is instant).
 const SLOW_INIT = Number(process.argv.find((arg) => arg.startsWith('--slow-init='))?.slice(12)) || 0
 const config = { model: 'stub-fast', effort: 'medium' }
@@ -182,7 +214,13 @@ function handle(message) {
       reply({
         protocolVersion: 1,
         agentCapabilities: { loadSession: false, promptCapabilities: { image: MODE !== 'noimage', embeddedContext: true } },
-        agentInfo: { name: 'acp-stub', title: 'ACP stub', version: '1.0.0' },
+        agentInfo: AGENT_INFO
+          ? {
+              name: AGENT_INFO.slice(0, AGENT_INFO.lastIndexOf('@')),
+              title: 'Claude Agent',
+              version: AGENT_INFO.slice(AGENT_INFO.lastIndexOf('@') + 1),
+            }
+          : { name: 'acp-stub', title: 'ACP stub', version: '1.0.0' },
         authMethods: [{ id: 'stub-login', name: 'Log in to the stub' }],
       })
     if (SLOW_INIT) return void sleep(SLOW_INIT).then(answer)
@@ -190,16 +228,46 @@ function handle(message) {
   }
   if (message.method === 'session/new') {
     if (MODE === 'auth') return fail(-32000, 'Authentication required')
+    if (NEW_FAILS) {
+      process.stderr.write(`stub stderr: ${NEW_FAILS}\n`)
+      return fail(-32603, NEW_FAILS)
+    }
+    if (NEW_EXITS) {
+      process.stderr.write('stub stderr: cannot go on\n')
+      return void process.stderr.write('', () => process.exit(7))
+    }
     sessionCwd = message.params.cwd
     newParams = message.params
     const answer = () =>
-      reply({
-        sessionId: `stub-session-${process.pid}`,
-        ...(OPTIONS ? { configOptions: configOptions() } : {}),
-        ...(MODES ? { modes: modes() } : {}),
-      })
+      reply(
+        V106
+          ? {
+              sessionId: `stub-session-${process.pid}`,
+              modes: { currentModeId: v106Mode(), availableModes: V106_MODES },
+              configOptions: v106Options(),
+            }
+          : {
+              sessionId: `stub-session-${process.pid}`,
+              ...(OPTIONS ? { configOptions: configOptions() } : {}),
+              ...(MODES ? { modes: modes() } : {}),
+            },
+      )
     if (SLOW_NEW) return void setTimeout(answer, 400)
     return answer()
+  }
+  if (V106 && message.method === 'session/set_mode') {
+    if (!V106_MODES.some((item) => item.id === message.params.modeId)) return fail(-32602, 'unknown mode')
+    mode = message.params.modeId
+    update(message.params.sessionId, { sessionUpdate: 'config_option_update', configOptions: v106Options() })
+    return reply({})
+  }
+  if (V106 && message.method === 'session/set_config_option') {
+    if (message.params.configId !== 'mode' || !V106_MODES.some((item) => item.id === message.params.value))
+      return fail(-32602, 'unknown option')
+    mode = message.params.value
+    // As the real adapter does: the mode's own update first, the option's new value only in the answer.
+    update(message.params.sessionId, { sessionUpdate: 'current_mode_update', currentModeId: mode })
+    return reply({ configOptions: v106Options() })
   }
   if (message.method === 'session/set_mode') {
     if (!MODES || !modes().availableModes.some((item) => item.id === message.params.modeId)) return fail(-32602, 'unknown mode')
@@ -421,7 +489,16 @@ async function prompt({ sessionId, prompt: blocks }) {
     return 'end_turn'
   }
   if (last === 'mode') {
-    say(sessionId, mode)
+    say(sessionId, V106 ? v106Mode() : mode)
+    return 'end_turn'
+  }
+  if (word === 'selfswitch') {
+    mode = rest[0]
+    update(sessionId, { sessionUpdate: 'current_mode_update', currentModeId: mode })
+    for (let index = 0; index < 40; index += 1) {
+      say(sessionId, `still here ${index} `)
+      await sleep(30)
+    }
     return 'end_turn'
   }
   if (last === 'config') {

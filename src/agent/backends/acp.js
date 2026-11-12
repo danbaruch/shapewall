@@ -76,6 +76,48 @@ export const READ_ONLY_MODES = {
   codex: ['read-only'],
   goose: ['chat'],
 }
+// The adapter versions the read-only and edit sessions were proven with,
+// against the real adapter (docs/agent-hardening.md). Another version is
+// used as it is, with a plain warning: an adapter changes what it starts a
+// session with (0.106.0 starts in the mode "auto" where 0.93.0 started in
+// "default"), and only a tested version is known to keep what is promised.
+export const TESTED_ADAPTERS = {
+  claude: { name: '@agentclientprotocol/claude-agent-acp', versions: ['0.93.0', '0.106.0'] },
+}
+const versionParts = (text) => {
+  const found = /^(\d+)\.(\d+)\.(\d+)/.exec(String(text || ''))
+  return found ? found.slice(1).map(Number) : null
+}
+const versionOrder = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]
+// What an adapter says it is (initialize's agentInfo), for a log line or an
+// error: "@agentclientprotocol/claude-agent-acp 0.106.0", or '' when it says nothing.
+export function adapterName(agentInfo) {
+  const name = showable(String(agentInfo?.name || agentInfo?.title || '')).slice(0, 80)
+  const version = showable(String(agentInfo?.version || '')).slice(0, 40)
+  return [name, version].filter(Boolean).join(' ')
+}
+// { state, versions, install }: 'tested', 'newer' (than every tested one) or
+// 'untested' (older, in between, another package, or no version said); null
+// for an agent with no tested list.
+export function adapterStatus(kind, agentInfo) {
+  const known = TESTED_ADAPTERS[kind]
+  if (!known) return null
+  const out = { versions: known.versions, install: `npm install -g ${known.name}@${known.versions.at(-1)}` }
+  const version = versionParts(agentInfo?.version)
+  if (agentInfo?.name !== known.name || !version) return { ...out, state: 'untested' }
+  if (known.versions.includes(version.join('.'))) return { ...out, state: 'tested' }
+  return { ...out, state: known.versions.every((item) => versionOrder(version, versionParts(item)) > 0) ? 'newer' : 'untested' }
+}
+// One plain line about an adapter that is not a tested one, or null.
+export function adapterWarning(kind, agentInfo, label) {
+  const status = adapterStatus(kind, agentInfo)
+  if (!status || status.state === 'tested') return null
+  const said = adapterName(agentInfo) || 'an adapter that does not say its version'
+  const tested = `${TESTED_ADAPTERS[kind].name} ${status.versions.join(' and ')}`
+  const what = status.state === 'newer' ? 'which is newer than the versions' : 'which is not a version'
+  return `${label} runs through ${said}, ${what} Shapewall ${VERSION} was tested with (${tested}). It is used as it is. If chats fail or behave oddly, install a tested one: ${status.install}`
+}
+
 // Claude Code's tools that only read. Everything else is removed from the
 // session, so no allow rule and no mode can run it.
 const CLAUDE_READ_TOOLS = ['Read', 'Grep', 'Glob']
@@ -757,6 +799,9 @@ class AcpProcess {
       this.state = 'ready'
       if (this.asks) await this.askingMode()
     } catch (error) {
+      // Its output closed: the exit follows in a moment, and says more (the code, its last words) than the request that failed.
+      if (!this.exited && !this.killedFor && (child.stdout.readableEnded || child.stdout.destroyed))
+        await Promise.race([this.exitedPromise, new Promise((resolve) => setTimeout(resolve, 500))])
       throw this.startError(error)
     } finally {
       clearTimeout(timer)
@@ -766,16 +811,65 @@ class AcpProcess {
   }
 
   startError(error) {
-    if (this.killedFor === 'start_timeout') {
-      this.kill('start_failed')
-      return new AgentError('agent_start', `${this.label} did not answer within ${Math.round(this.limits.startMs / 1000)} seconds.`)
-    }
+    const why = this.killedFor
     this.kill('start_failed')
+    if (why === 'start_timeout')
+      return this.startFailure(`${this.label} did not answer within ${Math.round(this.limits.startMs / 1000)} seconds`)
+    // Stopped while it started (an unsafe mode, a cancel): said as that, not as the request that then failed.
+    if (why) return this.stoppedError(why)
     // Read only, and the agent's mode cannot be trusted to ask: said as it is.
-    if (error instanceof AgentError && error.code === 'agent_unsafe_mode') return error
+    if (error instanceof AgentError && error.code === 'agent_unsafe_mode') {
+      const said = adapterName(this.agentInfo)
+      if (said) error.message = `${error.message} Its adapter: ${said}.`
+      return error
+    }
     if (authFailure(error)) return this.authError()
-    if (this.exited) return this.exitError()
-    return new AgentError('agent_start', `${this.label} did not start an ACP session (${cut(errorText(error) || 'no answer', 300)}).`)
+    if (this.exited) return this.exitError({ starting: true })
+    return this.startFailure(`${this.label} did not start an ACP session (${cut(errorText(error) || 'no answer', 300)})`)
+  }
+
+  // The agent's last words on stderr, for a message: a few lines, with
+  // anything that looks like a key removed and the home folder not spelled out.
+  stderrTail(max = 300, lines = 3) {
+    const home = os.homedir()
+    const tail = redact(this.stderr.trim().split('\n').slice(-lines).join(' ').trim())
+    return cut(home.length > 1 ? tail.split(home).join('~') : tail, max)
+  }
+
+  // What to try, after a start that failed: a tested adapter version when
+  // this one is not, else where to look.
+  startHint() {
+    const status = adapterStatus(acpAgentKind(this.argv), this.agentInfo)
+    if (status && status.state !== 'tested' && this.agentInfo)
+      return `This adapter version is not one Shapewall ${VERSION} was tested with (${status.versions.join(', ')}); a tested one: ${status.install}`
+    return 'To see more, run "shapewall doctor" in the project folder on the machine the agent runs on (docs/agents.md).'
+  }
+
+  // A start that failed, with everything known about why: what happened, the
+  // adapter and its version, its last output and what to try. Never just
+  // "did not start".
+  startFailure(what, code = 'agent_start') {
+    const tail = this.stderrTail()
+    const home = os.homedir()
+    const text = `${what}${this.via()}.${tail ? ` Its last output: ${tail}` : ''} ${this.startHint()}`.replace(/\s+/g, ' ')
+    // The agent's own error text may name files: the home folder is not spelled out in a chat.
+    return new AgentError(code, home.length > 1 ? text.split(home).join('~') : text)
+  }
+
+  // Stopped by Shapewall before it was ready, and why.
+  stoppedError(why = this.killedFor) {
+    if (why === 'unsafe_mode')
+      return this.startFailure(
+        `${this.label} moved to the mode "${this.unsafeWas ?? '?'}", which acts without asking, while it started. A connected agent must ask before it acts, so it was stopped`,
+        'agent_unsafe_mode',
+      )
+    const reasons = {
+      aborted: 'the request was cancelled',
+      cleared: 'the thread was cleared',
+      shutdown: 'Shapewall is stopping',
+      evicted: 'another thread needed its place',
+    }
+    return this.startFailure(`${this.label} did not start: ${reasons[why] || `it was stopped while starting (${why || this.state})`}`)
   }
 
   // Not logged in: the fix goes to the chat and to the server log.
@@ -785,10 +879,13 @@ class AcpProcess {
     return error
   }
 
-  exitError() {
-    const tail = this.stderr.trim().split('\n').slice(-3).join(' ').trim()
+  // `starting`: it went away before its session was ready (the adapter, its
+  // version and what to try are said too).
+  exitError({ starting = false } = {}) {
+    const tail = this.stderrTail()
     const how = this.exited?.signal ? `signal ${this.exited.signal}` : `code ${this.exited?.code ?? '?'}`
-    return new AgentError('agent_exited', `${this.label} stopped (${how})${tail ? `: ${cut(tail, 300)}` : '.'}`)
+    if (starting) return this.startFailure(`${this.label} stopped while it started (${how})`, 'agent_exited')
+    return new AgentError('agent_exited', `${this.label} stopped (${how})${tail ? `: ${tail}` : '.'}`)
   }
 
   gone(code, signalName) {
@@ -800,7 +897,15 @@ class AcpProcess {
     // Whatever a running turn was waiting for will not come.
     if (this.turn) {
       for (const permission of this.turn.permissions.values()) permission.settle('cancelled')
-      this.turn.queue.end(this.turn.cancelled ? null : this.exitError())
+      // Stopped here for a mode that acts without asking: the chat hears that, not "signal SIGTERM".
+      const why =
+        this.killedFor === 'unsafe_mode'
+          ? new AgentError(
+              'agent_unsafe_mode',
+              `${this.label} moved to the mode "${this.unsafeWas ?? '?'}", which acts without asking. A connected agent must ask before it acts, so it was stopped${this.via()}.`,
+            )
+          : this.exitError()
+      this.turn.queue.end(this.turn.cancelled ? null : why)
     }
     try {
       this.connection?.close()
@@ -965,12 +1070,29 @@ class AcpProcess {
     const wanted = READ_ONLY_MODES[acpAgentKind(this.argv)]
     return wanted ? wanted.includes(item.value) : !UNSAFE_VALUE_RE.test(`${item.value} ${item.name}`)
   }
+  // A mode's display name, as the agent lists it.
+  modeName(id) {
+    return this.modeState()?.values.find((item) => item.value === id)?.name || id
+  }
   // The mode when it is not allowed (see modeAllowed), else null.
   unsafeMode() {
     const state = this.modeState()
     if (!state) return null
-    const name = state.values.find((item) => item.value === state.current)?.name || state.current
-    return this.modeAllowed({ value: state.current, name }) ? null : state
+    return this.modeAllowed({ value: state.current, name: this.modeName(state.current) }) ? null : state
+  }
+  // A connected agent's session moved to a mode that acts without asking:
+  // it stops, and the log and the chat say which mode.
+  unsafeStop(mode) {
+    if (this.unsafeWas === undefined) {
+      this.unsafeWas = cut(showable(mode), 40)
+      this.log(`acp: ${this.label} moved to the mode "${this.unsafeWas}", which acts without asking, so it was stopped${this.via()}`)
+    }
+    this.kill('unsafe_mode')
+  }
+  // " (through <adapter> <version>)" for a message, or ''.
+  via() {
+    const said = adapterName(this.agentInfo)
+    return said ? ` (through ${said})` : ''
   }
   // Read only, fail closed: the session must report a mode, and it must be
   // one that asks. Anything else is switched to one, or the agent does not
@@ -1250,14 +1372,26 @@ class AcpProcess {
     if (params?.sessionId === this.sessionId && params.update?.sessionUpdate === 'config_option_update') {
       // The agent changed its own model or effort (or confirmed ours): the composer shows it.
       if (Array.isArray(params.update.configOptions)) this.configOptions = params.update.configOptions
-      if (this.asks && this.unsafeMode()) this.kill('unsafe_mode')
+      const unsafe = this.asks ? this.unsafeMode() : null
+      if (unsafe) this.unsafeStop(unsafe.current)
       return
     }
     if (params?.sessionId === this.sessionId && params.update?.sessionUpdate === 'current_mode_update') {
-      if (this.modes && typeof params.update.currentModeId === 'string')
-        this.modes = { ...this.modes, currentModeId: params.update.currentModeId }
-      // Read only: an agent that switches itself to a mode that acts without asking stops.
-      if (this.asks && this.unsafeMode()) this.kill('unsafe_mode')
+      const id = params.update.currentModeId
+      if (typeof id !== 'string') return
+      if (this.modes) this.modes = { ...this.modes, currentModeId: id }
+      // An agent that reports its mode both ways (a "mode" config option and
+      // modes) has one mode: this is it. The option's own update may come
+      // later, or only with the answer to the request that changed it
+      // (claude-agent-acp 0.106.0 sends this first when asked to switch), and
+      // until then the option would still name the mode the session left.
+      const option = this.configOptions.find((item) => item?.category === 'mode' && typeof item.currentValue === 'string')
+      if (option && optionValues(option.options).some((item) => item.value === id))
+        this.configOptions = this.configOptions.map((item) => (item === option ? { ...item, currentValue: id } : item))
+      // Read only: an agent that switches itself to a mode that acts without
+      // asking stops. The mode it names is checked itself, and so is what the
+      // session's state then says.
+      if (this.asks && (!this.modeAllowed({ value: id, name: this.modeName(id) }) || this.unsafeMode())) this.unsafeStop(id)
       return
     }
     const turn = this.turn
@@ -1829,6 +1963,7 @@ export function createAcpBackend(
     } catch (error) {
       agent.kill('start_failed')
       await agent.stoppingPromise
+      startFailed(agent, error)
       throw error
     } finally {
       starting.delete(agent)
@@ -1841,9 +1976,26 @@ export function createAcpBackend(
       await agent.stoppingPromise
       throw new AgentError('agent_start', 'The server is stopping.')
     }
-    if (agent.state !== 'ready') throw agent.exited ? agent.exitError() : new AgentError('agent_start', `${settings.label} did not start.`)
+    if (agent.state !== 'ready') {
+      // Ready a moment ago, and gone or stopped since: said with the cause.
+      const error = agent.exited ? agent.exitError({ starting: true }) : agent.stoppedError()
+      agent.kill('start_failed')
+      startFailed(agent, error)
+      throw error
+    }
     processes.set(thread, agent)
     return agent
+  }
+
+  // A start that failed goes to the log with its cause, as it goes to the
+  // chat: the message, and more of the agent's last output than a chat shows.
+  // Not when the person or Shapewall stopped it, and not twice for a login
+  // (authError logs its own line).
+  const startFailed = (agent, error) => {
+    if (['aborted', 'cleared', 'shutdown', 'evicted', 'doctor'].includes(agent.killedFor) || error?.code === 'agent_auth') return
+    log(`acp: ${error?.message || `${settings.label} did not start`}`)
+    const tail = agent.stderrTail(1500, 12)
+    if (tail) log(`acp: ${settings.label} last output: ${tail}`)
   }
 
   return {
@@ -1973,7 +2125,10 @@ export function createAcpBackend(
 
 // `shapewall doctor`: starts the agent, does the initialize handshake, and
 // stops it again. Never sends a prompt (that would spend the subscription).
-export async function acpHandshake(settings, { env = process.env, root, timeoutMs = 30000, processPool = null } = {}) {
+// `agent connect` does the same before it goes online, with the session a
+// connected agent gets (settings.readOnly, settings.remoteEdit): a session
+// that cannot be opened is said at once, with why, not at the first question.
+export async function acpHandshake(settings, { env = process.env, root, timeoutMs = 30000, processPool = null, log = () => {} } = {}) {
   const sandbox = createSandbox({ root })
   const agent = new AcpProcess({
     argv: settings.acp.argv,
@@ -1981,8 +2136,10 @@ export async function acpHandshake(settings, { env = process.env, root, timeoutM
     env,
     sandbox,
     limits: { ...ACP_DEFAULTS, startMs: timeoutMs },
-    log: () => {},
+    log,
     thread: 'doctor',
+    readOnly: settings.readOnly === true,
+    remoteEdit: settings.readOnly !== true && settings.remoteEdit ? settings.remoteEdit : null,
     onGone: (item) => {
       if (item.stopped || !item.pid) processPool?.agents.delete(item)
       poolChanged(processPool)
@@ -1991,9 +2148,11 @@ export async function acpHandshake(settings, { env = process.env, root, timeoutM
   try {
     await reserveProcessSlot(processPool, agent)
     await agent.start()
-    return { ok: true, agentInfo: agent.agentInfo, image: agent.image, choices: agent.choices }
+    // Stopped between its answer and now (a mode that acts without asking): not a session.
+    if (agent.state !== 'ready') throw agent.exited ? agent.exitError({ starting: true }) : agent.stoppedError()
+    return { ok: true, agentInfo: agent.agentInfo, image: agent.image, choices: agent.choices, mode: agent.modeState()?.current ?? null }
   } catch (error) {
-    return { ok: false, code: error.code, message: error.message }
+    return { ok: false, code: error.code, message: error.message, agentInfo: agent.agentInfo || null, stderr: agent.stderrTail(1500, 12) }
   } finally {
     agent.kill('doctor')
     await agent.stoppingPromise

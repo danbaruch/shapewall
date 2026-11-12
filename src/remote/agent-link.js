@@ -510,6 +510,8 @@ export async function runAgentLink({
         agentName: job.agent.name,
         ...fixTurn,
       })
+      // What the chat is told went wrong is in this machine's log too.
+      if (reply.status === 'error' && reply.error?.message) log(`turn ${id}: failed: ${reply.error.message}`)
       // Stopped from here (Ctrl+C, a lost link) reads differently from Stop on the board.
       if (reply.status === 'stopped' && ['shutdown', 'link_lost'].includes(controller.signal.reason)) {
         reply.status = 'error'

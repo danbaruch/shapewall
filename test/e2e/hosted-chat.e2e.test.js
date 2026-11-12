@@ -183,7 +183,7 @@ test('connect: the command shows a code, an admin names the agent and approves i
   assert.equal(await page.getAttribute('[data-sw-device-agent-kind]', 'data-sw-device-agent-kind'), 'claude')
   assert.equal(await page.inputValue('[data-sw-agent-name-input]'), 'Builder', 'the name the command suggested')
   assert.equal(await page.isChecked('[data-sw-device-agent-audience="owner"]'), true, 'only the approver, by default')
-  assert.match(await page.textContent('[data-sw-device-agent]'), /does not change files and runs no commands/)
+  assert.match(await page.textContent('[data-sw-device-agent]'), /Does not change files and runs no commands/)
   await page.click('[data-sw-agent-icon-option="owl"]', { force: true })
   await shot(page, 'device-agent-1440-light')
   // Everyone the agent policy trusts, so a second person can use it below.
