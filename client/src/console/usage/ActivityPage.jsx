@@ -351,7 +351,7 @@ export function ActivityLog({ fixed = {}, embedded = false }) {
         <button
           type="button"
           aria-pressed={get('sensitive') === '1'}
-          onClick={() => set({ sensitive: get('sensitive') === '1' ? null : '1' }, { push: true })}
+          onClick={() => set({ sensitive: (current) => (current.includes('1') ? null : '1') }, { push: true })}
           className={cn(
             'inline-flex h-9 items-center justify-center gap-1.5 rounded-md border px-2.5 text-xs font-medium outline-none focus-visible:outline-2 focus-visible:outline-accent',
             get('sensitive') === '1' ? 'border-accent/50 bg-accent/10 text-fg' : 'border-line bg-surface text-fg hover:bg-surface-2',
@@ -693,12 +693,13 @@ export function AgentPage({ agentId }) {
         badge={<Badge tone={agent.state === 'revoked' ? 'bad' : agent.state === 'offline' ? 'neutral' : 'ok'}>{stateLabel}</Badge>}
         description={`An agent of ${agent.projectName}${agent.machine ? `, on ${agent.machine}` : ''}.`}
         actions={
-          // The demo has one Agents page (the local console's), not one per project.
+          // The demo has no Agents page per project: every agent is on its API tokens page, by its token.
           <Link
-            to={DEMO ? `/w/${workspaceId}/agents` : `/w/${workspaceId}/agents/${agent.projectId}`}
+            to={DEMO ? `/w/${workspaceId}/tokens` : `/w/${workspaceId}/agents/${agent.projectId}`}
             className={cn(linkClass, 'inline-flex items-center gap-1 text-sm')}
+            data-sw-agent-settings
           >
-            {DEMO ? 'Agents' : 'Its settings'} <ArrowUpRight size={14} aria-hidden="true" />
+            {DEMO ? 'Its token' : 'Its settings'} <ArrowUpRight size={14} aria-hidden="true" />
           </Link>
         }
       />
@@ -870,7 +871,7 @@ function AccessReview() {
         title="Agents"
         icon={Bot}
         description="Each agent serves one project, with its own token."
-        manage={manage('agents', 'Manage agents')}
+        manage={DEMO ? manage('tokens', 'Their tokens') : manage('agents', 'Manage agents')}
         rows={data.agents}
         empty="No agent is connected."
         columns={[

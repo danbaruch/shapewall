@@ -632,6 +632,46 @@ test('after review: calendar periods, any model name, links only where a page op
   hosted.db.prepare("DELETE FROM agent_runs WHERE id LIKE 'run_e2e%'").run()
 })
 
+test('options ticked faster than the page redraws all hold: three in one go, then two chips removed in one go', async () => {
+  const { page, errors } = await open(s.ada)
+  await page.goto(url('/usage?tab=turns'))
+  await page.locator('[data-sw-grid-row]').first().waitFor()
+  await page.locator('[data-sw-filter="kind"]').click()
+  await page.locator('[data-sw-filter-option="chat"]').waitFor()
+  // Three presses in the same task: no redraw, no wait between them.
+  await page.evaluate(() => {
+    for (const kind of ['chat', 'fix', 'review']) document.querySelector(`[data-sw-filter-option="${kind}"]`).click()
+  })
+  await page.waitForFunction(() => new URLSearchParams(window.location.search).getAll('kind').length === 3)
+  assert.deepEqual(await page.evaluate(() => new URLSearchParams(window.location.search).getAll('kind')), ['chat', 'fix', 'review'])
+  for (const kind of ['chat', 'fix', 'review']) await page.locator(`[data-sw-filter-option="${kind}"][aria-selected="true"]`).waitFor()
+  await page.keyboard.press('Escape')
+  assert.equal(await page.locator('[data-sw-usage-chips] [data-sw-chip]').count(), 3)
+  const expected = (await s.ada.browser.get(api(`/usage/rows?${await pageQuery(page)}&kind=chat,fix,review&limit=1`))).json.total
+  await page.waitForFunction(
+    (count) => document.querySelector('[data-sw-turn-count]')?.getAttribute('data-sw-turn-count') === String(count),
+    expected,
+  )
+  // The same with playwright's own clicks, one straight after the other, in another filter.
+  await page.locator('[data-sw-filter="outcome"]').click()
+  for (const outcome of ['failed', 'stopped', 'needs_person'])
+    await page.locator(`[data-sw-filter-option="${outcome}"]`).click({ noWaitAfter: true })
+  await page.waitForFunction(() => new URLSearchParams(window.location.search).getAll('outcome').length === 3)
+  await page.keyboard.press('Escape')
+  // Two chips removed in one go: both go, the rest stay.
+  await page.evaluate(() => {
+    for (const id of ['kind:chat', 'outcome:stopped']) document.querySelector(`[data-sw-chip="${id}"]`).click()
+  })
+  await page.waitForFunction(() => {
+    const params = new URLSearchParams(window.location.search)
+    return params.getAll('kind').length === 2 && params.getAll('outcome').length === 2
+  })
+  assert.deepEqual(await page.evaluate(() => new URLSearchParams(window.location.search).getAll('kind')), ['fix', 'review'])
+  assert.deepEqual(await page.evaluate(() => new URLSearchParams(window.location.search).getAll('outcome')), ['failed', 'needs_person'])
+  assert.equal(await page.locator('[data-sw-usage-chips] [data-sw-chip]').count(), 4)
+  assert.deepEqual(errors, [])
+})
+
 test('a local board: the owner’s Usage view shows the turns of this computer; anyone else is told it is the owner’s', async () => {
   const setup = await demoSetup('usage-local')
   const now = Date.now()

@@ -187,10 +187,10 @@ export function Overview({ filter, isAdmin, compact = false, extraQuery = '' }) 
   const toggle = useCallback(
     (dimension) => (key) => {
       const value = key === '' ? '~' : key
-      const current = list(dimension)
-      set({ [dimension]: current.length === 1 && current[0] === value ? [] : [value] }, { push: true })
+      // From the address as it is when the press lands, not as it was drawn.
+      set({ [dimension]: (current) => (current.length === 1 && current[0] === value ? [] : [value]) }, { push: true })
     },
-    [list, set],
+    [set],
   )
   const useRange = (first, last) =>
     set({ range: 'custom', from: bucketRange(first, bucket).from, to: bucketRange(last, bucket).to }, { push: true })
