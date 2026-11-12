@@ -50,13 +50,16 @@ export function useBoardContext(input) {
     draftSpot,
     unread,
     liveKeys,
+    commentTargetKey = null,
   } = input
 
-  const [view] = useState(() => createBoardView({ focusedKey, selectingKey, settledZoom, selectedComment, draftSpot, unread, liveKeys }))
+  const [view] = useState(() =>
+    createBoardView({ focusedKey, selectingKey, settledZoom, selectedComment, draftSpot, unread, liveKeys, commentTargetKey }),
+  )
   // Before the browser paints, so a card never shows a frame of the old state.
   useLayoutEffect(() => {
-    view.set({ focusedKey, selectingKey, settledZoom, selectedComment, draftSpot, unread, liveKeys })
-  }, [view, focusedKey, selectingKey, settledZoom, selectedComment, draftSpot, unread, liveKeys])
+    view.set({ focusedKey, selectingKey, settledZoom, selectedComment, draftSpot, unread, liveKeys, commentTargetKey })
+  }, [view, focusedKey, selectingKey, settledZoom, selectedComment, draftSpot, unread, liveKeys, commentTargetKey])
 
   const actions = useMemo(() => {
     const now = () => latest.current

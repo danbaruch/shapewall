@@ -35,7 +35,7 @@ import { TryThis, useTryThis } from './TryThis'
 
 import { FIT_OPTIONS, MAX_ZOOM, MIN_ZOOM, clusterBounds, flyToPage, parseCamera, startViewport } from './camera'
 import { useSettledZoom } from './hooks/useSettledZoom'
-import { minimapDefault, minimapSaved, rememberMinimap, rememberTipDismissed, tipDismissed } from './prefs'
+import { minimapDefault, minimapSaved, rememberMinimap, rememberPageCommentSeen, rememberTipDismissed, tipDismissed } from './prefs'
 import { CommandPalette } from './PageFinder'
 import { useSidebarExpanded } from '../components/app-rail'
 import { BrokenLinks } from './BrokenLinks'
@@ -163,6 +163,10 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   useEffect(() => {
     if (!commentMode) setDrawArmed(false)
   }, [commentMode])
+  // "Comment" on a page's bar (FrameBar.jsx): comment mode with that page as
+  // its target ({ key, keyboard }). The note names the page and the page
+  // takes Enter; a click anywhere else is comment mode's as ever.
+  const [commentTarget, setCommentTarget] = useState(null)
   const [draft, setDraft] = useState(null)
   // Whether the comment being written has anything in it yet: text, an image
   // or a drawing. Read when a click or a key needs to know (never rendered).
@@ -702,6 +706,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     draftSpot,
     unread,
     liveKeys,
+    commentTargetKey: commentTarget?.key || null,
     // For the actions, read when one runs.
     selectedCommentId,
     closeThread,
@@ -901,7 +906,11 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   }, [markSeen, selectedComment])
   useEffect(() => {
     if (selectedComment) markTried('open')
-    if (commentMode) markTried('comment')
+    if (commentMode) {
+      markTried('comment')
+      // They found comments: the page bar's Comment needs no pointing out.
+      rememberPageCommentSeen()
+    }
     if (chatThread) markTried('agent')
   }, [chatThread, commentMode, markTried, selectedComment])
   useCommentLink({
@@ -1298,6 +1307,49 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   useEffect(() => {
     if (commentMode || selectingKey || drawingOn) setHand(false)
   }, [commentMode, selectingKey, drawingOn])
+  // The page bar's Comment: on for that page, and off again from the same
+  // button. A comment with something in it is never dropped for it.
+  const commentOnPage = (key, event) => {
+    if (!commenting) return
+    if (commentMode && !drawArmed && commentTarget?.key === key) {
+      setCommentMode(false)
+      return
+    }
+    if (keepDraft()) return
+    setDraft(null)
+    setDrawArmed(false)
+    setCommentMode(true)
+    // Enter or Space on the button (no pointer): the page takes the keyboard.
+    setCommentTarget({ key, keyboard: event?.detail === 0 })
+  }
+  // The target lasts while comment mode is aimed at that selected page: not
+  // past Draw, another page's comment, or the page being let go.
+  const draftKey = draft ? `${draft.pageId}|${draft.viewport}` : null
+  useEffect(() => {
+    if (!commentTarget) return
+    if (!commentMode || drawArmed || focusedKey !== commentTarget.key || (draftKey && draftKey !== commentTarget.key))
+      setCommentTarget(null)
+  }, [commentMode, commentTarget, draftKey, drawArmed, focusedKey])
+  // Started from the keyboard: the page is focused (Enter pins, Frame.jsx),
+  // and when it is over the focus goes back to the button.
+  const keyboardTarget = commentTarget?.keyboard ? commentTarget.key : null
+  useEffect(() => {
+    if (!keyboardTarget) return undefined
+    const { targetId, viewport } = splitFrameKey(keyboardTarget)
+    const canvas = canvasRef.current
+    const frame = window.requestAnimationFrame(() => {
+      canvas?.querySelector(`[data-sw-frame=${JSON.stringify(`${targetId}:${viewport}`)}]`)?.focus({ preventScroll: true })
+    })
+    return () => {
+      window.cancelAnimationFrame(frame)
+      window.requestAnimationFrame(() => {
+        const active = document.activeElement
+        // The page gave the keyboard up (to the body, or its card): nothing else took it.
+        if (active && active !== document.body && !active.matches('[data-sw-frame], .react-flow__node')) return
+        canvas?.querySelector(`[data-sw-frame-comment=${JSON.stringify(keyboardTarget)}]`)?.focus({ preventScroll: true })
+      })
+    }
+  }, [keyboardTarget])
   const pickTool = (id) => {
     const session = drawing.get()
     if (id === 'select' || id === 'hand') {
@@ -1781,6 +1833,8 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                       onClose={clearFocus}
                       onCapture={canCapture && !comparePair ? (pageId) => startCapture(null, [pageId]) : null}
                       captureBusy={busy || Boolean(capture?.running)}
+                      onComment={commenting ? commentOnPage : null}
+                      commentTargetKey={commentMode && !drawArmed ? commentTarget?.key || null : null}
                     />
                     {wide && draft && !draftParked && !modalOpen ? (
                       <ComposerPopover
@@ -1921,7 +1975,21 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                     <ToolNote
                       wide={wide}
                       composing={toolNote === 'composing' ? { target: draftTarget, onCancel: () => (busy ? null : setDraft(null)) } : null}
-                      picking={toolNote === 'picking' ? { live: readyKeys.size > 0, draw: drawArmed } : null}
+                      picking={
+                        toolNote === 'picking'
+                          ? {
+                              live: commentTarget ? readyKeys.has(commentTarget.key) : readyKeys.size > 0,
+                              draw: drawArmed,
+                              page: commentTarget
+                                ? {
+                                    key: commentTarget.key,
+                                    title: targetTitle(splitFrameKey(commentTarget.key).targetId),
+                                    keyboard: commentTarget.keyboard,
+                                  }
+                                : null,
+                            }
+                          : null
+                      }
                       selectText={
                         toolNote === 'text'
                           ? {

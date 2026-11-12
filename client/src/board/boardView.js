@@ -15,6 +15,8 @@
 //   unread           Set of unread comment ids
 //   liveKeys         Set of frames showing live HTML
 //   hoveredId        the comment under the mouse (list row or pin)
+//   commentTargetKey the frame a page bar's Comment was pressed for (the
+//                    keyboard can pin there: Frame.jsx)
 import { createContext, useCallback, useContext, useSyncExternalStore } from 'react'
 
 const NO_IDS = new Set()
@@ -28,6 +30,7 @@ const INITIAL = {
   unread: NO_IDS,
   liveKeys: NO_IDS,
   hoveredId: null,
+  commentTargetKey: null,
 }
 
 export function createBoardView(initial = null) {

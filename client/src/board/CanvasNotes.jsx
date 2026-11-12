@@ -34,8 +34,8 @@ export function CanvasNotes({
   const modeLabel = (id) => modes.find((item) => item.id === id)?.label || id
   // The tip names only what this person can do here.
   const tipText = wide
-    ? `Scroll or drag to move, Ctrl+scroll or pinch to zoom. Click a page for its actions${canComment && !comparePair ? ', or press C to comment' : ''}.`
-    : `Pinch to zoom. Tap a page for its actions${canComment && !comparePair ? ', or the comment tool below to pin a note' : ''}.`
+    ? `Scroll or drag to move, Ctrl+scroll or pinch to zoom. Click a page for its actions${canComment && !comparePair ? ': Comment is first. Or press C, or use the Comment tool below' : ''}.`
+    : `Pinch to zoom. Tap a page for its actions${canComment && !comparePair ? ': Comment is first. Or use the comment tool below' : ''}.`
   return (
     <div className="pointer-events-none absolute inset-x-0 top-3 z-30 flex flex-col items-center gap-1.5 px-2" data-sw-canvas-notes="true">
       {showLinks && !activePage && !shownSteps && countLinks(data?.links, presentPages, hiddenLinkTargets) > IDLE_LINKS_MAX ? (

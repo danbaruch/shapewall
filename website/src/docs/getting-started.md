@@ -131,7 +131,7 @@ shapewall serve
 ```
 
 Open [http://127.0.0.1:4600/](http://127.0.0.1:4600/) (or add `--open` and Shapewall opens it for you). Scroll or drag to pan (Shift+scroll goes sideways, Space+drag and middle-drag work anywhere, and so does the **Hand** tool, H), Ctrl+scroll (Cmd+scroll on a Mac) or a pinch to zoom. Zoom in on a page and it switches
-from a screenshot to live HTML. Pick **Comment** in the tools at the bottom of the board (or press C), click an element on the page, write what should change.
+from a screenshot to live HTML. Click a page and press **Comment** on the bar that appears above it, or pick **Comment** in the tools at the bottom of the board (or press C). Then click an element on the page and write what should change.
 
 ### Images and drawings
 
