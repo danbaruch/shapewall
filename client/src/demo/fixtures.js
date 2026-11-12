@@ -17,6 +17,11 @@ export const SANDBOX_ID = fixedId('ws', 2)
 export const NOTES_PROJECT = fixedId('pr', 1)
 export const WEBSITE_PROJECT = fixedId('pr', 2)
 export const REVIEW_SHARE = fixedId('sh', 1)
+// The workspace's agents as the Usage and Activity pages know them (an agent
+// there is "ag_..."): the two scripted ones the board runs, the coding agent
+// whose token is on the API tokens page, and one for the website project.
+// Their fictional machines, models and history are in usage/world.js.
+export const DEMO_AGENT_IDS = { demo: fixedId('ag', 1), second: fixedId('ag', 2), coding: fixedId('ag', 3), website: fixedId('ag', 4) }
 
 // The board in the export, and the second project's board made from part of it.
 export const EXPORT_BOARD = 'demo'
