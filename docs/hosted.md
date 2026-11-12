@@ -306,7 +306,7 @@ The server treats every upload as untrusted, even from our CLI:
 - **Is an agent listening?** A comment sent to the agent is only picked up while some machine runs `shapewall watch --remote` (or
   an MCP client) with a token of the project that has the `claim` scope. The server remembers, in memory only, when such a token
   last called the API or held its event stream open; for 90 seconds after that the project has an agent online. Members who can
-  send comments to the agent see "Agent online: <token name>" or "No agent is listening" in the board's agent tooltip and on the
+  send comments to the agent see "Agent online: <token name>" or "No agent is listening" in the board's Agent panel (the Agent button in the top bar), in its tooltip and on the
   thread. Only the token's display name and the time are told, never to share link guests or public viewers, and nothing is stored:
   after a restart it reads "not listening" until the agent's next call.
 - **Removing a board.** A board pushed by mistake, or one you retired, comes off the server on the project page: "Remove board"
