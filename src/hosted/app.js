@@ -165,7 +165,12 @@ export function createHostedApp({
         return agentId ? { ...reply, agentId } : reply
       }),
       // What decides whether a token may take it (never serialized).
-      [COMMENT_ROUTING]: { agent_id: row.agent_id || null, dispatch_by: row.dispatch_by || null },
+      [COMMENT_ROUTING]: {
+        agent_id: row.agent_id || null,
+        dispatch_by: row.dispatch_by || null,
+        board_id: row.board_id,
+        number: row.number,
+      },
     }
   }
   const q = accounts(db)
@@ -254,7 +259,13 @@ export function createHostedApp({
   // While moving: which origin a request is for; the old one serves only the move.
   app.use(previousHostGate(sites))
 
-  const { publicUser, createWorkspace, acceptInvite, revokeGrantsOf, ownerCount } = createMembership({ db, quotas, iso, auditOf })
+  const { publicUser, createWorkspace, acceptInvite, revokeGrantsOf, ownerCount } = createMembership({
+    db,
+    quotas,
+    iso,
+    auditOf,
+    agentsFor,
+  })
 
   // ---- Health ----
   app.get('/api/health', (req, res) => res.json({ ok: true }))

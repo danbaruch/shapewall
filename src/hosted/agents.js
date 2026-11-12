@@ -94,22 +94,34 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
   // A token with the claim scope that has no agent row yet was made while an
   // older build ran on this database: it becomes an agent the first time it
   // is looked for, with the audience such tokens had (the agent policy's).
-  function ensure(projectId) {
+  // `audit(action, target, detail)`: hears `agent_first_seen` for each one,
+  // whoever's request found it (a token's call, the board, the console).
+  // Two requests may find the same token at once: the insert gives way to
+  // the row that is already there.
+  function ensure(projectId, audit = null) {
     const missing = t.all(
-      `SELECT k.id, k.created_by, k.created_at, k.last_used_at FROM api_tokens k WHERE k.workspace_id = :ws AND k.project_id = :project
+      `SELECT k.id, k.name, k.created_by, k.created_at, k.last_used_at FROM api_tokens k WHERE k.workspace_id = :ws AND k.project_id = :project
        AND k.scopes LIKE '%"claim"%' AND NOT EXISTS (SELECT 1 FROM agents a WHERE a.token_id = k.id)`,
       { project: projectId },
     )
-    for (const token of missing) insert({ projectId, tokenId: token.id, userId: token.created_by, at: token.created_at, inherited: true })
+    let made = 0
+    for (const token of missing) {
+      const id = insert({ projectId, tokenId: token.id, userId: token.created_by, at: token.created_at, inherited: true })
+      if (!id) continue
+      made += 1
+      audit?.('agent_first_seen', id, { project: projectId, token: token.id, name: token.name, kind: 'watcher' })
+    }
     if (missing.length) forget()
-    return missing.length
+    return made
   }
+  // Returns the new agent's id, or null when the token already had one.
   function insert({ projectId, tokenId, userId, at = iso(), inherited = false, machine = null, kind = 'watcher', lastSeenAt = null }) {
     const id = newId('ag')
-    t.run(
+    const result = t.run(
       `INSERT INTO agents (workspace_id, project_id, id, token_id, kind, machine, audience, audience_inherited, created_by, created_at,
          approved_by, approved_at, last_seen_at)
-       VALUES (:ws, :project, :id, :token, :kind, :machine, :audience, :inherited, :user, :at, :user, :at, :seen)`,
+       VALUES (:ws, :project, :id, :token, :kind, :machine, :audience, :inherited, :user, :at, :user, :at, :seen)
+       ON CONFLICT(token_id) DO NOTHING`,
       {
         project: projectId,
         id,
@@ -124,7 +136,7 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
       },
     )
     forget()
-    return id
+    return Number(result.changes) ? id : null
   }
   // A new token with the claim scope: its agent, for the person who made it
   // only until they say otherwise. `machine`: the label `shapewall login` sent.
@@ -163,14 +175,13 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
     return row
   }
   // The agent of a token, or null. A claim-scoped token from an older build
-  // becomes an agent here, on first sight (`onFirstSight(row)` hears of it).
-  function forToken(projectId, tokenId, { onFirstSight = null } = {}) {
+  // becomes an agent here, on first sight (`audit` hears of it, see ensure).
+  function forToken(projectId, tokenId, { audit = null } = {}) {
     const find = () => rows(projectId).find((row) => row.token_id === tokenId) || null
     const found = find()
-    if (found || !ensure(projectId)) return found
-    const made = find()
-    if (made) onFirstSight?.(made)
-    return made
+    if (found) return found
+    ensure(projectId, audit)
+    return find()
   }
   // Which agent a token is, for the face on a reply it wrote (revoked or not).
   const idForToken = (projectId, tokenId) => (tokenId ? rows(projectId).find((row) => row.token_id === tokenId)?.id || null : null)
@@ -367,6 +378,142 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
     return { ok: true, code: null, message: null }
   }
 
+  // Whether this agent's token holds the comment right now (it took it and
+  // has not finished). `row`: a comment row, or its COMMENT_ROUTING.
+  function holds(agent, projectId, row) {
+    if (!agent || !row) return false
+    const board = row.board_id
+    const number = row.number
+    return (held(projectId).get(agent.token_id) || []).some((item) => item.board === board && item.number === number)
+  }
+  // May this agent's token work on this comment at all (read it, reply, set
+  // a status, ask for an approval)? Yes while it holds it, whatever changed
+  // since: an audience governs new work, and never strands work under way.
+  // Otherwise the rule for taking it (claimCheck).
+  function workCheck(agent, projectId, row) {
+    if (holds(agent, projectId, row)) return { ok: true, code: null, message: null }
+    return claimCheck(agent, projectId, row)
+  }
+  // May this agent's token read a reply this person wrote? Only people in
+  // its audience (the same rule as sending it work): someone the agent
+  // policy trusts but this agent does not take work from cannot steer it
+  // through a reply. While it holds the comment, the person whose approval
+  // stands on it stays readable too.
+  function replyVisible(agent, projectId, row, userId) {
+    if (!agent || !userId) return false
+    return inAudience(agent, userId) || (userId === row?.dispatch_by && holds(agent, projectId, row))
+  }
+
+  // ---- Agents that are gone ----
+
+  // Every comment an agent holds, by the newest claim on it: [{ token_id,
+  // board, number }] for open comments that read queued or working.
+  function heldBy(projectId) {
+    const latest = new Map()
+    for (const claim of t.all(
+      `SELECT c.token_id, c.board_id, c.comment_number FROM agent_claims c
+       JOIN comments m ON m.workspace_id = c.workspace_id AND m.project_id = c.project_id AND m.board_id = c.board_id AND m.number = c.comment_number
+       WHERE c.workspace_id = :ws AND c.project_id = :project AND m.status = 'open' AND m.agent_status IN ('queued', 'working')
+       ORDER BY c.created_at, c.rowid`,
+      { project: projectId },
+    ))
+      latest.set(`${claim.board_id}#${claim.comment_number}`, {
+        token_id: claim.token_id,
+        board: claim.board_id,
+        number: claim.comment_number,
+      })
+    return [...latest.values()]
+  }
+  // An agent that can no longer take work lets go of everything: the
+  // comments it holds lose their working status and go to any agent (their
+  // claims end, their usage records close with the reason), the comments
+  // that waited for it go to any agent, and the project loses it as default.
+  // `audit` hears one agent_queue_released per comment. Safe to run again.
+  function releaseAgent(projectId, agent, { audit = null, reason = 'revoked', holding = null } = {}) {
+    const at = iso()
+    const where = 'workspace_id = :ws AND project_id = :project AND board_id = :board AND number = :number'
+    const mine = (holding || heldBy(projectId)).filter((item) => item.token_id === agent.token_id)
+    const said = (item, was) =>
+      audit?.('agent_queue_released', `${item.board}#${item.number}`, {
+        project: projectId,
+        from: agent.id,
+        fromName: agent.name,
+        to: null,
+        reason,
+        was,
+      })
+    for (const item of mine) {
+      t.run(
+        'UPDATE agent_runs SET ended_at = :at, outcome = :reason WHERE workspace_id = :ws AND project_id = :project AND agent_id = :agent AND board_id = :board AND comment_number = :number AND ended_at IS NULL',
+        { project: projectId, agent: agent.id, board: item.board, number: item.number, at, reason },
+      )
+      t.run(`UPDATE comments SET agent_status = NULL, agent_status_at = NULL, agent_id = NULL WHERE ${where}`, {
+        project: projectId,
+        board: item.board,
+        number: item.number,
+      })
+      said(item, 'working')
+    }
+    t.run(
+      'UPDATE agent_claims SET ended_at = :at WHERE workspace_id = :ws AND project_id = :project AND token_id = :token AND ended_at IS NULL',
+      { project: projectId, token: agent.token_id, at },
+    )
+    const queued = t
+      .all(
+        "SELECT board_id, number FROM comments WHERE workspace_id = :ws AND project_id = :project AND agent_id = :agent AND status = 'open' AND agent_status IS NULL",
+        { project: projectId, agent: agent.id },
+      )
+      .map((comment) => ({ board: comment.board_id, number: comment.number }))
+    for (const item of queued) {
+      t.run(`UPDATE comments SET agent_id = NULL WHERE ${where}`, { project: projectId, board: item.board, number: item.number })
+      said(item, 'waiting')
+    }
+    const wasDefault = defaultId(projectId) === agent.id
+    if (wasDefault) {
+      t.run('UPDATE projects SET default_agent_id = NULL WHERE workspace_id = :ws AND id = :project', { project: projectId })
+      audit?.('agent_default_changed', projectId, { before: agent.id, beforeName: agent.name, after: null, afterName: null, reason })
+    }
+    presence?.forgetAgent(t.workspaceId, agent.id)
+    forget()
+    return { comments: queued.length, held: mine.length, wasDefault }
+  }
+  // The same for every agent of the project that stopped being able to take
+  // work by another road: its token expired, was revoked with its maker's
+  // other grants, or its maker is no longer an admin. Run where such an
+  // agent would be seen (a token's call, the board's list, the console), so
+  // nothing reads "working" under an agent that is gone, and a revoked agent
+  // is never shown as the default.
+  function releaseGone(projectId, audit = null) {
+    const gone = rows(projectId).filter((row) => !live(row))
+    if (!gone.length) return 0
+    const holding = heldBy(projectId)
+    const addressed = new Set(
+      t
+        .all(
+          "SELECT DISTINCT agent_id FROM comments WHERE workspace_id = :ws AND project_id = :project AND agent_id IS NOT NULL AND status = 'open' AND agent_status IS NULL",
+          { project: projectId },
+        )
+        .map((row) => row.agent_id),
+    )
+    const open = new Set(
+      t
+        .all('SELECT DISTINCT token_id FROM agent_claims WHERE workspace_id = :ws AND project_id = :project AND ended_at IS NULL', {
+          project: projectId,
+        })
+        .map((row) => row.token_id),
+    )
+    const fallback = defaultId(projectId)
+    let released = 0
+    for (const agent of gone) {
+      const busy = holding.some((item) => item.token_id === agent.token_id)
+      if (!busy && !addressed.has(agent.id) && !open.has(agent.token_id) && fallback !== agent.id) continue
+      const reason = agent.token_revoked_at ? 'revoked' : agent.token_expires_at && agent.token_expires_at <= iso() ? 'expired' : 'inactive'
+      releaseAgent(projectId, agent, { audit, reason, holding })
+      released += 1
+    }
+    return released
+  }
+
   // ---- Usage records (the groundwork of the usage dashboard) ----
 
   // One row per comment an agent took: who asked, which agent, where, when.
@@ -391,10 +538,12 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
   // Closes the record of every run whose claim ended, with how it ended:
   // the status the agent left (done, needs-human, branch-ready), "resolved"
   // when the comment was resolved meanwhile, "released" when the claim was
-  // dropped with nothing to show, "removed" when the comment is gone.
+  // dropped with nothing to show, "removed" when the comment is gone. A run
+  // whose claim was swept away and followed by another claim on the same
+  // comment is "stale": what the comment says now is the later run's doing.
   function closeRuns(projectId) {
     const ended = t.all(
-      `SELECT r.id, r.board_id, r.comment_number, c.ended_at FROM agent_runs r
+      `SELECT r.id, r.claim_id, r.board_id, r.comment_number, c.ended_at FROM agent_runs r
        JOIN agent_claims c ON c.id = r.claim_id AND c.workspace_id = r.workspace_id
        WHERE r.workspace_id = :ws AND r.project_id = :project AND r.ended_at IS NULL AND c.ended_at IS NOT NULL`,
       { project: projectId },
@@ -404,13 +553,19 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
         'SELECT status, agent_status, resolved_at FROM comments WHERE workspace_id = :ws AND project_id = :project AND board_id = :board AND number = :number',
         { project: projectId, board: run.board_id, number: run.comment_number },
       )
+      const newest = t.get(
+        'SELECT id FROM agent_claims WHERE workspace_id = :ws AND project_id = :project AND board_id = :board AND comment_number = :number ORDER BY created_at DESC, rowid DESC LIMIT 1',
+        { project: projectId, board: run.board_id, number: run.comment_number },
+      )
       const outcome = !comment
         ? 'removed'
-        : comment.status === 'resolved'
-          ? 'resolved'
-          : ['done', 'needs-human', 'branch-ready'].includes(comment.agent_status)
-            ? comment.agent_status
-            : 'released'
+        : newest && newest.id !== run.claim_id
+          ? 'stale'
+          : comment.status === 'resolved'
+            ? 'resolved'
+            : ['done', 'needs-human', 'branch-ready'].includes(comment.agent_status)
+              ? comment.agent_status
+              : 'released'
       const at =
         comment?.status === 'resolved' && comment.resolved_at && comment.resolved_at < run.ended_at ? comment.resolved_at : run.ended_at
       t.run('UPDATE agent_runs SET ended_at = :at, outcome = :outcome WHERE workspace_id = :ws AND id = :id', { id: run.id, at, outcome })
@@ -450,8 +605,9 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
     }
   }
   // The agents of a project for its board: the ones that can take work.
-  function boardList(projectId, viewer, { boardId = null } = {}) {
-    ensure(projectId)
+  function boardList(projectId, viewer, { boardId = null, audit = null } = {}) {
+    ensure(projectId, audit)
+    releaseGone(projectId, audit)
     const agents = rows(projectId)
       .filter((row) => live(row))
       .map((row) => boardView(row, viewer, { boardId }))
@@ -512,9 +668,12 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
   }
   // Every agent of the project (or, without one, of the workspace), live
   // ones first.
-  function consoleList(projectId = null) {
-    if (projectId) ensure(projectId)
-    else for (const project of t.all('SELECT id FROM projects WHERE workspace_id = :ws')) ensure(project.id)
+  function consoleList(projectId = null, { audit = null } = {}) {
+    const projects = projectId ? [projectId] : t.all('SELECT id FROM projects WHERE workspace_id = :ws').map((project) => project.id)
+    for (const id of projects) {
+      ensure(id, audit)
+      releaseGone(id, audit)
+    }
     const all = rows(projectId).map(consoleView)
     return [...all.filter((agent) => agent.state !== 'revoked'), ...all.filter((agent) => agent.state === 'revoked')]
   }
@@ -672,8 +831,8 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
     return after(projectId, agentId)
   }
 
-  // Revokes the agent's token. What waited for it goes to any agent; it
-  // stops being the default.
+  // Revokes the agent's token. What it held and what waited for it go to
+  // any agent; it stops being the default.
   function revoke(actor, projectId, agentId) {
     mayManage(actor)
     const row = need(projectId, agentId)
@@ -682,29 +841,25 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
       { at: iso(), project: projectId, id: row.token_id },
     )
     if (!result.changes) throw new HttpError(404, 'unknown_agent', 'This agent was already revoked.')
-    const released = afterRevoke(projectId, row.id)
     actor.audit('token_revoked', row.token_id)
+    return { ok: true, ...afterRevoke(actor, projectId, row.id) }
+  }
+  // What follows a token's revocation, from here or the Tokens page: the
+  // comments it held and the ones that waited for it go to any agent
+  // (releaseAgent), the project loses it as default, and the audit log says
+  // so. Returns { comments, held, wasDefault }.
+  function afterRevoke(actor, projectId, agentId) {
+    forget()
+    const row = need(projectId, agentId)
+    const released = releaseAgent(projectId, row, { audit: actor.audit, reason: 'revoked' })
     actor.audit('agent_revoked', row.id, {
       project: projectId,
       name: row.name,
       released: released.comments,
+      held: released.held,
       wasDefault: released.wasDefault,
     })
-    return { ok: true, ...released }
-  }
-  // What follows a token's revocation, from here or the Tokens page: its
-  // open comments nobody took go to any agent, and the project loses it as
-  // default.
-  function afterRevoke(projectId, agentId) {
-    const comments = t.run(
-      "UPDATE comments SET agent_id = NULL WHERE workspace_id = :ws AND project_id = :project AND agent_id = :agent AND status = 'open' AND agent_status IS NULL",
-      { project: projectId, agent: agentId },
-    ).changes
-    const wasDefault = defaultId(projectId) === agentId
-    if (wasDefault) t.run('UPDATE projects SET default_agent_id = NULL WHERE workspace_id = :ws AND id = :project', { project: projectId })
-    presence?.forgetAgent(t.workspaceId, agentId)
-    forget()
-    return { comments: Number(comments), wasDefault }
+    return released
   }
 
   return {
@@ -725,6 +880,10 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
     address,
     release,
     claimCheck,
+    holds,
+    workCheck,
+    replyVisible,
+    releaseGone,
     startRun,
     closeRuns,
     boardView,

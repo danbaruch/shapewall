@@ -30,7 +30,7 @@ export function mountAgentRoutes(consoleApi, { db, publicOrigin, handle, inWorks
     '/workspaces/:ws/agents',
     inWorkspace(NEEDS.tokens),
     handle((req, res) => {
-      res.json({ agents: agentsFor(req.t).consoleList(), options })
+      res.json({ agents: transaction(db, () => agentsFor(req.t).consoleList(null, { audit: actorOf(req).audit })), options })
     }),
   )
 
@@ -57,7 +57,7 @@ export function mountAgentRoutes(consoleApi, { db, publicOrigin, handle, inWorks
           trusted: agents.trusted(req.project.id, null, row.user_id),
         }))
       res.json({
-        agents: agents.consoleList(req.project.id),
+        agents: transaction(db, () => agents.consoleList(req.project.id, { audit: actorOf(req).audit })),
         defaultAgentId: agents.defaultAgent(req.project.id)?.id || null,
         members,
         policy: { trustedRoles: policy.trustedRoles, trustedHandles: policy.trustedHandles },

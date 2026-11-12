@@ -443,7 +443,10 @@ comment, with a state and rules about who may use it. Nothing changes on the mac
 
   The audience only narrows: the project's **Agent policy** still decides who may send work to an agent at all. The server checks it
   twice, when the comment is sent (and when an admin approves someone else's run) and again when the agent's token takes it, against
-  the person whose approval stands on the comment. On the board, an agent you may not use is listed, greyed, with the reason ("Only
+  the person whose approval stands on the comment. The audience also decides whose replies the agent reads: a reply from someone it
+  does not take work from never reaches its token, however trusted they are by the agent policy. An audience governs new work: a
+  comment the agent already holds stays its own until it finishes, even if the audience is narrowed meanwhile, and sending a comment
+  again while an agent works on it changes nothing. On the board, an agent you may not use is listed, greyed, with the reason ("Only
   Ada can send work to Builder. Ask them, or an admin, to share it."). Changing an audience asks for a fresh passkey check.
   **Tokens that already had the `claim` scope before 0.4.0 keep the behaviour they had**: everyone the agent policy trusts. The
   console marks them "kept from before 0.4.0".
@@ -453,7 +456,10 @@ comment, with a state and rules about who may use it. Nothing changes on the mac
   run waits for a person with that role and a fresh passkey check. **Approve automatically** is listed as not available: it needs the
   agent's own machine to allow approvals from the board first, which arrives with connected agents in a later release. It is never the
   default and is never possible on the server's say alone.
-- **Revoke.** Revoking an agent revokes its token (and revoking the token on the Tokens page revokes the agent).
+- **Revoke.** Revoking an agent revokes its token (and revoking the token on the Tokens page revokes the agent). What it was working
+  on loses its "working" status and goes to any agent, with what waited for it; its usage records close as "revoked"; the project
+  loses it as default. The same happens when an agent stops working by another road (its token expired, its maker was removed or is
+  no longer an admin), the next time it would be seen. The audit log has one `agent_queue_released` entry per comment.
 - **The workspace overview.** **Agents** in the workspace menu (admins and owners) lists every agent of the workspace: the project
   it serves, its state, when it was last seen, who may send it work and who connected it, with a link to manage each. An agent
   belongs to one project; a machine that works on two projects has two tokens and so two agents.
@@ -821,7 +827,13 @@ reads; guest replies are removed from their responses. Read tokens without
 A claim token is an agent ([Agents on a hosted board](#agents-on-a-hosted-board)), and two more rules apply to it on every route:
 it sees and takes only comments sent to it or to any agent, and only when the person whose approval stands on the comment is in its
 audience. A comment sent to another agent answers 404 `unknown_comment`, exactly like one that was never dispatched: lists, direct
-reads, replies, statuses, approvals, comment files and the MCP tools. The events stream still carries ids only.
+reads, replies, statuses, approvals, comment files and the MCP tools. The events stream still carries ids only. On a comment it
+may work on, it reads only the replies of people in its audience. The token that holds a comment keeps all of this for that comment
+until it finishes.
+
+**Tokens without `claim` are not agents and are not routed.** A token with `read` (and `reply` or `status`) but no `claim` sees every
+comment of the project, including the ones sent to one agent, exactly as before 0.4.0: it is for scripts, CI and reporting, cannot take
+work, and is not listed on the board. Give `claim` to what should behave as an agent, and leave it off anything that only needs to read.
 
 Claims use an atomic per-project budget and compare-and-set. Exceeding a budget
 returns HTTP 429 `agent_budget`; another token cannot take over a live claim.

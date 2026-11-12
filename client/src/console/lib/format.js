@@ -48,7 +48,7 @@ export const CAPABILITIES = [
 export const ACCESS_LABEL = { own: 'Owner', manage: 'Manage', comment: 'Comment', view: 'View' }
 
 export const SCOPES = [
-  ['read', 'Read', 'Pages, comments, screenshots and live HTML'],
+  ['read', 'Read', 'Pages, comments, screenshots and live HTML. Without Take agent work: every comment, whoever it was sent to'],
   ['reply', 'Reply', 'Post agent replies'],
   ['status', 'Set agent status', 'Mark a comment as in progress, done or needing a person'],
   ['claim', 'Take agent work', 'Pick up the comments sent to an agent'],
@@ -164,9 +164,14 @@ export function describeAudit(entry) {
     case 'agent_approval_rule_changed':
       return `changed the approval settings of ${d.name || target}`
     case 'agent_revoked':
-      return `revoked the agent ${d.name || target}${d.released ? ` (${count(d.released, 'waiting comment', 'waiting comments')} went to any agent)` : ''}`
+      return `revoked the agent ${d.name || target}${(d.released || 0) + (d.held || 0) ? ` (${count((d.released || 0) + (d.held || 0), 'comment', 'comments')} went to any agent)` : ''}`
     case 'agent_queue_released':
-      return `let any agent take comment ${String(entry.target || '').replace(/^.*#/, '#')}${d.fromName ? ` (it was waiting for ${d.fromName})` : ''}`
+      return d.reason
+        ? `comment ${String(entry.target || '').replace(/^.*#/, '#')} went to any agent: ${d.fromName || 'its agent'} ${
+            { revoked: 'was revoked', expired: 'expired', inactive: 'stopped working (its maker is no longer an admin)' }[d.reason] ||
+            'is gone'
+          }${d.was === 'working' ? ' while working on it' : ''}`
+        : `let any agent take comment ${String(entry.target || '').replace(/^.*#/, '#')}${d.fromName ? ` (it was waiting for ${d.fromName})` : ''}`
     default:
       return entry.action.replace(/_/g, ' ')
   }

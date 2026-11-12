@@ -121,7 +121,14 @@ export function mountBoardRoutes(
     '/boards/:bid/agents',
     handle((req, res) => {
       const ctx = boardContext(req.t, req.project, req.params.bid)
-      res.json(agentsFor(req.t).boardList(req.project.id, { userId: req.user.id, role: req.role }, { boardId: ctx.board.id }))
+      // Reading the list is also where an agent that is gone lets go of its
+      // work, and where a token from an older build is first seen.
+      const audit = (action, target, detail) => auditOf(req, action, target, detail)
+      res.json(
+        transaction(db, () =>
+          agentsFor(req.t).boardList(req.project.id, { userId: req.user.id, role: req.role }, { boardId: ctx.board.id, audit }),
+        ),
+      )
     }),
   )
   const actorOf = (req) => ({
@@ -157,9 +164,16 @@ export function mountBoardRoutes(
         const agents = agentsFor(req.t)
         const going = agents.addressOf(req.project.id, current)
         const wanted = named ? req.body.agentId : approve && current.dispatch_hash ? going : undefined
-        // Work an agent already took stays with it.
-        if (['queued', 'working'].includes(current.agent_status) && wanted !== going)
-          throw new HttpError(409, 'agent_working', 'An agent is already working on this comment.')
+        // Work an agent already took stays with it, and so does the approval
+        // it was taken under: sending it again changes nothing (not who
+        // vouched for it, not where it goes), and sending it elsewhere is
+        // refused. Without a named agent (an older board) it is "again".
+        if (['queued', 'working'].includes(current.agent_status)) {
+          if (!roleAtLeast(req.role, 'member') || !agents.trusted(req.project.id, ctx.board.id, req.user.id))
+            throw new HttpError(403, 'untrusted_member', 'Only a trusted member may send work to an agent.')
+          if (named && wanted !== going) throw new HttpError(409, 'agent_working', 'An agent is already working on this comment.')
+          return current
+        }
         policyFor(req.t).vouch(req.project.id, ctx.board.id, current, req.user.id, { role: req.role, approve, expect })
         // After the vouch (which refuses people the agent policy does not
         // trust): the audience of the agent it is sent to, checked for the

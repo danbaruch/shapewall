@@ -446,15 +446,12 @@ export function mountConsoleRoutes(consoleApi, deps) {
       // the project loses it as its default (src/hosted/agents.js).
       const agents = agentsFor(req.t)
       const agent = agents.forToken(req.project.id, String(req.params.tid))
-      if (agent) {
-        const released = agents.afterRevoke(req.project.id, agent.id)
-        auditOf(req, 'agent_revoked', agent.id, {
-          project: req.project.id,
-          name: agent.name,
-          released: released.comments,
-          wasDefault: released.wasDefault,
-        })
-      }
+      if (agent)
+        agents.afterRevoke(
+          { userId: req.user.id, role: req.role, audit: (action, target, detail) => auditOf(req, action, target, detail) },
+          req.project.id,
+          agent.id,
+        )
       res.json({ ok: true })
     }),
   )

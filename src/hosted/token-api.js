@@ -102,12 +102,14 @@ export function mountTokenApi({
     // A token that may take work is an agent (src/hosted/agents.js), and it
     // was just heard from: it is online. A claim token made while an older
     // build ran on this database becomes an agent here, on first sight.
-    req.agent = req.token.scopes.includes('claim')
-      ? agentsFor(req.t).forToken(row.project_id, row.id, {
-          onFirstSight: (agent) =>
-            auditOf(req, 'agent_first_seen', agent.id, { project: row.project_id, token: row.id, name: row.name, kind: agent.kind }),
-        })
-      : null
+    if (req.token.scopes.includes('claim')) {
+      const agents = agentsFor(req.t)
+      const said = (action, target, detail) => auditOf(req, action, target, detail)
+      req.agent = agents.forToken(row.project_id, row.id, { audit: said })
+      // An agent of this project that is gone (revoked, expired, its maker
+      // no longer an admin) lets go of what it held before this one looks.
+      transaction(db, () => agents.releaseGone(row.project_id, said))
+    } else req.agent = null
     if (req.agent) agentsFor(req.t).seen(req.agent)
     next()
   }
@@ -138,7 +140,9 @@ export function mountTokenApi({
   // to it or to any agent, by someone in its audience (agents.js claimCheck).
   // A comment sent to another agent does not exist for it: 404, like one
   // that was never dispatched, on every route.
-  const mine = (req, row) => agentsFor(req.t).claimCheck(req.agent, req.project.id, row).ok
+  // The token that holds a comment keeps it until it is done, whatever
+  // changed since (agents.js workCheck).
+  const mine = (req, row) => agentsFor(req.t).workCheck(req.agent, req.project.id, row).ok
   const v1Comment = (fn) =>
     handle(async (req, res) => {
       req.ctx = boardContext(req.t, req.project, req.params.bid)
@@ -162,7 +166,12 @@ export function mountTokenApi({
   // member vouched for the comment, not for what others added after, so only
   // replies by members the agent policy trusts and the token's own replies.
   // Guests, other tokens, untrusted members and imported replies never reach it.
-  function agentReplies(req, ctx, replies = []) {
+  // And of those, only people in this agent's audience: someone it does not
+  // take work from cannot steer it through a reply (agents.js replyVisible).
+  function agentReplies(req, ctx, replies = [], commentId = null) {
+    if (!replies.length) return replies
+    const agents = agentsFor(req.t)
+    const row = commentId ? ctx.comments.get(commentId) : null
     const policy = agentPolicy(req.t, req.project.id, ctx.board.id)
     const handleFor = (user) => q.get('SELECT handle FROM users WHERE id = :id', { id: user })?.handle || null
     return replies.filter((reply) => {
@@ -170,15 +179,15 @@ export function mountTokenApi({
       if (reply.agent) return Boolean(by.token) && by.token === req.token.id
       if (reply.guest || reply.imported) return false
       const user = by.user || (reply.handle ? q.get('SELECT id FROM users WHERE handle = :handle', { handle: reply.handle })?.id : null)
-      return trustedMember({ ...req.t, handleFor }, policy, user)
+      return trustedMember({ ...req.t, handleFor }, policy, user) && agents.replyVisible(req.agent, req.project.id, row, user)
     })
   }
 
   // The replies a token reads. A claim token: agentReplies above. Any other
   // token: everything but share link guests' replies, which (like guest
   // comments) come only when asked for (?guests=1), on every route.
-  function tokenReplies(req, ctx, replies = []) {
-    if (req.token.scopes.includes('claim')) return agentReplies(req, ctx, replies)
+  function tokenReplies(req, ctx, replies = [], commentId = null) {
+    if (req.token.scopes.includes('claim')) return agentReplies(req, ctx, replies, commentId)
     return req.query.guests === '1' ? replies : replies.filter((reply) => !reply.guest)
   }
 
@@ -201,7 +210,7 @@ export function mountTokenApi({
   // Feedback items with download URLs instead of server paths.
   function remoteItem(req, ctx, context, comment) {
     const item = {
-      ...feedbackItem(context, { ...comment, replies: tokenReplies(req, ctx, comment.replies) }),
+      ...feedbackItem(context, { ...comment, replies: tokenReplies(req, ctx, comment.replies, comment.id) }),
       dispatchable: Boolean(comment.dispatchable),
       needsRunApproval: Boolean(comment.needsRunApproval),
     }
@@ -250,7 +259,7 @@ export function mountTokenApi({
       return null
     const comment = dispatchView(req.t, req.project.id, ctx.board.id, rowToComment(row))
     if (comment.authorGuest && req.query.guests !== '1') return null
-    const replies = tokenReplies(req, ctx, comment.replies)
+    const replies = tokenReplies(req, ctx, comment.replies, comment.id)
     if (replyId && !replies.some((reply) => Number(reply.id) === Number(replyId))) return null
     return { ...comment, replies }
   }

@@ -372,18 +372,107 @@ test('audience at claim time: an agent only takes work from people in its audien
   assert.deepEqual(changed.detail.after, { audience: 'members', users: [bo.user.id] })
   assert.equal(changed.detail.name, 'Builder')
 
-  // Narrowed while it works: the agent loses the comment at once.
+  // Narrowed while it works: an audience governs new work. The agent keeps
+  // the comment it holds until it is done, and takes nothing new from Ben.
   assert.equal((await take(builder.token, fromBo.id)).json.changed, true)
+  const later = await comment(bo, 'Ben asks again, after the audience is narrowed')
   assert.equal((await setAudience(ada, builderAgent, { audience: 'owner' })).status, 200)
-  assert.equal((await finish(builder.token, fromBo.id, 'working')).status, 404)
-  assert.equal(
-    (await tokenCall(hosted, builder.token, 'POST', `/api/v1/boards/sample/comments/${fromBo.id}/replies`, { body: { body: 'x' } })).status,
-    404,
+  assert.ok(!(await listed(builder.token)).includes(later.id), 'new work from outside the audience: not listed')
+  assert.equal((await take(builder.token, later.id)).status, 404)
+  assert.ok((await listed(builder.token)).includes(fromBo.id), 'the one it holds: still its own')
+  const one = `/api/v1/boards/sample/comments/${fromBo.id}`
+  assert.equal((await tokenCall(hosted, builder.token, 'GET', one)).status, 200)
+  assert.equal((await finish(builder.token, fromBo.id, 'working')).json.changed, true)
+  assert.equal((await tokenCall(hosted, builder.token, 'POST', `${one}/replies`, { body: { body: 'Still on it' } })).status, 201)
+  // It still reads the person whose approval it took the comment under.
+  assert.equal((await bo.browser.post(boardUrl(`/comments/${fromBo.id}/replies`), { body: 'Ben adds a detail' })).status, 201)
+  const read = (await tokenCall(hosted, builder.token, 'GET', one)).json.comment.replies.map((reply) => reply.body)
+  assert.deepEqual(read, ['Still on it', 'Ben adds a detail'])
+  assert.equal((await finish(builder.token, fromBo.id, 'done')).json.changed, true)
+  assert.equal((await seen(ada, fromBo.id)).agentStatus, 'done', 'not left working')
+  // Done: the claim is over, and so is the exception.
+  assert.equal((await tokenCall(hosted, builder.token, 'GET', one)).status, 404)
+  assert.equal((await take(fixer.token, later.id)).json.changed, true)
+  await finish(fixer.token, later.id)
+})
+
+test('replies: an agent reads only the replies of people in its audience, however trusted they are by the agent policy', async () => {
+  // Members may send work to an agent here; Builder is still Ada's alone.
+  await policy({ trustedRoles: ['member', 'admin', 'owner'], approveNonAdmin: false })
+  const builderAgent = await agentNamed('Builder')
+  assert.equal(builderAgent.audience.kind, 'owner')
+  const mine = await comment(ada, 'Fix the header')
+  assert.equal((await send(ada, mine.id, { agentId: builderAgent.id })).status, 200)
+  // Cyd cannot send Builder work, so Cyd cannot steer it through a reply either.
+  const own = await comment(cy, 'Cyd wants Builder')
+  assert.equal((await send(cy, own.id, { agentId: builderAgent.id })).json.error.code, 'agent_audience')
+  assert.equal((await cy.browser.post(boardUrl(`/comments/${mine.id}/replies`), { body: 'CYD: do something else entirely' })).status, 201)
+  assert.equal((await bo.browser.post(boardUrl(`/comments/${mine.id}/replies`), { body: 'BEN: and delete the footer' })).status, 201)
+  assert.equal((await ada.browser.post(boardUrl(`/comments/${mine.id}/replies`), { body: 'Ada: keep the logo' })).status, 201)
+  const one = `/api/v1/boards/sample/comments/${mine.id}`
+  const bodies = async () => (await tokenCall(hosted, builder.token, 'GET', one)).json.comment.replies.map((reply) => reply.body)
+  assert.deepEqual(await bodies(), ['Ada: keep the logo'])
+  const inList = (await tokenCall(hosted, builder.token, 'GET', '/api/v1/boards/sample/comments')).json.comments.find(
+    (item) => item.id === mine.id,
   )
-  // An admin clears the stuck status on the board; Fixer picks it up.
-  assert.equal((await api(bo, 'PATCH', boardUrl(`/comments/${fromBo.id}`), { agentStatus: null })).status, 200)
-  assert.equal((await take(fixer.token, fromBo.id)).json.changed, true)
-  await finish(fixer.token, fromBo.id)
+  assert.deepEqual(
+    inList.replies.map((reply) => reply.body),
+    ['Ada: keep the logo'],
+    'the list too',
+  )
+  // Taking the comment changes nothing about whose replies it reads; its own reply is there.
+  assert.equal((await take(builder.token, mine.id)).json.changed, true)
+  assert.equal((await tokenCall(hosted, builder.token, 'POST', `${one}/replies`, { body: { body: 'Agent: on it' } })).status, 201)
+  assert.deepEqual(await bodies(), ['Ada: keep the logo', 'Agent: on it'])
+  // Named into the audience: now Cyd's reply reaches it. Ben's still does not.
+  assert.equal((await setAudience(ada, builderAgent, { audience: 'members', users: [cy.user.id] })).status, 200)
+  assert.deepEqual(await bodies(), ['CYD: do something else entirely', 'Ada: keep the logo', 'Agent: on it'])
+  // People still see every reply on the board.
+  assert.equal((await seen(ada, mine.id)).replies.length, 4)
+  await finish(builder.token, mine.id)
+  await api(ada, 'POST', boardUrl(`/comments/${own.id}/resolve`), {})
+  assert.equal((await setAudience(ada, builderAgent, { audience: 'owner' })).status, 200)
+  await policy({})
+})
+
+test('sending a comment again while an agent works on it changes nothing: not who vouched for it, not where it goes', async () => {
+  const builderAgent = await agentNamed('Builder')
+  const fixerAgent = await agentNamed('Fixer')
+  const stored = (id) =>
+    hosted.db
+      .prepare("SELECT dispatch_by, agent_id, agent_status FROM comments WHERE project_id = ? AND board_id = 'sample' AND number = ?")
+      .get(project.id, id)
+  const held = await comment(ada, 'Builder has this')
+  assert.equal((await take(builder.token, held.id)).json.changed, true)
+  assert.equal(stored(held.id).dispatch_by, ada.user.id)
+  const vouches = async () => (await audit('comment_vouched')).filter((entry) => entry.target === `sample#${held.id}`).length
+  const before = await vouches()
+  // Ben (an admin Builder does not take work from) sends it again: to any
+  // agent, as an older board would (no agentId), and with a default agent set.
+  for (const [label, extra, setup] of [
+    ['any agent', { agentId: null }],
+    ['no agentId', {}],
+    ['no agentId, with a default agent', {}, () => api(ada, 'PUT', consoleUrl('/default-agent'), { agentId: fixerAgent.id })],
+  ]) {
+    await setup?.()
+    const again = await send(bo, held.id, extra)
+    assert.equal(again.status, 200, `${label}: ${again.text}`)
+    assert.deepEqual([again.json.comment.agentStatus, again.json.comment.agentId], ['queued', null], label)
+    assert.deepEqual({ ...stored(held.id) }, { dispatch_by: ada.user.id, agent_id: null, agent_status: 'queued' }, label)
+    assert.equal((await finish(builder.token, held.id, 'working')).status, 200, `${label}: the holder keeps working`)
+    await finish(builder.token, held.id, 'queued')
+  }
+  assert.equal(await vouches(), before, 'no new vouch in the audit log')
+  // Somewhere else is refused, as before; so is anyone the agent policy does not trust.
+  for (const agentId of [fixerAgent.id, builderAgent.id]) {
+    const moved = await send(ada, held.id, { agentId })
+    assert.equal(moved.status, 409, agentId)
+    assert.equal(moved.json.error.code, 'agent_working')
+  }
+  assert.equal((await send(cy, held.id, {})).status, 403)
+  assert.equal(stored(held.id).dispatch_by, ada.user.id)
+  await api(ada, 'PUT', consoleUrl('/default-agent'), { agentId: null })
+  assert.equal((await finish(builder.token, held.id, 'done')).json.changed, true)
 })
 
 test("an admin who approves someone else's run must be in the audience of the agent it was sent to", async () => {
@@ -791,7 +880,7 @@ test('revoking an agent: its token dies, what waited for it goes to any agent, a
   for (const user of [cy, di]) assert.equal((await api(user, 'DELETE', consoleUrl(`/agents/${agent.id}`))).status, 403)
   const gone = await api(bo, 'DELETE', consoleUrl(`/agents/${agent.id}`))
   assert.equal(gone.status, 200, gone.text)
-  assert.deepEqual(gone.json, { ok: true, comments: 1, wasDefault: true })
+  assert.deepEqual(gone.json, { ok: true, comments: 1, held: 0, wasDefault: true })
   assert.equal((await tokenCall(hosted, doomed.token, 'GET', '/api/v1/project')).status, 401)
   assert.equal((await seen(ada, waiting.id)).agentId, null)
   assert.ok((await listed(builder.token)).includes(waiting.id), 'any agent may take it now')
@@ -818,6 +907,191 @@ test('revoking an agent: its token dies, what waited for it goes to any agent, a
   assert.equal((await boardAgents(ada)).defaultAgentId, null)
   assert.ok((await audit('agent_revoked')).some((item) => item.target === secondAgent.id))
   await api(ada, 'POST', boardUrl(`/comments/${waiting.id}/resolve`), {})
+})
+
+test('an agent that is gone lets go of what it holds: revoked, its maker removed or demoted, its token expired', async () => {
+  const run = (id) =>
+    hosted.db
+      .prepare(
+        "SELECT outcome, ended_at FROM agent_runs WHERE project_id = ? AND board_id = 'sample' AND comment_number = ? ORDER BY started_at DESC",
+      )
+      .get(project.id, id)
+  const openClaims = (tokenId) =>
+    hosted.db.prepare('SELECT COUNT(*) AS n FROM agent_claims WHERE token_id = ? AND ended_at IS NULL').get(tokenId).n
+  const fixerAgent = await agentNamed('Fixer')
+  assert.equal((await setAudience(bo, fixerAgent, { audience: 'trusted' })).status, 200)
+  // Each case: an agent of Ada's that is the default, holds one comment and
+  // has another waiting for it.
+  async function busyAgent(name, user = ada) {
+    const made = await makeToken(user, name)
+    const agent = await agentNamed(name)
+    assert.equal((await setAudience(ada, agent, { audience: 'trusted' })).status, 200)
+    assert.equal((await api(ada, 'PUT', consoleUrl('/default-agent'), { agentId: agent.id })).status, 200)
+    const working = await comment(ada, `${name} works on this`)
+    const waiting = await comment(ada, `${name} has not started this`)
+    assert.equal(working.agentId, agent.id)
+    assert.equal((await take(made.token, working.id)).json.changed, true)
+    assert.equal((await finish(made.token, working.id, 'working')).json.changed, true)
+    return { ...made, agent, working, waiting }
+  }
+  async function released(item, reason, look = () => boardAgents(ada)) {
+    const board = await look()
+    for (const id of [item.working.id, item.waiting.id]) {
+      const now = await seen(ada, id)
+      assert.deepEqual([now.agentStatus, now.agentId, now.dispatchable], [null, null, true], `${reason}: #${id} is free again`)
+    }
+    assert.equal(openClaims(item.id), 0, `${reason}: its claim ended`)
+    const record = run(item.working.id)
+    assert.equal(record.outcome, reason)
+    assert.match(record.ended_at, /^\d{4}-/)
+    if (board.agents) {
+      assert.equal(board.defaultAgentId, null, `${reason}: no longer the default`)
+      assert.ok(!board.agents.some((agent) => agent.id === item.agent.id))
+    }
+    const listedAs = (await consoleAgents()).agents.find((agent) => agent.id === item.agent.id)
+    assert.deepEqual([listedAs.state, listedAs.isDefault], ['revoked', false], `${reason}: the console never shows it as default`)
+    const entries = (await audit('agent_queue_released')).filter((entry) => entry.detail.from === item.agent.id)
+    assert.deepEqual(
+      entries.map((entry) => [entry.target, entry.detail.was, entry.detail.reason]).sort(),
+      [
+        [`sample#${item.working.id}`, 'working', reason],
+        [`sample#${item.waiting.id}`, 'waiting', reason],
+      ].sort(),
+    )
+    // Another agent takes both.
+    for (const id of [item.working.id, item.waiting.id]) {
+      assert.equal((await take(fixer.token, id)).json.changed, true, `${reason}: #${id}`)
+      assert.equal((await finish(fixer.token, id, 'done')).json.changed, true)
+    }
+    assert.equal(run(item.working.id).outcome, 'done', 'the next run has its own record')
+  }
+
+  // Revoked on its Agents page.
+  const one = await busyAgent('Gone one')
+  const gone = await api(ada, 'DELETE', consoleUrl(`/agents/${one.agent.id}`))
+  assert.deepEqual(gone.json, { ok: true, comments: 1, held: 1, wasDefault: true })
+  const entry = (await audit('agent_revoked')).find((item) => item.target === one.agent.id)
+  assert.deepEqual([entry.detail.released, entry.detail.held, entry.detail.wasDefault], [1, 1, true])
+  await released(one, 'revoked')
+
+  // Its token revoked on the Tokens page.
+  const two = await busyAgent('Gone two')
+  assert.equal((await api(ada, 'DELETE', consoleUrl(`/tokens/${two.id}`))).status, 200)
+  await released(two, 'revoked')
+
+  // Its maker removed from the workspace (their tokens are revoked with them).
+  const eve = await signUp(hosted, { handle: 'eve-admin', displayName: 'Eve', invite: await invite(ada, ws, 'admin') })
+  const three = await busyAgent('Gone three', eve)
+  await fresh(ada)
+  assert.equal((await api(ada, 'DELETE', `/api/workspaces/${ws}/members/${eve.user.id}`)).status, 200)
+  await released(three, 'revoked')
+
+  // Its maker demoted, keeping the token: it stops working ("inactive"), and
+  // lets go the next time it would be seen. Here: another agent's token calls.
+  const fay = await signUp(hosted, { handle: 'fay-admin', displayName: 'Fay', invite: await invite(ada, ws, 'admin') })
+  const four = await busyAgent('Gone four', fay)
+  hosted.db.prepare("UPDATE memberships SET role = 'member' WHERE user_id = ?").run(fay.user.id)
+  assert.equal((await tokenCall(hosted, four.token, 'GET', '/api/v1/project')).status, 401)
+  assert.equal((await seen(ada, four.working.id)).agentStatus, 'working', 'nobody has looked yet')
+  assert.ok((await listed(fixer.token)).includes(four.working.id), 'seen by a token: released, and listed for it')
+  await released(four, 'inactive')
+
+  // Its token expired: the board's list is where it is seen.
+  const five = await busyAgent('Gone five')
+  hosted.db.prepare("UPDATE api_tokens SET expires_at = '2000-01-01T00:00:00.000Z' WHERE id = ?").run(five.id)
+  await released(five, 'expired')
+
+  // Seen from the console alone, the default is cleared as well.
+  const six = await busyAgent('Gone six')
+  hosted.db.prepare("UPDATE api_tokens SET expires_at = '2000-01-01T00:00:00.000Z' WHERE id = ?").run(six.id)
+  const consoleSees = await consoleAgents()
+  assert.equal(consoleSees.defaultAgentId, null)
+  assert.equal(hosted.db.prepare('SELECT default_agent_id FROM projects WHERE id = ?').get(project.id).default_agent_id, null)
+  await released(six, 'expired', async () => ({}))
+  assert.equal((await setAudience(bo, fixerAgent, { audience: 'owner' })).status, 200)
+})
+
+test('a usage record says what happened to its own run: one swept away under a later claim is "stale", never the later run\'s "done"', async () => {
+  const fixerAgent = await agentNamed('Fixer')
+  assert.equal((await setAudience(bo, fixerAgent, { audience: 'trusted' })).status, 200)
+  const runs = (id) =>
+    hosted.db
+      .prepare(
+        "SELECT agent_id, outcome FROM agent_runs WHERE project_id = ? AND board_id = 'sample' AND comment_number = ? ORDER BY started_at, rowid",
+      )
+      .all(project.id, id)
+      .map((row) => ({ ...row }))
+  const builderAgent = await agentNamed('Builder')
+  const shared = await comment(ada, 'Two agents, one after the other')
+  assert.equal((await take(builder.token, shared.id)).json.changed, true)
+  // An admin clears the status on the board; Builder's claim is left behind.
+  assert.equal((await api(ada, 'PATCH', boardUrl(`/comments/${shared.id}`), { agentStatus: null })).status, 200)
+  assert.equal((await take(fixer.token, shared.id)).json.changed, true)
+  assert.deepEqual(runs(shared.id), [
+    { agent_id: builderAgent.id, outcome: 'stale' },
+    { agent_id: fixerAgent.id, outcome: null },
+  ])
+  assert.equal((await finish(fixer.token, shared.id, 'done')).json.changed, true)
+  assert.deepEqual(runs(shared.id), [
+    { agent_id: builderAgent.id, outcome: 'stale' },
+    { agent_id: fixerAgent.id, outcome: 'done' },
+  ])
+  assert.equal((await setAudience(bo, fixerAgent, { audience: 'owner' })).status, 200)
+})
+
+test('a token from an older build becomes an agent once, whoever sees it first, and the audit log says so each way', async () => {
+  const made = await makeToken(ada, 'Late one')
+  const forget = () => hosted.db.prepare('DELETE FROM agents WHERE token_id = ?').run(made.id)
+  const firstSeen = () =>
+    hosted.db
+      .prepare("SELECT user_id, token_id, detail FROM audit_log WHERE action = 'agent_first_seen' ORDER BY id")
+      .all()
+      .map((row) => ({ user: row.user_id, by: row.token_id, ...JSON.parse(row.detail) }))
+      .filter((row) => row.token === made.id)
+  // Found twice (two requests at once end the same way: the insert gives way
+  // to the row that is there): one row, one audit entry.
+  forget()
+  const [a, b] = [tenant(hosted.db, ws), tenant(hosted.db, ws)].map((handle) => hosted.app.locals.agentsFor(handle))
+  const heard = []
+  const said = (action, target, detail) => heard.push([action, detail.name])
+  assert.equal(a.ensure(project.id, said), 1)
+  assert.equal(b.ensure(project.id, said), 0)
+  assert.equal(hosted.db.prepare('SELECT COUNT(*) AS n FROM agents WHERE token_id = ?').get(made.id).n, 1)
+  assert.deepEqual(heard, [['agent_first_seen', 'Late one']])
+  assert.match(
+    hosted.db.prepare("SELECT sql FROM sqlite_master WHERE name = 'agents'").get().sql,
+    /token_id TEXT NOT NULL UNIQUE/,
+    'the database refuses a second row for one token',
+  )
+  // Seen first by the console, by the board, by its own token: an entry each time.
+  forget()
+  assert.ok((await consoleAgents()).agents.some((agent) => agent.name === 'Late one' && agent.audience.inherited))
+  forget()
+  assert.ok((await boardAgents(bo)).agents.some((agent) => agent.name === 'Late one'))
+  forget()
+  assert.equal((await tokenCall(hosted, made.token, 'GET', '/api/v1/project')).status, 200)
+  assert.deepEqual(
+    firstSeen().map((row) => [row.user, row.by, row.name]),
+    [
+      [ada.user.id, null, 'Late one'],
+      [bo.user.id, null, 'Late one'],
+      [null, made.id, 'Late one'],
+    ],
+  )
+  assert.equal((await api(ada, 'DELETE', consoleUrl(`/tokens/${made.id}`))).status, 200)
+})
+
+test('a token without the claim scope is not an agent and is not routed: it reads every comment, as before', async () => {
+  const reader = await makeToken(ada, 'Reporter', ['read', 'reply', 'status'])
+  const fixerAgent = await agentNamed('Fixer')
+  assert.equal((await setAudience(bo, fixerAgent, { audience: 'trusted' })).status, 200)
+  const forFixer = await comment(ada, 'Only Fixer takes this')
+  assert.equal((await send(ada, forFixer.id, { agentId: fixerAgent.id })).status, 200)
+  assert.ok((await listed(reader.token)).includes(forFixer.id), 'it reads it')
+  assert.ok(!(await listed(builder.token)).includes(forFixer.id), 'another agent does not')
+  assert.equal((await take(reader.token, forFixer.id)).json.error.code, 'missing_scope', 'and can never take it')
+  assert.ok(!(await consoleAgents()).agents.some((agent) => agent.name === 'Reporter'))
+  await api(ada, 'POST', boardUrl(`/comments/${forFixer.id}/resolve`), {})
 })
 
 // ---- The real CLI ----

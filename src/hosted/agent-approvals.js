@@ -71,7 +71,7 @@ export function mountHostedApprovals({
       const comment = ctx.comments.get(req.params.cid)
       // A comment sent to another agent does not exist for this token, here
       // as on every other route.
-      if (agentsFor && !agentsFor(req.t).claimCheck(req.agent, req.project.id, comment).ok)
+      if (agentsFor && !agentsFor(req.t).workCheck(req.agent, req.project.id, comment).ok)
         throw error(404, 'unknown_comment', 'No dispatched comment at that id.')
       const at = now().toISOString()
       const id = `sa_${randomBytes(10).toString('hex')}`

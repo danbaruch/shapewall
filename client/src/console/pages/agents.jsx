@@ -491,8 +491,8 @@ export function ProjectAgentsPage({ projectId }) {
         }
       >
         <p>
-          Its token stops working at once, so the machine that uses it stops picking up comments. Comments that wait for it go to any agent.
-          This cannot be undone: connect it again with a new token.
+          Its token stops working at once, so the machine that uses it stops picking up comments. What it was working on and what waited for
+          it go to any agent. This cannot be undone: connect it again with a new token.
         </p>
       </ConfirmDialog>
       <CreateToken
@@ -766,7 +766,8 @@ function AudienceDialog({ agent, members, url, onClose, onSaved }) {
         ) : null}
         <Notice>
           An audience only narrows who may use this agent. The project's agent policy still decides who may send work to an agent at all,
-          and the machine that runs the agent has the last word.
+          and the machine that runs the agent has the last word. It also decides whose replies the agent reads. A comment the agent is
+          already working on stays with it until it is done.
         </Notice>
         <FormError error={save.error} />
       </div>
