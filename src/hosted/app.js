@@ -68,6 +68,8 @@ import { createAgentLinks, createChatService } from './agent-link.js'
 import { createChatStore } from './chat-store.js'
 import { createTurnHub } from './turn-hub.js'
 import { mountPages } from './pages.js'
+import { createTailnetAccounts } from './tailnet.js'
+import { mountTailnetAdmin } from './tailnet-routes.js'
 
 export { changeEventType, publicBoardView, TOKEN_SCOPES, INVITE_DAYS }
 
@@ -130,7 +132,13 @@ export function createHostedApp({
   // passkeys, sessions) in Activity. Off: those are each person's own. For a
   // server with one team; set by the operator (--owners-see-sign-ins).
   ownersSeeSignIns = false,
+  // Tailnet sign-in: { identityOf(req) } says who a request is from, by the
+  // identity headers of Tailscale's serve proxy and only when the request
+  // provably came through it (src/hosted/tailnet-identity.js). null: off,
+  // and the headers are never read.
+  tailnet = null,
 }) {
+  if (guestOnly) tailnet = null
   const base = new URL(origin)
   if (!['http:', 'https:'].includes(base.protocol) || base.pathname !== '/' || base.search)
     throw new Error('origin: an http(s) origin without a path')
@@ -255,12 +263,16 @@ export function createHostedApp({
     needSession,
     needFresh,
     needFreshOrRecovery,
-    freshOrThrow,
+    needUnrestricted,
+    coreFreshOrThrow,
+    stepUp,
+    stepUpOrThrow,
     inWorkspace,
     inProject,
     handle,
     auditOf,
-  } = createGuards({ db, dataDir, auth, quotas, secure, trustProxy, rateLimiter, siteOf, SESSION_COOKIE, iso, now, log })
+  } = createGuards({ db, dataDir, auth, quotas, secure, trustProxy, rateLimiter, siteOf, SESSION_COOKIE, iso, now, log, tailnet })
+  const tailnetAccounts = createTailnetAccounts({ db, iso, now })
 
   // ---- Headers for everything ----
   app.use((req, res, next) => {
@@ -322,12 +334,16 @@ export function createHostedApp({
     needSession,
     needFresh,
     needFreshOrRecovery,
+    needUnrestricted,
     auditOf,
     publicUser,
     createWorkspace,
     acceptInvite,
     revokeGrantsOf,
     ownerCount,
+    secure,
+    tailnet,
+    tailnetAccounts,
   })
   app.use('/auth', authRouter)
   app.use('/auth', (req, res) => fail(res, 404, 'not_found', 'No such route.'))
@@ -357,7 +373,9 @@ export function createHostedApp({
     inWorkspace,
     inProject,
     needFresh,
-    freshOrThrow,
+    coreFreshOrThrow,
+    stepUp,
+    stepUpOrThrow,
     auditOf,
     HttpError,
     listTokens,
@@ -407,7 +425,9 @@ export function createHostedApp({
     inWorkspace,
     inProject,
     needFresh,
-    freshOrThrow,
+    coreFreshOrThrow,
+    stepUp,
+    stepUpOrThrow,
     auditOf,
     createWorkspace,
     acceptInvite,
@@ -416,6 +436,8 @@ export function createHostedApp({
     createApiToken,
     agentsFor,
     ownersSeeSignIns: ownersSeeSignIns === true,
+    tailnet,
+    tailnetAccounts,
   }
   mountInviteLinks(consoleApi, consoleDeps)
   // Share link preview and opening: no session, the link is the secret.
@@ -426,6 +448,7 @@ export function createHostedApp({
   consoleApi.use(needSession)
   consoleApi.use(limit('session', (req) => req.user.id))
   mountConsoleRoutes(consoleApi, consoleDeps)
+  mountTailnetAdmin(consoleApi, consoleDeps)
   mountAgentRoutes(consoleApi, consoleDeps)
   mountUsageRoutes(consoleApi, consoleDeps)
   mountAdmin(consoleApi, deps)
@@ -447,7 +470,8 @@ export function createHostedApp({
     inWorkspace,
     inProject,
     handle,
-    freshOrThrow,
+    stepUp,
+    stepUpOrThrow,
     auditOf,
     clientIp,
     policyFor,
@@ -488,7 +512,7 @@ export function createHostedApp({
     agentsFor,
     boardContext,
     dispatchView,
-    needFresh,
+    stepUp,
     approvalApi,
     chatFor,
     hub: turnHub,
@@ -590,7 +614,9 @@ export function createHostedApp({
     while (i < hops.length - 1 && hops[i + 1] && trusted(hops[i], i)) i += 1
     return hops[i] || 'unknown'
   }
-  const presence = hub.listener(presenceAuthorizer({ db, dataDir, origin: publicOrigin, auth, now, guestOnly }), { clientIp: upgradeIp })
+  const presence = hub.listener(presenceAuthorizer({ db, dataDir, origin: publicOrigin, auth, now, guestOnly, tailnet }), {
+    clientIp: upgradeIp,
+  })
   app.locals.presence = { attach: presence.attach, close: presence.close, hub }
   app.locals.events = events
   app.locals.agentPresence = agentPresence

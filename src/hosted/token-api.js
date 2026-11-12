@@ -53,7 +53,7 @@ export function mountTokenApi({
   policyFor,
   boardContext,
   dispatchView,
-  needFresh,
+  stepUp,
   approvalApi,
   // Connected agents (src/hosted/agent-link.js): the chat store, the live
   // turns, the open links and what ends a turn.
@@ -649,7 +649,7 @@ export function mountTokenApi({
     policyFor,
     agentsFor,
     boardContext,
-    needFresh,
+    stepUp,
     auditOf,
     now,
   })

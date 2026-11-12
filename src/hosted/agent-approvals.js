@@ -16,7 +16,7 @@ export function mountHostedApprovals({
   policyFor,
   agentsFor = null,
   boardContext,
-  needFresh,
+  stepUp,
   auditOf,
   now,
 }) {
@@ -153,7 +153,7 @@ export function mountHostedApprovals({
   )
   boardApi.post(
     '/boards/:bid/approvals/:aid',
-    needFresh,
+    stepUp('cards'),
     handle((req, res) => {
       if (!roleAtLeast(req.role, 'admin') || !policyFor(req.t).trusted(agentPolicy(req.t, req.project.id, req.params.bid), req.user.id))
         throw error(403, 'forbidden', 'Only trusted admins approve shell commands.')

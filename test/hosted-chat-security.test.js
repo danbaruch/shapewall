@@ -16,7 +16,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { createRemote, pushDefinition, pushFiles } from '../src/remote/remote.js'
-import { createBrowser, createProject, invite, reauth, signUp, startHostedServer, tokenCall, writeLocalCaptures } from './hosted-helpers.js'
+import { createBrowser, createProject, invite, reauth, signUp, startHostedServer, tokenCall, writeLocalCaptures, askAgain } from './hosted-helpers.js'
 import { chat as send, connectAgent, parseEvents, startLink, until } from './hosted-chat-helpers.js'
 import { sampleConfig } from './helpers.js'
 
@@ -97,6 +97,8 @@ before(async () => {
   hosted = await startHostedServer('hosted-chat-security', { signup: 'open' })
   ada = await signUp(hosted, { handle: 'ada', displayName: 'Ada' })
   ws = ada.workspaceId
+  // These tests are about the passkey checks: the workspace asks for them (off by default).
+  askAgain(hosted, ws)
   bo = await signUp(hosted, { handle: 'bo-admin', displayName: 'Bo', invite: await invite(ada, ws, 'admin') })
   cyd = await signUp(hosted, { handle: 'cyd', displayName: 'Cyd', invite: await invite(ada, ws, 'member') })
   dee = await signUp(hosted, { handle: 'dee', displayName: 'Dee', invite: await invite(ada, ws, 'member') })

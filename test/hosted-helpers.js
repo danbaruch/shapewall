@@ -292,6 +292,15 @@ function chunk(type, data) {
   return Buffer.concat([head, data, tail])
 }
 
+// Switches on a workspace's "Ask for a passkey again" settings
+// (src/hosted/step-up.js), straight in the database: every group and the
+// admin idle rule, one check counting for 5 minutes. Tests of the opt-in
+// start here; without it a signed-in session with the right role is enough.
+export function askAgain(hosted, workspaceId, settings = {}) {
+  const value = { cards: true, agents: true, tokens: true, members: true, data: true, adminIdle: true, windowMinutes: 5, ...settings }
+  hosted.db.prepare('UPDATE workspaces SET step_up = ? WHERE id = ?').run(JSON.stringify(value), workspaceId)
+}
+
 // A fresh passkey check for a signed-up user (the console's re-auth).
 export async function reauth(user) {
   const start = await user.browser.post('/auth/reauth/options', {})

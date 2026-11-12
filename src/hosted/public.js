@@ -26,7 +26,7 @@ export const publicUrl = (publicId) => `/p/${publicId}/`
 
 // The workspace switch and the per-project switch, for the console.
 export function mountPublicAdmin(router, deps) {
-  const { db, handle, inWorkspace, inProject, freshOrThrow, auditOf, HttpError, iso } = deps
+  const { db, handle, inWorkspace, inProject, stepUpOrThrow, auditOf, HttpError, iso } = deps
 
   router.patch(
     '/workspaces/:ws/public-projects',
@@ -36,9 +36,9 @@ export function mountPublicAdmin(router, deps) {
       if (typeof enabled !== 'boolean') throw new HttpError(400, 'invalid_settings', 'enabled: true or false.')
       const current = Boolean(req.t.get('SELECT public_projects FROM workspaces WHERE workspace_id = :ws').public_projects)
       if (enabled && !current) {
-        // Putting boards on the open web: the owner, with a passkey check.
+        // Putting boards on the open web: the owner (and the passkey again when the workspace asks).
         if (req.role !== 'owner') throw new HttpError(403, 'forbidden', 'Only an owner turns public projects on.')
-        freshOrThrow(req)
+        stepUpOrThrow(req, 'tokens')
       }
       if (enabled !== current) {
         transaction(db, () => {
@@ -69,7 +69,7 @@ export function mountPublicAdmin(router, deps) {
         if (req.role !== 'owner') throw new HttpError(403, 'forbidden', 'Only an owner makes a project public.')
         const on = req.t.get('SELECT public_projects FROM workspaces WHERE workspace_id = :ws').public_projects
         if (!on) throw new HttpError(409, 'public_off', 'Public projects are off in this workspace. An owner turns them on in Settings.')
-        freshOrThrow(req)
+        stepUpOrThrow(req, 'tokens')
         const id = newPublicId()
         req.t.run('UPDATE projects SET public_id = :pub, public_at = :at, public_by = :user WHERE workspace_id = :ws AND id = :id', {
           pub: id,

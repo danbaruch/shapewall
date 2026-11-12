@@ -13,10 +13,28 @@ import { PushError } from './push.js'
 import { LIMITS } from './ratelimit.js'
 import { TenancyError, audit, roleAtLeast, roleIn, tenant } from './tenancy.js'
 import { CommentError } from '../store.js'
+import { STEP_UP_GROUP_BEFORE, stepUpWindowLabel } from './step-up.js'
+import { stepUpSettings } from './step-up-settings.js'
+import { sessionReader } from './tailnet.js'
 
 const ACTIVE_EVERY_MS = 5 * 60_000
 
-export function createGuards({ db, dataDir, auth, quotas, secure, trustProxy, rateLimiter, siteOf, SESSION_COOKIE, iso, now, log }) {
+export function createGuards({
+  db,
+  dataDir,
+  auth,
+  quotas,
+  secure,
+  trustProxy,
+  rateLimiter,
+  siteOf,
+  SESSION_COOKIE,
+  iso,
+  now,
+  log,
+  // Tailnet sign-in ({ identityOf(req) }, src/hosted/tailnet-identity.js), or null.
+  tailnet = null,
+}) {
   const clientIp = (req) => (trustProxy ? req.ip : req.socket.remoteAddress) || 'unknown'
   const setCookie = (res, name, value, maxAgeSeconds) => {
     res.append('Set-Cookie', `${name}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSeconds}${secure ? '; Secure' : ''}`)
@@ -31,10 +49,13 @@ export function createGuards({ db, dataDir, auth, quotas, secure, trustProxy, ra
     }
 
   // ---- Sessions ----
+  // A session that came in by tailnet identity counts only on a request that
+  // carries that identity (src/hosted/tailnet.js sessionReader).
+  const readSession = sessionReader({ auth, tailnet })
   function sessionOf(req) {
     if (req.sessionChecked) return req.auth
     req.sessionChecked = true
-    req.auth = auth.readSession(parseCookies(req.headers.cookie)[SESSION_COOKIE]) || null
+    req.auth = readSession(req, parseCookies(req.headers.cookie)[SESSION_COOKIE]) || null
     return req.auth
   }
 
@@ -57,22 +78,87 @@ export function createGuards({ db, dataDir, auth, quotas, secure, trustProxy, ra
     req.user = req.auth.user
     next()
   }
-  const needFresh = (req, res, next) => {
-    if (!auth.isFresh(req.auth.session)) {
-      return fail(
-        res,
+  // ---- Asking for the passkey again (src/hosted/step-up.js) ----
+  //
+  // notFresh(req, windowMs, message, extra): the refusal to send when the
+  // session has no passkey check in the window, or null. An account that
+  // signs in by its tailnet identity and has no passkey cannot give one: it
+  // is told to add a passkey first (`passkey_required`), never let through.
+  const noPasskey = (req) => req.auth.session.via === 'tailnet' && auth.passkeyCount(req.auth.user.id) === 0
+  function notFresh(req, windowMs, message, extra) {
+    if (auth.isFresh(req.auth.session, windowMs)) return null
+    if (noPasskey(req)) {
+      const lead = extra.stepUp === 'always' ? 'This always needs a passkey' : 'This needs a passkey here'
+      return new HttpError(
         403,
-        'reauth_required',
-        `Confirm with your passkey first (needed every ${Math.round(REAUTH_MS / 60000)} minutes for this).`,
+        'passkey_required',
+        lead + ', and your account has none: your tailnet signs you in. Add a passkey in Account and security, then try again.',
+        extra,
       )
     }
-    next()
+    return new HttpError(403, 'reauth_required', message, extra)
   }
-  const needFreshOrRecovery = (req, res, next) => (auth.canAddAfterRecovery(req.auth.session) ? next() : needFresh(req, res, next))
-  const freshOrThrow = (req) => {
-    if (!auth.isFresh(req.auth.session))
-      throw new HttpError(403, 'reauth_required', 'Confirm with your passkey first (needed for owner changes).')
+  const CORE_MINUTES = Math.round(REAUTH_MS / 60000)
+  // The fixed core: always, on every server.
+  const coreRefusal = (req) =>
+    notFresh(
+      req,
+      REAUTH_MS,
+      'Confirm with your passkey first. Shapewall always asks before this (once every ' + CORE_MINUTES + ' minutes).',
+      { stepUp: 'always' },
+    )
+  // Recovery-code sessions, and sessions of a passkey still on hold, keep
+  // the strict rules for everything that ever asked for a passkey.
+  const restrictedRefusal = (req) =>
+    auth.restricted(req.auth.session)
+      ? notFresh(
+          req,
+          REAUTH_MS,
+          'Confirm with your passkey first: this session started with a recovery code, or with a passkey that was added with one in the last 24 hours.',
+          { stepUp: 'restricted' },
+        )
+      : null
+  // A workspace's own choice: only when its owner switched the group on.
+  function groupRefusal(req, group, t = req.t) {
+    const restricted = restrictedRefusal(req)
+    if (restricted) return restricted
+    const settings = stepUpSettings(t).get()
+    if (!settings[group]) return null
+    return notFresh(
+      req,
+      settings.windowMinutes * 60_000,
+      'This workspace asks for your passkey again before ' +
+        STEP_UP_GROUP_BEFORE[group] +
+        ' (once every ' +
+        stepUpWindowLabel(settings.windowMinutes) +
+        '). An owner sets this in Settings, "Ask for a passkey again".',
+      { stepUp: group, windowMinutes: settings.windowMinutes },
+    )
   }
+  const refuse = (res, error) => fail(res, error.statusCode, error.code, error.message, error.extra)
+  const asMiddleware = (refusalOf) => (req, res, next) => {
+    const error = refusalOf(req)
+    return error ? refuse(res, error) : next()
+  }
+  const asThrow =
+    (refusalOf) =>
+    (req, ...rest) => {
+      const error = refusalOf(req, ...rest)
+      if (error) throw error
+    }
+  const needFresh = asMiddleware(coreRefusal)
+  const coreFreshOrThrow = asThrow(coreRefusal)
+  // After inWorkspace (req.t): stepUp('tokens').
+  const stepUp = (group) => asMiddleware((req) => groupRefusal(req, group))
+  // stepUpOrThrow(req, 'cards'), or with a tenant handle the route made itself.
+  const stepUpOrThrow = asThrow(groupRefusal)
+  // Account routes outside the core that a restricted session still may not use.
+  const needUnrestricted = asMiddleware(restrictedRefusal)
+  // Adding a passkey: a fresh check, or shortly after a recovery sign-in, or
+  // the first passkey of an account that signs in by its tailnet identity
+  // (it has nothing stronger to be checked with yet).
+  const needFreshOrRecovery = (req, res, next) =>
+    auth.canAddAfterRecovery(req.auth.session) || noPasskey(req) ? next() : needFresh(req, res, next)
   // :ws must be a workspace the user is in, with at least `role`. Unknown
   // and foreign workspaces answer the same 404.
   const inWorkspace =
@@ -82,19 +168,22 @@ export function createGuards({ db, dataDir, auth, quotas, secure, trustProxy, ra
       const current = ID_PATTERNS.workspace.test(ws) ? roleIn(db, req.user.id, ws) : null
       if (!current) return fail(res, 404, 'unknown_workspace', 'No such workspace.')
       if (!roleAtLeast(current, role)) return fail(res, 403, 'forbidden', `This needs the ${role} role or higher.`)
-      // Admin pages idle-expire: 12 hours without one, a passkey check
-      // brings them back (the rest of the session keeps working).
-      if (roleAtLeast(role, 'admin')) {
-        if (auth.adminIdleExpired(req.auth.session))
-          return fail(
-            res,
-            403,
-            'reauth_required',
-            'You have been away from admin pages for 12 hours. Confirm with your passkey to continue.',
+      req.t = tenant(db, ws)
+      // Admin pages idle-expire when the workspace's owner asked for it
+      // (Settings, "Ask for a passkey again"): 12 hours without one, a
+      // passkey check brings them back (the rest of the session keeps working).
+      if (roleAtLeast(role, 'admin') && stepUpSettings(req.t).get().adminIdle) {
+        if (auth.adminIdleExpired(req.auth.session)) {
+          const error = notFresh(
+            req,
+            REAUTH_MS,
+            'You have been away from admin pages for 12 hours, and this workspace asks for your passkey after that (Settings, "Ask for a passkey again"). Confirm with your passkey to continue.',
+            { stepUp: 'adminIdle' },
           )
+          if (error) return refuse(res, error)
+        }
         auth.touchAdmin(req.auth.session)
       }
-      req.t = tenant(db, ws)
       // Suspended by the operator: read-only (export still works).
       const suspended = suspendedWrite(req, req.t)
       if (suspended) return fail(res, 403, 'workspace_suspended', suspended)
@@ -122,7 +211,7 @@ export function createGuards({ db, dataDir, auth, quotas, secure, trustProxy, ra
         error instanceof HttpError ||
         error instanceof AgentPolicyError
       ) {
-        return fail(res, error.statusCode, error.code, error.message)
+        return fail(res, error.statusCode, error.code, error.message, error.extra || null)
       }
       if (!(error instanceof TenancyError)) log(`error: ${error.name || 'Error'} (request failed; request values omitted)`)
       else log(`tenancy error: ${error.message}`)
@@ -138,7 +227,8 @@ export function createGuards({ db, dataDir, auth, quotas, secure, trustProxy, ra
       action,
       target,
       ip: clientIp(req),
-      detail,
+      // What a person did in a session their tailnet signed in says so.
+      detail: req.auth?.session?.via === 'tailnet' && req.user ? { ...detail, signedInBy: 'tailnet' } : detail,
       at: iso(),
     })
 
@@ -162,7 +252,10 @@ export function createGuards({ db, dataDir, auth, quotas, secure, trustProxy, ra
     needSession,
     needFresh,
     needFreshOrRecovery,
-    freshOrThrow,
+    needUnrestricted,
+    coreFreshOrThrow,
+    stepUp,
+    stepUpOrThrow,
     inWorkspace,
     inProject,
     handle,

@@ -24,6 +24,7 @@ import {
   startHostedServer,
   tokenCall,
   writeLocalCaptures,
+  askAgain,
 } from './hosted-helpers.js'
 import { sampleConfig, tempDir } from './helpers.js'
 import { createRemote, pushDefinition, pushFiles } from '../src/remote/remote.js'
@@ -182,6 +183,7 @@ test('public projects: owner-only with a passkey check, view-only, every write r
   const hosted = await serve('access-public', { reportEmail: 'abuse@example.com', usercontent: true, clientDir })
   const owner = await signUp(hosted, { handle: 'pia' })
   const ws = owner.workspaceId
+  askAgain(hosted, ws)
   const project = await createProject(owner, ws, 'Site')
   await reauth(owner)
   const board = await pushSample(hosted, await createToken(owner, ws, project.id), 'access-public')
@@ -643,6 +645,8 @@ test('admin pages idle-expire after 12 hours; member pages keep working; a passk
   const hosted = await serve('access-idle', { now: time.now })
   const owner = await signUp(hosted, { handle: 'ida' })
   const ws = owner.workspaceId
+  // Off by default: the workspace asks for it.
+  askAgain(hosted, ws)
   await createProject(owner, ws, 'Site')
   assert.equal((await owner.browser.get(`/api/workspaces/${ws}/tokens`)).status, 200)
   // Busy admins stay in: each admin request restarts the clock.
@@ -732,18 +736,21 @@ test('migration 5 adds its tables and columns on top of a version 4 database', a
     ALTER TABLE projects DROP COLUMN default_agent_id; ALTER TABLE comments DROP COLUMN agent_id;
     DROP TABLE saved_views; ALTER TABLE workspaces DROP COLUMN retention_usage_days;
     DROP INDEX audit_workspace_at; DROP INDEX audit_workspace_user; DROP INDEX audit_account_user;
+    ALTER TABLE workspaces DROP COLUMN step_up; ALTER TABLE workspaces DROP COLUMN cli_browser_approval;
+    DROP INDEX users_tailnet_login; ALTER TABLE users DROP COLUMN tailnet_login; ALTER TABLE users DROP COLUMN tailnet_linked_at;
+    ALTER TABLE sessions DROP COLUMN tailnet_login; ALTER TABLE invites DROP COLUMN tailnet_login; DROP TABLE tailnet_visitors;
     DROP TABLE schema_migrations;
     PRAGMA user_version = 4;
   `)
   old.close()
   const db = await openDatabase(path.join(dataDir, 'shapewall.db'))
-  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 15)
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 16)
   assert.deepEqual(
     db
       .prepare('SELECT version FROM schema_migrations ORDER BY version')
       .all()
       .map((row) => row.version),
-    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
   )
   assert.equal(db.prepare('SELECT handle FROM users WHERE id = ?').get(owner.user.id).handle, 'mira')
   assert.equal(db.prepare('SELECT name FROM projects WHERE id = ?').get(project.id).name, 'Existing site')

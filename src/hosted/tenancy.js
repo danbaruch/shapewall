@@ -213,6 +213,17 @@ export function findInviteByHash(db, tokenHash) {
   )
 }
 
+// The invites made for one tailnet login (src/hosted/tailnet.js), in any
+// workspace, with what inviteUsable needs. The caller keeps the usable ones.
+export function findInvitesForTailnetLogin(db, login) {
+  return prepare(
+    db,
+    `SELECT i.*, w.name AS workspace_name, m.role AS creator_role FROM invites i JOIN workspaces w ON w.id = i.workspace_id
+     LEFT JOIN memberships m ON m.workspace_id = i.workspace_id AND m.user_id = i.created_by
+     WHERE i.tailnet_login = :login AND i.used_at IS NULL AND i.revoked_at IS NULL ORDER BY i.created_at`,
+  ).all({ login })
+}
+
 // Whether an invite row (from findInviteByHash) still works: unused, not
 // revoked, not expired, and its creator can still invite to that role (an
 // admin up to admin, an owner for owners). A removed or demoted admin's

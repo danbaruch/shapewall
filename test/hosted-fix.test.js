@@ -14,7 +14,7 @@ import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { createRemote, pushDefinition, pushFiles } from '../src/remote/remote.js'
 import { watchRemote } from '../src/remote/remote-watch.js'
-import { createProject, invite, reauth, signUp, startHostedServer, writeLocalCaptures } from './hosted-helpers.js'
+import { createProject, invite, reauth, signUp, startHostedServer, writeLocalCaptures, askAgain } from './hosted-helpers.js'
 import { connectAgent, fixScript, gitRepo, parseEvents, startLink, until } from './hosted-chat-helpers.js'
 import { sampleConfig, tempDir } from './helpers.js'
 
@@ -114,6 +114,8 @@ before(async () => {
   hosted = await startHostedServer('hosted-fix', { now: () => new Date(Date.now() + skew) })
   ada = await signUp(hosted, { handle: 'ada', displayName: 'Ada' })
   ws = ada.workspaceId
+  // These tests are about the passkey checks: the workspace asks for them (off by default).
+  askAgain(hosted, ws)
   bea = await signUp(hosted, { handle: 'bea', displayName: 'Bea', invite: await invite(ada, ws, 'admin') })
   cyd = await signUp(hosted, { handle: 'cyd', displayName: 'Cyd', invite: await invite(ada, ws, 'member') })
   project = await createProject(ada, ws, 'Site')

@@ -8,7 +8,7 @@ import path from 'node:path'
 import { createRemote, pushDefinition, pushFiles } from '../src/remote/remote.js'
 import { changeEventType } from '../src/hosted/events.js'
 import { b64, pngWithText } from './comment-media-fixtures.js'
-import { createProject, createToken, invite, reauth, signUp, startHostedServer, writeLocalCaptures } from './hosted-helpers.js'
+import { createProject, createToken, invite, reauth, signUp, startHostedServer, writeLocalCaptures, askAgain } from './hosted-helpers.js'
 import { sampleConfig } from './helpers.js'
 
 let hosted
@@ -42,6 +42,8 @@ before(async () => {
   hosted = await startHostedServer('hosted-board-remove', { signup: 'open' })
   alice = await signUp(hosted, { handle: 'alice' })
   ws = alice.workspaceId
+  // These tests are about the passkey checks: the workspace asks for them (off by default).
+  askAgain(hosted, ws)
   mel = await signUp(hosted, { handle: 'mel', invite: await invite(alice, ws, 'member') })
   bob = await signUp(hosted, { handle: 'bob' })
   project = await createProject(alice, ws, 'Site')

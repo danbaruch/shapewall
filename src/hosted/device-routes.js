@@ -15,7 +15,7 @@ import { roleAtLeast, roleIn, tenant, workspacesForUser } from './tenancy.js'
 import { TOKEN_SCOPES } from './tokens.js'
 
 export function mountDeviceApprovals(consoleApi, deps) {
-  const { db, dataDir, now, quotas, deviceLogins, clientIp, limit, handle, needFresh, auditOf, createApiToken, agentsFor } = deps
+  const { db, dataDir, now, quotas, deviceLogins, clientIp, limit, handle, stepUpOrThrow, auditOf, createApiToken, agentsFor } = deps
 
   // ---- `shapewall login`: approving a login in the console ----
   // The CLI side (start, poll) is on /api/v1/device, without a session.
@@ -74,7 +74,6 @@ export function mountDeviceApprovals(consoleApi, deps) {
   consoleApi.post(
     '/device/approve',
     limit('deviceLookup', (req) => req.user.id),
-    needFresh,
     handle(async (req, res) => {
       const found = deviceFound(req)
       const ws = String(req.body?.workspaceId || '')
@@ -82,6 +81,8 @@ export function mountDeviceApprovals(consoleApi, deps) {
       if (!role) throw new HttpError(404, 'unknown_workspace', 'No such workspace.')
       if (!roleAtLeast(role, NEEDS.tokens)) throw new HttpError(403, 'forbidden', `This needs the ${NEEDS.tokens} role or higher.`)
       req.t = tenant(db, ws)
+      // Approving a machine or an agent: the passkey again only when this workspace asks ("Agents and machines").
+      stepUpOrThrow(req, 'agents')
       if (workspaceSuspended(req.t))
         throw new HttpError(403, 'workspace_suspended', 'This workspace is suspended by the server operator; it takes no new tokens.')
       req.role = role

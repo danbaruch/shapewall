@@ -670,6 +670,31 @@ const MIGRATIONS = [
   CREATE INDEX audit_workspace_user ON audit_log(workspace_id, user_id, id);
   CREATE INDEX audit_account_user ON audit_log(user_id, id) WHERE workspace_id IS NULL;
   `,
+  // Step-up as a workspace's choice (step_up: a JSON object, '{}' is all off;
+  // src/hosted/step-up.js), and tailnet sign-in (src/hosted/tailnet.js): the
+  // tailnet login an account is linked to, the one a session came in with
+  // (such a session works only on requests that carry that identity), the
+  // one an invite is for, and the logins that arrived and belong to nobody
+  // yet. cli_browser_approval: a workspace that wants `shapewall login` and
+  // `agent connect` approved in the browser even from a tailnet machine.
+  // Additive; an older build ignores all of it (docs/hosted.md,
+  // "Rolling back").
+  `
+  ALTER TABLE workspaces ADD COLUMN step_up TEXT NOT NULL DEFAULT '{}';
+  ALTER TABLE workspaces ADD COLUMN cli_browser_approval INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE users ADD COLUMN tailnet_login TEXT;
+  ALTER TABLE users ADD COLUMN tailnet_linked_at TEXT;
+  CREATE UNIQUE INDEX users_tailnet_login ON users(tailnet_login) WHERE tailnet_login IS NOT NULL;
+  ALTER TABLE sessions ADD COLUMN tailnet_login TEXT;
+  ALTER TABLE invites ADD COLUMN tailnet_login TEXT;
+  CREATE TABLE tailnet_visitors (
+    login TEXT PRIMARY KEY,
+    name TEXT NOT NULL DEFAULT '',
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    visits INTEGER NOT NULL DEFAULT 1
+  );
+  `,
 ]
 
 export async function openDatabase(file) {

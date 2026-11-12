@@ -25,7 +25,7 @@ import { execFileSync } from 'node:child_process'
 import { cardHash } from '../src/agent/card-hash.js'
 import { createQuotas } from '../src/hosted/quotas.js'
 import { createRemote, pushDefinition, pushFiles } from '../src/remote/remote.js'
-import { createProject, invite, reauth, signUp, startHostedServer, tokenCall, writeLocalCaptures } from './hosted-helpers.js'
+import { createProject, invite, reauth, signUp, startHostedServer, tokenCall, writeLocalCaptures, askAgain } from './hosted-helpers.js'
 import { connectAgent, fixScript, gitRepo, parseEvents, startLink, until } from './hosted-chat-helpers.js'
 import { sampleConfig, tempDir } from './helpers.js'
 
@@ -123,6 +123,8 @@ before(async () => {
   })
   ada = await signUp(hosted, { handle: 'ada', displayName: 'Ada' })
   ws = ada.workspaceId
+  // These tests are about the passkey checks: the workspace asks for them (off by default).
+  askAgain(hosted, ws)
   bea = await signUp(hosted, { handle: 'bea', displayName: 'Bea', invite: await invite(ada, ws, 'admin') })
   cyd = await signUp(hosted, { handle: 'cyd', displayName: 'Cyd', invite: await invite(ada, ws, 'member') })
   project = await createProject(ada, ws, 'Site')
