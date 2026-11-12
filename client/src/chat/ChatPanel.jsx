@@ -39,7 +39,7 @@ import { ChatHistory, exportThread, restoreVersion } from './history'
 import { fallbackTitle, isChatThread, newChatId, threadKind } from './threads'
 import { useAnswerRatings } from './actions'
 import { AllowForChat } from './allowForChat'
-import { HostedAnswer, answerHostedPermission } from './hostedPermissions.js'
+import { HostedAnswer, HostedPush, answerHostedPermission } from './hostedPermissions.js'
 import { confirmHostedPasskey } from '../board/HostedApprovals'
 import { AutoAllowSettings } from './composerParts'
 import BranchModeToggle from './BranchModeToggle'
@@ -382,6 +382,7 @@ export default function ChatPanel({
   const submit = useChatTurn({
     optionChoices: () => optionsRef.current?.forMessage() || null,
     hostedFix: () => (hosted && fixRequest?.hosted && fixRequest.commentId === commentId ? fixRequest.hosted : null),
+    confirmPasskey: hosted ? confirmHostedPasskey : null,
     boardId,
     threadId,
     draft,
@@ -618,6 +619,13 @@ export default function ChatPanel({
   const hostedAnswer = useMemo(
     () => (hosted ? { ok: editsAnswer?.ok === true, reason: editsAnswer?.reason || null } : null),
     [hosted, editsAnswer?.ok, editsAnswer?.reason],
+  )
+  // "Push this fix" on a held fix: for people who may ask this agent for a fix.
+  const canPush = hosted && agent?.edits?.fix?.ok === true && !running
+  const hostedPush = useMemo(
+    () => (canPush ? () => submitRef.current('', false, { push: true }) : null),
+
+    [canPush],
   )
   // The turn in flight, until the refetched thread has it (by id, no doubles).
   // Only in its own thread: a comment's Ask agent can switch threads mid-turn.
@@ -899,44 +907,46 @@ export default function ChatPanel({
           ) : null}
           <AllowForChat.Provider value={allowForChat}>
             <HostedAnswer.Provider value={hostedAnswer}>
-              <RefsContext.Provider value={refs}>
-                <MessageList
-                  listRef={listRef}
-                  scroll={scroll}
-                  onContinue={() => submit(CONTINUE_PROMPT)}
-                  comment={comment}
-                  loading={thread.loading}
-                  messages={messages}
-                  shown={shown}
-                  liveRun={liveRun}
-                  remoteRunning={remoteRunning}
-                  boardId={boardId}
-                  pages={pages}
-                  agent={agent}
-                  speaker={speaker}
-                  readAloud={readAloudProps}
-                  touch={touch}
-                  onAnswer={answer}
-                  onRead={readMessage}
-                  onRetry={retry}
-                  retryDisabled={running || Boolean(draft.trim() || attachments.length)}
-                  owner={Boolean(agent?.ownerWrites)}
-                  onUndo={running ? null : undo}
-                  onBranch={running ? null : onBranch}
-                  onRecapture={onRecapture}
-                  versions={selectedThread?.versions || null}
-                  onEdit={hosted ? null : editMessage}
-                  onVersion={chooseVersion}
-                  editDisabled={running || dictation.listening}
-                  ratings={answerRatings.ratings}
-                  onRate={hosted ? null : answerRatings.rate}
-                  onRegenerate={hosted ? null : (message, request) => submit('', false, { regenerate: { message, request } })}
-                  regenerateDisabled={running || dictation.listening}
-                  otherAgent={agent?.ownerWrites && otherAgent ? otherAgent : null}
-                  onTryOther={tryOther}
-                  onCheckAgain={agent?.ownerWrites ? checkAgain : null}
-                />
-              </RefsContext.Provider>
+              <HostedPush.Provider value={hostedPush}>
+                <RefsContext.Provider value={refs}>
+                  <MessageList
+                    listRef={listRef}
+                    scroll={scroll}
+                    onContinue={() => submit(CONTINUE_PROMPT)}
+                    comment={comment}
+                    loading={thread.loading}
+                    messages={messages}
+                    shown={shown}
+                    liveRun={liveRun}
+                    remoteRunning={remoteRunning}
+                    boardId={boardId}
+                    pages={pages}
+                    agent={agent}
+                    speaker={speaker}
+                    readAloud={readAloudProps}
+                    touch={touch}
+                    onAnswer={answer}
+                    onRead={readMessage}
+                    onRetry={retry}
+                    retryDisabled={running || Boolean(draft.trim() || attachments.length)}
+                    owner={Boolean(agent?.ownerWrites)}
+                    onUndo={running ? null : undo}
+                    onBranch={running ? null : onBranch}
+                    onRecapture={onRecapture}
+                    versions={selectedThread?.versions || null}
+                    onEdit={hosted ? null : editMessage}
+                    onVersion={chooseVersion}
+                    editDisabled={running || dictation.listening}
+                    ratings={answerRatings.ratings}
+                    onRate={hosted ? null : answerRatings.rate}
+                    onRegenerate={hosted ? null : (message, request) => submit('', false, { regenerate: { message, request } })}
+                    regenerateDisabled={running || dictation.listening}
+                    otherAgent={agent?.ownerWrites && otherAgent ? otherAgent : null}
+                    onTryOther={tryOther}
+                    onCheckAgain={agent?.ownerWrites ? checkAgain : null}
+                  />
+                </RefsContext.Provider>
+              </HostedPush.Provider>
             </HostedAnswer.Provider>
           </AllowForChat.Provider>
           {hostedBlocked ? (

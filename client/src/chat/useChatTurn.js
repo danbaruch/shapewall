@@ -66,6 +66,9 @@ export function useChatTurn({
   // comment as this person read it and makes the turn itself: no text, no
   // screenshot from here.
   hostedFix = () => null,
+  // The passkey step, when a hosted server asks for one before it starts a
+  // fix (an admin's Fix is also their approval of the run) or a push.
+  confirmPasskey = null,
 }) {
   // A send while a turn is still running in progress (between the click and
   // the stream starting too): one at a time.
@@ -78,8 +81,9 @@ export function useChatTurn({
   // `regenerate`: { message, request } asks again for the latest answer; the
   // new one takes its place, the old one stays as an earlier version. All of
   // them stream like any turn (frame-batched below).
-  const submit = async (textValue = draft, fix = false, { queued = null, editOf = null, regenerate = null } = {}) => {
-    const fromComposer = !editOf && !regenerate
+  // `push`: a hosted board's "Push this fix", asked again (no text of its own).
+  const submit = async (textValue = draft, fix = false, { queued = null, editOf = null, regenerate = null, push = false } = {}) => {
+    const fromComposer = !editOf && !regenerate && !push
     const item = queued || {
       text: regenerate ? regenerate.request.text || '' : String(textValue ?? '').trim(),
       fix: fromComposer && fix,
@@ -91,7 +95,7 @@ export function useChatTurn({
     const text = fix ? FIX_PROMPT : item.text
     if (running || isSending(boardId) || dictation.listening) return false
     if (editOf && !text) return false
-    if (!regenerate && !fix && !text && !item.attachments.length && !item.mentions.length && !item.files.length) return false
+    if (!regenerate && !fix && !push && !text && !item.attachments.length && !item.mentions.length && !item.files.length) return false
     setSending(boardId, true)
     const startedThread = threadId
     dictation.cancel()
@@ -119,21 +123,23 @@ export function useChatTurn({
     // that stopped meanwhile starts with them again (src/agent/routes.js).
     const choices = optionChoices()
     const withOptions = (value) => (choices && Object.keys(choices).length ? { ...value, options: choices } : value)
-    const body = remoteFix
-      ? { fix: true, ...(remoteFix.agentId ? { agentId: remoteFix.agentId } : {}), dispatchHash: remoteFix.dispatchHash }
-      : regenerate
-        ? withOptions({ regenerate: regenerate.message.id })
-        : withOptions({
-            text,
-            ...(fix ? { fix: true } : {}),
-            ...(editOf ? { editOf } : {}),
-            attachments: sent.map(({ name, mediaType, data, source }) => ({ name, mediaType, data, ...(source ? { source } : {}) })),
-            // Composer extras (src/agent/composer.js): mention ids and text files.
-            ...(item.mentions.length ? { mentions: mentionsForServer(item.mentions) } : {}),
-            ...(item.files.length
-              ? { files: item.files.map(({ name, mediaType, text: content }) => ({ name, mediaType, text: content })) }
-              : {}),
-          })
+    const body = push
+      ? { push: true }
+      : remoteFix
+        ? { fix: true, ...(remoteFix.agentId ? { agentId: remoteFix.agentId } : {}), dispatchHash: remoteFix.dispatchHash }
+        : regenerate
+          ? withOptions({ regenerate: regenerate.message.id })
+          : withOptions({
+              text,
+              ...(fix ? { fix: true } : {}),
+              ...(editOf ? { editOf } : {}),
+              attachments: sent.map(({ name, mediaType, data, source }) => ({ name, mediaType, data, ...(source ? { source } : {}) })),
+              // Composer extras (src/agent/composer.js): mention ids and text files.
+              ...(item.mentions.length ? { mentions: mentionsForServer(item.mentions) } : {}),
+              ...(item.files.length
+                ? { files: item.files.map(({ name, mediaType, text: content }) => ({ name, mediaType, text: content })) }
+                : {}),
+            })
     setNotice(null)
     if (!queued && fromComposer) {
       setDraft('')
@@ -181,7 +187,14 @@ export function useChatTurn({
     const controller = new AbortController()
     setAbort(boardId, controller)
     try {
-      await sendMessage(boardId, startedThread, body, {
+      const send = (options) =>
+        sendMessage(boardId, startedThread, body, options).catch(async (error) => {
+          // The server wants a passkey check first: give it, and send once more.
+          if (error?.code !== 'reauth_required' || !confirmPasskey || !(remoteFix || push)) throw error
+          await confirmPasskey()
+          return sendMessage(boardId, startedThread, body, options)
+        })
+      await send({
         signal: controller.signal,
         onEvent: (name, data) => {
           if (name === 'tool')
@@ -206,7 +219,7 @@ export function useChatTurn({
       if (error.name !== 'AbortError' && !pending.final) {
         // Only restore a message the server did not accept. An interrupted
         // response must not invite an accidental duplicate send.
-        const restore = !accepted && !editOf && !regenerate && !remoteFix
+        const restore = !accepted && !editOf && !regenerate && !remoteFix && !push
         stash(boardId, startedThread, (composer) => {
           // Not an error to retry: the owner-only note takes the composer's place.
           if (ownerOnlyError(error)) composer.setOwnerRefused(true)

@@ -176,7 +176,14 @@ export function buildJob({ ctx, turn, agent, rows, inAudience, asker, commentIte
     // Who asked. `owner`: the person who connected this agent.
     asker,
     ...(turn.kind === 'fix'
-      ? { approvals: { edits: approvals?.edits === 'auto' ? 'auto' : 'ask', commands: approvals?.commands === 'auto' ? 'auto' : 'ask' } }
+      ? {
+          approvals: {
+            edits: approvals?.edits === 'auto' ? 'auto' : 'ask',
+            commands: approvals?.commands === 'auto' ? 'auto' : 'ask',
+            // The person who connected the agent set the rule themself.
+            byOwner: approvals?.byOwner === true,
+          },
+        }
       : {}),
     messages,
     context: {

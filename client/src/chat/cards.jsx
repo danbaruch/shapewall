@@ -223,6 +223,11 @@ export function PermissionCard({ card, onAnswer, live, touch }) {
           </p>
         ) : null}
         <DiffView diff={card.diff} />
+        {card.diffHidden ? (
+          <p className="text-xs leading-5 text-muted" data-sw-chat-permission-diff-hidden="true">
+            The change itself is shown to the people this agent works for.
+          </p>
+        ) : null}
       </div>
       {pending && !mayAnswer ? (
         <p
@@ -253,7 +258,10 @@ export function PermissionCard({ card, onAnswer, live, touch }) {
             ))}
           </div>
           <p className="flex items-center gap-1 text-xs text-muted">
-            <Clock size={12} className="shrink-0" aria-hidden="true" /> No answer in 2 minutes counts as Deny.
+            <Clock size={12} className="shrink-0" aria-hidden="true" />{' '}
+            {card.name === 'push'
+              ? "This is the whole fix. No answer in 10 minutes: it stays on the agent's machine, not pushed."
+              : 'No answer in 2 minutes counts as Deny.'}
           </p>
         </div>
       ) : null}

@@ -24,6 +24,7 @@ import {
   Trash2,
   Undo2,
 } from 'lucide-react'
+import { useHostedPush } from './hostedPermissions.js'
 import { Badge, Button, Dialog } from '../components/ui'
 import { cn } from '../lib/utils'
 import { DiffView } from './DiffCards'
@@ -246,6 +247,10 @@ function BranchActions({ message, summary, owner, touch, onBranch }) {
 function RemoteBranch({ summary, touch }) {
   const branch = summary.branch
   const [note, setNote] = useState(null)
+  // Held: an edit in it went without asking, so it is pushed only once
+  // someone has looked at its whole diff ("Push this fix").
+  const push = useHostedPush()
+  const [asking, setAsking] = useState(false)
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(branch.name)
@@ -289,11 +294,39 @@ function RemoteBranch({ summary, touch }) {
           <HardDrive size={12} className="mt-0.5 shrink-0" aria-hidden="true" />
         )}
         <span className="min-w-0">
-          {branch.pushed ? `Pushed to ${branch.remote || 'the remote'}` : "On the agent's machine, not pushed"}
+          {branch.pushed
+            ? `Pushed to ${branch.remote || 'the remote'}`
+            : branch.held
+              ? "On the agent's machine, not pushed: its edits went without asking, so someone has to look at the whole diff first"
+              : "On the agent's machine, not pushed"}
           {branch.baseName ? `. Made from ${branch.baseName}.` : '.'}
         </span>
       </p>
-      {summary.pr?.url ? (
+      {branch.held && push ? (
+        <Button
+          size={touch ? 'touch' : 'sm'}
+          variant="secondary"
+          className={cn('shrink-0', !touch && 'self-start')}
+          disabled={asking}
+          onClick={async () => {
+            setAsking(true)
+            try {
+              await push()
+            } finally {
+              setAsking(false)
+            }
+          }}
+          data-sw-chat-branch-push={branch.name}
+        >
+          <CloudUpload size={13} aria-hidden="true" /> Push this fix
+        </Button>
+      ) : null}
+      {summary.pr?.url && summary.pr.link === false ? (
+        <p className="flex items-start gap-1.5" data-sw-chat-summary-pr-text="true">
+          <GitPullRequest size={12} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 break-all">Pull request: {summary.pr.url}</span>
+        </p>
+      ) : summary.pr?.url ? (
         <p className="flex items-center gap-1.5">
           <GitPullRequest size={12} className="shrink-0" aria-hidden="true" />
           <a

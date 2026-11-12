@@ -23,6 +23,7 @@ import { agentSettings } from '../agent/config.js'
 import { REMOTE_FIX_PREAMBLE, REMOTE_PREAMBLE } from '../agent/context.js'
 import { authFiles, findConfigFile, loadConfig } from '../config.js'
 import { AGENT_SLUG_RE, forgetAgentCredential, readAgentCredential, saveAgentCredential } from './credentials.js'
+import { fixRoot, sweepFixes } from './agent-fix.js'
 import { fatalLinkError, runAgentLink } from './agent-link.js'
 import {
   POLICY_APPROVALS,
@@ -254,7 +255,10 @@ export async function agentConnect(
   const kind = acpAgentKind(settings.acp.argv) || 'custom'
   const label = terminalSafe(settings.label)
   // Checked before anything is asked of anyone: a wrong flag changes nothing.
-  const policyNow = readMachinePolicy(origin, slug, env)
+  // A value in the file that is not understood reads as the narrowest setting, and is said.
+  const policyNow = readMachinePolicy(origin, slug, env, {
+    warn: (text) => log(`Not understood, so read as the narrowest setting: ${text}`),
+  })
   const changes = policyChanges(flags, policyNow, kind)
 
   // ---- The agent's token: its own, never the saved login's ----
@@ -317,6 +321,17 @@ export async function agentConnect(
   const policy = COMMANDS_PROVEN.includes(kind) ? saved : { ...saved, commands: [], auto: saved.auto.filter((item) => item !== 'commands') }
   if (saved.commands.length && !policy.commands.length) log(`Not in effect: the commands in ${policyFile(env)}. ${NO_COMMANDS}`)
   const edits = policy.approvals !== 'none'
+  if (edits) {
+    // Said now rather than at the first fix: where fixes are made must be outside the project.
+    try {
+      fixRoot(config.dir, env)
+    } catch (error) {
+      throw new Error(error.message.replace(/^On the agent's machine, t/, 'T').replace(/ there /, ' '), { cause: error })
+    }
+    // What an earlier run left behind (it was killed mid-fix): removed, and its branch names are free again.
+    const swept = sweepFixes(config.dir, env)
+    if (swept.length) log(`Removed ${swept.length} unfinished fix cop${swept.length === 1 ? 'y' : 'ies'} an earlier run left behind.`)
+  }
   const profile = profileProblems(kind, config.dir, env)
   if (profile.refuse.length)
     throw new Error(`${label} is not started read-only on this machine. ${profile.refuse.join(' ')} See docs/agent-hardening.md.`)

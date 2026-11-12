@@ -35,7 +35,8 @@
 // the event stream has) and interrupts what it was answering.
 
 import express from 'express'
-import { CARD_HASH_RE, CARD_ID_RE, CARD_LIMITS, cardContent, cardHash, cardSubjectHash } from '../agent/card-hash.js'
+import { CARD_HASH_RE, CARD_ID_RE, cardContent, cardHash, cardSubjectHash, cardTtlMax } from '../agent/card-hash.js'
+import { checkStorageQuota } from './comment-files.js'
 import { FRAME_LIMITS, cleanEvent, cleanReply, usageOf } from './chat-frames.js'
 import { createPermissionStore, permissionView } from './chat-permissions.js'
 import { buildJob } from './chat-job.js'
@@ -147,15 +148,31 @@ export function createChatService({ db, hub, links, events, chatFor, now = () =>
   function releaseFix(t, row, status = 'needs-human') {
     if (row.kind !== 'fix' || !row.comment_number) return
     const at = now().toISOString()
-    const key = { project: row.project_id, board: row.board_id, number: row.comment_number, at }
+    // Bound to this turn's own claim: when that claim is over already (the
+    // comment was taken again since, by another fix), this write is stale
+    // and changes nothing.
+    const claim = t.get('SELECT claim_id FROM agent_runs WHERE workspace_id = :ws AND id = :run', { run: row.run_id })?.claim_id || null
+    if (!claim) return
+    const ended = t.run('UPDATE agent_claims SET ended_at = :at WHERE workspace_id = :ws AND id = :claim AND ended_at IS NULL', {
+      claim,
+      at,
+    })
+    if (!Number(ended.changes)) return
     t.run(
       `UPDATE comments SET agent_status = :status, agent_status_at = :at WHERE workspace_id = :ws AND project_id = :project
          AND board_id = :board AND number = :number AND status = 'open' AND agent_status IN ('queued', 'working')`,
-      { ...key, status },
+      { project: row.project_id, board: row.board_id, number: row.comment_number, at, status },
     )
+  }
+  // The machine took the fix: the comment says "working", while this turn's claim is the open one.
+  function workingFix(t, row) {
+    if (row.kind !== 'fix' || !row.comment_number) return
+    const claim = t.get('SELECT claim_id FROM agent_runs WHERE workspace_id = :ws AND id = :run', { run: row.run_id })?.claim_id || null
+    if (!claim || !t.get('SELECT 1 AS x FROM agent_claims WHERE workspace_id = :ws AND id = :claim AND ended_at IS NULL', { claim })) return
     t.run(
-      'UPDATE agent_claims SET ended_at = :at WHERE workspace_id = :ws AND project_id = :project AND board_id = :board AND comment_number = :number AND ended_at IS NULL',
-      key,
+      `UPDATE comments SET agent_status = 'working', agent_status_at = :at WHERE workspace_id = :ws AND project_id = :project
+         AND board_id = :board AND number = :number AND status = 'open' AND agent_status = 'queued'`,
+      { project: row.project_id, board: row.board_id, number: row.comment_number, at: now().toISOString() },
     )
   }
   // "An agent came or went", for the boards of its project: at most once
@@ -229,7 +246,7 @@ export function createChatService({ db, hub, links, events, chatFor, now = () =>
     // Cards nobody answered in time: expired here too, should the machine
     // not say so itself. Every viewer sees it; the audit log keeps it.
     for (const turn of hub.all()) {
-      if (turn.kind !== 'fix') continue
+      if (!['fix', 'push'].includes(turn.kind)) continue
       const t = tenant(db, turn.workspaceId)
       const perms = permsFor(t)
       const due = transaction(db, () => {
@@ -304,6 +321,7 @@ export function createChatService({ db, hub, links, events, chatFor, now = () =>
     nameOf,
     cancelCards,
     releaseFix,
+    workingFix,
   }
 }
 
@@ -381,6 +399,7 @@ export function mountAgentLink(
     dispatchView,
     remoteItem,
     contextFor,
+    quotaOf = null,
   },
 ) {
   const router = express.Router()
@@ -693,7 +712,10 @@ export function mountAgentLink(
       live.linkId = linkIdOf(req)
       if (live.state === 'queued') {
         live.state = 'running'
-        store.setRunning(row.id)
+        transaction(db, () => {
+          store.setRunning(row.id)
+          chat.workingFix(req.t, row)
+        })
       }
       hub.heard(live)
       res.json({ job })
@@ -745,9 +767,11 @@ export function mountAgentLink(
       notAnothers(req, live)
       const reply = cleanReply(req.body?.message)
       // A turn the board stopped ends as stopped, whatever the machine says.
-      if (live.cancel && reply.status === 'done') reply.status = 'stopped'
+      // One thing stands: a branch that was pushed before the Stop was heard exists, and the thread says so.
+      const pushedAnyway = ['fix', 'push'].includes(row.kind) && reply.summary?.branch.pushed === true
+      if (live.cancel && reply.status === 'done' && !pushedAnyway) reply.status = 'stopped'
       // Only a fix leaves a branch.
-      if (row.kind !== 'fix' || reply.status !== 'done') delete reply.summary
+      if (!['fix', 'push'].includes(row.kind) || reply.status !== 'done') delete reply.summary
       const stored = transaction(db, () => {
         const store = chatFor(req.t)
         const perms = chat.permsFor(req.t)
@@ -761,8 +785,14 @@ export function mountAgentLink(
             ? { ...permissionView(asked.get(card.id), { name }), ...(card.at !== undefined ? { at: card.at } : {}) }
             : card,
         )
+        // And every one of them is in the stored answer, whether the machine's
+        // answer lists it or not ("Push this fix" is the machine's own card,
+        // not the agent's): what was asked and how it ended is part of the thread.
+        const listed = new Set(reply.cards.map((card) => card.id))
+        for (const card of asked.values()) if (!listed.has(card.id)) reply.cards.push(permissionView(card, { name }))
         const state = reply.status === 'done' ? 'done' : reply.status === 'stopped' ? 'stopped' : 'error'
-        if (!store.endTurn(row, state, { ...usageOf(reply), approvals: row.kind === 'fix' ? perms.counts(row.id) : null })) return null
+        if (!store.endTurn(row, state, { ...usageOf(reply), approvals: ['fix', 'push'].includes(row.kind) ? perms.counts(row.id) : null }))
+          return null
         // A finished fix leaves its comment where it stands at once, should the
         // machine go away before it says so itself (it posts its reply next).
         chat.releaseFix(req.t, row, reply.summary ? 'branch-ready' : 'needs-human')
@@ -815,7 +845,11 @@ export function mountAgentLink(
       card: card.id,
       kind: card.name,
       // The file an edit is about; a command only as its hash. Never content.
-      ...(card.name === 'edit' ? { path: card.detail } : { commandHash: cardSubjectHash(card) }),
+      ...(card.name === 'edit'
+        ? { path: card.detail }
+        : card.name === 'push'
+          ? { branch: card.detail }
+          : { commandHash: cardSubjectHash(card) }),
       ...extra,
     })
   // The machine asks: a card that waits for a person. Taken only for a fix
@@ -838,20 +872,28 @@ export function mountAgentLink(
       if (event) hub.push(live, event[0], event[1])
     }
     const content = cardContent(data)
-    if (!id || !content || row.kind !== 'fix' || agents.editMode(req.agent) === 'none') return refuse()
+    if (!id || !content || agents.editMode(req.agent) === 'none') return refuse()
+    // Edits (and commands) in a fix; "Push this fix" in a fix or when it is asked again. Nothing in a chat.
+    if (!(row.kind === 'fix' || (row.kind === 'push' && content.name === 'push'))) return refuse()
     if (content.name === 'execute' && !agents.machinePolicy(req.agent).commands.includes(content.detail)) return refuse()
     if (cardHash(row.id, content) !== data.hash) return refuse()
-    // Two minutes at most, by this server's clock, whatever the machine's says.
-    const latest = chat.now().getTime() + CARD_LIMITS.ttlMs
-    const wanted = Date.parse(content.expiresAt)
-    if (!(wanted > chat.now().getTime())) return refuse()
-    const stored = transaction(db, () => {
-      const made = chat
-        .permsFor(req.t)
-        .add(row, { card: content, hash: data.hash, expiresAt: new Date(Math.min(wanted, latest)).toISOString() })
-      if (made) auditCard(req, 'agent_permission_asked', row, content)
-      return made
-    })
+    // How long it waits is a length of time, counted here from now on this
+    // server's clock (the machine counts the same length on its own), and
+    // never longer than a card of its kind may wait.
+    const expiresAt = new Date(chat.now().getTime() + Math.min(content.ttlMs, cardTtlMax(content.name))).toISOString()
+    let stored = null
+    try {
+      stored = transaction(db, () => {
+        // A card with its diff is stored: it counts against the workspace's storage like anything else.
+        if (quotaOf) checkStorageQuota(req.t, Buffer.byteLength(JSON.stringify(content)), quotaOf(req.t))
+        const made = chat.permsFor(req.t).add(row, { card: content, hash: data.hash, expiresAt })
+        if (made) auditCard(req, 'agent_permission_asked', row, content)
+        return made
+      })
+    } catch (error) {
+      if (!error?.statusCode) throw error
+      stored = null
+    }
     if (!stored) return refuse()
     hub.push(live, 'tool', permissionView(stored, { name: chat.nameOf(req.t) }))
     chat.notify(req.t.workspaceId, row.project_id, row.board_id, row.thread_id)
@@ -864,12 +906,19 @@ export function mountAgentLink(
     const name = chat.nameOf(req.t)
     const stored = typeof data?.id === 'string' ? perms.get(row.id, data.id) : null
     if (stored) {
-      // Denied, expired or cancelled there: taken. "Approved" is never taken
-      // from the machine: only a person's answer here does that.
-      if (stored.state === 'pending' && ['denied', 'expired', 'cancelled'].includes(data.state)) {
+      // Denied, expired or cancelled there: taken, also for a card a person
+      // allowed here a moment ago. The machine is the one that would act, so
+      // its "no" is final: an answer it took as late, or did not take, is not
+      // shown as "Allowed by ...", and is not counted as allowed.
+      // "Approved" is never taken from the machine: only a person's answer here does that.
+      if (['pending', 'approved'].includes(stored.state) && ['denied', 'expired', 'cancelled'].includes(data.state)) {
         transaction(db, () => {
-          if (perms.settle(row.id, stored.id, data.state) && data.state === 'expired')
-            auditCard(req, 'agent_permission_expired', row, perms.cardOf(stored))
+          const changed =
+            stored.state === 'pending' ? perms.settle(row.id, stored.id, data.state) : perms.overrule(row.id, stored.id, data.state)
+          if (!changed) return
+          if (stored.state === 'approved')
+            auditCard(req, 'agent_permission_not_taken', row, perms.cardOf(stored), { answeredBy: stored.answered_by, became: data.state })
+          else if (data.state === 'expired') auditCard(req, 'agent_permission_expired', row, perms.cardOf(stored))
         })
       }
       hub.push(live, 'tool', permissionView(perms.get(row.id, stored.id), { name }))
@@ -878,11 +927,12 @@ export function mountAgentLink(
     // Allowed on the machine without asking: shown and counted only when
     // this agent's rule here is "always allow" for that kind too.
     if (data?.state !== 'approved' || row.kind !== 'fix') return false
-    const content = cardContent({ ...data, expiresAt: chat.now().toISOString() })
+    const content = cardContent({ ...data, ttlMs: 1000 })
+    if (content?.name === 'push') return false
     const agents = agentsFor(req.t)
     if (!content || agents.approvalRules(req.agent)[content.name === 'edit' ? 'edits' : 'commands'] !== 'auto') return false
     const made = transaction(db, () => {
-      const card = perms.add(row, { card: content, hash: cardHash(row.id, content), state: 'auto', expiresAt: content.expiresAt })
+      const card = perms.add(row, { card: content, hash: cardHash(row.id, content), state: 'auto', expiresAt: chat.now().toISOString() })
       if (card) auditCard(req, 'agent_permission_auto', row, content)
       return card
     })

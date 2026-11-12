@@ -53,11 +53,12 @@ export function cleanJob(raw) {
   if (!TURN_ID_RE.test(String(turn.id || ''))) throw new JobError('The server sent an invalid turn id.')
   if (!ID_RE.test(String(turn.board || ''))) throw new JobError('The server sent an invalid board id.')
   if (!THREAD_RE.test(String(turn.thread || ''))) throw new JobError('The server sent an invalid thread id.')
-  const kind = ['comment', 'fix'].includes(turn.kind) ? turn.kind : 'chat'
+  const kind = ['comment', 'fix', 'push'].includes(turn.kind) ? turn.kind : 'chat'
   const comment = Number.isSafeInteger(turn.comment) && turn.comment > 0 ? turn.comment : null
   if (kind !== 'chat' && !comment) throw new JobError('The server sent a comment turn without a comment.')
   // A fix is always about its own comment's thread.
-  if (kind === 'fix' && turn.thread !== `comment-${comment}`) throw new JobError('The server sent a fix for another thread.')
+  if (['fix', 'push'].includes(kind) && turn.thread !== `comment-${comment}`)
+    throw new JobError('The server sent a fix for another thread.')
   // The server's approval rule for this agent, per kind: "auto" only ever
   // counts where this machine's own policy says so too (agent-link.js).
   const rule = (value) => (value === 'auto' ? 'auto' : 'ask')
@@ -94,7 +95,8 @@ export function cleanJob(raw) {
     turn: { id: turn.id, board: turn.board, thread: turn.thread, kind, comment },
     agent: { name: text(raw.agent?.name, 60) || null },
     asker: { name: text(raw.asker?.name, 80) || null, handle: text(raw.asker?.handle, 40) || null, owner: raw.asker?.owner === true },
-    approvals: { edits: rule(raw.approvals?.edits), commands: rule(raw.approvals?.commands) },
+    // `byOwner`: the server says the person who connected this agent set the rule themself.
+    approvals: { edits: rule(raw.approvals?.edits), commands: rule(raw.approvals?.commands), byOwner: raw.approvals?.byOwner === true },
     messages,
     context: {
       board: {

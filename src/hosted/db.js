@@ -625,6 +625,7 @@ const MIGRATIONS = [
   ALTER TABLE agent_runs ADD COLUMN approvals_asked INTEGER;
   ALTER TABLE agent_runs ADD COLUMN approvals_allowed INTEGER;
   ALTER TABLE agent_runs ADD COLUMN approvals_denied INTEGER;
+  ALTER TABLE agents ADD COLUMN approval_rule_by TEXT;
   `,
 ]
 

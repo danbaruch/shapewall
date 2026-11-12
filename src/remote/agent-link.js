@@ -30,7 +30,8 @@ import { redact } from '../agent/backends/openai.js'
 import { cardHash } from '../agent/card-hash.js'
 import { tokensToText } from '../agent/plain-text.js'
 import { runTurn } from '../agent/run.js'
-import { FixRefusal, dropFixFolder, finishFix, prepareFix } from './agent-fix.js'
+import { git } from '../agent/starter/worktree.js'
+import { FixRefusal, dropFixFolder, dropHeld, finishFix, heldDiff, heldSummary, prepareFix, pushFix, readHeld } from './agent-fix.js'
 import { JobError, TURN_ID_RE, cleanJob, jobConversation } from './agent-job.js'
 import { RemoteError, badTokenMessage, readBounded } from './remote.js'
 import { ID_RE } from '../config.js'
@@ -50,6 +51,8 @@ export const LINK_DEFAULTS = {
   sendRetryMs: 60_000,
   queued: 5,
   commentRetryMs: 60_000,
+  // How long "Push this fix" waits for someone to look at the whole diff.
+  pushCardMs: 10 * 60_000,
 }
 
 // Errors that end the command: the token stopped working or was never an
@@ -294,19 +297,104 @@ export async function runAgentLink({
           entry.cards.delete(sent.id)
           return push('tool', sent)
         }
-        const hash = cardHash(id, sent)
+        // How long it waits, as a length of time: each end counts it on its
+        // own clock, so the two clocks need not agree (card-hash.js).
+        const ttlMs = Math.max(1000, Math.round((Date.parse(sent.expiresAt) - Date.now()) / 1000) * 1000)
+        const card = { ...sent, ttlMs }
+        delete card.expiresAt
+        const hash = cardHash(id, card)
         if (!hash) {
           setImmediate(() => entry.backend?.answerPermission(entry.thread, sent.id, 'deny'))
           return
         }
-        entry.cards.set(sent.id, { hash, expires: Date.parse(sent.expiresAt) })
-        push('permission', { ...sent, hash })
+        entry.cards.set(sent.id, { hash, expires: Date.now() + ttlMs })
+        push('permission', { ...card, hash })
         clearTimeout(timer)
         timer = null
         sending = sending.then(flush)
         return
       }
       push(name, sent)
+    }
+    // A card of this machine's own (not the agent's): shown on the board,
+    // answered like any other, with the same hash, expiry and recheck.
+    // Resolves 'approved' | 'denied' | 'expired' | 'cancelled'.
+    const askBoard = ({ name, label, detail, diff }, ttlMs) =>
+      new Promise((resolve) => {
+        const cardId = `perm_${randomBytes(12).toString('hex')}`
+        const card = JSON.parse(
+          clean(
+            JSON.stringify({
+              id: cardId,
+              kind: 'permission',
+              name,
+              label,
+              detail,
+              diff,
+              state: 'pending',
+              options: [],
+              chosen: null,
+              ttlMs,
+            }),
+          ),
+        )
+        const hash = cardHash(id, card)
+        if (!hash || controller.signal.aborted) return resolve(hash ? 'cancelled' : 'denied')
+        let waiting = null
+        const settle = (state) => {
+          if (!entry.cards.has(cardId)) return
+          entry.cards.delete(cardId)
+          clearTimeout(waiting)
+          controller.signal.removeEventListener('abort', onAbort)
+          push('tool', { ...card, state })
+          resolve(state)
+        }
+        const onAbort = () => settle('cancelled')
+        entry.cards.set(cardId, { hash, expires: Date.now() + ttlMs, settle })
+        waiting = setTimeout(() => settle('expired'), ttlMs)
+        waiting.unref?.()
+        controller.signal.addEventListener('abort', onAbort, { once: true })
+        push('permission', { ...card, hash })
+        clearTimeout(timer)
+        timer = null
+        sending = sending.then(flush)
+      })
+    // A fix that is held back (an edit in it went without asking): one card
+    // with its whole diff. Pushed only when a person allows that card.
+    // -> { summary, notes, line, pushed }
+    async function offerPush(record) {
+      const kept = async (note) => ({ summary: await heldSummary(record), notes: [note], line: null, pushed: false })
+      const hasRemote = policy.remote
+        ? (await git(['remote', 'get-url', policy.remote], { cwd: fix.config.dir, env: fix.env }).catch(() => '')).trim()
+        : ''
+      if (!hasRemote) {
+        // Nowhere to push: nothing is held back from anywhere.
+        dropHeld(record)
+        const summary = await heldSummary(record)
+        summary.branch.held = false
+        return { summary, notes: [], line: null, pushed: false }
+      }
+      const diff = await heldDiff(record)
+      if (!diff)
+        return kept("Not pushed: the fix is too large to show in full on the board. Review and push the branch on the agent's machine.")
+      push('status', { text: 'Waiting for someone to look at the whole diff before it is pushed' })
+      const state = await askBoard({ name: 'push', label: 'Push this fix', detail: record.branch, diff }, limit.pushCardMs)
+      if (state !== 'approved')
+        return kept(
+          `Not pushed: ${state === 'denied' ? 'the push was denied' : state === 'expired' ? 'nobody answered in time' : 'it was stopped'}. The fix is on its branch, on the agent's machine. "Push this fix" asks again.`,
+        )
+      const pushed = await pushFix({
+        config: fix.config,
+        policy,
+        record,
+        signal: controller.signal,
+        env: fix.env,
+        fetchImpl: fix.fetchImpl,
+        log,
+      })
+      if (pushed.pushed) dropHeld(record)
+      else pushed.summary.branch.held = true
+      return pushed
     }
 
     let job = null
@@ -327,6 +415,39 @@ export async function runAgentLink({
         return
       }
       const fixing = job.turn.kind === 'fix'
+      // "Push this fix", asked again for a fix this machine holds back.
+      if (job.turn.kind === 'push') {
+        log(`turn ${id}: push the held fix of comment #${job.turn.comment} on ${job.turn.board}`)
+        const record =
+          policy.approvals === 'none' || !fix
+            ? null
+            : await readHeld({ config: fix.config, env: fix.env, board: job.turn.board, comment: job.turn.comment })
+        if (!record) {
+          await finish(refused("No fix of this comment is waiting to be pushed on the agent's machine.", 'no_held_fix'))
+          return
+        }
+        entry.thread = `${job.turn.board}/${job.turn.thread}`
+        const offered = await offerPush(record)
+        const stoppedNow = controller.signal.aborted && !offered.pushed
+        const message = JSON.parse(
+          clean(
+            JSON.stringify({
+              text: offered.pushed ? offered.line : '',
+              cards: offered.notes.map((text, index) => ({
+                id: `note-fix-${index + 1}`,
+                kind: 'note',
+                name: 'note',
+                label: String(text).slice(0, 200),
+              })),
+              status: stoppedNow ? 'stopped' : 'done',
+              summary: offered.summary,
+            }),
+          ),
+        )
+        await finish(message)
+        if (offered.pushed && remote) await remote.reply(job.turn.board, job.turn.comment, { body: offered.line }).catch(() => {})
+        return
+      }
       log(
         `turn ${id}: ${fixing ? `fix for comment #${job.turn.comment}` : job.turn.kind === 'comment' ? `comment #${job.turn.comment}` : 'chat'} on ${job.turn.board}`,
       )
@@ -343,7 +464,6 @@ export async function runAgentLink({
           await answerComment(job, null)
           return
         }
-        await remote?.setAgentStatus(job.turn.board, job.turn.comment, 'working', { onlyFrom: ['queued'] }).catch(() => {})
         push('status', { text: 'Making a fresh copy of the project on a new branch' })
         try {
           prepared = await prepareFix({ config: fix.config, policy, job, env: fix.env })
@@ -359,9 +479,17 @@ export async function runAgentLink({
           workdir: prepared.workdir,
           gate: {
             // Asked on the board, unless this machine and the server's rule both say "allow".
-            decide: ({ kind }) => (job.approvals[kindOf(kind)] === 'auto' && policy.auto.includes(kindOf(kind)) ? 'allow' : 'ask'),
-            approved: (rel, hash) => approved.set(rel, hash),
-            expected: (rel) => approved.get(rel) || null,
+            // On a machine that said "owner", the rule must also be the connecting person's own doing.
+            decide: ({ kind }) =>
+              job.approvals[kindOf(kind)] === 'auto' &&
+              policy.auto.includes(kindOf(kind)) &&
+              (policy.approvals !== 'owner' || job.approvals.byOwner === true)
+                ? 'allow'
+                : 'ask',
+            // `auto`: nobody looked at this edit (the fix is then held back from any remote).
+            approved: (rel, hash, { auto = false } = {}) => approved.set(rel, { hash, auto: auto || (approved.get(rel)?.auto ?? false) }),
+            expected: (rel) => approved.get(rel)?.hash || null,
+            ignored: (rel) => prepared.ignored(rel),
           },
         }
         entry.backend = editBackend
@@ -403,11 +531,31 @@ export async function runAgentLink({
             prepared: done,
             job,
             approved,
+            // Stop is honoured between every step: nothing is committed, pushed or opened after it.
+            signal: controller.signal,
             env: fix.env,
             fetchImpl: fix.fetchImpl,
             log,
           })
-          if (fixed.summary) reply.summary = fixed.summary
+          if (fixed.held) {
+            const offered = await offerPush(fixed.held)
+            fixed.summary = offered.summary
+            fixed.notes.push(...offered.notes)
+            if (offered.line) fixed.line = offered.line
+            // Stop while it waited to be looked at: the fix is taken back, branch and all.
+            if (controller.signal.aborted && !offered.pushed) {
+              dropHeld(fixed.held)
+              await git(['--git-dir', fixed.held.gitDir, 'update-ref', '-d', `refs/heads/${fixed.held.branch}`, fixed.held.commit], {
+                cwd: fixed.held.repo,
+                env: fix.env,
+              }).catch(() => {})
+              fixed.status = 'stopped'
+              fixed.summary = null
+              fixed.notes.length = 0
+            }
+          }
+          if (fixed.status === 'stopped') reply.status = 'stopped'
+          else if (fixed.summary) reply.summary = fixed.summary
           for (const [index, text] of fixed.notes.entries())
             reply.cards.push({ id: `note-fix-${index + 1}`, kind: 'note', name: 'note', label: String(text).slice(0, 200) })
         }
@@ -449,7 +597,6 @@ export async function runAgentLink({
       if (data?.turn) log(`answer for a card that is not waiting here (${cardId.slice(0, 40) || 'no id'}): ignored`)
       return
     }
-    entry.cards.delete(cardId)
     let allow = data.decision === 'allow'
     const why = !allow
       ? null
@@ -466,6 +613,9 @@ export async function runAgentLink({
       allow = false
       log(`an "allow" was not taken: ${why}`)
     }
+    // A card of this machine's own settles itself; the agent's go to the agent.
+    if (card.settle) return card.settle(allow ? 'approved' : 'denied')
+    entry.cards.delete(cardId)
     entry.backend?.answerPermission(entry.thread, cardId, allow ? 'allow' : 'deny')
   }
 
@@ -484,6 +634,7 @@ export async function runAgentLink({
     if (ok) lines.push(tokensToText(message.text).slice(0, 8000))
     if (fixing) {
       if (ready) lines.push(fixed.line)
+      else if (message?.status === 'stopped') lines.push('This fix was stopped before it was finished. Nothing was committed or pushed.')
       else if (why) lines.push(`I could not start this fix. ${why}`)
       else if (!ok) lines.push('I could not make this fix from here. It needs a person.')
       else lines.push('No change was committed.')
@@ -492,7 +643,10 @@ export async function runAgentLink({
       lines.push('I could not answer this comment from here. It needs a person, or an agent that can edit (shapewall watch --exec).')
     try {
       await remote.reply(board, comment, { body: lines.join('\n\n').slice(0, 9000) })
-      await remote.setAgentStatus(board, comment, fixing ? (ready ? 'branch-ready' : 'needs-human') : ok ? 'done' : 'needs-human')
+      // Where a fixed comment stands is the server's to write, with the turn (a late
+      // write from here could land on the next fix). A comment this agent answered:
+      // only while it still holds it.
+      if (!fixing) await remote.setAgentStatus(board, comment, ok ? 'done' : 'needs-human', { onlyFrom: ['queued', 'working'] })
     } catch (error) {
       log(`comment #${comment}: ${error.message}`)
     }

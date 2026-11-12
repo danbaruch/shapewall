@@ -3,9 +3,14 @@
 // server when the card arrives and again when a person answers, and checked
 // by the machine once more before the answer counts. It covers the turn, the
 // card's id, what is asked (an edit or a command), the path or the command,
-// the whole diff as it is shown, and when the card expires. An answer for
-// other content, another card, another turn or a later time is not this
-// card's answer.
+// the whole diff as it is shown, and how long the card waits. An answer for
+// other content, another card or another turn is not this card's answer.
+//
+// How long it waits is a length of time (`ttlMs`), not a moment: the machine
+// and the server each count it on their own clock from when they saw the
+// card, so the two clocks need not agree. The machine's count is the one
+// that decides (it is the one that would act); when it says a card expired,
+// the server's record follows.
 //
 // Both ends run the same code on the same fields, each after its own
 // cleaning (cleanCardDiff is idempotent), so a card the server would have to
@@ -17,9 +22,12 @@ import { cleanCardDiff } from './text-diff.js'
 
 export const CARD_ID_RE = /^perm_[a-f0-9]{12,32}$/
 export const CARD_HASH_RE = /^[a-f0-9]{64}$/
-// What a card of a hosted board may ask: a file edit, or a command.
-export const CARD_KINDS = ['edit', 'execute']
-export const CARD_LIMITS = { label: 400, detail: 4096, bytes: 96 * 1024, ttlMs: 2 * 60 * 1000 }
+// What a card of a hosted board may ask: a file edit, a command, or to push
+// a finished fix whose edits nobody looked at ("Push this fix", with its
+// whole diff).
+export const CARD_KINDS = ['edit', 'execute', 'push']
+export const CARD_LIMITS = { label: 400, detail: 4096, bytes: 96 * 1024, ttlMs: 2 * 60 * 1000, pushTtlMs: 10 * 60 * 1000 }
+export const cardTtlMax = (name) => (name === 'push' ? CARD_LIMITS.pushTtlMs : CARD_LIMITS.ttlMs)
 
 // The fields the hash covers, in a fixed shape. null: not a card that can be answered.
 export function cardContent(card) {
@@ -29,13 +37,14 @@ export function cardContent(card) {
   const label = typeof card.label === 'string' ? card.label : ''
   const detail = typeof card.detail === 'string' ? card.detail : ''
   if (!label || label.length > CARD_LIMITS.label || !detail || detail.length > CARD_LIMITS.detail) return null
-  const expiresAt = typeof card.expiresAt === 'string' && !Number.isNaN(Date.parse(card.expiresAt)) ? card.expiresAt : null
-  if (!expiresAt) return null
-  const diff = card.name === 'edit' ? cleanCardDiff(card.diff) : null
-  // An edit is approved with its whole diff in view, or not at all.
-  if (card.name === 'edit' && (!diff || diff.truncated || diff.outside || diff.path !== detail)) return null
+  const ttlMs = Number.isSafeInteger(card.ttlMs) && card.ttlMs >= 1000 && card.ttlMs <= cardTtlMax(card.name) ? card.ttlMs : null
+  if (!ttlMs) return null
+  const diff = card.name === 'execute' ? null : cleanCardDiff(card.diff)
+  // An edit, or a push, is approved with its whole diff in view, or not at all.
+  if (card.name !== 'execute' && (!diff || diff.truncated || diff.outside)) return null
+  if (card.name === 'edit' && diff.path !== detail) return null
   if (card.name === 'execute' && card.diff) return null
-  const content = { id: card.id, name: card.name, label, detail, diff, expiresAt }
+  const content = { id: card.id, name: card.name, label, detail, diff, ttlMs }
   return Buffer.byteLength(JSON.stringify(content)) <= CARD_LIMITS.bytes ? content : null
 }
 
@@ -44,16 +53,7 @@ export function cardHash(turnId, card) {
   if (!content || typeof turnId !== 'string' || !turnId) return null
   return createHash('sha256')
     .update(
-      JSON.stringify([
-        'shapewall-card-1',
-        turnId,
-        content.id,
-        content.name,
-        content.label,
-        content.detail,
-        content.diff,
-        content.expiresAt,
-      ]),
+      JSON.stringify(['shapewall-card-1', turnId, content.id, content.name, content.label, content.detail, content.diff, content.ttlMs]),
     )
     .digest('hex')
 }

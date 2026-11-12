@@ -316,7 +316,7 @@ export function createChatStore(t, { now = () => new Date() } = {}) {
         project: projectId,
         id: runId,
         claim: claimId,
-        kind: kind === 'fix' ? 'fix' : kind === 'comment' ? 'review' : 'chat',
+        kind: kind === 'fix' ? 'fix' : kind === 'push' ? 'push' : kind === 'comment' ? 'review' : 'chat',
         agent: agentId,
         board: boardId,
         number: commentNumber,

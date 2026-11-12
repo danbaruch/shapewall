@@ -148,7 +148,7 @@ test('the agent’s token and this machine’s policy are files of their own, pr
   assert.deepEqual(readMachinePolicy(ORIGIN, 'default', env), NONE)
   // What it does not understand reads as the narrowest: a 0.5.0 file ("never"), a made-up level, a list of nonsense.
   assert.deepEqual(
-    saveMachinePolicy(ORIGIN, 'default', { audience: 'owner', approvals: 'everyone', commands: 'remote', auto: ['edits'] }, env),
+    saveMachinePolicy(ORIGIN, 'default', { audience: 'owner', approvals: 'everyone', commands: 'never', auto: ['edits'] }, env),
     {
       ...NONE,
       audience: 'owner',
@@ -166,11 +166,11 @@ test('the agent’s token and this machine’s policy are files of their own, pr
       'three',
       {
         approvals: 'owner',
-        commands: ['npm  test', 'npm test', 'rm -rf /\nnpm test', '', 7],
-        auto: ['commands', 'edits', 'everything'],
-        allowPaths: ['package.json', '../outside', '/etc/passwd', '.git/config', '.shapewall/x', 'a/./b', '.github/workflows/ci.yml'],
+        commands: ['npm  test', 'npm test'],
+        auto: ['commands', 'edits'],
+        allowPaths: ['package.json', '.github/workflows/ci.yml'],
         base: 'main',
-        remote: '-x',
+        remote: 'upstream',
       },
       env,
     ),
@@ -181,8 +181,19 @@ test('the agent’s token and this machine’s policy are files of their own, pr
       auto: ['commands', 'edits'],
       allowPaths: ['package.json', '.github/workflows/ci.yml'],
       base: 'main',
-      remote: 'origin',
+      remote: 'upstream',
     },
+  )
+  // A list with an entry it cannot read is not trusted for the rest, and a remote it cannot read
+  // is no remote (test/agent-fix-policy.test.js has every case).
+  assert.deepEqual(
+    saveMachinePolicy(
+      ORIGIN,
+      'five',
+      { approvals: 'owner', commands: ['npm test', 'rm -rf /\nnpm test'], allowPaths: ['package.json', '../outside'], remote: '-x' },
+      env,
+    ),
+    { ...NONE, approvals: 'owner', remote: null },
   )
   // "commands" without a command to allow is nothing; a base that could be read as an option is none.
   assert.deepEqual(
@@ -274,8 +285,12 @@ test('a job is checked on the machine, and every piece of board text is quoted a
   const cleaned = cleanJob({ ...job(), command: 'rm -rf /', argv: ['x'], env: { A: 'b' }, cwd: '/', mcpServers: [1] })
   assert.deepEqual(Object.keys(cleaned).sort(), ['agent', 'approvals', 'asker', 'context', 'messages', 'turn'])
   // The server's rule reads as "ask" unless it says "auto" in so many words.
-  assert.deepEqual(cleaned.approvals, { edits: 'ask', commands: 'ask' })
-  assert.deepEqual(cleanJob({ ...job(), approvals: { edits: 'auto', commands: true } }).approvals, { edits: 'auto', commands: 'ask' })
+  assert.deepEqual(cleaned.approvals, { edits: 'ask', commands: 'ask', byOwner: false })
+  assert.deepEqual(cleanJob({ ...job(), approvals: { edits: 'auto', commands: true, byOwner: 'yes' } }).approvals, {
+    edits: 'auto',
+    commands: 'ask',
+    byOwner: false,
+  })
   // A fix is a comment's, in that comment's thread.
   assert.throws(() => cleanJob(job({ turn: { id: TURN, board: 'sample', thread: 'board', kind: 'fix' } })), /without a comment/)
   assert.throws(

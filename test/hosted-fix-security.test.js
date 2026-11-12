@@ -87,11 +87,16 @@ const untouched = (agent) => {
   assert.deepEqual(branches(agent), ['main'], 'no branch was made')
 }
 // A batch of events posted with the agent's token, as its machine (or whoever stole the token) would.
-async function inject(agent, turnId, events) {
-  // The next batch number is the server's: the last one it acknowledged, plus one.
-  const work = await tokenCall(hosted, agent.token, 'GET', '/api/v1/agent/work')
-  const ack = work.json?.turns?.find((turn) => turn.id === turnId)?.ack || 0
-  return tokenCall(hosted, agent.token, 'POST', `/api/v1/agent/turns/${turnId}/events`, { body: { seq: ack + 1, events } })
+// The machine posts too, and a number it took first makes this batch a repeat (dropped): with
+// `taken()`, it is sent until the server acted on it.
+async function inject(agent, turnId, events, taken = null) {
+  for (let tries = 0; ; tries += 1) {
+    // The next batch number is the server's: the last one it acknowledged, plus one.
+    const work = await tokenCall(hosted, agent.token, 'GET', '/api/v1/agent/work')
+    const ack = work.json?.turns?.find((turn) => turn.id === turnId)?.ack || 0
+    const sent = await tokenCall(hosted, agent.token, 'POST', `/api/v1/agent/turns/${turnId}/events`, { body: { seq: ack + 1, events } })
+    if (!taken || sent.status !== 200 || taken() || tries > 20) return sent
+  }
 }
 const askFrame = (turnId, fields = {}) => {
   const data = {
@@ -102,7 +107,7 @@ const askFrame = (turnId, fields = {}) => {
     detail: 'index.html',
     diff: { path: 'index.html', added: 1, removed: 1, created: false, outside: false, preview: '-a\n+b', full: null, truncated: false },
     state: 'pending',
-    expiresAt: new Date(Date.now() + 100_000).toISOString(),
+    ttlMs: 100_000,
     ...fields,
   }
   return { ...data, hash: fields.hash ?? cardHash(turnId, data) }
@@ -296,6 +301,9 @@ test('what a machine, or a stolen agent token, may claim: never "approved", neve
   const turn = pressFix(ada, made.id, { agentId: builder.agentId })
   const live = await until(() => liveTurn(made.id), 'the fix to start')
   await until(() => live.state === 'running', 'the machine to take it')
+  // The scripted agent now waits and says nothing more: the batches below are the only ones.
+  await until(() => live.events.some((event) => /is working/.test(event.data?.text || '')), 'the agent to start')
+  await new Promise((resolve) => setTimeout(resolve, 300))
   const before = cards().length
   // A wrong hash, a card that outlives two minutes by its own word, a command the machine never listed,
   // an edit with no diff or a cut one: none is stored, none can be answered.
@@ -307,7 +315,9 @@ test('what a machine, or a stolen agent token, may claim: never "approved", neve
     askFrame(live.id, { detail: 'other.html' }),
     askFrame(live.id, { name: 'fetch' }),
     askFrame(live.id, { id: 'perm_../../x' }),
-    askFrame(live.id, { expiresAt: 'soon' }),
+    askFrame(live.id, { ttlMs: 'soon' }),
+    askFrame(live.id, { ttlMs: 3_600_000 }),
+    askFrame(live.id, { ttlMs: undefined, expiresAt: new Date(Date.now() + 60_000).toISOString() }),
   ]
   assert.equal(
     (
@@ -322,7 +332,7 @@ test('what a machine, or a stolen agent token, may claim: never "approved", neve
   assert.equal(cards().length, before)
   assert.deepEqual(await waiting(), [])
   // A card that is taken: then the machine calls it approved, in an event and in its final answer.
-  const real = askFrame(live.id, { expiresAt: new Date(Date.now() + 3_600_000).toISOString() })
+  const real = askFrame(live.id)
   await inject(builder, live.id, [{ name: 'permission', data: real }])
   const stored = cardRow(real.id)
   assert.equal(stored.state, 'pending')
@@ -341,7 +351,7 @@ test('what a machine, or a stolen agent token, may claim: never "approved", neve
   await inject(builder, live.id, [{ name: 'permission', data: again }])
   assert.equal(JSON.parse(cardRow(real.id).card).detail, 'index.html')
   // Allowed "without asking" while this agent's rule here is "ask": not shown as allowed, not counted.
-  const selfServed = { ...askFrame(live.id), state: 'approved', chosen: 'Allowed automatically', expiresAt: null }
+  const selfServed = { ...askFrame(live.id), state: 'approved', chosen: 'Allowed automatically' }
   await inject(builder, live.id, [{ name: 'tool', data: selfServed }])
   assert.equal(cardRow(selfServed.id), undefined)
   assert.equal(live.events.findLast((event) => event.data?.id === selfServed.id).data.state, 'denied')
@@ -383,7 +393,9 @@ test('what a machine, or a stolen agent token, may claim: never "approved", neve
   const chatting = ada.browser.post(agentUrl(`/threads/${thread}/messages`), { text: 'slowly' })
   const chatTurn = await until(() => hosted.app.locals.chat.hub.all().find((item) => item.threadId === thread), 'the chat turn')
   const inChat = askFrame(chatTurn.id)
-  await inject(builder, chatTurn.id, [{ name: 'permission', data: inChat }])
+  await inject(builder, chatTurn.id, [{ name: 'permission', data: inChat }], () =>
+    chatTurn.events.some((event) => event.data?.id === inChat.id),
+  )
   assert.equal(cardRow(inChat.id), undefined)
   // A pull request link is shown only as https, and a summary only on a fix.
   await tokenCall(hosted, builder.token, 'POST', `/api/v1/agent/turns/${chatTurn.id}/finish`, {
@@ -613,7 +625,7 @@ test('a server that says "allow without asking", and a comment that tells the ag
   assert.equal(cards().length, before, 'nothing reached the board as a question')
   assert.ok(final.cards.filter((item) => item.kind === 'permission').every((item) => item.state === 'denied' && !item.options.length))
   assert.ok(final.cards.some((item) => /outside the project/.test(item.detail)))
-  assert.ok(final.cards.some((item) => /a settings file/.test(item.detail)))
+  assert.ok(final.cards.some((item) => /a file that runs on install, build, test or CI/.test(item.detail)))
   assert.ok(final.cards.some((item) => /not one of the commands it allows/.test(item.detail)))
   assert.ok(final.cards.some((item) => /only file edits and listed commands/.test(item.detail)))
   assert.equal(fs.existsSync(outside), false)

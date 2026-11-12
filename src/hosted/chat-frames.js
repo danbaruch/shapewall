@@ -43,12 +43,26 @@ export function cleanSummary(summary) {
     removed: lines(file?.removed),
     diff: null,
   }))
-  // A pull request link only as https, and only to show: the board never fetches it.
+  // A pull request: only a URL shaped like one (https://host/owner/repo/pull/7).
+  // It is a link only on github.com; on any other host it is shown as text,
+  // since this server cannot know which host the project's GitHub is on.
   let pr = null
   try {
     const url = new URL(String(summary.pr?.url || ''))
-    if (url.protocol === 'https:' && url.href.length <= 300 && !url.username && !url.password)
-      pr = { url: url.href, number: Number.isSafeInteger(summary.pr.number) && summary.pr.number > 0 ? summary.pr.number : null }
+    if (
+      url.protocol === 'https:' &&
+      url.href.length <= 300 &&
+      !url.username &&
+      !url.password &&
+      !url.search &&
+      !url.hash &&
+      /^\/[\w.-]+\/[\w.-]+\/pull\/\d+$/.test(url.pathname)
+    )
+      pr = {
+        url: url.href,
+        number: Number(url.pathname.split('/').at(-1)),
+        link: url.hostname === 'github.com',
+      }
   } catch {
     pr = null
   }
@@ -64,6 +78,9 @@ export function cleanSummary(summary) {
       baseName:
         typeof branch.baseName === 'string' && branch.baseName.length <= 120 && /^[\w./-]+$/.test(branch.baseName) ? branch.baseName : null,
       pushed: branch.pushed === true,
+      // Committed on the agent's machine and held there: an edit in it went
+      // without asking, so it is pushed only after "Push this fix".
+      held: branch.pushed !== true && branch.held === true,
       remote: branch.pushed === true && typeof branch.remote === 'string' && /^[\w.-]{1,60}$/.test(branch.remote) ? branch.remote : null,
     },
     pr: branch.pushed === true ? pr : null,

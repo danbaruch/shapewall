@@ -91,6 +91,17 @@ export function createPermissionStore(t, { now = () => new Date() } = {}) {
     )
     return Number(result.changes) > 0
   }
+  // The machine did not take a person's "allow" (it came too late there, or
+  // failed its own check): the card is what the machine says it is, and
+  // nobody is named as having allowed it.
+  function overrule(turnId, id, state) {
+    if (!['denied', 'expired', 'cancelled'].includes(state)) return false
+    const result = t.run(
+      "UPDATE chat_permissions SET state = :state, answered_by = NULL WHERE workspace_id = :ws AND turn_id = :turn AND id = :id AND state = 'approved'",
+      { turn: turnId, id, state },
+    )
+    return Number(result.changes) > 0
+  }
   // Cards past their time: expired. Returns the rows that just expired.
   function expire(turnId) {
     const at = iso()
@@ -133,6 +144,7 @@ export function createPermissionStore(t, { now = () => new Date() } = {}) {
     add,
     answer,
     settle,
+    overrule,
     expire,
     cancelTurn,
     pendingOfBoard,
@@ -170,6 +182,7 @@ export function permissionView(row, { name = () => null } = {}) {
     // Who answered, by name (the board says "Allowed by ...").
     answeredName: row.answered_by ? name(row.answered_by) : null,
     auto: row.state === 'auto',
+    // By this server's clock (the machine counts the same length of time on its own).
     expiresAt: pending ? row.expires_at : null,
     ...(pending ? { hash: row.card_hash } : {}),
     answerable: pending,

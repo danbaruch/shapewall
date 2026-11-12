@@ -414,6 +414,15 @@ export function websiteComments(pages, now = Date.now()) {
 // Messages go in `threads`, history fields in `threadMeta` (backend/chat.js).
 export function seedChats(now = Date.now()) {
   const at = (hours) => new Date(now - hours * HOUR).toISOString()
+  // "Today" and "yesterday" are days of the viewer's calendar, not a number
+  // of hours ago: just after midnight, two hours ago was yesterday. So the
+  // chat of today is at most as old as today is, and yesterday's is from
+  // yesterday evening, whatever the time is now.
+  const midnight = new Date(now)
+  midnight.setHours(0, 0, 0, 0)
+  const sinceMidnight = (now - midnight.getTime()) / HOUR
+  const today = Math.max(0.03, Math.min(2, sinceMidnight - 0.05))
+  const yesterday = sinceMidnight + 5
   const base = `${NOTES_PROJECT}/${EXPORT_BOARD}/`
   const robin = `user:${user('robin')}`
   const jo = `user:${user('jo')}`
@@ -433,10 +442,10 @@ export function seedChats(now = Date.now()) {
       id: 'chat-seedreleasenote1',
       owner: robin,
       messages: [
-        ask('msg_chat1a', 2, 'Draft release notes for the pricing changes'),
+        ask('msg_chat1a', today, 'Draft release notes for the pricing changes'),
         answer(
           'msg_chat1b',
-          1.98,
+          today - 0.02,
           '**Pricing, this release**\n\n- Plans sit side by side from tablet width up.\n- The Plus button has the stronger style (pull request 42).\n- The yearly toggle shows the saving as "2 months free".\n\nWant a shorter version for the changelog?',
           [tool('seed-chat1-tool', 'Read the comments on Pricing', '3 comments, 1 resolved')],
         ),
@@ -446,10 +455,10 @@ export function seedChats(now = Date.now()) {
       id: 'chat-seedalttextaudt1',
       owner: robin,
       messages: [
-        ask('msg_chat2a', 27, 'Which pages still miss alt text on their images?'),
+        ask('msg_chat2a', yesterday, 'Which pages still miss alt text on their images?'),
         answer(
           'msg_chat2b',
-          26.98,
+          yesterday - 0.02,
           'From the latest captures, Home has two decorative images without alt text and Pricing has none missing. Decorative images can use an empty alt; the hero photo on Home needs a real description.',
           [tool('seed-chat2-tool', 'Checked the captured pages', '2 pages')],
         ),
@@ -489,8 +498,8 @@ export function seedChats(now = Date.now()) {
       id: 'chat-seedjosquestion1',
       owner: jo,
       messages: [
-        ask('msg_chat5a', 30, 'Is the footer the same on every page?'),
-        answer('msg_chat5b', 29.98, 'Yes. Every captured page has the same footer, with the same four links.'),
+        ask('msg_chat5a', yesterday + 3, 'Is the footer the same on every page?'),
+        answer('msg_chat5b', yesterday + 2.98, 'Yes. Every captured page has the same footer, with the same four links.'),
       ],
     },
   ]

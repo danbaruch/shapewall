@@ -247,7 +247,15 @@ export function mountChatRoutes(
       const { agent, gone } = agentOfThread(found, row)
       res.json({
         id: threadId,
-        messages: store.messages(req.project.id, ctx.board.id, threadId),
+        // Each answer's cards, with their diffs only for the people that agent works for.
+        messages: (() => {
+          const sees = new Map()
+          return store.messages(req.project.id, ctx.board.id, threadId).map((message) => {
+            const id = message.agent?.id || null
+            if (!sees.has(id)) sees.set(id, seesDiffs(req, ctx.board.id, id))
+            return messageFor(message, sees.get(id))
+          })
+        })(),
         kind: threadKind(threadId),
         title: row?.title || null,
         archived: row?.archived === 1,
@@ -316,6 +324,28 @@ export function mountChatRoutes(
     return out
   }
 
+  // ---- Who reads what an agent asked to change ----
+
+  // The diff on a card is a piece of the project's code. It goes to the
+  // people the agent works for: someone in its audience whom the project
+  // trusts, whoever may answer its cards, and whoever asked for this turn.
+  // Everyone else who can open the thread reads that the agent asked to
+  // edit a file, which file, and how that ended. Live and stored alike.
+  function seesDiffs(req, boardId, agentId, startedBy = null) {
+    if (startedBy && startedBy === req.user.id) return true
+    const agents = agentsFor(req.t)
+    const agent = agentId ? agents.get(req.project.id, agentId) : null
+    if (!agent) return false
+    if (agents.inAudience(agent, req.user.id) && agents.trusted(req.project.id, boardId, req.user.id)) return true
+    return agents.answerCheck(agent, viewerOf(req, boardId)).ok
+  }
+  const withoutDiff = (card) =>
+    card?.kind === 'permission'
+      ? { ...card, diff: null, options: [], hash: undefined, answerable: false, diffHidden: Boolean(card.diff) }
+      : card
+  const messageFor = (message, sees) =>
+    sees || !Array.isArray(message?.cards) ? message : { ...message, cards: message.cards.map(withoutDiff) }
+
   // One event stream to the browser, in the shape the local board sends
   // (client/src/chat/stream.js): the turn's events from `after` on, then
   // every new one until it ends. Closing the response only stops listening.
@@ -370,13 +400,22 @@ export function mountChatRoutes(
     }
     const timer = setInterval(() => send(': keepalive\n\n'), 15_000)
     timer.unref()
+    const sees = seesDiffs(req, live.boardId, live.agentId, live.startedBy)
+    const shown = (event) =>
+      sees
+        ? event.data
+        : event.name === 'tool'
+          ? withoutDiff(event.data)
+          : event.name === 'done' && event.data?.message
+            ? { ...event.data, message: messageFor(event.data.message, false) }
+            : event.data
     const subscribed = hub.subscribe(live, after, (event) => {
       if (done) return
       if (event.name === 'end') {
         ending = true
         return pump()
       }
-      send(`id: ${event.seq}\nevent: ${event.name}\ndata: ${JSON.stringify(event.data)}\n\n`)
+      send(`id: ${event.seq}\nevent: ${event.name}\ndata: ${JSON.stringify(shown(event))}\n\n`)
     })
     if (!subscribed) {
       send(`event: status\ndata: ${JSON.stringify({ text: 'Too many people are watching this answer. Reload in a moment.' })}\n\n`)
@@ -422,29 +461,58 @@ export function mountChatRoutes(
     const row = agents.get(req.project.id, agent.id)
     const expect = typeof body.dispatchHash === 'string' ? body.dispatchHash : undefined
     const author = { name: req.user.display_name, handle: req.user.handle }
+    // A run that still needs an admin's approval (the project's agent policy
+    // asks for one for a non-admin's comment). Either the person pressing Fix
+    // may give it: then Fix gives it, with their passkey, and starts. Or they
+    // may not: then the comment is really sent for approval (the vouch stays,
+    // addressed to this agent, and admins see "Approve agent run" on it), and
+    // the answer says so. Never a message about an approval nobody can find.
+    const pending = transaction(db, () => {
+      const policy = policyFor(req.t)
+      const comment = ctx.comments.get(number)
+      if (comment.status !== 'open' || ['queued', 'working'].includes(comment.agent_status)) return false
+      if (policy.state(req.project.id, ctx.board.id, comment).dispatchable) return false
+      const admin = roleAtLeast(req.role, 'admin')
+      policy.vouch(req.project.id, ctx.board.id, comment, req.user.id, { role: req.role, approve: false, expect })
+      let now2 = ctx.comments.get(number)
+      if (!policy.state(req.project.id, ctx.board.id, now2).dispatchable && admin) {
+        // An admin's Fix is also their approval of the run: the same passkey check as "Approve agent run".
+        freshOrThrow(req)
+        policy.vouch(req.project.id, ctx.board.id, now2, req.user.id, { role: req.role, approve: true, expect })
+        now2 = ctx.comments.get(number)
+      }
+      const approvedNow = policy.state(req.project.id, ctx.board.id, now2).dispatchable
+      agents.address(req.project.id, ctx.board.id, now2, { userId: req.user.id, role: req.role }, agent.id)
+      said(req)('comment_vouched', `${ctx.board.id}#${number}`, {
+        project: req.project.id,
+        approve: approvedNow && admin,
+        agent: agent.id,
+        fix: true,
+      })
+      return !approvedNow
+    })
+    if (pending) {
+      chat.notify(req.t.workspaceId, req.project.id, ctx.board.id, threadId)
+      throw new HttpError(
+        409,
+        'run_needs_approval',
+        `Sent for approval. An admin has to approve this agent run first (Approve agent run, on the comment). Press Fix with ${agent.name} again after that.`,
+      )
+    }
     const made = transaction(db, () => {
       const policy = policyFor(req.t)
-      let comment = ctx.comments.get(number)
+      const comment = ctx.comments.get(number)
       if (comment.status !== 'open') throw new HttpError(409, 'comment_busy', 'This comment is resolved. Reopen it to fix it.')
       if (['queued', 'working'].includes(comment.agent_status))
         throw new HttpError(409, 'comment_busy', 'This comment is already with an agent.')
-      // A comment someone already sent, with its run approved, keeps that
-      // approval (pressing Fix must not undo an admin's OK). Anything else
-      // is vouched for now, by this person, for the text they saw.
-      if (policy.state(req.project.id, ctx.board.id, comment).dispatchable) {
-        if (!agents.trusted(req.project.id, ctx.board.id, req.user.id))
-          throw new HttpError(403, 'untrusted_member', 'Only a trusted member may send work to an agent.')
-        // Still for the text this person saw.
-        if (expect !== undefined && expect !== dispatchHash(comment))
-          throw new HttpError(409, 'comment_changed', 'This comment changed since you opened it. Read it again, then send it.')
-      } else {
-        policy.vouch(req.project.id, ctx.board.id, comment, req.user.id, { role: req.role, approve: false, expect })
-        said(req)('comment_vouched', `${ctx.board.id}#${number}`, { project: req.project.id, approve: false, agent: agent.id, fix: true })
-      }
-      agents.address(req.project.id, ctx.board.id, comment, { userId: req.user.id, role: req.role }, agent.id)
-      comment = ctx.comments.get(number)
       if (!policy.state(req.project.id, ctx.board.id, comment).dispatchable)
         throw new HttpError(409, 'run_needs_approval', 'An admin has to approve this agent run first (Approve agent run, on the comment).')
+      if (!agents.trusted(req.project.id, ctx.board.id, req.user.id))
+        throw new HttpError(403, 'untrusted_member', 'Only a trusted member may send work to an agent.')
+      // For the text this person saw.
+      if (expect !== undefined && expect !== dispatchHash(comment))
+        throw new HttpError(409, 'comment_changed', 'This comment changed since you opened it. Read it again, then send it.')
+      agents.address(req.project.id, ctx.board.id, comment, { userId: req.user.id, role: req.role }, agent.id)
       const fresh = agentsFor(req.t)
       const check = fresh.claimCheck(fresh.get(req.project.id, agent.id), req.project.id, comment)
       if (!check.ok) throw new HttpError(403, check.code, check.message)
@@ -505,14 +573,81 @@ export function mountChatRoutes(
     return live
   }
 
+  // "Push this fix", asked again: a fix whose edits went without asking is
+  // held on the agent's machine until someone has looked at its whole diff.
+  // This only asks the machine to show that card again (it has the fix; the
+  // server has no repository). Whoever may ask for a fix may ask; the card
+  // is then answered by someone who may answer cards, as any other.
+  function startPush(req, at) {
+    const { ctx, threadId, store } = at
+    if (threadKind(threadId) !== 'comment') throw new HttpError(400, 'fix_needs_comment', 'A fix belongs to a comment.')
+    const number = Number(threadId.slice(8))
+    const found = chatAgents(req, ctx.board.id)
+    const { agent, gone } = agentOfThread(found, at.row)
+    if (gone || !agent) throw new HttpError(409, 'no_agent', "This comment's agent is not connected.")
+    if (agent.edits.mode === 'none' || !agent.edits.fix.ok)
+      throw new HttpError(409, agent.chat.code || 'read_only_agent', agent.edits.fix.reason || READ_ONLY_NOTE)
+    if (runningOf(req, at)) throw new HttpError(409, 'agent_running', 'Wait for the answer in this chat, or stop it.')
+    const maxTurns = agent.link.maxTurns || LINK_TURNS_MAX
+    if (hub.ofAgent(req.t.workspaceId, agent.id).length >= maxTurns + LINK_LIMITS.queued)
+      throw new HttpError(429, 'agent_busy', `${agent.name} is busy. Try again in a moment.`)
+    const sends = rateLimiter.hit('chatSend', req.user.id, LIMITS.chatSend)
+    if (!sends.ok) throw new HttpError(429, 'rate_limited', 'That is a lot of requests. Wait a moment and try again.')
+    const author = { name: req.user.display_name, handle: req.user.handle }
+    const made = transaction(db, () => {
+      const message = store.append(req.project.id, ctx.board.id, threadId, {
+        role: 'user',
+        userId: req.user.id,
+        body: { text: `Push the fix of comment #${number}.`, sent: { comment: number }, push: true, author },
+      })
+      const turn = store.createTurn({
+        projectId: req.project.id,
+        boardId: ctx.board.id,
+        threadId,
+        agentId: agent.id,
+        kind: 'push',
+        userId: req.user.id,
+        userMessageId: message.id,
+        commentNumber: number,
+      })
+      said(req)('agent_turn_started', turn.id, {
+        project: req.project.id,
+        agent: agent.id,
+        agentName: agent.name,
+        board: ctx.board.id,
+        thread: threadId,
+        kind: 'push',
+      })
+      return { message, turn }
+    })
+    const live = hub.open({
+      id: made.turn.id,
+      workspaceId: req.t.workspaceId,
+      projectId: req.project.id,
+      boardId: ctx.board.id,
+      threadId,
+      agentId: agent.id,
+      kind: 'push',
+      startedBy: req.user.id,
+      seed: [
+        { name: 'user', data: { message: made.message } },
+        { name: 'status', data: { text: `Waiting for ${agent.name}` } },
+      ],
+    })
+    if (!links.send(req.t.workspaceId, agent.id, 'work', { turn: made.turn.id }))
+      chat.interrupt(req.t, made.turn, { message: `${agent.name} went offline. Try again when it is back.`, agentName: agent.name })
+    chat.notify(req.t.workspaceId, req.project.id, ctx.board.id, threadId)
+    return live
+  }
+
   router.post('/boards/:bid/threads/:thread/messages', express.json({ limit: '512kb' }), (req, res) => {
     let live
     try {
       const at = open(req)
       const { ctx, threadId, store } = at
       const body = req.body || {}
-      if (body.fix) {
-        live = startFix(req, at)
+      if (body.fix || body.push) {
+        live = body.fix ? startFix(req, at) : startPush(req, at)
         return follow(req, res, live, 0)
       }
       if (body.editOf || body.regenerate)
@@ -820,7 +955,11 @@ export function mountChatRoutes(
           kind: card.kind,
           cardHash: card.card_hash,
           // The file; a command only as its hash. Never the diff.
-          ...(card.kind === 'edit' ? { path: shown.detail } : { commandHash: cardSubjectHash(shown) }),
+          ...(card.kind === 'edit'
+            ? { path: shown.detail }
+            : card.kind === 'push'
+              ? { branch: shown.detail }
+              : { commandHash: cardSubjectHash(shown) }),
         })
         return { card: perms.get(live.id, id), owner: check.owner }
       })

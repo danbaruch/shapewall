@@ -155,6 +155,7 @@ test('a token that may take work is an agent from the moment it is made, for its
     mode: 'none',
     machine: { approvals: 'none', commands: [], auto: [] },
     rules: { edits: 'ask', commands: 'ask' },
+    autoBy: 'role',
   })
   assert.equal(agent.createdBy.handle, 'ada')
   assert.deepEqual(agent.token.scopes, [...AGENT_SCOPES].sort())
@@ -727,6 +728,7 @@ test('approval rule: a role-gated setting; "always ask" is the only rule in effe
     mode: 'none',
     machine: { approvals: 'none', commands: [], auto: [] },
     rules: { edits: 'ask', commands: 'ask' },
+    autoBy: 'role',
   })
   const entry = (await audit('agent_approval_rule_changed'))[0]
   assert.deepEqual(entry.detail.before, { rule: 'ask', changeRole: 'admin', answerRole: 'admin' })

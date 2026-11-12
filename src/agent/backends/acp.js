@@ -34,6 +34,7 @@ import { createSandbox, SandboxError } from '../acp/sandbox.js'
 import { ACP_PREAMBLE, NEXT_STEPS_PROMPT, NO_IMAGES_NOTE, quoteData } from '../context.js'
 import { AgentError } from '../errors.js'
 import { showable } from '../showable.js'
+import { neverCommitted, runsSomething } from '../exec-paths.js'
 import { diffForCard, diffForFiles } from '../text-diff.js'
 import { findProgram } from '../../watch.js'
 import { redact } from './openai.js'
@@ -169,7 +170,9 @@ export const REMOTE_OPTIONS = [
 export const REMOTE_REFUSALS = {
   kind: "Refused on the agent's machine: only file edits and listed commands can be asked from a hosted board",
   outside: "Refused on the agent's machine: outside the project, or in a folder agents may not write",
-  sensitive: "Refused on the agent's machine: a settings file it does not let a connected agent edit",
+  sensitive:
+    "Refused on the agent's machine: a file that runs on install, build, test or CI (settings, scripts, manifests, tests), which it does not let a connected agent edit",
+  never: "Refused on the agent's machine: Git's own files, node_modules and files Git ignores are never part of a fix",
   unknown: "Refused on the agent's machine: the whole change could not be worked out, so it cannot be shown",
   large: "Refused on the agent's machine: too large to show in full",
   command: "Refused on the agent's machine: not one of the commands it allows",
@@ -1105,6 +1108,7 @@ class AcpProcess {
     if (!turn.gate) return refuse(request.kind === 'edit' ? 'Edit a file' : 'Run a command', 'other', null, REMOTE_REFUSALS.policy)
     let card
     let approved = null
+    let guarded = false
     if (request.kind === 'edit') {
       const shown = showable(relativeTo(this.root, String(request.file || '')))
       let result
@@ -1123,8 +1127,20 @@ class AcpProcess {
       if (!result) return refuse('Edit a file', 'edit', shown, REMOTE_REFUSALS.unknown)
       const rel = result.rel.split(path.sep).join('/')
       if (!rel || rel.startsWith('..')) return refuse('Edit a file', 'edit', shown, REMOTE_REFUSALS.outside)
-      if (this.sandbox.sensitive(result.file) && !this.remoteEdit.allowPaths.includes(rel))
-        return refuse(`Edit ${rel}`, 'edit', rel, REMOTE_REFUSALS.sensitive)
+      // What Shapewall's commit would leave out is not asked for at all: an
+      // edit that was allowed and then silently dropped would be a lie.
+      let never = neverCommitted(rel)
+      try {
+        never = never || Boolean(await turn.gate.ignored?.(rel))
+      } catch {
+        never = true
+      }
+      if (!still()) return false
+      if (never) return refuse(`Edit ${rel}`, 'edit', rel, REMOTE_REFUSALS.never)
+      // Files that run something (exec-paths.js): only when this machine named the file,
+      // and then never without a person's answer.
+      guarded = this.sandbox.sensitive(result.file) || runsSomething(rel)
+      if (guarded && !this.remoteEdit.allowPaths.includes(rel)) return refuse(`Edit ${rel}`, 'edit', rel, REMOTE_REFUSALS.sensitive)
       const diff = diffForFiles([{ path: rel, oldText: result.current, newText: result.next, outside: false }])
       if (!diff || diff.truncated || Buffer.byteLength(JSON.stringify(diff)) > REMOTE_DIFF_MAX)
         return refuse(`Edit ${rel}`, 'edit', rel, REMOTE_REFUSALS.large)
@@ -1139,11 +1155,13 @@ class AcpProcess {
     let verdict = 'deny'
     try {
       verdict = await turn.gate.decide(
-        request.kind === 'edit' ? { kind: 'edit', path: approved.rel } : { kind: 'command', command: card.detail },
+        request.kind === 'edit' ? { kind: 'edit', path: approved.rel, guarded } : { kind: 'command', command: card.detail },
       )
     } catch {
       verdict = 'deny'
     }
+    // A file that runs something is never allowed without asking, whatever the rules say.
+    if (guarded && verdict === 'allow') verdict = 'ask'
     if (!still()) return false
     if (verdict === 'allow') {
       // Allowed without asking: the card says so, and nobody is waited for.
@@ -1160,7 +1178,8 @@ class AcpProcess {
       const { state } = await this.ask({ ...card, options: REMOTE_OPTIONS }, signal)
       if (state !== 'approved' || !still()) return false
     } else return refuse(card.title, card.kind, card.detail, REMOTE_REFUSALS.policy)
-    if (approved) turn.gate.approved?.(approved.rel, approved.hash)
+    // `auto`: nobody looked at this one (the fix is then held back from any remote: agent-fix.js).
+    if (approved) turn.gate.approved?.(approved.rel, approved.hash, { auto: verdict === 'allow' })
     return true
   }
 

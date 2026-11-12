@@ -56,27 +56,40 @@ export const DEFAULT_MACHINE_POLICY = {
 
 export const policyFile = (env = process.env) => path.join(path.dirname(credentialsFile(env)), 'agent-policy.json')
 
+// The file, read only once it is this person's and only theirs to write:
+// owner and mode are checked on the open file, before a byte of it is trusted.
 function readAll(file) {
-  let text
+  let fd
   try {
-    text = fs.readFileSync(file, 'utf8')
+    fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0))
   } catch (error) {
     if (error.code === 'ENOENT') return { version: 1, connections: {} }
+    if (error.code === 'ELOOP') throw new Error(`${file} is a symbolic link. A policy file is a plain file of your own.`, { cause: error })
     throw error
   }
-  if (process.platform !== 'win32') {
-    const stat = fs.statSync(file)
-    // A policy others can write is not this person's policy.
-    if (stat.mode & 0o022) throw new Error(`${file} can be changed by other users of this machine. Run: chmod 600 "${file}"`)
-  }
+  let text
   try {
-    const data = JSON.parse(text)
-    return data && typeof data.connections === 'object' && data.connections && !Array.isArray(data.connections)
-      ? data
-      : { version: 1, connections: {} }
+    const stat = fs.fstatSync(fd)
+    if (!stat.isFile()) throw new Error(`${file} is not a plain file.`)
+    if (process.platform !== 'win32') {
+      // A policy another user owns, or others can write, is not this person's policy.
+      if (typeof process.getuid === 'function' && stat.uid !== process.getuid())
+        throw new Error(`${file} belongs to another user of this machine. Remove it, then run agent connect again.`)
+      if (stat.mode & 0o022) throw new Error(`${file} can be changed by other users of this machine. Run: chmod 600 "${file}"`)
+    }
+    text = fs.readFileSync(fd, 'utf8')
+  } finally {
+    fs.closeSync(fd)
+  }
+  let data
+  try {
+    data = JSON.parse(text)
   } catch {
     throw new Error(`${file} is not valid JSON. Fix it or delete it.`)
   }
+  if (!data || typeof data.connections !== 'object' || !data.connections || Array.isArray(data.connections))
+    throw new Error(`${file} has no "connections". Fix it or delete it.`)
+  return data
 }
 
 // One command as it is compared: single spaces, no control characters, no
@@ -107,36 +120,79 @@ export const cleanBase = (value) =>
 const REMOTE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,59}$/
 export const cleanRemote = (value) => (typeof value === 'string' && REMOTE_RE.test(value) ? value : null)
 
-// Anything this file does not understand reads as the default, which is the
-// narrowest: no approvals, no commands, nothing automatic.
+// One entry of the file, as the policy in effect. A key that is missing
+// reads as its default. A key that is there but is not a value this file
+// knows (a typo, a wrong type, false, "", 0) reads as the NARROWEST setting
+// for that key, never as the default: no approvals, only the person who
+// connected it, no commands, nothing automatic, no settings files, never
+// pushed. `warn(text)` hears about each such key by name.
+const KNOWN_KEYS = ['audience', 'approvals', 'commands', 'auto', 'allowPaths', 'base', 'remote']
 const unique = (list) => [...new Set(list)]
-const clean = (entry) => {
-  const approvals = POLICY_APPROVALS.includes(entry?.approvals) ? entry.approvals : 'none'
+function clean(entry, warn = () => {}) {
+  const has = (key) =>
+    entry !== null && typeof entry === 'object' && !Array.isArray(entry) && Object.hasOwn(entry, key) && entry[key] !== undefined
+  if (entry !== undefined && entry !== null && (typeof entry !== 'object' || Array.isArray(entry))) {
+    warn('this connection\'s entry is not an object: read as "read and answer only, for the person who connected it"')
+    return { ...DEFAULT_MACHINE_POLICY, audience: 'owner', remote: null }
+  }
+  for (const key of Object.keys(entry || {})) if (!KNOWN_KEYS.includes(key)) warn(`"${key}" is not a setting this version knows: ignored`)
+  const bad = (key, narrow) => {
+    warn(`"${key}" has a value this version does not know: read as ${narrow}`)
+  }
+  let audience = DEFAULT_MACHINE_POLICY.audience
+  if (has('audience')) {
+    if (POLICY_AUDIENCES.includes(entry.audience)) audience = entry.audience
+    else {
+      audience = 'owner'
+      bad('audience', '"owner" (only the person who connected it)')
+    }
+  }
+  let approvals = 'none'
+  if (has('approvals')) {
+    if (POLICY_APPROVALS.includes(entry.approvals)) approvals = entry.approvals
+    else bad('approvals', '"none" (read and answer only)')
+  }
   const on = approvals !== 'none'
-  const commands = on
-    ? unique((Array.isArray(entry?.commands) ? entry.commands : []).map(cleanCommand).filter(Boolean)).slice(0, COMMANDS_MAX)
-    : []
+  // A list with one entry it cannot read is not trusted for the rest either.
+  const list = (key, each, max) => {
+    if (!has(key)) return []
+    const value = entry[key]
+    if (!Array.isArray(value) || value.length > max || value.some((item) => each(item) === null)) {
+      bad(key, 'empty')
+      return []
+    }
+    return unique(value.map(each))
+  }
+  const commands = list('commands', cleanCommand, COMMANDS_MAX)
+  const auto = list('auto', (kind) => (POLICY_AUTO_KINDS.includes(kind) ? kind : null), POLICY_AUTO_KINDS.length)
+  const allowPaths = list('allowPaths', cleanAllowPath, ALLOW_PATHS_MAX)
+  let base = null
+  if (has('base') && entry.base !== null) {
+    base = cleanBase(entry.base)
+    if (!base) bad('base', 'none (the commit the checkout is on)')
+  }
+  let remote = DEFAULT_MACHINE_POLICY.remote
+  if (has('remote')) {
+    remote = entry.remote === null ? null : cleanRemote(entry.remote)
+    if (entry.remote !== null && !remote) bad('remote', 'none (a fix is never pushed)')
+  }
   return {
-    audience: POLICY_AUDIENCES.includes(entry?.audience) ? entry.audience : DEFAULT_MACHINE_POLICY.audience,
+    audience,
     approvals,
-    commands,
-    auto: on
-      ? unique((Array.isArray(entry?.auto) ? entry.auto : []).filter((kind) => POLICY_AUTO_KINDS.includes(kind))).filter(
-          (kind) => kind !== 'commands' || commands.length > 0,
-        )
-      : [],
-    allowPaths: on
-      ? unique((Array.isArray(entry?.allowPaths) ? entry.allowPaths : []).map(cleanAllowPath).filter(Boolean)).slice(0, ALLOW_PATHS_MAX)
-      : [],
-    base: cleanBase(entry?.base),
-    remote: entry?.remote === null ? null : cleanRemote(entry?.remote) || DEFAULT_MACHINE_POLICY.remote,
+    commands: on ? commands : [],
+    auto: on ? auto.filter((kind) => kind !== 'commands' || commands.length > 0) : [],
+    allowPaths: on ? allowPaths : [],
+    base,
+    remote,
   }
 }
 export { clean as cleanMachinePolicy }
 
 // The policy for one connection (defaults when nothing is saved).
-export function readMachinePolicy(origin, slug = 'default', env = process.env) {
-  return clean(readAll(policyFile(env)).connections[`${origin}#${slug}`])
+// `warn(text)`: told about every value in the file that was not understood.
+export function readMachinePolicy(origin, slug = 'default', env = process.env, { warn = () => {} } = {}) {
+  const file = policyFile(env)
+  return clean(readAll(file).connections[`${origin}#${slug}`], (text) => warn(`${file}: ${text}`))
 }
 
 // Saves what was chosen for one connection; returns the policy in effect.
@@ -144,7 +200,7 @@ export function saveMachinePolicy(origin, slug, changes, env = process.env) {
   const file = policyFile(env)
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 })
   const data = readAll(file)
-  const next = clean({ ...data.connections[`${origin}#${slug}`], ...changes })
+  const next = clean({ ...clean(data.connections[`${origin}#${slug}`]), ...changes })
   data.version = 1
   data.connections[`${origin}#${slug}`] = next
   const temp = `${file}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`
@@ -171,7 +227,7 @@ export function describeMachinePolicy(policy) {
   ]
   if (policy.auto.length)
     lines.push(
-      `May be allowed without asking, when the server's rule for this agent says so: ${policy.auto.join(' and ')}. Still only inside the project${policy.auto.includes('commands') ? ' and only the commands above' : ''}.`,
+      `May be allowed without asking: ${policy.auto.join(' and ')}, once ${policy.approvals === 'owner' ? 'the person who connected it (nobody else)' : "someone with the agent's rule-changing role (an admin by default)"} switches that on in the console. Still only inside the project, never a file that runs something, and such a fix is not pushed until a person has looked at its whole diff on the board.`,
     )
   if (policy.allowPaths.length) lines.push(`Settings files it may ask to edit: ${policy.allowPaths.join(', ')}.`)
   lines.push(

@@ -220,7 +220,7 @@ test('Fix with agent: a card with the diff, answered with a fresh passkey, ends 
   assert.equal(builder.git('rev-parse', `${branch}~1`), head)
   assert.match(
     builder.git('log', '-1', '--format=%an <%ae>%n%B', branch),
-    new RegExp(`^Ada <ada@example.com>\\nFix comment #${made.id}: Say Hi`),
+    new RegExp(`^Ada <ada@example.com>\\nFix for Shapewall comment ${made.id}: Say Hi`),
   )
   assert.deepEqual(
     fixFolders(builder).filter((name) => !name.endsWith('.owner')),
@@ -371,7 +371,10 @@ test('a fix is pushed to the machine’s remote when it has one, and the run say
   const kept = (await second.done).final
   assert.equal(kept.summary.branch.pushed, false)
   assert.ok(
-    kept.cards.some((item) => item.kind === 'note' && /Not pushed: the fix changes package\.json, which would run in CI/.test(item.label)),
+    kept.cards.some(
+      (item) =>
+        item.kind === 'note' && /Not pushed: the fix changes package\.json, which runs on install, build, test or CI/.test(item.label),
+    ),
   )
   assert.throws(() =>
     execFileSync('git', ['--git-dir', bare, 'rev-parse', '--verify', `refs/heads/${kept.summary.branch.name}`], { stdio: 'pipe' }),

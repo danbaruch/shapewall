@@ -15,6 +15,13 @@ import { answerPermission } from './stream.js'
 export const HostedAnswer = createContext(null)
 export const useHostedAnswer = () => useContext(HostedAnswer)
 
+// "Push this fix", asked again: a fix whose edits went without asking stays
+// on the agent's machine until someone has looked at its whole diff. null
+// off a hosted board, or for someone who may not ask this agent for a fix;
+// else a function that asks the machine to show that card again.
+export const HostedPush = createContext(null)
+export const useHostedPush = () => useContext(HostedPush)
+
 export const WAITING_FALLBACK = 'Waiting for someone who may allow or deny this.'
 
 // How a hosted card ended, in words: who answered when a person did.

@@ -332,10 +332,16 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
         : []
     return { audience: policy.audience === 'owner' ? 'owner' : 'server', approvals, commands, auto }
   }
+  // On a machine that takes approvals from the person who connected it
+  // alone, "allow without asking" counts only when that same person set it:
+  // nobody else can take them out of the loop.
+  const ownerOnly = (row) => machinePolicy(row).approvals === 'owner'
+  const ruleStands = (row) =>
+    row.approval_rule !== 'auto' || !ownerOnly(row) || (Boolean(row.created_by) && row.approval_rule_by === row.created_by)
   const approvalOf = (row) => {
     const machine = machinePolicy(row)
     return {
-      approvalRule: row.approval_rule,
+      approvalRule: ruleStands(row) ? row.approval_rule : 'ask',
       approvalChangeRole: row.approval_change_role,
       approvalAnswerRole: row.approval_answer_role,
       machineApprovals: machine.approvals,
@@ -346,6 +352,8 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
   const approvalRules = (row) => ({
     edits: approvalRuleFor(approvalOf(row), 'edits'),
     commands: approvalRuleFor(approvalOf(row), 'commands'),
+    // The person who connected the agent set the rule themself (a machine that said "owner" asks for this).
+    byOwner: row.approval_rule === 'auto' && Boolean(row.created_by) && row.approval_rule_by === row.created_by,
   })
   // Whether a machine takes edits from the board at all, and how its
   // requests are answered: "none" (reads and answers), "ask" or "auto".
@@ -392,7 +400,7 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
         after: shape(now),
         by: 'machine',
       })
-    if (after.approval_rule === 'auto' && !approvalAutoAvailable(approvalOf(after))) {
+    if (after.approval_rule === 'auto' && (!ruleStands(after) || !approvalAutoAvailable(approvalOf(after)))) {
       t.run("UPDATE agents SET approval_rule = 'ask' WHERE workspace_id = :ws AND id = :id", { id: after.id })
       audit?.('agent_approval_rule_changed', after.id, {
         project: after.project_id,
@@ -902,7 +910,9 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
         // What its own machine allows: the ceiling for everything above.
         mode: editMode(row),
         machine: { approvals: machine.approvals, commands: machine.commands, auto: machine.auto },
-        rules: approvalRules(row),
+        rules: { edits: approvalRules(row).edits, commands: approvalRules(row).commands },
+        // Who may switch "allow without asking" on: only the person who connected it, when its machine says "owner".
+        autoBy: ownerOnly(row) ? 'owner' : 'role',
       },
       counts: { working: working.length, queued: queued.length },
       link: { ...linkView(row), streams: linkOf(row)?.streams || 0 },
@@ -1060,6 +1070,14 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
         throw new HttpError(400, 'invalid_approval_rule', `Approval rule: ${APPROVAL_RULES.join(', ')}.`)
       if (!canChangeApprovalRule(actor.role, current))
         throw new HttpError(403, 'forbidden', `Changing this agent's approval rule needs the ${before.changeRole} role.`)
+      // The machine takes approvals from the person who connected it alone:
+      // then only that person may say "without asking". An admin cannot take them out of the loop.
+      if (changes.rule === 'auto' && ownerOnly(row) && actor.userId !== row.created_by)
+        throw new HttpError(
+          403,
+          'forbidden',
+          `Only ${personName(people().get(row.created_by))} can let ${row.name} edit without asking: its machine takes approvals from the person who connected it alone.`,
+        )
       if (changes.rule === 'auto' && !approvalAutoAvailable(current))
         throw new HttpError(
           409,
@@ -1076,8 +1094,8 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
     }
     if (JSON.stringify(before) !== JSON.stringify(next)) {
       t.run(
-        'UPDATE agents SET approval_rule = :rule, approval_change_role = :changeRole, approval_answer_role = :answerRole WHERE workspace_id = :ws AND id = :id',
-        { ...next, id: row.id },
+        'UPDATE agents SET approval_rule = :rule, approval_change_role = :changeRole, approval_answer_role = :answerRole, approval_rule_by = :by WHERE workspace_id = :ws AND id = :id',
+        { ...next, id: row.id, by: next.rule !== before.rule ? actor.userId : row.approval_rule_by || null },
       )
       actor.audit('agent_approval_rule_changed', row.id, { project: projectId, name: row.name, before, after: next })
     }

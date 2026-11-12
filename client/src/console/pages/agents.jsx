@@ -1116,8 +1116,15 @@ function ApprovalDialog({ agent, role, url, onClose, onSaved }) {
                 </>
               ) : (
                 <span className="block text-xs text-muted" data-sw-agent-approval-applies>
-                  Applies to {machineAuto}, as its machine allows. Anything else still waits for an answer. A fix is always made on a
-                  branch.
+                  Applies to {machineAuto}, as its machine allows. Files that run something (settings, scripts, tests, CI) and anything else
+                  still wait for an answer. A fix is always made on a branch, and one made without asking is not pushed until someone looks
+                  at its whole diff on the board.
+                  {agent.approval.autoBy === 'owner' ? (
+                    <span className="mt-1 block" data-sw-agent-approval-owner-only>
+                      Only {agent.createdBy ? personName(agent.createdBy) : 'the person who connected it'} can switch this on: its machine
+                      takes approvals from them alone.
+                    </span>
+                  ) : null}
                 </span>
               )}
             </RuleOption>
