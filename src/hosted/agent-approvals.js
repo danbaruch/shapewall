@@ -4,9 +4,22 @@ import { randomBytes } from 'node:crypto'
 import { sha256 } from './crypto.js'
 import { dispatchHash, AgentPolicyError, agentPolicy } from './agent-policy.js'
 import { findApiToken } from './tenancy.js'
-import { roleAtLeast } from './permissions.js'
+import { canAnswerApproval, roleAtLeast } from './permissions.js'
 
-export function mountHostedApprovals({ v1, boardApi, handle, scope, db, transaction, policyFor, boardContext, needFresh, auditOf, now }) {
+export function mountHostedApprovals({
+  v1,
+  boardApi,
+  handle,
+  scope,
+  db,
+  transaction,
+  policyFor,
+  agentsFor = null,
+  boardContext,
+  needFresh,
+  auditOf,
+  now,
+}) {
   const error = (statusCode, code, message) => new AgentPolicyError(statusCode, code, message)
   const keyOf = (req) => ({ project: req.project.id, board: req.params.bid })
   function validate(req, row) {
@@ -34,6 +47,13 @@ export function mountHostedApprovals({ v1, boardApi, handle, scope, db, transact
     )
       throw error(409, 'approval_expired', 'This approval no longer matches a live run.')
     return row
+  }
+  // Who may answer an agent's approvals is a setting of that agent (admin by
+  // default, or owner): the same rule connected agents' cards will use
+  // (src/hosted/permissions.js canAnswerApproval).
+  const mayAnswer = (req, row) => {
+    const agent = agentsFor?.(req.t).forToken(req.project.id, row.token_id) || null
+    return canAnswerApproval(req.role, agent ? { approvalAnswerRole: agent.approval_answer_role } : null)
   }
   const byId = (req) =>
     req.t.get('SELECT * FROM agent_approvals WHERE workspace_id = :ws AND project_id = :project AND board_id = :board AND id = :id', {
@@ -119,7 +139,7 @@ export function mountHostedApprovals({ v1, boardApi, handle, scope, db, transact
         approvals: rows.filter((row) => {
           try {
             validate(req, row)
-            return true
+            return mayAnswer(req, row)
           } catch {
             return false
           }
@@ -136,6 +156,7 @@ export function mountHostedApprovals({ v1, boardApi, handle, scope, db, transact
       if (!['approved', 'denied'].includes(req.body?.state)) throw error(400, 'invalid_approval', 'Choose approved or denied.')
       const row = transaction(db, () => {
         const row = validate(req, byId(req))
+        if (!mayAnswer(req, row)) throw error(403, 'forbidden', "Answering this agent's approvals needs the owner role.")
         if (row.state !== 'pending' || req.body?.hash !== row.command_hash)
           throw error(409, 'approval_changed', 'This exact command is no longer pending.')
         req.t.run(

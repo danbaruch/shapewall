@@ -15,6 +15,7 @@ import { joinUrl } from '../config.js'
 import { MENTION_HANDLE_RE } from '../mentions.js'
 import { captureFiles, listVersions, readManifest, resolveFile, variantsWithFiles } from '../store.js'
 import { agentPolicy, expandScopes, trustedMember } from './agent-policy.js'
+import { COMMENT_ROUTING } from './agents.js'
 import { mountHostedApprovals } from './agent-approvals.js'
 import { sendPng } from './board-context.js'
 import { markupName } from '../comment-media.js'
@@ -31,7 +32,7 @@ import { findApiToken, tenant } from './tenancy.js'
 import { mountTokenEvents } from './token-events.js'
 
 export function mountTokenApi({
-  agentPresence = null,
+  agentsFor,
   db,
   dataDir,
   iso,
@@ -98,9 +99,15 @@ export function mountTokenApi({
       req.t.run('UPDATE api_tokens SET last_used_at = :at WHERE workspace_id = :ws AND id = :id', { at: iso(), id: row.id })
     }
     req.workspaceName = row.workspace_name
-    // A token that may take work was heard from: an agent is listening for
-    // this project (src/hosted/agent-presence.js; the name only).
-    if (req.token.scopes.includes('claim')) agentPresence?.seen(row.workspace_id, row.project_id, row.name)
+    // A token that may take work is an agent (src/hosted/agents.js), and it
+    // was just heard from: it is online. A claim token made while an older
+    // build ran on this database becomes an agent here, on first sight.
+    req.agent = req.token.scopes.includes('claim')
+      ? agentsFor(req.t).forToken(row.project_id, row.id, {
+          onFirstSight: (agent) => auditOf(req, 'agent_first_seen', agent.id, { project: row.project_id, token: row.id, kind: agent.kind }),
+        })
+      : null
+    if (req.agent) agentsFor(req.t).seen(req.agent)
     next()
   }
   v1.use(tokenAuth)
@@ -126,13 +133,18 @@ export function mountTokenApi({
   // Guest comments stay away from agents unless asked for, on every route
   // and not only in lists: reading one, replying, statuses, resolving and
   // reopening need the same opt-in (?guests=1) as listing them.
+  // A claim token works only on comments that are its agent's to take: sent
+  // to it or to any agent, by someone in its audience (agents.js claimCheck).
+  // A comment sent to another agent does not exist for it: 404, like one
+  // that was never dispatched, on every route.
+  const mine = (req, row) => agentsFor(req.t).claimCheck(req.agent, req.project.id, row).ok
   const v1Comment = (fn) =>
     handle(async (req, res) => {
       req.ctx = boardContext(req.t, req.project, req.params.bid)
       const row = req.ctx.comments.get(req.params.cid)
       if (
         req.token.scopes.includes('claim') &&
-        !policyFor(req.t).state(req.project.id, req.ctx.board.id, { ...row, status: 'open' }).dispatchable
+        (!policyFor(req.t).state(req.project.id, req.ctx.board.id, { ...row, status: 'open' }).dispatchable || !mine(req, row))
       )
         throw new HttpError(404, 'unknown_comment', 'No dispatched comment at that id.')
       if (row.author_share_id && req.query.guests !== '1') {
@@ -232,7 +244,7 @@ export function mountTokenApi({
     const row = ctx.comments.get(number)
     if (
       req.token.scopes.includes('claim') &&
-      !policyFor(req.t).state(req.project.id, ctx.board.id, { ...row, status: 'open' }).dispatchable
+      (!policyFor(req.t).state(req.project.id, ctx.board.id, { ...row, status: 'open' }).dispatchable || !mine(req, row))
     )
       return null
     const comment = dispatchView(req.t, req.project.id, ctx.board.id, rowToComment(row))
@@ -251,7 +263,7 @@ export function mountTokenApi({
     const comments = ctx.comments
       .list({ status: status === 'all' ? null : status, mention })
       .map((comment) => dispatchView(req.t, req.project.id, ctx.board.id, comment))
-      .filter((comment) => !req.token.scopes.includes('claim') || comment.dispatchable)
+      .filter((comment) => !req.token.scopes.includes('claim') || (comment.dispatchable && mine(req, comment[COMMENT_ROUTING])))
       .filter((comment) => !pageId || comment.pageId === pageId || context.variants.get(comment.pageId)?.pageId === pageId)
       .filter((comment) => {
         if (guests || !comment.authorGuest) return true
@@ -278,7 +290,7 @@ export function mountTokenApi({
   // Any `author` in the request is ignored, so a token cannot pose as a person.
   const tokenAuthor = (req) => ({ name: cleanAuthor(req.token.name, 'agent'), agent: true })
 
-  mountTokenEvents(v1, { db, iso, events, streams, scope, agentPresence })
+  mountTokenEvents(v1, { db, iso, events, streams, scope, agentsFor })
 
   v1.get(
     '/project',
@@ -501,8 +513,23 @@ export function mountTokenApi({
         if (taking && !req.token.scopes.includes('claim')) throw new HttpError(403, 'missing_scope', 'Taking work needs the claim scope.')
         // Only open comments are claimed (and counted against the budget).
         if (taking && row.status !== 'open') throw new HttpError(409, 'not_open', 'Only an open comment can be taken.')
-        if (taking && row.status === 'open' && (!onlyFrom || onlyFrom.includes(row.agent_status || null)))
-          policyFor(req.t).claim(req.project.id, ctx.board.id, row, req.token.id)
+        const agents = agentsFor(req.t)
+        if (taking && row.status === 'open' && (!onlyFrom || onlyFrom.includes(row.agent_status || null))) {
+          // Checked again on the row this transaction reads: a comment sent
+          // to another agent, or by someone outside this agent's audience,
+          // is never taken.
+          const check = agents.claimCheck(req.agent, req.project.id, row)
+          if (!check.ok) throw new HttpError(403, check.code, check.message)
+          const claimId = policyFor(req.t).claim(req.project.id, ctx.board.id, row, req.token.id, req.agent.id)
+          agents.startRun({
+            projectId: req.project.id,
+            boardId: ctx.board.id,
+            number: row.number,
+            agentId: req.agent.id,
+            claimId,
+            askedBy: row.dispatch_by,
+          })
+        }
         if (['queued', 'working'].includes(row.agent_status)) {
           const claim = req.t.get(
             'SELECT token_id FROM agent_claims WHERE workspace_id = :ws AND project_id = :project AND board_id = :board AND comment_number = :number AND ended_at IS NULL ORDER BY created_at DESC LIMIT 1',
@@ -516,6 +543,9 @@ export function mountTokenApi({
             'UPDATE agent_claims SET ended_at = :at WHERE workspace_id = :ws AND project_id = :project AND board_id = :board AND comment_number = :number AND ended_at IS NULL',
             { project: req.project.id, board: ctx.board.id, number: row.number, at: iso() },
           )
+        // The usage record of every run whose claim just ended (this one, or
+        // stale ones the claim above swept).
+        agents.closeRuns(req.project.id)
         return result
       })
       res.json({ comment: v1Item(req, ctx, result.comment), changed: result.changed })
@@ -553,7 +583,20 @@ export function mountTokenApi({
     }),
   )
   v1.use(v1Json)
-  mountHostedApprovals({ v1, boardApi: approvalApi, handle, scope, db, transaction, policyFor, boardContext, needFresh, auditOf, now })
+  mountHostedApprovals({
+    v1,
+    boardApi: approvalApi,
+    handle,
+    scope,
+    db,
+    transaction,
+    policyFor,
+    agentsFor,
+    boardContext,
+    needFresh,
+    auditOf,
+    now,
+  })
   v1.use((req, res) => fail(res, 404, 'not_found', 'No such API route.'))
 
   return { v1, tokenAuth }

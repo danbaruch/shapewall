@@ -95,6 +95,7 @@ export function mountConsoleRoutes(consoleApi, deps) {
     revokeGrantsOf,
     ownerCount,
     createApiToken,
+    agentsFor,
   } = deps
 
   consoleApi.get(
@@ -441,6 +442,19 @@ export function mountConsoleRoutes(consoleApi, deps) {
       )
       if (!result.changes) throw new HttpError(404, 'unknown_token', 'No such token.')
       auditOf(req, 'token_revoked', String(req.params.tid))
+      // A token that was an agent: what waited for it goes to any agent, and
+      // the project loses it as its default (src/hosted/agents.js).
+      const agents = agentsFor(req.t)
+      const agent = agents.forToken(req.project.id, String(req.params.tid))
+      if (agent) {
+        const released = agents.afterRevoke(req.project.id, agent.id)
+        auditOf(req, 'agent_revoked', agent.id, {
+          project: req.project.id,
+          name: agent.name,
+          released: released.comments,
+          wasDefault: released.wasDefault,
+        })
+      }
       res.json({ ok: true })
     }),
   )

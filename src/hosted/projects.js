@@ -142,6 +142,11 @@ export function createProjectStore(t, { db, dataDir, maxProjects = PROJECTS_MAX 
       const comments = t.get(`SELECT COUNT(*) AS n FROM comments ${where}`, key).n
       const images = t.get(`SELECT COALESCE(SUM(bytes), 0) AS n FROM comment_files ${where}`, key).n
       const open = t.all(`SELECT id FROM pushes ${where} AND status = 'open'`, key).map((push) => push.id)
+      // The usage record of a run on this board stays (it is history), closed.
+      t.run(`UPDATE agent_runs SET ended_at = :at, outcome = 'removed' ${where} AND ended_at IS NULL`, {
+        ...key,
+        at: new Date().toISOString(),
+      })
       for (const table of BOARD_TABLES) t.run(`DELETE FROM ${table} ${where}`, key)
       return { comments, bytes: row.bytes + images, open }
     })

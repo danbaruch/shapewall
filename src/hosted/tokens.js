@@ -9,11 +9,13 @@ import { HttpError, cleanName } from './http.js'
 export const TOKEN_SCOPES = ['read', 'reply', 'status', 'claim', 'resolve', 'push', 'import']
 const DAY = 86_400_000
 
-export function createApiTokens({ iso, auditOf }) {
+export function createApiTokens({ iso, auditOf, agentsFor = null }) {
   // A new project token for req.t / req.project, made by req.user. Returns
   // the token (shown once) and its listing. `via` marks how it was made
-  // ("login" for `shapewall login`) in the audit log.
-  function createApiToken(req, body, { via = null } = {}) {
+  // ("login" for `shapewall login`) in the audit log. A token that may take
+  // work (the claim scope) is an agent from the start (src/hosted/agents.js),
+  // for the person who made it only; `machine` is the label a login sent.
+  function createApiToken(req, body, { via = null, machine = null } = {}) {
     // A name too long is refused, not cut (as on a rename): it is what people will see.
     const name = cleanName(body.name, 61)
     if (!name || name.length > 60) throw new HttpError(400, 'invalid_name', 'Token name: 1 to 60 characters.')
@@ -50,6 +52,11 @@ export function createApiTokens({ iso, auditOf }) {
       },
     )
     auditOf(req, 'token_created', id, { project: req.project.id, scopes, ...(days ? { days } : {}), ...(via ? { via } : {}) })
+    if (scopes.includes('claim') && agentsFor)
+      agentsFor(req.t).create(
+        { userId: req.user.id, role: req.role, audit: (action, target, detail) => auditOf(req, action, target, detail) },
+        { projectId: req.project.id, tokenId: id, machine },
+      )
     const info = listTokens(req.t, { projectId: req.project.id, now: iso() }).find((item) => item.id === id)
     return { token, info }
   }

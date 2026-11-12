@@ -30,6 +30,8 @@ export const TENANT_TABLES = [
   'import_batches',
   'comment_imports',
   'comment_files',
+  'agents',
+  'agent_runs',
 ]
 export { ROLES, roleAtLeast } from './permissions.js'
 

@@ -31,7 +31,7 @@ import { listTokens, mountAdmin } from './admin.js'
 import { createDeviceLogins } from './device.js'
 import { cleanEmail } from './mail.js'
 import { mountShareAdmin, mountSharePublic } from './shares.js'
-import { createCommentStore } from './comments.js'
+import { REPLY_AUTHOR, createCommentStore } from './comments.js'
 import { createUsercontent } from './usercontent.js'
 import { mountRebind, prepareOrigins, previousHostGate } from './rebind.js'
 import { mountPublicAdmin } from './public.js'
@@ -61,6 +61,8 @@ import { createBoardContext } from './board-context.js'
 import { mountBoardRoutes } from './board-routes.js'
 import { mountTokenApi } from './token-api.js'
 import { createAgentPresence } from './agent-presence.js'
+import { COMMENT_ROUTING, createAgentStore } from './agents.js'
+import { mountAgentRoutes } from './agent-routes.js'
 import { mountPages } from './pages.js'
 
 export { changeEventType, publicBoardView, TOKEN_SCOPES, INVITE_DAYS }
@@ -132,16 +134,39 @@ export function createHostedApp({
   deviceLogins ||= createDeviceLogins({ db, now })
   const ownsEvents = !eventBus
   const events = eventBus || createEventBus()
-  // Which projects have an agent listening right now (in memory only).
+  // Which agents are listening right now (in memory only).
   const agentPresence = createAgentPresence({ now })
   const streams = new Set()
   const policyFor = (t) =>
     createAgentPolicy(t, { now, handleFor: (user) => q.get('SELECT handle FROM users WHERE id = :id', { id: user })?.handle || null })
+  const handleFor = (user) => q.get('SELECT handle FROM users WHERE id = :id', { id: user })?.handle || null
+  // The agents of a workspace (src/hosted/agents.js), one store per tenant
+  // handle: a handle lives for one request, so what the store read once in
+  // a request is not read again.
+  const agentStores = new WeakMap()
+  const agentsFor = (t) => {
+    if (!agentStores.has(t)) agentStores.set(t, createAgentStore(t, { now, presence: agentPresence, handleFor }))
+    return agentStores.get(t)
+  }
   const dispatchView = (t, project, board, comment) => {
     const row = createCommentStore(t, project, board).get(comment.id)
+    const agents = agentsFor(t)
     // dispatchHash: what "Send to agent" must send back, so a vouch covers
     // the text its sender saw (src/hosted/board-routes.js).
-    return { ...comment, ...policyFor(t).state(project, board, row), dispatchHash: dispatchHash(row) }
+    return {
+      ...comment,
+      ...policyFor(t).state(project, board, row),
+      dispatchHash: dispatchHash(row),
+      // The agent the comment was sent to (null: any agent), and which agent
+      // wrote each agent reply, for its face on the thread. Agent ids only.
+      agentId: agents.addressOf(project, row),
+      replies: comment.replies.map((reply) => {
+        const agentId = agents.idForToken(project, reply[REPLY_AUTHOR]?.token)
+        return agentId ? { ...reply, agentId } : reply
+      }),
+      // What decides whether a token may take it (never serialized).
+      [COMMENT_ROUTING]: { agent_id: row.agent_id || null, dispatch_by: row.dispatch_by || null },
+    }
   }
   const q = accounts(db)
   const iso = (offset = 0) => new Date(now().getTime() + offset).toISOString()
@@ -333,7 +358,7 @@ export function createHostedApp({
   consoleApi.use(guardWrites)
   consoleApi.use(express.json({ limit: '64kb' }))
 
-  const createApiToken = createApiTokens({ iso, auditOf })
+  const createApiToken = createApiTokens({ iso, auditOf, agentsFor })
   const consoleDeps = {
     db,
     dataDir,
@@ -361,6 +386,7 @@ export function createHostedApp({
     revokeGrantsOf,
     ownerCount,
     createApiToken,
+    agentsFor,
   }
   mountInviteLinks(consoleApi, consoleDeps)
   // Share link preview and opening: no session, the link is the secret.
@@ -371,6 +397,7 @@ export function createHostedApp({
   consoleApi.use(needSession)
   consoleApi.use(limit('session', (req) => req.user.id))
   mountConsoleRoutes(consoleApi, consoleDeps)
+  mountAgentRoutes(consoleApi, consoleDeps)
   mountAdmin(consoleApi, deps)
   mountShareAdmin(consoleApi, deps)
   mountPublicAdmin(consoleApi, deps)
@@ -394,6 +421,7 @@ export function createHostedApp({
     auditOf,
     clientIp,
     policyFor,
+    agentsFor,
     dispatchView,
     boardContext,
     cleaner,
@@ -423,6 +451,7 @@ export function createHostedApp({
     auditOf,
     clientIp,
     policyFor,
+    agentsFor,
     boardContext,
     dispatchView,
     needFresh,
@@ -508,6 +537,7 @@ export function createHostedApp({
   app.locals.presence = { attach: presence.attach, close: presence.close, hub }
   app.locals.events = events
   app.locals.agentPresence = agentPresence
+  app.locals.agentsFor = agentsFor
   app.locals.sweep = sweep
   app.locals.close = async () => {
     presence.close()
