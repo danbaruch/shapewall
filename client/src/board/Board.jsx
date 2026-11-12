@@ -903,6 +903,13 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     setViewportNotice(null)
     updateParams({ vp: value === defaultMode ? null : value })
   }
+  // Hosted boards have no chat, but people who can send comments to the
+  // agent get the Agent control all the same: it opens a small panel that
+  // says whether an agent is listening and what it is doing
+  // (HostedAgentPanel.jsx). Desktop only for now; `ha=1` in the address.
+  const hostedAgent = Boolean(info?.hosted && !DEMO && data?.agentDispatch && !chatAvailable)
+  const hostedAgentOpen = hostedAgent && wide && params.get('ha') === '1' && !checksOpen
+  const openHostedAgent = () => updateParams({ ha: '1', checks: null, cv: null })
   const allOpen = comments.filter((item) => item.status === 'open').length
   // What the agents are doing, board-wide, for the toolbar (agentActivity.js):
   // from the comments' agent statuses (the events stream and the comments
@@ -1310,6 +1317,14 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
           <div className="flex min-w-0 flex-1 flex-col">
             <BoardToolbar
               {...barProps}
+              {...(wide && hostedAgent
+                ? {
+                    chatAvailable: true,
+                    chatThread: hostedAgentOpen ? 'hosted' : null,
+                    reopenChat: openHostedAgent,
+                    openAgentThread: openHostedAgent,
+                  }
+                : {})}
               wide={wide}
               info={info}
               boardId={boardId}
@@ -1637,6 +1652,19 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                 panelHidden={panelHidden}
                 panelProps={panelProps}
                 updateParams={updateParams}
+                hostedAgent={
+                  hostedAgentOpen
+                    ? {
+                        listening: data?.agentListening || null,
+                        activity,
+                        approvals: approvalRows.length,
+                        onOpenComment: (id) => {
+                          const comment = comments.find((item) => item.id === id)
+                          if (comment) focusComment(comment)
+                        },
+                      }
+                    : null
+                }
               />
             </div>
           </div>

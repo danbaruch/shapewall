@@ -9,7 +9,10 @@ import { ChevronDown, FileText, Search } from 'lucide-react'
 import { Input } from '../components/ui'
 import { cn } from '../lib/utils'
 
-export function PagesTree({ groups, comments, activePage, onPage, bare = false }) {
+// `filter`: its own "Filter pages" box. Only the collapsed rail's flyout has
+// one; in the expanded sidebar the board's search field sits right above the
+// list (BoardRail.jsx), and two search boxes are one too many.
+export function PagesTree({ groups, comments, activePage, onPage, bare = false, filter = true }) {
   const [query, setQuery] = useState('')
   const [folded, setFolded] = useState(() => new Set())
   const needle = query.trim().toLowerCase()
@@ -46,7 +49,7 @@ export function PagesTree({ groups, comments, activePage, onPage, bare = false }
       )}
       {/* The expanded sidebar has the board's search above its tabs (BoardRail.jsx): one field there, not two.
           The collapsed rail's flyout keeps this filter for its own list. */}
-      {bare ? null : (
+      {bare || !filter ? null : (
         <div className="pb-2">
           <Input
             size="sm"
