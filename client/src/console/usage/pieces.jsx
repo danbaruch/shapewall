@@ -2,14 +2,31 @@
 // cells for values an agent may not have reported, and the outcome chip.
 
 import { Dialog as DialogPrimitive } from 'radix-ui'
-import { ArrowDownRight, ArrowUpRight, Minus, X } from 'lucide-react'
+import { ArrowDownRight, ArrowUpRight, FlaskConical, Minus, X } from 'lucide-react'
 import { DialogOverlay, Skeleton, Tooltip } from '../../components/ui'
+import { DEMO } from '../../lib/demo'
 import { cn } from '../../lib/utils'
 import { OUTCOME_GROUP_LABEL, OUTCOME_LABEL, outcomeGroup } from '../../../../src/hosted/usage-shape.js'
 import { Card } from '../components'
 import { OUTCOME_ICON, Sparkline } from './charts'
 import { NOT_REPORTED, change } from './format'
 import { STATUS, useChartTheme } from './theme'
+
+// The public demo says once, under a page's title, that what it shows is
+// made up (client/src/demo/usage). Nothing outside the demo build.
+export function DemoNote({ children, testId }) {
+  if (!DEMO) return null
+  return (
+    <p
+      className="mb-4 flex items-start gap-2 rounded-md border border-line bg-surface-2/60 px-3 py-2.5 text-xs text-muted print:hidden"
+      role="note"
+      data-sw-demo-numbers={testId}
+    >
+      <FlaskConical size={14} className="mt-px shrink-0" aria-hidden="true" />
+      <span>{children}</span>
+    </p>
+  )
+}
 
 // A number an agent did not report: a dash that says so, never a zero.
 export function Unreported({ what = null }) {

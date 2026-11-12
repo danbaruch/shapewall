@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { Background, ReactFlow, useNodesInitialized, useNodesState, useReactFlow } from '@xyflow/react'
 import { api, BROWSER_COMMENTS, fileUrl, STATIC } from '../lib/api'
 import { resetBrowserComments } from '../lib/browserComments'
-import { useMediaQuery, useOverlayEntry, useParams, useResource } from '../lib/hooks'
+import { leavePage, useMediaQuery, useOverlayEntry, useParams, useResource } from '../lib/hooks'
 import { cn, savedAuthor } from '../lib/utils'
 import { Spinner } from '../components/ui'
 import { BoardContext, NODE_TYPES } from './nodes'
@@ -1875,6 +1875,8 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                         : null
                     }
                     onAgent={chatAvailable ? reopenChat : null}
+                    // The console's Usage page, for whoever may read it (demo/install.js).
+                    onUsage={demo?.usageHref ? () => leavePage(demo.usageHref) : null}
                     onClose={closeTry}
                   />
                 ) : null}

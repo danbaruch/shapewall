@@ -46,7 +46,7 @@ import { setSearch, useUsageFilter, useWs, useWsPages } from './data'
 import { FilterBar, ViewsMenu } from './filters'
 import { bucketRange, change, defaultBucket, formatCost, formatCount, formatDuration, formatTime, percent, shortDate } from './format'
 import { ColumnChooser, DataGrid, readLayout, writeLayout } from './grid'
-import { OutcomeChip, StatTile, Unreported, orUnreported } from './pieces'
+import { DemoNote, OutcomeChip, StatTile, Unreported, orUnreported } from './pieces'
 import { TurnDrawer } from './TurnDrawer'
 
 const pick = (value, allowed, fallback) => (allowed.includes(value) ? value : fallback)
@@ -116,6 +116,10 @@ export function UsagePage() {
           </span>
         }
       />
+      <DemoNote testId="usage">
+        This is a demo with made-up numbers: about sixty days of a pretend team&apos;s agent turns. Ask the agent on the board, or run a
+        fix, and your turn is added here. Exports are made in this browser; Reset puts everything back.
+      </DemoNote>
       {exporter.error ? (
         <p className="mb-3 text-sm text-bad" role="alert">
           {exporter.error}
@@ -183,10 +187,10 @@ export function Overview({ filter, isAdmin, compact = false, extraQuery = '' }) 
   const toggle = useCallback(
     (dimension) => (key) => {
       const value = key === '' ? '~' : key
-      const current = list(dimension)
-      set({ [dimension]: current.length === 1 && current[0] === value ? [] : [value] }, { push: true })
+      // From the address as it is when the press lands, not as it was drawn.
+      set({ [dimension]: (current) => (current.length === 1 && current[0] === value ? [] : [value]) }, { push: true })
     },
-    [list, set],
+    [set],
   )
   const useRange = (first, last) =>
     set({ range: 'custom', from: bucketRange(first, bucket).from, to: bucketRange(last, bucket).to }, { push: true })

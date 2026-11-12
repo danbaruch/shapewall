@@ -12,7 +12,10 @@ import { QueryClient, keepPreviousData, useInfiniteQuery, useMutation, useQuery,
 import { leavePage } from '../../lib/hooks'
 import { api, wsUrl } from '../lib/api'
 import { currentSearch, setSearch as replaceSearch, useSearch } from '../lib/router'
+import { UNSPLIT, applyChanges, readList } from './address'
 import { periodOf, zone } from './format'
+
+export { applyChanges, toggled } from './address'
 
 export const queryClient = new QueryClient({
   defaultOptions: {
@@ -35,38 +38,21 @@ export { useSearch }
 export const setSearch = (params, options) => leavePage(() => replaceSearch(params.toString(), options))
 
 // The address as an object, with one setter: set({ key: value }) replaces
-// keys (null, '' or an empty list removes one). A list is the key repeated
+// keys (null, '' or an empty list removes one; a function gets the key's
+// current values, see applyChanges). A list is the key repeated
 // (agent=a&agent=b), so a value may hold any character: a model's name has
 // commas and brackets. Older links with comma lists of ids still read.
 export function useAddress() {
   const search = useSearch()
   const params = useMemo(() => new URLSearchParams(search), [search])
   const get = useCallback((key, fallback = '') => params.get(key) ?? fallback, [params])
-  const list = useCallback(
-    (key) =>
-      params
-        .getAll(key)
-        .flatMap((value) => (UNSPLIT.includes(key) ? [value] : value.split(',')))
-        .filter(Boolean),
-    [params],
-  )
+  const list = useCallback((key) => readList(params, key), [params])
   const set = useCallback((changes, options) => {
     // Read when the change lands, so two changes in a row both hold.
-    leavePage(() => {
-      const next = new URLSearchParams(currentSearch())
-      for (const [key, value] of Object.entries(changes)) {
-        next.delete(key)
-        for (const item of Array.isArray(value) ? value : [value])
-          if (item !== null && item !== undefined && item !== '' && item !== false) next.append(key, String(item))
-      }
-      replaceSearch(next.toString(), options)
-    })
+    leavePage(() => replaceSearch(applyChanges(currentSearch(), changes), options))
   }, [])
   return { params, search, get, list, set }
 }
-
-// Filters whose values are never split on commas (whatever an agent called its model).
-const UNSPLIT = ['model']
 // The filter keys of the Usage pages, as the address and the API name them.
 export const FILTER_KEYS = ['agent', 'project', 'person', 'kind', 'model', 'outcome']
 export const RANGE_KEYS = ['tokensMin', 'tokensMax', 'durationMin', 'durationMax']

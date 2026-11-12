@@ -18,11 +18,13 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '../../components/ui'
+import { DEMO } from '../../lib/demo'
 import { useMediaQuery } from '../../lib/hooks'
 import { cn } from '../../lib/utils'
 import { DIMENSION_LABEL, KIND_LABEL, OUTCOME_GROUP_IDS, OUTCOME_GROUP_LABEL, USAGE_KINDS } from '../../../../src/hosted/usage-shape.js'
+import { currentPath } from '../lib/router'
 import { useToast } from '../state'
-import { FILTER_KEYS, RANGE_KEYS, VIEW_SKIP, useViews } from './data'
+import { FILTER_KEYS, RANGE_KEYS, VIEW_SKIP, toggled, useViews } from './data'
 import { PRESETS, dateInput, formatCount } from './format'
 
 const chip =
@@ -120,17 +122,15 @@ export function PeriodPicker({ period, onChange }) {
 }
 
 // One dimension: a list of what there is, with counts, several at once.
-export function MultiFilter({ id, label, options, values, onChange }) {
+// `onToggle(param)`: one option ticked or unticked. The parent applies it to
+// the address as it is then, not to the values this menu was drawn with, so
+// options ticked in quick succession all hold.
+export function MultiFilter({ id, label, options, values, onToggle, onChange }) {
   const [open, setOpen] = useState(false)
   const [text, setText] = useState('')
   const picked = new Set(values.map(fromParam))
   const shown = options.filter((option) => !text || option.label.toLowerCase().includes(text.toLowerCase()))
-  const toggle = (key) => {
-    const next = new Set(picked)
-    if (next.has(key)) next.delete(key)
-    else next.add(key)
-    onChange([...next].map(toParam))
-  }
+  const toggle = (key) => onToggle(toParam(key))
   const first = options.find((option) => picked.has(option.key))
   return (
     <Popover open={open} onOpenChange={setOpen} history={false}>
@@ -346,7 +346,7 @@ export function FilterBar({ filter, options, children }) {
       chips.push({
         id: `${dimension}:${key}`,
         text: `${DIMENSION_LABEL[dimension]}: ${labelOf(dimension, key)}`,
-        clear: () => set({ [dimension]: list(dimension).filter((item) => item !== key) }, { push: true }),
+        clear: () => set({ [dimension]: (current) => current.filter((item) => item !== key) }, { push: true }),
       })
   for (const key of RANGE_KEYS)
     if (get(key)) {
@@ -367,6 +367,7 @@ export function FilterBar({ filter, options, children }) {
             label={DIMENSION_LABEL[dimension]}
             options={lists[dimension]}
             values={list(dimension)}
+            onToggle={(value) => set({ [dimension]: toggled(value) }, { push: true })}
             onChange={(values) => set({ [dimension]: values }, { push: true })}
           />
         ))}
@@ -433,7 +434,9 @@ export function ViewsMenu({ workspaceId, page, search, onOpen }) {
   const active = views.find((view) => view.query === current)
   const copyLink = async () => {
     try {
-      await navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}${current ? `?${current}` : ''}`)
+      // The public demo keeps the route, and so the filters, in the fragment.
+      const route = DEMO ? `#${currentPath()}` : ''
+      await navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}${route}${current ? `?${current}` : ''}`)
       toast('Link copied. It carries the filters, not your access.')
     } catch {
       toast('This browser did not allow copying', 'bad')
