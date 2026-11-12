@@ -489,7 +489,7 @@ test('desktop: Select text is offered on a live page and says so otherwise; comp
     await page.waitForSelector('[data-sw-compare-bar]')
     await page.waitForSelector('[data-sw-comment-mode]', { state: 'detached' })
     assert.deepEqual(
-      await page.$eval('[data-sw-tools] [data-sw-tool]', (nodes) => nodes.map((node) => node.getAttribute('data-sw-tool'))),
+      await page.$$eval('[data-sw-tools] [data-sw-tool]', (nodes) => nodes.map((node) => node.getAttribute('data-sw-tool'))),
       ['select', 'hand'],
     )
     assert.equal(await page.locator('[data-sw-tools-divider]').count(), 0, 'no divider with nothing after it')
