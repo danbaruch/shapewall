@@ -1087,7 +1087,9 @@ function ApprovalDialog({ agent, role, url, onClose, onSaved }) {
               <span className="block text-xs text-muted">
                 {linked && mode === 'none'
                   ? 'Once its machine takes edits from the board, each one waits for a person with the role below.'
-                  : 'Everything the agent asks to do waits for a person with the role below.'}
+                  : agent.approval.machine.approvals === 'owner'
+                    ? `Everything the agent asks to do waits for ${agent.createdBy ? personName(agent.createdBy) : 'the person who connected it'}: its machine takes answers from nobody else.`
+                    : 'Everything the agent asks to do waits for a person with the role below.'}
               </span>
             </RuleOption>
             <RuleOption

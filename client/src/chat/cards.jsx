@@ -206,7 +206,8 @@ export function PermissionCard({ card, onAnswer, live, touch }) {
             </Badge>
           ) : null}
         </p>
-        {card.detail ? (
+        {/* A detail that only repeats the path in the heading says nothing more. */}
+        {card.detail && !(split && card.detail === split.path) ? (
           looksLikeCode(card.detail) ? (
             <code className="block max-h-48 overflow-y-auto rounded-md bg-sunken px-2 py-1.5 font-mono text-[11px] leading-4 break-all whitespace-pre-wrap text-muted">
               {card.detail}

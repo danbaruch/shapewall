@@ -1370,7 +1370,12 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
         <DemoBanner />
         <AccessLostBanner />
         {info?.hosted && data?.agentApprove ? (
-          <HostedApprovals boardId={boardId} onRows={setApprovalRows} onOpenThread={chatAvailable ? openChat : null} />
+          <HostedApprovals
+            boardId={boardId}
+            onRows={setApprovalRows}
+            onOpenThread={chatAvailable ? openChat : null}
+            openThread={chatThread || null}
+          />
         ) : null}
         <a
           href="#sw-comments"

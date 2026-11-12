@@ -15,6 +15,7 @@ import { Bot, ChevronDown, GitBranch, ShieldQuestion, Sparkles } from 'lucide-re
 import { Button } from '../components/ui'
 import { cn } from '../lib/utils'
 import { AgentPicker } from '../chat/AgentPicker'
+import { useCommentAgentFocus } from '../chat/agentFocus'
 import { fixLabel } from '../chat/profiles'
 import { useAgentWork } from './FixWithAgent'
 import { fixChoice } from './hostedAgents'
@@ -28,14 +29,16 @@ import { fixChoice } from './hostedAgents'
 // button.
 export default function HostedFix({ comment, list = null, busy = false, touch = false, slot = 'action', onFix, onOpenChat = null }) {
   const work = useAgentWork(comment)
+  const focus = useCommentAgentFocus(comment.id)
   if (!list || comment.status !== 'open') return null
   const size = touch ? 'touch' : 'sm'
   // With an agent: the way into its chat ("Send to agent" says who has it).
   if (work || comment.agentStatus === 'branch-ready') {
     if (!onOpenChat || slot !== 'status') return null
     const holder = (list.agents || []).find((agent) => (agent.working || []).includes(comment.id)) || null
-    // An agent that takes comments on its own (shapewall watch --remote) has no chat to open.
-    if (work && holder && !holder.link?.connected) return null
+    // An agent that takes comments on its own (shapewall watch --remote) has
+    // no chat to open: only a connected agent's fix, or this tab's own turn.
+    if (work && !focus && !holder?.link?.connected) return null
     return (
       <div className="flex min-w-0 flex-wrap items-center gap-1.5 pb-2" data-sw-hosted-fix-block={comment.id}>
         {work === 'waiting' ? (

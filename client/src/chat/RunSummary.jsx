@@ -256,8 +256,9 @@ function RemoteBranch({ summary, touch }) {
   }
   return (
     <div className="space-y-1.5 border-t border-line px-2.5 py-2 text-caption text-muted" data-sw-chat-remote-branch={branch.name}>
-      <div className={cn('flex min-w-0 gap-2', touch ? 'flex-col' : 'items-center')}>
-        <p className="flex min-w-0 flex-1 items-start gap-1.5">
+      {/* The name gets the full width (a branch name is long); its Copy button sits under it. */}
+      <div className="flex min-w-0 flex-col gap-1.5">
+        <p className="flex min-w-0 items-start gap-1.5">
           <GitBranch size={12} className="mt-0.5 shrink-0" aria-hidden="true" />
           <span className="min-w-0 break-words">
             Fix ready on branch{' '}
@@ -274,7 +275,7 @@ function RemoteBranch({ summary, touch }) {
         <Button
           size={touch ? 'touch' : 'sm'}
           variant="secondary"
-          className="shrink-0"
+          className={cn('shrink-0', !touch && 'self-start')}
           onClick={copy}
           data-sw-chat-branch-copy={branch.name}
         >

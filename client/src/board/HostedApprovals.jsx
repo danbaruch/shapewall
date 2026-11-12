@@ -42,8 +42,9 @@ export const cardPlace = (thread) => (commentOf(thread) ? `comment #${commentOf(
 // activity counts an approval as "needs your OK"). A chat card is a row
 // too: { id, chat: true, commentId }.
 // `onOpenThread(threadId)`: opens the Agent panel at a chat (null: the
-// board has no chat, and the cards are not listed).
-export function HostedApprovals({ boardId, onRows = null, onOpenThread = null }) {
+// board has no chat, and the cards are not listed). `openThread`: the chat
+// on screen now; its cards are right there, so the strip leaves them out.
+export function HostedApprovals({ boardId, onRows = null, onOpenThread = null, openThread = null }) {
   const [rows, setRows] = useState([])
   const [cards, setCards] = useState([])
   const chat = Boolean(onOpenThread)
@@ -118,7 +119,8 @@ export function HostedApprovals({ boardId, onRows = null, onOpenThread = null })
       setBusy(false)
     }
   }
-  if (!rows.length && !cards.length && !error && !budget?.exhausted) return null
+  const listed = cards.filter((card) => card.thread !== openThread)
+  if (!rows.length && !listed.length && !error && !budget?.exhausted) return null
   return (
     <section aria-label="Agent approvals" className="max-h-64 shrink-0 overflow-auto border-b border-line bg-surface p-3 text-sm">
       {budget?.exhausted ? (
@@ -127,9 +129,9 @@ export function HostedApprovals({ boardId, onRows = null, onOpenThread = null })
           in Agent policy in the console.
         </p>
       ) : null}
-      {cards.length ? (
-        <ul className="space-y-1.5 pb-1" aria-label="Requests waiting for your answer" data-sw-hosted-cards={cards.length}>
-          {cards.map((card) => (
+      {listed.length ? (
+        <ul className="space-y-1.5 pb-1" aria-label="Requests waiting for your answer" data-sw-hosted-cards={listed.length}>
+          {listed.map((card) => (
             <li
               key={`${card.thread}/${card.id}`}
               className="flex min-w-0 flex-col gap-2 rounded-lg border border-warn/50 bg-warn/10 px-3 py-2 sm:flex-row sm:items-center"
