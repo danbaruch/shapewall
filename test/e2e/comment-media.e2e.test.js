@@ -461,10 +461,10 @@ test('phone 390: draw in the full-sheet page, attach, post; 44 px targets', asyn
       tools.every((rect) => rect.height >= 43.5),
       `44 px tall tools: ${JSON.stringify(tools)}`,
     )
-    // One line at 390, inside the screen.
+    // Inside the screen at 390 (two lines, checked above).
     assert.ok(
-      tools.every((rect) => Math.abs(rect.top - tools[0].top) < 1 && rect.right <= 390),
-      'the tools are one row',
+      tools.every((rect) => rect.right <= 390),
+      'no tool runs off the screen',
     )
     // The zoom-first hint toast never sits over a sheet.
     assert.equal(await page.locator('[data-sw-toast]').count(), 0)
