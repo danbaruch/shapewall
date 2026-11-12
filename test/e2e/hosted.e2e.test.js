@@ -24,7 +24,7 @@ import path from 'node:path'
 import { chromium } from 'playwright'
 import { runCapture } from '../../src/capture/capture.js'
 import { main } from '../../src/cli.js'
-import { startHostedServer, tokenCall, writeLocalCaptures } from '../hosted-helpers.js'
+import { askAgain, startHostedServer, tokenCall, writeLocalCaptures } from '../hosted-helpers.js'
 import { ROOT_DIR, demoSetup, liveElementBox } from './helpers.js'
 
 const SHOTS = process.env.SHAPEWALL_SHOTS ? path.resolve(process.env.SHAPEWALL_SHOTS) : null
@@ -264,13 +264,27 @@ async function startDeviceLogin() {
   return response.json()
 }
 
-// The owner's sign-in as it is ten minutes on: sensitive actions ask for the passkey again.
+// The owner's sign-in as it is half an hour on: whatever asks for the passkey again does now.
 const staleSignIn = () => hosted.db.prepare('UPDATE sessions SET verified_at = ?').run(new Date(Date.now() - 30 * 60_000).toISOString())
 
-test('sign in a terminal: Approve with a sign-in that is not fresh asks for the passkey, says so when that is closed, and shows a refusal', async () => {
+test('sign in a terminal: Approve needs no passkey by default; a workspace that asks for one gets the prompt, which says which setting asked', async () => {
   const { page, errors } = owner
   // The 403s below are the point of this test; the browser logs each one.
   const expected = (text) => /status of 40[34]/.test(text)
+  // By default being signed in as an admin is enough, however long ago the passkey was used.
+  const plain = await startDeviceLogin()
+  staleSignIn()
+  await page.goto(`${hosted.origin}/device`)
+  await page.fill('[data-sw-device-code]', plain.userCode)
+  await page.click('[data-sw-device-lookup]')
+  await page.waitForSelector('[data-sw-device-approve]')
+  await page.click('[data-sw-device-approve]')
+  await page.waitForSelector('[data-sw-device-done="approved"]')
+  assert.equal(await page.locator('[data-sw-reauth]').count(), 0, 'no passkey prompt')
+  assert.deepEqual(errors, [])
+
+  // The owner switched on "Agents and machines" (Settings, "Ask for a passkey again").
+  askAgain(hosted, workspaceId, { cards: false, tokens: false, members: false, data: false, adminIdle: false })
   const login = await startDeviceLogin()
   staleSignIn()
   await page.goto(`${hosted.origin}/device`)
@@ -283,6 +297,10 @@ test('sign in a terminal: Approve with a sign-in that is not fresh asks for the 
   await page.click('[data-sw-device-approve]')
   await refused
   await page.waitForSelector('[data-sw-reauth]')
+  assert.match(
+    await page.textContent('[data-sw-reauth-why="agents"]'),
+    /This workspace asks for your passkey again before changes to agents and machines \(once every 5 minutes\)/,
+  )
   await shot(page, 'device-1-passkey')
   // Closed without confirming: the page says why nothing was approved.
   await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click()
@@ -316,6 +334,48 @@ test('sign in a terminal: Approve with a sign-in that is not fresh asks for the 
   await page.waitForSelector('[data-sw-device] [data-sw-error]')
   assert.match(await page.textContent('[data-sw-device] [data-sw-error]'), /code is not right, or it expired|already used/)
   assert.equal(await page.locator('[data-sw-device-reauth-note]').count(), 0)
+  assert.deepEqual(
+    errors.filter((text) => !expected(text)),
+    [],
+  )
+  errors.length = 0
+  // Back to the default for the tests that follow.
+  hosted.db.prepare("UPDATE workspaces SET step_up = '{}' WHERE id = ?").run(workspaceId)
+})
+
+test('settings: "Ask for a passkey again" is all off; an owner switches a group on with no prompt, and off only with the passkey', async () => {
+  const { page, errors } = owner
+  const expected = (text) => /status of 403/.test(text)
+  staleSignIn()
+  await page.goto(`${hosted.origin}/w/${workspaceId}/settings`)
+  await page.waitForSelector('[data-sw-settings-step-up]')
+  const row = (id) => page.locator(`[data-sw-step-up-row="${id}"]`)
+  for (const id of ['cards', 'agents', 'tokens', 'members', 'data', 'adminIdle'])
+    assert.equal(await row(id).locator('[data-sw-switch]').getAttribute('data-sw-switch'), 'off', `${id} is off by default`)
+  assert.equal(await row('cliApproval').count(), 0, 'the command line switch is for servers with tailnet sign-in')
+  assert.match(await page.textContent('[data-sw-step-up-always]'), /Always asked, on every server.*deleting a workspace/)
+  await shot(page, 'step-up-1-default')
+  // On: nothing more is asked.
+  await row('tokens').getByRole('switch').click()
+  await row('tokens').locator('[data-sw-switch="on"]').waitFor()
+  assert.equal(await page.locator('[data-sw-reauth]').count(), 0)
+  assert.equal(JSON.parse(hosted.db.prepare('SELECT step_up FROM workspaces WHERE id = ?').get(workspaceId).step_up).tokens, true)
+  await shot(page, 'step-up-2-on')
+  // Off is weaker: the fixed core asks, and says so.
+  await row('tokens').getByRole('switch').click()
+  await page.waitForSelector('[data-sw-reauth-why="always"]')
+  assert.match(await page.textContent('[data-sw-reauth-why="always"]'), /Shapewall always asks before this/)
+  await shot(page, 'step-up-3-weaker-asks')
+  await page.click('[data-sw-reauth]')
+  await row('tokens').locator('[data-sw-switch="off"]').waitFor()
+  const audited = hosted.db
+    .prepare("SELECT detail FROM audit_log WHERE workspace_id = ? AND action = 'step_up_changed' ORDER BY id")
+    .all(workspaceId)
+    .map((entry) => JSON.parse(entry.detail))
+  assert.deepEqual(audited, [
+    { setting: 'tokens', before: false, after: true },
+    { setting: 'tokens', before: true, after: false },
+  ])
   assert.deepEqual(
     errors.filter((text) => !expected(text)),
     [],
@@ -361,7 +421,7 @@ test('remove one board in the console: its captures and comments go, the other b
   await page.goto(`${hosted.origin}/w/${workspaceId}/projects/${projectId}`)
   await page.waitForSelector('[data-sw-project-board="mistake"]')
   assert.equal(await page.locator('[data-sw-project-board]').count(), 2)
-  // The dialog names the board and says what goes.
+  // The dialog names the board and says what goes. The passkey was last used half an hour ago: by default that does not matter.
   staleSignIn()
   await page.click('[data-sw-remove-board="mistake"]')
   await page.waitForSelector('[data-sw-remove-board-note]')
@@ -372,9 +432,8 @@ test('remove one board in the console: its captures and comments go, the other b
   )
   assert.match(await page.textContent('[data-sw-remove-board-note]'), /brings its captures back, but not the comments/)
   await shot(page, 'board-remove-1-confirm')
-  // The sign-in is not fresh: the passkey first, then it is removed.
+  // Signed in as an admin is enough: no passkey prompt, it is removed.
   await page.click('[data-sw-confirm]')
-  await page.click('[data-sw-reauth]')
   await page.waitForSelector('[data-sw-project-board="mistake"]', { state: 'detached' })
   await page.waitForSelector('[data-sw-project-board="demo"]')
   assert.equal(await page.locator('[data-sw-project-board]').count(), 1)
@@ -505,11 +564,6 @@ test('admin loop: invite, accept on a phone, change the role, share a link, gues
   await page.waitForSelector('[data-sw-confirm]')
   await shot(page, '8-role-confirm')
   await page.click('[data-sw-confirm]')
-  // Making an admin needs a recent passkey check; confirm if the console asks.
-  await page
-    .locator('[data-sw-reauth]')
-    .click({ timeout: 1500 })
-    .catch(() => {})
   await page.waitForSelector('[data-sw-role-select="sam"]:has-text("Admin")')
   assert.equal(
     hosted.db.prepare("SELECT role FROM memberships m JOIN users u ON u.id = m.user_id WHERE u.handle = 'sam'").get().role,
@@ -823,7 +877,7 @@ test('hosted starter: shell approval on the board, a fixture edit and a mocked p
   })
   try {
     await page.goto(`${hosted.origin}/w/${workspaceId}/p/${project.id}/?board=${setup.config.boards[0].id}`)
-    await page.getByRole('button', { name: 'Approve once with passkey' }).waitFor()
+    await page.getByRole('button', { name: 'Approve once' }).waitFor()
     await shot(page, 'agent-approval-desktop')
     await page.setViewportSize({ width: 390, height: 844 })
     await page.waitForSelector('[data-sw-toolbar="compact"]')
@@ -831,12 +885,10 @@ test('hosted starter: shell approval on the board, a fixture edit and a mocked p
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), 'approval board fits at390')
     await shot(page, 'agent-approval-phone')
     assert.ok(
-      await page
-        .getByRole('button', { name: 'Approve once with passkey' })
-        .evaluate((button) => button.getBoundingClientRect().height >= 44),
+      await page.getByRole('button', { name: 'Approve once' }).evaluate((button) => button.getBoundingClientRect().height >= 44),
       'approval touch target',
     )
-    await page.getByRole('button', { name: 'Approve once with passkey' }).click()
+    await page.getByRole('button', { name: 'Approve once' }).click()
     const result = await running
     assert.equal(result.failure, null)
     assert.deepEqual(result.files, ['approved.txt'])

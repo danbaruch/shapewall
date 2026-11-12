@@ -56,6 +56,49 @@ a Usage view on a local board.
 - **Not in this release:** scheduled or emailed exports, per-agent budgets, notifications for "worth a look" entries, and a
   tamper-evident (hash-chained) audit log. The public demo does not have the two pages.
 
+Signing in to a team server: fewer passkey prompts, and your tailnet login as the sign-in.
+
+- **Signed in with the right role is enough.** A team server no longer asks for the passkey again before workspace actions:
+  approving an agent or a machine (`shapewall login`, `agent connect`), agent settings, API tokens, share links and public
+  projects, exports, Allow on an agent's edit and "Push this fix", admins and their roles, deleting a project or a board. The
+  12-hour admin idle rule is off too. This changes the default on upgrade.
+- **A small fixed core always asks** (a passkey check in the last 10 minutes): adding or removing a passkey, new recovery codes,
+  linking or unlinking a tailnet login, deleting your account, deleting a workspace, making, changing, removing or inviting an
+  owner, moving your sign-in to the server's new address, and making the setting below weaker.
+- **"Ask for a passkey again" is a workspace setting** (Settings; owners; off by default), one switch per group: agent edits and
+  pushes; agents and machines; tokens and share links; members and roles; exports and deletes. With them how long one check
+  counts (5, 15, 30 or 60 minutes) and the admin idle rule. Changes are audited with the value before and after
+  (`step_up_changed`, marked "Worth a look"), and asking for less needs a passkey check itself.
+- **The server decides, and says why.** The console no longer asks on its own: it shows "Confirm it's you" only when a route
+  answers `reauth_required`, with the server's message naming the rule that asked (the fixed core, or which setting). The board's
+  "Approve once" for a shell command follows the same rule.
+- **Recovery-code sessions keep their restrictions,** and every action is in the audit log as before.
+- **Tailnet sign-in** (`shapewall hosted --tailscale --tailnet-sign-in`, or `SHAPEWALL_HOSTED_TAILNET_SIGN_IN=1`; opt-in, Linux).
+  A tailnet user who arrives through `tailscale serve` is signed in as the account linked to their tailnet login: no passkey, no
+  password. Each login is its own account, so roles, audiences, the audit log and usage work unchanged, and an admin still
+  decides who is in a workspace: an unknown login sees who to ask and is listed for the admins under Members; an invite can be
+  made for one tailnet login, and only that login can use it. An account with a passkey links or unlinks its login on the
+  Account page. Tagged devices and shared nodes without a user are never signed in.
+- **Where the identity is believed.** Only on a connection whose other end is owned by tailscaled (from the kernel's socket
+  table), only while the serve entry the server added is the one way to its port, with exactly one clean login header and no
+  Funnel mark. Never on direct loopback requests, on Funnel traffic, or without the flag. Where the server cannot make that
+  check it refuses to start with the flag, and says why. A tailnet session works only with the identity it was made for, is
+  marked as such in the device list, the audit log and Activity, and signing out keeps that browser signed out until "Continue
+  as". For the fixed core, an account with no passkey is asked to add one first.
+- **From the command line, with no browser** (on a server with tailnet sign-in, from a tailnet machine). `shapewall hosted
+  claim` makes the first account from the server's machine. `shapewall login` and `shapewall agent connect` are approved by
+  your tailnet identity when your role may make tokens (`--project`, `--workspace`; `--name`, `--icon`, `--tint`, `--used-by`
+  for an agent); with several projects the command lists the flags to add and never prompts. `shapewall join` takes the invite
+  made for your login, or an invite link. `shapewall admin projects list|create`, `admin invites create`, `admin members list`
+  and `admin agents list` do a few admin jobs; the server checks the role and writes the audit entry. A workspace can keep the
+  browser approval for command line logins (Settings). On any other server these commands behave as before or say what they
+  need.
+- **Upgrade notes.** Migration 16 is additive (the settings, tailnet logins on accounts, sessions and invites, the list of
+  tailnet visitors); see [Migration 16 and rollback](docs/hosted.md#migration-16-and-rollback). If you want the passkey prompts
+  back, an owner switches the groups on in each workspace's Settings.
+- **Not in this release:** tailnet sign-in on macOS or Windows servers (no way there to prove a request came from tailscaled),
+  more admin commands or MCP tools for administration, admin tokens, and profile pictures from the tailnet.
+
 ## 0.6.0 - 2026-11-12
 
 Connected agents, stage C: approvals and edits from a hosted board. A connected agent can make a fix for a comment, on a new

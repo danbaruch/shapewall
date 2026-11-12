@@ -80,7 +80,9 @@ export const useToast = () => useContext(ToastContext)
 // ---- Re-auth ----
 // withReauth(action) runs the action; if the server answers reauth_required,
 // a dialog asks for the passkey (a click, so every browser allows the
-// prompt), then the action runs once more.
+// prompt), then the action runs once more. The console never asks on its
+// own: by default a workspace asks for nothing, and the dialog says, in the
+// server's words, which rule asked (the fixed core, or a workspace setting).
 
 const ReauthContext = createContext(null)
 
@@ -95,11 +97,11 @@ export function ReauthProvider({ children }) {
   const [error, setError] = useState(null)
 
   const ask = useCallback(
-    (message) =>
+    (message, { stepUp = null, addFirst = false } = {}) =>
       new Promise((resolve, reject) => {
         setError(null)
         setTryExisting(false)
-        setPending({ resolve, reject, message })
+        setPending({ resolve, reject, message, stepUp, addFirst })
       }),
     [],
   )
@@ -109,8 +111,10 @@ export function ReauthProvider({ children }) {
       try {
         return await action()
       } catch (failure) {
-        if (!(failure instanceof ApiError) || failure.code !== 'reauth_required') throw failure
-        await ask(failure.message)
+        // The server decides, route by route: it asks for the passkey (reauth_required) or, for an account that
+        // has none because its tailnet signs it in, says to add one first (passkey_required).
+        if (!(failure instanceof ApiError) || !['reauth_required', 'passkey_required'].includes(failure.code)) throw failure
+        await ask(failure.message, { stepUp: failure.stepUp, addFirst: failure.code === 'passkey_required' })
         return action()
       }
     },
@@ -148,7 +152,8 @@ export function ReauthProvider({ children }) {
     navigateSoon('/account#add-passkey')
     window.setTimeout(() => window.dispatchEvent(new Event(ADD_PASSKEY_EVENT)), 450)
   }
-  const askAdd = recovery && !tryExisting
+  const noPasskey = Boolean(pending?.addFirst)
+  const askAdd = noPasskey || (recovery && !tryExisting)
   const onHold =
     me?.passkeys
       ?.map((key) => key.onHoldUntil)
@@ -187,7 +192,9 @@ export function ReauthProvider({ children }) {
         }
       >
         <div className="space-y-2 px-5 py-4 text-sm text-muted">
-          {askAdd ? (
+          {noPasskey ? (
+            <p data-sw-reauth-no-passkey>{pending.message}</p>
+          ) : askAdd ? (
             <>
               <p data-sw-reauth-recovery>
                 You signed in with a recovery code, so there is no passkey to confirm this change with. Add a passkey first: for your
@@ -203,7 +210,7 @@ export function ReauthProvider({ children }) {
               </button>
             </>
           ) : (
-            <p>This is a sensitive change, so Shapewall checks your passkey first (once every 10 minutes).</p>
+            <p data-sw-reauth-why={pending?.stepUp || ''}>{pending?.message || 'Confirm with your passkey first.'}</p>
           )}
           {error ? (
             <p className="text-bad" role="alert">

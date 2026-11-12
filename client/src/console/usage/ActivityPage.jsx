@@ -128,6 +128,15 @@ const ACTIVITY_COLUMNS = [
       <span className="inline-flex min-w-0 items-center gap-1.5">
         {entry.sensitive ? <ShieldAlert size={13} className="shrink-0 text-warn" aria-label="A security-relevant change" /> : null}
         <span className="truncate first-letter:uppercase">{describeAudit(entry)}</span>
+        {entry.tailnetSession ? (
+          <span
+            className="shrink-0 rounded border border-line px-1 text-[10px] text-muted"
+            title="Done in a session their tailnet signed in"
+            data-sw-activity-tailnet
+          >
+            tailnet
+          </span>
+        ) : null}
       </span>
     ),
   },

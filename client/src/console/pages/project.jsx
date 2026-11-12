@@ -188,7 +188,7 @@ export function ProjectPage({ projectId }) {
               ) : !data.workspace.settings.publicProjects ? (
                 <Notice tone="info">Public projects are off in this workspace. An owner turns them on in Settings.</Notice>
               ) : isOwner ? (
-                <p>Private. Making it public asks for your passkey.</p>
+                <p>Private.</p>
               ) : (
                 <p>Private. Only an owner can make a project public.</p>
               )}
@@ -279,7 +279,7 @@ export function ProjectPage({ projectId }) {
           >
             <p>This deletes every board, capture, comment, token and share link of the project. It cannot be undone.</p>
           </ConfirmDialog>
-          {/* useAction asks for the passkey first when the sign-in is not fresh, then removes; any other
+          {/* useAction asks for the passkey first when the server says this workspace wants one, then removes; any other
               refusal shows in the dialog. */}
           <ConfirmDialog
             open={Boolean(removingBoard)}

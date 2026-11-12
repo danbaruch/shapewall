@@ -73,6 +73,11 @@ export function Sessions() {
                     This device
                   </Badge>
                 ) : null}
+                {item.via === 'tailnet' ? (
+                  <Badge className="px-2 py-0.5 text-[11px]" data-sw-session-tailnet>
+                    Signed in by tailnet
+                  </Badge>
+                ) : null}
                 {item.via === 'recovery' ? (
                   <Badge tone="warn" className="px-2 py-0.5 text-[11px]">
                     <ShieldAlert size={11} aria-hidden="true" /> Recovery code
@@ -109,7 +114,7 @@ export function Sessions() {
           })
         }
       >
-        <p>That browser has to sign in with a passkey again.</p>
+        <p>That browser has to sign in again.</p>
       </ConfirmDialog>
       <ConfirmDialog
         open={allOthers}

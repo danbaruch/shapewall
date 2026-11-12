@@ -26,6 +26,7 @@ import { Link, leaveTo } from '../lib/router'
 import { useAction, useLoad, useSession, useToast } from '../state'
 import { InviteDialog } from './invites'
 import { useWorkspace } from './workspace'
+import { TailnetVisitors } from './tailnet'
 
 export function MembersSection() {
   const { data, role, isAdmin, workspaceId, reload } = useWorkspace()
@@ -119,6 +120,7 @@ export function MembersSection() {
           </>
         }
       />
+      {isAdmin ? <TailnetVisitors /> : null}
       <Card>
         <div className="border-b border-line p-3 sm:px-5">
           <Input
@@ -279,8 +281,8 @@ export function MembersSection() {
               <p>Their pending invites, share links and API tokens are revoked.</p>
             ) : null}
             {change.member.role === 'owner' && change.role === 'admin' ? <p>Their pending owner invites are revoked.</p> : null}
-            {['owner', 'admin'].includes(change.role) || ['owner', 'admin'].includes(change.member.role) ? (
-              <p className="text-xs">Changes to owners and admins, and making someone one, ask for your passkey.</p>
+            {change.role === 'owner' || change.member.role === 'owner' ? (
+              <p className="text-xs">Making, changing or removing an owner always asks for your passkey.</p>
             ) : null}
           </>
         ) : null}

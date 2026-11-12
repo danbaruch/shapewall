@@ -189,7 +189,7 @@ export function useCommentActions({
     })
   }
 
-  // Hosted boards: hand the comment to the agent (an admin approves the run with a passkey).
+  // Hosted boards: hand the comment to the agent (an admin approves the run; with a passkey when the workspace asks for one).
   // The server takes the comment only as this person saw it: `dispatchHash`
   // is read from the comment on screen at the click, before the passkey
   // prompt, so an edit made meanwhile is never sent unread.

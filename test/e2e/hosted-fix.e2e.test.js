@@ -24,7 +24,7 @@ import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { chromium } from 'playwright'
 import { createRemote, pushDefinition, pushFiles } from '../../src/remote/remote.js'
-import { createProject, invite, reauth, signUp, startHostedServer, writeLocalCaptures } from '../hosted-helpers.js'
+import { askAgain, createProject, invite, reauth, signUp, startHostedServer, writeLocalCaptures } from '../hosted-helpers.js'
 import { connectAgent, fixScript, gitRepo, startLink } from '../hosted-chat-helpers.js'
 import { sampleConfig, tempDir } from '../helpers.js'
 import { ROOT_DIR } from './helpers.js'
@@ -51,7 +51,7 @@ const fresh = async (user) => {
   hosted.rateLimiter.reset()
   await reauth(user)
 }
-// Every session's passkey check is old: the next Allow has to ask for it.
+// Every session's passkey check is old: the next Allow has to ask for it (this workspace switched on "Agent edits and pushes").
 const stale = () => hosted.db.prepare('UPDATE sessions SET verified_at = ?').run(new Date(Date.now() - 60 * 60 * 1000).toISOString())
 
 async function until(check, label, ms = 30_000) {
@@ -161,6 +161,8 @@ before(async () => {
   hosted = await startHostedServer('hosted-fix-e2e', { clientDir: path.join(ROOT_DIR, 'dist', 'client') })
   ada = await signUp(hosted, { handle: 'ada', displayName: 'Ada' })
   ws = ada.workspaceId
+  // This workspace asks for a passkey again before agent edits and pushes (off by default): the Allow steps below show the prompt.
+  askAgain(hosted, ws, { agents: false, tokens: false, members: false, data: false, adminIdle: false })
   bea = await signUp(hosted, { handle: 'bea', displayName: 'Bea', invite: await invite(ada, ws, 'admin') })
   cyd = await signUp(hosted, { handle: 'cyd', displayName: 'Cyd', invite: await invite(ada, ws, 'member') })
   project = await createProject(ada, ws, 'Site')

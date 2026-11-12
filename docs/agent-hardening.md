@@ -280,8 +280,8 @@ What the machine does, whatever the server says:
   agent works for (its audience, whoever may answer, whoever asked); everyone else who can open the thread reads that it asked to
   edit a file and how that ended.
 - **An answer is for one card.** It must send the card's hash back, within 2 minutes, once. The 2 minutes are a length of time
-  each side counts on its own clock, so the clocks need not agree. Allow needs a passkey check in the last 10 minutes on the
-  server. The machine then checks the answer again: a card it asked and still waits on, the same hash, not expired by its own
+  each side counts on its own clock, so the clocks need not agree. A workspace can ask for the answerer's passkey again before Allow
+  (off by default; the server's Settings, "Agent edits and pushes"). The machine then checks the answer again: a card it asked and still waits on, the same hash, not expired by its own
   count, once, and from the connecting person when it said "owner". A failed "allow" is a deny, and the board then shows the
   card as expired or denied, never as allowed. An answer for a card it never asked is ignored.
 - **Shapewall makes the commit, and only of what was allowed.** No hook, filter or attribute runs. Every changed file must have
@@ -314,7 +314,8 @@ hand-edited policy file are not in effect.
 How edits were proven. The check used the real Claude Code adapter, a throwaway server on localhost, a throwaway Git repository
 with a local bare remote, and the real `shapewall agent connect --approvals owner`:
 
-- **Allow.** A Fix with Builder edited one file after Allow in a browser, with a passkey. The commit landed on
+- **Allow.** A Fix with Builder edited one file after Allow in a browser (with a passkey check, which that workspace asked
+  for). The commit landed on
   `shapewall/comment-1-...` and was pushed to the bare remote. The checkout stayed clean on `main`, with the old file.
 - **Deny.** A Deny left no branch and no folder.
 - **A comment that asked for more.** The comment also asked for a file outside the project, a new `package.json` and shell
@@ -334,8 +335,8 @@ The limits of edit mode, plainly:
 - **Shapewall does not sandbox the agent's own tools.** The checks above cover what the agent asks. The fix session is set up so
   that its editing tools ask every time, and that was seen with one adapter version on one machine. If files in your own checkout
   change during a fix, the thread says so; it cannot undo it.
-- **With approvals on, a compromised hosted server can forge an "allow".** The machine cannot see the passkey check or the person
-  behind an answer: it sees what the server sends. A server that was broken into can answer "allow", with the right hash, for an
+- **With approvals on, a compromised hosted server can forge an "allow".** The machine cannot see the person behind an answer, or whether a
+  passkey was checked: it sees what the server sends. A server that was broken into can answer "allow", with the right hash, for an
   edit the agent really asked, and for "Push this fix". So the worst case with approvals on is: edits to ordinary source files,
   on a branch, in a throwaway folder, pushed for review. Not commands, not your checkout, not files that run something on
   install, build, test or CI, and not files outside the project that the agent asks about.

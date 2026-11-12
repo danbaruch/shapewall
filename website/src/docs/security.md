@@ -56,6 +56,32 @@ hosted boards and static exports always use an opaque frame. Hosted live HTML ca
   of a command line.
 - The MCP server takes ids only; no tool can read an arbitrary path. `--read-only` and `--no-capture` limit what an agent can do.
 
+## Signing in to a team server
+
+- **Signed in with the right role is enough.** Approving an agent or a machine, tokens, share links, exports, an agent's edit and
+  push cards, members and roles: your role decides, with no second prompt.
+- **A small fixed core always asks for the passkey again** (a check in the last 10 minutes): adding or removing a passkey, new
+  recovery codes, linking a tailnet login, deleting your account or a workspace, making, changing or removing an owner, moving
+  your sign-in to the server's new address, and making the settings below weaker.
+- **A workspace can ask for more.** An owner switches groups on in Settings ("Ask for a passkey again"): agent edits and pushes,
+  agents and machines, tokens and share links, members and roles, exports and deletes; how long one check counts; and the admin
+  idle rule. Off by default. Every change is in the audit log with the value before and after.
+- **Recovery-code sessions stay restricted** whatever a workspace chose, and every action is audited as before.
+- **Tailnet sign-in is opt-in** (`shapewall hosted --tailscale --tailnet-sign-in`). A tailnet user who arrives through `tailscale
+serve` is signed in as the account linked to their tailnet login, with no passkey. Each login is its own account, and an admin
+  still invites each one with a role: being on the tailnet alone gives nothing, because a tailnet also holds family devices,
+  contractors and shared nodes, and because roles and the audit log need to know who did what.
+- **The identity headers are believed only where they can be.** Only on a connection whose other end is owned by tailscaled (read
+  from the kernel's socket table, on Linux), only while the serve entry the server added is the one way to its port, with exactly
+  one clean login header. Never on direct loopback requests, on Funnel traffic, or with the flag off. Where the server cannot
+  make that check it refuses to start with the flag. A tailnet session works only together with the identity it was made for;
+  its cookie is worth nothing off the tailnet. Tagged devices and shared nodes without a user are never signed in.
+- **The limit.** A program that already runs as root on the server's machine can pretend to be tailscaled; it could also read the
+  database directly. The checks were proven with a stand-in proxy that follows Tailscale's documented behaviour, not against a
+  live tailnet: [what was and was not checked](/docs/hosted#what-was-and-was-not-checked-against-real-tailscale).
+
+Details: [Signing in](/docs/hosted#signing-in).
+
 ## Usage and activity on a team server
 
 - **A usage record holds numbers and ids, never text.** Each agent turn records who asked, which agent on which machine, how it
@@ -109,7 +135,8 @@ What these protections do not cover:
 - **Edits from a hosted board are a choice made on the code machine.** Who may make someone else's machine change files? By
   default, nobody. `shapewall agent connect --approvals owner` (or `admins`) switches it on, on that machine only, and the server
   can only narrow it. A fix is then made on a new branch in a folder of its own, never in the checkout. Each edit is checked on
-  the machine, shown on the board as a card with the full diff, and allowed by a person with a recent passkey check. The machine
+  the machine, shown on the board as a card with the full diff, and allowed by a person who may answer that agent (a workspace can ask for
+  their passkey again first). The machine
   checks every answer again, and keeps the commit only if it is exactly what was allowed. Commands are not offered for Claude
   Code in this release: its fix session has no shell tool. The limit: Shapewall does not sandbox the agent's own tools, and with
   approvals on, a compromised server can forge an "allow" for an edit the agent really asked. The worst case is then edits to

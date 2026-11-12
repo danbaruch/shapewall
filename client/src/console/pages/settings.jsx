@@ -1,4 +1,5 @@
-// Workspace settings: the name, share links on or off (admins), leaving,
+// Workspace settings: the name, share links on or off (admins), when the
+// workspace asks for a passkey again (owners, ./step-up.jsx), leaving,
 // and deleting the workspace (the owner, with the name typed back).
 
 import { useEffect, useState } from 'react'
@@ -10,6 +11,7 @@ import { api, download, wsUrl } from '../lib/api'
 import { useAction, useSession, useToast } from '../state'
 import { useWorkspace } from './workspace'
 import { leaveTo } from '../lib/router'
+import { StepUpCard } from './step-up'
 
 export function SettingsSection() {
   const { data, isAdmin, isOwner, workspaceId, reload } = useWorkspace()
@@ -62,7 +64,10 @@ export function SettingsSection() {
 
   return (
     <>
-      <PageHeader title="Settings" description="The workspace name, sharing, export, and leaving or deleting it." />
+      <PageHeader
+        title="Settings"
+        description="The workspace name, sharing, when a passkey is asked for again, export, and leaving or deleting it."
+      />
       <div className="grid gap-5">
         <Card>
           <CardHeader icon={PencilLine} title="Name" description="Shown to members, in invites and to guests of share links." />
@@ -114,7 +119,7 @@ export function SettingsSection() {
               {shareOn
                 ? 'On. Each link reaches one project, expires, can have a passcode and can be revoked. Turning this off stops every link at once; turning it back on restores the ones that are not revoked or expired.'
                 : isAdmin
-                  ? 'Off. No share link works in this workspace. Turning this on asks for your passkey.'
+                  ? 'Off. No share link works in this workspace.'
                   : 'Off. No share link works in this workspace. An admin can turn them on.'}
             </p>
             {turningOff === 'shares' ? null : <FormError error={share.error} />}
@@ -143,13 +148,15 @@ export function SettingsSection() {
                 {publicOn
                   ? 'On. An owner makes a project public on its page. Public boards are view-only and not indexed. Turning this off clears every public URL for good.'
                   : isOwner
-                    ? 'Off. Turning this on asks for your passkey. Each project still stays private until you make it public.'
+                    ? 'Off. Each project still stays private until you make it public.'
                     : 'Off. Only an owner can turn public projects on.'}
               </p>
               {turningOff === 'public' ? null : <FormError error={publicSwitch.error} />}
             </div>
           </Card>
         ) : null}
+
+        <StepUpCard />
 
         {isAdmin ? (
           <Card data-sw-settings-export>

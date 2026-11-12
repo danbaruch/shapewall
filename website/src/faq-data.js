@@ -42,6 +42,6 @@ export const FAQ = [
   },
   {
     q: 'Can my team use it together?',
-    a: 'Yes, on a server you host. The team server (beta), started with shapewall hosted, adds passkey sign-in, workspaces with owner, admin, member and viewer roles, live presence, and share links for clients. Captures run on your machines and upload to your server.',
+    a: 'Yes, on a server you host. The team server (beta), started with shapewall hosted, adds accounts (a passkey each, or on your tailnet just your tailnet login), workspaces with owner, admin, member and viewer roles, live presence, and share links for clients. Captures run on your machines and upload to your server.',
   },
 ]

@@ -12,6 +12,7 @@ import { Recovery } from './account/recovery'
 import { Sessions } from './account/sessions'
 import { SecurityLog } from './account/activity'
 import { DeleteAccount } from './account/delete'
+import { TailnetAccount } from './tailnet'
 
 export function AccountPage() {
   const { me } = useSession()
@@ -42,6 +43,7 @@ export function AccountPage() {
           ) : null}
           <Profile />
           <Passkeys />
+          <TailnetAccount />
           <Recovery />
           <Sessions />
           <SecurityLog />

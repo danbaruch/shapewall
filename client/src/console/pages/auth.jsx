@@ -14,6 +14,7 @@ import { createPasskey, errorMessage, getPasskey, supportsAutofill, supportsPass
 import { TurnstileWidget } from '../lib/turnstile'
 import { useSession } from '../state'
 import { AuthLayout } from '../shell'
+import { TailnetArrival } from './tailnet'
 
 export const TOKEN_RE = /^[A-Za-z0-9_-]{20,100}$/
 export const INVITE_KEY = 'shapewall.invite'
@@ -146,7 +147,9 @@ export function SignIn() {
       <Card className="p-6 sm:p-8">
         <h1 className="text-xl font-semibold text-fg">Sign in</h1>
         <p className="mt-1 text-sm text-muted">
-          Use the passkey you made for Shapewall: on this device, in a password manager or on your phone.
+          {!me && session?.tailnet && session.tailnet.state !== 'none'
+            ? 'On this server your tailnet login is the sign-in. A passkey works too, if you made one.'
+            : 'Use the passkey you made for Shapewall: on this device, in a password manager or on your phone.'}
         </p>
         {moving ? (
           <Notice tone="info" className="mt-4" title={`This server is moving to ${hostOf(moving.to)}`} data-sw-moving-notice>
@@ -165,8 +168,19 @@ export function SignIn() {
             </Link>
           </Notice>
         ) : null}
+        {/* A server with tailnet sign-in: what it says about the login this browser arrives with. */}
+        {!me && session?.tailnet ? (
+          <TailnetArrival
+            tailnet={session.tailnet}
+            signup={session.signup}
+            onSignedIn={(result) => (result?.workspaceId && next === '/' ? window.location.assign(`/w/${result.workspaceId}`) : finish())}
+          />
+        ) : null}
+        {!me && session?.tailnet && session.tailnet.state !== 'none' ? (
+          <p className="mt-6 text-xs font-medium tracking-wide text-muted uppercase">Or with a passkey</p>
+        ) : null}
         {!recovery ? (
-          <div className="mt-6 space-y-3">
+          <div className={!me && session?.tailnet && session.tailnet.state !== 'none' ? 'mt-3 space-y-3' : 'mt-6 space-y-3'}>
             {can ? (
               <>
                 {autofill ? (
@@ -413,6 +427,39 @@ export function SignUp() {
     }
   }, [tokens.invite])
 
+  // A server with tailnet sign-in, arriving as a login that has no account
+  // yet: the tailnet is the sign-in, and a passkey is optional.
+  const visitor = anon?.tailnet && ['unknown', 'invited'].includes(anon.tailnet.state) ? anon.tailnet : null
+  const visitorLogin = visitor?.login || null
+  useEffect(() => {
+    if (!visitor) return
+    setHandle((current) => current || visitor.suggested?.handle || '')
+    setName((current) => current || visitor.suggested?.displayName || '')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visitorLogin])
+  const joinByTailnet = async () => {
+    setHandleTouched(true)
+    if (problem) return
+    setBusy(true)
+    setError(null)
+    try {
+      const result = await api.post('/auth/tailnet/join', {
+        handle,
+        displayName: name,
+        ...(tokens.invite ? { invite: tokens.invite } : {}),
+        ...(tokens.setup ? { setup: tokens.setup } : {}),
+        ...(!tokens.invite && workspaceValue.trim() ? { workspaceName: workspaceValue.trim() } : {}),
+      })
+      invite.forget()
+      setup.forget()
+      await refresh()
+      navigate(`/w/${result.workspaceId}`)
+    } catch (failure) {
+      setError(failure instanceof ApiError ? failure.message : errorMessage(failure))
+      setBusy(false)
+    }
+  }
+
   const suggested = name.trim() ? `${name.trim()}'s workspace` : ''
   const workspaceValue = workspaceEdited ? workspaceName : suggested
   const problem = handleProblem(handle)
@@ -552,9 +599,29 @@ export function SignUp() {
           ) : null}
           {needsCheck ? <TurnstileWidget key={checkRound} siteKey={anon.turnstile} onToken={setTurnstileToken} onError={setError} /> : null}
           <FormError error={error} />
+          {visitor && (tokens.invite || tokens.setup || visitor.state === 'invited' || openSignup) ? (
+            <>
+              <Notice tone="info" title={`Your tailnet signs you in as ${visitor.login}`} data-sw-signup-tailnet>
+                No passkey is needed here. You can add one later in Account and security; a few things, like deleting a workspace, always
+                ask for one.
+              </Notice>
+              <Button
+                type="button"
+                variant="default"
+                size="touch"
+                className="w-full text-[15px]"
+                disabled={busy || !handle || Boolean(problem) || !name || Boolean(previewError)}
+                onClick={joinByTailnet}
+                data-sw-signup-tailnet-submit
+              >
+                {busy ? <Spinner /> : <ArrowRight size={17} aria-hidden="true" />}
+                Continue as {visitor.login}
+              </Button>
+            </>
+          ) : null}
           <Button
             type="submit"
-            variant="default"
+            variant={visitor ? 'secondary' : 'default'}
             size="touch"
             className="w-full text-[15px]"
             disabled={

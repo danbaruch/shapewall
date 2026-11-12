@@ -161,6 +161,8 @@ export async function startHostedServer(name, options = {}) {
     ...(options.turnstile ? { turnstile: options.turnstile } : {}),
     ...(options.reportEmail ? { reportEmail: options.reportEmail } : {}),
     ...(options.ownersSeeSignIns ? { ownersSeeSignIns: true } : {}),
+    // Tailnet sign-in with a gate the test made (the real start is test/tailnet-helpers.js).
+    ...(options.tailnet ? { tailnet: options.tailnet } : {}),
   })
   holder.app.locals.presence.attach(server)
   return {

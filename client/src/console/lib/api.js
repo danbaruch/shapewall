@@ -38,7 +38,7 @@ export async function call(method, url, body) {
       response.status,
       data?.error?.code || 'error',
       response.status === 429 && retry > 0 ? withRetry(message, retry) : message,
-      { retryAfter: response.status === 429 && retry > 0 ? retry : null },
+      { retryAfter: response.status === 429 && retry > 0 ? retry : null, stepUp: data?.error?.stepUp || null },
     )
   }
   return data
