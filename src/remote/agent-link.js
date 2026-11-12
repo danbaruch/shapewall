@@ -27,7 +27,9 @@
 
 import { randomBytes } from 'node:crypto'
 import { redact } from '../agent/backends/openai.js'
+import { cardHash } from '../agent/card-hash.js'
 import { runTurn } from '../agent/run.js'
+import { FixRefusal, dropFixFolder, finishFix, prepareFix } from './agent-fix.js'
 import { JobError, TURN_ID_RE, cleanJob, jobConversation } from './agent-job.js'
 import { RemoteError, badTokenMessage, readBounded } from './remote.js'
 import { ID_RE } from '../config.js'
@@ -136,8 +138,13 @@ export async function runAgentLink({
   token,
   source = null,
   backend,
+  // The same agent started to take edits from the board (acp.js remoteEdit),
+  // for fixes; null: this machine reads and answers only.
+  editBackend = null,
+  // { config, env, fetchImpl }: the project a fix is made in (agent-fix.js).
+  fix = null,
   hello,
-  policy = { audience: 'server' },
+  policy: givenPolicy = {},
   remote = null,
   // Close a link another process holds for this agent, and take its place.
   takeover = false,
@@ -148,6 +155,9 @@ export async function runAgentLink({
   onReady = () => {},
 }) {
   const limit = { ...LINK_DEFAULTS, ...limits }
+  // Whatever is missing reads as the narrowest: no approvals, nothing automatic.
+  const policy = { audience: 'server', approvals: 'none', commands: [], auto: [], allowPaths: [], base: null, remote: null, ...givenPolicy }
+  if (!editBackend || !fix) policy.approvals = 'none'
   const api = createLinkClient({ origin, token, source, fetchImpl })
   const maxTurns = Math.min(Math.max(Number(hello.maxTurns) || 2, 1), 4)
   // turn id -> { controller, done }
@@ -169,7 +179,8 @@ export async function runAgentLink({
 
   async function runOne(id) {
     const controller = new AbortController()
-    const entry = { controller, done: null }
+    // `cards`: the permission cards of this turn that wait for an answer.
+    const entry = { controller, done: null, cards: new Map(), thread: null, backend }
     running.set(id, entry)
     // Events on their way to the server, in order.
     let pending = []
@@ -270,8 +281,37 @@ export async function runAgentLink({
       }
     }
     const refused = (text, code = 'refused') => ({ text: '', cards: [], status: 'error', error: { code, message: text } })
+    // What the agent does, on its way to the server with this agent's token
+    // removed. A permission card that waits for an answer goes out at once,
+    // as `permission`, with the hash an answer must carry (card-hash.js). A
+    // card that cannot be hashed cannot be answered: it is denied here.
+    const emit = (name, data) => {
+      if (name === 'text' || name === 'reasoning') return push(name, { text: clean(data.text) })
+      const sent = JSON.parse(clean(JSON.stringify(data)))
+      if (name === 'tool' && sent?.kind === 'permission') {
+        if (sent.state !== 'pending') {
+          entry.cards.delete(sent.id)
+          return push('tool', sent)
+        }
+        const hash = cardHash(id, sent)
+        if (!hash) {
+          setImmediate(() => entry.backend?.answerPermission(entry.thread, sent.id, 'deny'))
+          return
+        }
+        entry.cards.set(sent.id, { hash, expires: Date.parse(sent.expiresAt) })
+        push('permission', { ...sent, hash })
+        clearTimeout(timer)
+        timer = null
+        sending = sending.then(flush)
+        return
+      }
+      push(name, sent)
+    }
 
     let job = null
+    // A fix: its folder (agent-fix.js), and what was allowed in it.
+    let prepared = null
+    const approved = new Map()
     try {
       const fetched = await api.job(id, controller.signal)
       job = cleanJob(fetched?.job)
@@ -282,9 +322,50 @@ export async function runAgentLink({
         await finish(
           refused('This agent takes questions only from the person who connected it (set on its own machine).', 'agent_audience'),
         )
+        if (job.turn.kind !== 'chat') await answerComment(job, null)
         return
       }
-      log(`turn ${id}: ${job.turn.kind === 'comment' ? `comment #${job.turn.comment}` : 'chat'} on ${job.turn.board}`)
+      const fixing = job.turn.kind === 'fix'
+      log(
+        `turn ${id}: ${fixing ? `fix for comment #${job.turn.comment}` : job.turn.kind === 'comment' ? `comment #${job.turn.comment}` : 'chat'} on ${job.turn.board}`,
+      )
+      let fixTurn = {}
+      if (fixing) {
+        // This machine's own rule again: no fix unless it said so itself.
+        if (policy.approvals === 'none' || !editBackend || !fix) {
+          await finish(refused('This agent reads and answers only: its machine does not take edits from the board.', 'agent_read_only'))
+          await answerComment(job, null)
+          return
+        }
+        if (!job.context.comment) {
+          await finish(refused('This agent may not read that comment, so it cannot fix it.', 'agent_audience'))
+          await answerComment(job, null)
+          return
+        }
+        await remote?.setAgentStatus(job.turn.board, job.turn.comment, 'working', { onlyFrom: ['queued'] }).catch(() => {})
+        push('status', { text: 'Making a fresh copy of the project on a new branch' })
+        try {
+          prepared = await prepareFix({ config: fix.config, policy, job, env: fix.env })
+        } catch (error) {
+          if (!(error instanceof FixRefusal)) throw error
+          log(`turn ${id}: ${error.message}`)
+          await finish(refused(error.message, 'fix_refused'))
+          await answerComment(job, null, { why: error.message })
+          return
+        }
+        const kindOf = (kind) => (kind === 'edit' ? 'edits' : 'commands')
+        fixTurn = {
+          workdir: prepared.workdir,
+          gate: {
+            // Asked on the board, unless this machine and the server's rule both say "allow".
+            decide: ({ kind }) => (job.approvals[kindOf(kind)] === 'auto' && policy.auto.includes(kindOf(kind)) ? 'allow' : 'ask'),
+            approved: (rel, hash) => approved.set(rel, hash),
+            expected: (rel) => approved.get(rel) || null,
+          },
+        }
+        entry.backend = editBackend
+      }
+      entry.thread = `${job.turn.board}/${job.turn.thread}`
       const reply = await runTurn({
         config: null,
         // The board's own store is not on this machine: the conversation is
@@ -293,21 +374,46 @@ export async function runAgentLink({
         threadId: job.turn.thread,
         messages: [],
         conversation: jobConversation(job),
-        backend,
-        emit: (name, data) =>
-          push(name, name === 'text' || name === 'reasoning' ? { text: clean(data.text) } : JSON.parse(clean(JSON.stringify(data)))),
+        backend: fixing ? editBackend : backend,
+        emit,
         signal: controller.signal,
         allowCapture: false,
         agentName: job.agent.name,
+        ...fixTurn,
       })
       // Stopped from here (Ctrl+C, a lost link) reads differently from Stop on the board.
       if (reply.status === 'stopped' && ['shutdown', 'link_lost'].includes(controller.signal.reason)) {
         reply.status = 'error'
         reply.error = { code: 'interrupted', message: "The agent's machine stopped before it finished. Ask again." }
       }
+      let fixed = null
+      if (prepared) {
+        // The agent's session lived in the fix's folder: it ends with it.
+        editBackend.resetThread?.(entry.thread)
+        push('status', { text: 'Checking and committing the fix' })
+        const done = prepared
+        prepared = null
+        // A turn that was stopped, failed or allowed nothing leaves no branch.
+        if (reply.status !== 'done' || reply.error || !approved.size) await dropFixFolder(done)
+        else {
+          fixed = await finishFix({
+            config: fix.config,
+            policy,
+            prepared: done,
+            job,
+            approved,
+            env: fix.env,
+            fetchImpl: fix.fetchImpl,
+            log,
+          })
+          if (fixed.summary) reply.summary = fixed.summary
+          for (const [index, text] of fixed.notes.entries())
+            reply.cards.push({ id: `note-fix-${index + 1}`, kind: 'note', name: 'note', label: String(text).slice(0, 200) })
+        }
+      }
       const message = JSON.parse(clean(JSON.stringify(reply)))
       await finish(message)
-      if (job.turn.kind === 'comment') await answerComment(job, message)
+      if (job.turn.kind !== 'chat') await answerComment(job, message, { fixed })
     } catch (error) {
       if (fatalLinkError(error)) throw error
       if (error instanceof RemoteError && [404, 410].includes(error.status)) return
@@ -317,27 +423,74 @@ export async function runAgentLink({
           error instanceof JobError ? 'This agent could not read the request the server sent.' : 'The agent could not answer. Ask again.',
         ),
       ).catch(() => {})
-      if (job?.turn.kind === 'comment') await answerComment(job, null).catch(() => {})
+      if (job && job.turn.kind !== 'chat') await answerComment(job, null).catch(() => {})
     } finally {
       clearTimeout(timer)
+      if (prepared) {
+        editBackend?.resetThread?.(entry.thread)
+        await dropFixFolder(prepared).catch(() => {})
+      }
       running.delete(id)
       next()
     }
   }
 
+  // A person's answer to a card, as the server relays it. It counts only for
+  // a card this machine asked and still waits on, with the hash of exactly
+  // what it asked, before the card expired, and once. An "allow" that fails
+  // any of that is a deny; an answer for a card that is not waiting here is
+  // nothing at all.
+  function onAnswer(data) {
+    const entry = running.get(String(data?.turn || ''))
+    const cardId = String(data?.card || '')
+    const card = entry?.cards.get(cardId)
+    if (!card) {
+      if (data?.turn) log(`answer for a card that is not waiting here (${cardId.slice(0, 40) || 'no id'}): ignored`)
+      return
+    }
+    entry.cards.delete(cardId)
+    let allow = data.decision === 'allow'
+    const why = !allow
+      ? null
+      : data.hash !== card.hash
+        ? 'it is not for what was asked'
+        : !(Date.now() < card.expires)
+          ? 'it came too late'
+          : policy.approvals === 'none'
+            ? 'this machine takes no approvals'
+            : policy.approvals === 'owner' && data.by?.owner !== true
+              ? 'only the person who connected this agent may allow'
+              : null
+    if (why) {
+      allow = false
+      log(`an "allow" was not taken: ${why}`)
+    }
+    entry.backend?.answerPermission(entry.thread, cardId, allow ? 'allow' : 'deny')
+  }
+
   // The reply on a comment that was sent to this agent, and where it stands
-  // now: answered (done) or left to a person.
-  async function answerComment(job, message) {
+  // now: answered (done), a fix waiting on a branch, or left to a person.
+  // `fixed`: what a fix ended as (agent-fix.js finishFix). `why`: why a fix
+  // was not started.
+  async function answerComment(job, message, { fixed = null, why = null } = {}) {
     if (!remote) return
     const { board, comment } = job.turn
+    const fixing = job.turn.kind === 'fix'
     const ok = message?.status === 'done' && !message.error && message.text?.trim()
+    const ready = fixing && fixed?.status === 'branch-ready'
+    const lines = []
+    if (ok) lines.push(message.text.slice(0, 8000))
+    if (fixing) {
+      if (ready) lines.push(fixed.line)
+      else if (why) lines.push(`I could not start this fix. ${why}`)
+      else if (!ok) lines.push('I could not make this fix from here. It needs a person.')
+      else lines.push('No change was committed.')
+      for (const note of fixed?.notes || []) lines.push(note)
+    } else if (!ok)
+      lines.push('I could not answer this comment from here. It needs a person, or an agent that can edit (shapewall watch --exec).')
     try {
-      await remote.reply(board, comment, {
-        body: ok
-          ? message.text.slice(0, 9000)
-          : 'I could not answer this comment from here. It needs a person, or an agent that can edit (shapewall watch --exec).',
-      })
-      await remote.setAgentStatus(board, comment, ok ? 'done' : 'needs-human')
+      await remote.reply(board, comment, { body: lines.join('\n\n').slice(0, 9000) })
+      await remote.setAgentStatus(board, comment, fixing ? (ready ? 'branch-ready' : 'needs-human') : ok ? 'done' : 'needs-human')
     } catch (error) {
       log(`comment #${comment}: ${error.message}`)
     }
@@ -368,6 +521,8 @@ export async function runAgentLink({
       open.add(turn.id)
       if (running.has(turn.id)) {
         if (turn.cancel) running.get(turn.id).controller.abort('stopped')
+        // Answers given while the link was down.
+        for (const answer of Array.isArray(turn.answers) ? turn.answers.slice(0, 20) : []) onAnswer({ ...answer, turn: turn.id })
         continue
       }
       // Queued: ours to start. Running without us: this process restarted
@@ -464,7 +619,18 @@ export async function runAgentLink({
     }
     try {
       const said = await api.hello(
-        { ...hello, maxTurns, capabilities: { chat: true }, policy: { audience: policy.audience }, ...(taking ? { takeover: true } : {}) },
+        {
+          ...hello,
+          maxTurns,
+          capabilities: {
+            chat: true,
+            edits: policy.approvals !== 'none',
+            commands: policy.approvals !== 'none' && policy.commands.length > 0,
+          },
+          // What this machine allows, for the board to show. The server can only narrow it.
+          policy: { audience: policy.audience, approvals: policy.approvals, commands: policy.commands, auto: policy.auto },
+          ...(taking ? { takeover: true } : {}),
+        },
         controller.signal,
       )
       agent = said?.agent && typeof said.agent.id === 'string' ? said.agent : null
@@ -514,6 +680,7 @@ export async function runAgentLink({
           }
           if (name === 'work') start(data?.turn)
           else if (name === 'cancel') running.get(String(data?.turn || ''))?.controller.abort('stopped')
+          else if (name === 'answer') onAnswer(data)
           else if (name === 'change') scanComments()
           else if (name === 'bye') {
             takenOver = true

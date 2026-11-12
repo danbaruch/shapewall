@@ -45,6 +45,8 @@ import {
   APPROVAL_ROLES,
   APPROVAL_RULES,
   approvalAutoAvailable,
+  approvalRuleFor,
+  canAnswerApproval,
   canChangeApprovalRoles,
   canChangeApprovalRule,
   canManageAgents,
@@ -317,6 +319,92 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
     forget()
     return get(row.project_id, row.id)
   }
+  // What the agent's machine said it allows (hello), as the approval rules
+  // read it. Nothing here is ever more than the machine said.
+  function machinePolicy(row) {
+    const policy = linked(row) ? capsOf(row).policy || {} : {}
+    const approvals = ['owner', 'admins'].includes(policy.approvals) ? policy.approvals : 'none'
+    const commands =
+      approvals !== 'none' && Array.isArray(policy.commands) ? policy.commands.filter((item) => typeof item === 'string') : []
+    const auto =
+      approvals !== 'none' && Array.isArray(policy.auto)
+        ? policy.auto.filter((kind) => kind === 'edits' || (kind === 'commands' && commands.length > 0))
+        : []
+    return { audience: policy.audience === 'owner' ? 'owner' : 'server', approvals, commands, auto }
+  }
+  const approvalOf = (row) => {
+    const machine = machinePolicy(row)
+    return {
+      approvalRule: row.approval_rule,
+      approvalChangeRole: row.approval_change_role,
+      approvalAnswerRole: row.approval_answer_role,
+      machineApprovals: machine.approvals,
+      machineAuto: machine.auto,
+    }
+  }
+  // The rule in effect for this agent's requests, per kind: what a fix is told.
+  const approvalRules = (row) => ({
+    edits: approvalRuleFor(approvalOf(row), 'edits'),
+    commands: approvalRuleFor(approvalOf(row), 'commands'),
+  })
+  // Whether a machine takes edits from the board at all, and how its
+  // requests are answered: "none" (reads and answers), "ask" or "auto".
+  function editMode(row) {
+    const machine = machinePolicy(row)
+    if (machine.approvals === 'none') return 'none'
+    return approvalRules(row).edits === 'auto' ? 'auto' : 'ask'
+  }
+  // May this person answer this agent's permission cards, and if not, why
+  // (said on the card). Every rule must hold: the agent's answer role, its
+  // audience and the project's trust (the same as sending it work), and the
+  // level its own machine set ("owner": only the person who connected it).
+  function answerCheck(row, { userId, role, boardId = null }) {
+    const machine = machinePolicy(row)
+    const owner = people().get(row.created_by) || null
+    if (!live(row)) return { ok: false, reason: `${row.name} was revoked.` }
+    if (machine.approvals === 'none')
+      return { ok: false, reason: `${row.name} reads and answers only: its machine takes no approvals from the board.` }
+    const who =
+      machine.approvals === 'owner'
+        ? personName(owner)
+        : row.approval_answer_role === 'owner'
+          ? `an owner ${row.name} takes work from`
+          : `an admin ${row.name} takes work from`
+    const no = { ok: false, reason: `Waiting for ${who} to allow or deny this.` }
+    if (!userId || !canAnswerApproval(role, approvalOf(row))) return no
+    if (!inAudience(row, userId) || !trusted(row.project_id, boardId, userId)) return no
+    if (machine.approvals === 'owner' && row.created_by !== userId) return no
+    return { ok: true, reason: null, owner: Boolean(row.created_by) && row.created_by === userId }
+  }
+  // The link opened (hello): when the machine no longer allows "without
+  // asking", a stored "always allow" does not wait for it to come back. It
+  // is set to "ask" again, in the open. `audit(action, target, detail)`.
+  // Also says, when it changed, what the machine allows now.
+  function helloPolicy(before, after, audit) {
+    const was = machinePolicy(before)
+    const now = machinePolicy(after)
+    const shape = (policy) => ({ approvals: policy.approvals, commands: policy.commands.length, auto: policy.auto })
+    if (JSON.stringify(shape(was)) !== JSON.stringify(shape(now)))
+      audit?.('agent_edit_mode_changed', after.id, {
+        project: after.project_id,
+        name: after.name,
+        before: shape(was),
+        after: shape(now),
+        by: 'machine',
+      })
+    if (after.approval_rule === 'auto' && !approvalAutoAvailable(approvalOf(after))) {
+      t.run("UPDATE agents SET approval_rule = 'ask' WHERE workspace_id = :ws AND id = :id", { id: after.id })
+      audit?.('agent_approval_rule_changed', after.id, {
+        project: after.project_id,
+        name: after.name,
+        before: { rule: 'auto' },
+        after: { rule: 'ask' },
+        reason: 'the machine no longer allows requests without asking',
+      })
+      forget()
+    }
+    return get(after.project_id, after.id)
+  }
   // A claim-scoped token was heard from: its agent is online, and its
   // last-seen time is written down at most once a minute.
   function seen(row) {
@@ -434,12 +522,38 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
         commands: caps.commands === true,
         images: caps.images === true,
       },
-      policy: {
-        audience: caps.policy?.audience === 'owner' ? 'owner' : 'server',
-        approvals: 'none',
-        commands: 'never',
-      },
+      policy: machinePolicy(row),
       maxTurns: Number.isInteger(caps.maxTurns) ? caps.maxTurns : null,
+    }
+  }
+  // Edits from the board, as the board says it about this agent: whether
+  // its machine takes them, how requests are answered, and whether this
+  // person may press Fix and answer its cards (with the reason when not).
+  function editsView(row, viewer, { boardId = null } = {}) {
+    const mode = editMode(row)
+    const machine = machinePolicy(row)
+    const answer = mode === 'none' ? { ok: false, reason: null } : answerCheck(row, { ...viewer, boardId })
+    const chat = chatCheck(row, { ...viewer, boardId })
+    const fix =
+      mode === 'none'
+        ? {
+            ok: false,
+            reason: `${row.name} reads and answers only. Edits are switched on on its own machine (shapewall agent connect --approvals).`,
+          }
+        : chat.ok
+          ? { ok: true, reason: null }
+          : { ok: false, reason: chat.reason }
+    return {
+      mode,
+      text:
+        mode === 'none'
+          ? 'Reads and answers'
+          : mode === 'auto'
+            ? 'Edits on a branch, allowed without asking'
+            : `Edits on a branch, each allowed by ${machine.approvals === 'owner' ? 'the person who connected it' : row.approval_answer_role === 'owner' ? 'an owner' : 'an admin'}`,
+      commands: machine.commands.length,
+      answer: { ok: answer.ok, reason: answer.reason },
+      fix,
     }
   }
 
@@ -730,6 +844,7 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
       // A connected agent: whether it chats, and whether this person may
       // chat with it right now (with the reason when not).
       link: linkView(row),
+      edits: editsView(row, viewer, { boardId }),
       chat: (() => {
         const chat = chatCheck(row, { ...viewer, boardId })
         return { ok: chat.ok, code: chat.code, reason: chat.reason }
@@ -762,11 +877,8 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
     const working = held(row.project_id).get(row.token_id) || []
     const queued = waiting(row.project_id).get(row.id) || []
     const audience = audienceOf(row)
-    const approval = {
-      approvalRule: row.approval_rule,
-      approvalChangeRole: row.approval_change_role,
-      approvalAnswerRole: row.approval_answer_role,
-    }
+    const approval = approvalOf(row)
+    const machine = machinePolicy(row)
     return {
       id: row.id,
       name: row.name,
@@ -787,6 +899,10 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
         autoAvailable: approvalAutoAvailable(approval),
         changeRole: row.approval_change_role,
         answerRole: row.approval_answer_role,
+        // What its own machine allows: the ceiling for everything above.
+        mode: editMode(row),
+        machine: { approvals: machine.approvals, commands: machine.commands, auto: machine.auto },
+        rules: approvalRules(row),
       },
       counts: { working: working.length, queued: queued.length },
       link: { ...linkView(row), streams: linkOf(row)?.streams || 0 },
@@ -938,7 +1054,7 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
     if (!live(row)) throw new HttpError(409, 'agent_revoked', 'This agent was revoked.')
     const before = { rule: row.approval_rule, changeRole: row.approval_change_role, answerRole: row.approval_answer_role }
     const next = { ...before }
-    const current = { approvalRule: before.rule, approvalChangeRole: before.changeRole, approvalAnswerRole: before.answerRole }
+    const current = approvalOf(row)
     if (changes.rule !== undefined && changes.rule !== before.rule) {
       if (!APPROVAL_RULES.includes(changes.rule))
         throw new HttpError(400, 'invalid_approval_rule', `Approval rule: ${APPROVAL_RULES.join(', ')}.`)
@@ -948,7 +1064,7 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
         throw new HttpError(
           409,
           'approval_auto_unavailable',
-          "Automatic approval needs the agent's own machine to allow approvals from the board. No connected agent can do that yet.",
+          "Allowing without asking needs the agent's own machine to say so first: shapewall agent connect --approvals owner --auto edits, on that machine.",
         )
       next.rule = changes.rule
     }
@@ -1011,6 +1127,12 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
     linked,
     capsOf,
     hello,
+    helloPolicy,
+    machinePolicy,
+    approvalRules,
+    editMode,
+    answerCheck,
+    editsView,
     chatCheck,
     linkView,
     seen,

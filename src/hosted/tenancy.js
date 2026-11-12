@@ -35,6 +35,7 @@ export const TENANT_TABLES = [
   'chat_threads',
   'chat_messages',
   'chat_turns',
+  'chat_permissions',
 ]
 export { ROLES, roleAtLeast } from './permissions.js'
 

@@ -137,8 +137,9 @@ test('approving a connection makes an agent with its own token: fixed scopes, th
   assert.ok(agent.link.connectedAt)
   assert.equal(agent.link.version, '0.5.0')
   assert.deepEqual(agent.link.capabilities, { chat: true, edits: false, commands: false, images: false })
-  assert.deepEqual(agent.link.policy, { audience: 'server', approvals: 'none', commands: 'never' })
+  assert.deepEqual(agent.link.policy, { audience: 'server', approvals: 'none', commands: [], auto: [] })
   assert.equal(agent.approval.autoAvailable, false, 'a read-only agent never opts in to approvals')
+  assert.equal(agent.approval.mode, 'none')
   const log = audit()
   const connected = log.find((row) => row.action === 'agent_connected')
   assert.equal(connected.target, builder.agentId)
@@ -270,17 +271,18 @@ test('read and answer only: the machine refuses writes, commands and permission 
   // And there is nothing to answer on the server either.
   const answer = await ada.browser.post(chatUrl(thread, `/permissions/${card.id}`), { optionId: 'allow' })
   assert.equal(answer.status, 409)
-  assert.equal(answer.json.error.code, 'read_only_agent')
+  assert.equal(answer.json.error.code, 'no_permission')
   // What the machine offered the agent in the first place.
   const caps = JSON.parse((await chat(ada, chatUrl(thread, '/messages'), 'caps')).final.text)
   assert.deepEqual(caps, { fs: { readTextFile: true, writeTextFile: false }, terminal: false })
   // Its environment has no Shapewall token or setting.
   const names = JSON.parse((await chat(ada, chatUrl(thread, '/messages'), 'env')).final.text)
   assert.ok(!names.some((name) => /^SHAPEWALL_/.test(name)))
-  // A fix from the board is refused with words, not attempted.
+  // A fix from a chat is refused with words, not attempted: a fix starts from a comment
+  // (and from an agent whose machine takes edits: test/hosted-fix.test.js).
   const fix = await chat(ada, chatUrl(thread, '/messages'), { text: 'x', fix: true })
   assert.equal(fix.status, 400)
-  assert.equal(fix.json.error.code, 'read_only_agent')
+  assert.equal(fix.json.error.code, 'fix_needs_comment')
   const image = await chat(ada, chatUrl(thread, '/messages'), {
     text: 'x',
     attachments: [{ name: 'a.png', mediaType: 'image/png', data: 'AAAA' }],

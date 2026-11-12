@@ -25,7 +25,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { Readable, Writable } from 'node:stream'
 import { PROTOCOL_VERSION, RequestError, client, ndJsonStream } from '@agentclientprotocol/sdk'
@@ -120,6 +120,58 @@ export function readOnlyEnv(kind) {
   if (kind === 'goose') return { GOOSE_MODE: 'chat' }
   return {}
 }
+
+// ---- Edits from a hosted board (`remoteEdit`) --------------------------------
+// What `shapewall agent connect --approvals ...` runs for a fix: the agent may
+// ask to edit files of the project and, when the machine lists some, to run
+// exactly those commands. Every request is checked here first, on the
+// machine, whatever anyone answers later:
+//   - an edit: a file inside the turn's folder (after symlinks), not in .git
+//     or Shapewall's store, not a settings file unless the machine allows it
+//     by name, and one whose whole result can be worked out and shown
+//   - a command: one of the machine's listed commands, character for character
+//   - anything else: refused
+// What passes becomes a card (or, where the machine and the server's rule
+// both say so, is allowed at once), through the turn's `gate`. A turn with no
+// gate changes nothing. The agent's own settings are left out as for a
+// read-only session, and it keeps only its reading and editing tools.
+const CLAUDE_EDIT_TOOLS = ['Edit', 'Write', 'MultiEdit']
+const CLAUDE_COMMAND_TOOLS = ['Bash', 'BashOutput', 'KillShell']
+export function remoteEditSession(kind, { commands = [] } = {}) {
+  if (kind !== 'claude') return {}
+  const tools = [...CLAUDE_READ_TOOLS, ...CLAUDE_EDIT_TOOLS, ...(commands.length ? CLAUDE_COMMAND_TOOLS : [])]
+  return {
+    _meta: {
+      claudeCode: {
+        options: {
+          settingSources: [],
+          strictMcpConfig: true,
+          tools,
+          disallowedTools: CLAUDE_ACTING_TOOLS.filter((tool) => !tools.includes(tool)),
+          allowDangerouslySkipPermissions: false,
+        },
+      },
+    },
+  }
+}
+// The two answers a card from a hosted board has.
+export const REMOTE_OPTIONS = [
+  { optionId: 'allow', name: 'Allow', kind: 'allow_once' },
+  { optionId: 'deny', name: 'Deny', kind: 'reject_once' },
+]
+export const REMOTE_REFUSALS = {
+  kind: "Refused on the agent's machine: only file edits and listed commands can be asked from a hosted board",
+  outside: "Refused on the agent's machine: outside the project, or in a folder agents may not write",
+  sensitive: "Refused on the agent's machine: a settings file it does not let a connected agent edit",
+  unknown: "Refused on the agent's machine: the whole change could not be worked out, so it cannot be shown",
+  large: "Refused on the agent's machine: too large to show in full",
+  command: "Refused on the agent's machine: not one of the commands it allows",
+  policy: "Refused on the agent's machine: it does not take this from the board",
+  option: "Refused on the agent's machine: the agent offered no way to allow it once",
+}
+const sha256 = (text) => createHash('sha256').update(String(text)).digest('hex')
+// The most a card's diff may weigh to be relayed to a hosted board.
+const REMOTE_DIFF_MAX = 80 * 1024
 
 const STDERR_KEEP = 4000
 // The most an approval card shows (and so the most that can be approved).
@@ -577,9 +629,10 @@ class AcpProcess {
     mcpServers = [],
     extraEnv = {},
     readOnly = false,
+    remoteEdit = null,
     preamble = null,
   }) {
-    Object.assign(this, { argv, label, sandbox, limits, log, thread, onGone, mcpServers, readOnly, preamble })
+    Object.assign(this, { argv, label, sandbox, limits, log, thread, onGone, mcpServers, readOnly, remoteEdit, preamble })
     // `extraEnv`: set by Shapewall itself, never by the agent (branch mode's
     // GIT_CEILING_DIRECTORIES), for the agent and the terminals it runs.
     // Read only: the variables that put the agent's own sandbox in force win over the person's.
@@ -598,6 +651,12 @@ class AcpProcess {
 
   get pid() {
     return this.child?.pid ?? null
+  }
+
+  // A connected agent (read only, or taking edits from a hosted board): its
+  // session must be in a mode that asks before it acts.
+  get asks() {
+    return this.readOnly || Boolean(this.remoteEdit)
   }
 
   async start(signal) {
@@ -663,7 +722,11 @@ class AcpProcess {
       const init = await this.connection.agent.request('initialize', {
         protocolVersion: PROTOCOL_VERSION,
         // Read only: the agent is offered no way to write or run through Shapewall.
-        clientCapabilities: { fs: { readTextFile: true, writeTextFile: !this.readOnly }, terminal: !this.readOnly },
+        clientCapabilities: {
+          fs: { readTextFile: true, writeTextFile: !this.readOnly },
+          // Edits from a hosted board: a terminal only when the machine lists commands.
+          terminal: !this.readOnly && !(this.remoteEdit && !this.remoteEdit.commands.length),
+        },
         clientInfo: { name: 'shapewall', title: 'Shapewall', version: VERSION },
       })
       this.agentInfo = init?.agentInfo || null
@@ -673,7 +736,11 @@ class AcpProcess {
         cwd: this.root,
         mcpServers: this.mcpServers,
         // Read only: the agent's own controls are set so that it cannot act (readOnlySession).
-        ...(this.readOnly ? readOnlySession(acpAgentKind(this.argv)) : {}),
+        ...(this.readOnly
+          ? readOnlySession(acpAgentKind(this.argv))
+          : this.remoteEdit
+            ? remoteEditSession(acpAgentKind(this.argv), this.remoteEdit)
+            : {}),
       })
       this.sessionId = session.sessionId
       this.choices = sessionChoices(session)
@@ -682,7 +749,7 @@ class AcpProcess {
       // As the session started, before any chat's choices: what a new chat starts from.
       this.startOptions = sessionOptions(this.configOptions, this.modes)
       this.state = 'ready'
-      if (this.readOnly) await this.askingMode()
+      if (this.asks) await this.askingMode()
     } catch (error) {
       throw this.startError(error)
     } finally {
@@ -807,10 +874,11 @@ class AcpProcess {
 
   // Starts session/prompt. Returns the events and a finish() for when the
   // reader stops early.
-  prompt(blocks, signal) {
+  prompt(blocks, signal, gate = null) {
     clearTimeout(this.idleTimer)
     const queue = eventQueue()
-    const turn = { queue, permissions: new Map(), cancelled: false, settled: false, text: '' }
+    // `gate`: who decides this turn's requests (edits from a hosted board).
+    const turn = { queue, permissions: new Map(), cancelled: false, settled: false, text: '', gate, chain: Promise.resolve() }
     this.turn = turn
     this.fresh = false
     const onAbort = () => this.cancel(turn)
@@ -946,7 +1014,7 @@ class AcpProcess {
 
   // Read only: what the agent asked for is refused here, and the answer
   // says so (a card nobody can answer). Returns the card's state.
-  refuse({ title, kind, detail = null }) {
+  refuse({ title, kind, detail = null, note = READ_ONLY_NOTE }) {
     const turn = this.turn
     if (turn && !turn.cancelled)
       turn.queue.push({
@@ -954,7 +1022,7 @@ class AcpProcess {
         id: `perm_${randomBytes(6).toString('hex')}`,
         title: cut(title, 120),
         kind,
-        detail: `${detail ? `${cut(detail, 300)}\n` : ''}[${READ_ONLY_NOTE}]`,
+        detail: `${detail ? `${cut(detail, 300)}\n` : ''}[${note}]`,
         diff: null,
         options: [],
         expiresAt: null,
@@ -962,6 +1030,135 @@ class AcpProcess {
         chosen: null,
       })
     return 'denied'
+  }
+
+  // ---- Edits from a hosted board ---------------------------------------------
+
+  // What an edit would leave in its file: { file, rel, current, next }, or
+  // null when that cannot be worked out in full. From a whole new content
+  // (Write), from old/new pairs every one of which the file holds now
+  // (Edit, MultiEdit), or from one ACP diff whose old text is the file as it
+  // is now. `file` is the real path, inside this turn's folder. Throws when
+  // the path is outside it (or in .git, or in Shapewall's store).
+  editResult(file, call, known, input) {
+    const real = this.sandbox.resolve(path.resolve(this.root, file), { write: true })
+    const rel = path.relative(this.root, real)
+    const current = this.currentText(real)
+    const text = (value) => (typeof value === 'string' && value.length <= DIFF_INPUT_MAX ? value : null)
+    let next = null
+    if (input) {
+      const edits = Array.isArray(input.edits) ? input.edits : [input]
+      const pairs = edits.map((edit) => ({
+        oldText: text(edit?.old_string ?? edit?.old_str ?? edit?.oldText),
+        newText: text(edit?.new_string ?? edit?.new_str ?? edit?.newText),
+        all: edit?.replace_all === true,
+      }))
+      if (pairs.length && pairs.every((pair) => pair.oldText !== null && pair.newText !== null)) {
+        next = current
+        for (const pair of pairs) {
+          if (next === null || !pair.oldText || !next.includes(pair.oldText)) return null
+          next = pair.all ? next.split(pair.oldText).join(pair.newText) : next.replace(pair.oldText, () => pair.newText)
+        }
+      } else next = text(input.content ?? input.file_text ?? input.text)
+    }
+    if (next === null) {
+      const sent = Array.isArray(call?.content) ? diffContent(call.content) : known?.diffs
+      if (sent?.length !== 1) return null
+      const only = sent[0]
+      let same = false
+      try {
+        same = this.sandbox.resolve(path.resolve(this.root, only.path), { write: true }) === real
+      } catch {
+        same = false
+      }
+      if (!same || (only.oldText ?? null) !== current) return null
+      next = only.newText
+    }
+    return { file: real, rel, current, next }
+  }
+
+  // One request of a turn that takes edits from a hosted board, decided:
+  // refused here, allowed at once (the machine and the server's rule both
+  // say so), or asked on the board. Resolves true when it may go ahead.
+  // `request`: { kind: 'edit', file, call, known, input } or
+  // { kind: 'command', command }. One at a time per turn, so each edit is
+  // worked out against the file as the one before left it.
+  remoteRequest(request, signal) {
+    const turn = this.turn
+    if (!turn || turn.cancelled) return Promise.resolve(false)
+    const run = turn.chain.then(() => this.remoteDecide(turn, request, signal))
+    turn.chain = run.catch(() => {})
+    return run
+  }
+
+  async remoteDecide(turn, request, signal) {
+    const still = () => this.turn === turn && !turn.cancelled && !signal?.aborted && this.state === 'ready' && !this.stoppingPromise
+    if (!still()) return false
+    const refuse = (title, kind, detail, note) => {
+      this.refuse({ title, kind, detail, note })
+      return false
+    }
+    // No gate: this turn was not started to change anything.
+    if (!turn.gate) return refuse(request.kind === 'edit' ? 'Edit a file' : 'Run a command', 'other', null, REMOTE_REFUSALS.policy)
+    let card
+    let approved = null
+    if (request.kind === 'edit') {
+      const shown = showable(relativeTo(this.root, String(request.file || '')))
+      let result
+      try {
+        // An earlier edit of this file that was allowed may still be on its way to disk.
+        for (let tries = 0; ; tries += 1) {
+          result = this.editResult(request.file, request.call, request.known, request.input)
+          const before = result ? turn.gate.expected?.(result.rel.split(path.sep).join('/')) : null
+          if (!before || tries >= 40 || sha256(result.current ?? '') === before) break
+          await new Promise((resolve) => setTimeout(resolve, 50))
+        }
+      } catch {
+        return refuse('Edit a file', 'edit', shown, REMOTE_REFUSALS.outside)
+      }
+      if (!still()) return false
+      if (!result) return refuse('Edit a file', 'edit', shown, REMOTE_REFUSALS.unknown)
+      const rel = result.rel.split(path.sep).join('/')
+      if (!rel || rel.startsWith('..')) return refuse('Edit a file', 'edit', shown, REMOTE_REFUSALS.outside)
+      if (this.sandbox.sensitive(result.file) && !this.remoteEdit.allowPaths.includes(rel))
+        return refuse(`Edit ${rel}`, 'edit', rel, REMOTE_REFUSALS.sensitive)
+      const diff = diffForFiles([{ path: rel, oldText: result.current, newText: result.next, outside: false }])
+      if (!diff || diff.truncated || Buffer.byteLength(JSON.stringify(diff)) > REMOTE_DIFF_MAX)
+        return refuse(`Edit ${rel}`, 'edit', rel, REMOTE_REFUSALS.large)
+      card = { title: `${result.current === null ? 'Create' : 'Edit'} ${rel}`, kind: 'edit', detail: rel, diff }
+      approved = { rel, hash: sha256(result.next) }
+    } else {
+      const command = typeof request.command === 'string' ? request.command.trim() : ''
+      if (!command || !this.remoteEdit.commands.includes(command))
+        return refuse('Run a command', 'execute', showable(command), REMOTE_REFUSALS.command)
+      card = { title: 'Run a command', kind: 'execute', detail: command, diff: null }
+    }
+    let verdict = 'deny'
+    try {
+      verdict = await turn.gate.decide(
+        request.kind === 'edit' ? { kind: 'edit', path: approved.rel } : { kind: 'command', command: card.detail },
+      )
+    } catch {
+      verdict = 'deny'
+    }
+    if (!still()) return false
+    if (verdict === 'allow') {
+      // Allowed without asking: the card says so, and nobody is waited for.
+      turn.queue.push({
+        type: 'permission',
+        id: `perm_${randomBytes(12).toString('hex')}`,
+        ...card,
+        options: [],
+        expiresAt: null,
+        state: 'approved',
+        chosen: 'Allowed automatically',
+      })
+    } else if (verdict === 'ask') {
+      const { state } = await this.ask({ ...card, options: REMOTE_OPTIONS }, signal)
+      if (state !== 'approved' || !still()) return false
+    } else return refuse(card.title, card.kind, card.detail, REMOTE_REFUSALS.policy)
+    if (approved) turn.gate.approved?.(approved.rel, approved.hash)
+    return true
   }
 
   // The composer's option menus, as sessionOptions lists them.
@@ -1031,14 +1228,14 @@ class AcpProcess {
     if (params?.sessionId === this.sessionId && params.update?.sessionUpdate === 'config_option_update') {
       // The agent changed its own model or effort (or confirmed ours): the composer shows it.
       if (Array.isArray(params.update.configOptions)) this.configOptions = params.update.configOptions
-      if (this.readOnly && this.unsafeMode()) this.kill('unsafe_mode')
+      if (this.asks && this.unsafeMode()) this.kill('unsafe_mode')
       return
     }
     if (params?.sessionId === this.sessionId && params.update?.sessionUpdate === 'current_mode_update') {
       if (this.modes && typeof params.update.currentModeId === 'string')
         this.modes = { ...this.modes, currentModeId: params.update.currentModeId }
       // Read only: an agent that switches itself to a mode that acts without asking stops.
-      if (this.readOnly && this.unsafeMode()) this.kill('unsafe_mode')
+      if (this.asks && this.unsafeMode()) this.kill('unsafe_mode')
       return
     }
     const turn = this.turn
@@ -1180,6 +1377,30 @@ class AcpProcess {
       const reject = options.find((item) => item.kind === 'reject_once') || options.find((item) => item.kind === 'reject_always')
       return reject ? { outcome: { outcome: 'selected', optionId: reject.optionId } } : { outcome: { outcome: 'cancelled' } }
     }
+    // Edits from a hosted board: checked and decided here (remoteRequest).
+    // The agent only ever hears "once": its "always" options are not used.
+    if (this.remoteEdit) {
+      const kind = call.kind || known.kind || 'other'
+      const reject = options.find((item) => item.kind === 'reject_once') || options.find((item) => item.kind === 'reject_always')
+      const no = () => (reject ? { outcome: { outcome: 'selected', optionId: reject.optionId } } : { outcome: { outcome: 'cancelled' } })
+      const allow = options.find((item) => item.kind === 'allow_once')
+      const file = [input?.file_path, input?.path, input?.filePath].find((value) => typeof value === 'string' && value)
+      const command = typeof input?.command === 'string' ? input.command : null
+      let request = null
+      if (kind === 'edit' && file) request = { kind: 'edit', file, call, known, input }
+      else if (kind === 'execute' && command !== null && !file) request = { kind: 'command', command }
+      if (!request || !allow) {
+        this.refuse({
+          title: request ? (request.kind === 'edit' ? 'Edit a file' : 'Run a command') : 'Use a tool',
+          kind,
+          detail,
+          note: request ? REMOTE_REFUSALS.option : REMOTE_REFUSALS.kind,
+        })
+        return no()
+      }
+      const ok = await this.remoteRequest(request, signal)
+      return ok ? { outcome: { outcome: 'selected', optionId: allow.optionId } } : no()
+    }
     const { state, option } = await this.ask(
       {
         title: call.title || known.title || 'Use a tool',
@@ -1271,6 +1492,32 @@ class AcpProcess {
       throw new RequestError(-32000, READ_ONLY_REFUSAL)
     }
     const turn = this.turn
+    // Edits from a hosted board: the same checks and the same card as an
+    // edit the agent makes with its own tool; then the write, through the sandbox.
+    if (this.remoteEdit) {
+      const ok =
+        typeof params?.path === 'string' && typeof params?.content === 'string'
+          ? await this.remoteRequest(
+              { kind: 'edit', file: params.path, call: null, known: null, input: { content: params.content } },
+              signal,
+            )
+          : false
+      if (!ok) throw new RequestError(-32000, 'This file was not written: the edit was refused or not allowed.')
+      try {
+        const file = this.sandbox.write(params)
+        this.turn?.queue.push({
+          type: 'tool',
+          id: `acp-write-${randomBytes(4).toString('hex')}`,
+          name: 'edit',
+          label: 'Wrote a file',
+          state: 'done',
+          detail: relativeTo(this.root, file),
+        })
+        return {}
+      } catch (error) {
+        throw sandboxRefusal(error)
+      }
+    }
     let target
     try {
       target = this.sandbox.resolve(params?.path, { write: true })
@@ -1360,19 +1607,30 @@ class AcpProcess {
       ...Object.entries(extraEnv).map(([name, value]) => `env ${name}=${showable(value)}`),
       ...(ignored.length ? [`env ignored: ${ignored.join(', ')}`] : []),
     ]
-    const { state } = await this.ask(
-      {
-        title: 'Run a command',
-        kind: 'execute',
-        detail: lines.join('\n'),
-        options: [
-          { optionId: 'run', name: 'Run', kind: 'allow_once' },
-          { optionId: 'deny', name: "Don't run", kind: 'reject_once' },
-        ],
-      },
-      signal,
-    )
-    if (state !== 'approved') throw new RequestError(-32000, `The person did not allow this command (${state}).`)
+    if (this.remoteEdit) {
+      // From a hosted board: one of the machine's listed commands, exactly,
+      // in the project folder, with no environment of the agent's choosing.
+      if (cwd !== this.root || Object.keys(extraEnv).length || ignored.length) {
+        this.refuse({ title: 'Run a command', kind: 'execute', detail: shown, note: REMOTE_REFUSALS.command })
+        throw new RequestError(-32000, 'Refused: a command from a hosted board runs in the project folder, with no extra environment.')
+      }
+      const ok = await this.remoteRequest({ kind: 'command', command: formatCommand([command, ...args]) }, signal)
+      if (!ok) throw new RequestError(-32000, 'This command was refused or not allowed.')
+    } else {
+      const { state } = await this.ask(
+        {
+          title: 'Run a command',
+          kind: 'execute',
+          detail: lines.join('\n'),
+          options: [
+            { optionId: 'run', name: 'Run', kind: 'allow_once' },
+            { optionId: 'deny', name: "Don't run", kind: 'reject_once' },
+          ],
+        },
+        signal,
+      )
+      if (state !== 'approved') throw new RequestError(-32000, `The person did not allow this command (${state}).`)
+    }
     // Approval can resolve immediately before teardown. Recheck after that
     // await so no terminal group appears after stopOwned took its snapshot.
     if (!turn || this.turn !== turn || turn.cancelled || signal?.aborted || this.state !== 'ready' || this.stoppingPromise)
@@ -1526,6 +1784,8 @@ export function createAcpBackend(
       thread,
       // Read only (settings.readOnly, `shapewall agent connect`): see the top of this file.
       readOnly: settings.readOnly === true,
+      // Edits from a hosted board (settings.remoteEdit: { commands, allowPaths }).
+      remoteEdit: settings.readOnly !== true && settings.remoteEdit ? settings.remoteEdit : null,
       mcpServers: mcpServersFor?.(thread) || [],
       onGone: (item) => {
         if (item.stopped || !item.pid) processPool?.agents.delete(item)
@@ -1578,7 +1838,9 @@ export function createAcpBackend(
     // `workdir`: { root, env, protect, sensitivePaths } for a turn that works
     // in a folder of its own (branch mode): the thread's agent runs there,
     // started afresh when its session was in another folder.
-    async *stream({ messages, signal, thread = 'default', choices = null, workdir = null }) {
+    // `gate`: { decide, approved, expected } for a turn that takes edits
+    // from a hosted board (AcpProcess.remoteRequest).
+    async *stream({ messages, signal, thread = 'default', choices = null, workdir = null, gate = null, preamble = null }) {
       if (signal?.aborted) return
       await preparing.get(thread)?.catch(() => {})
       let agent = processes.get(thread)
@@ -1605,7 +1867,11 @@ export function createAcpBackend(
       yield { type: 'status', text: `${settings.label} is working` }
       const image = agent.image && settings.vision !== false
       if (!image && messages.at(-1)?.content?.some((part) => part.type === 'image')) yield { type: 'notice', text: NO_IMAGES_NOTE }
-      const turn = agent.prompt(promptBlocks({ messages, fresh: agent.fresh, image, thread, preamble: settings.preamble || null }), signal)
+      const turn = agent.prompt(
+        promptBlocks({ messages, fresh: agent.fresh, image, thread, preamble: preamble || settings.preamble || null }),
+        signal,
+        gate,
+      )
       try {
         for await (const event of turn.events) yield event
       } catch (error) {

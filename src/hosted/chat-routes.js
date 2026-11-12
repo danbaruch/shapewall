@@ -14,6 +14,14 @@
 //   POST   agent/boards/:bid/threads/:thread/profile    { profileId }
 //   PATCH  agent/boards/:bid/threads/:thread            { title?, archived? }
 //   DELETE agent/boards/:bid/threads/:thread
+//   POST   agent/boards/:bid/threads/:thread/permissions/:id   { optionId, hash }
+//   GET    agent/boards/:bid/permissions      the cards that wait for this person
+//
+// "Fix with <agent>" is POST .../threads/comment-<n>/messages { fix: true }:
+// the server takes the comment in the agent's name (the vouch, the claim and
+// the budget are the token API's own, unchanged) and opens the turn itself.
+// Only for an agent whose own machine takes edits from the board; the fix is
+// made on a new branch there, and every edit is a card someone answers here.
 //
 // Two differences from a local board: a turn outlives the request that
 // started it (closing the tab does not stop the agent; Stop does), and
@@ -30,7 +38,12 @@
 //   - choosing a thread's agent: someone who may use the agent they choose.
 //   - Stop: whoever sent the message, the person who connected the agent,
 //     and admins.
-// A connected agent reads and answers only. There is no card to answer here.
+//   - answering a card: the role the agent's answer setting names (admin by
+//     default), in the agent's audience and trusted by the project, and the
+//     person who connected it alone when its machine says "owner"
+//     (src/hosted/agents.js answerCheck). Allow needs a fresh passkey check.
+//     The answer must carry the hash of the card as it was shown, before the
+//     card expires (2 minutes), once.
 
 import express from 'express'
 import { listJourneys } from '../journeys.js'
@@ -41,6 +54,8 @@ import { QUERY_MAX, THREAD_RE, CHAT_RE, threadKind } from '../agent/thread-histo
 import { agentPolicy } from './agent-policy.js'
 import { LINK_LIMITS } from './agent-link.js'
 import { LINK_TURNS_MAX } from './agents.js'
+import { CARD_HASH_RE, CARD_ID_RE, cardSubjectHash } from '../agent/card-hash.js'
+import { permissionView } from './chat-permissions.js'
 import { CHAT_LIMITS } from './chat-store.js'
 import { checkStorageQuota } from './comment-files.js'
 import { transaction } from './db.js'
@@ -54,6 +69,8 @@ const MENTIONS_MAX = 8
 export const FOLLOW = { queueBytes: 4 * 1024 * 1024, stuckMs: 30_000 }
 export const READ_ONLY_NOTE =
   'This agent reads the project and answers. It does not change files or run commands from the board; send a comment to an agent that runs "shapewall watch --exec" for a fix.'
+// From which agent statuses a comment may be fixed (again).
+const FIXABLE_FROM = [null, 'done', 'needs-human', 'branch-ready']
 
 const cut = (value, max) => {
   const text = String(value ?? '')
@@ -64,7 +81,23 @@ const cut = (value, max) => {
 
 export function mountChatRoutes(
   boardApi,
-  { db, handle, auditOf, agentsFor, chatFor, hub, links, chat, boardContext, rateLimiter, quotas = null, workspaceQuota = undefined },
+  {
+    db,
+    handle,
+    auditOf,
+    agentsFor,
+    chatFor,
+    hub,
+    links,
+    chat,
+    boardContext,
+    rateLimiter,
+    quotas = null,
+    workspaceQuota = undefined,
+    policyFor = null,
+    freshOrThrow = () => {},
+    now = () => new Date(),
+  },
 ) {
   const router = express.Router({ mergeParams: true })
   const said = (req) => (action, target, detail) => auditOf(req, action, target, detail)
@@ -122,11 +155,21 @@ export function mountChatRoutes(
     sendsKey: false,
     // Images are not sent to a connected agent yet.
     vision: false,
-    // Nothing on a hosted board lets the board change the agent's machine.
+    // Nothing on a hosted board changes the agent's machine directly: a fix
+    // is made on a branch there, each edit allowed on a card.
     ownerWrites: false,
     fixWithAgent: false,
     chatNeedsOwner: false,
-    readOnly: true,
+    readOnly: !agent || agent.edits?.mode === 'none',
+    // Edits from the board: the mode, whether this person may press Fix and
+    // answer its cards, and why not (src/hosted/agents.js editsView).
+    edits: agent?.edits || {
+      mode: 'none',
+      text: 'Reads and answers',
+      commands: 0,
+      answer: { ok: false, reason: null },
+      fix: { ok: false, reason: null },
+    },
     // Whether this person may send it a message now, and why not.
     composer: agent
       ? { ok: agent.chat.ok, code: agent.chat.code, reason: agent.chat.reason }
@@ -349,14 +392,126 @@ export function mountChatRoutes(
     res.once('close', finish)
   }
 
+  // ---- Fix with <agent> ----
+
+  // The server takes the comment for the agent and opens the turn. Every
+  // rule of sending a comment to an agent holds, by the same functions: the
+  // vouch (a trusted member; a non-admin's run still needs an admin's
+  // approval), the agent's audience, the claim with its budgets, one agent
+  // at a time on a comment. On top: the agent's own machine must take edits.
+  function startFix(req, at) {
+    const { ctx, threadId, store } = at
+    const body = req.body || {}
+    if (threadKind(threadId) !== 'comment') throw new HttpError(400, 'fix_needs_comment', 'Fix with agent starts from a comment.')
+    if (!policyFor) throw new HttpError(404, 'not_found', 'Not on this server.')
+    const number = Number(threadId.slice(8))
+    const agents = agentsFor(req.t)
+    const found = chatAgents(req, ctx.board.id)
+    if (body.agentId !== undefined && typeof body.agentId !== 'string') throw new HttpError(400, 'invalid_agent', 'agentId: an agent id.')
+    const agent = body.agentId ? found.agents.find((item) => item.id === body.agentId) || null : agentOfThread(found, at.row).agent
+    if (!agent) throw new HttpError(409, 'no_agent', 'No connected agent of this project can make a fix.')
+    if (agent.edits.mode === 'none') throw new HttpError(409, 'read_only_agent', agent.edits.fix.reason || READ_ONLY_NOTE)
+    if (!agent.edits.fix.ok)
+      throw new HttpError(agent.chat.code === 'agent_audience' ? 403 : 409, agent.chat.code || 'agent_unavailable', agent.edits.fix.reason)
+    if (runningOf(req, at)) throw new HttpError(409, 'agent_running', 'Wait for the answer in this chat, or stop it.')
+    const maxTurns = agent.link.maxTurns || LINK_TURNS_MAX
+    if (hub.ofAgent(req.t.workspaceId, agent.id).length >= maxTurns + LINK_LIMITS.queued)
+      throw new HttpError(429, 'agent_busy', `${agent.name} is busy. Try again in a moment.`)
+    const sends = rateLimiter.hit('chatSend', req.user.id, LIMITS.chatSend)
+    if (!sends.ok) throw new HttpError(429, 'rate_limited', 'That is a lot of requests. Wait a moment and try again.')
+    const row = agents.get(req.project.id, agent.id)
+    const expect = typeof body.dispatchHash === 'string' ? body.dispatchHash : undefined
+    const author = { name: req.user.display_name, handle: req.user.handle }
+    const made = transaction(db, () => {
+      const policy = policyFor(req.t)
+      let comment = ctx.comments.get(number)
+      if (comment.status !== 'open') throw new HttpError(409, 'comment_busy', 'This comment is resolved. Reopen it to fix it.')
+      if (['queued', 'working'].includes(comment.agent_status))
+        throw new HttpError(409, 'comment_busy', 'This comment is already with an agent.')
+      // A comment someone already sent, with its run approved, keeps that
+      // approval (pressing Fix must not undo an admin's OK). Anything else
+      // is vouched for now, by this person, for the text they saw.
+      if (policy.state(req.project.id, ctx.board.id, comment).dispatchable) {
+        if (!agents.trusted(req.project.id, ctx.board.id, req.user.id))
+          throw new HttpError(403, 'untrusted_member', 'Only a trusted member may send work to an agent.')
+      } else {
+        policy.vouch(req.project.id, ctx.board.id, comment, req.user.id, { role: req.role, approve: false, expect })
+        said(req)('comment_vouched', `${ctx.board.id}#${number}`, { project: req.project.id, approve: false, agent: agent.id, fix: true })
+      }
+      agents.address(req.project.id, ctx.board.id, comment, { userId: req.user.id, role: req.role }, agent.id)
+      comment = ctx.comments.get(number)
+      if (!policy.state(req.project.id, ctx.board.id, comment).dispatchable)
+        throw new HttpError(409, 'run_needs_approval', 'An admin has to approve this agent run first (Approve agent run, on the comment).')
+      const fresh = agentsFor(req.t)
+      const check = fresh.claimCheck(fresh.get(req.project.id, agent.id), req.project.id, comment)
+      if (!check.ok) throw new HttpError(403, check.code, check.message)
+      // The claim, in the agent's name: the same budgets as a claim it makes itself.
+      const claimId = policy.claim(req.project.id, ctx.board.id, comment, row.token_id, row.id)
+      const taken = ctx.comments.setAgentStatus(number, 'queued', { onlyFrom: FIXABLE_FROM }, now())
+      if (!taken.changed) throw new HttpError(409, 'comment_busy', 'This comment is already with an agent.')
+      const { created } = store.ensure(req.project.id, ctx.board.id, threadId, { userId: req.user.id, agentId: agent.id })
+      store.setAgent(req.project.id, ctx.board.id, threadId, agent.id)
+      if (created)
+        said(req)('chat_thread_created', `${ctx.board.id}/${threadId}`, { project: req.project.id, agent: agent.id, agentName: agent.name })
+      const message = store.append(req.project.id, ctx.board.id, threadId, {
+        role: 'user',
+        userId: req.user.id,
+        body: { text: `Fix comment #${number} with ${agent.name}.`, sent: { comment: number }, fix: true, author },
+      })
+      const turn = store.createTurn({
+        projectId: req.project.id,
+        boardId: ctx.board.id,
+        threadId,
+        agentId: agent.id,
+        kind: 'fix',
+        userId: req.user.id,
+        userMessageId: message.id,
+        commentNumber: number,
+        claimId,
+      })
+      said(req)('agent_turn_started', turn.id, {
+        project: req.project.id,
+        agent: agent.id,
+        agentName: agent.name,
+        board: ctx.board.id,
+        thread: threadId,
+        kind: 'fix',
+      })
+      return { message, turn }
+    })
+    const live = hub.open({
+      id: made.turn.id,
+      workspaceId: req.t.workspaceId,
+      projectId: req.project.id,
+      boardId: ctx.board.id,
+      threadId,
+      agentId: agent.id,
+      kind: 'fix',
+      startedBy: req.user.id,
+      seed: [
+        { name: 'user', data: { message: made.message } },
+        { name: 'status', data: { text: `Waiting for ${agent.name}` } },
+      ],
+    })
+    if (!links.send(req.t.workspaceId, agent.id, 'work', { turn: made.turn.id }))
+      chat.interrupt(req.t, made.turn, {
+        message: `${row.name} went offline before it could start. Try again when it is back.`,
+        agentName: row.name,
+      })
+    chat.notify(req.t.workspaceId, req.project.id, ctx.board.id, threadId)
+    return live
+  }
+
   router.post('/boards/:bid/threads/:thread/messages', express.json({ limit: '512kb' }), (req, res) => {
     let live
     try {
       const at = open(req)
       const { ctx, threadId, store } = at
       const body = req.body || {}
-      // What a connected agent does not do from the board yet, said plainly.
-      if (body.fix) throw new HttpError(400, 'read_only_agent', READ_ONLY_NOTE)
+      if (body.fix) {
+        live = startFix(req, at)
+        return follow(req, res, live, 0)
+      }
       if (body.editOf || body.regenerate)
         throw new HttpError(
           400,
@@ -509,6 +664,8 @@ export function mountChatRoutes(
         })
         live.cancelAt = Date.now()
         hub.push(live, 'status', { text: 'Stopping' })
+        // Stop cancels what waits for an answer: no card of a stopped turn is answered.
+        if (row) transaction(db, () => chat.cancelCards(req.t, row, live))
         // With no machine to hear it, the turn ends here. A machine that
         // does not let go in time is not waited for either (the sweep in
         // agent-link.js ends it as stopped).
@@ -611,9 +768,97 @@ export function mountChatRoutes(
     }),
   )
 
-  // What a hosted board does not have: say so, never fall through.
-  router.all('/boards/:bid/threads/:thread/permissions/:permission', (req, res) =>
-    fail(res, 409, 'read_only_agent', 'A connected agent reads and answers only: there is nothing to approve from the board.'),
+  // ---- Permission cards ----
+
+  // A person answers a card: { optionId: "allow" | "deny" (or null), hash }.
+  // Every check is made here, on the server's own record of the card, in the
+  // transaction that writes the answer: the card is this thread's running
+  // turn's, it still waits and has not expired, the hash is the one of the
+  // card as it was shown, and this person may answer this agent's cards.
+  // Allow needs a passkey check in the last minutes; Deny does not (it only
+  // ever stops something). Then the machine hears it, and checks again.
+  router.post(
+    '/boards/:bid/threads/:thread/permissions/:permission',
+    handle((req, res) => {
+      const at = open(req)
+      const live = runningOf(req, at)
+      const id = String(req.params.permission || '')
+      const optionId = req.body?.optionId ?? null
+      if (![null, 'allow', 'deny'].includes(optionId)) throw new HttpError(400, 'invalid_answer', 'optionId: "allow" or "deny".')
+      const allow = optionId === 'allow'
+      const hash = req.body?.hash
+      if (!CARD_ID_RE.test(id) || !live) throw new HttpError(409, 'no_permission', 'This request is no longer waiting for an answer.')
+      const perms = chat.permsFor(req.t)
+      const agents = agentsFor(req.t)
+      const row = at.store.turn(live.id)
+      const outcome = transaction(db, () => {
+        const card = perms.get(live.id, id)
+        // Another turn's card, another agent's, a made-up id: all the same.
+        if (!card || card.board_id !== at.ctx.board.id || card.thread_id !== at.threadId || card.agent_id !== live.agentId)
+          throw new HttpError(409, 'no_permission', 'This request is no longer waiting for an answer.')
+        const agent = agents.get(req.project.id, card.agent_id)
+        const check = agent ? agents.answerCheck(agent, viewerOf(req, at.ctx.board.id)) : { ok: false, reason: null }
+        if (!check.ok) throw new HttpError(403, 'forbidden', check.reason || "You may not answer this agent's requests.")
+        if (live.cancel || card.state !== 'pending' || card.expires_at <= now().toISOString())
+          throw new HttpError(409, 'no_permission', 'This request is no longer waiting for an answer.')
+        if (typeof hash !== 'string' || !CARD_HASH_RE.test(hash) || hash !== card.card_hash)
+          throw new HttpError(409, 'permission_changed', 'This is not the request you were shown. Reload and read it again.')
+        if (allow) freshOrThrow(req)
+        if (!perms.answer(live.id, id, { state: allow ? 'approved' : 'denied', userId: req.user.id }))
+          throw new HttpError(409, 'no_permission', 'This request is no longer waiting for an answer.')
+        const shown = perms.cardOf(card)
+        said(req)(allow ? 'agent_permission_approved' : 'agent_permission_denied', live.id, {
+          project: req.project.id,
+          agent: card.agent_id,
+          agentName: agent.name,
+          board: card.board_id,
+          thread: card.thread_id,
+          card: card.id,
+          kind: card.kind,
+          cardHash: card.card_hash,
+          // The file; a command only as its hash. Never the diff.
+          ...(card.kind === 'edit' ? { path: shown.detail } : { commandHash: cardSubjectHash(shown) }),
+        })
+        return { card: perms.get(live.id, id), owner: check.owner }
+      })
+      // Everyone watching sees it at once; then the machine hears it.
+      hub.push(live, 'tool', permissionView(outcome.card, { name: chat.nameOf(req.t) }))
+      links.send(req.t.workspaceId, live.agentId, 'answer', {
+        turn: live.id,
+        card: id,
+        decision: allow ? 'allow' : 'deny',
+        hash: outcome.card.card_hash,
+        by: { owner: outcome.owner === true },
+      })
+      if (row) chat.notify(req.t.workspaceId, req.project.id, at.ctx.board.id, at.threadId)
+      res.json({ ok: true, state: allow ? 'approved' : 'denied' })
+    }),
+  )
+
+  // The cards of this board that wait for this person (for the strip above
+  // the board, so an admin sees them with the panel closed). Never a card
+  // of someone's private chat, and never one this person may not answer.
+  router.get(
+    '/boards/:bid/permissions',
+    handle((req, res) => {
+      const ctx = boardContext(req.t, req.project, req.params.bid)
+      const agents = agentsFor(req.t)
+      const name = chat.nameOf(req.t)
+      const waiting = chat
+        .permsFor(req.t)
+        .pendingOfBoard(req.project.id, ctx.board.id)
+        .filter((card) => hub.get(card.turn_id) && !CHAT_RE.test(card.thread_id))
+        .filter((card) => {
+          const agent = agents.get(req.project.id, card.agent_id)
+          return Boolean(agent) && agents.answerCheck(agent, viewerOf(req, ctx.board.id)).ok
+        })
+        .map((card) => ({
+          ...permissionView(card, { name }),
+          thread: card.thread_id,
+          agent: { id: card.agent_id, name: agents.get(req.project.id, card.agent_id)?.name || 'Agent' },
+        }))
+      res.json({ permissions: waiting })
+    }),
   )
   router.use((req, res) => fail(res, 404, 'not_found', 'Not on a hosted board.'))
 

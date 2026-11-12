@@ -82,13 +82,22 @@ export const canChangeApprovalRule = (role, agent) => canManageAgents(role) && r
 // Which role those two take is itself an owner's decision.
 export const canChangeApprovalRoles = (role) => role === 'owner'
 export const canAnswerApproval = (role, agent) => roleAtLeast(role, agent?.approvalAnswerRole || 'admin')
-// Automatic approval needs the agent's own machine to have opted in to
-// approvals from the board (`agent.machineApprovals`, what a connected agent
-// reported: "none", "owner" or "admins"). A connected agent reads and
-// answers only for now and always reports "none", so "always ask" is the
-// only rule in effect.
-export const approvalAutoAvailable = (agent) => ['owner', 'admins'].includes(agent?.machineApprovals)
+// Automatic approval needs the agent's own machine to have opted in twice:
+// to approvals from the board at all (`agent.machineApprovals`, what a
+// connected agent reported: "none", "owner" or "admins"), and to "allowed
+// without asking" for at least one kind of request (`agent.machineAuto`:
+// "edits", "commands"). Without both, "always ask" is the only rule in
+// effect, whatever is stored. Even with both, the machine keeps its own
+// limits: the rule never widens what may be edited or which commands run.
+export const APPROVAL_KINDS = ['edits', 'commands']
+const machineAutoKinds = (agent) =>
+  ['owner', 'admins'].includes(agent?.machineApprovals)
+    ? APPROVAL_KINDS.filter((kind) => Array.isArray(agent?.machineAuto) && agent.machineAuto.includes(kind))
+    : []
+export const approvalAutoAvailable = (agent) => machineAutoKinds(agent).length > 0
 export const effectiveApprovalRule = (agent) => (agent?.approvalRule === 'auto' && approvalAutoAvailable(agent) ? 'auto' : 'ask')
+// The rule in effect for one kind of request: "auto" only for a kind the machine named.
+export const approvalRuleFor = (agent, kind) => (agent?.approvalRule === 'auto' && machineAutoKinds(agent).includes(kind) ? 'auto' : 'ask')
 
 // Roles: admins manage members and viewers (and may make admins); only
 // owners change owners or admins. `newRole` null asks about removing.

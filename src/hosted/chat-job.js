@@ -119,7 +119,8 @@ function mentionData(ctx, comments, mention) {
 // `commentItem(number)`: the thread's comment as this agent's token may
 // read it (replies filtered to its audience), or null.
 // `commentVisible(comment)`: whether this agent may read that comment.
-export function buildJob({ ctx, turn, agent, rows, inAudience, asker, commentItem, commentVisible }) {
+// `approvals`: the approval rule in effect per kind of request, for a fix.
+export function buildJob({ ctx, turn, agent, rows, inAudience, asker, commentItem, commentVisible, approvals = null }) {
   const board = ctx.board
   const all = ctx.comments.list({})
   const comments = all.filter((comment) => !comment.authorGuest && commentVisible(comment))
@@ -174,6 +175,9 @@ export function buildJob({ ctx, turn, agent, rows, inAudience, asker, commentIte
     agent: { id: agent.id, name: agent.name },
     // Who asked. `owner`: the person who connected this agent.
     asker,
+    ...(turn.kind === 'fix'
+      ? { approvals: { edits: approvals?.edits === 'auto' ? 'auto' : 'ask', commands: approvals?.commands === 'auto' ? 'auto' : 'ask' } }
+      : {}),
     messages,
     context: {
       board: { id: board.id, title: board.title, url: board.publicUrl || board.baseUrl || null, pages: board.pages.map(pageOf) },

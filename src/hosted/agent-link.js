@@ -19,6 +19,14 @@
 //   POST /agent/turns             { board, comment }: a turn the agent opens
 //                                 for a comment it took
 //
+// Approvals (a fix, on a machine that takes edits from the board): the
+// machine sends a `permission` event with the card and its hash; the server
+// checks the hash, stores the card (chat-permissions.js) and shows it. A
+// person's answer goes down the stream as `answer` { turn, card, decision,
+// hash, by }, and again in GET /agent/work for a machine that was
+// reconnecting. The machine checks it once more. The server never invents a
+// card and never calls one approved on the machine's word.
+//
 // Every route needs the "agent" scope and derives the workspace, project and
 // agent from the token: no id in a request can name another tenant's turn.
 // What the machine sends is cleaned field by field (chat-frames.js); batches
@@ -27,7 +35,9 @@
 // the event stream has) and interrupts what it was answering.
 
 import express from 'express'
+import { CARD_HASH_RE, CARD_ID_RE, CARD_LIMITS, cardContent, cardHash, cardSubjectHash } from '../agent/card-hash.js'
 import { FRAME_LIMITS, cleanEvent, cleanReply, usageOf } from './chat-frames.js'
+import { createPermissionStore, permissionView } from './chat-permissions.js'
 import { buildJob } from './chat-job.js'
 import { INTERRUPTED_MESSAGE } from './chat-store.js'
 import { LINK_KINDS, LINK_TURNS_MAX } from './agents.js'
@@ -35,7 +45,7 @@ import { rowToComment } from './comments.js'
 import { transaction } from './db.js'
 import { HttpError, fail } from './http.js'
 import { LIMITS } from './ratelimit.js'
-import { findApiToken, tenant, workspacesWithOpenTurns } from './tenancy.js'
+import { audit, findApiToken, tenant, workspacesWithOpenTurns } from './tenancy.js'
 import { TURN_LIMITS } from './turn-hub.js'
 
 export const LINK_LIMITS = {
@@ -118,6 +128,35 @@ export function partialOf(turn) {
 // What ends a turn from the server's side (the machine went away, Stop with
 // no machine to hear it, a revoked agent, a restart), in one place.
 export function createChatService({ db, hub, links, events, chatFor, now = () => new Date() }) {
+  const permsFor = (t) => createPermissionStore(t, { now })
+  const nameOf = (t) => (userId) =>
+    t.get('SELECT u.display_name FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.workspace_id = :ws AND m.user_id = :user', {
+      user: userId,
+    })?.display_name || 'someone who left'
+  // The turn is over: whatever cards still waited are cancelled, and every
+  // viewer sees it. Runs inside the caller's transaction.
+  function cancelCards(t, row, live = hub.get(row.id)) {
+    const cancelled = permsFor(t).cancelTurn(row.id)
+    if (live) for (const card of cancelled) hub.push(live, 'tool', permissionView(card, { name: nameOf(t) }))
+    return cancelled
+  }
+  // A fix that ended without its machine (it went away, was revoked, or the
+  // server restarted): the comment is not left "working" under a claim
+  // nobody holds. It needs a person; the claim ends with its usage record.
+  function releaseFix(t, row) {
+    if (row.kind !== 'fix' || !row.comment_number) return
+    const at = now().toISOString()
+    const key = { project: row.project_id, board: row.board_id, number: row.comment_number, at }
+    t.run(
+      `UPDATE comments SET agent_status = 'needs-human', agent_status_at = :at WHERE workspace_id = :ws AND project_id = :project
+         AND board_id = :board AND number = :number AND status = 'open' AND agent_status IN ('queued', 'working')`,
+      key,
+    )
+    t.run(
+      'UPDATE agent_claims SET ended_at = :at WHERE workspace_id = :ws AND project_id = :project AND board_id = :board AND comment_number = :number AND ended_at IS NULL',
+      key,
+    )
+  }
   // "An agent came or went", for the boards of its project: at most once
   // every few seconds per agent, however fast its link flaps. The last
   // change always goes out (a trailing publish).
@@ -169,7 +208,12 @@ export function createChatService({ db, hub, links, events, chatFor, now = () =>
   // Ends a turn without the machine's answer. `row`: its chat_turns row.
   function interrupt(t, row, { state = 'interrupted', message = INTERRUPTED_MESSAGE, agentName = null } = {}) {
     const live = hub.get(row.id)
-    const stored = transaction(db, () => chatFor(t).interrupt(row, { state, message, agentName, partial: live ? partialOf(live) : null }))
+    const stored = transaction(db, () => {
+      cancelCards(t, row, live)
+      const made = chatFor(t).interrupt(row, { state, message, agentName, partial: live ? partialOf(live) : null })
+      if (made) releaseFix(t, row)
+      return made
+    })
     if (live) hub.close(live, 'done', stored ? { message: stored } : null)
     if (stored) notify(row.workspace_id, row.project_id, row.board_id, row.thread_id)
     return stored
@@ -181,6 +225,38 @@ export function createChatService({ db, hub, links, events, chatFor, now = () =>
   // Turns whose machine went quiet with no link, or that ran too long; and
   // turns a person stopped whose machine did not let go in time.
   function sweep() {
+    // Cards nobody answered in time: expired here too, should the machine
+    // not say so itself. Every viewer sees it; the audit log keeps it.
+    for (const turn of hub.all()) {
+      if (turn.kind !== 'fix') continue
+      const t = tenant(db, turn.workspaceId)
+      const perms = permsFor(t)
+      const due = transaction(db, () => {
+        const rows = perms.expire(turn.id)
+        for (const row of rows) {
+          const card = perms.cardOf(row)
+          audit(t, {
+            userId: null,
+            tokenId: null,
+            shareId: null,
+            action: 'agent_permission_expired',
+            target: turn.id,
+            ip: null,
+            detail: {
+              project: turn.projectId,
+              agent: turn.agentId,
+              board: turn.boardId,
+              thread: turn.threadId,
+              card: row.id,
+              kind: card.name,
+            },
+            at: now().toISOString(),
+          })
+        }
+        return rows
+      })
+      for (const row of due) hub.push(turn, 'tool', permissionView(row, { name: nameOf(t) }))
+    }
     for (const turn of hub.all()) {
       if (!turn.cancel || Date.now() - (turn.cancelAt || 0) < LINK_LIMITS.stopGraceMs) continue
       const t = tenant(db, turn.workspaceId)
@@ -213,7 +289,7 @@ export function createChatService({ db, hub, links, events, chatFor, now = () =>
     }
     return ended
   }
-  return { notify, interrupt, interruptAgent, sweep, sweepStale, agentChanged, auditDue, close, now }
+  return { notify, interrupt, interruptAgent, sweep, sweepStale, agentChanged, auditDue, close, now, permsFor, nameOf, cancelCards }
 }
 
 const VERSION_RE = /^\d{1,4}\.\d{1,4}\.\d{1,4}(?:[-+][0-9A-Za-z.-]{1,40})?$/
@@ -222,8 +298,10 @@ const TURN_ID_RE = /^turn_[a-f0-9]{24}$/
 // a reconnect of the same process from a second process on the same token.
 const LINK_ID_RE = /^[a-f0-9]{16,64}$/
 
-// What hello may say, cleaned. A connected agent reads and answers only:
-// whatever a machine claims about edits or commands is recorded as "no".
+// What hello may say, cleaned. What a machine says about edits, commands
+// and "without asking" is its own ceiling, recorded so the board can show it
+// and the approval rules can stay under it. Anything unclear reads as the
+// narrowest: no approvals, no commands, nothing automatic.
 export function cleanHello(body) {
   const input = body && typeof body === 'object' && !Array.isArray(body) ? body : {}
   if (!LINK_KINDS.includes(input.kind)) throw new HttpError(400, 'invalid_hello', `kind: ${LINK_KINDS.join(', ')}.`)
@@ -233,17 +311,34 @@ export function cleanHello(body) {
   if (input.version !== undefined && (typeof input.version !== 'string' || !VERSION_RE.test(input.version)))
     throw new HttpError(400, 'invalid_hello', 'version: a version number.')
   const policy = input.policy && typeof input.policy === 'object' ? input.policy : {}
+  const approvals = ['owner', 'admins'].includes(policy.approvals) ? policy.approvals : 'none'
+  const edits = approvals !== 'none'
+  const commands = edits
+    ? [
+        ...new Set(
+          (Array.isArray(policy.commands) ? policy.commands : []).filter((item) => typeof item === 'string' && item && item.length <= 200),
+        ),
+      ]
+        // eslint-disable-next-line no-control-regex
+        .filter((item) => !/[\u0000-\u001f\u007f]/.test(item))
+        .slice(0, 20)
+    : []
+  const auto = edits
+    ? ['edits', 'commands'].filter(
+        (kind) => Array.isArray(policy.auto) && policy.auto.includes(kind) && (kind !== 'commands' || commands.length),
+      )
+    : []
   return {
     kind: input.kind,
     machine: typeof input.machine === 'string' ? input.machine.slice(0, 80) : null,
     capabilities: {
       chat: input.capabilities?.chat === true,
-      edits: false,
-      commands: false,
+      edits,
+      commands: commands.length > 0,
       images: false,
       version: input.version || null,
       maxTurns,
-      policy: { audience: policy.audience === 'owner' ? 'owner' : 'server', approvals: 'none', commands: 'never' },
+      policy: { audience: policy.audience === 'owner' ? 'owner' : 'server', approvals, commands, auto },
     },
   }
 }
@@ -343,7 +438,9 @@ export function mountAgentLink(
       // Before anything is written: a second process does not rename the machine of the first.
       onlyOne(req, linkId, req.body?.takeover === true)
       const agents = agentsFor(req.t)
-      const row = transaction(db, () => agents.hello(req.agent, hello))
+      // What the machine allows now, against what it allowed before: a change
+      // is audited, and a stored "always allow" it no longer backs is reset.
+      const row = transaction(db, () => agents.helloPolicy(req.agent, agents.hello(req.agent, hello), said(req)))
       res.json({
         agent: {
           id: row.id,
@@ -479,7 +576,16 @@ export function mountAgentLink(
         // `mine`: this process took it (it fetched its job). Another process's turn is not this one's to end.
         const mine = !live.linkId || live.linkId === linkIdOf(req)
         if (mine) hub.heard(live)
-        turns.push({ id: row.id, state: live.state, cancel: live.cancel, ack: live.acked, mine })
+        // Answers a person gave while this machine was reconnecting.
+        const answers = mine
+          ? chat
+              .permsFor(req.t)
+              .ofTurn(row.id)
+              .filter((card) => ['approved', 'denied'].includes(card.state) && card.answered_by)
+              .slice(-20)
+              .map((card) => answerFrame(req, card))
+          : []
+        turns.push({ id: row.id, state: live.state, cancel: live.cancel, ack: live.acked, mine, ...(answers.length ? { answers } : {}) })
       }
       res.json({ turns })
     }),
@@ -519,6 +625,9 @@ export function mountAgentLink(
           handle: person?.handle || null,
           owner: Boolean(row.started_by) && row.started_by === req.agent.created_by,
         },
+        // The approval rule in effect, per kind ("auto" only where this
+        // agent's machine said so itself; the machine checks again).
+        approvals: agents.approvalRules(req.agent),
         // A comment reaches this agent only when the person asking wrote it,
         // or the agent holds it, or its author is in the agent's audience
         // and the token API would show it to this agent's token (sent to an
@@ -596,6 +705,12 @@ export function mountAgentLink(
         return
       }
       for (const item of list) {
+        // A permission card: asked now, or one the machine says was settled.
+        if (item?.name === 'permission') {
+          askCard(req, row, live, item.data)
+          continue
+        }
+        if (item?.name === 'tool' && item.data?.kind === 'permission' && settleCard(req, row, live, item.data)) continue
         const event = cleanEvent(item)
         if (event) hub.push(live, event[0], event[1])
       }
@@ -616,10 +731,38 @@ export function mountAgentLink(
       const reply = cleanReply(req.body?.message)
       // A turn the board stopped ends as stopped, whatever the machine says.
       if (live.cancel && reply.status === 'done') reply.status = 'stopped'
+      // Only a fix leaves a branch.
+      if (row.kind !== 'fix' || reply.status !== 'done') delete reply.summary
       const stored = transaction(db, () => {
         const store = chatFor(req.t)
+        const perms = chat.permsFor(req.t)
+        chat.cancelCards(req.t, row, live)
+        // The cards that were asked on the board are the server's record of
+        // them (who answered, how), never the machine's account.
+        const name = chat.nameOf(req.t)
+        const asked = new Map(perms.ofTurn(row.id).map((card) => [card.id, card]))
+        reply.cards = reply.cards.map((card) =>
+          card.kind === 'permission' && asked.has(card.id)
+            ? { ...permissionView(asked.get(card.id), { name }), ...(card.at !== undefined ? { at: card.at } : {}) }
+            : card,
+        )
         const state = reply.status === 'done' ? 'done' : reply.status === 'stopped' ? 'stopped' : 'error'
-        if (!store.endTurn(row, state, usageOf(reply))) return null
+        if (!store.endTurn(row, state, { ...usageOf(reply), approvals: row.kind === 'fix' ? perms.counts(row.id) : null })) return null
+        if (reply.summary) {
+          const detail = {
+            project: row.project_id,
+            agent: req.agent.id,
+            agentName: req.agent.name,
+            board: row.board_id,
+            comment: row.comment_number,
+          }
+          // As the agent's machine reported it: the server sees no repository.
+          said(req)('agent_fix_branch_ready', row.id, { ...detail, branch: reply.summary.branch.name, files: reply.summary.files.length })
+          if (reply.summary.branch.pushed)
+            said(req)('agent_branch_pushed', row.id, { ...detail, branch: reply.summary.branch.name, remote: reply.summary.branch.remote })
+          if (reply.summary.pr)
+            said(req)('agent_pull_request_opened', row.id, { ...detail, branch: reply.summary.branch.name, url: reply.summary.pr.url })
+        }
         return store.append(row.project_id, row.board_id, row.thread_id, {
           role: 'assistant',
           agentId: req.agent.id,
@@ -632,6 +775,103 @@ export function mountAgentLink(
       res.json({ ok: true })
     }),
   )
+
+  // ---- Permission cards ----
+
+  // An answer as the machine hears it. `by.owner`: the person who connected
+  // this agent answered (a machine set to "owner" takes no other "allow").
+  const answerFrame = (req, card) => ({
+    turn: card.turn_id,
+    card: card.id,
+    decision: card.state === 'approved' ? 'allow' : 'deny',
+    hash: card.card_hash,
+    by: { owner: Boolean(card.answered_by) && card.answered_by === req.agent.created_by },
+  })
+  const auditCard = (req, action, row, card, extra = {}) =>
+    said(req)(action, row.id, {
+      project: row.project_id,
+      agent: req.agent.id,
+      agentName: req.agent.name,
+      board: row.board_id,
+      thread: row.thread_id,
+      card: card.id,
+      kind: card.name,
+      // The file an edit is about; a command only as its hash. Never content.
+      ...(card.name === 'edit' ? { path: card.detail } : { commandHash: cardSubjectHash(card) }),
+      ...extra,
+    })
+  // The machine asks: a card that waits for a person. Taken only for a fix
+  // of an agent whose machine takes edits, with a hash that matches what
+  // arrived, and within the turn's allowance. Anything else is answered
+  // "deny" at once (the machine is not left waiting) and shown as refused.
+  function askCard(req, row, live, data) {
+    const agents = agentsFor(req.t)
+    const id = typeof data?.id === 'string' && CARD_ID_RE.test(data.id) ? data.id : null
+    const refuse = () => {
+      if (id && typeof data.hash === 'string' && CARD_HASH_RE.test(data.hash))
+        links.send(req.t.workspaceId, req.agent.id, 'answer', {
+          turn: row.id,
+          card: id,
+          decision: 'deny',
+          hash: data.hash,
+          by: { owner: false },
+        })
+      const event = cleanEvent({ name: 'tool', data: { ...data, kind: 'permission', state: 'denied' } })
+      if (event) hub.push(live, event[0], event[1])
+    }
+    const content = cardContent(data)
+    if (!id || !content || row.kind !== 'fix' || agents.editMode(req.agent) === 'none') return refuse()
+    if (content.name === 'execute' && !agents.machinePolicy(req.agent).commands.includes(content.detail)) return refuse()
+    if (cardHash(row.id, content) !== data.hash) return refuse()
+    // Two minutes at most, by this server's clock, whatever the machine's says.
+    const latest = chat.now().getTime() + CARD_LIMITS.ttlMs
+    const wanted = Date.parse(content.expiresAt)
+    if (!(wanted > chat.now().getTime())) return refuse()
+    const stored = transaction(db, () => {
+      const made = chat
+        .permsFor(req.t)
+        .add(row, { card: content, hash: data.hash, expiresAt: new Date(Math.min(wanted, latest)).toISOString() })
+      if (made) auditCard(req, 'agent_permission_asked', row, content)
+      return made
+    })
+    if (!stored) return refuse()
+    hub.push(live, 'tool', permissionView(stored, { name: chat.nameOf(req.t) }))
+    chat.notify(req.t.workspaceId, row.project_id, row.board_id, row.thread_id)
+  }
+  // The machine says what became of a card. True: handled here (the card is
+  // one the server knows, or one the machine allowed by itself under the
+  // "always allow" rule). False: an ordinary refused request (cleanEvent).
+  function settleCard(req, row, live, data) {
+    const perms = chat.permsFor(req.t)
+    const name = chat.nameOf(req.t)
+    const stored = typeof data?.id === 'string' ? perms.get(row.id, data.id) : null
+    if (stored) {
+      // Denied, expired or cancelled there: taken. "Approved" is never taken
+      // from the machine: only a person's answer here does that.
+      if (stored.state === 'pending' && ['denied', 'expired', 'cancelled'].includes(data.state)) {
+        transaction(db, () => {
+          if (perms.settle(row.id, stored.id, data.state) && data.state === 'expired')
+            auditCard(req, 'agent_permission_expired', row, perms.cardOf(stored))
+        })
+      }
+      hub.push(live, 'tool', permissionView(perms.get(row.id, stored.id), { name }))
+      return true
+    }
+    // Allowed on the machine without asking: shown and counted only when
+    // this agent's rule here is "always allow" for that kind too.
+    if (data?.state !== 'approved' || row.kind !== 'fix') return false
+    const content = cardContent({ ...data, expiresAt: chat.now().toISOString() })
+    const agents = agentsFor(req.t)
+    if (!content || agents.approvalRules(req.agent)[content.name === 'edit' ? 'edits' : 'commands'] !== 'auto') return false
+    const made = transaction(db, () => {
+      const card = perms.add(row, { card: content, hash: cardHash(row.id, content), state: 'auto', expiresAt: content.expiresAt })
+      if (card) auditCard(req, 'agent_permission_auto', row, content)
+      return card
+    })
+    if (!made) return false
+    hub.push(live, 'tool', permissionView(made, { name }))
+    return true
+  }
 
   // A comment sent to this agent, taken by it (the claim is the token API's,
   // unchanged): its answer streams into the comment's chat thread. The agent
