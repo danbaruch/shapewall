@@ -373,7 +373,7 @@ export function ProjectAgentsPage({ projectId }) {
                             ? 'Kept from before 0.4.0, when the agent policy alone decided, so nothing changed on upgrade. New agents start with only the person who connected them.'
                             : agent.audience.kind === 'trusted'
                               ? ''
-                              : 'They must also be trusted by the agent policy below.'}
+                              : "They must also be trusted by this project's agent policy (on the project page)."}
                         </dd>
                         <dd className="mt-2">
                           <Button
@@ -632,7 +632,15 @@ function EditAgentDialog({ agent, kinds, url, onClose, onSaved }) {
       }
     >
       <div className="space-y-4 p-5" data-sw-agent-edit-dialog>
-        <NameField id={`${id}-name`} value={value} onChange={setValue} touch problem={problem} disabled={save.busy} />
+        <NameField
+          id={`${id}-name`}
+          value={value}
+          onChange={setValue}
+          touch
+          problem={problem}
+          disabled={save.busy}
+          hint="Shown on boards, in Send to agent and on its replies."
+        />
         <Field label="What runs behind it" hint="Only changes the default icon: a known program shows its mark.">
           {(field) => (
             <Select value={kind} onValueChange={setKind} disabled={save.busy}>
@@ -871,7 +879,7 @@ function ApprovalDialog({ agent, role, url, onClose, onSaved }) {
           <Field label="Who may answer its approvals" hint="They also need a fresh passkey check for each answer.">
             {roleSelect(answerRole, setAnswerRole, 'answer')}
           </Field>
-          <Field label="Who may change this rule" hint={mayRoles ? 'Only an owner changes these two.' : 'Only an owner changes these two.'}>
+          <Field label="Who may change this rule" hint="Only an owner changes these two.">
             {roleSelect(changeRole, setChangeRole, 'change')}
           </Field>
         </div>

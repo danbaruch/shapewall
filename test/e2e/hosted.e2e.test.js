@@ -400,7 +400,7 @@ test('remove one board in the console: its captures and comments go, the other b
   errors.length = 0
 })
 
-test('hosted board: the Agent control opens a panel that says whether an agent is listening', async () => {
+test('hosted board: the Agent control opens a panel that lists the agents and says which are online', async () => {
   const { page, errors } = owner
   const projectId = hosted.db.prepare("SELECT id FROM projects WHERE name = 'Demo site'").get().id
   await page.goto(`${hosted.origin}/w/${workspaceId}/p/${projectId}/?board=demo`)
@@ -409,7 +409,7 @@ test('hosted board: the Agent control opens a panel that says whether an agent i
   const agent = '[data-sw-toolbar="full"] [data-sw-panel-switch] [data-sw-chat-toggle]'
   await page.waitForSelector(agent)
   assert.equal(await page.getAttribute(agent, 'aria-pressed'), 'false')
-  assert.match(await page.getAttribute(agent, 'aria-label'), /No agent is listening/)
+  assert.match(await page.getAttribute(agent, 'aria-label'), /No agent is connected/)
   await page.click(agent)
   await page.waitForSelector('[data-sw-rail="agent"] [data-sw-hosted-agent]')
   assert.equal(await page.getAttribute(agent, 'aria-pressed'), 'true')
@@ -417,7 +417,7 @@ test('hosted board: the Agent control opens a panel that says whether an agent i
   const listening = '[data-sw-hosted-agent-listening]'
   assert.equal(await page.getAttribute(listening, 'data-sw-hosted-agent-listening'), 'none')
   const said = await page.textContent(listening)
-  assert.match(said, /No agent is listening/)
+  assert.match(said, /No agent is connected to this project/)
   assert.ok(said.includes(`shapewall watch --remote ${hosted.origin}`), 'how to connect one')
   assert.equal(
     await page.getAttribute('[data-sw-hosted-agent-docs]', 'href'),
@@ -438,8 +438,11 @@ test('hosted board: the Agent control opens a panel that says whether an agent i
   assert.equal(called.status, 200)
   await page.reload()
   await page.waitForSelector('[data-sw-hosted-agent-listening="online"]')
-  assert.match(await page.textContent(listening), /Agent online: Build box/)
-  assert.match(await page.getAttribute(agent, 'aria-label'), /Agent online: Build box/)
+  // Each agent by name, with its state (the full flows: hosted-agents.e2e.test.js).
+  const row = '[data-sw-hosted-agent-row][data-sw-hosted-agent-name="Build box"]'
+  assert.equal(await page.getAttribute(row, 'data-sw-agent-state'), 'online')
+  assert.match(await page.textContent(row), /Build box\s*Online/)
+  assert.match(await page.getAttribute(agent, 'aria-label'), /Build box online/)
   assert.doesNotMatch(await page.textContent('[data-sw-hosted-agent]'), /swp_|tk_/)
   await shot(page, 'hosted-agent-2-online')
   // The same button closes it; Comments takes its place again.

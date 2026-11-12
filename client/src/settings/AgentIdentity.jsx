@@ -193,17 +193,19 @@ export function IconPicker({ value, onChange, label, logo = null, upload = true,
   )
 }
 
-// The Name field. `builtIn`: the name an empty field falls back to.
-export function NameField({ value, onChange, builtIn = '', touch = false, id, problem = null, disabled = false }) {
+// The Name field. `builtIn`: the name an empty field falls back to. `hint`:
+// where the name shows, when that is not the local board (a team server).
+export function NameField({ value, onChange, builtIn = '', touch = false, id, problem = null, disabled = false, hint = null }) {
   return (
     <Field
       label="Name"
       htmlFor={id}
       problem={problem}
       hint={
-        builtIn
+        hint ||
+        (builtIn
           ? `Shown in chats, on its replies and on Fix buttons. Leave it empty for "${builtIn}".`
-          : 'Shown in chats, on its replies and on Fix buttons.'
+          : 'Shown in chats, on its replies and on Fix buttons.')
       }
     >
       <Input
