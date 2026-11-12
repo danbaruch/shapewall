@@ -762,6 +762,8 @@ test('in the demo: hide and add back, two charts side by side with their own opt
     }
     await page.keyboard.press('Escape')
     await panel.waitFor({ state: 'detached' })
+    // (The closing panel hands the focus back to its button; that has to land before the focus is put elsewhere.)
+    await page.waitForFunction(() => document.activeElement?.matches('[data-sw-widget-options]'))
     // By keyboard: the duration chart up past the chart above it.
     await widget(page, 'latency').focus()
     const [, row] = await placeOf(page, 'latency')

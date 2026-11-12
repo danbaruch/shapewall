@@ -1837,6 +1837,8 @@ test('nothing is cut off at the default sizes, looking or editing; lists and the
   assert.equal((await placeOf(page, 'budgets'))[1], under + 3)
   await page.keyboard.press('Escape')
   await panel.waitFor({ state: 'detached' })
+  // (The closing panel hands the focus back to its button; that has to land before the focus is put elsewhere.)
+  await page.waitForFunction(() => document.activeElement?.matches('[data-sw-widget-options]'))
   assert.deepEqual(await clipped(), [])
   // A list sized by hand keeps the height it was given, whatever its rows: it scrolls inside itself.
   await widget(page, 'top_threads').focus()
