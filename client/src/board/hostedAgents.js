@@ -116,3 +116,52 @@ export function agentsSummary(list) {
 }
 // Whether any agent could act on a comment right now (null: not known yet).
 export const anyOnline = (list) => (list ? (list.agents || []).some((agent) => agent.state !== 'offline') : null)
+
+// ---- Fix with <agent> (HostedFix.jsx) ------------------------------------------
+//
+// An agent connected with `shapewall agent connect --approvals ...` makes
+// fixes from the board, on a branch on its own machine. Each agent says
+// whether this person may press Fix with it now (`edits.fix`: { ok, reason },
+// src/hosted/agents.js editsView) and how its edits are allowed
+// (`edits.text`).
+
+// The mode line under an agent's name, or '' for one that is not connected
+// for chat and fixes (it takes comments with `shapewall watch --remote`).
+export const editsLine = (agent) => (agent?.link?.connected && agent.edits?.text ? agent.edits.text : '')
+
+// What "Fix with ..." on a comment offers this person:
+// { agent, options, reason }. `agent`: the one the main button uses (the
+// agent the comment is addressed to, else the project's default, else the
+// first that can fix), or null when none can. `options`: every agent that
+// can, as the picker's rows (chat/AgentPicker.jsx), when there are several.
+// `reason`: with no agent, the one line that says why, from the agent the
+// fix would have gone to (null: no connected agent makes fixes at all, and
+// nothing needs saying).
+export function fixChoice(list, comment = null) {
+  const agents = list?.agents || []
+  const wanted = [byId(agents, comment?.agentId), byId(agents, list?.defaultAgentId), ...agents].filter(Boolean)
+  const first = (pool) => wanted.find((agent) => pool.includes(agent)) || null
+  const able = agents.filter((agent) => agent.edits?.fix?.ok === true)
+  if (!able.length) {
+    const linked = agents.filter((agent) => agent.link?.connected && agent.edits?.fix?.reason)
+    // An agent whose edits are on but that is offline or not theirs says more than one that only reads.
+    const would = first(linked.filter((agent) => agent.edits.mode !== 'none')) || first(linked)
+    return { agent: null, options: [], reason: would ? would.edits.fix.reason : null }
+  }
+  const agent = first(able)
+  const options =
+    able.length > 1
+      ? [agent, ...able.filter((item) => item !== agent)].map((item) => ({
+          id: item.id,
+          label: item.name,
+          configured: true,
+          state: STATE_MARK[item.state] || 'ready',
+          line: [editsLine(item) || stateWords(item), item.machine].filter(Boolean).join(' · '),
+          isDefault: Boolean(item.isDefault),
+          icon: item.icon || null,
+          tint: item.tint || null,
+          logo: item.logo || null,
+        }))
+      : []
+  return { agent, options, reason: null }
+}

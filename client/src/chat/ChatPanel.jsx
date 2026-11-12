@@ -39,6 +39,8 @@ import { ChatHistory, exportThread, restoreVersion } from './history'
 import { fallbackTitle, isChatThread, newChatId, threadKind } from './threads'
 import { useAnswerRatings } from './actions'
 import { AllowForChat } from './allowForChat'
+import { HostedAnswer, answerHostedPermission } from './hostedPermissions.js'
+import { confirmHostedPasskey } from '../board/HostedApprovals'
 import { AutoAllowSettings } from './composerParts'
 import BranchModeToggle from './BranchModeToggle'
 import { BatchProgress } from '../board/BatchFixes'
@@ -379,6 +381,7 @@ export default function ChatPanel({
   // One turn: send, stream, finish (useChatTurn.js).
   const submit = useChatTurn({
     optionChoices: () => optionsRef.current?.forMessage() || null,
+    hostedFix: () => (hosted && fixRequest?.hosted && fixRequest.commentId === commentId ? fixRequest.hosted : null),
     boardId,
     threadId,
     draft,
@@ -410,13 +413,15 @@ export default function ChatPanel({
   const startedFix = useRef(null)
   useEffect(() => {
     if (!fixRequest || fixRequest.commentId !== commentId || !configured || startedFix.current === fixRequest.nonce) return
+    // A hosted fix names its agent; a thread still loading is not the one to send from.
+    if (fixRequest.hosted && !hosted) return
     const nonce = fixRequest.nonce
     startedFix.current = nonce
     // Not sent (a turn still running, dictation on): try again when that ends.
     submitRef.current('', true).then((started) => {
       if (!started && startedFix.current === nonce) startedFix.current = null
     })
-  }, [fixRequest, commentId, configured, running, dictation.listening])
+  }, [fixRequest, commentId, configured, hosted, running, dictation.listening])
 
   // The composer's send: while a turn runs (or a message is still going
   // out), the message waits in the queue instead.
@@ -515,13 +520,25 @@ export default function ChatPanel({
     }
   }
 
+  // Resolves false when the answer was not taken (the card stays as it was).
   const answer = async (permissionId, optionId, target = threadId) => {
+    // A hosted board's card goes back with its hash; Allow may ask for the passkey first.
+    const card = hosted
+      ? [...(run?.reply?.cards || []), ...messages.flatMap((message) => message.cards || [])].find(
+          (item) => item.id === permissionId && item.kind === 'permission' && item.hosted,
+        )
+      : null
     try {
-      await answerPermission(boardId, target, permissionId, optionId)
+      if (card) await answerHostedPermission({ boardId, threadId: target, card, optionId, confirmPasskey: confirmHostedPasskey })
+      else await answerPermission(boardId, target, permissionId, optionId)
       if (!running && target === threadRef.current) thread.refetch()
+      return true
     } catch (error) {
       if (ownerOnlyError(error)) setNotice({ tone: 'info', text: OWNER_ONLY })
-      else setNotice({ tone: 'bad', text: error.message })
+      else setNotice({ tone: 'bad', text: error.message || 'That answer was not taken.' })
+      // Answered meanwhile, expired or changed: show the card as it is now.
+      if (card && target === threadRef.current) thread.refetch()
+      return false
     }
   }
 
@@ -596,6 +613,12 @@ export default function ChatPanel({
   // Hosted: this person cannot message the thread's agent right now (it is
   // offline, or it is not theirs to use): said in place of the composer.
   const hostedBlocked = hosted && configured && selectedThread && agent?.composer && !agent.composer.ok && !run ? agent.composer : null
+  // Hosted: whether this person may answer the agent's permission cards (cards.jsx).
+  const editsAnswer = agent?.edits?.answer
+  const hostedAnswer = useMemo(
+    () => (hosted ? { ok: editsAnswer?.ok === true, reason: editsAnswer?.reason || null } : null),
+    [hosted, editsAnswer?.ok, editsAnswer?.reason],
+  )
   // The turn in flight, until the refetched thread has it (by id, no doubles).
   // Only in its own thread: a comment's Ask agent can switch threads mid-turn.
   const liveRun = run?.threadId === threadId ? run : null
@@ -875,44 +898,46 @@ export default function ChatPanel({
             </div>
           ) : null}
           <AllowForChat.Provider value={allowForChat}>
-            <RefsContext.Provider value={refs}>
-              <MessageList
-                listRef={listRef}
-                scroll={scroll}
-                onContinue={() => submit(CONTINUE_PROMPT)}
-                comment={comment}
-                loading={thread.loading}
-                messages={messages}
-                shown={shown}
-                liveRun={liveRun}
-                remoteRunning={remoteRunning}
-                boardId={boardId}
-                pages={pages}
-                agent={agent}
-                speaker={speaker}
-                readAloud={readAloudProps}
-                touch={touch}
-                onAnswer={answer}
-                onRead={readMessage}
-                onRetry={retry}
-                retryDisabled={running || Boolean(draft.trim() || attachments.length)}
-                owner={Boolean(agent?.ownerWrites)}
-                onUndo={running ? null : undo}
-                onBranch={running ? null : onBranch}
-                onRecapture={onRecapture}
-                versions={selectedThread?.versions || null}
-                onEdit={hosted ? null : editMessage}
-                onVersion={chooseVersion}
-                editDisabled={running || dictation.listening}
-                ratings={answerRatings.ratings}
-                onRate={hosted ? null : answerRatings.rate}
-                onRegenerate={hosted ? null : (message, request) => submit('', false, { regenerate: { message, request } })}
-                regenerateDisabled={running || dictation.listening}
-                otherAgent={agent?.ownerWrites && otherAgent ? otherAgent : null}
-                onTryOther={tryOther}
-                onCheckAgain={agent?.ownerWrites ? checkAgain : null}
-              />
-            </RefsContext.Provider>
+            <HostedAnswer.Provider value={hostedAnswer}>
+              <RefsContext.Provider value={refs}>
+                <MessageList
+                  listRef={listRef}
+                  scroll={scroll}
+                  onContinue={() => submit(CONTINUE_PROMPT)}
+                  comment={comment}
+                  loading={thread.loading}
+                  messages={messages}
+                  shown={shown}
+                  liveRun={liveRun}
+                  remoteRunning={remoteRunning}
+                  boardId={boardId}
+                  pages={pages}
+                  agent={agent}
+                  speaker={speaker}
+                  readAloud={readAloudProps}
+                  touch={touch}
+                  onAnswer={answer}
+                  onRead={readMessage}
+                  onRetry={retry}
+                  retryDisabled={running || Boolean(draft.trim() || attachments.length)}
+                  owner={Boolean(agent?.ownerWrites)}
+                  onUndo={running ? null : undo}
+                  onBranch={running ? null : onBranch}
+                  onRecapture={onRecapture}
+                  versions={selectedThread?.versions || null}
+                  onEdit={hosted ? null : editMessage}
+                  onVersion={chooseVersion}
+                  editDisabled={running || dictation.listening}
+                  ratings={answerRatings.ratings}
+                  onRate={hosted ? null : answerRatings.rate}
+                  onRegenerate={hosted ? null : (message, request) => submit('', false, { regenerate: { message, request } })}
+                  regenerateDisabled={running || dictation.listening}
+                  otherAgent={agent?.ownerWrites && otherAgent ? otherAgent : null}
+                  onTryOther={tryOther}
+                  onCheckAgain={agent?.ownerWrites ? checkAgain : null}
+                />
+              </RefsContext.Provider>
+            </HostedAnswer.Provider>
           </AllowForChat.Provider>
           {hostedBlocked ? (
             <div className="shrink-0 p-3" data-sw-chat-blocked={hostedBlocked.code || 'true'}>

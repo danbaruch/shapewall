@@ -100,8 +100,10 @@ export async function readEventStream(response, onEvent) {
 // null to deny. Rejects with ApiError when the card is no longer waiting.
 // The settings token goes with it (lib/api.js, every thread control route): a
 // starter agent's command card is answered only by the person at the machine.
-export const answerPermission = (boardId, threadId, permissionId, optionId) =>
-  api.post(`${threadPath(boardId, threadId)}/permissions/${enc(permissionId)}`, { optionId })
+// `hash`: a hosted board's card says which request the person read (the
+// server takes an answer to that request only).
+export const answerPermission = (boardId, threadId, permissionId, optionId, hash = undefined) =>
+  api.post(`${threadPath(boardId, threadId)}/permissions/${enc(permissionId)}`, { optionId, ...(hash ? { hash } : {}) })
 
 // Rejects with ApiError when the server refuses; the panel then drops the stream.
 export const stopThread = (boardId, threadId) => api.post(`${threadPath(boardId, threadId)}/stop`, {})

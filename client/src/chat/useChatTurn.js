@@ -61,6 +61,11 @@ export function useChatTurn({
   onFixDone,
   // The chat's agent options for this message ({ configId: value }) or null.
   optionChoices = () => null,
+  // A hosted board's fix ("Fix with Builder" on a comment): () => { agentId,
+  // dispatchHash } for the fix being started, or null. The server takes the
+  // comment as this person read it and makes the turn itself: no text, no
+  // screenshot from here.
+  hostedFix = () => null,
 }) {
   // A send while a turn is still running in progress (between the click and
   // the stream starting too): one at a time.
@@ -94,7 +99,8 @@ export function useChatTurn({
     setHelp(false)
     const edited = editOf ? messages.find((message) => message.id === editOf) : null
     let sent = regenerate ? regenerate.request.attachments || [] : item.attachments
-    if (fix && comment) {
+    const remoteFix = fix ? hostedFix() : null
+    if (fix && comment && !remoteFix) {
       try {
         const files = captureFor(comment.pageId, comment.viewport)
         if (files)
@@ -113,19 +119,21 @@ export function useChatTurn({
     // that stopped meanwhile starts with them again (src/agent/routes.js).
     const choices = optionChoices()
     const withOptions = (value) => (choices && Object.keys(choices).length ? { ...value, options: choices } : value)
-    const body = regenerate
-      ? withOptions({ regenerate: regenerate.message.id })
-      : withOptions({
-          text,
-          ...(fix ? { fix: true } : {}),
-          ...(editOf ? { editOf } : {}),
-          attachments: sent.map(({ name, mediaType, data, source }) => ({ name, mediaType, data, ...(source ? { source } : {}) })),
-          // Composer extras (src/agent/composer.js): mention ids and text files.
-          ...(item.mentions.length ? { mentions: mentionsForServer(item.mentions) } : {}),
-          ...(item.files.length
-            ? { files: item.files.map(({ name, mediaType, text: content }) => ({ name, mediaType, text: content })) }
-            : {}),
-        })
+    const body = remoteFix
+      ? { fix: true, ...(remoteFix.agentId ? { agentId: remoteFix.agentId } : {}), dispatchHash: remoteFix.dispatchHash }
+      : regenerate
+        ? withOptions({ regenerate: regenerate.message.id })
+        : withOptions({
+            text,
+            ...(fix ? { fix: true } : {}),
+            ...(editOf ? { editOf } : {}),
+            attachments: sent.map(({ name, mediaType, data, source }) => ({ name, mediaType, data, ...(source ? { source } : {}) })),
+            // Composer extras (src/agent/composer.js): mention ids and text files.
+            ...(item.mentions.length ? { mentions: mentionsForServer(item.mentions) } : {}),
+            ...(item.files.length
+              ? { files: item.files.map(({ name, mediaType, text: content }) => ({ name, mediaType, text: content })) }
+              : {}),
+          })
     setNotice(null)
     if (!queued && fromComposer) {
       setDraft('')
@@ -198,7 +206,7 @@ export function useChatTurn({
       if (error.name !== 'AbortError' && !pending.final) {
         // Only restore a message the server did not accept. An interrupted
         // response must not invite an accidental duplicate send.
-        const restore = !accepted && !editOf && !regenerate
+        const restore = !accepted && !editOf && !regenerate && !remoteFix
         stash(boardId, startedThread, (composer) => {
           // Not an error to retry: the owner-only note takes the composer's place.
           if (ownerOnlyError(error)) composer.setOwnerRefused(true)

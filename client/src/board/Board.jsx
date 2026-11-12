@@ -1112,6 +1112,27 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                   openChat(threadForComment(comment.id))
                 }
               : null,
+          // Hosted: "Fix with <agent>" (HostedFix.jsx). The server takes the
+          // comment as it reads on screen at the click (`dispatchHash`), for
+          // the agent named; the comment's chat opens and shows the turn.
+          onHostedFix:
+            info?.hosted &&
+            !DEMO &&
+            chatAvailable &&
+            data?.agentDispatch &&
+            !data?.migratedTo?.readOnly &&
+            !selectedComment.authorGuest &&
+            !selectedComment.authorAgent
+              ? (comment, agentId) => {
+                  setFixRequest({
+                    commentId: comment.id,
+                    nonce: Date.now(),
+                    hosted: { agentId, dispatchHash: comment.dispatchHash },
+                  })
+                  if (!wide) setThreadSheet(false)
+                  openChat(threadForComment(comment.id))
+                }
+              : null,
           onAskAgent: chatAvailable
             ? (comment) => {
                 if (!wide) setThreadSheet(false)
@@ -1153,6 +1174,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     fixRequest,
     onFixDone: () => {
       setFixRequest(null)
+      agentsQuery.refetch()
       view.refetch()
       commentsQuery.refetch()
     },
@@ -1347,7 +1369,9 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
       <div className="flex h-full flex-col" data-sw-board={boardId} style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
         <DemoBanner />
         <AccessLostBanner />
-        {info?.hosted && data?.agentApprove ? <HostedApprovals boardId={boardId} onRows={setApprovalRows} /> : null}
+        {info?.hosted && data?.agentApprove ? (
+          <HostedApprovals boardId={boardId} onRows={setApprovalRows} onOpenThread={chatAvailable ? openChat : null} />
+        ) : null}
         <a
           href="#sw-comments"
           className="sr-only z-[80] rounded-md bg-accent px-3 py-2 text-sm font-medium text-accent-fg focus:not-sr-only focus:absolute focus:top-2 focus:left-2"

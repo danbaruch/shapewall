@@ -72,7 +72,14 @@ export function agentActivity({ comments = [], focus = null, approvals = [], tit
   else if (working.size) parts.push(`${working.size} agents working: ${names(list(working))}`)
   const passive = waiting.filter((item) => item.why !== 'approval')
   if (passive.length === 1)
-    parts.push(passive[0].why === 'branch-ready' ? `Fix ready to apply on ${passive[0].name}` : `${passive[0].name} needs a person`)
+    parts.push(
+      passive[0].why === 'branch-ready'
+        ? // Hosted: the fix is on a branch on the agent's machine; nothing is applied from the board.
+          agents
+          ? `Fix ready on a branch for ${passive[0].name}`
+          : `Fix ready to apply on ${passive[0].name}`
+        : `${passive[0].name} needs a person`,
+    )
   else if (passive.length) parts.push(`${passive.length} comments wait for you: ${names(passive)}`)
   // Hosted: say which agents would act on a comment, if any.
   if (agents) parts.push(agentsSummary(agents))

@@ -7,16 +7,16 @@
 // who may send it work. Below: what waits for a person. Only for people who
 // can send comments to an agent (never a share link guest or a public
 // viewer).
-import { Bot, MessageSquare, Settings2 } from 'lucide-react'
+import { Bot, Eye, GitBranch, MessageSquare, Settings2, ShieldCheck } from 'lucide-react'
 import { Button } from '../components/ui'
 import { PanelHeader } from '../components/panel-header'
 import { AgentMark } from '../chat/AgentPicker'
 import { useState } from 'react'
 import { cn, formatRelative } from '../lib/utils'
-import { STATE_MARK, stateWords } from './hostedAgents'
+import { STATE_MARK, editsLine, stateWords } from './hostedAgents'
 
 const DOCS_URL = 'https://shapewall.com/docs/where-to-run#where-the-work-happens'
-const WHY = { approval: 'needs your OK', 'needs-human': 'needs a person', 'branch-ready': 'fix ready to apply' }
+const WHY = { approval: 'needs your OK', 'needs-human': 'needs a person', 'branch-ready': 'fix ready on a branch' }
 const ITEM =
   'flex min-h-11 w-full items-center gap-2 rounded-md border border-line bg-surface px-2.5 py-1.5 text-left text-sm text-fg outline-none hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-accent lg:min-h-9'
 
@@ -38,6 +38,12 @@ function Items({ title, items, tone, note, onOpen, hook }) {
       </ul>
     </section>
   )
+}
+
+// Reads only, edits with an OK each time, or edits without asking.
+function ModeIcon({ mode }) {
+  const Icon = mode === 'none' ? Eye : mode === 'auto' ? ShieldCheck : GitBranch
+  return <Icon size={12} className="mt-0.5 shrink-0" aria-hidden="true" />
 }
 
 // The comments an agent holds or that wait for it, as small buttons.
@@ -69,6 +75,9 @@ function AgentRow({ agent, nameOf, onOpen, onChat }) {
   // Connected with `shapewall agent connect`: it chats.
   const chats = Boolean(onChat && agent.link?.connected && agent.link.chats)
   const [opening, setOpening] = useState(false)
+  // How its edits are allowed, as its own machine set it (hostedAgents.js).
+  const mode = agent.edits?.mode || 'none'
+  const modeLine = editsLine(agent)
   const elsewhere = (agent.elsewhere?.working || 0) + (agent.elsewhere?.queued || 0)
   return (
     <li
@@ -102,6 +111,12 @@ function AgentRow({ agent, nameOf, onOpen, onChat }) {
             {stateWords(agent)}
             {agent.machine ? ` · ${agent.machine}` : ''}
           </p>
+          {modeLine ? (
+            <p className="flex min-w-0 items-start gap-1 text-xs text-muted" data-sw-hosted-agent-mode={mode}>
+              <ModeIcon mode={mode} />
+              <span className="min-w-0">{mode === 'none' ? `${modeLine}. No edits, no commands.` : modeLine}</span>
+            </p>
+          ) : null}
         </div>
         {chats ? (
           <Button
@@ -125,10 +140,10 @@ function AgentRow({ agent, nameOf, onOpen, onChat }) {
         ) : null}
       </div>
       {/* Not theirs to use: the line about who it takes work from says so, once. */}
-      {chats && (agent.chat?.ok || agent.canSend) ? (
+      {chats && (agent.chat?.ok ? mode !== 'none' : agent.canSend) ? (
         <p className="text-[11px] text-muted" data-sw-hosted-agent-chat-note={agent.chat?.ok ? 'ok' : agent.chat?.code || 'no'}>
           {agent.chat?.ok
-            ? 'Reads the project and answers. No edits, no commands.'
+            ? 'Chat reads the project and answers. A fix starts from a comment: Fix with ' + agent.name + '.'
             : agent.chat?.code === 'agent_offline'
               ? `${agent.name} is offline: chat needs it online. A comment sent to it waits.`
               : agent.chat?.reason}
@@ -327,7 +342,7 @@ export function HostedAgentPanel({
         ) : null}
         {approvals ? (
           <p className="rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-xs text-fg" data-sw-hosted-agent-approvals={approvals}>
-            {approvals === 1 ? 'A command waits' : `${approvals} commands wait`} for your OK: see the strip at the top of the board.
+            {approvals === 1 ? 'A request waits' : `${approvals} requests wait`} for your OK: see the strip at the top of the board.
           </p>
         ) : null}
         <Items

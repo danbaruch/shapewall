@@ -8,6 +8,7 @@ import { useState } from 'react'
 import {
   CheckCircle2,
   ChevronRight,
+  CloudUpload,
   Copy,
   ExternalLink,
   FileMinus,
@@ -18,6 +19,7 @@ import {
   GitCommitHorizontal,
   GitMerge,
   GitPullRequest,
+  HardDrive,
   RefreshCw,
   Trash2,
   Undo2,
@@ -238,6 +240,81 @@ function BranchActions({ message, summary, owner, touch, onBranch }) {
   )
 }
 
+// A hosted board: the fix was made on the agent's machine, on a branch of
+// its own (src/remote/agent-fix.js). Nothing here applies or undoes it: the
+// board says where it is, whether it was pushed, and links the pull request.
+function RemoteBranch({ summary, touch }) {
+  const branch = summary.branch
+  const [note, setNote] = useState(null)
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(branch.name)
+      setNote('Copied the branch name.')
+    } catch {
+      setNote(`The branch: ${branch.name}`)
+    }
+  }
+  return (
+    <div className="space-y-1.5 border-t border-line px-2.5 py-2 text-caption text-muted" data-sw-chat-remote-branch={branch.name}>
+      <div className={cn('flex min-w-0 gap-2', touch ? 'flex-col' : 'items-center')}>
+        <p className="flex min-w-0 flex-1 items-start gap-1.5">
+          <GitBranch size={12} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 break-words">
+            Fix ready on branch{' '}
+            <span className="font-mono break-all text-fg" data-sw-chat-branch-name={branch.name}>
+              {branch.name}
+            </span>
+            {branch.commit ? (
+              <>
+                , commit <span className="font-mono text-fg">{branch.commit.slice(0, 7)}</span>
+              </>
+            ) : null}
+          </span>
+        </p>
+        <Button
+          size={touch ? 'touch' : 'sm'}
+          variant="secondary"
+          className="shrink-0"
+          onClick={copy}
+          data-sw-chat-branch-copy={branch.name}
+        >
+          <Copy size={13} aria-hidden="true" /> Copy branch name
+        </Button>
+      </div>
+      <p className="flex items-start gap-1.5" data-sw-chat-branch-pushed={branch.pushed ? 'true' : 'false'}>
+        {branch.pushed ? (
+          <CloudUpload size={12} className="mt-0.5 shrink-0" aria-hidden="true" />
+        ) : (
+          <HardDrive size={12} className="mt-0.5 shrink-0" aria-hidden="true" />
+        )}
+        <span className="min-w-0">
+          {branch.pushed ? `Pushed to ${branch.remote || 'the remote'}` : "On the agent's machine, not pushed"}
+          {branch.baseName ? `. Made from ${branch.baseName}.` : '.'}
+        </span>
+      </p>
+      {summary.pr?.url ? (
+        <p className="flex items-center gap-1.5">
+          <GitPullRequest size={12} className="shrink-0" aria-hidden="true" />
+          <a
+            href={summary.pr.url}
+            target="_blank"
+            rel="noreferrer noopener"
+            className={cn('inline-flex min-w-0 items-center gap-1 text-accent underline underline-offset-2', touch && 'min-h-11')}
+            data-sw-chat-summary-pr="true"
+          >
+            <span className="truncate">Pull request {summary.pr.number ? `#${summary.pr.number}` : summary.pr.url.split('/').pop()}</span>
+            <ExternalLink size={11} className="shrink-0" aria-hidden="true" />
+          </a>
+        </p>
+      ) : null}
+      <p className="sr-only" aria-live="polite">
+        {note || ''}
+      </p>
+      {note ? <p data-sw-chat-branch-note="true">{note}</p> : null}
+    </div>
+  )
+}
+
 function UndoDialog({ open, summary, busy, error, onCancel, onConfirm, touch }) {
   const branch = summary.undo?.kind === 'branch'
   // Agent branch mode, after Apply: Undo reverts what Apply brought in.
@@ -300,6 +377,10 @@ export default function RunSummary({ message, owner = false, touch = false, onUn
   if (!summary) return null
   const files = summary.files || []
   const undone = summary.undone
+  // A hosted board's fix: on a branch on the agent's machine. Nothing in
+  // the board's own captures changed, and nothing is applied or undone here.
+  const remote = summary.kind === 'remote-branch' && Boolean(summary.branch?.name)
+  if (remote) onRecapture = null
   const waiting = summary.branch?.state === 'ready'
   const canUndo = Boolean(owner && onUndo && summary.undo?.available && !undone && !waiting)
   const resolved = (summary.resolved || []).map((id) => resolveToken(refs?.index, 'comment', id) || { id, plain: true })
@@ -357,7 +438,8 @@ export default function RunSummary({ message, owner = false, touch = false, onUn
           {summary.more ? <li className="px-1 py-1 text-caption text-muted">and {plural(summary.more, 'more file')}</li> : null}
         </ul>
       ) : null}
-      {commit || summary.pr || resolved.length ? (
+      {remote ? <RemoteBranch summary={summary} touch={touch} /> : null}
+      {!remote && (commit || summary.pr || resolved.length) ? (
         <div className="space-y-1 border-t border-line px-2.5 py-1.5 text-caption text-muted">
           {commit ? (
             <p className="flex min-w-0 items-center gap-1.5" data-sw-chat-summary-commit={short}>
