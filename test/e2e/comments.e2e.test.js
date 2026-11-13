@@ -415,3 +415,80 @@ test('phone 390: tap a pin for the thread sheet, react and reply, 44 px targets,
     await context.close()
   }
 })
+
+// "Jump to comment": where a row in the list leaves the board. The pin has
+// to end up inside the canvas and clear of the furniture drawn over it (the
+// screen-size note at the top, the page bar and the canvas tools at the
+// bottom, the comments rail at the side).
+const CLEAR = { top: 40, bottom: 76, side: 8 }
+
+const cameraTransform = (page) => page.evaluate(() => getComputedStyle(document.querySelector('.react-flow__viewport')).transform)
+
+test('desktop 1440: a row in the list flies the board to its pin, in the clear, and a second click does not jolt it', async () => {
+  const { context, page, errors } = await openBoard({ viewport: { width: 1440, height: 900 } })
+  try {
+    const row = (id) => `[data-sw-comment-list] [data-sw-comment="${id}"]`
+    // Go to the comment on Home first, so the one on Pricing is off screen.
+    await page.click(row(first.id))
+    await settle(page, `[data-sw-pin="${first.id}"]`)
+    assert.equal(await page.locator(`[data-sw-pin="${third.id}"]`).count(), 0, 'the Pricing pin is off screen')
+    const before = await cameraTransform(page)
+
+    await page.click(row(third.id))
+    const pin = await settle(page, `[data-sw-pin="${third.id}"]`)
+    assert.notEqual(await cameraTransform(page), before, 'the camera moved')
+    assert.ok(pin, 'the pin is drawn')
+    await page.waitForSelector(`[data-sw-thread-popover="${third.id}"]`)
+
+    // It came to rest inside the canvas, clear of the bars over it,
+    const pane = await page.locator('.react-flow').boundingBox()
+    assert.ok(pin.x >= pane.x + CLEAR.side, `pin x ${pin.x} inside the canvas at ${pane.x}`)
+    assert.ok(pin.x + pin.width <= pane.x + pane.width - CLEAR.side, `pin right ${pin.x + pin.width} inside ${pane.x + pane.width}`)
+    assert.ok(pin.y >= pane.y + CLEAR.top, `pin y ${pin.y} below the top bar`)
+    assert.ok(pin.y + pin.height <= pane.y + pane.height - CLEAR.bottom, `pin bottom ${pin.y + pin.height} above the page bar`)
+    // never under the comments rail,
+    const rail = await page.locator('[data-sw-rail]').first().boundingBox()
+    assert.ok(pin.x + pin.width <= rail.x, `pin right ${pin.x + pin.width} left of the rail at ${rail.x}`)
+    // and left of the middle, so the thread has room beside it, not on it.
+    assert.ok(pin.x < pane.x + pane.width / 2, `pin x ${pin.x} left of the canvas centre`)
+    const thread = await page.locator(`[data-sw-thread-popover="${third.id}"]`).boundingBox()
+    assert.ok(thread.x >= pin.x + pin.width, 'the thread opens beside the pin, not over it')
+
+    // The pin says it has just been arrived at.
+    assert.equal(await page.getAttribute(`[data-sw-pin="${third.id}"]`, 'data-sw-pin-landed'), 'true')
+
+    // Clicking the same row again answers, but moves nothing.
+    const landed = await cameraTransform(page)
+    await page.click(row(third.id))
+    await page.waitForTimeout(700)
+    assert.equal(await cameraTransform(page), landed, 'the camera stayed put')
+    assert.equal(await page.locator(`[data-sw-thread-popover="${third.id}"]`).count(), 1, 'the thread is still open')
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})
+
+test('phone 390: a row in the list flies to its pin, above the thread sheet', async () => {
+  const { context, page, errors } = await openBoard(PHONE)
+  try {
+    await page.tap('[data-sw-panel-toggle]')
+    await page.waitForSelector('[data-sw-comment-list]')
+    const before = await cameraTransform(page)
+    await page.tap(`[data-sw-comment-list] [data-sw-comment="${third.id}"]`)
+    const sheet = `[data-sw-thread-sheet="${third.id}"]`
+    await page.waitForSelector(sheet)
+    const pin = await settle(page, `[data-sw-pin="${third.id}"]`)
+    assert.notEqual(await cameraTransform(page), before, 'the camera moved')
+    assert.ok(pin, 'the pin is drawn')
+    // In the upper part, clear of the sheet over the lower part.
+    const sheetBox = await page.locator(sheet).boundingBox()
+    assert.ok(pin.y + pin.height <= sheetBox.y, `pin bottom ${pin.y + pin.height} above the sheet at ${sheetBox.y}`)
+    assert.ok(pin.y >= CLEAR.top, `pin y ${pin.y} below the toolbar`)
+    assert.ok(pin.x >= 0 && pin.x + pin.width <= 390, `pin x ${pin.x} on screen`)
+    assert.equal(await page.getAttribute(`[data-sw-pin="${third.id}"]`, 'data-sw-pin-landed'), 'true')
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})

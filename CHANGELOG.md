@@ -3,6 +3,21 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## 0.7.1 - 2026-11-13
+
+- Clicking a comment in the right-hand rail lands somewhere you can read. The pin is placed in the clear part of the canvas, left of
+  centre so the thread opens beside it instead of over it, and the zoom is kept in a comfortable band (1.2 to 2) rather than
+  carrying a 400% view across with you. Before, every jump dropped the pin on the exact middle of the canvas at whatever zoom you
+  had, so clicking down the list read as "nothing happened". Phones keep their own rule: the pin goes to the upper part, clear of
+  the thread sheet below it; a sheet made unusually tall by an image can still reach it.
+- A board already looking at the pin does not move, so a second click on the open comment no longer jolts it, and the pin rings for
+  a moment on arrival so a short hop still reads as one move.
+- A comment whose pin cannot be drawn -- a variant while comparing, or a page left out by "Changed pages only" -- now says so in a
+  toast and lets go of the focus. Before, the click did nothing at all and the unfinished focus also stopped the board refitting on
+  the next change of screen size.
+- Esc on a tooltip no longer leaves an invisible layer mounted for good. Cancelling the fade-out mid-flight kept the tooltip in the
+  page, and a layer that never unmounts swallows every Esc beneath it, so threads stopped closing after that.
+
 ## 0.7.0 - 2026-11-13
 
 Connected agents, stage E: the Usage dashboard, and people's activity. Two new pages in the Workspace Console of a team server, and

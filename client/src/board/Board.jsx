@@ -59,7 +59,7 @@ import { useJourneyActions } from './hooks/useJourneyActions'
 import { useCommentActions } from './hooks/useCommentActions'
 import { useBoardData } from './hooks/useBoardData'
 import { useJourneyState } from './hooks/useJourneyState'
-import { useFlyToPending, usePhoneStartView, useRefitOnChange } from './hooks/useCameraMoves'
+import { LANDED_MS, useFlyToPending, usePhoneStartView, useRefitOnChange } from './hooks/useCameraMoves'
 import { useCommentLink } from './hooks/useCommentLink'
 import { useThreadNav } from './hooks/useThreadNav'
 import { useChecks } from './hooks/useChecks'
@@ -512,7 +512,39 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     const timer = window.setTimeout(() => setViewportNotice(null), 6000)
     return () => window.clearTimeout(timer)
   }, [viewportNotice])
-  useFlyToPending({ pendingFocus, setPendingFocus, targets: layout.targets, viewports, flow, canvasRef, wide, setSettledZoom })
+  // A comment whose pin the board cannot show: its page is left out of the
+  // current view (a variant while comparing, or a page "Changed pages only"
+  // drops). The thread still opens; the board says why it did not move
+  // rather than looking broken.
+  const onFocusHidden = useCallback(
+    (comment) => {
+      if (comment?.id == null) return
+      setToast({ at: Date.now(), text: `Comment #${comment.id} is on a page this view is not showing, so the board stayed put.` })
+    },
+    [setToast],
+  )
+  // The pin the board has just flown to rings for a moment, so a jump
+  // between two cards that look alike still reads as an arrival, and a jump
+  // that moved nothing (the camera was already there) still answers the
+  // click. The ring lives in the view store (set below, once it exists), so
+  // only that pin re-renders.
+  const landedTimer = useRef(0)
+  const ringLanded = useRef(() => {})
+  const onFocusLanded = useCallback((comment) => ringLanded.current(comment), [])
+  useEffect(() => () => window.clearTimeout(landedTimer.current), [])
+  useFlyToPending({
+    pendingFocus,
+    setPendingFocus,
+    targets: layout.targets,
+    viewports,
+    mode,
+    flow,
+    canvasRef,
+    wide,
+    setSettledZoom,
+    onHidden: onFocusHidden,
+    onLanded: onFocusLanded,
+  })
   usePhoneStartView({ wide, nodesReady, initialCamera, selectedCommentId, canvasRef, nodes: layout.nodes, flow, setSettledZoom })
   // The first view on a desktop: a board that fits at a readable zoom is
   // fitted whole, a big one opens on its first group (camera.js). Hidden
@@ -736,6 +768,14 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     defaultMode,
     onImageError,
   })
+  // The arrival ring for "jump to comment" (onFocusLanded above): the view
+  // store only exists from here on.
+  ringLanded.current = (comment) => {
+    window.clearTimeout(landedTimer.current)
+    boardView.set({ landedId: comment?.id ?? null })
+    if (comment?.id == null) return
+    landedTimer.current = window.setTimeout(() => boardView.set({ landedId: null }), LANDED_MS)
+  }
 
   // Hosted boards: the project's agents as this person may see and use them
   // (src/hosted/agents.js), for the Agent panel, "Send to <agent>" on a

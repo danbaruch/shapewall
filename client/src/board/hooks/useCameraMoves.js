@@ -1,40 +1,83 @@
 import { useEffect, useRef } from 'react'
 import { pinPoint } from '../layout'
 import { FIT_OPTIONS } from '../camera'
+import { focusViewport, focusZoom, settled } from '../commentFocus'
 import { motionDuration } from '../../lib/motion'
 
-// Screen pixels kept free above a card on a phone for its title row (24 px
-// at any zoom) and a little air, so the header never sits under the toolbar.
-const PHONE_HEADER_ROOM = 40
+// How long a pin that has not appeared is waited for. Long enough for a card
+// that is still being laid out, short enough that a comment the current view
+// hides says so instead of hanging.
+export const FOCUS_WAIT_MS = 700
+// How long the pin keeps its arrival ring.
+export const LANDED_MS = 1600
 
-// A comment waiting to be shown (`pendingFocus`): once its pin is on the board,
-// fly to it. A phone puts the pin in the upper part, above the thread sheet.
-export function useFlyToPending({ pendingFocus, setPendingFocus, targets, viewports, flow, canvasRef, wide, setSettledZoom }) {
+// A comment waiting to be shown (`pendingFocus`): once its pin is on the
+// board, fly to it (commentFocus.js decides where it lands) and tell
+// `onLanded`, which rings the pin so a short hop still reads as an arrival.
+// `onHidden` is told when the pin cannot be shown at all, so the board can
+// say so rather than sit on a focus that never resolves -- a stale
+// `pendingFocus` also stops the refit when the screen size changes
+// (useRefitOnChange).
+export function useFlyToPending({
+  pendingFocus,
+  setPendingFocus,
+  targets,
+  viewports,
+  mode,
+  flow,
+  canvasRef,
+  wide,
+  setSettledZoom,
+  onHidden = null,
+  onLanded = null,
+}) {
+  const hidden = useRef(onHidden)
+  hidden.current = onHidden
+  const landed = useRef(onLanded)
+  landed.current = onLanded
   useEffect(() => {
-    if (!pendingFocus) return
+    if (!pendingFocus) return undefined
     const point = pinPoint(targets, pendingFocus)
     if (!point) {
-      // Gone for good (removed page or variant, unknown viewport): stop waiting.
-      if (!targets[pendingFocus.pageId] || !viewports[pendingFocus.viewport]) setPendingFocus(null)
-      return
+      // Gone for good (removed page or variant, unknown viewport): stop at once.
+      if (!targets[pendingFocus.pageId] || !viewports[pendingFocus.viewport]) {
+        setPendingFocus(null)
+        hidden.current?.(pendingFocus)
+        return undefined
+      }
+      // Still on its way: the board is changing to the screen size this
+      // comment lives on, so its frame has not been laid out yet. The change
+      // re-runs this effect.
+      if (mode !== 'all' && mode !== pendingFocus.viewport) return undefined
+      // The board is showing that screen size and the pin is still not
+      // there. Give it a moment for the layout, then stop waiting. A comment
+      // on a page the view hides (a variant while comparing, a page left out
+      // by "Changed pages only") never gets a pin, and waiting for one left
+      // the click doing nothing at all -- and the stale focus also stopped
+      // the next refit.
+      const timer = window.setTimeout(() => {
+        setPendingFocus(null)
+        hidden.current?.(pendingFocus)
+      }, FOCUS_WAIT_MS)
+      return () => window.clearTimeout(timer)
     }
     setPendingFocus(null)
     setSettledZoom(null)
-    const zoom = Math.max(flow.getZoom(), 1.2)
     const box = canvasRef.current?.getBoundingClientRect()
-    const target = targets[pendingFocus.pageId]
-    if (wide || !box?.width || !target) {
-      flow.setCenter(point.x, point.y, { zoom, duration: motionDuration(450) })
-      return
-    }
-    // Phone: the thread sheet covers the lower part of the screen, so the pin
-    // goes in the upper part (28% down the canvas). When that would push the
-    // card's title row above the canvas (under the toolbar), the card comes
-    // down until its header shows, as long as the pin stays in the upper half.
-    let y = box.height * 0.28 - point.y * zoom
-    if (target.y * zoom + y < PHONE_HEADER_ROOM) y = Math.min(PHONE_HEADER_ROOM - target.y * zoom, box.height * 0.45 - point.y * zoom)
-    flow.setViewport({ x: box.width / 2 - point.x * zoom, y, zoom }, { duration: motionDuration(450) })
-  }, [canvasRef, flow, targets, pendingFocus, setPendingFocus, setSettledZoom, viewports, wide])
+    const wanted = focusViewport({
+      point,
+      box,
+      wide,
+      zoom: flow.getZoom(),
+      cardTop: targets[pendingFocus.pageId]?.y ?? null,
+    })
+    if (!wanted) flow.setCenter(point.x, point.y, { zoom: focusZoom(flow.getZoom()), duration: motionDuration(450) })
+    // Already there: land without moving, so clicking the open comment again
+    // (or its neighbour on the same card) never jolts the board.
+    else flow.setViewport(wanted, { duration: settled(flow.getViewport(), wanted) ? 0 : motionDuration(450) })
+    landed.current?.(pendingFocus)
+    return undefined
+  }, [canvasRef, flow, mode, targets, pendingFocus, setPendingFocus, setSettledZoom, viewports, wide])
 }
 
 // The first view on a phone: two cards of the first group across, not the
