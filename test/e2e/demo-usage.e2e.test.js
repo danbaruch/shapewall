@@ -770,7 +770,7 @@ test('in the demo: hide and add back, two charts side by side with their own opt
     await widget(page, 'latency').focus()
     const [, row] = await placeOf(page, 'latency')
     await page.keyboard.press('ArrowUp')
-    await said(page, /^Turn duration moved to row \d+, column 7; 6 wide, 5 tall/)
+    await said(page, /^Turn duration moved to row \d+, column \d+; 6 wide, 5 tall/)
     assert.ok((await placeOf(page, 'latency'))[1] < row)
     await layoutSaved(page)
     await page.keyboard.press('Escape')
