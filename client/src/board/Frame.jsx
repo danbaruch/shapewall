@@ -1,14 +1,14 @@
 // One frame of a card: the screenshot (or the page's live HTML), its pins,
 // the draft pin and the hover outline; and a compare frame.
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { useStore } from '@xyflow/react'
 import { ImageOff, Info } from 'lucide-react'
-import { pinSpot } from './layout'
+import { framePins } from './layout'
 import { anchorAt, describeElement, elementAt, resolveAnchor } from './anchors'
 import { frameDom } from './frameDom'
 import { useElementMap } from './elementMaps'
 import { anchorFromMap, describeAt, hitTest, plainLabel, resolveOnMap } from '../../../src/capture/element-map.js'
-import { DOT_CLUSTER_PX, DraftPin, Pin, PinCluster, clusterPins, pinLookAt } from './pins'
+import { DraftPin } from './pins'
+import { FramePins, useFrameClusters, useFramePins, useLandedPin, usePinLook } from './framePins'
 import { cn } from '../lib/utils'
 import { useBoardView } from './boardView'
 import { BoardContext } from './boardContext'
@@ -83,34 +83,16 @@ function LiveDoc({ src, viewport, native, frame, selecting, opaque, onReady, onL
   )
 }
 
-// An agent is working on this comment: its own status, or the chat's
-// "agent focus" store (chat/agentFocus.js).
-function isWorking(board, comment) {
-  return comment.agentStatus === 'working' || Boolean(board.agentWorking?.has(comment.id))
-}
-
 export function Frame({ targetId, frame, image, kind, version, emptyText, note }) {
   const board = useContext(BoardContext)
   // A page with its own frame height carries its frame's size (layout.js).
   const native = frame.native || board.viewports[frame.viewport]
-  // Pins keep roughly the same size on screen at any zoom: 28 px on a
-  // readable frame, down to 18 px on a small one, and a 10 px dot once the
-  // frame is a thumbnail (it covers no more of the page than it must). On
-  // touch they never shrink below their 44 px hit area; as dots they let the
-  // tap through to the card, which zooms in first.
-  const pinMax = board.touch ? 50 : 6
   const { viewport } = frame
   const liveKey = `${targetId}|${viewport}`
-  // The open thread, when it is on this frame: it keeps its pin even when the
-  // filter hides it (just resolved).
   const comparing = Boolean(board.compare)
-  const openHere = useBoardView((state) => {
-    const open = state.selectedComment
-    return !comparing && open && open.pageId === targetId && open.viewport === viewport ? open : null
-  })
-  const listed = board.pinsFor(targetId, viewport)
-  const pins = useMemo(() => (openHere && !listed.includes(openHere) ? [...listed, openHere] : listed), [listed, openHere])
-  const selectedCommentId = openHere?.id ?? null
+  // This frame's pins, and the open thread's own, which it keeps even when
+  // the filter hides it (just resolved).
+  const { pins, openHere, selectedCommentId } = useFramePins(board, targetId, viewport)
   // The drawing shown over the page: the open thread's, else the hovered
   // pin's, when it was drawn on this capture (an older one shows in the
   // thread's before and after instead).
@@ -134,12 +116,7 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
   // A frame with nothing pinned (and no hover outline possible) skips the pin
   // zoom subscriptions, so zooming does not re-render it for them.
   const scalesPins = pins.length > 0 || Boolean(draft) || (board.commentMode && live)
-  const pinLook = useStore((state) => (scalesPins ? pinLookAt(state.transform[2], frame.w, board.touch, pinMax, Boolean(draft)) : 'full:1'))
-  const compactPins = pinLook.startsWith('dot:')
-  const pinScale = Number(pinLook.slice(pinLook.indexOf(':') + 1))
-  // Clusters are worked out per zoom step, not on every frame of a zoom (and
-  // never for fewer than two pins, where the zoom does not matter).
-  const clusterZoom = useStore((state) => (pins.length > 1 ? Math.round(state.transform[2] * 20) / 20 : 1))
+  const { pinScale, compactPins } = usePinLook(board, frame, { active: scalesPins, drafting: Boolean(draft) })
   const selecting = useBoardView((state) => state.selectingKey === liveKey) && live
   // "Select text" has two steps, so the wheel stays the board's: armed (the
   // page looks ready, the board still pans and zooms over it) and, after a
@@ -183,34 +160,8 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
     // layoutTick re-resolves after the document resizes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [live, map, doc, pins, native, layoutTick])
-  // This frame's unread pins as one string, so reading a thread elsewhere
-  // changes nothing here.
-  const unreadIds = useBoardView((state) =>
-    pins.length
-      ? pins
-          .filter((comment) => state.unread.has(comment.id))
-          .map((comment) => comment.id)
-          .join(',')
-      : '',
-  )
-  // The pin the board has just flown to, when it is one of this frame's: a
-  // frame that does not hold it answers null and never re-renders.
-  const landedId = useBoardView((state) =>
-    state.landedId !== null && pins.some((comment) => comment.id === state.landedId) ? state.landedId : null,
-  )
-  const clusters = useMemo(() => {
-    const unread = new Set(unreadIds ? unreadIds.split(',') : [])
-    return clusterPins(
-      pins.map((comment) => {
-        const position = positions?.get(comment.id) || null
-        return { comment, position, spot: pinSpot(comment, position), unread: unread.has(String(comment.id)) }
-      }),
-      frame,
-      clusterZoom,
-      selectedCommentId,
-      compactPins ? DOT_CLUSTER_PX : undefined,
-    )
-  }, [pins, positions, unreadIds, frame, clusterZoom, selectedCommentId, compactPins])
+  const landedId = useLandedPin(pins)
+  const clusters = useFrameClusters({ pins, positions, frame, compact: compactPins, selectedCommentId })
   useEffect(() => {
     const view = frameDom.defaultView(doc)
     if (!view) return undefined
@@ -420,34 +371,15 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
         {hover && canHover ? <HoverOutline hover={hover} native={native} scale={pinScale} /> : null}
         {draft?.anchor && !drawingOn ? <PickedOutline draft={draft} scale={pinScale} /> : null}
         {openHere?.anchor ? <ThreadTarget comment={openHere} box={positions?.get(openHere.id)?.box || null} /> : null}
-        {clusters.map((group) =>
-          group.items.length === 1 ? (
-            <Pin
-              key={group.items[0].comment.id}
-              comment={group.items[0].comment}
-              position={group.items[0].position}
-              scale={pinScale}
-              compact={compactPins}
-              selected={selectedCommentId === group.items[0].comment.id}
-              unread={group.items[0].unread}
-              working={isWorking(board, group.items[0].comment)}
-              landed={landedId === group.items[0].comment.id}
-              onSelect={board.onSelectComment}
-              onHover={board.onHoverComment}
-              touch={board.touch}
-            />
-          ) : (
-            <PinCluster
-              key={`cluster-${group.items[0].comment.id}`}
-              items={group.items}
-              compact={compactPins}
-              touch={board.touch}
-              working={group.items.some((item) => isWorking(board, item.comment))}
-              scale={pinScale}
-              onOpen={(items) => board.onOpenCluster(targetId, frame.viewport, items)}
-            />
-          ),
-        )}
+        <FramePins
+          targetId={targetId}
+          viewport={viewport}
+          clusters={clusters}
+          scale={pinScale}
+          compact={compactPins}
+          selectedCommentId={selectedCommentId}
+          landedId={landedId}
+        />
         {comparing ? null : <FrameDrawing frameKey={liveKey} native={native} shown={shownDrawing} />}
         {draft ? <DraftPin draft={draft} scale={pinScale} name={board.me?.name} colorKey={board.me?.name} /> : null}
       </div>
@@ -559,10 +491,18 @@ function HoverOutline({ hover, native, scale }) {
 
 // Compare mode: one environment's screenshot of the page. The second
 // environment's frame carries the pixel diff as a red overlay and its share.
+// Its pins are the page's own, on the first environment's frame only
+// (layout.js framePins).
 export function CompareFrame({ pageId, frame }) {
   const board = useContext(BoardContext)
   const { compare } = board
-  const native = frame.native || board.viewports[frame.viewport]
+  const { viewport } = frame
+  const native = frame.native || board.viewports[viewport]
+  const pinned = framePins(frame, compare)
+  const { pins, openHere, selectedCommentId } = useFramePins(board, pageId, viewport, pinned)
+  const { pinScale, compactPins } = usePinLook(board, frame, { active: pins.length > 0 })
+  const landedId = useLandedPin(pins)
+  const clusters = useFrameClusters({ pins, frame, compact: compactPins, selectedCommentId })
   const image = compare.files?.[frame.env]?.[pageId]?.[frame.viewport]
   const sharp = useBoardView((state) => wantsFull(frame, state.settledZoom, native))
   const full = image && (!image.thumb || sharp)
@@ -610,6 +550,16 @@ export function CompareFrame({ pageId, frame }) {
             data-sw-diff-overlay="true"
           />
         ) : null}
+        {openHere?.anchor ? <ThreadTarget comment={openHere} box={null} /> : null}
+        <FramePins
+          targetId={pageId}
+          viewport={viewport}
+          clusters={clusters}
+          scale={pinScale}
+          compact={compactPins}
+          selectedCommentId={selectedCommentId}
+          landedId={landedId}
+        />
       </div>
     </>
   )
