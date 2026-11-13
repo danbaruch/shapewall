@@ -664,10 +664,12 @@ export function settle(items, cols = LAYOUT_COLS, fitted = {}) {
     let best = null
     for (const tall of [null, ...fits.map((item) => item.id), ...(fits.length > 1 ? ['*'] : [])]) {
       const height = (item) => (tall === '*' || tall === item.id ? item.h * LAYOUT_SUB : heights.get(item.id))
+      const fitted = new Set(band.filter((item) => height(item) !== item.h * LAYOUT_SUB).map((item) => item.id))
       const tried = settleBand(
         band.map((item) => ({ ...item, h: height(item) })),
         cols,
         stretches,
+        fitted,
       )
       if (!best || tried.holes < best.holes) best = tried
       if (!best.holes) break
@@ -679,8 +681,9 @@ export function settle(items, cols = LAYOUT_COLS, fitted = {}) {
 }
 
 // One band of settle(): flowed, then every column reaches down to the band's end where nothing is under it.
-// Returns the places, the band's end and how many cells of it are left empty.
-function settleBand(items, cols, stretches) {
+// Returns the places, the band's end and how many cells of it are left empty. `fitted`: the ids drawn shorter
+// than stored, at their content's height (a widget sized by hand keeps the height it was given).
+function settleBand(items, cols, stretches, fitted) {
   const placed = flow(items, cols)
   const end = placed.reduce((low, item) => Math.max(low, item.y + item.h), 0)
   const taken = (c, row, self) =>
@@ -695,7 +698,7 @@ function settleBand(items, cols, stretches) {
   // beside a longer one, a breakdown with nothing that fits under it) reaches down too, so no hole is left
   // and the band ends on one line: its card ends there, what it holds stays at its top.
   for (const item of placed) if (stretches(item)) reach(item)
-  for (const item of placed) if (!stretches(item)) reach(item)
+  for (const item of placed) if (!stretches(item) && fitted.has(item.id)) reach(item)
   const used = new Set(placed.map((item) => item.x + item.w))
   const right = Math.max(...used)
   let holes = 0
