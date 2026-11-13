@@ -8,8 +8,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Clicking a comment in the right-hand rail lands somewhere you can read. The pin is placed in the clear part of the canvas, left of
   centre so the thread opens beside it instead of over it, and the zoom is kept in a comfortable band (1.2 to 2) rather than
   carrying a 400% view across with you. Before, every jump dropped the pin on the exact middle of the canvas at whatever zoom you
-  had, so clicking down the list read as "nothing happened". Phones keep their own rule: the pin sits in the upper part, above the
-  thread sheet.
+  had, so clicking down the list read as "nothing happened". Phones keep their own rule: the pin goes to the upper part, clear of
+  the thread sheet below it; a sheet made unusually tall by an image can still reach it.
 - A board already looking at the pin does not move, so a second click on the open comment no longer jolts it, and the pin rings for
   a moment on arrival so a short hop still reads as one move.
 - A comment whose pin cannot be drawn -- a variant while comparing, or a page left out by "Changed pages only" -- now says so in a
