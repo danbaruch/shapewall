@@ -529,11 +529,11 @@ function TopWidget({ item, options, ctx, menu }) {
         {menu}
       </div>
       {top.isLoading ? (
-        <p className="px-4 py-6 text-center text-xs text-muted" role="status">
+        <p className="px-4 py-6 text-center text-xs text-muted" role="status" data-sw-fit-wait>
           Loading
         </p>
       ) : rows.length ? (
-        <ol className="min-h-0 flex-1 overflow-y-auto py-1" data-sw-top-rows={rows.length}>
+        <ol className="min-h-0 flex-1 overflow-y-auto py-1" data-sw-top-rows={rows.length} data-sw-fit>
           {rows.map((row, index) => (
             <li key={row.key}>
               <button
@@ -553,7 +553,9 @@ function TopWidget({ item, options, ctx, menu }) {
           ))}
         </ol>
       ) : (
-        <p className="px-4 py-6 text-center text-xs text-muted">{TOP_EMPTY[id]}</p>
+        <p className="px-4 py-6 text-center text-xs text-muted" data-sw-fit data-sw-fit-end>
+          {TOP_EMPTY[id]}
+        </p>
       )}
     </Card>
   )
@@ -583,11 +585,11 @@ function BudgetsWidget({ ctx }) {
         </div>
       </div>
       {state.isLoading ? (
-        <p className="px-4 py-6 text-center text-xs text-muted" role="status">
+        <p className="px-4 py-6 text-center text-xs text-muted" role="status" data-sw-fit-wait>
           Loading
         </p>
       ) : projects.length ? (
-        <ul className="min-h-0 flex-1 divide-y divide-line overflow-y-auto">
+        <ul className="min-h-0 flex-1 divide-y divide-line overflow-y-auto" data-sw-fit>
           {projects.map(({ project, budgets }) => (
             <li
               key={project.id}
@@ -641,7 +643,9 @@ function BudgetsWidget({ ctx }) {
           ))}
         </ul>
       ) : (
-        <p className="px-4 py-6 text-center text-xs text-muted">No project has an agent policy with a budget yet.</p>
+        <p className="px-4 py-6 text-center text-xs text-muted" data-sw-fit data-sw-fit-end>
+          No project has an agent policy with a budget yet.
+        </p>
       )}
     </Card>
   )

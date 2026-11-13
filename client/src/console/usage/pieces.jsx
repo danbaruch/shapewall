@@ -88,7 +88,7 @@ export function StatTile({
       className={cn(
         'min-w-0 px-4',
         showLabel ? 'py-3' : 'py-1.5',
-        fill && '@container/tile flex h-full flex-col justify-center overflow-hidden',
+        fill && '@container/tile flex h-full flex-col justify-start overflow-hidden',
       )}
       data-sw-tile={testId}
     >

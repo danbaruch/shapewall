@@ -1,7 +1,10 @@
 // End to end: arranging the Usage dashboard with a real mouse, on the public
 // demo's export (served under /demo/ with the site's CSP). After every step the
 // board is measured: no two widgets overlap, and no widget has an empty space
-// above it in any of its columns (it sits on the widget above, or on the top).
+// above it in any of its columns (it sits on the widget above, or on the top),
+// unless the widget above is as tall as what it holds: a short widget keeps
+// its own height and is never stretched to match its row (its card ends where
+// its content does).
 // Drags push the others aside and land where the tinted place showed; a
 // resize keeps its row whole; two hidden widgets come back from "Add widget";
 // Undo and Reset (after a confirm) work; a reload draws the saved layout at
@@ -89,14 +92,29 @@ async function assertTidy(page, label) {
   const found = await page.locator('[data-sw-widget]').evaluateAll((nodes) =>
     nodes.map((node) => {
       const box = node.getBoundingClientRect()
-      const [x, y, w, h] = node.dataset.swWidgetPlace.split(',').map(Number)
-      return { id: node.dataset.swWidget, x, y, w, h, left: box.left, top: box.top, right: box.right, bottom: box.bottom }
+      // (Where the grid draws it: fine rows, each widget at its own height.)
+      const [x, y, w, h, fit] = node.dataset.swWidgetDrawn.split(',')
+      const card = node.querySelector('.sw-widget-body > *').getBoundingClientRect()
+      return {
+        id: node.dataset.swWidget,
+        x: Number(x),
+        y: Number(y),
+        w: Number(w),
+        h: Number(h),
+        fit: fit === 'fit',
+        left: box.left,
+        top: box.top,
+        right: box.right,
+        bottom: box.bottom,
+        cardBottom: card.bottom,
+      }
     }),
   )
   const cols = Number(await page.locator('[data-sw-layout-cols]').getAttribute('data-sw-layout-cols'))
   const problems = []
   for (const a of found) {
     if (a.x < 0 || a.x + a.w > cols) problems.push(`${a.id} outside the grid`)
+    if (Math.abs(a.cardBottom - a.bottom) > 1) problems.push(`${a.id}: its card does not fill its place`)
     for (const b of found)
       if (a.id < b.id && a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1)
         problems.push(`${a.id} overlaps ${b.id} on screen`)
@@ -104,6 +122,9 @@ async function assertTidy(page, label) {
     for (let c = a.x; c < a.x + a.w; c += 1) {
       const above = found.filter((o) => o !== a && o.x <= c && c < o.x + o.w && o.y + o.h <= a.y)
       const row = Math.max(0, ...above.map((o) => o.y + o.h))
+      // (Under a widget as tall as what it holds, the room it does not need may stay empty.)
+      const nearestAbove = [...above].sort((p, q) => q.y + q.h - (p.y + p.h))[0]
+      if (row !== a.y && nearestAbove?.fit) break
       if (row !== a.y) {
         problems.push(`${a.id}: a hole above it in column ${c + 1} (rows ${row + 1} to ${a.y})`)
         break
@@ -206,7 +227,9 @@ test('1440 px: drag, resize, hide two and add them back, undo, reset; the board 
     await assertTidy(page, 'wider')
     await shot(page, '1440-08-wider')
     from = await corner()
-    await drag(page, from, { x: from.x - column * 8, y: from.y + (LAYOUT_ROW + LAYOUT_GAP) * 2 })
+    // (Drawn at its content's height: dragged down to where 7 rows end.)
+    const tallBy = 7 * (LAYOUT_ROW + LAYOUT_GAP) - LAYOUT_GAP - (await widget(page, 'breakdown').boundingBox()).height
+    await drag(page, from, { x: from.x - column * 8, y: from.y + tallBy })
     await saved(page)
     // Narrow enough for the next chart to come up beside it, as tall as it now (the spare column is shared between the two).
     const [bx, by, bw, bh] = await placeOf(page, 'breakdown')
@@ -313,12 +336,9 @@ test('1024 px, dark: medium columns; a drag and a height resize keep the board p
     assert.equal(await widget(page, 'breakdown').locator('.sw-resize-e, .sw-resize-se').count(), 0)
     await widget(page, 'breakdown').hover()
     const edge = await middle(widget(page, 'breakdown').locator('.sw-resize-s'))
-    await drag(
-      page,
-      edge,
-      { x: edge.x, y: edge.y + (LAYOUT_ROW + LAYOUT_GAP) * 2 },
-      { hold: () => shot(page, '1024-dark-02-resize-taller') },
-    )
+    // (Drawn at its content's height: dragged down to where 7 rows end.)
+    const tallBy = 7 * (LAYOUT_ROW + LAYOUT_GAP) - LAYOUT_GAP - (await widget(page, 'breakdown').boundingBox()).height
+    await drag(page, edge, { x: edge.x, y: edge.y + tallBy }, { hold: () => shot(page, '1024-dark-02-resize-taller') })
     await saved(page)
     assert.equal((await placeOf(page, 'breakdown'))[3], 7)
     await assertTidy(page, 'taller')
@@ -385,11 +405,101 @@ test('390 px phone: one column while editing, up and down to reorder, nothing to
     await widget(page, 'tile_tokens').locator('[data-sw-widget-up]').click()
     await page.waitForFunction(() => document.querySelector('[data-sw-widget]')?.dataset.swWidget === 'tile_tokens')
     await saved(page)
+    // "Saved" sits on the help's line, never on a line of its own.
+    const [help, status] = await Promise.all(
+      ['#sw-layout-help', '[data-sw-layout-status]'].map((selector) => page.locator(selector).boundingBox()),
+    )
+    assert.ok(status.y < help.y + help.height && help.y < status.y + status.height, 'the status shares the help line')
     await assertTidy(page, 'phone reordered')
     await shot(page, '390-02-reordered')
     await page.locator('[data-sw-layout-done]').click()
     await assertTidy(page, 'phone view after')
     await shot(page, '390-03-view')
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})
+
+test('1440 px: a short widget keeps its own height beside a taller one; the ones under it move up; a resize by hand still works', async () => {
+  const { context, page, errors } = await open({ width: 1440, height: 900 })
+  try {
+    // The demo has two projects: the breakdown is two rows of bars beside a full chart.
+    await widget(page, 'breakdown').locator('[data-sw-breakdown-row]').first().waitFor()
+    await page.waitForFunction(() => document.querySelector('[data-sw-widget="breakdown"]')?.dataset.swWidgetDrawn.endsWith(',fit'))
+    await assertTidy(page, 'as it starts')
+    const box = async (id) => widget(page, id).boundingBox()
+    const breakdown = await box('breakdown')
+    const outcomes = await box('outcomes')
+    assert.equal(Math.round(breakdown.y), Math.round(outcomes.y), 'side by side')
+    assert.ok(breakdown.height < outcomes.height - 120, `its own height, not the row's: ${breakdown.height} beside ${outcomes.height}`)
+    // Its card ends under its last row (no empty band at the bottom).
+    const slack = await widget(page, 'breakdown').evaluate((node) => {
+      const rows = [...node.querySelectorAll('[data-sw-breakdown-row]')]
+      return node.getBoundingClientRect().bottom - rows[rows.length - 1].getBoundingClientRect().bottom
+    })
+    assert.ok(slack < 40, `the card ends under its content: ${slack} px`)
+    // The chart under it moves up into the room it leaves, and reaches down to where its neighbour column ends.
+    const approvals = await box('approvals')
+    assert.ok(Math.abs(approvals.y - (breakdown.y + breakdown.height + LAYOUT_GAP)) < 1.5, 'the next chart sits right under it')
+    const latency = await box('latency')
+    assert.ok(Math.abs(approvals.y + approvals.height - (latency.y + latency.height)) < 1.5, 'the two columns end together')
+    // The top lists start on one line, as tall as each other.
+    const lists = await Promise.all(['top_agents', 'top_threads', 'top_slowest', 'top_denied'].map(box))
+    assert.ok(
+      lists.every((one) => Math.abs(one.y - lists[0].y) < 1 && Math.abs(one.height - lists[0].height) < 1),
+      'one row of lists',
+    )
+    // The tiles' labels are on one line.
+    const labels = await page
+      .locator('[data-sw-tile-head]')
+      .evaluateAll((nodes) => nodes.slice(0, 3).map((node) => Math.round(node.getBoundingClientRect().top)))
+    assert.equal(new Set(labels).size, 1, `tile labels on one line: ${labels}`)
+    await shot(page, '1440-own-01-view')
+
+    // A resize by hand with the mouse: the breakdown takes the rows it was given, and keeps them.
+    await page.locator('[data-sw-layout-edit="off"]').click()
+    await page.locator('[data-sw-layout-bar]').waitFor()
+    await widget(page, 'breakdown').hover()
+    const edge = await middle(widget(page, 'breakdown').locator('.sw-resize-s'))
+    await drag(page, edge, { x: edge.x, y: edge.y + (LAYOUT_ROW + LAYOUT_GAP) * 3 }, { hold: () => shot(page, '1440-own-02-resize') })
+    await saved(page)
+    const [, , , rows] = await placeOf(page, 'breakdown')
+    assert.ok(rows >= 3, `sized by hand: ${rows} rows`)
+    assert.ok(!(await widget(page, 'breakdown').getAttribute('data-sw-widget-drawn')).endsWith(',fit'), 'its height is its own now')
+    assert.ok(Math.abs((await box('breakdown')).height - (rows * (LAYOUT_ROW + LAYOUT_GAP) - LAYOUT_GAP)) < 1.5, 'drawn at that height')
+    assert.ok((await box('outcomes')).height > 300, 'the chart beside it keeps its height')
+    await assertTidy(page, 'resized by hand')
+    // Undo: it follows what it holds again.
+    await page.locator('[data-sw-layout-undo]').click()
+    await page.waitForFunction(() => document.querySelector('[data-sw-widget="breakdown"]')?.dataset.swWidgetDrawn.endsWith(',fit'))
+    await saved(page)
+    await assertTidy(page, 'undone')
+
+    // The last chart of a full row made narrower from its right edge: it narrows (the one on its left takes the room).
+    await widget(page, 'outcomes').hover()
+    const column = ((await page.locator('.react-grid-layout').boundingBox()).width + LAYOUT_GAP) / 12
+    const right = await middle(widget(page, 'outcomes').locator('.sw-resize-e'))
+    const before = await box('outcomes')
+    await drag(page, right, { x: right.x - column * 2, y: right.y })
+    await saved(page)
+    assert.deepEqual(await placeOf(page, 'outcomes'), [8, 10, 4, 5])
+    assert.ok((await box('outcomes')).width < before.width - column, 'narrower on screen')
+    await assertTidy(page, 'last of a row narrower')
+    await shot(page, '1440-own-03-narrower')
+
+    // A reload draws the heights at once: no widget moves once the data is in.
+    await page.locator('[data-sw-layout-done]').click()
+    await page.reload()
+    await page.locator('[data-sw-widget]').first().waitFor({ timeout: 30000 })
+    const drawnNow = () =>
+      page
+        .locator('[data-sw-widget]')
+        .evaluateAll((nodes) => Object.fromEntries(nodes.map((node) => [node.dataset.swWidget, node.dataset.swWidgetDrawn])))
+    const firstPaint = await drawnNow()
+    await widget(page, 'breakdown').locator('[data-sw-breakdown-row]').first().waitFor()
+    await page.waitForTimeout(800)
+    assert.deepEqual(await drawnNow(), firstPaint, 'no jump once the data is in')
     assert.deepEqual(errors, [])
   } finally {
     await context.close()

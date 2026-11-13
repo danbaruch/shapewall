@@ -437,10 +437,14 @@ export function resizeItem(layout, id, w, h) {
     for (const other of layout.items)
       if (other.id !== id && WIDGETS[other.type]?.group === 'tile') changed.set(other.id, { ...other, w: next.w })
   const right = dw && !tile ? row.find((other) => other.x === item.x + item.w) : null
-  if (right) {
-    const size = sizeOf(right.type)
-    const w2 = right.w - dw
-    if (w2 >= size.minW && w2 <= size.maxW) changed.set(right.id, { ...right, w: w2 })
+  // The last of a full row made narrower: the one to its left takes the width (else the row would be drawn across again
+  // and the widget would look stuck at its width).
+  const left = dw < 0 && !tile && !right && item.x + item.w === LAYOUT_COLS ? row.find((other) => other.x + other.w === item.x) : null
+  for (const other of [right, left]) {
+    if (!other) continue
+    const size = sizeOf(other.type)
+    const w2 = other.w - dw
+    if (w2 >= size.minW && w2 <= size.maxW) changed.set(other.id, { ...other, w: w2 })
   }
   let items = flow(readingOrder(layout.items).map((other) => changed.get(other.id) ?? other))
   if (next.h !== item.h) {
@@ -448,7 +452,8 @@ export function resizeItem(layout, id, w, h) {
     const placed = items.find((other) => other.id === id)
     const beside = (other) => {
       const size = sizeOf(other.type)
-      return other.id !== id && other.y === placed.y && other.h === item.h && next.h >= size.minH && next.h <= size.maxH
+      // (A widget as tall as what it holds keeps its own height: only the ones sized like it follow.)
+      return other.id !== id && !other.auto && other.y === placed.y && other.h === item.h && next.h >= size.minH && next.h <= size.maxH
     }
     if (items.some(beside))
       items = flow(items.map((other) => (beside(other) ? { ...other, h: next.h, ...(other.auto ? { auto: false } : {}) } : other)))
@@ -584,15 +589,88 @@ export function fill(items, cols = LAYOUT_COLS) {
       x += item.w
     })
   }
-  // And a widget with empty rows under it, above a widget below, reaches down to it.
-  for (const item of readingOrder(out)) {
-    const under = (other) => other !== item && other.y >= item.y + item.h && other.x < item.x + item.w && item.x < other.x + other.w
-    const below = Math.min(...out.filter(under).map((other) => other.y))
-    if (!Number.isFinite(below) || below === item.y + item.h) continue
-    const free = (row) => !Array.from({ length: item.w }, (_, at) => item.x + at).some((c) => taken(c, row, row + 1, new Set([item])))
-    let h = item.h
-    while (item.y + h < below && free(item.y + h)) h++
-    item.h = h
+  return out
+}
+
+// ---- Drawn heights ----
+//
+// A widget as tall as what it holds (a list, a breakdown, the budgets, while
+// nobody sized it by hand) is drawn at the height of its content, measured
+// on the page, not at the rows it is stored with: a breakdown of two
+// projects is no taller than two rows of bars. So the grid is drawn on finer
+// rows, LAYOUT_SUB to a row: a stored height of h is drawn h * LAYOUT_SUB
+// fine rows tall, the same pixels as ever.
+export const LAYOUT_SUB = 4
+// A fine row's pitch in pixels (one fine row and the gap after it), and the
+// height a fine row is given to the grid so that h fine rows and the gaps
+// between them come to the same pixels as a stored row.
+export const LAYOUT_SUB_PITCH = (LAYOUT_ROW + LAYOUT_GAP) / LAYOUT_SUB
+export const LAYOUT_SUB_ROW = LAYOUT_SUB_PITCH - LAYOUT_GAP
+// The fine rows a widget whose card is `px` tall takes (never fewer than a heading needs).
+export const subRowsFor = (px) => Math.max(6, Math.ceil((px + LAYOUT_GAP) / LAYOUT_SUB_PITCH))
+// Whether a widget is drawn at the height of its content.
+export const fitsContent = (item) => Boolean(item.auto && WIDGETS[item.type]?.auto)
+
+// The widgets as drawn, in fine rows: each at its own height (`fitted`:
+// { id: fine rows } for the widgets that are as tall as their content; the
+// rest at their stored height). The stored layout is taken a band at a time
+// (rows no widget reaches across, grouped as below: the tiles, the charts in
+// pairs, the top lists, the budgets): in a band the widgets flow in
+// reading order as the stored layout does, so a widget under a shorter one
+// moves up into the room it leaves, and a chart that ends a column short of
+// the band's bottom reaches down to it (a plot can be taller; a list cannot
+// be fuller, so a column of lists alone keeps its own end). Bands stay in
+// line with each other, so a row of lists keeps one top edge, and the lists
+// side by side in a row, set to the same number of rows, are as tall as the
+// tallest of them (a list set to more rows is taller on its own).
+export function settle(items, cols = LAYOUT_COLS, fitted = {}) {
+  const order = readingOrder(items)
+  // (Never taller than the rows it is given for what it holds: past those it scrolls, as it always has.)
+  const own = (item) => (fitsContent(item) && Number.isInteger(fitted[item.id]) ? Math.min(fitted[item.id], item.h * LAYOUT_SUB) : null)
+  const heights = new Map(order.map((item) => [item.id, own(item) ?? item.h * LAYOUT_SUB]))
+  for (const item of order) {
+    if (WIDGETS[item.type].group !== 'list' || own(item) === null) continue
+    const run = order.filter(
+      (other) => other.y === item.y && other.h === item.h && WIDGETS[other.type].group === 'list' && own(other) !== null,
+    )
+    heights.set(item.id, Math.max(...run.map((other) => own(other))))
+  }
+  // Rows: the runs no widget reaches across. A row joins the band above it when it is split into the same columns
+  // (charts in pairs, row after row, are two columns), or when it holds charts only: they can take up what the
+  // band above leaves uneven.
+  const rows = []
+  let bottom = -1
+  for (const item of order) {
+    if (item.y >= bottom) rows.push([])
+    rows[rows.length - 1].push(item)
+    bottom = Math.max(bottom, item.y + item.h)
+  }
+  const stretches = (item) => WIDGETS[item.type].group === 'chart' && !WIDGETS[item.type].auto
+  const columnsOf = (row) => row.map((item) => `${item.x}:${item.w}`).join(' ')
+  const bands = []
+  rows.forEach((row, index) => {
+    if (index && (columnsOf(row) === columnsOf(rows[index - 1]) || row.every(stretches))) bands[bands.length - 1].push(...row)
+    else bands.push([...row])
+  })
+  const out = []
+  let top = 0
+  for (const band of bands) {
+    const placed = flow(
+      band.map((item) => ({ ...item, h: heights.get(item.id) })),
+      cols,
+    )
+    const end = placed.reduce((low, item) => Math.max(low, item.y + item.h), 0)
+    const taken = (c, row, self) =>
+      placed.some((other) => other !== self && other.x <= c && c < other.x + other.w && other.y <= row && row < other.y + other.h)
+    for (const item of placed) {
+      if (!stretches(item)) continue
+      const under = (other) => other !== item && other.y >= item.y + item.h && other.x < item.x + item.w && item.x < other.x + other.w
+      const below = Math.min(end, ...placed.filter(under).map((other) => other.y))
+      const free = (row) => !Array.from({ length: item.w }, (_, at) => item.x + at).some((c) => taken(c, row, item))
+      while (item.y + item.h < below && free(item.y + item.h)) item.h += 1
+    }
+    for (const item of placed) out.push({ ...item, y: item.y + top })
+    top += end
   }
   return out
 }

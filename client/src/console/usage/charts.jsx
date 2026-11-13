@@ -171,6 +171,7 @@ export function ChartCard({
           state?.isPlaceholderData && state?.isFetching && 'opacity-60',
         )}
         aria-busy={Boolean(state?.isFetching)}
+        data-sw-fit-wait={loading ? '' : undefined}
         onTouchStart={showAtTouch}
         data-sw-chart-body
       >
@@ -265,6 +266,7 @@ export function DataTable({ table, title, fill = false }) {
       role="region"
       aria-label={`${title}: table`}
       data-sw-chart-table
+      data-sw-fit={fill ? '' : undefined}
     >
       <table className="w-full border-collapse text-xs">
         <thead className="sticky top-0 bg-surface">
@@ -766,7 +768,11 @@ export function BreakdownChart({
       view={view}
       onView={onView}
     >
-      <ol className={cn('space-y-0.5 px-2 pt-1', fill && 'min-h-0 flex-1 overflow-y-auto')} data-sw-breakdown={dimension}>
+      <ol
+        className={cn('space-y-0.5 px-2 pt-1', fill && 'min-h-0 flex-1 overflow-y-auto')}
+        data-sw-breakdown={dimension}
+        data-sw-fit={fill ? '' : undefined}
+      >
         {shown.map((group) => {
           const value = valueOf(group, metric)
           const unknown = value === null || value === undefined
