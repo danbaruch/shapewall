@@ -78,7 +78,13 @@ async function goLive(page, target, viewport) {
   await page.click(frame)
   // A card tapped as a thumbnail flies into view first, and may go live on its own.
   const openLive = `[data-sw-open-live="${target}|${viewport}"]`
-  await page.waitForSelector(`${openLive}, ${frame}[data-sw-live="ready"]`, { timeout: 15000 })
+  // (On a touch screen the page bar is compact: Open live is in its More menu.)
+  const more = `[data-sw-frame-more="${target}|${viewport}"]`
+  await page.waitForSelector(`${openLive}, ${more}, ${frame}[data-sw-live="ready"]`, { timeout: 15000 })
+  if (!(await page.locator(openLive).count()) && (await page.locator(more).count())) {
+    await page.click(more)
+    await page.waitForSelector(openLive)
+  }
   if (await page.locator(openLive).count()) await page.click(openLive)
   await page.waitForSelector(`${frame}[data-sw-live="ready"]`, { timeout: 15000 })
   // The sandbox is in place: no scripts and an opaque origin, so the board
