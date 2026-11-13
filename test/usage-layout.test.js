@@ -19,6 +19,7 @@ import {
   defaultLayout,
   describeItem,
   duplicateItem,
+  fill,
   fitLayout,
   hiddenTypes,
   migrateLayout,
@@ -396,16 +397,23 @@ test('moving and resizing: a drag puts a widget in the order where it was droppe
   assert.deepEqual(place(resizeItem(layout, 'time', 40, 40), 'time').slice(2), [12, 10])
   // Never past the right edge from where it is.
   assert.deepEqual(place(resizeItem(layout, 'outcomes', 12, 5), 'outcomes'), [6, 10, 6, 5])
-  // A chart made wider than leaves room beside it: the one after it goes on to the next row.
+  // A row stays whole: a chart made wider takes the width from the one beside it, and a narrower one gives it back.
   const wide = resizeItem(layout, 'breakdown', 8, 5)
   assertTidy(wide.items)
   assert.deepEqual(place(wide, 'breakdown'), [0, 10, 8, 5])
-  assert.deepEqual(place(wide, 'outcomes'), [0, 15, 6, 5])
-  // A taller chart: the next one fills in beside it, under its neighbour.
+  assert.deepEqual(place(wide, 'outcomes'), [8, 10, 4, 5])
+  const narrow = resizeItem(layout, 'breakdown', 4, 5)
+  assert.deepEqual(place(narrow, 'outcomes'), [4, 10, 8, 5])
+  // When the one beside it cannot be that narrow, it goes on to the next row.
+  const wider = resizeItem(layout, 'breakdown', 9, 5)
+  assertTidy(wider.items)
+  assert.deepEqual(place(wider, 'outcomes'), [0, 15, 6, 5])
+  // A taller chart: the one beside it, as tall before, grows with it, so no hole opens under either.
   const taller = resizeItem(layout, 'breakdown', 6, 8)
   assertTidy(taller.items)
-  assert.deepEqual(place(taller, 'approvals'), [6, 15, 6, 5])
-  assert.deepEqual(place(taller, 'latency'), [0, 18, 6, 5])
+  assert.deepEqual(place(taller, 'outcomes'), [6, 10, 6, 8])
+  assert.deepEqual(place(taller, 'approvals'), [0, 18, 6, 5])
+  assert.deepEqual(place(taller, 'latency'), [6, 18, 6, 5])
   for (const type of WIDGET_TYPES) {
     const size = WIDGETS[type].size
     assert.ok(size.minW <= size.w && size.w <= size.maxW && size.minH <= size.h && size.h <= size.maxH, type)
@@ -444,6 +452,29 @@ test('arrow keys: changes places with the neighbour beside, above or below; Shif
   assert.deepEqual(stepResize(layout, 'latency', 'right'), layout, 'already at the right edge')
   assert.deepEqual(stepResize(layout, 'tile_calls', 'down'), layout, 'a tile has one height')
   assert.equal(describeItem(at(up, 'latency')), 'row 11, column 7; 6 wide, 5 tall')
+})
+
+test('fill: a row that stops short of the edge, with nothing that fits the rest, is drawn across it', () => {
+  const layout = defaultLayout()
+  assert.deepEqual(fill(layout.items), layout.items, 'the default layout has no short rows')
+  // Five tiles: the last two share the second row.
+  const five = removeItem(layout, 'tile_tokens')
+  const drawn = { items: fill(five.items) }
+  assert.deepEqual(place(drawn, 'tile_fixes'), [0, 2, 6, 2])
+  assert.deepEqual(place(drawn, 'tile_failed'), [6, 2, 6, 2])
+  assert.deepEqual(place(five, 'tile_fixes'), [0, 2, 4, 2], 'what is stored keeps its own width')
+  // A chart widened past what its neighbour can give takes the row; its neighbour keeps its height on the next.
+  const wide = resizeItem(layout, 'breakdown', 9, 7)
+  assertTidy(wide.items)
+  assert.deepEqual(place(wide, 'outcomes'), [0, 17, 6, 5])
+  assert.deepEqual(place({ items: fill(wide.items) }, 'breakdown'), [0, 10, 12, 7])
+  for (const cols of [12, 6, 2]) {
+    const out = fill(reflow(five.items, cols), cols)
+    for (const a of out)
+      for (const b of out)
+        if (a !== b) assert.ok(!(a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h), `${a.id} ${b.id} at ${cols}`)
+    assert.ok(out.every((item) => item.x + item.w <= cols))
+  }
 })
 
 test('reflow: fewer columns show the same widgets in reading order, with no overlaps and no gaps', () => {

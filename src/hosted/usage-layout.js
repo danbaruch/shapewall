@@ -425,7 +425,30 @@ export function resizeItem(layout, id, w, h) {
   if (next.w === item.w && next.h === item.h) return layout
   // A height set by hand stays as it was set.
   if (item.auto && next.h !== item.h) next.auto = false
-  return withItems(layout, flow(readingOrder(layout.items).map((other) => (other.id === id ? next : other))))
+  const changed = new Map([[id, next]])
+  // A row stays whole: the widget just to its right gives or takes the width
+  // (when its own sizes allow), and the widgets beside it that were as tall
+  // take the new height, so a resize never opens a hole beside or under it.
+  const row = layout.items.filter((other) => other.id !== id && other.y === item.y)
+  const dw = next.w - item.w
+  const right = dw ? row.find((other) => other.x === item.x + item.w) : null
+  if (right) {
+    const size = sizeOf(right.type)
+    const w2 = right.w - dw
+    if (w2 >= size.minW && w2 <= size.maxW) changed.set(right.id, { ...right, w: w2 })
+  }
+  let items = flow(readingOrder(layout.items).map((other) => changed.get(other.id) ?? other))
+  if (next.h !== item.h) {
+    // (Beside it once it has its new width: a neighbour that went on to the next row keeps its height.)
+    const placed = items.find((other) => other.id === id)
+    const beside = (other) => {
+      const size = sizeOf(other.type)
+      return other.id !== id && other.y === placed.y && other.h === item.h && next.h >= size.minH && next.h <= size.maxH
+    }
+    if (items.some(beside))
+      items = flow(items.map((other) => (beside(other) ? { ...other, h: next.h, ...(other.auto ? { auto: false } : {}) } : other)))
+  }
+  return withItems(layout, items)
 }
 const overlapsColumns = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w
 // One step with an arrow key. Left and right: one place back or on in the
@@ -524,6 +547,39 @@ export function reflow(items, cols = LAYOUT_COLS) {
     readingOrder(items).map((item) => ({ ...item, w: narrowWidth(item, cols) })),
     cols,
   )
+}
+
+// The layout as it is drawn: a row that stops short of the right edge, with
+// nothing that could fill the rest, shares the rest among its widgets (the
+// ones that end the row and are as tall as its last). Only the drawing:
+// what is stored keeps its own widths, so a widget added back or moved finds
+// the room it had.
+export function fill(items, cols = LAYOUT_COLS) {
+  const out = items.map((item) => ({ ...item }))
+  const taken = (c, top, bottom, skip) =>
+    out.some((other) => !skip.has(other) && other.x <= c && c < other.x + other.w && other.y < bottom && top < other.y + other.h)
+  for (const y of [...new Set(out.map((item) => item.y))].sort((a, b) => a - b)) {
+    const row = out.filter((item) => item.y === y).sort((a, b) => a.x - b.x)
+    const last = row[row.length - 1]
+    // The run of widgets side by side that ends the row, all as tall as the last.
+    const run = [last]
+    for (let at = row.length - 2; at >= 0; at--) {
+      const one = row[at]
+      if (one.x + one.w !== run[0].x || one.h !== last.h) break
+      run.unshift(one)
+    }
+    const skip = new Set(run)
+    let spare = 0
+    while (last.x + last.w + spare < cols && !taken(last.x + last.w + spare, y, y + last.h, skip)) spare++
+    if (!spare) continue
+    let x = run[0].x
+    run.forEach((item, index) => {
+      item.w += Math.floor(spare / run.length) + (index < spare % run.length ? 1 : 0)
+      item.x = x
+      x += item.w
+    })
+  }
+  return out
 }
 
 // Moves a widget to a place in the reading order (what the up and down

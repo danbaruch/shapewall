@@ -93,7 +93,7 @@ export function StatTile({
       data-sw-tile={testId}
     >
       {showLabel || menu ? (
-        <div className="flex items-center justify-between gap-1">
+        <div className="flex items-center justify-between gap-1" data-sw-tile-head>
           <p className="truncate text-xs font-medium text-muted">{showLabel ? label : ''}</p>
           {menu}
         </div>

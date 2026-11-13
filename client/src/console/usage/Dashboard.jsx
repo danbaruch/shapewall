@@ -1,30 +1,46 @@
 // The Usage overview as a dashboard: a grid of widgets (widgets.jsx) that a
 // person can arrange. The layout itself, and every rule about it, is in
 // src/hosted/usage-layout.js; saving is in layout-state.js. This file is
-// the grid, "Edit layout", and the chrome a widget wears while it is edited.
+// the grid, "Edit layout", the panel widgets are added back from, and the
+// little set of tools a widget wears while it is edited.
 //
-// Outside "Edit layout" nothing moves: the grid only places the cards.
-// While editing, on 12 columns a widget is dragged by its bar and resized
-// from its corner (react-grid-layout: mouse, touch and pen), or moved with
-// the arrow keys and resized with Shift and the arrow keys; every change is
-// spoken by a live region. On fewer columns (a narrow window, a phone) the
-// same layout is shown reflowed, and widgets are put in another order with
-// their up and down buttons, the arrow keys or, on 6 columns, a drag.
+// The widgets flow into the grid in order (usage-layout.js), so the grid
+// never has a hole another widget fits. Outside "Edit layout" nothing
+// moves. While editing, a widget is dragged by any part of its card: the
+// others make room around a tinted place where it will land, and close up
+// behind it. On 12 columns it is resized from its right edge, its bottom
+// edge or its corner. The keyboard does the same: the arrow keys move a
+// widget past its neighbour, Shift and the arrow keys resize it, and every
+// change is spoken by a live region. On fewer columns (a narrow window, a
+// phone) the same layout is shown reflowed: there a drag (6 columns) or the
+// up and down buttons put widgets in another order.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import ReactGridLayout from 'react-grid-layout'
 import {
+  Activity,
   ArrowDown,
   ArrowUp,
   BarChart3,
   Check,
   CircleAlert,
+  CircleDollarSign,
+  Coins,
   Copy,
+  Gauge,
   GripVertical,
+  Hourglass,
   LayoutDashboard,
+  ListOrdered,
+  MessagesSquare,
+  PieChart,
   Plus,
   RotateCcw,
+  ShieldCheck,
+  Timer,
+  TriangleAlert,
   Undo2,
+  Wrench,
   X,
 } from 'lucide-react'
 import {
@@ -37,6 +53,9 @@ import {
   DropdownMenuTrigger,
   EmptyState,
   IconButton,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
   Spinner,
 } from '../../components/ui'
 import { cn } from '../../lib/utils'
@@ -49,11 +68,13 @@ import {
   addItem,
   colsFor,
   describeItem,
+  dropBefore,
   duplicateItem,
   fitLayout,
   hiddenTypes,
-  moveItem,
+  placeBefore,
   readingOrder,
+  fill,
   reflow,
   removeItem,
   reorder,
@@ -61,18 +82,46 @@ import {
   roomFor,
   setOptions,
   stepMove,
-  stepResize,
   visibleItems,
 } from '../../../../src/hosted/usage-layout.js'
-import { Card, LoadError } from '../components'
+import { Card, ConfirmDialog, LoadError } from '../components'
 import { useWorkspace } from '../pages/workspace'
 import { useWs } from './data'
 import { defaultBucket } from './format'
-import { Widget, WidgetOptions } from './widgets'
+import { Widget, WidgetOptions, optionRows } from './widgets'
 
 const pick = (value, allowed, fallback) => (allowed.includes(value) ? value : fallback)
 const ARROWS = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' }
+const STEP = { left: [-1, 0], right: [1, 0], up: [0, -1], down: [0, 1] }
 const GROUP_LABEL = { tile: 'Tiles', chart: 'Charts', list: 'Top lists', budgets: 'Budgets' }
+// What the panel of widgets to add says about each, and its icon.
+const ABOUT = {
+  tile_calls: [MessagesSquare, 'How many agent turns, with a trend line'],
+  tile_tokens: [Coins, 'Tokens the agents reported, in and out'],
+  tile_duration: [Timer, 'Time the agents spent, with the median turn'],
+  tile_cost: [CircleDollarSign, 'What the agents reported it cost'],
+  tile_fixes: [Wrench, 'Fixes asked for, and how many were made'],
+  tile_failed: [TriangleAlert, 'Share of turns that failed or were stopped'],
+  time: [BarChart3, 'Turns, tokens or cost over time, split as you like'],
+  breakdown: [PieChart, 'The biggest projects, agents, people or models'],
+  outcomes: [Activity, 'How turns ended, over time'],
+  approvals: [ShieldCheck, 'Approvals asked for, given and denied'],
+  latency: [Hourglass, 'How long turns took: median and slowest'],
+  top_agents: [ListOrdered, 'The agents that took the most turns'],
+  top_threads: [ListOrdered, 'The threads that used the most tokens'],
+  top_slowest: [ListOrdered, 'The turns that took longest'],
+  top_denied: [ListOrdered, 'Who had the most approvals denied'],
+  budgets: [Gauge, 'Each project’s daily budgets and today’s use'],
+}
+// Which edges a widget is resized by: a tile has one height.
+const HANDLES = { tile: ['e'], chart: ['s', 'e', 'se'], list: ['s', 'e', 'se'], budgets: ['s', 'e', 'se'] }
+// Where a widget that comes back goes: after the last of its kind (a tile among the tiles), else last.
+function addBefore(layout, type) {
+  const order = readingOrder(layout.items)
+  const group = WIDGETS[type].group
+  const last = order.findLastIndex((item) => WIDGETS[item.type].group === group)
+  return last < 0 ? null : (order[last + 1]?.id ?? null)
+}
 
 // The width of an element, kept up to date. A change is taken up on the
 // next frame (never inside the observer's own callback), so a grid that
@@ -105,31 +154,116 @@ function useWidth() {
   return [hold, node ? width : 0, ref]
 }
 
+// The corner and the two edges a widget is resized by: quiet until the widget is pointed at.
 const resizeHandle = (axis, ref) => (
   <span
     ref={ref}
-    className={`react-resizable-handle react-resizable-handle-${axis} sw-resize-handle`}
-    data-sw-widget-resize
+    className={`react-resizable-handle react-resizable-handle-${axis} sw-resize sw-resize-${axis}`}
+    {...(axis === 'se' ? { 'data-sw-widget-resize': '' } : { 'data-sw-widget-resize-edge': axis })}
     aria-hidden="true"
   />
 )
 
-// The button in the page's header: "Edit layout", and "Done" while editing.
+// The button in the page's header that starts "Edit layout" (the bar it opens has the one way out: Done).
 export function EditLayoutButton({ editing, onEditing, disabled = false, why = null }) {
+  if (editing) return null
   return (
     <Button
       size="touch"
-      variant={editing ? 'default' : 'secondary'}
+      variant="secondary"
       className="lg:h-9"
-      onClick={() => onEditing(!editing)}
+      onClick={() => onEditing(true)}
       disabled={disabled}
       title={disabled ? why : undefined}
-      aria-pressed={editing}
-      data-sw-layout-edit={editing ? 'on' : 'off'}
+      data-sw-layout-edit="off"
     >
-      {editing ? <Check size={15} aria-hidden="true" /> : <LayoutDashboard size={15} aria-hidden="true" />}
-      {editing ? 'Done' : 'Edit layout'}
+      <LayoutDashboard size={15} aria-hidden="true" />
+      Edit layout
     </Button>
+  )
+}
+
+// The widgets that are not on the dashboard, to add back with a press.
+function AddPanel({ hidden, onAdd, onAdded }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <Popover open={open} onOpenChange={setOpen} history={false}>
+      <PopoverTrigger asChild>
+        <Button size="sm" variant="secondary" data-sw-layout-add>
+          <Plus size={14} aria-hidden="true" /> Add widget
+          {hidden.length ? (
+            <span
+              className="tabular -mr-1 ml-0.5 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-accent px-1 text-[11px] leading-none font-semibold text-accent-fg"
+              data-sw-layout-add-count={hidden.length}
+            >
+              {hidden.length}
+              <span className="sr-only"> not on the dashboard</span>
+            </span>
+          ) : null}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="end"
+        className="w-[min(22rem,calc(100vw-2rem))] p-0"
+        onCloseAutoFocus={(event) => {
+          if (onAdded()) event.preventDefault()
+        }}
+        data-sw-layout-add-menu
+      >
+        <div className="border-b border-line px-3.5 py-2.5">
+          <p className="text-sm font-semibold text-fg">Add a widget</p>
+          <p className="text-xs text-muted">
+            {hidden.length
+              ? 'Widgets not on your dashboard. It goes in among its kind.'
+              : 'Every widget is on your dashboard. Hide one with its ×, or duplicate a chart.'}
+          </p>
+        </div>
+        {hidden.length ? (
+          <div className="max-h-[min(60vh,26rem)] overflow-y-auto p-1.5">
+            {Object.keys(GROUP_LABEL)
+              .filter((group) => hidden.some((type) => WIDGETS[type].group === group))
+              .map((group) => (
+                <div key={group} className="pb-1">
+                  <p className="px-2 pt-1.5 pb-1 text-[11px] font-semibold tracking-wide text-muted uppercase">{GROUP_LABEL[group]}</p>
+                  <ul>
+                    {hidden
+                      .filter((type) => WIDGETS[type].group === group)
+                      .map((type) => {
+                        const [Icon, about] = ABOUT[type]
+                        return (
+                          <li key={type}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onAdd(type)
+                                setOpen(false)
+                              }}
+                              className="group/add flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left outline-none hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
+                              data-sw-layout-add-item={type}
+                            >
+                              <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-line bg-surface-2 text-muted group-hover/add:border-accent/40 group-hover/add:text-accent">
+                                <Icon size={17} aria-hidden="true" />
+                              </span>
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate text-sm font-medium text-fg">{WIDGETS[type].title}</span>
+                                <span className="block truncate text-xs text-muted">{about}</span>
+                              </span>
+                              <Plus size={16} className="shrink-0 text-faint group-hover/add:text-accent" aria-hidden="true" />
+                            </button>
+                          </li>
+                        )
+                      })}
+                  </ul>
+                </div>
+              ))}
+          </div>
+        ) : (
+          <p className="sr-only" data-sw-layout-add-none>
+            Every widget is on the dashboard.
+          </p>
+        )}
+      </PopoverContent>
+    </Popover>
   )
 }
 
@@ -157,7 +291,7 @@ export function Dashboard({ filter, isAdmin, board, editing, onEditing }) {
   // ---- What is drawn ----
 
   const items = useMemo(() => visibleItems(layout, { admin: isAdmin }), [layout, isAdmin])
-  const shown = useMemo(() => reflow(items, cols), [items, cols])
+  const shown = useMemo(() => fill(reflow(items, cols), cols), [items, cols])
   const ordered = useMemo(() => readingOrder(shown), [shown])
   const titleOf = useCallback(
     (item) => {
@@ -213,7 +347,7 @@ export function Dashboard({ filter, isAdmin, board, editing, onEditing }) {
   // The same words twice in a row are still said twice (the count keys the node).
   const say = useCallback((text) => setLive((current) => ({ text, n: current.n + 1 })), [])
   const placeOf = (next, id) => {
-    const item = reflow(visibleItems(next, { admin: isAdmin }), cols).find((other) => other.id === id)
+    const item = fill(reflow(visibleItems(next, { admin: isAdmin }), cols), cols).find((other) => other.id === id)
     return item ? describeItem(item) : ''
   }
   // Applies a change to the layout and says what came of it.
@@ -227,7 +361,7 @@ export function Dashboard({ filter, isAdmin, board, editing, onEditing }) {
       return
     }
     change(next, { key })
-    setNotice({ text: 'Layout saved', undo: true })
+    // (No note for a move or a resize: the bar says "Saved", and its Undo takes it back.)
     say(`${title} ${verb} ${placeOf(next, id)}`)
   }
   const saveOptions = (item, changes) => {
@@ -249,11 +383,11 @@ export function Dashboard({ filter, isAdmin, board, editing, onEditing }) {
     say(`${title} hidden. Add widget brings it back.`)
   }
   const add = (type) => {
-    const { layout: next, id } = addItem(layout, type)
+    const { layout: next, id } = addItem(layout, type, {}, { before: addBefore(layout, type) })
     if (!id) return
     change(next)
     added.current = id
-    setNotice({ text: `${WIDGETS[type].title} added at the bottom`, undo: true })
+    setNotice({ text: `${WIDGETS[type].title} added`, undo: true })
     say(`${WIDGETS[type].title} added at ${placeOf(next, id)}`)
   }
   const duplicate = (item) => {
@@ -283,7 +417,8 @@ export function Dashboard({ filter, isAdmin, board, editing, onEditing }) {
       return
     }
     if (event.shiftKey)
-      apply(item.id, (current) => stepResize(current, item.id, direction), {
+      // (From the size it is drawn at: a widget that fills its row grows or shrinks from there.)
+      apply(item.id, (current) => resizeItem(current, item.id, item.w + STEP[direction][0], item.h + STEP[direction][1]), {
         verb: 'resized:',
         key: `size:${item.id}`,
         unchanged: direction === 'left' || direction === 'up' ? 'is as small as it goes' : 'is as large as it goes',
@@ -295,17 +430,57 @@ export function Dashboard({ filter, isAdmin, board, editing, onEditing }) {
         unchanged: `cannot move further ${direction}`,
       })
   }
-  // The grid library reports where a drag or a resize ended.
-  const onDragStop = (grid, _old, moved) => {
-    if (!moved) return
-    if (wide) apply(moved.i, (current) => moveItem(current, moved.i, moved.x, moved.y), { verb: 'moved to' })
-    else {
-      const order = [...grid].sort((a, b) => a.y - b.y || a.x - b.x).map((entry) => entry.i)
-      apply(moved.i, (current) => reorder(current, moved.i, order.indexOf(moved.i)), { verb: 'moved to' })
-    }
+  // ---- A drag or a resize with the mouse, a finger or a pen ----
+  //
+  // While a widget is dragged or resized, the grid library asks its
+  // "compactor" where every widget goes. The answer is the layout model's
+  // own (usage-layout.js): the change applied to the layout as it was when
+  // the drag began, then flowed. So the tinted place shown while dragging is
+  // exactly where the widget lands, nothing ever overlaps, and what is saved
+  // is what was shown. Outside a drag the compactor moves nothing: the
+  // layout it is given is already flowed.
+  const gesture = useRef(null) // { kind: 'drag' | 'resize', id, base, point, next }
+  const shownOf = useRef(null)
+  shownOf.current = (next) => fill(reflow(visibleItems(next, { admin: isAdmin }), cols), cols)
+  const compactor = useMemo(
+    () => ({
+      type: 'vertical',
+      allowOverlap: false,
+      compact(given) {
+        const now = gesture.current
+        if (!now) return given.map((entry) => ({ ...entry }))
+        const entry = given.find((one) => one.i === now.id)
+        if (now.kind === 'resize' && entry) now.next = resizeItem(now.base, now.id, entry.w, entry.h)
+        else if (now.kind === 'drag' && now.point)
+          now.next = placeBefore(now.base, now.id, dropBefore(now.drawn, now.id, now.point.x, now.point.y))
+        const places = new Map(shownOf.current(now.next || now.base).map((item) => [item.id, item]))
+        return given.map((one) => {
+          const place = places.get(one.i)
+          return place ? { ...one, x: place.x, y: place.y, w: place.w, h: place.h, moved: false } : { ...one }
+        })
+      },
+    }),
+    [],
+  )
+  // Where the pointer is, in columns and rows of the grid.
+  const pointOf = (event) => {
+    const box = gridRef.current?.getBoundingClientRect()
+    const at = event?.touches?.[0] || event?.changedTouches?.[0] || event
+    if (!box || !at || typeof at.clientX !== 'number') return null
+    const column = (width - LAYOUT_GAP * (cols - 1)) / cols + LAYOUT_GAP
+    return { x: (at.clientX - box.left) / column, y: (at.clientY - box.top) / (LAYOUT_ROW + LAYOUT_GAP) }
   }
-  const onResizeStop = (_grid, _old, sized) => {
-    if (sized) apply(sized.i, (current) => resizeItem(current, sized.i, sized.w, sized.h), { verb: 'resized:' })
+  const startGesture = (kind) => (_grid, _old, item) => {
+    if (item) gesture.current = { kind, id: item.i, base: layout, drawn: shown, point: null, next: null }
+  }
+  const onDrag = (_grid, _old, _item, _placeholder, event) => {
+    if (gesture.current) gesture.current.point = pointOf(event) ?? gesture.current.point
+  }
+  const endGesture = (verb) => () => {
+    const done = gesture.current
+    gesture.current = null
+    if (!done?.next || done.next === done.base) return
+    apply(done.id, () => done.next, { verb })
   }
 
   // ---- Edit mode ----
@@ -355,11 +530,29 @@ export function Dashboard({ filter, isAdmin, board, editing, onEditing }) {
       shown.map((item) => {
         const size = WIDGETS[item.type].size
         return wide
-          ? { i: item.id, x: item.x, y: item.y, w: item.w, h: item.h, minW: size.minW, maxW: size.maxW, minH: size.minH, maxH: size.maxH }
+          ? {
+              i: item.id,
+              x: item.x,
+              y: item.y,
+              w: item.w,
+              h: item.h,
+              minW: size.minW,
+              maxW: size.maxW,
+              minH: size.minH,
+              maxH: size.maxH,
+              resizeHandles: HANDLES[WIDGETS[item.type].group],
+            }
           : { i: item.id, x: item.x, y: item.y, w: item.w, h: item.h }
       }),
     [shown, wide],
   )
+  const [confirmReset, setConfirmReset] = useState(false)
+  const resetNow = () => {
+    setConfirmReset(false)
+    board.reset()
+    setNotice({ text: board.hasDefault ? 'Back to the workspace’s layout' : 'Back to the default layout', undo: true })
+    say('The layout is back to the default.')
+  }
 
   if (summary.error && !summary.data)
     return (
@@ -383,6 +576,14 @@ export function Dashboard({ filter, isAdmin, board, editing, onEditing }) {
 
   const hidden = hiddenTypes(layout, { admin: isAdmin })
   const canDrag = editing && cols > 2
+  // How much of a widget's heading its tools cover (they sit over its top right corner).
+  const toolsWidth = (item) => {
+    const tile = WIDGETS[item.type].group === 'tile'
+    let room = canDrag ? 20 : 56
+    if (!(cols === 2 && tile) && optionRows(item.type).length) room += 28
+    if (WIDGETS[item.type].many && cols > 2) room += 28
+    return room + 28 + 22
+  }
   return (
     <div
       data-sw-usage-overview
@@ -437,23 +638,28 @@ export function Dashboard({ filter, isAdmin, board, editing, onEditing }) {
 
       {editing ? (
         <div
-          className="sticky top-2 z-30 mb-3 flex flex-wrap items-center gap-x-2 gap-y-2 rounded-xl border border-accent/50 bg-surface px-3 py-2 shadow-pop print:hidden"
+          className="sticky top-2 z-30 mb-3 flex flex-wrap items-center gap-x-2 gap-y-2 rounded-xl border border-line bg-surface py-2 pr-2 pl-3.5 shadow-pop print:hidden"
           role="toolbar"
           aria-label="Edit layout"
           data-sw-layout-bar
         >
-          <p className="mr-auto min-w-0 flex-[1_1_14rem] text-sm text-fg" id="sw-layout-help">
-            <strong className="font-semibold">Editing the layout.</strong>{' '}
-            <span className="text-muted">
-              {wide
-                ? 'Drag a widget by its bar and resize it from its corner, or use the arrow keys (with Shift to resize).'
-                : cols > 2
-                  ? 'Drag a widget by its bar, or use its arrows, to put it in another place. Resize on a wider screen.'
-                  : 'Use a widget’s arrows to move it up or down. Drag and resize on a wider screen.'}
+          <p className="mr-auto flex min-w-0 flex-[1_1_16rem] items-center gap-2 text-sm text-fg" id="sw-layout-help">
+            <LayoutDashboard size={15} className="shrink-0 text-accent" aria-hidden="true" />
+            <span className="min-w-0">
+              <strong className="font-semibold">Editing layout</strong>
+              <span className="text-muted">
+                {' · '}
+                {wide
+                  ? 'Drag a widget to move it, drag an edge to resize.'
+                  : cols > 2
+                    ? 'Drag a widget to move it.'
+                    : 'Use the arrows to reorder.'}
+              </span>
+              <span className="sr-only"> The arrow keys move the widget in focus; with Shift, they resize it.</span>
             </span>
           </p>
           <span
-            className={cn('inline-flex items-center gap-1 text-xs', failed ? 'text-bad' : 'text-muted')}
+            className={cn('inline-flex min-w-[4.5rem] items-center justify-end gap-1 text-xs', failed ? 'text-bad' : 'text-muted')}
             role="status"
             data-sw-layout-status={board.status}
           >
@@ -471,67 +677,31 @@ export function Dashboard({ filter, isAdmin, board, editing, onEditing }) {
               </>
             ) : null}
           </span>
-          <Button size="sm" variant="secondary" onClick={board.undo} disabled={!board.canUndo} data-sw-layout-undo>
-            <Undo2 size={14} aria-hidden="true" /> Undo
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button size="sm" variant="secondary" data-sw-layout-add>
-                <Plus size={14} aria-hidden="true" /> Add widget
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              className="w-64"
-              onCloseAutoFocus={(event) => {
-                if (!added.current) return
-                event.preventDefault()
+          <span className="flex flex-wrap items-center gap-1.5">
+            <Button size="sm" variant="secondary" onClick={board.undo} disabled={!board.canUndo} data-sw-layout-undo>
+              <Undo2 size={14} aria-hidden="true" /> Undo
+            </Button>
+            <AddPanel
+              hidden={hidden}
+              onAdd={add}
+              onAdded={() => {
+                if (!added.current) return false
                 setFocusId(added.current)
                 added.current = null
+                return true
               }}
-              data-sw-layout-add-menu
-            >
-              {hidden.length ? (
-                Object.keys(GROUP_LABEL)
-                  .filter((group) => hidden.some((type) => WIDGETS[type].group === group))
-                  .map((group) => (
-                    <div key={group}>
-                      <DropdownMenuLabel>{GROUP_LABEL[group]}</DropdownMenuLabel>
-                      {hidden
-                        .filter((type) => WIDGETS[type].group === group)
-                        .map((type) => (
-                          <DropdownMenuItem key={type} onSelect={() => add(type)} data-sw-layout-add-item={type}>
-                            <Plus size={14} aria-hidden="true" /> {WIDGETS[type].title}
-                          </DropdownMenuItem>
-                        ))}
-                    </div>
-                  ))
-              ) : (
-                <p className="px-2.5 py-2 text-xs text-muted" data-sw-layout-add-none>
-                  Every widget is on the dashboard. Hide one with its ×, or duplicate a chart from its bar.
-                </p>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button size="sm" variant="secondary" data-sw-layout-reset-menu>
-                <RotateCcw size={14} aria-hidden="true" /> Reset
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent className="w-72">
-              <DropdownMenuItem
-                disabled={!board.customised}
-                onSelect={() => {
-                  board.reset()
-                  setNotice({ text: board.hasDefault ? 'Back to the workspace’s layout' : 'Back to the default layout', undo: true })
-                  say('The layout is back to the default.')
-                }}
-                data-sw-layout-reset
-              >
-                <RotateCcw size={14} aria-hidden="true" /> Reset to default
-              </DropdownMenuItem>
-              {board.canSetDefault ? (
-                <>
+            />
+            {board.canSetDefault ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="sm" variant="secondary" data-sw-layout-reset-menu>
+                    <RotateCcw size={14} aria-hidden="true" /> Reset
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-72">
+                  <DropdownMenuItem disabled={!board.customised} onSelect={() => setConfirmReset(true)} data-sw-layout-reset>
+                    <RotateCcw size={14} aria-hidden="true" /> {board.hasDefault ? 'Reset to the workspace layout' : 'Reset to default'}
+                  </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuLabel>For the workspace</DropdownMenuLabel>
                   <DropdownMenuItem
@@ -562,15 +732,39 @@ export function Dashboard({ filter, isAdmin, board, editing, onEditing }) {
                       <X size={14} aria-hidden="true" /> Remove the workspace default
                     </DropdownMenuItem>
                   ) : null}
-                </>
-              ) : null}
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <Button size="sm" variant="default" onClick={() => onEditing(false)} data-sw-layout-done>
-            Done
-          </Button>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : (
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={!board.customised}
+                title={board.customised ? undefined : 'This is already the default layout'}
+                onClick={() => setConfirmReset(true)}
+                data-sw-layout-reset
+              >
+                <RotateCcw size={14} aria-hidden="true" /> Reset
+              </Button>
+            )}
+            <Button size="sm" variant="default" className="min-w-16" onClick={() => onEditing(false)} data-sw-layout-done>
+              Done
+            </Button>
+          </span>
         </div>
       ) : null}
+      <ConfirmDialog
+        open={confirmReset}
+        onClose={() => setConfirmReset(false)}
+        title="Reset the layout?"
+        confirmLabel="Reset"
+        onConfirm={resetNow}
+      >
+        <p className="text-sm text-muted">
+          {board.hasDefault
+            ? 'Your dashboard goes back to the layout your workspace starts everyone from. Undo brings yours back.'
+            : 'Your dashboard goes back to the layout everyone starts from. Undo brings yours back.'}
+        </p>
+      </ConfirmDialog>
 
       {/* The tiles and the top lists are widgets among the others now: both names stay on the grid that holds them. */}
       <div ref={holdGrid} className="sw-layout" data-sw-layout data-sw-usage-tiles data-sw-usage-top>
@@ -581,13 +775,16 @@ export function Dashboard({ filter, isAdmin, board, editing, onEditing }) {
             gridConfig={{ cols, rowHeight: LAYOUT_ROW, margin: [LAYOUT_GAP, LAYOUT_GAP], containerPadding: [0, 0] }}
             dragConfig={{
               enabled: canDrag,
-              handle: '[data-sw-widget-handle]',
-              cancel: 'button, a, input, [data-sw-no-drag]',
+              cancel: 'button, a, input, [role="menu"], .react-resizable-handle',
               threshold: 4,
             }}
-            resizeConfig={{ enabled: editing && wide, handles: ['se'], handleComponent: resizeHandle }}
-            onDragStop={onDragStop}
-            onResizeStop={onResizeStop}
+            resizeConfig={{ enabled: editing && wide, handles: ['s', 'e', 'se'], handleComponent: resizeHandle }}
+            compactor={compactor}
+            onDragStart={startGesture('drag')}
+            onDrag={onDrag}
+            onDragStop={endGesture('moved to')}
+            onResizeStart={startGesture('resize')}
+            onResizeStop={endGesture('resized:')}
           >
             {ordered.map((item, index) => {
               const title = titleOf(item)
@@ -596,8 +793,8 @@ export function Dashboard({ filter, isAdmin, board, editing, onEditing }) {
               return (
                 <div
                   key={item.id}
-                  className="sw-widget"
-                  style={{ '--sw-w': item.w }}
+                  className={cn('sw-widget', canDrag && 'sw-widget-drag')}
+                  style={{ '--sw-w': item.w, ...(editing ? { '--sw-tools': `${toolsWidth(item)}px` } : {}) }}
                   data-sw-widget={item.id}
                   data-sw-widget-type={item.type}
                   data-sw-widget-place={`${item.x},${item.y},${item.w},${item.h}`}
@@ -611,69 +808,63 @@ export function Dashboard({ filter, isAdmin, board, editing, onEditing }) {
                       }
                     : {})}
                 >
-                  <div className="flex h-full min-w-0 flex-col">
-                    {editing ? (
-                      <div className="sw-widget-bar" data-sw-widget-bar>
-                        <span
-                          className={cn('sw-widget-grip', canDrag && 'sw-widget-grip-on')}
-                          {...(canDrag ? { 'data-sw-widget-handle': '' } : {})}
-                          title={canDrag ? 'Drag to move' : undefined}
-                        >
-                          {canDrag ? <GripVertical size={15} className="shrink-0 text-muted" aria-hidden="true" /> : null}
-                          <span className="truncate">{title}</span>
-                        </span>
-                        {wide ? null : (
-                          <>
-                            <IconButton
-                              label={`Move ${title} up`}
-                              size="icon-xs"
-                              disabled={index === 0}
-                              onClick={() => moveInOrder(item, -1)}
-                              data-sw-widget-up
-                            >
-                              <ArrowUp size={14} aria-hidden="true" />
-                            </IconButton>
-                            <IconButton
-                              label={`Move ${title} down`}
-                              size="icon-xs"
-                              disabled={index === ordered.length - 1}
-                              onClick={() => moveInOrder(item, 1)}
-                              data-sw-widget-down
-                            >
-                              <ArrowDown size={14} aria-hidden="true" />
-                            </IconButton>
-                          </>
-                        )}
-                        {/* A tile on a phone is too narrow for more than its name, its arrows and its ×. */}
-                        {cols === 2 && WIDGETS[item.type].group === 'tile' ? null : menu}
-                        {WIDGETS[item.type].many ? (
-                          <IconButton
-                            label={roomFor(layout, item.type) ? `Duplicate ${title}` : `No more copies of ${WIDGETS[item.type].title} fit`}
-                            size="icon-xs"
-                            disabled={!roomFor(layout, item.type)}
-                            onClick={() => duplicate(item)}
-                            data-sw-widget-duplicate
-                          >
-                            <Copy size={14} aria-hidden="true" />
-                          </IconButton>
-                        ) : null}
-                        <IconButton label={`Hide ${title}`} size="icon-xs" onClick={() => hide(item)} data-sw-widget-hide>
-                          <X size={15} aria-hidden="true" />
-                        </IconButton>
-                      </div>
-                    ) : null}
-                    <div className="sw-widget-body min-h-0 min-w-0 flex-1" inert={editing}>
-                      <Widget
-                        item={item}
-                        options={options}
-                        setOptions={(changes) => saveOptions(item, changes)}
-                        ctx={ctx}
-                        // While editing, the options are on the widget's bar (false: a widget with no button of its own).
-                        menu={editing ? false : menu}
-                        editing={editing}
-                      />
-                    </div>
+                  <div className="sw-widget-body h-full min-w-0" inert={editing}>
+                    <Widget
+                      item={item}
+                      options={options}
+                      setOptions={(changes) => saveOptions(item, changes)}
+                      ctx={ctx}
+                      // While editing, the widget's tools sit where its options button was (false: no button of its own).
+                      menu={editing ? false : menu}
+                    />
                   </div>
+                  {editing ? (
+                    // The tools of a widget being edited, in its top right corner: hold it, its options, a copy, hide it.
+                    <div className="sw-widget-tools" data-sw-widget-bar>
+                      {canDrag ? (
+                        <span className="sw-widget-grip" data-sw-widget-handle title="Drag to move" aria-hidden="true">
+                          <GripVertical size={14} />
+                        </span>
+                      ) : (
+                        <>
+                          <IconButton
+                            label={`Move ${title} up`}
+                            size="icon-xs"
+                            disabled={index === 0}
+                            onClick={() => moveInOrder(item, -1)}
+                            data-sw-widget-up
+                          >
+                            <ArrowUp size={14} aria-hidden="true" />
+                          </IconButton>
+                          <IconButton
+                            label={`Move ${title} down`}
+                            size="icon-xs"
+                            disabled={index === ordered.length - 1}
+                            onClick={() => moveInOrder(item, 1)}
+                            data-sw-widget-down
+                          >
+                            <ArrowDown size={14} aria-hidden="true" />
+                          </IconButton>
+                        </>
+                      )}
+                      {/* A tile on a phone is too narrow for more than its arrows and its ×. */}
+                      {cols === 2 && WIDGETS[item.type].group === 'tile' ? null : menu}
+                      {WIDGETS[item.type].many && cols > 2 ? (
+                        <IconButton
+                          label={roomFor(layout, item.type) ? `Duplicate ${title}` : `No more copies of ${WIDGETS[item.type].title} fit`}
+                          size="icon-xs"
+                          disabled={!roomFor(layout, item.type)}
+                          onClick={() => duplicate(item)}
+                          data-sw-widget-duplicate
+                        >
+                          <Copy size={14} aria-hidden="true" />
+                        </IconButton>
+                      ) : null}
+                      <IconButton label={`Hide ${title}`} size="icon-xs" onClick={() => hide(item)} data-sw-widget-hide>
+                        <X size={15} aria-hidden="true" />
+                      </IconButton>
+                    </div>
+                  ) : null}
                 </div>
               )
             })}

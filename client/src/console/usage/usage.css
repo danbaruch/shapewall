@@ -70,124 +70,214 @@
   min-width: 0;
   border-radius: 0.75rem;
 }
-/* Widgets glide to their places only while the layout is edited. */
+.sw-layout .sw-widget-body > * {
+  height: 100%;
+}
+
+/* While the layout is edited the widgets glide to their places. */
 .sw-layout-editing .react-grid-layout {
-  transition: height 180ms ease;
+  transition: height 200ms ease;
 }
 .sw-layout-editing .react-grid-item {
   transition:
-    transform 180ms ease,
-    width 180ms ease,
-    height 180ms ease;
+    transform 200ms cubic-bezier(0.2, 0.8, 0.3, 1),
+    width 200ms cubic-bezier(0.2, 0.8, 0.3, 1),
+    height 200ms cubic-bezier(0.2, 0.8, 0.3, 1);
 }
 .sw-layout-editing .react-grid-item.resizing,
 .sw-layout-editing .react-grid-item.react-draggable-dragging {
   transition: none;
-  z-index: 5;
+  /* Above the sticky edit bar while it is held. */
+  z-index: 40;
 }
-.sw-layout-editing .react-grid-item.react-draggable-dragging {
-  box-shadow: var(--shadow-pop, 0 12px 32px rgb(0 0 0 / 0.22));
-  background: var(--bg, var(--surface));
+
+/* A widget being edited is the same card as ever: a ring when it is pointed at or has the focus, and it is held anywhere. */
+.sw-layout-editing .sw-widget-body > * {
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+.sw-layout-editing .sw-widget-drag {
+  cursor: grab;
+  /* A finger on a widget drags it while the layout is edited (the page scrolls from the gaps and the bar). */
+  touch-action: none;
+  user-select: none;
+}
+.sw-layout-editing .sw-widget:hover .sw-widget-body > *,
+.sw-layout-editing .sw-widget.resizing .sw-widget-body > * {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+}
+.sw-layout-editing .sw-widget:focus {
+  outline: none;
+}
+.sw-layout-editing .sw-widget:focus-visible .sw-widget-body > * {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.sw-layout-editing .react-draggable-dragging {
   cursor: grabbing;
 }
-.sw-layout-editing .react-grid-item.react-draggable-dragging .sw-widget-body,
-.sw-layout-editing .react-grid-item.resizing .sw-widget-body {
-  opacity: 1;
+.sw-layout-editing .react-draggable-dragging .sw-widget-body > * {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  box-shadow:
+    0 18px 40px -12px rgb(0 0 0 / 0.28),
+    0 4px 12px -4px rgb(0 0 0 / 0.12);
 }
-/* Where a dragged or resized widget will land. */
+/* Its own switches step aside (its options are in its tools), and its heading leaves room for the tools. */
+.sw-layout-editing [data-sw-chart-controls] {
+  display: none !important;
+}
+.sw-layout-editing :is([data-sw-chart-header], [data-sw-top-head], [data-sw-tile-head], [data-sw-budgets-head]) {
+  padding-right: var(--sw-tools, 7rem);
+}
+
+/* Where the widget will land: a quiet tinted place. */
 .sw-layout .react-grid-item.react-grid-placeholder {
   z-index: 1;
-  border: 2px dashed var(--accent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  transition: transform 100ms ease;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  transition:
+    transform 160ms ease,
+    width 160ms ease,
+    height 160ms ease;
   user-select: none;
+}
+
+/* The tools in a widget's top right corner while it is edited. */
+.sw-widget-tools {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 2px;
+  /* Quiet until the widget is pointed at: then the tools sit on a small chip of their own. */
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  background: var(--surface);
+  cursor: default;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+.sw-widget-tools > :not(.sw-widget-grip) {
+  opacity: 0.6;
+  transition: opacity 120ms ease;
+}
+.sw-widget:is(:hover, :focus-within, .resizing) .sw-widget-tools {
+  border-color: var(--line);
+  box-shadow: var(--shadow-card, 0 1px 2px rgb(0 0 0 / 0.06));
+}
+.sw-widget:is(:hover, :focus-within) .sw-widget-tools > * {
+  opacity: 1;
+}
+@media (hover: none) {
+  .sw-widget-tools > :not(.sw-widget-grip) {
+    opacity: 1;
+  }
+}
+.sw-widget-grip {
+  display: inline-flex;
+  width: 20px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  color: var(--faint);
+  cursor: grab;
+}
+.sw-widget:hover .sw-widget-grip {
+  color: var(--fg);
+}
+
+/* Resizing: the right edge, the bottom edge and the corner. Each shows a small grip when the widget is pointed at. */
+.sw-layout .sw-resize {
+  position: absolute;
+  z-index: 4;
+  touch-action: none;
+}
+.sw-layout .sw-resize::after {
+  content: '';
+  position: absolute;
+  opacity: 0;
+  transition:
+    opacity 120ms ease,
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+.sw-layout .sw-resize-e {
+  top: 14px;
+  right: -7px;
+  bottom: 14px;
+  width: 14px;
+  cursor: ew-resize;
+}
+.sw-layout .sw-resize-e::after {
+  top: 50%;
+  left: 5px;
+  width: 4px;
+  height: 32px;
+  max-height: 60%;
+  border-radius: 4px;
+  background: var(--line-strong);
+  transform: translateY(-50%);
+}
+.sw-layout .sw-resize-s {
+  right: 14px;
+  bottom: -7px;
+  left: 14px;
+  height: 14px;
+  cursor: ns-resize;
+}
+.sw-layout .sw-resize-s::after {
+  top: 5px;
+  left: 50%;
+  width: 32px;
+  height: 4px;
+  border-radius: 4px;
+  background: var(--line-strong);
+  transform: translateX(-50%);
+}
+.sw-layout .sw-resize-se {
+  right: -5px;
+  bottom: -5px;
+  width: 22px;
+  height: 22px;
+  cursor: nwse-resize;
+}
+.sw-layout .sw-resize-se::after {
+  right: 8px;
+  bottom: 8px;
+  width: 9px;
+  height: 9px;
+  border-right: 2px solid var(--line-strong);
+  border-bottom: 2px solid var(--line-strong);
+  border-bottom-right-radius: 3px;
+}
+.sw-layout-editing .sw-widget:hover .sw-resize::after,
+.sw-layout-editing .sw-widget:focus-visible .sw-resize::after,
+.sw-layout-editing .sw-widget.resizing .sw-resize::after {
+  opacity: 1;
+}
+.sw-layout .sw-resize:hover::after,
+.sw-layout .react-resizable-handle:active::after {
+  background-color: var(--accent);
+  border-color: var(--accent);
+  opacity: 1;
+}
+.sw-layout .sw-resize-se:hover::after {
+  background-color: transparent;
 }
 .sw-layout .react-resizable-hide > .react-resizable-handle {
   display: none;
 }
-
-/* A widget while the layout is edited: an outline, a bar to hold it by, a corner to size it by. */
-.sw-layout-editing .sw-widget {
-  outline: 1px dashed var(--line-strong);
-  outline-offset: 3px;
-}
-.sw-layout-editing .sw-widget:hover {
-  outline-color: var(--accent);
-}
-.sw-layout-editing .sw-widget:focus {
-  outline: 2px solid var(--accent);
-  outline-offset: 3px;
-}
-.sw-layout-editing .sw-widget-body {
-  /* Nothing inside is pressed while editing; it stays readable. */
-  opacity: 0.82;
-}
-.sw-widget-bar {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 2px;
-  height: 32px;
-  margin-bottom: 4px;
-  padding: 0 4px 0 2px;
-  border: 1px solid var(--line-strong);
-  border-radius: 0.5rem;
-  background: var(--surface-2);
-  color: var(--fg);
-  font-size: 12px;
-  font-weight: 600;
-}
-.sw-widget-grip {
-  display: flex;
-  min-width: 0;
-  flex: 1 1 auto;
-  align-items: center;
-  gap: 4px;
-  align-self: stretch;
-  padding: 0 6px;
-}
-.sw-widget-grip-on {
-  cursor: grab;
-  /* A finger on the bar drags the widget; anywhere else it scrolls the page. */
-  touch-action: none;
-  user-select: none;
-}
-.sw-layout .sw-resize-handle {
-  position: absolute;
-  right: -4px;
-  bottom: -4px;
-  z-index: 2;
-  width: 28px;
-  height: 28px;
-  cursor: se-resize;
-  touch-action: none;
-}
-/* Three strokes across the corner, on a chip of the surface so they read on any card. */
-.sw-layout .sw-resize-handle::before {
-  content: '';
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  width: 20px;
-  height: 20px;
-  border: 1px solid var(--line-strong);
-  border-radius: 6px 0 10px 0;
-  background:
-    linear-gradient(
-        135deg,
-        transparent 0 46%,
-        var(--fg) 46% 54%,
-        transparent 54% 64%,
-        var(--fg) 64% 72%,
-        transparent 72% 82%,
-        var(--fg) 82% 90%,
-        transparent 90%
-      )
-      no-repeat 2px 2px / 14px 14px,
-    var(--surface);
-}
-.sw-layout .sw-resize-handle:hover::before {
-  border-color: var(--accent);
+/* (A pointer that cannot hover, a finger: the grips show all the time.) */
+@media (hover: none) {
+  .sw-layout-editing .sw-resize::after {
+    opacity: 1;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
