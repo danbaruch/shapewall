@@ -100,6 +100,8 @@ const pick = (value, allowed, fallback) => (allowed.includes(value) ? value : fa
 const ARROWS = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' }
 const STEP = { left: [-1, 0], right: [1, 0], up: [0, -1], down: [0, 1] }
 const GROUP_LABEL = { tile: 'Tiles', chart: 'Charts', list: 'Top lists', budgets: 'Budgets' }
+// The longest a first visit holds the grid back for its widgets' data (then it shows what it has).
+const FIRST_PAINT_WAIT_MS = 1500
 // What the panel of widgets to add says about each, and its icon.
 const ABOUT = {
   tile_calls: [MessagesSquare, 'How many agent turns, with a trend line'],
@@ -329,6 +331,19 @@ export function Dashboard({ filter, isAdmin, board, editing, onEditing }) {
   fittedRef.current = fitted
   // What the grid draws: every widget at its own height, in fine rows.
   const drawn = useMemo(() => settle(shown, cols, fitted), [shown, cols, fitted])
+  // A first visit has no kept heights: the grid is held back (usage.css) until every widget as tall as its content
+  // has been measured with its data in, or for a moment at most, so no card is seen shrinking once its data arrives.
+  const measuredAll = shown.every((item) => !fitsContent(item) || Number.isInteger(fitted[item.id]))
+  const [ready, setReady] = useState(measuredAll)
+  useEffect(() => {
+    if (ready) return undefined
+    if (measuredAll) {
+      setReady(true)
+      return undefined
+    }
+    const timer = window.setTimeout(() => setReady(true), FIRST_PAINT_WAIT_MS)
+    return () => window.clearTimeout(timer)
+  }, [ready, measuredAll])
   const titleOf = useCallback(
     (item) => {
       const copies = ordered.filter((other) => other.type === item.type)
@@ -945,7 +960,15 @@ export function Dashboard({ filter, isAdmin, board, editing, onEditing }) {
       </ConfirmDialog>
 
       {/* The tiles and the top lists are widgets among the others now: both names stay on the grid that holds them. */}
-      <div ref={holdGrid} className="sw-layout" data-sw-layout data-sw-usage-tiles data-sw-usage-top>
+      <div
+        ref={holdGrid}
+        className="sw-layout"
+        data-sw-layout
+        data-sw-layout-ready={ready ? 'true' : 'false'}
+        aria-busy={ready ? undefined : true}
+        data-sw-usage-tiles
+        data-sw-usage-top
+      >
         {width ? (
           <ReactGridLayout
             layout={grid}

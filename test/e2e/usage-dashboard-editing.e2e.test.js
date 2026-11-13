@@ -122,9 +122,7 @@ async function assertTidy(page, label) {
     for (let c = a.x; c < a.x + a.w; c += 1) {
       const above = found.filter((o) => o !== a && o.x <= c && c < o.x + o.w && o.y + o.h <= a.y)
       const row = Math.max(0, ...above.map((o) => o.y + o.h))
-      // (Under a widget as tall as what it holds, the room it does not need may stay empty.)
-      const nearestAbove = [...above].sort((p, q) => q.y + q.h - (p.y + p.h))[0]
-      if (row !== a.y && nearestAbove?.fit) break
+      // (No exception, under a widget as tall as what it holds either: it reaches down rather than leave a hole.)
       if (row !== a.y) {
         problems.push(`${a.id}: a hole above it in column ${c + 1} (rows ${row + 1} to ${a.y})`)
         break
@@ -503,5 +501,90 @@ test('1440 px: a short widget keeps its own height beside a taller one; the ones
     assert.deepEqual(errors, [])
   } finally {
     await context.close()
+  }
+})
+
+// The rows of a band end on one line, whatever sizes and options are chosen: a short breakdown made narrow beside
+// a wide chart (the charts under it are split into other columns, so none can come up under it) reaches down to
+// where the chart ends; a Top 10 beside Top 5s makes the whole row of lists as tall as it. And a first visit
+// (nothing kept in this browser) shows the grid once its heights are known: no card shrinks in front of the reader.
+test('1440 px: no hole beside a short widget in rows of uneven widths; a Top 10 beside Top 5s ends evenly; a first visit does not jump', async () => {
+  const { context, page, errors } = await open({ width: 1440, height: 900 })
+  try {
+    const box = async (id) => widget(page, id).boundingBox()
+    await page.locator('[data-sw-layout-edit="off"]').click()
+    await page.locator('[data-sw-layout-bar]').waitFor()
+    // A Top 10 among Top 5s, from the widget's own options.
+    await widget(page, 'top_threads').hover()
+    await page.locator('[data-sw-widget-options="top_threads"]').click()
+    const panel = page.locator('[data-sw-widget-options-panel="top_threads"]')
+    await panel.locator('[data-sw-pick="option-rows"]').click()
+    await page
+      .getByRole('option', { name: /\b10\b/ })
+      .first()
+      .click()
+    await page.keyboard.press('Escape')
+    await saved(page)
+    await page.waitForFunction(
+      () => Number(document.querySelector('[data-sw-widget="top_threads"] [data-sw-top-rows]')?.dataset.swTopRows) > 5,
+    )
+    // The breakdown made narrower with the mouse, from its right edge: the chart beside it takes the room.
+    await widget(page, 'breakdown').hover()
+    const column = ((await page.locator('.react-grid-layout').boundingBox()).width + LAYOUT_GAP) / 12
+    const right = await middle(widget(page, 'breakdown').locator('.sw-resize-e'))
+    await drag(page, right, { x: right.x - column * 2, y: right.y })
+    await saved(page)
+    assert.equal((await placeOf(page, 'breakdown'))[2], 4)
+    await assertTidy(page, 'uneven widths, editing')
+    await shot(page, '1440-even-01-edit')
+    await page.locator('[data-sw-layout-done]').click()
+    await assertTidy(page, 'uneven widths, viewing')
+    // The breakdown ends where the chart beside it ends (one bottom line, no hole), its rows at its top.
+    const [breakdown, outcomes] = [await box('breakdown'), await box('outcomes')]
+    assert.ok(Math.abs(breakdown.y + breakdown.height - (outcomes.y + outcomes.height)) < 1.5, 'one bottom line')
+    const approvals = await box('approvals')
+    assert.ok(approvals.y - (breakdown.y + breakdown.height) < LAYOUT_GAP + 1.5, 'the next row right under it')
+    // The lists end on one line, every one as tall as the Top 10.
+    const lists = await Promise.all(['top_agents', 'top_threads', 'top_slowest', 'top_denied'].map(box))
+    const bottoms = lists.map((one) => Math.round(one.y + one.height))
+    assert.equal(new Set(bottoms).size, 1, `the lists end on one line: ${bottoms}`)
+    const tenRows = await widget(page, 'top_threads').evaluate((node) => {
+      const rows = [...node.querySelectorAll('[data-sw-top-rows] > li')]
+      return node.getBoundingClientRect().bottom - rows[rows.length - 1].getBoundingClientRect().bottom
+    })
+    assert.ok(tenRows >= 0 && tenRows < 40, `the Top 10 sets the height: ${tenRows} px under its last row`)
+    await shot(page, '1440-even-02-view')
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+
+  // A first visit: the grid is shown once (no card shrinks), at the heights it keeps.
+  const fresh = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  try {
+    const page = await fresh.newPage()
+    const errors = []
+    page.on('pageerror', (error) => errors.push(error.message))
+    await page.addInitScript(() => {
+      window.__seen = []
+      const look = () => {
+        const grid = document.querySelector('.sw-layout .react-grid-layout')
+        const one = document.querySelector('[data-sw-widget="breakdown"]')
+        if (grid && one && Number(getComputedStyle(grid).opacity) > 0) window.__seen.push(Math.round(one.getBoundingClientRect().height))
+        if (performance.now() < 15000) requestAnimationFrame(look)
+      }
+      requestAnimationFrame(look)
+    })
+    await page.goto(usageUrl())
+    await page.locator('[data-sw-layout-ready="true"]').waitFor({ timeout: 30000 })
+    await widget(page, 'breakdown').locator('[data-sw-breakdown-row]').first().waitFor()
+    await page.waitForTimeout(1200)
+    const seen = await page.evaluate(() => [...new Set(window.__seen)])
+    assert.equal(seen.length, 1, `the breakdown is seen at one height only: ${seen}`)
+    assert.ok(seen[0] < 300, `its own height, not the stored one: ${seen[0]}`)
+    await assertTidy(page, 'a first visit')
+    assert.deepEqual(errors, [])
+  } finally {
+    await fresh.close()
   }
 })

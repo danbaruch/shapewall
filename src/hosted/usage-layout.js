@@ -618,11 +618,13 @@ export const fitsContent = (item) => Boolean(item.auto && WIDGETS[item.type]?.au
 // pairs, the top lists, the budgets): in a band the widgets flow in
 // reading order as the stored layout does, so a widget under a shorter one
 // moves up into the room it leaves, and a chart that ends a column short of
-// the band's bottom reaches down to it (a plot can be taller; a list cannot
-// be fuller, so a column of lists alone keeps its own end). Bands stay in
-// line with each other, so a row of lists keeps one top edge, and the lists
-// side by side in a row, set to the same number of rows, are as tall as the
-// tallest of them (a list set to more rows is taller on its own).
+// the band's bottom reaches down to it. A widget as tall as its content that
+// still ends short of the band, with nothing that fits under it, reaches down
+// last, so a band never leaves a hole and always ends on one line (a Top 5
+// beside a Top 10 is as tall as it, its rows at its top). Bands stay in line
+// with each other, so a row of lists keeps one top edge, and the lists side
+// by side in a row, set to the same number of rows, are as tall as the
+// tallest of them.
 export function settle(items, cols = LAYOUT_COLS, fitted = {}) {
   const order = readingOrder(items)
   // (Never taller than the rows it is given for what it holds: past those it scrolls, as it always has.)
@@ -655,24 +657,50 @@ export function settle(items, cols = LAYOUT_COLS, fitted = {}) {
   const out = []
   let top = 0
   for (const band of bands) {
-    const placed = flow(
-      band.map((item) => ({ ...item, h: heights.get(item.id) })),
-      cols,
-    )
-    const end = placed.reduce((low, item) => Math.max(low, item.y + item.h), 0)
-    const taken = (c, row, self) =>
-      placed.some((other) => other !== self && other.x <= c && c < other.x + other.w && other.y <= row && row < other.y + other.h)
-    for (const item of placed) {
-      if (!stretches(item)) continue
-      const under = (other) => other !== item && other.y >= item.y + item.h && other.x < item.x + item.w && item.x < other.x + other.w
-      const below = Math.min(end, ...placed.filter(under).map((other) => other.y))
-      const free = (row) => !Array.from({ length: item.w }, (_, at) => item.x + at).some((c) => taken(c, row, item))
-      while (item.y + item.h < below && free(item.y + item.h)) item.h += 1
+    // The band drawn with its widgets as tall as their content, then (should that leave a hole no widget can
+    // reach into, as when the charts under a short widget are split into other columns than the row above)
+    // with one of them, or none, kept at its stored height: the first with the fewest empty cells wins.
+    const fits = band.filter((item) => heights.get(item.id) !== item.h * LAYOUT_SUB)
+    let best = null
+    for (const tall of [null, ...fits.map((item) => item.id), ...(fits.length > 1 ? ['*'] : [])]) {
+      const height = (item) => (tall === '*' || tall === item.id ? item.h * LAYOUT_SUB : heights.get(item.id))
+      const tried = settleBand(
+        band.map((item) => ({ ...item, h: height(item) })),
+        cols,
+        stretches,
+      )
+      if (!best || tried.holes < best.holes) best = tried
+      if (!best.holes) break
     }
-    for (const item of placed) out.push({ ...item, y: item.y + top })
-    top += end
+    for (const item of best.placed) out.push({ ...item, y: item.y + top })
+    top += best.end
   }
   return out
+}
+
+// One band of settle(): flowed, then every column reaches down to the band's end where nothing is under it.
+// Returns the places, the band's end and how many cells of it are left empty.
+function settleBand(items, cols, stretches) {
+  const placed = flow(items, cols)
+  const end = placed.reduce((low, item) => Math.max(low, item.y + item.h), 0)
+  const taken = (c, row, self) =>
+    placed.some((other) => other !== self && other.x <= c && c < other.x + other.w && other.y <= row && row < other.y + other.h)
+  const reach = (item) => {
+    const under = (other) => other !== item && other.y >= item.y + item.h && other.x < item.x + item.w && item.x < other.x + other.w
+    const below = Math.min(end, ...placed.filter(under).map((other) => other.y))
+    const free = (row) => !Array.from({ length: item.w }, (_, at) => item.x + at).some((c) => taken(c, row, item))
+    while (item.y + item.h < below && free(item.y + item.h)) item.h += 1
+  }
+  // The charts first (a plot can take the room). Then whatever still ends short of the band (a short list
+  // beside a longer one, a breakdown with nothing that fits under it) reaches down too, so no hole is left
+  // and the band ends on one line: its card ends there, what it holds stays at its top.
+  for (const item of placed) if (stretches(item)) reach(item)
+  for (const item of placed) if (!stretches(item)) reach(item)
+  const used = new Set(placed.map((item) => item.x + item.w))
+  const right = Math.max(...used)
+  let holes = 0
+  for (let c = 0; c < right; c += 1) for (let row = 0; row < end; row += 1) if (!taken(c, row, null)) holes += 1
+  return { placed, end, holes }
 }
 
 // Moves a widget to a place in the reading order (what the up and down

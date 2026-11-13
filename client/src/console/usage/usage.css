@@ -64,6 +64,17 @@
 
 .sw-layout .react-grid-layout {
   position: relative;
+  transition: opacity 180ms ease;
+}
+/* The first visit: held back until the widgets as tall as their content have been measured (or a moment has
+   passed), then shown at once in their places, so nothing shrinks in front of the reader. */
+.sw-layout[data-sw-layout-ready='false'] .react-grid-layout {
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sw-layout .react-grid-layout {
+    transition: none;
+  }
 }
 .sw-layout .react-grid-item {
   /* Never a box of its own: the card inside is the widget. */
