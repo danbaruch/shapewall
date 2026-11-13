@@ -3,6 +3,19 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+- Clicking a comment in the right-hand rail always takes you to that comment. When the current view was hiding the comment's card
+  the click did nothing at all: compare mode lays out no variants, so the two comments on the demo board's variants had no pin to
+  fly to, and "Changed pages only" drops the pages that did not change, so every comment on an unchanged page went the same way.
+  The jump now turns off the least view state that reveals the card and flies to the pin: a comment on a variant leaves compare
+  mode, a comment on an unchanged page shows all pages and stays in compare mode, and a comment on another screen size still only
+  switches screen size. Each one is said out loud in the note the viewport switch has always used, worded for what changed, with
+  one button that puts the view back exactly as it was. It all goes through the address, so a reload or a shared link lands in the
+  same place.
+- Measured on the demo board, comparing Staging with Production, clicking every comment in the rail: 18 of 20 moved the board
+  before, 20 of 20 now, at 1440 and at 390 px wide. With "Changed pages only" on it was 11 of 20 before.
+
 ## 0.7.2 - 2026-11-13
 
 - Comparing two environments, the board draws the comment pins again. While compare was on, every frame was handed an empty pin

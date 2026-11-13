@@ -280,7 +280,7 @@ export function BoardToolbar({
   modes,
   mode,
   setMode,
-  viewportNotice,
+  viewNotice,
   canComment,
   comparePair,
   setMenuOpen,
@@ -331,6 +331,9 @@ export function BoardToolbar({
   const statusKind = capture?.running ? 'running' : capture?.state === 'failed' && capture.error ? 'failed' : 'dot'
   const progress = capture?.running && capture.total ? `${capture.done || 0}/${capture.total}` : 'Capturing'
   const viewportLabels = modes.map((item) => item.label).join('\n')
+  // Only a jump that switched the screen size flashes the screen-size toggle;
+  // one that only left compare mode has nothing to point at here.
+  const flashViewport = viewNotice?.changes?.includes('viewport') ? viewNotice : null
   const fit = useMemo(
     () =>
       fitToolbar({
@@ -523,9 +526,9 @@ export function BoardToolbar({
         {off.viewport ? null : <Divider />}
         {modes.length > 1 ? (
           <span
-            key={viewportNotice?.at || 'still'}
-            className={cn('shrink-0 rounded-md', viewportNotice && 'animate-flash')}
-            data-sw-viewport-flash={viewportNotice ? viewportNotice.to : undefined}
+            key={flashViewport?.at || 'still'}
+            className={cn('shrink-0 rounded-md', flashViewport && 'animate-flash')}
+            data-sw-viewport-flash={flashViewport ? flashViewport.to : undefined}
           >
             <ToggleGroup
               label="Screen size"

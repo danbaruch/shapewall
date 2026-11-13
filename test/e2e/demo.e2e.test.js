@@ -627,6 +627,130 @@ test('the links overlay lists the broken link and a card shows its capture netwo
   }
 })
 
+// Compare mode lays out no variants, and "Changed pages only" drops unchanged
+// pages, so a comment on either had no pin and clicking its row in the rail
+// did nothing at all. Every row must take you to its comment: the view moves
+// out of the way (and says so) and the board flies to the pin.
+//
+// The whole rail, not a sample: the bug hid in the rows a sampling check
+// happened not to pick.
+const COMPARE = 'cmp=staging_production'
+
+// Where the canvas is right now, and whether the pin is drawn inside it.
+const cameraAt = (page) => page.evaluate(() => document.querySelector('.react-flow__viewport')?.style.transform || '')
+
+async function pinInCanvas(page, id) {
+  const pin = `[data-sw-pin="${id}"]`
+  await page.waitForSelector(pin, { timeout: 15000 })
+  // The fly is animated: wait for the pin to stop moving before measuring.
+  let last = null
+  for (let tries = 0; tries < 40; tries += 1) {
+    const box = await page.locator(pin).first().boundingBox()
+    if (box && last && Math.abs(box.x - last.x) < 0.5 && Math.abs(box.y - last.y) < 0.5) break
+    last = box
+    await page.waitForTimeout(100)
+  }
+  const box = await page.locator(pin).first().boundingBox()
+  const canvas = await page.locator('.react-flow').first().boundingBox()
+  return { box, canvas, landed: await page.getAttribute(pin, 'data-sw-pin-landed') }
+}
+
+// Clicks every row in the rail and reports the rows that did not take the
+// reader anywhere. `tap`: a phone, where the rail is a sheet.
+async function everyRowGoesSomewhere(page, { tap = false }) {
+  const rows = await page.$$eval('[data-sw-comment-list] [data-sw-comment]', (list) =>
+    list.map((node) => node.getAttribute('data-sw-comment')),
+  )
+  const dead = []
+  const moved = []
+  const notices = {}
+  for (const id of rows) {
+    const before = await cameraAt(page)
+    const row = `[data-sw-comment-list] [data-sw-comment="${id}"]`
+    if (tap) await page.tap(row)
+    else await page.click(row)
+    const notice = await page
+      .locator('[data-sw-view-notice]')
+      .first()
+      .textContent()
+      .catch(() => null)
+    if (notice) notices[id] = notice.replace(/\s+/g, ' ').trim()
+    let seen = null
+    try {
+      seen = await pinInCanvas(page, id)
+    } catch {
+      dead.push(`#${id}: no pin was ever drawn`)
+      continue
+    }
+    const { box, canvas, landed } = seen
+    if (!box) dead.push(`#${id}: the pin is not on screen`)
+    else if (box.x < canvas.x || box.x + box.width > canvas.x + canvas.width || box.y < canvas.y) {
+      dead.push(`#${id}: the pin is outside the canvas (${Math.round(box.x)}, ${Math.round(box.y)})`)
+    } else if (landed !== 'true') dead.push(`#${id}: the pin never reported an arrival`)
+    if ((await cameraAt(page)) !== before) moved.push(id)
+    // Compare mode for the next row: a jump that left it offers one way back.
+    const back = page.locator('[data-sw-viewport-notice-back]')
+    if (await back.count()) {
+      if (tap) await back.tap()
+      else await back.click()
+      await page.waitForSelector('[data-sw-view-notice]', { state: 'detached' })
+      await page.waitForSelector('[data-sw-compare-bar]', { timeout: 15000 })
+    }
+    // The rail is a sheet on a phone and the jump closed it.
+    if (tap && !(await page.locator('[data-sw-comment-list]').count())) {
+      await page.tap('[data-sw-panel-toggle]')
+      await page.waitForSelector('[data-sw-comment-list]')
+    }
+  }
+  return { rows, dead, moved, notices }
+}
+
+test('comparing, desktop 1440: every comment in the rail takes you to its pin, variants included', async () => {
+  const { context, page, errors } = await open()
+  try {
+    await openBoard(page, `${base}?${COMPARE}`)
+    await page.waitForSelector('[data-sw-compare-bar]')
+    await page.waitForSelector('[data-sw-comment-list]')
+    const { rows, dead, moved, notices } = await everyRowGoesSomewhere(page, { tap: false })
+    // The demo board's open comments, the two on variants among them.
+    assert.ok(rows.length >= 20, `the rail has ${rows.length} comments`)
+    assert.deepEqual(dead, [])
+    assert.equal(moved.length, rows.length, `${moved.length} of ${rows.length} rows moved the board`)
+    // The variant comments are the ones compare mode used to hide: they say so.
+    const left = Object.values(notices).filter((text) => /Left compare/.test(text))
+    assert.equal(left.length, 2, `two variant comments said they left compare, got ${left.length}`)
+    assert.match(left[0], /is on a variant, which compare does not show/)
+    assert.match(left[0], /Back to compare/)
+    await shot(page, 'compare-rail-desktop')
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})
+
+test('comparing, phone 390: every comment in the rail takes you to its pin', async () => {
+  const { context, page, errors } = await open({
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+    deviceScaleFactor: 2,
+  })
+  try {
+    await openBoard(page, `${base}?${COMPARE}`)
+    await page.waitForSelector('[data-sw-compare-bar]')
+    await page.tap('[data-sw-panel-toggle]')
+    await page.waitForSelector('[data-sw-comment-list]')
+    const { rows, dead, moved } = await everyRowGoesSomewhere(page, { tap: true })
+    assert.ok(rows.length >= 20, `the rail has ${rows.length} comments`)
+    assert.deepEqual(dead, [])
+    assert.equal(moved.length, rows.length, `${moved.length} of ${rows.length} rows moved the board`)
+    await shot(page, 'compare-rail-phone')
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})
+
 test('appearance: the choice persists across the board and console and applies before the app loads', async () => {
   const { context, page, errors } = await open({ colorScheme: 'light' })
   try {
