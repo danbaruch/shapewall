@@ -1230,3 +1230,67 @@ test('phone 390: "Comment on this page" is the first action of a tapped page, fi
     await context.close()
   }
 })
+
+// A phone (Android Chrome, 412 wide): open the bar's More menu, then pan the
+// board. The menu closes and the bar stays a bar, stuck to the page, never a
+// lone round button. Comment is a soft tint at rest and the solid fill only
+// while comment mode is on.
+test('phone 412: panning with More open closes the menu and keeps the bar; Comment is tinted at rest, filled when on', async () => {
+  const { context, page, errors } = await openBoard({ ...PHONE, viewport: { width: 412, height: 915 } })
+  try {
+    await page.waitForSelector(TOOLS)
+    const frame = await page.locator('[data-sw-frame^="home:"]').first().boundingBox()
+    await page.touchscreen.tap(frame.x + frame.width / 2, Math.max(frame.y + 60, 200))
+    await page.waitForSelector('[data-sw-frame-bar]')
+    await page.waitForTimeout(700)
+    const look = () =>
+      page.$eval('[data-sw-frame-bar] [data-sw-frame-comment]', (node) => {
+        const style = getComputedStyle(node)
+        // The fill's alpha: rgb() is opaque; rgba() or a slash carries one.
+        const parts = style.backgroundColor.match(/[\d.]+/g) || []
+        const fill = /rgba|\//.test(style.backgroundColor) ? Number(parts.at(-1)) : 1
+        return { pressed: node.getAttribute('aria-pressed'), fill, color: style.color, bg: style.backgroundColor }
+      })
+    const rest = await look()
+    assert.equal(rest.pressed, 'false')
+    assert.ok(rest.fill < 0.2, `a soft tint at rest: ${JSON.stringify(rest)}`)
+    await shot(page, 'page-bar-412-rest')
+    const cdp = await context.newCDPSession(page)
+    const drag = async (x, y, dy) => {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] })
+      for (let step = 1; step <= 12; step += 1) {
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: y + (dy * step) / 12 }] })
+        await page.waitForTimeout(16)
+      }
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    }
+    const homeTop = () => page.$eval('[data-sw-frame^="home:"]', (node) => node.getBoundingClientRect().top)
+    // Up (the title row leaves the top), further up, and back down; the
+    // finger lands on a card one time and on the bare canvas the next.
+    for (const dy of [-160, -240, 140]) {
+      await page.tap('[data-sw-frame-bar] [data-sw-frame-more]')
+      await page.waitForSelector('[data-sw-frame-more-menu] [role="menuitem"]')
+      const before = await homeTop()
+      await drag(206, 700, dy)
+      await page.waitForSelector('[data-sw-frame-more-menu]', { state: 'detached' })
+      await page.waitForTimeout(300)
+      const after = await homeTop()
+      assert.ok(Math.abs(after - before) > 40, `the board moved with the first touch (${before} -> ${after})`)
+      assert.equal(await page.locator('[data-sw-frame-bar-toggle]').count(), 0, `no lone button after a pan of ${dy}`)
+      assert.equal(await page.locator('[data-sw-frame-bar]').count(), 1, `the bar is still there after a pan of ${dy}`)
+      await assertBarFits(page, `after a pan of ${dy}`)
+    }
+    await shot(page, 'page-bar-412-panned')
+    await page.tap('[data-sw-frame-bar] [data-sw-frame-comment]')
+    await page.waitForSelector('[data-sw-comment-hint-page]')
+    await page.waitForTimeout(250)
+    const on = await look()
+    assert.equal(on.pressed, 'true')
+    assert.equal(on.fill, 1, `solid while comment mode is on: ${JSON.stringify(on)}`)
+    assert.notEqual(on.color, rest.color, 'the text turns light on the fill')
+    await shot(page, 'page-bar-412-commenting')
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})

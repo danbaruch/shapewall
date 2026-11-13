@@ -73,6 +73,38 @@ test('a side spot that would touch the hint moves below it', () => {
   assert.deepEqual(place, { left: 408, top: 48 })
 })
 
+// A phone (412 wide, touch): the card is about as wide as the canvas, so
+// there is never room beside it. Panning it up must not collapse the bar to
+// one button: it sticks under the card's title row, then to the canvas top.
+test('on a touch screen the bar sticks to the card as it is panned, never collapsing to one button', () => {
+  const canvas = { width: 412, height: 700 }
+  const phoneBar = { width: 328, height: 54 }
+  const notes = { left: 100, right: 300, top: 12, bottom: 40 }
+  for (const avoid of [null, notes]) {
+    // From the card well down the canvas to its top scrolled far above it.
+    for (let top = 160; top >= -400; top -= 4) {
+      const card = { left: 50, top, right: 290, bottom: top + 560, titleTop: top - 30 }
+      const { place } = placeFrameBar({ card, canvas, bar: phoneBar, avoid, gap: 8, zoom: 0.5, pin: true })
+      const at = `card top at ${top}${avoid ? ', with a note' : ''}`
+      assert.ok(place, `${at}: the bar, not one button`)
+      assert.ok(place.left >= 8 && place.left + phoneBar.width <= 412 - 8, `${at}: inside the canvas`)
+      assert.ok(place.top >= 8 && place.top + phoneBar.height <= 700 - 8, `${at}: inside the canvas`)
+      // Never over the card's own title row (its name and badges).
+      const row = { left: card.left, right: card.right, top: card.titleTop, bottom: card.top }
+      assert.equal(overlaps(box(place, phoneBar), row, 0), false, `${at}: clear of the title row`)
+      if (avoid) assert.equal(overlaps(box(place, phoneBar), avoid), false, `${at}: clear of the note`)
+    }
+  }
+  // Scrolled past: a sticky header at the top of the canvas.
+  const past = { left: 50, top: -200, right: 290, bottom: 360, titleTop: -230 }
+  assert.deepEqual(placeFrameBar({ card: past, canvas, bar: phoneBar, pin: true }).place, { left: 8, top: 8 })
+  // Only the card's bottom is left on screen: below it.
+  const gone = { left: 50, top: -540, right: 290, bottom: 40, titleTop: -570 }
+  assert.deepEqual(placeFrameBar({ card: gone, canvas, bar: phoneBar, pin: true }).place, { left: 8, top: 48 })
+  // A mouse screen keeps the one-button collapse when the card fills the canvas.
+  assert.equal(placeFrameBar({ card: past, canvas, bar: phoneBar }).place, null)
+})
+
 // ---- What the bar shows at a width (fitFrameBar) --------------------------------
 
 const everything = { comment: true, live: 'open', checks: true, history: true, capture: true, link: true }
