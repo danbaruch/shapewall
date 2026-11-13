@@ -3,7 +3,8 @@ import { X } from 'lucide-react'
 import { cn } from '../lib/utils'
 import { Button, IconButton } from '../components/ui'
 
-// A short-lived note with Undo (resolve, delete), over the canvas. It closes
+// A short-lived note with Undo (resolve, delete), over the canvas, at the top
+// of the tool dock. It closes
 // itself after six seconds, but not while the pointer or the keyboard focus
 // is on it (`hold`): Undo must not vanish under someone reaching for it. The
 // six seconds start again when they leave.
@@ -38,7 +39,7 @@ function useGoneUnderSheet(toast, setToast) {
   }, [passing, setToast])
 }
 
-export function BoardToast({ toast, setToast, onHold, wide, raised }) {
+export function BoardToast({ toast, setToast, onHold, wide }) {
   useGoneUnderSheet(toast, setToast)
   if (!toast) return null
   return (
@@ -50,10 +51,9 @@ export function BoardToast({ toast, setToast, onHold, wide, raised }) {
       onBlur={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget)) onHold?.(false)
       }}
-      className={cn(
-        'absolute inset-x-0 z-[80] mx-auto flex w-max max-w-[calc(100%-1rem)] animate-pop-in items-center gap-2 rounded-lg bg-fg py-1 pr-1 pl-3 text-xs font-medium text-surface shadow-pop',
-        raised ? (wide ? 'bottom-28' : 'bottom-44') : wide ? 'bottom-4' : 'bottom-16',
-      )}
+      // A child of the tool dock (BoardTools.jsx): above the board's tools
+      // and whatever else is docked at the bottom of the canvas.
+      className="pointer-events-auto relative z-[80] flex w-max max-w-full animate-pop-in items-center gap-2 rounded-lg bg-fg py-1 pr-1 pl-3 text-xs font-medium text-surface shadow-pop"
       role="status"
       data-sw-toast="true"
     >

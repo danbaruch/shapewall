@@ -11,19 +11,14 @@ import { transaction } from './db.js'
 import { mountDeviceApprovals } from './device-routes.js'
 import { HttpError, fail, cleanInviteNote, cleanName, cleanWorkspaceName } from './http.js'
 import { cleanEmail } from './mail.js'
-import {
-  NEEDS,
-  canInvite,
-  canManage,
-  canRemoveMember,
-  inviteNeedsFresh,
-  leavesNoOwner,
-  removalNeedsFresh,
-  roleChangeNeedsFresh,
-} from './permissions.js'
+import { NEEDS, canInvite, canManage, canRemoveMember, leavesNoOwner } from './permissions.js'
+import { roleChangeTouchesAdmin, roleChangeTouchesOwner } from './step-up.js'
+import { stepUpSettings } from './step-up-settings.js'
+import { cleanTailnetLogin } from './tailnet-identity.js'
 import { projectPublic } from './public.js'
 import { LIMITS } from './ratelimit.js'
 import { SHARE_DAYS } from './shares.js'
+import { createViews } from './usage.js'
 import { ROLES, findInviteByHash, inviteUsable, roleAtLeast, roleIn, tenant, workspacesForUser } from './tenancy.js'
 
 export const INVITE_DAYS = [1, 3, 7, 14, 30]
@@ -33,7 +28,9 @@ const DAY = 86_400_000
 
 // Invite links: preview needs no session, accepting one does.
 export function mountInviteLinks(consoleApi, deps) {
-  const { db, iso, limit, handle, sessionOf, needSession, clientIp, acceptInvite } = deps
+  const { db, iso, limit, handle, sessionOf, needSession, clientIp, acceptInvite, tailnet = null } = deps
+  // The tailnet login a request arrives with (an invite can be for one login only).
+  const arrivesAs = (req) => (tailnet ? tailnet.identityOf(req)?.login || null : null)
 
   // Invite preview needs no session (the link is the secret). Invite and
   // setup links carry their token in the URL fragment, which browsers never
@@ -56,7 +53,9 @@ export function mountInviteLinks(consoleApi, deps) {
           usable: inviteUsable(invite, iso()),
         })
       }
-      if (!inviteUsable(invite, iso())) return fail(res, 404, 'invalid_invite', 'This invite link is used, expired or revoked.')
+      // An invite made for a tailnet login reads as invalid to everyone else.
+      if (!inviteUsable(invite, iso()) || (invite.tailnet_login && invite.tailnet_login !== arrivesAs(req)))
+        return fail(res, 404, 'invalid_invite', 'This invite link is used, expired or revoked.')
       res.json({ workspace: { name: invite.workspace_name }, role: invite.role, expiresAt: invite.expires_at })
     }),
   )
@@ -67,7 +66,11 @@ export function mountInviteLinks(consoleApi, deps) {
     handle(async (req, res) => {
       const invite = typeof req.body?.token === 'string' ? findInviteByHash(db, sha256(req.body.token)) : null
       if (!invite) throw new AuthError(403, 'invalid_invite', 'This invite link is used, expired or revoked.')
-      acceptInvite(tenant(db, invite.workspace_id), invite, req.user.id, clientIp(req))
+      // The account must be the one linked to the login it arrives with.
+      const login = arrivesAs(req)
+      acceptInvite(tenant(db, invite.workspace_id), invite, req.user.id, clientIp(req), {
+        tailnetLogin: login && req.user.tailnet_login === login ? login : null,
+      })
       res.json({ workspaceId: invite.workspace_id })
     }),
   )
@@ -88,15 +91,32 @@ export function mountConsoleRoutes(consoleApi, deps) {
     handle,
     inWorkspace,
     inProject,
-    needFresh,
-    freshOrThrow,
+    coreFreshOrThrow,
+    machineTokensOrThrow,
+    adminMakingOrThrow,
+    stepUp,
+    stepUpOrThrow,
     auditOf,
     createWorkspace,
     revokeGrantsOf,
     ownerCount,
     createApiToken,
     agentsFor,
+    tailnet = null,
+    tailnetAccounts = null,
+    passkeys = null,
   } = deps
+  // Making, changing or removing an owner always asks for the passkey; the
+  // same for an admin when the workspace asks for it ("Members and roles").
+  // makesAdmin: the request gives someone the admin role (an invite, or a
+  // change of role). With "Approve command line logins in the browser" on,
+  // a session that only a tailnet identity stands behind may not: the new
+  // admin could make the tokens that switch keeps from it (guards.js).
+  const roleStepUp = (req, { owner, admin, makesAdmin = false }) => {
+    if (owner) coreFreshOrThrow(req)
+    else if (admin) stepUpOrThrow(req, 'members')
+    if (makesAdmin && !owner) adminMakingOrThrow(req)
+  }
 
   consoleApi.get(
     '/workspaces',
@@ -120,6 +140,7 @@ export function mountConsoleRoutes(consoleApi, deps) {
       const workspace = t.get(
         'SELECT id, name, created_at, share_links, public_projects, suspended_at, suspended_reason FROM workspaces WHERE workspace_id = :ws',
       )
+      const stepUpNow = stepUpSettings(t).get()
       const members = t
         .all(
           `SELECT m.user_id, m.role, m.created_at, m.last_active_at, u.handle, u.display_name FROM memberships m JOIN users u ON u.id = m.user_id
@@ -140,17 +161,29 @@ export function mountConsoleRoutes(consoleApi, deps) {
       const invites = roleAtLeast(req.role, NEEDS.invites)
         ? t
             .all(
-              'SELECT id, role, created_at, expires_at, note FROM invites WHERE workspace_id = :ws AND used_at IS NULL AND revoked_at IS NULL AND expires_at > :now ORDER BY created_at DESC',
+              'SELECT id, role, created_at, expires_at, note, tailnet_login FROM invites WHERE workspace_id = :ws AND used_at IS NULL AND revoked_at IS NULL AND expires_at > :now ORDER BY created_at DESC',
               { now: iso() },
             )
-            .map((row) => ({ id: row.id, role: row.role, createdAt: row.created_at, expiresAt: row.expires_at, note: row.note || null }))
+            .map((row) => ({
+              id: row.id,
+              role: row.role,
+              createdAt: row.created_at,
+              expiresAt: row.expires_at,
+              note: row.note || null,
+              tailnetLogin: row.tailnet_login || null,
+            }))
         : []
       res.json({
         workspace: {
           id: workspace.id,
           name: workspace.name,
           createdAt: workspace.created_at,
-          settings: { shareLinks: Boolean(workspace.share_links), publicProjects: Boolean(workspace.public_projects) },
+          settings: {
+            shareLinks: Boolean(workspace.share_links),
+            publicProjects: Boolean(workspace.public_projects),
+            // When this workspace asks for the passkey again (src/hosted/step-up.js).
+            stepUp: stepUpNow,
+          },
           // Set by the server operator (shapewall hosted admin suspend).
           suspended: workspace.suspended_at ? { at: workspace.suspended_at, reason: workspace.suspended_reason || null } : null,
         },
@@ -160,7 +193,17 @@ export function mountConsoleRoutes(consoleApi, deps) {
         projects,
         invites,
         // What the console can offer: invite emails only when the server can send them.
-        features: { inviteEmail: inviteEmailOn, inviteDays: INVITE_DAYS, shareDays: SHARE_DAYS, publicProjects: true, guestSessions: true },
+        features: {
+          inviteEmail: inviteEmailOn,
+          inviteDays: INVITE_DAYS,
+          shareDays: SHARE_DAYS,
+          publicProjects: true,
+          guestSessions: true,
+          // Invites for a tailnet login, and the list of tailnet visitors.
+          tailnetSignIn: Boolean(tailnet),
+          // false: Tailscale is the only sign-in here (no passkeys, so nothing in "Ask for a passkey again" applies).
+          passkeys: passkeys ? passkeys.on() : true,
+        },
       })
     }),
   )
@@ -183,8 +226,7 @@ export function mountConsoleRoutes(consoleApi, deps) {
     handle(async (req, res) => {
       const role = req.body?.role
       if (!ROLES.includes(role)) throw new HttpError(400, 'invalid_role', `Role: ${ROLES.join(', ')}.`)
-      // Granting admin or owner needs a recent passkey check.
-      if (inviteNeedsFresh(role)) freshOrThrow(req)
+      roleStepUp(req, { owner: role === 'owner', admin: role === 'admin', makesAdmin: role === 'admin' })
       let revoked = { invites: 0, shares: 0, tokens: 0 }
       transaction(db, () => {
         const target = req.t.get('SELECT role FROM memberships WHERE workspace_id = :ws AND user_id = :user', {
@@ -194,8 +236,8 @@ export function mountConsoleRoutes(consoleApi, deps) {
         if (!canManage(req.role, target.role, role)) throw new HttpError(403, 'forbidden', 'Only an owner can change owners and admins.')
         if (leavesNoOwner({ targetRole: target.role, newRole: role, owners: ownerCount(req.t) }))
           throw new HttpError(409, 'last_owner', 'A workspace needs an owner.')
-        // Taking power away from an owner or admin needs a recent passkey check too.
-        if (roleChangeNeedsFresh(target.role, role)) freshOrThrow(req)
+        // Taking power away from an owner (always) or an admin (when the workspace asks).
+        roleStepUp(req, { owner: roleChangeTouchesOwner(target.role, role), admin: roleChangeTouchesAdmin(target.role, role) })
         req.t.run('UPDATE memberships SET role = :role WHERE workspace_id = :ws AND user_id = :user', {
           role,
           user: String(req.params.uid),
@@ -221,8 +263,12 @@ export function mountConsoleRoutes(consoleApi, deps) {
         if (!canRemoveMember(req.role, target.role, { self })) throw new HttpError(403, 'forbidden', 'You cannot remove this member.')
         if (leavesNoOwner({ targetRole: target.role, owners: ownerCount(req.t) }))
           throw new HttpError(409, 'last_owner', 'A workspace needs an owner.')
-        if (removalNeedsFresh(target.role, { self })) freshOrThrow(req)
+        // An owner who leaves is an owner removed, like any other: the fixed core asks. Leaving with a
+        // lesser role is one's own business and asks nothing.
+        roleStepUp(req, { owner: target.role === 'owner', admin: !self && target.role === 'admin' })
         req.t.run('DELETE FROM memberships WHERE workspace_id = :ws AND user_id = :user', { user: userId })
+        // Their saved views on the Usage and Activity pages go with them.
+        createViews(req.t).removeOf(userId)
         auditOf(req, self ? 'member_left' : 'member_removed', userId, { role: target.role })
         // Their API tokens are revoked too, unless an admin asks to keep them
         // ({ revokeTokens: false }). Kept or not, they stop working: a token
@@ -242,9 +288,22 @@ export function mountConsoleRoutes(consoleApi, deps) {
       const role = req.body?.role || 'member'
       if (!ROLES.includes(role)) throw new HttpError(400, 'invalid_role', `Role: ${ROLES.join(', ')}.`)
       if (!canInvite(req.role, role)) throw new HttpError(403, 'forbidden', 'Only an owner can invite an owner.')
-      if (inviteNeedsFresh(role)) freshOrThrow(req)
+      roleStepUp(req, { owner: role === 'owner', admin: role === 'admin', makesAdmin: role === 'admin' })
       const days = req.body?.expiresInDays ?? INVITE_DAYS_DEFAULT
       if (!INVITE_DAYS.includes(days)) throw new HttpError(400, 'invalid_expiry', `expiresInDays: one of ${INVITE_DAYS.join(', ')}.`)
+      // An invite for one tailnet login: only an account linked to that login
+      // (or a first visit that arrives as it) can take it.
+      let tailnetLogin = null
+      if (req.body?.tailnetLogin !== undefined && req.body?.tailnetLogin !== null && req.body?.tailnetLogin !== '') {
+        if (!tailnet)
+          throw new HttpError(409, 'tailnet_off', 'Tailnet sign-in is off on this server, so an invite cannot be for a tailnet login.')
+        tailnetLogin = cleanTailnetLogin(req.body.tailnetLogin)
+        if (!tailnetLogin)
+          throw new HttpError(400, 'invalid_login', 'Tailnet login: the name the person signs in to Tailscale with, like ada@example.com.')
+        const holder = tailnetAccounts.userFor(tailnetLogin)
+        if (holder && roleIn(db, holder.id, req.t.workspaceId))
+          throw new HttpError(409, 'already_member', `${tailnetLogin} is already in this workspace.`)
+      }
       let email = null
       if (req.body?.email !== undefined && req.body?.email !== null && req.body?.email !== '') {
         if (!inviteEmailOn) throw new HttpError(409, 'email_off', 'This server does not send invite emails. Copy the link instead.')
@@ -275,10 +334,16 @@ export function mountConsoleRoutes(consoleApi, deps) {
       const id = newId('iv')
       const expiresAt = iso(days * DAY)
       req.t.run(
-        'INSERT INTO invites (workspace_id, id, token_hash, role, created_by, created_at, expires_at, email, note) VALUES (:ws, :id, :hash, :role, :user, :at, :expires, :email, :note)',
-        { id, hash: sha256(token), role, user: req.user.id, at: iso(), expires: expiresAt, email, note },
+        'INSERT INTO invites (workspace_id, id, token_hash, role, created_by, created_at, expires_at, email, note, tailnet_login) VALUES (:ws, :id, :hash, :role, :user, :at, :expires, :email, :note, :tailnet)',
+        { id, hash: sha256(token), role, user: req.user.id, at: iso(), expires: expiresAt, email, note, tailnet: tailnetLogin },
       )
-      auditOf(req, 'invite_created', id, { role, days, ...(email ? { emailed: true } : {}), ...(note ? { note } : {}) })
+      auditOf(req, 'invite_created', id, {
+        role,
+        days,
+        ...(email ? { emailed: true } : {}),
+        ...(note ? { note } : {}),
+        ...(tailnetLogin ? { tailnet: tailnetLogin } : {}),
+      })
       const url = `${publicOrigin}/invite#${token}`
       let emailed = null
       if (email) {
@@ -294,7 +359,7 @@ export function mountConsoleRoutes(consoleApi, deps) {
         emailed = { ok: result.ok, error: result.ok ? null : result.error }
         if (result.ok) req.t.run('UPDATE invites SET emailed_at = :at WHERE workspace_id = :ws AND id = :id', { at: iso(), id })
       }
-      res.status(201).json({ invite: { id, role, expiresAt, email, note }, url, emailed })
+      res.status(201).json({ invite: { id, role, expiresAt, email, note, tailnetLogin }, url, emailed })
     }),
   )
   consoleApi.delete(
@@ -335,7 +400,7 @@ export function mountConsoleRoutes(consoleApi, deps) {
   consoleApi.delete(
     '/workspaces/:ws/projects/:pid',
     inWorkspace(NEEDS.projects),
-    needFresh,
+    stepUp('data'),
     inProject,
     handle(async (req, res) => {
       req.projects.remove(req.project.id)
@@ -352,7 +417,7 @@ export function mountConsoleRoutes(consoleApi, deps) {
   consoleApi.delete(
     '/workspaces/:ws/projects/:pid/boards/:bid',
     inWorkspace(NEEDS.projects),
-    needFresh,
+    stepUp('data'),
     inProject,
     handle(async (req, res) => {
       const gone = req.projects.removeBoard(req.project.id, req.params.bid)
@@ -372,9 +437,11 @@ export function mountConsoleRoutes(consoleApi, deps) {
   consoleApi.post(
     '/workspaces/:ws/projects/:pid/tokens',
     inWorkspace(NEEDS.tokens),
-    needFresh,
+    stepUp('tokens'),
     inProject,
     handle(async (req, res) => {
+      // A token is what a command line or an agent works with: where the workspace wants a passkey for those, here too.
+      machineTokensOrThrow(req)
       res.status(201).json(createApiToken(req, req.body || {}))
     }),
   )
@@ -388,15 +455,25 @@ export function mountConsoleRoutes(consoleApi, deps) {
   consoleApi.put(
     '/workspaces/:ws/projects/:pid/agent',
     inWorkspace('admin'),
-    needFresh,
+    stepUp('agents'),
     inProject,
     handle((req, res) => {
       const policy = cleanPolicy(req.body)
+      const before = agentPolicy(req.t, req.project.id)
       req.t.run('UPDATE projects SET agent_policy = :policy WHERE workspace_id = :ws AND id = :project', {
         project: req.project.id,
         policy: JSON.stringify(policy),
       })
-      auditOf(req, 'agent_policy_changed', req.project.id)
+      // What changed, setting by setting (names of settings and their values; the board overrides as a count).
+      const shown = (value) =>
+        Array.isArray(value) ? value.join(', ') || 'none' : value && typeof value === 'object' ? Object.keys(value).length : value
+      const changed = Object.keys(policy).filter((key) => JSON.stringify(policy[key]) !== JSON.stringify(before[key]))
+      auditOf(req, 'agent_policy_changed', req.project.id, {
+        name: req.project.name,
+        changed,
+        before: Object.fromEntries(changed.map((key) => [key, shown(before[key])])),
+        after: Object.fromEntries(changed.map((key) => [key, shown(policy[key])])),
+      })
       res.json({ policy })
     }),
   )

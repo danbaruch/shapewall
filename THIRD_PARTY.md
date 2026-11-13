@@ -9,6 +9,21 @@ Shapewall is Apache 2.0 (with `src/hosted` under FSL 1.1, see `NOTICE`). This fi
 the built board (`dist/client`, and the public demo) beyond the usual npm dependencies, or that the board downloads at run time. Each
 component keeps its own license; none of them is GPL or LGPL.
 
+## Charts and the data grid of the console (`client/src/console/usage`, built as `dist/console/assets/usage-*`)
+
+Loaded only when the console's Usage or Activity page opens. Bundled into those chunks; none of it is in the board.
+
+| Component                                                                                                                                                        | What it is                                                  | License                   |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | ------------------------- |
+| [Recharts](https://github.com/recharts/recharts) 3.10                                                                                                            | The charts                                                  | MIT                       |
+| Recharts' dependencies: victory-vendor (d3-shape, d3-scale, d3-array, d3-time, d3-format, d3-interpolate ...)                                                    | Scales, shapes and number formats                           | MIT, ISC and BSD-3-Clause |
+| Recharts' dependencies: Redux Toolkit, Redux, React Redux, Reselect, Immer, es-toolkit, decimal.js-light, eventemitter3, tiny-invariant, use-sync-external-store | Chart state and helpers                                     | MIT                       |
+| [TanStack Table](https://github.com/TanStack/table) 9.3 (with TanStack Store)                                                                                    | The grid's column model                                     | MIT                       |
+| [TanStack Virtual](https://github.com/TanStack/virtual) 3.14                                                                                                     | Virtual rows                                                | MIT                       |
+| [TanStack Query](https://github.com/TanStack/query) 5.107                                                                                                        | Fetching and caching for the two pages                      | MIT                       |
+| [react-grid-layout](https://github.com/react-grid-layout/react-grid-layout) 2.3                                                                                  | Drag, resize and placement of the Usage dashboard's widgets | MIT                       |
+| react-grid-layout's dependencies: react-draggable, react-resizable, prop-types, clsx, fast-equals                                                                | Pointer and touch handling for it                           | MIT                       |
+
 ## Natural read-aloud voices (`client/src/chat/tts`, built as `assets/tts-*`)
 
 Loaded only when someone turns natural voices on (docs/agents.md, "Natural voices"). Everything runs in the browser.

@@ -36,6 +36,8 @@ export const TENANT_TABLES = [
   'chat_messages',
   'chat_turns',
   'chat_permissions',
+  'saved_views',
+  'usage_layouts',
 ]
 export { ROLES, roleAtLeast } from './permissions.js'
 
@@ -212,6 +214,17 @@ export function findInviteByHash(db, tokenHash) {
   )
 }
 
+// The invites made for one tailnet login (src/hosted/tailnet.js), in any
+// workspace, with what inviteUsable needs. The caller keeps the usable ones.
+export function findInvitesForTailnetLogin(db, login) {
+  return prepare(
+    db,
+    `SELECT i.*, w.name AS workspace_name, m.role AS creator_role FROM invites i JOIN workspaces w ON w.id = i.workspace_id
+     LEFT JOIN memberships m ON m.workspace_id = i.workspace_id AND m.user_id = i.created_by
+     WHERE i.tailnet_login = :login AND i.used_at IS NULL AND i.revoked_at IS NULL ORDER BY i.created_at`,
+  ).all({ login })
+}
+
 // Whether an invite row (from findInviteByHash) still works: unused, not
 // revoked, not expired, and its creator can still invite to that role (an
 // admin up to admin, an owner for owners). A removed or demoted admin's
@@ -243,7 +256,7 @@ export function roleIn(db, userId, workspaceId) {
 export function allWorkspaces(db) {
   return prepare(
     db,
-    'SELECT id, name, created_at, created_by, share_links, suspended_at, suspended_reason, retention_versions FROM workspaces ORDER BY created_at, id',
+    'SELECT id, name, created_at, created_by, share_links, suspended_at, suspended_reason, retention_versions, retention_usage_days FROM workspaces ORDER BY created_at, id',
   ).all()
 }
 
@@ -299,6 +312,40 @@ export function seenDevice(db, userId, device) {
        AND json_extract(detail, '$.device') = :device LIMIT 1`,
     ).get({ user: userId, device }),
   )
+}
+
+// The account events of a workspace's members (sign-ins, passkeys, sessions:
+// rows with no workspace), for the workspace's Activity page: only of people
+// who are members now, only since each joined, and only the actions listed
+// (src/hosted/usage-shape.js ACCOUNT_ACTIONS). Newest first, `before` an
+// entry id. `userId`: one member (a person reading their own activity).
+export function memberAccountEvents(
+  db,
+  workspaceId,
+  { userId = null, actions, from = null, to = null, q = null, before = Number.MAX_SAFE_INTEGER, limit = 50 },
+) {
+  if (!ID_PATTERNS.workspace.test(String(workspaceId || ''))) return []
+  return prepare(
+    db,
+    `SELECT a.id, a.action, a.target, a.ip, a.detail, a.at, a.user_id, u.handle, u.display_name
+     FROM memberships m JOIN audit_log a ON a.user_id = m.user_id AND a.workspace_id IS NULL JOIN users u ON u.id = a.user_id
+     WHERE m.workspace_id = :ws AND a.at >= m.created_at AND a.id < :before
+       AND a.action IN (SELECT value FROM json_each(:actions))
+       AND (:user IS NULL OR a.user_id = :user) AND (:from IS NULL OR a.at >= :from) AND (:to IS NULL OR a.at < :to)
+       AND (:q IS NULL OR instr(lower(replace(a.action, '_', ' ') || ' ' || coalesce(a.ip, '') || ' ' || coalesce(a.detail, '') || ' ' ||
+         u.display_name || ' ' || u.handle), :q) > 0)
+     ORDER BY a.id DESC LIMIT :limit`,
+  ).all({ ws: workspaceId, actions: JSON.stringify(actions), user: userId, from, to, q, before, limit })
+}
+
+// Account deletion: the person's saved views, in every workspace, go with them.
+export function deleteSavedViewsOf(db, userId) {
+  // With the layouts those views carry, and the person's own dashboard layouts.
+  prepare(db, "DELETE FROM usage_layouts WHERE kind = 'view' AND subject IN (SELECT id FROM saved_views WHERE user_id = :user)").run({
+    user: userId,
+  })
+  prepare(db, "DELETE FROM usage_layouts WHERE kind = 'person' AND subject = :user").run({ user: userId })
+  prepare(db, 'DELETE FROM saved_views WHERE user_id = :user').run({ user: userId })
 }
 
 // Account deletion: the person's own account-level log goes with them.

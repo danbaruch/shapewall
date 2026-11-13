@@ -95,6 +95,14 @@ const COMMANDS = {
     await login(flags, out)
     return 0
   },
+  join: async ({ flags, out, fetch }) => {
+    const { joinCommand } = await import('./remote/tailnet-cli.js')
+    return joinCommand(flags, out, { fetchImpl: fetch })
+  },
+  admin: async ({ positional, flags, out, fetch }) => {
+    const { adminCommand } = await import('./remote/tailnet-cli.js')
+    return adminCommand(positional, flags, out, { fetchImpl: fetch })
+  },
   share: async ({ flags, out }) => {
     const { share } = await import('./remote/share.js')
     return (await share(flags, out)).code

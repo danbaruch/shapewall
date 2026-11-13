@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Brush } from 'lucide-react'
 import { Button, Input, Kbd } from '../components/ui'
 import { MentionTextarea } from './Mentions'
@@ -27,10 +27,16 @@ export function CommentComposer({
   description,
   media,
   discard = null,
+  // Phones: open straight on the drawing sheet (the board's Draw tool).
+  startDraw = false,
 }) {
   const body = draft?.body || ''
   const lines = Math.min(8, Math.max(touch ? 3 : 2, body.split('\n').length))
   const [sheet, setSheet] = useState(false)
+  const drawable = Boolean(touch && media?.draw && media?.page)
+  useEffect(() => {
+    if (startDraw && drawable) setSheet(true)
+  }, [startDraw, drawable])
   const shapes = useDrawing((value) => (value?.owner === 'composer' ? value.shapes.length : 0))
   const images = media?.images
   const canAttach = Boolean(media?.attach && images)

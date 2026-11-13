@@ -19,6 +19,7 @@ import {
   startHostedServer,
   tokenCall,
   writeLocalCaptures,
+  askAgain,
 } from './hosted-helpers.js'
 import { sampleConfig } from './helpers.js'
 
@@ -67,6 +68,8 @@ before(async () => {
   hosted = await startHostedServer('hosted-admin', { now: () => new Date(clock), mailer })
   owner = await signUp(hosted, { handle: 'olive', displayName: 'Olive Owner' })
   ws = owner.workspaceId
+  // These tests are about the passkey checks: the workspace asks for them (off by default).
+  askAgain(hosted, ws)
   admin = await signUp(hosted, { handle: 'ada', displayName: 'Ada Admin', invite: await invite(owner, ws, 'admin') })
   member = await signUp(hosted, { handle: 'mel', displayName: 'Mel Member', invite: await invite(owner, ws, 'member') })
   viewer = await signUp(hosted, { handle: 'vic', displayName: 'Vic Viewer', invite: await invite(owner, ws, 'viewer') })
@@ -327,8 +330,7 @@ test('sessions: listed with device labels, one can be ended, never the current o
   clock += 11 * MIN
   await freshen(member)
   assert.equal((await member.browser.call('DELETE', `/auth/sessions/${current.id}`)).json.error.code, 'current_session')
-  assert.equal((await other.browser.call('DELETE', `/auth/sessions/${mac.id}`)).status, 403, 'not fresh for bob, and not his')
-  await freshen(other)
+  assert.equal((await other.browser.call('DELETE', `/auth/sessions/${mac.id}`)).status, 404, 'not his: unknown')
   assert.equal((await other.browser.call('DELETE', `/auth/sessions/${mac.id}`)).status, 404, "someone else's session is unknown")
   const ended = await member.browser.call('DELETE', `/auth/sessions/${mac.id}`)
   assert.equal(ended.status, 200)
@@ -340,6 +342,7 @@ test('share links: off by default, turned on with a fresh check, one project onl
   const plain = await startHostedServer('hosted-admin-shares', { now: () => new Date(clock) })
   try {
     const user = await signUp(plain, { handle: 'sara' })
+    askAgain(plain, user.workspaceId)
     const p = await createProject(user, user.workspaceId, 'Site')
     const created = await user.browser.post(`/api/workspaces/${user.workspaceId}/projects/${p.id}/shares`, { mode: 'view' })
     assert.equal(created.json.error.code, 'shares_off')

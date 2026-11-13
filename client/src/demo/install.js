@@ -12,6 +12,8 @@ import { notifyAgentsChanged, notifyBatchChanged } from '../lib/agentEvents'
 import { createDemoBackend } from './backend'
 import { consoleTitle } from './titles'
 import { GUEST_NAME, STATE_VERSION, VIEW_AS, seedState } from './fixtures'
+import { NEEDS, roleAtLeast } from '../../../src/hosted/permissions.js'
+import { PAGE_COMMENT_KEY } from '../board/prefs'
 
 const STATE_KEY = 'shapewall.demo.state.v1'
 // Chat images kept across reloads (data URLs), up to this much in total.
@@ -127,6 +129,8 @@ export async function installDemo(app) {
     loadJson,
     save,
     onBatch: (boardId) => notifyBatchChanged(boardId),
+    // The fictional usage history keeps this visitor's days and working hours.
+    zoneOffset: -new Date().getTimezoneOffset(),
     location: { project: params.get('project'), base: base(), fixturesAt: info.fixturesAt || null },
   })
   if (state !== saved) persist()
@@ -159,6 +163,12 @@ export async function installDemo(app) {
     // Images on a new comment or reply, kept like chat attachments.
     for (const attachment of answer.attachments || []) keepFile(attachment)
     if (answer.forget?.length) forgetFiles(answer.forget)
+    // An export, made in this browser: a download, named as a server names it.
+    if (answer.file)
+      return new Response(answer.file.text, {
+        status: 200,
+        headers: { 'Content-Type': answer.file.type, 'Content-Disposition': `attachment; filename="${answer.file.name}"` },
+      })
     return new Response(JSON.stringify(answer.json), { status: answer.status, headers: { 'Content-Type': 'application/json' } })
   }
 
@@ -205,6 +215,16 @@ export async function installDemo(app) {
       role: state.viewAs,
       roleLabel: roleLabel(state.viewAs),
       personaName: state.viewAs === 'guest' ? `${state.guestName || GUEST_NAME}, through a share link` : user?.displayName || 'signed out',
+      // The console's Usage page of the main workspace, for whoever may read
+      // it (members and up): the board's "Try this" card leads there.
+      usageHref:
+        user &&
+        roleAtLeast(
+          state.memberships.find((item) => item.userId === user.id && item.workspaceId === state.workspaces[0]?.id)?.role,
+          NEEDS.usage,
+        )
+          ? new URL(`console.html#/w/${state.workspaces[0].id}/usage`, base()).href
+          : null,
       signedOut: Boolean(state.signedOut),
       viewAs: { value: state.viewAs, options, onChange: go },
       // This tab's share link when it does not open (DemoShareProblem):
@@ -227,6 +247,8 @@ export async function installDemo(app) {
         try {
           window.localStorage.removeItem(STATE_KEY)
           window.localStorage.removeItem(FILES_KEY)
+          // The page bar's Comment button is pointed out again (board/prefs.js).
+          window.localStorage.removeItem(PAGE_COMMENT_KEY)
         } catch {
           /* storage blocked: nothing was kept, the reload starts over anyway */
         }

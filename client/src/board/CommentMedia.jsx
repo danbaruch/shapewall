@@ -274,10 +274,11 @@ export function ShapeCount({ count, className }) {
 }
 
 // Desktop, while a tool is on: the composer or thread steps aside and this
-// bar, docked at the top of the canvas, says what is going on ("Drawing on
-// Home · Desktop") and holds the tools. Done (or Escape) goes one step back:
-// the composer or the reply box, with its text, images and the drawing.
-// The bar can sit over the top of the page being drawn on (the camera is
+// bar, just above the board's tools at the bottom of the canvas, says what
+// is going on ("Drawing on Home · Desktop") and holds the tools. Done (or
+// Escape) goes one step back: the composer or the reply box, with its text,
+// images and the drawing.
+// The bar can sit over the page being drawn on (the camera is
 // not moved for it), so it never blocks the pen: only its buttons take the
 // pointer, a stroke can start on its label or between its buttons, and
 // while a stroke is being made the whole bar fades back and lets go.
@@ -301,7 +302,7 @@ export function DrawBar({ owner, title }) {
       </p>
       <span className="h-5 w-px shrink-0 bg-line" aria-hidden="true" />
       <DrawTools owner={owner} touch={false} bar />
-      <Tooltip content={<KeyTip label={`Back to ${back}`} keys={['Esc']} />} side="bottom">
+      <Tooltip content={<KeyTip label={`Back to ${back}`} keys={['Esc']} />} side="top">
         <Button
           size="xs"
           variant="default"
@@ -320,10 +321,13 @@ export function DrawBar({ owner, title }) {
 // Phones: the page in a full sheet, to draw on with a finger.
 export function DrawSheet({ open, onClose, owner, src, native, title }) {
   const mine = useDrawing((value) => (value?.owner === owner ? value : null))
+  // Also when the sheet opens with the composer (the Draw tool on a phone),
+  // a moment before its drawing exists.
+  const ready = Boolean(mine)
   useEffect(() => {
     if (open && mine && !mine.tool) drawing.set({ tool: 'box' })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open])
+  }, [open, ready])
   if (!native) return null
   const close = () => {
     drawing.set({ tool: null })

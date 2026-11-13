@@ -1,0 +1,805 @@
+// The model of the Usage dashboard's layout (src/hosted/usage-layout.js):
+// what a stored layout may hold, how widgets close up and reflow, the
+// default, the changes a person can make, and older stored shapes.
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import {
+  LAYOUT_COLS,
+  LAYOUT_LIMITS,
+  LAYOUT_SUB,
+  LAYOUT_VERSION,
+  LayoutError,
+  WIDGETS,
+  WIDGET_TYPES,
+  addItem,
+  cleanLayout,
+  cleanOptions,
+  collides,
+  colsFor,
+  compact,
+  defaultLayout,
+  describeItem,
+  duplicateItem,
+  fill,
+  fitLayout,
+  hiddenTypes,
+  migrateLayout,
+  moveItem,
+  readLayout,
+  readingOrder,
+  reflow,
+  removeItem,
+  reorder,
+  resizeItem,
+  roomFor,
+  setOptions,
+  settle,
+  stepMove,
+  stepResize,
+  subRowsFor,
+  visibleItems,
+} from '../src/hosted/usage-layout.js'
+
+const ids = (items) => readingOrder(items).map((item) => item.id)
+const at = (layout, id) => layout.items.find((item) => item.id === id)
+const place = (layout, id) => {
+  const item = at(layout, id)
+  return [item.x, item.y, item.w, item.h]
+}
+// Nothing overlaps, everything is inside the grid, and the widgets are flowed (in reading order, each in the first place
+// after the one before it where it fits: flowing them again changes nothing).
+function assertTidy(items, cols = LAYOUT_COLS) {
+  for (const a of items) {
+    assert.ok(a.x >= 0 && a.x + a.w <= cols && a.y >= 0, `${a.id} is inside the grid`)
+    for (const b of items) assert.ok(!collides(a, b), `${a.id} and ${b.id} do not overlap`)
+  }
+  assert.deepEqual(compact(items, cols), readingOrder(items), 'flowed')
+}
+const item = (id, x, y, w, h, extra = {}) => ({ id, type: id.replace(/-\d+$/, ''), x, y, w, h, ...extra })
+
+test('the default: every widget once, tidy, and what cleaning gives back unchanged', () => {
+  const layout = defaultLayout()
+  assert.equal(layout.v, LAYOUT_VERSION)
+  assert.deepEqual(layout.items.map((entry) => entry.type).sort(), [...WIDGET_TYPES].sort())
+  assertTidy(layout.items)
+  assert.deepEqual(cleanLayout(layout), layout, 'the default is a valid layout as it stands')
+  // Three tiles to a row, the chart over time across the page, charts in pairs, four lists, the budgets.
+  assert.deepEqual(place(layout, 'tile_fixes'), [4, 2, 4, 2])
+  assert.deepEqual(place(layout, 'time'), [0, 4, 12, 6])
+  assert.deepEqual(place(layout, 'latency'), [6, 15, 6, 5])
+  assert.deepEqual(place(layout, 'top_denied'), [9, 20, 3, 4])
+  assert.equal(at(layout, 'budgets').y, 24)
+  // Every option has its default, and the defaults are what the page showed before it could be arranged.
+  assert.deepEqual(at(layout, 'time').options, {
+    metric: 'calls',
+    by: 'agent',
+    bucket: 'auto',
+    style: 'stacked',
+    legend: true,
+    brush: true,
+    view: 'chart',
+  })
+  assert.deepEqual(at(layout, 'latency').options, { percentiles: ['p50', 'p95'], log: false, view: 'chart' })
+  assert.deepEqual(at(layout, 'tile_calls').options, { spark: true, compare: true })
+  assert.deepEqual(at(layout, 'tile_fixes').options, { compare: true }, 'a tile with no trend has no trend option')
+  assert.deepEqual(at(layout, 'budgets').options, {})
+  // Two calls never share an object.
+  defaultLayout().items[0].x = 9
+  assert.equal(defaultLayout().items[0].x, 0)
+})
+
+test('validation: what is not a layout is refused', () => {
+  for (const bad of [
+    null,
+    undefined,
+    'layout',
+    7,
+    true,
+    {},
+    { v: 1 },
+    { v: 1, items: 'none' },
+    { v: 1, items: {} },
+    { v: 99, items: [] },
+    { items: [] },
+  ]) {
+    assert.throws(
+      () => cleanLayout(bad),
+      (error) => error instanceof LayoutError && error.code === 'invalid_layout',
+      JSON.stringify(bad),
+    )
+    assert.equal(readLayout(bad), null)
+  }
+  const huge = { v: 1, items: [], pad: 'x'.repeat(LAYOUT_LIMITS.bytes) }
+  assert.throws(
+    () => cleanLayout(huge),
+    (error) => error instanceof LayoutError && error.code === 'layout_too_large',
+  )
+  // Something that cannot even be written as JSON.
+  const loop = { v: 1, items: [] }
+  loop.self = loop
+  assert.throws(() => cleanLayout(loop), LayoutError)
+  assert.deepEqual(cleanLayout({ v: 1, items: [] }), { v: 1, items: [] }, 'an empty dashboard is a layout')
+})
+
+test('validation: unknown widgets, sizes and places out of range, and repeats are dropped', () => {
+  const good = item('time', 0, 0, 12, 6)
+  const kept = (entries) => cleanLayout({ v: 1, items: entries }).items.map((entry) => entry.id)
+  assert.deepEqual(kept([good]), ['time'])
+  const dropped = [
+    item('clock', 0, 0, 4, 2),
+    { ...good, type: 'constructor' },
+    { ...good, type: '__proto__' },
+    { ...good, type: 'toString' },
+    { ...good, type: 7 },
+    { ...good, id: 'Time' },
+    { ...good, id: 'time 2' },
+    { ...good, id: '' },
+    { ...good, id: 'x'.repeat(40) },
+    { ...good, id: 7 },
+    { ...good, id: '<script>' },
+    { ...good, w: 3 },
+    { ...good, w: 13 },
+    { ...good, h: 3 },
+    { ...good, h: 11 },
+    { ...good, h: 5.5 },
+    { ...good, w: '12' },
+    { ...good, w: NaN },
+    { ...good, h: Infinity },
+    { ...good, x: -1 },
+    { ...good, x: 1 },
+    { ...good, y: -1 },
+    { ...good, y: LAYOUT_LIMITS.rows + 1 },
+    { ...good, y: 1e9 },
+    { ...good, x: null },
+    item('tile_calls', 0, 0, 5, 2),
+    item('tile_calls', 0, 0, 1, 2),
+    item('tile_calls', 0, 0, 4, 3),
+    item('tile_calls', 0, 0, 4, 1),
+    null,
+    'time',
+    [],
+    7,
+  ]
+  for (const entry of dropped) assert.deepEqual(kept([entry]), [], JSON.stringify(entry))
+  // A bad item goes; the good ones around it stay.
+  assert.deepEqual(kept([dropped[0], good, dropped[11]]), ['time'])
+  // The same id twice: the first one holds. A tile is on the dashboard once; a chart at most four times.
+  assert.deepEqual(kept([good, { ...good, y: 6 }]), ['time'])
+  assert.deepEqual(kept([item('tile_calls', 0, 0, 4, 2), { ...item('tile_calls', 4, 0, 4, 2), id: 'tile_calls-2' }]), ['tile_calls'])
+  const copies = [1, 2, 3, 4, 5, 6].map((n) => ({ ...item('time', 0, n * 6, 12, 6), id: n === 1 ? 'time' : `time-${n}` }))
+  assert.deepEqual(kept(copies), ['time', 'time-2', 'time-3', 'time-4'])
+  // More items than a dashboard holds: the rest are not read.
+  const many = Array.from({ length: 200 }, (_, n) => ({ ...item('tile_calls', 0, n * 2, 4, 2), id: `t${n}` }))
+  assert.ok(cleanLayout({ v: 1, items: [...many.slice(0, 60)] }).items.length <= LAYOUT_LIMITS.items)
+  // Only the keys of an item are kept: nothing else rides along into storage.
+  const [only] = cleanLayout({ v: 1, items: [{ ...good, static: true, html: '<img onerror=alert(1)>', __proto__: { evil: 1 } }] }).items
+  assert.deepEqual(Object.keys(only).sort(), ['h', 'id', 'options', 'type', 'w', 'x', 'y'])
+  assert.equal(only.evil, undefined)
+})
+
+test('validation: options keep listed values only, everything else is the default', () => {
+  assert.deepEqual(
+    cleanOptions('time', { metric: 'tokens', by: 'model', bucket: 'week', style: 'lines', legend: false, brush: false, view: 'table' }),
+    {
+      metric: 'tokens',
+      by: 'model',
+      bucket: 'week',
+      style: 'lines',
+      legend: false,
+      brush: false,
+      view: 'table',
+    },
+  )
+  assert.deepEqual(
+    cleanOptions('time', { metric: 'secrets', by: ['agent'], bucket: 7, style: '<b>', legend: 'yes', brush: 1, view: null, extra: 'x' }),
+    defaultLayout().items.find((entry) => entry.id === 'time').options,
+  )
+  for (const junk of [null, undefined, 'x', 7, [], [{ metric: 'tokens' }]])
+    assert.deepEqual(cleanOptions('breakdown', junk), cleanOptions('breakdown', {}))
+  assert.deepEqual(cleanOptions('breakdown', { rows: 12, share: false, metric: 'cost', by: 'kind' }), {
+    by: 'kind',
+    metric: 'cost',
+    rows: 12,
+    share: false,
+    view: 'chart',
+  })
+  assert.equal(cleanOptions('breakdown', { rows: 500 }).rows, 8)
+  assert.equal(cleanOptions('breakdown', { rows: '12' }).rows, 8, 'a number written as text is not a listed value')
+  assert.equal(cleanOptions('top_agents', { rows: 10 }).rows, 10)
+  assert.equal(cleanOptions('top_agents', { rows: 11 }).rows, 5)
+  assert.equal(cleanOptions('outcomes', { mode: 'counts' }).mode, 'counts')
+  assert.equal(cleanOptions('approvals', { mode: 'separate' }).mode, 'separate')
+  // A set: listed values in the listed order, never empty.
+  assert.deepEqual(cleanOptions('latency', { percentiles: ['p99', 'p50', 'p1', 'p99'], log: true }), {
+    percentiles: ['p50', 'p99'],
+    log: true,
+    view: 'chart',
+  })
+  assert.deepEqual(cleanOptions('latency', { percentiles: [] }).percentiles, ['p50', 'p95'])
+  assert.deepEqual(cleanOptions('latency', { percentiles: 'p99' }).percentiles, ['p50', 'p95'])
+  assert.deepEqual(cleanOptions('tile_cost', { spark: true, compare: false }), { spark: true, compare: false })
+  assert.deepEqual(cleanOptions('clock', { anything: 1 }), {}, 'an unknown widget has no options')
+  // Inherited keys are not options.
+  assert.deepEqual(cleanOptions('time', Object.create({ metric: 'tokens' })).metric, 'calls')
+  // Through a whole layout.
+  const cleaned = cleanLayout({
+    v: 1,
+    items: [{ ...item('latency', 0, 0, 6, 5), options: { percentiles: ['p90'], log: 'true', nope: 1 } }],
+  })
+  assert.deepEqual(cleaned.items[0].options, { percentiles: ['p90'], log: false, view: 'chart' })
+})
+
+test('compaction: widgets close up, never overlap, and a tidy layout stays as it is', () => {
+  // Gaps close.
+  const gappy = compact([item('tile_calls', 0, 5, 4, 2), item('time', 0, 20, 12, 6), item('tile_tokens', 4, 9, 4, 2)])
+  assertTidy(gappy)
+  assert.deepEqual(
+    gappy.map((entry) => [entry.id, entry.x, entry.y]),
+    [
+      ['tile_calls', 0, 0],
+      ['tile_tokens', 4, 0],
+      ['time', 0, 2],
+    ],
+  )
+  // Overlaps are pulled apart: the one that reads first keeps its place.
+  const piled = compact([item('time', 0, 0, 12, 6), item('breakdown', 0, 0, 6, 5), item('outcomes', 3, 2, 6, 5)])
+  assertTidy(piled)
+  assert.deepEqual(
+    ids(piled),
+    ['breakdown', 'time', 'outcomes'].sort((a, b) => piled.find((e) => e.id === a).y - piled.find((e) => e.id === b).y),
+  )
+  // A widget slides up beside a tall neighbour, not only under it.
+  const beside = compact([item('time', 0, 0, 6, 8), item('tile_calls', 6, 6, 4, 2), item('tile_tokens', 6, 9, 4, 2)])
+  assert.deepEqual(
+    beside.map((entry) => entry.y),
+    [0, 0, 2],
+  )
+  // Idempotent, and the input is not changed.
+  const before = defaultLayout().items
+  const copy = JSON.parse(JSON.stringify(before))
+  assert.deepEqual(compact(before), before)
+  assert.deepEqual(before, copy)
+  assert.deepEqual(compact(compact(piled)), piled)
+  // What cleanLayout stores is always tidy, whatever came in.
+  const stored = cleanLayout({
+    v: 1,
+    items: [item('time', 0, 300, 12, 6), item('breakdown', 0, 300, 6, 5), item('tile_calls', 2, 300, 4, 2)],
+  })
+  assertTidy(stored.items)
+  assert.equal(Math.min(...stored.items.map((entry) => entry.y)), 0)
+})
+
+test('hiding leaves no gap; adding puts a widget back at the bottom; duplicating copies a chart with its options', () => {
+  let layout = defaultLayout()
+  layout = removeItem(layout, 'time')
+  assertTidy(layout.items)
+  assert.equal(at(layout, 'breakdown').y, 4, 'the charts under the hidden one moved up')
+  assert.deepEqual(hiddenTypes(layout, { admin: true }), ['time'])
+  layout = removeItem(layout, 'tile_tokens')
+  layout = removeItem(layout, 'budgets')
+  assert.deepEqual(hiddenTypes(layout, { admin: true }), ['tile_tokens', 'time', 'budgets'])
+  assert.deepEqual(hiddenTypes(layout), ['tile_tokens', 'time'], 'a member is never offered the budgets')
+  assert.equal(removeItem(layout, 'nothing').items.length, layout.items.length)
+
+  const added = addItem(layout, 'time')
+  assert.equal(added.id, 'time')
+  assertTidy(added.layout.items)
+  const back = at(added.layout, 'time')
+  assert.deepEqual([back.x, back.w, back.h], [0, 12, 6])
+  assert.equal(
+    back.y,
+    Math.max(...added.layout.items.filter((entry) => entry.id !== 'time').map((entry) => entry.y + entry.h)),
+    'at the bottom',
+  )
+  assert.deepEqual(back.options, cleanOptions('time', {}))
+  // What cannot be added: an unknown widget, a second tile.
+  assert.equal(addItem(added.layout, 'clock').id, null)
+  assert.equal(addItem(added.layout, 'tile_calls').id, null)
+  assert.equal(roomFor(added.layout, 'tile_calls'), 0)
+  assert.equal(roomFor(added.layout, 'tile_tokens'), 1)
+  assert.equal(roomFor(added.layout, 'time'), LAYOUT_LIMITS.copies - 1)
+
+  // A chart half the page wide: its copy sits beside it, with the same options.
+  layout = resizeItem(defaultLayout(), 'time', 6, 6)
+  layout = setOptions(layout, 'time', { metric: 'tokens', style: 'lines' })
+  const twin = duplicateItem(layout, 'time')
+  assert.equal(twin.id, 'time-2')
+  assertTidy(twin.layout.items)
+  assert.deepEqual(place(twin.layout, 'time'), [0, 4, 6, 6])
+  assert.deepEqual(place(twin.layout, 'time-2'), [6, 4, 6, 6])
+  assert.deepEqual(at(twin.layout, 'time-2').options, at(twin.layout, 'time').options)
+  // The copy's options are its own.
+  const changed = setOptions(twin.layout, 'time-2', { metric: 'cost', by: 'model', bucket: 'week' })
+  assert.equal(at(changed, 'time').options.metric, 'tokens')
+  assert.deepEqual(
+    [at(changed, 'time-2').options.metric, at(changed, 'time-2').options.by, at(changed, 'time-2').options.bucket],
+    ['cost', 'model', 'week'],
+  )
+  assert.equal(setOptions(changed, 'time-2', { metric: 'nonsense' }).items.find((entry) => entry.id === 'time-2').options.metric, 'calls')
+  // A chart as wide as the page: its copy goes under it.
+  const under = duplicateItem(defaultLayout(), 'time')
+  assert.deepEqual(place(under.layout, 'time-2'), [0, 10, 12, 6])
+  assert.equal(at(under.layout, 'breakdown').y, 16)
+  assertTidy(under.layout.items)
+  // Four copies at most; a tile is never duplicated.
+  let full = defaultLayout()
+  for (let n = 0; n < 6; n += 1) full = duplicateItem(full, 'time').layout
+  assert.equal(full.items.filter((entry) => entry.type === 'time').length, LAYOUT_LIMITS.copies)
+  assert.equal(duplicateItem(full, 'time').id, null)
+  assert.equal(duplicateItem(defaultLayout(), 'tile_calls').id, null)
+  assert.deepEqual(cleanLayout(full), full, 'what the changes make is always a valid layout')
+})
+
+test('flowing: the order is the layout; holes close, and a flowed layout stays exactly as it is', () => {
+  const layout = defaultLayout()
+  assert.deepEqual(compact(layout.items), layout.items, 'the default is already flowed')
+  // Hiding a tile: the tiles after it close up, row by row; the rest of the page follows.
+  const fewer = removeItem(layout, 'tile_tokens')
+  assertTidy(fewer.items)
+  assert.deepEqual(
+    ['tile_calls', 'tile_duration', 'tile_cost', 'tile_fixes', 'tile_failed'].map((id) => place(fewer, id).slice(0, 2)),
+    [
+      [0, 0],
+      [4, 0],
+      [8, 0],
+      [0, 2],
+      [4, 2],
+    ],
+  )
+  // Hiding a chart of a pair: the next chart takes its place beside the other.
+  const pair = removeItem(layout, 'outcomes')
+  assert.deepEqual(place(pair, 'approvals'), [6, 10, 6, 5])
+  assert.deepEqual(place(pair, 'latency'), [0, 15, 6, 5])
+  // Whatever is done, flowing again changes nothing (so a reload never moves a widget).
+  let random = 7
+  const next = (n) => {
+    random = (random * 1103515245 + 12345) % 2147483648
+    return random % n
+  }
+  for (let run = 0; run < 60; run += 1) {
+    let current = defaultLayout()
+    for (let step = 0; step < 10; step += 1) {
+      const target = current.items[next(current.items.length)]
+      const pick = next(4)
+      if (pick === 0) current = moveItem(current, target.id, next(12), next(30))
+      else if (pick === 1) current = resizeItem(current, target.id, target.w + next(7) - 3, target.h + next(5) - 2)
+      else if (pick === 2 && current.items.length > 4) current = removeItem(current, target.id)
+      else current = stepMove(current, target.id, ['left', 'right', 'up', 'down'][next(4)])
+      assertTidy(current.items)
+      assert.deepEqual(compact(current.items), current.items)
+      assert.deepEqual(cleanLayout(current), current)
+    }
+  }
+})
+
+test('moving and resizing: a drag puts a widget in the order where it was dropped; sizes stay inside what the type allows', () => {
+  const layout = defaultLayout()
+  // The duration chart dropped on the first tile: it comes first, everything else after it.
+  const moved = moveItem(layout, 'latency', 0, 0)
+  assertTidy(moved.items)
+  assert.deepEqual(place(moved, 'latency'), [0, 0, 6, 5])
+  assert.deepEqual(ids(moved.items).slice(0, 3), ['latency', 'tile_calls', 'tile_tokens'])
+  assert.deepEqual(cleanLayout(moved), moved)
+  // The chart over time dropped on the tiles' first row: above the stats.
+  const above = moveItem(layout, 'time', 0, 0)
+  assert.deepEqual(place(above, 'time'), [0, 0, 12, 6])
+  assert.deepEqual(place(above, 'tile_calls'), [0, 6, 4, 2])
+  // A tile dropped on the next tile (dragged on): after it. Dropped back on the first: in front of it.
+  assert.deepEqual(ids(moveItem(layout, 'tile_calls', 4, 0).items).slice(0, 3), ['tile_tokens', 'tile_calls', 'tile_duration'])
+  assert.deepEqual(ids(moveItem(layout, 'tile_duration', 0, 0).items).slice(0, 3), ['tile_duration', 'tile_calls', 'tile_tokens'])
+  // Dropped where it is, or past the end: where it is, and last.
+  assert.equal(moveItem(layout, 'tile_calls', 0, 0), layout)
+  assert.equal(ids(moveItem(layout, 'tile_calls', 3, 9999).items).at(-1), 'tile_calls')
+  assertTidy(moveItem(layout, 'latency', 99, -5).items)
+  assert.equal(moveItem(layout, 'nothing', 0, 0), layout)
+
+  // Sizes stop at the type's least and most.
+  assert.deepEqual(place(resizeItem(layout, 'tile_calls', 1, 9), 'tile_calls').slice(2), [WIDGETS.tile_calls.size.minW, 2])
+  assert.deepEqual(place(resizeItem(layout, 'tile_calls', 9, 1), 'tile_calls').slice(2), [4, 2])
+  assert.deepEqual(place(resizeItem(layout, 'time', 1, 1), 'time').slice(2), [4, 4], 'a chart cannot be made too small to read')
+  assert.deepEqual(place(resizeItem(layout, 'time', 40, 40), 'time').slice(2), [12, 10])
+  // The tiles share one width: one made narrower makes them four to a row.
+  const threes = resizeItem(layout, 'tile_calls', 3, 2)
+  assertTidy(threes.items)
+  assert.ok(threes.items.filter((item) => item.type.startsWith('tile_')).every((item) => item.w === 3))
+  assert.deepEqual(place(threes, 'tile_cost'), [9, 0, 3, 2])
+  // Never past the right edge from where it is.
+  assert.deepEqual(place(resizeItem(layout, 'outcomes', 12, 5), 'outcomes'), [6, 10, 6, 5])
+  // A row stays whole: a chart made wider takes the width from the one beside it, and a narrower one gives it back.
+  const wide = resizeItem(layout, 'breakdown', 8, 5)
+  assertTidy(wide.items)
+  assert.deepEqual(place(wide, 'breakdown'), [0, 10, 8, 5])
+  assert.deepEqual(place(wide, 'outcomes'), [8, 10, 4, 5])
+  const narrow = resizeItem(layout, 'breakdown', 4, 5)
+  assert.deepEqual(place(narrow, 'outcomes'), [4, 10, 8, 5])
+  // When the one beside it cannot be that narrow, it goes on to the next row.
+  const wider = resizeItem(layout, 'breakdown', 9, 5)
+  assertTidy(wider.items)
+  assert.deepEqual(place(wider, 'outcomes'), [0, 15, 6, 5])
+  // A taller chart: the one beside it, as tall before, grows with it, so no hole opens under either.
+  const taller = resizeItem(layout, 'breakdown', 6, 8)
+  assertTidy(taller.items)
+  assert.deepEqual(place(taller, 'outcomes'), [6, 10, 6, 8])
+  assert.deepEqual(place(taller, 'approvals'), [0, 18, 6, 5])
+  assert.deepEqual(place(taller, 'latency'), [6, 18, 6, 5])
+  for (const type of WIDGET_TYPES) {
+    const size = WIDGETS[type].size
+    assert.ok(size.minW <= size.w && size.w <= size.maxW && size.minH <= size.h && size.h <= size.maxH, type)
+  }
+  assert.deepEqual([WIDGETS.tile_calls.size.minW, WIDGETS.tile_calls.size.maxW], [3, 4], 'a tile has two widths and one height')
+})
+
+test('arrow keys: changes places with the neighbour beside, above or below; Shift resizes', () => {
+  const layout = defaultLayout()
+  // Up: the duration chart changes places with the outcomes chart above it.
+  const up = stepMove(layout, 'latency', 'up')
+  assertTidy(up.items)
+  assert.deepEqual(place(up, 'latency'), [6, 10, 6, 5])
+  assert.deepEqual(place(up, 'outcomes'), [6, 15, 6, 5])
+  // And down again is where it started.
+  assert.deepEqual(stepMove(up, 'latency', 'down'), layout)
+  // A tile up: it changes places with the tile above it.
+  const tileUp = stepMove(layout, 'tile_fixes', 'up')
+  assert.deepEqual(place(tileUp, 'tile_fixes'), [4, 0, 4, 2])
+  assert.deepEqual(place(tileUp, 'tile_tokens'), [4, 2, 4, 2])
+  // At the top and at the bottom there is nowhere to go.
+  assert.equal(stepMove(layout, 'tile_calls', 'up'), layout)
+  assert.equal(stepMove(layout, 'budgets', 'down'), layout)
+  assert.equal(stepMove(layout, 'tile_calls', 'left'), layout)
+  assert.equal(stepMove(layout, 'budgets', 'right'), layout)
+  // Sideways: one place in the order, so beside each other they change places.
+  assert.deepEqual(ids(stepMove(layout, 'tile_tokens', 'left').items).slice(0, 3), ['tile_tokens', 'tile_calls', 'tile_duration'])
+  assert.deepEqual(ids(stepMove(layout, 'tile_tokens', 'right').items).slice(0, 3), ['tile_calls', 'tile_duration', 'tile_tokens'])
+  // The last tile of a row on to the next row's first place.
+  assert.deepEqual(place(stepMove(layout, 'tile_duration', 'right'), 'tile_duration'), [0, 2, 4, 2])
+  assertTidy(stepMove(layout, 'tile_tokens', 'left').items)
+  // Shift: a column or a row at a time, inside the limits.
+  assert.deepEqual(place(stepResize(layout, 'latency', 'left'), 'latency').slice(2), [5, 5])
+  assert.deepEqual(place(stepResize(layout, 'latency', 'down'), 'latency').slice(2), [6, 6])
+  assert.deepEqual(place(stepResize(layout, 'latency', 'up'), 'latency').slice(2), [6, 4])
+  assert.deepEqual(stepResize(layout, 'latency', 'right'), layout, 'already at the right edge')
+  assert.deepEqual(stepResize(layout, 'tile_calls', 'down'), layout, 'a tile has one height')
+  assert.equal(describeItem(at(up, 'latency')), 'row 11, column 7; 6 wide, 5 tall')
+})
+
+test('fill: a row that stops short of the edge, with nothing that fits the rest, is drawn across it', () => {
+  const layout = defaultLayout()
+  assert.deepEqual(fill(layout.items), layout.items, 'the default layout has no short rows')
+  // Five tiles: the last two share the second row.
+  const five = removeItem(layout, 'tile_tokens')
+  const drawn = { items: fill(five.items) }
+  assert.deepEqual(place(drawn, 'tile_fixes'), [0, 2, 6, 2])
+  assert.deepEqual(place(drawn, 'tile_failed'), [6, 2, 6, 2])
+  assert.deepEqual(place(five, 'tile_fixes'), [0, 2, 4, 2], 'what is stored keeps its own width')
+  // A chart widened past what its neighbour can give takes the row; its neighbour keeps its height on the next.
+  const wide = resizeItem(layout, 'breakdown', 9, 7)
+  assertTidy(wide.items)
+  assert.deepEqual(place(wide, 'outcomes'), [0, 17, 6, 5])
+  assert.deepEqual(place({ items: fill(wide.items) }, 'breakdown'), [0, 10, 12, 7])
+  for (const cols of [12, 6, 2]) {
+    const out = fill(reflow(five.items, cols), cols)
+    for (const a of out)
+      for (const b of out)
+        if (a !== b) assert.ok(!(a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h), `${a.id} ${b.id} at ${cols}`)
+    assert.ok(out.every((item) => item.x + item.w <= cols))
+  }
+})
+
+test('reflow: fewer columns show the same widgets in reading order, with no overlaps and no gaps', () => {
+  const layout = defaultLayout()
+  assert.equal(reflow(layout.items, 12), layout.items, '12 columns: the layout itself')
+  const medium = reflow(layout.items, 6)
+  assertTidy(medium, 6)
+  assert.deepEqual(ids(medium), ids(layout.items), 'the same order')
+  // Tiles three to a row, charts one to a row, lists two to a row.
+  assert.deepEqual(
+    medium.filter((entry) => entry.type.startsWith('tile_')).map((entry) => [entry.x, entry.y, entry.w]),
+    [
+      [0, 0, 2],
+      [2, 0, 2],
+      [4, 0, 2],
+      [0, 2, 2],
+      [2, 2, 2],
+      [4, 2, 2],
+    ],
+  )
+  for (const id of ['time', 'breakdown', 'outcomes', 'approvals', 'latency', 'budgets'])
+    assert.equal(medium.find((entry) => entry.id === id).w, 6)
+  assert.deepEqual(
+    medium.filter((entry) => entry.type.startsWith('top_')).map((entry) => [entry.x, entry.w]),
+    [
+      [0, 3],
+      [3, 3],
+      [0, 3],
+      [3, 3],
+    ],
+  )
+  // A phone: tiles in pairs, everything else one under the other.
+  const phone = reflow(layout.items, 2)
+  assertTidy(phone, 2)
+  assert.deepEqual(ids(phone), ids(layout.items))
+  assert.deepEqual(
+    phone.slice(0, 7).map((entry) => [entry.x, entry.w]),
+    [
+      [0, 1],
+      [1, 1],
+      [0, 1],
+      [1, 1],
+      [0, 1],
+      [1, 1],
+      [0, 2],
+    ],
+  )
+  // Deterministic, heights kept, the input untouched.
+  assert.deepEqual(reflow(layout.items, 6), medium)
+  assert.deepEqual(
+    phone.map((entry) => entry.h),
+    readingOrder(layout.items).map((entry) => entry.h),
+  )
+  assert.deepEqual(layout, defaultLayout())
+  // A hidden widget leaves no gap on any grid; an arranged layout reflows tidily too.
+  const arranged = moveItem(removeItem(removeItem(layout, 'time'), 'tile_fixes'), 'latency', 6, 0)
+  for (const cols of [6, 2]) {
+    const out = reflow(arranged.items, cols)
+    assertTidy(out, cols)
+    assert.deepEqual(ids(out), ids(arranged.items))
+  }
+  // Which grid a width gets.
+  assert.deepEqual([1400, 840, 839, 560, 559, 390, 0].map(colsFor), [12, 12, 6, 6, 2, 2, 2])
+})
+
+test('reorder (the up and down buttons of a narrow screen): the order asked for, on the stored 12 columns', () => {
+  const layout = defaultLayout()
+  const order = ids(layout.items)
+  const expect = (from, to) => {
+    const next = [...order]
+    next.splice(to, 0, next.splice(from, 1)[0])
+    return next
+  }
+  // One step down, one step up, to the very end, to the very start.
+  for (const [id, to] of [
+    ['tile_calls', 1],
+    ['tile_tokens', 0],
+    ['time', 7],
+    ['time', 5],
+    ['latency', 9],
+    ['tile_calls', order.length - 1],
+    ['budgets', 0],
+    ['top_denied', 11],
+  ]) {
+    const moved = reorder(layout, id, to)
+    assertTidy(moved.items)
+    assert.deepEqual(ids(moved.items), expect(order.indexOf(id), to), `${id} to ${to}`)
+    assert.deepEqual(cleanLayout(moved), moved)
+    // And a narrow screen shows that order.
+    assert.deepEqual(ids(reflow(moved.items, 2)), ids(moved.items))
+  }
+  assert.equal(reorder(layout, 'time', order.indexOf('time')), layout, 'already there')
+  assert.equal(reorder(layout, 'nothing', 0), layout)
+  assert.deepEqual(ids(reorder(layout, 'tile_calls', -5).items), order, 'before the first is the first')
+  assert.deepEqual(ids(reorder(layout, 'budgets', 99).items), order, 'after the last is the last')
+  // Many steps in a row keep a tidy layout with every widget.
+  let walked = layout
+  for (let step = 0; step < order.length + 3; step += 1) {
+    const now = ids(walked.items)
+    walked = reorder(walked, 'tile_calls', Math.min(now.indexOf('tile_calls') + 1, now.length - 1))
+    assertTidy(walked.items)
+  }
+  assert.equal(ids(walked.items).at(-1), 'tile_calls')
+  assert.equal(walked.items.length, layout.items.length)
+})
+
+test('who sees what: the budgets are drawn for admins only, and the rest closes up', () => {
+  const layout = moveItem(defaultLayout(), 'budgets', 0, 0)
+  assert.equal(visibleItems(layout, { admin: true }), layout.items)
+  const member = visibleItems(layout)
+  assert.ok(!member.some((entry) => entry.type === 'budgets'))
+  assertTidy(member)
+  assert.equal(member.find((entry) => entry.id === 'tile_calls').y, 0)
+  const without = removeItem(layout, 'budgets')
+  assert.equal(visibleItems(without), without.items)
+})
+
+test('an older stored shape: a bare list of grid items is read as a layout; a newer version as none', () => {
+  // Before a layout carried a version: the grid library's own items, keyed `i`.
+  const old = [
+    { i: 'tile_calls', x: 0, y: 0, w: 4, h: 2 },
+    { i: 'time', x: 0, y: 2, w: 12, h: 6, options: { metric: 'tokens' } },
+    { i: 'time-2', x: 0, y: 8, w: 6, h: 6, moved: true, static: false },
+    { i: 'clock', x: 0, y: 14, w: 4, h: 2 },
+    { i: 'outcomes', x: 6, y: 8, w: 99, h: 5 },
+    { x: 0, y: 0, w: 4, h: 2 },
+    null,
+  ]
+  const migrated = migrateLayout(old)
+  assert.equal(migrated.v, LAYOUT_VERSION)
+  const layout = cleanLayout(old)
+  assert.deepEqual(
+    layout.items.map((entry) => [entry.id, entry.type, entry.x, entry.y, entry.w, entry.h]),
+    [
+      ['tile_calls', 'tile_calls', 0, 0, 4, 2],
+      ['time', 'time', 0, 2, 12, 6],
+      ['time-2', 'time', 0, 8, 6, 6],
+    ],
+    'what it knows is kept; the unknown widget and the impossible size are dropped',
+  )
+  assert.equal(at(layout, 'time').options.metric, 'tokens')
+  assert.equal(at(layout, 'time-2').options.metric, 'calls')
+  assert.deepEqual(readLayout(old), layout)
+  assert.deepEqual(cleanLayout(layout), layout, 'once migrated it is a current layout')
+  // A layout written by a later build: not guessed at.
+  assert.equal(migrateLayout({ v: LAYOUT_VERSION + 1, items: [] }), null)
+  assert.equal(readLayout({ v: LAYOUT_VERSION + 1, items: old }), null)
+  assert.equal(migrateLayout('[]'), null)
+  assert.equal(readLayout(null), null)
+})
+
+test('a list, a breakdown and the budgets are as tall as what they hold, until they are sized by hand', () => {
+  const layout = defaultLayout()
+  // Which widgets follow their content, and that the default heights are the fitted ones.
+  assert.deepEqual(
+    layout.items.filter((entry) => entry.auto).map((entry) => entry.id),
+    ['breakdown', 'top_agents', 'top_threads', 'top_slowest', 'top_denied', 'budgets'],
+  )
+  assert.ok(!('auto' in at(layout, 'time')) && !('auto' in at(layout, 'tile_calls')))
+  assert.equal(fitLayout(layout), layout, 'nothing to change: the same layout')
+  assert.equal(fitLayout(layout, { budgets: 3 }), layout, 'three projects are what the default height holds')
+  // More rows: taller, and what is under it moves down. Fewer: shorter, and it moves up.
+  const ten = fitLayout(setOptions(layout, 'top_agents', { rows: 10 }))
+  assertTidy(ten.items)
+  assert.deepEqual(place(ten, 'top_agents'), [0, 20, 3, 7])
+  assert.equal(at(ten, 'budgets').y, 27)
+  assert.deepEqual(place(ten, 'top_threads'), [3, 20, 3, 4], 'its neighbours keep their own height')
+  const three = fitLayout(setOptions(ten, 'top_agents', { rows: 3 }))
+  assert.deepEqual(place(three, 'top_agents'), [0, 20, 3, 3])
+  assert.equal(at(three, 'budgets').y, 24)
+  assert.deepEqual(
+    [5, 8, 12, 20].map((rows) => at(fitLayout(setOptions(layout, 'breakdown', { rows })), 'breakdown').h),
+    [4, 5, 7, 10],
+  )
+  // The budgets: a row per project, never a blank band, and a list that scrolls from six projects on.
+  assert.deepEqual(
+    [0, 1, 2, 3, 4, 5, 6, 10, 40].map((budgets) => at(fitLayout(layout, { budgets }), 'budgets').h),
+    [3, 3, 4, 4, 5, 6, 6, 6, 6],
+  )
+  assert.equal(at(fitLayout(layout, { budgets: null }), 'budgets').h, 4, 'not known yet: as stored')
+  assert.equal(at(fitLayout(layout, {}), 'budgets').h, 4)
+  // Sized by hand: the height stays whatever the content does. A change of width alone is not that.
+  const wider = resizeItem(layout, 'top_agents', 4, 4)
+  assert.equal(at(wider, 'top_agents').auto, true)
+  const byHand = resizeItem(layout, 'top_agents', 3, 6)
+  assert.equal(at(byHand, 'top_agents').auto, false)
+  assert.deepEqual(place(fitLayout(setOptions(byHand, 'top_agents', { rows: 10 })), 'top_agents'), [0, 20, 3, 6])
+  assert.equal(at(stepResize(layout, 'budgets', 'down'), 'budgets').auto, false)
+  assert.equal(at(fitLayout(stepResize(layout, 'budgets', 'down'), { budgets: 1 }), 'budgets').h, 5)
+  assert.equal(at(stepResize(layout, 'budgets', 'left'), 'budgets').auto, true)
+  // It is stored, checked like everything else, and a copy starts by following its content again.
+  assert.deepEqual(cleanLayout(byHand), byHand)
+  const junk = cleanLayout({
+    v: 1,
+    items: [
+      { ...at(layout, 'top_agents'), auto: 'yes' },
+      { ...at(layout, 'time'), auto: true },
+      { ...at(layout, 'breakdown'), h: 7, auto: undefined },
+    ],
+  })
+  assert.equal(at(junk, 'top_agents').auto, true, 'not a yes or a no: it follows while it has the default height')
+  assert.ok(!('auto' in at(junk, 'time')), 'a chart over time has no such switch')
+  assert.equal(at(junk, 'breakdown').auto, false, 'a stored height that is not the default was set by hand')
+  assert.equal(at(duplicateItem(resizeItem(layout, 'breakdown', 6, 7), 'breakdown').layout, 'breakdown-2').auto, false, 'a copy is a copy')
+  assert.equal(at(addItem(removeItem(byHand, 'top_agents'), 'top_agents').layout, 'top_agents').auto, true)
+  // Fitting never leaves an overlap or a gap, whatever is fitted.
+  let busy = layout
+  for (const id of ['top_agents', 'top_threads', 'top_slowest', 'top_denied']) busy = setOptions(busy, id, { rows: id.length % 2 ? 10 : 3 })
+  assertTidy(fitLayout(setOptions(busy, 'breakdown', { rows: 20 }), { budgets: 9 }).items)
+  assert.deepEqual(layout, defaultLayout(), 'the layout given is never changed')
+})
+
+test('settle: each widget drawn at its own height; the charts close the gap, and no band leaves a hole or an uneven bottom', () => {
+  const layout = defaultLayout()
+  const S = LAYOUT_SUB
+  const drawn = (fitted, items = layout.items, cols = LAYOUT_COLS) => settle(items, cols, fitted)
+  const spot = (items, id) => {
+    const one = items.find((other) => other.id === id)
+    return [one.x, one.y, one.w, one.h]
+  }
+  const noOverlap = (items, cols = LAYOUT_COLS) => {
+    for (const a of items) {
+      assert.ok(a.x >= 0 && a.x + a.w <= cols && a.y >= 0, a.id)
+      for (const b of items) assert.ok(!collides(a, b), a.id + ' and ' + b.id)
+    }
+  }
+  // Nothing measured yet: the stored layout, row for row.
+  const plain = drawn({})
+  noOverlap(plain)
+  for (const one of layout.items) assert.deepEqual(spot(plain, one.id), [one.x, one.y * S, one.w, one.h * S], one.id)
+  // A breakdown of two projects beside the outcomes chart: it keeps its own height; the approvals chart moves up under it
+  // and reaches down to where the duration chart ends, so the lists start on one line.
+  const short = drawn({ breakdown: 8 })
+  noOverlap(short)
+  assert.deepEqual(spot(short, 'breakdown'), [0, 10 * S, 6, 8])
+  assert.deepEqual(spot(short, 'outcomes'), [6, 10 * S, 6, 5 * S])
+  assert.deepEqual(spot(short, 'approvals'), [0, 10 * S + 8, 6, 10 * S - 8])
+  assert.deepEqual(spot(short, 'latency'), [6, 15 * S, 6, 5 * S])
+  for (const id of ['top_agents', 'top_threads', 'top_slowest', 'top_denied']) assert.equal(spot(short, id)[1], 20 * S, id)
+  // Lists side by side share the tallest one's height; the budgets fit what they hold.
+  const lists = drawn({ top_agents: 13, top_threads: 15, top_slowest: 15, top_denied: 13, budgets: 12 })
+  noOverlap(lists)
+  for (const id of ['top_agents', 'top_threads', 'top_slowest', 'top_denied']) assert.equal(spot(lists, id)[3], 15, id)
+  assert.deepEqual(spot(lists, 'budgets'), [0, 24 * S - 1, 12, 12])
+  // A widget sized by hand keeps that height whatever it holds.
+  const byHand = resizeItem(layout, 'breakdown', 6, 7)
+  assert.equal(spot(drawn({ breakdown: 8 }, byHand.items), 'breakdown')[3], 7 * S)
+  // Alone in its band beside a taller chart, with nothing that fits under it, a short breakdown reaches down to
+  // where the chart ends: no hole, one bottom edge.
+  const pair = [item('breakdown', 0, 0, 6, 5, { auto: true }), item('outcomes', 6, 0, 6, 5), item('time', 0, 5, 12, 6)]
+  const alone = drawn({ breakdown: 8 }, pair)
+  assert.deepEqual(spot(alone, 'breakdown'), [0, 0, 6, 5 * S])
+  assert.deepEqual(spot(alone, 'time'), [0, 5 * S, 12, 6 * S])
+  // A breakdown made wider than the chart beside it: a chart moved up under it would leave a hole beside itself
+  // (the next row is split into other columns), so the breakdown keeps its stored height and the next row stays
+  // one line under both.
+  const wider = resizeItem(layout, 'breakdown', 8, 5)
+  const mixed = drawn({ breakdown: 8 }, wider.items)
+  noOverlap(mixed)
+  assert.deepEqual(spot(mixed, 'breakdown'), [0, 10 * S, 8, 5 * S])
+  assert.deepEqual(spot(mixed, 'approvals'), [0, 15 * S, 6, 5 * S])
+  assert.equal(spot(mixed, 'latency')[1], 15 * S)
+  // Rows of uneven widths: a narrow breakdown beside a wide chart, two charts in pairs under them. The charts cannot
+  // fit under the breakdown, so it reaches down to where the wide chart ends instead of leaving a hole.
+  const uneven = [
+    item('breakdown', 0, 0, 4, 5, { auto: true }),
+    item('outcomes', 4, 0, 8, 5),
+    item('approvals', 0, 5, 6, 5),
+    item('latency', 6, 5, 6, 5),
+  ]
+  const unevenDrawn = drawn({ breakdown: 9 }, uneven)
+  noOverlap(unevenDrawn)
+  assert.deepEqual(spot(unevenDrawn, 'breakdown'), [0, 0, 4, 5 * S])
+  assert.deepEqual(spot(unevenDrawn, 'approvals'), [0, 5 * S, 6, 5 * S])
+  // A Top 10 beside Top 5s (different rows, so different stored heights): the row of lists ends on one line, every
+  // list as tall as the longest.
+  const fourLists = [
+    item('top_agents', 0, 0, 3, 7, { auto: true }),
+    item('top_threads', 3, 0, 3, 4, { auto: true }),
+    item('top_slowest', 6, 0, 3, 4, { auto: true }),
+    item('top_denied', 9, 0, 3, 4, { auto: true }),
+    item('budgets', 0, 7, 12, 4, { auto: true }),
+  ]
+  const listsDrawn = drawn({ top_agents: 24, top_threads: 15, top_slowest: 15, top_denied: 13, budgets: 12 }, fourLists)
+  noOverlap(listsDrawn)
+  for (const id of ['top_agents', 'top_threads', 'top_slowest', 'top_denied'])
+    assert.deepEqual(spot(listsDrawn, id).slice(1), [0, 3, 24], id)
+  assert.deepEqual(spot(listsDrawn, 'budgets'), [0, 24, 12, 12])
+  // Every column ends on one bottom line and nothing leaves a hole, whatever is fitted.
+  for (const items of [unevenDrawn, listsDrawn, alone, short, lists, mixed]) {
+    const cells = new Set(
+      items.flatMap((one) => Array.from({ length: one.w * one.h }, (_, at) => `${one.x + (at % one.w)},${one.y + Math.floor(at / one.w)}`)),
+    )
+    const bottom = Math.max(...items.map((one) => one.y + one.h))
+    const holes = []
+    for (let c = 0; c < LAYOUT_COLS; c += 1) for (let r = 0; r < bottom; r += 1) if (!cells.has(`${c},${r}`)) holes.push(`${c},${r}`)
+    assert.deepEqual(holes.slice(0, 5), [], items.map((one) => `${one.id}@${one.x},${one.y},${one.w},${one.h}`).join(' '))
+  }
+  // Fewer columns: one widget under another, each its own height.
+  const phone = drawn({ breakdown: 8 }, reflow(layout.items, 2), 2)
+  noOverlap(phone, 2)
+  assert.equal(spot(phone, 'breakdown')[3], 8)
+  assert.equal(spot(phone, 'outcomes')[1], spot(phone, 'breakdown')[1] + 8)
+  // Pixels to fine rows: a stored row is LAYOUT_SUB of them; never fewer than a heading needs.
+  assert.equal(subRowsFor(128), 2 * S)
+  assert.equal(subRowsFor(129), 2 * S + 1)
+  assert.equal(subRowsFor(10), 6)
+})
+
+test('resize: the last widget of a full row made narrower gives its width to the one on its left', () => {
+  const layout = defaultLayout()
+  const narrow = resizeItem(layout, 'outcomes', 4, 5)
+  assertTidy(narrow.items)
+  assert.deepEqual(place(narrow, 'breakdown'), [0, 10, 8, 5])
+  assert.deepEqual(place(narrow, 'outcomes'), [8, 10, 4, 5])
+  // A widget as tall as what it holds does not follow a neighbour made taller.
+  const taller = resizeItem(layout, 'outcomes', 6, 7)
+  assert.equal(at(taller, 'breakdown').h, 5)
+  assert.equal(at(taller, 'breakdown').auto, true)
+})

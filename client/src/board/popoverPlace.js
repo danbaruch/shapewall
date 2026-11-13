@@ -16,12 +16,16 @@
 // the element's vertical extent at the pin's place across.
 export const PLACE_GAP = 10
 // Room kept free inside the canvas: 10px all round, and the bottom strip of
-// the zoom controls (12px margin + 38px bar + 10px).
+// the zoom controls and the board's tools (12px margin + 38px bar + 10px).
 export const PLACE_PADDING = { top: 10, right: 10, bottom: 60, left: 10 }
+// While the note for the tool in use shows above the tools ("Commenting on
+// ...", the comment hint): its row too (8px + 32px).
+export const NOTE_PADDING = { ...PLACE_PADDING, bottom: PLACE_PADDING.bottom + 40 }
 
 // A card that was dragged to `at` ({ x, y }, its top left corner on screen),
 // held inside the canvas: never under the side panel, off screen or on the
-// zoom controls' strip. A card taller than the canvas keeps its top in view.
+// strip of the zoom controls and the board's tools. A card taller than the
+// canvas keeps its top in view.
 export function clampMoved(at, box, width, height, padding = PLACE_PADDING) {
   const x = Math.max(box.left + padding.left, Math.min(box.right - padding.right - width, at.x))
   const y = Math.max(box.top + padding.top, Math.min(box.bottom - padding.bottom - height, at.y))

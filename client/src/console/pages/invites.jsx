@@ -88,7 +88,9 @@ export function InvitesSection() {
                               {invite.note}
                             </span>
                           ) : null}
-                          {invite.email ? (
+                          {invite.tailnetLogin ? (
+                            <span data-sw-invite-tailnet>For the tailnet login {invite.tailnetLogin}</span>
+                          ) : invite.email ? (
                             <span className="inline-flex items-center gap-1">
                               <Mail size={13} aria-hidden="true" /> {invite.email}
                             </span>
@@ -202,12 +204,14 @@ export function InviteDialog({ open, onClose, onCreated }) {
   const [days, setDays] = useState('7')
   const [email, setEmail] = useState('')
   const [note, setNote] = useState('')
+  const [login, setLogin] = useState('')
   const { run, busy, error, setError } = useAction()
   const [result, setResult] = useSecretResult(open, () => {
     setRole('member')
     setDays('7')
     setEmail('')
     setNote('')
+    setLogin('')
     setError(null)
   })
   const roles = invitableRoles(myRole)
@@ -219,6 +223,7 @@ export function InviteDialog({ open, onClose, onCreated }) {
         expiresInDays: Number(days),
         ...(email.trim() ? { email: email.trim() } : {}),
         ...(note.trim() ? { note: note.trim() } : {}),
+        ...(login.trim() ? { tailnetLogin: login.trim() } : {}),
       })
       setResult(made)
       await onCreated?.()
@@ -245,7 +250,12 @@ export function InviteDialog({ open, onClose, onCreated }) {
               {made.emailed.error}. Copy the link and send it yourself.
             </Notice>
           ) : null}
-          {DEMO ? (
+          {made.invite.tailnetLogin ? (
+            <Notice tone="ok" title={`${made.invite.tailnetLogin} is invited`} data-sw-invite-tailnet-result>
+              They join as {ROLE_LABEL[made.invite.role].toLowerCase()} the next time they open this server through the tailnet (or with
+              shapewall join). Only that tailnet login can use this invite, so the link below is optional.
+            </Notice>
+          ) : DEMO ? (
             <Notice tone="info" title="A sample link" data-sw-invite-sample>
               The demo has no server, so this link opens nothing. On a real server it makes one {ROLE_LABEL[made.invite.role].toLowerCase()}
               , works once and expires <Time value={made.invite.expiresAt} />.
@@ -311,6 +321,26 @@ export function InviteDialog({ open, onClose, onCreated }) {
               />
             )}
           </Field>
+          {features.tailnetSignIn ? (
+            <Field
+              label="Tailnet login (optional)"
+              hint="The name they sign in to Tailscale with. Only that login can use the invite, and they need no link."
+            >
+              {(props) => (
+                <Input
+                  {...props}
+                  size="touch"
+                  value={login}
+                  onChange={(event) => setLogin(event.target.value)}
+                  autoComplete="off"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  placeholder="ada@example.com"
+                  data-sw-invite-tailnet-login
+                />
+              )}
+            </Field>
+          ) : null}
           {features.inviteEmail ? (
             <Field label="Email (optional)" hint="We email the link to this address. Leave it empty to copy the link yourself.">
               {(props) => (
@@ -330,7 +360,7 @@ export function InviteDialog({ open, onClose, onCreated }) {
             <p className="text-xs text-muted">This server does not send email: you copy the link and send it yourself.</p>
           )}
           {role === 'owner' ? (
-            <Notice tone="warn">An owner can change or remove anyone, you included. Inviting one asks for your passkey.</Notice>
+            <Notice tone="warn">An owner can change or remove anyone, you included. Inviting one always asks you to confirm.</Notice>
           ) : null}
           <FormError error={error} />
           <div className="flex justify-end gap-2">
@@ -338,7 +368,7 @@ export function InviteDialog({ open, onClose, onCreated }) {
               Cancel
             </Button>
             <Button type="submit" size="touch" variant="default" disabled={busy} className="lg:h-10" data-sw-invite-create>
-              {busy ? <Spinner /> : null} {email.trim() ? 'Create and email' : 'Create invite link'}
+              {busy ? <Spinner /> : null} {login.trim() ? 'Invite this login' : email.trim() ? 'Create and email' : 'Create invite link'}
             </Button>
           </div>
         </form>

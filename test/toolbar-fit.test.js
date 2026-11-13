@@ -3,7 +3,7 @@
 // that an open journey never changes the bar's shape.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { FIT_STEPS, TOOLBAR, collapsed, fitToolbar, toolbarItems, zoneWidth } from '../client/src/board/toolbarFit.js'
+import { FIT_STEPS, SIDE_PANEL, TOOLBAR, collapsed, fitToolbar, toolbarItems, zoneWidth } from '../client/src/board/toolbarFit.js'
 
 // About the system UI font: 7 px a character at 13 px, scaled by size.
 const SIZE = { name: 14, ui: 13, xs: 12, count: 11 }
@@ -20,7 +20,6 @@ const local = (title = 'Marketing site', journey = null) =>
     journey,
     viewports: ['Desktop', 'Tablet', 'Phone', 'All'],
     capture: true,
-    comment: true,
     panels: { comments: 20, agent: true, checks: true },
     settings: true,
   })
@@ -31,7 +30,6 @@ const demo = (journey = null) =>
     journey,
     title: 'Acme storefront',
     viewports: ['Desktop', 'Tablet', 'Phone', 'All'],
-    comment: true,
     panels: { comments: 20, agent: true, checks: true },
   })
 
@@ -61,27 +59,30 @@ const layout = (items, width) => {
 
 test('the steps drop labels in order: panel toggles, Views, screen size, then tight; there is no search in the bar', () => {
   assert.deepEqual(FIT_STEPS, ['full', 'panels', 'view', 'viewport', 'tight'])
-  const none = { panels: false, view: false, viewport: false, comment: false, tight: false }
+  const none = { panels: false, view: false, viewport: false, tight: false }
   assert.deepEqual(collapsed(0), none)
   assert.deepEqual(collapsed(1), { ...none, panels: true })
   assert.deepEqual(collapsed(2), { ...none, panels: true, view: true })
   assert.deepEqual(collapsed(3), { ...none, panels: true, view: true, viewport: true })
-  assert.deepEqual(collapsed(4), { panels: true, view: true, viewport: true, comment: true, tight: true })
+  assert.deepEqual(collapsed(4), { panels: true, view: true, viewport: true, tight: true })
   // Each item collapses at its own step.
   const items = local()
   const at = Object.fromEntries([...items.left, ...items.right].map((item) => [item.id, item.at || null]))
   assert.deepEqual(at, {
     divider: null,
-    'panels-divider': null,
     viewport: 'viewport',
     view: 'view',
     capture: null,
     'capture-status': null,
-    comment: 'comment',
     panels: 'panels',
     settings: null,
   })
   assert.equal('searchIcon' in items, false)
+  // Comment is a tool on the canvas now (BoardTools.jsx), not a toolbar control.
+  assert.equal(
+    items.right.some((item) => item.id === 'comment'),
+    false,
+  )
 })
 
 test('narrowing the toolbar only ever drops more labels, never brings one back', () => {
@@ -222,4 +223,71 @@ test("an open journey's name takes the spare room up to its cap and never more t
   const shortFit = fitToolbar({ width: 2504, ...short })
   assert.equal(shortFit.journey, short.left.find((item) => item.id === 'view').full[shortFit.step] - 41 - 27)
   assert.equal(fitToolbar({ width: 2504, ...local() }).journey, 0)
+})
+
+// The side panel as dragged: its least, its default, and its most in a window.
+const panelMax = (window) => Math.max(SIDE_PANEL.min, Math.min(SIDE_PANEL.max, Math.floor(window * SIDE_PANEL.share)))
+const togglesOf = (items) => items.right.find((item) => item.id === 'panels')
+
+test('the side panel is never narrower than its toggles need: the least and the default fit them with a long count', () => {
+  const busy = toolbarItems({ text, title: 'x', panels: { comments: 124, agent: true, checks: true }, settings: true })
+  const need = togglesOf(busy).full + 2 * TOOLBAR.pad
+  assert.ok(need <= SIDE_PANEL.min, 'the toggles need ' + need + ', the least is ' + SIDE_PANEL.min)
+  assert.ok(SIDE_PANEL.min <= SIDE_PANEL.width && SIDE_PANEL.width <= SIDE_PANEL.max)
+  assert.equal(SIDE_PANEL.width, 384, 'the default stays')
+  // The least is reachable at the narrowest desktop window.
+  assert.ok(Math.floor(1024 * SIDE_PANEL.share) >= SIDE_PANEL.min)
+})
+
+test('a panel open: its toggles span the panel wherever the bar fits them, and nothing overlaps or leaves the bar', () => {
+  for (const items of [local(), demo(), local(LONG), local(LONG, JOURNEY), demo(JOURNEY)]) {
+    for (let window = 1024; window <= 2560; window += 8) {
+      for (const rail of [RAIL, 256, railMax(window)]) {
+        for (const panel of [SIDE_PANEL.min, SIDE_PANEL.width, panelMax(window)]) {
+          const width = window - rail
+          const fit = fitToolbar({ width, panel, ...items })
+          const off = collapsed(fit.step)
+          const gap = off.tight ? TOOLBAR.tightGap : TOOLBAR.gap
+          const view = items.left.find((item) => item.id === 'view')
+          const grown = fit.journey && Array.isArray(view.full) ? fit.journey - (view.full[fit.step] - 41 - 27) : 0
+          const left = Math.min(items.name, TOOLBAR.name[fit.step]) + gap + zoneWidth(items.left, fit.step) + grown
+          const others = items.right.filter((item) => item.id !== 'panels')
+          // Stretched: the others, then the panel's column less the bar's own padding on its right.
+          const right = fit.stretched ? zoneWidth([...others, { full: panel - TOOLBAR.pad }], fit.step) : zoneWidth(items.right, fit.step)
+          const inner = width - 2 * TOOLBAR.pad
+          const zoneGap = off.tight ? TOOLBAR.tightZoneGap : TOOLBAR.zoneGap
+          const where = ' at ' + window + ' rail ' + rail + ' panel ' + panel
+          assert.ok(left + right + zoneGap <= inner + 0.5, 'zones ' + left + '+' + right + ' overflow ' + inner + where)
+          // It falls back to the toggles' own width only when no step fits the panel's.
+          if (!fit.stretched) assert.deepEqual(fit, fitToolbar({ width, ...items }), 'the compact fit' + where)
+        }
+      }
+    }
+  }
+})
+
+test('a panel open: stretched from a 1280 px window up, sidebar open or not; compact at 1024 with the sidebar open; no panel, no stretch', () => {
+  for (const items of [local(), demo()]) {
+    for (const [window, rail] of [
+      [1280, RAIL],
+      [1280, 256],
+      [1440, RAIL],
+      [1440, 256],
+      [1920, 420],
+    ]) {
+      for (const panel of [SIDE_PANEL.min, SIDE_PANEL.width, panelMax(window)]) {
+        const fit = fitToolbar({ width: window - rail, panel, ...items })
+        assert.equal(fit.stretched, true, 'stretched at ' + window + ' rail ' + rail + ' panel ' + panel)
+      }
+    }
+    // The default panel costs no label at 1440 with the sidebar collapsed.
+    assert.equal(fitToolbar({ width: 1440 - RAIL, panel: SIDE_PANEL.width, ...items }).step, 0)
+    assert.equal(fitToolbar({ width: 1024 - RAIL, panel: SIDE_PANEL.width, ...items }).stretched, true, '1024, sidebar collapsed')
+    assert.equal('stretched' in fitToolbar({ width: 1440 - RAIL, ...items }), false)
+    assert.equal('stretched' in fitToolbar({ width: 1440 - RAIL, panel: null, ...items }), false)
+  }
+  assert.equal('stretched' in fitToolbar({ width: 1024 - 256, panel: SIDE_PANEL.width, ...local() }), false, 'no room: the compact toggles')
+  // A count too long for the panel: the toggles keep their own width rather than lose their words.
+  const huge = toolbarItems({ text, title: 'x', panels: { comments: 123456789012, agent: true, checks: true } })
+  assert.equal('stretched' in fitToolbar({ width: 1440 - RAIL, panel: SIDE_PANEL.min, ...huge }), false)
 })

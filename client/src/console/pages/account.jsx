@@ -12,6 +12,7 @@ import { Recovery } from './account/recovery'
 import { Sessions } from './account/sessions'
 import { SecurityLog } from './account/activity'
 import { DeleteAccount } from './account/delete'
+import { TailnetAccount } from './tailnet'
 
 export function AccountPage() {
   const { me } = useSession()
@@ -21,18 +22,24 @@ export function AccountPage() {
       {/* On a desktop the app sidebar lists the sections (shell.jsx). */}
       <SidebarSections
         label="Account"
-        sections={ACCOUNT_SECTIONS.map(([id, label, Icon]) => ({
-          id: `account-nav-${id}`,
-          label,
-          icon: Icon,
-          onSelect: () => jump(id),
-          'data-sw-account-nav': id,
-        }))}
+        sections={ACCOUNT_SECTIONS.filter(([id]) => !me?.passkeysOff || !['account-passkeys', 'account-recovery'].includes(id)).map(
+          ([id, label, Icon]) => ({
+            id: `account-nav-${id}`,
+            label,
+            icon: Icon,
+            onSelect: () => jump(id),
+            'data-sw-account-nav': id,
+          }),
+        )}
       />
       <div className="min-w-0">
         <PageHeader
           title="Account and security"
-          description="Your profile, the passkeys you sign in with, recovery codes and signed-in devices."
+          description={
+            me?.passkeysOff
+              ? 'Your profile, how you sign in and your signed-in devices.'
+              : 'Your profile, the passkeys you sign in with, recovery codes and signed-in devices.'
+          }
         />
         <div className="grid gap-5">
           {me?.local ? (
@@ -41,8 +48,9 @@ export function AccountPage() {
             </Notice>
           ) : null}
           <Profile />
-          <Passkeys />
-          <Recovery />
+          {me?.passkeysOff ? null : <Passkeys />}
+          <TailnetAccount />
+          {me?.passkeysOff ? null : <Recovery />}
           <Sessions />
           <SecurityLog />
           <DeleteAccount />

@@ -70,6 +70,7 @@ const wantsToken = (url, method) =>
   url.startsWith('/api/agent/settings') ||
   url === '/api/agent/status' ||
   url.startsWith('/api/agent/feedback') ||
+  url.startsWith('/api/agent/usage') ||
   url.startsWith('/api/agent/branches') ||
   (/^\/?api\/agent\/boards\//.test(url) && url.includes('/threads')) ||
   /^\/?api\/agent\/boards\/[a-z0-9-]+\/batch(\/|$)/.test(url) ||
@@ -108,12 +109,14 @@ function staticPath(url) {
 // re-exports it), so `instanceof ApiError` holds whichever made the call.
 // `details`: the server's extra lines; `retryAfter`: seconds, on a 429.
 export class ApiError extends Error {
-  constructor(status, code, message, { details = null, retryAfter = null } = {}) {
+  constructor(status, code, message, { details = null, retryAfter = null, stepUp = null } = {}) {
     super(message)
     this.status = status
     this.code = code
     this.details = details
     this.retryAfter = retryAfter
+    // Which rule asked for a passkey (src/hosted/step-up.js): 'always', a group, 'adminIdle' or 'restricted'.
+    this.stepUp = stepUp
   }
 }
 
@@ -121,6 +124,7 @@ export class ApiError extends Error {
 export const responseError = (status, data) =>
   new ApiError(status, data?.error?.code || 'http_error', data?.error?.message || `Request failed (${status})`, {
     details: data?.error?.details || null,
+    stepUp: data?.error?.stepUp || null,
   })
 
 async function fetchJson(target) {

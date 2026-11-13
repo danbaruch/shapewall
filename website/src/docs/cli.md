@@ -581,6 +581,10 @@ Commands
                             project's agent, else Claude Code when found). Codex, goose and Gemini CLI are not
                             offered in this release. Never a command from the server
       --name "Builder"      the name to suggest on the approval page (the approver has the last word)
+      --project SLUG        on a server with tailnet sign-in, run on a tailnet machine: no browser, your tailnet
+                            user approves it. --project (and --workspace NAME) pick the project when there are
+                            several; --used-by owner|trusted who may send it work (default owner: only you);
+                            --icon NAME and --tint NAME as on the approval page
       --as NAME             a second connection from this machine (its own token; default "default")
       --audience owner|server  "owner": the server keeps it to the person who connects it even if its audience
                             there is widened, and this machine refuses a job the server says is someone else's
@@ -682,6 +686,17 @@ Commands
 
 Hosted Shapewall (docs/hosted.md)
   login --remote URL        get a project token through the browser; saved for the --remote commands
+      --project SLUG        on a server with tailnet sign-in, run on a tailnet machine: no code and no browser,
+                            your tailnet user approves it (if its role may). --project, and --workspace NAME
+                            when you are in several, pick the project; with one project neither is needed
+  join --remote URL         join a workspace on a server with tailnet sign-in, from a tailnet machine: takes the
+                            invite an admin made for your tailnet login. The role is the invite's
+      --invite LINK         an invite link (or its code) instead
+  admin projects list|create NAME | members list | agents list | invites create
+                            a few admin commands on a server with tailnet sign-in, as your tailnet user (the
+                            server checks your role). --remote URL; --workspace NAME when you are in several
+      --login LOGIN         invites create: for one tailnet login (ada@example.com); or --link for a link
+      --role ROLE           viewer, member (default), admin or owner; --days N until it expires; --name; --json
   push                      upload the latest captures to a hosted project
       --include-checks      explicitly include private diagnostic reports
       --remote URL          the hosted Shapewall (or $SHAPEWALL_REMOTE)
@@ -701,12 +716,28 @@ Hosted Shapewall (docs/hosted.md)
       --usercontent-origin URL  serve live HTML only from this other origin (or $SHAPEWALL_USERCONTENT_ORIGIN)
       --previous-origin URL while moving to a new origin: the old one (sign-in moves, up to 30 days)
       --report-email ADDR   where "Report this board" on public projects goes
+      --owners-see-sign-ins workspace owners see their members' sign-ins and devices in Activity
+                            (off: each person sees only their own; for a server with one team)
       --tailscale           on your tailnet through tailscale serve (https://<machine>.<tailnet>.ts.net)
       --tailscale-port N    default 443; --funnel: share links public through Tailscale Funnel
                             (share pages only, never the console), on --funnel-port 8443|443|10000
+      --tailnet-sign-in     with --tailscale: a tailnet user is signed in as the account linked to their tailnet
+                            login, no passkey (or $SHAPEWALL_HOSTED_TAILNET_SIGN_IN=1). An admin still decides
+                            who is in a workspace. Needs Linux and Tailscale 1.98+ in its normal (TUN) mode, not
+                            in a container; refuses to start where it cannot prove that a request came through
+                            tailscale serve. An identity is per device: what runs as you there can act as you.
+                            Tailscale is then the only sign-in: no passkeys, and the few things that always ask
+                            take a typed confirmation
+      --tailnet-passkeys    with --tailnet-sign-in: also allow passkeys ($SHAPEWALL_HOSTED_TAILNET_PASSKEYS=1, or
+                            hosted admin passkeys on|off). An account that adds one confirms with it
       --quotas FILE         per-workspace quotas (default <data>/quotas.json when it exists)
       --retention-hours N   prune old versions every N hours (default 6, 0 = off); --retention-keep N (2)
   hosted setup-link         print the first account's one-time link (it is not in the log)
+  hosted claim --data DIR --login LOGIN
+                            with --tailnet-sign-in: make the first account on the server's own machine, no
+                            browser. Whoever can read the data folder says whose server it is: --login is the
+                            owner's tailnet login (ada@example.com); --workspace-name NAME. From another tailnet
+                            device: hosted claim --setup-link URL (the server then sees who asks)
       --data DIR | --new    --new: make a new link (the old one stops working)
   hosted move-origin --to URL   move the server to a new origin (passkeys move with a rebind)
       --data DIR | --days N | --status   window 1 to 30 days (default 30)
@@ -714,6 +745,8 @@ Hosted Shapewall (docs/hosted.md)
       --usercontent-domain HOST  live HTML on its own domain; --email (TLS); --dir (./shapewall-hosted)
       --source DIR          a Shapewall checkout to build from; --dry-run; --force; --start (build, start, setup link)
   hosted admin list|suspend|resume|delete|export|reports|retention|log   the operator's commands
+  hosted admin members|invites|projects|passkeys ...   who is in a workspace and how people sign in, from the
+                            server's own machine (shapewall hosted admin help lists them)
   hosted backup --to DIR [--keep-days N]   a consistent copy while the server runs
   hosted restore --from BACKUP --data NEW | --from BACKUP --check (the restore drill)
 

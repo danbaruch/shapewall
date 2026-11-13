@@ -5,8 +5,9 @@
 // every query goes through the request's tenant handle (req.t).
 //
 // Who may do what: src/hosted/permissions.js (NEEDS), shared with the
-// console and the public demo. Deleting the workspace also needs a fresh
-// passkey check and the workspace's name typed back.
+// console and the public demo. Deleting the workspace always needs a fresh
+// passkey check and the workspace's name typed back; what else asks for the
+// passkey again is the workspace's own choice (src/hosted/step-up.js).
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -16,9 +17,11 @@ import { ID_RE } from '../config.js'
 import { createCommentStore } from './comments.js'
 import { NEEDS, ROLE_ACCESS, tokenCreatorOk } from './permissions.js'
 import { projectDir } from './projects.js'
+import { stepUpSettings } from './step-up-settings.js'
 import { auditAccount } from './tenancy.js'
 import { ZIP_MAX_BYTES, createZip } from './zip.js'
 import { createChatStore } from './chat-store.js'
+import { createUsage } from './usage.js'
 
 const AUDIT_PAGE = 50
 const AUDIT_PAGE_MAX = 200
@@ -30,7 +33,7 @@ const AUDIT_CSV_MAX = 10_000
 const AUDIT_EXPORT_MAX = 100_000
 const AUDIT_EXPORT_PAGE = 1000
 
-const AUDIT_SELECT = `SELECT a.id, a.action, a.target, a.ip, a.detail, a.at, a.user_id, a.token_id, a.share_id,
+export const AUDIT_SELECT = `SELECT a.id, a.action, a.target, a.ip, a.detail, a.at, a.user_id, a.token_id, a.share_id,
     u.handle, u.display_name, k.name AS token_name, s.name AS share_name,
     tu.handle AS target_handle, tu.display_name AS target_user, tp.name AS target_project,
     tk.name AS target_token, ts.name AS target_share
@@ -45,7 +48,7 @@ const AUDIT_SELECT = `SELECT a.id, a.action, a.target, a.ip, a.detail, a.at, a.u
 
 // What the search looks through: one string per row (no OR, which the tenant
 // guard refuses).
-const AUDIT_HAYSTACK = [
+export const AUDIT_HAYSTACK = [
   "replace(a.action, '_', ' ')",
   'a.target',
   'a.ip',
@@ -63,7 +66,7 @@ const AUDIT_HAYSTACK = [
   .map((column) => `coalesce(${column}, '')`)
   .join(" || ' ' || ")
 
-function auditEntry(row) {
+export function auditEntry(row) {
   const detail = JSON.parse(row.detail || '{}')
   return {
     id: row.id,
@@ -325,6 +328,21 @@ export async function writeWorkspaceExport(t, exported, { write, now, iso, expor
   }
   await audit.write(count ? '\n]\n' : ']\n')
   await audit.end()
+  // The usage records (src/hosted/usage.js): one row per agent turn, numbers
+  // and ids only, newest first, all of them.
+  const usage = zip.stream(`${root}usage.json`)
+  await usage.write('[')
+  let turns = 0
+  const end = Date.now() + 86_400_000
+  const store = createUsage(t)
+  // Every record, a page at a time: an export is the whole workspace.
+  for (const page of store.pages({ fromMs: 0, toMs: end }, { all: true, userId: null }, { max: Infinity })) {
+    let text = ''
+    for (const row of page) text += `${turns++ ? ',' : ''}\n  ${JSON.stringify(row)}`
+    await usage.write(text)
+  }
+  await usage.write(turns ? '\n]\n' : ']\n')
+  await usage.end()
   for (const { project, row, files, images = [] } of plan) {
     const base = `${root}projects/${project.slug}/boards/${row.board_id}/`
     const comments = createCommentStore(t, project.id, row.board_id).list()
@@ -387,7 +405,23 @@ function isoOrNull(value) {
 }
 
 export function mountAdmin(router, deps) {
-  const { db, dataDir, iso, now, handle, inWorkspace, needFresh, auditOf, HttpError, listTokens, clientIp, limit } = deps
+  const {
+    db,
+    dataDir,
+    iso,
+    now,
+    handle,
+    inWorkspace,
+    needFresh,
+    stepUp,
+    stepUpOrThrow,
+    coreFreshOrThrow,
+    auditOf,
+    HttpError,
+    listTokens,
+    clientIp,
+    limit,
+  } = deps
   // Workspaces with an export being written: one at a time each.
   const exporting = new Set()
 
@@ -397,7 +431,7 @@ export function mountAdmin(router, deps) {
     inWorkspace(NEEDS.invites),
     handle(async (req, res) => {
       const rows = req.t.all(
-        `SELECT i.id, i.role, i.created_at, i.expires_at, i.used_at, i.revoked_at, i.email, i.emailed_at, i.note,
+        `SELECT i.id, i.role, i.created_at, i.expires_at, i.used_at, i.revoked_at, i.email, i.emailed_at, i.note, i.tailnet_login,
            c.handle AS creator_handle, c.display_name AS creator_name, u.handle AS used_handle, u.display_name AS used_name
          FROM invites i LEFT JOIN users c ON c.id = i.created_by LEFT JOIN users u ON u.id = i.used_by
          WHERE i.workspace_id = :ws ORDER BY i.created_at DESC LIMIT :limit`,
@@ -415,6 +449,7 @@ export function mountAdmin(router, deps) {
         email: row.email || null,
         emailedAt: row.emailed_at || null,
         note: row.note || null,
+        tailnetLogin: row.tailnet_login || null,
         createdBy: row.creator_handle ? { handle: row.creator_handle, displayName: row.creator_name } : null,
         usedBy: row.used_handle ? { handle: row.used_handle, displayName: row.used_name } : null,
       }))
@@ -555,6 +590,7 @@ export function mountAdmin(router, deps) {
     inWorkspace(NEEDS.audit),
     handle(async (req, res) => {
       const rows = auditRows(req, { limit: AUDIT_CSV_MAX, before: Number.MAX_SAFE_INTEGER })
+      auditOf(req, 'audit_exported', null, { rows: rows.length, scope: 'workspace', view: 'audit' })
       const lines = [['time', 'actor_type', 'actor', 'actor_handle', 'action', 'target', 'ip', 'detail']]
       for (const row of rows) {
         const entry = auditEntry(row)
@@ -600,15 +636,15 @@ export function mountAdmin(router, deps) {
   // ---- Export: a zip of the workspace before it is deleted (admins) ----
   // workspace.json (members, projects, tokens and share links without their
   // secrets), audit.json, and per project and board the board definition,
-  // its comments and every pushed file. Needs a fresh passkey check: it is
-  // everything in the workspace in one download.
+  // its comments and every pushed file. Everything in the workspace in one
+  // download: the passkey again when the workspace asks ("Exports and deletes").
   // One export at a time per workspace (409 while one runs), a few an hour
   // per person (LIMITS.export), and the audit log read 1000 rows at a time.
   router.post(
     '/workspaces/:ws/export',
     inWorkspace(NEEDS.export),
     limit('export', (req) => req.user.id),
-    needFresh,
+    stepUp('data'),
     handle(async (req, res) => {
       const t = req.t
       if (exporting.has(t.workspaceId))
@@ -661,13 +697,43 @@ export function mountAdmin(router, deps) {
       const { shareLinks } = req.body || {}
       if (typeof shareLinks !== 'boolean') throw new HttpError(400, 'invalid_settings', 'shareLinks: true or false.')
       // Letting people outside the workspace in is a sensitive change.
-      if (shareLinks) deps.freshOrThrow(req)
+      if (shareLinks) stepUpOrThrow(req, 'tokens')
       const current = req.t.get('SELECT share_links FROM workspaces WHERE workspace_id = :ws')
       if (Boolean(current.share_links) !== shareLinks) {
         req.t.run('UPDATE workspaces SET share_links = :on WHERE workspace_id = :ws', { on: shareLinks ? 1 : 0 })
         auditOf(req, shareLinks ? 'share_links_enabled' : 'share_links_disabled')
       }
       res.json({ settings: { shareLinks } })
+    }),
+  )
+
+  // When this workspace asks for the passkey again (src/hosted/step-up.js):
+  // one setting per request, { group, on } | { windowMinutes } | { adminIdle } | { cliApproval }.
+  // Owners only; asking for less needs a fresh passkey check itself.
+  router.patch(
+    '/workspaces/:ws/step-up',
+    inWorkspace(NEEDS.settings),
+    handle(async (req, res) => {
+      const body = req.body || {}
+      const actor = {
+        role: req.role,
+        fresh: () => coreFreshOrThrow(req),
+        audit: (action, target, detail) => auditOf(req, action, target, detail),
+      }
+      const settings = stepUpSettings(req.t)
+      const named = ['group', 'windowMinutes', 'adminIdle', 'cliApproval'].filter((key) => Object.hasOwn(body, key))
+      if (named.length !== 1)
+        throw new HttpError(400, 'invalid_settings', 'One setting at a time: group and on, windowMinutes, adminIdle or cliApproval.')
+      const stepUpNow = transaction(db, () =>
+        named[0] === 'group'
+          ? settings.setGroup(actor, body.group, body.on)
+          : named[0] === 'windowMinutes'
+            ? settings.setWindow(actor, body.windowMinutes)
+            : named[0] === 'adminIdle'
+              ? settings.setAdminIdle(actor, body.adminIdle)
+              : settings.setCliApproval(actor, body.cliApproval),
+      )
+      res.json({ settings: { stepUp: stepUpNow } })
     }),
   )
 
@@ -699,7 +765,7 @@ export function mountAdmin(router, deps) {
   )
 }
 
-function actorOf(row, detail) {
+export function actorOf(row, detail) {
   if (row.user_id) return { type: 'user', id: row.user_id, label: row.display_name || 'Former member', handle: row.handle || null }
   if (row.token_id) return { type: 'token', id: row.token_id, label: row.token_name || 'Deleted token' }
   if (row.share_id) {
@@ -717,5 +783,6 @@ function actorOf(row, detail) {
       link: row.share_name || 'Share link',
     }
   }
-  return { type: 'system', id: null, label: 'System' }
+  // Done on the server's machine with `shapewall hosted admin` (src/hosted/operator-access.js).
+  return { type: 'system', id: null, label: detail?.by === 'operator' ? 'Server operator' : 'System' }
 }

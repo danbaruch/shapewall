@@ -8,12 +8,14 @@ import { useEffect, useRef, useState } from 'react'
 import { useStoreApi } from '@xyflow/react'
 import { Popover, PopoverAnchor, PopoverContent } from '../components/ui'
 import { cn } from '../lib/utils'
-import { PLACE_GAP, PLACE_PADDING, clampMoved, placePopover } from './popoverPlace'
+import { NOTE_PADDING, PLACE_GAP, PLACE_PADDING, clampMoved, placePopover } from './popoverPlace'
 
 const TEXT_FIELD = 'input, textarea, select, [contenteditable="true"]'
 
-// Room kept free inside the canvas, so a popover never sits on the zoom controls.
-const COLLISION_PADDING = PLACE_PADDING
+// Room kept free inside the canvas, so a popover never sits on the zoom
+// controls or the board's tools, nor on the tools' note while one shows
+// (BoardTools.jsx: "Commenting on ...", the comment hint).
+const noteUp = () => Boolean(document.querySelector('[data-sw-tool-note]'))
 // Beside its pin the card starts a little above (or left of) the pin's edge.
 const ALIGN_OFFSET = -6
 // A press on a card's header becomes a drag after this many pixels.
@@ -43,6 +45,7 @@ function inCanvas(rect, box) {
 //                  edges for the card to fit beside the side panel
 //   moved { x, y } the card was dragged: it sits at that point on screen
 //                  (its top left corner), held inside the canvas
+//   padding        the room kept free inside the canvas (popoverPlace.js)
 function useCanvasAnchor(selector, point, avoid, place) {
   const store = useStoreApi()
   const ref = useRef(null)
@@ -70,10 +73,10 @@ function useCanvasAnchor(selector, point, avoid, place) {
       pinRect,
       targetRect,
       getBoundingClientRect() {
-        const { on, side, width, height, moved } = place.current
+        const { on, side, width, height, moved, padding = PLACE_PADDING } = place.current
         const box = canvasBox()
         if (moved && box) {
-          const at = clampMoved(moved, box, width, height)
+          const at = clampMoved(moved, box, width, height, padding)
           return new DOMRect(at.x, at.y, 0, 0)
         }
         const pin = pinRect()
@@ -105,6 +108,7 @@ function useCanvasAnchor(selector, point, avoid, place) {
 function usePlacement(open, anchor, content, place, moved) {
   const store = useStoreApi()
   const [side, setSide] = useState('right')
+  const [padding, setPadding] = useState(PLACE_PADDING)
   useEffect(() => {
     if (!open) return undefined
     const pick = () => {
@@ -112,13 +116,23 @@ function usePlacement(open, anchor, content, place, moved) {
       if (!box) return
       const width = content.current?.offsetWidth || 360
       const height = content.current?.offsetHeight || 240
+      const room = noteUp() ? NOTE_PADDING : PLACE_PADDING
+      setPadding(room)
       if (moved) {
-        place.current = { on: 'pin', side: 'bottom', width, height, moved }
+        place.current = { on: 'pin', side: 'bottom', width, height, moved, padding: room }
         setSide('bottom')
         return
       }
-      const next = placePopover({ pin: anchor.current.pinRect(), target: anchor.current.targetRect(), box, width, height, gap: PLACE_GAP })
-      place.current = { ...next, width, height, moved: null }
+      const next = placePopover({
+        pin: anchor.current.pinRect(),
+        target: anchor.current.targetRect(),
+        box,
+        width,
+        height,
+        gap: PLACE_GAP,
+        padding: room,
+      })
+      place.current = { ...next, width, height, moved: null, padding: room }
       setSide(next.side)
     }
     pick()
@@ -136,7 +150,7 @@ function usePlacement(open, anchor, content, place, moved) {
       window.clearInterval(timer)
     }
   }, [open, store, anchor, content, place, moved])
-  return side
+  return { side, padding }
 }
 
 // Dragging a card by its header ([data-sw-card-drag-handle]): to see the page
@@ -167,7 +181,15 @@ function useCardDrag(content, anchor, resetKey) {
       active = true
       setDragging(true)
       move.preventDefault()
-      setMoved(clampMoved({ x: from.left + dx, y: from.top + dy }, anchor.current.canvasBox() || box, from.width, from.height))
+      setMoved(
+        clampMoved(
+          { x: from.left + dx, y: from.top + dy },
+          anchor.current.canvasBox() || box,
+          from.width,
+          from.height,
+          noteUp() ? NOTE_PADDING : PLACE_PADDING,
+        ),
+      )
     }
     const end = () => {
       window.removeEventListener('pointermove', onMove)
@@ -205,7 +227,7 @@ function CanvasPopover({
   const anchor = useCanvasAnchor(selector, point, avoid, place)
   const content = useRef(null)
   const drag = useCardDrag(content, anchor, resetKey)
-  const side = usePlacement(open, anchor, content, place, drag.moved)
+  const { side, padding } = usePlacement(open, anchor, content, place, drag.moved)
   const moved = Boolean(drag.moved)
   return (
     <Popover open={open} onOpenChange={(next) => (next ? null : onClose())}>
@@ -220,7 +242,7 @@ function CanvasPopover({
         avoidCollisions={!moved}
         // Stay inside the canvas, follow the camera, hide with the pin.
         collisionBoundary={store.getState().domNode}
-        collisionPadding={COLLISION_PADDING}
+        collisionPadding={padding}
         sticky="always"
         hideWhenDetached={!moved}
         updatePositionStrategy="always"

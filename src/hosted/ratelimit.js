@@ -55,6 +55,8 @@ export function createRateLimiter({ now = () => Date.now() } = {}) {
 // and expensive to abuse; recovery codes get the tightest limit.
 export const LIMITS = {
   ceremony: { limit: 30, windowMs: 60_000 },
+  // POST /auth/tailnet/sign-in, per tailnet login.
+  tailnetSignIn: { limit: 30, windowMs: 60_000 },
   // Failed recovery codes only: per handle and IP, and per IP. A stranger
   // cannot use up someone else's attempts from another address.
   recoveryFail: { limit: 5, windowMs: 15 * 60_000 },
@@ -101,4 +103,8 @@ export const LIMITS = {
   deviceLookup: { limit: 10, windowMs: 60_000 },
   // Workspace exports per person (each is a zip of everything).
   export: { limit: 5, windowMs: 60 * 60_000 },
+  // Usage, activity and access review downloads, per person.
+  usageExport: { limit: 30, windowMs: 60 * 60_000 },
+  // Activity searches and filters by agent or project (they read the log entry by entry), per person.
+  activitySearch: { limit: 60, windowMs: 60_000 },
 }

@@ -41,7 +41,7 @@
 //   - answering a card: the role the agent's answer setting names (admin by
 //     default), in the agent's audience and trusted by the project, and the
 //     person who connected it alone when its machine says "owner"
-//     (src/hosted/agents.js answerCheck). Allow needs a fresh passkey check.
+//     (src/hosted/agents.js answerCheck). Allow asks for the passkey again when the workspace says so.
 //     The answer must carry the hash of the card as it was shown, before the
 //     card expires (2 minutes), once.
 
@@ -95,7 +95,7 @@ export function mountChatRoutes(
     quotas = null,
     workspaceQuota = undefined,
     policyFor = null,
-    freshOrThrow = () => {},
+    stepUpOrThrow = () => {},
     now = () => new Date(),
   },
 ) {
@@ -463,7 +463,7 @@ export function mountChatRoutes(
     const author = { name: req.user.display_name, handle: req.user.handle }
     // A run that still needs an admin's approval (the project's agent policy
     // asks for one for a non-admin's comment). Either the person pressing Fix
-    // may give it: then Fix gives it, with their passkey, and starts. Or they
+    // may give it: then Fix gives it and starts. Or they
     // may not: then the comment is really sent for approval (the vouch stays,
     // addressed to this agent, and admins see "Approve agent run" on it), and
     // the answer says so. Never a message about an approval nobody can find.
@@ -476,8 +476,8 @@ export function mountChatRoutes(
       policy.vouch(req.project.id, ctx.board.id, comment, req.user.id, { role: req.role, approve: false, expect })
       let now2 = ctx.comments.get(number)
       if (!policy.state(req.project.id, ctx.board.id, now2).dispatchable && admin) {
-        // An admin's Fix is also their approval of the run: the same passkey check as "Approve agent run".
-        freshOrThrow(req)
+        // An admin's Fix is also their approval of the run: the passkey again when "Approve agent run" asks for it.
+        stepUpOrThrow(req, 'cards')
         policy.vouch(req.project.id, ctx.board.id, now2, req.user.id, { role: req.role, approve: true, expect })
         now2 = ctx.comments.get(number)
       }
@@ -913,8 +913,8 @@ export function mountChatRoutes(
   // transaction that writes the answer: the card is this thread's running
   // turn's, it still waits and has not expired, the hash is the one of the
   // card as it was shown, and this person may answer this agent's cards.
-  // Allow needs a passkey check in the last minutes; Deny does not (it only
-  // ever stops something). Then the machine hears it, and checks again.
+  // Allow asks for the passkey again when the workspace switched that on
+  // ("Agent edits and pushes"); Deny never does (it only ever stops something). Then the machine hears it, and checks again.
   router.post(
     '/boards/:bid/threads/:thread/permissions/:permission',
     handle((req, res) => {
@@ -941,7 +941,7 @@ export function mountChatRoutes(
           throw new HttpError(409, 'no_permission', 'This request is no longer waiting for an answer.')
         if (typeof hash !== 'string' || !CARD_HASH_RE.test(hash) || hash !== card.card_hash)
           throw new HttpError(409, 'permission_changed', 'This is not the request you were shown. Reload and read it again.')
-        if (allow) freshOrThrow(req)
+        if (allow) stepUpOrThrow(req, 'cards')
         if (!perms.answer(live.id, id, { state: allow ? 'approved' : 'denied', userId: req.user.id }))
           throw new HttpError(409, 'no_permission', 'This request is no longer waiting for an answer.')
         const shown = perms.cardOf(card)

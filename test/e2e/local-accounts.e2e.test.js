@@ -10,6 +10,7 @@ import { PNG } from 'pngjs'
 import { createApp, stopChildren } from '../../src/server/app.js'
 import { openDatabase } from '../../src/hosted/db.js'
 import { demoSetup } from './helpers.js'
+import { believedGate, tailnetUserId } from '../tailnet-helpers.js'
 
 let browser
 before(async () => {
@@ -45,7 +46,12 @@ test('Tailscale owner enrolls through a fixed HTTPS origin without an owner toke
     ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', key, '-out', cert, '-days', '1', '-subj', '/CN=fixture.example.ts.net'],
     { stdio: 'ignore' },
   )
-  const tailscale = { host: 'fixture.example.ts.net', ownerLogin: 'owner@example.test' }
+  const tailscale = {
+    host: 'fixture.example.ts.net',
+    ownerLogin: 'owner@example.test',
+    ownerUserId: tailnetUserId('owner@example.test'),
+    gate: believedGate(),
+  }
   const holder = {}
   // Simulate the trusted Tailscale local proxy, overwriting inbound identity.
   const server = https.createServer({ key: fs.readFileSync(key), cert: fs.readFileSync(cert) }, (req, res) => {

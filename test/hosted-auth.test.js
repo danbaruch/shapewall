@@ -4,7 +4,7 @@
 import { after, before, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { sha256 } from '../src/hosted/crypto.js'
-import { createAuthenticator, createBrowser, invite, signUp, startHostedServer } from './hosted-helpers.js'
+import { createAuthenticator, createBrowser, invite, signUp, startHostedServer, askAgain } from './hosted-helpers.js'
 
 let hosted
 let owner
@@ -218,6 +218,8 @@ test('sensitive actions need a fresh passkey check, which re-auth gives', async 
   const timed = await startHostedServer('hosted-auth-fresh', { now: () => new Date(now) })
   try {
     const user = await signUp(timed, { handle: 'fresh' })
+    // New tokens ask for the passkey only when the workspace says so.
+    askAgain(timed, user.workspaceId)
     const project = await user.browser.post(`/api/workspaces/${user.workspaceId}/projects`, { name: 'Site' })
     assert.equal(project.status, 201)
     const tokens = `/api/workspaces/${user.workspaceId}/projects/${project.json.project.id}/tokens`

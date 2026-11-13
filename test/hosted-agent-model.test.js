@@ -32,7 +32,17 @@ import {
 } from '../src/hosted/permissions.js'
 import { createRemote, pushDefinition, pushFiles } from '../src/remote/remote.js'
 import { createRemoteMcpServer } from '../src/remote/remote-mcp.js'
-import { createBrowser, createProject, invite, reauth, signUp, startHostedServer, tokenCall, writeLocalCaptures } from './hosted-helpers.js'
+import {
+  createBrowser,
+  createProject,
+  invite,
+  reauth,
+  signUp,
+  startHostedServer,
+  tokenCall,
+  writeLocalCaptures,
+  askAgain,
+} from './hosted-helpers.js'
 import { sampleConfig, tempDir } from './helpers.js'
 import { stopChild } from './child-process-helpers.js'
 
@@ -120,6 +130,8 @@ before(async () => {
   hosted = await startHostedServer('hosted-agent-model')
   ada = await signUp(hosted, { handle: 'ada', displayName: 'Ada' })
   ws = ada.workspaceId
+  // These tests are about the passkey checks: the workspace asks for them (off by default).
+  askAgain(hosted, ws)
   bo = await signUp(hosted, { handle: 'ben', displayName: 'Ben', invite: await invite(ada, ws, 'admin') })
   cy = await signUp(hosted, { handle: 'cyd', displayName: 'Cyd', invite: await invite(ada, ws, 'member') })
   di = await signUp(hosted, { handle: 'dia', displayName: 'Dia', invite: await invite(ada, ws, 'viewer') })
@@ -1232,13 +1244,17 @@ test('migration 12: the claim tokens of a 0.3.4 database become watcher agents t
     ALTER TABLE comments DROP COLUMN agent_id;
     ALTER TABLE agent_claims DROP COLUMN agent_id;
     DELETE FROM schema_migrations WHERE version = 12;
+    DROP TABLE saved_views; ALTER TABLE workspaces DROP COLUMN retention_usage_days;
+    DROP INDEX audit_workspace_at; DROP INDEX audit_workspace_user; DROP INDEX audit_account_user;
+    DELETE FROM schema_migrations WHERE version = 15;
     PRAGMA user_version = 11;
   `)
   old.close()
 
   let db = await openDatabase(file)
-  // Migrations 13 (connected agents) and 14 (approvals from the board) were applied before and stay.
-  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 14)
+  // Migrations 13 (connected agents) and 14 (approvals from the board) were applied before and stay;
+  // 15 (usage and activity) adds its columns to the usage records again.
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 17)
   const rows = db.prepare('SELECT a.*, k.name FROM agents a JOIN api_tokens k ON k.id = a.token_id').all()
   assert.deepEqual(
     rows.map((row) => row.name),

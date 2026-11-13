@@ -63,10 +63,14 @@ import { mountTokenApi } from './token-api.js'
 import { createAgentPresence } from './agent-presence.js'
 import { COMMENT_ROUTING, createAgentStore } from './agents.js'
 import { mountAgentRoutes } from './agent-routes.js'
+import { mountUsageRoutes } from './usage-routes.js'
 import { createAgentLinks, createChatService } from './agent-link.js'
 import { createChatStore } from './chat-store.js'
 import { createTurnHub } from './turn-hub.js'
 import { mountPages } from './pages.js'
+import { createPasskeyPolicy } from './passkey-policy.js'
+import { createTailnetAccounts } from './tailnet.js'
+import { mountTailnetAdmin } from './tailnet-routes.js'
 
 export { changeEventType, publicBoardView, TOKEN_SCOPES, INVITE_DAYS }
 
@@ -125,7 +129,23 @@ export function createHostedApp({
   turnstile = null,
   // Where "Report this board" on a public project goes (an email address).
   reportEmail = null,
+  // Whether a workspace's owners see their members' account events (sign-ins,
+  // passkeys, sessions) in Activity. Off: those are each person's own. For a
+  // server with one team; set by the operator (--owners-see-sign-ins).
+  ownersSeeSignIns = false,
+  // Tailnet sign-in: { identityOf(req) } says who a request is from, by the
+  // identity headers of Tailscale's serve proxy and only when the request
+  // provably came through it (src/hosted/tailnet-identity.js). null: off,
+  // and the headers are never read.
+  tailnet = null,
+  // With tailnet sign-in: also allow passkeys (--tailnet-passkeys). Off by
+  // default there; the operator's switch in the database wins
+  // (src/hosted/passkey-policy.js). Without tailnet sign-in passkeys are
+  // always the sign-in.
+  tailnetPasskeys = false,
 }) {
+  if (guestOnly) tailnet = null
+  const passkeys = createPasskeyPolicy({ db, tailnet, flag: tailnetPasskeys })
   const base = new URL(origin)
   if (!['http:', 'https:'].includes(base.protocol) || base.pathname !== '/' || base.search)
     throw new Error('origin: an http(s) origin without a path')
@@ -250,12 +270,42 @@ export function createHostedApp({
     needSession,
     needFresh,
     needFreshOrRecovery,
-    freshOrThrow,
+    passkeysGate,
+    tailnetOnly,
+    needFreshOrHeldRemoval,
+    removesHeldPasskey,
+    noPasskey,
+    needUnrestricted,
+    needPasskeyBacked,
+    fixedCore,
+    cutTailnetSessions,
+    passkeyOrThrow,
+    machineTokensOrThrow,
+    adminMakingOrThrow,
+    coreFreshOrThrow,
+    stepUp,
+    stepUpOrThrow,
     inWorkspace,
     inProject,
     handle,
     auditOf,
-  } = createGuards({ db, dataDir, auth, quotas, secure, trustProxy, rateLimiter, siteOf, SESSION_COOKIE, iso, now, log })
+  } = createGuards({
+    db,
+    dataDir,
+    auth,
+    quotas,
+    secure,
+    trustProxy,
+    rateLimiter,
+    siteOf,
+    SESSION_COOKIE,
+    iso,
+    now,
+    log,
+    tailnet,
+    passkeys,
+  })
+  const tailnetAccounts = createTailnetAccounts({ db, iso, now })
 
   // ---- Headers for everything ----
   app.use((req, res, next) => {
@@ -270,6 +320,10 @@ export function createHostedApp({
   app.use(usercontent.gate)
   // While moving: which origin a request is for; the old one serves only the move.
   app.use(previousHostGate(sites))
+  // Passkeys off (a tailnet sign-in server, by default): their routes say so.
+  app.use(passkeysGate)
+  // The fixed core: what always asks for a fresh passkey check (one table, src/hosted/step-up.js).
+  app.use(fixedCore)
 
   const { publicUser, createWorkspace, acceptInvite, revokeGrantsOf, ownerCount } = createMembership({
     db,
@@ -317,12 +371,23 @@ export function createHostedApp({
     needSession,
     needFresh,
     needFreshOrRecovery,
+    tailnetOnly,
+    passkeys,
+    needFreshOrHeldRemoval,
+    removesHeldPasskey,
+    noPasskey,
+    needUnrestricted,
+    needPasskeyBacked,
+    cutTailnetSessions,
     auditOf,
     publicUser,
     createWorkspace,
     acceptInvite,
     revokeGrantsOf,
     ownerCount,
+    secure,
+    tailnet,
+    tailnetAccounts,
   })
   app.use('/auth', authRouter)
   app.use('/auth', (req, res) => fail(res, 404, 'not_found', 'No such route.'))
@@ -352,7 +417,9 @@ export function createHostedApp({
     inWorkspace,
     inProject,
     needFresh,
-    freshOrThrow,
+    coreFreshOrThrow,
+    stepUp,
+    stepUpOrThrow,
     auditOf,
     HttpError,
     listTokens,
@@ -384,6 +451,7 @@ export function createHostedApp({
   const createApiToken = createApiTokens({ iso, auditOf, agentsFor })
   const consoleDeps = {
     db,
+    passkeys,
     dataDir,
     auth,
     iso,
@@ -402,7 +470,12 @@ export function createHostedApp({
     inWorkspace,
     inProject,
     needFresh,
-    freshOrThrow,
+    coreFreshOrThrow,
+    passkeyOrThrow,
+    machineTokensOrThrow,
+    adminMakingOrThrow,
+    stepUp,
+    stepUpOrThrow,
     auditOf,
     createWorkspace,
     acceptInvite,
@@ -410,6 +483,9 @@ export function createHostedApp({
     ownerCount,
     createApiToken,
     agentsFor,
+    ownersSeeSignIns: ownersSeeSignIns === true,
+    tailnet,
+    tailnetAccounts,
   }
   mountInviteLinks(consoleApi, consoleDeps)
   // Share link preview and opening: no session, the link is the secret.
@@ -420,7 +496,9 @@ export function createHostedApp({
   consoleApi.use(needSession)
   consoleApi.use(limit('session', (req) => req.user.id))
   mountConsoleRoutes(consoleApi, consoleDeps)
+  mountTailnetAdmin(consoleApi, consoleDeps)
   mountAgentRoutes(consoleApi, consoleDeps)
+  mountUsageRoutes(consoleApi, consoleDeps)
   mountAdmin(consoleApi, deps)
   mountShareAdmin(consoleApi, deps)
   mountPublicAdmin(consoleApi, deps)
@@ -440,7 +518,8 @@ export function createHostedApp({
     inWorkspace,
     inProject,
     handle,
-    freshOrThrow,
+    stepUp,
+    stepUpOrThrow,
     auditOf,
     clientIp,
     policyFor,
@@ -481,7 +560,7 @@ export function createHostedApp({
     agentsFor,
     boardContext,
     dispatchView,
-    needFresh,
+    stepUp,
     approvalApi,
     chatFor,
     hub: turnHub,
@@ -531,6 +610,7 @@ export function createHostedApp({
     return mintSetupLink(db, publicOrigin, now())
   }
   app.locals.deviceLogins = deviceLogins
+  app.locals.cutTailnetSessions = cutTailnetSessions
   app.locals.sites = sites
 
   // Staging sweep at start and on a timer (unref'd: it never keeps the
@@ -583,7 +663,9 @@ export function createHostedApp({
     while (i < hops.length - 1 && hops[i + 1] && trusted(hops[i], i)) i += 1
     return hops[i] || 'unknown'
   }
-  const presence = hub.listener(presenceAuthorizer({ db, dataDir, origin: publicOrigin, auth, now, guestOnly }), { clientIp: upgradeIp })
+  const presence = hub.listener(presenceAuthorizer({ db, dataDir, origin: publicOrigin, auth, now, guestOnly, tailnet, passkeys }), {
+    clientIp: upgradeIp,
+  })
   app.locals.presence = { attach: presence.attach, close: presence.close, hub }
   app.locals.events = events
   app.locals.agentPresence = agentPresence

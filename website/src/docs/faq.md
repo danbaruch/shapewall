@@ -50,7 +50,7 @@ its own. Setups for each agent: [agent recipes](/docs/agent-recipes).
 
 ## Can my team use it together?
 
-Yes, on a server you run. The team server (beta), started with `shapewall hosted`, gives your team passkey sign-in, workspaces with
+Yes, on a server you run. The team server (beta), started with `shapewall hosted`, gives your team accounts (a passkey each, or on your tailnet your tailnet login), workspaces with
 roles, share links and shared boards. Teammates can also chat on the board with Claude Code, connected from the machine that
 has the code (`shapewall agent connect`): by default it reads the project and answers, and does not change files or run commands
 from the board. Other agents are not offered for chat in this release; they take comments through `shapewall watch --remote`. [The hosted guide](/docs/hosted) covers setup.
@@ -74,9 +74,41 @@ on branch" with the name to copy. The folder is removed afterwards; the branch s
 ## Who can approve an agent's edit?
 
 Someone with the agent's answer role (admin by default), who is also in the agent's audience and trusted by the project's agent
-policy. When the agent's machine was started with `--approvals owner`, only the person who connected it. Allow needs a passkey
-check in the last 10 minutes; Deny does not. A card waits 2 minutes and is answered once, and the agent's machine checks every
+policy. When the agent's machine was started with `--approvals owner`, only the person who connected it. Being signed in with
+that role is enough; a workspace's owner can switch on "ask for a passkey again" before Allow. Deny never asks. A card waits 2 minutes and is answered once, and the agent's machine checks every
 answer again before it counts.
+
+## Do I need a passkey to sign in to a team server?
+
+Not on your tailnet. Start the server with `shapewall hosted --tailscale --tailnet-sign-in` and your tailnet login is the sign-in:
+no passkey and no password. An admin still invites each login with a role, so being on the tailnet alone gives nothing. On a
+server reached through your own domain, or a tailnet server without that flag, everyone signs in with a passkey. See
+[Signing in](/docs/hosted#signing-in).
+
+## How often does it ask for my passkey?
+
+Rarely. Signed in with the right role is enough for the daily work: approving agents, tokens, share links, an agent's edits. A
+few things always ask (your passkeys and recovery codes, deleting an account or a workspace, changing owners), and a workspace's
+owner can switch on more in Settings.
+
+## Do I need a passkey on a tailnet server?
+
+No. A server started with `--tailnet-sign-in` signs you in by your Tailscale account, on every tailnet device of yours, and
+asks for no passkey. The tailnet is the trust boundary there: anything running as you on one of your tailnet devices can act
+as you. Whoever runs the server can also allow passkeys (`shapewall hosted admin passkeys on`).
+
+## Can I reach a server over SSH instead of Tailscale?
+
+Yes. Start it with `--origin http://shapewall.localhost:4700`, run `ssh -L 4700:127.0.0.1:4700 you@server` and open
+`http://shapewall.localhost:4700`: passkeys work there. See [Over SSH](/docs/hosted#over-ssh).
+
+## Can I set up a team server and join one from my coding agent, without a browser?
+
+Yes, on a server with tailnet sign-in. The owner runs `shapewall hosted claim --login <their tailnet login>` on the server's
+machine, then, on another tailnet device, `shapewall admin projects create` and `shapewall login` (the server's own machine is
+never signed in by its tailnet identity). A teammate runs `shapewall join` and `shapewall agent connect`. The server knows each
+machine's tailnet user, checks their role and writes the audit entry. See
+[From your coding agent](/docs/hosted#from-your-coding-agent).
 
 ## What does it need to run?
 

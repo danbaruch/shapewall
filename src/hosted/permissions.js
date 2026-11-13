@@ -6,8 +6,10 @@
 //
 //   viewer   sees projects, boards and comments
 //   member   + comments, replies, reactions, resolve and reopen; edits and deletes their own
+//   member   + their own agent usage (and that of agents they connected)
 //   admin    + projects, tokens, invites (up to admin), share links, members
-//              and viewers, any comment, the access overview, audit log, settings
+//              and viewers, any comment, the access overview, audit log, settings,
+//              the workspace's usage, everyone's activity, the access review
 //   owner    + admins and owners, owner invites, deleting the workspace
 //   guest    a share link visitor: one project; comments and replies on a
 //            comment link, nothing else
@@ -38,6 +40,14 @@ export const NEEDS = {
   access: 'admin',
   audit: 'admin',
   export: 'admin',
+  // Usage: a member reads their own turns and the agents they connected;
+  // admins and owners the workspace (src/hosted/usage.js usageScope).
+  usage: 'member',
+  // Activity: anyone in the workspace reads their own; admins and owners all of it.
+  activity: 'viewer',
+  accessReview: 'admin',
+  // The layout of the Usage dashboard that everyone in the workspace starts from.
+  usageDefaultLayout: 'owner',
   deleteWorkspace: 'owner',
 }
 export const can = (role, need) => roleAtLeast(role, NEEDS[need])
@@ -120,11 +130,9 @@ export const canInvite = (actorRole, role) =>
   can(actorRole, 'invites') && ROLES.includes(role) && (role !== 'owner' || actorRole === 'owner')
 export const invitableRoles = (actorRole) => ROLES.filter((role) => canInvite(actorRole, role))
 
-// Changes that need a passkey check in the last 10 minutes.
-export const inviteNeedsFresh = (role) => role === 'owner' || role === 'admin'
-export const roleChangeNeedsFresh = (targetRole, newRole) =>
-  newRole === 'owner' || newRole === 'admin' || (['owner', 'admin'].includes(targetRole) && targetRole !== newRole)
-export const removalNeedsFresh = (targetRole, { self = false } = {}) => !self && ['owner', 'admin'].includes(targetRole)
+// Which of these ask for the passkey again is in src/hosted/step-up.js:
+// anything that makes, changes or removes an owner always does; the same
+// for an admin only when the workspace's owner switched that on.
 
 // A workspace always keeps an owner.
 export const leavesNoOwner = ({ targetRole, newRole = null, owners }) => targetRole === 'owner' && newRole !== 'owner' && owners <= 1

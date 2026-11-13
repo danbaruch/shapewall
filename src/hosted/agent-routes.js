@@ -15,7 +15,7 @@ import { HttpError } from './http.js'
 import { AGENT_AUDIENCES, APPROVAL_ROLES, APPROVAL_RULES, NEEDS, roleAtLeast } from './permissions.js'
 import { AGENT_KINDS } from './agents.js'
 
-export function mountAgentRoutes(consoleApi, { db, publicOrigin, handle, inWorkspace, inProject, needFresh, auditOf, agentsFor }) {
+export function mountAgentRoutes(consoleApi, { db, publicOrigin, handle, inWorkspace, inProject, stepUp, auditOf, agentsFor }) {
   const actorOf = (req) => ({
     userId: req.user.id,
     role: req.role,
@@ -85,7 +85,7 @@ export function mountAgentRoutes(consoleApi, { db, publicOrigin, handle, inWorks
   consoleApi.put(
     '/workspaces/:ws/projects/:pid/agents/:aid/audience',
     inWorkspace(NEEDS.tokens),
-    needFresh,
+    stepUp('agents'),
     inProject,
     handle((req, res) => {
       const { audience, users } = req.body || {}
@@ -98,7 +98,7 @@ export function mountAgentRoutes(consoleApi, { db, publicOrigin, handle, inWorks
   consoleApi.put(
     '/workspaces/:ws/projects/:pid/agents/:aid/approval',
     inWorkspace(NEEDS.tokens),
-    needFresh,
+    stepUp('agents'),
     inProject,
     handle((req, res) => {
       const { rule, changeRole, answerRole } = req.body || {}

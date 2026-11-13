@@ -113,7 +113,7 @@ export function describeAudit(entry) {
         .split('/')
         .pop()}${d.project ? ` from ${d.project}` : ''}${d.comments ? ` (${count(d.comments, 'comment', 'comments')})` : ''}`
     case 'token_created':
-      return `created the API token ${target}${Array.isArray(d.scopes) ? ` (${d.scopes.join(', ')})` : ''}${d.via === 'login' ? ' with shapewall login' : ''}`
+      return `created the API token ${target}${Array.isArray(d.scopes) ? ` (${d.scopes.join(', ')})` : ''}${d.via === 'login' ? ' with shapewall login' : ''}${d.approvedBy ? `, approved by ${d.approvedBy}${d.machine ? ` from ${d.machine}` : ''}` : ''}`
     case 'token_revoked':
       return `revoked the API token ${target}`
     case 'token_renamed':
@@ -172,6 +172,104 @@ export function describeAudit(entry) {
             'is gone'
           }${d.was === 'working' ? ' while working on it' : ''}`
         : `let any agent take comment ${String(entry.target || '').replace(/^.*#/, '#')}${d.fromName ? ` (it was waiting for ${d.fromName})` : ''}`
+    // Sign-in and passkeys (account events of the workspace's members).
+    case 'signed_in':
+      return `signed in${d.via === 'recovery_code' ? ' with a recovery code' : d.via === 'tailnet' ? ` by tailnet identity${d.tailnet ? ` (${d.tailnet})` : ''}` : ''}${d.device ? ` on ${d.device}` : ''}${d.newDevice ? ' (a new device)' : ''}`
+    case 'signed_out':
+      return `signed out${d.device ? ` on ${d.device}` : ''}`
+    case 'account_created':
+      return `created their account${d.device ? ` on ${d.device}` : ''}`
+    case 'passkey_added':
+      return d.viaTailnet ? 'added their first passkey, in a tailnet session (on hold for 24 hours)' : 'added a passkey'
+    case 'tailnet_linked':
+      return `linked their tailnet login${d.tailnet ? ` ${d.tailnet}` : ''}${d.atSignUp ? ' when signing up' : ''}`
+    case 'tailnet_unlinked':
+      return `unlinked their tailnet login${d.tailnet ? ` ${d.tailnet}` : ''}`
+    case 'tailnet_visitor_dismissed':
+      return `took ${d.tailnet || 'a tailnet visitor'} off the list of tailnet visitors`
+    case 'step_up_changed': {
+      const names = {
+        cards: 'agent edits and pushes',
+        agents: 'agents and machines',
+        tokens: 'tokens and share links',
+        members: 'members and roles',
+        data: 'exports and deletes',
+      }
+      // The server's operator switched passkeys off or on for the whole server (a tailnet sign-in server).
+      if (d.setting === 'passkeys')
+        return d.after
+          ? 'allowed passkeys on this server again: what this workspace asks a passkey for is asked again'
+          : 'switched passkeys off on this server: what this workspace asks a passkey for is not asked until they are on again'
+      if (d.setting === 'windowMinutes') return `changed how long a passkey check counts from ${d.before} to ${d.after} minutes`
+      if (d.setting === 'adminIdle')
+        return `${d.after ? 'switched on' : 'switched off'} the passkey check for admin pages after 12 hours away`
+      if (d.setting === 'cliApproval') return `${d.after ? 'switched on' : 'switched off'} browser approval for command line logins`
+      return `${d.after ? 'switched on' : 'switched off'} asking for a passkey again before ${names[d.setting] || d.setting}`
+    }
+    case 'passkey_removed':
+      return 'removed a passkey'
+    case 'recovery_codes_created':
+      return 'made new recovery codes'
+    case 'session_revoked':
+      return 'signed out one of their devices'
+    case 'sessions_revoked':
+      return 'signed out their other devices'
+    // Agents at work (src/hosted/agent-link.js, chat-routes.js).
+    case 'agent_connected':
+      return `approved the connection of the agent ${d.name || target}${d.machine ? ` (${d.machine})` : ''}`
+    case 'agent_link_connected':
+      return `${d.agentName || d.name || 'an agent'} connected${d.machine ? ` from ${d.machine}` : ''}`
+    case 'agent_link_disconnected':
+      return `${d.agentName || d.name || 'an agent'} disconnected`
+    case 'agent_edit_mode_changed':
+      return `${d.agentName || d.name || 'an agent'} changed what its machine allows`
+    case 'agent_turn_started':
+      return `asked ${d.agentName || 'an agent'}${d.kind === 'fix' ? ' for a fix' : d.kind === 'comment' ? ' to answer a comment' : ''}${d.board ? ` on ${d.board}` : ''}`
+    case 'agent_turn_stopped':
+      return `stopped ${d.agentName || 'an agent'}`
+    case 'agent_fix_branch_ready':
+      return `${d.agentName || 'an agent'} left a fix on the branch ${d.branch || ''}${d.files ? ` (${count(d.files, 'file', 'files')})` : ''}`
+    case 'agent_branch_pushed':
+      return `${d.agentName || 'an agent'} pushed the branch ${d.branch || ''}`
+    case 'agent_pull_request_opened':
+      return `${d.agentName || 'an agent'} opened a pull request for ${d.branch || 'its branch'}`
+    case 'agent_permission_asked':
+      return `${d.agentName || 'an agent'} asked to ${d.kind === 'edit' ? `edit ${d.path || 'a file'}` : d.kind === 'push' ? `push ${d.branch || 'a branch'}` : 'run a command'}`
+    case 'agent_permission_approved':
+      return `allowed ${d.agentName || 'an agent'} to ${d.kind === 'edit' ? `edit ${d.path || 'a file'}` : d.kind === 'push' ? `push ${d.branch || 'a branch'}` : 'run a command'}`
+    case 'agent_permission_denied':
+      return `denied ${d.agentName || 'an agent'}'s request to ${d.kind === 'edit' ? `edit ${d.path || 'a file'}` : d.kind === 'push' ? `push ${d.branch || 'a branch'}` : 'run a command'}`
+    case 'agent_permission_auto':
+      return `${d.agentName || 'an agent'} was allowed without asking to ${d.kind === 'edit' ? `edit ${d.path || 'a file'}` : 'run a command'}`
+    case 'agent_permission_expired':
+      return `a request of ${d.agentName || 'an agent'} waited too long and expired`
+    case 'agent_permission_not_taken':
+      return `${d.agentName || 'an agent'}'s machine did not take an answer (${d.became || 'refused'})`
+    case 'chat_thread_created':
+      return `started a chat${d.board ? ` on ${d.board}` : ''}`
+    case 'chat_thread_deleted':
+      return 'deleted a chat'
+    case 'chat_thread_agent_changed':
+      return 'changed the agent of a chat'
+    // Settings and exports.
+    case 'agent_policy_changed':
+      return `changed the agent policy of ${d.name || target}${Array.isArray(d.changed) && d.changed.length ? ` (${d.changed.join(', ')})` : ''}`
+    case 'usage_retention_changed':
+      return `set how long usage records are kept${d.after ? ` to ${d.after} days` : ' back to the default'}`
+    case 'usage_layout_default_set':
+      return `set the Usage layout everyone starts from (${count(d.widgets || 0, 'widget', 'widgets')})`
+    case 'usage_layout_default_removed':
+      return 'removed the Usage layout everyone starts from'
+    case 'project_made_public':
+      return `made the project ${d.name || target} public`
+    case 'project_made_private':
+      return `made the project ${d.name || target} private again`
+    case 'usage_exported':
+      return `exported usage (${count(d.rows || 0, 'turn', 'turns')}, ${d.format || 'csv'}${d.scope === 'own' ? ', their own' : ''})`
+    case 'audit_exported':
+      return `exported the ${d.view === 'activity' ? 'activity' : 'audit'} log (${count(d.rows || 0, 'entry', 'entries')}${d.scope === 'own' ? ', their own' : ''})`
+    case 'access_exported':
+      return 'exported the access review'
     default:
       return entry.action.replace(/_/g, ' ')
   }

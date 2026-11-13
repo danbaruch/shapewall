@@ -3,6 +3,258 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## 0.7.0 - 2026-11-13
+
+Connected agents, stage E: the Usage dashboard, and people's activity. Two new pages in the Workspace Console of a team server, and
+a Usage view on a local board.
+
+- **Usage** (`/w/<workspace>/usage`). Every agent turn (a chat answer, a comment answer, a fix, a push) with the numbers the agent
+  reported. Tiles with the change against the period before (turns, tokens, agent time, reported cost, fixes ready, failed or
+  stopped). Usage over time as stacked bars by day, week or month, split by agent, project, person, kind, model or outcome,
+  measuring turns, tokens, time or reported cost, with a brush to zoom. A ranked breakdown with shares, how turns ended, approvals,
+  and the median and 95th percentile turn duration. Top lists, and each project's daily budgets with today's use. Hover or tap for
+  exact values; press a bar, a row or a legend entry to filter the whole page; every chart has a table, "copy as CSV" and "copy as
+  an image". One palette, checked for colour-blind readers in light and dark.
+- **The Usage dashboard is yours to arrange.** "Edit layout" turns the overview into a grid of widgets: drag one by its bar,
+  resize it from its corner (a chart cannot be made too small to read; a tile has three widths), hide it and add it back,
+  duplicate a chart so two sit side by side with different measures, undo, and reset. Every widget has options behind its "..."
+  button, saved per widget: bars or lines, legend and brush, how many rows, shares or counts, which percentiles (now also the
+  90th and 99th) and a logarithmic axis, tiles' trend and comparison lines, chart or table. Arrow keys move a widget and Shift
+  with arrows resizes it, announced as you go; a finger drags on a tablet; a phone shows one column with up and down buttons.
+  Layouts are saved per person per workspace, checked strictly on the server, and autosaved with Undo. A saved view of
+  the overview keeps its layout and widget options unless you untick "Include this layout"; whoever opens its link sees them
+  without losing their own. Lists and the budgets are as tall as what they hold until sized by hand, and every row of widgets ends on one line
+  with no holes (a Top 5 beside a Top 10 is as tall as it). Owners can set the layout everyone
+  starts from (audited). Printing follows reading order. One additive migration (16); see docs/hosted.md, "Arranging the
+  dashboard". The public demo has all of it, kept until Reset.
+- **Nothing is estimated, and "not reported" is not zero.** A cost appears only when the agent or its endpoint reported one. An
+  agent that reports no tokens shows "Not reported" (a dash, or a hatched area in a chart), and totals say how many turns reported.
+- **Turns: a real grid.** Sorted, filtered and paged by the server (fast at 100,000 rows, tested), virtual rows, column chooser
+  and reordering, pinned columns, grouping with subtotals, a density toggle, keyboard navigation, a drawer with the full record
+  and a link to the comment or board, and CSV or JSON export of the filtered set (streamed, at most 50,000 rows, audited).
+  Drag a header to move a column and its right edge to resize it (the header's menu does both from the keyboard). Grouped rows
+  can show the period before and the change beside each group. A sorted table holds still while a running turn finishes.
+- **Filters live in the address,** so a link is a view. Saved views are a person's own names for an address; a link or a view
+  never shows its reader more than they may see.
+- **Who sees usage:** owners and admins the workspace; a member their own turns and every turn of an agent they connected;
+  viewers, share link guests and project tokens nothing. Checked on every route, including exports and a turn opened by its id.
+- **What a turn records, completed.** Duration (the server's clock, and the agent's own when it says), tool calls counted by
+  type, approvals allowed without asking and who answered the others, the context window, and who connected the agent. Never the
+  question, the answer, a file or a diff.
+- **Activity** (`/w/<workspace>/activity`). People's activity, read from the audit log: sign-in and sign-out, settings with the
+  value before and after, agents connected, reconfigured and revoked, approval cards answered, tokens, exports. Filter by person,
+  kind of action, agent, project and period; "Worth a look" keeps the security-relevant changes. A page per person (role, what
+  they made, devices, their usage and activity) and per agent. Admins and owners read everyone's; anyone else their own.
+- **Sign-ins and devices stay each person's own.** They cover every workspace a person is in, so an owner or admin does not see
+  them for anyone else. On a server with one team the operator can let owners see them: `shapewall hosted
+  --owners-see-sign-ins` (off by default).
+- **Periods compare honestly.** The last N days against the N local days before, across clock changes; this week or month so
+  far against last week or month to the same day; last month against the month before. Any number of clock changes in a period
+  is bucketed right.
+- **Access review.** Every person, agent, API token, share link, public project and open invite in one place, with what it
+  reaches, who made it and when it was last used; unused for 90 days is marked. Exports as CSV.
+- **New audit entries:** `signed_out`, `usage_exported`, `audit_exported` (the old audit CSV leaves one too), `access_exported`,
+  `usage_retention_changed`; `agent_policy_changed` now records which settings changed, before and after.
+- **Retention, quota, export.** Usage records are kept 400 days by default (`shapewall hosted admin retention ws_ID --usage-days
+  N`), count toward the storage quota, and are all in the workspace export as `usage.json`.
+- **On a local board,** each agent turn is a line in `.shapewall/agent-usage.jsonl` (0600, written under a file lock; `shapewall
+  init` now names it in `.gitignore`, and a project set up earlier should make sure `.shapewall/` is ignored), and the console's Usage page shows the owner
+  totals, a chart by day and agent, how turns ended and the newest turns.
+- **Phones.** At 390 px the tiles stack, charts answer a tap, the grid is a list of cards and a turn opens as a sheet.
+- **Upgrade notes.** Migration 15 is additive (new columns on the usage records, saved views, indexes); see
+  [Migration 15 and rollback](docs/hosted.md#migration-15-and-rollback). The retention job starts removing finished usage records
+  older than 400 days. The console gains Recharts and TanStack Table, Virtual and Query, loaded only with these two pages; the
+  board's JavaScript is unchanged in size.
+- **Not in this release:** scheduled or emailed exports, per-agent budgets, notifications for "worth a look" entries, and a
+  tamper-evident (hash-chained) audit log.
+- **The live demo has Usage and Activity,** with made-up numbers. Its console shows both pages working in the browser: about sixty
+  days of a pretend team's agent turns (a few thousand, placed relative to today; busy weekdays, spikes, a quiet stretch, a day of
+  failures, agents that report a cost, tokens only, or nothing) and the activity that goes with them. Every chart, the grid, a
+  turn, saved views, CSV and JSON exports (made in the browser), a person's page, an agent's page and the access review work.
+  Asking the agent or running a fix on the demo board adds a turn and its activity; Reset puts everything back. The demo counts
+  rows in memory and shares the rest with the server (`src/hosted/usage-core.js`, `activity-core.js`); a test puts the same rows
+  into a real server and compares every answer. The demo's Audit log page reads the same history, each agent has its token on
+  the API tokens page, and a turn's link opens its comment on the demo board. The charts still load only with these two pages.
+- **Fixed: filter options ticked quickly all hold.** On Usage, ticking two options of a filter faster than the page redrew kept
+  only the last one: each press wrote the list the menu was drawn with. A press is now applied to the address as it is when it
+  lands. The same goes for removing filter chips, pressing a chart to filter, and "Worth a look" on Activity.
+
+Signing in to a team server: fewer passkey prompts, and your tailnet login as the sign-in.
+
+- **Signed in with the right role is enough.** A team server no longer asks for the passkey again before workspace actions:
+  approving an agent or a machine (`shapewall login`, `agent connect`), agent settings, API tokens, share links and public
+  projects, exports, Allow on an agent's edit and "Push this fix", admins and their roles, deleting a project or a board. The
+  12-hour admin idle rule is off too. This changes the default on upgrade.
+- **A small fixed core always asks** (a passkey check in the last 10 minutes): adding or removing a passkey, new recovery codes,
+  linking or unlinking a tailnet login, deleting your account, deleting a workspace, making, changing, removing or inviting an
+  owner, moving your sign-in to the server's new address, and making the setting below weaker.
+- **"Ask for a passkey again" is a workspace setting** (Settings; owners; off by default), one switch per group: agent edits and
+  pushes; agents and machines; tokens and share links; members and roles; exports and deletes. With them how long one check
+  counts (5, 15, 30 or 60 minutes) and the admin idle rule. Changes are audited with the value before and after
+  (`step_up_changed`, marked "Worth a look"), and asking for less needs a passkey check itself.
+- **The server decides, and says why.** The console no longer asks on its own: it shows "Confirm it's you" only when a route
+  answers `reauth_required`, with the server's message naming the rule that asked (the fixed core, or which setting). The board's
+  "Approve once" for a shell command follows the same rule.
+- **Recovery-code sessions keep their restrictions,** and every action is in the audit log as before.
+- **Tailnet sign-in** (`shapewall hosted --tailscale --tailnet-sign-in`, or `SHAPEWALL_HOSTED_TAILNET_SIGN_IN=1`; opt-in, Linux).
+  A tailnet user who arrives through `tailscale serve` is signed in as the account linked to their tailnet login: no passkey, no
+  password. **Tailscale is then the only sign-in:** one identity, your different machines, no second credential. No passkey is
+  asked for or offered (the sign-in page shows only "Continue as ..."; passkey routes answer `passkeys_off`), and the few
+  things that always ask take a typed name in the console (the workspace's, or your handle) and `--yes` on the command
+  line. The tailnet is the trust boundary: anything running as you on one of your tailnet devices can act as you. Passkeys are
+  an opt-in hardening there: `--tailnet-passkeys`, or `shapewall hosted admin passkeys on|off|status --data DIR`; with them
+  on, what this section says about passkeys on a tailnet server applies. Each login is its own account, so roles, audiences, the audit log and usage work unchanged, and an admin still
+  decides who is in a workspace: an unknown login sees who to ask and is listed for the admins under Members; an invite can be
+  made for one tailnet login, and only that login can use it. An account with a passkey links or unlinks its login on the
+  Account page. Tagged devices and shared nodes without a user are never signed in.
+- **Where the identity is believed.** Only when all of this holds: the request carries a secret path that only the serve entry
+  the server made adds (new at each start, in no log); the connection's other end is a socket owned by root, from the kernel's
+  socket table; tailscaled's own whois gives the request's tailnet address to the same login, on a user's untagged device;
+  the request does not come from the server's own machine; exactly one clean login header and no Funnel mark. Never on direct loopback requests, raw TCP forwards, Funnel traffic, or
+  without the flag. The server refuses to start with the flag, says why, and suspends it while running: not Linux, tailscaled
+  in userspace-networking mode, Tailscale before 1.98, tailscaled running a SOCKS5 or outbound HTTP proxy or started with a
+  loopback-forwarding debug switch (`TS_DEBUG_NETSTACK_LOOPBACK_PORT`, `TS_DEBUG_NETSTACK_SUBNETS`, where its environment
+  can be read), no tailscaled of root visible (a process an ordinary user named tailscaled is ignored), the node unable to say
+  which node it is, the server in a container, or a serve config that is not its one entry. Root and the Tailscale operator
+  on the server's machine are trusted; nothing else on the machine or the tailnet is. The secret is taken off before the
+  application sees the request, on the hosted server and the local board, and is in no response.
+- **The server's own machine is never signed in by its tailnet identity.** Any program on that machine can ask tailscaled for
+  the server's own address and arrives through the proxy with the machine owner's login. A request from one of the node's own
+  tailnet addresses, or one that whois gives to this node, is refused, in the browser ("This is the server's own machine") and
+  from the command line. There: a passkey or another tailnet device on a hosted server, `localhost` on a local board.
+- **An identity is per device, not per person,** and the product says so: anything running as you on a tailnet device of yours
+  can act as you in a tailnet session. So: a tailnet session works only with the identity it was made for (and is stored so
+  that an older build cannot use it); it is marked in the device list, the audit log and Activity; signing out keeps that
+  browser signed out until "Continue as"; for the fixed core an account with no passkey is asked to add one, and that first
+  passkey is on hold for 24 hours (audited, "Worth a look"); a passkey account is linked to a tailnet login at sign-up only
+  when the box "Also sign me in from this tailnet login" is ticked; and "Sign out other devices" needs a session that passed a
+  passkey check, or an account that has no passkey.
+- **The local board uses the same proof.** `shapewall serve --tailscale` let any program on the machine pass as the owner by
+  sending `Tailscale-User-Login` to the loopback port, and so approve an agent's command. The owner's other devices are now let
+  in by identity only with the proof above (where it is not possible they pair, and the board says why), and approving a
+  command or an edit needs the host's settings token, a paired device, or that proof.
+- **From the command line, with no browser** (on a server with tailnet sign-in, from a tailnet machine). `shapewall hosted
+  claim --data DIR --login LOGIN` makes the first account on the server's machine: reading the data folder is the proof, the
+  login is taken on your word, and the command prints what it linked (`--setup-link URL` from another tailnet device checks
+  the identity instead). On the server's own machine `login` and `agent connect` fall back to the code, and `join` and
+  `admin` say to use another device. `shapewall login` and `shapewall agent connect` are approved by
+  your tailnet identity when your role may make tokens (`--project`, `--workspace`; `--name`, `--icon`, `--tint`, `--used-by`
+  for an agent); with several projects the command lists the flags to add and never prompts. `shapewall join` takes the invite
+  made for your login, or an invite link. `shapewall admin projects list|create`, `admin invites create`, `admin members list`
+  and `admin agents list` do a few admin jobs; the server checks the role and writes the audit entry. A workspace can require
+  the code, the browser and a passkey for approving machines (Settings, "Approve command line logins in the browser"): the
+  server then refuses a session that only a tailnet identity stands behind, whatever the client sends, and refuses the same
+  session an API token made on a project's page. On any other server these commands behave as before or say what they
+  need.
+- **Upgrade notes.** Migration 17 is additive (the settings, tailnet logins on accounts, sessions and invites, the list of
+  tailnet visitors); see [Migration 17 and rollback](docs/hosted.md#migration-17-and-rollback). If you want the passkey prompts
+  back, an owner switches the groups on in each workspace's Settings.
+- **The fixed core matches paths as the router does** (any case, a trailing slash, an encoded parameter). An owner who
+  leaves a workspace passes it too, like any other owner removed.
+- **A first passkey added in a tailnet session can be taken away again.** Adding it needs a browser and a step that names
+  the device. While it is on hold (24 hours), every page of the account shows "A passkey was added from ..." with "Not you?
+  Remove it": any tailnet session of the account removes it with no passkey check, though it is the only passkey, and every
+  other passkey on hold starts its day again. A held passkey cannot add a second one. After the hold, or for any account,
+  the operator has `shapewall hosted admin passkeys list|remove --handle HANDLE | --login LOGIN --data DIR` (audited).
+- **"Approve command line logins in the browser" covers three things:** approving a login or an agent, making an API token,
+  and inviting or making an admin. The settings card says exactly that.
+- **An account is held to the tailnet user, not to the login's spelling.** The server keeps Tailscale's id of the user with
+  a linked login (migration 17, `users.tailnet_user_id`) and requires it on every request; a link made by `hosted claim
+  --login` takes the id of the first proven request. A device with an expired key is nobody. The machine's own addresses
+  are also read from its network interfaces on every request.
+- **Which process is tailscaled:** the main process of `tailscaled.service` where systemd runs it, else by name; root in all
+  four ids in both cases. On a local board a failed self test of the peer check keeps identity off until a restart.
+- **For the person at the server's own machine** (never signed in by its tailnet identity): `shapewall hosted admin members
+  list|add|remove`, `invites list|create|revoke`, `projects list` and `passkeys status|on|off|list|remove`, with the data
+  folder as the proof, each in the operator log and in the workspace's audit log as "Server operator".
+- **Over SSH.** A hosted server started with `--origin http://shapewall.localhost:<port>` (no TLS, loopback) and reached
+  through `ssh -L` works with passkey accounts; the name keeps the session cookie from other servers on your localhost, which
+  plain `http://localhost:<port>` (also supported) does not. Documented with what a local board over a tunnel means, and
+  tested with the real command and a real browser at both.
+- **Switching passkeys off or on** (`hosted admin passkeys off|on`) ends the sessions a passkey started, keeps a held passkey
+  removable and restarts its hold, and tells each workspace that asks for a passkey somewhere (audit log, Settings).
+  `hosted admin members relink|unlink` repairs an account whose tailnet user id changed; the page shows the command.
+- **Not in this release:** tailnet sign-in on macOS or Windows servers, in containers, or with a userspace-networking
+  tailscaled (no way there to prove a request came through tailscale serve), more admin commands or MCP tools for
+  administration, admin tokens, and profile pictures from the tailnet. The proof is tested with a stand-in for tailscale
+  serve and was run against a real tailscaled with a second device; a tagged device, the suspension on a changed serve
+  config and a browser sign-in were not checked live: [what was and was not checked](docs/hosted.md#what-was-and-was-not-checked-against-real-tailscale).
+
+- **The panel buttons are the panel's header.** With a side panel open, Comments, Agent and Checks in the top bar are exactly as
+  wide as the panel under them (the same inset as the panel's own rows), share that width, and follow the panel as you drag its
+  edge. With no panel open they go back to their own width at the right of the bar; so do they in a window too narrow to fit
+  them stretched. Agent settings now sits left of them, in the same place either way. The panel's default width is unchanged
+  (384 px); the narrowest it drags to is now 368 px (was 280), so it is never narrower than its buttons need. Phones are unchanged.
+
+### Fixes found on a real setup
+
+A fix for connected agents on the current Claude Code adapter.
+
+- **Connected agents work with `@agentclientprotocol/claude-agent-acp` 0.106.0.** With 0.6.0 and that adapter,
+  `shapewall agent connect` connected, and the first question then failed with only "Claude Code did not start." The cause:
+  0.106.0 starts a session in the mode "auto" and, when asked to switch, sends the new mode before its answer, in another place
+  than the one Shapewall read. The session looked as if it still acted without asking, so Shapewall stopped it. Now the mode the
+  agent names is the mode Shapewall checks, and the session is switched to "default" as intended. Nothing is loosened: a session
+  that moves itself to a mode that acts without asking is still stopped, and the mode it names is checked on its own as well.
+- **Tested adapter versions: 0.93.0 and 0.106.0.** The read-only and the edit provocations were run again on both with the real
+  adapter ([how](docs/agent-hardening.md#connected-agents)). `agent connect` now opens a session when it starts (no prompt is
+  sent) and prints which adapter answered. A version it was not tested with is used with a plain `Warning:` that names the tested
+  ones; a session that cannot be opened stops the command with the cause.
+- **A start that fails says why.** The chat and the machine's log both get the adapter's error or its last output, the adapter's
+  name and version, and what to try. A turn that fails is also written to the machine's log. Never a bare "did not start".
+- **The approval page shows what the machine asked for.** The box on the "Connect an agent" page said "does not change files"
+  even for a machine started with `--approvals owner` or `--auto edits`. The terminal now reports its rules with the code, and
+  the page says them: edits on a branch and who may allow them, "without asking" if asked, the base branch, and that commands are
+  never run. It is marked "Reported by the terminal"; an older shapewall that reports nothing is said to have said nothing.
+- **"Sign in a terminal" reads cleanly.** The two commands on `/device` are each in a code block on a line of their own, instead
+  of one sentence that wrapped into narrow columns.
+- **An expired code names the command that was run.** `shapewall agent connect` no longer says "Run shapewall login again".
+
+### The board's tools move to the bottom of the canvas
+
+Board tools: the tools you use on the board moved out of the top bar.
+
+- **A floating toolbar at the bottom centre of the canvas,** like FigJam, Miro and tldraw. It holds what you do to the board:
+  **Select** (V), **Hand** (H), then after a thin divider **Comment** (C), **Draw** and, on desktop when the board has live
+  pages, **Select text**. One tool is in use at a time (Comment, Draw and Select text fill with the accent colour; Select
+  and Hand in use are a quiet neutral chip); Esc goes back a step at a time and ends on Select. The top bar keeps what
+  you look at: the board, the screen sizes, Views and the Comments, Agent and Checks panels. The Comment button is no longer in
+  the top bar.
+- **Select and Hand.** Select is the default pointer: a click selects a page and shows its actions or opens a comment's pin,
+  and a drag on empty canvas still pans. Hand is for moving around a dense board: a drag anywhere pans, on pages and pins
+  too, and a click selects and opens nothing. Holding Space in any tool is a temporary Hand, as before, and so is a
+  middle-button drag. V and H do nothing while you type. Desktop only: on a phone a finger already pans.
+- **Draw is a tool of its own.** Pick Draw and click a page: a comment starts on that page and you draw at once (a box, an arrow
+  or the pen, as before). With a comment or a reply open, Draw draws on that comment's page. A drawing is still part of a
+  comment, and the Box, Arrow and Pen buttons under a comment work as they did.
+- **The note for the tool in use sits just above the tools:** the comment hint, "Commenting on ...", the drawing bar and the
+  select-text note moved there from the top of the canvas. The tip, the links notes and the viewport notice stay at the top.
+- **Nothing overlaps.** The tools are centred on the canvas (not the window), so they move when the sidebar or the side panel
+  opens or is resized. On a narrow canvas they shift clear of the zoom controls, then the zoom controls compact (Fit and the
+  minimap switch stay in the zoom menu), then the minimap steps aside. An open journey's bar and the toast sit above the tools.
+- **Phones:** the tools are the bottom bar (44 px targets, above the safe-area inset) and the comment button left the top row.
+  They step aside while a sheet or the keyboard is up. Draw, then a tap on a page, opens the page full screen to draw on.
+- **Permissions are unchanged.** A viewer, a read-only share link or an export without comments has no Comment or Draw tool;
+  a guest who may comment has both. Compare mode has neither, as before. Someone who may not comment has Select and Hand on a
+  desktop (and Select text while a page is live), and no toolbar on a phone.
+- **Keyboard and screen readers:** the tools are a labelled toolbar with one tab stop; the arrow keys, Home and End move between
+  them, and each says whether it is in use. Tooltips show the shortcuts.
+- **Esc goes back one step at a time.** With a journey open, Esc leaves comment mode (or Select text) first and the next Esc
+  leaves the journey; one press used to do both. Turning comment mode on ends Select text, so one tool is in use at a time.
+- **Comments keep clear of the tools.** A thread or a new-comment card near the bottom of the canvas sits above the tools, and
+  above their note while one shows.
+- **Comment, right on the page.** Select a page and its bar now starts with **Comment**: press it, then click where the comment
+  goes on that page (the hint above the tools names the page; on a live page it pins to the element you click). It works from the
+  keyboard too (Enter on the button, Enter again for the top left of the page) and is the first action when you tap a page on a
+  phone. The Comment tool at the bottom of the board and the C key work as before. People who cannot comment do not see it. The
+  first time you select a page the button is pointed out with a ring, once. Comment is a soft tint at rest and filled while it
+  is on.
+- **The page bar is one line at any width.** It leads with the page's name and screen size; Open live, Select text, Checks
+  and History keep their words (with counts), and on a narrow canvas they move, one at a time, into a More menu instead of
+  becoming bare icons. On a phone the bar is compact: Comment, More (everything else, Open live and Open in a new tab
+  included) and Close. It rides above the page's title row and, as you pan, stays at the top of the canvas like a sticky
+  header, moving smoothly and never covering the page's headline while the top of the page is in view.
+
 ## 0.6.0 - 2026-11-12
 
 Connected agents, stage C: approvals and edits from a hosted board. A connected agent can make a fix for a comment, on a new

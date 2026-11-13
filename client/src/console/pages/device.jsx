@@ -11,6 +11,7 @@ import { CheckCircle2, Terminal, XCircle } from 'lucide-react'
 import { Button, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Spinner } from '../../components/ui'
 import { Card, CheckToggle, Field, FormError, Notice, PageHeader } from '../components'
 import { DEMO } from '../../lib/demo'
+import { agentAsks, agentAsksDone } from '../lib/agent-asks'
 import { api, serverOrigin } from '../lib/api'
 import { SCOPES, formatDateTime } from '../lib/format'
 import { Link } from '../lib/router'
@@ -52,7 +53,7 @@ export function DevicePage() {
   // An agent connection: how it will look and who may use it.
   const [look, setLook] = useState({ name: '', icon: null, tint: null, png: null })
   const [audience, setAudience] = useState('owner')
-  // Approve was held back because the sign-in is not fresh, and the passkey
+  // Approve was held back because the server asked for a passkey check first (its message), and the passkey
   // check that follows was closed: said on the page, so the button never
   // looks as if it did nothing.
   const [needsPasskey, setNeedsPasskey] = useState(false)
@@ -76,6 +77,8 @@ export function DevicePage() {
   const agentLogin = found?.login.purpose === 'agent'
   const agentKind = AGENT_KIND[found?.login.agent?.kind] || AGENT_KIND.custom
   const lookProblem = agentLogin ? nameProblem(look.name) : null
+  // What the machine said it takes from the board (its --approvals, --auto, --base).
+  const asked = agentAsks(found?.login.agent?.asks)
   const pickWorkspace = (id) => {
     setWorkspaceId(id)
     setProjectId(found.workspaces.find((item) => item.id === id)?.projects[0]?.id || '')
@@ -98,7 +101,7 @@ export function DevicePage() {
       } catch (failure) {
         // The passkey dialog opens next (useAction); if it is closed, this
         // note stays. Any other refusal shows its message below.
-        setNeedsPasskey(failure?.code === 'reauth_required')
+        setNeedsPasskey(failure?.code === 'reauth_required' ? failure.message : false)
         throw failure
       }
     })
@@ -149,8 +152,8 @@ export function DevicePage() {
                 {done.agent ? (
                   <p className="text-sm text-muted" data-sw-device-agent-done>
                     It serves {done.project.name} in {done.workspace.name}, and shows as online on the board once the terminal says it is
-                    connected. It reads the project and answers; it does not change files or run commands. Rename it, change who may use it,
-                    or revoke it on the project's Agents page.
+                    connected. {agentAsksDone(found?.login.agent?.asks)} Rename it, change who may use it, or revoke it on the project's
+                    Agents page.
                   </p>
                 ) : (
                   <p className="text-sm text-muted">
@@ -162,7 +165,9 @@ export function DevicePage() {
             ) : (
               <>
                 <h2 className="text-lg font-semibold text-fg">Login denied</h2>
-                <p className="text-sm text-muted">The terminal gets no token. Run shapewall login again if that was a mistake.</p>
+                <p className="text-sm text-muted">
+                  The terminal gets no token. Run {agentLogin ? 'shapewall agent connect' : 'shapewall login'} again if that was a mistake.
+                </p>
               </>
             )}
             <div className="flex flex-wrap gap-2">
@@ -182,12 +187,27 @@ export function DevicePage() {
           </div>
         ) : !found ? (
           <form onSubmit={find} className="space-y-4">
-            <p className="flex items-start gap-2 text-sm text-muted">
-              <Terminal size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
-              Run <code className="font-mono text-fg">shapewall agent connect --remote {serverOrigin()}</code> (to connect a coding agent)
-              or <code className="font-mono text-fg">shapewall login --remote {serverOrigin()}</code> (for a token), and type the code it
-              shows.
-            </p>
+            <div className="space-y-3 text-sm text-muted" data-sw-device-howto>
+              <p className="flex items-start gap-2">
+                <Terminal size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+                <span>Run one of these in a terminal, then type the code it shows.</span>
+              </p>
+              {[
+                ['To connect a coding agent', `shapewall agent connect --remote ${serverOrigin()}`],
+                ['For a token (push, comments, watch)', `shapewall login --remote ${serverOrigin()}`],
+              ].map(([label, command]) => (
+                <div key={command} className="min-w-0">
+                  <p className="mb-1 text-[13px] font-medium text-fg">{label}</p>
+                  <pre
+                    className="overflow-x-auto whitespace-pre-wrap break-words rounded-lg sm:whitespace-pre border border-line bg-surface-2 px-3 py-2 font-mono text-[13px] leading-5 text-fg"
+                    tabIndex={0}
+                    data-sw-device-command
+                  >
+                    <code>{command}</code>
+                  </pre>
+                </div>
+              ))}
+            </div>
             <Field label="Code from the terminal">
               {(props) => (
                 <Input
@@ -356,10 +376,24 @@ export function DevicePage() {
                         ))}
                       </div>
                     </fieldset>
-                    <Notice tone="info" title="What a connected agent does">
-                      It reads the project on that machine and answers questions in the board's chat, and it reads and answers comments sent
-                      to it. It does not change files and runs no commands: that machine refuses both. Its token can read comments, reply,
-                      set agent statuses and take work; it cannot resolve comments or push.
+                    <Notice
+                      tone={asked.mode === 'edits' ? 'warn' : 'info'}
+                      title={asked.mode === 'edits' ? 'This machine asked to edit files' : 'What this agent does'}
+                      data-sw-device-agent-asks={asked.mode}
+                      data-sw-device-agent-auto={found.login.agent?.asks?.auto ? 'true' : undefined}
+                    >
+                      <p className="text-xs">
+                        {asked.mode === 'unknown'
+                          ? 'Not reported by the terminal'
+                          : 'Reported by the terminal, and enforced on that machine'}
+                      </p>
+                      <ul className="mt-1.5 list-disc space-y-1 pl-4">
+                        {asked.lines.map((line) => (
+                          <li key={line} className="break-words">
+                            {line}
+                          </li>
+                        ))}
+                      </ul>
                     </Notice>
                   </div>
                 ) : null}
@@ -408,7 +442,7 @@ export function DevicePage() {
             )}
             {needsPasskey && !decide.busy && !decide.error ? (
               <Notice tone="warn" title="Not approved yet: confirm with your passkey" data-sw-device-reauth-note>
-                Approving a login needs a fresh passkey check (once every 10 minutes). Press Approve again and use your passkey when asked.
+                {needsPasskey} Press Approve again and use your passkey when asked.
               </Notice>
             ) : null}
             <FormError error={decide.error} />

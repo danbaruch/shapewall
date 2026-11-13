@@ -123,12 +123,24 @@ export function createPermissionStore(t, { now = () => new Date() } = {}) {
          AND expires_at > :at ORDER BY created_at DESC LIMIT 50`,
       { project: projectId, board: boardId, at: iso() },
     )
+  // How the requests of a turn ended, for its usage record. `allowed` counts
+  // every request that went ahead (a person's "allow" and the automatic
+  // ones); `auto` is the part nobody was asked about; `by` says who answered
+  // the rest (user id to how many they allowed and denied). Ids and counts only.
   const counts = (turnId) => {
     const all = ofTurn(turnId)
+    const by = {}
+    for (const row of all) {
+      if (!row.answered_by || !['approved', 'denied'].includes(row.state)) continue
+      by[row.answered_by] ||= { allowed: 0, denied: 0 }
+      by[row.answered_by][row.state === 'approved' ? 'allowed' : 'denied'] += 1
+    }
     return {
       asked: all.length,
       allowed: all.filter((row) => ['approved', 'auto'].includes(row.state)).length,
       denied: all.filter((row) => ['denied', 'expired', 'cancelled'].includes(row.state)).length,
+      auto: all.filter((row) => row.state === 'auto').length,
+      by,
     }
   }
   const removeThread = (projectId, boardId, threadId) =>

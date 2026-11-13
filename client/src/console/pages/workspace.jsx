@@ -1,8 +1,21 @@
 // /w/:ws/...: a workspace with its sections. Admin sections show only to
 // admins and owners (the server refuses them to anyone else anyway).
 
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
-import { Bot, FolderKanban, KeyRound, Lock, MailPlus, MessageSquareText, ScrollText, Settings, ShieldCheck, Users } from 'lucide-react'
+import { Suspense, createContext, lazy, useCallback, useContext, useEffect, useRef, useState } from 'react'
+import {
+  Activity,
+  BarChart3,
+  Bot,
+  FolderKanban,
+  KeyRound,
+  Lock,
+  MailPlus,
+  MessageSquareText,
+  ScrollText,
+  Settings,
+  ShieldCheck,
+  Users,
+} from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { Card, LoadError, Loading, RoleBadge } from '../components'
 import { api, wsUrl } from '../lib/api'
@@ -24,6 +37,10 @@ import { AgentsSection } from './local-agents'
 import { AgentsOverview, ProjectAgentsPage } from './agents'
 import { DEMO } from '../../lib/demo'
 
+// Usage and Activity bring the charts and the data grid with them: loaded
+// only when one of the two pages opens, so no other page pays for them.
+const UsageArea = lazy(() => import('../usage/index.jsx'))
+
 const WorkspaceContext = createContext(null)
 export const useWorkspace = () => useContext(WorkspaceContext)
 
@@ -38,12 +55,16 @@ const SECTIONS = [
   // admins. The demo shows the local console's Agents page here instead,
   // read-only, to everyone.
   ['agents', 'Agents', Bot, DEMO ? 'viewer' : 'admin'],
+  // What agents did (a member: their own turns) and what people did (anyone:
+  // their own activity; admins: everyone's, and the access review).
+  ['usage', 'Usage', BarChart3, 'member'],
+  ['activity', 'Activity', Activity, 'viewer'],
   // Only where the server's boards have chat (features.agentFeedback).
   ['feedback', 'Agent feedback', MessageSquareText, 'admin'],
   ['settings', 'Settings', Settings, 'viewer'],
 ]
 
-export function WorkspacePage({ workspaceId, section, projectId }) {
+export function WorkspacePage({ workspaceId, section, projectId, subjectId = null }) {
   const detail = useLoad(wsUrl(workspaceId))
   // A desktop has the app sidebar, which lists the sections (shell.jsx).
   const wide = useMediaQuery('(min-width: 1024px)')
@@ -87,7 +108,9 @@ export function WorkspacePage({ workspaceId, section, projectId }) {
   const visible = sections.filter(([, , , least]) => roleAtLeast(role, least))
   // A section this role cannot see (a link from an admin, an old bookmark)
   // says so instead of quietly showing the projects.
-  const needs = sections.find(([id]) => id === section && !visible.some(([seen]) => seen === id))
+  const needs = SECTIONS.find(
+    ([id]) => id === section && sections.some(([known]) => known === id) && !visible.some(([seen]) => seen === id),
+  )
   const current = needs ? section : visible.some(([id]) => id === section) ? section : 'projects'
   // A project's Agents page (/w/:ws/agents/:pid) belongs to Agents.
   const projectAgents = Boolean(projectId) && section === 'agents' && !DEMO
@@ -102,6 +125,12 @@ export function WorkspacePage({ workspaceId, section, projectId }) {
   else if (current === 'tokens') body = <TokensSection />
   else if (current === 'audit') body = <AuditSection />
   else if (current === 'agents') body = DEMO ? <AgentsSection /> : <AgentsOverview />
+  else if (current === 'usage' || current === 'activity')
+    body = (
+      <Suspense fallback={<Loading label="Loading the page" rows={4} />}>
+        <UsageArea section={current} subjectId={subjectId} />
+      </Suspense>
+    )
   else if (current === 'settings') body = <SettingsSection />
   else if (current === 'feedback') body = <AgentFeedbackView baseUrl={wsUrl(workspaceId, '/agent-feedback')} get={api.get} />
   else body = <ProjectsSection />
@@ -194,7 +223,8 @@ function NeedsRole({ section, least, role, workspaceId }) {
       </span>
       <h1 className="mt-4 text-lg font-semibold text-fg">This page needs the {ROLE_LABEL[least].toLowerCase()} role</h1>
       <p className="mt-1 text-sm text-muted">
-        {section} is for admins and owners. You are a {ROLE_LABEL[role].toLowerCase()} here; ask an admin if you need it.
+        {section} is for {least === 'member' ? 'members, admins and owners' : 'admins and owners'}. You are a{' '}
+        {ROLE_LABEL[role].toLowerCase()} here; ask an admin if you need it.
       </p>
       <Link to={`/w/${workspaceId}`} className="mt-4 inline-block text-sm font-medium text-accent underline-offset-2 hover:underline">
         Back to the projects

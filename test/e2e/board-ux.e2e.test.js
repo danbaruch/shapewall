@@ -168,7 +168,7 @@ test('desktop: the frame bar clears on compare, journeys and fit, and hides when
   }
 })
 
-test('desktop: comment mode outlines the element under the mouse, the hint stays off the page, the pin sits beside it', async () => {
+test('desktop: comment mode outlines the element under the mouse, the hint sits just above the tools, the pin sits beside it', async () => {
   const { context, page, errors } = await openBoard(DESKTOP)
   try {
     const frame = '[data-sw-frame="pricing:desktop"]'
@@ -178,12 +178,17 @@ test('desktop: comment mode outlines the element under the mouse, the hint stays
     const before = await rect(page, '[data-sw-canvas]')
     await page.click('[data-sw-comment-mode]')
     await page.waitForSelector('[data-sw-comment-hint="element"]')
-    // The hint is a small pill over the canvas: turning comment mode on does
-    // not move the canvas (or the page under the mouse).
+    // The hint is a small pill over the canvas, just above the board's tools
+    // (next to the tool it explains): turning comment mode on does not move
+    // the canvas (or the page under the mouse).
     const hint = await rect(page, '[data-sw-comment-hint]')
     const canvas = await rect(page, '[data-sw-canvas]')
+    const tools = await rect(page, '[data-sw-tools]')
     assert.equal(canvas.top, before.top, 'the canvas did not move')
-    assert.ok(hint.top >= canvas.top && hint.bottom < canvas.top + 60, `hint ${hint.top}-${hint.bottom} canvas ${canvas.top}`)
+    assert.ok(
+      hint.bottom <= tools.top && tools.top - hint.bottom <= 12 && hint.top > canvas.top + 60,
+      `hint ${hint.top}-${hint.bottom} tools ${tools.top} canvas ${canvas.top}`,
+    )
     assert.ok(hint.right - hint.left < canvas.right - canvas.left, 'a pill, not a full-width bar')
     assert.match(await page.textContent('[data-sw-comment-hint]'), /element/)
 
@@ -404,7 +409,7 @@ test('desktop: the side panel stops at 560 px or 40% of the window, a wider stor
     await page.keyboard.press('Shift+ArrowLeft')
     assert.equal(await width(), 560)
     for (let presses = 0; presses < 8; presses += 1) await page.keyboard.press('Shift+ArrowRight')
-    assert.equal(await width(), 280)
+    assert.equal(await width(), 368, "never narrower than the top bar's panel toggles need")
     await page.keyboard.press('Home')
     assert.equal(await width(), 384)
 
@@ -681,9 +686,10 @@ test('desktop: a thread or composer card is dragged by its header, stays on the 
     await dragBy(side, 50)
     await page.waitForSelector(`${composer}[data-sw-card-moved="true"]`)
     const after = await rect(page, composer)
-    // Where it was dragged to, held inside the canvas (10 px in, 60 px above its foot).
+    // Where it was dragged to, held inside the canvas (10 px in, and above its
+    // foot: the board's tools and the "Commenting on ..." note above them, 100 px).
     const wantLeft = Math.max(canvas.left + 10, Math.min(canvas.right - 10 - before.width, before.left + side))
-    const wantTop = Math.max(canvas.top + 10, Math.min(canvas.bottom - 60 - before.height, before.top + 50))
+    const wantTop = Math.max(canvas.top + 10, Math.min(canvas.bottom - 100 - before.height, before.top + 50))
     assert.ok(
       Math.abs(after.left - wantLeft) <= 2 && Math.abs(after.top - wantTop) <= 2,
       `composer at ${after.left},${after.top}, wanted ${wantLeft},${wantTop} from ${before.left},${before.top}`,
@@ -1181,6 +1187,119 @@ test('desktop: an open thread stays while you look around and closes when you go
   }
 })
 
+test("desktop: with a side panel open the top bar's panel toggles span exactly the panel, follow a resize, and go back to their own width when it closes", async () => {
+  for (const viewport of [
+    { width: 1280, height: 800 },
+    { width: 1440, height: 900 },
+  ]) {
+    const { context, page, errors } = await openBoard({ viewport })
+    try {
+      const at = `at ${viewport.width}`
+      const bar = '[data-sw-toolbar="full"]'
+      const places = () =>
+        page.evaluate((sel) => {
+          const box = (name) => {
+            const r = document.querySelector(name)?.getBoundingClientRect()
+            return r ? { left: r.left, right: r.right, width: r.width } : null
+          }
+          const toggles = [...document.querySelectorAll(`${sel} [data-sw-panel-switch] button`)]
+          return {
+            state: document.querySelector(`${sel} [data-sw-panel-tabs]`).getAttribute('data-sw-panel-tabs'),
+            tabs: box(`${sel} [data-sw-panel-tabs]`),
+            track: box(`${sel} [data-sw-panel-switch]`),
+            panel: box('[data-sw-rail]'),
+            bar: box(sel),
+            left: box(`${sel} [data-sw-toolbar-zone="left"]`),
+            buttons: toggles.map((node) => node.getBoundingClientRect().width),
+            words: toggles.map((node) => node.textContent.replace(/[\d\s]+$/, '')),
+            scroll: document.documentElement.scrollWidth - window.innerWidth,
+            transition: toggles.map((node) => getComputedStyle(node).transitionProperty).join(' '),
+          }
+        }, bar)
+      // The toggles are the panel's header: the same left and right edge, the
+      // track inside the bar's padding (12 px) on both sides.
+      const spans = async (label) => {
+        const now = await places()
+        const where = `${label} ${at}`
+        assert.equal(now.state, 'stretched', where)
+        assert.ok(Math.abs(now.tabs.left - now.panel.left) <= 1, `${where}: left ${now.tabs.left} against ${now.panel.left}`)
+        assert.ok(Math.abs(now.tabs.right - now.panel.right) <= 1, `${where}: right ${now.tabs.right} against ${now.panel.right}`)
+        assert.ok(Math.abs(now.track.left - (now.panel.left + 12)) <= 1, `${where}: track left ${now.track.left}`)
+        assert.ok(Math.abs(now.track.right - (now.panel.right - 12)) <= 1, `${where}: track right ${now.track.right}`)
+        assert.ok(now.left.right < now.tabs.left, `${where}: the left zone ends before the toggles`)
+        assert.equal(now.scroll, 0, `${where}: nothing leaves the window`)
+        assert.ok(
+          now.words.every((word) => word.length > 0),
+          `${where}: every toggle keeps its word`,
+        )
+        const inner = now.buttons.reduce((sum, width) => sum + width, 0)
+        assert.ok(Math.abs(inner - (now.track.width - 6)) <= 1, `${where}: the toggles fill the track`)
+        return now
+      }
+      await page.waitForSelector('[data-sw-rail="comments"]')
+      const first = await spans('comments')
+      assert.equal(Math.round(first.panel.width), 384, 'the default width stays')
+      assert.doesNotMatch(first.transition, /width|flex|all/, 'no width transition: a drag is followed, not animated')
+
+      // Dragged wider: on every move, not only on release.
+      const handle = await rect(page, '[data-sw-rail-handle]')
+      await page.mouse.move(handle.left + handle.width / 2, 400)
+      await page.mouse.down()
+      await page.mouse.move(handle.left - 60, 400, { steps: 3 })
+      const mid = await spans('mid drag')
+      assert.ok(mid.panel.width > first.panel.width + 40)
+      await page.mouse.move(handle.left - 120, 400, { steps: 3 })
+      await page.mouse.up()
+      const wide = await spans('dragged wider')
+      // With the room the toggles share the width equally.
+      if (wide.buttons.length > 1) {
+        assert.ok(Math.max(...wide.buttons) - Math.min(...wide.buttons) <= 1, `equal shares ${at}: ${wide.buttons.join(' ')}`)
+      }
+      assert.deepEqual([wide.left.left, wide.left.width], [first.left.left, first.left.width], `the left zone did not move ${at}`)
+      await shot(page, `ux-panel-tabs-${viewport.width}-wide`)
+
+      // As narrow as it goes: still the panel's width, the words kept.
+      await page.focus('[data-sw-rail-handle]')
+      for (let presses = 0; presses < 8; presses += 1) await page.keyboard.press('Shift+ArrowRight')
+      const narrow = await spans('at its narrowest')
+      assert.equal(Math.round(narrow.panel.width), 368)
+      await shot(page, `ux-panel-tabs-${viewport.width}-narrow`)
+      await page.keyboard.press('Home')
+      await spans('back at the default')
+      await page.evaluate(() => document.activeElement?.blur())
+
+      // Another panel: the same width, so nothing moves.
+      if (await page.locator(`${bar} [data-sw-checks-toggle]`).count()) {
+        await page.click(`${bar} [data-sw-checks-toggle]`)
+        await page.waitForSelector('[data-sw-rail="checks"]')
+        const checks = await spans('checks')
+        assert.deepEqual([checks.track.left, checks.track.right], [first.track.left, first.track.right])
+        await page.click(`${bar} [data-sw-checks-toggle]`)
+        await page.waitForSelector('[data-sw-rail="comments"]')
+      }
+
+      // Closed: the toggles' own width, at the right of the bar; the left zone has not moved.
+      await page.click(`${bar} [data-sw-panel-toggle]`)
+      await page.waitForSelector('[data-sw-rail]', { state: 'detached' })
+      const closed = await places()
+      assert.equal(closed.state, 'compact')
+      assert.ok(closed.track.width < first.track.width, `compact ${at}: ${closed.track.width}`)
+      assert.ok(Math.abs(closed.track.right - (closed.bar.right - 12)) <= 1, `compact ${at}: at the right of the bar`)
+      assert.ok(Math.abs(closed.track.right - first.track.right) <= 1, `the right edge does not move ${at}`)
+      assert.deepEqual([closed.left.left, closed.left.width], [first.left.left, first.left.width])
+      // The panel is never narrower than these need.
+      assert.ok(closed.track.width + 24 <= 368, `the least panel width fits the toggles (${closed.track.width})`)
+      await shot(page, `ux-panel-tabs-${viewport.width}-closed`)
+      await page.click(`${bar} [data-sw-panel-toggle]`)
+      await page.waitForSelector('[data-sw-rail="comments"]')
+      await spans('opened again')
+      assert.deepEqual(errors, [])
+    } finally {
+      await context.close()
+    }
+  }
+})
+
 test('desktop: search lives in the sidebar, and the toolbar keeps its shape when a journey opens', async () => {
   const { context, page, errors } = await openBoard(DESKTOP)
   try {
@@ -1230,12 +1349,13 @@ test('desktop: search lives in the sidebar, and the toolbar keeps its shape when
         return {
           fit: document.querySelector(sel).getAttribute('data-sw-toolbar-fit'),
           view: box('[data-sw-view-menu]')?.[0],
-          comment: box('[data-sw-comment-mode]'),
           panels: box('[data-sw-panel-switch]'),
           sizes: box('[aria-label="Screen size"]'),
         }
       }, bar)
     const before = await places()
+    // Comment is a tool on the canvas, not a control of this bar.
+    assert.equal(await page.locator(`${bar} [data-sw-comment-mode]`).count(), 0)
     await choose(page, '[data-sw-page-jump]', 'journey:sign-up')
     await page.waitForSelector(`${bar} [data-sw-view-journey-name]`)
     assert.deepEqual(await places(), before, 'the bar kept its shape')

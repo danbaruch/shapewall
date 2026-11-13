@@ -27,6 +27,27 @@ export function tipDismissed() {
   }
 }
 
+// The page bar's Comment button is pointed out once (FrameBar.jsx): to a
+// person who has not started a comment in this browser yet. The demo's Reset
+// forgets it (demo/install.js), so the demo starts over whole.
+export const PAGE_COMMENT_KEY = 'shapewall.tip.pageComment'
+export function pageCommentSeen() {
+  try {
+    return window.localStorage.getItem(PAGE_COMMENT_KEY) === '1'
+  } catch {
+    // Storage is blocked: no emphasis rather than one on every page.
+    return true
+  }
+}
+
+export function rememberPageCommentSeen() {
+  try {
+    window.localStorage.setItem(PAGE_COMMENT_KEY, '1')
+  } catch {
+    /* not remembered */
+  }
+}
+
 export function rememberMinimap(on) {
   try {
     window.localStorage.setItem(MINIMAP_KEY, on ? 'on' : 'off')

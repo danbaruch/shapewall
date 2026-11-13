@@ -19,7 +19,7 @@ import { DEMO, useDemo } from '../lib/demo'
 
 // A board page the server answered with the console: no access to it (any more).
 const BOARD_RE = /^\/w\/[^/]+\/p\/[^/]+\/?$/
-const WS_RE = /^\/w\/(ws_[a-f0-9]{24})(?:\/([a-z]+))?(?:\/(pr_[a-f0-9]{24}))?\/?$/
+const WS_RE = /^\/w\/(ws_[a-f0-9]{24})(?:\/([a-z]+))?(?:\/((?:pr|us|ag)_[a-f0-9]{24}))?\/?$/
 
 export default function App() {
   return (
@@ -86,7 +86,15 @@ function Routes() {
   if (path === '/account') page = <AccountPage />
   else if (path === '/device') page = <DevicePage />
   else if (match)
-    page = <WorkspacePage key={match[1]} workspaceId={match[1]} section={match[2] || 'projects'} projectId={match[3] || null} />
+    page = (
+      <WorkspacePage
+        key={match[1]}
+        workspaceId={match[1]}
+        section={match[2] || 'projects'}
+        projectId={match[3]?.startsWith('pr_') ? match[3] : null}
+        subjectId={match[3] && !match[3].startsWith('pr_') ? match[3] : null}
+      />
+    )
   else page = <Home />
   return <AppShell>{page}</AppShell>
 }

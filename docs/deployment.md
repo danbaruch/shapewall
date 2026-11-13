@@ -192,23 +192,45 @@ error is a host permission failure before account enrollment, not a passkey or T
 complete the existing supported Serve permission/setup process for the intended port, then retry deliberately. Do not run Shapewall
 as root, change account origins or relax identity checks to bypass it.
 
-A Tailscale request gets owner access only if its immediate peer is loopback,
-its Host is exactly this node's `*.ts.net` name, and `Tailscale-User-Login` equals
-the node owner's login. Other users, shared-in devices, tagged nodes, and
-missing or mismatched identity headers must pair. `--no-identity` disables
-header trust altogether. The node owner is determined at server start; restart
-Shapewall after changing the node's owner.
+A Tailscale request gets owner access only if its Host is exactly this node's
+`*.ts.net` name, `Tailscale-User-Login` equals the node owner's login, and the
+request provably came through the serve entry Shapewall made. A header alone
+proves nothing: any program on the host (an agent whose command is waiting for
+approval included) can send it to the loopback port. The proof is the same as
+the hosted server's tailnet sign-in: the serve entry points at a secret path
+made at each start, the connection's other end must be a socket owned by root
+(tailscaled), `tailscale whois` must give the request's tailnet address to
+the owner's login, and the request must not come from this machine itself
+([how](hosted.md#how-the-server-knows-a-request-came-through-tailscale-serve)).
+A program on the host can ask tailscaled for the board's tailnet address and
+would arrive with the owner's login, so the host's own tailnet address is
+never the owner: on the host, open `http://localhost:<port>` (the settings
+token makes you the owner there); the tailnet address opened on the host asks
+to pair and says why. The secret path is taken off before the application
+sees the request and is in no redirect or response.
+Other users, shared-in devices, tagged nodes, and missing or mismatched
+identity headers must pair. `--no-identity` disables it altogether. The node
+owner is determined at server start; restart Shapewall after changing the
+node's owner.
 
-This relies on Tailscale Serve stripping client-supplied identity headers and
-setting its own values. Keep Tailscale current. See the
-[Tailscale identity-header documentation](https://tailscale.com/docs/features/tailscale-serve#identity-headers)
-and its [proxy header implementation](https://github.com/tailscale/tailscale/blob/main/ipn/ipnlocal/serve.go).
-A process already running on the host can forge loopback requests and headers;
-that process is inside the host trust boundary. Do not proxy another service to
-this listener. For an unverified proxy or client version, use `--no-identity`
-until you have checked a forged owner header from a different tailnet user is
-replaced or rejected. Shapewall's tests cover its own request handling, not
-your Tailscale daemon or tailnet ACLs.
+Where that cannot be proven, identity is off and every other device pairs; the
+board still starts and says why: not Linux, tailscaled in userspace-networking
+mode, Tailscale before 1.98, tailscaled running a SOCKS5 or outbound HTTP
+proxy or started with a loopback-forwarding debug switch, no tailscaled of
+root visible, the node unable to say which node it is, or Shapewall in a
+container. The same is checked every 30 seconds while the board runs.
+
+Approving an agent's command or edit (`/permissions/` routes) needs the
+settings token from the host's own terminal, unless the request is the owner by
+proven tailnet identity or comes from a device the owner paired. A local
+program cannot approve its own command by dressing a request up.
+
+Root and the Tailscale operator on the host are trusted; nothing else on the
+host or the tailnet is. A tailnet identity is per device: anything running as
+you on another tailnet device of yours is the owner here. Do not proxy another
+service to this listener. Shapewall's tests cover its own request handling with
+a stand-in proxy, not your Tailscale daemon or tailnet ACLs
+([what was and was not checked](hosted.md#what-was-and-was-not-checked-against-real-tailscale)).
 
 ### Tailscale with a local account
 

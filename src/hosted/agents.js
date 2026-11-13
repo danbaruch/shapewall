@@ -39,6 +39,7 @@ import { logoForAgent } from '../agent/agent-logos.js'
 import { cleanAgentName, isAgentTint, isBuiltInIcon } from '../agent/identity.js'
 import { agentPolicy, trustedMember } from './agent-policy.js'
 import { newId } from './crypto.js'
+import { RUN_DURATION } from './usage-shape.js'
 import { HttpError } from './http.js'
 import {
   AGENT_AUDIENCES,
@@ -695,7 +696,7 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
       })
     for (const item of mine) {
       t.run(
-        'UPDATE agent_runs SET ended_at = :at, outcome = :reason WHERE workspace_id = :ws AND project_id = :project AND agent_id = :agent AND board_id = :board AND comment_number = :number AND ended_at IS NULL',
+        `UPDATE agent_runs SET ended_at = :at, outcome = :reason, ${RUN_DURATION} WHERE workspace_id = :ws AND project_id = :project AND agent_id = :agent AND board_id = :board AND comment_number = :number AND ended_at IS NULL`,
         { project: projectId, agent: agent.id, board: item.board, number: item.number, at, reason },
       )
       t.run(`UPDATE comments SET agent_status = NULL, agent_status_at = NULL, agent_id = NULL WHERE ${where}`, {
@@ -772,8 +773,10 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
   // NULL: a watcher reports none of them.
   function startRun({ projectId, boardId, number, agentId, claimId, askedBy }) {
     t.run(
-      `INSERT INTO agent_runs (workspace_id, project_id, id, kind, agent_id, claim_id, board_id, comment_number, asked_by, started_at)
-       VALUES (:ws, :project, :id, 'fix', :agent, :claim, :board, :number, :asked, :at)`,
+      `INSERT INTO agent_runs (workspace_id, project_id, id, kind, agent_id, claim_id, board_id, comment_number, asked_by, started_at,
+         agent_owner)
+       VALUES (:ws, :project, :id, 'fix', :agent, :claim, :board, :number, :asked, :at,
+         (SELECT a.created_by FROM agents a WHERE a.id = :agent))`,
       {
         project: projectId,
         id: newId('run'),
@@ -819,7 +822,11 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
               : 'released'
       const at =
         comment?.status === 'resolved' && comment.resolved_at && comment.resolved_at < run.ended_at ? comment.resolved_at : run.ended_at
-      t.run('UPDATE agent_runs SET ended_at = :at, outcome = :outcome WHERE workspace_id = :ws AND id = :id', { id: run.id, at, outcome })
+      t.run(`UPDATE agent_runs SET ended_at = :at, outcome = :outcome, ${RUN_DURATION} WHERE workspace_id = :ws AND id = :id`, {
+        id: run.id,
+        at,
+        outcome,
+      })
     }
     return ended.length
   }

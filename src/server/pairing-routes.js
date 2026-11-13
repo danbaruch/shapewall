@@ -12,13 +12,28 @@ export function cookieValue(req, name) {
 }
 const loopback = (address) =>
   address === '::1' || /^127\.\d+\.\d+\.\d+$/.test(address || '') || /^::ffff:127\.\d+\.\d+\.\d+$/.test(address || '')
+// The board's owner, arriving from another of their tailnet devices. The
+// Tailscale-User-Login header alone proves nothing: any program on this
+// machine (an agent whose command waits for approval included) can send it
+// to the loopback port. It counts only on a request the identity proof let
+// through (src/tailnet-proof.js: the serve entry's secret, a connection
+// owned by tailscaled, tailscaled's own whois; `tailscale.gate`, made in
+// src/server/tailscale.js and asked for every request in src/server/app.js).
+// No gate (the proof is not possible here), no identity: such devices pair.
 export function ownerIdentity(req, tailscale) {
-  if (!tailscale?.ownerLogin || !tailscale.host || tailscale.noIdentity) return false
+  if (!tailscale?.ownerLogin || !tailscale.host || tailscale.noIdentity || !tailscale.gate) return false
   if (!loopback(req.socket?.remoteAddress)) return false
   const host = String(req.headers.host || '')
     .toLowerCase()
     .replace(/:\d+$/, '')
-  return host === tailscale.host && req.headers['tailscale-user-login'] === tailscale.ownerLogin
+  const identity = tailscale.gate.identityOf(req)
+  // The owner's login, and the same tailnet user as the one this node belongs to.
+  return (
+    host === tailscale.host &&
+    identity?.login === String(tailscale.ownerLogin).toLowerCase() &&
+    Boolean(tailscale.ownerUserId) &&
+    identity.userId === tailscale.ownerUserId
+  )
 }
 
 // Before every board API and file route: there is one owner, never anonymous guests.
@@ -82,7 +97,15 @@ export function remoteAccess({
   router.get('/api/pairing', (req, res) => {
     const pairing = devices.poll(cookieValue(req, devices.pairCookie))
     if (pairing.state === 'approved') cookie(req, res, devices.cookie, cookieValue(req, devices.pairCookie), DEVICE_IDLE_MS)
-    res.json({ enabled: true, secure: secure(req), access: req.shapewallAccess.kind, pairing })
+    res.json({
+      enabled: true,
+      secure: secure(req),
+      access: req.shapewallAccess.kind,
+      pairing,
+      // This browser is on the computer that runs Shapewall and came in through its tailnet name:
+      // the tailnet identity is never taken from here (src/tailnet-proof.js).
+      ownMachine: Boolean(tailscale?.gate?.ownMachine?.(req)),
+    })
   })
   router.post('/api/pairing', protectedWrite, express.json({ limit: '2kb' }), (req, res) => {
     try {
@@ -129,6 +152,14 @@ export function remoteAccess({
     const access = req.shapewallAccess
     // Express routes are case-insensitive by default; authorization must be too.
     const route = req.path.toLowerCase()
+    // Answering an agent's request to run a command or edit a file: the
+    // settings token from the host's own terminal, whatever the request
+    // looks like, unless it is the owner by proven tailnet identity or a
+    // device the owner paired (its own cookie, approved on the host). A
+    // local program cannot approve its own command by dressing a request up
+    // as coming from somewhere else.
+    if (/\/permissions\//.test(route) && !['identity', 'device'].includes(access.kind) && !settingsTokenOk(req, token))
+      return fail(res, 403, 'host_only', 'Use the settings link on the host computer to approve commands.')
     if (access.kind === 'nobody') {
       if (route.startsWith('/api/')) return fail(res, 401, 'pairing_required', 'Pair this device on the computer running Shapewall.')
       // Only the application shell and public static assets. Captures and data never pass this gate.
@@ -145,8 +176,6 @@ export function remoteAccess({
     } else if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
       if (!sameOriginWrite(req)) return fail(res, 403, 'bad_origin', 'Use the board page itself.')
     }
-    if (access.kind === 'host' && /\/permissions\//.test(route) && !settingsTokenOk(req, token))
-      return fail(res, 403, 'host_only', 'Use the settings link on the host computer to approve commands.')
     if (access.kind !== 'host' && route.startsWith('/api/agent/')) {
       if (noRemoteChat && !route.startsWith('/api/agent/settings'))
         return fail(res, 403, 'remote_chat_disabled', 'Chat from other devices is off (--no-remote-chat).')

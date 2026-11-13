@@ -25,6 +25,7 @@ import {
   startHostedServer,
   tinyPng,
   tokenCall,
+  askAgain,
 } from './hosted-helpers.js'
 import { tempDir } from './helpers.js'
 
@@ -167,6 +168,8 @@ test('making or inviting an admin or owner needs a recent passkey check', async 
   const hosted = await startHostedServer('review-owner', { now: time.now })
   try {
     const owner = await signUp(hosted, { handle: 'oona' })
+    // An owner is always asked; an admin when the workspace says so.
+    askAgain(hosted, owner.workspaceId)
     const member = await signUp(hosted, { handle: 'mia', invite: await invite(owner, owner.workspaceId, 'member') })
     time.advance(11 * 60_000)
     const invites = `/api/workspaces/${owner.workspaceId}/invites`

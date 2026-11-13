@@ -65,6 +65,8 @@ export function cleanDisplayName(value) {
 export function deviceLabel(userAgent) {
   const ua = String(userAgent || '').slice(0, 512)
   if (!ua) return null
+  // The command line, signed in by tailnet identity (src/remote/tailnet-cli.js).
+  if (/^shapewall-cli\b/.test(ua)) return 'Shapewall CLI'
   const browser = /Edg\//.test(ua)
     ? 'Edge'
     : /OPR\//.test(ua)
@@ -203,13 +205,13 @@ export function createAuth({ db, origin, rpId, rpName = 'Shapewall', now = () =>
     return { row, info }
   }
 
-  function storePasskey(userId, info, nickname = '', { viaRecovery = false } = {}) {
+  function storePasskey(userId, info, nickname = '', { viaRecovery = false, tailnetFrom = null } = {}) {
     if (q.get('SELECT id FROM passkeys WHERE id = :id', { id: info.credential.id })) {
       throw new AuthError(409, 'passkey_exists', 'That passkey is already registered.')
     }
     q.run(
-      `INSERT INTO passkeys (id, user_id, public_key, counter, transports, device_type, backed_up, nickname, created_at, recovery_added_at, rp_id)
-       VALUES (:id, :user, :key, :counter, :transports, :device, :backed, :nickname, :at, :recovery, :rp)`,
+      `INSERT INTO passkeys (id, user_id, public_key, counter, transports, device_type, backed_up, nickname, created_at, recovery_added_at, rp_id, tailnet_added_from)
+       VALUES (:id, :user, :key, :counter, :transports, :device, :backed, :nickname, :at, :recovery, :rp, :tailnet)`,
       {
         id: info.credential.id,
         user: userId,
@@ -222,6 +224,7 @@ export function createAuth({ db, origin, rpId, rpName = 'Shapewall', now = () =>
         at: iso(),
         recovery: viaRecovery ? iso() : null,
         rp: rpId,
+        tailnet: tailnetFrom ? String(tailnetFrom).slice(0, 80) : null,
       },
     )
   }
@@ -253,13 +256,13 @@ export function createAuth({ db, origin, rpId, rpName = 'Shapewall', now = () =>
   // no session yet). `check(row)` runs in the same transaction before the
   // passkey is stored and may return { viaRecovery } (a rebind consumes its
   // token there, so a token is used at most once).
-  async function finishAddPasskey(ceremony, response, userId, nickname, { viaRecovery = false, check = null } = {}) {
+  async function finishAddPasskey(ceremony, response, userId, nickname, { viaRecovery = false, tailnetFrom = null, check = null } = {}) {
     const { row, info } = await verifyRegistration(ceremony, response)
     if (!row.user_id || (userId !== null && row.user_id !== userId))
       throw new AuthError(400, 'no_ceremony', 'Start again: the sign-in request expired.')
     transaction(db, () => {
       const extra = check ? check(row) || {} : {}
-      storePasskey(row.user_id, info, nickname, { viaRecovery: extra.viaRecovery ?? viaRecovery })
+      storePasskey(row.user_id, info, nickname, { viaRecovery: extra.viaRecovery ?? viaRecovery, tailnetFrom })
     })
     return { id: info.credential.id, userId: row.user_id, data: row.data }
   }
@@ -320,7 +323,23 @@ export function createAuth({ db, origin, rpId, rpName = 'Shapewall', now = () =>
     return { ...user, trusted: !onHold(key), passkeyId: key.id }
   }
 
-  const onHold = (key) => Boolean(key.recovery_added_at) && now().getTime() - Date.parse(key.recovery_added_at) < RECOVERY_HOLD_MS
+  // `at`: the moment to judge the hold at (now, unless passkeys are off on this server and holds stand still).
+  const onHold = (key, at = null) =>
+    Boolean(key.recovery_added_at) && (at || now()).getTime() - Date.parse(key.recovery_added_at) < RECOVERY_HOLD_MS
+  // On hold, and added by a tailnet session with no passkey check (the first
+  // passkey of an account its tailnet signs in). Until the hold ends, any
+  // tailnet session of the account may take it away again (removeHeldPasskey).
+  const heldByTailnet = (key, at = null) => Boolean(key.tailnet_added_from) && onHold(key, at)
+  const heldPasskeys = (userId, at = null) =>
+    passkeysOf(userId)
+      .filter((key) => heldByTailnet(key, at))
+      .map((key) => ({
+        id: key.id,
+        nickname: key.nickname,
+        addedAt: key.created_at,
+        device: key.tailnet_added_from,
+        onHoldUntil: new Date(Date.parse(key.recovery_added_at) + RECOVERY_HOLD_MS).toISOString(),
+      }))
 
   // ---- Passkey management ----
 
@@ -368,6 +387,44 @@ export function createAuth({ db, origin, rpId, rpName = 'Shapewall', now = () =>
     })
   }
 
+  // "Not you? Remove it": a passkey that a tailnet session added, taken away
+  // while it is still on hold. Unlike removePasskey this needs no passkey
+  // check and no recovery codes, and may leave the account with no passkey:
+  // the account is back where it was before the passkey (its tailnet signs
+  // it in), and nothing else could remove a passkey that somebody else on one
+  // of the person's devices made. Every other passkey still on hold starts
+  // its 24 hours again: someone objected, so nothing added around then is
+  // trusted sooner. Returns the removed passkey's row.
+  function removeHeldPasskey(userId, id, at = null) {
+    return transaction(db, () => {
+      const key = passkeysOf(userId).find((item) => item.id === id)
+      if (!key) throw new AuthError(404, 'unknown_passkey', 'No such passkey.')
+      if (!heldByTailnet(key, at))
+        throw new AuthError(409, 'passkey_not_held', 'That passkey is no longer on hold. Removing it needs a passkey check.')
+      q.run('DELETE FROM passkeys WHERE id = :id AND user_id = :user', { id, user: userId })
+      q.run(
+        'UPDATE passkeys SET recovery_added_at = :at WHERE user_id = :user AND recovery_added_at IS NOT NULL AND recovery_added_at > :since',
+        {
+          at: iso(),
+          user: userId,
+          since: iso(-RECOVERY_HOLD_MS),
+        },
+      )
+      return key
+    })
+  }
+
+  // The operator's way (shapewall hosted admin passkeys): any passkey, also
+  // the last one, with no rule about recovery codes. Returns the row or null.
+  function removePasskeyAsOperator(userId, id) {
+    return transaction(db, () => {
+      const key = passkeysOf(userId).find((item) => item.id === id)
+      if (!key) return null
+      q.run('DELETE FROM passkeys WHERE id = :id AND user_id = :user', { id, user: userId })
+      return key
+    })
+  }
+
   // ---- Recovery codes ----
 
   function newRecoveryCodes(userId) {
@@ -410,28 +467,47 @@ export function createAuth({ db, origin, rpId, rpName = 'Shapewall', now = () =>
 
   // ---- Sessions ----
 
-  // `verified`: the sign-in counts as a fresh passkey check. `via`: passkey
-  // or recovery (a recovery session is never fresh). `device` is a short
-  // label from the User-Agent ("Chrome on macOS"), never the raw header.
-  function createSession(userId, { verified = true, via = 'passkey', device = null, ip = null } = {}) {
+  // `verified`: the sign-in counts as a fresh passkey check. `via`: passkey,
+  // recovery (a recovery session is never fresh) or tailnet (`tailnetLogin`:
+  // the tailnet identity the session came in with; never fresh until a
+  // passkey confirms it). `device` is a short label from the User-Agent
+  // ("Chrome on macOS"), never the raw header.
+  //
+  // A tailnet session is stored with via 'passkey' and its login in
+  // tailnet_login (the column's CHECK predates it, and a build before tailnet
+  // sign-in then reads it as a session that never passed a passkey check).
+  function createSession(userId, { verified = true, via = 'passkey', device = null, ip = null, tailnetLogin = null } = {}) {
     const token = randomToken(32)
+    if (via === 'tailnet' && !tailnetLogin) throw new Error('a tailnet session needs its login')
+    if (via === 'tailnet') via = 'passkey'
+    else tailnetLogin = null
     q.run(
-      `INSERT INTO sessions (token_hash, id, user_id, created_at, last_seen_at, expires_at, verified_at, via, user_agent, ip)
-       VALUES (:hash, :id, :user, :at, :at, :expires, :verified, :via, :device, :ip)`,
+      `INSERT INTO sessions (token_hash, id, user_id, created_at, last_seen_at, expires_at, verified_at, via, user_agent, ip, tailnet_login)
+       VALUES (:hash, :id, :user, :at, :at, :expires, :verified, :via, :device, :ip, :tailnet)`,
       {
-        hash: sha256(token),
+        hash: sessionHash(token, tailnetLogin),
         id: newId('se'),
         user: userId,
         at: iso(),
         expires: iso(SESSION_DAYS * DAY),
-        verified: verified && via === 'passkey' ? iso() : NEVER_VERIFIED,
+        verified: verified && via === 'passkey' && !tailnetLogin ? iso() : NEVER_VERIFIED,
         via,
+        tailnet: tailnetLogin,
         device: device ? String(device).slice(0, 80) : null,
         ip: ip ? String(ip).slice(0, 64) : null,
       },
     )
     return token
   }
+
+  // A tailnet session is stored under the hash of "tailnet:<token>", not of
+  // the token: a build from before tailnet sign-in looks a cookie up by the
+  // hash of the token alone (readSession there), finds nothing, and so can
+  // never use such a session as an ordinary one after a downgrade.
+  const sessionHash = (token, tailnetLogin) => sha256(tailnetLogin ? `tailnet:${token}` : token)
+
+  // How a session came in, as the API and the audit log say it.
+  const viaOf = (row) => (row.tailnet_login ? 'tailnet' : row.via)
 
   // The account's live sessions for the Account page: ids, never hashes.
   function listSessions(userId, currentHash) {
@@ -444,7 +520,7 @@ export function createAuth({ db, origin, rpId, rpName = 'Shapewall', now = () =>
         createdAt: row.created_at,
         lastSeenAt: row.last_seen_at,
         expiresAt: row.expires_at,
-        via: row.via,
+        via: viaOf(row),
         device: row.user_agent || null,
         ip: row.ip || null,
       }))
@@ -462,8 +538,14 @@ export function createAuth({ db, origin, rpId, rpName = 'Shapewall', now = () =>
   // at most once an hour).
   function readSession(token) {
     if (typeof token !== 'string' || token.length < 20 || token.length > 100) return null
-    const hash = sha256(token)
-    const session = q.get('SELECT * FROM sessions WHERE token_hash = :hash', { hash })
+    // An ordinary session by the token's hash; a tailnet session by its own
+    // (never the other way round: the login column must agree with the hash).
+    let hash = sha256(token)
+    let session = q.get('SELECT * FROM sessions WHERE token_hash = :hash AND tailnet_login IS NULL', { hash })
+    if (!session) {
+      hash = sessionHash(token, true)
+      session = q.get('SELECT * FROM sessions WHERE token_hash = :hash AND tailnet_login IS NOT NULL', { hash })
+    }
     if (!session) return null
     if (session.expires_at <= iso() || Date.parse(session.created_at) + SESSION_MAX_DAYS * DAY <= now().getTime()) {
       q.run('DELETE FROM sessions WHERE token_hash = :hash', { hash })
@@ -479,7 +561,7 @@ export function createAuth({ db, origin, rpId, rpName = 'Shapewall', now = () =>
         hash,
       })
     }
-    return { user, session: { ...session, hash } }
+    return { user, session: { ...session, via: viaOf(session), hash } }
   }
 
   const markVerified = (sessionHash) =>
@@ -488,7 +570,7 @@ export function createAuth({ db, origin, rpId, rpName = 'Shapewall', now = () =>
   // sign-in itself) more than ADMIN_IDLE_MS ago.
   const lastAdminSeen = (session) =>
     Math.max(
-      ...[session.admin_seen_at, session.via === 'passkey' ? session.verified_at : null, session.created_at]
+      ...[session.admin_seen_at, session.via !== 'recovery' ? session.verified_at : null, session.created_at]
         .filter(Boolean)
         .map((value) => Date.parse(value)),
     )
@@ -498,7 +580,20 @@ export function createAuth({ db, origin, rpId, rpName = 'Shapewall', now = () =>
     if (now().getTime() - lastAdminSeen(session) < 60_000) return
     q.run('UPDATE sessions SET admin_seen_at = :at WHERE token_hash = :hash', { at: iso(), hash: session.hash })
   }
-  const isFresh = (session) => session.via === 'passkey' && now().getTime() - Date.parse(session.verified_at) <= REAUTH_MS
+  // A passkey check in the last `windowMs` (10 minutes for the fixed core; a
+  // workspace's own window for the groups it switched on). A tailnet session
+  // is fresh once a passkey of the account confirmed it.
+  const isFresh = (session, windowMs = REAUTH_MS) =>
+    session.via !== 'recovery' && now().getTime() - Date.parse(session.verified_at) <= windowMs
+  // Sessions that keep the strict rules whatever a workspace chose: one that
+  // started with a recovery code, and one a passkey started that could not
+  // confirm sensitive actions then (added with a recovery code in the last 24
+  // hours) and that no trusted passkey has confirmed since.
+  const restricted = (session) => session.via === 'recovery' || (session.via === 'passkey' && session.verified_at === NEVER_VERIFIED)
+  // Whether this session itself ever passed a passkey check (at sign-in or since).
+  const passedPasskey = (session) => session.via !== 'recovery' && session.verified_at !== NEVER_VERIFIED
+  const deleteTailnetSessions = (userId) =>
+    q.run('DELETE FROM sessions WHERE user_id = :user AND tailnet_login IS NOT NULL', { user: userId })
   // A recovery session may add a passkey for a short while after signing in.
   const canAddAfterRecovery = (session) => session.via === 'recovery' && now().getTime() - Date.parse(session.created_at) <= RECOVERY_ADD_MS
   const deleteSession = (sessionHash) => q.run('DELETE FROM sessions WHERE token_hash = :hash', { hash: sessionHash })
@@ -514,6 +609,10 @@ export function createAuth({ db, origin, rpId, rpName = 'Shapewall', now = () =>
     listPasskeys,
     renamePasskey,
     removePasskey,
+    removeHeldPasskey,
+    removePasskeyAsOperator,
+    heldPasskeys,
+    isHeldByTailnet: (userId, id, at = null) => passkeysOf(userId).some((key) => key.id === id && heldByTailnet(key, at)),
     newRecoveryCodes,
     recoveryRemaining,
     useRecoveryCode,
@@ -525,6 +624,10 @@ export function createAuth({ db, origin, rpId, rpName = 'Shapewall', now = () =>
     adminIdleExpired,
     touchAdmin,
     isFresh,
+    restricted,
+    passedPasskey,
+    deleteTailnetSessions,
+    passkeyCount: (userId) => passkeysOf(userId).length,
     canAddAfterRecovery,
     deleteSession,
     deleteOtherSessions,

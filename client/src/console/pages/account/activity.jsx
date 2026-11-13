@@ -20,7 +20,9 @@ const SECURITY_LABEL = {
       ? 'Passkey added for the new address'
       : detail.viaRecovery
         ? 'Passkey added after a recovery-code sign-in'
-        : 'Passkey added',
+        : detail.viaTailnet
+          ? 'First passkey added in a tailnet session (on hold for 24 hours)'
+          : 'Passkey added',
   rebind_started: () => 'Started moving your sign-in to a new address',
   passkey_removed: () => 'Passkey removed',
   passkey_renamed: () => 'Passkey renamed',

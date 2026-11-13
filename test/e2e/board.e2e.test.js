@@ -78,7 +78,13 @@ async function goLive(page, target, viewport) {
   await page.click(frame)
   // A card tapped as a thumbnail flies into view first, and may go live on its own.
   const openLive = `[data-sw-open-live="${target}|${viewport}"]`
-  await page.waitForSelector(`${openLive}, ${frame}[data-sw-live="ready"]`, { timeout: 15000 })
+  // (On a touch screen the page bar is compact: Open live is in its More menu.)
+  const more = `[data-sw-frame-more="${target}|${viewport}"]`
+  await page.waitForSelector(`${openLive}, ${more}, ${frame}[data-sw-live="ready"]`, { timeout: 15000 })
+  if (!(await page.locator(openLive).count()) && (await page.locator(more).count())) {
+    await page.click(more)
+    await page.waitForSelector(openLive)
+  }
   if (await page.locator(openLive).count()) await page.click(openLive)
   await page.waitForSelector(`${frame}[data-sw-live="ready"]`, { timeout: 15000 })
   // The sandbox is in place: no scripts and an opaque origin, so the board
@@ -682,6 +688,7 @@ test('static export: read-only board on a plain file server', async () => {
     await page.goto(`http://127.0.0.1:${fileServer.address().port}/`)
     await page.waitForSelector('[data-sw-node="home"]')
     assert.equal(await page.locator('[data-sw-comment-mode]').count(), 0, 'no commenting in a static export')
+    assert.equal(await page.locator('[data-sw-tool="draw"]').count(), 0, 'no Draw tool either')
     assert.equal(await page.locator('[data-sw-capture]').count(), 0)
     // Comments made earlier are in the export (filter: all).
     await page.click('button:has-text("All")')

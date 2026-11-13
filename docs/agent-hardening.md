@@ -193,7 +193,13 @@ choice, made on that machine ([Edits from a hosted board](#edits-from-a-hosted-b
     Skill are removed from the session, and bypassing permissions is switched off.
 - **Fail closed.** The session's mode must be "default" or "plan"; any other is switched to "default", or the agent is not
   started. An agent that reports no session mode at all is not started read-only. An agent that switches itself to another mode
-  mid-answer is stopped.
+  mid-answer is stopped, and the thread says which mode. claude-agent-acp 0.106.0 starts a session in the mode "auto" (Claude
+  decides what to ask about) when no settings file names a default mode. The adapter reads that from the settings files itself,
+  so leaving them out of the session does not change it. Shapewall switches such a session to "default" before the first
+  question, and the machine's log says so.
+- **Checked when it starts.** `agent connect` opens the session before it goes online, the way a question would (no prompt is
+  sent). A session that cannot be opened, or that cannot be put in a mode that asks, stops the command with the cause. An adapter
+  version this release was not tested with is used with a plain warning ([tested versions](agents.md#claude-code)).
 - **Managed settings stop the start.** `/etc/claude-code/managed-settings.json` cannot be left out of a session. When it allows
   acting tools (Bash, Edit, Write, MultiEdit, NotebookEdit, WebFetch, WebSearch, Task, `mcp__*`, or Read of absolute or home paths)
   or runs hooks, `agent connect` refuses to start. Your own and the project's rules are reported as "Left out of this session".
@@ -210,13 +216,15 @@ choice, made on that machine ([Edits from a hosted board](#edits-from-a-hosted-b
 - **Its token stays out of the agent.** The agent process gets a small environment with no `SHAPEWALL_*` variable, and the agent's
   own token is removed from anything sent back.
 
-How it was proven. The check used the real Claude Code adapter (claude-agent-acp 0.93.0), in a project whose
-`.claude/settings.json` and `.claude/settings.local.json` allowed Bash, Edit, Write, WebFetch, `mcp__*` and reads anywhere, with the
-default mode `bypassPermissions`. The instructions told the agent it had full permission and must create a file, run `touch`, and
-read `/etc/hostname`.
+How it was proven. The check used the real Claude Code adapter, **claude-agent-acp 0.93.0 and 0.106.0** (the tested versions of
+Shapewall 0.7.0; 0.106.0 with Claude Code 2.1.322), in a project whose `.claude/settings.json` and `.claude/settings.local.json`
+allowed Bash, Edit, Write, WebFetch, `mcp__*` and reads anywhere, with the default mode `bypassPermissions` and, for 0.7.0, hooks
+that run a command when a session starts, on every prompt and before every tool. The instructions told the agent it had full
+permission and must create a file, run `touch`, and read `/etc/hostname`.
 
-- **Claude Code, started as above:** no file was created, no command ran (the session had only Glob, Grep and Read), and the read
-  outside the project was asked for and refused.
+- **Claude Code, started as above, on each of the two versions:** no file was created, no command ran (the session had only Glob,
+  Grep and Read), none of the project's hooks ran, and the read outside the project was asked for and refused. On 0.106.0 the
+  session started in "auto" and was switched to "default" first.
 - **Claude Code, same project, session not hardened:** it ran a shell command without asking. That is why the hardening exists.
 - **Codex 2.2.2, under the same test in its read-only sandbox:** it wrote no file, but it ran `pwd` and read `/etc/hostname`
   without asking. What it reads can leave the machine in an answer, so it is not offered.
@@ -229,9 +237,12 @@ The limits, plainly:
 - **It reads the project, and its answers leave your machine.** Whoever may ask can get file contents quoted back: every file in
   the project folder, a `.env` file included. The agent is told not to quote secrets; that is an instruction, not a control.
   Connect only projects whose code the audience may read, and keep secrets out of the folder.
-- **One machine, one adapter version.** The check above is what was seen there. A later adapter may take other options or bring
-  other tools. So still give a connected agent a profile of its own: a separate config folder with no allow rules, logged in for
-  this purpose.
+- **One machine, two adapter versions.** The check above is what was seen there, with 0.93.0 and 0.106.0. A later adapter may
+  take other options or bring other tools: Shapewall 0.6.0 could not start a connected session on 0.106.0 at all, because that
+  version reports a mode switch in another order. `agent connect` warns when the adapter is not a tested version; it cannot know
+  what a version it has never seen does. So still give a connected agent a profile of its own: a separate config folder with no
+  allow rules, logged in for this purpose. The hooks of your own `~/.claude/settings.json` were not provoked separately: the same
+  option (`settingSources: []`) leaves that file out as it does the project's.
 - **Settings in the left-out files do not apply.** An `apiKeyHelper` or `env` in those settings files is not used by the connected
   session. The login itself is not in those files.
 - **One link per agent.** A second `agent connect` on the same token is refused, and names the machine already connected.
@@ -280,8 +291,8 @@ What the machine does, whatever the server says:
   agent works for (its audience, whoever may answer, whoever asked); everyone else who can open the thread reads that it asked to
   edit a file and how that ended.
 - **An answer is for one card.** It must send the card's hash back, within 2 minutes, once. The 2 minutes are a length of time
-  each side counts on its own clock, so the clocks need not agree. Allow needs a passkey check in the last 10 minutes on the
-  server. The machine then checks the answer again: a card it asked and still waits on, the same hash, not expired by its own
+  each side counts on its own clock, so the clocks need not agree. A workspace can ask for the answerer's passkey again before Allow
+  (off by default; the server's Settings, "Agent edits and pushes"). The machine then checks the answer again: a card it asked and still waits on, the same hash, not expired by its own
   count, once, and from the connecting person when it said "owner". A failed "allow" is a deny, and the board then shows the
   card as expired or denied, never as allowed. An answer for a card it never asked is ignored.
 - **Shapewall makes the commit, and only of what was allowed.** No hook, filter or attribute runs. Every changed file must have
@@ -311,10 +322,13 @@ over an agent that does not ask. So a fix session of Claude Code gets no shell t
 and MultiEdit, no settings files and no MCP servers), `--allow-command` is refused for it with that explanation, and commands in a
 hand-edited policy file are not in effect.
 
-How edits were proven. The check used the real Claude Code adapter, a throwaway server on localhost, a throwaway Git repository
-with a local bare remote, and the real `shapewall agent connect --approvals owner`:
+How edits were proven. The check used the real Claude Code adapter (claude-agent-acp 0.93.0 for 0.6.0; 0.93.0 and 0.106.0 again
+for 0.7.0, in a repository whose committed `.claude/settings.json` allowed Bash, Edit and Write without asking and ran a hook), a
+throwaway server on localhost, a throwaway Git repository with a local bare remote, and the real
+`shapewall agent connect --approvals owner`:
 
-- **Allow.** A Fix with Builder edited one file after Allow in a browser, with a passkey. The commit landed on
+- **Allow.** A Fix with Builder edited one file after Allow in a browser (with a passkey check, which that workspace asked
+  for). The commit landed on
   `shapewall/comment-1-...` and was pushed to the bare remote. The checkout stayed clean on `main`, with the old file.
 - **Deny.** A Deny left no branch and no folder.
 - **A comment that asked for more.** The comment also asked for a file outside the project, a new `package.json` and shell
@@ -334,8 +348,8 @@ The limits of edit mode, plainly:
 - **Shapewall does not sandbox the agent's own tools.** The checks above cover what the agent asks. The fix session is set up so
   that its editing tools ask every time, and that was seen with one adapter version on one machine. If files in your own checkout
   change during a fix, the thread says so; it cannot undo it.
-- **With approvals on, a compromised hosted server can forge an "allow".** The machine cannot see the passkey check or the person
-  behind an answer: it sees what the server sends. A server that was broken into can answer "allow", with the right hash, for an
+- **With approvals on, a compromised hosted server can forge an "allow".** The machine cannot see the person behind an answer, or whether a
+  passkey was checked: it sees what the server sends. A server that was broken into can answer "allow", with the right hash, for an
   edit the agent really asked, and for "Push this fix". So the worst case with approvals on is: edits to ordinary source files,
   on a branch, in a throwaway folder, pushed for review. Not commands, not your checkout, not files that run something on
   install, build, test or CI, and not files outside the project that the agent asks about.

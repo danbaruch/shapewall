@@ -56,6 +56,86 @@ hosted boards and static exports always use an opaque frame. Hosted live HTML ca
   of a command line.
 - The MCP server takes ids only; no tool can read an arbitrary path. `--read-only` and `--no-capture` limit what an agent can do.
 
+## Signing in to a team server
+
+- **Signed in with the right role is enough.** Approving an agent or a machine, tokens, share links, exports, an agent's edit and
+  push cards, members and roles: your role decides, with no second prompt.
+- **A small fixed core always asks for the passkey again** (a check in the last 10 minutes): adding or removing a passkey, new
+  recovery codes, linking a tailnet login, deleting your account or a workspace, making, changing or removing an owner, moving
+  your sign-in to the server's new address, and making the settings below weaker.
+- **A workspace can ask for more.** An owner switches groups on in Settings ("Ask for a passkey again"): agent edits and pushes,
+  agents and machines, tokens and share links, members and roles, exports and deletes; how long one check counts; and the admin
+  idle rule. Off by default. Every change is in the audit log with the value before and after.
+- **Recovery-code sessions stay restricted** whatever a workspace chose, and every action is audited as before.
+- **On a tailnet sign-in server Tailscale is the only sign-in, and the tailnet is the trust boundary.** No passkey is asked
+  for or offered there by default. Anything running as you on one of your tailnet devices can act as you, so lock your
+  devices and keep the tailnet to people and machines you trust. The few things Shapewall always asks about (deleting a
+  workspace or an account, changing owners) take a typed name in the console and `--yes` on the command line: deliberateness,
+  not a second factor. An operator who wants one switches passkeys on (`--tailnet-passkeys`, or `shapewall hosted admin
+passkeys on`); the points below about passkeys on a tailnet server apply then.
+- **Tailnet sign-in is opt-in** (`shapewall hosted --tailscale --tailnet-sign-in`). A tailnet user who arrives through `tailscale
+serve` is signed in as the account linked to their tailnet login, with no passkey. Each login is its own account, and an admin
+  still invites each one with a role: being on the tailnet alone gives nothing, because a tailnet also holds family devices,
+  contractors and shared nodes, and because roles and the audit log need to know who did what.
+- **The identity headers are believed only where they can be.** Every one of these must hold: the request carries a secret path
+  that only the serve entry the server made adds; the connection's other end is a socket owned by root (read from the kernel's
+  socket table, on Linux); tailscaled's own whois gives the request's tailnet address to that login, on a user's untagged
+  device; the request does not come from the server's own machine; exactly one clean login header. Never on direct loopback
+  requests, raw TCP forwards, Funnel traffic, or with the flag
+  off. The server refuses to start with the flag, and suspends it while running, when tailscaled is in userspace-networking
+  mode, older than 1.98, runs its own SOCKS5 or HTTP proxy, or when the server is in a container. A tailnet session works only
+  together with the identity it was made for; its cookie is worth nothing off the tailnet. Tagged devices and shared nodes
+  without a user are never signed in.
+- **The server's own machine is never signed in by its tailnet identity.** Any program on that machine can ask tailscaled for
+  the server's address and would arrive with the machine owner's login, through the proxy, with nothing to tell it from the
+  owner. So a request from the machine's own tailnet addresses is refused, and the page says why. There the owner uses
+  another tailnet device, or the operator's commands with the data folder (`shapewall hosted claim`, `shapewall hosted admin
+members|invites|projects|passkeys`), where reading the data folder is the proof. On a local board the host uses `localhost`.
+- **An identity is per device, not per person.** Anything running as you on a tailnet device of yours can act as you in a
+  tailnet session. So the fixed core asks for a passkey, a first passkey is on hold for 24 hours, a passkey account is linked
+  to a tailnet login only when you tick the box, and a workspace can require a passkey for approving machines, making API
+  tokens and inviting or making admins (one switch covers the three, because each leads to the others). While a first passkey
+  is on hold every page of the account shows where it was added, and any tailnet session of the account removes it with one
+  button, no passkey needed; after that the server's operator can (`shapewall hosted admin passkeys`). Several OS users of
+  one tailnet device all count as that device's owner.
+- **An account is held to the tailnet user.** The server keeps Tailscale's own id of the user with a linked login and requires
+  it on every request, so a login that is later given to someone else, or that reads the same on a node shared in from another
+  tailnet, signs nobody in. A device whose key expired is nobody.
+- **The local board uses the same proof.** `shapewall serve --tailscale` lets the owner's other devices in by tailnet identity
+  only with it, and approving an agent's command needs the host's settings token, a paired device or that proof: a local
+  program cannot approve its own command with a forged header.
+- **The limit.** Root on the server's machine, and whoever may change tailscaled's serve config there, are trusted: either can
+  pretend to be anyone (tailscaled's environment, which an unprivileged server cannot read, is part of that). The checks are
+  tested with a stand-in proxy, and were run against a real tailscaled with a second device; a tagged device, the suspension
+  on a changed serve config and a browser sign-in were not: [what was and was not checked](/docs/hosted#what-was-and-was-not-checked-against-real-tailscale).
+
+Details: [Signing in](/docs/hosted#signing-in).
+
+## Usage and activity on a team server
+
+- **A usage record holds numbers and ids, never text.** Each agent turn records who asked, which agent on which machine, how it
+  ended, how long it took, tool calls counted by type, and the tokens and cost the agent itself reported. Never the question, the
+  answer, a file name from a step, file content or a diff. Nothing is estimated: a number an agent did not report shows as "Not
+  reported", not zero.
+- **Who reads usage is decided by the server on every request.** Owners and admins see the workspace. A member sees their own
+  turns and every turn of an agent they connected. Viewers, share link guests and project tokens see nothing. Exports, a turn
+  opened by its id and saved views follow the same rule: a link carries filters, never access.
+- **A dashboard layout is its maker's own.** How a person arranges the Usage dashboard is saved for that person in that
+  workspace, and no route reads or writes anyone else's. A layout says which widgets go where and nothing about usage; the
+  server checks it before storing it and again before handing it back, and drops what it does not know. A saved view may carry
+  a layout for whoever opens its link, and only an owner sets the layout a workspace starts from (audited).
+- **Activity is the audit log, read by person.** Settings with the value before and after, agents, approvals, tokens and
+  exports. Admins and owners read everyone's; anyone else only their own.
+- **Sign-ins and devices are each person's own.** They cover every workspace a person is in, so no owner or admin sees them
+  for someone else unless the server's operator switches that on for a single-team server (`--owners-see-sign-ins`), and then
+  only owners do. The access review lists every person, agent, token
+  and share link with who made it and when it was last used.
+- **What the log is not.** The application cannot edit or delete an entry, but the log is not tamper-evident against someone with
+  the database file. Keep backups if you need to compare.
+
+Details: [Usage and activity](/docs/hosted#usage-and-activity). The live demo shows both pages with made-up numbers:
+[Usage](/demo/console.html#/w/ws_4c756d000000000000000001/usage) and [Activity](/demo/console.html#/w/ws_4c756d000000000000000001/activity).
+
 ## What is up to you
 
 - **Capture with test data.** Screenshots show exactly what the page showed. Live HTML drops secrets it can recognise, but a screenshot
@@ -89,7 +169,8 @@ What these protections do not cover:
 - **Edits from a hosted board are a choice made on the code machine.** Who may make someone else's machine change files? By
   default, nobody. `shapewall agent connect --approvals owner` (or `admins`) switches it on, on that machine only, and the server
   can only narrow it. A fix is then made on a new branch in a folder of its own, never in the checkout. Each edit is checked on
-  the machine, shown on the board as a card with the full diff, and allowed by a person with a recent passkey check. The machine
+  the machine, shown on the board as a card with the full diff, and allowed by a person who may answer that agent (a workspace can ask for
+  their passkey again first). The machine
   checks every answer again, and keeps the commit only if it is exactly what was allowed. Commands are not offered for Claude
   Code in this release: its fix session has no shell tool. The limit: Shapewall does not sandbox the agent's own tools, and with
   approvals on, a compromised server can forge an "allow" for an edit the agent really asked. The worst case is then edits to

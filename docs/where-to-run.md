@@ -7,9 +7,10 @@ Shapewall has two shapes. Pick by who needs the board and when, not by how big t
 | One person, reviewing your own project          | `npx shapewall serve` in the project, next to its dev server | You, on this machine                 | No: start it when you work |
 | One person, also on your phone or second laptop | `npx shapewall serve --tailscale`                            | Your own devices on your tailnet     | No                         |
 | A team, or you and your agents around the clock | `shapewall hosted --tailscale` on a machine that stays on    | Everyone you invite, on your tailnet | Yes                        |
+| The same, with no passkeys to set up            | `shapewall hosted --tailscale --tailnet-sign-in`             | Tailnet users you invite by login    | Yes                        |
 | A team with people outside your tailnet         | `shapewall hosted` behind your own domain                    | Everyone you invite, from anywhere   | Yes                        |
 
-The first two are the same local board. The last two are the same hosted server, reached two ways. Nothing about a project changes
+The first two are the same local board. The others are the same hosted server, reached in different ways. Nothing about a project changes
 when you move between them: the config, the captures and the comments are the same files.
 
 ## The local board
@@ -45,6 +46,86 @@ name, with a real certificate and nothing open to the internet. Add `--funnel` t
 and sign-in stay private. When people outside your tailnet need accounts, put the server behind your own domain instead:
 `shapewall hosted --setup --domain app.example.com` writes a Docker Compose and Caddy folder for that
 ([Own domain deployment](hosted.md#own-domain-deployment-mode-2)).
+
+### How people sign in
+
+| How you reach it             | Sign-in                                                                                    |
+| ---------------------------- | ------------------------------------------------------------------------------------------ |
+| Local board                  | None. It is yours, on your machine                                                         |
+| Over an SSH tunnel           | A local board: none, as if you sat at that machine. A hosted server: a passkey each        |
+| Tailnet, `--tailnet-sign-in` | Your Tailscale account, on every tailnet device of yours. No passkey. An admin invites you |
+| Own domain                   | A passkey each                                                                             |
+
+On the hosted server, being signed in with the right role is enough for everything in a workspace. A few things always ask
+(deleting an account or a workspace, changing owners): for a passkey where passkeys are the sign-in, and for a typed name on
+a tailnet sign-in server, where Tailscale is the only sign-in and the tailnet is the trust boundary (anything running as you
+on one of your tailnet devices can act as you; lock your devices and keep the tailnet to people and machines you trust). A
+tailnet server can also allow passkeys (`--tailnet-passkeys`). Details: [Signing in](hosted.md#signing-in).
+
+### Over SSH
+
+No Tailscale? Tunnel one port over SSH.
+
+```sh
+shapewall hosted --data ./hosted-data --port 4700 --origin http://shapewall.localhost:4700   # on the server; loopback, no TLS
+ssh -L 4700:127.0.0.1:4700 you@server                                                     # on your machine
+# then open http://shapewall.localhost:4700
+```
+
+A hosted server reached this way uses passkey accounts. `shapewall.localhost` is a name browsers send to your own machine and
+treat as a secure context, so passkeys work, and it keeps the server's cookies to itself; plain `http://localhost:4700` works
+too, but there the session cookie is also sent to any other web server on your machine's localhost. Everyone who tunnels in
+shares `127.0.0.1` for rate limits and in the audit log. A local board reached this way (`shapewall serve` on the remote
+machine, the same kind of tunnel) sees you as the person at that machine: no sign-in, and so not something to tunnel for
+other people. More: [Over SSH](hosted.md#over-ssh).
+
+With tailnet sign-in the server believes Tailscale's identity headers only on requests that provably came through the serve
+entry it made (a secret path, a connection owned by tailscaled, tailscaled's own whois), never on direct loopback requests,
+raw forwards or Funnel traffic, never for a request from the server's own machine (use a passkey or another device there),
+and each tailnet login is its own account: being on the tailnet alone puts nobody in a
+workspace. It needs Linux, Tailscale 1.98 or newer in its normal (TUN) mode, and a server that is not in a container. A
+tailnet identity is per device, not per person: anything running as you on a tailnet device of yours can act as you there.
+See [Tailnet sign-in](hosted.md#tailnet-sign-in).
+
+### From your coding agent
+
+On a server with tailnet sign-in, a terminal or a coding agent on a tailnet machine needs no browser: the server knows the
+machine's tailnet user.
+
+An owner, from nothing to a first project. On the machine that runs the server (the data folder is the proof; `--login`
+says whose server it is):
+
+```sh
+shapewall hosted --data ./hosted-data --tailscale --tailnet-sign-in &
+shapewall hosted claim --data ./hosted-data --login ada@example.com --workspace-name "Team"   # no browser
+```
+
+Then on another tailnet device of the owner's (the server's own machine is never signed in by its tailnet identity):
+
+```sh
+shapewall admin projects create "My site" --remote https://board.example.ts.net
+shapewall login --remote https://board.example.ts.net                        # no code, no browser
+shapewall capture && shapewall push --remote https://board.example.ts.net
+shapewall admin invites create --login ben@example.com --role admin --remote https://board.example.ts.net
+```
+
+Needs a browser: nothing now. Later, adding a passkey, for the few things that always ask for one (a first passkey can confirm
+them 24 hours after it is added, so add it early).
+
+A member, on their own tailnet machine, after an admin invited their login:
+
+```sh
+shapewall join --remote https://board.example.ts.net                         # takes the invite; the role is the invite's
+shapewall agent connect --remote https://board.example.ts.net --project my-site --name "Builder"
+```
+
+Needs a browser: nothing for an admin, unless the workspace switched on "Approve command line logins in the browser" (then the
+code, the browser and a passkey). A member or viewer may not connect a machine by themselves: `agent connect` shows a code
+for an admin to approve, as on any server.
+
+On a server without tailnet sign-in these commands change nothing: `login` and `agent connect` use the code and the browser,
+`join` says an account needs a passkey (made in the browser), and `admin` points at the console. The rules, and every refusal:
+[From your coding agent](hosted.md#from-your-coding-agent).
 
 ### Where the work happens
 
