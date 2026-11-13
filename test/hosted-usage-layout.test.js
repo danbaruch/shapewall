@@ -231,10 +231,10 @@ test('what is stored is a checked layout: junk is refused, unknown widgets and i
     mixed.json.layout.items.map((item) => [item.id, item.x, item.y, item.w, item.h]),
     [
       ['time', 0, 0, 12, 6],
-      ['tile_tokens', 0, 6, 4, 2],
-      ['breakdown', 6, 6, 6, 5],
+      ['breakdown', 0, 6, 6, 5],
+      ['tile_tokens', 6, 6, 4, 2],
     ],
-    'the overlap was pulled apart too',
+    'the overlap was pulled apart too: the widgets flow in their reading order',
   )
   assert.deepEqual(mixed.json.layout.items[0].options, {
     metric: 'tokens',
@@ -245,7 +245,7 @@ test('what is stored is a checked layout: junk is refused, unknown widgets and i
     brush: true,
     view: 'chart',
   })
-  assert.deepEqual(mixed.json.layout.items[2].options, { by: 'project', metric: 'chart', rows: 8, share: true, view: 'chart' })
+  assert.deepEqual(mixed.json.layout.items[1].options, { by: 'project', metric: 'chart', rows: 8, share: true, view: 'chart' })
   const text = stored().layout
   assert.doesNotMatch(text, /script|onerror|DROP|clock|evil|html|onload/)
   assert.deepEqual(JSON.parse(text), mixed.json.layout)

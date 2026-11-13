@@ -7,9 +7,11 @@
 //
 // A layout is { v, items }: one item per widget on a grid of 12 columns,
 // { id, type, x, y, w, h, options }. Rows are a fixed height; a widget is
-// `h` rows tall. Nothing overlaps and nothing floats: items always compact
-// upward. Narrower screens show the same layout reflowed to fewer columns
-// (reflow), never a second stored layout.
+// `h` rows tall. The widgets' order and sizes are the layout: their places
+// follow by flowing them into the grid (flow), so nothing overlaps, nothing
+// floats, and a change never leaves a hole the widgets after it fit.
+// Narrower screens show the same layout reflowed to fewer columns (reflow),
+// never a second stored layout.
 //
 // A list, a breakdown and the budgets are as tall as what they hold (so many
 // rows, so many projects) until someone sizes them by hand: such an item
@@ -51,7 +53,9 @@ const bool = (fallback) => ({ kind: 'bool', fallback })
 const pick = (values, fallback) => ({ kind: 'enum', values, fallback })
 const some = (values, fallback) => ({ kind: 'set', values, fallback })
 
-const TILE = { w: 4, h: 2, minW: 2, maxW: 4, minH: 2, maxH: 2 }
+// (`oldMinW`: the least a stored layout may still hold from before the least
+// was raised; it reads as the least there is now.)
+const TILE = { w: 4, h: 2, minW: 3, oldMinW: 2, maxW: 4, minH: 2, maxH: 2 }
 const CHART = { w: 6, h: 5, minW: 4, maxW: 12, minH: 4, maxH: 8 }
 const LIST = { w: 3, h: 4, minW: 3, maxW: 6, minH: 3, maxH: 9 }
 const VIEW = pick(['chart', 'table'], 'chart')
@@ -191,32 +195,52 @@ const firstHit = (placed, item) => placed.find((other) => collides(other, item))
 // printed page and a screen reader take them in.
 export const readingOrder = (items) => [...items].sort(byPlace)
 
-// Every item as far up as it goes, in reading order: no overlaps, no gaps.
-export function compact(items) {
+// The widgets flowed into the grid in the order given, like words on a
+// page: each goes to the first place after the one before it (row by row
+// from the top, left to right) where it fits. So nothing overlaps, nothing
+// floats, and a widget that is hidden, moved or resized never leaves a hole
+// that the widgets after it fit: they close up. The order is the layout;
+// the places follow from it, so flowing a flowed layout changes nothing.
+export function flow(items, cols = LAYOUT_COLS) {
   const placed = []
-  for (const given of readingOrder(items)) {
-    const item = { ...given }
-    while (item.y > 0 && !firstHit(placed, { ...item, y: item.y - 1 })) item.y -= 1
-    let hit
-    while ((hit = firstHit(placed, item))) item.y = hit.y + hit.h
-    placed.push(item)
+  let from = { x: 0, y: 0 }
+  for (const given of items) {
+    const w = Math.min(given.w, cols)
+    let spot = null
+    for (let y = from.y; !spot; y += 1)
+      for (let x = y === from.y ? from.x : 0; x + w <= cols && !spot; x += 1) {
+        const at = { ...given, w, x, y }
+        if (!firstHit(placed, at)) spot = at
+      }
+    placed.push(spot)
+    // The next one starts after this one (on its row, to its right).
+    from = { x: spot.x + 1, y: spot.y }
   }
-  // Always in reading order, so the same arrangement is the same stored text.
-  return readingOrder(placed)
+  return placed
 }
-// One item put where it was asked to go; whatever was there moves down.
-function settle(items, id) {
-  const pinned = items.find((item) => item.id === id)
-  if (!pinned) return compact(items)
-  const placed = [{ ...pinned }]
-  for (const given of readingOrder(items)) {
-    if (given.id === id) continue
-    const item = { ...given }
-    let hit
-    while ((hit = firstHit(placed, item))) item.y = hit.y + hit.h
-    placed.push(item)
+// A layout's items tidied: flowed in their reading order. (A tidy layout
+// comes out as it went in, so what is stored reads back the same.)
+export const compact = (items, cols = LAYOUT_COLS) => flow(readingOrder(items), cols)
+
+// Where a widget dragged to a point of the grid (in columns and rows, the
+// pointer's place) goes in the order: in front of the widget under the
+// point when it is dragged back, after it when it is dragged on; over empty
+// space, after every widget that starts before that place. Returns the id
+// of the widget it goes in front of (null: last). `items`: the widgets
+// where they are drawn.
+export function dropBefore(items, id, px, py) {
+  const order = readingOrder(items)
+  const self = order.find((item) => item.id === id)
+  if (!self) return null
+  const others = order.filter((item) => item.id !== id)
+  const under = others.find((item) => px >= item.x && px < item.x + item.w && py >= item.y && py < item.y + item.h)
+  if (under) {
+    const on = order.indexOf(under) > order.indexOf(self)
+    return on ? (others[others.indexOf(under) + 1]?.id ?? null) : under.id
   }
-  return compact(placed)
+  const x = Math.floor(px)
+  const y = Math.floor(py)
+  return others.find((item) => item.y > y || (item.y === y && item.x > x))?.id ?? null
 }
 
 const sizeOf = (type) => WIDGETS[type].size
@@ -260,13 +284,13 @@ function cleanItem(given, seen, counts) {
   if (!known(type) || typeof id !== 'string' || !ID.test(id) || seen.has(id)) return null
   const size = sizeOf(type)
   if (![x, y, w, h].every(whole)) return null
-  if (w < size.minW || w > size.maxW || h < size.minH || h > size.maxH) return null
+  if (w < (size.oldMinW ?? size.minW) || w > size.maxW || h < size.minH || h > size.maxH) return null
   if (x < 0 || x + w > LAYOUT_COLS || y < 0 || y > LAYOUT_LIMITS.rows) return null
   const count = counts.get(type) || 0
   if (count >= (WIDGETS[type].many ? LAYOUT_LIMITS.copies : 1)) return null
   counts.set(type, count + 1)
   seen.add(id)
-  const item = { id, type, x, y, w, h, options: cleanOptions(type, given.options) }
+  const item = { id, type, x, y, w: Math.max(w, size.minW), h, options: cleanOptions(type, given.options) }
   // Whether its height still follows what it holds. A layout stored before this was kept: it does while it has the default height.
   if (WIDGETS[type].auto) item.auto = typeof given.auto === 'boolean' ? given.auto : h === size.h
   return item
@@ -374,48 +398,85 @@ export function fitLayout(layout, facts = {}) {
 const withItems = (layout, items) => ({ v: LAYOUT_VERSION, items })
 const find = (layout, id) => layout.items.find((item) => item.id === id)
 
-// Puts a widget at a column and a row. What was there moves down.
-export function moveItem(layout, id, x, y) {
-  const item = find(layout, id)
-  if (!item) return layout
-  const next = { ...item, x: clamp(Math.round(x), 0, LAYOUT_COLS - item.w), y: clamp(Math.round(y), 0, LAYOUT_LIMITS.rows) }
-  return withItems(
-    layout,
-    settle(
-      layout.items.map((other) => (other.id === id ? next : other)),
-      id,
-    ),
-  )
+// Puts a widget in front of another in the order (null: last); everything
+// flows again from there.
+export function placeBefore(layout, id, before) {
+  const order = readingOrder(layout.items)
+  const item = order.find((other) => other.id === id)
+  if (!item || before === id) return layout
+  const rest = order.filter((other) => other.id !== id)
+  const at = before === null ? rest.length : rest.findIndex((other) => other.id === before)
+  if (at < 0) return layout
+  rest.splice(at, 0, item)
+  const items = flow(rest)
+  return sameLayout(items, layout.items) ? layout : withItems(layout, items)
 }
-// Sizes a widget, inside what its type allows.
+// A widget dragged by its top left corner to a column and a row: it goes
+// where dropBefore says for that corner.
+export function moveItem(layout, id, x, y) {
+  return find(layout, id) ? placeBefore(layout, id, dropBefore(layout.items, id, x + 0.5, y + 0.5)) : layout
+}
+// Sizes a widget, inside what its type allows; the ones after it flow again.
 export function resizeItem(layout, id, w, h) {
   const item = find(layout, id)
   if (!item) return layout
+  // (Never past the right edge from where it is: a corner dragged there stops there.)
   const next = { ...item, ...fitSize(item.type, Math.round(w), Math.round(h), item.x) }
+  if (next.w === item.w && next.h === item.h) return layout
   // A height set by hand stays as it was set.
   if (item.auto && next.h !== item.h) next.auto = false
-  return withItems(
-    layout,
-    settle(
-      layout.items.map((other) => (other.id === id ? next : other)),
-      id,
-    ),
-  )
+  const changed = new Map([[id, next]])
+  // A row stays whole: the widget just to its right gives or takes the width
+  // (when its own sizes allow), and the widgets beside it that were as tall
+  // take the new height, so a resize never opens a hole beside or under it.
+  const row = layout.items.filter((other) => other.id !== id && other.y === item.y)
+  const dw = next.w - item.w
+  // The tiles are one row of numbers: they share one width (three or four to a row).
+  const tile = WIDGETS[item.type]?.group === 'tile'
+  if (dw && tile)
+    for (const other of layout.items)
+      if (other.id !== id && WIDGETS[other.type]?.group === 'tile') changed.set(other.id, { ...other, w: next.w })
+  const right = dw && !tile ? row.find((other) => other.x === item.x + item.w) : null
+  if (right) {
+    const size = sizeOf(right.type)
+    const w2 = right.w - dw
+    if (w2 >= size.minW && w2 <= size.maxW) changed.set(right.id, { ...right, w: w2 })
+  }
+  let items = flow(readingOrder(layout.items).map((other) => changed.get(other.id) ?? other))
+  if (next.h !== item.h) {
+    // (Beside it once it has its new width: a neighbour that went on to the next row keeps its height.)
+    const placed = items.find((other) => other.id === id)
+    const beside = (other) => {
+      const size = sizeOf(other.type)
+      return other.id !== id && other.y === placed.y && other.h === item.h && next.h >= size.minH && next.h <= size.maxH
+    }
+    if (items.some(beside))
+      items = flow(items.map((other) => (beside(other) ? { ...other, h: next.h, ...(other.auto ? { auto: false } : {}) } : other)))
+  }
+  return withItems(layout, items)
 }
 const overlapsColumns = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w
-// One step with an arrow key. Left and right: one column. Up and down: past
-// the widget above or below (one row would only fall back into place).
+// One step with an arrow key. Left and right: one place back or on in the
+// order (beside it, they change places). Up and down: in front of the
+// widget above it, or after the widget below it.
 export function stepMove(layout, id, direction) {
-  const item = find(layout, id)
-  if (!item) return layout
-  if (direction === 'left' || direction === 'right') return moveItem(layout, id, item.x + (direction === 'left' ? -1 : 1), item.y)
-  const others = layout.items.filter((other) => other.id !== id && overlapsColumns(other, item))
-  if (direction === 'up') {
-    const above = others.filter((other) => other.y + other.h <= item.y).sort((a, b) => b.y + b.h - (a.y + a.h) || a.x - b.x)[0]
-    return above ? moveItem(layout, id, item.x, above.y) : layout
-  }
-  const below = others.filter((other) => other.y >= item.y + item.h).sort((a, b) => a.y - b.y || a.x - b.x)[0]
-  return below ? moveItem(layout, id, item.x, below.y + below.h) : layout
+  const order = readingOrder(layout.items)
+  const at = order.findIndex((other) => other.id === id)
+  if (at < 0) return layout
+  const item = order[at]
+  if (direction === 'left') return at > 0 ? placeBefore(layout, id, order[at - 1].id) : layout
+  if (direction === 'right') return at < order.length - 1 ? placeBefore(layout, id, order[at + 2]?.id ?? null) : layout
+  const others = order.filter((other) => other.id !== id && overlapsColumns(other, item))
+  const other =
+    direction === 'up'
+      ? others.filter((one) => one.y + one.h <= item.y).sort((a, b) => b.y + b.h - (a.y + a.h) || a.x - b.x)[0]
+      : others.filter((one) => one.y >= item.y + item.h).sort((a, b) => a.y - b.y || a.x - b.x)[0]
+  if (!other) return layout
+  // The two change places in the order.
+  const swapped = [...order]
+  swapped[at] = other
+  swapped[order.indexOf(other)] = item
+  return withItems(layout, flow(swapped))
 }
 // One step with Shift and an arrow key: a column wider or narrower, a row
 // taller or shorter.
@@ -450,24 +511,27 @@ export function roomFor(layout, type) {
 export const hiddenTypes = (layout, { admin = false } = {}) =>
   WIDGET_TYPES.filter((type) => (admin || !WIDGETS[type].admin) && !layout.items.some((item) => item.type === type))
 
-// Adds a widget at the bottom, at its default size. Returns { layout, id }
-// (the same layout and no id when there is no room for one).
-export function addItem(layout, type, options = {}) {
+// Adds a widget at its default size, after the last one (`before`: in
+// front of that widget instead). Returns { layout, id } (the same layout
+// and no id when there is no room for one).
+export function addItem(layout, type, options = {}, { before = null } = {}) {
   const id = roomFor(layout, type) ? freeId(layout, type) : null
   if (!id) return { layout, id: null }
   const item = { ...at(type, 0, bottomOf(layout.items)), id, options: cleanOptions(type, options) }
-  return { layout: withItems(layout, compact([...layout.items, item])), id }
+  const order = readingOrder(layout.items)
+  const index = before === null ? -1 : order.findIndex((other) => other.id === before)
+  order.splice(index < 0 ? order.length : index, 0, item)
+  return { layout: withItems(layout, flow(order)), id }
 }
-// A second copy of a chart, with the same options, beside the first where
-// there is room and under it where there is not.
+// A second copy of a chart, with the same options, right after the first:
+// beside it where there is room, under it where there is not.
 export function duplicateItem(layout, id) {
   const item = find(layout, id)
   if (!item || !WIDGETS[item.type].many || !roomFor(layout, item.type)) return { layout, id: null }
   const copy = { ...item, id: freeId(layout, item.type), options: cleanOptions(item.type, item.options) }
-  const beside = item.x + item.w + item.w <= LAYOUT_COLS
-  copy.x = beside ? item.x + item.w : item.x
-  copy.y = beside ? item.y : item.y + item.h
-  return { layout: withItems(layout, settle([...layout.items, copy], copy.id)), id: copy.id }
+  const order = readingOrder(layout.items)
+  order.splice(order.indexOf(item) + 1, 0, copy)
+  return { layout: withItems(layout, flow(order)), id: copy.id }
 }
 
 // ---- Narrower screens ----
@@ -480,25 +544,6 @@ function narrowWidth(item, cols) {
   const least = group === 'tile' ? 2 : group === 'list' ? 3 : cols
   return clamp(Math.round((item.w * cols) / LAYOUT_COLS), least, cols)
 }
-// Widgets in a given order, each at a given width, filled in like words on
-// a line: a widget that does not fit the line starts the next one.
-function flow(items, cols) {
-  const out = []
-  let x = 0
-  let y = 0
-  let tall = 0
-  for (const item of items) {
-    if (x + item.w > cols) {
-      y += tall
-      x = 0
-      tall = 0
-    }
-    out.push({ ...item, x, y })
-    x += item.w
-    tall = Math.max(tall, item.h)
-  }
-  return compact(out)
-}
 // The layout on a grid of `cols` columns: the same widgets in reading
 // order, at the widths that grid allows. 12 columns: the layout itself.
 export function reflow(items, cols = LAYOUT_COLS) {
@@ -509,36 +554,59 @@ export function reflow(items, cols = LAYOUT_COLS) {
   )
 }
 
+// The layout as it is drawn: a row that stops short of the right edge, with
+// nothing that could fill the rest, shares the rest among its widgets (the
+// ones that end the row and are as tall as its last). Only the drawing:
+// what is stored keeps its own widths, so a widget added back or moved finds
+// the room it had.
+export function fill(items, cols = LAYOUT_COLS) {
+  const out = items.map((item) => ({ ...item }))
+  const taken = (c, top, bottom, skip) =>
+    out.some((other) => !skip.has(other) && other.x <= c && c < other.x + other.w && other.y < bottom && top < other.y + other.h)
+  for (const y of [...new Set(out.map((item) => item.y))].sort((a, b) => a - b)) {
+    const row = out.filter((item) => item.y === y).sort((a, b) => a.x - b.x)
+    const last = row[row.length - 1]
+    // The run of widgets side by side that ends the row, all as tall as the last.
+    const run = [last]
+    for (let at = row.length - 2; at >= 0; at--) {
+      const one = row[at]
+      if (one.x + one.w !== run[0].x || one.h !== last.h) break
+      run.unshift(one)
+    }
+    const skip = new Set(run)
+    let spare = 0
+    while (last.x + last.w + spare < cols && !taken(last.x + last.w + spare, y, y + last.h, skip)) spare++
+    if (!spare) continue
+    let x = run[0].x
+    run.forEach((item, index) => {
+      item.w += Math.floor(spare / run.length) + (index < spare % run.length ? 1 : 0)
+      item.x = x
+      x += item.w
+    })
+  }
+  // And a widget with empty rows under it, above a widget below, reaches down to it.
+  for (const item of readingOrder(out)) {
+    const under = (other) => other !== item && other.y >= item.y + item.h && other.x < item.x + item.w && item.x < other.x + other.w
+    const below = Math.min(...out.filter(under).map((other) => other.y))
+    if (!Number.isFinite(below) || below === item.y + item.h) continue
+    const free = (row) => !Array.from({ length: item.w }, (_, at) => item.x + at).some((c) => taken(c, row, row + 1, new Set([item])))
+    let h = item.h
+    while (item.y + h < below && free(item.y + h)) h++
+    item.h = h
+  }
+  return out
+}
+
 // Moves a widget to a place in the reading order (what the up and down
-// buttons of a narrow screen do). It takes the place of the widget it now
-// comes before; where that would not give the order asked for, the whole
-// layout is filled in again in that order.
+// buttons of a narrow screen do, and a drag on fewer columns).
 export function reorder(layout, id, index) {
-  const order = readingOrder(layout.items).map((item) => item.id)
-  const from = order.indexOf(id)
+  const order = readingOrder(layout.items)
+  const from = order.findIndex((item) => item.id === id)
   if (from < 0) return layout
   const to = clamp(index, 0, order.length - 1)
   if (to === from) return layout
-  order.splice(from, 1)
-  order.splice(to, 0, id)
-  const item = find(layout, id)
-  const next = find(layout, order[to + 1])
-  const moved = next
-    ? moveItem(layout, id, Math.min(next.x, LAYOUT_COLS - item.w), next.y)
-    : moveItem(layout, id, 0, bottomOf(layout.items))
-  if (
-    readingOrder(moved.items)
-      .map((other) => other.id)
-      .join() === order.join()
-  )
-    return moved
-  return withItems(
-    layout,
-    flow(
-      order.map((key) => find(layout, key)),
-      LAYOUT_COLS,
-    ),
-  )
+  const rest = order.filter((item) => item.id !== id)
+  return placeBefore(layout, id, rest[to]?.id ?? null)
 }
 
 // What a screen reader hears after a move or a resize.

@@ -677,13 +677,13 @@ test('the dashboard can be arranged in the demo: "Try this" leads to Edit layout
     assert.equal(await page.locator('[data-sw-widget]').count(), 16)
     assert.deepEqual(await placeOf(page, 'time'), [0, 4, 12, 6])
     assert.equal(await page.locator('[data-sw-widget-handle]').count(), 0, 'nothing to drag until the layout is edited')
-    // The hint says what there is to try, and its button starts it.
+    // The hint says what there is to try; the one way in is the header's Edit layout.
     const hint = page.locator('[data-sw-demo-try="layout"]')
-    assert.match(await hint.textContent(), /Try this:.*Drag a chart.*resize.*hide a tile/s)
+    assert.match(await hint.textContent(), /Try this:.*Edit layout.*drag a chart.*resize.*hide a tile/s)
     await shot(page, 'layout-try-this')
-    await hint.locator('[data-sw-demo-try-edit]').click()
+    await page.locator('[data-sw-layout-edit="off"]').click()
     await page.locator('[data-sw-layout-bar]').waitFor()
-    assert.equal(await page.locator('[data-sw-layout-edit]').getAttribute('data-sw-layout-edit'), 'on')
+    assert.equal(await page.locator('[data-sw-layout-edit]').count(), 0, 'the bar’s Done is the one way out')
     assert.equal(await hint.count(), 0, 'the hint steps aside while the layout is edited')
     assert.equal(await page.locator('[data-sw-widget-handle]').count(), 16)
 
@@ -693,9 +693,10 @@ test('the dashboard can be arranged in the demo: "Try this" leads to Edit layout
     await said(page, /Turns moved to row 1, column 9; 4 wide, 2 tall/)
     assert.deepEqual(await placeOf(page, 'tile_calls'), [8, 0, 4, 2])
     await layoutSaved(page)
-    // Resize the duration chart from its corner.
-    await dragBy(page, widget(page, 'latency').locator('[data-sw-widget-resize]'), (-column / 4) * 2, -72)
-    await said(page, /Turn duration resized: row \d+, column 7; 4 wide, 4 tall/)
+    // Resize the breakdown from its corner, narrower and a row taller: the chart beside it takes the width and the height.
+    await dragBy(page, widget(page, 'breakdown').locator('[data-sw-widget-resize]'), -column / 2, 72)
+    await said(page, /Breakdown resized: row 11, column 1; 4 wide, 6 tall/)
+    assert.deepEqual(await placeOf(page, 'outcomes'), [4, 10, 8, 6])
     await layoutSaved(page)
     await shot(page, 'layout-edit')
     await page.locator('[data-sw-layout-done]').click()
@@ -704,9 +705,9 @@ test('the dashboard can be arranged in the demo: "Try this" leads to Edit layout
     await page.reload()
     await tile(page, 'calls').waitFor()
     assert.deepEqual(await placeOf(page, 'tile_calls'), [8, 0, 4, 2])
-    assert.deepEqual((await placeOf(page, 'latency')).slice(2), [4, 4])
+    assert.deepEqual(await placeOf(page, 'breakdown'), [0, 10, 4, 6])
     const stored = (await storedLayout(page)).layout
-    assert.deepEqual([itemOf(stored, 'tile_calls').x, itemOf(stored, 'latency').w, itemOf(stored, 'latency').h], [8, 4, 4])
+    assert.deepEqual([itemOf(stored, 'tile_calls').x, itemOf(stored, 'breakdown').w, itemOf(stored, 'breakdown').h], [8, 4, 6])
     await page.locator('[data-sw-chart="latency"] .recharts-line-curve').first().waitFor()
 
     // Reset (the demo's own) puts the dashboard back, and forgets the layout.
@@ -740,12 +741,13 @@ test('in the demo: hide and add back, two charts side by side with their own opt
     )
     await page.locator('[data-sw-layout-add-item="tile_failed"]').click()
     await widget(page, 'tile_failed').waitFor()
-    await said(page, /Failed or stopped added at row \d+, column 1; 4 wide, 2 tall/)
+    await said(page, /Failed or stopped added at row 3, column 9; 4 wide, 2 tall/)
     assert.equal(await page.locator('[data-sw-chart="approvals"]').count(), 0)
 
     // Two charts over time: the first as it was, the copy measuring cost by model, weekly, as lines.
     await widget(page, 'time').focus()
-    for (let n = 0; n < 6; n += 1) await page.keyboard.press('Shift+ArrowLeft')
+    // (One step on to the next width it is drawn at: narrower than half, the row could not take the chart after it.)
+    await page.keyboard.press('Shift+ArrowLeft')
     await said(page, /Usage over time resized: row 5, column 1; 6 wide, 6 tall/)
     await widget(page, 'time').locator('[data-sw-widget-duplicate]').click()
     await widget(page, 'time-2').waitFor()
@@ -768,7 +770,7 @@ test('in the demo: hide and add back, two charts side by side with their own opt
     await widget(page, 'latency').focus()
     const [, row] = await placeOf(page, 'latency')
     await page.keyboard.press('ArrowUp')
-    await said(page, /^Turn duration moved to row \d+, column 7; 6 wide, 5 tall/)
+    await said(page, /^Turn duration moved to row \d+, column \d+; 6 wide, 5 tall/)
     assert.ok((await placeOf(page, 'latency'))[1] < row)
     await layoutSaved(page)
     await page.keyboard.press('Escape')
@@ -799,6 +801,8 @@ test('in the demo: hide and add back, two charts side by side with their own opt
     await widget(page, 'time-2').waitFor()
     await page.locator('[data-sw-layout-reset-menu]').click()
     await page.locator('[data-sw-layout-reset]').click()
+    // Reset asks first.
+    await page.locator('[data-sw-confirm]').click()
     await widget(page, 'time-2').waitFor({ state: 'detached' })
     await widget(page, 'approvals').waitFor()
     assert.deepEqual(await placeOf(page, 'time'), [0, 4, 12, 6])
@@ -840,6 +844,7 @@ test('in the demo: a view saved with its layout shows it to another person; the 
     await page.locator('[data-sw-layout-edit="off"]').click()
     await page.locator('[data-sw-layout-reset-menu]').click()
     await page.locator('[data-sw-layout-reset]').click()
+    await page.locator('[data-sw-confirm]').click()
     await layoutSaved(page)
     await page.locator('[data-sw-layout-done]').click()
     assert.equal(await page.locator('[data-sw-top]').count(), 0, 'reset is to the workspace’s default')
@@ -855,10 +860,10 @@ test('in the demo: a view saved with its layout shows it to another person; the 
     assert.equal(await page.locator('[data-sw-widget]').count(), 12)
     assert.deepEqual(await storedLayout(page).then((stored) => [stored.layout, stored.canSetDefault]), [null, false])
     await page.locator('[data-sw-layout-edit="off"]').click()
-    await page.locator('[data-sw-layout-reset-menu]').click()
+    // (No menu for them: a Reset of their own, and nothing to set for the workspace.)
+    assert.equal(await page.locator('[data-sw-layout-reset-menu]').count(), 0)
     await page.locator('[data-sw-layout-reset]').waitFor()
     assert.equal(await page.locator('[data-sw-layout-set-default]').count(), 0)
-    await page.keyboard.press('Escape')
     // Their own change is theirs.
     await widget(page, 'tile_calls').locator('[data-sw-widget-hide]').click()
     await layoutSaved(page)

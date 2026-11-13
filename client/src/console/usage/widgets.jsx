@@ -296,7 +296,7 @@ function tileOf(type, { now, before, trendOf }) {
   }
 }
 
-function TileWidget({ item, options, ctx, menu, editing }) {
+function TileWidget({ item, options, ctx, menu }) {
   const summary = useWs(ctx.workspaceId, `/usage/summary?${ctx.query}`)
   // The trend line: the same buckets as the page's charts. Asked for only when it shows.
   const wanted = Boolean(options.spark)
@@ -320,8 +320,6 @@ function TileWidget({ item, options, ctx, menu, editing }) {
       loading={summary.isLoading}
       fill
       menu={menu}
-      // While the layout is edited the widget's bar carries the name.
-      showLabel={!editing}
       spark={wanted}
       showCompare={options.compare}
       {...tile}
@@ -331,7 +329,7 @@ function TileWidget({ item, options, ctx, menu, editing }) {
 
 // ---- Charts ----
 
-function TimeWidget({ options, setOptions, ctx, menu, editing }) {
+function TimeWidget({ options, setOptions, ctx, menu }) {
   const { metric, by } = options
   const bucket = options.bucket === 'auto' ? ctx.autoBucket : options.bucket
   const series = useWs(ctx.workspaceId, `/usage/series?${ctx.query}&bucket=${bucket}&groupBy=${by}&metric=${metric}`)
@@ -351,7 +349,6 @@ function TimeWidget({ options, setOptions, ctx, menu, editing }) {
       showLegend={options.legend}
       showBrush={options.brush}
       fill
-      header={!editing}
       menu={menu}
       view={options.view}
       onView={(view) => setOptions({ view })}
@@ -383,7 +380,7 @@ function TimeWidget({ options, setOptions, ctx, menu, editing }) {
   )
 }
 
-function BreakdownWidget({ options, setOptions, ctx, menu, editing }) {
+function BreakdownWidget({ options, setOptions, ctx, menu }) {
   const by = options.by
   const metric = options.metric === 'chart' ? ctx.metric : options.metric
   const breakdown = useWs(ctx.workspaceId, `/usage/breakdown?${ctx.query}&groupBy=${by}`)
@@ -399,7 +396,6 @@ function BreakdownWidget({ options, setOptions, ctx, menu, editing }) {
       rows={options.rows}
       showShare={options.share}
       fill
-      header={!editing}
       menu={menu}
       view={options.view}
       onView={(view) => setOptions({ view })}
@@ -419,7 +415,7 @@ function BreakdownWidget({ options, setOptions, ctx, menu, editing }) {
 // The series the outcomes and approvals charts (and the tiles' trend lines) read: one per bucket, not split.
 const usePlain = (ctx) => useWs(ctx.workspaceId, `/usage/series?${ctx.query}&bucket=${ctx.bucket}&groupBy=none&metric=calls`)
 
-function OutcomesWidget({ options, setOptions, ctx, menu, editing }) {
+function OutcomesWidget({ options, setOptions, ctx, menu }) {
   const plain = usePlain(ctx)
   return (
     <OutcomesChart
@@ -430,14 +426,13 @@ function OutcomesWidget({ options, setOptions, ctx, menu, editing }) {
       pressed={ctx.filter.list('outcome')}
       mode={options.mode}
       fill
-      header={!editing}
       menu={menu}
       view={options.view}
       onView={(view) => setOptions({ view })}
     />
   )
 }
-function ApprovalsWidget({ options, setOptions, ctx, menu, editing }) {
+function ApprovalsWidget({ options, setOptions, ctx, menu }) {
   const plain = usePlain(ctx)
   return (
     <ApprovalsChart
@@ -446,14 +441,13 @@ function ApprovalsWidget({ options, setOptions, ctx, menu, editing }) {
       state={plain}
       mode={options.mode}
       fill
-      header={!editing}
       menu={menu}
       view={options.view}
       onView={(view) => setOptions({ view })}
     />
   )
 }
-function LatencyWidget({ options, setOptions, ctx, menu, editing }) {
+function LatencyWidget({ options, setOptions, ctx, menu }) {
   const latency = useWs(ctx.workspaceId, `/usage/latency?${ctx.query}&bucket=${ctx.bucket}`)
   return (
     <LatencyChart
@@ -463,7 +457,6 @@ function LatencyWidget({ options, setOptions, ctx, menu, editing }) {
       percentiles={options.percentiles}
       log={options.log}
       fill
-      header={!editing}
       menu={menu}
       view={options.view}
       onView={(view) => setOptions({ view })}
@@ -521,7 +514,7 @@ function topRows(id, data, { workspaceId, filter, isAdmin }) {
   }))
 }
 
-function TopWidget({ item, options, ctx, menu, editing }) {
+function TopWidget({ item, options, ctx, menu }) {
   const id = TOP_ID[item.type]
   // Five is what the server sends unless asked: the four lists then share one request.
   const top = useWs(ctx.workspaceId, `/usage/top?${ctx.query}${options.rows === 5 ? '' : `&limit=${options.rows}`}`)
@@ -529,15 +522,12 @@ function TopWidget({ item, options, ctx, menu, editing }) {
   const title = WIDGETS[item.type].title
   return (
     <Card className="flex h-full min-w-0 flex-col overflow-hidden" data-sw-top={id}>
-      {/* While the layout is edited the widget's bar is its heading. */}
-      {editing ? null : (
-        <div className="flex shrink-0 items-center justify-between gap-1 border-b border-line py-1.5 pr-2 pl-4">
-          <h2 className="truncate py-1 text-ui font-semibold text-fg" title={title}>
-            {title}
-          </h2>
-          {menu}
-        </div>
-      )}
+      <div className="flex shrink-0 items-center justify-between gap-1 border-b border-line py-1.5 pr-2 pl-4" data-sw-top-head>
+        <h2 className="truncate py-1 text-ui font-semibold text-fg" title={title}>
+          {title}
+        </h2>
+        {menu}
+      </div>
       {top.isLoading ? (
         <p className="px-4 py-6 text-center text-xs text-muted" role="status">
           Loading
@@ -572,12 +562,12 @@ function TopWidget({ item, options, ctx, menu, editing }) {
 // ---- Budgets ----
 
 // Each project's daily budgets from its agent policy, with today's use.
-function BudgetsWidget({ ctx, editing }) {
+function BudgetsWidget({ ctx }) {
   const state = useWs(ctx.workspaceId, '/usage/budgets', { keep: false })
   const projects = state.data?.projects || []
   return (
     <Card className="flex h-full min-w-0 flex-col overflow-hidden" data-sw-usage-budgets>
-      <div className={cn('shrink-0 items-start gap-3 border-b border-line px-4 py-3 sm:px-5', editing ? 'hidden' : 'flex')}>
+      <div className="flex shrink-0 items-start gap-3 border-b border-line px-4 py-3 sm:px-5" data-sw-budgets-head>
         <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-muted">
           <Gauge size={16} aria-hidden="true" />
         </span>
@@ -597,15 +587,11 @@ function BudgetsWidget({ ctx, editing }) {
           Loading
         </p>
       ) : projects.length ? (
-        // (While the layout is edited the heading is on the widget's bar: the rows share the room it leaves.)
-        <ul className={cn('min-h-0 flex-1 divide-y divide-line overflow-y-auto', editing && 'flex flex-col')}>
+        <ul className="min-h-0 flex-1 divide-y divide-line overflow-y-auto">
           {projects.map(({ project, budgets }) => (
             <li
               key={project.id}
-              className={cn(
-                'grid gap-x-6 gap-y-2 px-4 py-2 sm:grid-cols-[minmax(0,12rem)_repeat(2,minmax(0,1fr))] sm:px-5',
-                editing && 'flex-[1_0_auto] content-center',
-              )}
+              className="grid gap-x-6 gap-y-2 px-4 py-2 sm:grid-cols-[minmax(0,12rem)_repeat(2,minmax(0,1fr))] sm:px-5"
               data-sw-budget={project.name}
             >
               <Link
@@ -671,8 +657,8 @@ const BODY = {
 }
 // One widget, drawn. `options`: the item's saved options with whatever an
 // older link's address still says on top (Dashboard.jsx).
-export function Widget({ item, options, setOptions, ctx, menu, editing }) {
+export function Widget({ item, options, setOptions, ctx, menu }) {
   const group = WIDGETS[item.type].group
   const Body = group === 'tile' ? TileWidget : group === 'list' ? TopWidget : BODY[item.type]
-  return <Body item={item} options={options} setOptions={setOptions} ctx={ctx} menu={menu} editing={editing} />
+  return <Body item={item} options={options} setOptions={setOptions} ctx={ctx} menu={menu} />
 }

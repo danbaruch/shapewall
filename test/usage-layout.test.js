@@ -19,6 +19,7 @@ import {
   defaultLayout,
   describeItem,
   duplicateItem,
+  fill,
   fitLayout,
   hiddenTypes,
   migrateLayout,
@@ -42,17 +43,14 @@ const place = (layout, id) => {
   const item = at(layout, id)
   return [item.x, item.y, item.w, item.h]
 }
-// Nothing overlaps, everything is inside the grid, and nothing could move up.
+// Nothing overlaps, everything is inside the grid, and the widgets are flowed (in reading order, each in the first place
+// after the one before it where it fits: flowing them again changes nothing).
 function assertTidy(items, cols = LAYOUT_COLS) {
   for (const a of items) {
     assert.ok(a.x >= 0 && a.x + a.w <= cols && a.y >= 0, `${a.id} is inside the grid`)
     for (const b of items) assert.ok(!collides(a, b), `${a.id} and ${b.id} do not overlap`)
-    if (a.y > 0)
-      assert.ok(
-        items.some((b) => collides({ ...a, y: a.y - 1 }, b)),
-        `${a.id} rests on something`,
-      )
   }
+  assert.deepEqual(compact(items, cols), readingOrder(items), 'flowed')
 }
 const item = (id, x, y, w, h, extra = {}) => ({ id, type: id.replace(/-\d+$/, ''), x, y, w, h, ...extra })
 
@@ -329,40 +327,106 @@ test('hiding leaves no gap; adding puts a widget back at the bottom; duplicating
   assert.deepEqual(cleanLayout(full), full, 'what the changes make is always a valid layout')
 })
 
-test('moving and resizing: inside the grid, inside what the type allows, pushing what was there down', () => {
+test('flowing: the order is the layout; holes close, and a flowed layout stays exactly as it is', () => {
   const layout = defaultLayout()
-  // The duration chart up beside the first row of tiles: the tiles it lands on move down.
-  const moved = moveItem(layout, 'latency', 6, 0)
+  assert.deepEqual(compact(layout.items), layout.items, 'the default is already flowed')
+  // Hiding a tile: the tiles after it close up, row by row; the rest of the page follows.
+  const fewer = removeItem(layout, 'tile_tokens')
+  assertTidy(fewer.items)
+  assert.deepEqual(
+    ['tile_calls', 'tile_duration', 'tile_cost', 'tile_fixes', 'tile_failed'].map((id) => place(fewer, id).slice(0, 2)),
+    [
+      [0, 0],
+      [4, 0],
+      [8, 0],
+      [0, 2],
+      [4, 2],
+    ],
+  )
+  // Hiding a chart of a pair: the next chart takes its place beside the other.
+  const pair = removeItem(layout, 'outcomes')
+  assert.deepEqual(place(pair, 'approvals'), [6, 10, 6, 5])
+  assert.deepEqual(place(pair, 'latency'), [0, 15, 6, 5])
+  // Whatever is done, flowing again changes nothing (so a reload never moves a widget).
+  let random = 7
+  const next = (n) => {
+    random = (random * 1103515245 + 12345) % 2147483648
+    return random % n
+  }
+  for (let run = 0; run < 60; run += 1) {
+    let current = defaultLayout()
+    for (let step = 0; step < 10; step += 1) {
+      const target = current.items[next(current.items.length)]
+      const pick = next(4)
+      if (pick === 0) current = moveItem(current, target.id, next(12), next(30))
+      else if (pick === 1) current = resizeItem(current, target.id, target.w + next(7) - 3, target.h + next(5) - 2)
+      else if (pick === 2 && current.items.length > 4) current = removeItem(current, target.id)
+      else current = stepMove(current, target.id, ['left', 'right', 'up', 'down'][next(4)])
+      assertTidy(current.items)
+      assert.deepEqual(compact(current.items), current.items)
+      assert.deepEqual(cleanLayout(current), current)
+    }
+  }
+})
+
+test('moving and resizing: a drag puts a widget in the order where it was dropped; sizes stay inside what the type allows', () => {
+  const layout = defaultLayout()
+  // The duration chart dropped on the first tile: it comes first, everything else after it.
+  const moved = moveItem(layout, 'latency', 0, 0)
   assertTidy(moved.items)
-  assert.deepEqual(place(moved, 'latency'), [6, 0, 6, 5])
-  assert.deepEqual(place(moved, 'tile_calls'), [0, 0, 4, 2])
-  assert.ok(at(moved, 'tile_tokens').y >= 5 && at(moved, 'tile_duration').y >= 5)
+  assert.deepEqual(place(moved, 'latency'), [0, 0, 6, 5])
+  assert.deepEqual(ids(moved.items).slice(0, 3), ['latency', 'tile_calls', 'tile_tokens'])
   assert.deepEqual(cleanLayout(moved), moved)
-  // Out of range: clamped to the grid.
-  assert.equal(at(moveItem(layout, 'latency', 99, 0), 'latency').x, 6)
-  assert.equal(at(moveItem(layout, 'latency', -5, 0), 'latency').x, 0)
-  assertTidy(moveItem(layout, 'latency', 3, 9999).items)
+  // The chart over time dropped on the tiles' first row: above the stats.
+  const above = moveItem(layout, 'time', 0, 0)
+  assert.deepEqual(place(above, 'time'), [0, 0, 12, 6])
+  assert.deepEqual(place(above, 'tile_calls'), [0, 6, 4, 2])
+  // A tile dropped on the next tile (dragged on): after it. Dropped back on the first: in front of it.
+  assert.deepEqual(ids(moveItem(layout, 'tile_calls', 4, 0).items).slice(0, 3), ['tile_tokens', 'tile_calls', 'tile_duration'])
+  assert.deepEqual(ids(moveItem(layout, 'tile_duration', 0, 0).items).slice(0, 3), ['tile_duration', 'tile_calls', 'tile_tokens'])
+  // Dropped where it is, or past the end: where it is, and last.
+  assert.equal(moveItem(layout, 'tile_calls', 0, 0), layout)
+  assert.equal(ids(moveItem(layout, 'tile_calls', 3, 9999).items).at(-1), 'tile_calls')
+  assertTidy(moveItem(layout, 'latency', 99, -5).items)
   assert.equal(moveItem(layout, 'nothing', 0, 0), layout)
 
   // Sizes stop at the type's least and most.
-  assert.deepEqual(place(resizeItem(layout, 'tile_calls', 1, 9), 'tile_calls').slice(2), [2, 2])
+  assert.deepEqual(place(resizeItem(layout, 'tile_calls', 1, 9), 'tile_calls').slice(2), [WIDGETS.tile_calls.size.minW, 2])
   assert.deepEqual(place(resizeItem(layout, 'tile_calls', 9, 1), 'tile_calls').slice(2), [4, 2])
   assert.deepEqual(place(resizeItem(layout, 'time', 1, 1), 'time').slice(2), [4, 4], 'a chart cannot be made too small to read')
   assert.deepEqual(place(resizeItem(layout, 'time', 40, 40), 'time').slice(2), [12, 10])
-  // Never past the right edge.
+  // The tiles share one width: one made narrower makes them four to a row.
+  const threes = resizeItem(layout, 'tile_calls', 3, 2)
+  assertTidy(threes.items)
+  assert.ok(threes.items.filter((item) => item.type.startsWith('tile_')).every((item) => item.w === 3))
+  assert.deepEqual(place(threes, 'tile_cost'), [9, 0, 3, 2])
+  // Never past the right edge from where it is.
   assert.deepEqual(place(resizeItem(layout, 'outcomes', 12, 5), 'outcomes'), [6, 10, 6, 5])
-  // A taller chart pushes what is under it down.
+  // A row stays whole: a chart made wider takes the width from the one beside it, and a narrower one gives it back.
+  const wide = resizeItem(layout, 'breakdown', 8, 5)
+  assertTidy(wide.items)
+  assert.deepEqual(place(wide, 'breakdown'), [0, 10, 8, 5])
+  assert.deepEqual(place(wide, 'outcomes'), [8, 10, 4, 5])
+  const narrow = resizeItem(layout, 'breakdown', 4, 5)
+  assert.deepEqual(place(narrow, 'outcomes'), [4, 10, 8, 5])
+  // When the one beside it cannot be that narrow, it goes on to the next row.
+  const wider = resizeItem(layout, 'breakdown', 9, 5)
+  assertTidy(wider.items)
+  assert.deepEqual(place(wider, 'outcomes'), [0, 15, 6, 5])
+  // A taller chart: the one beside it, as tall before, grows with it, so no hole opens under either.
   const taller = resizeItem(layout, 'breakdown', 6, 8)
   assertTidy(taller.items)
-  assert.equal(at(taller, 'approvals').y, 18)
+  assert.deepEqual(place(taller, 'outcomes'), [6, 10, 6, 8])
+  assert.deepEqual(place(taller, 'approvals'), [0, 18, 6, 5])
+  assert.deepEqual(place(taller, 'latency'), [6, 18, 6, 5])
   for (const type of WIDGET_TYPES) {
     const size = WIDGETS[type].size
     assert.ok(size.minW <= size.w && size.w <= size.maxW && size.minH <= size.h && size.h <= size.maxH, type)
   }
-  assert.deepEqual([WIDGETS.tile_calls.size.minW, WIDGETS.tile_calls.size.maxW], [2, 4], 'a tile has three widths and one height')
+  assert.deepEqual([WIDGETS.tile_calls.size.minW, WIDGETS.tile_calls.size.maxW], [3, 4], 'a tile has two widths and one height')
 })
 
-test('arrow keys: a column at a time sideways, past the neighbour up and down; Shift resizes', () => {
+test('arrow keys: changes places with the neighbour beside, above or below; Shift resizes', () => {
   const layout = defaultLayout()
   // Up: the duration chart changes places with the outcomes chart above it.
   const up = stepMove(layout, 'latency', 'up')
@@ -371,14 +435,20 @@ test('arrow keys: a column at a time sideways, past the neighbour up and down; S
   assert.deepEqual(place(up, 'outcomes'), [6, 15, 6, 5])
   // And down again is where it started.
   assert.deepEqual(stepMove(up, 'latency', 'down'), layout)
+  // A tile up: it changes places with the tile above it.
+  const tileUp = stepMove(layout, 'tile_fixes', 'up')
+  assert.deepEqual(place(tileUp, 'tile_fixes'), [4, 0, 4, 2])
+  assert.deepEqual(place(tileUp, 'tile_tokens'), [4, 2, 4, 2])
   // At the top and at the bottom there is nowhere to go.
   assert.equal(stepMove(layout, 'tile_calls', 'up'), layout)
   assert.equal(stepMove(layout, 'budgets', 'down'), layout)
-  // Sideways: one column, stopping at the edges.
-  const narrow = resizeItem(layout, 'breakdown', 4, 5)
-  assert.equal(at(stepMove(narrow, 'breakdown', 'right'), 'breakdown').x, 1)
-  assert.deepEqual(stepMove(layout, 'tile_calls', 'left'), layout)
-  assert.deepEqual(stepMove(layout, 'tile_duration', 'right'), layout)
+  assert.equal(stepMove(layout, 'tile_calls', 'left'), layout)
+  assert.equal(stepMove(layout, 'budgets', 'right'), layout)
+  // Sideways: one place in the order, so beside each other they change places.
+  assert.deepEqual(ids(stepMove(layout, 'tile_tokens', 'left').items).slice(0, 3), ['tile_tokens', 'tile_calls', 'tile_duration'])
+  assert.deepEqual(ids(stepMove(layout, 'tile_tokens', 'right').items).slice(0, 3), ['tile_calls', 'tile_duration', 'tile_tokens'])
+  // The last tile of a row on to the next row's first place.
+  assert.deepEqual(place(stepMove(layout, 'tile_duration', 'right'), 'tile_duration'), [0, 2, 4, 2])
   assertTidy(stepMove(layout, 'tile_tokens', 'left').items)
   // Shift: a column or a row at a time, inside the limits.
   assert.deepEqual(place(stepResize(layout, 'latency', 'left'), 'latency').slice(2), [5, 5])
@@ -387,6 +457,29 @@ test('arrow keys: a column at a time sideways, past the neighbour up and down; S
   assert.deepEqual(stepResize(layout, 'latency', 'right'), layout, 'already at the right edge')
   assert.deepEqual(stepResize(layout, 'tile_calls', 'down'), layout, 'a tile has one height')
   assert.equal(describeItem(at(up, 'latency')), 'row 11, column 7; 6 wide, 5 tall')
+})
+
+test('fill: a row that stops short of the edge, with nothing that fits the rest, is drawn across it', () => {
+  const layout = defaultLayout()
+  assert.deepEqual(fill(layout.items), layout.items, 'the default layout has no short rows')
+  // Five tiles: the last two share the second row.
+  const five = removeItem(layout, 'tile_tokens')
+  const drawn = { items: fill(five.items) }
+  assert.deepEqual(place(drawn, 'tile_fixes'), [0, 2, 6, 2])
+  assert.deepEqual(place(drawn, 'tile_failed'), [6, 2, 6, 2])
+  assert.deepEqual(place(five, 'tile_fixes'), [0, 2, 4, 2], 'what is stored keeps its own width')
+  // A chart widened past what its neighbour can give takes the row; its neighbour keeps its height on the next.
+  const wide = resizeItem(layout, 'breakdown', 9, 7)
+  assertTidy(wide.items)
+  assert.deepEqual(place(wide, 'outcomes'), [0, 17, 6, 5])
+  assert.deepEqual(place({ items: fill(wide.items) }, 'breakdown'), [0, 10, 12, 7])
+  for (const cols of [12, 6, 2]) {
+    const out = fill(reflow(five.items, cols), cols)
+    for (const a of out)
+      for (const b of out)
+        if (a !== b) assert.ok(!(a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h), `${a.id} ${b.id} at ${cols}`)
+    assert.ok(out.every((item) => item.x + item.w <= cols))
+  }
 })
 
 test('reflow: fewer columns show the same widgets in reading order, with no overlaps and no gaps', () => {

@@ -134,12 +134,9 @@ export function UsagePage() {
         >
           <LayoutDashboard size={14} className="shrink-0 text-accent" aria-hidden="true" />
           <span className="min-w-0 flex-[1_1_14rem]">
-            <strong className="font-semibold">Try this:</strong> make the dashboard yours. Drag a chart to a new place, resize it from its
-            corner, hide a tile, or put two charts side by side. Reset puts it back.
+            <strong className="font-semibold">Try this:</strong> press Edit layout, then drag a chart to a new place, resize it from an
+            edge, or hide a tile and add it back. Reset puts it back.
           </span>
-          <Button size="xs" variant="soft" onClick={() => setEditing(true)} disabled={!board.ready} data-sw-demo-try-edit>
-            Edit layout
-          </Button>
         </p>
       ) : null}
       {exporter.error ? (
