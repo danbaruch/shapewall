@@ -558,5 +558,8 @@ for (const width of [390, 412]) {
       big.sheetTop < short.sheetTop - 40,
       `the image comment's sheet (${big.sheetTop}) is taller than a plain one's (${short.sheetTop})`,
     )
+    // And it still leaves a strip of board above it: a sheet that grows to
+    // the whole screen leaves the pin nowhere to land, whatever the camera does.
+    assert.ok(big.sheetTop >= 200, `even the tall sheet leaves board above it (top ${big.sheetTop} of 844)`)
   })
 }
