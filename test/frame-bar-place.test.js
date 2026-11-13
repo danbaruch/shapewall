@@ -143,6 +143,25 @@ test('a phone: no title, Checks, History and Capture are icons, Comment keeps it
   assert.ok(small.fits)
 })
 
+test('counts after Checks and History take room; the screen size chip goes before the name does', () => {
+  const plain = fitFrameBar({ canvasWidth: 1400, items: everything })
+  const counted = fitFrameBar({ canvasWidth: 1400, items: { ...everything, checksCount: true, historyCount: true } })
+  assert.equal(counted.step, 'full')
+  assert.ok(counted.width > plain.width, 'the counts widen the bar')
+  assert.equal(counted.chip, true, 'room for the chip')
+  // Narrower: the title stays, its chip goes first.
+  let sawTitleWithoutChip = false
+  for (let canvasWidth = 1400; canvasWidth >= 260; canvasWidth -= 2) {
+    const fit = fitFrameBar({ canvasWidth, items: everything })
+    if (fit.chip) assert.ok(fit.title)
+    if (fit.title && !fit.chip) sawTitleWithoutChip = true
+  }
+  assert.ok(sawTitleWithoutChip)
+  // Phones count no words, so no counts either.
+  const phone = fitFrameBar({ canvasWidth: 390, touch: true, items: { comment: true, checks: true, checksCount: true, link: true } })
+  assert.deepEqual([phone.labels.comment, phone.labels.checks, phone.chip], [true, false, false])
+})
+
 test('someone who may not comment has no Comment on the bar, and the rest still fits', () => {
   const fit = fitFrameBar({ canvasWidth: 384, items: { live: 'open', checks: true, link: true } })
   assert.equal(fit.labels.comment, false)
