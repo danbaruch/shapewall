@@ -515,6 +515,14 @@ export function Dashboard({ filter, isAdmin, board, editing, onEditing }) {
   const onDrag = (_grid, _old, _item, _placeholder, event) => {
     if (gesture.current) gesture.current.point = pointOf(event) ?? gesture.current.point
   }
+  // The tinted place while resizing is where the widget will be drawn (a row it alone ends is drawn across).
+  const onResize = (_grid, _old, item, placeholder) => {
+    const now = gesture.current
+    if (!now || !item || !placeholder) return
+    const w = now.wide ? item.w : now.base.items.find((one) => one.id === now.id).w
+    const place = shownOf.current(resizeItem(now.base, now.id, w, item.h)).find((one) => one.id === now.id)
+    if (place) Object.assign(placeholder, { x: place.x, y: place.y, w: place.w, h: place.h })
+  }
   const endGesture = (verb) => () => {
     const done = gesture.current
     gesture.current = null
@@ -616,6 +624,7 @@ export function Dashboard({ filter, isAdmin, board, editing, onEditing }) {
 
   const hidden = hiddenTypes(layout, { admin: isAdmin })
   const canDrag = editing && cols > 2
+  const coarse = typeof window !== 'undefined' && Boolean(window.matchMedia?.('(pointer: coarse)').matches)
   // How much of a widget's heading its tools cover (they sit over its top right corner).
   const toolsWidth = (item) => {
     const tile = WIDGETS[item.type].group === 'tile'
@@ -817,6 +826,8 @@ export function Dashboard({ filter, isAdmin, board, editing, onEditing }) {
             gridConfig={{ cols, rowHeight: LAYOUT_ROW, margin: [LAYOUT_GAP, LAYOUT_GAP], containerPadding: [0, 0] }}
             dragConfig={{
               enabled: canDrag,
+              // (A finger drags by the grip only, so it can still scroll the page from anywhere else.)
+              ...(coarse ? { handle: '[data-sw-widget-handle]' } : {}),
               cancel: 'button, a, input, [role="menu"], .react-resizable-handle',
               threshold: 4,
             }}
@@ -826,6 +837,7 @@ export function Dashboard({ filter, isAdmin, board, editing, onEditing }) {
             onDrag={onDrag}
             onDragStop={endGesture('moved to')}
             onResizeStart={startGesture('resize')}
+            onResize={onResize}
             onResizeStop={endGesture('resized:')}
           >
             {ordered.map((item, index) => {
@@ -835,7 +847,7 @@ export function Dashboard({ filter, isAdmin, board, editing, onEditing }) {
               return (
                 <div
                   key={item.id}
-                  className={cn('sw-widget', canDrag && 'sw-widget-drag')}
+                  className={cn('sw-widget', canDrag && !coarse && 'sw-widget-drag')}
                   style={{ '--sw-w': item.w, ...(editing ? { '--sw-tools': `${toolsWidth(item)}px` } : {}) }}
                   data-sw-widget={item.id}
                   data-sw-widget-type={item.type}

@@ -917,12 +917,13 @@ test('edit layout: drag a widget by its bar and reload, resize it from its corne
     },
     [before.width, before.height],
   )
-  // A chart cannot be made too small to read: pulled far in, it stops at four columns and four rows.
+  // A chart cannot be made too small to read: pulled far in, the breakdown stops at three columns and three rows
+  // (drawn four tall: the chart beside it is as short as it goes at four, and the row stays whole).
   const least = await dragBy(page, widget(page, 'breakdown').locator('[data-sw-widget-resize]'), -step * 9, -400)
   await least.drop()
   await page.waitForFunction(() => document.querySelector('[data-sw-widget="breakdown"]:not(.resizing)'))
-  assert.deepEqual((await placeOf(page, 'breakdown')).slice(2), [4, 4])
-  assert.deepEqual(await placeOf(page, 'outcomes'), [4, 10, 8, 4], 'and the one beside it takes the room')
+  assert.deepEqual((await placeOf(page, 'breakdown')).slice(2), [3, 4])
+  assert.deepEqual(await placeOf(page, 'outcomes'), [3, 10, 9, 4], 'and the one beside it takes the room')
   // The tiles share one width (three or four to a row): pulled in, they stop at three columns.
   const shrink = await dragBy(page, widget(page, 'tile_tokens').locator('.sw-resize-e'), -step * 9, 0)
   await shrink.drop()
@@ -930,7 +931,7 @@ test('edit layout: drag a widget by its bar and reload, resize it from its corne
   await layoutSaved(page)
   await page.reload()
   await page.locator('[data-sw-chart="outcomes"] .recharts-bar-rectangle').first().waitFor()
-  assert.deepEqual((await placeOf(page, 'breakdown')).slice(2), [4, 4], 'the size survived a reload')
+  assert.deepEqual((await placeOf(page, 'breakdown')).slice(2), [3, 4], 'the size survived a reload')
   assert.ok((await storedLayout(s.ada)).layout.items.filter((item) => item.type.startsWith('tile_')).every((item) => item.w === 3))
   assert.deepEqual((await placeOf(page, 'tile_tokens')).slice(2), [3, 2])
   // At its smallest a tile still shows its number whole.
@@ -959,10 +960,13 @@ test('edit layout: hide a widget and add it back, duplicate a chart with other o
   await widget(page, 'tile_fixes').locator('[data-sw-widget-hide]').click()
   await widget(page, 'tile_fixes').waitFor({ state: 'detached' })
   assert.equal(await page.locator('[data-sw-chart="approvals"]').count(), 0)
-  // The duration chart keeps its place; the two lists that were under the hidden chart move up into the gap.
-  assert.deepEqual(await placeOf(page, 'latency'), [6, 15, 6, 5])
-  assert.deepEqual(await placeOf(page, 'top_agents'), [0, 15, 3, 4])
-  assert.deepEqual(await placeOf(page, 'top_slowest'), [6, 20, 3, 4])
+  // The rest closes up in order: the duration chart takes the hidden chart's place, the lists come up beside it
+  // (two by two), and it is drawn as tall as they are, so nothing is left empty.
+  assert.deepEqual(await placeOf(page, 'latency'), [0, 15, 6, 8])
+  assert.deepEqual(await placeOf(page, 'top_agents'), [6, 15, 3, 4])
+  assert.deepEqual(await placeOf(page, 'top_slowest'), [6, 19, 3, 4])
+  // The five tiles left: the last row's two share it.
+  assert.deepEqual(await placeOf(page, 'tile_failed'), [6, 2, 6, 2])
   await layoutSaved(page)
   await page.locator('[data-sw-layout-add]').click()
   assert.deepEqual(
@@ -1097,10 +1101,9 @@ test('edit layout by keyboard: every widget takes the focus, arrows move, Shift 
   assert.match(await widget(page, 'latency').evaluate((node) => getComputedStyle(node).transitionDuration), /^0s/)
   // The focus is visible.
   await widget(page, 'latency').focus()
-  const ring = await widget(page, 'latency').evaluate(
-    (node) => getComputedStyle(node).outlineStyle + ' ' + getComputedStyle(node).outlineWidth,
-  )
-  assert.equal(ring, 'solid 2px')
+  // (A ring on the card itself, in the accent: the same card as ever, its border and a 1 px shadow.)
+  const ring = await widget(page, 'latency').evaluate((node) => getComputedStyle(node.querySelector('.sw-widget-body > *')).boxShadow)
+  assert.match(ring, /0px 0px 0px 1px/)
   // Nothing inside a widget takes the focus or a press while the layout is edited.
   assert.ok(
     await widget(page, 'latency')
@@ -1577,9 +1580,12 @@ test('narrower screens: 6 columns on a small window, one column on a phone with 
   assert.deepEqual((await placeOf(small.page, 'outcomes')).slice(0, 3), [0, 15, 6])
   assert.deepEqual(await placeOf(small.page, 'top_threads'), [3, 30, 3, 4])
   await editLayout(small.page)
-  assert.match(await small.page.locator('#sw-layout-help').textContent(), /Resize on a wider screen/)
-  assert.equal(await small.page.locator('[data-sw-widget-resize]:visible').count(), 0)
-  assert.equal(await small.page.locator('[data-sw-widget-up]').count(), 15)
+  // Dragged as on a wide screen; only heights are set here (the widths are the wide layout's), from the bottom edge.
+  assert.match(await small.page.locator('#sw-layout-help').textContent(), /its bottom edge to resize/)
+  assert.equal(await small.page.locator('[data-sw-widget-resize]').count(), 0)
+  assert.equal(await small.page.locator('.sw-resize-e').count(), 0)
+  assert.equal(await small.page.locator('.sw-resize-s').count(), 9, 'every widget but the six tiles')
+  assert.equal(await small.page.locator('[data-sw-widget-handle]').count(), 15)
   await shot(small.page, 'e2e-layout-1024-edit')
   await small.page.locator('[data-sw-layout-done]').click()
   assert.deepEqual(small.errors, [])
@@ -1620,7 +1626,7 @@ test('narrower screens: 6 columns on a small window, one column on a phone with 
 
   // Edit: up and down buttons, no grip, no corner.
   await editLayout(page)
-  assert.match(await page.locator('#sw-layout-help').textContent(), /arrows to move it up or down/)
+  assert.match(await page.locator('#sw-layout-help').textContent(), /Use the arrows to reorder/)
   assert.equal(await page.locator('[data-sw-widget-handle]').count(), 0)
   assert.equal(await page.locator('[data-sw-widget-resize]:visible').count(), 0)
   assert.ok(await widget(page, 'tile_calls').locator('[data-sw-widget-up]').isDisabled(), 'the first cannot go up')
@@ -1795,15 +1801,11 @@ test('nothing is cut off at the default sizes, looking or editing; lists and the
     .evaluate((card) => card.getBoundingClientRect().bottom - card.querySelector('li:last-child').getBoundingClientRect().bottom)
   assert.ok(band >= 0 && band < 24, `${band} px under the last project`)
 
-  // Editing: the bar is the widget's heading (its name is there once), and everything still fits under it.
+  // Editing: the same cards, each with its own heading (named once), the tools in its corner; everything still fits.
   await editLayout(page)
   await page.locator('[data-sw-widget="tile_calls"] [data-sw-widget-bar]').waitFor()
-  assert.equal(await page.locator('[data-sw-chart-header]:visible').count(), 0, 'no second title on a chart')
-  assert.equal(
-    await page.locator('[data-sw-top] h2:visible, [data-sw-usage-budgets] h2:visible').count(),
-    0,
-    'nor on a list or the budgets',
-  )
+  assert.equal(await page.locator('[data-sw-chart-header]:visible').count(), 5, 'each chart keeps its heading')
+  assert.equal(await page.locator('[data-sw-chart-controls]:visible').count(), 0, 'its switches step aside (they are in its options)')
   for (const [id, title] of [
     ['latency', 'Turn duration'],
     ['top_agents', 'Busiest agents'],

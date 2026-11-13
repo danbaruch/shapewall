@@ -187,6 +187,15 @@
   justify-content: center;
   color: var(--faint);
   cursor: grab;
+  touch-action: none;
+}
+@media (pointer: coarse) {
+  /* A finger holds the grip, so it is a finger's size. */
+  .sw-widget-grip {
+    width: 32px;
+    height: 32px;
+    color: var(--muted);
+  }
 }
 .sw-widget:hover .sw-widget-grip {
   color: var(--fg);
@@ -270,7 +279,7 @@
 .sw-layout .sw-resize-se:hover::after {
   background-color: transparent;
 }
-.sw-layout .react-resizable-hide > .react-resizable-handle {
+.sw-layout .react-resizable-hide > :is(.react-resizable-handle, .sw-resize) {
   display: none;
 }
 /* (A pointer that cannot hover, a finger: the grips show all the time.) */

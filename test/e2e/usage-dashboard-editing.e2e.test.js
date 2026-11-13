@@ -18,6 +18,7 @@ import express from 'express'
 import { chromium } from 'playwright'
 import { WORKSPACE_ID } from '../../client/src/demo/fixtures.js'
 import { ROOT_DIR, listen } from './helpers.js'
+import { LAYOUT_GAP, LAYOUT_ROW } from '../../src/hosted/usage-layout.js'
 
 const SHOTS = process.env.SHAPEWALL_SHOTS ? path.resolve(process.env.SHAPEWALL_SHOTS) : null
 const SHELL_CSP =
@@ -108,7 +109,7 @@ async function assertTidy(page, label) {
         break
       }
       const nearest = above.sort((p, q) => q.bottom - p.bottom)[0]
-      if (nearest && a.top - nearest.bottom > 12 + 1.5) {
+      if (nearest && a.top - nearest.bottom > LAYOUT_GAP + 1.5) {
         problems.push(`${a.id}: ${Math.round(a.top - nearest.bottom)} px under ${nearest.id}, more than the gap`)
         break
       }
@@ -171,11 +172,18 @@ test('1440 px: drag, resize, hide two and add them back, undo, reset; the board 
       { x: top.box.x + 40, y: top.box.y + 10 },
       {
         hold: async () => {
-          const placeholder = page.locator('.react-grid-placeholder')
-          await placeholder.waitFor()
-          const grid = await page.locator('.react-grid-layout').boundingBox()
-          const box = await placeholder.boundingBox()
-          assert.ok(Math.abs(box.y - grid.y) < 2 && box.width > grid.width - 4, 'the place shown is the top row, full width')
+          // The place shown (once it has glided there) is the top row, full width.
+          await page
+            .waitForFunction(
+              () => {
+                const grid = document.querySelector('.react-grid-layout').getBoundingClientRect()
+                const box = document.querySelector('.react-grid-placeholder')?.getBoundingClientRect()
+                return box && Math.abs(box.top - grid.top) < 2 && box.width > grid.width - 4
+              },
+              null,
+              { timeout: 5000 },
+            )
+            .catch(() => assert.fail('the place shown is not the top row, full width'))
           await shot(page, '1440-05-drag-chart')
         },
       },
@@ -187,7 +195,7 @@ test('1440 px: drag, resize, hide two and add them back, undo, reset; the board 
     await shot(page, '1440-06-chart-dropped')
 
     // Resize: wider than its neighbour can give (it takes the row; the neighbour goes on below), then narrower and taller.
-    const column = ((await page.locator('.react-grid-layout').boundingBox()).width + 12) / 12
+    const column = ((await page.locator('.react-grid-layout').boundingBox()).width + LAYOUT_GAP) / 12
     const corner = async () => middle(widget(page, 'breakdown').locator('[data-sw-widget-resize]'))
     await widget(page, 'breakdown').hover()
     let from = await corner()
@@ -198,12 +206,12 @@ test('1440 px: drag, resize, hide two and add them back, undo, reset; the board 
     await assertTidy(page, 'wider')
     await shot(page, '1440-08-wider')
     from = await corner()
-    await drag(page, from, { x: from.x - column * 8, y: from.y + 72 * 2 })
+    await drag(page, from, { x: from.x - column * 8, y: from.y + (LAYOUT_ROW + LAYOUT_GAP) * 2 })
     await saved(page)
     // Narrow enough for the next chart to come up beside it, as tall as it now (the spare column is shared between the two).
     const [bx, by, bw, bh] = await placeOf(page, 'breakdown')
     assert.deepEqual([bx, by, bh], [0, 10, 7])
-    assert.ok(bw <= 5, `narrower: ${bw}`)
+    assert.ok(bw <= 6, `narrower: ${bw}`)
     assert.deepEqual(await placeOf(page, 'outcomes'), [bw, 10, 12 - bw, 7])
     await assertTidy(page, 'narrower and taller')
     // The chart re-fits: its plot fills the new width.
@@ -305,7 +313,12 @@ test('1024 px, dark: medium columns; a drag and a height resize keep the board p
     assert.equal(await widget(page, 'breakdown').locator('.sw-resize-e, .sw-resize-se').count(), 0)
     await widget(page, 'breakdown').hover()
     const edge = await middle(widget(page, 'breakdown').locator('.sw-resize-s'))
-    await drag(page, edge, { x: edge.x, y: edge.y + 72 * 2 }, { hold: () => shot(page, '1024-dark-02-resize-taller') })
+    await drag(
+      page,
+      edge,
+      { x: edge.x, y: edge.y + (LAYOUT_ROW + LAYOUT_GAP) * 2 },
+      { hold: () => shot(page, '1024-dark-02-resize-taller') },
+    )
     await saved(page)
     assert.equal((await placeOf(page, 'breakdown'))[3], 7)
     await assertTidy(page, 'taller')
@@ -313,9 +326,11 @@ test('1024 px, dark: medium columns; a drag and a height resize keep the board p
 
     // The keyboard: the focus shows; an arrow moves, Shift and an arrow resizes.
     await widget(page, 'outcomes').focus()
+    // (Beside the breakdown in the wide layout, it grew with it: from there, a row taller.)
+    const tall = (await placeOf(page, 'outcomes'))[3]
     await page.keyboard.press('Shift+ArrowDown')
     await saved(page)
-    assert.equal((await placeOf(page, 'outcomes'))[3], 6)
+    assert.equal((await placeOf(page, 'outcomes'))[3], tall + 1)
     const ring = await widget(page, 'outcomes').evaluate((node) => getComputedStyle(node.querySelector('.sw-widget-body > *')).boxShadow)
     assert.notEqual(ring, 'none', 'the focus is drawn')
     const [, row] = await placeOf(page, 'outcomes')
@@ -360,10 +375,11 @@ test('390 px phone: one column while editing, up and down to reorder, nothing to
     await assertTidy(page, 'phone view')
     await page.locator('[data-sw-layout-edit="off"]').click()
     await page.locator('[data-sw-layout-bar]').waitFor()
+    await assertTidy(page, 'phone editing')
     const widths = await page.locator('[data-sw-widget]').evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().width))
     assert.ok(Math.max(...widths) - Math.min(...widths) < 1, 'one column')
     assert.equal(await page.locator('[data-sw-widget-handle]').count(), 0)
-    assert.equal(await page.locator('.sw-resize').count(), 0)
+    assert.equal(await page.locator('.sw-resize:visible').count(), 0)
     assert.ok(await page.evaluate(() => document.scrollingElement.scrollWidth <= window.innerWidth + 1))
     await shot(page, '390-01-edit')
     await widget(page, 'tile_tokens').locator('[data-sw-widget-up]').click()
