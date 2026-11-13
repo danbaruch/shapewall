@@ -695,7 +695,7 @@ test('a list, a breakdown and the budgets are as tall as what they hold, until t
   assert.deepEqual(layout, defaultLayout(), 'the layout given is never changed')
 })
 
-test('settle: each widget drawn at its own height; a short one never stretches, the charts beside it close the gap', () => {
+test('settle: each widget drawn at its own height; the charts close the gap, and no band leaves a hole or an uneven bottom', () => {
   const layout = defaultLayout()
   const S = LAYOUT_SUB
   const drawn = (fitted, items = layout.items, cols = LAYOUT_COLS) => settle(items, cols, fitted)
@@ -730,17 +730,57 @@ test('settle: each widget drawn at its own height; a short one never stretches, 
   // A widget sized by hand keeps that height whatever it holds.
   const byHand = resizeItem(layout, 'breakdown', 6, 7)
   assert.equal(spot(drawn({ breakdown: 8 }, byHand.items), 'breakdown')[3], 7 * S)
-  // Alone in its band beside a taller chart, a short breakdown leaves the room under it empty rather than stretch.
+  // Alone in its band beside a taller chart, with nothing that fits under it, a short breakdown reaches down to
+  // where the chart ends: no hole, one bottom edge.
   const pair = [item('breakdown', 0, 0, 6, 5, { auto: true }), item('outcomes', 6, 0, 6, 5), item('time', 0, 5, 12, 6)]
   const alone = drawn({ breakdown: 8 }, pair)
-  assert.deepEqual(spot(alone, 'breakdown'), [0, 0, 6, 8])
+  assert.deepEqual(spot(alone, 'breakdown'), [0, 0, 6, 5 * S])
   assert.deepEqual(spot(alone, 'time'), [0, 5 * S, 12, 6 * S])
-  // A breakdown made wider than the chart beside it: the charts of the next row still move up under it.
+  // A breakdown made wider than the chart beside it: a chart moved up under it would leave a hole beside itself
+  // (the next row is split into other columns), so the breakdown keeps its stored height and the next row stays
+  // one line under both.
   const wider = resizeItem(layout, 'breakdown', 8, 5)
   const mixed = drawn({ breakdown: 8 }, wider.items)
   noOverlap(mixed)
-  assert.deepEqual(spot(mixed, 'approvals'), [0, 10 * S + 8, 6, 10 * S - 8])
+  assert.deepEqual(spot(mixed, 'breakdown'), [0, 10 * S, 8, 5 * S])
+  assert.deepEqual(spot(mixed, 'approvals'), [0, 15 * S, 6, 5 * S])
   assert.equal(spot(mixed, 'latency')[1], 15 * S)
+  // Rows of uneven widths: a narrow breakdown beside a wide chart, two charts in pairs under them. The charts cannot
+  // fit under the breakdown, so it reaches down to where the wide chart ends instead of leaving a hole.
+  const uneven = [
+    item('breakdown', 0, 0, 4, 5, { auto: true }),
+    item('outcomes', 4, 0, 8, 5),
+    item('approvals', 0, 5, 6, 5),
+    item('latency', 6, 5, 6, 5),
+  ]
+  const unevenDrawn = drawn({ breakdown: 9 }, uneven)
+  noOverlap(unevenDrawn)
+  assert.deepEqual(spot(unevenDrawn, 'breakdown'), [0, 0, 4, 5 * S])
+  assert.deepEqual(spot(unevenDrawn, 'approvals'), [0, 5 * S, 6, 5 * S])
+  // A Top 10 beside Top 5s (different rows, so different stored heights): the row of lists ends on one line, every
+  // list as tall as the longest.
+  const fourLists = [
+    item('top_agents', 0, 0, 3, 7, { auto: true }),
+    item('top_threads', 3, 0, 3, 4, { auto: true }),
+    item('top_slowest', 6, 0, 3, 4, { auto: true }),
+    item('top_denied', 9, 0, 3, 4, { auto: true }),
+    item('budgets', 0, 7, 12, 4, { auto: true }),
+  ]
+  const listsDrawn = drawn({ top_agents: 24, top_threads: 15, top_slowest: 15, top_denied: 13, budgets: 12 }, fourLists)
+  noOverlap(listsDrawn)
+  for (const id of ['top_agents', 'top_threads', 'top_slowest', 'top_denied'])
+    assert.deepEqual(spot(listsDrawn, id).slice(1), [0, 3, 24], id)
+  assert.deepEqual(spot(listsDrawn, 'budgets'), [0, 24, 12, 12])
+  // Every column ends on one bottom line and nothing leaves a hole, whatever is fitted.
+  for (const items of [unevenDrawn, listsDrawn, alone, short, lists, mixed]) {
+    const cells = new Set(
+      items.flatMap((one) => Array.from({ length: one.w * one.h }, (_, at) => `${one.x + (at % one.w)},${one.y + Math.floor(at / one.w)}`)),
+    )
+    const bottom = Math.max(...items.map((one) => one.y + one.h))
+    const holes = []
+    for (let c = 0; c < LAYOUT_COLS; c += 1) for (let r = 0; r < bottom; r += 1) if (!cells.has(`${c},${r}`)) holes.push(`${c},${r}`)
+    assert.deepEqual(holes.slice(0, 5), [], items.map((one) => `${one.id}@${one.x},${one.y},${one.w},${one.h}`).join(' '))
+  }
   // Fewer columns: one widget under another, each its own height.
   const phone = drawn({ breakdown: 8 }, reflow(layout.items, 2), 2)
   noOverlap(phone, 2)

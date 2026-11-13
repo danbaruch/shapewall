@@ -2,8 +2,8 @@
 // Pure, so it is tested without a browser.
 //
 // The bar sits outside the card: above it, else to its right, else to its
-// left; when none fits it collapses to one button (on a touch screen it sticks
-// to the card's top edge first, see `pin`). It must never cover the
+// left; when none fits it collapses to one button. On a touch screen it follows
+// one continuous rule instead, a sticky header over the card (see `pin`). It must never cover the
 // notes along the top of the canvas (CanvasNotes: the links hints, the tip,
 // the viewport notice), so a spot that would overlap `avoid` (their union
 // rect, with a gap) is moved below them or given up for the next one. The
@@ -47,8 +47,8 @@ export function notesRect(rects, origin) {
 // `canvas`: { width, height }; `bar`: { width, height }. Returns
 // { place: { left, top } | null, toggle: { left, top } } where `toggle` is the
 // collapsed button's spot (used when `place` is null) and `fallback` the
-// spot for the bar expanded from it. `pin`: a touch screen's bar sticks to the
-// card instead of collapsing (below).
+// spot for the bar expanded from it. `pin`: a touch screen's bar rides above
+// the card and sticks to the canvas's top instead of collapsing (below).
 export function placeFrameBar({ card, canvas, bar, avoid = null, gap = 8, zoom = 1, toggleSize = 44, pin = false }) {
   const { width, height } = canvas
   const below = avoid ? avoid.bottom + gap : gap
@@ -70,22 +70,23 @@ export function placeFrameBar({ card, canvas, bar, avoid = null, gap = 8, zoom =
   }
   if (!place && card.right + gap + bar.width <= width - gap) place = side(card.right + gap)
   if (!place && card.left - gap - bar.width >= gap) place = side(card.left - gap - bar.width)
-  // `pin` (touch screens): a phone's canvas is about one card wide, so there
-  // is seldom room beside the card, and the spot above is gone as soon as
-  // the card's title row nears the top. Rather than collapse to one button
-  // there (the bar would flip between the two on every pan), the bar sticks:
-  // just inside the card's top edge, under its title row (never over the
-  // name and badges), and at the canvas's top once that edge has scrolled
-  // past it, like a sticky header. Below the card when only its bottom is left.
-  if (!place && pin) {
-    let top = Math.max(gap, card.top + gap)
-    if (!clear({ left: alignedLeft, top })) top = Math.max(top, below)
-    const floor = Math.min(card.bottom, height) - gap
-    if (top + bar.height <= floor) place = { left: alignedLeft, top }
-    else if (card.bottom + gap + bar.height <= height - gap) {
-      const spot = { left: alignedLeft, top: Math.max(gap, card.bottom + gap) }
-      if (clear(spot)) place = spot
-    }
+  // `pin` (touch screens): a compact bar that behaves like a sticky header.
+  // A phone's canvas is about one card wide, so there is seldom room beside
+  // the card, and switching between spots made the bar jump. So on touch it
+  // has one rule, continuous as the board pans or zooms (no jumps): it rides
+  // just above the card's title row, and once that row nears the top of the
+  // canvas it stays at the top (below the notes, if any), covering only a
+  // strip of the page; when only the card's bottom is left it leaves with it.
+  // Across, it lines up with the card's right edge, or centres on a card
+  // narrower than the bar, so it covers as little of the neighbours as it can.
+  if (pin) {
+    const cardWidth = card.right - card.left
+    const across = cardWidth >= bar.width ? card.right - bar.width : card.left + (cardWidth - bar.width) / 2
+    const left = Math.round(Math.max(gap, Math.min(width - bar.width - gap, across)))
+    const sticky = clear({ left, top: gap }) ? gap : below
+    let top = Math.max(sticky, card.titleTop - bar.height - gap)
+    top = Math.min(top, card.bottom - bar.height - gap, height - bar.height - gap)
+    return { place: { left, top: Math.round(top) }, toggle: { left, top: sticky }, fallback: { left, top: sticky } }
   }
 
   // Collapsed: on the title row, left of its badges, when the row is on
@@ -112,7 +113,8 @@ export function placeFrameBar({ card, canvas, bar, avoid = null, gap = 8, zoom =
 //      (Done, while text is being selected, stays: it ends a mode.)
 // Close is always the last button. Open in a new tab sits beside it as an
 // icon while nothing overflows on a mouse screen; once there is a More menu
-// (and always on a touch screen) it moves into it.
+// it moves into it. A touch screen always gets the compact bar: Comment, More
+// (everything else) and Close.
 // The widths are the buttons' fixed sizes plus their text, rounded up
 // (FrameBar.jsx renders exactly these), never read back from the bar. The
 // width returned is the most the bar may take: it hugs its content.
@@ -176,6 +178,26 @@ export function fitFrameBar({ canvasWidth, touch = false, items = {}, margin = 1
     if (title) parts.push(0) // the title's own gap
     const fixed = parts.reduce((sum, part) => sum + part, 0) + sizes.gap * (parts.length - 1) + sizes.pad + sizes.divider
     return { title, bar: onBar, menu: actions.filter((id) => menu.includes(id)), link, more, fixed }
+  }
+  // A phone's bar is compact, at any width: Comment, then More (every other
+  // action, Open live included, and Open in a new tab), then Close. Done,
+  // while text is being selected, stays on the bar: it ends a mode.
+  if (touch) {
+    const compact = layout(
+      actions.filter((id) => id !== 'done'),
+      false,
+    )
+    return {
+      step: 'compact',
+      title: false,
+      chip: false,
+      bar: compact.bar,
+      menu: compact.menu,
+      link: compact.link,
+      more: compact.more,
+      width: Math.min(compact.fixed, room),
+      fits: compact.fixed <= room,
+    }
   }
   const full = layout([], !touch)
   const width = Math.min(full.fixed + sizes.title, room)

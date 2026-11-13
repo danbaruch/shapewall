@@ -25,9 +25,9 @@ const TITLE_ROW_PX = 30
 // they stay tappable (44 px on touch) at any zoom. The bar sits outside the
 // card, never over its title and badges: above the card, else to its right,
 // else to its left. On a touch screen, where a card is about as wide as the
-// canvas, it then sticks to the card's top edge (under its title row) and to
-// the top of the canvas as the card scrolls, rather than collapsing on every
-// pan. Otherwise, when the card fills the canvas it shrinks to one button
+// canvas, the bar is compact (Comment, More, Close) and acts as a sticky
+// header: above the card's title row, then at the top of the canvas as the
+// card scrolls, moving continuously, never collapsing. Otherwise, when the card fills the canvas it shrinks to one button
 // in the card's header (or the canvas's top left corner when the header is
 // off screen), away from the page's own nav and buttons. It never covers the
 // notes along the top of the canvas (CanvasNotes), such as the links hint

@@ -3,7 +3,7 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
-## 0.7.0 - 2026-11-12
+## 0.7.0 - 2026-11-13
 
 Connected agents, stage E: the Usage dashboard, and people's activity. Two new pages in the Workspace Console of a team server, and
 a Usage view on a local board.
@@ -23,7 +23,8 @@ a Usage view on a local board.
   with arrows resizes it, announced as you go; a finger drags on a tablet; a phone shows one column with up and down buttons.
   Layouts are saved per person per workspace, checked strictly on the server, and autosaved with Undo. A saved view of
   the overview keeps its layout and widget options unless you untick "Include this layout"; whoever opens its link sees them
-  without losing their own. Lists and the budgets are as tall as what they hold until sized by hand. Owners can set the layout everyone
+  without losing their own. Lists and the budgets are as tall as what they hold until sized by hand, and every row of widgets ends on one line
+  with no holes (a Top 5 beside a Top 10 is as tall as it). Owners can set the layout everyone
   starts from (audited). Printing follows reading order. One additive migration (16); see docs/hosted.md, "Arranging the
   dashboard". The public demo has all of it, kept until Reset.
 - **Nothing is estimated, and "not reported" is not zero.** A cost appears only when the agent or its endpoint reported one. An
@@ -246,8 +247,13 @@ Board tools: the tools you use on the board moved out of the top bar.
   goes on that page (the hint above the tools names the page; on a live page it pins to the element you click). It works from the
   keyboard too (Enter on the button, Enter again for the top left of the page) and is the first action when you tap a page on a
   phone. The Comment tool at the bottom of the board and the C key work as before. People who cannot comment do not see it. The
-  first time you select a page the button is pointed out with a ring, once. The bar itself is now always one line: on a narrow
-  canvas its buttons become icons with tooltips, Comment and Open live last.
+  first time you select a page the button is pointed out with a ring, once. Comment is a soft tint at rest and filled while it
+  is on.
+- **The page bar is one line at any width.** It leads with the page's name and screen size; Open live, Select text, Checks
+  and History keep their words (with counts), and on a narrow canvas they move, one at a time, into a More menu instead of
+  becoming bare icons. On a phone the bar is compact: Comment, More (everything else, Open live and Open in a new tab
+  included) and Close. It rides above the page's title row and, as you pan, stays at the top of the canvas like a sticky
+  header, moving smoothly and never covering the page's headline while the top of the page is in view.
 
 ## 0.6.0 - 2026-11-12
 
