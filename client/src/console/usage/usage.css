@@ -292,7 +292,11 @@
 @media (prefers-reduced-motion: reduce) {
   .sw-layout-editing .react-grid-layout,
   .sw-layout-editing .react-grid-item,
-  .sw-layout .react-grid-item.react-grid-placeholder {
+  .sw-layout .react-grid-item.react-grid-placeholder,
+  .sw-layout-editing .sw-widget-body > *,
+  .sw-widget-tools,
+  .sw-widget-tools > *,
+  .sw-layout .sw-resize::after {
     transition: none;
   }
 }

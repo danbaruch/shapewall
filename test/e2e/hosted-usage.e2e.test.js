@@ -976,15 +976,12 @@ test('edit layout: hide a widget and add it back, duplicate a chart with other o
     ['tile_fixes', 'approvals'],
   )
   await shot(page, 'e2e-layout-add-menu')
-  // Add the chart back: it comes back at the bottom, focused, and is announced.
+  // Add the chart back: it comes back after the last chart (among its kind), focused, and is announced.
   await page.locator('[data-sw-layout-add-item="approvals"]').click()
   await widget(page, 'approvals').waitFor()
-  await said(page, /Approvals added at row \d+, column 1; 6 wide, 5 tall/)
+  await said(page, /Approvals added at row 16, column 7; 6 wide, 5 tall/)
   assert.ok(await widget(page, 'approvals').evaluate((node) => node === document.activeElement), 'the new widget has the focus')
-  const places = await page
-    .locator('[data-sw-widget]')
-    .evaluateAll((nodes) => nodes.map((node) => Number(node.getAttribute('data-sw-widget-place').split(',')[1])))
-  assert.equal((await placeOf(page, 'approvals'))[1], Math.max(...places), 'at the bottom')
+  assert.deepEqual(await placeOf(page, 'approvals'), [6, 15, 6, 5], 'beside the duration chart, before the lists')
   await page.locator('[data-sw-chart="approvals"] .recharts-bar-rectangle').first().waitFor({ state: 'attached' })
   await layoutSaved(page)
   // The toast's Undo takes the last change back (the chart is hidden again); the bar's Undo the one before (the tile returns).
@@ -1007,7 +1004,7 @@ test('edit layout: hide a widget and add it back, duplicate a chart with other o
   await widget(page, 'time-2').waitFor()
   assert.deepEqual(await placeOf(page, 'time'), [0, 4, 6, 6])
   assert.deepEqual(await placeOf(page, 'time-2'), [6, 4, 6, 6])
-  assert.match(await widget(page, 'time-2').locator('[data-sw-widget-bar]').textContent(), /Usage over time 2/)
+  assert.match(await widget(page, 'time-2').locator('[data-sw-widget-hide]').getAttribute('aria-label'), /Hide Usage over time 2/)
   await widget(page, 'time-2').locator('[data-sw-widget-options]').click()
   const panel = page.locator('[data-sw-widget-options-panel="time-2"]')
   for (const [key, name] of [
@@ -1117,17 +1114,15 @@ test('edit layout by keyboard: every widget takes the focus, arrows move, Shift 
   assert.deepEqual(await placeOf(page, 'latency'), [6, 10, 6, 5])
   assert.deepEqual(await placeOf(page, 'outcomes'), [6, 15, 6, 5])
   assert.ok(await widget(page, 'latency').evaluate((node) => node === document.activeElement), 'the focus stays on the widget')
-  // Narrower, then a column to the left; shorter and taller.
+  // Narrower: the row stays whole, so the chart beside it takes the column. Then shorter, with that chart, as far as it goes.
   await page.keyboard.press('Shift+ArrowLeft')
-  await said(page, /^Turn duration resized: row 11, column 7; 5 wide, 5 tall/)
-  await page.keyboard.press('ArrowRight')
-  await said(page, /^Turn duration moved to row 11, column 8; 5 wide, 5 tall/)
+  await said(page, /^Turn duration resized: row 11, column 8; 5 wide, 5 tall/)
+  assert.deepEqual(await placeOf(page, 'breakdown'), [0, 10, 7, 5])
   await page.keyboard.press('Shift+ArrowUp')
   await said(page, /^Turn duration resized: row 11, column 8; 5 wide, 4 tall/)
+  assert.deepEqual(await placeOf(page, 'breakdown'), [0, 10, 7, 4])
   await page.keyboard.press('Shift+ArrowUp')
   await said(page, /^Turn duration is as small as it goes/)
-  await page.keyboard.press('ArrowRight')
-  await said(page, /^Turn duration cannot move further right/)
   assert.deepEqual(await placeOf(page, 'latency'), [7, 10, 5, 4])
   // A tile at the top left has nowhere to go up or left.
   await widget(page, 'tile_calls').focus()
@@ -1142,7 +1137,8 @@ test('edit layout by keyboard: every widget takes the focus, arrows move, Shift 
   const stored = (await storedLayout(s.ada)).layout
   assert.deepEqual(
     [itemOf(stored, 'latency').x, itemOf(stored, 'latency').y, itemOf(stored, 'latency').w, itemOf(stored, 'latency').h],
-    [7, 10, 5, 4],
+    // (Stored at its own width; the spare column is drawn on the chart before it.)
+    [6, 10, 5, 4],
   )
   assert.deepEqual([itemOf(stored, 'tile_calls').x, itemOf(stored, 'tile_calls').y], [0, 2])
   // Tab reaches the widget's own buttons; its × hides it.
@@ -1692,7 +1688,7 @@ test('a tablet: a finger on a widget’s bar drags it, a finger anywhere else sc
       type,
       touchPoints: type === 'touchEnd' ? [] : [{ x: Math.round(x), y: Math.round(y), id: 1 }],
     })
-  const start = { x: from.x + 40, y: from.y + from.height / 2 }
+  const start = { x: from.x + from.width / 2, y: from.y + from.height / 2 }
   await touch('touchStart', start.x, start.y)
   for (let step = 1; step <= 12; step += 1)
     await touch('touchMove', start.x + ((to.x - from.x) * step) / 12, start.y + (step < 3 ? step * 3 : 6))
@@ -1823,11 +1819,11 @@ test('nothing is cut off at the default sizes, looking or editing; lists and the
     }),
   )
   assert.deepEqual(await clipped(), [], 'editing the default dashboard')
-  // The budgets' rows share the room its heading left: no blank strip under the last one.
+  // The budgets are the same card as when viewed: no blank band under the last project.
   const strip = await page
     .locator('[data-sw-usage-budgets]')
     .evaluate((card) => card.getBoundingClientRect().bottom - card.querySelector('li:last-child').getBoundingClientRect().bottom)
-  assert.ok(strip >= 0 && strip < 4, 'no strip under the last project while editing: ' + strip)
+  assert.ok(strip >= 0 && strip < 24, 'no band under the last project while editing: ' + strip)
   assert.match(await page.locator('[data-sw-tile="tokens"]').textContent(), /of [\d,]+ turns reported/, 'a tile keeps its third line')
   await shot(page, 'e2e-layout-edit-fits')
 
@@ -1838,7 +1834,9 @@ test('nothing is cut off at the default sizes, looking or editing; lists and the
   await panel.locator('[data-sw-pick="option-rows"]').click()
   await page.getByRole('option', { name: 'Top 3', exact: true }).click()
   await page.locator('[data-sw-top="agents"] [data-sw-top-rows="3"]').waitFor()
-  assert.deepEqual(await placeOf(page, 'top_agents'), [0, 20, 3, 3])
+  // (Three rows, drawn as tall as the lists beside it: no hole opens above the budgets.)
+  assert.deepEqual(await placeOf(page, 'top_agents'), [0, 20, 3, 4])
+  assert.equal(itemOf((await storedLayout(s.ada)).layout ?? { items: [{ id: 'top_agents', h: 3 }] }, 'top_agents').h, 3)
   await panel.locator('[data-sw-pick="option-rows"]').click()
   await page.getByRole('option', { name: 'Top 10', exact: true }).click()
   await page.waitForFunction(
@@ -1850,10 +1848,11 @@ test('nothing is cut off at the default sizes, looking or editing; lists and the
   // (The closing panel hands the focus back to its button; that has to land before the focus is put elsewhere.)
   await page.waitForFunction(() => document.activeElement?.matches('[data-sw-widget-options]'))
   assert.deepEqual(await clipped(), [])
-  // A list sized by hand keeps the height it was given, whatever its rows: it scrolls inside itself.
+  // A list sized by hand keeps the height it was given, whatever its rows. (A step goes on to the next height it is
+  // drawn at: beside the ten-row list it was already drawn seven tall, so the step makes it eight.)
   await widget(page, 'top_threads').focus()
   await page.keyboard.press('Shift+ArrowDown')
-  await said(page, /Threads that used the most tokens resized: row 21, column 4; 3 wide, 5 tall/)
+  await said(page, /Threads that used the most tokens resized: row 21, column 4; 3 wide, 8 tall/)
   await widget(page, 'top_threads').locator('[data-sw-widget-options]').click()
   panel = page.locator('[data-sw-widget-options-panel="top_threads"]')
   await panel.locator('[data-sw-pick="option-rows"]').click()
@@ -1861,20 +1860,21 @@ test('nothing is cut off at the default sizes, looking or editing; lists and the
   await page.locator('[data-sw-top="threads"] [data-sw-top-rows="10"]').waitFor()
   await page.keyboard.press('Escape')
   await panel.waitFor({ state: 'detached' })
-  assert.deepEqual(await placeOf(page, 'top_threads'), [3, 20, 3, 5])
-  assert.deepEqual(await clipped(), ['list threads'])
+  assert.deepEqual(await placeOf(page, 'top_threads'), [3, 20, 3, 8])
+  assert.deepEqual(await clipped(), [])
   await layoutSaved(page)
   const stored = (await storedLayout(s.ada)).layout
   assert.deepEqual(
     [itemOf(stored, 'top_agents').auto, itemOf(stored, 'top_threads').auto, itemOf(stored, 'top_threads').h],
-    [true, false, 5],
+    [true, false, 8],
   )
   await page.locator('[data-sw-layout-done]').click()
   await page.reload()
   await page.locator('[data-sw-top="threads"] [data-sw-top-rows="10"]').waitFor()
-  assert.deepEqual(await placeOf(page, 'top_agents'), [0, 20, 3, 7])
-  assert.deepEqual(await placeOf(page, 'top_threads'), [3, 20, 3, 5])
-  assert.deepEqual(await clipped(), ['list threads'])
+  // (The ten-row list is drawn as tall as the row it shares.)
+  assert.deepEqual(await placeOf(page, 'top_agents'), [0, 20, 3, 8])
+  assert.deepEqual(await placeOf(page, 'top_threads'), [3, 20, 3, 8])
+  assert.deepEqual(await clipped(), [])
 
   // More projects, taller budgets, while nobody sized them by hand; from six on the list scrolls.
   await helpers.reauth(s.ada)
