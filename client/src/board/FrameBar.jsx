@@ -1,5 +1,5 @@
 import { viewportLabel } from './viewports'
-import { useEffect, useLayoutEffect, useState } from 'react'
+import { useContext, useEffect, useLayoutEffect, useState } from 'react'
 import { useStore } from '@xyflow/react'
 import { Camera, ExternalLink, Flag, History, MessageSquarePlus, MonitorPlay, MoreHorizontal, TextSelect, X } from 'lucide-react'
 import { cn } from '../lib/utils'
@@ -7,6 +7,7 @@ import { Button, IconButton, Tooltip } from '../components/ui'
 import { isThumbnail } from './layout'
 import { fitFrameBar, notesRect, placeFrameBar } from './frameBarPlace'
 import { KeyTip } from './KeyTip'
+import { BoardContext } from './boardContext'
 import { pageCommentSeen, rememberPageCommentSeen } from './prefs'
 
 const TITLE_ROW_PX = 30
@@ -23,8 +24,12 @@ const TITLE_ROW_PX = 30
 //
 // Comment comes first, for whoever may comment here (`onComment`; the same
 // rule as the Comment tool at the bottom of the board): it starts a comment
-// on this page. The bar is one line at any width: frameBarPlace.js
-// (fitFrameBar) says which buttons keep their words.
+// on this page, and it is the bar's one filled (primary) button. The rest are
+// quiet: Open live or Select text, Checks and History (with their counts, the
+// same as the card header's badges), Capture, then after a hairline the
+// page's utilities (open in a new tab, close). The page's name leads, with its
+// screen size as a small chip. The bar hugs its content and is one line at
+// any width: frameBarPlace.js (fitFrameBar) says which buttons keep their words.
 export default function FrameBar({
   focused,
   target,
@@ -42,6 +47,7 @@ export default function FrameBar({
   onComment = null,
   commenting = false,
   history = 0,
+  checks = 0,
   onHistory = null,
   onChecks = null,
   onCapture = null,
@@ -126,6 +132,8 @@ export default function FrameBar({
       history: Boolean(onHistory),
       capture: Boolean(onCapture),
       link: Boolean(href),
+      checksCount: checks > 0,
+      historyCount: history > 0,
     },
   })
   const barWidth = fit.width
@@ -142,7 +150,6 @@ export default function FrameBar({
   const size = touch ? 'touch' : 'sm'
   // A button without its word is the square icon button.
   const sized = (labelled) => (labelled ? size : touch ? 'icon' : 'icon-sm')
-  const quiet = 'text-fg shadow-none'
   // Labels stay 13 px on touch so the bar keeps its measured width.
   const label = touch && 'text-[13px]'
   if (!place && !expanded) {
@@ -164,7 +171,14 @@ export default function FrameBar({
       </IconButton>
     )
   }
-  const style = place ? { left: place.left, top: place.top, width: barWidth } : { left: fallback.left, top: fallback.top, width: barWidth }
+  // The bar hugs its content, up to the width fitFrameBar allows. A bar above
+  // the card or on its left keeps its right edge where the placement put it
+  // (in line with the card's right edge), so a shorter bar does not drift.
+  const spot = place || fallback
+  const anchorRight = Boolean(place) && place.left < left + frame.w * zoom
+  const style = anchorRight
+    ? { right: width - (spot.left + barWidth), top: spot.top, maxWidth: barWidth }
+    : { left: spot.left, top: spot.top, maxWidth: barWidth }
   // A button that lost its word keeps its name: a tooltip (mouse, keyboard).
   const tipped = (content, button, shown = true) =>
     shown && !touch ? (
@@ -174,12 +188,14 @@ export default function FrameBar({
     ) : (
       button
     )
+  const checksText = checks ? `Page checks: ${checks} need${checks === 1 ? 's' : ''} attention` : 'Page checks'
+  const historyText = `Page history: ${history + 1} captures`
+  const utility = cn(secondary, DIVIDED)
   return (
     <div
       className={cn(
-        'nodrag nopan nowheel absolute z-20 flex flex-nowrap items-center gap-1 overflow-hidden rounded-lg border border-line bg-surface/95 p-1 shadow-pop backdrop-blur',
-        // Too narrow even for the icons: the first ones stay.
-        fit.fits ? 'justify-end' : 'justify-start',
+        'nodrag nopan nowheel absolute z-20 flex w-max flex-nowrap items-center gap-1 overflow-hidden rounded-lg border border-line bg-surface/95 p-1 shadow-pop backdrop-blur',
+        touch && 'rounded-xl',
       )}
       style={style}
       role="toolbar"
@@ -189,8 +205,18 @@ export default function FrameBar({
       onClick={(event) => event.stopPropagation()}
     >
       {fit.title ? (
-        <span className="min-w-0 flex-1 truncate px-1.5 text-xs font-medium text-muted">
-          {title} · {viewportLabel(frame.viewport)}
+        <span className="flex min-w-0 shrink items-center gap-1.5 pr-1.5 pl-2" data-sw-frame-bar-title="true">
+          <span className="min-w-0 truncate text-[13px] font-semibold text-fg" title={title}>
+            {title}
+          </span>
+          <span
+            className={cn(
+              'shrink-0 rounded bg-surface-2 px-1.5 text-[10.5px] leading-[18px] font-medium text-muted',
+              !fit.chip && 'sr-only',
+            )}
+          >
+            {viewportLabel(frame.viewport)}
+          </span>
         </span>
       ) : null}
       {onComment ? (
@@ -209,13 +235,13 @@ export default function FrameBar({
             'Open live',
             <Button
               size={sized(fit.labels.live)}
-              variant="default"
-              className={cn('shadow-none', label)}
+              variant="ghost"
+              className={cn(secondary, label)}
               onClick={onOpenLive}
               aria-label="Open live"
               data-sw-open-live={focused}
             >
-              <MonitorPlay size={15} aria-hidden="true" /> {fit.labels.live ? 'Open live' : null}
+              <MonitorPlay size={ICON} aria-hidden="true" /> {fit.labels.live ? 'Open live' : null}
             </Button>,
             !fit.labels.live,
           )
@@ -225,81 +251,128 @@ export default function FrameBar({
             selecting ? 'Done selecting text' : 'Select text',
             <Button
               size={sized(fit.labels.live)}
-              variant={selecting ? 'default' : 'ghost'}
-              className={cn('shadow-none', label, !selecting && 'text-fg')}
+              variant={selecting ? 'soft' : 'ghost'}
+              className={cn(selecting ? 'shadow-none' : secondary, label)}
               aria-label={selecting ? 'Done' : 'Select text'}
               aria-pressed={selecting}
               disabled={!ready}
               onClick={onToggleSelect}
               data-sw-select-text={focused}
             >
-              <TextSelect size={15} aria-hidden="true" /> {fit.labels.live ? (selecting ? 'Done' : 'Select text') : null}
+              <TextSelect size={ICON} aria-hidden="true" /> {fit.labels.live ? (selecting ? 'Done' : 'Select text') : null}
             </Button>,
             !fit.labels.live,
           )
         : null}
       {onChecks
         ? tipped(
-            'Page checks',
+            checksText,
             <Button
               size={sized(fit.labels.checks)}
               variant="ghost"
-              className={quiet}
+              className={secondary}
               onClick={onChecks}
               aria-label="Page checks"
+              aria-description={checks ? `${checks} need${checks === 1 ? 's' : ''} attention` : undefined}
               data-sw-frame-checks={focused}
             >
-              <Flag size={15} aria-hidden="true" />
-              {fit.labels.checks ? 'Checks' : null}
+              <Flag size={ICON} aria-hidden="true" />
+              {fit.labels.checks ? (
+                <>
+                  Checks
+                  {checks ? <Count tone="warn">{checks}</Count> : null}
+                </>
+              ) : null}
             </Button>,
-            !fit.labels.checks,
           )
         : null}
-      {onHistory ? (
-        <Tooltip content={`Page history: ${history + 1} captures`}>
-          <Button
-            size={sized(fit.labels.history)}
-            variant="ghost"
-            className={quiet}
-            onClick={onHistory}
-            aria-label={`Page history: ${history + 1} captures`}
-            data-sw-frame-history={focused}
-          >
-            <History size={15} aria-hidden="true" /> {fit.labels.history ? 'History' : null}
-          </Button>
-        </Tooltip>
-      ) : null}
-      {onCapture ? (
-        <Tooltip content="Recapture this page at every screen size">
-          <Button
-            size={sized(fit.labels.capture)}
-            variant="ghost"
-            className={quiet}
-            disabled={captureBusy}
-            onClick={onCapture}
-            aria-label="Capture this page"
-            data-sw-frame-capture={focused}
-          >
-            <Camera size={15} aria-hidden="true" /> {fit.labels.capture ? 'Capture' : null}
-          </Button>
-        </Tooltip>
-      ) : null}
+      {onHistory
+        ? tipped(
+            historyText,
+            <Button
+              size={sized(fit.labels.history)}
+              variant="ghost"
+              className={secondary}
+              onClick={onHistory}
+              aria-label={historyText}
+              data-sw-frame-history={focused}
+            >
+              <History size={ICON} aria-hidden="true" />
+              {fit.labels.history ? (
+                <>
+                  History
+                  {history ? <Count>{history + 1}</Count> : null}
+                </>
+              ) : null}
+            </Button>,
+          )
+        : null}
+      {onCapture
+        ? tipped(
+            'Recapture this page at every screen size',
+            <Button
+              size={sized(fit.labels.capture)}
+              variant="ghost"
+              className={secondary}
+              disabled={captureBusy}
+              onClick={onCapture}
+              aria-label="Capture this page"
+              data-sw-frame-capture={focused}
+            >
+              <Camera size={ICON} aria-hidden="true" /> {fit.labels.capture ? 'Capture' : null}
+            </Button>,
+          )
+        : null}
+      {/* The page's own utilities, after a hairline: open it in a tab, close the bar. */}
       {href ? (
-        <IconButton asChild size={touch ? 'icon' : 'icon-sm'} className={quiet} label="Open the page in a new tab">
+        <IconButton
+          asChild
+          size={touch ? 'icon' : 'icon-sm'}
+          className={utility}
+          label="Open the page in a new tab"
+          side="bottom"
+          data-sw-frame-bar-link="true"
+        >
           <a href={href} target="_blank" rel="noreferrer">
-            <ExternalLink size={15} aria-hidden="true" />
+            <ExternalLink size={ICON} aria-hidden="true" />
           </a>
         </IconButton>
       ) : null}
       <IconButton
         size={touch ? 'icon' : 'icon-sm'}
+        className={href ? secondary : utility}
         onClick={place ? onClose : () => setExpandedFor(null)}
         label={place ? 'Close' : 'Collapse'}
+        side="bottom"
         data-sw-frame-bar-close="true"
       >
-        <X size={15} aria-hidden="true" />
+        <X size={ICON} aria-hidden="true" />
       </IconButton>
     </div>
+  )
+}
+
+// One icon size on the bar (the board's tools use the same).
+const ICON = 16
+// A quiet action: the board tools' ghost look.
+const secondary = 'text-fg/80 shadow-none hover:text-fg focus-visible:outline-offset-1'
+// The hairline before the utilities, drawn by the first of them (the bar's
+// children are its buttons; fitFrameBar counts the room as `divider`).
+const DIVIDED =
+  "relative ml-1.5 before:pointer-events-none before:absolute before:top-1/2 before:-left-[5.5px] before:h-5 before:w-px before:-translate-y-1/2 before:bg-line before:content-['']"
+
+// A small count after a button's word (checks that need attention, captures).
+function Count({ tone = 'neutral', children }) {
+  return (
+    <span
+      className={cn(
+        'tabular -mr-0.5 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[10.5px] leading-none font-semibold',
+        tone === 'warn' ? 'bg-warn/15 text-fg' : 'bg-surface-2 text-muted',
+      )}
+      aria-hidden="true"
+    >
+      {children}
+    </span>
   )
 }
 
@@ -323,8 +396,14 @@ function CommentAction({ focused, size, touch, labelled, active, onComment }) {
   const button = (
     <Button
       size={size}
-      variant={active ? 'default' : 'soft'}
-      className={cn('shadow-none', touch && 'text-[13px]', emphasis && !active && 'bg-accent/12 outline-2 outline-offset-1 outline-accent')}
+      variant="default"
+      className={cn(
+        'shadow-none focus-visible:outline-offset-1',
+        touch && 'text-[13px]',
+        // Pressed (the Comment tool is on for this page): a ring around the fill.
+        active && 'ring-2 ring-accent/35 ring-offset-1 ring-offset-surface',
+        emphasis && !active && 'outline-2 outline-offset-2 outline-accent',
+      )}
       aria-label="Comment on this page"
       aria-pressed={active}
       aria-keyshortcuts="C"
@@ -332,7 +411,7 @@ function CommentAction({ focused, size, touch, labelled, active, onComment }) {
       data-sw-frame-comment={focused}
       data-sw-frame-comment-emphasis={emphasis ? 'true' : undefined}
     >
-      <MessageSquarePlus size={15} aria-hidden="true" /> {labelled ? 'Comment' : null}
+      <MessageSquarePlus size={ICON} aria-hidden="true" /> {labelled ? 'Comment' : null}
     </Button>
   )
   if (touch) return button
@@ -364,6 +443,7 @@ export function FocusedFrameBar({
   onComment = null,
   commentTargetKey = null,
 }) {
+  const board = useContext(BoardContext)
   if (!focusedKey) return null
   const split = focusedKey.lastIndexOf('|')
   const targetId = focusedKey.slice(0, split)
@@ -391,6 +471,8 @@ export function FocusedFrameBar({
       onComment={onComment ? (event) => onComment(focusedKey, event) : null}
       commenting={commentTargetKey === focusedKey}
       history={page ? data?.versions?.[page.id]?.[viewport]?.length || 0 : 0}
+      // The same count as the card header's checks badge (CardBadges.jsx).
+      checks={page && onChecks && board?.onChecks ? board.checksCount(page.id) : 0}
       onChecks={page && onChecks ? () => onChecks(page.id, viewport) : null}
       onHistory={page && historyCountFor(page.id) ? () => onHistory(page.id, viewport) : null}
       onCapture={page && onCapture ? () => onCapture(page.id) : null}

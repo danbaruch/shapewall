@@ -92,7 +92,8 @@ export function placeFrameBar({ card, canvas, bar, avoid = null, gap = 8, zoom =
 // So Comment and Open live stay labelled for as long as they fit. Phones
 // never show the title or the words of Checks, History and Capture.
 // The widths are the buttons' fixed sizes plus their text, rounded up
-// (FrameBar.jsx renders exactly these), never read back from the bar.
+// (FrameBar.jsx renders exactly these), never read back from the bar. The
+// width returned is the most the bar may take: it hugs its content.
 export const BAR_STEPS = ['full', 'capture', 'history', 'checks', 'title', 'live', 'comment']
 
 const BAR = {
@@ -100,25 +101,33 @@ const BAR = {
     icon: 32,
     gap: 4,
     pad: 10, // p-1 and the border, both sides
-    title: 150, // the room the name gets when everything fits
-    titleMin: 96, // and the least it keeps before the next word drops
-    label: { comment: 100, open: 104, select: 104, done: 74, checks: 84, history: 88, capture: 90 },
+    divider: 6, // the hairline before the utilities (open in a tab, close)
+    count: 22, // a count after Checks' or History's word
+    title: 160, // the room the name and its screen size get when everything fits
+    titleMin: 88, // and the least it keeps before the next word drops
+    titleChip: 140, // below this the screen size chip goes (the name stays)
+    label: { comment: 100, open: 104, select: 103, done: 74, checks: 84, history: 88, capture: 90 },
   },
   touch: {
     icon: 44,
     gap: 4,
     pad: 10,
+    divider: 6,
+    count: 0, // no words on phones, so no counts
     title: 0,
     titleMin: 0,
+    titleChip: 0,
     label: { comment: 108, open: 112, select: 118, done: 82, checks: 44, history: 44, capture: 44 },
   },
 }
 
 // `items`: { comment, live: 'open' | 'select' | 'done' | null, checks,
-// history, capture, link } (what this page's bar has; Close is always there).
-// Returns { step, labels: { comment, live, checks, history, capture }, title,
-// width, fits }: which words show, whether the title does, the bar's width
-// (never more than the canvas less a margin) and whether its content fits it.
+// history, capture, link, checksCount, historyCount } (what this page's bar
+// has; Close is always there; the counts: whether Checks or History show a
+// number after their word). Returns { step, labels: { comment, live, checks,
+// history, capture }, title, chip, width, fits }: which words show, whether
+// the title and its screen size chip do, the most the bar may take (never
+// more than the canvas less a margin) and whether its content fits it.
 export function fitFrameBar({ canvasWidth, touch = false, items = {}, margin = 16 }) {
   const sizes = touch ? BAR.touch : BAR.desktop
   const room = Math.max(0, canvasWidth - margin)
@@ -130,13 +139,15 @@ export function fitFrameBar({ canvasWidth, touch = false, items = {}, margin = 1
     if (items.comment) parts.push(labelled('comment') ? sizes.label.comment : sizes.icon)
     if (items.live) parts.push(labelled('live') ? sizes.label[items.live] : sizes.icon)
     for (const id of ['checks', 'history', 'capture']) {
-      if (items[id]) parts.push(labelled(id) ? sizes.label[id] : sizes.icon)
+      if (!items[id]) continue
+      const counted = items[`${id}Count`] ? sizes.count : 0
+      parts.push(labelled(id) ? sizes.label[id] + counted : sizes.icon)
     }
     if (items.link) parts.push(sizes.icon)
     parts.push(sizes.icon) // Close
     const title = !touch && at < BAR_STEPS.indexOf('title')
     if (title) parts.push(0) // the title's own gap
-    const fixed = parts.reduce((sum, part) => sum + part, 0) + sizes.gap * (parts.length - 1) + sizes.pad
+    const fixed = parts.reduce((sum, part) => sum + part, 0) + sizes.gap * (parts.length - 1) + sizes.pad + sizes.divider
     return {
       step,
       title,
@@ -159,6 +170,15 @@ export function fitFrameBar({ canvasWidth, touch = false, items = {}, margin = 1
     if (candidate.fixed + (candidate.title ? sizes.titleMin : 0) <= width) break
   }
   const fits = pick.fixed + (pick.title ? sizes.titleMin : 0) <= width
+  // The screen size chip only where the name keeps room beside it.
+  const chip = pick.title && width - pick.fixed >= sizes.titleChip
   // Without the title nothing stretches: the bar is as wide as its buttons.
-  return { step: pick.step, labels: pick.labels, title: pick.title, width: pick.title ? width : Math.min(pick.fixed, room), fits }
+  return {
+    step: pick.step,
+    labels: pick.labels,
+    title: pick.title,
+    chip,
+    width: pick.title ? width : Math.min(pick.fixed, room),
+    fits,
+  }
 }
