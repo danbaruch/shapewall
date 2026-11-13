@@ -1195,14 +1195,25 @@ test('phone 390: "Comment on this page" is the first action of a tapped page, fi
       `44 px targets: ${JSON.stringify(sizes)}`,
     )
     await assertBarFits(page, 'phone')
-    // The rest are in More (a menu with words, 44 px rows), Close is last.
-    assert.equal(await page.$eval('[data-sw-frame-bar] > :last-child', (node) => node.getAttribute('aria-label')), 'Close')
+    // The compact phone bar: Comment, More, Close and nothing else, narrow
+    // enough to leave most of the page (and its neighbours) in view.
+    assert.equal(await page.getAttribute('[data-sw-frame-bar]', 'data-sw-frame-bar-fit'), 'compact')
+    const kids = await page.$$eval('[data-sw-frame-bar] > *', (nodes) => nodes.map((node) => node.getAttribute('aria-label')))
+    assert.deepEqual(kids, ['Comment on this page', 'More actions for Home', 'Close'])
+    const width = await page.$eval('[data-sw-frame-bar]', (node) => node.getBoundingClientRect().width)
+    assert.ok(width <= 224, `a compact bar (${width} px)`)
+    // The rest are in More (a menu with words, 44 px rows), Open live first.
     await page.tap('[data-sw-frame-bar] [data-sw-frame-more]')
     await page.waitForSelector('[data-sw-frame-more-menu] [role="menuitem"]')
     const rows = await page.$$eval('[data-sw-frame-more-menu] [role="menuitem"]', (nodes) =>
       nodes.map((node) => [node.textContent.trim(), node.offsetHeight]),
     )
     assert.ok(rows.length && rows.every(([text, height]) => text && height >= 44), JSON.stringify(rows))
+    assert.equal(rows[0][0], 'Open live', JSON.stringify(rows))
+    assert.ok(
+      rows.some(([text]) => text === 'Open in a new tab'),
+      JSON.stringify(rows),
+    )
     await shot(page, 'page-bar-phone-more')
     await page.keyboard.press('Escape')
     await page.waitForSelector('[data-sw-frame-more-menu]', { state: 'detached' })
@@ -1256,11 +1267,32 @@ test('phone 412: panning with More open closes the menu and keeps the bar; Comme
     assert.ok(rest.fill < 0.2, `a soft tint at rest: ${JSON.stringify(rest)}`)
     await shot(page, 'page-bar-412-rest')
     const cdp = await context.newCDPSession(page)
+    // Where the bar and the card are, in px from the canvas's top.
+    const where = () =>
+      page.evaluate(() => {
+        const bar = document.querySelector('[data-sw-frame-bar]')?.getBoundingClientRect()
+        const canvas = document.querySelector('[data-sw-canvas]').getBoundingClientRect()
+        const card = document.querySelector('[data-sw-frame^="home:"]').getBoundingClientRect()
+        return bar ? { bar: bar.top - canvas.top, card: card.top - canvas.top, bottom: bar.bottom - canvas.top } : null
+      })
+    // Every step of a drag: the bar moves no more than the card (plus a
+    // pixel), so it never jumps; while the card's top is well down the
+    // canvas the bar sits above its title row, never over the page.
+    const steps = []
     const drag = async (x, y, dy) => {
       await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] })
+      let last = await where()
       for (let step = 1; step <= 12; step += 1) {
         await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: y + (dy * step) / 12 }] })
         await page.waitForTimeout(16)
+        const now = await where()
+        if (last && now) {
+          steps.push(now)
+          const moved = Math.abs(now.bar - last.bar)
+          assert.ok(moved <= Math.abs(now.card - last.card) + 1.5, `no jump: ${JSON.stringify([last, now])}`)
+          if (now.card > 180) assert.ok(now.bottom <= now.card - 30 + 1, `above the title row: ${JSON.stringify(now)}`)
+        }
+        last = now
       }
       await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
     }
@@ -1280,6 +1312,11 @@ test('phone 412: panning with More open closes the menu and keeps the bar; Comme
       assert.equal(await page.locator('[data-sw-frame-bar]').count(), 1, `the bar is still there after a pan of ${dy}`)
       await assertBarFits(page, `after a pan of ${dy}`)
     }
+    // Scrolled past the card's top, it was a strip at the top of the canvas.
+    assert.ok(
+      steps.some((step) => step.card < 0 && step.bar <= 60),
+      JSON.stringify(steps.slice(0, 6)),
+    )
     await shot(page, 'page-bar-412-panned')
     await page.tap('[data-sw-frame-bar] [data-sw-frame-comment]')
     await page.waitForSelector('[data-sw-comment-hint-page]')
