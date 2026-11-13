@@ -421,6 +421,23 @@ export function Dashboard({ filter, isAdmin, board, editing, onEditing }) {
       unchanged: step < 0 ? 'is already first' : 'is already last',
     })
   }
+  // One step of Shift and an arrow: on to the next size the widget is drawn at. (A row
+  // that cannot take what a narrower widget leaves is drawn full, so a step there shows nothing.)
+  const sizeStep = (current, item, direction) => {
+    const [dw, dh] = STEP[direction]
+    const stored = current.items.find((other) => other.id === item.id)
+    let last = current
+    for (let n = 1; n <= LAYOUT_COLS; n += 1) {
+      const next = resizeItem(current, item.id, stored.w + dw * n, stored.h + dh * n)
+      const mine = next.items.find((other) => other.id === item.id)
+      const was = last.items.find((other) => other.id === item.id)
+      if (mine.w === was.w && mine.h === was.h) return last
+      const drawn = drawnOf(visibleItems(next, { admin: isAdmin })).find((other) => other.id === item.id)
+      if (drawn && (drawn.w !== item.w || drawn.h !== item.h)) return next
+      last = next
+    }
+    return last
+  }
   const onKey = (event, item) => {
     const direction = ARROWS[event.key]
     if (!direction || event.target !== event.currentTarget || event.altKey || event.ctrlKey || event.metaKey) return
@@ -429,8 +446,7 @@ export function Dashboard({ filter, isAdmin, board, editing, onEditing }) {
       const tall = direction === 'up' || direction === 'down'
       if (event.shiftKey && cols > 2 && tall) {
         // (A medium screen: the height only; the widths are the wide layout's.)
-        const stored = layout.items.find((other) => other.id === item.id)
-        apply(item.id, (current) => resizeItem(current, item.id, stored.w, item.h + STEP[direction][1]), {
+        apply(item.id, (current) => sizeStep(current, item, direction), {
           verb: 'resized:',
           key: `size:${item.id}`,
           unchanged: direction === 'up' ? 'is as small as it goes' : 'is as large as it goes',
@@ -440,8 +456,7 @@ export function Dashboard({ filter, isAdmin, board, editing, onEditing }) {
       return
     }
     if (event.shiftKey)
-      // (From the size it is drawn at: a widget that fills its row grows or shrinks from there.)
-      apply(item.id, (current) => resizeItem(current, item.id, item.w + STEP[direction][0], item.h + STEP[direction][1]), {
+      apply(item.id, (current) => sizeStep(current, item, direction), {
         verb: 'resized:',
         key: `size:${item.id}`,
         unchanged: direction === 'left' || direction === 'up' ? 'is as small as it goes' : 'is as large as it goes',

@@ -431,7 +431,12 @@ export function resizeItem(layout, id, w, h) {
   // take the new height, so a resize never opens a hole beside or under it.
   const row = layout.items.filter((other) => other.id !== id && other.y === item.y)
   const dw = next.w - item.w
-  const right = dw ? row.find((other) => other.x === item.x + item.w) : null
+  // The tiles are one row of numbers: they share one width (three or four to a row).
+  const tile = WIDGETS[item.type]?.group === 'tile'
+  if (dw && tile)
+    for (const other of layout.items)
+      if (other.id !== id && WIDGETS[other.type]?.group === 'tile') changed.set(other.id, { ...other, w: next.w })
+  const right = dw && !tile ? row.find((other) => other.x === item.x + item.w) : null
   if (right) {
     const size = sizeOf(right.type)
     const w2 = right.w - dw

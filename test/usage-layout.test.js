@@ -395,6 +395,11 @@ test('moving and resizing: a drag puts a widget in the order where it was droppe
   assert.deepEqual(place(resizeItem(layout, 'tile_calls', 9, 1), 'tile_calls').slice(2), [4, 2])
   assert.deepEqual(place(resizeItem(layout, 'time', 1, 1), 'time').slice(2), [4, 4], 'a chart cannot be made too small to read')
   assert.deepEqual(place(resizeItem(layout, 'time', 40, 40), 'time').slice(2), [12, 10])
+  // The tiles share one width: one made narrower makes them four to a row.
+  const threes = resizeItem(layout, 'tile_calls', 3, 2)
+  assertTidy(threes.items)
+  assert.ok(threes.items.filter((item) => item.type.startsWith('tile_')).every((item) => item.w === 3))
+  assert.deepEqual(place(threes, 'tile_cost'), [9, 0, 3, 2])
   // Never past the right edge from where it is.
   assert.deepEqual(place(resizeItem(layout, 'outcomes', 12, 5), 'outcomes'), [6, 10, 6, 5])
   // A row stays whole: a chart made wider takes the width from the one beside it, and a narrower one gives it back.

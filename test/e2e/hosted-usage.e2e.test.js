@@ -878,7 +878,8 @@ test('edit layout: drag a widget by its bar and reload, resize it from its corne
   await dashboard(page)
   await editLayout(page)
   assert.equal(await page.locator('[data-sw-widget-handle]').count(), 16)
-  assert.equal(await page.locator('[data-sw-widget-resize]').count(), 16)
+  // (The corner grip: every widget but the tiles, which only get wider or narrower.)
+  assert.equal(await page.locator('[data-sw-widget-resize]').count(), 10)
   const column = (await widget(page, 'tile_tokens').boundingBox()).x - (await widget(page, 'tile_calls').boundingBox()).x
   // The first tile to the right end of its row: while it is held, a placeholder shows where it will land.
   const drag = await dragBy(page, widget(page, 'tile_calls').locator('[data-sw-widget-handle]'), column * 2, 0)
@@ -897,38 +898,41 @@ test('edit layout: drag a widget by its bar and reload, resize it from its corne
   assert.deepEqual(await placeOf(page, 'tile_calls'), [8, 0, 4, 2], 'the move survived a reload')
   assert.equal(await page.locator('[data-sw-layout-bar]').count(), 0, 'a reload is not in edit mode')
 
-  // Resize: the duration chart two columns narrower and a row shorter.
+  // Resize: the outcomes chart two columns narrower and a row shorter; the chart before it in the row takes the width.
   await editLayout(page)
   const step = column / 4
-  const before = await widget(page, 'latency').locator('.recharts-wrapper').boundingBox()
-  const resize = await dragBy(page, widget(page, 'latency').locator('[data-sw-widget-resize]'), -step * 2, -72)
+  const before = await widget(page, 'outcomes').locator('.recharts-wrapper').boundingBox()
+  // (Its left neighbour's right edge: the breakdown two columns wider and a row shorter.)
+  const resize = await dragBy(page, widget(page, 'breakdown').locator('[data-sw-widget-resize]'), step * 2, -72)
   await page.locator('.react-grid-item.resizing').waitFor()
   await resize.drop()
-  await said(page, /Turn duration resized: row \d+, column 7; 4 wide, 4 tall/)
-  assert.deepEqual((await placeOf(page, 'latency')).slice(2), [4, 4])
+  await said(page, /Breakdown resized: row 11, column 1; 8 wide, 4 tall/)
+  assert.deepEqual(await placeOf(page, 'outcomes'), [8, 10, 4, 4])
   await layoutSaved(page)
-  // The chart redrew at its new size, inside its card.
+  // The chart beside it redrew at its new size, inside its card.
   await page.waitForFunction(
     ([width, height]) => {
-      const plot = document.querySelector('[data-sw-widget="latency"] .recharts-wrapper')?.getBoundingClientRect()
-      return plot && plot.width < width * 0.75 && plot.width > width * 0.5 && plot.height < height - 40 && plot.height > 96
+      const plot = document.querySelector('[data-sw-widget="outcomes"] .recharts-wrapper')?.getBoundingClientRect()
+      return plot && plot.width < width * 0.75 && plot.width > width * 0.5 && plot.height < height - 40 && plot.height > 60
     },
     [before.width, before.height],
   )
   // A chart cannot be made too small to read: pulled far in, it stops at four columns and four rows.
-  const least = await dragBy(page, widget(page, 'latency').locator('[data-sw-widget-resize]'), -step * 5, -400)
+  const least = await dragBy(page, widget(page, 'breakdown').locator('[data-sw-widget-resize]'), -step * 9, -400)
   await least.drop()
-  await page.waitForFunction(() => document.querySelector('[data-sw-widget="latency"]:not(.resizing)'))
-  assert.deepEqual((await placeOf(page, 'latency')).slice(2), [4, 4])
-  // A tile has three widths and one height: pulled as far in as it goes it stops at two columns.
-  const shrink = await dragBy(page, widget(page, 'tile_tokens').locator('[data-sw-widget-resize]'), -step * 9, 200)
+  await page.waitForFunction(() => document.querySelector('[data-sw-widget="breakdown"]:not(.resizing)'))
+  assert.deepEqual((await placeOf(page, 'breakdown')).slice(2), [4, 4])
+  assert.deepEqual(await placeOf(page, 'outcomes'), [4, 10, 8, 4], 'and the one beside it takes the room')
+  // The tiles share one width (three or four to a row): pulled in, they stop at three columns.
+  const shrink = await dragBy(page, widget(page, 'tile_tokens').locator('.sw-resize-e'), -step * 9, 0)
   await shrink.drop()
-  await said(page, /Tokens resized: row \d+, column \d+; 2 wide, 2 tall/)
+  await said(page, /Tokens resized: row \d+, column \d+; 3 wide, 2 tall/)
   await layoutSaved(page)
   await page.reload()
-  await page.locator('[data-sw-chart="latency"] .recharts-line-curve').first().waitFor()
-  assert.deepEqual((await placeOf(page, 'latency')).slice(2), [4, 4], 'the size survived a reload')
-  assert.deepEqual((await placeOf(page, 'tile_tokens')).slice(2), [2, 2])
+  await page.locator('[data-sw-chart="outcomes"] .recharts-bar-rectangle').first().waitFor()
+  assert.deepEqual((await placeOf(page, 'breakdown')).slice(2), [4, 4], 'the size survived a reload')
+  assert.ok((await storedLayout(s.ada)).layout.items.filter((item) => item.type.startsWith('tile_')).every((item) => item.w === 3))
+  assert.deepEqual((await placeOf(page, 'tile_tokens')).slice(2), [3, 2])
   // At its smallest a tile still shows its number whole.
   const value = page.locator('[data-sw-tile="tokens"] [data-sw-tile-value]')
   assert.ok(await value.evaluate((node) => node.scrollWidth <= node.clientWidth + 1), 'the number is not cut off')
@@ -992,7 +996,8 @@ test('edit layout: hide a widget and add it back, duplicate a chart with other o
 
   // Two charts over time side by side, each with its own measure, split, bucket and style.
   await widget(page, 'time').focus()
-  for (let n = 0; n < 6; n += 1) await page.keyboard.press('Shift+ArrowLeft')
+  // (One step on to the next width it is drawn at: narrower than half, the row could not take the chart after it.)
+  await page.keyboard.press('Shift+ArrowLeft')
   await said(page, /Usage over time resized: row 5, column 1; 6 wide, 6 tall/)
   await widget(page, 'time').locator('[data-sw-widget-duplicate]').click()
   await widget(page, 'time-2').waitFor()
@@ -1057,6 +1062,8 @@ test('edit layout: hide a widget and add it back, duplicate a chart with other o
   await editLayout(page)
   await page.locator('[data-sw-layout-reset-menu]').click()
   await page.locator('[data-sw-layout-reset]').click()
+  // Reset asks first.
+  await page.locator('[data-sw-confirm]').click()
   await widget(page, 'time-2').waitFor({ state: 'detached' })
   await widget(page, 'approvals').waitFor()
   assert.deepEqual(await placeOf(page, 'time'), [0, 4, 12, 6])
@@ -1081,7 +1088,8 @@ test('edit layout by keyboard: every widget takes the focus, arrows move, Shift 
   await page.locator('[data-sw-layout-edit]').focus()
   await page.keyboard.press('Enter')
   await page.locator('[data-sw-layout-bar]').waitFor()
-  assert.equal(await page.locator('[data-sw-layout-edit]').getAttribute('aria-pressed'), 'true')
+  // The bar’s Done is the one way out.
+  assert.equal(await page.locator('[data-sw-layout-edit]').count(), 0)
   assert.equal(await page.locator('[data-sw-widget][tabindex="0"][role="group"]').count(), 16, 'every widget is focusable')
   assert.equal(await widget(page, 'latency').getAttribute('aria-label'), 'Turn duration: row 16, column 7; 6 wide, 5 tall')
   assert.match(await page.locator('#sw-layout-help').textContent(), /arrow keys/)
@@ -1332,11 +1340,10 @@ test('saving: a failed save keeps the change on the page and says so; "Try again
   assert.equal(await page.locator('[data-sw-widget]').count(), 15)
   assert.equal(await page.locator('[data-sw-usage-budgets]').count(), 0)
   await editLayout(page)
-  await page.locator('[data-sw-layout-reset-menu]').click()
-  await page.locator('[data-sw-layout-reset]').waitFor()
+  // (No menu for a member: a Reset of their own.)
+  assert.equal(await page.locator('[data-sw-layout-reset-menu]').count(), 0)
   assert.equal(await page.locator('[data-sw-layout-set-default]').count(), 0)
   assert.ok(await page.locator('[data-sw-layout-reset]').isDisabled(), 'nothing to reset yet')
-  await page.keyboard.press('Escape')
   // The server is unreachable for a moment.
   let refuse = true
   await page.route('**/usage/layout', (route) => (refuse && route.request().method() === 'PUT' ? route.abort() : route.continue()))
@@ -1525,9 +1532,10 @@ test('the workspace default: an owner sets it for everyone, someone who joins st
   assert.equal((await storedLayout(gil)).layout.items.length, 11)
   assert.equal((await storedLayout(s.ada)).default.items.length, 12)
   // "Reset to default" is the workspace's default for them.
-  await fresh.page.locator('[data-sw-layout-reset-menu]').click()
+  assert.equal(await fresh.page.locator('[data-sw-layout-reset-menu]').count(), 0)
   assert.equal(await fresh.page.locator('[data-sw-layout-set-default]').count(), 0, 'only an owner sets it')
   await fresh.page.locator('[data-sw-layout-reset]').click()
+  await fresh.page.locator('[data-sw-confirm]').click()
   await widget(fresh.page, 'tile_calls').waitFor()
   await layoutSaved(fresh.page)
   assert.equal(await fresh.page.locator('[data-sw-top]').count(), 0)
