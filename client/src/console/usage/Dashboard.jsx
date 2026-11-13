@@ -63,7 +63,9 @@ import { USAGE_BUCKETS, USAGE_DIMENSIONS, USAGE_METRICS } from '../../../../src/
 import {
   LAYOUT_COLS,
   LAYOUT_GAP,
-  LAYOUT_ROW,
+  LAYOUT_SUB,
+  LAYOUT_SUB_PITCH,
+  LAYOUT_SUB_ROW,
   WIDGETS,
   addItem,
   colsFor,
@@ -75,6 +77,7 @@ import {
   placeBefore,
   readingOrder,
   fill,
+  fitsContent,
   flow,
   reflow,
   removeItem,
@@ -82,7 +85,9 @@ import {
   resizeItem,
   roomFor,
   setOptions,
+  settle,
   stepMove,
+  subRowsFor,
   visibleItems,
 } from '../../../../src/hosted/usage-layout.js'
 import { Card, ConfirmDialog, LoadError } from '../components'
@@ -307,6 +312,23 @@ export function Dashboard({ filter, isAdmin, board, editing, onEditing }) {
   )
   const shown = useMemo(() => drawnOf(items), [items, drawnOf])
   const ordered = useMemo(() => readingOrder(shown), [shown])
+  // The fine rows each widget that is as tall as its content needs, measured on the page (usage-layout.js, settle).
+  // (Kept in this browser between visits, so a reload draws them at once instead of shrinking them once the data is in.)
+  const fitKey = `sw-usage-fit:${workspaceId}`
+  const [fitted, setFitted] = useState(() => {
+    try {
+      const kept = JSON.parse(window.localStorage.getItem(fitKey) || '{}')
+      return kept && typeof kept === 'object' && !Array.isArray(kept)
+        ? Object.fromEntries(Object.entries(kept).filter(([, rows]) => Number.isInteger(rows) && rows > 0 && rows < 200))
+        : {}
+    } catch {
+      return {}
+    }
+  })
+  const fittedRef = useRef(fitted)
+  fittedRef.current = fitted
+  // What the grid draws: every widget at its own height, in fine rows.
+  const drawn = useMemo(() => settle(shown, cols, fitted), [shown, cols, fitted])
   const titleOf = useCallback(
     (item) => {
       const copies = ordered.filter((other) => other.type === item.type)
@@ -477,9 +499,31 @@ export function Dashboard({ filter, isAdmin, board, editing, onEditing }) {
   // exactly where the widget lands, nothing ever overlaps, and what is saved
   // is what was shown. Outside a drag the compactor moves nothing: the
   // layout it is given is already flowed.
-  const gesture = useRef(null) // { kind: 'drag' | 'resize', id, base, point, next }
+  const gesture = useRef(null) // { kind: 'drag' | 'resize', id, base, drawn, point, next, startH }
+  // The layout with the widget resized to what the grid holds (`entry`: its width in columns, its height in fine rows).
+  // The height is stored in whole rows: the nearest, unless that is no change in the direction the edge went (a widget
+  // as tall as its content is often between two rows).
+  const resizedTo = (now, entry) => {
+    const stored = now.base.items.find((one) => one.id === now.id)
+    const w = now.wide ? entry.w : stored.w
+    let h = stored.h
+    let chosen = false
+    if (entry.h !== now.startH) {
+      const rows = Math.round(entry.h / LAYOUT_SUB)
+      const bigger = entry.h > now.startH
+      if (bigger ? rows * LAYOUT_SUB > now.startH : rows * LAYOUT_SUB < now.startH) {
+        h = rows
+        chosen = true
+      }
+    }
+    const next = resizeItem(now.base, now.id, w, h)
+    // A widget drawn at its content's height and given the rows it is stored with: those rows are its height now.
+    if (!chosen || !next.items.find((one) => one.id === now.id)?.auto) return next
+    return { ...next, items: next.items.map((one) => (one.id === now.id ? { ...one, auto: false } : one)) }
+  }
   const shownOf = useRef(null)
-  shownOf.current = (next) => drawnOf(visibleItems(next, { admin: isAdmin }))
+  // (As the grid draws it: fine rows, each widget at its own height.)
+  shownOf.current = (next) => settle(drawnOf(visibleItems(next, { admin: isAdmin })), cols, fittedRef.current)
   const compactor = useMemo(
     () => ({
       type: 'vertical',
@@ -488,8 +532,7 @@ export function Dashboard({ filter, isAdmin, board, editing, onEditing }) {
         const now = gesture.current
         if (!now) return given.map((entry) => ({ ...entry }))
         const entry = given.find((one) => one.i === now.id)
-        if (now.kind === 'resize' && entry)
-          now.next = resizeItem(now.base, now.id, now.wide ? entry.w : now.base.items.find((one) => one.id === now.id).w, entry.h)
+        if (now.kind === 'resize' && entry) now.next = resizedTo(now, entry)
         else if (now.kind === 'drag' && now.point)
           now.next = placeBefore(now.base, now.id, dropBefore(now.drawn, now.id, now.point.x, now.point.y))
         const places = new Map(shownOf.current(now.next || now.base).map((item) => [item.id, item]))
@@ -507,10 +550,12 @@ export function Dashboard({ filter, isAdmin, board, editing, onEditing }) {
     const at = event?.touches?.[0] || event?.changedTouches?.[0] || event
     if (!box || !at || typeof at.clientX !== 'number') return null
     const column = (width - LAYOUT_GAP * (cols - 1)) / cols + LAYOUT_GAP
-    return { x: (at.clientX - box.left) / column, y: (at.clientY - box.top) / (LAYOUT_ROW + LAYOUT_GAP) }
+    return { x: (at.clientX - box.left) / column, y: (at.clientY - box.top) / LAYOUT_SUB_PITCH }
   }
   const startGesture = (kind) => (_grid, _old, item) => {
-    if (item) gesture.current = { kind, id: item.i, base: layout, drawn: shown, wide, point: null, next: null }
+    if (!item) return
+    const start = drawn.find((one) => one.id === item.i)
+    gesture.current = { kind, id: item.i, base: layout, drawn, wide, point: null, next: null, startH: start?.h ?? item.h }
   }
   const onDrag = (_grid, _old, _item, _placeholder, event) => {
     if (gesture.current) gesture.current.point = pointOf(event) ?? gesture.current.point
@@ -519,8 +564,7 @@ export function Dashboard({ filter, isAdmin, board, editing, onEditing }) {
   const onResize = (_grid, _old, item, placeholder) => {
     const now = gesture.current
     if (!now || !item || !placeholder) return
-    const w = now.wide ? item.w : now.base.items.find((one) => one.id === now.id).w
-    const place = shownOf.current(resizeItem(now.base, now.id, w, item.h)).find((one) => one.id === now.id)
+    const place = shownOf.current(resizedTo(now, item)).find((one) => one.id === now.id)
     if (place) Object.assign(placeholder, { x: place.x, y: place.y, w: place.w, h: place.h })
   }
   const endGesture = (verb) => () => {
@@ -529,6 +573,78 @@ export function Dashboard({ filter, isAdmin, board, editing, onEditing }) {
     if (!done?.next || done.next === done.base) return
     apply(done.id, () => done.next, { verb })
   }
+
+  // ---- Heights that follow the content ----
+  //
+  // A list, a breakdown or the budgets (while nobody sized them by hand) is
+  // as tall as what it shows. Its card's growing part ([data-sw-fit]) takes
+  // whatever room the card has; what it holds is measured from its children,
+  // so the height a card needs is found whatever height it is drawn at, and
+  // drawing it at that height measures the same again (no loop).
+  const measure = useCallback(() => {
+    const root = gridRef.current
+    // (Before the grid has drawn its widgets there is nothing to measure: what was kept stays.)
+    if (!root || !root.querySelector('[data-sw-widget]')) return
+    const now = fittedRef.current
+    const next = {}
+    for (const node of root.querySelectorAll('[data-sw-widget]')) {
+      const id = node.getAttribute('data-sw-widget')
+      const item = shown.find((one) => one.id === id)
+      if (!item || !fitsContent(item)) continue
+      const card = node.querySelector('.sw-widget-body > *')
+      if (!card) continue
+      // Still loading: it keeps the height it had (or had the last time the page was open), so nothing jumps.
+      if (card.querySelector('[data-sw-fit-wait]')) {
+        if (Number.isInteger(now[id])) next[id] = now[id]
+        continue
+      }
+      const grows = card.querySelector('[data-sw-fit]')
+      if (!grows) continue
+      const box = grows.getBoundingClientRect()
+      const frame = card.getBoundingClientRect()
+      let natural
+      if (grows.hasAttribute('data-sw-fit-end')) {
+        // A line that ends the card (a list with nothing in it): the card ends under it.
+        const style = getComputedStyle(card)
+        natural = box.bottom - frame.top + (parseFloat(style.paddingBottom) || 0) + (parseFloat(style.borderBottomWidth) || 0)
+      } else {
+        const bottom = Math.max(box.top, ...Array.from(grows.children, (child) => child.getBoundingClientRect().bottom))
+        const content = bottom - box.top + grows.scrollTop + (parseFloat(getComputedStyle(grows).paddingBottom) || 0)
+        natural = frame.height - grows.clientHeight + content
+      }
+      next[id] = subRowsFor(Math.ceil(natural - 0.5))
+    }
+    setFitted((current) => {
+      const keys = Object.keys(next)
+      return keys.length === Object.keys(current).length && keys.every((key) => current[key] === next[key]) ? current : next
+    })
+  }, [shown, gridRef])
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(fitKey, JSON.stringify(fitted))
+    } catch {
+      // (Only a convenience: without it a reload measures again.)
+    }
+  }, [fitted, fitKey])
+  useLayoutEffect(() => {
+    measure()
+  })
+  useEffect(() => {
+    const root = gridRef.current
+    if (!root) return undefined
+    // A widget's data arrives on its own: look again when anything in the grid changes (once a frame).
+    let frame = 0
+    const later = () => {
+      window.cancelAnimationFrame(frame)
+      frame = window.requestAnimationFrame(measure)
+    }
+    const observer = new MutationObserver(later)
+    observer.observe(root, { childList: true, subtree: true, characterData: true })
+    return () => {
+      window.cancelAnimationFrame(frame)
+      observer.disconnect()
+    }
+  }, [measure, gridRef, width])
 
   // ---- Edit mode ----
 
@@ -574,7 +690,7 @@ export function Dashboard({ filter, isAdmin, board, editing, onEditing }) {
 
   const grid = useMemo(
     () =>
-      shown.map((item) => {
+      drawn.map((item) => {
         const size = WIDGETS[item.type].size
         const group = WIDGETS[item.type].group
         if (cols <= 2) return { i: item.id, x: item.x, y: item.y, w: item.w, h: item.h }
@@ -587,12 +703,12 @@ export function Dashboard({ filter, isAdmin, board, editing, onEditing }) {
           h: item.h,
           minW: wide ? size.minW : item.w,
           maxW: wide ? Math.max(size.maxW, item.w) : item.w,
-          minH: size.minH,
-          maxH: Math.max(size.maxH, item.h),
+          minH: Math.min(size.minH * LAYOUT_SUB, item.h),
+          maxH: Math.max(size.maxH * LAYOUT_SUB, item.h),
           resizeHandles: wide ? HANDLES[group] : group === 'tile' ? [] : ['s'],
         }
       }),
-    [shown, wide, cols],
+    [drawn, wide, cols],
   )
   const [confirmReset, setConfirmReset] = useState(false)
   const resetNow = () => {
@@ -623,6 +739,11 @@ export function Dashboard({ filter, isAdmin, board, editing, onEditing }) {
     )
 
   const hidden = hiddenTypes(layout, { admin: isAdmin })
+  // Where the grid draws a widget, in fine rows (",fit": its height follows its content).
+  const drawnPlace = (id) => {
+    const one = drawn.find((item) => item.id === id)
+    return one ? `${one.x},${one.y},${one.w},${one.h}${fitsContent(one) && Number.isInteger(fitted[id]) ? ',fit' : ''}` : ''
+  }
   const canDrag = editing && cols > 2
   const coarse = typeof window !== 'undefined' && Boolean(window.matchMedia?.('(pointer: coarse)').matches)
   // How much of a widget's heading its tools cover (they sit over its top right corner).
@@ -692,24 +813,28 @@ export function Dashboard({ filter, isAdmin, board, editing, onEditing }) {
           aria-label="Edit layout"
           data-sw-layout-bar
         >
-          <p className="mr-auto flex min-w-0 flex-[1_1_16rem] items-center gap-2 text-sm text-fg" id="sw-layout-help">
-            <LayoutDashboard size={15} className="shrink-0 text-accent" aria-hidden="true" />
-            <span className="min-w-0">
-              <strong className="font-semibold">Editing layout</strong>
-              <span className="text-muted">
-                {' · '}
-                {wide
-                  ? 'Drag a widget to move it, drag an edge to resize.'
-                  : cols > 2
-                    ? 'Drag a widget to move it, its bottom edge to resize.'
-                    : 'Use the arrows to reorder.'}
+          {/* The help and whether the layout is saved share a line (on a phone too: the status never wraps on its own). */}
+          <div className="mr-auto flex min-w-0 flex-[1_1_16rem] items-center gap-3">
+            <p className="flex min-w-0 flex-1 items-center gap-2 text-sm text-fg" id="sw-layout-help">
+              <LayoutDashboard size={15} className="shrink-0 text-accent" aria-hidden="true" />
+              <span className="min-w-0">
+                <strong className="font-semibold">Editing layout</strong>
+                <span className="text-muted">
+                  {' · '}
+                  {wide
+                    ? 'Drag a widget to move it, drag an edge to resize.'
+                    : cols > 2
+                      ? 'Drag a widget to move it, its bottom edge to resize.'
+                      : 'Use the arrows to reorder.'}
+                </span>
+                <span className="sr-only"> The arrow keys move the widget in focus; with Shift, they resize it.</span>
               </span>
-              <span className="sr-only"> The arrow keys move the widget in focus; with Shift, they resize it.</span>
-            </span>
-          </p>
-          <span className="ml-auto flex flex-wrap items-center justify-end gap-x-2 gap-y-2">
+            </p>
             <span
-              className={cn('inline-flex min-w-[4.5rem] items-center justify-end gap-1 text-xs', failed ? 'text-bad' : 'text-muted')}
+              className={cn(
+                'inline-flex shrink-0 items-center justify-end gap-1 text-xs whitespace-nowrap',
+                failed ? 'text-bad' : 'text-muted',
+              )}
               role="status"
               data-sw-layout-status={board.status}
             >
@@ -727,6 +852,8 @@ export function Dashboard({ filter, isAdmin, board, editing, onEditing }) {
                 </>
               ) : null}
             </span>
+          </div>
+          <span className="ml-auto flex flex-wrap items-center justify-end gap-x-2 gap-y-2">
             <span className="flex flex-wrap items-center gap-1.5">
               <Button size="sm" variant="secondary" onClick={board.undo} disabled={!board.canUndo} data-sw-layout-undo>
                 <Undo2 size={14} aria-hidden="true" /> Undo
@@ -823,7 +950,7 @@ export function Dashboard({ filter, isAdmin, board, editing, onEditing }) {
           <ReactGridLayout
             layout={grid}
             width={width}
-            gridConfig={{ cols, rowHeight: LAYOUT_ROW, margin: [LAYOUT_GAP, LAYOUT_GAP], containerPadding: [0, 0] }}
+            gridConfig={{ cols, rowHeight: LAYOUT_SUB_ROW, margin: [LAYOUT_GAP, LAYOUT_GAP], containerPadding: [0, 0] }}
             dragConfig={{
               enabled: canDrag,
               // (A finger drags by the grip only, so it can still scroll the page from anywhere else.)
@@ -852,6 +979,7 @@ export function Dashboard({ filter, isAdmin, board, editing, onEditing }) {
                   data-sw-widget={item.id}
                   data-sw-widget-type={item.type}
                   data-sw-widget-place={`${item.x},${item.y},${item.w},${item.h}`}
+                  data-sw-widget-drawn={drawnPlace(item.id)}
                   {...(editing
                     ? {
                         tabIndex: 0,

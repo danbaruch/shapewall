@@ -693,8 +693,10 @@ test('the dashboard can be arranged in the demo: "Try this" leads to Edit layout
     await said(page, /Turns moved to row 1, column 9; 4 wide, 2 tall/)
     assert.deepEqual(await placeOf(page, 'tile_calls'), [8, 0, 4, 2])
     await layoutSaved(page)
-    // Resize the breakdown from its corner, narrower and a row taller: the chart beside it takes the width and the height.
-    await dragBy(page, widget(page, 'breakdown').locator('[data-sw-widget-resize]'), -column / 2, 72)
+    // Resize the breakdown from its corner, narrower and to six rows (it is drawn as tall as its two bars until then): the
+    // chart beside it takes the width and the height.
+    const sixRows = 6 * 72 - 16 - (await widget(page, 'breakdown').boundingBox()).height
+    await dragBy(page, widget(page, 'breakdown').locator('[data-sw-widget-resize]'), -column / 2, sixRows)
     await said(page, /Breakdown resized: row 11, column 1; 4 wide, 6 tall/)
     assert.deepEqual(await placeOf(page, 'outcomes'), [4, 10, 8, 6])
     await layoutSaved(page)

@@ -903,7 +903,9 @@ test('edit layout: drag a widget by its bar and reload, resize it from its corne
   const step = column / 4
   const before = await widget(page, 'outcomes').locator('.recharts-wrapper').boundingBox()
   // (Its left neighbour's right edge: the breakdown two columns wider and a row shorter.)
-  const resize = await dragBy(page, widget(page, 'breakdown').locator('[data-sw-widget-resize]'), step * 2, -72)
+  // (Drawn as tall as its rows until it is sized by hand: dragged to where four rows end.)
+  const fourRows = 4 * 72 - 16 - (await widget(page, 'breakdown').boundingBox()).height
+  const resize = await dragBy(page, widget(page, 'breakdown').locator('[data-sw-widget-resize]'), step * 2, fourRows)
   await page.locator('.react-grid-item.resizing').waitFor()
   await resize.drop()
   await said(page, /Breakdown resized: row 11, column 1; 8 wide, 4 tall/)
@@ -918,11 +920,11 @@ test('edit layout: drag a widget by its bar and reload, resize it from its corne
     [before.width, before.height],
   )
   // A chart cannot be made too small to read: pulled far in, the breakdown stops at three columns and three rows
-  // (drawn four tall: the chart beside it is as short as it goes at four, and the row stays whole).
+  // (and keeps them: the chart beside it is as short as it goes at four, and stays so).
   const least = await dragBy(page, widget(page, 'breakdown').locator('[data-sw-widget-resize]'), -step * 9, -400)
   await least.drop()
   await page.waitForFunction(() => document.querySelector('[data-sw-widget="breakdown"]:not(.resizing)'))
-  assert.deepEqual((await placeOf(page, 'breakdown')).slice(2), [3, 4])
+  assert.deepEqual((await placeOf(page, 'breakdown')).slice(2), [3, 3])
   assert.deepEqual(await placeOf(page, 'outcomes'), [3, 10, 9, 4], 'and the one beside it takes the room')
   // The tiles share one width (three or four to a row): pulled in, they stop at three columns.
   const shrink = await dragBy(page, widget(page, 'tile_tokens').locator('.sw-resize-e'), -step * 9, 0)
@@ -931,7 +933,7 @@ test('edit layout: drag a widget by its bar and reload, resize it from its corne
   await layoutSaved(page)
   await page.reload()
   await page.locator('[data-sw-chart="outcomes"] .recharts-bar-rectangle').first().waitFor()
-  assert.deepEqual((await placeOf(page, 'breakdown')).slice(2), [3, 4], 'the size survived a reload')
+  assert.deepEqual((await placeOf(page, 'breakdown')).slice(2), [3, 3], 'the size survived a reload')
   assert.ok((await storedLayout(s.ada)).layout.items.filter((item) => item.type.startsWith('tile_')).every((item) => item.w === 3))
   assert.deepEqual((await placeOf(page, 'tile_tokens')).slice(2), [3, 2])
   // At its smallest a tile still shows its number whole.
@@ -962,7 +964,11 @@ test('edit layout: hide a widget and add it back, duplicate a chart with other o
   assert.equal(await page.locator('[data-sw-chart="approvals"]').count(), 0)
   // The rest closes up in order: the duration chart takes the hidden chart's place, the lists come up beside it
   // (two by two), and it is drawn as tall as they are, so nothing is left empty.
-  assert.deepEqual(await placeOf(page, 'latency'), [0, 15, 6, 8])
+  assert.deepEqual(await placeOf(page, 'latency'), [0, 15, 6, 5])
+  const drawnOf = async (id) => (await widget(page, id).getAttribute('data-sw-widget-drawn')).split(',').slice(0, 4).map(Number)
+  const [, latencyTop, , latencyHeight] = await drawnOf('latency')
+  const [, slowestTop, , slowestHeight] = await drawnOf('top_slowest')
+  assert.equal(latencyTop + latencyHeight, slowestTop + slowestHeight, 'the chart reaches down as far as the lists beside it')
   assert.deepEqual(await placeOf(page, 'top_agents'), [6, 15, 3, 4])
   assert.deepEqual(await placeOf(page, 'top_slowest'), [6, 19, 3, 4])
   // The five tiles left: the last row's two share it.
@@ -1120,7 +1126,8 @@ test('edit layout by keyboard: every widget takes the focus, arrows move, Shift 
   assert.deepEqual(await placeOf(page, 'breakdown'), [0, 10, 7, 5])
   await page.keyboard.press('Shift+ArrowUp')
   await said(page, /^Turn duration resized: row 11, column 8; 5 wide, 4 tall/)
-  assert.deepEqual(await placeOf(page, 'breakdown'), [0, 10, 7, 4])
+  // (The breakdown is as tall as its rows: it keeps its own height.)
+  assert.deepEqual(await placeOf(page, 'breakdown'), [0, 10, 7, 5])
   await page.keyboard.press('Shift+ArrowUp')
   await said(page, /^Turn duration is as small as it goes/)
   assert.deepEqual(await placeOf(page, 'latency'), [7, 10, 5, 4])
@@ -1137,8 +1144,8 @@ test('edit layout by keyboard: every widget takes the focus, arrows move, Shift 
   const stored = (await storedLayout(s.ada)).layout
   assert.deepEqual(
     [itemOf(stored, 'latency').x, itemOf(stored, 'latency').y, itemOf(stored, 'latency').w, itemOf(stored, 'latency').h],
-    // (Stored at its own width; the spare column is drawn on the chart before it.)
-    [6, 10, 5, 4],
+    // (The last of a full row made narrower: the chart before it took the column.)
+    [7, 10, 5, 4],
   )
   assert.deepEqual([itemOf(stored, 'tile_calls').x, itemOf(stored, 'tile_calls').y], [0, 2])
   // Tab reaches the widget's own buttons; its × hides it.
@@ -1782,8 +1789,16 @@ test('nothing is cut off at the default sizes, looking or editing; lists and the
       for (const card of document.querySelectorAll('[data-sw-chart]')) {
         const box = card.getBoundingClientRect()
         const legend = card.querySelector('[data-sw-chart-legend]')?.getBoundingClientRect()
-        const plot = card.querySelector('.recharts-wrapper, [data-sw-breakdown]')?.getBoundingClientRect()
-        if ((legend && legend.bottom > box.bottom + 1) || (plot && plot.bottom > box.bottom + 1) || (plot && plot.height < 120))
+        const node = card.querySelector('.recharts-wrapper, [data-sw-breakdown]')
+        const plot = node?.getBoundingClientRect()
+        // (A breakdown is as tall as its rows: never scrolled, and no plot to keep readable.)
+        const rows = node?.hasAttribute('data-sw-breakdown')
+        if (
+          (legend && legend.bottom > box.bottom + 1) ||
+          (plot && plot.bottom > box.bottom + 1) ||
+          (plot && !rows && plot.height < 120) ||
+          (rows && cut(node))
+        )
           out.push(`chart ${card.getAttribute('data-sw-chart')}`)
       }
       return out
@@ -1834,8 +1849,11 @@ test('nothing is cut off at the default sizes, looking or editing; lists and the
   await panel.locator('[data-sw-pick="option-rows"]').click()
   await page.getByRole('option', { name: 'Top 3', exact: true }).click()
   await page.locator('[data-sw-top="agents"] [data-sw-top-rows="3"]').waitFor()
-  // (Three rows, drawn as tall as the lists beside it: no hole opens above the budgets.)
-  assert.deepEqual(await placeOf(page, 'top_agents'), [0, 20, 3, 4])
+  // (Three rows, and drawn as tall as they are: it keeps its own height beside the lists of five.)
+  assert.deepEqual(await placeOf(page, 'top_agents'), [0, 20, 3, 3])
+  const drawnHeight = async (id) => Number((await widget(page, id).getAttribute('data-sw-widget-drawn')).split(',')[3])
+  await page.waitForFunction(() => document.querySelector('[data-sw-widget="top_agents"]')?.dataset.swWidgetDrawn.endsWith(',fit'))
+  assert.ok((await drawnHeight('top_agents')) < (await drawnHeight('top_threads')), 'shorter than the lists of five beside it')
   assert.equal(itemOf((await storedLayout(s.ada)).layout ?? { items: [{ id: 'top_agents', h: 3 }] }, 'top_agents').h, 3)
   await panel.locator('[data-sw-pick="option-rows"]').click()
   await page.getByRole('option', { name: 'Top 10', exact: true }).click()
@@ -1848,11 +1866,12 @@ test('nothing is cut off at the default sizes, looking or editing; lists and the
   // (The closing panel hands the focus back to its button; that has to land before the focus is put elsewhere.)
   await page.waitForFunction(() => document.activeElement?.matches('[data-sw-widget-options]'))
   assert.deepEqual(await clipped(), [])
-  // A list sized by hand keeps the height it was given, whatever its rows. (A step goes on to the next height it is
-  // drawn at: beside the ten-row list it was already drawn seven tall, so the step makes it eight.)
+  // A list sized by hand keeps the height it was given, whatever its rows: four steps make it eight tall.
   await widget(page, 'top_threads').focus()
-  await page.keyboard.press('Shift+ArrowDown')
-  await said(page, /Threads that used the most tokens resized: row 21, column 4; 3 wide, 8 tall/)
+  for (const tall of [5, 6, 7, 8]) {
+    await page.keyboard.press('Shift+ArrowDown')
+    await said(page, new RegExp(`Threads that used the most tokens resized: row 21, column 4; 3 wide, ${tall} tall`))
+  }
   await widget(page, 'top_threads').locator('[data-sw-widget-options]').click()
   panel = page.locator('[data-sw-widget-options-panel="top_threads"]')
   await panel.locator('[data-sw-pick="option-rows"]').click()
@@ -1871,8 +1890,8 @@ test('nothing is cut off at the default sizes, looking or editing; lists and the
   await page.locator('[data-sw-layout-done]').click()
   await page.reload()
   await page.locator('[data-sw-top="threads"] [data-sw-top-rows="10"]').waitFor()
-  // (The ten-row list is drawn as tall as the row it shares.)
-  assert.deepEqual(await placeOf(page, 'top_agents'), [0, 20, 3, 8])
+  // (The ten-row list keeps its own height beside the one sized by hand.)
+  assert.deepEqual(await placeOf(page, 'top_agents'), [0, 20, 3, 7])
   assert.deepEqual(await placeOf(page, 'top_threads'), [3, 20, 3, 8])
   assert.deepEqual(await clipped(), [])
 

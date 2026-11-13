@@ -6,6 +6,7 @@ import assert from 'node:assert/strict'
 import {
   LAYOUT_COLS,
   LAYOUT_LIMITS,
+  LAYOUT_SUB,
   LAYOUT_VERSION,
   LayoutError,
   WIDGETS,
@@ -32,8 +33,10 @@ import {
   resizeItem,
   roomFor,
   setOptions,
+  settle,
   stepMove,
   stepResize,
+  subRowsFor,
   visibleItems,
 } from '../src/hosted/usage-layout.js'
 
@@ -690,4 +693,73 @@ test('a list, a breakdown and the budgets are as tall as what they hold, until t
   for (const id of ['top_agents', 'top_threads', 'top_slowest', 'top_denied']) busy = setOptions(busy, id, { rows: id.length % 2 ? 10 : 3 })
   assertTidy(fitLayout(setOptions(busy, 'breakdown', { rows: 20 }), { budgets: 9 }).items)
   assert.deepEqual(layout, defaultLayout(), 'the layout given is never changed')
+})
+
+test('settle: each widget drawn at its own height; a short one never stretches, the charts beside it close the gap', () => {
+  const layout = defaultLayout()
+  const S = LAYOUT_SUB
+  const drawn = (fitted, items = layout.items, cols = LAYOUT_COLS) => settle(items, cols, fitted)
+  const spot = (items, id) => {
+    const one = items.find((other) => other.id === id)
+    return [one.x, one.y, one.w, one.h]
+  }
+  const noOverlap = (items, cols = LAYOUT_COLS) => {
+    for (const a of items) {
+      assert.ok(a.x >= 0 && a.x + a.w <= cols && a.y >= 0, a.id)
+      for (const b of items) assert.ok(!collides(a, b), a.id + ' and ' + b.id)
+    }
+  }
+  // Nothing measured yet: the stored layout, row for row.
+  const plain = drawn({})
+  noOverlap(plain)
+  for (const one of layout.items) assert.deepEqual(spot(plain, one.id), [one.x, one.y * S, one.w, one.h * S], one.id)
+  // A breakdown of two projects beside the outcomes chart: it keeps its own height; the approvals chart moves up under it
+  // and reaches down to where the duration chart ends, so the lists start on one line.
+  const short = drawn({ breakdown: 8 })
+  noOverlap(short)
+  assert.deepEqual(spot(short, 'breakdown'), [0, 10 * S, 6, 8])
+  assert.deepEqual(spot(short, 'outcomes'), [6, 10 * S, 6, 5 * S])
+  assert.deepEqual(spot(short, 'approvals'), [0, 10 * S + 8, 6, 10 * S - 8])
+  assert.deepEqual(spot(short, 'latency'), [6, 15 * S, 6, 5 * S])
+  for (const id of ['top_agents', 'top_threads', 'top_slowest', 'top_denied']) assert.equal(spot(short, id)[1], 20 * S, id)
+  // Lists side by side share the tallest one's height; the budgets fit what they hold.
+  const lists = drawn({ top_agents: 13, top_threads: 15, top_slowest: 15, top_denied: 13, budgets: 12 })
+  noOverlap(lists)
+  for (const id of ['top_agents', 'top_threads', 'top_slowest', 'top_denied']) assert.equal(spot(lists, id)[3], 15, id)
+  assert.deepEqual(spot(lists, 'budgets'), [0, 24 * S - 1, 12, 12])
+  // A widget sized by hand keeps that height whatever it holds.
+  const byHand = resizeItem(layout, 'breakdown', 6, 7)
+  assert.equal(spot(drawn({ breakdown: 8 }, byHand.items), 'breakdown')[3], 7 * S)
+  // Alone in its band beside a taller chart, a short breakdown leaves the room under it empty rather than stretch.
+  const pair = [item('breakdown', 0, 0, 6, 5, { auto: true }), item('outcomes', 6, 0, 6, 5), item('time', 0, 5, 12, 6)]
+  const alone = drawn({ breakdown: 8 }, pair)
+  assert.deepEqual(spot(alone, 'breakdown'), [0, 0, 6, 8])
+  assert.deepEqual(spot(alone, 'time'), [0, 5 * S, 12, 6 * S])
+  // A breakdown made wider than the chart beside it: the charts of the next row still move up under it.
+  const wider = resizeItem(layout, 'breakdown', 8, 5)
+  const mixed = drawn({ breakdown: 8 }, wider.items)
+  noOverlap(mixed)
+  assert.deepEqual(spot(mixed, 'approvals'), [0, 10 * S + 8, 6, 10 * S - 8])
+  assert.equal(spot(mixed, 'latency')[1], 15 * S)
+  // Fewer columns: one widget under another, each its own height.
+  const phone = drawn({ breakdown: 8 }, reflow(layout.items, 2), 2)
+  noOverlap(phone, 2)
+  assert.equal(spot(phone, 'breakdown')[3], 8)
+  assert.equal(spot(phone, 'outcomes')[1], spot(phone, 'breakdown')[1] + 8)
+  // Pixels to fine rows: a stored row is LAYOUT_SUB of them; never fewer than a heading needs.
+  assert.equal(subRowsFor(128), 2 * S)
+  assert.equal(subRowsFor(129), 2 * S + 1)
+  assert.equal(subRowsFor(10), 6)
+})
+
+test('resize: the last widget of a full row made narrower gives its width to the one on its left', () => {
+  const layout = defaultLayout()
+  const narrow = resizeItem(layout, 'outcomes', 4, 5)
+  assertTidy(narrow.items)
+  assert.deepEqual(place(narrow, 'breakdown'), [0, 10, 8, 5])
+  assert.deepEqual(place(narrow, 'outcomes'), [8, 10, 4, 5])
+  // A widget as tall as what it holds does not follow a neighbour made taller.
+  const taller = resizeItem(layout, 'outcomes', 6, 7)
+  assert.equal(at(taller, 'breakdown').h, 5)
+  assert.equal(at(taller, 'breakdown').auto, true)
 })
