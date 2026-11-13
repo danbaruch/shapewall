@@ -524,6 +524,29 @@ body {
   }
 }
 
+/* "Jump to comment" (board/hooks/useCameraMoves.js): the pin the board has
+   just flown to rings for a moment, so a short hop still reads as an arrival
+   and the eye lands on the right pin among its neighbours. */
+[data-sw-pin-landed='true'] {
+  z-index: 30;
+  animation: pin-landed 800ms cubic-bezier(0.2, 0, 0, 1) 2;
+}
+@keyframes pin-landed {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 60%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 12px transparent;
+  }
+}
+/* Reduced motion keeps the ring, steady. */
+@media (prefers-reduced-motion: reduce) {
+  [data-sw-pin-landed='true'] {
+    animation: none !important;
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 60%, transparent);
+  }
+}
+
 /* Keyboard focus is always visible. In Tailwind 4 `outline-none` also sets
    --tw-outline-style to none, so `outline-none focus-visible:outline-2` on
    one element (the usual way to say "no ring for the mouse, a ring for the

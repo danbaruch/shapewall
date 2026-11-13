@@ -15,6 +15,9 @@
 //   unread           Set of unread comment ids
 //   liveKeys         Set of frames showing live HTML
 //   hoveredId        the comment under the mouse (list row or pin)
+//   landedId         the comment the board has just flown to ("jump to
+//                    comment"): its pin rings for a moment so the arrival is
+//                    seen (hooks/useCameraMoves.js)
 //   commentTargetKey the frame a page bar's Comment was pressed for (the
 //                    keyboard can pin there: Frame.jsx)
 import { createContext, useCallback, useContext, useSyncExternalStore } from 'react'
@@ -30,6 +33,7 @@ const INITIAL = {
   unread: NO_IDS,
   liveKeys: NO_IDS,
   hoveredId: null,
+  landedId: null,
   commentTargetKey: null,
 }
 

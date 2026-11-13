@@ -104,7 +104,7 @@ function WorkingRing({ dot = false }) {
 }
 
 // A pin on a thumbnail: a 10 px dot in the author's colour.
-function PinDot({ comment, spot, scale, selected, unread, working, onSelect, onHover, touch, label }) {
+function PinDot({ comment, spot, scale, selected, unread, working, onSelect, onHover, touch, label, landed = false }) {
   const author = commentAuthor(comment)
   const agent = isAgentAuthor(author)
   return (
@@ -133,6 +133,7 @@ function PinDot({ comment, spot, scale, selected, unread, working, onSelect, onH
       aria-label={label}
       aria-pressed={selected}
       data-sw-pin={comment.id}
+      data-sw-pin-landed={landed ? 'true' : undefined}
       data-sw-pin-look="dot"
       data-sw-pin-state={pinState(comment)}
       data-sw-pin-unread={unread ? 'true' : undefined}
@@ -142,7 +143,21 @@ function PinDot({ comment, spot, scale, selected, unread, working, onSelect, onH
   )
 }
 
-export function Pin({ comment, position, scale, compact = false, selected, unread, working = false, onSelect, onHover, touch }) {
+// `landed`: the board has just flown to this pin ("jump to comment"), so it
+// rings for a moment. The frame reads it from the view store (Frame.jsx).
+export function Pin({
+  comment,
+  position,
+  scale,
+  compact = false,
+  selected,
+  unread,
+  working = false,
+  landed = false,
+  onSelect,
+  onHover,
+  touch,
+}) {
   const spot = pinSpot(comment, position)
   // In live mode an anchored comment whose element is gone sits at its stored
   // spot with a dashed ring: "this moved".
@@ -169,6 +184,7 @@ export function Pin({ comment, position, scale, compact = false, selected, unrea
       onHover={onHover}
       touch={touch}
       label={label}
+      landed={landed}
     />
   ) : (
     <button
@@ -195,6 +211,7 @@ export function Pin({ comment, position, scale, compact = false, selected, unrea
       aria-label={label}
       aria-pressed={selected}
       data-sw-pin={comment.id}
+      data-sw-pin-landed={landed ? 'true' : undefined}
       data-sw-pin-state={state}
       data-sw-pin-anchor={comment.anchor ? (position ? (moved ? 'moved' : 'element') : 'xy') : 'none'}
       data-sw-pin-unread={unread ? 'true' : undefined}
