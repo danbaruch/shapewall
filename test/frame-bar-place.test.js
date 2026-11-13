@@ -2,7 +2,7 @@
 // canvas (the comment-mode hint first of all), at any canvas width.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { BAR_STEPS, fitFrameBar, notesRect, overlaps, placeFrameBar } from '../client/src/board/frameBarPlace.js'
+import { OVERFLOW_ORDER, fitFrameBar, notesRect, overlaps, placeFrameBar } from '../client/src/board/frameBarPlace.js'
 
 const bar = { width: 640, height: 40 }
 const box = (spot, size = bar) => ({ ...spot, width: size.width, height: size.height })
@@ -76,95 +76,88 @@ test('a side spot that would touch the hint moves below it', () => {
 // ---- What the bar shows at a width (fitFrameBar) --------------------------------
 
 const everything = { comment: true, live: 'open', checks: true, history: true, capture: true, link: true }
+const counted = { ...everything, checksCount: true, historyCount: true }
 
-test('a wide canvas shows every word and the title; the bar is never wider than the canvas', () => {
-  const fit = fitFrameBar({ canvasWidth: 1400, items: everything })
+test('a wide canvas shows the title, every action with its word, and Open in a new tab beside Close', () => {
+  const fit = fitFrameBar({ canvasWidth: 1400, items: counted })
   assert.equal(fit.step, 'full')
   assert.equal(fit.title, true)
-  assert.deepEqual(fit.labels, { comment: true, live: true, checks: true, history: true, capture: true })
+  assert.equal(fit.chip, true)
+  assert.deepEqual(fit.bar, ['open', 'checks', 'history', 'capture'])
+  assert.deepEqual(fit.menu, [])
+  assert.equal(fit.link, 'bar')
+  assert.equal(fit.more, false)
   assert.ok(fit.fits)
-  for (const canvasWidth of [1400, 900, 640, 500, 384, 300]) {
-    const at = fitFrameBar({ canvasWidth, items: everything })
-    assert.ok(at.width <= canvasWidth - 16, `the bar at ${canvasWidth} is ${at.width} wide`)
-    assert.ok(at.fits, `fits at ${canvasWidth}`)
-  }
+  // The counts take room.
+  assert.ok(fit.width > fitFrameBar({ canvasWidth: 1400, items: everything }).width)
 })
 
-test('words drop one step at a time as the canvas narrows; Comment and Open live keep theirs longest, Comment last', () => {
-  const steps = []
-  let last = -1
-  for (let canvasWidth = 1400; canvasWidth >= 260; canvasWidth -= 2) {
+test('as the canvas narrows: the chip, then the title go, then actions move into More one at a time, least needed first', () => {
+  let last = { menu: -1, title: true, chip: true }
+  const seen = new Set()
+  for (let canvasWidth = 1400; canvasWidth >= 240; canvasWidth -= 2) {
     const fit = fitFrameBar({ canvasWidth, items: everything })
-    const at = BAR_STEPS.indexOf(fit.step)
-    assert.ok(at >= last, `never back a step (${fit.step} at ${canvasWidth})`)
-    if (at !== last) steps.push(fit.step)
-    last = at
-    // A later word never outlives an earlier one.
-    const { comment, live, checks, history, capture } = fit.labels
-    assert.ok(comment || !live, 'Comment outlives Open live')
-    assert.ok(live || !checks, 'Open live outlives Checks')
-    assert.ok(checks || !history, 'Checks outlives History')
-    assert.ok(history || !capture, 'History outlives Capture')
-    // The title goes before Open live or Comment lose their word.
-    if (fit.title) assert.ok(comment && live, 'the title is gone before Comment or Open live become icons')
+    assert.ok(fit.width <= canvasWidth - 16, `the bar at ${canvasWidth} is ${fit.width} wide`)
+    if (canvasWidth >= 280) assert.ok(fit.fits, `fits at ${canvasWidth}`)
+    // Never back a step.
+    assert.ok(fit.menu.length >= Math.max(0, last.menu), `more in the menu as it narrows (${canvasWidth})`)
+    if (!last.title) assert.equal(fit.title, false)
+    if (!last.chip) assert.equal(fit.chip, false)
+    if (fit.chip) assert.ok(fit.title)
+    // The title goes before anything moves into the menu.
+    if (fit.menu.length) assert.equal(fit.title, false)
+    // The menu takes them in order, and the bar keeps the rest in theirs.
+    const present = OVERFLOW_ORDER.filter((id) => id !== 'select')
+    assert.deepEqual([...fit.menu].sort(), present.slice(0, fit.menu.length).sort(), `the least needed go first (${canvasWidth})`)
+    for (const id of fit.menu) assert.ok(!fit.bar.includes(id))
+    // Once there is a menu, Open in a new tab is in it.
+    if (fit.menu.length) assert.equal(fit.link, 'menu')
+    assert.equal(fit.more, fit.menu.length > 0 || fit.link === 'menu')
+    seen.add(fit.step)
+    last = { menu: fit.menu.length, title: fit.title, chip: fit.chip }
   }
-  assert.deepEqual(steps, BAR_STEPS, 'every step is used, in order')
+  // Select text is not on this bar (the page is not live), so four can go.
+  for (const step of ['full', 'title', 'more-1', 'more-2', 'more-3', 'more-4']) assert.ok(seen.has(step), `${step} is used`)
 })
 
-test('the measured cases: 1024 with the sidebar and a panel open keeps Comment and the live button labelled', () => {
-  // A local board (Checks and Capture), the page live: canvas 384 px.
-  const items = { comment: true, live: 'select', checks: true, capture: true, link: true }
-  const narrow = fitFrameBar({ canvasWidth: 384, items })
-  assert.equal(narrow.step, 'title')
-  assert.deepEqual(narrow.labels, { comment: true, live: true, checks: false, history: false, capture: false })
-  assert.equal(narrow.title, false)
-  // The panel alone (588 px), and 1280 and 1440: everything.
-  for (const canvasWidth of [588, 640, 844, 1004]) assert.equal(fitFrameBar({ canvasWidth, items }).step, 'full', `${canvasWidth}`)
+test('a live page: Select text is the first to go, Done (a mode in use) stays on the bar', () => {
+  const live = fitFrameBar({ canvasWidth: 384, items: { comment: true, live: 'select', checks: true, capture: true, link: true } })
+  assert.equal(live.title, false)
+  assert.equal(live.menu[0], 'select')
+  assert.ok(live.bar.includes('checks'))
+  const done = fitFrameBar({ canvasWidth: 384, items: { comment: true, live: 'done', checks: true, capture: true, link: true } })
+  assert.ok(done.bar.includes('done'))
+  assert.ok(!done.menu.includes('done'))
+  // The panel alone (588 px) and wider: everything, with the title.
+  for (const canvasWidth of [588, 640, 844, 1004]) {
+    assert.equal(
+      fitFrameBar({ canvasWidth, items: { comment: true, live: 'select', checks: true, capture: true, link: true } }).step,
+      'full',
+    )
+  }
 })
 
-test('a phone: no title, Checks, History and Capture are icons, Comment keeps its word', () => {
-  const fit = fitFrameBar({
-    canvasWidth: 390,
-    touch: true,
-    items: { comment: true, live: 'open', checks: true, capture: true, link: true },
-  })
+test('a phone: no title, Comment and Open live keep their words, the rest and Open in a new tab are in More, Close last', () => {
+  const fit = fitFrameBar({ canvasWidth: 390, touch: true, items: { ...counted } })
   assert.equal(fit.title, false)
-  assert.equal(fit.labels.comment, true)
-  assert.equal(fit.labels.checks, false)
-  assert.equal(fit.labels.capture, false)
+  assert.deepEqual(fit.bar, ['open'])
+  assert.deepEqual(fit.menu, ['checks', 'history', 'capture'])
+  assert.equal(fit.link, 'menu')
+  assert.ok(fit.more)
   assert.ok(fit.fits)
   assert.ok(fit.width <= 374)
-  // With less on the bar, Open live keeps its word too.
+  // Nothing else on the bar: Open in a new tab still goes into More on touch.
   const few = fitFrameBar({ canvasWidth: 390, touch: true, items: { comment: true, live: 'open', link: true } })
-  assert.deepEqual([few.labels.comment, few.labels.live], [true, true])
-  // A very small phone with everything: icons only, still one line.
-  const small = fitFrameBar({ canvasWidth: 320, touch: true, items: { ...everything, history: false } })
-  assert.equal(small.labels.comment, false)
+  assert.deepEqual([few.bar, few.menu, few.link, few.more], [['open'], [], 'menu', true])
+  // A very small phone: Comment, More and Close, still one line.
+  const small = fitFrameBar({ canvasWidth: 320, touch: true, items: everything })
+  assert.deepEqual(small.bar, [])
   assert.ok(small.fits)
 })
 
-test('counts after Checks and History take room; the screen size chip goes before the name does', () => {
-  const plain = fitFrameBar({ canvasWidth: 1400, items: everything })
-  const counted = fitFrameBar({ canvasWidth: 1400, items: { ...everything, checksCount: true, historyCount: true } })
-  assert.equal(counted.step, 'full')
-  assert.ok(counted.width > plain.width, 'the counts widen the bar')
-  assert.equal(counted.chip, true, 'room for the chip')
-  // Narrower: the title stays, its chip goes first.
-  let sawTitleWithoutChip = false
-  for (let canvasWidth = 1400; canvasWidth >= 260; canvasWidth -= 2) {
-    const fit = fitFrameBar({ canvasWidth, items: everything })
-    if (fit.chip) assert.ok(fit.title)
-    if (fit.title && !fit.chip) sawTitleWithoutChip = true
-  }
-  assert.ok(sawTitleWithoutChip)
-  // Phones count no words, so no counts either.
-  const phone = fitFrameBar({ canvasWidth: 390, touch: true, items: { comment: true, checks: true, checksCount: true, link: true } })
-  assert.deepEqual([phone.labels.comment, phone.labels.checks, phone.chip], [true, false, false])
-})
-
 test('someone who may not comment has no Comment on the bar, and the rest still fits', () => {
-  const fit = fitFrameBar({ canvasWidth: 384, items: { live: 'open', checks: true, link: true } })
-  assert.equal(fit.labels.comment, false)
+  const fit = fitFrameBar({ canvasWidth: 400, items: { live: 'open', checks: true, link: true } })
   assert.ok(fit.fits)
   assert.ok(fit.title, 'room for the title again')
+  assert.deepEqual(fit.menu, [])
 })

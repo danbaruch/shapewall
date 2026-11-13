@@ -82,29 +82,34 @@ export function placeFrameBar({ card, canvas, bar, avoid = null, gap = 8, zoom =
 }
 
 // ---- What the bar shows at a width ---------------------------------------------
-// The bar is one line, always. When the canvas is too narrow for all of it,
-// words drop one step at a time (each step adds to the ones before it), and
-// every button keeps its accessible name and a tooltip:
-//   capture, history, checks   their words go, in that order
-//   title                      the page's name and screen size go
-//   live                       Open live (or Select text) becomes an icon
-//   comment                    Comment becomes an icon, last of all
-// So Comment and Open live stay labelled for as long as they fit. Phones
-// never show the title or the words of Checks, History and Capture.
+// The bar is one line, always, and every button on it keeps its word. Comment
+// is the primary action: it is always there, always labelled. When the canvas
+// is too narrow for everything:
+//   1. the screen size chip goes, then the page's name
+//   2. the secondary actions move, one at a time, into a More (…) menu, the
+//      least needed first: Select text, Capture, History, Checks, Open live.
+//      (Done, while text is being selected, stays: it ends a mode.)
+// Close is always the last button. Open in a new tab sits beside it as an
+// icon while nothing overflows on a mouse screen; once there is a More menu
+// (and always on a touch screen) it moves into it.
 // The widths are the buttons' fixed sizes plus their text, rounded up
 // (FrameBar.jsx renders exactly these), never read back from the bar. The
 // width returned is the most the bar may take: it hugs its content.
-export const BAR_STEPS = ['full', 'capture', 'history', 'checks', 'title', 'live', 'comment']
+
+// The order the secondary actions leave the bar in, first to go first.
+export const OVERFLOW_ORDER = ['select', 'capture', 'history', 'checks', 'open']
+// The order they sit in, on the bar and in the menu.
+export const ACTION_ORDER = ['open', 'select', 'done', 'checks', 'history', 'capture']
 
 const BAR = {
   desktop: {
     icon: 32,
     gap: 4,
     pad: 10, // p-1 and the border, both sides
-    divider: 6, // the hairline before the utilities (open in a tab, close)
+    divider: 6, // the hairline before the utilities (More, open in a tab, close)
     count: 22, // a count after Checks' or History's word
     title: 160, // the room the name and its screen size get when everything fits
-    titleMin: 88, // and the least it keeps before the next word drops
+    titleMin: 88, // and the least it keeps before it goes
     titleChip: 140, // below this the screen size chip goes (the name stays)
     label: { comment: 100, open: 104, select: 103, done: 74, checks: 84, history: 88, capture: 90 },
   },
@@ -113,71 +118,70 @@ const BAR = {
     gap: 4,
     pad: 10,
     divider: 6,
-    count: 0, // no words on phones, so no counts
-    title: 0,
+    count: 22,
+    title: 0, // phones show no title: the card's own header names the page
     titleMin: 0,
     titleChip: 0,
-    label: { comment: 108, open: 112, select: 118, done: 82, checks: 44, history: 44, capture: 44 },
+    label: { comment: 108, open: 112, select: 118, done: 82, checks: 98, history: 102, capture: 106 },
   },
 }
 
 // `items`: { comment, live: 'open' | 'select' | 'done' | null, checks,
 // history, capture, link, checksCount, historyCount } (what this page's bar
 // has; Close is always there; the counts: whether Checks or History show a
-// number after their word). Returns { step, labels: { comment, live, checks,
-// history, capture }, title, chip, width, fits }: which words show, whether
-// the title and its screen size chip do, the most the bar may take (never
-// more than the canvas less a margin) and whether its content fits it.
+// number after their word). Returns { step, title, chip, bar, menu, link,
+// width, fits }: whether the title and its screen size chip show, the
+// secondary actions on the bar and those in the More menu (ids from
+// ACTION_ORDER, in that order), where Open in a new tab goes ('bar', 'menu'
+// or null), the most the bar may take (never more than the canvas less a
+// margin) and whether its content fits it. `step` names the state, for the
+// tests: 'full' (everything and the title), 'title' (everything, no title)
+// or 'more-N' (N actions in the menu).
 export function fitFrameBar({ canvasWidth, touch = false, items = {}, margin = 16 }) {
   const sizes = touch ? BAR.touch : BAR.desktop
   const room = Math.max(0, canvasWidth - margin)
-  const widthAt = (step) => {
-    const at = BAR_STEPS.indexOf(step)
-    const words = (id) => !touch || id === 'comment' || id === 'live'
-    const labelled = (id) => Boolean(items[id]) && words(id) && at < BAR_STEPS.indexOf(id)
+  const actions = ACTION_ORDER.filter((id) => items.live === id || (['checks', 'history', 'capture'].includes(id) && items[id]))
+  const widthOf = (id) => sizes.label[id] + (items[`${id}Count`] ? sizes.count : 0)
+  const layout = (menu, title) => {
+    const onBar = actions.filter((id) => !menu.includes(id))
+    const link = items.link ? (touch || menu.length ? 'menu' : 'bar') : null
+    const more = menu.length > 0 || link === 'menu'
     const parts = []
-    if (items.comment) parts.push(labelled('comment') ? sizes.label.comment : sizes.icon)
-    if (items.live) parts.push(labelled('live') ? sizes.label[items.live] : sizes.icon)
-    for (const id of ['checks', 'history', 'capture']) {
-      if (!items[id]) continue
-      const counted = items[`${id}Count`] ? sizes.count : 0
-      parts.push(labelled(id) ? sizes.label[id] + counted : sizes.icon)
-    }
-    if (items.link) parts.push(sizes.icon)
+    if (items.comment) parts.push(sizes.label.comment)
+    for (const id of onBar) parts.push(widthOf(id))
+    if (more) parts.push(sizes.icon)
+    if (link === 'bar') parts.push(sizes.icon)
     parts.push(sizes.icon) // Close
-    const title = !touch && at < BAR_STEPS.indexOf('title')
     if (title) parts.push(0) // the title's own gap
     const fixed = parts.reduce((sum, part) => sum + part, 0) + sizes.gap * (parts.length - 1) + sizes.pad + sizes.divider
-    return {
-      step,
-      title,
-      fixed,
-      labels: {
-        comment: labelled('comment'),
-        live: labelled('live'),
-        checks: labelled('checks'),
-        history: labelled('history'),
-        capture: labelled('capture'),
-      },
-    }
+    return { title, bar: onBar, menu: actions.filter((id) => menu.includes(id)), link, more, fixed }
   }
-  const full = widthAt('full')
+  const full = layout([], !touch)
   const width = Math.min(full.fixed + sizes.title, room)
-  let pick = null
-  for (const step of BAR_STEPS) {
-    const candidate = widthAt(step)
-    pick = candidate
-    if (candidate.fixed + (candidate.title ? sizes.titleMin : 0) <= width) break
+  const candidates = []
+  if (!touch) candidates.push(full)
+  candidates.push(layout([], false))
+  const menu = []
+  for (const id of OVERFLOW_ORDER) {
+    if (!actions.includes(id)) continue
+    menu.push(id)
+    candidates.push(layout([...menu], false))
   }
-  const fits = pick.fixed + (pick.title ? sizes.titleMin : 0) <= width
+  const needs = (candidate) => candidate.fixed + (candidate.title ? sizes.titleMin : 0)
+  const pick = candidates.find((candidate) => needs(candidate) <= (candidate.title ? width : room)) || candidates.at(-1)
+  const fits = needs(pick) <= (pick.title ? width : room)
   // The screen size chip only where the name keeps room beside it.
   const chip = pick.title && width - pick.fixed >= sizes.titleChip
-  // Without the title nothing stretches: the bar is as wide as its buttons.
+  const step = pick.title ? 'full' : pick.menu.length ? `more-${pick.menu.length}` : 'title'
   return {
-    step: pick.step,
-    labels: pick.labels,
+    step,
     title: pick.title,
     chip,
+    bar: pick.bar,
+    menu: pick.menu,
+    link: pick.link,
+    more: pick.more,
+    // Without the title nothing stretches: the bar is as wide as its buttons.
     width: pick.title ? width : Math.min(pick.fixed, room),
     fits,
   }

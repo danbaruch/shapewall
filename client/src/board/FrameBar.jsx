@@ -3,7 +3,16 @@ import { useContext, useEffect, useLayoutEffect, useState } from 'react'
 import { useStore } from '@xyflow/react'
 import { Camera, ExternalLink, Flag, History, MessageSquarePlus, MonitorPlay, MoreHorizontal, TextSelect, X } from 'lucide-react'
 import { cn } from '../lib/utils'
-import { Button, IconButton, Tooltip } from '../components/ui'
+import {
+  Button,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+  IconButton,
+  Tooltip,
+} from '../components/ui'
 import { isThumbnail } from './layout'
 import { fitFrameBar, notesRect, placeFrameBar } from './frameBarPlace'
 import { KeyTip } from './KeyTip'
@@ -24,12 +33,14 @@ const TITLE_ROW_PX = 30
 //
 // Comment comes first, for whoever may comment here (`onComment`; the same
 // rule as the Comment tool at the bottom of the board): it starts a comment
-// on this page, and it is the bar's one filled (primary) button. The rest are
-// quiet: Open live or Select text, Checks and History (with their counts, the
-// same as the card header's badges), Capture, then after a hairline the
-// page's utilities (open in a new tab, close). The page's name leads, with its
-// screen size as a small chip. The bar hugs its content and is one line at
-// any width: frameBarPlace.js (fitFrameBar) says which buttons keep their words.
+// on this page, and it is the bar's one filled (primary) button, labelled at
+// every width. The rest are quiet: Open live or Select text, Checks and
+// History (with their counts, the same as the card header's badges),
+// Capture, then after a hairline the utilities (More, open in a new tab,
+// close). The page's name leads, with its screen size as a small chip. The
+// bar hugs its content and is one line at any width: what does not fit moves
+// into the More menu, never down to a row of bare icons (frameBarPlace.js,
+// fitFrameBar, says what goes where).
 export default function FrameBar({
   focused,
   target,
@@ -148,10 +159,7 @@ export default function FrameBar({
   })
 
   const size = touch ? 'touch' : 'sm'
-  // A button without its word is the square icon button.
-  const sized = (labelled) => (labelled ? size : touch ? 'icon' : 'icon-sm')
-  // Labels stay 13 px on touch so the bar keeps its measured width.
-  const label = touch && 'text-[13px]'
+  const iconSize = touch ? 'icon' : 'icon-sm'
   if (!place && !expanded) {
     return (
       <IconButton
@@ -179,18 +187,98 @@ export default function FrameBar({
   const style = anchorRight
     ? { right: width - (spot.left + barWidth), top: spot.top, maxWidth: barWidth }
     : { left: spot.left, top: spot.top, maxWidth: barWidth }
-  // A button that lost its word keeps its name: a tooltip (mouse, keyboard).
-  const tipped = (content, button, shown = true) =>
-    shown && !touch ? (
-      <Tooltip content={content} side="bottom">
+  const needAttention = checks ? `${checks} need${checks === 1 ? 's' : ''} attention` : null
+  const historyText = `Page history: ${history + 1} captures`
+  // The secondary actions, the same on the bar and in the More menu.
+  const actions = {
+    open: {
+      label: 'Open live',
+      name: 'Open live',
+      icon: MonitorPlay,
+      tip: 'Open the live page: scroll it, click it',
+      onSelect: onOpenLive,
+      data: { 'data-sw-open-live': focused },
+    },
+    select: {
+      label: 'Select text',
+      name: 'Select text',
+      icon: TextSelect,
+      disabled: !ready,
+      pressed: false,
+      onSelect: onToggleSelect,
+      data: { 'data-sw-select-text': focused },
+    },
+    done: {
+      label: 'Done',
+      name: 'Done',
+      icon: TextSelect,
+      tip: <KeyTip label="Done selecting text" keys={['Esc']} />,
+      disabled: !ready,
+      pressed: true,
+      onSelect: onToggleSelect,
+      data: { 'data-sw-select-text': focused },
+    },
+    checks: {
+      label: 'Checks',
+      name: 'Page checks',
+      description: needAttention || undefined,
+      icon: Flag,
+      tip: needAttention ? `Page checks: ${needAttention}` : null,
+      count: checks || null,
+      warn: true,
+      onSelect: onChecks,
+      data: { 'data-sw-frame-checks': focused },
+    },
+    history: {
+      label: 'History',
+      name: historyText,
+      icon: History,
+      tip: historyText,
+      count: history ? history + 1 : null,
+      onSelect: onHistory,
+      data: { 'data-sw-frame-history': focused },
+    },
+    capture: {
+      label: 'Capture',
+      name: 'Capture this page',
+      icon: Camera,
+      tip: 'Recapture this page at every screen size',
+      disabled: captureBusy,
+      onSelect: onCapture,
+      data: { 'data-sw-frame-capture': focused },
+    },
+  }
+  const onBar = (id) => {
+    const action = actions[id]
+    const button = (
+      <Button
+        key={id}
+        size={size}
+        variant={action.pressed ? 'soft' : 'ghost'}
+        className={cn(action.pressed ? 'shadow-none focus-visible:outline-offset-1' : secondary, touch && 'text-[13px]')}
+        aria-label={action.name}
+        aria-description={action.description}
+        aria-pressed={action.pressed}
+        disabled={action.disabled}
+        onClick={action.onSelect}
+        {...action.data}
+      >
+        <action.icon size={ICON} aria-hidden="true" />
+        {action.label}
+        {action.count ? <Count tone={action.warn ? 'warn' : 'neutral'}>{action.count}</Count> : null}
+      </Button>
+    )
+    return action.tip && !touch ? (
+      <Tooltip key={id} content={action.tip} side="bottom">
         {button}
       </Tooltip>
     ) : (
       button
     )
-  const checksText = checks ? `Page checks: ${checks} need${checks === 1 ? 's' : ''} attention` : 'Page checks'
-  const historyText = `Page history: ${history + 1} captures`
-  const utility = cn(secondary, DIVIDED)
+  }
+  // The first of the utilities (More, open in a tab, close) draws the hairline.
+  const firstUtility = fit.more ? 'more' : fit.link === 'bar' ? 'link' : 'close'
+  const utility = (id) => cn(secondary, id === firstUtility && DIVIDED)
   return (
     <div
       className={cn(
@@ -205,7 +293,7 @@ export default function FrameBar({
       onClick={(event) => event.stopPropagation()}
     >
       {fit.title ? (
-        <span className="flex min-w-0 shrink items-center gap-1.5 pr-1.5 pl-2" data-sw-frame-bar-title="true">
+        <span className="flex min-w-0 shrink items-center gap-2 pr-1 pl-2" data-sw-frame-bar-title="true">
           <span className="min-w-0 truncate text-[13px] font-semibold text-fg" title={title}>
             {title}
           </span>
@@ -220,115 +308,25 @@ export default function FrameBar({
         </span>
       ) : null}
       {onComment ? (
-        <CommentAction
-          key={focused}
+        <CommentAction key={focused} focused={focused} size={size} touch={touch} active={commenting} onComment={onComment} />
+      ) : null}
+      {fit.bar.map(onBar)}
+      {fit.more ? (
+        <MoreMenu
           focused={focused}
-          size={sized(fit.labels.comment)}
+          title={title}
+          size={iconSize}
           touch={touch}
-          labelled={fit.labels.comment}
-          active={commenting}
-          onComment={onComment}
+          className={utility('more')}
+          actions={fit.menu.map((id) => ({ id, ...actions[id] }))}
+          href={fit.link === 'menu' ? href : null}
         />
       ) : null}
-      {hasLive && !live
-        ? tipped(
-            'Open live',
-            <Button
-              size={sized(fit.labels.live)}
-              variant="ghost"
-              className={cn(secondary, label)}
-              onClick={onOpenLive}
-              aria-label="Open live"
-              data-sw-open-live={focused}
-            >
-              <MonitorPlay size={ICON} aria-hidden="true" /> {fit.labels.live ? 'Open live' : null}
-            </Button>,
-            !fit.labels.live,
-          )
-        : null}
-      {live
-        ? tipped(
-            selecting ? 'Done selecting text' : 'Select text',
-            <Button
-              size={sized(fit.labels.live)}
-              variant={selecting ? 'soft' : 'ghost'}
-              className={cn(selecting ? 'shadow-none' : secondary, label)}
-              aria-label={selecting ? 'Done' : 'Select text'}
-              aria-pressed={selecting}
-              disabled={!ready}
-              onClick={onToggleSelect}
-              data-sw-select-text={focused}
-            >
-              <TextSelect size={ICON} aria-hidden="true" /> {fit.labels.live ? (selecting ? 'Done' : 'Select text') : null}
-            </Button>,
-            !fit.labels.live,
-          )
-        : null}
-      {onChecks
-        ? tipped(
-            checksText,
-            <Button
-              size={sized(fit.labels.checks)}
-              variant="ghost"
-              className={secondary}
-              onClick={onChecks}
-              aria-label="Page checks"
-              aria-description={checks ? `${checks} need${checks === 1 ? 's' : ''} attention` : undefined}
-              data-sw-frame-checks={focused}
-            >
-              <Flag size={ICON} aria-hidden="true" />
-              {fit.labels.checks ? (
-                <>
-                  Checks
-                  {checks ? <Count tone="warn">{checks}</Count> : null}
-                </>
-              ) : null}
-            </Button>,
-          )
-        : null}
-      {onHistory
-        ? tipped(
-            historyText,
-            <Button
-              size={sized(fit.labels.history)}
-              variant="ghost"
-              className={secondary}
-              onClick={onHistory}
-              aria-label={historyText}
-              data-sw-frame-history={focused}
-            >
-              <History size={ICON} aria-hidden="true" />
-              {fit.labels.history ? (
-                <>
-                  History
-                  {history ? <Count>{history + 1}</Count> : null}
-                </>
-              ) : null}
-            </Button>,
-          )
-        : null}
-      {onCapture
-        ? tipped(
-            'Recapture this page at every screen size',
-            <Button
-              size={sized(fit.labels.capture)}
-              variant="ghost"
-              className={secondary}
-              disabled={captureBusy}
-              onClick={onCapture}
-              aria-label="Capture this page"
-              data-sw-frame-capture={focused}
-            >
-              <Camera size={ICON} aria-hidden="true" /> {fit.labels.capture ? 'Capture' : null}
-            </Button>,
-          )
-        : null}
-      {/* The page's own utilities, after a hairline: open it in a tab, close the bar. */}
-      {href ? (
+      {fit.link === 'bar' ? (
         <IconButton
           asChild
-          size={touch ? 'icon' : 'icon-sm'}
-          className={utility}
+          size={iconSize}
+          className={utility('link')}
           label="Open the page in a new tab"
           side="bottom"
           data-sw-frame-bar-link="true"
@@ -339,8 +337,8 @@ export default function FrameBar({
         </IconButton>
       ) : null}
       <IconButton
-        size={touch ? 'icon' : 'icon-sm'}
-        className={href ? secondary : utility}
+        size={iconSize}
+        className={utility('close')}
         onClick={place ? onClose : () => setExpandedFor(null)}
         label={place ? 'Close' : 'Collapse'}
         side="bottom"
@@ -349,6 +347,62 @@ export default function FrameBar({
         <X size={ICON} aria-hidden="true" />
       </IconButton>
     </div>
+  )
+}
+
+// More (…): the secondary actions that did not fit on the bar, with their
+// icons, words and counts, and Open in a new tab. A Radix menu: arrow keys,
+// Enter, Esc, typeahead.
+function MoreMenu({ focused, title, size, touch, className, actions, href }) {
+  const trigger = (
+    <DropdownMenuTrigger asChild>
+      <Button
+        size={size}
+        variant="ghost"
+        className={cn(className, 'data-[state=open]:bg-surface-2 data-[state=open]:text-fg')}
+        aria-label={`More actions for ${title}`}
+        data-sw-frame-more={focused}
+      >
+        <MoreHorizontal size={ICON} aria-hidden="true" />
+      </Button>
+    </DropdownMenuTrigger>
+  )
+  return (
+    <DropdownMenu>
+      {touch ? (
+        trigger
+      ) : (
+        <Tooltip content="More actions" side="bottom">
+          {trigger}
+        </Tooltip>
+      )}
+      <DropdownMenuContent side="bottom" align="end" className="min-w-52" data-sw-frame-more-menu={focused}>
+        {actions.map((action) => (
+          <DropdownMenuItem
+            key={action.id}
+            disabled={action.disabled}
+            onSelect={action.onSelect}
+            aria-description={action.description}
+            {...action.data}
+          >
+            <action.icon size={ICON} aria-hidden="true" />
+            <span className="min-w-0 flex-1 truncate">{action.label}</span>
+            {action.count ? <Count tone={action.warn ? 'warn' : 'neutral'}>{action.count}</Count> : null}
+          </DropdownMenuItem>
+        ))}
+        {href ? (
+          <>
+            {actions.length ? <DropdownMenuSeparator /> : null}
+            <DropdownMenuItem asChild data-sw-frame-bar-link="true">
+              <a href={href} target="_blank" rel="noreferrer">
+                <ExternalLink size={ICON} aria-hidden="true" />
+                <span className="min-w-0 flex-1 truncate">Open in a new tab</span>
+              </a>
+            </DropdownMenuItem>
+          </>
+        ) : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
@@ -384,7 +438,7 @@ const EMPHASIS_MS = 2600
 // The first time a person who has never started a comment in this browser
 // sees it, it wears a ring for a moment (prefs.js: once per browser; the
 // demo's Reset brings it back). No motion: the ring is there, then not.
-function CommentAction({ focused, size, touch, labelled, active, onComment }) {
+function CommentAction({ focused, size, touch, active, onComment }) {
   const [emphasis, setEmphasis] = useState(false)
   useEffect(() => {
     if (pageCommentSeen()) return undefined
@@ -411,7 +465,7 @@ function CommentAction({ focused, size, touch, labelled, active, onComment }) {
       data-sw-frame-comment={focused}
       data-sw-frame-comment-emphasis={emphasis ? 'true' : undefined}
     >
-      <MessageSquarePlus size={ICON} aria-hidden="true" /> {labelled ? 'Comment' : null}
+      <MessageSquarePlus size={ICON} aria-hidden="true" /> Comment
     </Button>
   )
   if (touch) return button
