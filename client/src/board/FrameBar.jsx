@@ -24,7 +24,10 @@ const TITLE_ROW_PX = 30
 // Actions for the card the user tapped, drawn in screen pixels next to it so
 // they stay tappable (44 px on touch) at any zoom. The bar sits outside the
 // card, never over its title and badges: above the card, else to its right,
-// else to its left. When the card fills the canvas it shrinks to one button
+// else to its left. On a touch screen, where a card is about as wide as the
+// canvas, it then sticks to the card's top edge (under its title row) and to
+// the top of the canvas as the card scrolls, rather than collapsing on every
+// pan. Otherwise, when the card fills the canvas it shrinks to one button
 // in the card's header (or the canvas's top left corner when the header is
 // off screen), away from the page's own nav and buttons. It never covers the
 // notes along the top of the canvas (CanvasNotes), such as the links hint
@@ -33,9 +36,10 @@ const TITLE_ROW_PX = 30
 //
 // Comment comes first, for whoever may comment here (`onComment`; the same
 // rule as the Comment tool at the bottom of the board): it starts a comment
-// on this page, and it is the bar's one filled (primary) button, labelled at
-// every width. The rest are quiet: Open live or Select text, Checks and
-// History (with their counts, the same as the card header's badges),
+// on this page, and it is the bar's primary button, labelled at every width:
+// a soft accent tint at rest, the solid fill while it is on (pressed). The
+// rest are quiet: Open live or Select text, Checks and History (with their
+// counts, the same as the card header's badges),
 // Capture, then after a hairline the utilities (More, open in a new tab,
 // close). The page's name leads, with its screen size as a small chip. The
 // bar hugs its content and is one line at any width: what does not fit moves
@@ -156,6 +160,7 @@ export default function FrameBar({
     avoid,
     gap,
     zoom,
+    pin: touch,
   })
 
   const size = touch ? 'touch' : 'sm'
@@ -319,6 +324,7 @@ export default function FrameBar({
           touch={touch}
           className={utility('more')}
           actions={fit.menu.map((id) => ({ id, ...actions[id] }))}
+          view={transform.join(',')}
           href={fit.link === 'menu' ? href : null}
         />
       ) : null}
@@ -353,7 +359,13 @@ export default function FrameBar({
 // More (…): the secondary actions that did not fit on the bar, with their
 // icons, words and counts, and Open in a new tab. A Radix menu: arrow keys,
 // Enter, Esc, typeahead.
-function MoreMenu({ focused, title, size, touch, className, actions, href }) {
+//
+// A pan or zoom of the board closes it (`view` is the board's transform): the
+// menu belongs to the bar where it was opened, and the bar moves with the card.
+// On a touch screen it is not modal, so that pan starts with the first touch.
+function MoreMenu({ focused, title, size, touch, className, actions, href, view }) {
+  const [open, setOpen] = useState(false)
+  useEffect(() => setOpen(false), [view])
   const trigger = (
     <DropdownMenuTrigger asChild>
       <Button
@@ -368,7 +380,9 @@ function MoreMenu({ focused, title, size, touch, className, actions, href }) {
     </DropdownMenuTrigger>
   )
   return (
-    <DropdownMenu>
+    // Not modal on a touch screen: a finger on the canvas pans at once (and
+    // so closes the menu) instead of being swallowed to close it first.
+    <DropdownMenu open={open} onOpenChange={setOpen} modal={!touch}>
       {touch ? (
         trigger
       ) : (
@@ -450,12 +464,12 @@ function CommentAction({ focused, size, touch, active, onComment }) {
   const button = (
     <Button
       size={size}
-      variant="default"
+      // At rest a soft accent tint (accent text and icon); pressed (the Comment
+      // tool is on for this page) the solid accent fill.
+      variant={active ? 'default' : 'soft'}
       className={cn(
         'shadow-none focus-visible:outline-offset-1',
         touch && 'text-[13px]',
-        // Pressed (the Comment tool is on for this page): a ring around the fill.
-        active && 'ring-2 ring-accent/35 ring-offset-1 ring-offset-surface',
         emphasis && !active && 'outline-2 outline-offset-2 outline-accent',
       )}
       aria-label="Comment on this page"

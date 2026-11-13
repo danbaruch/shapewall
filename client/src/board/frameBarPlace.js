@@ -2,7 +2,8 @@
 // Pure, so it is tested without a browser.
 //
 // The bar sits outside the card: above it, else to its right, else to its
-// left; when none fits it collapses to one button. It must never cover the
+// left; when none fits it collapses to one button (on a touch screen it sticks
+// to the card's top edge first, see `pin`). It must never cover the
 // notes along the top of the canvas (CanvasNotes: the links hints, the tip,
 // the viewport notice), so a spot that would overlap `avoid` (their union
 // rect, with a gap) is moved below them or given up for the next one. The
@@ -46,8 +47,9 @@ export function notesRect(rects, origin) {
 // `canvas`: { width, height }; `bar`: { width, height }. Returns
 // { place: { left, top } | null, toggle: { left, top } } where `toggle` is the
 // collapsed button's spot (used when `place` is null) and `fallback` the
-// spot for the bar expanded from it.
-export function placeFrameBar({ card, canvas, bar, avoid = null, gap = 8, zoom = 1, toggleSize = 44 }) {
+// spot for the bar expanded from it. `pin`: a touch screen's bar sticks to the
+// card instead of collapsing (below).
+export function placeFrameBar({ card, canvas, bar, avoid = null, gap = 8, zoom = 1, toggleSize = 44, pin = false }) {
   const { width, height } = canvas
   const below = avoid ? avoid.bottom + gap : gap
   const clampY = (value) => Math.max(gap, Math.min(height - bar.height - gap, value))
@@ -60,12 +62,31 @@ export function placeFrameBar({ card, canvas, bar, avoid = null, gap = 8, zoom =
     return lower.top + bar.height + gap <= height ? lower : null
   }
   let place = null
+  // In line with the card's right edge, inside the canvas.
+  const alignedLeft = Math.max(gap, Math.min(card.right - bar.width, width - bar.width - gap))
   if (card.titleTop - bar.height - gap >= gap) {
-    const spot = { left: Math.max(gap, Math.min(card.right - bar.width, width - bar.width - gap)), top: card.titleTop - bar.height - gap }
+    const spot = { left: alignedLeft, top: card.titleTop - bar.height - gap }
     if (clear(spot)) place = spot
   }
   if (!place && card.right + gap + bar.width <= width - gap) place = side(card.right + gap)
   if (!place && card.left - gap - bar.width >= gap) place = side(card.left - gap - bar.width)
+  // `pin` (touch screens): a phone's canvas is about one card wide, so there
+  // is seldom room beside the card, and the spot above is gone as soon as
+  // the card's title row nears the top. Rather than collapse to one button
+  // there (the bar would flip between the two on every pan), the bar sticks:
+  // just inside the card's top edge, under its title row (never over the
+  // name and badges), and at the canvas's top once that edge has scrolled
+  // past it, like a sticky header. Below the card when only its bottom is left.
+  if (!place && pin) {
+    let top = Math.max(gap, card.top + gap)
+    if (!clear({ left: alignedLeft, top })) top = Math.max(top, below)
+    const floor = Math.min(card.bottom, height) - gap
+    if (top + bar.height <= floor) place = { left: alignedLeft, top }
+    else if (card.bottom + gap + bar.height <= height - gap) {
+      const spot = { left: alignedLeft, top: Math.max(gap, card.bottom + gap) }
+      if (clear(spot)) place = spot
+    }
+  }
 
   // Collapsed: on the title row, left of its badges, when the row is on
   // screen; else the canvas's top left corner. Below the notes if they are there.
