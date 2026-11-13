@@ -7,12 +7,16 @@ import {
   FOCUS_ROOM,
   FOCUS_ZOOM_MAX,
   FOCUS_ZOOM_MIN,
+  PHONE_FLOOR_SHARE,
   PHONE_HEADER_ROOM,
   PHONE_SHARE,
+  PHONE_SHEET_GAP,
+  PHONE_TOP_ROOM,
   THREAD_ROOM,
   focusSpot,
   focusViewport,
   focusZoom,
+  phoneFloor,
   settled,
 } from '../client/src/board/commentFocus.js'
 
@@ -94,14 +98,58 @@ test('a phone brings the card down when the share would hide its title row', () 
   const near = { x: 500, y: 1250 }
   const view = focusViewport({ point: near, box: PHONE, wide: false, zoom: 1.2, cardTop: 1000 })
   assert.equal(Math.round(1000 * view.zoom + view.y), PHONE_HEADER_ROOM)
-  // The pin still sits in the upper half, clear of the thread sheet.
-  assert.ok(onScreen(view, near).y <= PHONE.height * 0.45 + 0.001)
+  // The pin still sits in the upper part, clear of the thread sheet.
+  assert.ok(onScreen(view, near).y <= phoneFloor(PHONE) + 0.001)
 })
 
-test('a phone keeps a pin far down a tall card in the upper half', () => {
+test('a phone keeps a pin far down a tall card above the sheet', () => {
   const far = { x: 500, y: 3000 }
   const view = focusViewport({ point: far, box: PHONE, wide: false, zoom: 1.2, cardTop: 1000 })
-  assert.equal(Math.round(onScreen(view, far).y), Math.round(PHONE.height * 0.45))
+  assert.equal(Math.round(onScreen(view, far).y), Math.round(phoneFloor(PHONE)))
+})
+
+// ---- The thread sheet's real height ------------------------------------------
+
+test('the floor sits a clear gap above the measured sheet, and assumes one when there is nothing to measure', () => {
+  // A short sheet: the pin may come much further down than the guess allows.
+  assert.equal(phoneFloor(PHONE, 640), 640 - PHONE_SHEET_GAP)
+  // Nothing to measure (a jump that opens no thread): the share the board
+  // has always used, so those jumps are untouched.
+  assert.equal(phoneFloor(PHONE, null), PHONE.height * PHONE_FLOOR_SHARE)
+  assert.equal(phoneFloor(PHONE, Number.NaN), phoneFloor(PHONE, null))
+  // A sheet taller than the canvas (it reaches over the top of it): the pin
+  // goes as high as it can, never under the toolbar.
+  assert.equal(phoneFloor(PHONE, 10), PHONE_TOP_ROOM)
+  assert.equal(phoneFloor(PHONE, -200), PHONE_TOP_ROOM)
+  // A sheet that is not up at all cannot push the floor below the canvas.
+  assert.equal(phoneFloor(PHONE, 5000), PHONE.height - PHONE_SHEET_GAP)
+})
+
+test('a tall sheet (a comment carrying an image) pulls the pin up above it', () => {
+  // The sheet of a comment with an image and a thread: two thirds of the screen.
+  const tall = 240
+  const spot = focusSpot(PHONE, false, tall)
+  assert.ok(spot.y <= tall - PHONE_SHEET_GAP, `spot ${spot.y} a clear gap above the sheet at ${tall}`)
+  // Without the measurement the same comment would have landed at the share,
+  // which is lower than the sheet's top: that was the bug.
+  assert.ok(PHONE.height * PHONE_SHARE > tall - PHONE_SHEET_GAP, 'the old share was not high enough')
+})
+
+test('a tall sheet also holds back the card that comes down for its title row', () => {
+  const tall = 240
+  const far = { x: 500, y: 3000 }
+  const view = focusViewport({ point: far, box: PHONE, wide: false, zoom: 1.2, cardTop: 1000, sheetTop: tall })
+  assert.ok(onScreen(view, far).y <= tall - PHONE_SHEET_GAP, 'the pin stays a clear gap above the sheet')
+  // And a short sheet is not made to pay for it: the pin comes down as far
+  // as it used to, so a jump on a long card still shows the card's top.
+  const low = focusViewport({ point: far, box: PHONE, wide: false, zoom: 1.2, cardTop: 1000, sheetTop: 700 })
+  assert.ok(onScreen(low, far).y > onScreen(view, far).y, 'a short sheet leaves the pin lower')
+})
+
+test('a short sheet keeps the pin at the usual share, not lower', () => {
+  // The floor only ever pulls the pin up: a strip of a sheet does not drop it.
+  const spot = focusSpot(PHONE, false, PHONE.height)
+  assert.equal(spot.y, PHONE.height * PHONE_SHARE)
 })
 
 test('a camera already there is left alone, a camera a nudge away is not', () => {
