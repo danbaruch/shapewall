@@ -1122,9 +1122,15 @@ test('page bar: one line inside the canvas at 1024, 1280 and 1440 with the sideb
         )
         assert.equal(words[0][0], 'Comment on this page')
         assert.equal(words[0][1], 'Comment', `Comment keeps its word, ${label} at ${width}`)
-        assert.ok(words[1][1], `the live button keeps its word, ${label} at ${width}`)
-        // Words drop from the end: after the first icon there are only icons.
+        // Every action on the bar keeps its word; only the utilities (More,
+        // open in a new tab, Close) are icons, at the end.
         assert.match(words.map(([, text]) => (text ? 'w' : 'i')).join(''), /^w+i+$/, JSON.stringify(words))
+        const icons = words.filter(([, text]) => !text).map(([name]) => name)
+        assert.ok(
+          icons.every((name) => /^(More actions for |Open the page in a new tab$|Close$)/.test(name)),
+          JSON.stringify(icons),
+        )
+        assert.equal(icons.at(-1), 'Close')
         const row = await bottomRow(page)
         assert.equal(overlap(await maybeRect(page, '[data-sw-frame-bar]'), row.tools), false, 'the bar clears the tools')
         return page.getAttribute('[data-sw-frame-bar]', 'data-sw-frame-bar-fit')
@@ -1134,11 +1140,19 @@ test('page bar: one line inside the canvas at 1024, 1280 and 1440 with the sideb
       await page.click('[data-sw-sidebar-toggle]')
       const both = await check('sidebar and panel open')
       if (width === 1024) {
-        assert.notEqual(both, 'full', 'the narrow canvas drops words')
-        // An icon that lost its word has a tooltip.
-        await page.hover('[data-sw-frame-bar] [data-sw-frame-checks]')
-        await page.waitForSelector('[role="tooltip"]')
-        assert.match(await page.textContent('[role="tooltip"]'), /Page checks/)
+        assert.match(both, /^more-/, 'the narrow canvas moves actions into More')
+        // More opens a menu of the rest, with their words, by keyboard too.
+        await page.focus('[data-sw-frame-bar] [data-sw-frame-more]')
+        await page.keyboard.press('Enter')
+        await page.waitForSelector('[data-sw-frame-more-menu] [role="menuitem"]')
+        const items = await page.$$eval('[data-sw-frame-more-menu] [role="menuitem"]', (nodes) =>
+          nodes.map((node) => node.textContent.trim()),
+        )
+        assert.ok(items.length >= 2 && items.every(Boolean), JSON.stringify(items))
+        assert.ok(items.includes('Open in a new tab'), JSON.stringify(items))
+        await shot(page, `page-bar-more-${width}`)
+        await page.keyboard.press('Escape')
+        await page.waitForSelector('[data-sw-frame-more-menu]', { state: 'detached' })
         await page.mouse.move(5, 5)
       }
       await shot(page, `page-bar-width-${width}`)
@@ -1181,6 +1195,17 @@ test('phone 390: "Comment on this page" is the first action of a tapped page, fi
       `44 px targets: ${JSON.stringify(sizes)}`,
     )
     await assertBarFits(page, 'phone')
+    // The rest are in More (a menu with words, 44 px rows), Close is last.
+    assert.equal(await page.$eval('[data-sw-frame-bar] > :last-child', (node) => node.getAttribute('aria-label')), 'Close')
+    await page.tap('[data-sw-frame-bar] [data-sw-frame-more]')
+    await page.waitForSelector('[data-sw-frame-more-menu] [role="menuitem"]')
+    const rows = await page.$$eval('[data-sw-frame-more-menu] [role="menuitem"]', (nodes) =>
+      nodes.map((node) => [node.textContent.trim(), node.offsetHeight]),
+    )
+    assert.ok(rows.length && rows.every(([text, height]) => text && height >= 44), JSON.stringify(rows))
+    await shot(page, 'page-bar-phone-more')
+    await page.keyboard.press('Escape')
+    await page.waitForSelector('[data-sw-frame-more-menu]', { state: 'detached' })
     await shot(page, 'page-bar-phone-1')
     await page.tap('[data-sw-frame-comment]')
     await page.waitForSelector('[data-sw-comment-hint-page]')
