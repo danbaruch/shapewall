@@ -11,6 +11,35 @@ export const FOCUS_WAIT_MS = 700
 // How long the pin keeps its arrival ring.
 export const LANDED_MS = 1600
 
+// The phone's thread sheet (BoardPanels.jsx) is a bottom sheet: it covers the
+// bottom of the canvas, and how much depends on the comment in it -- a short
+// one is a strip, one carrying an image and a thread is more than half the
+// screen. The pin has to land above whichever it is, so the sheet is measured
+// here and handed to commentFocus.js.
+//
+// Its height, not the top of its box: the sheet slides up as it opens
+// (animate-sheet-in is a translate), so its box is still moving while this
+// runs, and it is pinned to the bottom of the window, so the height is the
+// honest measure. The answer is in canvas pixels from the canvas's top, to
+// match the rest of the focus arithmetic.
+//
+// Null when there is no sheet: a desktop, a jump that opens none, or one
+// that is not in the page yet (see SHEET_FRAMES).
+export function sheetTopIn(box) {
+  if (!box) return null
+  const panel = document.querySelector('[data-sw-thread-sheet]')?.closest('[role="dialog"]')
+  const height = panel?.offsetHeight
+  if (!height) return null
+  return window.innerHeight - height - box.top
+}
+
+// The sheet is portalled in a tick after the click that opens it, so the
+// first look often finds nothing. Rather than fly on a guess and correct it
+// afterwards (two moves for one click), the jump waits up to this many frames
+// for the sheet to arrive and then makes its one move. A few frames is under
+// the eye's threshold; past them the jump goes anyway, on the fallback.
+export const SHEET_FRAMES = 5
+
 // A comment waiting to be shown (`pendingFocus`): once its pin is on the
 // board, fly to it (commentFocus.js decides where it lands) and tell
 // `onLanded`, which rings the pin so a short hop still reads as an arrival.
@@ -35,6 +64,11 @@ export function useFlyToPending({
   hidden.current = onHidden
   const landed = useRef(onLanded)
   landed.current = onLanded
+  // The frame a jump is waiting on for its sheet (below). Held outside the
+  // effect so that re-running it for another comment, or leaving the board,
+  // drops the old wait instead of letting two jumps race.
+  const waiting = useRef(0)
+  useEffect(() => () => window.cancelAnimationFrame(waiting.current), [])
   useEffect(() => {
     if (!pendingFocus) return undefined
     const point = pinPoint(targets, pendingFocus)
@@ -63,19 +97,38 @@ export function useFlyToPending({
     }
     setPendingFocus(null)
     setSettledZoom(null)
-    const box = canvasRef.current?.getBoundingClientRect()
-    const wanted = focusViewport({
-      point,
-      box,
-      wide,
-      zoom: flow.getZoom(),
-      cardTop: targets[pendingFocus.pageId]?.y ?? null,
-    })
-    if (!wanted) flow.setCenter(point.x, point.y, { zoom: focusZoom(flow.getZoom()), duration: motionDuration(450) })
-    // Already there: land without moving, so clicking the open comment again
-    // (or its neighbour on the same card) never jolts the board.
-    else flow.setViewport(wanted, { duration: settled(flow.getViewport(), wanted) ? 0 : motionDuration(450) })
-    landed.current?.(pendingFocus)
+    window.cancelAnimationFrame(waiting.current)
+    // A comment opened on a phone brings its thread sheet up with it, and the
+    // pin has to land clear of the sheet, which is as tall as the comment in
+    // it makes it. The sheet is not in the page on this tick, so the jump
+    // waits a few frames for it, then moves once, with the real measurement.
+    // Everything else (a desktop, a jump to a page or a parked draft, which
+    // open no sheet) goes straight away, as it always did.
+    const sheetWanted = !wide && pendingFocus.id != null
+    let frames = 0
+    const fly = () => {
+      const box = canvasRef.current?.getBoundingClientRect()
+      const sheetTop = wide ? null : sheetTopIn(box)
+      if (sheetWanted && sheetTop === null && frames < SHEET_FRAMES) {
+        frames += 1
+        waiting.current = window.requestAnimationFrame(fly)
+        return
+      }
+      const wanted = focusViewport({
+        point,
+        box,
+        wide,
+        zoom: flow.getZoom(),
+        cardTop: targets[pendingFocus.pageId]?.y ?? null,
+        sheetTop,
+      })
+      if (!wanted) flow.setCenter(point.x, point.y, { zoom: focusZoom(flow.getZoom()), duration: motionDuration(450) })
+      // Already there: land without moving, so clicking the open comment again
+      // (or its neighbour on the same card) never jolts the board.
+      else flow.setViewport(wanted, { duration: settled(flow.getViewport(), wanted) ? 0 : motionDuration(450) })
+      landed.current?.(pendingFocus)
+    }
+    fly()
     return undefined
   }, [canvasRef, flow, mode, targets, pendingFocus, setPendingFocus, setSettledZoom, viewports, wide])
 }
