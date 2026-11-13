@@ -15,7 +15,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
   fixed share of the canvas, which was right for a short sheet and left a comment carrying an image sitting behind its own thread.
   The sheet is measured as it opens, and the pin is kept a clear gap above it; a short sheet leaves the pin exactly where it was.
   The thread sheet also keeps a strip of board above itself rather than growing to four fifths of the screen, so there is somewhere
-  for the pin to land; a long thread scrolls inside the sheet.
+  for the pin to land; a long thread scrolls inside the sheet. Measured on every comment of the demo board at 390 and 412 px wide.
 
 ## 0.7.1 - 2026-11-13
 

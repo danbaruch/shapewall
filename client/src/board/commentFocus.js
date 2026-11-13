@@ -28,8 +28,10 @@ export const PHONE_HEADER_ROOM = 40
 // Screen pixels kept free between the pin's spot and the top of the phone's
 // thread sheet. The pin's pointed corner is on its spot and its 28 px bubble
 // normally grows upwards from there, but a pin near a card's top edge flips
-// and grows downwards instead: the gap covers that bubble and leaves air.
-export const PHONE_SHEET_GAP = 44
+// and grows downwards instead, and the open thread's pin is grown and ringed:
+// about 41 px below its spot, measured on the staging demo. The gap covers
+// that and leaves air.
+export const PHONE_SHEET_GAP = 64
 // How far down the canvas a pin may be brought when there is no sheet to
 // measure: a jump that opens no thread at all (back to a parked draft, to a
 // page, to a journey step) has nothing to keep clear of, so it keeps the
