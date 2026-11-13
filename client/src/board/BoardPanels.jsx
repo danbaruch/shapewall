@@ -226,7 +226,12 @@ export function PhoneSheets({
         size="md"
       >
         {threadProps ? (
-          <div className="flex max-h-[72dvh] flex-col outline-none" tabIndex={-1} data-autofocus data-sw-thread-sheet={selectedComment.id}>
+          // The thread keeps a strip of board above it. A long thread, or one
+          // carrying an image, used to grow until the sheet took four fifths
+          // of the screen, and the pin the board had just flown to had
+          // nowhere left to land (commentFocus.js: phoneFloor). The thread
+          // scrolls inside the sheet instead.
+          <div className="flex max-h-[62dvh] flex-col outline-none" tabIndex={-1} data-autofocus data-sw-thread-sheet={selectedComment.id}>
             <ThreadView {...threadProps} />
           </div>
         ) : null}

@@ -158,8 +158,10 @@ export function useBoardContext(input) {
       setLiveReady,
       // The pins the list shows on a frame. The open thread keeps its pin even
       // when the filter hides it (just resolved): the frame adds that one
-      // itself, from the view store.
-      pinsFor: (target, viewport) => (compareView ? NO_PINS : pinsByTarget.get(`${target}|${viewport}`) || NO_PINS),
+      // itself, from the view store. Compare mode asks for them too: the
+      // frame of the first environment draws them (Frame.jsx CompareFrame),
+      // so clicking a comment in the list has a pin to land on.
+      pinsFor: (target, viewport) => pinsByTarget.get(`${target}|${viewport}`) || NO_PINS,
       me,
       checksCount: (pageId) => checksCounts.get(pageId) || 0,
       historyCount: (pageId) => historyCount(data?.versions, pageId),

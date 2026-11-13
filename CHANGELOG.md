@@ -3,6 +3,20 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## 0.7.2 - 2026-11-13
+
+- Comparing two environments, the board draws the comment pins again. While compare was on, every frame was handed an empty pin
+  list and a compare frame had no pin layer in it at all, so "jump to comment" flew the camera to the right spot and there was
+  nothing there to see, click or ring. A page's comments belong to the page rather than to one environment, so each comment gets a
+  single pin, on the first environment's frame -- the one the camera flies to -- and the second frame's diff overlay stays clear.
+  Pins look and behave the same on either frame: the same sizes at a zoom, the same clustering, selection, hover preview and
+  arrival ring.
+- On a phone, a comment's pin now lands clear of its thread sheet however tall that sheet is. The jump used to put the pin at a
+  fixed share of the canvas, which was right for a short sheet and left a comment carrying an image sitting behind its own thread.
+  The sheet is measured as it opens, and the pin is kept a clear gap above it; a short sheet leaves the pin exactly where it was.
+  The thread sheet also keeps a strip of board above itself rather than growing to four fifths of the screen, so there is somewhere
+  for the pin to land; a long thread scrolls inside the sheet. Measured on every comment of the demo board at 390 and 412 px wide.
+
 ## 0.7.1 - 2026-11-13
 
 - Clicking a comment in the right-hand rail lands somewhere you can read. The pin is placed in the clear part of the canvas, left of

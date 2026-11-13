@@ -253,6 +253,17 @@ export function pinSpot(comment, live = null) {
   return { x: clamp(x), y: clamp(y), flipX, flipY }
 }
 
+// Whether a frame carries the page's comment pins. Compare mode draws one
+// frame per environment, and a comment belongs to the page, not to an
+// environment, so only the first environment's frame takes the pins: one pin
+// per comment rather than the same one twice, on the frame the camera flies
+// to (pinPoint below takes a viewport's first frame, which is the first
+// environment's), and the second frame keeps its diff overlay clear. Outside
+// compare mode every frame carries its own.
+export function framePins(frame, compare = null) {
+  return !compare || !frame?.env ? true : frame.env === compare.a
+}
+
 // Canvas point of a pin: node origin + frame offset + percentage of the frame.
 export function pinPoint(targets, comment) {
   const target = targets[comment.pageId]

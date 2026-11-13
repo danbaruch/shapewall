@@ -27,6 +27,9 @@ let config
 let server
 let browser
 let boardUrl
+// Kept for the compare-mode pin tests.
+let blogComment
+let phoneComment
 
 before(async () => {
   assert.ok(fs.existsSync(path.join(ROOT_DIR, 'dist', 'client', 'index.html')), 'run "npm run build" before the board e2e test')
@@ -48,7 +51,14 @@ before(async () => {
   await runCapture({ config, envId: 'production', log: () => {} })
   const board = config.boards[0]
   // Robin and Sam are on the board (they wrote comments); "@ag" is a typo.
-  await createComment(config, board, { pageId: 'blog', viewport: 'desktop', x: 40, y: 30, body: 'Covers feel heavy', author: 'Robin' })
+  blogComment = await createComment(config, board, {
+    pageId: 'blog',
+    viewport: 'desktop',
+    x: 40,
+    y: 30,
+    body: 'Covers feel heavy',
+    author: 'Robin',
+  })
   await createComment(config, board, {
     pageId: 'features',
     viewport: 'desktop',
@@ -57,7 +67,14 @@ before(async () => {
     body: 'Ask @ag and @robin about this',
     author: 'Sam',
   })
-  await createComment(config, board, { pageId: 'home', viewport: 'phone', x: 50, y: 40, body: 'The phone hero is cramped', author: 'Mei' })
+  phoneComment = await createComment(config, board, {
+    pageId: 'home',
+    viewport: 'phone',
+    x: 50,
+    y: 40,
+    body: 'The phone hero is cramped',
+    author: 'Mei',
+  })
   server = await listen(createApp({ config }))
   boardUrl = `http://127.0.0.1:${server.address().port}/`
   browser = await chromium.launch()
@@ -898,6 +915,103 @@ test('phone: go to page in compare fits the pair to the screen width and shows t
     assert.ok(node.width >= canvas.width * 0.9, `the pair is ${node.width} of ${canvas.width} px`)
     assert.ok(node.left >= canvas.left - 1 && node.right <= canvas.right + 1, 'the pair is on screen')
     await shot(page, 'ux-7-phone-compare-page')
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})
+
+// A pin's screen box once the camera has stopped moving.
+async function pinBox(page, id) {
+  const selector = `[data-sw-pin="${id}"]`
+  await page.waitForSelector(selector)
+  let last = null
+  for (let tries = 0; tries < 40; tries += 1) {
+    const box = await page.locator(selector).first().boundingBox()
+    if (box && last && Math.abs(box.x - last.x) < 0.5 && Math.abs(box.y - last.y) < 0.5) return box
+    last = box
+    await page.waitForTimeout(120)
+  }
+  return last
+}
+
+test('desktop: comparing, the pins are on the first environment frame, and a row in the list lands on one', async () => {
+  const { context, page, errors } = await openBoard(DESKTOP, { query: '?cmp=staging_production' })
+  try {
+    await page.waitForSelector('[data-sw-compare-bar]')
+    await page.waitForSelector('[data-sw-pin], [data-sw-pin-cluster]')
+    // Every pin is on a Staging frame: one per comment, never the same one
+    // on both frames of a pair, and the diff overlay beside it stays clear.
+    const on = await page.$$eval('[data-sw-pin], [data-sw-pin-cluster]', (nodes) =>
+      nodes.map((node) => node.closest('[data-sw-frame]')?.getAttribute('data-sw-frame')),
+    )
+    assert.ok(on.length >= 2, `pins are drawn while comparing (${show(on)})`)
+    assert.ok(
+      on.every((frame) => frame && frame.endsWith(':staging')),
+      show(on),
+    )
+    const ids = await page.$$eval('[data-sw-pin]', (nodes) => nodes.map((node) => node.getAttribute('data-sw-pin')))
+    assert.equal(new Set(ids).size, ids.length, `no comment is pinned twice (${show(ids)})`)
+    await shot(page, 'ux-8-compare-pins')
+
+    // A row in the comments list flies to its pin, which rings on arrival,
+    // and the thread opens beside it.
+    await page.click(`[data-sw-comment-list] [data-sw-comment="${blogComment.id}"]`)
+    const pin = await pinBox(page, blogComment.id)
+    const canvas = await rect(page, '[data-sw-canvas]')
+    assert.ok(pin.width > 0 && pin.height > 0, 'the pin is drawn')
+    assert.ok(pin.x >= canvas.left && pin.x + pin.width <= canvas.right, `pin x ${pin.x} inside the canvas`)
+    assert.ok(pin.y >= canvas.top && pin.y + pin.height <= canvas.bottom, `pin y ${pin.y} inside the canvas`)
+    assert.equal(await page.getAttribute(`[data-sw-pin="${blogComment.id}"]`, 'data-sw-pin-landed'), 'true')
+    await page.waitForSelector(`[data-sw-thread-popover="${blogComment.id}"]`)
+    await shot(page, 'ux-8-compare-pin-landed')
+
+    // And clicking the pin itself opens its thread again.
+    await page.locator(`[data-sw-thread-popover="${blogComment.id}"]`).focus()
+    await page.keyboard.press('Escape')
+    await page.waitForSelector(`[data-sw-thread-popover="${blogComment.id}"]`, { state: 'detached' })
+    await page.click(`[data-sw-pin="${blogComment.id}"]`)
+    await page.waitForSelector(`[data-sw-thread-popover="${blogComment.id}"]`)
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})
+
+test('phone: comparing, a row in the list lands on a pin above the thread sheet', async () => {
+  const { context, page, errors } = await openBoard(PHONE, { query: '?cmp=staging_production' })
+  try {
+    await page.waitForSelector('[data-sw-compare-bar]')
+    await page.tap('[data-sw-panel-toggle]')
+    await page.waitForSelector('[data-sw-comment-list]')
+    await page.tap(`[data-sw-comment-list] [data-sw-comment="${phoneComment.id}"]`)
+    const sheet = `[data-sw-thread-sheet="${phoneComment.id}"]`
+    await page.waitForSelector(sheet)
+    const pin = await pinBox(page, phoneComment.id)
+    const sheetBox = await page.locator(sheet).boundingBox()
+    assert.ok(pin.x >= 0 && pin.x + pin.width <= 390, `pin x ${pin.x} on screen`)
+    assert.ok(pin.y + pin.height <= sheetBox.y, `pin bottom ${pin.y + pin.height} above the sheet at ${sheetBox.y}`)
+    assert.equal(await page.getAttribute(`[data-sw-pin="${phoneComment.id}"]`, 'data-sw-pin-landed'), 'true')
+    await shot(page, 'ux-9-phone-compare-pin')
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})
+
+test('comparing: a comment on a page the view leaves out says so instead of doing nothing', async () => {
+  const { context, page, errors } = await openBoard(DESKTOP, { query: '?cmp=staging_production' })
+  try {
+    await page.waitForSelector('[data-sw-changed-only="off"]')
+    // The two environments are the same site, so nothing changed and
+    // "Changed pages only" leaves no page on the board: no pin for any
+    // comment, whichever one is picked.
+    await page.click('[data-sw-changed-only]')
+    await page.waitForSelector('[data-sw-changed-only="on"]')
+    await page.waitForFunction(() => document.querySelectorAll('[data-sw-node]').length === 0)
+    await page.click(`[data-sw-comment-list] [data-sw-comment="${blogComment.id}"]`)
+    await page.waitForSelector('[data-sw-toast]')
+    assert.match(await page.textContent('[data-sw-toast]'), /is on a page this view is not showing/)
     assert.deepEqual(errors, [])
   } finally {
     await context.close()

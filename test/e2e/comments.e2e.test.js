@@ -13,6 +13,7 @@ import { chromium } from 'playwright'
 import { runCapture } from '../../src/capture/capture.js'
 import { createApp } from '../../src/server/app.js'
 import { addReply, createComment, listComments } from '../../src/store.js'
+import { solidPng } from '../comment-media-fixtures.js'
 import { ROOT_DIR, demoSetup, listen } from './helpers.js'
 
 let setup
@@ -22,6 +23,7 @@ let boardUrl
 let first
 let second
 let third
+let tall
 
 before(async () => {
   assert.ok(fs.existsSync(path.join(ROOT_DIR, 'dist', 'client', 'index.html')), 'run "npm run build" before the comments e2e test')
@@ -54,6 +56,23 @@ before(async () => {
     body: 'Price table wraps',
     author: 'Mei',
   })
+  // A comment whose thread sheet is tall on a phone: two images, a long body
+  // and replies. The pin still has to land above its sheet, which is the one
+  // the fixed share of the canvas used to get wrong.
+  tall = await createComment(setup.config, board, {
+    pageId: 'pricing',
+    viewport: 'desktop',
+    x: 40,
+    y: 70,
+    body: 'On a phone the plan cards stack into one long column and the compare table runs off the side.\nTwo shots of what it looks like on a small screen are attached.\nCould the plans sit side by side from 768 px, and the table scroll on its own?',
+    author: 'Robin',
+    images: [
+      { name: 'plans-phone.png', mediaType: 'image/png', data: solidPng(8, 6, [40, 90, 200, 255]).toString('base64') },
+      { name: 'table-phone.png', mediaType: 'image/png', data: solidPng(8, 6, [200, 120, 40, 255]).toString('base64') },
+    ],
+  })
+  await addReply(setup.config, 'demo', tall.id, { author: 'Mei', body: 'The table is the worse of the two. Let us start there.' })
+  await addReply(setup.config, 'demo', tall.id, { author: 'Jo', body: 'Agreed, and the plan cards can wait for the next round.' })
   server = await listen(createApp({ config: setup.config }))
   boardUrl = `http://127.0.0.1:${server.address().port}/`
   browser = await chromium.launch()
@@ -492,3 +511,55 @@ test('phone 390: a row in the list flies to its pin, above the thread sheet', as
     await context.close()
   }
 })
+
+// The sheet's own panel, not the scrolling box inside it: the panel's top
+// edge is what the pin has to stay above.
+const sheetPanelTop = (page, id) =>
+  page.evaluate(
+    (sel) => document.querySelector(sel)?.closest('[role="dialog"]')?.getBoundingClientRect().top ?? null,
+    `[data-sw-thread-sheet="${id}"]`,
+  )
+
+// Every comment, at both common phone widths: the pin has to land above the
+// thread sheet whatever the comment holds. A short one leaves the pin where
+// it always was; a comment with images and a thread has a sheet half the
+// screen tall, and the pin used to land behind it.
+for (const width of [390, 412]) {
+  test(`phone ${width}: every row in the list flies to a pin clear of its thread sheet, tall sheets and all`, async () => {
+    const landed = []
+    for (const comment of [first, second, third, tall]) {
+      // A fresh board each time, as a reader arriving at the list would see it.
+      const { context, page, errors } = await openBoard({ ...PHONE, viewport: { width, height: 844 } })
+      try {
+        await page.tap('[data-sw-panel-toggle]')
+        await page.waitForSelector('[data-sw-comment-list]')
+        await page.tap(`[data-sw-comment-list] [data-sw-comment="${comment.id}"]`)
+        const sheet = `[data-sw-thread-sheet="${comment.id}"]`
+        await page.waitForSelector(sheet)
+        const pin = await settle(page, `[data-sw-pin="${comment.id}"]`)
+        assert.ok(pin, `#${comment.id}: the pin is drawn`)
+        const top = await sheetPanelTop(page, comment.id)
+        assert.ok(top !== null, `#${comment.id}: the sheet is up`)
+        const clear = top - (pin.y + pin.height)
+        landed.push({ id: comment.id, sheetTop: Math.round(top), clear: Math.round(clear) })
+        assert.ok(clear >= 8, `#${comment.id}: pin bottom ${pin.y + pin.height} is ${Math.round(clear)} px above the sheet at ${top}`)
+        assert.ok(pin.y >= CLEAR.top, `#${comment.id}: pin y ${pin.y} below the toolbar`)
+        assert.ok(pin.x >= 0 && pin.x + pin.width <= width, `#${comment.id}: pin x ${pin.x} on screen`)
+        assert.deepEqual(errors, [])
+      } finally {
+        await context.close()
+      }
+    }
+    // The sheet of the comment with two images and a thread really is the
+    // tall one, so this test would catch the fixed-share placement coming back.
+    const short = landed.find((item) => item.id === third.id)
+    const big = landed.find((item) => item.id === tall.id)
+    assert.ok(
+      big.sheetTop < short.sheetTop - 40,
+      `the image comment's sheet (${big.sheetTop}) is taller than a plain one's (${short.sheetTop})`,
+    )
+    // And it still leaves a strip of board above it: a sheet that grows to
+    // the whole screen leaves the pin nowhere to land, whatever the camera does.
+    assert.ok(big.sheetTop >= 200, `even the tall sheet leaves board above it (top ${big.sheetTop} of 844)`)
+  })
+}
