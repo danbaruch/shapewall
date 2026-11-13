@@ -576,10 +576,12 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     updateParams(viewNotice.back)
     setViewNotice(null)
   }, [updateParams, viewNotice])
-  // A comment whose pin the board cannot show: its page is left out of the
-  // current view (a variant while comparing, or a page "Changed pages only"
-  // drops). The thread still opens; the board says why it did not move
-  // rather than looking broken.
+  // A comment whose pin the board cannot show at all. The view getting out of
+  // the way covers the reasons it knows (another screen size, compare mode, the
+  // changed-pages filter: see commentReveal.js), so what is left here is a
+  // card that is simply not on this board any more -- a page or variant
+  // removed by a recapture, a screen size the board no longer has. The thread
+  // still opens; the board says why it did not move rather than looking broken.
   const onFocusHidden = useCallback(
     (comment) => {
       if (comment?.id == null) return

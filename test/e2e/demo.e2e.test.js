@@ -642,9 +642,15 @@ const cameraAt = (page) => page.evaluate(() => document.querySelector('.react-fl
 async function pinInCanvas(page, id) {
   const pin = `[data-sw-pin="${id}"]`
   await page.waitForSelector(pin, { timeout: 15000 })
+  // The arrival ring answers the click, and it only lasts a moment
+  // (LANDED_MS), so it is caught as it happens, before the camera settles.
+  const landed = await page
+    .waitForSelector(`${pin}[data-sw-pin-landed="true"]`, { timeout: 5000 })
+    .then(() => true)
+    .catch(() => false)
   // The fly is animated: wait for the pin to stop moving before measuring.
   let last = null
-  for (let tries = 0; tries < 40; tries += 1) {
+  for (let tries = 0; tries < 30; tries += 1) {
     const box = await page.locator(pin).first().boundingBox()
     if (box && last && Math.abs(box.x - last.x) < 0.5 && Math.abs(box.y - last.y) < 0.5) break
     last = box
@@ -652,7 +658,7 @@ async function pinInCanvas(page, id) {
   }
   const box = await page.locator(pin).first().boundingBox()
   const canvas = await page.locator('.react-flow').first().boundingBox()
-  return { box, canvas, landed: await page.getAttribute(pin, 'data-sw-pin-landed') }
+  return { box, canvas, landed }
 }
 
 // Clicks every row in the rail and reports the rows that did not take the
@@ -686,7 +692,7 @@ async function everyRowGoesSomewhere(page, { tap = false }) {
     if (!box) dead.push(`#${id}: the pin is not on screen`)
     else if (box.x < canvas.x || box.x + box.width > canvas.x + canvas.width || box.y < canvas.y) {
       dead.push(`#${id}: the pin is outside the canvas (${Math.round(box.x)}, ${Math.round(box.y)})`)
-    } else if (landed !== 'true') dead.push(`#${id}: the pin never reported an arrival`)
+    } else if (!landed) dead.push(`#${id}: the pin never reported an arrival`)
     if ((await cameraAt(page)) !== before) moved.push(id)
     // Compare mode for the next row: a jump that left it offers one way back.
     const back = page.locator('[data-sw-viewport-notice-back]')
