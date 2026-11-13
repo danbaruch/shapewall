@@ -193,6 +193,11 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
           .join(',')
       : '',
   )
+  // The pin the board has just flown to, when it is one of this frame's: a
+  // frame that does not hold it answers null and never re-renders.
+  const landedId = useBoardView((state) =>
+    state.landedId !== null && pins.some((comment) => comment.id === state.landedId) ? state.landedId : null,
+  )
   const clusters = useMemo(() => {
     const unread = new Set(unreadIds ? unreadIds.split(',') : [])
     return clusterPins(
@@ -426,6 +431,7 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
               selected={selectedCommentId === group.items[0].comment.id}
               unread={group.items[0].unread}
               working={isWorking(board, group.items[0].comment)}
+              landed={landedId === group.items[0].comment.id}
               onSelect={board.onSelectComment}
               onHover={board.onHoverComment}
               touch={board.touch}

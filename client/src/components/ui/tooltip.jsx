@@ -15,11 +15,27 @@ export const TooltipTrigger = TooltipPrimitive.Trigger
 // and an open tooltip is a layer: with the keyboard on a button inside a
 // thread or a dialog (its tooltip showing), the first Esc closed just the
 // tooltip and a second one was needed for the thing itself. Here the tooltip
-// still closes, at once (no fade, so its layer is gone by the next frame),
-// and the same key is then given to whatever is under it.
+// still closes, at once (the fade is run out, so its layer is gone by the
+// next frame), and the same key is then given to whatever is under it.
 function passEscapeOn(tooltip) {
   const from = document.activeElement
-  if (tooltip) tooltip.style.animation = 'none'
+  // The fade-out is run out in a millisecond rather than removed. Removing
+  // it (`animation: none`) cancels it mid-flight, and the animationcancel
+  // that fires carries the old animation's name, which Radix no longer
+  // matches against the current one: the tooltip then stays mounted for
+  // good, and a layer that never unmounts swallows every Esc under it, so
+  // the thread or dialog it sits in stops closing. Finishing it keeps that
+  // bookkeeping and clears the layer just as fast.
+  if (tooltip) {
+    tooltip.style.animationDuration = '1ms'
+    for (const animation of tooltip.getAnimations()) {
+      try {
+        animation.finish()
+      } catch {
+        // An animation with no end cannot be finished; it is not one of ours.
+      }
+    }
+  }
   let tries = 0
   const pass = () => {
     tries += 1
