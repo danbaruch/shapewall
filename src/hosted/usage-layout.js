@@ -579,6 +579,16 @@ export function fill(items, cols = LAYOUT_COLS) {
       x += item.w
     })
   }
+  // And a widget with empty rows under it, above a widget below, reaches down to it.
+  for (const item of readingOrder(out)) {
+    const under = (other) => other !== item && other.y >= item.y + item.h && other.x < item.x + item.w && item.x < other.x + other.w
+    const below = Math.min(...out.filter(under).map((other) => other.y))
+    if (!Number.isFinite(below) || below === item.y + item.h) continue
+    const free = (row) => !Array.from({ length: item.w }, (_, at) => item.x + at).some((c) => taken(c, row, row + 1, new Set([item])))
+    let h = item.h
+    while (item.y + h < below && free(item.y + h)) h++
+    item.h = h
+  }
   return out
 }
 
