@@ -5,7 +5,8 @@
 // stay text, the phone comment card and Back, the viewport switch is said
 // out loud, phone screens open on phone captures with a first-run tip,
 // compare on a phone fits the pair, frame labels sit off the capture, pins
-// sit beside their element, and a missing image refetches the board once.
+// sit beside their element, a comment on a page the view filters out reveals
+// that page and flies to it, and a missing image refetches the board once.
 // Set SHAPEWALL_SHOTS=<dir> to keep screenshots of each step.
 import { after, before, test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -999,19 +1000,39 @@ test('phone: comparing, a row in the list lands on a pin above the thread sheet'
   }
 })
 
-test('comparing: a comment on a page the view leaves out says so instead of doing nothing', async () => {
+test('comparing: a comment on a page "Changed pages only" leaves out shows all pages and flies there', async () => {
   const { context, page, errors } = await openBoard(DESKTOP, { query: '?cmp=staging_production' })
   try {
     await page.waitForSelector('[data-sw-changed-only="off"]')
     // The two environments are the same site, so nothing changed and
-    // "Changed pages only" leaves no page on the board: no pin for any
-    // comment, whichever one is picked.
+    // "Changed pages only" leaves no page on the board at all: no pin for
+    // any comment, whichever one is picked. The jump used to stop there.
     await page.click('[data-sw-changed-only]')
     await page.waitForSelector('[data-sw-changed-only="on"]')
     await page.waitForFunction(() => document.querySelectorAll('[data-sw-node]').length === 0)
     await page.click(`[data-sw-comment-list] [data-sw-comment="${blogComment.id}"]`)
-    await page.waitForSelector('[data-sw-toast]')
-    assert.match(await page.textContent('[data-sw-toast]'), /is on a page this view is not showing/)
+    // The filter goes, the page comes back, the board lands on the pin, and
+    // the note says what changed. Compare mode stays on: it is not the one
+    // hiding the page, so it is not what gets turned off.
+    await page.waitForSelector('[data-sw-view-notice="changed"]')
+    assert.match(
+      await page.textContent('[data-sw-view-notice]'),
+      /Showing all pages: comment #\d+ is on a page "Changed pages only" leaves out\./,
+    )
+    await page.waitForSelector('[data-sw-changed-only="off"]')
+    await page.waitForSelector('[data-sw-compare-bar]')
+    assert.equal(new URL(page.url()).searchParams.get('cmp'), 'staging_production')
+    assert.equal(new URL(page.url()).searchParams.get('changed'), '0')
+    await page.waitForSelector(`[data-sw-pin="${blogComment.id}"][data-sw-pin-landed="true"]`)
+    await settle(page)
+    const pin = await rect(page, `[data-sw-pin="${blogComment.id}"]`)
+    const canvas = await rect(page, '.react-flow')
+    assert.ok(pin.x >= canvas.x && pin.right <= canvas.right, `pin x ${Math.round(pin.x)} inside the canvas`)
+    assert.ok(pin.y >= canvas.y && pin.bottom <= canvas.bottom, `pin y ${Math.round(pin.y)} inside the canvas`)
+    await shot(page, 'ux-10-compare-changed-reveal')
+    // One way back puts the filter on again.
+    await page.click('[data-sw-viewport-notice-back]')
+    await page.waitForSelector('[data-sw-changed-only="on"]')
     assert.deepEqual(errors, [])
   } finally {
     await context.close()
