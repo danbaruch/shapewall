@@ -82,14 +82,20 @@ export function framesFor(mode, viewports, envs = null, only = null, frameHeight
 // the mode does not show (a tablet-only variant in Desktop mode) is a short
 // card that says so, never a full-size empty frame. `only` lists its own
 // viewports when it is collapsed.
+//
+// A variant is one capture of one idea: there is no second environment of it
+// to compare against, so it is a single-frame card in compare mode as it is
+// outside it, beside its page's pair. `plainShape` is its page's shape with
+// one frame per viewport (never the compare pair), which is what a variant
+// with no file list of its own falls back to.
 const COLLAPSED = 44
-function variantShape(variant, mode, viewports, pageShape, frameHeight = null) {
+export function variantShape(variant, mode, viewports, plainShape, frameHeight = null) {
   const files = variant.files && typeof variant.files === 'object' ? Object.keys(variant.files).filter((name) => viewports[name]) : null
-  if (!files?.length) return { frames: pageShape.frames, height: pageShape.height, only: null }
+  if (!files?.length) return { frames: plainShape.frames, width: plainShape.width, height: plainShape.height, only: null }
   const shown = viewportsFor(mode, viewports).filter((name) => files.includes(name))
-  if (!shown.length) return { frames: [], height: PAD + COLLAPSED, only: files }
+  if (!shown.length) return { frames: [], width: plainShape.width, height: PAD + COLLAPSED, only: files }
   const own = framesFor(mode, viewports, null, shown, frameHeight)
-  return { frames: own.frames, height: own.height, only: null }
+  return { frames: own.frames, width: own.width, height: own.height, only: null }
 }
 
 export function layoutBoard({ pages, groups, variants, viewports, mode, compare = null }) {
@@ -97,10 +103,20 @@ export function layoutBoard({ pages, groups, variants, viewports, mode, compare 
   // fewer viewports get narrower (or shorter) cards and the row closes up.
   const { width } = framesFor(mode, viewports, compare)
   const shapes = new Map()
+  const shapeKey = (page) => `${(page.viewports || []).join(',')}|${JSON.stringify(page.frameHeight || null)}`
   const shapeOf = (page) => {
-    const key = `${(page.viewports || []).join(',')}|${JSON.stringify(page.frameHeight || null)}`
+    const key = shapeKey(page)
     if (!shapes.has(key)) shapes.set(key, framesFor(mode, viewports, compare, page.viewports, page.frameHeight))
     return shapes.get(key)
+  }
+  // The same card with one frame per viewport: what a variant beside it is.
+  // Outside compare mode it is the page's own shape.
+  const plainShapes = new Map()
+  const plainShapeOf = (page) => {
+    if (!compare) return shapeOf(page)
+    const key = shapeKey(page)
+    if (!plainShapes.has(key)) plainShapes.set(key, framesFor(mode, viewports, null, page.viewports, page.frameHeight))
+    return plainShapes.get(key)
   }
   const variantsByPage = new Map()
   for (const variant of variants || []) {
@@ -126,14 +142,20 @@ export function layoutBoard({ pages, groups, variants, viewports, mode, compare 
     let rowHeight = 0
     for (const page of members) {
       const shape = shapeOf(page)
-      const count = variantsByPage.get(page.id)?.length || 0
-      const itemWidth = shape.width + count * (shape.width + VARIANT_GAP)
+      // Each variant beside the page takes its own width: in compare mode the
+      // page is a pair of frames and its variants are single frames, so they
+      // are no longer all the same width.
+      const beside = (variantsByPage.get(page.id) || []).map((variant) => ({
+        variant,
+        shape: variantShape(variant, mode, viewports, plainShapeOf(page), page.frameHeight),
+      }))
+      const itemWidth = beside.reduce((sum, item) => sum + item.shape.width + VARIANT_GAP, shape.width)
       if (x > 0 && x + itemWidth > rowLimit) {
         x = 0
         y += rowHeight + PAGE_GAP_Y
         rowHeight = 0
       }
-      placed.push({ page, shape, x: x + GROUP_PAD, y: y + GROUP_PAD + GROUP_LABEL })
+      placed.push({ page, shape, beside, x: x + GROUP_PAD, y: y + GROUP_PAD + GROUP_LABEL })
       x += itemWidth + PAGE_GAP_X
       maxX = Math.max(maxX, x - PAGE_GAP_X)
       rowHeight = Math.max(rowHeight, shape.height)
@@ -173,7 +195,7 @@ export function layoutBoard({ pages, groups, variants, viewports, mode, compare 
       focusable: false,
       zIndex: -1,
     })
-    for (const { page, shape, x: px, y: py } of block.placed) {
+    for (const { page, shape, beside, x: px, y: py } of block.placed) {
       const { frames, width, height } = shape
       const x = Math.round(block.x + px)
       const y = Math.round(block.y + py)
@@ -188,25 +210,23 @@ export function layoutBoard({ pages, groups, variants, viewports, mode, compare 
         ariaLabel: `${page.title}, ${page.group} page. Arrow keys: its comments and buttons. Enter: its actions.`,
       })
       targets[page.id] = { x, y, w: width, h: height, frames, nodeId: page.id }
-      const list = variantsByPage.get(page.id) || []
-      list.forEach((variant, index) => {
-        const vx = x + (index + 1) * (width + VARIANT_GAP)
+      let vx = x + width + VARIANT_GAP
+      beside.forEach(({ variant, shape: own }, index) => {
         const id = `variant:${variant.id}`
-        const own = variantShape(variant, mode, viewports, shape, page.frameHeight)
         nodes.push({
           id,
           type: 'variant',
           position: { x: vx, y },
           data: { variant, frames: own.frames, only: own.only },
           ariaLabel: `Variant: ${variant.title}. Arrow keys: its comments and buttons. Enter: its actions.`,
-          style: { width, height: own.height },
-          width,
+          style: { width: own.width, height: own.height },
+          width: own.width,
           height: own.height,
         })
-        targets[id] = { x: vx, y, w: width, h: own.height, frames: own.frames, nodeId: id }
+        targets[id] = { x: vx, y, w: own.width, h: own.height, frames: own.frames, nodeId: id }
         edges.push({
           id: `edge:${id}`,
-          source: index === 0 ? page.id : `variant:${list[index - 1].id}`,
+          source: index === 0 ? page.id : `variant:${beside[index - 1].variant.id}`,
           sourceHandle: 'right',
           target: id,
           targetHandle: 'left',
@@ -217,6 +237,7 @@ export function layoutBoard({ pages, groups, variants, viewports, mode, compare 
           style: { strokeDasharray: '6 6' },
           ariaLabel: `Variant of ${page.title}: ${variant.title}`,
         })
+        vx += own.width + VARIANT_GAP
       })
     }
   }

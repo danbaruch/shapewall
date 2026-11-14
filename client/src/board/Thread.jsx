@@ -369,6 +369,11 @@ export function ThreadView({
   agents = null,
   onSaveName = null,
   media = null,
+  // A note about what a jump to this comment changed, with its way back
+  // (CanvasNotes.jsx RevealNotice). The phone's thread sheet puts it here
+  // because the sheet is a modal: a note left on the canvas under it could
+  // not be tapped. On a desktop it stays on the canvas and this is null.
+  notice = null,
 }) {
   const [editing, setEditing] = useState(false)
   const [confirming, setConfirming] = useState(false)
@@ -456,14 +461,16 @@ export function ThreadView({
                 <span className="shrink-0 text-faint">· {comment.viewport}</span>
               )}
             </>
-          ) : nav?.total > 1 ? (
-            <span className="tabular">
-              {nav.index + 1} of {nav.total}
-            </span>
           ) : null}
         </p>
         {nav?.total > 1 ? (
-          <>
+          // The two steps read as one control, with where you are between
+          // them. On a phone this is how you walk the list: the sheet is a
+          // modal, so the list behind it is not there to be tapped, and a
+          // chevron on its own did not say what it stepped through. They lead
+          // the row there, since the sheet's own title row names the comment
+          // and this one would otherwise hang off an empty title.
+          <div className={cn('flex shrink-0 items-center gap-0.5', onClose ? null : 'order-first')} data-sw-thread-steps="true">
             <IconButton
               size={size}
               onClick={nav.onPrev}
@@ -474,6 +481,11 @@ export function ThreadView({
             >
               <ChevronLeft size={16} aria-hidden="true" />
             </IconButton>
+            {onClose ? null : (
+              <span className="tabular px-0.5 text-xs whitespace-nowrap text-muted" data-sw-thread-step-of="true">
+                {nav.index + 1} of {nav.total}
+              </span>
+            )}
             <IconButton
               size={size}
               onClick={nav.onNext}
@@ -484,7 +496,7 @@ export function ThreadView({
             >
               <ChevronRight size={16} aria-hidden="true" />
             </IconButton>
-          </>
+          </div>
         ) : null}
         {can.resolve ? (
           <IconButton
@@ -545,6 +557,11 @@ export function ThreadView({
           </IconButton>
         ) : null}
       </div>
+
+      {/* What a jump changed to show this comment, and the way back: a strip
+          of its own under the header, so it covers none of the thread's
+          controls and adds nothing to the sheet's height (BoardPanels.jsx). */}
+      {notice ? <div className="shrink-0">{notice}</div> : null}
 
       {fixable || chips ? (
         <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-1.5 border-b border-line px-3 py-1.5" data-sw-thread-agent="true">

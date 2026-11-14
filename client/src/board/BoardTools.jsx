@@ -256,6 +256,39 @@ export function useCanvasWidth(canvasRef) {
   return width
 }
 
+// Where the canvas starts down the window, and how tall the window is: how
+// much room a bottom sheet may take without covering the board (sheetFit.js).
+// Measured rather than worked out from what is on screen, because the canvas's
+// own box is the one thing that knows every bar above it -- the toolbar, the
+// notice bar, compare mode's bar, a migration banner, a hosted board's
+// approvals -- and it is resized by all of them.
+export function useCanvasRoom(canvasRef, enabled) {
+  const [room, setRoom] = useState(null)
+  useLayoutEffect(() => {
+    const node = canvasRef.current
+    if (!enabled || !node) {
+      setRoom(null)
+      return undefined
+    }
+    const read = () => {
+      const canvasTop = Math.round(node.getBoundingClientRect().top)
+      const windowHeight = window.innerHeight
+      setRoom((previous) =>
+        previous && previous.canvasTop === canvasTop && previous.windowHeight === windowHeight ? previous : { canvasTop, windowHeight },
+      )
+    }
+    read()
+    window.addEventListener('resize', read)
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(read)
+    observer?.observe(node)
+    return () => {
+      window.removeEventListener('resize', read)
+      observer?.disconnect()
+    }
+  }, [canvasRef, enabled])
+  return room
+}
+
 // A phone's on-screen keyboard is up: the page's visible height is well short
 // of the window's. The tools step aside for it.
 export function useKeyboardUp(enabled) {

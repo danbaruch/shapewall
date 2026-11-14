@@ -9,6 +9,7 @@ import { BoardContext, NODE_TYPES } from './nodes'
 import { EDGE_TYPES } from './edges'
 import { layoutBoard, nativeSize, pinPoint } from './layout'
 import { revealPlan } from './commentReveal'
+import { sheetContentMax, sheetPanelMax } from './sheetFit'
 import { cardKeyDown, isEditable, useCanvasNavigation } from './navigation'
 import { COMMENT_STATES, beforeAfter, entryVersion, historyCount, pageChange } from './flow'
 import { FILTERS } from './CommentsPanel'
@@ -44,7 +45,7 @@ import { BoardToolbar } from './BoardToolbar'
 import { BoardMenu } from './BoardMenu'
 import { CanvasNotes } from './CanvasNotes'
 import { DrawingBar, DrawingMode, useDrawingMode } from './DrawingMode'
-import { BoardTools, ToolDock, ToolNote, useCanvasWidth, useKeyboardUp } from './BoardTools'
+import { BoardTools, ToolDock, ToolNote, useCanvasRoom, useCanvasWidth, useKeyboardUp } from './BoardTools'
 import { DOCK, NOTE_ROOM, placeTools, toolsWidth } from './toolDock'
 import { activeTool as toolInUse, hasDivider, toolForKey, toolList } from './tools'
 import { isIgnoredTypeahead } from '../components/ui'
@@ -308,7 +309,12 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
         ? layoutBoard({
             pages: layoutPages,
             groups: data.board.groups,
-            variants: comparePair ? [] : data.variants,
+            // Variants are laid out while comparing too: a variant is one
+            // capture of one idea, with no second environment to compare it
+            // against, so it is a single-frame card beside its page's pair.
+            // Leaving them out is what left a comment on a variant with no
+            // pin to fly to, which 0.7.3 answered by leaving compare mode.
+            variants: data.variants,
             viewports,
             mode,
             compare: comparePair,
@@ -431,12 +437,19 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     refetchCompare()
   }, [data?.environments, imageVersion, refetchComments, refetchCompare, refetchView])
   // A pin opens its thread: at the pin on desktop, as a sheet on a phone.
-  // A thread picked from the phone list returns to the list when it closes.
+  // A thread picked from the phone list returns to the list when it closes,
+  // and says so: `threadBack` puts "Comments" in the sheet's title row, so
+  // the way back is named rather than an X you have to guess at.
   const threadFromList = useRef(false)
+  const [threadBack, setThreadBack] = useState(false)
+  const cameFromList = useCallback((value) => {
+    threadFromList.current = value
+    setThreadBack(value)
+  }, [])
   const selectComment = useCallback(
     (comment) => {
       if (keepDraft()) return
-      threadFromList.current = false
+      cameFromList(false)
       setDraft(null)
       updateParams({ c: comment.id })
       if (!wide) {
@@ -444,14 +457,14 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
         setThreadSheet(true)
       }
     },
-    [keepDraft, updateParams, wide],
+    [cameFromList, keepDraft, updateParams, wide],
   )
   const closeThread = useCallback(() => {
     setThreadSheet(false)
     updateParams({ c: null })
     if (threadFromList.current && !wide) setSheetOpen(true)
-    threadFromList.current = false
-  }, [updateParams, wide])
+    cameFromList(false)
+  }, [cameFromList, updateParams, wide])
 
   // When an open comment closes on its own. A thread, and the new-comment
   // composer, belong to the spot they point at:
@@ -476,7 +489,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   openThreadId.current = selectedCommentId
   const leaveForNavigation = useCallback(() => {
     if (openThreadId.current) {
-      threadFromList.current = false
+      cameFromList(false)
       setThreadSheet(false)
       updateParams({ c: null })
     }
@@ -485,7 +498,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
       if (draftFilled()) setDraftParked(true)
       else setDraft(null)
     }
-  }, [draftFilled, updateParams, wide])
+  }, [cameFromList, draftFilled, updateParams, wide])
   const reopenDraft = useCallback(() => {
     const kept = draftRef.current
     if (!kept) return
@@ -498,13 +511,14 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   }, [defaultMode, mode, updateParams, viewports])
 
   // Pan to a comment's pin, moving the view out of the way first when it is
-  // hiding the comment: another screen size, compare mode (which lays out no
-  // variants), "Changed pages only" (which drops unchanged pages). Every one
-  // of those is said out loud (a note with a way back, the viewport toggle
-  // flashes), so the board never changes what it shows behind the user's
-  // back, and all of it goes through the URL, so a reload lands here too. On
-  // a phone the list closes and the comment shows as a card at its pin; Back
-  // returns to the list.
+  // hiding the comment: another screen size, or "Changed pages only" (which
+  // drops unchanged pages). Both are said out loud (a note with a way back,
+  // the viewport toggle flashes), so the board never changes what it shows
+  // behind the user's back, and all of it goes through the URL, so a reload
+  // lands here too. Compare mode used to be a third reason; it now lays
+  // variants out, so nothing has to be turned off for them. On a phone the
+  // list closes and the comment shows as a card at its pin, which says
+  // "Comments" to go back to the list.
   const focusComment = useCallback(
     (comment) => {
       if (keepDraft()) return
@@ -515,22 +529,18 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
       const plan = revealPlan({
         hasTarget: Boolean(layout.targets[comment.pageId]),
         known: Boolean(ownerPageId && pagesById.has(ownerPageId) && (!onVariant || variant)),
-        onVariant,
-        compare: Boolean(comparePair),
         changedOnly: changedOnly && Boolean(compareData),
         pageChanged: (pageChange(compareData, ownerPageId) || 0) > 0,
       })
-      const leaveCompare = Boolean(plan?.leaveCompare)
       const showAllPages = Boolean(plan?.showAllPages)
       setDraft(null)
       setPendingFocus(comment)
       updateParams({
         c: comment.id,
         ...(switching ? { vp: comment.viewport === defaultMode ? null : comment.viewport } : {}),
-        // Leaving compare takes its own params with it, as the Compare button does.
-        ...(leaveCompare ? { cmp: null, changed: null, diff: null } : showAllPages ? { changed: '0' } : {}),
+        ...(showAllPages ? { changed: '0' } : {}),
       })
-      const changes = [...(switching ? ['viewport'] : []), ...(leaveCompare ? ['compare'] : []), ...(showAllPages ? ['changed'] : [])]
+      const changes = [...(switching ? ['viewport'] : []), ...(showAllPages ? ['changed'] : [])]
       // Set on every jump, cleared on every jump: a note left over from the
       // last one named the wrong comment and offered a way back to a view
       // this jump had already moved on from.
@@ -545,8 +555,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
               // One way back: the params exactly as they were before the jump.
               back: {
                 ...(switching ? { vp: was('vp') } : {}),
-                ...(leaveCompare ? { cmp: was('cmp'), changed: was('changed'), diff: was('diff') } : {}),
-                ...(showAllPages && !leaveCompare ? { changed: was('changed') } : {}),
+                ...(showAllPages ? { changed: was('changed') } : {}),
               },
             }
           : null,
@@ -556,21 +565,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
         setThreadSheet(true)
       }
     },
-    [
-      changedOnly,
-      compareData,
-      comparePair,
-      defaultMode,
-      keepDraft,
-      layout.targets,
-      mode,
-      pagesById,
-      was,
-      updateParams,
-      variantsById,
-      viewports,
-      wide,
-    ],
+    [changedOnly, compareData, defaultMode, keepDraft, layout.targets, mode, pagesById, was, updateParams, variantsById, viewports, wide],
   )
   // The note goes after a moment, as a note does. Back puts the view as it was.
   useEffect(() => {
@@ -1185,7 +1180,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     selectedId: selectedCommentId,
     onHover: boardContext.onHoverComment,
     onFocus: (comment) => {
-      threadFromList.current = !wide
+      cameFromList(!wide)
       focusComment(comment)
     },
     unread,
@@ -1557,6 +1552,12 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   const toolsOffered = Boolean(data) && tools.length > 1
   const toolsShown = toolsOffered && !phoneCovered && !keyboardUp
   const canvasWidth = useCanvasWidth(canvasRef)
+  // A phone's thread sheet is measured against the canvas, so whatever sits
+  // over the canvas comes off the sheet rather than off the strip of board
+  // the pin lands on (sheetFit.js).
+  const canvasRoom = useCanvasRoom(canvasRef, !wide)
+  const sheetContent = canvasRoom ? sheetContentMax(canvasRoom) : null
+  const sheetPanel = canvasRoom ? sheetPanelMax(canvasRoom) : null
   const noteSqueezed = Boolean(toolNote) && canvasWidth < NOTE_ROOM
   const minimapWanted = wide && minimapOn && !liveKeys.size && !journey && !builder && !noteSqueezed
   const toolsPlace = !toolsShown
@@ -1809,6 +1810,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                 totalPages={data?.board?.pages?.length || 0}
                 changedOnly={changedOnly}
                 showDiff={showDiff}
+                canComment={canComment}
                 canCapture={canCapture}
                 captureBusy={busy || Boolean(capture?.running)}
                 touch={!wide}
@@ -2168,6 +2170,9 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
             draftDescription={draftDescription}
             composerProps={composerProps}
             startDraw={sheetDraw}
+            threadFromList={threadBack}
+            sheetContentMax={sheetContent}
+            sheetPanelMax={sheetPanel}
           />
           <BoardMenu
             {...barProps}

@@ -191,6 +191,14 @@ export function PhoneSheets({
   modeLabel = (id) => id,
   // The Draw tool picked this page: the composer opens on its drawing sheet.
   startDraw = false,
+  // The thread sheet came from the comments list, so it says what it goes
+  // back to.
+  threadFromList = false,
+  // How tall the thread's box inside the sheet may be, so the sheet leaves a
+  // strip of board above itself for the pin (sheetFit.js). Null: unmeasured,
+  // and the stylesheet's own share stands.
+  sheetContentMax = null,
+  sheetPanelMax = null,
 }) {
   return (
     <>
@@ -231,30 +239,41 @@ export function PhoneSheets({
         title={selectedComment ? `#${selectedComment.id} · ${targetTitle(selectedComment.pageId)}` : 'Comment'}
         description={selectedComment ? `${selectedComment.viewport} capture` : undefined}
         size="md"
+        back={threadFromList ? 'Comments' : null}
+        maxHeight={sheetPanelMax}
       >
         {threadProps ? (
           // The thread keeps a strip of board above it. A long thread, or one
           // carrying an image, used to grow until the sheet took four fifths
           // of the screen, and the pin the board had just flown to had
           // nowhere left to land (commentFocus.js: phoneFloor). The thread
-          // scrolls inside the sheet instead.
+          // scrolls inside the sheet instead. How much it may take is measured
+          // against the canvas, not the window, so a bar over the canvas
+          // (compare mode's is 145 px at 390) comes off the sheet rather than
+          // off the strip of board the pin lands on (sheetFit.js).
           <div
             className="relative flex max-h-[62dvh] flex-col outline-none"
+            style={sheetContentMax ? { maxHeight: sheetContentMax } : undefined}
             tabIndex={-1}
             data-autofocus
             data-sw-thread-sheet={selectedComment.id}
           >
-            {/* Over the thread, not above it: the sheet's height is what
-                leaves a strip of board for the pin to land on (commentFocus.js:
-                phoneFloor), so the note must not add to it. It covers the top
-                of the thread for the few seconds it is up, which is the right
-                trade while it is explaining why the board moved. */}
-            {viewNotice && viewNotice.id === selectedComment.id ? (
-              <div className="absolute inset-x-0 top-0 z-10">
-                <RevealNotice notice={viewNotice} onUndo={undoViewNotice} modeLabel={modeLabel} compact inSheet />
-              </div>
-            ) : null}
-            <ThreadView {...threadProps} />
+            {/* The note rides inside the thread, under its own header
+                (Thread.jsx `notice`): the sheet's height is what leaves a
+                strip of board for the pin (commentFocus.js: phoneFloor), so
+                the note must not add to it, and 0.7.3's answer -- an overlay
+                over the top of the thread -- covered the thread's own
+                previous, next, resolve and more buttons for the six seconds
+                it was up. The thread's scrolling box gives up the room
+                instead. */}
+            <ThreadView
+              {...threadProps}
+              notice={
+                viewNotice && viewNotice.id === selectedComment.id ? (
+                  <RevealNotice notice={viewNotice} onUndo={undoViewNotice} modeLabel={modeLabel} compact inSheet />
+                ) : null
+              }
+            />
           </div>
         ) : null}
       </Dialog>

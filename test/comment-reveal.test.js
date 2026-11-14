@@ -6,60 +6,47 @@ import assert from 'node:assert/strict'
 import { revealNotice, revealPlan } from '../client/src/board/commentReveal.js'
 
 // A comment on a page, on the board, in plain view: the common case.
-const SHOWN = { hasTarget: true, known: true, onVariant: false, compare: false, changedOnly: false, pageChanged: false }
+const SHOWN = { hasTarget: true, known: true, changedOnly: false, pageChanged: false }
 const plan = (over) => revealPlan({ ...SHOWN, ...over })
 
 test('a card already on the board asks for no change at all', () => {
   assert.equal(plan({}), null)
-  // Even in compare mode on "Changed pages only": the pin is there, so fly.
-  assert.equal(plan({ compare: true, changedOnly: true, onVariant: true }), null)
+  // Even on "Changed pages only": the pin is there, so fly.
+  assert.equal(plan({ changedOnly: true }), null)
 })
 
-test('compare mode hides a variant, so the jump leaves compare -- and only compare', () => {
-  assert.deepEqual(plan({ hasTarget: false, onVariant: true, compare: true, pageChanged: true }), {
-    leaveCompare: true,
-    showAllPages: false,
-  })
+test('compare mode is no longer a reason: it lays variants out', () => {
+  // 0.7.3 left compare mode to show a comment on a variant, because compare
+  // laid out no variants. 0.8.0 lays them out as single-frame cards
+  // (layout.js), so the card is there and the jump changes nothing. The only
+  // thing that can hide one now is the changed-pages filter.
+  assert.equal(plan({ changedOnly: false }), null)
+  assert.deepEqual(plan({ hasTarget: false, changedOnly: false, pageChanged: true }), { gone: true })
 })
 
-test('a page compare mode keeps but "Changed pages only" drops stays in compare', () => {
-  // The narrowest escape: the page is on the board as soon as every page is.
-  assert.deepEqual(plan({ hasTarget: false, compare: true, changedOnly: true, pageChanged: false }), {
-    leaveCompare: false,
-    showAllPages: true,
-  })
+test('a page "Changed pages only" drops is shown again, and nothing else is touched', () => {
+  assert.deepEqual(plan({ hasTarget: false, changedOnly: true, pageChanged: false }), { showAllPages: true })
 })
 
-test('a variant beside an unchanged page needs both', () => {
-  assert.deepEqual(plan({ hasTarget: false, onVariant: true, compare: true, changedOnly: true, pageChanged: false }), {
-    leaveCompare: true,
-    showAllPages: true,
-  })
-})
-
-test('a changed page whose variant is hidden leaves compare without showing every page', () => {
-  assert.deepEqual(plan({ hasTarget: false, onVariant: true, compare: true, changedOnly: true, pageChanged: true }), {
-    leaveCompare: true,
-    showAllPages: false,
-  })
-})
-
-test('"Changed pages only" outside compare mode is not a reason: compare carries it', () => {
-  // changedOnly only applies while comparing (useCompare.js), so a hidden
-  // card with compare off and the page unchanged is simply gone.
-  assert.deepEqual(plan({ hasTarget: false, compare: false, changedOnly: false, pageChanged: false }), { gone: true })
+test('a variant beside a page the filter drops goes the same way as the page', () => {
+  // The filter drops a page and the variants beside it together, so showing
+  // every page brings both back; the comment is on the variant either way.
+  assert.deepEqual(plan({ hasTarget: false, changedOnly: true, pageChanged: false }), { showAllPages: true })
 })
 
 test('a removed page or variant is gone, whatever the view is doing', () => {
-  assert.deepEqual(plan({ hasTarget: false, known: false, onVariant: true, compare: true }), { gone: true })
-  assert.deepEqual(plan({ hasTarget: false, known: false, changedOnly: true, compare: true }), { gone: true })
+  assert.deepEqual(plan({ hasTarget: false, known: false }), { gone: true })
+  assert.deepEqual(plan({ hasTarget: false, known: false, changedOnly: true }), { gone: true })
 })
 
 test('a card hidden for a reason the view cannot name is gone, not a guess', () => {
-  // Compare mode is on and the comment is on a page that did change, with
-  // "Changed pages only" off: nothing here explains the missing card, so the
-  // board says so rather than turning compare off for no reason.
-  assert.deepEqual(plan({ hasTarget: false, compare: true, changedOnly: false, pageChanged: true }), { gone: true })
+  // The comment is on a page that did change, with "Changed pages only" off:
+  // nothing here explains the missing card, so the board says so rather than
+  // turning something off for no reason.
+  assert.deepEqual(plan({ hasTarget: false, changedOnly: false, pageChanged: true }), { gone: true })
+  // And on the filter, for a page that did change: the filter is keeping it,
+  // so the filter is not what is hiding it.
+  assert.deepEqual(plan({ hasTarget: false, changedOnly: true, pageChanged: true }), { gone: true })
 })
 
 // ---- what the notice says ----------------------------------------------------
@@ -81,13 +68,6 @@ test('a viewport switch keeps the sentence it has always had', () => {
   })
 })
 
-test('leaving compare says it was a variant', () => {
-  assert.deepEqual(notice(['compare']), {
-    text: 'Left compare: comment #7 is on a variant, which compare does not show.',
-    back: 'Back to compare',
-  })
-})
-
 test('showing every page names the filter it turned off', () => {
   assert.deepEqual(notice(['changed']), {
     text: 'Showing all pages: comment #7 is on a page "Changed pages only" leaves out.',
@@ -96,14 +76,10 @@ test('showing every page names the filter it turned off', () => {
 })
 
 test('two changes read as one sentence with one way back', () => {
-  assert.deepEqual(notice(['viewport', 'compare']), {
-    text: 'Showing Phone, left compare: comment #7 is on the phone capture, and on a variant, which compare does not show.',
-    back: 'Back to Desktop and compare',
+  assert.deepEqual(notice(['viewport', 'changed']), {
+    text: 'Showing Phone, showing all pages: comment #7 is on the phone capture, and on a page "Changed pages only" leaves out.',
+    back: 'Back to Desktop and changed pages only',
   })
-})
-
-test('three changes list properly rather than piling up "and"', () => {
-  assert.equal(notice(['viewport', 'compare', 'changed']).back, 'Back to Desktop, compare and changed pages only')
 })
 
 // ---- the compact wording a phone gets ----------------------------------------
@@ -113,13 +89,12 @@ test('three changes list properly rather than piling up "and"', () => {
 
 test('compact says what changed and for which comment, and nothing else', () => {
   assert.deepEqual(small(['viewport']), { text: 'Showing Phone for comment #7.', back: 'Back' })
-  assert.deepEqual(small(['compare']), { text: 'Left compare for comment #7.', back: 'Back' })
   assert.deepEqual(small(['changed']), { text: 'Showing all pages for comment #7.', back: 'Back' })
 })
 
 test('compact keeps two changes on one short line', () => {
-  const said = small(['viewport', 'compare'])
-  assert.equal(said.text, 'Showing Phone, left compare for comment #7.')
+  const said = small(['viewport', 'changed'])
+  assert.equal(said.text, 'Showing Phone, showing all pages for comment #7.')
   // Short enough to sit beside its button at 390 px rather than stack above it.
   assert.ok(said.text.length <= 48, `"${said.text}" is ${said.text.length} characters`)
 })
