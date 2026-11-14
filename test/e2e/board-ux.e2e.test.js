@@ -80,13 +80,14 @@ before(async () => {
   // Where "shapewall comments add" puts a pin with no --selector, and where
   // it falls back when a --selector no longer resolves in the latest capture
   // (comments-cli.js DEFAULT_PIN): the very top left of the page.
+  // A name of its own: tests below find a comment by its author.
   edgeComment = await createComment(config, board, {
     pageId: 'blog',
     viewport: 'desktop',
     x: 2,
     y: 2,
     body: 'Added from the CLI with no selector',
-    author: 'Sam',
+    author: 'Kit',
   })
   server = await listen(createApp({ config }))
   boardUrl = `http://127.0.0.1:${server.address().port}/`
