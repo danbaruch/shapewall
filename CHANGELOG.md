@@ -9,13 +9,14 @@ and the project uses [Semantic Versioning](https://semver.org/).
   board: compare mode's bar pushes the canvas 247 px down the window, and the sheet kept taking its share of the window, 598 px
   of 844, so it started at 246 px and the canvas ended at 844. The pin was placed correctly and the camera flew to it, behind
   the sheet: 9 of the board's 20 comments landed where nobody could see them. The sheet is now measured against the canvas
-  rather than the window, so whatever sits over the canvas comes off the sheet instead of off the board: at 390 px in compare
-  mode, with the canvas starting 247 px down, the sheet is capped at 477 px rather than 603 and leaves the 120 px strip of
-  board the pin lands in, and with nothing over the canvas it is exactly as tall as it has been since 0.7.2. The same
-  arithmetic covers every other bar that shortens the canvas (the notice bar, a migration banner, a hosted board's
-  approvals), because what is measured is the canvas's own box and the canvas is what they
-  all shorten. Checked at 390 px on all 20 comments of the demo board while comparing, by what is drawn at the pin rather than
-  by its coordinates: none covered, where 9 of 20 were.
+  rather than the window, so whatever sits over the canvas comes off the sheet instead of off the board: it is capped at
+  whatever leaves 120 px of board below the bars, which is the pin's own room and the gap the jump keeps above the sheet. On
+  the demo board at 390 px in compare mode that comes out as a sheet of 403 to 445 px with a strip of 129 to 171 px, where
+  before it was 598 px over a 597 px canvas; with nothing over the canvas the sheet is exactly as tall as it has been since
+  0.7.2. The same arithmetic covers every other bar that shortens the canvas (the notice bar, a migration banner, a hosted
+  board's approvals), because what is measured is the canvas's own box and the canvas is what they all shorten. Checked at
+  390 px on all 20 comments of the demo board while comparing, by what is drawn at the pin rather than by its coordinates:
+  none covered, where 9 of 20 were.
 - **On a phone, walking from one comment to the next.** The note a jump leaves ("Showing Phone for comment #12") lay over the
   top of the thread, which is where the thread keeps previous, next, resolve and more, so for the six seconds it was up none of
   them could be tapped, and the list itself is behind a modal sheet. It now sits in the thread's own flow, under its header,
