@@ -78,13 +78,13 @@ Any proxy works (nginx with `auth_basic`, an SSO proxy such as oauth2-proxy, a T
 - Anyone who can reach the board can read every capture and comment and, unless you pass `--read-only` or `--no-capture`, add comments
   and start captures.
 - The board chat spends your model key, so it is off on a shared board unless you pass `--chat` (with a rate limit, a cap on answers at
-  once and a storage quota per board). See [agents.md](agents.md#sharing-a-board).
+  once and a storage quota per board). See [Chat with an agent](agents.md#sharing-a-board).
 - The comment author is a free-text name, not an identity. If you need accountability, put identity in the proxy and its logs.
 - Binding to a non-loopback address (`--host 0.0.0.0`) without a proxy exposes the board unauthenticated; Shapewall prints a warning. With
   a non-loopback `--host` and no allowed host names, the Host check is off.
 - With GitHub connect, anyone who can use the board can open issues with the server's token. A GitHub webhook
   (`POST /api/github/webhook`, only when `SHAPEWALL_GITHUB_WEBHOOK_SECRET` is set) must reach the board without the proxy's login; it is
-  protected by its signature instead. See [github.md](github.md#webhook).
+  protected by its signature instead. See [GitHub connect](github.md#webhook).
 - `SHAPEWALL_ALLOWED_HOSTS` (comma-separated) adds names the same way as `--allowed-host`, and keeps the Host check on for a non-loopback
   `--host`. The value `*` turns the check off on purpose, for when the proxy in front already restricts the Host.
 

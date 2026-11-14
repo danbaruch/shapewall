@@ -94,7 +94,7 @@ Every delivery must carry a valid `X-Hub-Signature-256` for the secret (checked 
 nothing. `ping` answers 200; `pull_request` events of the configured repo link and resolve as above; other events and other repos are
 acknowledged and ignored. The webhook needs no token: the event carries the pull request. A `--read-only` server refuses deliveries.
 
-The board's Host check still applies, so add the public name with `--allowed-host` (see [deployment.md](deployment.md)). If an
+The board's Host check still applies, so add the public name with `--allowed-host` (see [Deployment and self-hosting](deployment.md)). If an
 authenticating proxy sits in front of the board, let `POST /api/github/webhook` through without the login; the signature is what protects
 it.
 

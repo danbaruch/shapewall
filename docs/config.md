@@ -39,16 +39,16 @@ spelling against the tables below when something you set has no effect.
 | `versions`      | 0-50                  | `5`                                 | Previous captures kept per page and viewport, for before/after. `0` keeps none.                                                                               |
 | `boardUrl`      | http(s) URL           | the running `serve` address         | Where people open the board, for links in notifications and GitHub issues. Without it, links use a running `shapewall serve` for this config, else port 4600. |
 | `environments`  | Environment[]         | none                                | The same pages at other base URLs, for compare mode. 1 to 8 of them. See below.                                                                               |
-| `journeys`      | Journey[]             | none                                | Named page sequences, which may fork. See [journeys.md](journeys.md).                                                                                         |
+| `journeys`      | Journey[]             | none                                | Named page sequences, which may fork. See [Journeys and links](journeys.md).                                                                                  |
 | `auth`          | object                | none                                | See below.                                                                                                                                                    |
 | `browser`       | object                | Playwright's Chromium               | `{ "channel": "chrome" }` or `{ "executablePath": "/path/to/chrome" }` (absolute, outside the project).                                                       |
 | `groups`        | string[]              | order of first use                  | Group order on the board.                                                                                                                                     |
 | `pages`         | Page[]                | required (or `boards`)              | See below.                                                                                                                                                    |
 | `boards`        | Board[]               | none                                | Several boards in one file, instead of top-level `pages`.                                                                                                     |
-| `notifications` | object                | off                                 | Webhook, Slack, Discord and email for comment events. See [notifications.md](notifications.md).                                                               |
+| `notifications` | object                | off                                 | Webhook, Slack, Discord and email for comment events. See [Notifications](notifications.md).                                                                  |
 | `github`        | object                | none                                | GitHub connect: `repo`, `boardUrl`, `labels`. See [GitHub](#github) below.                                                                                    |
 | `agent`         | object                | none                                | The board chat's model endpoint. See [Agent](#agent) below.                                                                                                   |
-| `starterAgent`  | object                | none                                | The sandboxed starter agent: who may dispatch work, tests, budgets. See [starter-agent.md](starter-agent.md).                                                 |
+| `starterAgent`  | object                | none                                | The sandboxed starter agent: who may dispatch work, tests, budgets. See [Sandboxed starter agent](starter-agent.md).                                          |
 | `sitemap`       | URL, file or object   | none                                | Default source for `shapewall sitemap`. See [Sitemap import](#sitemap-import).                                                                                |
 | `checks`        | object                | none                                | Defaults for page checks. Only `seo` and `budgets` are accepted. See [Checks SEO](#checks-seo) and [Checks budgets](#checks-budgets) below.                   |
 | `ci`            | object                | none                                | Capture on pull requests: threshold, pages, ignore selectors, build and serve commands. See [CI](#ci) below.                                                  |
@@ -407,12 +407,12 @@ Versions are kept for the default environment only.
 10, put on new issues), `board` (the board that bare `shapewall:<id>` markers mean) and `apiUrl` (GitHub Enterprise Server). Top level
 only. The token comes from `SHAPEWALL_GITHUB_TOKEN` or `GITHUB_TOKEN` and the webhook secret from `SHAPEWALL_GITHUB_WEBHOOK_SECRET`; a
 `token`, `webhookSecret` or `secret` key here is an error. Environment overrides: `SHAPEWALL_GITHUB_REPO`, `SHAPEWALL_BOARD_URL`,
-`SHAPEWALL_GITHUB_API_URL`. See [github.md](github.md).
+`SHAPEWALL_GITHUB_API_URL`. See [GitHub connect](github.md).
 
 ## CI
 
 Capture on every pull request: what `shapewall ci` and the workflow from `shapewall init --ci` read. See
-[pull-requests.md](pull-requests.md).
+[Capture on pull requests](pull-requests.md).
 
 ```json
 {
@@ -451,7 +451,7 @@ from `shapewall ci capture --allow-start` inside a CI job (`GITHUB_ACTIONS` or `
 ```
 
 The board chat's endpoint: any OpenAI-compatible chat completions API. `baseUrl` and `model` are required to connect; `apiKeyEnv` (the
-variable holding the key, default `SHAPEWALL_AGENT_API_KEY`), `label` (the name shown for it; a connected agent's name and icon are set on the Agents page, see [agents.md](agents.md#name-and-icon)), `vision` (default `true`), `tools` (default `true`), `maxTokens`,
+variable holding the key, default `SHAPEWALL_AGENT_API_KEY`), `label` (the name shown for it; a connected agent's name and icon are set on the Agents page, see [Chat with an agent](agents.md#name-and-icon)), `vision` (default `true`), `tools` (default `true`), `maxTokens`,
 `temperature` (0 to 2) and `backend` are optional. `maxTokens` is a whole number from 1 to 200000. `backend` is
 `"openai-compatible"` (the default) or `"acp"`, which chats with an agent CLI over ACP instead; that command comes from
 `serve --agent-acp`, `SHAPEWALL_AGENT_ACP` or the host's saved agent settings, never from the config. Top level only. An `apiKey`,
@@ -459,7 +459,7 @@ variable holding the key, default `SHAPEWALL_AGENT_API_KEY`), `label` (the name 
 `exec`, `acp`, `acpCommand`, `program`, `args`, `argv`, `env`), because a committed config would run it on the machine of whoever
 chats from that repo. `apiKeyEnv` may only name `SHAPEWALL_AGENT_*` or a `*_API_KEY`
 variable. A key goes only to this machine, a known hosted API, or a host confirmed in `SHAPEWALL_AGENT_KEY_HOSTS`.
-Environment overrides: `SHAPEWALL_AGENT_BASE_URL`, `SHAPEWALL_AGENT_MODEL`. See [agents.md](agents.md).
+Environment overrides: `SHAPEWALL_AGENT_BASE_URL`, `SHAPEWALL_AGENT_MODEL`. See [Chat with an agent](agents.md).
 
 How fixes run, both off by default and also on the Agents page of the Workspace Console (saved settings win over these):
 `branchMode` (`true` runs an agent CLI's fixes on a branch of their own) with `branchPrefix` (default `"shapewall/"`), see
