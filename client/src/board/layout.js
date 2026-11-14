@@ -89,7 +89,7 @@ export function framesFor(mode, viewports, envs = null, only = null, frameHeight
 // one frame per viewport (never the compare pair), which is what a variant
 // with no file list of its own falls back to.
 const COLLAPSED = 44
-export function variantShape(variant, mode, viewports, plainShape, frameHeight = null) {
+function variantShape(variant, mode, viewports, plainShape, frameHeight = null) {
   const files = variant.files && typeof variant.files === 'object' ? Object.keys(variant.files).filter((name) => viewports[name]) : null
   if (!files?.length) return { frames: plainShape.frames, width: plainShape.width, height: plainShape.height, only: null }
   const shown = viewportsFor(mode, viewports).filter((name) => files.includes(name))
