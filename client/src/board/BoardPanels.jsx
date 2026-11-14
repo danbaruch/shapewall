@@ -238,9 +238,21 @@ export function PhoneSheets({
           // of the screen, and the pin the board had just flown to had
           // nowhere left to land (commentFocus.js: phoneFloor). The thread
           // scrolls inside the sheet instead.
-          <div className="flex max-h-[62dvh] flex-col outline-none" tabIndex={-1} data-autofocus data-sw-thread-sheet={selectedComment.id}>
+          <div
+            className="relative flex max-h-[62dvh] flex-col outline-none"
+            tabIndex={-1}
+            data-autofocus
+            data-sw-thread-sheet={selectedComment.id}
+          >
+            {/* Over the thread, not above it: the sheet's height is what
+                leaves a strip of board for the pin to land on (commentFocus.js:
+                phoneFloor), so the note must not add to it. It covers the top
+                of the thread for the few seconds it is up, which is the right
+                trade while it is explaining why the board moved. */}
             {viewNotice && viewNotice.id === selectedComment.id ? (
-              <RevealNotice notice={viewNotice} onUndo={undoViewNotice} modeLabel={modeLabel} compact inSheet />
+              <div className="absolute inset-x-0 top-0 z-10">
+                <RevealNotice notice={viewNotice} onUndo={undoViewNotice} modeLabel={modeLabel} compact inSheet />
+              </div>
             ) : null}
             <ThreadView {...threadProps} />
           </div>
