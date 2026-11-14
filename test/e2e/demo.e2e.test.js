@@ -670,6 +670,10 @@ async function everyRowGoesSomewhere(page, { tap = false }) {
   const dead = []
   const moved = []
   const notices = {}
+  // Which card each pin landed on, so a comment on a variant can be told from
+  // one on a page. Read while the pin is on screen: the board only renders
+  // the cards in view, so counting them at the end would find none.
+  const on = {}
   for (const id of rows) {
     const before = await cameraAt(page)
     const row = `[data-sw-comment-list] [data-sw-comment="${id}"]`
@@ -690,6 +694,13 @@ async function everyRowGoesSomewhere(page, { tap = false }) {
       return node ? (node.textContent || '').replace(/\s+/g, ' ').trim() : null
     })
     if (notice) notices[id] = notice
+    // The card the pin landed on: a page, or a variant beside one. (The
+    // board only renders the cards in view, so this is read while the pin is
+    // on screen rather than counted at the end.)
+    on[id] = await page.evaluate(
+      (sel) => document.querySelector(sel)?.closest('[data-sw-node]')?.getAttribute('data-sw-node') || null,
+      `[data-sw-pin="${id}"]`,
+    )
     const { box, canvas, landed } = seen
     // The pin's middle, not its box: the bubble grows from its pointed corner
     // and a pin resting near a card's top edge on a phone can hang a few
@@ -701,30 +712,53 @@ async function everyRowGoesSomewhere(page, { tap = false }) {
       dead.push(`#${id}: the pin rests outside the canvas (${Math.round(at.x)}, ${Math.round(at.y)})`)
     } else if (!landed) dead.push(`#${id}: the pin never reported an arrival`)
     if ((await cameraAt(page)) !== before) moved.push(id)
-    // On a phone the jump closed the rail and opened the thread over the
-    // board, and the thread's backdrop swallows every tap on the canvas and
-    // the toolbar, so it closes before anything else is reached.
-    if (tap && (await page.locator('[data-sw-thread-sheet]').count())) {
-      await page.keyboard.press('Escape')
-      await page.waitForSelector('[data-sw-thread-sheet]', { state: 'detached', timeout: 15000 })
-      await page.waitForTimeout(250)
+    // On a phone the pin has to be visible, not merely inside the canvas in
+    // coordinates: the thread sheet the jump opens covers the bottom of the
+    // board, and in compare mode it covered all of it (0.7.3). What is drawn
+    // at the pin's middle answers it: the pin, or the sheet's own dimming
+    // backdrop with the board behind it; the sheet means it is not there.
+    if (tap && box) {
+      const over = await page.evaluate(
+        ([px, py]) => {
+          const element = document.elementFromPoint(px, py)
+          const sheet = document.querySelector('[data-sw-thread-sheet]')?.closest('[role="dialog"]')
+          const canvas = document.querySelector('[data-sw-canvas]')
+          return {
+            hit: !element ? 'nothing' : element.closest('[data-sw-pin]') ? 'pin' : element.closest('[role="dialog"]') ? 'sheet' : 'board',
+            strip: sheet && canvas ? Math.round(sheet.getBoundingClientRect().top - canvas.getBoundingClientRect().top) : null,
+          }
+        },
+        [at.x, at.y],
+      )
+      if (over.hit === 'sheet') dead.push(`#${id}: the thread sheet covers the pin`)
+      if (over.strip !== null && over.strip < 112) dead.push(`#${id}: the sheet leaves only ${over.strip} px of board above it`)
     }
-    // Compare mode for the next row. On a desktop the note's own way back
-    // does it, which exercises that button on every jump that raises it. On a
-    // phone the note sits under the thread sheet and then under the rail
-    // sheet that replaces it, so nothing there is tappable and the address
-    // does the work instead (see the fallback below).
+    // On a phone the jump closed the rail and opened the thread over the
+    // board. The sheet is a modal, so nothing behind it can be tapped: the
+    // way back to the list is the sheet's own "Comments", which is the one
+    // gesture a reader has there (0.7.3 had only an X, and an automated pass
+    // spent its time timing out on taps that the backdrop swallowed).
+    if (tap && (await page.locator('[data-sw-thread-sheet]').count())) {
+      const toList = page.locator('[data-sw-dialog-back]')
+      if (!(await toList.count())) dead.push(`#${id}: the sheet offers no way back to the list`)
+      else await toList.first().tap()
+      await page.waitForSelector('[data-sw-thread-sheet]', { state: 'detached', timeout: 15000 })
+    }
+    // Compare mode is never turned off by a jump now that variants are laid
+    // out inside it, so every row is reached in the view the reader chose. A
+    // row that did take it off is a defect, not something to put back.
+    if (!(await page.locator('[data-sw-compare-bar]').count())) {
+      dead.push(`#${id}: the jump left compare mode`)
+      await openBoard(page, `${base}?${COMPARE}`)
+      await page.waitForSelector('[data-sw-compare-bar]', { timeout: 20000 })
+    }
+    // A jump that switched screen size puts it back from the note, which
+    // exercises that button on every jump that raises one. On a phone the
+    // note rides in the thread sheet, which has just been closed.
     const back = page.locator('[data-sw-viewport-notice-back]')
     if (!tap && (await back.count())) {
       await back.click()
       await page.waitForSelector('[data-sw-view-notice]', { state: 'detached' })
-      await page.waitForSelector('[data-sw-compare-bar]', { timeout: 15000 })
-    }
-    // The note goes by itself after a while, so Back is not always there to
-    // click. The address brings compare back either way.
-    if (!(await page.locator('[data-sw-compare-bar]').count())) {
-      await openBoard(page, `${base}?${COMPARE}`)
-      await page.waitForSelector('[data-sw-compare-bar]', { timeout: 20000 })
     }
     // The rail is a sheet on a phone: bring it back for the next row.
     if (tap && !(await page.locator('[data-sw-comment-list]').count())) {
@@ -732,7 +766,7 @@ async function everyRowGoesSomewhere(page, { tap = false }) {
       await page.waitForSelector('[data-sw-comment-list]')
     }
   }
-  return { rows, dead, moved, notices }
+  return { rows, dead, moved, notices, on }
 }
 
 test('comparing, desktop 1440: every comment in the rail takes you to its pin, variants included', async () => {
@@ -741,16 +775,22 @@ test('comparing, desktop 1440: every comment in the rail takes you to its pin, v
     await openBoard(page, `${base}?${COMPARE}`)
     await page.waitForSelector('[data-sw-compare-bar]')
     await page.waitForSelector('[data-sw-comment-list]')
-    const { rows, dead, moved, notices } = await everyRowGoesSomewhere(page, { tap: false })
+    const { rows, dead, moved, notices, on } = await everyRowGoesSomewhere(page, { tap: false })
     // The demo board's open comments, the two on variants among them.
     assert.ok(rows.length >= 20, `the rail has ${rows.length} comments`)
     assert.deepEqual(dead, [])
     assert.equal(moved.length, rows.length, `${moved.length} of ${rows.length} rows moved the board`)
-    // The variant comments are the ones compare mode used to hide: they say so.
-    const left = Object.values(notices).filter((text) => /Left compare/.test(text))
-    assert.equal(left.length, 2, `two variant comments said they left compare, got ${left.length}`)
-    assert.match(left[0], /is on a variant, which compare does not show/)
-    assert.match(left[0], /Back to compare/)
+    // The two variant comments are the ones compare mode used to hide, and it
+    // does not any more: their variants are laid out beside their pages as
+    // single-frame cards, so nothing says it left compare and the compare bar
+    // is still up at the end of the walk.
+    const left = Object.values(notices).filter((text) => /compare/i.test(text))
+    assert.deepEqual(left, [], 'no jump had to leave compare mode')
+    assert.equal(await page.locator('[data-sw-compare-bar]').count(), 1, 'still comparing after the whole rail')
+    // The two variant comments really landed on their variant's own card,
+    // while comparing: that card is the one 0.7.3 had to leave compare to draw.
+    const onVariants = Object.entries(on).filter(([, node]) => String(node).startsWith('variant:'))
+    assert.equal(onVariants.length, 2, `comments landed on variant cards while comparing: ${JSON.stringify(on)}`)
     await shot(page, 'compare-rail-desktop')
     assert.deepEqual(errors, [])
   } finally {
@@ -770,10 +810,18 @@ test('comparing, phone 390: every comment in the rail takes you to its pin', asy
     await page.waitForSelector('[data-sw-compare-bar]')
     await page.tap('[data-sw-panel-toggle]')
     await page.waitForSelector('[data-sw-comment-list]')
+    const started = Date.now()
     const { rows, dead, moved } = await everyRowGoesSomewhere(page, { tap: true })
+    const took = Date.now() - started
     assert.ok(rows.length >= 20, `the rail has ${rows.length} comments`)
+    // `dead` now also holds every pin the thread sheet covered, and every
+    // sheet that left too little board above it to land on.
     assert.deepEqual(dead, [])
     assert.equal(moved.length, rows.length, `${moved.length} of ${rows.length} rows moved the board`)
+    // And it is a walk rather than an ordeal: 0.7.3 took about 25 minutes for
+    // this, nearly all of it taps timing out on things the sheet covered.
+    assert.ok(took < 240000, `walked ${rows.length} comments in ${Math.round(took / 1000)}s`)
+    assert.equal(await page.locator('[data-sw-compare-bar]').count(), 1, 'still comparing after the whole rail')
     await shot(page, 'compare-rail-phone')
     assert.deepEqual(errors, [])
   } finally {

@@ -979,7 +979,32 @@ test('desktop: comparing, the pins are on the first environment frame, and a row
   }
 })
 
-test('phone: comparing, a row in the list lands on a pin above the thread sheet', async () => {
+// The sheet's own panel, not the scrolling box inside it: the panel is what
+// covers the board, and in compare mode it covered all of it.
+const sheetPanel = (page, id) =>
+  page.evaluate(
+    (sel) => document.querySelector(sel)?.closest('[role="dialog"]')?.getBoundingClientRect().toJSON() ?? null,
+    `[data-sw-thread-sheet="${id}"]`,
+  )
+
+// What is really drawn at a point: the pin itself, the dialog's dimming
+// backdrop (the board is behind it and visible, as it is under every sheet),
+// or the sheet, which means the pin is not on screen at all however good its
+// coordinates look. 0.7.3 checked coordinates only, and called pins "on
+// screen" while the sheet was over them.
+const whatIsAt = (page, x, y) =>
+  page.evaluate(
+    ([px, py]) => {
+      const element = document.elementFromPoint(px, py)
+      if (!element) return 'nothing'
+      if (element.closest('[data-sw-pin]')) return 'pin'
+      if (element.closest('[role="dialog"]')) return 'sheet'
+      return /animate-fade-in/.test(String(element.className)) ? 'backdrop' : 'board'
+    },
+    [x, y],
+  )
+
+test('phone: comparing, a row in the list lands on a pin you can see, not behind the sheet', async () => {
   const { context, page, errors } = await openBoard(PHONE, { query: '?cmp=staging_production' })
   try {
     await page.waitForSelector('[data-sw-compare-bar]')
@@ -989,11 +1014,81 @@ test('phone: comparing, a row in the list lands on a pin above the thread sheet'
     const sheet = `[data-sw-thread-sheet="${phoneComment.id}"]`
     await page.waitForSelector(sheet)
     const pin = await pinBox(page, phoneComment.id)
-    const sheetBox = await page.locator(sheet).boundingBox()
+    const panel = await sheetPanel(page, phoneComment.id)
+    const canvas = await rect(page, '[data-sw-canvas]')
+    const bar = await rect(page, '[data-sw-compare-bar]')
+    // Compare mode's bar pushes the canvas well down the window: that is the
+    // shape of board this has to work on, and what 0.7.3's sheet knew nothing
+    // about (it took its share of the window and covered the lot).
+    assert.ok(bar.height > 60, `the compare bar is ${Math.round(bar.height)} px tall at 390`)
+    assert.ok(canvas.top > 160, `the canvas starts ${Math.round(canvas.top)} px down the window`)
+    // The sheet leaves a strip of board above itself, measured from the top
+    // of the canvas rather than the top of the window.
+    const strip = panel.top - canvas.top
+    assert.ok(strip >= 112, `the sheet at ${Math.round(panel.top)} leaves ${Math.round(strip)} px of board below the bar`)
+    // And the pin is in that strip, and really drawn there.
     assert.ok(pin.x >= 0 && pin.x + pin.width <= 390, `pin x ${pin.x} on screen`)
-    assert.ok(pin.y + pin.height <= sheetBox.y, `pin bottom ${pin.y + pin.height} above the sheet at ${sheetBox.y}`)
+    assert.ok(pin.y >= canvas.top, `pin y ${Math.round(pin.y)} below the top of the canvas at ${Math.round(canvas.top)}`)
+    assert.ok(pin.y + pin.height <= panel.top, `pin bottom ${Math.round(pin.y + pin.height)} above the sheet at ${Math.round(panel.top)}`)
+    assert.notEqual(await whatIsAt(page, pin.x + pin.width / 2, pin.y + pin.height / 2), 'sheet', 'the sheet is not over the pin')
     assert.equal(await page.getAttribute(`[data-sw-pin="${phoneComment.id}"]`, 'data-sw-pin-landed'), 'true')
     await shot(page, 'ux-9-phone-compare-pin')
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})
+
+// Walking the list on a phone. The sheet is a modal, so the list behind it is
+// not there to be tapped: the way on has to be in the sheet. "Next" steps to
+// the next comment and flies to it, "Comments" goes back to the list -- one
+// tap each, no reload, and compare mode stays on all the way.
+test('phone: comparing, the thread sheet walks from comment to comment and back to the list', async () => {
+  const { context, page, errors } = await openBoard(PHONE, { query: '?cmp=staging_production' })
+  try {
+    await page.waitForSelector('[data-sw-compare-bar]')
+    await page.tap('[data-sw-panel-toggle]')
+    await page.waitForSelector('[data-sw-comment-list]')
+    const rows = await page.$$eval('[data-sw-comment-list] [data-sw-comment]', (list) =>
+      list.map((node) => node.getAttribute('data-sw-comment')),
+    )
+    assert.ok(rows.length >= 3, `the list has ${rows.length} comments`)
+    await page.tap(`[data-sw-comment-list] [data-sw-comment="${rows[0]}"]`)
+    await page.waitForSelector(`[data-sw-thread-sheet="${rows[0]}"]`)
+    const openId = () => page.getAttribute('[data-sw-thread-sheet]', 'data-sw-thread-sheet')
+    const started = Date.now()
+    const seen = [await openId()]
+    for (let step = 0; step < rows.length - 1; step += 1) {
+      const before = seen[seen.length - 1]
+      // One tap, in the sheet, with nothing over it: 0.7.3's jump note sat on
+      // top of these buttons for the six seconds it was up.
+      await page.tap('[data-sw-thread-steps] [data-sw-thread-next]')
+      await page.waitForFunction(
+        (was) => document.querySelector('[data-sw-thread-sheet]')?.getAttribute('data-sw-thread-sheet') !== was,
+        before,
+        { timeout: 10000 },
+      )
+      seen.push(await openId())
+      // Still comparing: a comment on a variant no longer takes compare mode
+      // off to show itself.
+      assert.equal(await page.locator('[data-sw-compare-bar]').count(), 1, `#${seen[seen.length - 1]}: still comparing`)
+    }
+    const took = Date.now() - started
+    assert.equal(new Set(seen).size, rows.length, `walked ${seen.length} comments: ${seen.join(', ')}`)
+    // The comment it ends on has really landed: its pin is drawn, in the clear.
+    const last = seen[seen.length - 1]
+    const pin = await pinBox(page, last)
+    const panel = await sheetPanel(page, last)
+    assert.ok(pin, `#${last}: the pin is drawn`)
+    assert.ok(pin.y + pin.height <= panel.top, `#${last}: pin bottom ${Math.round(pin.y + pin.height)} above the sheet`)
+    // A walk, not an ordeal.
+    assert.ok(took < 45000, `walked ${rows.length} comments in ${Math.round(took / 1000)}s`)
+    // And the way back to the list is one tap, named.
+    await page.tap('[data-sw-dialog-back]')
+    await page.waitForSelector('[data-sw-comment-list]', { timeout: 10000 })
+    assert.equal(await page.locator('[data-sw-thread-sheet]').count(), 0, 'the thread closed')
+    assert.equal(await page.locator('[data-sw-compare-bar]').count(), 1, 'and compare mode is still on')
+    await shot(page, 'ux-9-phone-compare-walk')
     assert.deepEqual(errors, [])
   } finally {
     await context.close()
