@@ -675,12 +675,9 @@ async function everyRowGoesSomewhere(page, { tap = false }) {
     const row = `[data-sw-comment-list] [data-sw-comment="${id}"]`
     if (tap) await page.tap(row)
     else await page.click(row)
-    const notice = await page
-      .locator('[data-sw-view-notice]')
-      .first()
-      .textContent()
-      .catch(() => null)
-    if (notice) notices[id] = notice.replace(/\s+/g, ' ').trim()
+    // The pin first, and nothing that waits before it: the arrival ring only
+    // lasts LANDED_MS, so anything auto-waiting in between (a locator for a
+    // notice that this row does not raise) would outlast the thing measured.
     let seen = null
     try {
       seen = await pinInCanvas(page, id)
@@ -688,21 +685,48 @@ async function everyRowGoesSomewhere(page, { tap = false }) {
       dead.push(`#${id}: no pin was ever drawn`)
       continue
     }
+    const notice = await page.evaluate(() => {
+      const node = document.querySelector('[data-sw-view-notice]')
+      return node ? (node.textContent || '').replace(/\s+/g, ' ').trim() : null
+    })
+    if (notice) notices[id] = notice
     const { box, canvas, landed } = seen
+    // The pin's middle, not its box: the bubble grows from its pointed corner
+    // and a pin resting near a card's top edge on a phone can hang a few
+    // pixels over the canvas's own edge. That is 0.7.2 behaviour, measured
+    // the same on the live demo, and not what this test is about.
+    const at = box && { x: box.x + box.width / 2, y: box.y + box.height / 2 }
     if (!box) dead.push(`#${id}: the pin is not on screen`)
-    else if (box.x < canvas.x || box.x + box.width > canvas.x + canvas.width || box.y < canvas.y) {
-      dead.push(`#${id}: the pin is outside the canvas (${Math.round(box.x)}, ${Math.round(box.y)})`)
+    else if (at.x < canvas.x || at.x > canvas.x + canvas.width || at.y < canvas.y || at.y > canvas.y + canvas.height) {
+      dead.push(`#${id}: the pin rests outside the canvas (${Math.round(at.x)}, ${Math.round(at.y)})`)
     } else if (!landed) dead.push(`#${id}: the pin never reported an arrival`)
     if ((await cameraAt(page)) !== before) moved.push(id)
-    // Compare mode for the next row: a jump that left it offers one way back.
+    // On a phone the jump closed the rail and opened the thread over the
+    // board, and the thread's backdrop swallows every tap on the canvas and
+    // the toolbar, so it closes before anything else is reached.
+    if (tap && (await page.locator('[data-sw-thread-sheet]').count())) {
+      await page.keyboard.press('Escape')
+      await page.waitForSelector('[data-sw-thread-sheet]', { state: 'detached', timeout: 15000 })
+      await page.waitForTimeout(250)
+    }
+    // Compare mode for the next row. On a desktop the note's own way back
+    // does it, which exercises that button on every jump that raises it. On a
+    // phone the note sits under the thread sheet and then under the rail
+    // sheet that replaces it, so nothing there is tappable and the address
+    // does the work instead (see the fallback below).
     const back = page.locator('[data-sw-viewport-notice-back]')
-    if (await back.count()) {
-      if (tap) await back.tap()
-      else await back.click()
+    if (!tap && (await back.count())) {
+      await back.click()
       await page.waitForSelector('[data-sw-view-notice]', { state: 'detached' })
       await page.waitForSelector('[data-sw-compare-bar]', { timeout: 15000 })
     }
-    // The rail is a sheet on a phone and the jump closed it.
+    // The note goes by itself after a while, so Back is not always there to
+    // click. The address brings compare back either way.
+    if (!(await page.locator('[data-sw-compare-bar]').count())) {
+      await openBoard(page, `${base}?${COMPARE}`)
+      await page.waitForSelector('[data-sw-compare-bar]', { timeout: 20000 })
+    }
+    // The rail is a sheet on a phone: bring it back for the next row.
     if (tap && !(await page.locator('[data-sw-comment-list]').count())) {
       await page.tap('[data-sw-panel-toggle]')
       await page.waitForSelector('[data-sw-comment-list]')
