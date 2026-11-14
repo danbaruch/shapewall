@@ -97,6 +97,14 @@ export function focusViewport({ point, box, wide, zoom, cardTop = null, sheetTop
   if (!wide && Number.isFinite(cardTop) && cardTop * at + y < PHONE_HEADER_ROOM) {
     y = Math.min(PHONE_HEADER_ROOM - cardTop * at, phoneFloor(box, sheetTop) - point.y * at)
   }
+  // Letting the card down for its title row can carry the pin itself over the
+  // top of the canvas: a comment near the top of a tall card landed with its
+  // bubble clipped, since the bubble grows upwards from the spot.
+  // PHONE_TOP_ROOM is the pin's own room and it wins, the way it already does
+  // for the floor (phoneFloor). The card's header gives way first: a header
+  // half under the toolbar still reads, a clipped pin does not, and the pin
+  // is what the jump was for.
+  if (!wide) y = Math.max(y, PHONE_TOP_ROOM - point.y * at)
   return { x, y, zoom: at }
 }
 

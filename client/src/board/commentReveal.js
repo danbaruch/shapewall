@@ -47,13 +47,20 @@ function sentenceList(items) {
   return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
 }
 
-// The notice over the canvas after a jump moved the view out of the way, and
-// the label of its one way back. `changes` names what the jump changed, in
-// the order it reads best; `label` turns a viewport name into its button
-// label ("phone" -> "Phone"), so the wording has no opinion about the modes.
+const lower = (text) => text.charAt(0).toLowerCase() + text.slice(1)
+
+// The notice after a jump moved the view out of the way, and the label of its
+// one way back. `changes` names what the jump changed, in the order it reads
+// best; `label` turns a viewport name into its button label ("phone" ->
+// "Phone"), so the wording has no opinion about the modes.
+//
+// `compact` is for a phone, where the full sentence ran to five lines and the
+// button went under it. It says what changed and which comment, and leaves
+// out why: on a phone the notice sits in the thread sheet, whose own header
+// already names the page or variant the comment is on.
 //
 // A viewport switch on its own keeps the sentence it has always had.
-export function revealNotice(notice, label = (name) => name) {
+export function revealNotice(notice, label = (name) => name, { compact = false } = {}) {
   if (!notice?.changes?.length) return null
   const heads = []
   const spots = []
@@ -75,8 +82,10 @@ export function revealNotice(notice, label = (name) => name) {
       backs.push('changed pages only')
     }
   }
+  const said = heads.map((head, index) => (index === 0 ? head : lower(head))).join(', ')
+  if (compact) return { text: `${said} for comment #${notice.id}.`, back: 'Back' }
   return {
-    text: `${heads.join(', ')}: comment #${notice.id} is on ${spots.join(', and on ')}.`,
+    text: `${said}: comment #${notice.id} is on ${spots.join(', and on ')}.`,
     back: `Back to ${sentenceList(backs)}`,
   }
 }

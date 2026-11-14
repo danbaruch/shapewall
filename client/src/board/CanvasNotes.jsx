@@ -2,6 +2,38 @@ import { Lightbulb, MessageSquarePlus, X } from 'lucide-react'
 import { Button, IconButton } from '../components/ui'
 import { IDLE_LINKS_MAX, countLinks } from './flow'
 import { revealNotice } from './commentReveal'
+import { cn } from '../lib/utils'
+
+// What a jump changed to show the comment, and the one way back. It is drawn
+// in two places, because on a phone the jump opens the thread sheet over the
+// board: a modal, so a note left on the canvas under it is visible but cannot
+// be tapped, and is hidden from assistive tech with the rest of the canvas.
+// Beside the canvas it stays on the canvas as it always has; on a phone it
+// goes inside the sheet (BoardPanels.jsx), where it is reachable and read.
+export function RevealNotice({ notice, onUndo, modeLabel, compact = false, inSheet = false }) {
+  const said = revealNotice(notice, modeLabel, { compact })
+  if (!said) return null
+  return (
+    <div
+      className={cn(
+        'flex items-center gap-2 text-xs text-fg',
+        inSheet
+          ? 'w-full border-b border-line bg-surface-2 px-4 py-2'
+          : 'pointer-events-auto w-max max-w-full rounded-lg border border-line bg-surface py-1 pr-1 pl-3 shadow-pop',
+      )}
+      role="status"
+      data-sw-view-notice={notice.changes.join(' ')}
+      // The viewport switch keeps the name it has always had, so a link or a
+      // test that waits for it still does.
+      data-sw-viewport-notice={notice.changes.includes('viewport') ? notice.to : undefined}
+    >
+      <span className="min-w-0 flex-1 text-pretty">{said.text}</span>
+      <Button size={compact ? 'touch' : 'xs'} variant="secondary" className="shrink-0" onClick={onUndo} data-sw-viewport-notice-back="true">
+        {said.back}
+      </Button>
+    </div>
+  )
+}
 
 // The notes along the top of the canvas, about what the canvas shows: the
 // links hints, the first-visit tip, a draft put aside and the viewport switch
@@ -28,12 +60,16 @@ export function CanvasNotes({
   builder,
   viewNotice,
   undoViewNotice,
+  // On a phone the open thread sheet owns the notice: it is a modal, so a
+  // copy left here would be unreachable under it.
+  noticeInSheet = false,
   dismissTip,
   modes,
   comparePair,
 }) {
   const modeLabel = (id) => modes.find((item) => item.id === id)?.label || id
   const revealed = revealNotice(viewNotice, modeLabel)
+  const showNotice = Boolean(revealed) && !noticeInSheet
   // The tip names only what this person can do here.
   const tipText = wide
     ? `Scroll or drag to move, Ctrl+scroll or pinch to zoom. Click a page for its actions${canComment && !comparePair ? ': Comment is first. Or press C, or use the Comment tool below' : ''}.`
@@ -116,27 +152,7 @@ export function CanvasNotes({
           </Button>
         </div>
       ) : null}
-      {revealed ? (
-        <div
-          className="pointer-events-auto flex w-max max-w-full items-center gap-2 rounded-lg border border-line bg-surface py-1 pr-1 pl-3 text-xs text-fg shadow-pop"
-          role="status"
-          data-sw-view-notice={viewNotice.changes.join(' ')}
-          // The viewport switch keeps the name it has always had, so a link
-          // or a test that waits for it still does.
-          data-sw-viewport-notice={viewNotice.changes.includes('viewport') ? viewNotice.to : undefined}
-        >
-          <span className="min-w-0">{revealed.text}</span>
-          <Button
-            size={wide ? 'xs' : 'touch'}
-            variant="secondary"
-            className="shrink-0"
-            onClick={undoViewNotice}
-            data-sw-viewport-notice-back="true"
-          >
-            {revealed.back}
-          </Button>
-        </div>
-      ) : null}
+      {showNotice ? <RevealNotice notice={viewNotice} onUndo={undoViewNotice} modeLabel={modeLabel} compact={!wide} /> : null}
     </div>
   )
 }

@@ -126,6 +126,8 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     return list
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewportNames.join(',')])
+  // A screen size as the toggle labels it, for the notices that name one.
+  const modeLabel = useCallback((id) => modes.find((item) => item.id === id)?.label || id, [modes])
   const defaultMode = phoneWidth && viewportNames.includes('phone') ? 'phone' : viewportNames[0] || 'desktop'
   const mode = modes.some((item) => item.id === params.get('vp')) ? params.get('vp') : defaultMode
   const filter = FILTERS.some((item) => item.id === params.get('filter')) ? params.get('filter') : 'open'
@@ -529,21 +531,26 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
         ...(leaveCompare ? { cmp: null, changed: null, diff: null } : showAllPages ? { changed: '0' } : {}),
       })
       const changes = [...(switching ? ['viewport'] : []), ...(leaveCompare ? ['compare'] : []), ...(showAllPages ? ['changed'] : [])]
-      if (changes.length) {
-        setViewNotice({
-          id: comment.id,
-          at: Date.now(),
-          changes,
-          from: mode,
-          to: comment.viewport,
-          // One way back: the params exactly as they were before the jump.
-          back: {
-            ...(switching ? { vp: was('vp') } : {}),
-            ...(leaveCompare ? { cmp: was('cmp'), changed: was('changed'), diff: was('diff') } : {}),
-            ...(showAllPages && !leaveCompare ? { changed: was('changed') } : {}),
-          },
-        })
-      }
+      // Set on every jump, cleared on every jump: a note left over from the
+      // last one named the wrong comment and offered a way back to a view
+      // this jump had already moved on from.
+      setViewNotice(
+        changes.length
+          ? {
+              id: comment.id,
+              at: Date.now(),
+              changes,
+              from: mode,
+              to: comment.viewport,
+              // One way back: the params exactly as they were before the jump.
+              back: {
+                ...(switching ? { vp: was('vp') } : {}),
+                ...(leaveCompare ? { cmp: was('cmp'), changed: was('changed'), diff: was('diff') } : {}),
+                ...(showAllPages && !leaveCompare ? { changed: was('changed') } : {}),
+              },
+            }
+          : null,
+      )
       if (!wide) {
         setSheetOpen(false)
         setThreadSheet(true)
@@ -1866,6 +1873,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                     builder={builder}
                     viewNotice={viewNotice}
                     undoViewNotice={undoViewNotice}
+                    noticeInSheet={!wide && threadSheet && viewNotice?.id === selectedCommentId}
                     dismissTip={dismissTip}
                     modes={modes}
                     comparePair={comparePair}
@@ -2146,6 +2154,9 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
             sheetOpen={sheetOpen}
             setSheetOpen={setSheetOpen}
             panelProps={panelProps}
+            viewNotice={viewNotice}
+            undoViewNotice={undoViewNotice}
+            modeLabel={modeLabel}
             threadSheet={threadSheet}
             threadProps={threadProps}
             closeThread={closeThread}
