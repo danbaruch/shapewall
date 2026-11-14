@@ -18,7 +18,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - On a phone that note now rides in the thread sheet the jump opens, instead of on the canvas behind it. The sheet is a modal, so
   a note left on the canvas was dimmed, could not be tapped and was hidden from screen readers along with the rest of the board:
   the way back was visible and useless. In the sheet it sits under the header that names the page or variant, which lets it say
-  what changed in one line beside its button rather than the five lines it took at 390 px.
+  what changed in one line beside its button rather than the five lines it took at 390 px. It lies over the top of the thread
+  rather than above it, so it adds nothing to the sheet's height: the sheet's height is what leaves a strip of board for the pin
+  to land on, and a note that pushed the sheet taller would have taken back what 0.7.2 won there.
 - A note now describes only the jump you just made. One left over from the previous jump could name another comment, and offer a
   way back to a view that jump had already moved on from.
 - A pin can no longer be carried over the top of the canvas by the card coming down for its title row. The pin's own room comes
