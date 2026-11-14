@@ -17,7 +17,7 @@ import { startDemoSite } from '../../examples/demo-site/server.js'
 import { normalizeConfig } from '../../src/config.js'
 import { runCapture } from '../../src/capture/capture.js'
 import { createApp } from '../../src/server/app.js'
-import { createComment, listComments, setAgentStatus } from '../../src/store.js'
+import { commentsFile, createComment, listComments, setAgentStatus } from '../../src/store.js'
 import { ROOT_DIR, listen, liveElementBox } from './helpers.js'
 
 const SHOTS = process.env.SHAPEWALL_SHOTS ? path.resolve(process.env.SHAPEWALL_SHOTS) : null
@@ -1655,5 +1655,50 @@ test('with motion allowed the working mark pulses like a working pin', async () 
   } finally {
     await context.close()
     await setAgentStatus(config, 'demo', working.id, 'done')
+  }
+})
+
+// The view getting out of the way covers the reasons it knows (another screen
+// size, compare mode, the changed-pages filter). What is left is a comment
+// whose card is simply not on this board any more: a page or variant dropped
+// by a recapture. Nothing can reveal that, so the board says so and lets go
+// of the focus rather than sitting on it.
+//
+// Last in the file, and it puts the comment store back afterwards, because
+// the store is shared with every test above.
+test('a comment whose page is gone says so instead of moving the board', async () => {
+  const file = commentsFile(config, 'demo')
+  const before = fs.readFileSync(file, 'utf8')
+  // Written straight into the store: the API refuses an unknown page, which
+  // is the point -- this state only arises after the page it named is gone.
+  const orphan = await createComment(config, config.boards[0], {
+    pageId: 'blog',
+    viewport: 'desktop',
+    x: 50,
+    y: 50,
+    body: 'On a page that has since been dropped',
+    author: 'Robin',
+  })
+  const store = JSON.parse(fs.readFileSync(file, 'utf8'))
+  store.comments.find((item) => item.id === orphan.id).pageId = 'page-dropped-by-a-recapture'
+  fs.writeFileSync(file, JSON.stringify(store, null, 2))
+  const { context, page, errors } = await openBoard(DESKTOP)
+  try {
+    const row = `[data-sw-comment-list] [data-sw-comment="${orphan.id}"]`
+    await page.waitForSelector(row)
+    const transform = () => page.evaluate(() => document.querySelector('.react-flow__viewport')?.style.transform || '')
+    const still = await transform()
+    await page.click(row)
+    await page.waitForSelector('[data-sw-toast]')
+    assert.match(await page.textContent('[data-sw-toast]'), /is on a page this view is not showing/)
+    // Nothing was turned off to chase it: no notice, and no view to put back.
+    assert.equal(await page.locator('[data-sw-view-notice]').count(), 0)
+    assert.equal(await transform(), still, 'the board stayed where it was')
+    // The thread still opens, so the comment is readable even unpinned.
+    assert.equal(new URL(page.url()).searchParams.get('c'), String(orphan.id))
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+    fs.writeFileSync(file, before)
   }
 })

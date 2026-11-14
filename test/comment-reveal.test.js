@@ -66,6 +66,8 @@ test('a card hidden for a reason the view cannot name is gone, not a guess', () 
 
 const label = (name) => name[0].toUpperCase() + name.slice(1)
 const notice = (changes, over = {}) => revealNotice({ id: 7, at: 1, changes, from: 'desktop', to: 'phone', ...over }, label)
+const small = (changes, over = {}) =>
+  revealNotice({ id: 7, at: 1, changes, from: 'desktop', to: 'phone', ...over }, label, { compact: true })
 
 test('no change means no notice', () => {
   assert.equal(revealNotice(null, label), null)
@@ -95,11 +97,33 @@ test('showing every page names the filter it turned off', () => {
 
 test('two changes read as one sentence with one way back', () => {
   assert.deepEqual(notice(['viewport', 'compare']), {
-    text: 'Showing Phone, Left compare: comment #7 is on the phone capture, and on a variant, which compare does not show.',
+    text: 'Showing Phone, left compare: comment #7 is on the phone capture, and on a variant, which compare does not show.',
     back: 'Back to Desktop and compare',
   })
 })
 
 test('three changes list properly rather than piling up "and"', () => {
   assert.equal(notice(['viewport', 'compare', 'changed']).back, 'Back to Desktop, compare and changed pages only')
+})
+
+// ---- the compact wording a phone gets ----------------------------------------
+// The full sentence ran to five lines at 390 px with the button under it. The
+// compact one says what changed and which comment; the sheet it sits in names
+// the page or variant, so the "why" is already on screen.
+
+test('compact says what changed and for which comment, and nothing else', () => {
+  assert.deepEqual(small(['viewport']), { text: 'Showing Phone for comment #7.', back: 'Back' })
+  assert.deepEqual(small(['compare']), { text: 'Left compare for comment #7.', back: 'Back' })
+  assert.deepEqual(small(['changed']), { text: 'Showing all pages for comment #7.', back: 'Back' })
+})
+
+test('compact keeps two changes on one short line', () => {
+  const said = small(['viewport', 'compare'])
+  assert.equal(said.text, 'Showing Phone, left compare for comment #7.')
+  // Short enough to sit beside its button at 390 px rather than stack above it.
+  assert.ok(said.text.length <= 48, `"${said.text}" is ${said.text.length} characters`)
+})
+
+test('compact still says nothing when nothing changed', () => {
+  assert.equal(small([]), null)
 })

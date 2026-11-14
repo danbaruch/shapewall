@@ -3,6 +3,7 @@ import { ChatSkeleton } from '../components/app-states'
 import { Dialog } from '../components/ui'
 import { cn } from '../lib/utils'
 import CommentsPanel from './CommentsPanel'
+import { RevealNotice } from './CanvasNotes'
 import { HostedAgentPanel } from './HostedAgentPanel'
 import { railWidthSaved, rememberRailWidth } from './prefs'
 import { publishSidePanelWidth } from './sidePanelWidth'
@@ -182,6 +183,12 @@ export function PhoneSheets({
   setDraft,
   draftDescription,
   composerProps,
+  // What a jump changed to show this comment, and the way back. It rides in
+  // the sheet rather than on the canvas, because the sheet is a modal: a note
+  // left under it could not be tapped and was hidden from assistive tech.
+  viewNotice = null,
+  undoViewNotice = null,
+  modeLabel = (id) => id,
   // The Draw tool picked this page: the composer opens on its drawing sheet.
   startDraw = false,
 }) {
@@ -232,6 +239,9 @@ export function PhoneSheets({
           // nowhere left to land (commentFocus.js: phoneFloor). The thread
           // scrolls inside the sheet instead.
           <div className="flex max-h-[62dvh] flex-col outline-none" tabIndex={-1} data-autofocus data-sw-thread-sheet={selectedComment.id}>
+            {viewNotice && viewNotice.id === selectedComment.id ? (
+              <RevealNotice notice={viewNotice} onUndo={undoViewNotice} modeLabel={modeLabel} compact inSheet />
+            ) : null}
             <ThreadView {...threadProps} />
           </div>
         ) : null}

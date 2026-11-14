@@ -15,6 +15,14 @@ and the project uses [Semantic Versioning](https://semver.org/).
   same place.
 - Measured on the demo board, comparing Staging with Production, clicking every comment in the rail: 18 of 20 moved the board
   before, 20 of 20 now, at 1440 and at 390 px wide. With "Changed pages only" on it was 11 of 20 before.
+- On a phone that note now rides in the thread sheet the jump opens, instead of on the canvas behind it. The sheet is a modal, so
+  a note left on the canvas was dimmed, could not be tapped and was hidden from screen readers along with the rest of the board:
+  the way back was visible and useless. In the sheet it sits under the header that names the page or variant, which lets it say
+  what changed in one line beside its button rather than the five lines it took at 390 px.
+- A note now describes only the jump you just made. One left over from the previous jump could name another comment, and offer a
+  way back to a view that jump had already moved on from.
+- A pin can no longer be carried over the top of the canvas by the card coming down for its title row. The pin's own room comes
+  first and the header gives way: a header half under the toolbar still reads, a clipped pin does not.
 
 ## 0.7.2 - 2026-11-13
 
