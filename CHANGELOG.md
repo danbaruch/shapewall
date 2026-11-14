@@ -3,7 +3,7 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.7.3 - 2026-11-14
 
 - Clicking a comment in the right-hand rail always takes you to that comment. When the current view was hiding the comment's card
   the click did nothing at all: compare mode lays out no variants, so the two comments on the demo board's variants had no pin to
@@ -23,8 +23,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
   to land on, and a note that pushed the sheet taller would have taken back what 0.7.2 won there.
 - A note now describes only the jump you just made. One left over from the previous jump could name another comment, and offer a
   way back to a view that jump had already moved on from.
-- A pin can no longer be carried over the top of the canvas by the card coming down for its title row. The pin's own room comes
-  first and the header gives way: a header half under the toolbar still reads, a clipped pin does not.
+- On a phone a pin can no longer be carried over the top of the canvas by the card coming down for its title row. The pin's own
+  room comes first and the header gives way: a header half under the toolbar still reads, a clipped pin does not.
 
 ## 0.7.2 - 2026-11-13
 
