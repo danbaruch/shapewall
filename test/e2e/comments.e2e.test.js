@@ -551,11 +551,15 @@ for (const width of [390, 412]) {
       }
     }
     // The sheet of the comment with two images and a thread really is the
-    // tall one, so this test would catch the fixed-share placement coming back.
+    // tall one, so this test would catch the fixed-share placement coming
+    // back. (The gap between the two is about 30 px rather than 40 since
+    // 0.8.0: a sheet opened from the list leads its title row with a named
+    // "Comments" control instead of a 44 px close button, which takes a few
+    // pixels off every sheet's header, the tall one and the plain one alike.)
     const short = landed.find((item) => item.id === third.id)
     const big = landed.find((item) => item.id === tall.id)
     assert.ok(
-      big.sheetTop < short.sheetTop - 40,
+      big.sheetTop < short.sheetTop - 24,
       `the image comment's sheet (${big.sheetTop}) is taller than a plain one's (${short.sheetTop})`,
     )
     // And it still leaves a strip of board above it: a sheet that grows to
