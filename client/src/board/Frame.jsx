@@ -293,7 +293,7 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
       ) : null}
       <div
         className={cn(
-          'absolute overflow-hidden rounded-sm border border-line bg-surface-2',
+          'absolute rounded-sm border border-line bg-surface-2',
           // Picking: a click picks, so a drag must not pan. With a target
           // picked the page drags the canvas again, like any other page.
           picking && 'nodrag nopan cursor-crosshair',
@@ -331,46 +331,57 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
         data-sw-draw-surface={drawSurface ? 'true' : undefined}
         data-sw-select-text-state={selectable ? (reading ? 'reading' : 'armed') : undefined}
       >
-        {src ? (
-          <img
-            src={src}
-            alt={`${frame.viewport} screenshot`}
-            loading="lazy"
-            decoding="async"
-            draggable={false}
-            onError={board.onImageError}
-            className="pointer-events-none block h-full w-full object-cover object-top select-none"
-          />
-        ) : (
-          <div className="flex h-full flex-col items-center justify-center gap-2 p-4 text-center">
-            <ImageOff size={22} className="text-faint" aria-hidden="true" />
-            <p className="text-[11px] leading-4 text-muted">{emptyText}</p>
-          </div>
-        )}
-        {live ? (
-          <LiveDoc
-            key={opaque ? 'opaque' : 'dom'}
-            src={board.liveUrl(kind, image.live, version)}
-            viewport={frame.viewport}
-            native={native}
-            frame={frame}
-            selecting={reading}
-            opaque={opaque}
-            onReady={onFrame}
-            onLeave={() => onReading(null)}
-          />
-        ) : null}
-        {note && !live ? (
-          <p
-            className="pointer-events-none absolute inset-x-0 bottom-0 flex items-start gap-1 bg-surface/90 px-1.5 py-1 text-[9.5px] leading-[13px] text-muted"
-            data-sw-page-note="true"
-          >
-            <Info size={10} className="mt-px shrink-0" aria-hidden="true" /> {note}
-          </p>
-        ) : null}
-        {hover && canHover ? <HoverOutline hover={hover} native={native} scale={pinScale} /> : null}
-        {draft?.anchor && !drawingOn ? <PickedOutline draft={draft} scale={pinScale} /> : null}
-        {openHere?.anchor ? <ThreadTarget comment={openHere} box={positions?.get(openHere.id)?.box || null} /> : null}
+        {/* The page and everything drawn on it is clipped to the frame; the
+            pins below are not. A pin is a mark about the page rather than
+            part of it, and one near an edge was cut in half by this box: a
+            comment stored at 2% / 2% (where "shapewall comments add" falls
+            back when a --selector no longer resolves) had the middle of its
+            bubble outside the clip, so it was not in the hit test at all and
+            could not be clicked. It hangs over the card's edge instead, the
+            way it does in Figma. */}
+        <div className="absolute inset-0 overflow-hidden rounded-sm" data-sw-frame-clip="true">
+          {src ? (
+            <img
+              src={src}
+              alt={`${frame.viewport} screenshot`}
+              loading="lazy"
+              decoding="async"
+              draggable={false}
+              onError={board.onImageError}
+              className="pointer-events-none block h-full w-full object-cover object-top select-none"
+            />
+          ) : (
+            <div className="flex h-full flex-col items-center justify-center gap-2 p-4 text-center">
+              <ImageOff size={22} className="text-faint" aria-hidden="true" />
+              <p className="text-[11px] leading-4 text-muted">{emptyText}</p>
+            </div>
+          )}
+          {live ? (
+            <LiveDoc
+              key={opaque ? 'opaque' : 'dom'}
+              src={board.liveUrl(kind, image.live, version)}
+              viewport={frame.viewport}
+              native={native}
+              frame={frame}
+              selecting={reading}
+              opaque={opaque}
+              onReady={onFrame}
+              onLeave={() => onReading(null)}
+            />
+          ) : null}
+          {note && !live ? (
+            <p
+              className="pointer-events-none absolute inset-x-0 bottom-0 flex items-start gap-1 bg-surface/90 px-1.5 py-1 text-[9.5px] leading-[13px] text-muted"
+              data-sw-page-note="true"
+            >
+              <Info size={10} className="mt-px shrink-0" aria-hidden="true" /> {note}
+            </p>
+          ) : null}
+          {hover && canHover ? <HoverOutline hover={hover} native={native} scale={pinScale} /> : null}
+          {draft?.anchor && !drawingOn ? <PickedOutline draft={draft} scale={pinScale} /> : null}
+          {openHere?.anchor ? <ThreadTarget comment={openHere} box={positions?.get(openHere.id)?.box || null} /> : null}
+          {comparing ? null : <FrameDrawing frameKey={liveKey} native={native} shown={shownDrawing} />}
+        </div>
         <FramePins
           targetId={targetId}
           viewport={viewport}
@@ -380,7 +391,6 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
           selectedCommentId={selectedCommentId}
           landedId={landedId}
         />
-        {comparing ? null : <FrameDrawing frameKey={liveKey} native={native} shown={shownDrawing} />}
         {draft ? <DraftPin draft={draft} scale={pinScale} name={board.me?.name} colorKey={board.me?.name} /> : null}
       </div>
     </>
@@ -518,39 +528,43 @@ export function CompareFrame({ pageId, frame }) {
         {second && result?.status === 'ok' ? <span className="text-accent"> · {result.percent}% changed</span> : null}
       </FrameLabel>
       <div
-        className="absolute overflow-hidden rounded-sm border border-line bg-surface-2"
+        className="absolute rounded-sm border border-line bg-surface-2"
         style={{ left: frame.x, top: frame.y, width: frame.w, height: frame.h }}
         data-sw-frame={`${pageId}:${frame.viewport}:${frame.env}`}
         data-sw-image={src ? (full ? 'full' : 'thumb') : 'none'}
       >
-        {src ? (
-          <img
-            src={src}
-            alt={`${frame.viewport} screenshot, ${compare.titleOf(frame.env)}`}
-            loading="lazy"
-            decoding="async"
-            draggable={false}
-            onError={board.onImageError}
-            className="pointer-events-none block h-full w-full object-cover object-top select-none"
-          />
-        ) : (
-          <div className="flex h-full flex-col items-center justify-center gap-2 p-4 text-center">
-            <ImageOff size={22} className="text-faint" aria-hidden="true" />
-            <p className="text-[11px] leading-4 text-muted" data-sw-compare-failed={failure ? 'true' : undefined}>
-              {failure ? `Capture failed: ${failure}` : `Not captured in ${compare.titleOf(frame.env)} yet.`}
-            </p>
-          </div>
-        )}
-        {diff ? (
-          <img
-            src={board.imageUrl(compare.diffKind, diff, compare.diffVersion)}
-            alt=""
-            draggable={false}
-            className="pointer-events-none absolute inset-0 block h-full w-full object-cover object-top opacity-80 select-none"
-            data-sw-diff-overlay="true"
-          />
-        ) : null}
-        {openHere?.anchor ? <ThreadTarget comment={openHere} box={null} /> : null}
+        {/* The captures and the diff are clipped to the frame, the pins are
+            not: see the Frame above. */}
+        <div className="absolute inset-0 overflow-hidden rounded-sm" data-sw-frame-clip="true">
+          {src ? (
+            <img
+              src={src}
+              alt={`${frame.viewport} screenshot, ${compare.titleOf(frame.env)}`}
+              loading="lazy"
+              decoding="async"
+              draggable={false}
+              onError={board.onImageError}
+              className="pointer-events-none block h-full w-full object-cover object-top select-none"
+            />
+          ) : (
+            <div className="flex h-full flex-col items-center justify-center gap-2 p-4 text-center">
+              <ImageOff size={22} className="text-faint" aria-hidden="true" />
+              <p className="text-[11px] leading-4 text-muted" data-sw-compare-failed={failure ? 'true' : undefined}>
+                {failure ? `Capture failed: ${failure}` : `Not captured in ${compare.titleOf(frame.env)} yet.`}
+              </p>
+            </div>
+          )}
+          {diff ? (
+            <img
+              src={board.imageUrl(compare.diffKind, diff, compare.diffVersion)}
+              alt=""
+              draggable={false}
+              className="pointer-events-none absolute inset-0 block h-full w-full object-cover object-top opacity-80 select-none"
+              data-sw-diff-overlay="true"
+            />
+          ) : null}
+          {openHere?.anchor ? <ThreadTarget comment={openHere} box={null} /> : null}
+        </div>
         <FramePins
           targetId={pageId}
           viewport={viewport}

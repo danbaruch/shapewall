@@ -643,12 +643,12 @@ export function mountBoardRoutes(
       '/boards/:bid/comments/:cid/reopen',
       canWrite,
       withBoard((req, res, ctx) => {
-        res.json({
-          comment: shown(
-            req,
-            transaction(db, () => ctx.comments.update(req.params.cid, { status: 'open' }, now())),
-          ),
-        })
+        const comment = transaction(db, () => ctx.comments.update(req.params.cid, { status: 'open' }, now()))
+        // The resolve beside this one is audited and so is the delete below;
+        // reopening was not, so the log showed work being closed and never
+        // being put back.
+        auditOf(req, 'comment_reopened', `${ctx.board.id}#${comment.id}`, { project: req.project.id })
+        res.json({ comment: shown(req, comment) })
       }),
     )
     router.delete(

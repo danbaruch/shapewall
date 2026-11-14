@@ -200,7 +200,7 @@ export const ACTION_GROUPS = {
     'chat_thread_deleted',
     'chat_thread_agent_changed',
   ],
-  comments: ['comment_resolved', 'comment_deleted'],
+  comments: ['comment_resolved', 'comment_reopened', 'comment_deleted'],
   exports: ['workspace_exported', 'audit_exported', 'usage_exported', 'access_exported'],
 }
 export const ACTION_GROUP_IDS = Object.keys(ACTION_GROUPS)

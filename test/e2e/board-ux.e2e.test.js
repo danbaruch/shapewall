@@ -31,6 +31,7 @@ let boardUrl
 // Kept for the compare-mode pin tests.
 let blogComment
 let phoneComment
+let edgeComment
 
 before(async () => {
   assert.ok(fs.existsSync(path.join(ROOT_DIR, 'dist', 'client', 'index.html')), 'run "npm run build" before the board e2e test')
@@ -75,6 +76,17 @@ before(async () => {
     y: 40,
     body: 'The phone hero is cramped',
     author: 'Mei',
+  })
+  // Where "shapewall comments add" puts a pin with no --selector, and where
+  // it falls back when a --selector no longer resolves in the latest capture
+  // (comments-cli.js DEFAULT_PIN): the very top left of the page.
+  edgeComment = await createComment(config, board, {
+    pageId: 'blog',
+    viewport: 'desktop',
+    x: 2,
+    y: 2,
+    body: 'Added from the CLI with no selector',
+    author: 'Sam',
   })
   server = await listen(createApp({ config }))
   boardUrl = `http://127.0.0.1:${server.address().port}/`
@@ -1033,6 +1045,94 @@ test('phone: comparing, a row in the list lands on a pin you can see, not behind
     assert.notEqual(await whatIsAt(page, pin.x + pin.width / 2, pin.y + pin.height / 2), 'sheet', 'the sheet is not over the pin')
     assert.equal(await page.getAttribute(`[data-sw-pin="${phoneComment.id}"]`, 'data-sw-pin-landed'), 'true')
     await shot(page, 'ux-9-phone-compare-pin')
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})
+
+// A pin near a page's top left corner, which is where the CLI puts one when
+// it has no selector to go on. The frame used to clip its own pins, so the
+// top half of this one was cut off and its middle was outside the clip box:
+// not drawn, and not in the hit test either, so it could not be clicked at
+// all. A comment added from the CLI could land permanently unreachable.
+for (const view of [
+  { id: 'desktop 1440', size: DESKTOP, query: '' },
+  { id: 'compare 1440', size: DESKTOP, query: '?cmp=staging_production' },
+  { id: 'phone 390', size: PHONE, query: '' },
+  { id: 'compare phone 390', size: PHONE, query: '?cmp=staging_production' },
+]) {
+  test(`${view.id}: a pin at the very top of a page is drawn whole and can be clicked`, async () => {
+    const { context, page, errors } = await openBoard(view.size, { query: `${view.query}${view.query ? '&' : '?'}c=${edgeComment.id}` })
+    try {
+      const pin = await pinBox(page, edgeComment.id)
+      assert.ok(pin && pin.width > 0 && pin.height > 0, 'the pin is drawn')
+      // Nothing clips it: its own middle is inside every box that could.
+      const clipped = await page.evaluate((id) => {
+        const node = document.querySelector(`[data-sw-pin="${id}"]`)
+        const box = node.getBoundingClientRect()
+        const middle = { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+        const boxes = []
+        for (let el = node.parentElement; el; el = el.parentElement) {
+          const style = getComputedStyle(el)
+          if (style.overflow === 'hidden' || style.overflowY === 'hidden') {
+            const r = el.getBoundingClientRect()
+            if (middle.y < r.top || middle.y > r.bottom || middle.x < r.left || middle.x > r.right) {
+              boxes.push({ by: el.getAttribute('data-sw-frame-clip') ? 'the frame' : el.className.slice(0, 40), top: Math.round(r.top) })
+            }
+          }
+        }
+        return { boxes, middle, hit: document.elementsFromPoint(middle.x, middle.y).includes(node) }
+      }, edgeComment.id)
+      assert.deepEqual(clipped.boxes, [], `nothing clips the pin's middle (${JSON.stringify(clipped.middle)})`)
+      assert.ok(clipped.hit, 'the pin is what is drawn at its own middle, so a click reaches it')
+      // And a click really does open its thread.
+      await page.keyboard.press('Escape')
+      await page.waitForTimeout(300)
+      if (view.size === PHONE) await page.tap(`[data-sw-pin="${edgeComment.id}"]`)
+      else await page.click(`[data-sw-pin="${edgeComment.id}"]`)
+      await page.waitForSelector(`[data-sw-thread-sheet="${edgeComment.id}"], [data-sw-thread-popover="${edgeComment.id}"]`, {
+        timeout: 10000,
+      })
+      assert.deepEqual(errors, [])
+    } finally {
+      await context.close()
+    }
+  })
+}
+
+// The notes along the top of the canvas (the first-run tip, the links hints,
+// a kept draft) step aside for a phone sheet. They sit in the strip of board
+// the jump keeps clear for the pin, so the tip was drawn over the pin the
+// board had just flown to, and being behind a modal backdrop it could not
+// even be dismissed.
+test('phone: the first-run tip steps aside for a sheet, and the pin it used to cover is in the clear', async () => {
+  const { context, page, errors } = await openBoard(PHONE, { query: '?cmp=staging_production', tip: true })
+  try {
+    await page.waitForSelector('[data-sw-compare-bar]')
+    await page.waitForSelector('[data-sw-tip]')
+    await page.tap('[data-sw-panel-toggle]')
+    await page.waitForSelector('[data-sw-comment-list]')
+    await page.tap(`[data-sw-comment-list] [data-sw-comment="${phoneComment.id}"]`)
+    await page.waitForSelector(`[data-sw-thread-sheet="${phoneComment.id}"]`)
+    assert.equal(await page.locator('[data-sw-tip]').count(), 0, 'no tip over the board while the sheet is up')
+    assert.equal(await page.locator('[data-sw-canvas-notes]').count(), 0, 'and no empty notes layer either')
+    const pin = await pinBox(page, phoneComment.id)
+    const covered = await page.evaluate((id) => {
+      const node = document.querySelector(`[data-sw-pin="${id}"]`)
+      const box = node.getBoundingClientRect()
+      const at = document.elementsFromPoint(box.x + box.width / 2, box.y + box.height / 2)
+      return { hit: at.includes(node), overTip: at.some((el) => el.closest?.('[data-sw-tip]')) }
+    }, phoneComment.id)
+    assert.ok(pin, 'the pin is drawn')
+    assert.equal(covered.overTip, false, 'nothing of the tip is over the pin')
+    assert.ok(covered.hit, 'the pin is what is drawn at its own middle')
+    // It comes back when the sheet closes, so the tip is not lost, only held.
+    await page.tap('[data-sw-dialog-back]')
+    await page.waitForSelector('[data-sw-comment-list]')
+    await page.keyboard.press('Escape')
+    await page.waitForSelector('[data-sw-comment-list]', { state: 'detached' })
+    await page.waitForSelector('[data-sw-tip]')
     assert.deepEqual(errors, [])
   } finally {
     await context.close()

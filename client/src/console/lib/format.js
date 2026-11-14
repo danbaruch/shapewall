@@ -122,6 +122,8 @@ export function describeAudit(entry) {
       return `pushed ${d.files ?? 'some'} files`
     case 'comment_resolved':
       return `resolved comment ${String(entry.target || '').replace(/^.*#/, '#')}`
+    case 'comment_reopened':
+      return `reopened comment ${String(entry.target || '').replace(/^.*#/, '#')}`
     case 'comment_deleted':
       return `deleted comment ${String(entry.target || '').replace(/^.*#/, '#')}`
     case 'share_links_enabled':

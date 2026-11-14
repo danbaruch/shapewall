@@ -267,10 +267,38 @@ export function formatFeedbackItem(item, { cwd = process.cwd() } = {}) {
   return lines
 }
 
+// What a report leaves out, in one line under the count. A remote report read
+// with a claim-scoped token holds only the comments that agent may take
+// (another agent's work, and work nobody has been given, are not its to see),
+// and share link guests' comments wait to be asked for. Neither was said in
+// the text report, so the count read like the board's own: "2 comments on
+// testbed" while a third was open and routed to another agent. Counting them
+// is the server's job (token-api.js remoteReport); saying so is this one's.
+export function withheldNote(report) {
+  const parts = []
+  if (report?.routedElsewhere > 0) {
+    parts.push(
+      `${report.routedElsewhere} ${report.routedElsewhere === 1 ? 'is' : 'are'} routed to another agent or not dispatched, ` +
+        'so this token does not read them',
+    )
+  }
+  if (report?.guestsHidden > 0) {
+    parts.push(
+      `${report.guestsHidden} ${report.guestsHidden === 1 ? 'is' : 'are'} from share link guests ` + '(--include-guests to see them)',
+    )
+  }
+  return parts.length ? `Not shown here: ${parts.join('; ')}.` : null
+}
+
 export function formatFeedback(report, options = {}) {
-  if (!report.comments.length) return `No ${report.status === 'all' ? '' : `${report.status} `}comments on "${report.board.id}".`
+  const withheld = withheldNote(report)
+  if (!report.comments.length) {
+    const none = `No ${report.status === 'all' ? '' : `${report.status} `}comments on "${report.board.id}".`
+    return withheld ? `${none}\n${withheld}` : none
+  }
   const lines = [
     `${report.count} ${report.status === 'all' ? '' : `${report.status} `}comment${report.count === 1 ? '' : 's'} on "${report.board.id}"`,
+    ...(withheld ? [withheld] : []),
     '',
   ]
   for (const item of report.comments) lines.push(...formatFeedbackItem(item, options), '')
@@ -315,7 +343,13 @@ const AGENT_HEADER =
 // `comments --for-agent`: the report as quoted data.
 export function formatFeedbackForAgent(report) {
   const status = report.status === 'all' ? '' : `${report.status} `
-  const lines = [AGENT_HEADER, '', `${report.count} ${status}comment${report.count === 1 ? '' : 's'} on board "${report.board.id}".`]
+  const withheld = withheldNote(report)
+  const lines = [
+    AGENT_HEADER,
+    '',
+    `${report.count} ${status}comment${report.count === 1 ? '' : 's'} on board "${report.board.id}".`,
+    ...(withheld ? [withheld] : []),
+  ]
   for (const item of report.comments) lines.push('', quoteItem(item, report.board.id))
   return lines.join('\n')
 }

@@ -33,6 +33,28 @@ and the project uses [Semantic Versioning](https://semver.org/).
   know which capture was meant. The compare bar now says so in a line, with the whole reason in its tooltip and for a screen
   reader, rather than leaving the missing tool unexplained. Reading, replying, resolving and jumping to a comment all work
   while comparing, as they did.
+- **A pin near the top of a page could not be clicked.** The frame clipped its own pins, so a pin close to an edge was drawn
+  with half of it cut off and, worse, with its middle outside the clip box: it was not what the browser found at its own centre,
+  so a click went to the page behind it. Measured on a local board at 2% / 2%, in all four views (1440, compare 1440, 390,
+  compare 390). That spot matters because it is where `shapewall comments add` puts a pin with no `--selector`, and where it
+  falls back when a `--selector` no longer resolves in the latest capture, so a comment added from the command line could land
+  permanently unreachable. The page and everything drawn on it is still clipped to the frame; the pins are not, and hang over
+  the card's edge the way they do in Figma. The fallback spot itself is unchanged: with the clipping gone it reads as a note
+  about the page, which is what a comment with no element to point at is.
+- **On a phone, the first-run tip no longer sits where the pin lands.** The notes along the top of the canvas (the tip, the
+  links hints, a kept draft) stayed up under a sheet, where a modal backdrop leaves them dimmed, untappable and hidden from
+  screen readers; and they sit in exactly the strip of board the jump keeps clear, so at 390 in compare mode the tip was drawn
+  over the pin the board had just flown to. They step aside while a sheet covers the board and come back when it closes.
+- **Reopening a comment is in the audit log.** On a team server, resolving a comment was recorded and reopening it was not, on
+  both routes (the console's and the token API's), so the log showed work being closed and never being put back. It is now
+  `comment_reopened`, counted in Usage and offered in the Activity filters beside `comment_resolved` and `comment_deleted`, and
+  named in the activity list ("reopened comment #12"). The public demo's Activity records it too.
+- **`shapewall comments --remote` says when it was given less than the board has.** A claim-scoped token reads only the
+  comments its agent may take, which is deliberate, but the count read like the board's own: "2 comments on testbed" with a
+  third open and routed to another agent. The report now carries `routedElsewhere` beside `guestsHidden`, and the text says
+  "Not shown here: 1 is routed to another agent or not dispatched, so this token does not read them." Guests' comments, which
+  were counted but never mentioned, are named in the same line. A token without the claim scope is given everything, so it is
+  told nothing.
 
 ## 0.7.3 - 2026-11-14
 
