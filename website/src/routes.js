@@ -60,6 +60,13 @@ export const PAGES = [
     og: 'privacy',
   },
   {
+    path: '/terms',
+    title: 'Terms of use | Shapewall',
+    description:
+      'What these terms cover: this website and the public demo. The software is covered by its licenses, and a team server by its operator.',
+    og: 'privacy',
+  },
+  {
     path: '/legal/terms',
     noindex: true,
     title: 'Terms template for self-hosted servers | Shapewall',
