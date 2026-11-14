@@ -5,7 +5,8 @@
 // stay text, the phone comment card and Back, the viewport switch is said
 // out loud, phone screens open on phone captures with a first-run tip,
 // compare on a phone fits the pair, frame labels sit off the capture, pins
-// sit beside their element, and a missing image refetches the board once.
+// sit beside their element, a comment on a page the view filters out reveals
+// that page and flies to it, and a missing image refetches the board once.
 // Set SHAPEWALL_SHOTS=<dir> to keep screenshots of each step.
 import { after, before, test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -16,7 +17,7 @@ import { startDemoSite } from '../../examples/demo-site/server.js'
 import { normalizeConfig } from '../../src/config.js'
 import { runCapture } from '../../src/capture/capture.js'
 import { createApp } from '../../src/server/app.js'
-import { createComment, listComments, setAgentStatus } from '../../src/store.js'
+import { commentsFile, createComment, listComments, setAgentStatus } from '../../src/store.js'
 import { ROOT_DIR, listen, liveElementBox } from './helpers.js'
 
 const SHOTS = process.env.SHAPEWALL_SHOTS ? path.resolve(process.env.SHAPEWALL_SHOTS) : null
@@ -999,19 +1000,39 @@ test('phone: comparing, a row in the list lands on a pin above the thread sheet'
   }
 })
 
-test('comparing: a comment on a page the view leaves out says so instead of doing nothing', async () => {
+test('comparing: a comment on a page "Changed pages only" leaves out shows all pages and flies there', async () => {
   const { context, page, errors } = await openBoard(DESKTOP, { query: '?cmp=staging_production' })
   try {
     await page.waitForSelector('[data-sw-changed-only="off"]')
     // The two environments are the same site, so nothing changed and
-    // "Changed pages only" leaves no page on the board: no pin for any
-    // comment, whichever one is picked.
+    // "Changed pages only" leaves no page on the board at all: no pin for
+    // any comment, whichever one is picked. The jump used to stop there.
     await page.click('[data-sw-changed-only]')
     await page.waitForSelector('[data-sw-changed-only="on"]')
     await page.waitForFunction(() => document.querySelectorAll('[data-sw-node]').length === 0)
     await page.click(`[data-sw-comment-list] [data-sw-comment="${blogComment.id}"]`)
-    await page.waitForSelector('[data-sw-toast]')
-    assert.match(await page.textContent('[data-sw-toast]'), /is on a page this view is not showing/)
+    // The filter goes, the page comes back, the board lands on the pin, and
+    // the note says what changed. Compare mode stays on: it is not the one
+    // hiding the page, so it is not what gets turned off.
+    await page.waitForSelector('[data-sw-view-notice="changed"]')
+    assert.match(
+      await page.textContent('[data-sw-view-notice]'),
+      /Showing all pages: comment #\d+ is on a page "Changed pages only" leaves out\./,
+    )
+    await page.waitForSelector('[data-sw-changed-only="off"]')
+    await page.waitForSelector('[data-sw-compare-bar]')
+    assert.equal(new URL(page.url()).searchParams.get('cmp'), 'staging_production')
+    assert.equal(new URL(page.url()).searchParams.get('changed'), '0')
+    await page.waitForSelector(`[data-sw-pin="${blogComment.id}"][data-sw-pin-landed="true"]`)
+    await settle(page)
+    const pin = await rect(page, `[data-sw-pin="${blogComment.id}"]`)
+    const canvas = await rect(page, '.react-flow')
+    assert.ok(pin.x >= canvas.x && pin.right <= canvas.right, `pin x ${Math.round(pin.x)} inside the canvas`)
+    assert.ok(pin.y >= canvas.y && pin.bottom <= canvas.bottom, `pin y ${Math.round(pin.y)} inside the canvas`)
+    await shot(page, 'ux-10-compare-changed-reveal')
+    // One way back puts the filter on again.
+    await page.click('[data-sw-viewport-notice-back]')
+    await page.waitForSelector('[data-sw-changed-only="on"]')
     assert.deepEqual(errors, [])
   } finally {
     await context.close()
@@ -1634,5 +1655,50 @@ test('with motion allowed the working mark pulses like a working pin', async () 
   } finally {
     await context.close()
     await setAgentStatus(config, 'demo', working.id, 'done')
+  }
+})
+
+// The view getting out of the way covers the reasons it knows (another screen
+// size, compare mode, the changed-pages filter). What is left is a comment
+// whose card is simply not on this board any more: a page or variant dropped
+// by a recapture. Nothing can reveal that, so the board says so and lets go
+// of the focus rather than sitting on it.
+//
+// Last in the file, and it puts the comment store back afterwards, because
+// the store is shared with every test above.
+test('a comment whose page is gone says so instead of moving the board', async () => {
+  const file = commentsFile(config, 'demo')
+  const before = fs.readFileSync(file, 'utf8')
+  // Written straight into the store: the API refuses an unknown page, which
+  // is the point -- this state only arises after the page it named is gone.
+  const orphan = await createComment(config, config.boards[0], {
+    pageId: 'blog',
+    viewport: 'desktop',
+    x: 50,
+    y: 50,
+    body: 'On a page that has since been dropped',
+    author: 'Robin',
+  })
+  const store = JSON.parse(fs.readFileSync(file, 'utf8'))
+  store.comments.find((item) => item.id === orphan.id).pageId = 'page-dropped-by-a-recapture'
+  fs.writeFileSync(file, JSON.stringify(store, null, 2))
+  const { context, page, errors } = await openBoard(DESKTOP)
+  try {
+    const row = `[data-sw-comment-list] [data-sw-comment="${orphan.id}"]`
+    await page.waitForSelector(row)
+    const transform = () => page.evaluate(() => document.querySelector('.react-flow__viewport')?.style.transform || '')
+    const still = await transform()
+    await page.click(row)
+    await page.waitForSelector('[data-sw-toast]')
+    assert.match(await page.textContent('[data-sw-toast]'), /is on a page this view is not showing/)
+    // Nothing was turned off to chase it: no notice, and no view to put back.
+    assert.equal(await page.locator('[data-sw-view-notice]').count(), 0)
+    assert.equal(await transform(), still, 'the board stayed where it was')
+    // The thread still opens, so the comment is readable even unpinned.
+    assert.equal(new URL(page.url()).searchParams.get('c'), String(orphan.id))
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+    fs.writeFileSync(file, before)
   }
 })

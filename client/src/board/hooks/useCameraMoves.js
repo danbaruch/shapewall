@@ -179,7 +179,13 @@ export function useRefitOnChange({ mode, pendingFocus, shapeKey, clearFocus, fit
     if (previousShape.current === shapeKey) return undefined
     previousShape.current = shapeKey
     clearFocus()
+    // A jump that left compare mode, or turned "Changed pages only" off, to
+    // reveal a comment reshapes the board on its way to the pin: refitting
+    // the whole board 60 ms later would throw the camera straight back off
+    // it. The pin is the point of the move, so the fly wins, exactly as it
+    // does for a viewport switch above.
+    if (pendingFocus) return undefined
     const timer = window.setTimeout(fitBoard, 60)
     return () => window.clearTimeout(timer)
-  }, [clearFocus, fitBoard, shapeKey])
+  }, [clearFocus, fitBoard, pendingFocus, shapeKey])
 }

@@ -108,6 +108,26 @@ test('a phone keeps a pin far down a tall card above the sheet', () => {
   assert.equal(Math.round(onScreen(view, far).y), Math.round(phoneFloor(PHONE)))
 })
 
+test('a phone never lets the card come down far enough to carry the pin over the top', () => {
+  // A pin on the very top edge of its card: bringing the card's title row to
+  // PHONE_HEADER_ROOM would leave the pin above its own room, where the
+  // bubble is clipped by the toolbar. The pin's room wins, and it is the
+  // header that gives way rather than the floor.
+  const edge = { x: 500, y: 1005 }
+  const view = focusViewport({ point: edge, box: PHONE, wide: false, zoom: 1.2, cardTop: 1000, sheetTop: 120 })
+  const at = onScreen(view, edge).y
+  assert.ok(at >= PHONE_TOP_ROOM - 0.001, `pin at ${Math.round(at)}, room ${PHONE_TOP_ROOM}`)
+  assert.ok(at <= phoneFloor(PHONE, 120) + 0.001, `pin at ${Math.round(at)}, floor ${Math.round(phoneFloor(PHONE, 120))}`)
+})
+
+test('the pin room never argues with a floor that is already at it', () => {
+  // A sheet tall enough to leave no room gives the highest pin there is, and
+  // the clamp agrees with it rather than pushing the pin under the sheet.
+  const far = { x: 500, y: 3000 }
+  const view = focusViewport({ point: far, box: PHONE, wide: false, zoom: 1.2, cardTop: 1000, sheetTop: -1 })
+  assert.equal(Math.round(onScreen(view, far).y), PHONE_TOP_ROOM)
+})
+
 // ---- The thread sheet's real height ------------------------------------------
 
 test('the floor sits a clear gap above the measured sheet, and assumes one when there is nothing to measure', () => {

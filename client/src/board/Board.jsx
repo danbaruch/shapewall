@@ -8,6 +8,7 @@ import { Spinner } from '../components/ui'
 import { BoardContext, NODE_TYPES } from './nodes'
 import { EDGE_TYPES } from './edges'
 import { layoutBoard, nativeSize, pinPoint } from './layout'
+import { revealPlan } from './commentReveal'
 import { cardKeyDown, isEditable, useCanvasNavigation } from './navigation'
 import { COMMENT_STATES, beforeAfter, entryVersion, historyCount, pageChange } from './flow'
 import { FILTERS } from './CommentsPanel'
@@ -98,6 +99,11 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   // The canvas, minimap and controls follow the picked mode, not only the OS.
   const colorMode = useResolvedMode()
   const [params, updateParams] = useParams()
+  // One param as it is right now, for a callback that must not be rebuilt on
+  // every param change (focusComment, which remembers what to go back to).
+  const paramsRef = useRef(params)
+  paramsRef.current = params
+  const was = useCallback((key) => paramsRef.current.get(key), [])
   // A static export is read-only, unless it keeps comments in the browser.
   const [shareOpen, setShareOpen] = useState(false)
   const canAct = !info?.readOnly && (!STATIC || BROWSER_COMMENTS)
@@ -120,6 +126,8 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     return list
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewportNames.join(',')])
+  // A screen size as the toggle labels it, for the notices that name one.
+  const modeLabel = useCallback((id) => modes.find((item) => item.id === id)?.label || id, [modes])
   const defaultMode = phoneWidth && viewportNames.includes('phone') ? 'phone' : viewportNames[0] || 'desktop'
   const mode = modes.some((item) => item.id === params.get('vp')) ? params.get('vp') : defaultMode
   const filter = FILTERS.some((item) => item.id === params.get('filter')) ? params.get('filter') : 'open'
@@ -234,8 +242,10 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   const [pendingFocus, setPendingFocus] = useState(null)
   const [hoverPage, setHoverPage] = useState(null)
   const [builder, setBuilder] = useState(null)
-  // Opening a comment on the other viewport switches the viewport: said out loud.
-  const [viewportNotice, setViewportNotice] = useState(null)
+  // Opening a comment the current view hides moves the view out of the way --
+  // another viewport, compare mode, "Changed pages only" -- and says so, with
+  // one way back (commentReveal.js, CanvasNotes.jsx).
+  const [viewNotice, setViewNotice] = useState(null)
   const [tipOpen, setTipOpen] = useState(() => !tipDismissed())
   // The demo's "Try this" card, and which of its steps were done.
   const [tryOpen, closeTryCard] = useTryThis(Boolean(demo))
@@ -487,35 +497,98 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     setPendingFocus({ pageId: kept.pageId, viewport: kept.viewport, x: kept.x, y: kept.y })
   }, [defaultMode, mode, updateParams, viewports])
 
-  // Pan to a comment's pin, switching viewport first when it is not on screen.
-  // The switch is said out loud (a note with a way back, the toggle flashes),
-  // so the board never changes viewport behind the user's back. On a phone
-  // the list closes and the comment shows as a card at its pin; Back returns
-  // to the list.
+  // Pan to a comment's pin, moving the view out of the way first when it is
+  // hiding the comment: another screen size, compare mode (which lays out no
+  // variants), "Changed pages only" (which drops unchanged pages). Every one
+  // of those is said out loud (a note with a way back, the viewport toggle
+  // flashes), so the board never changes what it shows behind the user's
+  // back, and all of it goes through the URL, so a reload lands here too. On
+  // a phone the list closes and the comment shows as a card at its pin; Back
+  // returns to the list.
   const focusComment = useCallback(
     (comment) => {
       if (keepDraft()) return
       const switching = mode !== 'all' && comment.viewport !== mode && Boolean(viewports[comment.viewport])
+      const onVariant = String(comment.pageId).startsWith('variant:')
+      const variant = onVariant ? variantsById.get(comment.pageId) : null
+      const ownerPageId = onVariant ? variant?.pageId : comment.pageId
+      const plan = revealPlan({
+        hasTarget: Boolean(layout.targets[comment.pageId]),
+        known: Boolean(ownerPageId && pagesById.has(ownerPageId) && (!onVariant || variant)),
+        onVariant,
+        compare: Boolean(comparePair),
+        changedOnly: changedOnly && Boolean(compareData),
+        pageChanged: (pageChange(compareData, ownerPageId) || 0) > 0,
+      })
+      const leaveCompare = Boolean(plan?.leaveCompare)
+      const showAllPages = Boolean(plan?.showAllPages)
       setDraft(null)
       setPendingFocus(comment)
-      updateParams({ c: comment.id, ...(switching ? { vp: comment.viewport === defaultMode ? null : comment.viewport } : {}) })
-      if (switching) setViewportNotice({ from: mode, to: comment.viewport, id: comment.id, at: Date.now() })
+      updateParams({
+        c: comment.id,
+        ...(switching ? { vp: comment.viewport === defaultMode ? null : comment.viewport } : {}),
+        // Leaving compare takes its own params with it, as the Compare button does.
+        ...(leaveCompare ? { cmp: null, changed: null, diff: null } : showAllPages ? { changed: '0' } : {}),
+      })
+      const changes = [...(switching ? ['viewport'] : []), ...(leaveCompare ? ['compare'] : []), ...(showAllPages ? ['changed'] : [])]
+      // Set on every jump, cleared on every jump: a note left over from the
+      // last one named the wrong comment and offered a way back to a view
+      // this jump had already moved on from.
+      setViewNotice(
+        changes.length
+          ? {
+              id: comment.id,
+              at: Date.now(),
+              changes,
+              from: mode,
+              to: comment.viewport,
+              // One way back: the params exactly as they were before the jump.
+              back: {
+                ...(switching ? { vp: was('vp') } : {}),
+                ...(leaveCompare ? { cmp: was('cmp'), changed: was('changed'), diff: was('diff') } : {}),
+                ...(showAllPages && !leaveCompare ? { changed: was('changed') } : {}),
+              },
+            }
+          : null,
+      )
       if (!wide) {
         setSheetOpen(false)
         setThreadSheet(true)
       }
     },
-    [defaultMode, keepDraft, mode, updateParams, viewports, wide],
+    [
+      changedOnly,
+      compareData,
+      comparePair,
+      defaultMode,
+      keepDraft,
+      layout.targets,
+      mode,
+      pagesById,
+      was,
+      updateParams,
+      variantsById,
+      viewports,
+      wide,
+    ],
   )
+  // The note goes after a moment, as a note does. Back puts the view as it was.
   useEffect(() => {
-    if (!viewportNotice) return undefined
-    const timer = window.setTimeout(() => setViewportNotice(null), 6000)
+    if (!viewNotice) return undefined
+    const timer = window.setTimeout(() => setViewNotice(null), 6000)
     return () => window.clearTimeout(timer)
-  }, [viewportNotice])
-  // A comment whose pin the board cannot show: its page is left out of the
-  // current view (a variant while comparing, or a page "Changed pages only"
-  // drops). The thread still opens; the board says why it did not move
-  // rather than looking broken.
+  }, [viewNotice])
+  const undoViewNotice = useCallback(() => {
+    if (!viewNotice) return
+    updateParams(viewNotice.back)
+    setViewNotice(null)
+  }, [updateParams, viewNotice])
+  // A comment whose pin the board cannot show at all. The view getting out of
+  // the way covers the reasons it knows (another screen size, compare mode, the
+  // changed-pages filter: see commentReveal.js), so what is left here is a
+  // card that is simply not on this board any more -- a page or variant
+  // removed by a recapture, a screen size the board no longer has. The thread
+  // still opens; the board says why it did not move rather than looking broken.
   const onFocusHidden = useCallback(
     (comment) => {
       if (comment?.id == null) return
@@ -999,7 +1072,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     // A screen size the open comment (or the one being written) is not on.
     const pointsAt = selectedComment || draft
     if (pointsAt && value !== 'all' && pointsAt.viewport !== value) leaveForNavigation()
-    setViewportNotice(null)
+    setViewNotice(null)
     updateParams({ vp: value === defaultMode ? null : value })
   }
   // Hosted boards: people who can send comments to an agent get the Agent
@@ -1703,7 +1776,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
               demo={demo}
               localSettingsAvailable={localSettingsAvailable}
               setShareOpen={setShareOpen}
-              viewportNotice={viewportNotice}
+              viewNotice={viewNotice}
               canComment={canComment}
               minimapOn={minimapOn}
               toggleMinimap={toggleMinimap}
@@ -1798,10 +1871,11 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                     tryOpen={tryOpen}
                     journey={journey}
                     builder={builder}
-                    viewportNotice={viewportNotice}
+                    viewNotice={viewNotice}
+                    undoViewNotice={undoViewNotice}
+                    noticeInSheet={!wide && threadSheet && viewNotice?.id === selectedCommentId}
                     dismissTip={dismissTip}
                     modes={modes}
-                    setMode={setMode}
                     comparePair={comparePair}
                   />
                 )}
@@ -2080,6 +2154,9 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
             sheetOpen={sheetOpen}
             setSheetOpen={setSheetOpen}
             panelProps={panelProps}
+            viewNotice={viewNotice}
+            undoViewNotice={undoViewNotice}
+            modeLabel={modeLabel}
             threadSheet={threadSheet}
             threadProps={threadProps}
             closeThread={closeThread}
