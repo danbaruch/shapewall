@@ -670,6 +670,10 @@ async function everyRowGoesSomewhere(page, { tap = false }) {
   const dead = []
   const moved = []
   const notices = {}
+  // Which card each pin landed on, so a comment on a variant can be told from
+  // one on a page. Read while the pin is on screen: the board only renders
+  // the cards in view, so counting them at the end would find none.
+  const on = {}
   for (const id of rows) {
     const before = await cameraAt(page)
     const row = `[data-sw-comment-list] [data-sw-comment="${id}"]`
@@ -690,6 +694,13 @@ async function everyRowGoesSomewhere(page, { tap = false }) {
       return node ? (node.textContent || '').replace(/\s+/g, ' ').trim() : null
     })
     if (notice) notices[id] = notice
+    // The card the pin landed on: a page, or a variant beside one. (The
+    // board only renders the cards in view, so this is read while the pin is
+    // on screen rather than counted at the end.)
+    on[id] = await page.evaluate(
+      (sel) => document.querySelector(sel)?.closest('[data-sw-node]')?.getAttribute('data-sw-node') || null,
+      `[data-sw-pin="${id}"]`,
+    )
     const { box, canvas, landed } = seen
     // The pin's middle, not its box: the bubble grows from its pointed corner
     // and a pin resting near a card's top edge on a phone can hang a few
@@ -755,7 +766,7 @@ async function everyRowGoesSomewhere(page, { tap = false }) {
       await page.waitForSelector('[data-sw-comment-list]')
     }
   }
-  return { rows, dead, moved, notices }
+  return { rows, dead, moved, notices, on }
 }
 
 test('comparing, desktop 1440: every comment in the rail takes you to its pin, variants included', async () => {
@@ -764,7 +775,7 @@ test('comparing, desktop 1440: every comment in the rail takes you to its pin, v
     await openBoard(page, `${base}?${COMPARE}`)
     await page.waitForSelector('[data-sw-compare-bar]')
     await page.waitForSelector('[data-sw-comment-list]')
-    const { rows, dead, moved, notices } = await everyRowGoesSomewhere(page, { tap: false })
+    const { rows, dead, moved, notices, on } = await everyRowGoesSomewhere(page, { tap: false })
     // The demo board's open comments, the two on variants among them.
     assert.ok(rows.length >= 20, `the rail has ${rows.length} comments`)
     assert.deepEqual(dead, [])
@@ -776,9 +787,10 @@ test('comparing, desktop 1440: every comment in the rail takes you to its pin, v
     const left = Object.values(notices).filter((text) => /compare/i.test(text))
     assert.deepEqual(left, [], 'no jump had to leave compare mode')
     assert.equal(await page.locator('[data-sw-compare-bar]').count(), 1, 'still comparing after the whole rail')
-    // The variants really are on the board while comparing, with their pins.
-    const variants = await page.$$eval('[data-sw-node^="variant:"]', (list) => list.map((node) => node.getAttribute('data-sw-node')))
-    assert.ok(variants.length >= 2, `variants on the board while comparing: ${JSON.stringify(variants)}`)
+    // The two variant comments really landed on their variant's own card,
+    // while comparing: that card is the one 0.7.3 had to leave compare to draw.
+    const onVariants = Object.entries(on).filter(([, node]) => String(node).startsWith('variant:'))
+    assert.equal(onVariants.length, 2, `comments landed on variant cards while comparing: ${JSON.stringify(on)}`)
     await shot(page, 'compare-rail-desktop')
     assert.deepEqual(errors, [])
   } finally {

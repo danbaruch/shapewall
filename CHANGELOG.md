@@ -3,6 +3,37 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+- **On a phone, comparing two environments, the thread sheet covered the whole board.** Measured at 390 px wide on the demo
+  board: compare mode's bar pushes the canvas 247 px down the window, and the sheet kept taking its share of the window, 598 px
+  of 844, so it started at 246 px and the canvas ended at 844. The pin was placed correctly and the camera flew to it, behind
+  the sheet: 9 of the board's 20 comments landed where nobody could see them. The sheet is now measured against the canvas
+  rather than the window, so whatever sits over the canvas comes off the sheet instead of off the board: at 390 px in compare
+  mode it is 445 px tall and leaves a 129 px strip of board with the pin in it, and with nothing over the canvas it is exactly
+  as tall as it has been since 0.7.2. The same arithmetic covers every other bar that shortens the canvas (the notice bar, a
+  migration banner, a hosted board's approvals), because what is measured is the canvas's own box and the canvas is what they
+  all shorten. Checked at 390 px on all 20 comments of the demo board while comparing, by what is drawn at the pin rather than
+  by its coordinates: none covered, where 9 of 20 were.
+- **On a phone, walking from one comment to the next.** The note a jump leaves ("Showing Phone for comment #12") lay over the
+  top of the thread, which is where the thread keeps previous, next, resolve and more, so for the six seconds it was up none of
+  them could be tapped, and the list itself is behind a modal sheet. It now sits in the thread's own flow, under its header,
+  and gives up a little of the thread's scrolling room rather than covering anything or making the sheet taller. The sheet's
+  steps lead its second row as one control, "previous, 16 of 20, next", and the sheet says what it goes back to, "Comments", in
+  place of an X that did the same thing without saying so. Stepping through the demo board's comments takes about 100 ms a
+  comment rather than 6.3 seconds, and the whole rail at 390 px is walked in about two minutes rather than twenty-five.
+- **Comparing two environments, a variant is on the board.** Compare mode laid out no variants at all, so a comment on one had
+  no pin, and 0.7.3 answered that by leaving compare mode to show it. A variant is one capture of one idea and has no second
+  environment to compare against, so it is now laid out inside compare mode as the single-frame card it is, beside its page's
+  pair and at its own width. A comment on a variant has a pin, the board flies to it, and compare mode stays on. With that, the
+  one thing compare mode used to hide is gone, so "jump to comment" has one fewer view change to make, to say and to put back;
+  the machinery stays for the one that is left, "Changed pages only", which really does drop pages.
+- **Why there is no Comment tool while comparing.** A comment belongs to a page rather than to one environment (the pins are
+  drawn once, on the first environment's frame), so a click on either capture would be the same comment and the board cannot
+  know which capture was meant. The compare bar now says so in a line, with the whole reason in its tooltip and for a screen
+  reader, rather than leaving the missing tool unexplained. Reading, replying, resolving and jumping to a comment all work
+  while comparing, as they did.
+
 ## 0.7.3 - 2026-11-14
 
 - Clicking a comment in the right-hand rail always takes you to that comment. When the current view was hiding the comment's card
