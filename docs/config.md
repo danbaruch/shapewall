@@ -10,11 +10,20 @@ each board (including a board's own `viewports`, `block`, `setup` and `auth`), `
 in the serve log and the board keeps the last good config. `outputDir`, `boardUrl`, `auth`, `browser`, `liveHtml`, `agent`,
 `starterAgent`, `notifications` and `github` still need a restart (the log says so).
 
+`checks` and `ci` are in neither list, so an edit to either is silently not picked up and the log says nothing about it. Restart
+`serve` for a `checks` change to reach the board's **Run checks**; `ci` is read by `shapewall ci` in its own run, so a running board
+never uses it anyway.
+
+A key Shapewall does not know is usually ignored rather than reported. Unknown keys are refused only inside `capturePacing`,
+`checks`, `setup`, `ci`, an action's options and a page's `seo`, plus the secret and command key lists in `agent` and `github`. So a
+misspelled key at the top level, in a board or on a page costs you no error message: the setting simply does nothing. Check the
+spelling against the tables below when something you set has no effect.
+
 ## Top level
 
 | Key             | Type                  | Default                             | Notes                                                                                                                                                         |
 | --------------- | --------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `title`         | string                | `"Shapewall"`                       | Board title (single-board configs).                                                                                                                           |
+| `title`         | string                | `"Shapewall"`                       | The config's title, on the board and in exports and hosted pushes. In a single-board config the board takes it too; a board with none is titled by its id.    |
 | `id`            | string                | `"site"`                            | Board id for single-board configs. Lowercase letters, digits, dashes.                                                                                         |
 | `baseUrl`       | http(s) URL           | required                            | Where pages are loaded from. May include a base path: `http://localhost:3000/app`.                                                                            |
 | `publicUrl`     | http(s) URL           | none                                | Used for "Open page" links and to rewrite links in live HTML.                                                                                                 |
@@ -29,7 +38,7 @@ in the serve log and the board keeps the last good config. `outputDir`, `boardUr
 | `liveHtml`      | boolean               | `true`                              | `false` captures screenshots only.                                                                                                                            |
 | `versions`      | 0-50                  | `5`                                 | Previous captures kept per page and viewport, for before/after. `0` keeps none.                                                                               |
 | `boardUrl`      | http(s) URL           | the running `serve` address         | Where people open the board, for links in notifications and GitHub issues. Without it, links use a running `shapewall serve` for this config, else port 4600. |
-| `environments`  | Environment[]         | none                                | The same pages at other base URLs, for compare mode. See below.                                                                                               |
+| `environments`  | Environment[]         | none                                | The same pages at other base URLs, for compare mode. 1 to 8 of them. See below.                                                                               |
 | `journeys`      | Journey[]             | none                                | Named page sequences, which may fork. See [journeys.md](journeys.md).                                                                                         |
 | `auth`          | object                | none                                | See below.                                                                                                                                                    |
 | `browser`       | object                | Playwright's Chromium               | `{ "channel": "chrome" }` or `{ "executablePath": "/path/to/chrome" }` (absolute, outside the project).                                                       |
@@ -41,6 +50,7 @@ in the serve log and the board keeps the last good config. `outputDir`, `boardUr
 | `agent`         | object                | none                                | The board chat's model endpoint. See [Agent](#agent) below.                                                                                                   |
 | `starterAgent`  | object                | none                                | The sandboxed starter agent: who may dispatch work, tests, budgets. See [starter-agent.md](starter-agent.md).                                                 |
 | `sitemap`       | URL, file or object   | none                                | Default source for `shapewall sitemap`. See [Sitemap import](#sitemap-import).                                                                                |
+| `checks`        | object                | none                                | Defaults for page checks. Only `seo` and `budgets` are accepted. See [Checks SEO](#checks-seo) and [Checks budgets](#checks-budgets) below.                   |
 | `ci`            | object                | none                                | Capture on pull requests: threshold, pages, ignore selectors, build and serve commands. See [CI](#ci) below.                                                  |
 
 Environment overrides: `SHAPEWALL_BROWSER_CHANNEL`, `SHAPEWALL_BROWSER_PATH`.
@@ -58,11 +68,11 @@ Environment overrides: `SHAPEWALL_BROWSER_CHANNEL`, `SHAPEWALL_BROWSER_PATH`.
 | `group`          | string             | Card group on the board. Defaults to `Pages`.                                                                                                                                          |
 | `note`           | string             | Up to 200 characters, shown on the card and with its comments: "Sample data", "Signed-out state".                                                                                      |
 | `waitFor`        | selector           | Must be visible before the shot.                                                                                                                                                       |
-| `actions`        | Action[]           | Run in order after loading, before the shot.                                                                                                                                           |
+| `actions`        | Action[]           | Run in order after loading, before the shot. At most 30.                                                                                                                               |
 | `viewports`      | string[]           | A subset of the configured viewports for this page.                                                                                                                                    |
 | `expectStatus`   | number or number[] | An error page captured on purpose, e.g. `404` or `[404, 410]`. It is captured like any page; another status is the failure.                                                            |
 | `errorSelectors` | string[]           | Optional known error-state CSS selectors for checks. At most 10 selectors of 500 characters each. Visible matches produce a reliability finding; no page-text guessing.                |
-| `seo`            | object             | Optional `{ "indexable": false }` skips public SEO diagnostics even with `--seo`. Omit or use `true` for selected public pages. SEO remains off without `--seo`.                       |
+| `seo`            | object             | An object whose only key is a boolean `indexable`. `{ "indexable": false }` skips public SEO diagnostics even with `--seo`; omit it for public pages. SEO is off without `--seo`.      |
 | `timeout`        | ms                 | This page's budget for loading, `waitFor` and its actions, 1000-300000. Replaces `timeouts.page` for it, and lets its `wait` and `hold` actions run that long.                         |
 | `localStorage`   | object             | Seeds for this page, on top of the board's. See [localStorage seeds](#localstorage-seeds).                                                                                             |
 | `frameHeight`    | number or object   | This page's own frame height, 240-8000: one number for all its viewports, or `{ "desktop": 900, "phone": 844 }`. The browser window stays the viewport's. See [Viewports](#viewports). |
@@ -203,8 +213,9 @@ A board for a guest-first app and a canvas game might read:
 
 ## Viewports
 
-`viewports` (top level, and per board) is keyed by name. `desktop`, `tablet` and `phone` are built in; any other lowercase name works
-too (`phone-landscape`, `kiosk`). Up to 8.
+`viewports` (top level, and per board) is keyed by name. `desktop`, `tablet` and `phone` are built in; a name of your own works too
+(`phone-landscape`, `kiosk`), as long as it is lowercase letters, digits and dashes, starts with a letter and is at most 32
+characters: `Kiosk` and `4k` are rejected. Up to 8.
 
 | Key            | Notes                                                                                                                    |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------ |
@@ -242,6 +253,7 @@ heights.
 - `"analytics"` is a built-in list: Google Analytics and Tag Manager, Plausible, Umami Cloud, Cloudflare Web Analytics and RUM, Segment,
   Hotjar, Clarity, Mixpanel, Amplitude, PostHog, Heap, FullStory, Fathom, Simple Analytics, GoatCounter, and the Meta, Bing, LinkedIn,
   X, TikTok and HubSpot pixels. A self-hosted analytics endpoint needs its own pattern (`"*/umami/*"`).
+- A list holds at most 50 entries, each at most 300 characters and without whitespace.
 
 The top-level list applies to every board; a board's `block` adds to it. Blocked requests are not network failures in the capture
 warnings or in page checks. Page checks apply the same list.
@@ -254,9 +266,10 @@ warnings or in page checks. Page checks apply the same list.
 { "localStorage": { "game.trailerSeen": "1", "settings": { "music": false } } }
 ```
 
-Strings are stored as they are; numbers, booleans, objects and arrays as JSON. A page's keys win over its board's, a board's over the
-top level's. They are set on every load of that origin in the shot. Use them for flags an app checks at start (a tutorial seen, a saved
-setting) instead of clicking through to set them.
+Strings are stored as they are; numbers, booleans, objects and arrays as JSON. Each object takes at most 50 keys, a key at most 200
+characters and a stored value at most 20000. A page's keys win over its board's, a board's over the top level's. They are set on
+every load of that origin in the shot. Use them for flags an app checks at start (a tutorial seen, a saved setting) instead of
+clicking through to set them.
 
 ## Setup (shared state)
 
@@ -275,7 +288,7 @@ and the pages in its scope start from the browser state it left: cookies, localS
 }
 ```
 
-- `actions` (required): any page actions, including `viewports` guards and `optional`.
+- `actions` (required): any page actions, including `viewports` guards and `optional`. At most 30, as on a page.
 - `path`: where it starts, default `/`.
 - `groups` and `pages`: its scope. Without either, every page of the board uses it; with them, only pages in those groups or with
   those ids (marketing pages keep a clean first visit).
@@ -311,8 +324,8 @@ page only.
 - With more than `--limit` pages (default 100, at most 1000), the shallowest are kept, so the top of the site wins over deep archives.
 - `--board ID` adds them to one board of a multi-board config. Nothing is captured; run `shapewall capture` next.
 
-To set the source once, add `sitemap` to the config (or to a board in `boards[]`). `shapewall sitemap` with no argument reads it, and
-`init --sitemap` records it:
+To set the source once, add `sitemap` to the config, or, in a multi-board config, to each board inside `boards[]` (a top-level
+`sitemap` beside `boards` is an error). `shapewall sitemap` with no argument reads it, and `init --sitemap` records it:
 
 ```json
 { "sitemap": { "source": "https://www.example.com/sitemap.xml", "limit": 50, "exclude": ["/tag/"], "group": "Site" } }
@@ -393,7 +406,7 @@ Versions are kept for the default environment only.
 `repo` (`owner/name`), `boardUrl` (where the board is served, for links from issues; default `http://127.0.0.1:4600/`), `labels` (up to
 10, put on new issues), `board` (the board that bare `shapewall:<id>` markers mean) and `apiUrl` (GitHub Enterprise Server). Top level
 only. The token comes from `SHAPEWALL_GITHUB_TOKEN` or `GITHUB_TOKEN` and the webhook secret from `SHAPEWALL_GITHUB_WEBHOOK_SECRET`; a
-`token` or `webhookSecret` key here is an error. Environment overrides: `SHAPEWALL_GITHUB_REPO`, `SHAPEWALL_BOARD_URL`,
+`token`, `webhookSecret` or `secret` key here is an error. Environment overrides: `SHAPEWALL_GITHUB_REPO`, `SHAPEWALL_BOARD_URL`,
 `SHAPEWALL_GITHUB_API_URL`. See [github.md](github.md).
 
 ## CI
@@ -419,10 +432,10 @@ Capture on every pull request: what `shapewall ci` and the workflow from `shapew
 | `threshold` | 0-1      | `0.00001`       | Share of pixels below which a shot counts as unchanged (0.00001 is 0.001%). A size change always counts. `--threshold` overrides it.                                                     |
 | `pages`     | string[] | every page      | Page ids to compare (an allow-list), in the config's order.                                                                                                                              |
 | `viewports` | string[] | each page's own | Viewport names to compare.                                                                                                                                                               |
-| `ignore`    | string[] | none            | CSS selectors hidden (`visibility: hidden`) on both sides before each shot: clocks, ads, random content. Up to 50.                                                                       |
+| `ignore`    | string[] | none            | CSS selectors hidden (`visibility: hidden`) on both sides before each shot: clocks, ads, random content. Up to 50, each at most 300 characters.                                          |
 | `images`    | string   | `"links"`       | `"links"`: the comment links to the workflow artifact. `"branch"`: thumbnails committed to a `shapewall-ci` branch and shown inline (public repositories only; needs `contents: write`). |
 | `maxPages`  | 1-500    | `50`            | Compare at most this many pages. `--max-pages` overrides it.                                                                                                                             |
-| `start`     | object   | none            | Build and serve mode: `install`, `build` and `serve` commands, the `url` serve listens on, and `timeout` in ms (default 180000).                                                         |
+| `start`     | object   | none            | Build and serve mode: `install`, `build` and `serve` commands, the `url` serve listens on, and `timeout` in ms (1000 to 1800000, default 180000). With `start`, `serve` is required.     |
 
 `start` commands are argv arrays (`["npm", "run", "build"]`): a program name found on `PATH`, then its arguments, run without a shell.
 A string is an error, and so are paths (`./build.sh`, so a config cannot name a program the repository ships), shells and launchers
@@ -439,7 +452,12 @@ from `shapewall ci capture --allow-start` inside a CI job (`GITHUB_ACTIONS` or `
 
 The board chat's endpoint: any OpenAI-compatible chat completions API. `baseUrl` and `model` are required to connect; `apiKeyEnv` (the
 variable holding the key, default `SHAPEWALL_AGENT_API_KEY`), `label` (the name shown for it; a connected agent's name and icon are set on the Agents page, see [agents.md](agents.md#name-and-icon)), `vision` (default `true`), `tools` (default `true`), `maxTokens`,
-`temperature` and `backend` (`"openai-compatible"`) are optional. Top level only. An `apiKey`, `key` or `token` key here is an error, and `apiKeyEnv` may only name `SHAPEWALL_AGENT_*` or a `*_API_KEY`
+`temperature` (0 to 2) and `backend` are optional. `maxTokens` is a whole number from 1 to 200000. `backend` is
+`"openai-compatible"` (the default) or `"acp"`, which chats with an agent CLI over ACP instead; that command comes from
+`serve --agent-acp`, `SHAPEWALL_AGENT_ACP` or the host's saved agent settings, never from the config. Top level only. An `apiKey`,
+`key`, `token`, `secret` or `password` key here is an error, and so is any key that could name a command to run (`command`, `cmd`,
+`exec`, `acp`, `acpCommand`, `program`, `args`, `argv`, `env`), because a committed config would run it on the machine of whoever
+chats from that repo. `apiKeyEnv` may only name `SHAPEWALL_AGENT_*` or a `*_API_KEY`
 variable. A key goes only to this machine, a known hosted API, or a host confirmed in `SHAPEWALL_AGENT_KEY_HOSTS`.
 Environment overrides: `SHAPEWALL_AGENT_BASE_URL`, `SHAPEWALL_AGENT_MODEL`. See [agents.md](agents.md).
 
@@ -482,8 +500,12 @@ record and capture locally, then use the normal capture-push workflow instead of
 
 **Login script.** An ES module whose default export signs in. It runs once per capture; its cookies and storage are reused for every page.
 
-Capture also refuses a `baseUrl` whose public-looking hostname resolves to a private or loopback address, so a config from someone
-else cannot point captures at your internal network through DNS. Use `localhost` or the address itself for your own dev server.
+When the page being captured is loaded from a public host, the capture browser refuses that page's own requests to loopback, private
+and internal hosts, including a public name that resolves to one, so a public page cannot make the browser fetch from this machine or
+its network (a router page, a local dev server, cloud metadata). The `baseUrl` itself is never refused, and a `baseUrl` that is
+already local or private -- the usual dev site -- keeps all of its requests, including those to other hosts on your network. So the
+guard bounds what a public page may reach through the capture browser; it is not a check on where a config may point. Read a config
+you did not write before you capture with it.
 
 A login script is code: `shapewall capture`, the board's Capture button and page checks run it on your machine, as you, with your
 environment. Capture prints a line the first time it runs one. Only use a config with `auth.loginScript` from a repo you trust, and read
