@@ -1881,7 +1881,7 @@ member who filters by someone else gets an empty answer, not that person's rows.
 
 `/w/<workspace>/activity`. What people did, newest first, from the audit log: sign-in and sign-out, passkeys and sessions, members
 and invites, settings (with the value before and after), projects and pushes, share links and guests, tokens, agents (connected,
-audience, approval rule, revoked), approval cards (who allowed or denied what), agent work, comments (resolved and deleted) and
+audience, approval rule, revoked), approval cards (who allowed or denied what), agent work, comments (resolved, reopened and deleted) and
 exports. Filter by person, kind of
 action, agent, project, where it came through (a person, a token, a share link guest, the server) and period; search; open an
 entry for the address and device it came from and exactly what was recorded. "Worth a look" keeps the security-relevant changes:
@@ -2014,7 +2014,7 @@ Old-host passkeys show "For old.example" on the Account page.
   workspace.
 - **Audit log.** Account events (sign-up, sign-in by passkey or recovery code, failures, passkeys, recovery codes, sessions, deleted
   workspaces) and workspace events (members, roles, invites, projects, tokens, share links and their guests, settings, pushes,
-  resolved and deleted comments), with the user, token or share link and IP. Admins read the workspace log in the console.
+  resolved, reopened and deleted comments), with the user, token or share link and IP. Admins read the workspace log in the console.
 - **Headers.** `nosniff`, `no-referrer`, COOP same-origin, `X-Robots-Tag: noindex`, HSTS on https, a strict CSP on the console and the
   board shell, `frame-ancestors 'none'` except for live HTML. The console has no inline script; its only inline styles are the ones
   Radix adds for dialogs and menus, allowed by a per-response nonce (`style-src 'self' 'nonce-...'`). It renders every value as text
