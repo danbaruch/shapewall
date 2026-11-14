@@ -120,16 +120,16 @@ These need Playwright (installed by the CLI package at the repo root) and ImageM
 each message, stores it in SQLite and sends it to Telegram as plain text. It binds `127.0.0.1` only. Tests: `contact/server.test.mjs`,
 part of `npm test`.
 
-| Variable                     | Default                    | Effect                                                                                  |
-| ---------------------------- | -------------------------- | --------------------------------------------------------------------------------------- |
-| `PORT`                       | `4131`                     | Port on 127.0.0.1.                                                                      |
-| `DATABASE_PATH`              | `./data/contact.sqlite`    | The SQLite file (its folder is created).                                                |
-| `CONTACT_ALLOWED_ORIGIN`     | `https://shapewall.com`    | The only `Origin` accepted.                                                             |
-| `CONTACT_TELEGRAM_BOT_TOKEN` | empty                      | The bot token. Keep it in a root-only environment file, never in the repo.              |
-| `CONTACT_OPENCLAW_CONFIG`    | empty                      | Alternative: path of a JSON file with the token at `channels.telegram.botToken`.        |
-| `CONTACT_TELEGRAM_CHAT_ID`   | empty                      | The chat that receives messages. Without a token and chat id, messages are stored only. |
-| `CONTACT_TELEGRAM_THREAD_ID` | empty                      | Optional forum topic id.                                                                |
-| `CONTACT_TELEGRAM_API_BASE`  | `https://api.telegram.org` | Point at a local stub for testing.                                                      |
+| Variable                       | Default                    | Effect                                                                                  |
+| ------------------------------ | -------------------------- | --------------------------------------------------------------------------------------- |
+| `PORT`                         | `4131`                     | Port on 127.0.0.1.                                                                      |
+| `DATABASE_PATH`                | `./data/contact.sqlite`    | The SQLite file (its folder is created).                                                |
+| `CONTACT_ALLOWED_ORIGIN`       | `https://shapewall.com`    | The only `Origin` accepted.                                                             |
+| `CONTACT_TELEGRAM_BOT_TOKEN`   | empty                      | The bot token. Keep it in a root-only environment file, never in the repo.              |
+| `CONTACT_TELEGRAM_CONFIG_FILE` | empty                      | Alternative: path of a JSON file with the token at `channels.telegram.botToken`.        |
+| `CONTACT_TELEGRAM_CHAT_ID`     | empty                      | The chat that receives messages. Without a token and chat id, messages are stored only. |
+| `CONTACT_TELEGRAM_THREAD_ID`   | empty                      | Optional forum topic id.                                                                |
+| `CONTACT_TELEGRAM_API_BASE`    | `https://api.telegram.org` | Point at a local stub for testing.                                                      |
 
 What it enforces: `POST` only, `Content-Type: application/json`, a 16 KB body limit, the exact `Origin`, a hidden honeypot field
 (filled: answered with success and dropped), at least 3 seconds between the form appearing and being sent, a kind of `feedback`,
