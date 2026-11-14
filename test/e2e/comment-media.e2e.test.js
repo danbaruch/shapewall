@@ -178,11 +178,18 @@ test('desktop 1440: attach by picker and paste, draw a box and an arrow, post, t
     await page.waitForSelector(`${bar} [data-sw-draw-count="2"]`)
     const inside = await page.evaluate((sel) => {
       const frameNode = document.querySelector(sel)
-      const box = frameNode.getBoundingClientRect()
+      // What clips the drawing is the frame's own clip box: since 0.8.0 that
+      // is a box of its own inside the frame, holding the capture, the live
+      // page and anything drawn on them, so that the pins can sit outside it
+      // and hang over the card's edge rather than be cut in half by it
+      // (Frame.jsx).
+      const clip = frameNode.querySelector('[data-sw-frame-clip]') || frameNode
+      const box = clip.getBoundingClientRect()
       const paths = [...frameNode.querySelectorAll('[data-sw-drawing="draft"] path')].map((path) => path.getBoundingClientRect())
       return {
-        clipped: getComputedStyle(frameNode).overflow,
-        // Half the stroke's width may sit on the edge itself.
+        clipped: getComputedStyle(clip).overflow,
+        // Half the stroke's width may sit on the edge itself. Measured
+        // against the clip box, which is the page's own edge.
         over: Math.max(...paths.map((item) => item.right - box.right)),
       }
     }, frame)

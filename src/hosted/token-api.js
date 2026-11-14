@@ -284,12 +284,24 @@ export function mountTokenApi({
   // when it asks (`guests=1`), so an agent never picks one up by default.
   function remoteReport(req, ctx, { status = 'open', pageId = null, mention = null, guests = false } = {}) {
     const context = contextFor(ctx)
+    const claim = req.token.scopes.includes('claim')
     let guestsHidden = 0
+    // A claim token reads only the comments its agent may take: the rest are
+    // another agent's work or nobody's yet, and that is deliberate. What was
+    // not deliberate is that the count then read like the board's own, so
+    // "2 comments on testbed" with a third open and routed elsewhere looked
+    // like the whole picture. Counted like the guests' one, and said out
+    // loud by the formatter.
+    let routedElsewhere = 0
     const comments = ctx.comments
       .list({ status: status === 'all' ? null : status, mention })
       .map((comment) => dispatchView(req.t, req.project.id, ctx.board.id, comment))
-      .filter((comment) => !req.token.scopes.includes('claim') || (comment.dispatchable && mine(req, comment[COMMENT_ROUTING])))
       .filter((comment) => !pageId || comment.pageId === pageId || context.variants.get(comment.pageId)?.pageId === pageId)
+      .filter((comment) => {
+        if (!claim || (comment.dispatchable && mine(req, comment[COMMENT_ROUTING]))) return true
+        routedElsewhere += 1
+        return false
+      })
       .filter((comment) => {
         if (guests || !comment.authorGuest) return true
         guestsHidden += 1
@@ -307,6 +319,7 @@ export function mountTokenApi({
       },
       status,
       guestsHidden,
+      routedElsewhere,
       count: comments.length,
       comments,
     }
@@ -635,6 +648,9 @@ export function mountTokenApi({
     v1Json,
     v1Comment((req, res, ctx) => {
       const comment = transaction(db, () => ctx.comments.update(req.params.cid, { status: 'open' }, now()))
+      // Reopening is as much of a decision as resolving, and the log held
+      // only the resolve: whoever put the work back was nowhere in it.
+      auditOf(req, 'comment_reopened', `${ctx.board.id}#${comment.id}`, { project: req.project.id })
       res.json({ comment: v1Item(req, ctx, comment) })
     }),
   )

@@ -32,6 +32,8 @@ import {
 } from '../src/hosted/permissions.js'
 import { createRemote, pushDefinition, pushFiles } from '../src/remote/remote.js'
 import { createRemoteMcpServer } from '../src/remote/remote-mcp.js'
+import { formatFeedback } from '../src/feedback.js'
+import { ACTION_GROUPS } from '../src/hosted/usage-shape.js'
 import {
   createBrowser,
   createProject,
@@ -284,6 +286,24 @@ test("routing: a comment sent to one agent is that agent's alone, on every token
   // Builder's token: the addressed comment does not exist for it.
   assert.ok(!(await listed(builder.token)).includes(mine.id))
   assert.ok((await listed(builder.token)).includes(open.id))
+  // And the report says something was held back, rather than letting its
+  // count read like the board's own. Someone running "shapewall comments
+  // --remote" to see what is outstanding should not quietly miss work: the
+  // numbers add up to what the board has, and the text says so.
+  const builderReport = (await tokenCall(hosted, builder.token, 'GET', '/api/v1/boards/sample/comments')).json
+  const boardOpen = (await ada.browser.get(boardUrl('/comments'))).json.comments.filter((item) => item.status === 'open').length
+  assert.ok(builderReport.routedElsewhere >= 1, `routedElsewhere ${builderReport.routedElsewhere}`)
+  assert.equal(
+    builderReport.count + builderReport.routedElsewhere + builderReport.guestsHidden,
+    boardOpen,
+    'what the token reads, plus what it was not given, is what the board has',
+  )
+  assert.match(formatFeedback(builderReport), /Not shown here: \d+ (is|are) routed to another agent or not dispatched/)
+  // A token with no claim scope is given everything, so it is told nothing.
+  const plainReader = await makeToken(ada, 'Plain reader', ['read'])
+  const plainReport = (await tokenCall(hosted, plainReader.token, 'GET', '/api/v1/boards/sample/comments')).json
+  assert.equal(plainReport.routedElsewhere, 0)
+  assert.doesNotMatch(formatFeedback(plainReport), /Not shown here/)
   const path = `/api/v1/boards/sample/comments/${mine.id}`
   for (const [method, url, body] of [
     ['GET', path],
@@ -456,6 +476,34 @@ test('replies: an agent reads only the replies of people in its audience, howeve
   await api(ada, 'POST', boardUrl(`/comments/${own.id}/resolve`), {})
   assert.equal((await setAudience(ada, builderAgent, { audience: 'owner' })).status, 200)
   await policy({})
+})
+
+test('reopening a comment is in the audit log, from the console and from a token, as resolving is', async () => {
+  // Resolve and delete have always been audited; reopening was not, so a
+  // team server's log showed work being closed and never being put back.
+  const made = await comment(ada, 'Close me and open me again')
+  await fresh(ada)
+  assert.equal((await api(ada, 'POST', boardUrl(`/comments/${made.id}/resolve`), {})).status, 200)
+  assert.equal((await api(ada, 'POST', boardUrl(`/comments/${made.id}/reopen`), {})).status, 200)
+  const target = `sample#${made.id}`
+  assert.ok(
+    (await audit('comment_resolved')).some((entry) => entry.target === target),
+    'the resolve is in the log, as before',
+  )
+  const fromConsole = (await audit('comment_reopened')).filter((entry) => entry.target === target)
+  assert.equal(fromConsole.length, 1, 'and so is the reopen')
+  assert.equal(fromConsole[0].action, 'comment_reopened')
+
+  // The same through the token API, which has its own pair of routes.
+  const resolver = await makeToken(ada, 'Resolver', ['read', 'resolve'])
+  const one = `/api/v1/boards/sample/comments/${made.id}`
+  assert.equal((await tokenCall(hosted, resolver.token, 'POST', `${one}/resolve`, { body: {} })).status, 200)
+  assert.equal((await tokenCall(hosted, resolver.token, 'POST', `${one}/reopen`, { body: {} })).status, 200)
+  assert.equal((await audit('comment_reopened')).filter((entry) => entry.target === target).length, 2)
+  // It is counted where its siblings are counted, so Usage and the Activity
+  // filters offer it rather than dropping it on the floor.
+  assert.ok(ACTION_GROUPS.comments.includes('comment_reopened'))
+  assert.ok(ACTION_GROUPS.comments.includes('comment_resolved'))
 })
 
 test('sending a comment again while an agent works on it changes nothing: not who vouched for it, not where it goes', async () => {

@@ -1876,6 +1876,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                     viewNotice={viewNotice}
                     undoViewNotice={undoViewNotice}
                     noticeInSheet={!wide && threadSheet && viewNotice?.id === selectedCommentId}
+                    covered={phoneCovered}
                     dismissTip={dismissTip}
                     modes={modes}
                     comparePair={comparePair}
