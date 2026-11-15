@@ -7,6 +7,8 @@
 #      DEPLOY_HOST (the ssh host to release to),
 #      SHAPEWALL_ERROR_DSN (default: our GlitchTip project for shapewall.com and the demo; empty turns error reports off),
 #      SHAPEWALL_ERROR_ENVIRONMENT (default production),
+#      SHAPEWALL_SOURCEMAPS (default 1: upload the site's and the demo's source maps to our GlitchTip when
+#      GLITCHTIP_UPLOAD_ENV names the file with the upload settings; every .map is deleted from the build either way),
 #      SHAPEWALL_DEMO (default 1: build the live demo into dist/demo, and the fictional site it shows into
 #      dist/lumen.html + dist/lumen/ and dist/lumen-staging.html + dist/lumen-staging/, with scripts/demo-export.js;
 #      needs the root package installed and Playwright's Chromium).
@@ -18,6 +20,8 @@ cd "$(dirname "$0")/.."
 # package has no DSN and sends nothing unless whoever runs it sets SHAPEWALL_ERROR_DSN.
 export SHAPEWALL_ERROR_DSN="${SHAPEWALL_ERROR_DSN-https://04e1aacf286d4ab6856abb994d59846e@errors.thiionlabs.com/3}"
 export SHAPEWALL_ERROR_ENVIRONMENT="${SHAPEWALL_ERROR_ENVIRONMENT:-production}"
+# Readable stack traces for those reports: the site and demo builds upload their source maps (scripts/sourcemaps.mjs).
+export SHAPEWALL_SOURCEMAPS="${SHAPEWALL_SOURCEMAPS:-1}"
 if [ "${1:-}" = rollback ]; then
   ssh "$HOST" "cd $ROOT && prev=\$(readlink previous) && cur=\$(readlink current) && ln -sfn \"\$prev\" current && ln -sfn \"\$cur\" previous && echo now \$prev"
   exit 0
