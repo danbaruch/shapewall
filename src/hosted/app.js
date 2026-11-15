@@ -71,6 +71,7 @@ import { mountPages } from './pages.js'
 import { createPasskeyPolicy } from './passkey-policy.js'
 import { createTailnetAccounts } from './tailnet.js'
 import { mountTailnetAdmin } from './tailnet-routes.js'
+import { cspWithErrors, reportServerError } from '../error-tracking.js'
 
 export { changeEventType, publicBoardView, TOKEN_SCOPES, INVITE_DAYS }
 
@@ -124,6 +125,8 @@ export function createHostedApp({
   usercontentOrigin = null,
   // The origin this server is moving from (src/hosted/rebind.js), or null.
   previousOrigin = null,
+  // Opt-in error reports ({ dsn, origin, environment } from src/error-tracking.js); none by default.
+  errorTracking = null,
   // Bot checks on open sign-up and comment-link guests ({ siteKey, verify },
   // src/hosted/turnstile.js); none by default.
   turnstile = null,
@@ -256,7 +259,7 @@ export function createHostedApp({
       return resolveFile(ctx.config, ctx.board.id, kind, file)
     },
   })
-  const BOARD_PAGE_CSP = usercontent.boardCsp(BOARD_CSP)
+  const BOARD_PAGE_CSP = cspWithErrors(usercontent.boardCsp(BOARD_CSP), errorTracking)
   // true: a proxy on this host. A string ('uniquelocal'): the proxy is on a
   // private network (Docker Compose), in Express's trust proxy syntax.
   app.set('trust proxy', trustProxy ? (typeof trustProxy === 'string' ? trustProxy : 'loopback') : false)
@@ -572,7 +575,7 @@ export function createHostedApp({
   app.use('/api/v1', v1)
   app.use('/api', consoleApi)
 
-  mountPages(app, { db, dataDir, consoleDir, clientDir, turnstile, sessionOf, BOARD_PAGE_CSP, deps })
+  mountPages(app, { db, dataDir, consoleDir, clientDir, turnstile, sessionOf, BOARD_PAGE_CSP, deps, errorTracking })
 
   app.use((req, res) => {
     if (req.path.startsWith('/api/') || req.path.startsWith('/auth/')) return fail(res, 404, 'not_found', 'No such route.')
@@ -581,7 +584,10 @@ export function createHostedApp({
   // eslint-disable-next-line no-unused-vars
   app.use((error, req, res, next) => {
     const status = Number(error.status || error.statusCode) || 500
-    if (status >= 500) log(`error: ${error.name || 'Error'} (request failed; request values omitted)`)
+    if (status >= 500) {
+      log(`error: ${error.name || 'Error'} (request failed; request values omitted)`)
+      reportServerError(error)
+    }
     const api = /^\/(api|auth|w\/[^/]+\/p\/[^/]+\/api|s\/[^/]+\/api)\//.test(req.path)
     if (api) {
       return fail(

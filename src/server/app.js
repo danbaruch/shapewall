@@ -53,6 +53,7 @@ import { createLocalAccounts } from '../accounts/local.js'
 import { createBuzzClient } from '../buzz/client.js'
 import { buzzRouter } from '../buzz/routes.js'
 import { requireCleanBuzzEnvironment } from '../buzz/environment.js'
+import { cspWithErrors, errorMeta, errorSettingsFrom, reportServerError } from '../error-tracking.js'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 export const CLIENT_DIR = path.join(ROOT, 'dist', 'client')
@@ -62,7 +63,7 @@ export const OPEN_LINK_TTL_MS = 60 * 1000
 
 // The board shell. Inline styles are needed by the canvas library; scripts
 // only from this origin; live pages only in same-origin frames.
-const APP_CSP =
+const BASE_APP_CSP =
   "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'"
 // The natural voice's worker (client/src/chat/tts, built as assets/tts-*):
 // it compiles ONNX Runtime's WebAssembly and downloads the Kokoro model and
@@ -187,6 +188,10 @@ export function createApp({
 } = {}) {
   if (buzzBridge) requireCleanBuzzEnvironment()
   const chatOn = chat && !readOnly
+  // Opt-in error reports (SHAPEWALL_ERROR_DSN, src/error-tracking.js): the page tells the browser.
+  const errorSettings = errorSettingsFrom(env)
+  const errors = errorSettings?.dsn ? errorSettings : null
+  const APP_CSP = cspWithErrors(BASE_APP_CSP, errors)
   const app = express()
   // `serve --tailscale`: first, how the request came in. The serve entry's
   // secret comes off its path here, and whether it is the owner by tailnet
@@ -764,7 +769,7 @@ export function createApp({
   app.use('/api', (req, res) => fail(res, 404, 'not_found', 'No such API route.'))
 
   // This stays behind the same Host and remote-access gates as the board.
-  mountLocalConsole(app, consoleDir, { accounts: Boolean(account) })
+  mountLocalConsole(app, consoleDir, { accounts: Boolean(account), errors })
 
   // The client: hashed assets cached forever, index.html never.
   if (fs.existsSync(path.join(clientDir, 'index.html'))) {
@@ -774,22 +779,14 @@ export function createApp({
     )
     // Mark only a paired-owner server's shell: static exports, hosted and
     // demo clients must never probe the local pairing endpoint.
-    if (remote || account)
+    const shellMeta = `${remote ? '<meta name="shapewall-remote">\n' : ''}${account ? '<meta name="shapewall-local-accounts">\n' : ''}${errorMeta(errors)}`
+    if (shellMeta)
       app.get(['/', '/index.html'], (req, res) => {
         res.setHeader('Content-Security-Policy', APP_CSP)
         res.setHeader('Permissions-Policy', 'camera=(), microphone=(self), geolocation=()')
         res.setHeader('X-Frame-Options', 'DENY')
         res.setHeader('Cache-Control', 'no-cache')
-        res
-          .type('html')
-          .send(
-            fs
-              .readFileSync(path.join(clientDir, 'index.html'), 'utf8')
-              .replace(
-                '</head>',
-                `${remote ? '<meta name="shapewall-remote">\n' : ''}${account ? '<meta name="shapewall-local-accounts">\n' : ''}</head>`,
-              ),
-          )
+        res.type('html').send(fs.readFileSync(path.join(clientDir, 'index.html'), 'utf8').replace('</head>', `${shellMeta}</head>`))
       })
     app.use(
       express.static(clientDir, {
@@ -812,6 +809,10 @@ export function createApp({
       res.setHeader('Permissions-Policy', 'camera=(), microphone=(self), geolocation=()')
       res.setHeader('X-Frame-Options', 'DENY')
       res.setHeader('Cache-Control', 'no-cache')
+      if (errors)
+        return res
+          .type('html')
+          .send(fs.readFileSync(path.join(clientDir, 'index.html'), 'utf8').replace('</head>', `${errorMeta(errors)}</head>`))
       // root keeps the dotfile check to the file name, so an install under a
       // hidden folder (~/.local/...) still serves.
       res.sendFile('index.html', { root: clientDir })
@@ -824,7 +825,10 @@ export function createApp({
   // eslint-disable-next-line no-unused-vars
   app.use((error, req, res, next) => {
     const status = Number(error.status || error.statusCode) || 500
-    if (status >= 500) log(`error: ${error.stack || error.message}`)
+    if (status >= 500) {
+      log(`error: ${error.stack || error.message}`)
+      reportServerError(error)
+    }
     if (req.path.startsWith('/api/')) {
       if (error instanceof CommentError && status < 500) return fail(res, status, error.code, error.message)
       return fail(

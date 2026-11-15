@@ -26,8 +26,15 @@ function serviceWorker() {
     enforce: 'post',
     generateBundle(options, bundle) {
       const assets = Object.keys(bundle)
-        // The natural voice (assets/tts-*, tens of MB) loads only when someone turns it on.
-        .filter((name) => name.startsWith('assets/') && !name.startsWith(TTS_PREFIX) && !name.endsWith('.map'))
+        // The natural voice (assets/tts-*, tens of MB) loads only when someone turns it on, and the error-report SDK only
+        // when the server set SHAPEWALL_ERROR_DSN (client/src/lib/error-tracking.js): never cached ahead.
+        .filter(
+          (name) =>
+            name.startsWith('assets/') &&
+            !name.startsWith(TTS_PREFIX) &&
+            !name.startsWith('assets/error-reports-sdk-') &&
+            !name.endsWith('.map'),
+        )
         .sort()
       const shell = ['./', ...PUBLIC_SHELL, ...assets]
       const build = createHash('sha256').update(shell.join('\n')).digest('hex').slice(0, 12)

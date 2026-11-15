@@ -29,6 +29,8 @@ shapewall.com {
     # The demo board (same policy as `shapewall serve`); it frames its own live HTML snapshots, which get the
     # snapshot policy: no scripts at all, inline styles and data: images only, framed only by this origin.
     # Not indexed, whatever the site's stealth setting.
+    # connect-src also allows our error tracker (deploy.sh builds the demo with SHAPEWALL_ERROR_DSN): it receives scrubbed
+    # error reports only (src/error-scrub.js), never board content.
     # The natural read-aloud voice's worker scripts (assets/tts-*.js|mjs) get their own policy instead: they compile WebAssembly and
     # download the Kokoro model and voices from Hugging Face. A dedicated worker takes its CSP from its own script, so the board page
     # itself keeps connect-src 'self'. The voice runs in the visitor's browser; nothing is sent to shapewall.com.
@@ -46,7 +48,7 @@ shapewall.com {
     header @demoTts Permissions-Policy "camera=(), microphone=(), geolocation=()"
     header @demoLive Permissions-Policy "camera=(), microphone=(), geolocation=()"
     header @demoShell X-Frame-Options DENY
-    header @demoShell Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'"
+    header @demoShell Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://errors.thiionlabs.com; frame-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'"
     header @demoTts Content-Security-Policy "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' https://huggingface.co https://*.hf.co; base-uri 'none'; form-action 'none'"
     header @demoLive X-Frame-Options SAMEORIGIN
     header @demoLive Content-Security-Policy "default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'self'"
