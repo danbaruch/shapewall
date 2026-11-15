@@ -29,6 +29,10 @@
 // /lumen, staging as /lumen-staging, see scripts/demo-publish.js), with a
 // demo banner, noindex and forms that send nothing. The captures are taken
 // from the clean copies, so the board's screenshots carry none of that.
+// Error reports: with SHAPEWALL_ERROR_DSN (and SHAPEWALL_ERROR_ENVIRONMENT) set,
+// the board and console pages get the <meta> tags that turn the browser's
+// reporting on (src/error-tracking.js); without them the export sends nothing.
+// The host's CSP must then allow the DSN's origin in connect-src.
 // Run: node scripts/demo-export.js [outDir] [--publish siteRoot]   (default demo-export/)
 import { createHash } from 'node:crypto'
 import fs from 'node:fs'
@@ -40,6 +44,7 @@ import { startDemoSite } from '../examples/demo-site/server.js'
 import { joinUrl, normalizeConfig } from '../src/config.js'
 import { captureVariant, runCapture } from '../src/capture/capture.js'
 import { exportStatic } from '../src/export.js'
+import { errorMeta, errorSettingsFrom } from '../src/error-tracking.js'
 import { createJourney } from '../src/journeys.js'
 import { addReply, createComment, reactToComment, saveVariant, setAgentStatus, updateComment } from '../src/store.js'
 import { BANNER_TEXT, publicUrl, publishDemoSite } from './demo-publish.js'
@@ -53,6 +58,8 @@ const publishRoot = publishAt >= 0 ? args.splice(publishAt, 2)[1] : null
 if (publishAt >= 0 && !publishRoot) throw new Error('--publish needs a folder (the site root, e.g. website/dist)')
 const out = path.resolve(args[0] || path.join(ROOT, 'demo-export'))
 const DEMO_CLIENT = path.join(ROOT, 'dist', 'demo-app')
+const errorSettings = errorSettingsFrom(process.env)
+if (errorSettings?.problem) throw new Error(errorSettings.problem)
 if (!fs.existsSync(path.join(DEMO_CLIENT, 'console.html'))) throw new Error('Build the demo client first: npm run build:demo')
 const work = path.join(ROOT, 'test', '.output', 'demo-export')
 fs.rmSync(work, { recursive: true, force: true })
@@ -729,6 +736,13 @@ try {
   ])
   retime(result.out)
   checkNoLocalDetails(result.out)
+  if (errorSettings)
+    for (const page of ['index.html', 'console.html']) {
+      const file = path.join(result.out, page)
+      const text = fs.readFileSync(file, 'utf8')
+      if (!text.includes('</head>')) throw new Error(`demo export: ${page} has no </head> for the error report tags`)
+      fs.writeFileSync(file, text.replace('</head>', `${errorMeta(errorSettings)}</head>`))
+    }
   console.log(`Demo exported to ${result.out} (${result.files} files)`)
   if (publishRoot) {
     // After every capture, from the copies as they were last captured.
