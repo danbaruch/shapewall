@@ -889,7 +889,9 @@ function checkNoLocalDetails(dir) {
   for (const file of fs.statSync(dir).isDirectory() ? walk(dir) : [dir]) {
     if (!/\.(json|html|js|css|webmanifest)$/.test(file)) continue
     const text = fs.readFileSync(file, 'utf8')
-    const hit = needles.find((needle) => text.includes(needle))
+    // The error-report SDK (loaded only with SHAPEWALL_ERROR_DSN) has its own is-this-localhost check in it, not a host of ours.
+    const sdk = /(^|[\\/])error-reports-sdk-[\w-]+\.js$/.test(file)
+    const hit = needles.find((needle) => text.includes(needle) && !(sdk && ['127.0.0.1', 'localhost'].includes(needle)))
     if (hit) throw new Error(`${path.relative(dir, file) || path.basename(file)} contains "${hit}"; the demo must not carry local details.`)
   }
 }
