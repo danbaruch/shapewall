@@ -59,6 +59,14 @@ function scrubFrames(stacktrace) {
   }
 }
 
+// An error message without quoted text: some messages quote the input that
+// failed, e.g. JSON.parse's `Unexpected token 'x', "{"text":"my note"..." is
+// not valid JSON`, and that input can be board or comment content.
+export function scrubMessage(message) {
+  // From the first quote to the last (quoted input can hold quotes itself), or to the end when there is only one.
+  return message.replace(/["“][\s\S]*["”]|["“][\s\S]*$/, '"[redacted]"')
+}
+
 // Strips an event down to what it may carry (see the top of this file).
 // Returns the event, changed in place.
 export function scrubEvent(event) {
@@ -76,11 +84,21 @@ export function scrubEvent(event) {
   }
   if (typeof event.transaction === 'string') event.transaction = scrubUrl(event.transaction)
   if (Array.isArray(event.breadcrumbs)) event.breadcrumbs = event.breadcrumbs.map(scrubBreadcrumb).filter(Boolean)
-  for (const value of event.exception?.values || []) scrubFrames(value.stacktrace)
+  for (const value of event.exception?.values || []) {
+    scrubFrames(value.stacktrace)
+    if (typeof value.value === 'string') value.value = scrubMessage(value.value)
+  }
+  if (typeof event.message === 'string') event.message = scrubMessage(event.message)
+  if (event.logentry && typeof event.logentry.message === 'string') {
+    event.logentry = { message: scrubMessage(event.logentry.message) }
+  }
   for (const thread of event.threads?.values || []) scrubFrames(thread.stacktrace)
   // The device's and app's names and memory are not needed to fix an error.
   if (event.contexts) {
-    delete event.contexts.device?.name
+    if (event.contexts.device) {
+      const { type, family, model, arch } = event.contexts.device
+      event.contexts.device = Object.fromEntries(Object.entries({ type, family, model, arch }).filter(([, value]) => value !== undefined))
+    }
     delete event.contexts.app?.app_memory
     delete event.contexts.culture
     delete event.contexts.cloud_resource

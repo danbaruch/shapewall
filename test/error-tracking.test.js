@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { createApp, stopChildren } from '../src/server/app.js'
-import { errorSettingsFrom, scrubBreadcrumb, scrubEvent, scrubUrl } from '../src/error-scrub.js'
+import { errorSettingsFrom, scrubBreadcrumb, scrubEvent, scrubMessage, scrubUrl } from '../src/error-scrub.js'
 import { cspWithErrors, errorMeta } from '../src/error-tracking.js'
 import { request, sampleConfig, tempDir } from './helpers.js'
 
@@ -118,7 +118,11 @@ test('an event keeps the error and drops everything that could be content or ide
         },
       ],
     },
-    contexts: { os: { name: 'Linux' }, device: { name: 'Dans-Phone' }, culture: { timezone: 'X' } },
+    contexts: {
+      os: { name: 'Linux' },
+      device: { name: 'Dans-Phone', arch: 'x64', boot_time: '2026-11-06T12:59:51Z', memory_size: 33340440576, cpu_description: 'CPU X' },
+      culture: { timezone: 'X' },
+    },
   })
   assert.equal(event.user, undefined)
   assert.equal(event.server_name, undefined)
@@ -135,7 +139,7 @@ test('an event keeps the error and drops everything that could be content or ide
   assert.equal(frame.vars, undefined)
   assert.equal(frame.filename, '/assets/a.js')
   assert.equal(event.contexts.os.name, 'Linux')
-  assert.equal(event.contexts.device.name, undefined)
+  assert.deepEqual(event.contexts.device, { arch: 'x64' })
   assert.equal(event.contexts.culture, undefined)
   const text = JSON.stringify(event)
   for (const needle of [
@@ -151,4 +155,19 @@ test('an event keeps the error and drops everything that could be content or ide
   ])
     assert.ok(!text.includes(needle), needle)
   assert.equal(scrubBreadcrumb(null), null)
+})
+
+test('error messages lose quoted input (JSON.parse quotes what failed to parse)', () => {
+  let message
+  try {
+    JSON.parse('{"comments": nope "my secret note"}')
+  } catch (error) {
+    message = error.message
+  }
+  assert.match(message, /my se/)
+  const event = scrubEvent({ exception: { values: [{ type: 'SyntaxError', value: message }] }, message: 'saw "my secret note"' })
+  assert.doesNotMatch(JSON.stringify(event), /my se|mments/)
+  assert.match(event.exception.values[0].value, /^Unexpected token/)
+  assert.equal(scrubMessage('only "one quote and my secret'), 'only "[redacted]"')
+  assert.equal(scrubMessage("Cannot read properties of undefined (reading 'x')"), "Cannot read properties of undefined (reading 'x')")
 })
