@@ -4,7 +4,9 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { ttsWorker } from './scripts/vite-tts.js'
-import { appDefines, buildMetadata } from './scripts/build-info.js'
+import { appDefines, buildInfo, buildMetadata } from './scripts/build-info.js'
+import debugIds from './scripts/vite-debug-ids.mjs'
+import sourcemapsStep from './scripts/vite-sourcemaps-step.mjs'
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url))
 
@@ -30,12 +32,17 @@ export default defineConfig({
         handler: (html) => html.replaceAll('/_console/', './').replace(/\s*<meta name="sw-nonce"[^>]*>/, ''),
       },
     },
+    // Demo only (not the package build): hidden source maps with debug ids for our GlitchTip, uploaded for the
+    // release the demo reports (client/src/lib/error-tracking.js) when website/deploy/deploy.sh asks, always deleted.
+    debugIds(),
+    sourcemapsStep({ release: buildInfo.revision.slice(0, 7) }),
   ],
   worker: ttsWorker(),
   build: {
     outDir: '../dist/demo-app',
     emptyOutDir: true,
     chunkSizeWarningLimit: 1200,
+    sourcemap: 'hidden',
     rollupOptions: {
       input: { index: path.join(ROOT, 'client', 'index.html'), console: path.join(ROOT, 'client', 'console.html') },
     },

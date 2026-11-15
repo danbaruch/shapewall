@@ -3,6 +3,8 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { markdown } from './scripts/markdown.mjs'
+import debugIds from '../scripts/vite-debug-ids.mjs'
+import sourcemapsStep from '../scripts/vite-sourcemaps-step.mjs'
 
 // The site is prerendered: `vite build` (client), `vite build --ssr src/entry-server.jsx` (renderer), then
 // scripts/prerender.mjs writes one HTML file per route into dist/. Docs pages are markdown in src/docs/, turned
@@ -24,9 +26,12 @@ try {
   revision = ''
 }
 
-export default defineConfig({
+// Readable stack traces in our GlitchTip: the browser build makes hidden source maps with debug ids, uploads them
+// for `revision` when deploy/deploy.sh asks (SHAPEWALL_SOURCEMAPS=1) and always deletes them before anything ships.
+// The prerender (--ssr) build makes none.
+export default defineConfig(({ isSsrBuild }) => ({
   base: '/',
-  plugins: [markdown(), react(), tailwindcss()],
+  plugins: [markdown(), react(), tailwindcss(), debugIds(), sourcemapsStep({ release: revision })],
   // The launch switch, read by src/launch.js.
   // __SHAPEWALL_STEALTH__ lets client-side navigation keep the robots tag the prerender wrote (src/components/layout.jsx).
   define: {
@@ -41,5 +46,6 @@ export default defineConfig({
     target: 'es2022',
     modulePreload: { polyfill: false },
     assetsInlineLimit: 0,
+    sourcemap: isSsrBuild ? false : 'hidden',
   },
-})
+}))
