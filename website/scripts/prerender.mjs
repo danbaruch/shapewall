@@ -45,6 +45,10 @@ const analytics = umamiId
   ? `<script>if(location.hostname===${JSON.stringify(SITE_HOST)}){window.__shapewallAnalytics=true;const u=document.createElement('script');u.defer=true;u.src='/umami/script.js';u.dataset.websiteId=${JSON.stringify(umamiId)};u.dataset.domains=${JSON.stringify(SITE_HOST)};u.dataset.doNotTrack='true';document.head.append(u);}</script>`
   : ''
 
+// The error tracker a build with SHAPEWALL_ERROR_DSN reports to (src/errors.js): its origin, for connect-src.
+const errorDsn = (process.env.SHAPEWALL_ERROR_DSN || '').trim()
+const errorOrigin = errorDsn ? new URL(errorDsn).origin : ''
+
 // Content-Security-Policy as a meta tag. Inline scripts (the analytics loader) are allowed by hash. Cloudflare Web
 // Analytics, which Cloudflare adds to the pages it serves for shapewall.com, gets its one script host and its one
 // reporting host, nothing wider.
@@ -58,7 +62,7 @@ function withCsp(html) {
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data:",
     "font-src 'self'",
-    "connect-src 'self' https://cloudflareinsights.com",
+    `connect-src 'self' https://cloudflareinsights.com ${errorOrigin}`.trim(),
     "manifest-src 'self'",
     "worker-src 'self'",
     "object-src 'none'",

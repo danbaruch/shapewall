@@ -3,6 +3,14 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+- **Opt-in error reports for your own server.** Set `SHAPEWALL_ERROR_DSN` (any Sentry-compatible DSN: Sentry, GlitchTip) and
+  `shapewall serve` or `shapewall hosted` reports its unhandled errors there, and the pages it serves report browser errors to the
+  same place. Off by default: without the variable the SDK is never loaded and nothing is sent, and Shapewall has no DSN of its own.
+  Reports carry the error, stack trace, URL path, browser and release, never content, request bodies, cookies, query strings or
+  identities. See [Error reports](docs/deployment.md#error-reports-opt-in).
+
 ## 0.7.3 - 2026-11-14
 
 - Clicking a comment in the right-hand rail always takes you to that comment. When the current view was hiding the comment's card

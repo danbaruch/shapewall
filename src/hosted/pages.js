@@ -12,6 +12,7 @@ import { readPublic } from './public.js'
 import { readGuest } from './shares.js'
 import { roleIn, tenant } from './tenancy.js'
 import { TURNSTILE_ORIGIN } from './turnstile.js'
+import { cspWithErrors, errorMeta } from '../error-tracking.js'
 
 const CONSOLE_CSP =
   "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'"
@@ -26,18 +27,20 @@ const removeWorker = (req, res) => {
     )
 }
 
-export function mountPages(app, { db, dataDir, consoleDir, clientDir, turnstile, sessionOf, BOARD_PAGE_CSP, deps }) {
+export function mountPages(app, { db, dataDir, consoleDir, clientDir, turnstile, sessionOf, BOARD_PAGE_CSP, deps, errorTracking = null }) {
   // ---- Pages: the console and the board client ----
   // The console page gets a fresh nonce per response: the only inline thing
   // it allows is a <style> element that the dialog's scroll lock adds with
   // that nonce. Scripts come from 'self' only.
   const consoleFile = path.join(consoleDir, 'console.html')
-  const consoleHtml = fs.existsSync(consoleFile) ? fs.readFileSync(consoleFile, 'utf8') : null
+  // Opt-in error reports: a <meta> tag tells the page (src/error-tracking.js).
+  const withErrors = (html) => (html && errorTracking ? html.replace('</head>', `${errorMeta(errorTracking)}</head>`) : html)
+  const consoleHtml = withErrors(fs.existsSync(consoleFile) ? fs.readFileSync(consoleFile, 'utf8') : null)
   const sendConsole = (req, res, status = 200) => {
     if (!consoleHtml) return res.status(status).type('text').send('The Shapewall console is not built yet. Run "npm run build".')
     res.status(status)
     const nonce = randomToken(18)
-    let csp = CONSOLE_CSP.replace("style-src 'self'", `style-src 'self' 'nonce-${nonce}'`)
+    let csp = cspWithErrors(CONSOLE_CSP, errorTracking).replace("style-src 'self'", `style-src 'self' 'nonce-${nonce}'`)
     // The bot check's widget, only on a server that has one.
     if (turnstile)
       csp = csp
@@ -71,6 +74,8 @@ export function mountPages(app, { db, dataDir, consoleDir, clientDir, turnstile,
     app.get(route, (req, res) => sendConsole(req, res))
 
   const clientBuilt = fs.existsSync(path.join(clientDir, 'index.html'))
+  const boardHtml = clientBuilt && errorTracking ? withErrors(fs.readFileSync(path.join(clientDir, 'index.html'), 'utf8')) : null
+  const sendBoard = (res) => (boardHtml ? res.type('html').send(boardHtml) : res.sendFile('index.html', { root: clientDir }))
   // The client's own files under each project path; they hold no data.
   // The board's offline service worker caches the app shell; hosted boards
   // sit behind a session, so this one only removes itself.
@@ -103,7 +108,7 @@ export function mountPages(app, { db, dataDir, consoleDir, clientDir, turnstile,
     res.setHeader('Content-Security-Policy', BOARD_PAGE_CSP)
     res.setHeader('X-Frame-Options', 'DENY')
     res.setHeader('Cache-Control', 'no-cache')
-    res.sendFile('index.html', { root: clientDir })
+    sendBoard(res)
   })
 
   // A public project's board: the same client on the view-only API. No
@@ -124,7 +129,7 @@ export function mountPages(app, { db, dataDir, consoleDir, clientDir, turnstile,
     res.setHeader('Content-Security-Policy', BOARD_PAGE_CSP)
     res.setHeader('X-Frame-Options', 'DENY')
     res.setHeader('Cache-Control', 'no-store')
-    res.sendFile('index.html', { root: clientDir })
+    sendBoard(res)
   })
 
   // A share link's board: the same client, for a guest with the cookie that
@@ -145,6 +150,6 @@ export function mountPages(app, { db, dataDir, consoleDir, clientDir, turnstile,
     res.setHeader('Content-Security-Policy', BOARD_PAGE_CSP)
     res.setHeader('X-Frame-Options', 'DENY')
     res.setHeader('Cache-Control', 'no-store')
-    res.sendFile('index.html', { root: clientDir })
+    sendBoard(res)
   })
 }

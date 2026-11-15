@@ -12,9 +12,13 @@ import './nonce'
 import { lazy, StrictMode, Suspense } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App'
+import { startErrorTracking } from '../lib/error-tracking'
 import '../lib/theme'
 import '../lib/scrollbars'
 import './console.css'
+
+// Opt-in, off unless the page says so (src/error-tracking.js).
+startErrorTracking()
 
 const LocalConsole = __SHAPEWALL_DEMO__ ? null : lazy(() => import('./LocalConsole'))
 const LocalAccountsApp = __SHAPEWALL_DEMO__ ? null : lazy(() => import('./LocalAccountsApp'))
