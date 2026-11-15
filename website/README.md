@@ -51,6 +51,11 @@ To launch:
 
 To go back: `website/deploy/deploy.sh rollback` swaps to the previous release.
 
+Error reports from the site and the demo carry readable stack traces: their builds make hidden source maps with debug ids
+(`../scripts/vite-debug-ids.mjs`), and `deploy.sh` uploads them to our GlitchTip (`SHAPEWALL_SOURCEMAPS=1`, the default there, with
+`GLITCHTIP_UPLOAD_ENV` naming a KEY=value file outside the repository that holds the upload settings and token). Every `.map` is deleted from the build before anything ships,
+with or without an upload. The Shapewall package build does none of this.
+
 `NPM_PUBLISHED` in `src/launch.js` decides whether the marketing pages and the Getting started page install `shapewall` from the
 registry (`true`) or from GitHub (`false`). The root `README.md` and `docs/` write the registry install, with GitHub as the
 alternative for unreleased builds.
