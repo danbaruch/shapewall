@@ -747,7 +747,8 @@ and links to private hosts are removed. Screenshots show exactly what the page s
 **Can I use Firefox or WebKit?** No. Captures use Chromium, and thumbnails use a Chromium DevTools call.
 
 **Does it send anything anywhere?** Not by itself: there is no account and no telemetry. Captures load your pages; an agent endpoint,
-notifications, GitHub connect or a team server you set up receive what you send them.
+notifications, GitHub connect, a team server or an [error tracker](docs/deployment.md#error-reports-opt-in) you set up receive what you
+send them.
 
 **Where is my data?** In `outputDir` (default `.shapewall/`): PNGs, HTML snapshots, `manifest.json`, `comments.json`, `variants.json`,
 `journeys.json`, previous captures in `versions/`, other environments in `envs/`, cached diffs in `diffs/` and `agent/` (what

@@ -2,9 +2,13 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App'
 import { registerServiceWorker } from './lib/pwa'
+import { startErrorTracking } from './lib/error-tracking'
 import './lib/theme'
 import './lib/scrollbars'
 import './styles.css'
+
+// Opt-in, off unless the page says so (src/error-tracking.js).
+startErrorTracking()
 
 const start = () =>
   createRoot(document.getElementById('root')).render(
