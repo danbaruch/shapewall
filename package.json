@@ -29,6 +29,7 @@
     "THIRD_PARTY.md",
     "CHANGELOG.md",
     "Dockerfile.agent",
+    "docs/README.md",
     "docs/agent-hardening.md",
     "docs/agent-recipes.md",
     "docs/agent-workflow.md",
