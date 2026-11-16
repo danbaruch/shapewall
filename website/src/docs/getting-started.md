@@ -152,15 +152,18 @@ browser takes neither.
 
 ### Dictation
 
-The microphone button under a new comment, a reply or an edit turns speech into text, in Chrome, Edge and Safari (Firefox has no
-speech recognition, so there is no button there). Press it and talk: the words appear at the caret as you speak, or replace the
-text you selected, and settle as the browser is sure of them. Keep typing whenever you like. Press it again, or Esc, to stop;
-posting, closing the comment and switching to another tab stop it too. Nothing is posted until you post it. It listens in your
-browser's language.
+The microphone next to Post (or the send arrow) in the new comment, reply and edit boxes turns speech into text, in Chrome, Edge
+and Safari (Firefox has no speech recognition, so there is no microphone there). Press it once and talk: the microphone fills, the
+box's border takes the same colour and an empty box reads "Listening...". Nothing around it moves. Then the words appear at the
+caret as you speak, or replace the text you selected, and settle as the browser is sure of them. Keep typing whenever you like.
+Press it again, or Esc, to stop; posting, closing the comment and switching to another tab stop it too, and so do 30 seconds of
+quiet. Nothing is posted until you post it. It listens in your browser's language. If something goes wrong (a blocked or missing
+microphone, no speech, no network) a short note appears at the microphone (on a phone, across the top of the sheet) and goes by
+itself.
 
 The transcription is done by your browser's own speech service, not by Shapewall: in Chrome the audio goes to Google, in Safari to
-Apple. Shapewall never receives or stores the audio, only the text you post. That is why it only starts from a press, and the
-first press says so once before anything listens. On a phone, the keyboard's own microphone works as well.
+Apple. Shapewall never receives or stores the audio, only the text you post. It only starts from a press, and the microphone's
+tooltip says who does the transcribing. On a phone, the keyboard's own microphone works as well.
 
 ## Fix a comment with your agent
 

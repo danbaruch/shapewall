@@ -1,14 +1,5 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useReducer, useRef } from 'react'
-import {
-  DICTATION_IDLE,
-  DICTATION_SEEN_KEY,
-  dictationLang,
-  isActive,
-  nextDictation,
-  spliceSpeech,
-  spokenText,
-  transcriptParts,
-} from '../dictation'
+import { DICTATION_IDLE, bubbleMs, dictationLang, isActive, nextDictation, spliceSpeech, spokenText, transcriptParts } from '../dictation'
 
 // Dictation for one comment field (the composer, a reply, an edit): the
 // browser's speech recognition writes at the caret, the words still being
@@ -33,26 +24,6 @@ export function dictationSupported() {
     supported = true
   }
   return supported
-}
-
-// The privacy line is shown once per browser. Storage blocked (a private
-// window): once per page load instead.
-let seenHere = false
-export function dictationSeen() {
-  if (seenHere) return true
-  try {
-    return window.localStorage.getItem(DICTATION_SEEN_KEY) === '1'
-  } catch {
-    return false
-  }
-}
-function markSeen() {
-  seenHere = true
-  try {
-    window.localStorage.setItem(DICTATION_SEEN_KEY, '1')
-  } catch {
-    /* storage blocked: remembered for this page load */
-  }
 }
 
 const START_MS = 15000
@@ -185,22 +156,10 @@ export function useCommentDictation({ value, setValue, inputRef, max = Infinity 
       dispatch({ type: 'press' })
       return stop(session.current)
     }
-    if (state.status === 'asking') return dispatch({ type: 'press' })
-    const seen = dictationSeen()
-    dispatch({ type: 'press', seen })
-    if (seen) begin()
-  }
-  // Start and Not now leave with the note: the caret goes back to the field.
-  const consent = () => {
-    markSeen()
-    dispatch('consent')
+    dispatch({ type: 'press' })
     begin()
-    inputRef.current?.focus({ preventScroll: true })
   }
-  const decline = () => {
-    dispatch('decline')
-    inputRef.current?.focus({ preventScroll: true })
-  }
+  const dismiss = () => dispatch('dismiss')
 
   // The person typed while listening: their text stands, and the next words
   // go where their caret is now. What was still being heard stays as shown.
@@ -242,21 +201,27 @@ export function useCommentDictation({ value, setValue, inputRef, max = Infinity 
     if (next.caret >= next.value.length - 1) element.scrollTop = element.scrollHeight
   }, [value, inputRef])
 
-  // Esc stops dictation first (or answers "Not now"); a second Esc does what
-  // it always did. Read in the capture phase, before the popover or sheet.
-  const asking = state.status === 'asking'
+  // Esc stops dictation first; a second Esc does what it always did. Read in
+  // the capture phase, before the popover or sheet.
   useEffect(() => {
-    if (!active && !asking) return undefined
+    if (!active) return undefined
     const onKey = (event) => {
       if (event.key !== 'Escape' || event.isComposing) return
       event.preventDefault()
       event.stopImmediatePropagation()
       if (session.current) end(session.current, 'cancel')
-      else dispatch('decline')
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [active, asking, end])
+  }, [active, end])
+
+  // A bubble at the microphone goes by itself once there was time to read it.
+  const notice = !active ? state.notice : null
+  useEffect(() => {
+    if (!notice) return undefined
+    const timer = setTimeout(() => dispatch('dismiss'), bubbleMs(notice))
+    return () => clearTimeout(timer)
+  }, [notice])
 
   // A hidden tab or a page being left never keeps the microphone.
   useEffect(() => {
@@ -287,13 +252,14 @@ export function useCommentDictation({ value, setValue, inputRef, max = Infinity 
   return {
     supported: dictationSupported(),
     noteId,
-    // The note, for aria-describedby only while it says something.
+    // The spoken status, for aria-describedby only while it says something.
     describedBy: dictationSupported() && (state.status !== 'idle' || state.notice) ? noteId : undefined,
     state,
     active,
+    // The bubble at the microphone (an error, or "stopped by itself").
+    bubble: notice,
     toggle,
-    consent,
-    decline,
+    dismiss,
     cancel,
     onInput,
     fieldProps: { onMouseUp: follow, onKeyUp: follow },

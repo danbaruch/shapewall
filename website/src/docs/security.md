@@ -177,7 +177,7 @@ What these protections do not cover:
   project files, on a branch, in a throwaway folder, pushed for review. Not commands, and not the checkout. Give the agent a
   restricted profile, prefer `--approvals owner`, review the pull request like any other, and do not add `--allow-path` for CI
   files. See [agent hardening](/docs/agent-hardening#edits-from-a-hosted-board).
-- **Dictation is the browser's.** The microphone under a comment uses the browser's speech recognition, which in Chrome sends the
+- **Dictation is the browser's.** The microphone in a comment field uses the browser's speech recognition, which in Chrome sends the
   audio to Google's speech service. Shapewall never sees the audio. Only the board page itself may use the microphone
   (`Permissions-Policy: microphone=(self)`); every other response, live HTML snapshots included, sends `microphone=()`, and
   snapshots run in a script-free sandboxed frame. A hosted board's view-only share link and public boards keep it off.

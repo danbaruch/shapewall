@@ -208,7 +208,10 @@ a kit `HoverCard`. Resolved threads are hidden by the Open filter, which is the 
 
 C (or the Comment tool, in the board tools at the bottom of the canvas, or Comment on the selected page's bar, which also names that page in the hint) turns comment mode on; a click drops a draft pin and an inline composer (`ComposerPopover`) opens beside
 it: Enter posts, Shift+Enter adds a line, Esc cancels and stays in comment mode, @ suggests people. The composer, the reply box and
-the edit box have a microphone where the browser has speech recognition (`client/src/board/DictationButton.jsx`): the browser's
+the edit box share one composer box (`client/src/board/ComposerBox.jsx`: the text on top, growing with it to a
+maximum and then scrolling, `client/src/lib/useAutoGrow.js`; tools, microphone and send in a row along its bottom). The
+microphone is there where the browser has speech recognition
+(`client/src/board/DictationButton.jsx`; listening and errors never move the layout, an error is a bubble at the microphone): the browser's
 `SpeechRecognition` writes at the caret, the rules for joining words to the text around them and the session states are pure
 (`client/src/board/dictation.js`, tested in `test/comment-dictation.test.js`), and `hooks/useCommentDictation.js` drives one
 recognizer at a time and releases it on posting, Esc, unmount and a hidden tab. Shapewall never receives the audio; the browser's

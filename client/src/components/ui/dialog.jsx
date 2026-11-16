@@ -89,6 +89,7 @@ export function Dialog({
               back ? 'pl-2' : 'pl-5',
               wrapDescription ? 'items-start' : 'items-center',
             )}
+            data-sw-dialog-header="true"
           >
             {back ? (
               <DialogPrimitive.Close

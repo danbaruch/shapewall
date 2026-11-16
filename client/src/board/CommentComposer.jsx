@@ -6,8 +6,14 @@ import { cn } from '../lib/utils'
 import { COMMENT_MAX, sendsOnEnter } from './commentInput'
 import { AttachButton, ComposerImages, DrawSheet, DrawTools, imageDropProps } from './CommentMedia'
 import { useDrawing } from './drawing'
-import { DictationButton, DictationNote } from './DictationButton'
+import { DictationButton, DictationStatus, dictationPlaceholder } from './DictationButton'
+import { ComposerBox, composerFieldClass } from './ComposerBox'
 import { useCommentDictation } from './hooks/useCommentDictation'
+
+// The field grows with its text (wrapped lines too) up to eight lines, then
+// scrolls (lib/useAutoGrow.js).
+const GROW = { min: 2, max: 8 }
+const GROW_TOUCH = { min: 3, max: 8 }
 
 // A new comment: the text (Enter posts, Shift+Enter is a new line, Escape
 // cancels), and on a local board the name it is signed with. `media` (from
@@ -16,7 +22,10 @@ import { useCommentDictation } from './hooks/useCommentDictation'
 // the screenshot the phone draws on in a full sheet).
 // `discard` ({ onDiscard, onKeep }): Esc was pressed on a comment that holds a
 // drawing or images, so the composer asks before dropping that work.
-// The microphone (DictationButton.jsx) writes at the caret; posting stops it.
+// One composer box (ComposerBox.jsx): the text on top, growing with it; the
+// image and drawing tools, the microphone (DictationButton.jsx, it writes at
+// the caret; posting stops it) and Post along its bottom. The name, the keys
+// and Cancel sit under the box.
 export function CommentComposer({
   draft,
   onChange,
@@ -34,7 +43,6 @@ export function CommentComposer({
   startDraw = false,
 }) {
   const body = draft?.body || ''
-  const lines = Math.min(8, Math.max(touch ? 3 : 2, body.split('\n').length))
   const [sheet, setSheet] = useState(false)
   const drawable = Boolean(touch && media?.draw && media?.page)
   useEffect(() => {
@@ -52,7 +60,8 @@ export function CommentComposer({
     dictation.cancel()
     onSubmit()
   }
-  const mic = <DictationButton dictation={dictation} touch={touch} disabled={busy} />
+  const near = body.length > COMMENT_MAX - 200
+  const signed = Boolean(hosted && signedInAs)
   const describedBy = [images?.error ? 'sw-composer-image-error' : null, dictation.describedBy].filter(Boolean)
   return (
     <form
@@ -76,69 +85,84 @@ export function CommentComposer({
           {description}
         </p>
       ) : null}
-      <label className="block">
-        <span className="sr-only">Comment</span>
-        <MentionTextarea
-          size={touch ? 'touch' : 'sm'}
-          rows={lines}
-          value={body}
-          people={people}
-          className="resize-none"
-          onChange={(value) => {
-            const text = value.slice(0, COMMENT_MAX)
-            dictation.onInput(text)
-            onChange({ body: text })
-          }}
-          onKeyDown={(event) => {
-            if (sendsOnEnter(event, touch)) {
-              event.preventDefault()
-              post()
-            }
-          }}
-          inputRef={input}
-          {...dictation.fieldProps}
-          autoFocus
-          placeholder="Add a comment. @ to mention someone or @agent"
-          aria-describedby={describedBy.length ? describedBy.join(' ') : undefined}
-          data-sw-comment-input="true"
-        />
-      </label>
-      <DictationNote dictation={dictation} touch={touch} id={dictation.noteId} />
-      {canAttach ? <ComposerImages draft={images} touch={touch} id="sw-composer-image-error" /> : null}
-      {canAttach || canDraw || media?.attachNote || dictation.supported ? (
-        <div className="flex flex-wrap items-center gap-0.5" data-sw-composer-media="true">
-          {canDraw && !touch ? (
-            <DrawTools
-              owner="composer"
-              touch={false}
-              compact
-              className="flex-1"
-              leading={
-                canAttach || dictation.supported ? (
-                  <>
-                    {canAttach ? <AttachButton draft={images} touch={false} disabled={busy} /> : null}
-                    {mic}
-                  </>
-                ) : null
-              }
-            />
-          ) : (
-            <>
-              {canAttach ? <AttachButton draft={images} touch={touch} disabled={busy} /> : null}
-              {mic}
-            </>
-          )}
-          {canDraw && touch && media.page ? (
-            <Button size="touch" variant="ghost" onClick={() => setSheet(true)} data-sw-draw-open="true">
-              <Brush size={16} aria-hidden="true" /> {shapes ? `Drawing (${shapes})` : 'Draw on the page'}
+      <ComposerBox
+        touch={touch}
+        listening={dictation.active}
+        toolsProps={{ 'data-sw-composer-media': 'true' }}
+        tools={
+          <>
+            {canDraw && !touch ? (
+              <DrawTools
+                owner="composer"
+                touch={false}
+                compact
+                className="flex-1"
+                leading={canAttach ? <AttachButton draft={images} touch={false} disabled={busy} /> : null}
+              />
+            ) : canAttach ? (
+              <AttachButton draft={images} touch={touch} disabled={busy} />
+            ) : null}
+            {canDraw && touch && media.page ? (
+              <Button size="touch" variant="ghost" className="min-w-0 px-2.5" onClick={() => setSheet(true)} data-sw-draw-open="true">
+                <Brush size={16} aria-hidden="true" />
+                <span className="truncate">{shapes ? `Drawing (${shapes})` : 'Draw on the page'}</span>
+              </Button>
+            ) : null}
+          </>
+        }
+        actions={
+          <>
+            <DictationButton dictation={dictation} touch={touch} disabled={busy} bubbleSide="top" />
+            <Button
+              size={touch ? 'touch' : 'xs'}
+              variant="default"
+              type="submit"
+              disabled={busy || reading || (!body.trim() && !shapes && !images?.images.length)}
+              data-sw-save-comment="true"
+            >
+              {busy ? (images?.images.length ? 'Uploading...' : 'Posting...') : 'Post'}
             </Button>
-          ) : null}
-          {media?.attachNote ? (
-            <p className="w-full text-caption text-faint" data-sw-attach-note="true">
-              {media.attachNote}
-            </p>
-          ) : null}
-        </div>
+          </>
+        }
+      >
+        <label className="block">
+          <span className="sr-only">Comment</span>
+          <MentionTextarea
+            size={touch ? 'touch' : 'sm'}
+            grow={touch ? GROW_TOUCH : GROW}
+            value={body}
+            people={people}
+            className={composerFieldClass(touch)}
+            onChange={(value) => {
+              const text = value.slice(0, COMMENT_MAX)
+              dictation.onInput(text)
+              onChange({ body: text })
+            }}
+            onKeyDown={(event) => {
+              if (sendsOnEnter(event, touch)) {
+                event.preventDefault()
+                post()
+              }
+            }}
+            inputRef={input}
+            {...dictation.fieldProps}
+            autoFocus
+            placeholder={dictationPlaceholder(dictation, 'Add a comment. @ to mention')}
+            aria-describedby={describedBy.length ? describedBy.join(' ') : undefined}
+            data-sw-comment-input="true"
+          />
+        </label>
+        <DictationStatus dictation={dictation} id={dictation.noteId} />
+        {canAttach ? (
+          <div className="px-2.5 empty:hidden">
+            <ComposerImages draft={images} touch={touch} id="sw-composer-image-error" />
+          </div>
+        ) : null}
+      </ComposerBox>
+      {media?.attachNote ? (
+        <p className="text-caption text-faint" data-sw-attach-note="true">
+          {media.attachNote}
+        </p>
       ) : null}
       {touch && canDraw && media.page ? (
         <DrawSheet
@@ -181,43 +205,39 @@ export function CommentComposer({
             Keep
           </Button>
         </div>
-      ) : touch ? null : (
-        <p className="flex items-center gap-1 overflow-hidden text-[11px] whitespace-nowrap text-faint" data-sw-composer-keys="true">
-          <Kbd>Enter</Kbd> posts, <Kbd>Shift</Kbd>+<Kbd>Enter</Kbd> new line, <Kbd>Esc</Kbd> cancels
-        </p>
+      ) : (
+        // Under the box: who it is signed as (or the length near the limit),
+        // the keys on a desktop, and Cancel.
+        <div className="flex items-center gap-2">
+          <div className="min-w-0 flex-1 text-[11px] text-faint">
+            {near ? (
+              <span className="tabular">
+                {body.length}/{COMMENT_MAX}
+              </span>
+            ) : signed ? (
+              <p className="truncate">As {signedInAs}</p>
+            ) : null}
+            {touch || near ? null : (
+              <p className="flex items-center gap-1 overflow-hidden whitespace-nowrap" data-sw-composer-keys="true">
+                <Kbd>Enter</Kbd> posts, <Kbd>Shift</Kbd>+<Kbd>Enter</Kbd> new line, <Kbd>Esc</Kbd> cancels
+              </p>
+            )}
+          </div>
+          <Button
+            size={touch ? 'touch' : 'xs'}
+            variant="ghost"
+            className="self-end"
+            onClick={() => {
+              dictation.cancel()
+              onCancel()
+            }}
+            disabled={busy}
+            data-sw-composer-cancel="true"
+          >
+            Cancel
+          </Button>
+        </div>
       )}
-      <div className="flex items-center gap-2">
-        <p className="min-w-0 flex-1 truncate text-[11px] text-faint">
-          {body.length > COMMENT_MAX - 200 ? (
-            <span className="tabular">
-              {body.length}/{COMMENT_MAX}
-            </span>
-          ) : hosted && signedInAs ? (
-            `As ${signedInAs}`
-          ) : null}
-        </p>
-        <Button
-          size={touch ? 'touch' : 'xs'}
-          variant="ghost"
-          onClick={() => {
-            dictation.cancel()
-            onCancel()
-          }}
-          disabled={busy}
-          data-sw-composer-cancel="true"
-        >
-          Cancel
-        </Button>
-        <Button
-          size={touch ? 'touch' : 'xs'}
-          variant="default"
-          type="submit"
-          disabled={busy || reading || (!body.trim() && !shapes && !images?.images.length)}
-          data-sw-save-comment="true"
-        >
-          {busy ? (images?.images.length ? 'Uploading...' : 'Posting...') : 'Post'}
-        </Button>
-      </div>
     </form>
   )
 }

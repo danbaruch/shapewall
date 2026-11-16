@@ -249,6 +249,8 @@
      and on the toolbar's Agent pill. Never larger than the thing itself. */
   --animate-breathe: breathe 1.8s ease-in-out infinite;
   --animate-pulse-ring: pulse-ring 1.4s cubic-bezier(0.2, 0, 0, 1) 3;
+  /* The microphone in a comment field while it listens: a soft halo, out and gone. */
+  --animate-dictate: dictate 1.6s cubic-bezier(0.2, 0, 0, 1) infinite;
   /* Loading placeholders (kit Skeleton). */
   --animate-shimmer: shimmer 1.6s ease-in-out infinite;
   /* A control that changed on its own (the viewport, when a comment opens on the other one). */
@@ -312,6 +314,14 @@
     }
     100% {
       box-shadow: 0 0 0 10px transparent;
+    }
+  }
+  @keyframes dictate {
+    0% {
+      box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 40%, transparent);
+    }
+    100% {
+      box-shadow: 0 0 0 6px transparent;
     }
   }
   @keyframes shimmer {

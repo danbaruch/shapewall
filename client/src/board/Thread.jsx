@@ -42,7 +42,8 @@ import { replyDraftKey, replyDrafts } from './replyDrafts'
 import { hasCommentMedia } from '../../../src/comment-fields.js'
 import { COMMENT_MAX, sendsOnEnter } from './commentInput'
 import { Reactions } from './Reactions'
-import { DictationButton, DictationNote } from './DictationButton'
+import { DictationButton, DictationStatus, dictationPlaceholder } from './DictationButton'
+import { ComposerBox, composerFieldClass } from './ComposerBox'
 import { useCommentDictation } from './hooks/useCommentDictation'
 import { viewportIcon } from './viewports'
 import SendToAgent from './SendToAgent'
@@ -62,6 +63,11 @@ import {
   replyAuthor,
   safeHttpUrl,
 } from './commentParts'
+
+// Reply and edit fields grow with their text, wrapped lines too, then scroll
+// (lib/useAutoGrow.js): a reply starts at one line, an edit at two.
+const REPLY_GROW = { min: 1, max: 6 }
+const EDIT_GROW = { min: 2, max: 8 }
 
 const withNote = (text, note) => (note ? `${text}, ${note}` : text)
 
@@ -119,48 +125,55 @@ function EditBox({ comment, busy, onSave, onCancel, touch, people }) {
   }
   return (
     <form className="mt-1 space-y-1.5" onSubmit={submit} data-sw-edit-form={comment.id}>
-      <label className="block">
-        <span className="sr-only">Edit comment {comment.id}</span>
-        <MentionTextarea
-          rows={3}
-          size={touch ? 'touch' : 'sm'}
-          value={body}
-          maxLength={COMMENT_MAX}
-          onChange={(value) => {
-            dictation.onInput(value)
-            setBody(value)
-          }}
-          people={people}
-          onKeyDown={(event) => {
-            if (sendsOnEnter(event, touch)) {
-              event.preventDefault()
-              submit()
-            }
-          }}
-          inputRef={input}
-          {...dictation.fieldProps}
-          aria-describedby={dictation.describedBy}
-          autoFocus
-        />
-      </label>
-      <DictationNote dictation={dictation} touch={touch} id={dictation.noteId} />
-      <div className="flex items-center justify-end gap-2">
-        <div className="mr-auto flex items-center">
-          <DictationButton dictation={dictation} touch={touch} disabled={busy} />
-        </div>
-        <Button size={touch ? 'touch' : 'xs'} variant="ghost" onClick={onCancel} disabled={busy} data-sw-edit-cancel={comment.id}>
-          Cancel
-        </Button>
-        <Button
-          size={touch ? 'touch' : 'xs'}
-          variant="default"
-          type="submit"
-          disabled={busy || (!body.trim() && !wordless)}
-          data-sw-edit-save={comment.id}
-        >
-          Save
-        </Button>
-      </div>
+      <ComposerBox
+        touch={touch}
+        listening={dictation.active}
+        actions={
+          <>
+            <DictationButton dictation={dictation} touch={touch} disabled={busy} />
+            <Button size={touch ? 'touch' : 'xs'} variant="ghost" onClick={onCancel} disabled={busy} data-sw-edit-cancel={comment.id}>
+              Cancel
+            </Button>
+            <Button
+              size={touch ? 'touch' : 'xs'}
+              variant="default"
+              type="submit"
+              disabled={busy || (!body.trim() && !wordless)}
+              data-sw-edit-save={comment.id}
+            >
+              Save
+            </Button>
+          </>
+        }
+      >
+        <label className="block">
+          <span className="sr-only">Edit comment {comment.id}</span>
+          <MentionTextarea
+            grow={EDIT_GROW}
+            size={touch ? 'touch' : 'sm'}
+            value={body}
+            className={composerFieldClass(touch)}
+            placeholder={dictation.active ? dictationPlaceholder(dictation) : undefined}
+            maxLength={COMMENT_MAX}
+            onChange={(value) => {
+              dictation.onInput(value)
+              setBody(value)
+            }}
+            people={people}
+            onKeyDown={(event) => {
+              if (sendsOnEnter(event, touch)) {
+                event.preventDefault()
+                submit()
+              }
+            }}
+            inputRef={input}
+            {...dictation.fieldProps}
+            aria-describedby={dictation.describedBy}
+            autoFocus
+          />
+        </label>
+        <DictationStatus dictation={dictation} id={dictation.noteId} />
+      </ComposerBox>
     </form>
   )
 }
@@ -211,7 +224,6 @@ function ReplyBox({ comment, busy, onReply, touch, people, autoFocus, askName = 
   const page = canDraw && touch ? media.pageImage?.(comment.pageId, comment.viewport) : null
   const input = useRef(null)
   const dictation = useCommentDictation({ value: body, setValue: setBody, inputRef: input, max: COMMENT_MAX })
-  const mic = <DictationButton dictation={dictation} touch={touch} disabled={busy} />
   const submit = async (event) => {
     event?.preventDefault()
     dictation.cancel()
@@ -239,12 +251,11 @@ function ReplyBox({ comment, busy, onReply, touch, people, autoFocus, askName = 
       if (signed) setAsking(false)
     }
   }
-  const lines = Math.min(6, Math.max(1, body.split('\n').length))
   const errorId = `sw-reply-image-error-${comment.id}`
   const describedBy = [images.error ? errorId : null, dictation.describedBy].filter(Boolean)
   return (
     <form
-      className="flex flex-wrap items-end gap-2 border-t border-line px-3 py-2"
+      className="flex flex-col gap-2 border-t border-line px-3 py-2"
       onSubmit={submit}
       {...imageDropProps(images, canAttach)}
       data-sw-reply-form={comment.id}
@@ -265,84 +276,87 @@ function ReplyBox({ comment, busy, onReply, touch, people, autoFocus, askName = 
           />
         </div>
       ) : null}
-      <label className="min-w-0 flex-1">
-        <span className="sr-only">Reply to comment {comment.id}</span>
-        <MentionTextarea
-          rows={lines}
-          size={touch ? 'touch' : 'sm'}
-          value={body}
-          maxLength={COMMENT_MAX}
-          onChange={(value) => {
-            dictation.onInput(value)
-            setBody(value)
-          }}
-          people={people}
-          className="resize-none"
-          placeholder={touch ? 'Reply' : 'Reply, @ to mention'}
-          onKeyDown={(event) => {
-            if (sendsOnEnter(event, touch)) {
-              event.preventDefault()
-              submit()
-            }
-          }}
-          inputRef={input}
-          {...dictation.fieldProps}
-          autoFocus={autoFocus}
-          aria-describedby={describedBy.length ? describedBy.join(' ') : undefined}
-          data-sw-reply-input={comment.id}
-        />
-      </label>
-      <IconButton
-        type="submit"
-        variant="default"
-        size={touch ? 'icon' : 'icon-sm'}
-        className="rounded-full"
-        disabled={busy || images.reading || (!body.trim() && !shapes && !images.images.length)}
-        label={busy && images.images.length ? 'Uploading the reply' : 'Send reply'}
-        data-sw-reply-send={comment.id}
+      <ComposerBox
+        touch={touch}
+        listening={dictation.active}
+        className="w-full"
+        toolsProps={{ 'data-sw-reply-media': comment.id }}
+        tools={
+          <>
+            {canDraw && !touch ? (
+              <DrawTools
+                owner={owner}
+                touch={false}
+                compact
+                className="flex-1"
+                leading={canAttach ? <AttachButton draft={images} touch={false} disabled={busy} /> : null}
+              />
+            ) : canAttach ? (
+              <AttachButton draft={images} touch={touch} disabled={busy} />
+            ) : null}
+            {canDraw && touch && page ? (
+              <Button size="touch" variant="ghost" className="min-w-0 px-2.5" onClick={() => setSheet(true)} data-sw-draw-open="true">
+                <Brush size={16} aria-hidden="true" />
+                <span className="truncate">{shapes ? `Drawing (${shapes})` : 'Draw on the page'}</span>
+              </Button>
+            ) : null}
+          </>
+        }
+        actions={
+          <>
+            <DictationButton dictation={dictation} touch={touch} disabled={busy} />
+            <IconButton
+              type="submit"
+              variant="default"
+              size={touch ? 'icon' : 'icon-sm'}
+              className="rounded-full"
+              disabled={busy || images.reading || (!body.trim() && !shapes && !images.images.length)}
+              label={busy && images.images.length ? 'Uploading the reply' : 'Send reply'}
+              data-sw-reply-send={comment.id}
+            >
+              <ArrowUp size={16} aria-hidden="true" />
+            </IconButton>
+          </>
+        }
       >
-        <ArrowUp size={16} aria-hidden="true" />
-      </IconButton>
-      <DictationNote dictation={dictation} touch={touch} id={dictation.noteId} className="w-full" />
-      {canAttach ? (
-        <div className="w-full">
-          <ComposerImages draft={images} touch={touch} id={errorId} />
-        </div>
-      ) : null}
-      {canAttach || canDraw || media?.attachNote || dictation.supported ? (
-        <div className="-mt-1 -ml-1 flex w-full flex-wrap items-center gap-0.5" data-sw-reply-media={comment.id}>
-          {canDraw && !touch ? (
-            <DrawTools
-              owner={owner}
-              touch={false}
-              compact
-              className="flex-1"
-              leading={
-                canAttach || dictation.supported ? (
-                  <>
-                    {canAttach ? <AttachButton draft={images} touch={false} disabled={busy} /> : null}
-                    {mic}
-                  </>
-                ) : null
+        <label className="block">
+          <span className="sr-only">Reply to comment {comment.id}</span>
+          <MentionTextarea
+            grow={REPLY_GROW}
+            size={touch ? 'touch' : 'sm'}
+            value={body}
+            maxLength={COMMENT_MAX}
+            onChange={(value) => {
+              dictation.onInput(value)
+              setBody(value)
+            }}
+            people={people}
+            className={composerFieldClass(touch)}
+            placeholder={dictationPlaceholder(dictation, touch ? 'Reply' : 'Reply, @ to mention')}
+            onKeyDown={(event) => {
+              if (sendsOnEnter(event, touch)) {
+                event.preventDefault()
+                submit()
               }
-            />
-          ) : (
-            <>
-              {canAttach ? <AttachButton draft={images} touch={touch} disabled={busy} /> : null}
-              {mic}
-            </>
-          )}
-          {canDraw && touch && page ? (
-            <Button size="touch" variant="ghost" onClick={() => setSheet(true)} data-sw-draw-open="true">
-              <Brush size={16} aria-hidden="true" /> {shapes ? `Drawing (${shapes})` : 'Draw on the page'}
-            </Button>
-          ) : null}
-          {media?.attachNote ? (
-            <p className="w-full px-1 text-caption text-faint" data-sw-attach-note="true">
-              {media.attachNote}
-            </p>
-          ) : null}
-        </div>
+            }}
+            inputRef={input}
+            {...dictation.fieldProps}
+            autoFocus={autoFocus}
+            aria-describedby={describedBy.length ? describedBy.join(' ') : undefined}
+            data-sw-reply-input={comment.id}
+          />
+        </label>
+        <DictationStatus dictation={dictation} id={dictation.noteId} />
+        {canAttach ? (
+          <div className="px-2.5 empty:hidden">
+            <ComposerImages draft={images} touch={touch} id={errorId} />
+          </div>
+        ) : null}
+      </ComposerBox>
+      {media?.attachNote ? (
+        <p className="w-full px-1 text-caption text-faint" data-sw-attach-note="true">
+          {media.attachNote}
+        </p>
       ) : null}
       {canDraw && touch && page ? (
         <DrawSheet open={sheet} onClose={() => setSheet(false)} owner={owner} src={page.src} native={page.native} title={media.pageTitle} />
