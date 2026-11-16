@@ -29,6 +29,7 @@ import {
   Notice,
   PageHeader,
   SecretResultDialog,
+  ShownOnceNotice,
   Time,
   useSecretResult,
 } from '../components'
@@ -358,9 +359,9 @@ export function CreateToken({ open, onClose, projects, projectId = null, onCreat
       doneProps={{ 'data-sw-token-done': true }}
       renderResult={(made) => (
         <>
-          <Notice tone="warn" title="Copy it now: it is shown once">
+          <ShownOnceNotice>
             Store it as SHAPEWALL_TOKEN in an environment variable or your CI secrets, never in a repository.
-          </Notice>
+          </ShownOnceNotice>
           <CopyField value={made.token} testId="token" />
           <div>
             <p className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-muted">

@@ -442,6 +442,17 @@ export function SignUp() {
   const [previewError, setPreviewError] = useState(null)
   const [handle, setHandle] = useState('')
   const [handleTouched, setHandleTouched] = useState(false)
+  // The server said the handle is someone else's: said under the field (until it is changed), which takes the focus.
+  const [taken, setTaken] = useState(null)
+  const handleField = useRef(null)
+  useEffect(() => {
+    if (taken) handleField.current?.focus()
+  }, [taken])
+  const tookHandle = (failure) => {
+    if (failure?.code !== 'handle_taken') return false
+    setTaken({ handle, message: failure.message })
+    return true
+  }
   const [name, setName] = useState('')
   const [workspaceName, setWorkspaceName] = useState('')
   const [workspaceEdited, setWorkspaceEdited] = useState(false)
@@ -505,7 +516,7 @@ export function SignUp() {
       await refresh()
       navigate(`/w/${result.workspaceId}`)
     } catch (failure) {
-      setError(failure instanceof ApiError ? failure.message : errorMessage(failure))
+      if (!tookHandle(failure)) setError(failure instanceof ApiError ? failure.message : errorMessage(failure))
       setBusy(false)
     }
   }
@@ -513,6 +524,7 @@ export function SignUp() {
   const suggested = name.trim() ? `${name.trim()}'s workspace` : ''
   const workspaceValue = workspaceEdited ? workspaceName : suggested
   const problem = handleProblem(handle)
+  const handleError = (taken?.handle === handle ? taken.message : null) || (handleTouched || handle.length >= 3 ? problem : null)
 
   const submit = async (event) => {
     event.preventDefault()
@@ -537,7 +549,7 @@ export function SignUp() {
       setup.forget()
       setDone(result)
     } catch (failure) {
-      setError(failure instanceof ApiError ? failure.message : errorMessage(failure))
+      if (!tookHandle(failure)) setError(failure instanceof ApiError ? failure.message : errorMessage(failure))
       // A bot check token works once: a new check for the next try.
       if (needsCheck) {
         setTurnstileToken(null)
@@ -601,16 +613,17 @@ export function SignUp() {
           <Field
             label="Handle"
             hint="Lowercase letters, digits and dashes, starting with a letter. People @mention you with it."
-            error={handleTouched || handle.length >= 3 ? problem : null}
+            error={handleError}
           >
             {(props) => (
               <Input
                 {...props}
+                ref={handleField}
                 size="touch"
                 value={handle}
                 onChange={(event) => setHandle(event.target.value.toLowerCase().replace(/\s+/g, '-'))}
                 onBlur={() => setHandleTouched(true)}
-                aria-invalid={problem && (handleTouched || handle.length >= 3) ? true : undefined}
+                aria-invalid={handleError ? true : undefined}
                 autoComplete="username"
                 autoCapitalize="none"
                 spellCheck={false}
@@ -663,7 +676,7 @@ export function SignUp() {
                 variant="default"
                 size="touch"
                 className="w-full text-[15px]"
-                disabled={busy || !handle || Boolean(problem) || !name || Boolean(previewError)}
+                disabled={busy || !handle || Boolean(problem) || taken?.handle === handle || !name || Boolean(previewError)}
                 onClick={joinByTailnet}
                 data-sw-signup-tailnet-submit
               >
@@ -700,6 +713,7 @@ export function SignUp() {
                 busy ||
                 !handle ||
                 Boolean(problem) ||
+                taken?.handle === handle ||
                 !name ||
                 Boolean(previewError) ||
                 !supportsPasskeys() ||

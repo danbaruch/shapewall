@@ -5,7 +5,19 @@
 import { useEffect, useState } from 'react'
 import { DoorOpen, Download, Globe, Link2, PencilLine, Trash2 } from 'lucide-react'
 import { Button, Input, Spinner } from '../../components/ui'
-import { Card, CardHeader, ConfirmDialog, Field, FormError, Notice, PageHeader, Switch, demoNote } from '../components'
+import {
+  Card,
+  CardHeader,
+  ConfirmDialog,
+  DangerButton,
+  DangerCard,
+  Field,
+  FormError,
+  Notice,
+  PageHeader,
+  Switch,
+  demoNote,
+} from '../components'
 import { DEMO } from '../../lib/demo'
 import { api, download, wsUrl, saying } from '../lib/api'
 import { useAction, useSession, useToast } from '../state'
@@ -192,28 +204,21 @@ export function SettingsSection() {
           </Card>
         ) : null}
 
-        <Card className="border-bad/30">
+        <DangerCard>
           <CardHeader
             icon={DoorOpen}
             title="Leave workspace"
             description={lastOwner ? 'You are the only owner. Make someone else an owner first.' : 'You lose access to every project here.'}
             actions={
-              <Button
-                size="touch"
-                variant="danger"
-                onClick={() => setLeaving(true)}
-                disabled={lastOwner}
-                className="border border-bad/40 lg:h-9"
-                data-sw-leave-workspace
-              >
+              <DangerButton onClick={() => setLeaving(true)} disabled={lastOwner} data-sw-leave-workspace>
                 Leave
-              </Button>
+              </DangerButton>
             }
           />
-        </Card>
+        </DangerCard>
 
         {isOwner ? (
-          <Card className="border-bad/30">
+          <DangerCard>
             <CardHeader
               icon={Trash2}
               title="Delete workspace"
@@ -223,16 +228,9 @@ export function SettingsSection() {
                   : 'The demo keeps this workspace, so there is always something to look at. On a real server, the owner deletes a workspace here.'
               }
               actions={
-                <Button
-                  size="touch"
-                  variant="danger"
-                  disabled={!deletable}
-                  onClick={() => setDeleting(true)}
-                  className="border border-bad/40 lg:h-9"
-                  data-sw-delete-workspace
-                >
+                <DangerButton disabled={!deletable} onClick={() => setDeleting(true)} data-sw-delete-workspace>
                   Delete workspace
-                </Button>
+                </DangerButton>
               }
             />
             {deletable ? (
@@ -240,7 +238,7 @@ export function SettingsSection() {
                 <Notice tone="info">Download a copy first (Export, above) if you may want any of it later.</Notice>
               </div>
             ) : null}
-          </Card>
+          </DangerCard>
         ) : null}
       </div>
 

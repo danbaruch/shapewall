@@ -1,7 +1,6 @@
 import { useRef, useState } from 'react'
 import { ShieldCheck, Trash2 } from 'lucide-react'
-import { Button } from '../../../components/ui'
-import { Card, CardHeader, ConfirmDialog, LoadError, Loading, Notice, demoNote } from '../../components'
+import { Card, CardHeader, ConfirmDialog, DangerButton, DangerCard, LoadError, Loading, Notice, demoNote } from '../../components'
 import { DEMO } from '../../../lib/demo'
 import { api, saying } from '../../lib/api'
 import { useAction, useSession } from '../../state'
@@ -43,15 +42,15 @@ export function DeleteAccount() {
       </Card>
     )
   return (
-    <Card data-sw-delete-account>
+    <DangerCard data-sw-delete-account>
       <CardHeader
         icon={Trash2}
         title="Delete account"
         description={demoNote('Removes your account, passkeys and sessions. Comments you wrote keep your name.')}
         actions={
-          <Button size="touch" variant="danger" onClick={start} disabled={DEMO} className="lg:h-9" data-sw-delete-account-open>
+          <DangerButton onClick={start} disabled={DEMO} data-sw-delete-account-open>
             Delete account
-          </Button>
+          </DangerButton>
         }
       />
       <ConfirmDialog
@@ -101,6 +100,6 @@ export function DeleteAccount() {
           </div>
         ) : null}
       </ConfirmDialog>
-    </Card>
+    </DangerCard>
   )
 }
