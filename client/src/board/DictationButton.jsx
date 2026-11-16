@@ -12,11 +12,13 @@ import { DICTATION_MESSAGES, DICTATION_STOP_TIP, DICTATION_TIP, dictationAnnounc
 // hooks/useCommentDictation.js; the rules are dictation.js.
 
 // What the field needs while dictation is possible: room on the right so
-// text never runs under the microphone, and the live accent while it listens.
+// text never runs under the microphone, no resize grip (it would sit under the
+// microphone), and the live accent while it listens.
 export function dictationFieldClass(dictation, touch) {
   if (!dictation.supported) return null
   return cn(
     touch ? 'pr-11' : 'pr-9',
+    'resize-none',
     'transition-[border-color,box-shadow] duration-(--motion-base) ease-out',
     dictation.active && 'border-accent ring-3 ring-accent/15',
   )
