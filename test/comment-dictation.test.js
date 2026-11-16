@@ -126,7 +126,7 @@ test('errors land on idle with a plain message; our own abort says nothing', () 
     assert.deepEqual(state, { status: 'idle', notice: code })
     assert.ok(DICTATION_MESSAGES[code].text.length > 10)
     assert.equal(DICTATION_MESSAGES[code].tone, 'error')
-    assert.doesNotMatch(DICTATION_MESSAGES[code].text, /—/, 'no em dashes')
+    assert.doesNotMatch(DICTATION_MESSAGES[code].text, /\u2014/, 'no em dashes')
   }
   assert.deepEqual(nextDictation(listening, { type: 'error', code: 'aborted' }), DICTATION_IDLE)
   assert.deepEqual(nextDictation(listening, { type: 'error', code: 'something-new' }), { status: 'idle', notice: 'failed' })
