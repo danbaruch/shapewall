@@ -5,13 +5,22 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
-- **Dictation lives in the comment field.** The microphone now sits inside the new comment, reply and edit fields, in the
-  bottom-right corner, like a chat app's (a quiet 28 px icon on desktop, a 44 px target on phones), and one press starts it: the
-  separate privacy step is gone, and the tooltip now says that your browser's speech service transcribes and Shapewall never
-  gets the audio. While it listens the microphone fills with the accent and pulses softly (no pulse with reduced motion), the
-  field's border takes the same accent and an empty field reads "Listening...". Errors are a small bubble at the microphone that
-  goes by itself or can be dismissed. Starting, listening, stopping and failing no longer move anything. The fields that dictate
-  drop the resize grip, which sat under the microphone.
+- **One composer box.** The new comment, reply and edit fields are now one rounded box each, like a chat app's: the text on top
+  and a row along the bottom inside the box with the image and drawing tools on the left and the microphone and Post (or the
+  send arrow, or Cancel and Save) on the right. The box takes the focus ring, and the accent ring while dictation listens.
+- **The text grows with what you write.** A reply starts at one line, a new comment at two (three on phones), an edit at two;
+  each grows as text wraps or new lines are added, typed, pasted or dictated, up to six lines for a reply and eight for a comment
+  or an edit, then scrolls with the caret in view. It shrinks back as text is deleted and returns to one line after posting.
+  Before, a wrapped reply stayed one line tall and its lines were cut off at the top and bottom.
+- **Dictation notes never cover Post or Cancel.** On a phone a dictation error is a slim notice across the top of the sheet,
+  clear of its close button; on a desktop the note sits above or below the box, never on its buttons. The new comment
+  placeholder is shorter ("Add a comment. @ to mention") so it fits on one line.
+- **Dictation lives in the comment box.** The microphone now sits inside the new comment, reply and edit boxes, beside Post,
+  like a chat app's (a quiet 28 px icon on desktop, a 44 px target on phones), and one press starts it: the separate privacy
+  step is gone, and the tooltip now says that your browser's speech service transcribes and Shapewall never gets the audio.
+  While it listens the microphone fills with the accent and pulses softly (no pulse with reduced motion), the field's border
+  takes the same accent and an empty field reads "Listening...". Errors are a small bubble at the microphone that goes by itself
+  or can be dismissed. Starting, listening, stopping and failing no longer move anything.
 
 ## 0.9.0 - 2026-11-16
 

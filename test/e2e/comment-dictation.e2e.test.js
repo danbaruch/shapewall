@@ -174,31 +174,90 @@ function assertSameLayout(before, after, label) {
     }
   }
 }
-// The microphone sits inside the field's border, in its bottom-right corner,
-// and the field keeps room on its right so text never runs under it.
+// One composer box: the microphone and the send button sit in the box's
+// action row, under the text (so text never runs under them), at its right,
+// centred on one line, send rightmost; the text area has no border of its own
+// and no resize grip.
 async function assertMicInField(page, form) {
   await settledLayout(page, form)
   const where = await page.$eval(form, (root) => {
-    const textarea = root.querySelector('textarea')
-    const face = root.querySelector('[data-sw-dictate-face]').getBoundingClientRect()
-    const box = textarea.getBoundingClientRect()
+    const rect = (element) => element.getBoundingClientRect().toJSON()
+    const box = root.querySelector('[data-sw-composer-box]')
+    const textarea = box.querySelector('textarea')
+    const send = box.querySelector('[data-sw-save-comment], [data-sw-reply-send], [data-sw-edit-save]')
     const style = getComputedStyle(textarea)
     return {
-      face: face.toJSON(),
-      box: box.toJSON(),
-      textRight: box.right - parseFloat(style.paddingRight) - parseFloat(style.borderRightWidth),
+      box: rect(box),
+      field: rect(textarea),
+      face: rect(box.querySelector('[data-sw-dictate-face]')),
+      button: rect(box.querySelector('[data-sw-dictate]')),
+      send: send ? rect(send) : null,
       resize: style.resize,
+      fieldBorder: parseFloat(style.borderTopWidth) + parseFloat(style.borderLeftWidth),
     }
   })
-  assert.ok(where.face.left >= where.box.left && where.face.right <= where.box.right, 'inside the field, left to right')
-  assert.ok(where.face.top >= where.box.top && where.face.bottom <= where.box.bottom, 'inside the field, top to bottom')
-  assert.ok(where.box.right - where.face.right <= 8, 'at the right edge')
-  assert.ok(where.box.bottom - where.face.bottom <= 8, 'at the bottom edge')
-  assert.ok(where.textRight <= where.face.left, 'text stops before the microphone')
-  assert.equal(where.resize, 'none', 'no resize grip under the microphone')
+  const inside = (inner, outer) =>
+    inner.left >= outer.left - 0.5 && inner.right <= outer.right + 0.5 && inner.top >= outer.top - 0.5 && inner.bottom <= outer.bottom + 0.5
+  assert.ok(inside(where.face, where.box), 'the microphone is inside the box')
+  assert.ok(where.send && inside(where.send, where.box), 'the send button is inside the box')
+  assert.ok(where.face.top >= where.field.bottom - 0.5, 'text never runs under the microphone')
+  assert.ok(where.send.left >= where.button.right - 0.5, 'send is right of the microphone')
+  assert.ok(where.box.right - where.send.right <= 8, 'send is at the right edge')
+  assert.ok(where.box.bottom - where.send.bottom <= 8, 'the row is at the bottom of the box')
+  const middle = (r) => (r.top + r.bottom) / 2
+  assert.ok(Math.abs(middle(where.face) - middle(where.send)) < 1, 'the microphone and send share one line')
+  assert.equal(where.resize, 'none', 'no resize grip')
+  assert.equal(where.fieldBorder, 0, 'the text area has no border of its own')
   return where
 }
 const placeholder = (page, selector) => page.getAttribute(selector, 'placeholder')
+
+// A message (bubble or phone notice) never sits on the form's Post or Cancel,
+// nor on a sheet's close button. Returns the message's box.
+async function assertClearOfActions(page, form, code, label) {
+  const boxes = await page.evaluate(
+    ({ form, code }) => {
+      const root = document.querySelector(form)
+      const box = (element) => (element ? element.getBoundingClientRect().toJSON() : null)
+      const actions = [
+        ...root.querySelectorAll(
+          '[data-sw-save-comment], [data-sw-reply-send], [data-sw-edit-save], [data-sw-composer-cancel], [data-sw-edit-cancel]',
+        ),
+      ]
+      const close = root.closest('[role="dialog"]')?.querySelector('[data-dialog-close]')
+      return {
+        message: box(document.querySelector(`[data-sw-dictation-bubble="${code}"]`)),
+        actions: actions.map((element) => ({ name: element.textContent.trim() || element.getAttribute('aria-label'), box: box(element) })),
+        close: box(close),
+      }
+    },
+    { form, code },
+  )
+  assert.ok(boxes.message, `${label}: the message is up`)
+  assert.ok(boxes.actions.length > 0, `${label}: the form has its actions`)
+  const meets = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom
+  for (const action of boxes.actions) {
+    assert.ok(!meets(boxes.message, action.box), `${label}: the message covers ${action.name}`)
+  }
+  if (boxes.close) assert.ok(!meets(boxes.message, boxes.close), `${label}: the message covers the sheet's close button`)
+  return boxes.message
+}
+// A dictation error raised in a form, checked clear of its actions, then
+// dismissed.
+async function errorClear(page, form, label, tap = false) {
+  const button = `${form} [data-sw-dictate]`
+  if (tap) await page.tap(button)
+  else await page.click(button)
+  await page.waitForSelector(`${button}[aria-pressed="true"]`)
+  await page.evaluate(() => window.__speech.fail('network'))
+  await page.waitForSelector(bubble('network'))
+  await page.waitForTimeout(250)
+  const message = await assertClearOfActions(page, form, 'network', label)
+  if (tap) await page.tap(`${bubble('network')} [data-sw-dictation-dismiss]`)
+  else await page.click(`${bubble('network')} [data-sw-dictation-dismiss]`)
+  await page.waitForSelector(bubble('network'), { state: 'detached' })
+  return message
+}
 
 test('desktop 1440: the microphone is in the field; one press listens; words land at the caret; nothing moves; post and Esc let go', async () => {
   const { context, page, errors } = await openBoard({ viewport: { width: 1440, height: 900 } })
@@ -209,7 +268,7 @@ test('desktop 1440: the microphone is in the field; one press listens; words lan
     assert.equal(await page.getAttribute(mic, 'aria-pressed'), 'false')
     // The name field is named by its label, not its placeholder.
     assert.equal(await page.locator(composer).getByRole('textbox', { name: 'Your name', exact: true }).count(), 1)
-    // The tools row has no microphone: it is in the field.
+    // The tools have no microphone: it is beside Post.
     assert.equal(await page.locator(`${composer} [data-sw-composer-media] [data-sw-dictate]`).count(), 0)
     const idle = await settledLayout(page, `${composer} [data-sw-composer]`)
     const face = await assertMicInField(page, `${composer} [data-sw-composer]`)
@@ -338,7 +397,7 @@ test('desktop 1440: typing while listening carries on at the new caret; a long c
     // Reached by Tab from the field, worked by Enter and Space.
     await page.focus(field)
     let reached = false
-    for (let tries = 0; tries < 6 && !reached; tries += 1) {
+    for (let tries = 0; tries < 10 && !reached; tries += 1) {
       await page.keyboard.press('Tab')
       reached = await page.evaluate(() => document.activeElement?.hasAttribute('data-sw-dictate'))
     }
@@ -379,11 +438,12 @@ test('desktop 1440: an error is a bubble at the microphone, never a row; it can 
       assert.equal(await page.getAttribute(mic, 'aria-pressed'), 'false')
       assert.equal((await speech(page)).open, 0)
       assertSameLayout(idle, await settledLayout(page, form), `error ${code}`)
-      // Below the microphone (over the tools, never the words), its right edge
-      // near the microphone's.
+      // Above the microphone (Cancel sits under the box), its right edge near
+      // the microphone's.
       const [over, at] = await Promise.all([page.locator(bubble(code)).boundingBox(), page.locator(mic).boundingBox()])
-      assert.ok(over.y >= at.y + at.height, 'the bubble sits below the microphone')
+      assert.ok(over.y + over.height <= at.y, 'the bubble sits above the microphone')
       assert.ok(Math.abs(over.x + over.width - (at.x + at.width)) < 16, 'and lines up with it')
+      await assertClearOfActions(page, form, code, `desktop composer ${code}`)
       assert.equal(
         await page.evaluate(() => document.activeElement?.hasAttribute('data-sw-comment-input')),
         true,
@@ -463,8 +523,14 @@ test('desktop 1440: the reply box and the edit box dictate in their fields, one 
     await page.keyboard.press('Escape')
     await waitClosed(page)
     assert.equal(await page.locator(edit).count(), 1, 'the first Esc only stops dictation')
+    // An error in the edit box sits below its box: Cancel and Save are in the
+    // box's row, beside the microphone.
+    const editMessage = await errorClear(page, edit, 'desktop edit')
+    const editBox = await page.locator(`${edit} [data-sw-composer-box]`).boundingBox()
+    assert.ok(editMessage.top >= editBox.y + editBox.height - 0.5, 'the edit box message sits below the box')
     await page.click(`${edit} [data-sw-edit-cancel]`)
     await page.waitForSelector(edit, { state: 'detached' })
+    await errorClear(page, reply, 'desktop reply')
     // Another thread: the first one's microphone is released.
     await page.click(`${popover} [data-sw-thread-next]`)
     const next = `[data-sw-thread-popover]:not([data-sw-thread-popover="${first.id}"])`
@@ -478,7 +544,7 @@ test('desktop 1440: the reply box and the edit box dictate in their fields, one 
     await waitClosed(page)
     const counts = await speech(page)
     assert.equal(counts.open, 0)
-    assert.equal(counts.starts, 3)
+    assert.equal(counts.starts, 5)
     assert.deepEqual(errors, [])
   } finally {
     await context.close()
@@ -501,7 +567,7 @@ test('desktop 1440: no microphone where the browser has no speech recognition, a
 
 const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 }
 
-test('phone 390: the microphone is a 44 px target inside the field; nothing moves; the reply sheet too', async () => {
+test('phone 390: the microphone is a 44 px target inside the field; nothing moves; errors sit over the sheet header; reply and edit too', async () => {
   const { context, page, errors } = await openBoard(PHONE)
   try {
     await page.tap('[data-sw-comment-mode]')
@@ -553,8 +619,11 @@ test('phone 390: the microphone is a 44 px target inside the field; nothing move
     await page.evaluate(() => window.__speech.fail('not-allowed'))
     await page.waitForSelector(bubble('not-allowed'))
     assertSameLayout(idle, await settledLayout(page, sheet), 'phone error')
-    const over = await page.locator(bubble('not-allowed')).boundingBox()
-    assert.ok(over.x >= 0 && over.x + over.width <= 390, 'the bubble stays on screen')
+    const over = await assertClearOfActions(page, sheet, 'not-allowed', 'phone composer')
+    assert.ok(over.left >= 0 && over.right <= 390, 'the notice stays on screen')
+    const head = await page.locator('[role="dialog"] [data-sw-dialog-header]').boundingBox()
+    assert.ok(over.top >= head.y - 0.5 && over.top < head.y + head.height, 'the notice lies over the sheet header')
+    assert.ok(over.right - over.left >= 390 - 90, 'nearly the sheet width')
     await shot(page, 'phone-390-error')
     await page.tap(`${bubble('not-allowed')} [data-sw-dictation-dismiss]`)
     await page.waitForSelector(bubble('not-allowed'), { state: 'detached' })
@@ -583,9 +652,201 @@ test('phone 390: the microphone is a 44 px target inside the field; nothing move
     await say(page, 'on phones too', true)
     await expectValue(page, `${thread} [data-sw-reply-input]`, 'On phones too')
     await shot(page, 'phone-390-reply')
+    // Stopped, then an error: a notice over the sheet header, clear of Send.
+    await page.tap(replyMic)
+    await page.waitForSelector(`${replyMic}[aria-pressed="false"]`)
+    await waitClosed(page)
+    await errorClear(page, reply, 'phone reply', true)
     await page.tap(`${thread} [data-sw-reply-send]`)
     await page.waitForSelector(`${thread} [data-sw-reply="1"]`)
     await waitClosed(page)
+    // The edit box in the sheet: the same notice, clear of Cancel and Save.
+    await page.tap(`${thread} [data-sw-thread-menu]`)
+    await page.tap('[role="menu"] [data-sw-edit]')
+    const edit = `${thread} [data-sw-edit-form="${second.id}"]`
+    await page.waitForSelector(edit)
+    await page.waitForTimeout(300)
+    await errorClear(page, edit, 'phone edit', true)
+    await page.tap(`${edit} [data-sw-edit-cancel]`)
+    await page.waitForSelector(edit, { state: 'detached' })
+    await waitClosed(page)
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})
+
+// The text area of a composer box: how tall it is in lines, and whether any
+// of its text is cut off (scrollHeight past clientHeight).
+async function fieldFit(page, selector) {
+  return page.$eval(selector, (element) => {
+    const style = getComputedStyle(element)
+    const line = parseFloat(style.lineHeight)
+    const pad = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom)
+    return {
+      scroll: element.scrollHeight,
+      client: element.clientHeight,
+      top: element.scrollTop,
+      line,
+      pad,
+      lines: Math.round((element.clientHeight - pad) / line),
+      overflowY: style.overflowY,
+    }
+  })
+}
+function assertWholeLines(fit, lines, label) {
+  assert.equal(fit.lines, lines, `${label}: ${lines} lines tall, got ${fit.lines}`)
+  assert.ok(Math.abs(fit.client - (fit.line * lines + fit.pad)) < 1, `${label}: whole lines, padding top and bottom`)
+  assert.ok(fit.scroll <= fit.client + 1, `${label}: no line cut off (${fit.scroll} > ${fit.client})`)
+}
+const numbered = (count) => Array.from({ length: count }, (_, n) => `Line ${n + 1}`).join('\n')
+const SENTENCE = 'you hear me 1 2 3 can you hear me asdf, the pricing table needs more room between the plan names and the prices'
+
+// The reply box in a thread, at a desktop or a phone: it grows with typed,
+// pasted and dictated text, one line at a time, to six lines and then
+// scrolls with the caret in view; it never cuts a line; the microphone and
+// send stay in its row; the thread stays on screen; posting (even while
+// listening) leaves one empty line, an idle microphone and no ring.
+async function replyGrows(options, label) {
+  const { context, page, errors } = await openBoard(options, { url: `${boardUrl}?c=${first.id}` })
+  const touch = Boolean(options.hasTouch)
+  const press = (selector) => (touch ? page.tap(selector) : page.click(selector))
+  try {
+    const thread = touch ? `[data-sw-thread-sheet="${first.id}"]` : `[data-sw-thread-popover="${first.id}"]`
+    await page.waitForSelector(thread)
+    const reply = `${thread} [data-sw-reply-form]`
+    const input = `${reply} [data-sw-reply-input]`
+    const replyMic = `${reply} [data-sw-dictate]`
+    const box = `${reply} [data-sw-composer-box]`
+    await page.waitForSelector(input)
+    await settledLayout(page, reply)
+    assertWholeLines(await fieldFit(page, input), 1, `${label} empty`)
+    await assertMicInField(page, reply)
+    const onScreen = async (what) => {
+      const rect = await page.$eval(touch ? '[role="dialog"]' : thread, (element) => element.getBoundingClientRect().toJSON())
+      const view = page.viewportSize()
+      assert.ok(rect.top >= -0.5 && rect.bottom <= view.height + 0.5, `${label} ${what}: the thread stays on screen`)
+    }
+    await onScreen('one line')
+    await shot(page, `grow-${label}-1-line`)
+
+    // Typed, wrapping: every key keeps whole lines and cuts nothing.
+    await page.focus(input)
+    let grew = 1
+    for (const word of SENTENCE.split(' ')) {
+      await page.keyboard.type(`${word} `)
+      const fit = await fieldFit(page, input)
+      assert.ok(fit.scroll <= fit.client + 1, `${label} typing "${word}": no line cut off`)
+      assert.ok(fit.lines >= grew, `${label}: it never shrinks while typing`)
+      grew = fit.lines
+    }
+    assert.ok(grew >= 2, `${label}: the wrapped sentence made it grow (${grew} lines)`)
+    await page.fill(input, '')
+    assertWholeLines(await fieldFit(page, input), 1, `${label} cleared`)
+
+    // Two and five lines, then past the most (six): it scrolls, caret in view.
+    for (const count of [2, 5]) {
+      await page.fill(input, numbered(count))
+      await page.waitForTimeout(100)
+      assertWholeLines(await fieldFit(page, input), count, `${label} ${count} lines`)
+      await assertMicInField(page, reply)
+      await onScreen(`${count} lines`)
+      await shot(page, `grow-${label}-${count}-lines`)
+    }
+    await page.fill(input, numbered(10))
+    await page.waitForTimeout(100)
+    const past = await fieldFit(page, input)
+    assert.equal(past.lines, 6, `${label}: six lines at most`)
+    assert.equal(past.overflowY, 'auto', `${label}: past six lines it scrolls`)
+    assert.ok(past.top + past.client >= past.scroll - 1, `${label}: the caret (at the end) is in view`)
+    await assertMicInField(page, reply)
+    await onScreen('past the most')
+    await shot(page, `grow-${label}-past-max`)
+    await page.fill(input, 'short')
+    assertWholeLines(await fieldFit(page, input), 1, `${label} shrinks back`)
+
+    // Dictated, words still being heard: it grows as they arrive.
+    await page.fill(input, '')
+    await press(replyMic)
+    await page.waitForSelector(`${replyMic}[aria-pressed="true"]`)
+    await say(page, SENTENCE)
+    await page.waitForFunction((selector) => document.querySelector(selector)?.value.length > 40, input)
+    const heard = await fieldFit(page, input)
+    assert.ok(heard.lines >= 2, `${label}: interim words grow it (${heard.lines} lines)`)
+    assert.ok(heard.scroll <= heard.client + 1, `${label}: dictated text is not cut off`)
+    await assertMicInField(page, reply)
+
+    // Posted while listening, over two lines: one empty line, an idle
+    // microphone, no ring, the microphone released.
+    await page.focus(input)
+    await page.keyboard.press('End')
+    await page.keyboard.press('Shift+Enter')
+    await page.keyboard.type('and a second line')
+    const before = await page.locator(`${thread} [data-sw-reply]`).count()
+    if (touch) await page.tap(`${reply} [data-sw-reply-send]`)
+    else await page.keyboard.press('Enter')
+    await page.waitForFunction(({ thread, before }) => document.querySelectorAll(`${thread} [data-sw-reply]`).length > before, {
+      thread,
+      before,
+    })
+    await waitClosed(page)
+    await expectValue(page, input, '')
+    await settledLayout(page, reply)
+    assertWholeLines(await fieldFit(page, input), 1, `${label} after posting`)
+    assert.equal(await page.getAttribute(replyMic, 'aria-pressed'), 'false')
+    assert.equal(await page.getAttribute(replyMic, 'data-sw-dictate'), 'idle')
+    assert.equal(await page.getAttribute(box, 'data-sw-composer-box'), 'idle')
+    const ring = await page.$eval(box, (element) => getComputedStyle(element).boxShadow)
+    assert.ok(
+      ring === 'none' || !/rgba?\([^)]*\)\s+0px\s+0px\s+0px\s+3px/.test(ring),
+      `${label}: no listening ring after posting (${ring})`,
+    )
+    assert.equal((await speech(page)).open, 0, 'the microphone is released')
+    await shot(page, `grow-${label}-after-post`)
+
+    // The edit box grows the same way and cuts nothing.
+    if (!touch) {
+      await page.click(`${thread} [data-sw-thread-menu]`)
+      await page.click('[role="menu"] [data-sw-edit]')
+      const edit = `${thread} [data-sw-edit-form="${first.id}"]`
+      await page.waitForSelector(edit)
+      await page.fill(`${edit} textarea`, numbered(5))
+      await page.waitForTimeout(100)
+      assertWholeLines(await fieldFit(page, `${edit} textarea`), 5, `${label} edit 5 lines`)
+      await assertMicInField(page, edit)
+      await page.click(`${edit} [data-sw-edit-cancel]`)
+    }
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+}
+
+test('desktop 1440: the reply box grows with its text and never cuts a line; posting while listening resets it', async () => {
+  await replyGrows({ viewport: { width: 1440, height: 900 } }, '1440')
+})
+
+test('phone 390: the reply box grows with its text and never cuts a line; posting while listening resets it', async () => {
+  await replyGrows(PHONE, '390')
+})
+
+test('desktop 1440 and phone 390: the new comment box grows with its text and never cuts a line', async () => {
+  const { context, page, errors } = await openBoard({ viewport: { width: 1440, height: 900 } })
+  try {
+    await openComposer(page, 0.3, 0.3)
+    await page.waitForSelector(field)
+    assertWholeLines(await fieldFit(page, field), 2, 'composer empty')
+    for (const count of [2, 5, 8]) {
+      await page.fill(field, numbered(count))
+      await page.waitForTimeout(100)
+      assertWholeLines(await fieldFit(page, field), count, `composer ${count} lines`)
+      await assertMicInField(page, `${composer} [data-sw-composer]`)
+    }
+    await page.fill(field, numbered(12))
+    await page.waitForTimeout(100)
+    assert.equal((await fieldFit(page, field)).lines, 8, 'eight lines at most')
+    const rect = await page.$eval(composer, (element) => element.getBoundingClientRect().toJSON())
+    assert.ok(rect.top >= 0 && rect.bottom <= 900, 'the composer stays on screen')
     assert.deepEqual(errors, [])
   } finally {
     await context.close()
