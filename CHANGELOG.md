@@ -3,6 +3,15 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+- **Dictation lives in the comment field.** The microphone now sits inside the new comment, reply and edit fields, in the
+  bottom-right corner, like a chat app's (a quiet 28 px icon on desktop, a 44 px target on phones), and one press starts it:
+  the separate privacy step is gone, and the tooltip now says that your browser's speech service transcribes and Shapewall
+  never gets the audio. While it listens the microphone fills with the accent and pulses softly (no pulse with reduced motion),
+  the field's border takes the same accent and an empty field reads "Listening...". Errors are a small bubble at the
+  microphone that goes by itself or can be dismissed. Starting, listening, stopping and failing no longer move anything.
+
 ## 0.9.0 - 2026-11-16
 
 - **Dictate a comment.** A microphone button under a new comment, a reply and an edit, on the desktop popover, the phone sheets,

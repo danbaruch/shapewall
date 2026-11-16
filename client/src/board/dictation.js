@@ -6,10 +6,7 @@
 //
 // Privacy: Shapewall never sees the audio. The browser's speech service does
 // the transcription (in Chrome that is Google's), so dictation only ever
-// starts from an explicit press, and the first press says so once.
-
-// Remembered once someone has read the privacy line and started dictation.
-export const DICTATION_SEEN_KEY = 'shapewall.dictation.seen'
+// starts from an explicit press, and the button's tooltip says so.
 
 // Speech engines pad and double their spaces; one line of plain words.
 export function normalizeSpeech(text) {
@@ -75,16 +72,15 @@ export function spliceSpeech(value, { start, end = start }, spoken, max = Infini
   return { value: before + insert + after, caret: before.length + Math.min(insert.length, lead.length + words.length) }
 }
 
-// The dictation states. `status`: idle, asking (the first press shows the
-// privacy line, with Start and Not now), starting (waiting for the
+// The dictation states. `status`: idle, starting (waiting for the
 // microphone), listening, stopping (the last words are being settled).
-// `notice`: what the line under the field says, or null.
+// `notice`: what the bubble at the microphone says, or null.
 export const DICTATION_IDLE = { status: 'idle', notice: null }
 
 export const isActive = (state) => state.status === 'starting' || state.status === 'listening' || state.status === 'stopping'
 
-// One step. Events: { type: 'press', seen }, 'consent', 'decline', 'started',
-// 'result', { type: 'error', code }, 'ended', 'quiet', 'cancel', 'dismiss'.
+// One step. Events: 'press', 'started', 'result', { type: 'error', code },
+// 'ended', 'quiet', 'cancel', 'dismiss'.
 // Every way out of a session lands on idle, so the microphone is never left
 // on by a missed event.
 export function nextDictation(state, event) {
@@ -92,12 +88,7 @@ export function nextDictation(state, event) {
   switch (type) {
     case 'press':
       if (isActive(state)) return state.status === 'stopping' ? state : { status: 'stopping', notice: null }
-      if (state.status === 'asking') return DICTATION_IDLE
-      return event.seen ? { status: 'starting', notice: null } : { status: 'asking', notice: 'privacy' }
-    case 'consent':
-      return state.status === 'asking' ? { status: 'starting', notice: null } : state
-    case 'decline':
-      return state.status === 'asking' ? DICTATION_IDLE : state
+      return { status: 'starting', notice: null }
     case 'started':
       return state.status === 'starting' ? { status: 'listening', notice: null } : state
     case 'error': {
@@ -115,18 +106,14 @@ export function nextDictation(state, event) {
     case 'cancel':
       return state.status === 'idle' && !state.notice ? state : DICTATION_IDLE
     case 'dismiss':
-      return state.notice && !isActive(state) && state.status !== 'asking' ? { ...state, notice: null } : state
+      return state.notice && !isActive(state) ? { ...state, notice: null } : state
     default:
       return state
   }
 }
 
-// The line under the field, by notice. `tone`: info (muted) or error.
+// The bubble at the microphone, by notice. `tone`: info or error.
 export const DICTATION_MESSAGES = {
-  privacy: {
-    tone: 'info',
-    text: "Your browser's speech service (Google's, in Chrome) turns your voice into text. Shapewall never receives or stores the audio.",
-  },
   ended: { tone: 'info', text: 'Dictation stopped. Press the microphone to keep going.' },
   'not-allowed': { tone: 'error', text: 'Microphone access is blocked. Allow it for this site in your browser, then try again.' },
   'service-not-allowed': { tone: 'error', text: "This browser's speech service is not available here. You can still type." },
@@ -145,3 +132,19 @@ export function dictationLang({ languages = [], language = '', pageLang = '' } =
   const valid = (tag) => typeof tag === 'string' && /^[a-z]{2,3}(-[a-z0-9]{2,8})*$/i.test(tag)
   return [...(languages || []), language, pageLang].find(valid) || 'en-US'
 }
+
+// The microphone's tooltip: what it does, and who hears the audio.
+export const DICTATION_TIP = "Dictate. Your browser's speech service transcribes it; Shapewall never gets the audio."
+export const DICTATION_STOP_TIP = 'Stop dictation (Esc)'
+
+// What a screen reader hears (a visually hidden live region): the state, or
+// the bubble's words.
+export function dictationAnnouncement(state) {
+  if (state.status === 'starting') return 'Starting the microphone'
+  if (state.status === 'listening') return 'Listening'
+  if (state.notice) return DICTATION_MESSAGES[state.notice]?.text || ''
+  return ''
+}
+
+// How long a bubble stays up on its own: long enough to read an error.
+export const bubbleMs = (notice) => (DICTATION_MESSAGES[notice]?.tone === 'error' ? 8000 : 4000)
