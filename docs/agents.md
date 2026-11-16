@@ -707,7 +707,15 @@ Older Gemini CLI versions call the flag `--experimental-acp` (still accepted, de
   the panel shows a card with the agent's options (**Allow**, **Reject**, and any "always" choices it offers). An edit or a write
   shows its diff on the card, computed by Shapewall from the file as it is and the new text (the first 80 lines or 8 KB, with **Show
   the whole diff** for up to 1500 lines or 64 KB). No answer within 2 minutes counts as a deny, and so does Stop. Whether the agent asks at all is the agent's own setting (Claude Code's permission mode,
-  Codex's approval policy, goose's mode): Shapewall does not change it.
+  Codex's approval policy, goose's mode): Shapewall does not change it. One-click **Connect** saves the bare command
+  (`claude-agent-acp`), so the agent starts in whatever mode its own settings give it, and some adapters start in one that acts without
+  asking (`claude-agent-acp` 0.106.0 starts a new session in `auto` when no `permissions.defaultMode` is set).
+- **The mode in effect.** The panel's line about a local agent says it runs under its own permission settings. Once its session has
+  started and it reports a mode, the line names it: **Auto, which acts without asking** (any mode whose name says so: auto, accept
+  edits, bypass, full access, yolo and the like), **Default: it asks here before an edit or a command its own settings do not already
+  allow** (Claude Code's `default`, goose's `approve`), **Plan: it reads and answers** (Claude Code's `plan`, Codex's `read-only`,
+  goose's `chat`), or just the mode's name for any other. To be asked first, pick an asking mode in the composer's options, or set
+  one in the agent's own settings ([Restrict the agent's own tools](#restrict-the-agents-own-tools)).
 
 ### What the agent may do through Shapewall
 
@@ -746,12 +754,13 @@ quote each comment in the same `<shapewall-data trust="untrusted">` element.
 The agent works with its own tools under its own settings, and Shapewall cannot sandbox them. Run it the way you would run it on a repo
 full of other people's text:
 
-- **Claude Code** (`claude-agent-acp`) follows your Claude Code settings. Keep `permissions.defaultMode` at `default` (asks before
-  edits and commands) or `plan` (read-only), never `bypassPermissions`. A separate config folder for Shapewall works too:
+- **Claude Code** (`claude-agent-acp`) follows your Claude Code settings. Set `permissions.defaultMode` to `default` (asks before
+  edits and commands your allow rules do not cover) or `plan` (read-only), never `auto`, `acceptEdits` or `bypassPermissions`. Set
+  it explicitly: with none set, `claude-agent-acp` 0.106.0 starts in `auto`, which acts without asking. A separate config folder for Shapewall works too:
   `CLAUDE_CONFIG_DIR` is passed to the agent.
 - **Codex** (`codex-acp`) follows `~/.codex/config.toml` (or `CODEX_HOME`). Use `sandbox_mode = "workspace-write"` (or
   `"read-only"`) with `approval_policy = "on-request"`, never `danger-full-access`.
-- **goose** loads every extension enabled in its profile (browser control, say). Give it a profile of its own with only the developer
+- **goose** asks only in `GOOSE_MODE=approve` (or `smart_approve`); its default, `auto`, acts without asking. It also loads every extension enabled in its profile (browser control, say). Give it a profile of its own with only the developer
   extension, and start it with that extension named:
 
   ```sh
@@ -903,8 +912,8 @@ What the bridge protects against, and what it does not:
   own name (**Effort**, **Thinking**), and anything else it offers (a mode such as Ask or Plan) under **More options**. When the panel
   is too narrow for them, one control holds every option in sections. They come from an ACP agent's own session (`session/new`
   config options and its older modes), or the model list an OpenAI-compatible endpoint reports at `/models`. Never a permission or
-  sandbox setting, and never a mode that acts without asking (bypass, auto, yolo and the like), so the agent still asks before it
-  changes files or runs commands. Values show the agent's real names: a value that is just the agent's default says **Default
+  sandbox setting, and never a switch to a mode that acts without asking (bypass, auto, yolo and the like). A session that is
+  already in such a mode (its own settings started it there) keeps it until you pick another, and the panel's line says so. Values show the agent's real names: a value that is just the agent's default says **Default
   model**, or the model it says it currently is. The keyboard works as in any menu: the current choice has the focus when it opens,
   the arrows and Home and End move, Escape closes it back to its button.
 - **Options before the first message.** As soon as the panel is open and on screen for the owner, a new chat (New chat included)

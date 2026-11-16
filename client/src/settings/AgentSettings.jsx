@@ -434,27 +434,31 @@ export function AgentSettings({ onSaved, touch, buzz = false, onDirtyChange, age
             </p>
             <p>
               It runs with its own tools and extensions (a shell, browser control, MCP servers from its own config), and Shapewall does not
-              sandbox them: Shapewall only asks you before its own file writes and commands. Use a restricted profile:
+              sandbox them. Whether it asks before it edits a file or runs a command is its own permission setting: in a mode that acts
+              without asking, it does, and Shapewall shows no request. Use a restricted profile:
             </p>
             <ul className="list-disc space-y-0.5 pl-5">
               <li>
                 Claude Code: permission mode <code className="font-mono">default</code> or <code className="font-mono">plan</code> in your
-                Claude settings, never <code className="font-mono">bypassPermissions</code>.
+                Claude settings, never <code className="font-mono">auto</code>, <code className="font-mono">acceptEdits</code> or{' '}
+                <code className="font-mono">bypassPermissions</code>.
               </li>
               <li>
                 Codex: <code className="font-mono">sandbox_mode = "workspace-write"</code> or <code className="font-mono">"read-only"</code>
-                , never <code className="font-mono">danger-full-access</code>.
+                with <code className="font-mono">approval_policy = "on-request"</code>, never{' '}
+                <code className="font-mono">danger-full-access</code>.
               </li>
               <li>
-                goose: <code className="font-mono">goose acp --with-builtin developer</code> with a profile of its own that has no other
-                extensions (<code className="font-mono">GOOSE_PATH_ROOT</code>).
+                goose: <code className="font-mono">GOOSE_MODE=approve</code> and{' '}
+                <code className="font-mono">goose acp --with-builtin developer</code> with a profile of its own that has no other extensions
+                (<code className="font-mono">GOOSE_PATH_ROOT</code>).
               </li>
             </ul>
           </section>
           <Field
             label={overridden ? 'Saved agent command (used when Shapewall starts without the override)' : 'Agent command'}
             htmlFor="sw-agent-acp"
-            hint="One program and its arguments, no shell. It runs on this machine, as you, with its own login; Shapewall asks you before it writes files or runs commands."
+            hint="One program and its arguments, no shell. It runs on this machine, as you, with its own login and its own permission settings, which decide whether it asks before it writes files or runs commands."
           >
             <Input
               id="sw-agent-acp"

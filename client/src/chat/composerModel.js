@@ -382,6 +382,32 @@ export function autoAllowOption(card, rules, { ownerWrites = false } = {}) {
 
 // ---- Agent options (model, thinking, mode) ------------------------------------------
 
+// The mode the agent's session is in now, from the composer's options:
+// { name, permission } (permission: 'acts' | 'asks' | 'reads' when the
+// server could tell, else null), or null when the agent reports no mode or
+// no session has started yet.
+export function modeInEffect(options) {
+  const option = (options || []).find((item) => item?.category === 'mode' && typeof item.currentValue === 'string')
+  if (!option) return null
+  const value = (option.values || []).find((item) => item.value === option.currentValue)
+  return { name: value?.name || option.currentValue, permission: value?.permission || null }
+}
+
+// What the panel says about a local agent's permissions. Whether it asks
+// before it acts is the agent's own setting, not Shapewall's: one-click
+// Connect saves the bare command, so it runs in whatever mode its own
+// settings start it in, and some start in one that acts without asking.
+export function localPermissionLine(mode) {
+  const base = 'It runs under its own permission settings, so it may change files or run commands without asking.'
+  if (!mode) return `${base} When it does ask, the request shows here.`
+  if (mode.permission === 'acts')
+    return `${base} Its mode now is ${mode.name}, which acts without asking. To be asked first, pick another mode in the composer's options or in its own settings.`
+  if (mode.permission === 'asks')
+    return `Its mode now is ${mode.name}: it asks here before an edit or a command its own settings do not already allow.`
+  if (mode.permission === 'reads') return `Its mode now is ${mode.name}: it reads and answers, and does not change files.`
+  return `${base} Its mode now is ${mode.name}. When it does ask, the request shows here.`
+}
+
 // The choices people made, in this browser like the other chat preferences
 // (voice, read aloud): per chat, and the last used per agent, which a new
 // chat starts with. { chats: { "<board>/<thread>": { choices, at } },
