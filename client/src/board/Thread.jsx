@@ -16,6 +16,7 @@ import {
   ExternalLink,
   History,
   Info,
+  Layers,
   Link2,
   MoreHorizontal,
   Pencil,
@@ -46,6 +47,7 @@ import { DictationButton, DictationStatus, dictationPlaceholder } from './Dictat
 import { ComposerBox, composerFieldClass } from './ComposerBox'
 import { useCommentDictation } from './hooks/useCommentDictation'
 import { viewportIcon } from './viewports'
+import { frameKey } from './commentSide'
 import SendToAgent from './SendToAgent'
 import FixWithAgent from './FixWithAgent'
 import HostedFix from './HostedFix'
@@ -178,6 +180,24 @@ function EditBox({ comment, busy, onSave, onCancel, touch, people }) {
   )
 }
 
+// Which environment the comment was left on (commentSide.js sideLabel):
+// always while comparing, where the two sides of a card look alike, and
+// outside compare mode only for one left on another environment than the
+// board shows, whose pin then sits on a capture it was not left on.
+function SideChip({ label }) {
+  if (!label) return null
+  return (
+    <p className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] text-muted" data-sw-thread-side={label.env}>
+      <span className="inline-flex max-w-full min-w-0 items-center gap-1 rounded-full bg-surface-2 px-2 py-0.5">
+        <Layers size={11} className="shrink-0" aria-hidden="true" />
+        <span className="shrink-0">Left on</span>
+        <span className="truncate font-medium text-fg">{label.title}</span>
+      </span>
+      {label.drawnOn ? <span className="text-faint">Pinned here on the {label.drawnOn} capture</span> : null}
+    </p>
+  )
+}
+
 // The reply box at the bottom of a thread. `askName`: a local board with no
 // name saved in this browser asks once (the composer's saved name), so the
 // reply is not signed "anonymous". What is written and not sent (text,
@@ -202,7 +222,9 @@ function ReplyBox({ comment, busy, onReply, touch, people, autoFocus, askName = 
     replyDrafts.save(draftKey, { images: kept.filter((image) => image.state === 'ready') })
   }, [draftKey, kept])
   const owner = `reply-${comment.id}`
-  const drawKey = `${comment.pageId}|${comment.viewport}`
+  // In compare mode the drawing goes on the side the comment is on.
+  const side = media?.side || null
+  const drawKey = frameKey(comment.pageId, comment.viewport, side)
   const shapes = useDrawing((value) => (value?.owner === owner ? value.shapes.length : 0))
   // The reply's drawing is on the page as long as its box is open; its
   // shapes are kept with the draft and picked up again with it.
@@ -221,7 +243,7 @@ function ReplyBox({ comment, busy, onReply, touch, people, autoFocus, askName = 
       drawing.end(owner)
     }
   }, [canDraw, drawKey, owner, draftKey])
-  const page = canDraw && touch ? media.pageImage?.(comment.pageId, comment.viewport) : null
+  const page = canDraw && touch ? media.pageImage?.(comment.pageId, comment.viewport, side) : null
   const input = useRef(null)
   const dictation = useCommentDictation({ value: body, setValue: setBody, inputRef: input, max: COMMENT_MAX })
   const submit = async (event) => {
@@ -709,6 +731,7 @@ export function ThreadView({
                 </p>
               </Tooltip>
             ) : null}
+            <SideChip label={media?.sideLabel || null} />
             {page?.note ? (
               <p className="mt-1 flex items-start gap-1 text-xs text-faint" data-sw-page-note="true">
                 <Info size={11} className="mt-0.5 shrink-0" aria-hidden="true" /> {page.note}

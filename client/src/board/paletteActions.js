@@ -24,7 +24,7 @@ export function boardPaletteActions({
   openChecks,
 }) {
   return [
-    canComment && !comparePair
+    canComment
       ? {
           id: 'comment',
           label: commentMode ? 'Stop commenting' : 'Comment on a page',

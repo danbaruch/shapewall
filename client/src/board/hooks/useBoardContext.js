@@ -5,7 +5,7 @@ import { motionDuration } from '../../lib/motion'
 import { createBoardView } from '../boardView'
 import { withBarRoom } from '../camera'
 import { historyCount } from '../flow'
-import { isThumbnail } from '../layout'
+import { isThumbnail, pinFrame } from '../layout'
 
 const NO_PINS = []
 
@@ -105,7 +105,8 @@ export function useBoardContext(input) {
         // Phone: a tap on a page drawn small zooms to it first, so the page
         // can go live and the next tap pins to the element under the finger.
         const card = layout.targets[target.pageId]
-        const frame = card?.frames.find((item) => item.viewport === target.viewport)
+        // In compare mode the side it was placed on (target.environment).
+        const frame = pinFrame(card, target)
         const box = canvasRef.current?.getBoundingClientRect()
         if (!state.wide && frame && box?.width && frame.w * flow.getZoom() < box.width * 0.6) {
           state.setSettledZoom(null)
@@ -128,7 +129,7 @@ export function useBoardContext(input) {
       onReading: (key) => view.set({ readingKey: key }),
       // The chip an off-screen journey arrow ends in: go to that step.
       onJourneyStep: (step) => now().goStep(step),
-      onOpenCluster: (targetId, viewport, items) => now().openCluster(targetId, viewport, items),
+      onOpenCluster: (targetId, viewport, items, env = null) => now().openCluster(targetId, viewport, items, env),
       onChecks: (...args) => now().openChecks(...args),
       onHistory: (pageId, viewport = null) => now().openHistory(pageId, viewport),
       onShowViewport: (viewport) => now().updateParams({ vp: viewport === now().defaultMode ? null : viewport }),
@@ -146,7 +147,11 @@ export function useBoardContext(input) {
       viewports,
       journey: journeyView,
       compare: compareView,
-      commentMode: commentMode && canComment && !compareView,
+      // The board's environments, so a frame can tell a comment left on
+      // another one than the default (commentSide.js).
+      environments: data?.environments || NO_PINS,
+      // Compare mode too: a comment is placed on one side of the pair.
+      commentMode: commentMode && canComment,
       touch: !wide,
       imageUrl: (kind, file, version) => fileUrl(boardId, kind, file, version || imageVersion),
       liveUrl: (kind, file, version) => liveUrl(boardId, kind, file, version || imageVersion),
@@ -158,9 +163,9 @@ export function useBoardContext(input) {
       setLiveReady,
       // The pins the list shows on a frame. The open thread keeps its pin even
       // when the filter hides it (just resolved): the frame adds that one
-      // itself, from the view store. Compare mode asks for them too: the
-      // frame of the first environment draws them (Frame.jsx CompareFrame),
-      // so clicking a comment in the list has a pin to land on.
+      // itself, from the view store. Compare mode asks for them too: each
+      // side keeps the ones left on it (Frame.jsx CompareFrame,
+      // commentSide.js), so clicking a comment in the list has a pin to land on.
       pinsFor: (target, viewport) => pinsByTarget.get(`${target}|${viewport}`) || NO_PINS,
       me,
       checksCount: (pageId) => checksCounts.get(pageId) || 0,
@@ -191,6 +196,7 @@ export function useBoardContext(input) {
       compareView,
       data?.captures,
       data?.commentCounts,
+      data?.environments,
       data?.manifest,
       data?.versions,
       hosted,

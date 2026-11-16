@@ -10,8 +10,16 @@ export const viewportIcon = (name, fallback = Monitor) => ICONS[name] || ICONS[S
 // "phone-landscape" reads "Phone landscape".
 export const viewportLabel = (name) => name[0].toUpperCase() + name.slice(1).replace(/-/g, ' ')
 
-// A frame's key is `${targetId}|${viewport}` (a target id may hold a "|").
+// A frame's key is `${targetId}|${viewport}` (a target id may hold a "|"),
+// and on one side of a compare card `${targetId}|${viewport}@${env}`
+// (commentSide.js frameKey). `env` is null on every other frame.
 export function splitFrameKey(key) {
   const at = key.lastIndexOf('|')
-  return { targetId: key.slice(0, at), viewport: key.slice(at + 1) }
+  const rest = key.slice(at + 1)
+  const sep = rest.indexOf('@')
+  return {
+    targetId: key.slice(0, at),
+    viewport: sep < 0 ? rest : rest.slice(0, sep),
+    env: sep < 0 ? null : rest.slice(sep + 1),
+  }
 }

@@ -178,7 +178,8 @@ once the page is live), **Checks**, **History**, **Capture**, open in a new tab,
 the page, the next click on it pins (to the element, on a live page), and a click anywhere else is comment mode's as ever. From
 the keyboard, Enter on the button moves the focus to the page, and Enter there opens the composer near the top left of what
 shows of it; Esc gives the focus back to the button. Only people who have the Comment tool have the button (the same rule: not
-viewers, view-only links, compare mode or static exports). The first time someone who has not started a comment in this browser
+viewers, view-only links or static exports). In compare mode a page is two frames: from the keyboard, Enter on the button moves
+the focus to the first one, Tab to the second, and Enter places the comment on that side. The first time someone who has not started a comment in this browser
 selects a page, the button wears an accent ring for about two and a half seconds (`shapewall.tip.pageComment` in local storage;
 the demo's Reset forgets it). It is a ring, not an animation, so reduced motion needs no other path.
 

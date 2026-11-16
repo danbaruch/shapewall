@@ -1,7 +1,10 @@
-import { ArrowLeftRight, Camera, GitCompare, MessageSquareOff, X } from 'lucide-react'
+import { ArrowLeftRight, Camera, GitCompare, SlidersHorizontal, X } from 'lucide-react'
 import {
   Button,
   IconButton,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
   Select,
   SelectContent,
   SelectItem,
@@ -9,23 +12,27 @@ import {
   SelectValue,
   Spinner,
   Toggle,
-  Tooltip,
 } from '../components/ui'
 import { cn } from '../lib/utils'
 
-// Why there is no Comment tool while comparing. A comment belongs to a page
-// rather than to one environment -- the pins are drawn once, on the first
-// environment's frame (layout.js framePins) -- so a click on either capture
-// would be the same comment, and which capture you meant is a question the
-// board cannot answer for you. Reading, replying, resolving and jumping to a
-// comment all work while comparing; only placing a new one waits. The tools
-// show no Comment button in compare mode, and a button that is not there
-// explains nothing, so the bar says it in one line.
-const NO_COMMENTS = 'No new comments while comparing'
-const NO_COMMENTS_WHY = 'A comment belongs to a page, not to one environment. Leave compare to add one; replies and resolving work here.'
+// "3 of 26 pages changed", "1 page changed".
+export function changedText(changedPages, totalPages = 0) {
+  const total = totalPages || changedPages
+  return `${changedPages}${totalPages ? ` of ${totalPages}` : ''} page${total === 1 ? '' : 's'} changed`
+}
 
 // Compare mode controls: the two environments, the diff overlay, "changed
 // pages only", and a capture button for an environment with no captures yet.
+//
+// On a phone the bar is one row: the two environments, swap, the view
+// options behind one button, and leave. It used to wrap to four rows (145 px
+// at 390) and every pixel of it came off the board and off the thread sheet,
+// which is measured against the canvas (sheetFit.js): the thread was squeezed
+// to a few lines while comparing. One row gives the board and the sheet what
+// they have outside compare mode, less this bar's 60 px.
+//
+// Comments work while comparing: a pin goes on the side it is placed on
+// (commentSide.js), so the bar no longer has anything to say about them.
 export default function CompareBar({
   environments,
   pair,
@@ -35,9 +42,6 @@ export default function CompareBar({
   totalPages = 0,
   changedOnly,
   showDiff,
-  // This person may comment on this board, so the missing Comment tool is
-  // worth explaining. A viewer or a guest never had one.
-  canComment = false,
   canCapture,
   captureBusy,
   touch,
@@ -51,12 +55,14 @@ export default function CompareBar({
   // `prefix`: the visible word before the picker ("with"); the bar's own
   // "Compare" title already introduces the first one.
   const select = (value, onChange, label, testId, prefix = null) => (
-    <span className={cn('flex min-w-0 items-center gap-1 text-xs text-muted', touch && 'min-w-28 flex-1')}>
+    <span className={cn('flex min-w-0 items-center gap-1 text-xs text-muted', touch && 'flex-1 basis-0')}>
       {touch || !prefix ? null : <span aria-hidden="true">{prefix}</span>}
       <Select value={value} onValueChange={onChange}>
         <SelectTrigger
           size={touch ? 'touch' : 'sm'}
-          className={touch ? 'flex-1' : 'max-w-48'}
+          // A phone's row is tight: a little less padding keeps a name like
+          // "Production" whole at 390 px.
+          className={touch ? 'w-full min-w-0 px-2.5' : 'max-w-48'}
           aria-label={label}
           data-sw-compare-env={testId}
         >
@@ -73,32 +79,31 @@ export default function CompareBar({
     </span>
   )
   const missing = environments.filter((env) => pair.includes(env.id) && !env.capturedAt)
-  return (
-    <div
-      className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line bg-surface px-3 py-2"
-      role="region"
-      aria-label="Compare environments"
-      data-sw-compare-bar={pair.join('_')}
-    >
-      <span className="flex shrink-0 items-center gap-1.5 pr-1 text-[13px] font-semibold text-fg">
-        <GitCompare size={15} className="shrink-0 text-accent" aria-hidden="true" />
-        {touch ? null : 'Compare'}
-      </span>
-      {select(a, (value) => onPair(value === b ? [value, a] : [value, b]), 'Compare', 'a')}
-      <IconButton size={touch ? 'icon' : 'icon-sm'} onClick={() => onPair([b, a])} label="Swap the environments">
-        <ArrowLeftRight size={14} aria-hidden="true" />
-      </IconButton>
-      {select(b, (value) => onPair(value === a ? [b, value] : [a, value]), 'with', 'b', 'with')}
-      <IconButton
-        size={touch ? 'icon' : 'icon-sm'}
-        className={cn('ml-auto', !touch && 'order-last')}
-        onClick={onClose}
-        label="Leave compare mode"
-        data-sw-compare-close="true"
-      >
-        <X size={16} aria-hidden="true" />
-      </IconButton>
-      <Toggle size={touch ? 'touch' : 'sm'} pressed={showDiff} onPressedChange={onShowDiff}>
+  const titleOf = (id) => environments.find((env) => env.id === id)?.title || id
+  const status = (
+    <span className="text-xs text-muted" aria-live="polite" data-sw-compare-status={loading ? 'loading' : error ? 'error' : 'ready'}>
+      {loading ? (
+        <span className="inline-flex h-6 items-center gap-1.5">
+          <Spinner size={12} /> Comparing
+        </span>
+      ) : error ? (
+        <span className="text-bad">{error}</span>
+      ) : (
+        <span
+          className={cn(
+            'tabular inline-flex h-6 items-center rounded-full px-2 font-medium',
+            changedPages ? 'bg-accent/10 text-accent' : 'bg-surface-2 text-muted',
+          )}
+          data-sw-compare-changed={changedPages}
+        >
+          {changedText(changedPages, totalPages)}
+        </span>
+      )}
+    </span>
+  )
+  const toggles = (
+    <>
+      <Toggle size={touch ? 'touch' : 'sm'} pressed={showDiff} onPressedChange={onShowDiff} data-sw-diff-toggle={showDiff ? 'on' : 'off'}>
         Diff overlay
       </Toggle>
       <Toggle
@@ -109,48 +114,114 @@ export default function CompareBar({
       >
         Changed pages only
       </Toggle>
-      <span className="text-xs text-muted" aria-live="polite" data-sw-compare-status={loading ? 'loading' : 'ready'}>
-        {loading ? (
-          <span className="inline-flex items-center gap-1.5">
-            <Spinner size={12} /> Comparing
-          </span>
-        ) : error ? (
-          <span className="text-bad">{error}</span>
-        ) : (
-          <span
-            className={cn(
-              'tabular inline-flex h-6 items-center rounded-full px-2 font-medium',
-              changedPages ? 'bg-accent/10 text-accent' : 'bg-surface-2 text-muted',
-            )}
-          >
-            {changedPages}
-            {totalPages ? ` of ${totalPages}` : ''} page{(totalPages || changedPages) === 1 ? '' : 's'} changed
-          </span>
-        )}
-      </span>
-      {canComment ? (
-        <span className="flex min-w-0 items-center gap-1 text-xs text-muted" data-sw-compare-no-comments="true">
-          <MessageSquareOff size={13} className="shrink-0" aria-hidden="true" />
-          {touch ? (
-            <span className="min-w-0">{NO_COMMENTS}</span>
-          ) : (
-            <Tooltip content={NO_COMMENTS_WHY}>
-              <span className="min-w-0 cursor-help underline decoration-dotted underline-offset-2" tabIndex={0}>
-                {NO_COMMENTS}
-              </span>
-            </Tooltip>
-          )}
-          {/* The whole reason, for a reader who cannot hover a tooltip. */}
-          <span className="sr-only">{NO_COMMENTS_WHY}</span>
-        </span>
-      ) : null}
-      {canCapture
-        ? missing.map((env) => (
-            <Button key={env.id} size={touch ? 'touch' : 'sm'} disabled={captureBusy} onClick={() => onCapture(env.id)}>
-              <Camera size={14} aria-hidden="true" /> Capture {env.title}
+    </>
+  )
+  const captures = canCapture
+    ? missing.map((env) => (
+        <Button key={env.id} size={touch ? 'touch' : 'sm'} disabled={captureBusy} onClick={() => onCapture(env.id)}>
+          <Camera size={14} aria-hidden="true" /> Capture {env.title}
+        </Button>
+      ))
+    : null
+  const swap = (
+    <IconButton
+      size={touch ? 'icon' : 'icon-sm'}
+      // Phones: full height to tap, narrower so the two names fit.
+      className={cn(touch && 'w-8 shrink-0')}
+      onClick={() => onPair([b, a])}
+      label={`Swap: compare ${titleOf(b)} with ${titleOf(a)}`}
+      data-sw-compare-swap="true"
+    >
+      <ArrowLeftRight size={14} aria-hidden="true" />
+    </IconButton>
+  )
+  const close = (
+    <IconButton
+      size={touch ? 'icon' : 'icon-sm'}
+      className={cn(!touch && 'ml-auto')}
+      onClick={onClose}
+      label="Leave compare mode"
+      data-sw-compare-close="true"
+    >
+      <X size={16} aria-hidden="true" />
+    </IconButton>
+  )
+  const pickA = select(a, (value) => onPair(value === b ? [value, a] : [value, b]), 'Compare', 'a')
+  const pickB = select(b, (value) => onPair(value === a ? [b, value] : [a, value]), 'with', 'b', 'with')
+
+  if (touch) {
+    // One row. The options behind the slider button say how many pages
+    // changed on the button itself, so the count is never more than a
+    // glance away.
+    const optionsLabel = loading
+      ? 'Compare options, comparing'
+      : error
+        ? 'Compare options, the comparison failed'
+        : `Compare options, ${changedText(changedPages, totalPages)}`
+    return (
+      <div
+        className="flex shrink-0 items-center gap-1 border-b border-line bg-surface px-2 py-1.5"
+        role="region"
+        aria-label="Compare environments"
+        data-sw-compare-bar={pair.join('_')}
+        data-sw-compare-layout="row"
+      >
+        {pickA}
+        {swap}
+        {pickB}
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button variant="ghost" size="icon" className="relative shrink-0" aria-label={optionsLabel} data-sw-compare-options="true">
+              {loading ? <Spinner size={14} /> : <SlidersHorizontal size={16} aria-hidden="true" />}
+              {!loading && (error || changedPages) ? (
+                <span
+                  className={cn(
+                    'tabular absolute top-1 right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] leading-none font-semibold',
+                    error ? 'bg-bad text-white' : 'bg-accent text-accent-fg',
+                  )}
+                  aria-hidden="true"
+                >
+                  {error ? '!' : changedPages}
+                </span>
+              ) : null}
             </Button>
-          ))
-        : null}
+          </PopoverTrigger>
+          <PopoverContent align="end" className="w-72 p-3" data-sw-compare-options-panel="true">
+            <p className="mb-2 text-xs font-semibold text-fg">
+              {titleOf(a)} with {titleOf(b)}
+            </p>
+            <div className="mb-3">{status}</div>
+            <div className="flex flex-col gap-2 [&>button]:w-full [&>button]:justify-start">
+              {toggles}
+              {captures}
+            </div>
+          </PopoverContent>
+        </Popover>
+        {close}
+      </div>
+    )
+  }
+
+  return (
+    <div
+      className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line bg-surface px-3 py-2"
+      role="region"
+      aria-label="Compare environments"
+      data-sw-compare-bar={pair.join('_')}
+      data-sw-compare-layout="wrap"
+    >
+      <span className="flex shrink-0 items-center gap-1.5 pr-1 text-[13px] font-semibold text-fg">
+        <GitCompare size={15} className="shrink-0 text-accent" aria-hidden="true" />
+        Compare
+      </span>
+      {pickA}
+      {swap}
+      {pickB}
+      <span className="mx-1 h-5 w-px shrink-0 bg-line" aria-hidden="true" />
+      {toggles}
+      {status}
+      {captures}
+      {close}
     </div>
   )
 }

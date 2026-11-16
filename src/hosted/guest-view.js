@@ -32,6 +32,8 @@ export function guestView(comment, shareId) {
     ...(comment.authorGuest ? { authorGuest: true } : {}),
     ...(comment.authorAgent ? { authorAgent: true } : {}),
     ...(comment.anchor ? { anchor: comment.anchor } : {}),
+    // The side of a compare card it was left on (client/src/board/commentSide.js).
+    ...(comment.environment ? { environment: comment.environment } : {}),
     // Images and a drawing, when the comment has them (members attach
     // images; guests may draw).
     ...media(comment),

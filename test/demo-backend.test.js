@@ -288,6 +288,21 @@ test('board: comments seeded from the export as accounts; edit own, delete own o
   assert.equal((await admin.call('POST', '/api/boards/demo/capture', {})).status, 403)
 })
 
+test('board: a comment placed on one side of a compare card keeps its environment, as on the server', async () => {
+  const member = demo(as('member'))
+  const spot = { pageId: 'home', viewport: 'desktop', x: 20, y: 30, body: 'Only on production' }
+  const posted = await member.call('POST', '/api/boards/demo/comments', { ...spot, environment: 'production' })
+  assert.equal(posted.status, 201)
+  assert.equal(posted.json.comment.environment, 'production')
+  const listed = (await member.call('GET', '/api/boards/demo/comments')).json.comments.find((item) => item.id === posted.json.comment.id)
+  assert.equal(listed.environment, 'production')
+  const plain = await member.call('POST', '/api/boards/demo/comments', spot)
+  assert.equal(plain.json.comment.environment, undefined)
+  const bad = await member.call('POST', '/api/boards/demo/comments', { ...spot, environment: 'nowhere' })
+  assert.equal(bad.status, 400)
+  assert.equal(bad.json.error.code, 'invalid_environment')
+})
+
 test('the second project is made from part of the export', async () => {
   const { call } = demo(() => {}, { project: WEBSITE_PROJECT })
   const view = await call('GET', '/api/boards/website')

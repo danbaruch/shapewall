@@ -40,12 +40,13 @@ export function DrawingMode({ flow, canvasRef, targets, focusFor, shotFor }) {
       return undefined
     }
     const [owner, key] = active.split('\n')
-    const { targetId: pageId, viewport } = splitFrameKey(key)
+    // `env`: one side of a compare card.
+    const { targetId: pageId, viewport, env } = splitFrameKey(key)
     const target = latest.current.targets?.[pageId]
-    const frame = target?.frames.find((item) => item.viewport === viewport)
+    const frame = target?.frames.find((item) => item.viewport === viewport && (!env || item.env === env))
     if (!frame) return undefined
     let stale = false
-    contentExtent(latest.current.shotFor(pageId, viewport))
+    contentExtent(latest.current.shotFor(pageId, viewport, env))
       .catch(() => 1)
       .then((extent) => {
         if (stale || latest.current.active !== active) return
@@ -72,10 +73,10 @@ export function DrawingBar({ titleFor }) {
   const active = useDrawing(activeOf)
   if (!active) return null
   const [owner, key] = active.split('\n')
-  const { targetId, viewport } = splitFrameKey(key)
+  const { targetId, viewport, env } = splitFrameKey(key)
   return (
     <div className="pointer-events-none relative z-30 flex max-w-full justify-center" data-sw-drawing-mode="true">
-      <DrawBar owner={owner} title={titleFor?.(targetId, viewport) || ''} />
+      <DrawBar owner={owner} title={titleFor?.(targetId, viewport, env) || ''} />
     </div>
   )
 }
