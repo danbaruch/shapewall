@@ -2,7 +2,7 @@
 // the draft pin and the hover outline; and a compare frame.
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { ImageOff, Info } from 'lucide-react'
-import { framePins } from './layout'
+import { defaultEnvironment, environmentOf, frameKey } from './commentSide'
 import { anchorAt, describeElement, elementAt, resolveAnchor } from './anchors'
 import { frameDom } from './frameDom'
 import { useElementMap } from './elementMaps'
@@ -89,7 +89,6 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
   const native = frame.native || board.viewports[frame.viewport]
   const { viewport } = frame
   const liveKey = `${targetId}|${viewport}`
-  const comparing = Boolean(board.compare)
   // This frame's pins, and the open thread's own, which it keeps even when
   // the filter hides it (just resolved).
   const { pins, openHere, selectedCommentId } = useFramePins(board, targetId, viewport)
@@ -97,17 +96,21 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
   // pin's, when it was drawn on this capture (an older one shows in the
   // thread's before and after instead).
   const hoveredDrawn = useBoardView((state) => {
-    if (comparing || state.hoveredId === null) return null
+    if (state.hoveredId === null) return null
     return pins.find((item) => item.id === state.hoveredId && hasDrawing(item)) || null
   })
   const drawn = openHere && hasDrawing(openHere) ? openHere : hoveredDrawn
   const shownDrawing = useMemo(() => {
     if (!drawn) return null
+    // Drawn on another environment's capture (in compare mode): not over
+    // this one, where it would point at the wrong things. The thread says
+    // where it was left, and compare mode shows it on its own side.
+    if (environmentOf(drawn, board.environments) !== defaultEnvironment(board.environments)) return null
     const current = String(targetId).startsWith('variant:')
       ? null
       : entryVersion(board.manifest?.pages?.[targetId]?.[viewport], board.manifest)
     return { id: drawn.id, ...drawingsFor(drawn, current) }
-  }, [drawn, targetId, viewport, board.manifest])
+  }, [drawn, targetId, viewport, board.manifest, board.environments])
   const draft = useBoardView((state) => {
     const spot = state.draftSpot
     return spot && spot.pageId === targetId && spot.viewport === viewport ? spot : null
@@ -380,7 +383,7 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
           {hover && canHover ? <HoverOutline hover={hover} native={native} scale={pinScale} /> : null}
           {draft?.anchor && !drawingOn ? <PickedOutline draft={draft} scale={pinScale} /> : null}
           {openHere?.anchor ? <ThreadTarget comment={openHere} box={positions?.get(openHere.id)?.box || null} /> : null}
-          {comparing ? null : <FrameDrawing frameKey={liveKey} native={native} shown={shownDrawing} />}
+          <FrameDrawing frameKey={liveKey} native={native} shown={shownDrawing} />
         </div>
         <FramePins
           targetId={targetId}
@@ -501,37 +504,131 @@ function HoverOutline({ hover, native, scale }) {
 
 // Compare mode: one environment's screenshot of the page. The second
 // environment's frame carries the pixel diff as a red overlay and its share.
-// Its pins are the page's own, on the first environment's frame only
-// (layout.js framePins).
+// Each side draws the comments left on it (commentSide.js): a comment
+// placed here records this frame's environment, so it comes back on this
+// side in every later compare, and older comments (made outside compare
+// mode) are on the default environment's side. In comment mode a click
+// places a comment on this side; with the capture's element map, on the
+// element under the pointer, as on a live page.
 export function CompareFrame({ pageId, frame }) {
   const board = useContext(BoardContext)
   const { compare } = board
-  const { viewport } = frame
+  const { viewport, env } = frame
   const native = frame.native || board.viewports[viewport]
-  const pinned = framePins(frame, compare)
-  const { pins, openHere, selectedCommentId } = useFramePins(board, pageId, viewport, pinned)
-  const { pinScale, compactPins } = usePinLook(board, frame, { active: pins.length > 0 })
+  const key = frameKey(pageId, viewport, env)
+  const { pins, openHere, selectedCommentId } = useFramePins(board, pageId, viewport, true, env)
+  const draft = useBoardView((state) => {
+    const spot = state.draftSpot
+    return spot && spot.pageId === pageId && spot.viewport === viewport && spot.environment === env ? spot : null
+  })
+  const composing = useBoardView(isComposing)
+  const drawingOn = useDrawing(toolOn)
+  const drawSurface = useDrawing((value) => Boolean(value?.tool) && value.key === key)
+  const picking = board.commentMode && !composing && !drawingOn
+  const { pinScale, compactPins } = usePinLook(board, frame, {
+    active: pins.length > 0 || Boolean(draft) || picking,
+    drafting: Boolean(draft),
+  })
   const landedId = useLandedPin(pins)
   const clusters = useFrameClusters({ pins, frame, compact: compactPins, selectedCommentId })
-  const image = compare.files?.[frame.env]?.[pageId]?.[frame.viewport]
+  const image = compare.files?.[env]?.[pageId]?.[viewport]
   const sharp = useBoardView((state) => wantsFull(frame, state.settledZoom, native))
   const full = image && (!image.thumb || sharp)
-  const src = image ? board.imageUrl(compare.kindOf(frame.env), full ? image.file : image.thumb, compare.versionOf(frame.env)) : null
-  const result = compare.pages?.[pageId]?.[frame.viewport]
-  const failure = image ? null : compare.failures?.[frame.env]?.[pageId]?.[frame.viewport] || null
-  const second = frame.env === compare.b
+  const kind = compare.kindOf(env)
+  const version = compare.versionOf(env)
+  const src = image ? board.imageUrl(kind, full ? image.file : image.thumb, version) : null
+  const result = compare.pages?.[pageId]?.[viewport]
+  const failure = image ? null : compare.failures?.[env]?.[pageId]?.[viewport] || null
+  const second = env === compare.b
   const diff = second && compare.showDiff && result?.status === 'ok' && result.percent > 0 ? result.diff : null
+  // The capture's element map, read once the page is drawn big enough to
+  // point at its elements while commenting: a comment then sticks to the
+  // element, and the pointer outlines what a click would pin to.
+  const wantsMap = Boolean(image?.elements) && (picking || Boolean(draft)) && Boolean(sharp)
+  const { map } = useElementMap(wantsMap ? board.elementsUrl(kind, image.elements, version) : null)
+  // The drawing over this side: the open thread's own, else the hovered
+  // pin's. Only the default environment keeps capture versions; a drawing
+  // made on another one shows as it was made.
+  const hoveredDrawn = useBoardView((state) =>
+    state.hoveredId === null ? null : pins.find((item) => item.id === state.hoveredId && hasDrawing(item)) || null,
+  )
+  const drawn = openHere && hasDrawing(openHere) ? openHere : hoveredDrawn
+  const shownDrawing = useMemo(() => {
+    if (!drawn) return null
+    const current =
+      env === defaultEnvironment(board.environments) ? entryVersion(board.manifest?.pages?.[pageId]?.[viewport], board.manifest) : null
+    return { id: drawn.id, ...drawingsFor(drawn, current) }
+  }, [drawn, env, pageId, viewport, board.manifest, board.environments])
+  const [hover, setHover] = useState(null)
+  const hoverFrame = useRef(0)
+  const canHover = picking && Boolean(map) && !board.touch
+  useEffect(() => {
+    if (!canHover) setHover(null)
+  }, [canHover])
+  useEffect(() => () => window.cancelAnimationFrame(hoverFrame.current), [])
+  const onMouseMove = (event) => {
+    if (!canHover) return
+    const rect = event.currentTarget.getBoundingClientRect()
+    const x = ((event.clientX - rect.left) / rect.width) * native.width
+    const y = ((event.clientY - rect.top) / rect.height) * native.height
+    window.cancelAnimationFrame(hoverFrame.current)
+    hoverFrame.current = window.requestAnimationFrame(() => {
+      const position = hitTest(map, x, y)
+      setHover(position >= 0 ? describeAt(map, position, native) : null)
+    })
+  }
+  const onClick = (event) => {
+    if (!board.commentMode) return
+    event.stopPropagation()
+    const rect = event.currentTarget.getBoundingClientRect()
+    const fx = (event.clientX - rect.left) / rect.width
+    const fy = (event.clientY - rect.top) / rect.height
+    const pin = {
+      pageId,
+      viewport,
+      environment: env,
+      x: Math.max(0, Math.min(100, fx * 100)),
+      y: Math.max(0, Math.min(100, fy * 100)),
+    }
+    if (map) {
+      const x = fx * native.width
+      const y = fy * native.height
+      const anchor = anchorFromMap(map, x, y, native)
+      if (anchor) {
+        pin.anchor = anchor
+        pin.target = plainLabel(map.elements[hitTest(map, x, y)]?.t, anchor.text)
+      }
+    }
+    setHover(null)
+    board.onPin(pin)
+  }
+  const title = compare.titleOf(env)
   return (
     <>
       <FrameLabel frame={frame}>
-        {frame.viewport} · {compare.titleOf(frame.env)}
+        {viewport} · {title}
         {second && result?.status === 'ok' ? <span className="text-accent"> · {result.percent}% changed</span> : null}
       </FrameLabel>
       <div
-        className="absolute rounded-sm border border-line bg-surface-2"
-        style={{ left: frame.x, top: frame.y, width: frame.w, height: frame.h }}
-        data-sw-frame={`${pageId}:${frame.viewport}:${frame.env}`}
+        className={cn(
+          'absolute rounded-sm border border-line bg-surface-2',
+          // Picking: a click places the comment, so a drag must not pan.
+          picking && 'nodrag nopan cursor-crosshair',
+          drawSurface && 'outline-solid outline-accent',
+        )}
+        style={{
+          left: frame.x,
+          top: frame.y,
+          width: frame.w,
+          height: frame.h,
+          ...(drawSurface ? { outlineWidth: 3 * pinScale, outlineOffset: 2 * pinScale } : null),
+        }}
+        onClick={board.commentMode ? onClick : undefined}
+        onMouseMove={canHover ? onMouseMove : undefined}
+        onMouseLeave={canHover ? () => setHover(null) : undefined}
+        data-sw-frame={`${pageId}:${viewport}:${env}`}
         data-sw-image={src ? (full ? 'full' : 'thumb') : 'none'}
+        data-sw-draw-surface={drawSurface ? 'true' : undefined}
       >
         {/* The captures and the diff are clipped to the frame, the pins are
             not: see the Frame above. */}
@@ -539,7 +636,7 @@ export function CompareFrame({ pageId, frame }) {
           {src ? (
             <img
               src={src}
-              alt={`${frame.viewport} screenshot, ${compare.titleOf(frame.env)}`}
+              alt={`${viewport} screenshot, ${title}`}
               loading="lazy"
               decoding="async"
               draggable={false}
@@ -550,7 +647,7 @@ export function CompareFrame({ pageId, frame }) {
             <div className="flex h-full flex-col items-center justify-center gap-2 p-4 text-center">
               <ImageOff size={22} className="text-faint" aria-hidden="true" />
               <p className="text-[11px] leading-4 text-muted" data-sw-compare-failed={failure ? 'true' : undefined}>
-                {failure ? `Capture failed: ${failure}` : `Not captured in ${compare.titleOf(frame.env)} yet.`}
+                {failure ? `Capture failed: ${failure}` : `Not captured in ${title} yet.`}
               </p>
             </div>
           )}
@@ -563,17 +660,22 @@ export function CompareFrame({ pageId, frame }) {
               data-sw-diff-overlay="true"
             />
           ) : null}
+          {hover && canHover ? <HoverOutline hover={hover} native={native} scale={pinScale} /> : null}
+          {draft?.anchor && !drawingOn ? <PickedOutline draft={draft} scale={pinScale} /> : null}
           {openHere?.anchor ? <ThreadTarget comment={openHere} box={null} /> : null}
+          <FrameDrawing frameKey={key} native={native} shown={shownDrawing} />
         </div>
         <FramePins
           targetId={pageId}
           viewport={viewport}
+          env={env}
           clusters={clusters}
           scale={pinScale}
           compact={compactPins}
           selectedCommentId={selectedCommentId}
           landedId={landedId}
         />
+        {draft ? <DraftPin draft={draft} scale={pinScale} name={board.me?.name} colorKey={board.me?.name} /> : null}
       </div>
     </>
   )

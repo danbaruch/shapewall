@@ -1,3 +1,5 @@
+import { compareSide } from './commentSide.js'
+
 // Deterministic board layout. Pages are grouped (config order), each group is
 // a labelled frame holding its pages in rows, and groups wrap into rows so
 // the whole board is roughly screen-shaped. Variants take reserved space to
@@ -98,7 +100,10 @@ function variantShape(variant, mode, viewports, plainShape, frameHeight = null) 
   return { frames: own.frames, width: own.width, height: own.height, only: null }
 }
 
-export function layoutBoard({ pages, groups, variants, viewports, mode, compare = null }) {
+// `environments`: the board's environments (with `default`), so a pin in
+// compare mode goes on the frame of the environment it was left on
+// (commentSide.js).
+export function layoutBoard({ pages, groups, variants, viewports, mode, compare = null, environments = null }) {
   // Card size for the row limit: a page with every viewport. Pages limited to
   // fewer viewports get narrower (or shorter) cards and the row closes up.
   const { width } = framesFor(mode, viewports, compare)
@@ -210,6 +215,7 @@ export function layoutBoard({ pages, groups, variants, viewports, mode, compare 
         ariaLabel: `${page.title}, ${page.group} page. Arrow keys: its comments and buttons. Enter: its actions.`,
       })
       targets[page.id] = { x, y, w: width, h: height, frames, nodeId: page.id }
+      if (compare) targets[page.id].sides = { pair: compare, environments: environments || [] }
       let vx = x + width + VARIANT_GAP
       beside.forEach(({ variant, shape: own }, index) => {
         const id = `variant:${variant.id}`
@@ -274,22 +280,29 @@ export function pinSpot(comment, live = null) {
   return { x: clamp(x), y: clamp(y), flipX, flipY }
 }
 
-// Whether a frame carries the page's comment pins. Compare mode draws one
-// frame per environment, and a comment belongs to the page, not to an
-// environment, so only the first environment's frame takes the pins: one pin
-// per comment rather than the same one twice, on the frame the camera flies
-// to (pinPoint below takes a viewport's first frame, which is the first
-// environment's), and the second frame keeps its diff overlay clear. Outside
-// compare mode every frame carries its own.
-export function framePins(frame, compare = null) {
-  return !compare || !frame?.env ? true : frame.env === compare.a
+// The frame of a card that draws a comment (or the comment being written):
+// the frame of its viewport, and in compare mode the one of its side
+// (commentSide.js). A draft carries the environment of the frame it was
+// placed on, which is its side.
+export function pinFrame(target, comment) {
+  if (!target) return null
+  const side = target.sides ? compareSide(comment, target.sides.pair, target.sides.environments) : null
+  return target.frames.find((item) => item.viewport === comment.viewport && (!side || !item.env || item.env === side)) || null
 }
 
-// Canvas point of a pin: node origin + frame offset + percentage of the frame.
+// Canvas point of a pin: node origin + frame offset + percentage of the
+// frame. The point is where the pin is drawn (pinSpot), not the click it was
+// made from: a pin anchored to an element sits on the element's corner, so
+// for a wide element the click point was far from the pin, and a jump that
+// centred the click point left the pin hanging off a phone's screen (the
+// demo's comment #20 on a full-width table, 11 px past the right edge at
+// 390). A live page can move an anchored pin a little further (its element
+// re-resolved); the stored box is the best guess without the document.
 export function pinPoint(targets, comment) {
   const target = targets[comment.pageId]
   if (!target) return null
-  const frame = target.frames.find((item) => item.viewport === comment.viewport)
+  const frame = pinFrame(target, comment)
   if (!frame) return null
-  return { x: target.x + frame.x + (frame.w * comment.x) / 100, y: target.y + frame.y + (frame.h * comment.y) / 100, nodeId: target.nodeId }
+  const spot = pinSpot(comment)
+  return { x: target.x + frame.x + (frame.w * spot.x) / 100, y: target.y + frame.y + (frame.h * spot.y) / 100, nodeId: target.nodeId }
 }

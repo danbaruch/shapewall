@@ -1,7 +1,7 @@
 // Board layout: per-page viewports close the gap instead of an empty frame.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { framePins, framesFor, layoutBoard, pageViewports, pinPoint, pinSpot } from '../client/src/board/layout.js'
+import { framesFor, layoutBoard, pageViewports, pinFrame, pinPoint, pinSpot } from '../client/src/board/layout.js'
 
 const viewports = {
   desktop: { width: 1440, height: 2200, frameScale: 0.25 },
@@ -86,30 +86,44 @@ test('compare mode limits environment frames to the page viewports too', () => {
   )
 })
 
-test('comparing, the pins go on the first environment frame only, the one the camera flies to', () => {
-  const compare = { a: 'prod', b: 'staging' }
-  const layout = layoutBoard({ pages, groups: ['Marketing'], variants: [], viewports, mode: 'all', compare: ['prod', 'staging'] })
-  const frames = nodeOf(layout, 'home').data.frames
-  // One frame per environment per viewport, and exactly one of each pair pinned.
-  assert.deepEqual(
-    frames.map((frame) => `${frame.viewport}:${frame.env}:${framePins(frame, compare) ? 'pins' : 'bare'}`),
-    ['desktop:prod:pins', 'desktop:staging:bare', 'phone:prod:pins', 'phone:staging:bare'],
-  )
-  // The frame a comment's pin point lands on is the frame that draws pins.
+test('comparing, a pin lands on the frame of the environment it was left on', () => {
+  const environments = [
+    { id: 'prod', title: 'Production', default: true },
+    { id: 'staging', title: 'Staging' },
+    { id: 'preview', title: 'Preview' },
+  ]
+  const layout = layoutBoard({
+    pages,
+    groups: ['Marketing'],
+    variants: [],
+    viewports,
+    mode: 'all',
+    compare: ['staging', 'prod'],
+    environments,
+  })
+  const target = layout.targets.home
+  const frameAt = (point, viewport) =>
+    target.frames.find((frame) => frame.viewport === viewport && point.x - target.x >= frame.x && point.x - target.x <= frame.x + frame.w)
   for (const viewport of ['desktop', 'phone']) {
-    const point = pinPoint(layout.targets, { pageId: 'home', viewport, x: 50, y: 50 })
-    const target = layout.targets.home
-    const landed = frames.find(
-      (frame) => point.x - target.x >= frame.x && point.x - target.x <= frame.x + frame.w && frame.viewport === viewport,
+    // An older comment (no environment) is on the default environment: Production, the second frame here.
+    assert.equal(frameAt(pinPoint(layout.targets, { pageId: 'home', viewport, x: 50, y: 50 }), viewport).env, 'prod')
+    assert.equal(
+      frameAt(pinPoint(layout.targets, { pageId: 'home', viewport, x: 50, y: 50, environment: 'staging' }), viewport).env,
+      'staging',
     )
-    assert.ok(framePins(landed, compare), `${viewport}: the camera lands on the frame with the pins`)
+    // An environment that is not one of the two compared falls back to the first frame.
+    assert.equal(
+      frameAt(pinPoint(layout.targets, { pageId: 'home', viewport, x: 50, y: 50, environment: 'preview' }), viewport).env,
+      'staging',
+    )
+    // One the board no longer has is on the default.
+    assert.equal(frameAt(pinPoint(layout.targets, { pageId: 'home', viewport, x: 50, y: 50, environment: 'gone' }), viewport).env, 'prod')
   }
-  // Swapping the pair moves the pins with it.
-  assert.equal(framePins(frames[0], { a: 'staging', b: 'prod' }), false)
-  assert.equal(framePins(frames[1], { a: 'staging', b: 'prod' }), true)
-  // Outside compare mode every frame keeps its own pins.
-  assert.equal(framePins({ viewport: 'desktop' }, null), true)
-  assert.equal(framePins({ viewport: 'desktop' }, compare), true)
+  assert.equal(pinFrame(target, { pageId: 'home', viewport: 'phone', environment: 'staging' }).env, 'staging')
+  // Outside compare mode a card has one frame per viewport and no sides.
+  const plain = layoutBoard({ pages, groups: ['Marketing'], variants: [], viewports, mode: 'all', environments })
+  assert.equal(plain.targets.home.sides, undefined)
+  assert.equal(pinFrame(plain.targets.home, { pageId: 'home', viewport: 'phone', environment: 'staging' }).viewport, 'phone')
 })
 
 test('variants take their page card size', () => {
@@ -160,7 +174,8 @@ test('comparing, a variant is a single-frame card beside its page pair', () => {
   const point = pinPoint(layout.targets, { pageId: 'variant:v1', viewport: 'desktop', x: 50, y: 50 })
   const target = layout.targets['variant:v1']
   assert.ok(point.x > target.x && point.x < target.x + target.w, 'the pin is inside the variant card')
-  assert.ok(framePins(variant.data.frames[0], { a: 'prod', b: 'staging' }), 'a variant frame draws its pins')
+  assert.equal(target.sides, undefined, 'a variant has no sides')
+  assert.equal(pinFrame(target, { pageId: 'variant:v1', viewport: 'desktop', environment: 'staging' }), variant.data.frames[0])
 })
 
 test('comparing, two variants beside one page each keep their own width and stay in the group', () => {

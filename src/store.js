@@ -607,6 +607,7 @@ export function validateCommentInput(config, board, input) {
   ) {
     throw new CommentError(400, 'invalid_position', 'The pin must sit on the page (0 to 100 percent).')
   }
+  const environment = validateCommentEnvironment(board, input?.environment, { variant: Boolean(variant) })
   return {
     pageId,
     viewport,
@@ -617,7 +618,34 @@ export function validateCommentInput(config, board, input) {
     body: cleanCommentBody(input?.body, { media: hasCommentMedia(input) }),
     author: cleanAuthor(input?.author),
     anchor: validateAnchor(input?.anchor),
+    ...(environment ? { environment } : {}),
   }
+}
+
+// The environment a comment was left on (compare mode shows a page once per
+// environment, client/src/board/commentSide.js): one of the board's, or
+// nothing (the default environment, which is what every comment made
+// outside compare mode is on). A variant has no environment.
+export function validateCommentEnvironment(board, value, { variant = false } = {}) {
+  if (value === undefined || value === null || value === '') return null
+  const ids = (board?.environments || []).map((env) => env.id)
+  if (typeof value !== 'string' || variant || !ids.includes(value)) {
+    throw new CommentError(
+      400,
+      'invalid_environment',
+      variant ? 'A variant has no environments.' : `Environment must be one of ${ids.join(', ') || 'none'}.`,
+    )
+  }
+  return value
+}
+
+// Whether a comment is on another environment than the board's default:
+// its captures are in envs/<id>/captures and are not kept as versions.
+export function commentOnOtherEnvironment(board, comment) {
+  const env = comment?.environment
+  return Boolean(
+    env && board?.environments?.length && board.environments[0].id !== env && board.environments.some((item) => item.id === env),
+  )
 }
 
 // Events go into the shared event log while the comments lock is still held
@@ -646,7 +674,12 @@ export async function createComment(config, board, input, { now = new Date() } =
       id: store.nextId,
       ...clean,
       // The capture the reviewer saw, for before/after once it is fixed.
-      captureVersion: clean.pageId.startsWith('variant:') ? null : currentVersion(config, board.id, clean.pageId, clean.viewport),
+      // Only the default environment keeps old captures (versions/), so a
+      // comment left on another one (in compare mode) records none.
+      captureVersion:
+        clean.pageId.startsWith('variant:') || commentOnOtherEnvironment(board, clean)
+          ? null
+          : currentVersion(config, board.id, clean.pageId, clean.viewport),
       status: 'open',
       createdAt: now.toISOString(),
       updatedAt: now.toISOString(),

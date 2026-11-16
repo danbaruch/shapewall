@@ -4,13 +4,15 @@ import { saveAuthor } from '../../lib/utils'
 import { imagesPayload, useImageDraft } from '../commentImages'
 import { drawing, drawingPayload } from '../drawing'
 import { viewportLabel } from '../viewports'
+import { frameKey } from '../commentSide'
 import { plainLabel, selectorTag } from '../../../../src/capture/element-map.js'
 
 // The new comment being written (`draft`, placed by a click in comment mode):
 // saving it, the line that says where it goes, and the composer's props.
 // `media`: who may attach images and draw ({ attach, draw, attachNote }),
-// and `pageImage(pageId, viewport)` -> { src, native } for the phone's
-// drawing sheet.
+// and `pageImage(pageId, viewport, env)` -> { src, native } for the phone's
+// drawing sheet. `envTitle(id)` names a compare side, for the line that
+// says where the comment goes.
 export function useCommentDraft({
   draft,
   setDraft,
@@ -29,9 +31,11 @@ export function useCommentDraft({
   info,
   media = { attach: false, draw: false, attachNote: null },
   pageImage = () => null,
+  envTitle = (id) => id,
 }) {
   const images = useImageDraft({ enabled: media.attach })
-  const drawKey = draft ? `${draft.pageId}|${draft.viewport}` : null
+  // A compare card shows a page twice: the drawing is on the side the draft is on.
+  const drawKey = draft ? frameKey(draft.pageId, draft.viewport, draft.environment) : null
   // The composer's drawing lives with the draft: it starts with it, starts
   // over when the draft moves to another frame, and ends with it.
   useEffect(() => {
@@ -67,6 +71,8 @@ export function useCommentDraft({
         body: draft.body,
         author,
         ...(draft.anchor ? { anchor: draft.anchor } : {}),
+        // Placed on one side of a compare card: the environment it is on.
+        ...(draft.environment ? { environment: draft.environment } : {}),
         ...(attached.length ? { images: attached } : {}),
         ...(shapes.length ? { drawing: drawingPayload(shapes) } : {}),
       })
@@ -93,7 +99,15 @@ export function useCommentDraft({
       : `a spot on ${targetTitle(draft.pageId)}`
     : ''
   const draftDescription = draft
-    ? `${targetTitle(draft.pageId)} · ${viewportLabel(draft.viewport)} · ${draft.anchor ? draftTarget : `${Math.round(draft.x)}% across, ${Math.round(draft.y)}% down`}`
+    ? [
+        targetTitle(draft.pageId),
+        viewportLabel(draft.viewport),
+        // Compare mode: which side it goes on.
+        draft.environment ? envTitle(draft.environment) : null,
+        draft.anchor ? draftTarget : `${Math.round(draft.x)}% across, ${Math.round(draft.y)}% down`,
+      ]
+        .filter(Boolean)
+        .join(' · ')
     : ''
   const composerProps = {
     draft,
@@ -108,7 +122,7 @@ export function useCommentDraft({
       ...media,
       images,
       owner: 'composer',
-      page: draft && media.draw ? pageImage(draft.pageId, draft.viewport) : null,
+      page: draft && media.draw ? pageImage(draft.pageId, draft.viewport, draft.environment || null) : null,
       pageTitle: draft ? targetTitle(draft.pageId) : '',
     },
   }

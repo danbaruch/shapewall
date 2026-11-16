@@ -4,7 +4,7 @@ import { api, BROWSER_COMMENTS, fileUrl, STATIC } from '../lib/api'
 import { resetBrowserComments } from '../lib/browserComments'
 import { leavePage, useMediaQuery, useOverlayEntry, useParams, useResource } from '../lib/hooks'
 import { cn, savedAuthor } from '../lib/utils'
-import { Spinner } from '../components/ui'
+import { Button, Spinner } from '../components/ui'
 import { BoardContext, NODE_TYPES } from './nodes'
 import { EDGE_TYPES } from './edges'
 import { layoutBoard, nativeSize, pinPoint } from './layout'
@@ -67,6 +67,7 @@ import { useThreadNav } from './hooks/useThreadNav'
 import { useChecks } from './hooks/useChecks'
 import { useAgentParams } from './hooks/useAgentParams'
 import { useCompare } from './hooks/useCompare'
+import { compareSide, defaultEnvironment, environmentOf, frameKey, sideLabel } from './commentSide'
 import { useCommentLists } from './hooks/useCommentLists'
 import { useArrows } from './hooks/useArrows'
 import { useBoardContext } from './hooks/useBoardContext'
@@ -318,10 +319,12 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
             viewports,
             mode,
             compare: comparePair,
+            // In compare mode a pin goes on the side it was left on (commentSide.js).
+            environments: data.environments,
           })
         : { nodes: [], edges: [], targets: {} },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [data?.board, data?.variants, layoutPages, viewports, mode, comparePair],
+    [data?.board, data?.variants, data?.environments, layoutPages, viewports, mode, comparePair],
   )
   const [nodes, setNodes, onNodesChange] = useNodesState(layout.nodes)
   useEffect(() => {
@@ -757,17 +760,29 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
 
   // Where the comment being written goes (not its text, so typing does not
   // re-render the board).
+  // `environment`: the side of a compare card it was placed on.
   const draftSpot = useMemo(
-    () => (draft ? { pageId: draft.pageId, viewport: draft.viewport, x: draft.x, y: draft.y, anchor: draft.anchor } : null),
+    () =>
+      draft
+        ? {
+            pageId: draft.pageId,
+            viewport: draft.viewport,
+            x: draft.x,
+            y: draft.y,
+            anchor: draft.anchor,
+            environment: draft.environment || null,
+          }
+        : null,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [draft?.pageId, draft?.viewport, draft?.x, draft?.y, draft?.anchor],
+    [draft?.pageId, draft?.viewport, draft?.x, draft?.y, draft?.anchor, draft?.environment],
   )
   // A cluster of pins: zoom in until they come apart; at the closest zoom,
   // open the first one (the thread's arrows reach the rest).
+  // `env`: the compare frame the cluster is on.
   const openCluster = useCallback(
-    (targetId, viewport, items) => {
+    (targetId, viewport, items, env = null) => {
       const target = layout.targets[targetId]
-      const frame = target?.frames.find((item) => item.viewport === viewport)
+      const frame = target?.frames.find((item) => item.viewport === viewport && (!env || item.env === env))
       if (!frame) return
       if (flow.getZoom() >= 3.9) {
         selectComment(items[0].comment)
@@ -892,17 +907,23 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     }),
     [canComment, info?.guest],
   )
-  // The screenshot of a frame, for drawing on it in the phone's sheet.
+  // The screenshot of a frame, for drawing on it in the phone's sheet. `env`:
+  // one side of a compare card, whose capture is that environment's.
   const pageImage = useCallback(
-    (pageId, viewport) => {
-      const image = data?.captures?.[pageId]?.[viewport]
+    (pageId, viewport, env = null) => {
+      const image = env && compareView ? compareView.files?.[env]?.[pageId]?.[viewport] : data?.captures?.[pageId]?.[viewport]
       if (!image?.file) return null
       const variant = String(pageId).startsWith('variant:') ? variantsById.get(pageId) : null
       const page = pagesById.get(variant ? variant.pageId : pageId)
       const native = nativeSize(viewports, viewport, page?.frameHeight)
-      return native ? { src: fileUrl(boardId, 'captures', image.file, imageVersion), native } : null
+      if (!native) return null
+      const src =
+        env && compareView
+          ? fileUrl(boardId, compareView.kindOf(env), image.file, compareView.versionOf(env))
+          : fileUrl(boardId, 'captures', image.file, imageVersion)
+      return { src, native }
     },
-    [boardId, data?.captures, imageVersion, pagesById, variantsById, viewports],
+    [boardId, compareView, data?.captures, imageVersion, pagesById, variantsById, viewports],
   )
   // The comment being written: its description and what its composer needs.
   const { draftDescription, draftTarget, composerProps } = useCommentDraft({
@@ -926,7 +947,15 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     // Share link guests may draw but not upload (src/hosted).
     media: commentMedia,
     pageImage,
+    envTitle: (id) => environments.find((env) => env.id === id)?.title || id,
   })
+  // Which side of a compare card the open thread is on (null outside compare
+  // mode and on a variant), and what the thread says about it.
+  const threadSide = selectedComment ? compareSide(selectedComment, comparePair, environments) : null
+  const threadSideLabel = selectedComment ? sideLabel(selectedComment, { environments, pair: comparePair }) : null
+  // Left on another environment than the default: no capture versions to
+  // compare its drawing with (only the default environment keeps them).
+  const threadElsewhere = selectedComment ? environmentOf(selectedComment, environments) !== defaultEnvironment(environments) : false
 
   // The Draw tool picked a page: its comment is open, so the drawing starts
   // (after useCommentDraft's own effect, which makes the drawing). On a phone
@@ -977,7 +1006,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   useOverlayEntry(Boolean(journey), closeJourney)
   useOverlayEntry(Boolean(builder), () => setBuilder(null))
 
-  useCommentModeKeys({ commentMode, setCommentMode, canComment, comparePair, setDraft, keepDraft })
+  useCommentModeKeys({ commentMode, setCommentMode, canComment, setDraft, keepDraft })
   useJourneyCycleKey({ journeys, journey, builder, openJourney, closeJourney })
   // The app sidebar (desktop): expanded or collapsed, Ctrl/Cmd+B, remembered.
   const [sidebarOpen, toggleSidebar] = useSidebarExpanded(wide, false)
@@ -1232,8 +1261,13 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
           boardId,
           pageImage,
           pageTitle: targetTitle(selectedComment.pageId),
+          // Compare mode: the side it is drawn on (its drawing is made on that
+          // capture), and the environment it was left on, for its header.
+          side: threadSide,
+          sideLabel: threadSideLabel,
+          // Only the default environment's captures have versions to compare a drawing with.
           currentVersion: (comment) =>
-            String(comment.pageId).startsWith('variant:')
+            String(comment.pageId).startsWith('variant:') || threadElsewhere
               ? null
               : entryVersion(data?.manifest?.pages?.[comment.pageId]?.[comment.viewport], data?.manifest),
         },
@@ -1376,16 +1410,11 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   // The step a comment is at, one at a time (data-sw-comment-flow on the
   // canvas): drawing (a tool is on), composing (a target is picked, the
   // composer is open), picking (comment mode, nothing picked yet), else off.
-  const commentState = drawingOn
-    ? 'drawing'
-    : draft && wide && !draftParked
-      ? 'composing'
-      : commentMode && canComment && !comparePair
-        ? 'picking'
-        : 'off'
+  const commentState = drawingOn ? 'drawing' : draft && wide && !draftParked ? 'composing' : commentMode && canComment ? 'picking' : 'off'
   // ---- The board's tools (BoardTools.jsx) --------------------------------------
   // Only what this person may use here; with Select alone there is no toolbar.
-  const commenting = canComment && !comparePair
+  // Compare mode too: a comment goes on the side it is placed on (commentSide.js).
+  const commenting = canComment
   const hasLive = useMemo(
     () =>
       !comparePair &&
@@ -1804,13 +1833,13 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
               <CompareBar
                 environments={environments}
                 pair={comparePair}
-                loading={compareQuery.loading || !compareData}
-                error={compareQuery.error ? compareQuery.error.message : null}
+                // A failed comparison is an error, not a spinner that never ends.
+                loading={compareQuery.loading || (!compareData && !compareQuery.error)}
+                error={compareQuery.error ? compareQuery.error.message || 'The comparison could not be loaded.' : null}
                 changedPages={compareData?.changedPages ?? 0}
                 totalPages={data?.board?.pages?.length || 0}
                 changedOnly={changedOnly}
                 showDiff={showDiff}
-                canComment={canComment}
                 canCapture={canCapture}
                 captureBusy={busy || Boolean(capture?.running)}
                 touch={!wide}
@@ -1818,7 +1847,12 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                 onChangedOnly={setChangedOnly}
                 onShowDiff={(value) => updateParams({ diff: value ? null : 'off' })}
                 onCapture={(env) => startCapture(env)}
-                onClose={() => setCompare(null)}
+                onClose={() => {
+                  setCompare(null)
+                  // The bar and its button go: the keyboard goes back to the
+                  // board rather than to the top of the page.
+                  canvasRef.current?.focus({ preventScroll: true })
+                }}
               />
             ) : null}
             <div className="flex min-h-0 flex-1 overflow-hidden">
@@ -1843,7 +1877,14 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                     canvasRef={canvasRef}
                     targets={layout.targets}
                     focusFor={(owner) => ((owner === 'composer' ? draft?.y : selectedComment?.y) ?? 50) / 100}
-                    shotFor={(pageId, viewport) => {
+                    shotFor={(pageId, viewport, env = null) => {
+                      // One side of a compare card: that environment's capture.
+                      if (env && compareView) {
+                        const image = compareView.files?.[env]?.[pageId]?.[viewport]
+                        return image?.file
+                          ? fileUrl(boardId, compareView.kindOf(env), image.thumb || image.file, compareView.versionOf(env))
+                          : null
+                      }
                       const image = data.captures?.[pageId]?.[viewport]
                       return image?.file ? fileUrl(boardId, 'captures', image.thumb || image.file, imageVersion) : null
                     }}
@@ -1957,7 +1998,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                       <ComposerPopover
                         point={pinPoint(layout.targets, draft)}
                         // Re-aimed at another spot: a card that was dragged goes back to its pin.
-                        resetKey={`${draft.pageId}|${draft.viewport}|${draft.x}|${draft.y}`}
+                        resetKey={`${frameKey(draft.pageId, draft.viewport, draft.environment)}|${draft.x}|${draft.y}`}
                         stowed={drawingOn}
                         onClose={() => (busy ? null : setDraft(null))}
                         onEscape={() => {
@@ -2037,7 +2078,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                       if (pick) focusComment(pick)
                     }}
                     onComment={
-                      canComment && !comparePair
+                      canComment
                         ? () => {
                             if (keepDraft()) return
                             setDraft(null)
@@ -2052,9 +2093,20 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                   />
                 ) : null}
                 {comparePair && changedOnly && compareData && !layoutPages.length ? (
-                  <p className="absolute inset-x-0 top-1/3 mx-auto w-max max-w-[90%] rounded-lg bg-surface px-4 py-3 text-sm text-muted shadow-pop">
-                    No visual changes between these two environments.
-                  </p>
+                  // Nothing left to show: say so, and offer the one way back
+                  // to a board with pages on it.
+                  <div
+                    className="absolute inset-x-0 top-1/3 mx-auto flex w-max max-w-[90%] flex-col items-center gap-3 rounded-lg border border-line bg-surface px-5 py-4 text-center shadow-pop"
+                    role="status"
+                    data-sw-compare-empty="true"
+                  >
+                    <p className="text-sm font-medium text-fg">
+                      No pages changed between {compareView?.titleOf(comparePair[0])} and {compareView?.titleOf(comparePair[1])}.
+                    </p>
+                    <Button size={wide ? 'sm' : 'touch'} variant="secondary" onClick={() => setChangedOnly(false)}>
+                      Show all pages
+                    </Button>
+                  </div>
                 ) : null}
                 <ToolDock touch={!wide}>
                   <BoardToast toast={toast} setToast={setToast} onHold={holdToast} wide={wide} />
@@ -2087,7 +2139,11 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                     />
                   ) : null}
                   {toolNote === 'drawing' ? (
-                    <DrawingBar titleFor={(pageId, viewport) => `${targetTitle(pageId)} · ${viewportLabel(viewport)}`} />
+                    <DrawingBar
+                      titleFor={(pageId, viewport, env) =>
+                        [targetTitle(pageId), viewportLabel(viewport), env ? compareView?.titleOf(env) : null].filter(Boolean).join(' · ')
+                      }
+                    />
                   ) : toolNote && !phoneCovered ? (
                     <ToolNote
                       wide={wide}
