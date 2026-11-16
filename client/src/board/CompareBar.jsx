@@ -60,7 +60,9 @@ export default function CompareBar({
       <Select value={value} onValueChange={onChange}>
         <SelectTrigger
           size={touch ? 'touch' : 'sm'}
-          className={touch ? 'w-full min-w-0' : 'max-w-48'}
+          // A phone's row is tight: a little less padding keeps a name like
+          // "Production" whole at 390 px.
+          className={touch ? 'w-full min-w-0 px-2.5' : 'max-w-48'}
           aria-label={label}
           data-sw-compare-env={testId}
         >
@@ -124,6 +126,8 @@ export default function CompareBar({
   const swap = (
     <IconButton
       size={touch ? 'icon' : 'icon-sm'}
+      // Phones: full height to tap, narrower so the two names fit.
+      className={cn(touch && 'w-8 shrink-0')}
       onClick={() => onPair([b, a])}
       label={`Swap: compare ${titleOf(b)} with ${titleOf(a)}`}
       data-sw-compare-swap="true"

@@ -114,7 +114,7 @@ async function goTo(page, title, id) {
   await page.keyboard.press('Control+k')
   await page.waitForSelector('[data-sw-palette-input]')
   await page.fill('[data-sw-palette-input]', title)
-  await page.click(`[data-sw-palette] [data-sw-page-pick="${id}"]`)
+  await page.click(`[data-sw-palette] [data-sw-option="${id}"]`)
   await page.waitForSelector('[data-sw-palette]', { state: 'detached' })
   await settle(page)
 }
@@ -169,7 +169,14 @@ test('desktop: a comment goes on the side it is placed on, stays there, and its 
 
     // Leave comment mode, open the Production thread from its pin: it says
     // which side it is on; reply, resolve and reopen all work.
-    await page.keyboard.press('Escape')
+    // The new comment's thread is open: Escape closes it, C leaves comment
+    // mode (as outside compare, comments.e2e).
+    if (await page.locator('[data-sw-thread-popover]').count()) {
+      await page.locator('[data-sw-thread-popover]').first().focus()
+      await page.keyboard.press('Escape')
+      await page.waitForSelector('[data-sw-thread-popover]', { state: 'detached' })
+    }
+    await page.keyboard.press('c')
     await page.waitForSelector('[data-sw-comment-mode][aria-pressed="false"]')
     await page.click(`[data-sw-pin="${onProduction.id}"]`)
     const popover = `[data-sw-thread-popover="${onProduction.id}"]`
@@ -180,13 +187,22 @@ test('desktop: a comment goes on the side it is placed on, stays there, and its 
     await page.keyboard.press('Enter')
     await page.waitForSelector(`${popover} [data-sw-reply="1"]`)
     assert.equal(stored(onProduction.id).replies[0].body, 'Deploy is queued')
-    await page.click(`${popover} [data-sw-resolve="${onProduction.id}"]`)
-    await page.waitForFunction((id) => document.querySelector(`[data-sw-reopen="${id}"]`), onProduction.id)
-    assert.equal(stored(onProduction.id).status, 'resolved')
-    await page.click(`${popover} [data-sw-reopen="${onProduction.id}"]`)
-    await page.waitForFunction((id) => document.querySelector(`[data-sw-resolve="${id}"]`), onProduction.id)
-    assert.equal(stored(onProduction.id).status, 'open')
     await shot(page, 'compare-thread-production')
+    // Resolved, it leaves the open list (as outside compare, board.e2e); the
+    // Resolved filter shows it again on its side, and it reopens from there.
+    await page.click(`${popover} [data-sw-resolve="${onProduction.id}"]`)
+    await page.waitForSelector(popover, { state: 'detached' })
+    assert.equal(stored(onProduction.id).status, 'resolved')
+    const filter = (name) => page.click(`[data-sw-comment-list] >> xpath=.. >> button:has-text("${name}")`)
+    await filter('Resolved')
+    await page.waitForSelector(`[data-sw-pin="${onProduction.id}"]`)
+    assert.equal(await pinFrame(page, onProduction.id), 'pricing:desktop:production')
+    await page.click(`[data-sw-pin="${onProduction.id}"]`)
+    await page.click(`${popover} [data-sw-reopen="${onProduction.id}"]`)
+    for (let tries = 0; tries < 50 && stored(onProduction.id).status !== 'open'; tries += 1) await page.waitForTimeout(100)
+    assert.equal(stored(onProduction.id).status, 'open')
+    await page.keyboard.press('Escape')
+    await filter('Open')
 
     // Swapped, every comment keeps its side.
     await page.keyboard.press('Escape')
@@ -317,7 +333,9 @@ test('phone: a tap on the Production side places a comment there', async () => {
       await page.waitForTimeout(600)
     }
     await page.waitForSelector('[data-sw-composer] [data-sw-comment-input]')
-    assert.match(await page.textContent('[data-sw-composer]'), /Production/)
+    // The phone sheet names the side in its header, above the composer.
+    const header = await page.$eval('[data-sw-composer]', (node) => node.closest('[role="dialog"]')?.textContent || '')
+    assert.match(header, /Production/)
     await page.fill('[data-sw-composer] [data-sw-comment-input]', 'Hero overlaps on production')
     await page.tap('[data-sw-composer] button[type="submit"]')
     await page.waitForSelector('[data-sw-composer]', { state: 'detached' })
