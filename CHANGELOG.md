@@ -3,6 +3,63 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## 0.9.0 - 2026-11-16
+
+- **Dictate a comment.** A microphone button under a new comment, a reply and an edit, on the desktop popover, the phone sheets,
+  hosted boards and the demo. Press it and talk: the words appear live at the caret (or replace the selection), with a space and
+  a capital where they join the text, and you can keep typing. Press again or Esc to stop; posting, Cancel, closing the thread
+  or sheet, another thread and a hidden tab stop it as well, and nothing is ever posted by itself. A blocked microphone, no
+  microphone, no speech, a network failure and recognition ending by itself each get a plain line under the field. It uses the
+  browser's own speech recognition (no new dependency) and is not shown where the browser has none (Firefox). Privacy: the
+  browser's speech service turns the audio into text, and in Chrome that service is Google's, so the audio goes to Google;
+  Shapewall's server is not involved and never receives or stores it.
+  Dictation only starts from a press, and the first press says this once before anything listens. A hosted board's comment
+  share links now allow the microphone for the board page itself (`Permissions-Policy: microphone=(self)`); view-only links,
+  public boards and live HTML snapshots keep `microphone=()`. See [Dictation](website/src/docs/getting-started.md#dictation).
+- **The minimum Node version is now 22.19**, stated in `engines`: Shapewall's Lighthouse dependency needs it. The docs said
+  22.13.
+- **The agent panel no longer says a local agent asks before it acts.** It said "It asks before changing files or running
+  commands", but a local agent runs under its own permission settings, and Claude Code's adapter (0.106.0) starts new sessions in
+  its `auto` mode, which acts without asking. The panel now says the agent may change files or run commands without asking, names
+  the mode its session is in once there is one ("Its mode now is Auto, which acts without asking"), and links to how to restrict
+  it. The Connect dialog, the "Allow this?" dialog for a command, the agent settings and the docs say the same.
+- **A capture that was redirected to a sign-in page is no longer a silent "ok".** Each shot keeps the URL it landed on, the line
+  says "landed on /login/, not /app/", the run ends with a warning that points to Auth in docs/config.md, the board marks the card
+  "Redirected", and `capture --json` has `finalUrl` per shot and `redirectedShots`. `shapewall checks` now prints its warnings in
+  the terminal, not only in `--json`.
+- **`serve` on a port that is taken** says so in a sentence and suggests a port that is actually free (or that this project's own
+  server is already running there), instead of `listen EADDRINUSE`, and exits cleanly.
+- **`doctor` no longer says "Ready." for setups that cannot work.** It checks that the site in `baseUrl` answers (a warning with
+  the next step when it does not), that Shapewall's own dependencies are installed (a FAIL naming the missing ones), checks the
+  port `serve` last used for this project, and suggests only a free port. With warnings it ends "Ready, with N warnings above."
+- **Unknown config keys are warned about** by `doctor`, `capture` and `serve`, with the key that was most likely meant. A
+  required key under the wrong case (`"baseURL"`) says to rename it rather than "got undefined".
+- **A page that did not load says why in plain words**: "connection refused at http://127.0.0.1:4799 (is the site running?)" or
+  "host not found: … (check baseUrl)" instead of Playwright's `net::ERR_*` line, and a run where every shot failed the same way
+  ends with what to do next.
+- **`comments add --selector` that matches nothing** says where the pin sits until the board finds the element, and the board
+  no longer names an element from the selector's words for such a comment.
+- **`doctor --install-browser` on Fedora and other unlisted Linux distributions** prints one calm note instead of Playwright's
+  capitalised "BEWARE" three times, and leaves out the npx warning box that does not apply.
+- **`shapewall comments delete ID`** deletes a comment and its replies from the terminal. It asks first; `--yes` skips the
+  question and is required when there is no terminal to ask in.
+- **`init` lists every page** when only a line or two would have been hidden behind "and 1 more".
+- **`watch` without `--exec`** says that every comment it prints is marked queued and how to set its status, in its output,
+  its help and the docs.
+- **A board, console or demo tab left open across an upgrade** reloads itself once to pick up the new build when it asks for
+  a file the new build no longer has, showing "Updating to the latest version…" meanwhile. If that does not fix it, it shows a
+  plain failure with a Reload button instead of a blank page. At most one automatic reload per page per release in ten minutes,
+  and none when the browser keeps no session storage. Error reports stay off unless `SHAPEWALL_ERROR_DSN` is set.
+- **Account activity called every tailnet sign-in a passkey sign-in.** On a server started with `--tailscale --tailnet-sign-in`,
+  passkeys off, each sign-in read "Signed in with a passkey" while the device list beside it said "Signed in by tailnet". The
+  audit entry was right (`via: tailnet`); the page's label fell back to "passkey" for any method it did not name. It now says
+  "Signed in by tailnet" (with the login), the person's Activity page says "by tailnet" on their devices, and a sign-in method the
+  page does not know reads "Signed in". The session row now says so too: migration 18 lets `sessions.via` be `tailnet` and marks
+  existing tailnet sessions, which were stored as `passkey` with their login beside them. No permission ever depended on the
+  stored value (how a session came in is read from its tailnet login), so this is a record fix, not a security one. The
+  migration rebuilds the `sessions` table in one transaction and keeps every session signed in; rollback is in
+  [Migration 18 and rollback](docs/hosted.md#migration-18-and-rollback).
+
 ## 0.8.0 - 2026-11-16
 
 - **Opt-in error reports for your own server.** Set `SHAPEWALL_ERROR_DSN` (any Sentry-compatible DSN: Sentry, GlitchTip) and

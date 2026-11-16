@@ -1,4 +1,4 @@
-import { createContext, useContext, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createContext, useCallback, useContext, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Bot } from 'lucide-react'
 import { cn } from '../lib/utils'
 import { Avatar, Popover, PopoverAnchor, PopoverContent, Textarea } from '../components/ui'
@@ -50,8 +50,16 @@ function typedMention(value, caret) {
 // Enter, so it posts), Escape closes the list (not the dialog around it). The
 // list is a popover anchored to the field, so a sheet or a scrolling panel
 // never clips it, and the caret never leaves the field.
-export function MentionTextarea({ value, onChange, people, className, onKeyDown, size, ...props }) {
+// `inputRef` also receives the textarea (dictation writes at its caret).
+export function MentionTextarea({ value, onChange, people, className, onKeyDown, size, inputRef = null, ...props }) {
   const ref = useRef(null)
+  const setRef = useCallback(
+    (element) => {
+      ref.current = element
+      if (inputRef) inputRef.current = element
+    },
+    [inputRef],
+  )
   // The caret after a picked mention, placed as soon as the new text is in
   // the box (before the next key, so fast typing lands after the mention).
   const caretAfterPick = useRef(null)
@@ -101,7 +109,7 @@ export function MentionTextarea({ value, onChange, people, className, onKeyDown,
     <Popover open={open} onOpenChange={(next) => (next ? null : setTyped(null))} history={false}>
       <PopoverAnchor asChild>
         <Textarea
-          ref={ref}
+          ref={setRef}
           size={size}
           value={value}
           onChange={(event) => {

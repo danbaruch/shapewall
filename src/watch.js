@@ -383,6 +383,12 @@ export async function watchComments({
       log(
         `Watching board "${board.id}" for new comments${argv ? ` (running ${path.basename(argv[0])}, ${concurrency} at a time)` : ''}${claim ? '' : ', without claiming them'}. Ctrl+C stops.`,
       )
+      // Printing claims too: each comment printed stays queued until whatever
+      // reads stdout moves it on, so it is never handed out twice.
+      if (claim && !argv)
+        log(
+          'Each comment printed is marked queued. Whatever reads them sets its status ("shapewall comments status ID working|done|needs-human"), or "status ID clear" hands it out again; --no-claim marks nothing.',
+        )
       await runScan()
       while (!stopped) await new Promise((resolve) => (wake = resolve))
     }

@@ -109,6 +109,8 @@ export const SECTIONS = {
   comments reopen ID        reopen a comment   [--author NAME] [--json]
   comments reply ID         add a reply   --body TEXT [--author NAME (default agent)] [--json]
   comments status ID S      agent status: ${AGENT_STATUSES.join(', ')} or clear   [--note TEXT] [--author NAME] [--json]
+  comments delete ID        delete a comment, its replies and its images for good; asks first
+                            [--yes (do not ask; needed without a terminal)] [--json]
       --board ID            board (default: the first); --remote URL for a hosted board (see push)`,
   events: `  events                    comment events from every process (the shared log); never claims anything
       --follow              keep printing new events until Ctrl+C
@@ -122,7 +124,8 @@ export const SECTIONS = {
       --board ID | --env ID | --json`,
   watch: `  watch                     hand each new open comment to an agent (runs until Ctrl+C)
       --exec "CMD ARGS"     run this command per comment (comment JSON on stdin; no shell)
-                            without --exec, print one JSON line per comment
+                            without --exec, print one JSON line per comment and mark it queued
+                            (the reader sets its status with "comments status"; --no-claim marks none)
       --concurrency N       commands at once, 1 to 4 (default 1)
       --recapture           recapture the comment page after a successful --exec (local only)
       --new-only            skip comments that exist when the watch starts

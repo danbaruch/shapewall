@@ -3,7 +3,7 @@
 // resolve check, previous / next thread and a menu, and an inline reply box.
 // The same view is the desktop popover at the pin and the phone sheet. The
 // composer for a new comment is CommentComposer.jsx.
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import {
   ArrowUp,
   Bot,
@@ -42,6 +42,8 @@ import { replyDraftKey, replyDrafts } from './replyDrafts'
 import { hasCommentMedia } from '../../../src/comment-fields.js'
 import { COMMENT_MAX, sendsOnEnter } from './commentInput'
 import { Reactions } from './Reactions'
+import { DictationButton, DictationNote } from './DictationButton'
+import { useCommentDictation } from './hooks/useCommentDictation'
 import { viewportIcon } from './viewports'
 import SendToAgent from './SendToAgent'
 import FixWithAgent from './FixWithAgent'
@@ -104,10 +106,13 @@ function Message({ author, at, editedAt, children, reactions, canReact, me, onRe
 
 function EditBox({ comment, busy, onSave, onCancel, touch, people }) {
   const [body, setBody] = useState(comment.body)
+  const input = useRef(null)
+  const dictation = useCommentDictation({ value: body, setValue: setBody, inputRef: input, max: COMMENT_MAX })
   // A comment with an image or a drawing may lose all its text.
   const wordless = hasCommentMedia(comment)
   const submit = async (event) => {
     event?.preventDefault()
+    dictation.cancel()
     const text = body.trim()
     if ((!text && !wordless) || text === comment.body) return onCancel()
     if (await onSave(comment, text)) onCancel()
@@ -121,7 +126,10 @@ function EditBox({ comment, busy, onSave, onCancel, touch, people }) {
           size={touch ? 'touch' : 'sm'}
           value={body}
           maxLength={COMMENT_MAX}
-          onChange={setBody}
+          onChange={(value) => {
+            dictation.onInput(value)
+            setBody(value)
+          }}
           people={people}
           onKeyDown={(event) => {
             if (sendsOnEnter(event, touch)) {
@@ -129,10 +137,17 @@ function EditBox({ comment, busy, onSave, onCancel, touch, people }) {
               submit()
             }
           }}
+          inputRef={input}
+          {...dictation.fieldProps}
+          aria-describedby={dictation.describedBy}
           autoFocus
         />
       </label>
-      <div className="flex justify-end gap-2">
+      <DictationNote dictation={dictation} touch={touch} id={dictation.noteId} />
+      <div className="flex items-center justify-end gap-2">
+        <div className="mr-auto flex items-center">
+          <DictationButton dictation={dictation} touch={touch} disabled={busy} />
+        </div>
         <Button size={touch ? 'touch' : 'xs'} variant="ghost" onClick={onCancel} disabled={busy} data-sw-edit-cancel={comment.id}>
           Cancel
         </Button>
@@ -164,6 +179,7 @@ function ReplyBox({ comment, busy, onReply, touch, people, autoFocus, askName = 
   }
   const [asking, setAsking] = useState(() => askName && !savedAuthor())
   const [name, setName] = useState('')
+  const nameId = useId()
   const [sheet, setSheet] = useState(false)
   const canAttach = Boolean(media?.attach)
   const canDraw = Boolean(media?.draw)
@@ -193,8 +209,12 @@ function ReplyBox({ comment, busy, onReply, touch, people, autoFocus, askName = 
     }
   }, [canDraw, drawKey, owner, draftKey])
   const page = canDraw && touch ? media.pageImage?.(comment.pageId, comment.viewport) : null
+  const input = useRef(null)
+  const dictation = useCommentDictation({ value: body, setValue: setBody, inputRef: input, max: COMMENT_MAX })
+  const mic = <DictationButton dictation={dictation} touch={touch} disabled={busy} />
   const submit = async (event) => {
     event?.preventDefault()
+    dictation.cancel()
     const text = body.trim()
     const session = drawing.get()
     const drawn = session?.owner === owner ? session.shapes : []
@@ -221,6 +241,7 @@ function ReplyBox({ comment, busy, onReply, touch, people, autoFocus, askName = 
   }
   const lines = Math.min(6, Math.max(1, body.split('\n').length))
   const errorId = `sw-reply-image-error-${comment.id}`
+  const describedBy = [images.error ? errorId : null, dictation.describedBy].filter(Boolean)
   return (
     <form
       className="flex flex-wrap items-end gap-2 border-t border-line px-3 py-2"
@@ -229,9 +250,12 @@ function ReplyBox({ comment, busy, onReply, touch, people, autoFocus, askName = 
       data-sw-reply-form={comment.id}
     >
       {asking ? (
-        <label className="flex w-full items-center gap-2 text-xs text-muted">
-          <span className="shrink-0">Your name</span>
+        <div className="flex w-full items-center gap-2 text-xs text-muted">
+          <label className="shrink-0" htmlFor={nameId}>
+            Your name
+          </label>
           <Input
+            id={nameId}
             size={touch ? 'touch' : 'xs'}
             value={name}
             onChange={(event) => setName(event.target.value.slice(0, 60))}
@@ -239,7 +263,7 @@ function ReplyBox({ comment, busy, onReply, touch, people, autoFocus, askName = 
             className="flex-1"
             data-sw-reply-author={comment.id}
           />
-        </label>
+        </div>
       ) : null}
       <label className="min-w-0 flex-1">
         <span className="sr-only">Reply to comment {comment.id}</span>
@@ -248,7 +272,10 @@ function ReplyBox({ comment, busy, onReply, touch, people, autoFocus, askName = 
           size={touch ? 'touch' : 'sm'}
           value={body}
           maxLength={COMMENT_MAX}
-          onChange={setBody}
+          onChange={(value) => {
+            dictation.onInput(value)
+            setBody(value)
+          }}
           people={people}
           className="resize-none"
           placeholder={touch ? 'Reply' : 'Reply, @ to mention'}
@@ -258,8 +285,10 @@ function ReplyBox({ comment, busy, onReply, touch, people, autoFocus, askName = 
               submit()
             }
           }}
+          inputRef={input}
+          {...dictation.fieldProps}
           autoFocus={autoFocus}
-          aria-describedby={images.error ? errorId : undefined}
+          aria-describedby={describedBy.length ? describedBy.join(' ') : undefined}
           data-sw-reply-input={comment.id}
         />
       </label>
@@ -274,12 +303,13 @@ function ReplyBox({ comment, busy, onReply, touch, people, autoFocus, askName = 
       >
         <ArrowUp size={16} aria-hidden="true" />
       </IconButton>
+      <DictationNote dictation={dictation} touch={touch} id={dictation.noteId} className="w-full" />
       {canAttach ? (
         <div className="w-full">
           <ComposerImages draft={images} touch={touch} id={errorId} />
         </div>
       ) : null}
-      {canAttach || canDraw || media?.attachNote ? (
+      {canAttach || canDraw || media?.attachNote || dictation.supported ? (
         <div className="-mt-1 -ml-1 flex w-full flex-wrap items-center gap-0.5" data-sw-reply-media={comment.id}>
           {canDraw && !touch ? (
             <DrawTools
@@ -287,11 +317,21 @@ function ReplyBox({ comment, busy, onReply, touch, people, autoFocus, askName = 
               touch={false}
               compact
               className="flex-1"
-              leading={canAttach ? <AttachButton draft={images} touch={false} disabled={busy} /> : null}
+              leading={
+                canAttach || dictation.supported ? (
+                  <>
+                    {canAttach ? <AttachButton draft={images} touch={false} disabled={busy} /> : null}
+                    {mic}
+                  </>
+                ) : null
+              }
             />
-          ) : canAttach ? (
-            <AttachButton draft={images} touch={touch} disabled={busy} />
-          ) : null}
+          ) : (
+            <>
+              {canAttach ? <AttachButton draft={images} touch={touch} disabled={busy} /> : null}
+              {mic}
+            </>
+          )}
           {canDraw && touch && page ? (
             <Button size="touch" variant="ghost" onClick={() => setSheet(true)} data-sw-draw-open="true">
               <Brush size={16} aria-hidden="true" /> {shapes ? `Drawing (${shapes})` : 'Draw on the page'}

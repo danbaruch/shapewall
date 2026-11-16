@@ -140,6 +140,19 @@ test('guest sessions: one row per opened link, listed for admins, and an ended g
   assert.match(cookie, /^[A-Za-z0-9_-]{43}$/, 'a random token, not a signed payload')
   assert.equal(hosted.db.prepare('SELECT COUNT(*) AS n FROM guest_sessions WHERE token_hash = ?').get(cookie).n, 0, 'stored hashed')
   assert.equal((await ada.get(`/s/${sid}/api/info`)).json.user.name, 'Ada (guest)')
+  // A comment link's board may use the microphone (dictation), same origin only.
+  const guestShell = await ada.get(`/s/${sid}/`)
+  assert.equal(guestShell.headers['permissions-policy'], 'camera=(), microphone=(self), geolocation=()')
+  // A view-only link's board keeps it off.
+  const viewLink = await owner.browser.post(`/api/workspaces/${ws}/projects/${project.id}/shares`, { mode: 'view' })
+  assert.equal(viewLink.status, 201, viewLink.text)
+  const viewer = createBrowser(hosted.port, hosted.origin)
+  const viewOpened = await viewer.post(`/s/${viewLink.json.share.id}/open`, { token: new URL(viewLink.json.url).hash.slice(1) })
+  assert.equal(viewOpened.status, 200, viewOpened.text)
+  assert.equal(
+    (await viewer.get(`/s/${viewLink.json.share.id}/`)).headers['permissions-policy'],
+    'camera=(), microphone=(), geolocation=()',
+  )
 
   const base = `/api/workspaces/${ws}/projects/${project.id}/shares/${sid}/guests`
   const list = await owner.browser.get(base)
@@ -710,6 +723,9 @@ test('migration 5 adds its tables and columns on top of a version 4 database', a
   // Reproduce the pre-upgrade schema with real existing account/project data.
   // This is also the documented full rollback of migration 5.
   const old = await openDatabase(path.join(dataDir, 'shapewall.db'))
+  // Migration 18 first, as docs/hosted.md gives it: its check names sessions.tailnet_login, which 17's rollback drops.
+  const docs = fs.readFileSync(new URL('../docs/hosted.md', import.meta.url), 'utf8')
+  old.exec(/```sql\n([\s\S]+?)```/.exec(docs.slice(docs.indexOf('### Migration 18 and rollback')))[1])
   old.exec(`
     DROP TABLE device_logins; DROP TABLE guest_sessions; DROP TABLE rebind_tokens; DROP TABLE server_state;
     DROP INDEX projects_public_id;
@@ -746,13 +762,13 @@ test('migration 5 adds its tables and columns on top of a version 4 database', a
   `)
   old.close()
   const db = await openDatabase(path.join(dataDir, 'shapewall.db'))
-  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 17)
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 18)
   assert.deepEqual(
     db
       .prepare('SELECT version FROM schema_migrations ORDER BY version')
       .all()
       .map((row) => row.version),
-    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17],
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18],
   )
   assert.equal(db.prepare('SELECT handle FROM users WHERE id = ?').get(owner.user.id).handle, 'mira')
   assert.equal(db.prepare('SELECT name FROM projects WHERE id = ?').get(project.id).name, 'Existing site')

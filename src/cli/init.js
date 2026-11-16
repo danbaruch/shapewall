@@ -29,10 +29,14 @@ function sitemapOptions(flags) {
   }
 }
 
-// Indented "+ id  path  (group)" lines, the first `max` of them.
-function pageLines(pages, max = 30) {
-  const lines = pages.slice(0, max).map((page) => `  + ${page.id}  ${page.path}  (${page.group})`)
-  if (pages.length > max) lines.push(`  ... and ${pages.length - max} more`)
+// Indented "+ id  path  (group)" lines, the first `max` of them. A list
+// only a line or two longer is shown whole: "... and 1 more" takes the
+// line the page would have.
+export const TRUNCATE_SLACK = 2
+export function pageLines(pages, max = 30) {
+  const shown = pages.length - max <= TRUNCATE_SLACK ? pages.length : max
+  const lines = pages.slice(0, shown).map((page) => `  + ${page.id}  ${page.path}  (${page.group})`)
+  if (pages.length > shown) lines.push(`  ... and ${pages.length - shown} more`)
   return lines.join('\n')
 }
 

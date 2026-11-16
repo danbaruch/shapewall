@@ -145,7 +145,11 @@ export function mountPages(app, { db, dataDir, consoleDir, clientDir, turnstile,
   }
   app.get('/s/:sid', (req, res) => {
     if (!req.path.endsWith('/')) return res.redirect(302, `/s/${encodeURIComponent(req.params.sid)}/`)
-    if (!readGuest(req, deps)) return res.redirect(302, '/share?ended=1')
+    const guest = readGuest(req, deps)
+    if (!guest) return res.redirect(302, '/share?ended=1')
+    // A comment link's guest may dictate a comment (the board page itself,
+    // same origin only); a view-only link keeps the microphone off.
+    if (guest.mode === 'comment') res.setHeader('Permissions-Policy', 'camera=(), microphone=(self), geolocation=()')
     if (!clientBuilt) return res.type('text').send('The Shapewall client is not built yet. Run "npm run build".')
     res.setHeader('Content-Security-Policy', BOARD_PAGE_CSP)
     res.setHeader('X-Frame-Options', 'DENY')

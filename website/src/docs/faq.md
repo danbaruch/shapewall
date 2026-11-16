@@ -39,8 +39,10 @@ configured data directory; follow its operator backup procedure.
 Not by itself. Shapewall runs on your machine and has no telemetry and no account. Captures and checks load your configured pages
 and their resources. What you connect receives what you send it: an agent endpoint gets the chat and the comments you hand it,
 notifications go to your webhook, Slack, Discord or email, GitHub connect talks to GitHub, and `push` or `share` upload to the team
-server you chose. Setup can also download a browser, and the natural read-aloud voices download a model once. See the
-[privacy page](/privacy) for how this website differs from the tool.
+server you chose. Setup can also download a browser, and the natural read-aloud voices download a model once. Dictation (the
+microphone under a comment, and voice in for the chat) uses your browser's speech service, so in Chrome the audio goes to Google:
+it starts only when you press the button, and Shapewall never receives the audio. See the [privacy page](/privacy) for how this
+website differs from the tool.
 
 ## Which coding agents does it work with?
 
@@ -112,7 +114,7 @@ machine's tailnet user, checks their role and writes the audit entry. See
 
 ## What does it need to run?
 
-Node.js 22.13 or newer and Chromium, on Linux, macOS or Windows; Linux is the primary tested platform. `shapewall doctor
+Node.js 22.19 or newer and Chromium, on Linux, macOS or Windows; Linux is the primary tested platform. `shapewall doctor
 --install-browser` downloads the Chromium build, or you can use a Chrome you already have. See [install](/docs/getting-started#install).
 
 ## How is Shapewall licensed?

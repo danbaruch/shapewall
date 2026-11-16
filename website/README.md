@@ -51,6 +51,15 @@ To launch:
 
 To go back: `website/deploy/deploy.sh rollback` swaps to the previous release.
 
+Every release ends with smoke checks (`deploy.sh smoke` runs them alone: the home page, `robots.txt`, the sitemap, Getting started
+and, with the demo, `/demo/` and `/lumen`, each must answer 200; a failure exits nonzero and never rolls back by itself). When they
+pass, `deploy/release-retention.sh` runs on the host: it keeps current, previous and one more release and the newest 5
+`backups/pre-*`, and deletes older ones only after checking again, at that moment, that nothing points at them (`current`,
+`previous`, a file in the release root, Caddy or systemd config), that they are not newer than current, not changed in the last 3
+hours, hold no database files and run no process. It prints what it kept and why, and a problem only warns. `deploy.sh prune
+--dry-run` prints the plan without deleting anything. The script is the same file as in other release lanes: change it in one place
+and copy it; `test/release-retention.test.js` runs it against throwaway trees.
+
 Error reports from the site and the demo carry readable stack traces: their builds make hidden source maps with debug ids
 (`../scripts/vite-debug-ids.mjs`), and `deploy.sh` uploads them to our GlitchTip (`SHAPEWALL_SOURCEMAPS=1`, the default there, with
 `GLITCHTIP_UPLOAD_ENV` naming a KEY=value file outside the repository that holds the upload settings and token). Every `.map` is deleted from the build before anything ships,

@@ -726,6 +726,56 @@ const MIGRATIONS = [
     visits INTEGER NOT NULL DEFAULT 1
   );
   `,
+  // 18. A tailnet sign-in is recorded as one (0.9.0). sessions.via gains the
+  // value 'tailnet', and every session that came in by tailnet identity
+  // (tailnet_login set) is marked so. Before, such a session was stored as
+  // via 'passkey' with its login beside it: the code read it as a tailnet
+  // session (src/hosted/auth.js viaOf, from tailnet_login), but the row said
+  // passkey to anyone who read the table. SQLite cannot change a CHECK in
+  // place, so the table is rebuilt the way SQLite documents it (new table,
+  // copy, drop, rename, indexes again), inside the ledger's transaction:
+  // either all of it happens or none. Nothing references sessions (no
+  // foreign key, trigger or view), so the drop cascades to nothing. A row
+  // whose account is gone (only possible if foreign keys were ever off;
+  // such a session can never be read) is not copied rather than failing the
+  // start. A login is never '' (the code reads '' as no login, the SQL here
+  // as one; no code writes it, so only a hand-made row can have it): the
+  // copy turns a '' login into NULL and keeps that row's via: it is then a
+  // session with no login like any other, found by the hash of its token
+  // (one stored under a tailnet hash is never found, the stricter end), and
+  // a check keeps '' out from then on. The last CHECK keeps
+  // 'tailnet' to rows that carry a login; a row with a login may still say
+  // 'passkey', which is what a previous build writes if it runs on this
+  // database (docs/hosted.md, "Migration 18 and rollback"), and is read as a
+  // tailnet session all the same.
+  `
+  CREATE TABLE sessions_v18 (
+    token_hash TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    verified_at TEXT NOT NULL,
+    via TEXT NOT NULL DEFAULT 'passkey' CHECK (via IN ('passkey', 'recovery', 'tailnet')),
+    id TEXT,
+    user_agent TEXT,
+    ip TEXT,
+    admin_seen_at TEXT,
+    tailnet_login TEXT,
+    CHECK (tailnet_login IS NULL OR tailnet_login <> ''),
+    CHECK (via <> 'tailnet' OR (tailnet_login IS NOT NULL AND tailnet_login <> ''))
+  );
+  INSERT INTO sessions_v18
+    (token_hash, user_id, created_at, last_seen_at, expires_at, verified_at, via, id, user_agent, ip, admin_seen_at, tailnet_login)
+    SELECT token_hash, user_id, created_at, last_seen_at, expires_at, verified_at,
+      CASE WHEN tailnet_login IS NOT NULL AND tailnet_login <> '' THEN 'tailnet' ELSE via END,
+      id, user_agent, ip, admin_seen_at, NULLIF(tailnet_login, '')
+    FROM sessions WHERE user_id IN (SELECT id FROM users);
+  DROP TABLE sessions;
+  ALTER TABLE sessions_v18 RENAME TO sessions;
+  CREATE INDEX sessions_user ON sessions(user_id);
+  CREATE UNIQUE INDEX sessions_id ON sessions(id);
+  `,
 ]
 
 export async function openDatabase(file) {

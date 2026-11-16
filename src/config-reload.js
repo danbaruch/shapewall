@@ -11,6 +11,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { loadConfig } from './config.js'
+import { formatKeyWarning } from './config-keys.js'
 
 export const RELOADED_KEYS = [
   'title',
@@ -40,7 +41,7 @@ export function reloadConfig(config, { load = loadConfig } = {}) {
   const applied = RELOADED_KEYS.filter((key) => !same(config[key], next[key]))
   const restart = RESTART_KEYS.filter((key) => !same(config[key], next[key]))
   for (const key of applied) config[key] = next[key]
-  return { applied, restart }
+  return { applied, restart, warnings: next.warnings || [] }
 }
 
 // Starts watching; returns stop(). `log` gets one line per reload.
@@ -62,6 +63,8 @@ export function watchConfig(config, { log = () => {}, server = null } = {}) {
     }
     if (result.applied.length) log(`Config reloaded: ${result.applied.join(', ')}. Refresh the board to see it.`)
     if (result.restart.length) log(`Config: restart serve to apply ${result.restart.join(', ')}.`)
+    // A typo stays a warning: the edit is applied, and the log says what was ignored.
+    for (const warning of result.warnings) log(`Config: ${formatKeyWarning(warning)}`)
   }
   try {
     watcher = fs.watch(path.dirname(config.file), (event, file) => {
