@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Bot } from 'lucide-react'
 import { cn } from '../lib/utils'
+import { useAutoGrow } from '../lib/useAutoGrow'
 import { Avatar, Popover, PopoverAnchor, PopoverContent, Textarea } from '../components/ui'
 import { personColorKey } from './commentParts'
 import { isAgentHandle, isKnownMention, splitMentions } from '../../../src/mentions.js'
@@ -51,8 +52,11 @@ function typedMention(value, caret) {
 // list is a popover anchored to the field, so a sheet or a scrolling panel
 // never clips it, and the caret never leaves the field.
 // `inputRef` also receives the textarea (dictation writes at its caret).
-export function MentionTextarea({ value, onChange, people, className, onKeyDown, size, inputRef = null, ...props }) {
+// `grow` ({ min, max } in lines) makes the field grow with its text up to
+// `max` lines, then scroll (lib/useAutoGrow.js).
+export function MentionTextarea({ value, onChange, people, className, onKeyDown, size, inputRef = null, grow = null, ...props }) {
   const ref = useRef(null)
+  useAutoGrow(ref, value, grow)
   const setRef = useCallback(
     (element) => {
       ref.current = element
@@ -111,6 +115,8 @@ export function MentionTextarea({ value, onChange, people, className, onKeyDown,
         <Textarea
           ref={setRef}
           size={size}
+          rows={grow ? grow.min : props.rows}
+          className={cn(grow && (size === 'touch' ? 'leading-6' : 'leading-5'), className)}
           value={value}
           onChange={(event) => {
             onChange(event.target.value)
@@ -145,7 +151,6 @@ export function MentionTextarea({ value, onChange, people, className, onKeyDown,
             }
             onKeyDown?.(event)
           }}
-          className={className}
           aria-autocomplete="list"
           aria-expanded={open}
           aria-controls={open ? listId : undefined}
