@@ -3,7 +3,10 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.9.1 - 2026-11-16
+
+A cleaner comment composer. Each comment, reply and edit is now one box with the image and drawing tools, the microphone and
+Post all inside it; the text grows as you type; one press starts dictation; and dictation errors never cover Post.
 
 - **One composer box.** The new comment, reply and edit fields are now one rounded box each, like a chat app's: the text on top
   and a row along the bottom inside the box with the image and drawing tools on the left and the microphone and Post (or the
