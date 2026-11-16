@@ -287,6 +287,8 @@ export function useCommentDictation({ value, setValue, inputRef, max = Infinity 
   return {
     supported: dictationSupported(),
     noteId,
+    // The note, for aria-describedby only while it says something.
+    describedBy: dictationSupported() && (state.status !== 'idle' || state.notice) ? noteId : undefined,
     state,
     active,
     toggle,

@@ -25,7 +25,7 @@ export function DictationButton({ dictation, touch, disabled = false }) {
       label="Dictate"
       tooltip={on ? 'Stop dictation (Esc)' : 'Dictate: speak to type'}
       aria-pressed={on}
-      aria-describedby={dictation.noteId}
+      aria-describedby={dictation.describedBy}
       disabled={disabled && !on}
       onMouseDown={(event) => event.preventDefault()}
       onClick={dictation.toggle}

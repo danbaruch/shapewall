@@ -139,7 +139,7 @@ function EditBox({ comment, busy, onSave, onCancel, touch, people }) {
           }}
           inputRef={input}
           {...dictation.fieldProps}
-          aria-describedby={dictation.supported ? dictation.noteId : undefined}
+          aria-describedby={dictation.describedBy}
           autoFocus
         />
       </label>
@@ -241,7 +241,7 @@ function ReplyBox({ comment, busy, onReply, touch, people, autoFocus, askName = 
   }
   const lines = Math.min(6, Math.max(1, body.split('\n').length))
   const errorId = `sw-reply-image-error-${comment.id}`
-  const describedBy = [images.error ? errorId : null, dictation.supported ? dictation.noteId : null].filter(Boolean)
+  const describedBy = [images.error ? errorId : null, dictation.describedBy].filter(Boolean)
   return (
     <form
       className="flex flex-wrap items-end gap-2 border-t border-line px-3 py-2"

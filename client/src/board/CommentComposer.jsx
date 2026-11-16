@@ -53,7 +53,7 @@ export function CommentComposer({
     onSubmit()
   }
   const mic = <DictationButton dictation={dictation} touch={touch} disabled={busy} />
-  const describedBy = [images?.error ? 'sw-composer-image-error' : null, dictation.supported ? dictation.noteId : null].filter(Boolean)
+  const describedBy = [images?.error ? 'sw-composer-image-error' : null, dictation.describedBy].filter(Boolean)
   return (
     <form
       className="space-y-2"
