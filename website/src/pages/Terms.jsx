@@ -101,8 +101,7 @@ export default function Terms() {
           <p>
             Help is best effort and public: {LAUNCHED ? 'open' : 'invited repository users can open'} an issue on{' '}
             <a href={GITHUB_URL}>GitHub</a>. Nobody is on call, nothing is guaranteed to be answered or fixed, and the project can change or
-            stop. Security reports have their own private route, in the{' '}
-            <a href={`${GITHUB_URL}/blob/main/SECURITY.md`}>security policy</a>.
+            stop. Security reports have their own private route, in the <a href={`${GITHUB_URL}/blob/main/SECURITY.md`}>security policy</a>.
           </p>
 
           <h2 id="no-warranty">No warranty, and the limits of our liability</h2>
@@ -114,8 +113,7 @@ export default function Terms() {
           <p>
             To the extent the law allows, we are not liable for loss or damage arising from your use of this site, the documentation or the
             demo, including anything you do, or an agent does, by following something written here. Shapewall drives a real browser against
-            real pages and connects to tools that can change your code: read the{' '}
-            <Link to="/docs/security">security model</Link> and the{' '}
+            real pages and connects to tools that can change your code: read the <Link to="/docs/security">security model</Link> and the{' '}
             <Link to="/docs/agent-hardening">agent hardening guide</Link>, capture with test data, and keep a coding agent on a branch you
             review. Some jurisdictions do not allow these exclusions, in which case they apply only as far as they lawfully can.
           </p>
@@ -152,10 +150,9 @@ export default function Terms() {
             Then you are the operator, and you need your own terms, privacy notice, acceptable use policy and subprocessor list. Starting
             points are in <a href={`${GITHUB_URL}/tree/main/examples/hosted/legal`}>examples/hosted/legal</a> in the repository, with the
             same text at <Link to="/legal/terms">/legal/terms</Link>, <Link to="/legal/privacy">/legal/privacy</Link>,{' '}
-            <Link to="/legal/acceptable-use">/legal/acceptable-use</Link> and{' '}
-            <Link to="/legal/subprocessors">/legal/subprocessors</Link>. They are templates, not finished documents, and they are not an
-            agreement with us. Complete them and have them reviewed before you invite anyone. The{' '}
-            <Link to="/docs/hosted">hosted operator guide</Link> explains where the server shows those links.
+            <Link to="/legal/acceptable-use">/legal/acceptable-use</Link> and <Link to="/legal/subprocessors">/legal/subprocessors</Link>.
+            They are templates, not finished documents, and they are not an agreement with us. Complete them and have them reviewed before
+            you invite anyone. The <Link to="/docs/hosted">hosted operator guide</Link> explains where the server shows those links.
           </p>
 
           <h2 id="changes">Changes to these terms</h2>
