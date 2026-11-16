@@ -150,6 +150,18 @@ Your agent gets the images and a picture of the drawing on the screenshot with t
 can draw but not attach images. A static export shows the images and drawings it was exported with; one that keeps comments in the
 browser takes neither.
 
+### Dictation
+
+The microphone button under a new comment, a reply or an edit turns speech into text, in Chrome, Edge and Safari (Firefox has no
+speech recognition, so there is no button there). Press it and talk: the words appear at the caret as you speak, or replace the
+text you selected, and settle as the browser is sure of them. Keep typing whenever you like. Press it again, or Esc, to stop;
+posting, closing the comment and switching to another tab stop it too. Nothing is posted until you post it. It listens in your
+browser's language.
+
+The transcription is done by your browser's own speech service, not by Shapewall: in Chrome the audio goes to Google, in Safari to
+Apple. Shapewall never receives or stores the audio, only the text you post. That is why it only starts from a press, and the
+first press says so once before anything listens. On a phone, the keyboard's own microphone works as well.
+
 ## Fix a comment with your agent
 
 Put `shapewall.config.json` in the checkout the agent should edit and run `shapewall serve` there: the agent works in the folder the

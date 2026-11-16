@@ -5,6 +5,17 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+- **Dictate a comment.** A microphone button under a new comment, a reply and an edit, on the desktop popover, the phone sheets,
+  hosted boards and the demo. Press it and talk: the words appear live at the caret (or replace the selection), with a space and
+  a capital where they join the text, and you can keep typing. Press again or Esc to stop; posting, Cancel, closing the thread
+  or sheet, another thread and a hidden tab stop it as well, and nothing is ever posted by itself. A blocked microphone, no
+  microphone, no speech, a network failure and recognition ending by itself each get a plain line under the field. It uses the
+  browser's own speech recognition (no new dependency, nothing on the server) and is not shown where the browser has none
+  (Firefox). Privacy: in Chrome the browser sends the audio to Google's speech service; Shapewall never receives or stores it.
+  Dictation only starts from a press, and the first press says this once before anything listens. A hosted board's comment
+  share links now allow the microphone for the board page itself (`Permissions-Policy: microphone=(self)`); view-only links,
+  public boards and live HTML snapshots keep `microphone=()`. See [Dictation](website/src/docs/getting-started.md#dictation).
+
 - **Opt-in error reports for your own server.** Set `SHAPEWALL_ERROR_DSN` (any Sentry-compatible DSN: Sentry, GlitchTip) and
   `shapewall serve` or `shapewall hosted` reports its unhandled errors there, and the pages it serves report browser errors to the
   same place. Off by default: without the variable the SDK is never loaded and nothing is sent, and Shapewall has no DSN of its own.

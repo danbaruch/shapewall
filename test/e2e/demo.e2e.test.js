@@ -17,7 +17,7 @@ import express from 'express'
 import { chromium } from 'playwright'
 import { PNG } from 'pngjs'
 import { NOTES_PROJECT, WORKSPACE_ID } from '../../client/src/demo/fixtures.js'
-import { observeChatReply, ROOT_DIR, listen } from './helpers.js'
+import { fakeSpeechRecognition, observeChatReply, ROOT_DIR, listen } from './helpers.js'
 
 const SHOTS = process.env.SHAPEWALL_SHOTS ? path.resolve(process.env.SHAPEWALL_SHOTS) : null
 // The website's headers for /demo/* (website/deploy/shapewall.Caddyfile).
@@ -46,6 +46,9 @@ before(async () => {
     const tts = /^\/assets\/tts-[^/]*\.m?js$/.test(req.path)
     res.set('Content-Security-Policy', live ? LIVE_CSP : tts ? TTS_CSP : SHELL_CSP)
     res.set('X-Frame-Options', live ? 'SAMEORIGIN' : 'DENY')
+    // Only the board and console pages may use the microphone (dictation).
+    const voice = ['/', '/index.html', '/console.html'].includes(req.path)
+    res.set('Permissions-Policy', `camera=(), microphone=${voice ? '(self)' : '()'}, geolocation=()`)
     next()
   })
   app.use('/demo', express.static(out))
@@ -962,5 +965,43 @@ test('profile photo: browser-local upload, persistence, removal and reset at des
     } finally {
       await context.close()
     }
+  }
+})
+
+test('dictation: a reply takes speech on the demo board under the site policy; snapshots never get the microphone; Reset asks again', async () => {
+  const { context, page, errors } = await open()
+  await context.addInitScript(fakeSpeechRecognition)
+  try {
+    const shell = await page.goto(base)
+    assert.equal(shell.headers()['permissions-policy'], 'camera=(), microphone=(self), geolocation=()')
+    await page.waitForSelector('[data-sw-node="home"]', { timeout: 20000 })
+    await page.waitForSelector('[data-sw-demo-banner]')
+    assert.equal(await page.evaluate(() => document.featurePolicy.allowsFeature('microphone')), true)
+    // A captured page in its frame: its own header denies the microphone.
+    const live = await page.request.get(new URL('data/boards/demo/captures/home.desktop.html', base).href)
+    assert.equal(live.status(), 200)
+    assert.match(live.headers()['permissions-policy'], /microphone=\(\)/)
+    const thread = await openFirstThread(page)
+    const mic = `${thread} [data-sw-reply-media] [data-sw-dictate]`
+    await page.click(mic)
+    await page.waitForSelector(`${thread} [data-sw-dictation-note="privacy"]`)
+    await page.click(`${thread} [data-sw-dictation-start]`)
+    await page.waitForSelector(`${mic}[aria-pressed="true"]`)
+    await page.evaluate(() => window.__speech.say('looks great on the demo', true))
+    await page.waitForFunction((sel) => document.querySelector(sel)?.value === 'Looks great on the demo', `${thread} [data-sw-reply-input]`)
+    await shot(page, 'dictation-reply')
+    await page.keyboard.press('Escape')
+    await page.waitForFunction(() => window.__speech.open() === 0)
+    assert.equal(await page.locator(thread).count(), 1, 'Esc stopped dictation, not the thread')
+    assert.equal(await page.evaluate(() => window.localStorage.getItem('shapewall.dictation.seen')), '1')
+    await resetDemo(page)
+    assert.equal(
+      await page.evaluate(() => window.localStorage.getItem('shapewall.dictation.seen')),
+      null,
+      'Reset shows the privacy line again',
+    )
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
   }
 })

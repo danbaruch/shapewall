@@ -207,7 +207,12 @@ count, and clicking it zooms in until they part (`clusterPins` in `client/src/bo
 a kit `HoverCard`. Resolved threads are hidden by the Open filter, which is the toggle for showing them.
 
 C (or the Comment tool, in the board tools at the bottom of the canvas, or Comment on the selected page's bar, which also names that page in the hint) turns comment mode on; a click drops a draft pin and an inline composer (`ComposerPopover`) opens beside
-it: Enter posts, Shift+Enter adds a line, Esc cancels and stays in comment mode, @ suggests people. The open thread is a popover at
+it: Enter posts, Shift+Enter adds a line, Esc cancels and stays in comment mode, @ suggests people. The composer, the reply box and
+the edit box have a microphone where the browser has speech recognition (`client/src/board/Dictation.jsx`): the browser's
+`SpeechRecognition` writes at the caret, the rules for joining words to the text around them and the session states are pure
+(`client/src/board/dictation.js`, tested in `test/comment-dictation.test.js`), and `hooks/useCommentDictation.js` drives one
+recognizer at a time and releases it on posting, Esc, unmount and a hidden tab. Shapewall never receives the audio; the browser's
+speech service does the transcription. The open thread is a popover at
 its pin (`ThreadPopover`): resolve, previous and next (also the arrow keys), and a more menu (copy link, edit, ask agent, GitHub,
 history, delete), then the messages with reactions and an inline reply box. Both are Radix popovers anchored to a virtual element
 that reads the pin's position every frame, bounded by the canvas, so they follow pan and zoom, flip to stay on screen and hide when
