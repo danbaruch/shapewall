@@ -12,7 +12,9 @@ import { detectAgents } from '../agent/acp/detect.js'
 import { agentSettings } from '../agent/config.js'
 import { watchConfig } from '../config-reload.js'
 import { cliCommand } from '../invocation.js'
-import { DEFAULT_PORT, clearServeState, servedUrl, writeServeState } from '../serve-state.js'
+import { DEFAULT_PORT, clearServeState, runningBoardUrl, servedUrl, writeServeState } from '../serve-state.js'
+import { nextFreePort, portInUse } from '../ports.js'
+import { keyWarningLines } from '../config-keys.js'
 import { registerProject } from '../local-projects.js'
 import { openBrowser } from './open.js'
 import { startNotifier } from './notify.js'
@@ -80,8 +82,28 @@ export function detectedAgentsLine(found) {
   return parts.length ? parts.join(' ') : null
 }
 
+// A port that is taken, in plain words and with a port that is free (the
+// error Node gives is "listen EADDRINUSE: address already in use ...").
+// Any other listen error is returned as it is.
+export async function listenFailure(error, { port, host, config, flags = {} }) {
+  if (error?.code !== 'EADDRINUSE') return error
+  const running = runningBoardUrl(config)
+  const mine = running && Number(new URL(running).port) === port ? running : null
+  const free = mine ? null : await nextFreePort(port, host)
+  const keep = ['config', 'board']
+    .filter((name) => typeof flags[name] === 'string')
+    .map((name) => ` --${name} ${flags[name]}`)
+    .join('')
+  const { message, fix } = portInUse({ port, host, free, running: mine, command: (next) => cliCommand(`serve --port ${next}${keep}`) })
+  const friendly = new Error(`${message} ${fix}`)
+  friendly.code = 'EADDRINUSE'
+  return friendly
+}
+
 export async function serve(flags, out) {
   const config = loadConfig(flags.config)
+  // Keys the config has but Shapewall does not use (a typo, most often).
+  for (const line of keyWarningLines(config.warnings)) out(line)
   const acp = acpFlag(flags)
   const { createApp, stopChildren } = await import('../server/app.js')
   if (flags.lan && flags.tailscale) throw new Error('Choose --lan or --tailscale, not both.')
@@ -165,11 +187,17 @@ export async function serve(flags, out) {
       }
     : app
   const server = tls ? https.createServer(tls, handler).listen(port, host) : http.createServer(handler).listen(port, host)
-  watchConfig(config, { log: out, server })
-  await new Promise((resolve, reject) => {
-    server.once('listening', resolve)
-    server.once('error', reject)
-  })
+  const unwatch = watchConfig(config, { log: out, server })
+  try {
+    await new Promise((resolve, reject) => {
+      server.once('listening', resolve)
+      server.once('error', reject)
+    })
+  } catch (error) {
+    unwatch?.()
+    stopChildren(app)
+    throw await listenFailure(error, { port, host, config, flags })
+  }
   let hostServer = null
   if (lan && host !== '0.0.0.0') {
     hostServer = tls

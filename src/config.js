@@ -13,6 +13,7 @@ import { cliCommand } from './invocation.js'
 import { normalizeBudgets } from './checks/budgets.js'
 import { CAPTURE_PACING_DEFAULTS, CAPTURE_PACING_MAX } from './capture/pacing.js'
 import { validateCi } from './ci/settings.js'
+import { configKeyWarnings, formatKeyWarning, missingKeyHint } from './config-keys.js'
 
 export const CONFIG_FILE = 'shapewall.config.json'
 export const ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/
@@ -945,8 +946,11 @@ export function normalizeConfig(raw, { dir = process.cwd(), file = null, env = p
     pageIds: boards.flatMap((board) => board.pages.map((page) => page.id)),
     viewportNames: [...new Set([...Object.keys(viewports || {}), ...boards.flatMap((board) => Object.keys(board.viewports || {}))])],
   })
-  if (problems.length) throw new ConfigError(problems, file)
-  return {
+  // Keys the loader does not read (config-keys.js): a near miss of a key
+  // that is then missing ("baseURL") is named in that key's problem.
+  const keyWarnings = configKeyWarnings(raw, { max: 100 })
+  if (problems.length) throw new ConfigError(withKeyHints(problems, keyWarnings), file)
+  const config = {
     file,
     dir,
     title: text(raw.title, 120) || 'Shapewall',
@@ -970,6 +974,33 @@ export function normalizeConfig(raw, { dir = process.cwd(), file = null, env = p
     boards,
     notifications,
   }
+  // Not enumerable: the config's own settings stay what they were for
+  // anything that compares or copies them.
+  Object.defineProperty(config, 'warnings', { value: keyWarnings.slice(0, 20), enumerable: false })
+  return config
+}
+
+// A problem about a missing key gets the near miss the config has instead.
+// The other unknown keys follow, so the config can be fixed in one pass.
+function withKeyHints(problems, keyWarnings) {
+  if (!keyWarnings.length) return problems
+  const used = new Set()
+  const hinted = problems.map((problem) => {
+    const at = problem.indexOf(': ')
+    const near = at > 0 ? missingKeyHint(keyWarnings, problem.slice(0, at)) : null
+    if (!near) return problem
+    used.add(near.warning)
+    return problem.includes('(got undefined)')
+      ? problem.replace('(got undefined)', `(got undefined: ${near.hint})`)
+      : `${problem} (${near.hint})`
+  })
+  return [
+    ...hinted,
+    ...keyWarnings
+      .filter((warning) => !used.has(warning))
+      .slice(0, 20)
+      .map(formatKeyWarning),
+  ]
 }
 
 export function findConfigFile(explicit, cwd = process.cwd()) {
