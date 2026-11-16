@@ -162,7 +162,10 @@ export function MentionTextarea({ value, onChange, people, className, onKeyDown,
         id={listId}
         role="listbox"
         aria-label="Mention someone"
-        side="bottom"
+        // Above the field, as in a chat app: under it is the box's own row
+        // with Post, which the list must not cover. It flips when there is
+        // no room above.
+        side="top"
         className="max-h-56 w-[var(--radix-popover-trigger-width)] overflow-y-auto"
         // The caret stays in the field: the list never takes focus.
         onOpenAutoFocus={(event) => event.preventDefault()}
