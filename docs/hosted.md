@@ -2416,15 +2416,27 @@ the highest number applied, not a count. Rolling one back does not touch the oth
 
 Migration 18 (0.9.0) records a tailnet sign-in as one. It is the first migration that rewrites a table instead of adding to one:
 
-- `sessions.via` may now be `tailnet` as well as `passkey` and `recovery`, and a second check keeps `tailnet` to rows that carry
-  a `tailnet_login`;
+- `sessions.via` may now be `tailnet` as well as `passkey` and `recovery`, and a check keeps `tailnet` to rows that carry a
+  `tailnet_login`;
+- `sessions.tailnet_login` is never the empty string (another check): it is a login or `NULL`;
 - every existing session with a `tailnet_login` is marked `tailnet` (before, such a session was stored as `passkey` with its
-  login beside it).
+  login beside it). A row whose login is `''` (no build writes one; only a hand-made row can have it) is copied with `NULL`
+  instead and keeps its `via`: the server's code read `''` as "no login" while its SQL read it as a login, and now both
+  read it as none. Such a row is then an ordinary session, found by the hash of its token; one stored under a tailnet hash is
+  never found.
 
 Why a rebuild: SQLite cannot change a `CHECK` in place, so the server makes the new `sessions` table, copies every row into it,
 drops the old one, renames the new one and makes its two indexes again (`sessions_user`, `sessions_id`), as SQLite documents.
 All of it runs in the same transaction as the ledger entry, so a failure leaves the database as it was and the server does not
-start. Nothing references `sessions` (no foreign key, trigger or view), so dropping the old table touches nothing else. A session
+start. Nothing Shapewall makes references `sessions` (no foreign key, trigger or view), so dropping the old table touches nothing
+else. Two cases only a hand-made schema has:
+
+- **A view on `sessions`** makes the migration fail with `error in view <name>: no such table: main.sessions`. The server does not
+  start and the file is left as it was (still at 17). Drop the view, start the server, then make the view again.
+- **A trigger on `sessions`** is dropped with the old table, and the migration succeeds without it. Note its `CREATE TRIGGER`
+  first (`SELECT sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'sessions';`) and make it again afterwards.
+
+A session
 whose account no longer exists is not copied (it can only exist if foreign keys were switched off at some point, and it could
 never be used: signing in with it finds no account). Signed-in browsers stay signed in: the token hashes are copied as they are.
 
@@ -2472,7 +2484,7 @@ PRAGMA user_version = 17;
 COMMIT;
 ```
 
-Every session survives it, tailnet sessions as `passkey` with their login (as before 0.9.0). `PRAGMA user_version` is the
+Every session survives it, tailnet sessions as `passkey` with their login (as before 0.9.0). A login that was `''` before the upgrade stays `NULL`. `PRAGMA user_version` is the
 highest version left in `schema_migrations`: 17 unless a later migration is there too. The next upgrade runs 18 again. Never
 reset the ledger any other way. Test a rollback on a copy first: `PRAGMA integrity_check;` says `ok`, and `SELECT via,
 tailnet_login IS NOT NULL, COUNT(*) FROM sessions GROUP BY 1, 2;` shows the same sessions as before, with `tailnet` back to

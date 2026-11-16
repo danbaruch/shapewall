@@ -738,10 +738,16 @@ const MIGRATIONS = [
   // foreign key, trigger or view), so the drop cascades to nothing. A row
   // whose account is gone (only possible if foreign keys were ever off;
   // such a session can never be read) is not copied rather than failing the
-  // start. The second CHECK keeps 'tailnet' to rows that carry a login; a
-  // row with a login may still say 'passkey', which is what a previous build
-  // writes if it runs on this database (docs/hosted.md, "Migration 18 and
-  // rollback"), and is read as a tailnet session all the same.
+  // start. A login is never '' (the code reads '' as no login, the SQL here
+  // as one; no code writes it, so only a hand-made row can have it): the
+  // copy turns a '' login into NULL and keeps that row's via: it is then a
+  // session with no login like any other, found by the hash of its token
+  // (one stored under a tailnet hash is never found, the stricter end), and
+  // a check keeps '' out from then on. The last CHECK keeps
+  // 'tailnet' to rows that carry a login; a row with a login may still say
+  // 'passkey', which is what a previous build writes if it runs on this
+  // database (docs/hosted.md, "Migration 18 and rollback"), and is read as a
+  // tailnet session all the same.
   `
   CREATE TABLE sessions_v18 (
     token_hash TEXT PRIMARY KEY,
@@ -756,13 +762,14 @@ const MIGRATIONS = [
     ip TEXT,
     admin_seen_at TEXT,
     tailnet_login TEXT,
-    CHECK (via <> 'tailnet' OR tailnet_login IS NOT NULL)
+    CHECK (tailnet_login IS NULL OR tailnet_login <> ''),
+    CHECK (via <> 'tailnet' OR (tailnet_login IS NOT NULL AND tailnet_login <> ''))
   );
   INSERT INTO sessions_v18
     (token_hash, user_id, created_at, last_seen_at, expires_at, verified_at, via, id, user_agent, ip, admin_seen_at, tailnet_login)
     SELECT token_hash, user_id, created_at, last_seen_at, expires_at, verified_at,
-      CASE WHEN tailnet_login IS NOT NULL THEN 'tailnet' ELSE via END,
-      id, user_agent, ip, admin_seen_at, tailnet_login
+      CASE WHEN tailnet_login IS NOT NULL AND tailnet_login <> '' THEN 'tailnet' ELSE via END,
+      id, user_agent, ip, admin_seen_at, NULLIF(tailnet_login, '')
     FROM sessions WHERE user_id IN (SELECT id FROM users);
   DROP TABLE sessions;
   ALTER TABLE sessions_v18 RENAME TO sessions;

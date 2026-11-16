@@ -26,6 +26,9 @@ const sha = (value) => createHash('sha256').update(value).digest('hex')
 const docs = fs.readFileSync(new URL('../docs/hosted.md', import.meta.url), 'utf8')
 // The rollback of 18 exactly as docs/hosted.md gives it.
 const ROLLBACK_18 = /```sql\n([\s\S]+?)```/.exec(docs.slice(docs.indexOf('### Migration 18 and rollback')))[1]
+// The sessions table as 0.8.0 really makes it (frozen; not derived from this build or from the recipe).
+const SESSIONS_080 = fs.readFileSync(new URL('./fixtures/sessions-0.8.0.sql', import.meta.url), 'utf8')
+const TABLE_080 = /CREATE TABLE sessions \([\s\S]+?\);/.exec(SESSIONS_080)[0].slice(0, -1)
 
 const versions = (db) =>
   db
@@ -63,7 +66,8 @@ test('a new database has the tailnet sign-in method in its sessions table, with 
     )
     assert.equal(db.prepare('PRAGMA user_version').get().user_version, 18)
     assert.match(sessionsSql(db), /CHECK \(via IN \('passkey', 'recovery', 'tailnet'\)\)/)
-    assert.match(sessionsSql(db), /CHECK \(via <> 'tailnet' OR tailnet_login IS NOT NULL\)/)
+    assert.match(sessionsSql(db), /CHECK \(tailnet_login IS NULL OR tailnet_login <> ''\)/)
+    assert.match(sessionsSql(db), /CHECK \(via <> 'tailnet' OR \(tailnet_login IS NOT NULL AND tailnet_login <> ''\)\)/)
     assert.deepEqual(sessionIndexes(db), [
       'sessions_id: CREATE UNIQUE INDEX sessions_id ON sessions(id)',
       'sessions_user: CREATE INDEX sessions_user ON sessions(user_id)',
@@ -77,6 +81,8 @@ test('a new database has the tailnet sign-in method in its sessions table, with 
     insert.run('h1', 'se_1', NEVER, 'tailnet', 'ada@example.com')
     assert.throws(() => insert.run('h2', 'se_2', NEVER, 'tailnet', null), /CHECK constraint failed/, 'tailnet needs its login')
     assert.throws(() => insert.run('h3', 'se_3', NEVER, 'magic', null), /CHECK constraint failed/)
+    assert.throws(() => insert.run('h5', 'se_5', NEVER, 'tailnet', ''), /CHECK constraint failed/, 'an empty login is no login')
+    assert.throws(() => insert.run('h6', 'se_6', NEVER, 'passkey', ''), /CHECK constraint failed/, 'and is never stored')
     // What a previous build writes on this database (a tailnet session as 'passkey' with its login) is allowed.
     insert.run('h4', 'se_4', NEVER, 'passkey', 'ada@example.com')
     // The foreign key still cascades from the account.
@@ -91,10 +97,12 @@ test('migration 18 on a database from before it: every row kept, tailnet session
   const file = path.join(tempDir('session-via-upgrade'), 'shapewall.db')
   const now = () => new Date()
   let db = await openDatabase(file)
-  // A database as 0.8.0 left it: the sessions table of migrations 1 to 17, and 18 not in the ledger.
-  db.exec(ROLLBACK_18)
+  // A database as 0.8.0 left it: its sessions table from the frozen fixture, and 18 not in the ledger.
+  db.exec('DROP TABLE sessions')
+  db.exec(SESSIONS_080)
+  db.exec('DELETE FROM schema_migrations WHERE version = 18; PRAGMA user_version = 17;')
   assert.deepEqual(versions(db).slice(-2), [16, 17])
-  assert.match(sessionsSql(db), /CHECK \(via IN \('passkey', 'recovery'\)\)/)
+  assert.equal(sessionsSql(db), TABLE_080)
   const before = { columns: columns(db), indexes: sessionIndexes(db) }
   db.exec(`
     INSERT INTO users (id, handle, display_name, webauthn_user_id, created_at, tailnet_login)
@@ -104,7 +112,7 @@ test('migration 18 on a database from before it: every row kept, tailnet session
   const later = new Date(Date.now() + 86_400_000).toISOString()
   const at = new Date().toISOString()
   // Tokens, so the rows can be signed in with after the upgrade.
-  const tokens = { tailnet: 't'.repeat(43), passkey: 'p'.repeat(43), recovery: 'r'.repeat(43) }
+  const tokens = { tailnet: 't'.repeat(43), passkey: 'p'.repeat(43), recovery: 'r'.repeat(43), empty: 'e'.repeat(43) }
   const insert = db.prepare(
     `INSERT INTO sessions (token_hash, user_id, created_at, last_seen_at, expires_at, verified_at, via, id, user_agent, ip, admin_seen_at, tailnet_login)
      VALUES (:hash, :user, :at, :at, :later, :verified, :via, :id, :ua, :ip, :admin, :login)`,
@@ -163,8 +171,23 @@ test('migration 18 on a database from before it: every row kept, tailnet session
     admin: null,
     login: null,
   })
+  // Hand-made: an empty login (no build writes one). SQL called it a login and JS none, so 0.8.0 found it by
+  // neither lookup; after 18 it is NULL, a session with no login, and SQL and JS agree.
+  insert.run({
+    hash: sha(tokens.empty),
+    user: 'us_ben',
+    at,
+    later,
+    verified: at,
+    via: 'passkey',
+    id: 'se_empty_login',
+    ua: null,
+    ip: null,
+    admin: null,
+    login: '',
+  })
   const seeded = rowsOf(db)
-  assert.equal(seeded.length, 4)
+  assert.equal(seeded.length, 5)
   db.close()
   // A session whose account is gone (only possible with foreign keys off): never readable, and not copied.
   const { DatabaseSync } = await import('node:sqlite')
@@ -184,16 +207,17 @@ test('migration 18 on a database from before it: every row kept, tailnet session
   assert.deepEqual(sessionIndexes(db), before.indexes, 'the same indexes')
   assert.match(sessionsSql(db), /'tailnet'/)
   const migrated = rowsOf(db)
-  assert.equal(migrated.length, 4, 'every row kept but the orphan')
-  const expected = seeded.map((row) => ({ ...row, via: row.tailnet_login ? 'tailnet' : row.via }))
-  assert.deepEqual(migrated, expected, 'nothing changed but via, and only where a tailnet login is set')
+  assert.equal(migrated.length, 5, 'every row kept but the orphan')
+  const expected = seeded.map((row) => ({ ...row, via: row.tailnet_login ? 'tailnet' : row.via, tailnet_login: row.tailnet_login || null }))
+  assert.deepEqual(migrated, expected, 'nothing changed but via where a tailnet login is set, and an empty login is NULL')
   assert.deepEqual(
-    migrated.map((row) => [row.id, row.via]),
+    migrated.map((row) => [row.id, row.via, row.tailnet_login]),
     [
-      ['se_passkey', 'passkey'],
-      ['se_recovery', 'recovery'],
-      ['se_tailnet', 'tailnet'],
-      ['se_tailnet_confirmed', 'tailnet'],
+      ['se_empty_login', 'passkey', null],
+      ['se_passkey', 'passkey', null],
+      ['se_recovery', 'recovery', null],
+      ['se_tailnet', 'tailnet', 'ada@example.com'],
+      ['se_tailnet_confirmed', 'tailnet', 'ada@example.com'],
     ],
   )
   // Signed-in browsers stay signed in: the same tokens read the same sessions, each as what it is.
@@ -206,6 +230,8 @@ test('migration 18 on a database from before it: every row kept, tailnet session
   assert.equal(auth.readSession(tokens.recovery).session.via, 'recovery')
   assert.equal(auth.isFresh(auth.readSession(tokens.recovery).session), false)
   assert.equal(auth.readSession(tokens.tailnet.replace(/^t/, 'x')), null)
+  // The empty-login row: now an ordinary session with no login, read by its hash.
+  assert.equal(auth.readSession(tokens.empty).session.via, 'passkey')
   // Opened again: 18 does not run twice.
   db.close()
   db = await openDatabase(file)
@@ -221,7 +247,12 @@ test('migration 18 on a database from before it: every row kept, tailnet session
   assert.doesNotMatch(sessionsSql(db), /'tailnet'/)
   assert.deepEqual(columns(db), before.columns)
   assert.deepEqual(sessionIndexes(db), before.indexes)
-  assert.deepEqual(rowsOf(db), seeded, 'every row as it was before the upgrade')
+  assert.equal(sessionsSql(db).replace(/\s+/g, ' ').includes("CHECK (via IN ('passkey', 'recovery'))"), true)
+  assert.deepEqual(
+    rowsOf(db),
+    seeded.map((row) => ({ ...row, tailnet_login: row.tailnet_login || null })),
+    'every row as it was before the upgrade (an empty login stays NULL)',
+  )
   db.close()
   // And upgrading again marks them again.
   db = await openDatabase(file)

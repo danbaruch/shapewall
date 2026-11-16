@@ -2,47 +2,12 @@ import { History, ShieldAlert, ShieldCheck } from 'lucide-react'
 import { Button, Spinner } from '../../../components/ui'
 import { Card, CardHeader, LoadError, Loading, Time } from '../../components'
 import { usePagedLoad } from '../../state'
+import { securityLabel } from '../../lib/security-labels'
 
 // What happened to this account, newest first: sign-ins (and how), passkeys
-// added or removed, recovery codes, devices signed out.
-//
-// How a sign-in happened is the entry's `via` (src/hosted/auth-routes.js,
-// tailnet-routes.js, rebind.js): passkey, recovery_code, tailnet or rebind.
-// Only a passkey sign-in is called one; an entry that says none of these
-// says "Signed in" and nothing more.
-const SIGN_IN_LABEL = {
-  passkey: 'Signed in with a passkey',
-  tailnet: 'Signed in by tailnet',
-  recovery_code: 'Signed in with a recovery code',
-  rebind: 'Signed in after moving to a new address',
-}
-const NEW_DEVICE_LABEL = {
-  passkey: 'Signed in on a new device',
-  tailnet: 'Signed in by tailnet on a new device',
-}
-const SECURITY_LABEL = {
-  account_created: () => 'Account created',
-  signed_in: (detail) => (detail.newDevice && NEW_DEVICE_LABEL[detail.via]) || SIGN_IN_LABEL[detail.via] || 'Signed in',
-  passkey_added: (detail) =>
-    detail.via === 'rebind'
-      ? 'Passkey added for the new address'
-      : detail.viaRecovery
-        ? 'Passkey added after a recovery-code sign-in'
-        : detail.viaTailnet
-          ? 'First passkey added in a tailnet session (on hold for 24 hours)'
-          : 'Passkey added',
-  rebind_started: () => 'Started moving your sign-in to a new address',
-  passkey_removed: () => 'Passkey removed',
-  passkey_renamed: () => 'Passkey renamed',
-  recovery_codes_created: () => 'New recovery codes made',
-  sessions_revoked: () => 'Signed out every other device',
-  session_revoked: () => 'Signed out a device',
-  workspace_deleted: () => 'Deleted a workspace',
-}
-export function securityLabel(event) {
-  const label = SECURITY_LABEL[event.action]
-  return label ? label(event.detail || {}) : event.action.replaceAll('_', ' ')
-}
+// added or removed, recovery codes, devices signed out. The labels are in
+// client/src/console/lib/security-labels.js.
+
 function securityExtra(event) {
   const detail = event.detail || {}
   const parts = []

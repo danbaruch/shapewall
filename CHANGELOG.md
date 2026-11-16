@@ -3,7 +3,7 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
-## 0.8.0 - 2026-11-16
+## Unreleased
 
 - **Account activity called every tailnet sign-in a passkey sign-in.** On a server started with `--tailscale --tailnet-sign-in`,
   passkeys off, each sign-in read "Signed in with a passkey" while the device list beside it said "Signed in by tailnet". The
@@ -14,6 +14,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
   stored value (how a session came in is read from its tailnet login), so this is a record fix, not a security one. The
   migration rebuilds the `sessions` table in one transaction and keeps every session signed in; rollback is in
   [Migration 18 and rollback](docs/hosted.md#migration-18-and-rollback).
+
+## 0.8.0 - 2026-11-16
 
 - **Opt-in error reports for your own server.** Set `SHAPEWALL_ERROR_DSN` (any Sentry-compatible DSN: Sentry, GlitchTip) and
   `shapewall serve` or `shapewall hosted` reports its unhandled errors there, and the pages it serves report browser errors to the
