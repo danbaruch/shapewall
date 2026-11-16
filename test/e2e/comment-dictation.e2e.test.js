@@ -187,6 +187,7 @@ async function assertMicInField(page, form) {
       face: face.toJSON(),
       box: box.toJSON(),
       textRight: box.right - parseFloat(style.paddingRight) - parseFloat(style.borderRightWidth),
+      resize: style.resize,
     }
   })
   assert.ok(where.face.left >= where.box.left && where.face.right <= where.box.right, 'inside the field, left to right')
@@ -194,6 +195,7 @@ async function assertMicInField(page, form) {
   assert.ok(where.box.right - where.face.right <= 8, 'at the right edge')
   assert.ok(where.box.bottom - where.face.bottom <= 8, 'at the bottom edge')
   assert.ok(where.textRight <= where.face.left, 'text stops before the microphone')
+  assert.equal(where.resize, 'none', 'no resize grip under the microphone')
   return where
 }
 const placeholder = (page, selector) => page.getAttribute(selector, 'placeholder')
