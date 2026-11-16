@@ -12,7 +12,9 @@ function securityExtra(event) {
   const detail = event.detail || {}
   const parts = []
   if (detail.device) parts.push(detail.device)
-  if (event.action === 'signed_in' && detail.via === 'tailnet' && typeof detail.tailnet === 'string') parts.push(detail.tailnet)
+  const tailnetLogin =
+    (event.action === 'signed_in' && detail.via === 'tailnet') || event.action === 'tailnet_linked' || event.action === 'tailnet_unlinked'
+  if (tailnetLogin && typeof detail.tailnet === 'string') parts.push(detail.tailnet)
   if (detail.otherSessionsEnded) parts.push('other devices signed out')
   if (typeof detail.codesLeft === 'number') parts.push(`${detail.codesLeft} ${detail.codesLeft === 1 ? 'code' : 'codes'} left`)
   if (event.ip) parts.push(event.ip)

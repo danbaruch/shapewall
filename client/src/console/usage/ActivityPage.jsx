@@ -293,7 +293,7 @@ export function ActivityLog({ fixed = {}, embedded = false }) {
   const choose = (key, label, options, testId) => (
     <Select value={get(key) || ALL} onValueChange={(value) => set({ [key]: value === ALL ? null : value }, { push: true })}>
       <SelectTrigger
-        className={cn('h-9 w-full min-w-0 text-xs font-medium sm:w-auto', get(key) && 'border-accent/50 bg-accent/10')}
+        className={cn('h-11 w-full min-w-0 text-xs lg:h-9 font-medium sm:w-auto', get(key) && 'border-accent/50 bg-accent/10')}
         aria-label={label}
         data-sw-activity-filter={testId || key}
       >
@@ -325,7 +325,12 @@ export function ActivityLog({ fixed = {}, embedded = false }) {
             onChange={(changes) => set({ range: changes.range || '30d', from: changes.from, to: changes.to }, { push: true })}
           />
           {filter.range !== 'any' ? (
-            <Button size="sm" variant="ghost" className="h-9" onClick={() => set({ range: null, from: null, to: null }, { push: true })}>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-11 lg:h-9"
+              onClick={() => set({ range: null, from: null, to: null }, { push: true })}
+            >
               Any time
             </Button>
           ) : null}
@@ -362,7 +367,7 @@ export function ActivityLog({ fixed = {}, embedded = false }) {
           aria-pressed={get('sensitive') === '1'}
           onClick={() => set({ sensitive: (current) => (current.includes('1') ? null : '1') }, { push: true })}
           className={cn(
-            'inline-flex h-9 items-center justify-center gap-1.5 rounded-md border px-2.5 text-xs font-medium outline-none focus-visible:outline-2 focus-visible:outline-accent',
+            'inline-flex h-11 items-center justify-center gap-1.5 rounded-md border lg:h-9 px-2.5 text-xs font-medium outline-none focus-visible:outline-2 focus-visible:outline-accent',
             get('sensitive') === '1' ? 'border-accent/50 bg-accent/10 text-fg' : 'border-line bg-surface text-fg hover:bg-surface-2',
           )}
           data-sw-activity-sensitive
@@ -383,7 +388,7 @@ export function ActivityLog({ fixed = {}, embedded = false }) {
             placeholder="Search names and details"
             aria-label="Search the activity"
             maxLength={100}
-            className="h-9"
+            className="h-11 lg:h-9"
             wrapperClassName="w-full sm:w-52"
             data-sw-activity-search
           />
@@ -404,7 +409,14 @@ export function ActivityLog({ fixed = {}, embedded = false }) {
                 onReset={() => set({ cols: null, pin: null, w: null })}
               />
             </span>
-            <Button size="sm" variant="secondary" className="h-9" onClick={exportCsv} disabled={exporter.busy} data-sw-activity-export>
+            <Button
+              size="sm"
+              variant="secondary"
+              className="h-11 lg:h-9"
+              onClick={exportCsv}
+              disabled={exporter.busy}
+              data-sw-activity-export
+            >
               {exporter.busy ? <Spinner /> : <Download size={14} aria-hidden="true" />} Export CSV
             </Button>
           </span>
@@ -489,7 +501,7 @@ export function ActivityPage() {
             : 'Your own activity in this workspace: your sign-ins, what you changed and what you exported. Admins and owners see everyone’s.'
         }
         actions={
-          <Link to={`/w/${workspaceId}/usage`} className={cn(linkClass, 'inline-flex items-center gap-1 text-sm')}>
+          <Link to={`/w/${workspaceId}/usage`} className={cn(linkClass, 'inline-flex min-h-11 items-center gap-1 text-sm lg:min-h-0')}>
             Agent usage <ArrowUpRight size={14} aria-hidden="true" />
           </Link>
         }
@@ -504,6 +516,7 @@ export function ActivityPage() {
             label="View"
             value={tab}
             onChange={(next) => set({ tab: next === 'log' ? null : next }, { push: true })}
+            itemClassName="h-11 px-3 lg:h-8"
             options={[
               { id: 'log', label: 'Activity' },
               { id: 'review', label: 'Access review' },
@@ -668,7 +681,7 @@ function SubjectUsage({ title, filter, extra, to }) {
         <h2 className="text-heading font-semibold text-fg">{title}</h2>
         <span className="flex items-center gap-2 print:hidden">
           <PeriodPicker period={filter.period} onChange={(changes) => filter.set(changes, { push: true })} />
-          <Link to={to} className={cn(linkClass, 'inline-flex items-center gap-1 text-sm')}>
+          <Link to={to} className={cn(linkClass, 'inline-flex min-h-11 items-center gap-1 text-sm lg:min-h-0')}>
             Open in Usage <ArrowUpRight size={14} aria-hidden="true" />
           </Link>
         </span>
@@ -705,7 +718,7 @@ export function AgentPage({ agentId }) {
           // The demo has no Agents page per project: every agent is on its API tokens page, by its token.
           <Link
             to={DEMO ? `/w/${workspaceId}/tokens` : `/w/${workspaceId}/agents/${agent.projectId}`}
-            className={cn(linkClass, 'inline-flex items-center gap-1 text-sm')}
+            className={cn(linkClass, 'inline-flex min-h-11 items-center gap-1 text-sm lg:min-h-0')}
             data-sw-agent-settings
           >
             {DEMO ? 'Its token' : 'Its settings'} <ArrowUpRight size={14} aria-hidden="true" />
@@ -840,7 +853,7 @@ function AccessReview() {
         <Button
           size="sm"
           variant="secondary"
-          className="h-9 print:hidden"
+          className="h-11 lg:h-9 print:hidden"
           disabled={exporter.busy}
           onClick={() =>
             exporter.run(async () => {

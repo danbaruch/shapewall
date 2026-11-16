@@ -2083,8 +2083,8 @@ from `schema_migrations` too, as the recipes below do.
 
 **Why SQLite through `node:sqlite`.** One host, one process, small metadata (images are files), so SQLite fits. `node:sqlite` ships with
 Node, so the npm package stays free of native addons for the many people who only use the CLI; `better-sqlite3` would download or build a
-binary for every install. The cost is Node 22.13+ for the hosted server and an ExperimentalWarning on Node 22, which `shapewall hosted`
-hides.
+binary for every install. The cost: `node:sqlite` needs Node 22.13+ (Shapewall as a whole needs 22.19, so that is always met) and prints an
+ExperimentalWarning on Node 22, which `shapewall hosted` hides.
 
 ## Before you invite the team
 

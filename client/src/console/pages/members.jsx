@@ -21,6 +21,7 @@ import {
 import { Avatar, Card, CheckToggle, ConfirmDialog, PageHeader, RoleBadge, Time } from '../components'
 import { api, wsUrl } from '../lib/api'
 import { ROLES, ROLE_LABEL, ROLE_SUMMARY } from '../lib/format'
+import { roleInSentence } from '../lib/role-words'
 import { assignableRoles, canRemoveMember } from '../../../../src/hosted/permissions.js'
 import { Link, leaveTo } from '../lib/router'
 import { useAction, useLoad, useSession, useToast } from '../state'
@@ -64,7 +65,7 @@ export function MembersSection() {
       await api.patch(wsUrl(workspaceId, `/members/${change.member.userId}`), { role: change.role })
       const self = change.member.userId === me.user.id
       setChange(null)
-      toast(`${change.member.displayName} is now ${ROLE_LABEL[change.role].toLowerCase()}`)
+      toast(`${change.member.displayName} is now ${roleInSentence(change.role)}`)
       await reload()
       if (self) await refresh()
     })
