@@ -187,7 +187,9 @@ taken where it lands on the board, so it never starts autoscroll (Windows) or pa
   over the second. A variant keeps its single frame there, beside its page's pair: it is one capture of one idea, with no second
   environment to compare it against. Comments work while comparing: a comment placed on one side stores that side's environment
   (`environment`, an environment id; none outside compare mode, which is the default environment), and each side draws the
-  comments left on it (`commentSide.js`), so a pin is on its own side in every later compare, swapped too. A comment on an
+  comments left on it (`commentSide.js`), so a pin is on its own side in every later compare, swapped too. It sticks to that
+  side's elements: each environment's element map is served on its own route (`/api/boards/:id/env-elements/:env/:file`)
+  and a static export carries them under `envs/<id>/`. A comment on an
   environment that is not one of the two compared is drawn on the first, and its thread says so. Outside compare mode the board
   shows the default environment, so a comment left on another one keeps its pin there and its thread names the environment it was
   left on. Only the default environment keeps capture versions, so a comment on another one stores no `captureVersion`, and an
