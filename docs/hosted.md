@@ -43,7 +43,7 @@ shapewall hosted --data /var/lib/shapewall-hosted --origin https://app.example.c
 |                         | `SHAPEWALL_TURNSTILE_SITE_KEY`           | unset                     | With `SHAPEWALL_TURNSTILE_SECRET`: a Cloudflare Turnstile check on open sign-up and comment share links                                                    |
 |                         | `SHAPEWALL_TURNSTILE_SECRET`             | unset                     | Turnstile secret key. Both keys or neither (one alone is a warning and stays off)                                                                          |
 
-It needs Node 22.13 or newer (it uses the built-in `node:sqlite`). Passkeys need a secure context: `https://`, or `http://localhost`
+It needs Node 22.19 or newer, like the rest of Shapewall, and uses the built-in `node:sqlite`. Passkeys need a secure context: `https://`, or `http://localhost`
 for trying it on your own machine (`--origin http://localhost:4700`; not `127.0.0.1`, which is not a valid passkey RP ID).
 
 **The first account.** On an invite-only server with no accounts, the server makes a one-time setup link (valid 24 hours) and writes it

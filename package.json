@@ -54,7 +54,7 @@
     "docs/images"
   ],
   "engines": {
-    "node": ">=22"
+    "node": ">=22.19.0"
   },
   "scripts": {
     "dev": "vite",

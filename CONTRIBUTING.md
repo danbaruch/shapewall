@@ -5,7 +5,7 @@ report security problems privately as [SECURITY.md](SECURITY.md) describes, not 
 
 ## Setup
 
-You need Node.js 22.13 or newer.
+You need Node.js 22.19 or newer.
 
 ```sh
 git clone https://github.com/danbaruch/shapewall.git
