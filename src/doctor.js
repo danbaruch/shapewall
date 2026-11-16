@@ -36,6 +36,8 @@ export function playwrightVersion() {
 export const installHint = () => cliCommand('doctor --install-browser')
 // System libraries for Chromium, from the Playwright version Shapewall uses.
 const depsHint = () => `npx playwright@${playwrightVersion()} install-deps chromium`
+// Playwright's install-deps needs apt-get; the docs list the packages for other distributions.
+const LINUX_LIBS_URL = 'https://shapewall.com/docs/getting-started#linux-system-libraries'
 
 // package.json's engines floor (">=22.19.0"), compared major, minor and patch.
 export function checkNode(version = process.versions.node, engines = PACKAGE.engines?.node || '>=22') {
@@ -93,7 +95,7 @@ async function checkBrowser(config, { launch = true, chromium = null } = {}) {
         channel || executablePath
           ? 'Check the browser install.'
           : process.platform === 'linux'
-            ? `Chromium is downloaded, so this is usually missing system libraries: run "${depsHint()}" once as root (with sudo), then "${cliCommand('doctor')}" again.`
+            ? `Chromium is downloaded, so this is usually missing system libraries. On Debian or Ubuntu run "${depsHint()}" once as root (with sudo), then "${installHint()}" again. Fedora and other distributions: ${LINUX_LIBS_URL}`
             : `Run "${installHint()}" again, or set browser.channel to "chrome" to use an installed Chrome.`,
     }
   }

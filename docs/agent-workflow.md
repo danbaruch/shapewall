@@ -116,6 +116,15 @@ shapewall comments selectors --page signup --viewport phone --text "create accou
 `--text` keeps the elements whose text contains those words (any case); `--json` prints `{ selectors: [{ selector, text }] }`. The list
 comes from the capture's element map (`<output>/<board>/captures/<page>.<viewport>.elements.json`), so capture the page first.
 
+### Deleting a comment
+
+```sh
+shapewall comments delete 12
+```
+
+This removes the comment, its replies and its images for good, so it asks first. Without a terminal to ask in (a script, an agent's
+shell) it refuses unless you add `--yes`. To close a comment and keep its history, resolve it instead.
+
 ### Agent status
 
 `status` is the reviewer's verdict; `agentStatus` is where the agent's work stands:
