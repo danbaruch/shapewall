@@ -133,6 +133,8 @@ test('desktop 1440: the composer dictates at the caret, asks once, never posts b
     await page.waitForSelector(mic)
     assert.equal(await page.getAttribute(mic, 'aria-label'), 'Dictate')
     assert.equal(await page.getAttribute(mic, 'aria-pressed'), 'false')
+    // The name field is named by its label, not its placeholder.
+    assert.equal(await page.locator(composer).getByRole('textbox', { name: 'Your name', exact: true }).count(), 1)
     await page.keyboard.type('The price table')
     await shot(page, 'desktop-1440-idle')
 
@@ -322,6 +324,9 @@ test('desktop 1440: the reply box and the edit box dictate, one microphone at a 
     const popover = `[data-sw-thread-popover="${first.id}"]`
     await page.waitForSelector(popover)
     const replyMic = `${popover} [data-sw-reply-media] [data-sw-dictate]`
+    // No name saved in this browser yet: the reply asks for one, named by its label.
+    await page.waitForSelector(`${popover} [data-sw-reply-author]`)
+    assert.equal(await page.locator(popover).getByRole('textbox', { name: 'Your name', exact: true }).count(), 1)
     await page.click(replyMic)
     await page.waitForSelector(`${replyMic}[aria-pressed="true"]`)
     await say(page, 'agreed let us try 48 pixels', true)

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { Brush } from 'lucide-react'
 import { Button, Input, Kbd } from '../components/ui'
 import { MentionTextarea } from './Mentions'
@@ -46,6 +46,7 @@ export function CommentComposer({
   const canDraw = Boolean(media?.draw)
   const reading = Boolean(images?.reading)
   const input = useRef(null)
+  const nameId = useId()
   const dictation = useCommentDictation({ value: body, setValue: (value) => onChange({ body: value }), inputRef: input, max: COMMENT_MAX })
   const post = () => {
     dictation.cancel()
@@ -150,9 +151,12 @@ export function CommentComposer({
         />
       ) : null}
       {hosted ? null : (
-        <label className="flex items-center gap-2 text-xs text-muted">
-          <span className="shrink-0">Your name</span>
+        <div className="flex items-center gap-2 text-xs text-muted">
+          <label className="shrink-0" htmlFor={nameId}>
+            Your name
+          </label>
           <Input
+            id={nameId}
             size={touch ? 'touch' : 'xs'}
             value={draft?.author || ''}
             onChange={(event) => onChange({ author: event.target.value.slice(0, 60) })}
@@ -160,7 +164,7 @@ export function CommentComposer({
             className="flex-1"
             data-sw-comment-author="true"
           />
-        </label>
+        </div>
       )}
       {discard ? (
         <div

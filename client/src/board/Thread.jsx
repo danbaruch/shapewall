@@ -3,7 +3,7 @@
 // resolve check, previous / next thread and a menu, and an inline reply box.
 // The same view is the desktop popover at the pin and the phone sheet. The
 // composer for a new comment is CommentComposer.jsx.
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import {
   ArrowUp,
   Bot,
@@ -179,6 +179,7 @@ function ReplyBox({ comment, busy, onReply, touch, people, autoFocus, askName = 
   }
   const [asking, setAsking] = useState(() => askName && !savedAuthor())
   const [name, setName] = useState('')
+  const nameId = useId()
   const [sheet, setSheet] = useState(false)
   const canAttach = Boolean(media?.attach)
   const canDraw = Boolean(media?.draw)
@@ -249,9 +250,12 @@ function ReplyBox({ comment, busy, onReply, touch, people, autoFocus, askName = 
       data-sw-reply-form={comment.id}
     >
       {asking ? (
-        <label className="flex w-full items-center gap-2 text-xs text-muted">
-          <span className="shrink-0">Your name</span>
+        <div className="flex w-full items-center gap-2 text-xs text-muted">
+          <label className="shrink-0" htmlFor={nameId}>
+            Your name
+          </label>
           <Input
+            id={nameId}
             size={touch ? 'touch' : 'xs'}
             value={name}
             onChange={(event) => setName(event.target.value.slice(0, 60))}
@@ -259,7 +263,7 @@ function ReplyBox({ comment, busy, onReply, touch, people, autoFocus, askName = 
             className="flex-1"
             data-sw-reply-author={comment.id}
           />
-        </label>
+        </div>
       ) : null}
       <label className="min-w-0 flex-1">
         <span className="sr-only">Reply to comment {comment.id}</span>
