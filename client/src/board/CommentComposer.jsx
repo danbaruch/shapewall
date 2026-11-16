@@ -6,7 +6,7 @@ import { cn } from '../lib/utils'
 import { COMMENT_MAX, sendsOnEnter } from './commentInput'
 import { AttachButton, ComposerImages, DrawSheet, DrawTools, imageDropProps } from './CommentMedia'
 import { useDrawing } from './drawing'
-import { DictationButton, DictationNote } from './Dictation'
+import { DictationButton, DictationNote } from './DictationButton'
 import { useCommentDictation } from './hooks/useCommentDictation'
 
 // A new comment: the text (Enter posts, Shift+Enter is a new line, Escape
@@ -16,7 +16,7 @@ import { useCommentDictation } from './hooks/useCommentDictation'
 // the screenshot the phone draws on in a full sheet).
 // `discard` ({ onDiscard, onKeep }): Esc was pressed on a comment that holds a
 // drawing or images, so the composer asks before dropping that work.
-// The microphone (Dictation.jsx) writes at the caret; posting stops it.
+// The microphone (DictationButton.jsx) writes at the caret; posting stops it.
 export function CommentComposer({
   draft,
   onChange,

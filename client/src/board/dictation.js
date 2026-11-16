@@ -2,7 +2,7 @@
 // recognition (SpeechRecognition / webkitSpeechRecognition) writes into the
 // field at the caret. Kept pure, so the rules can be read and tested without
 // a browser (test/comment-dictation.test.js); the hook that drives the
-// recognizer is useCommentDictation.js and the button is Dictation.jsx.
+// recognizer is useCommentDictation.js and the button is DictationButton.jsx.
 //
 // Privacy: Shapewall never sees the audio. The browser's speech service does
 // the transcription (in Chrome that is Google's), so dictation only ever
