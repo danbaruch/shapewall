@@ -47,6 +47,16 @@ and the project uses [Semantic Versioning](https://semver.org/).
   stored value (how a session came in is read from its tailnet login), so this is a record fix, not a security one. The
   migration rebuilds the `sessions` table in one transaction and keeps every session signed in; rollback is in
   [Migration 18 and rollback](docs/hosted.md#migration-18-and-rollback).
+- **Dictate a comment.** A microphone button under a new comment, a reply and an edit, on the desktop popover, the phone sheets,
+  hosted boards and the demo. Press it and talk: the words appear live at the caret (or replace the selection), with a space and
+  a capital where they join the text, and you can keep typing. Press again or Esc to stop; posting, Cancel, closing the thread
+  or sheet, another thread and a hidden tab stop it as well, and nothing is ever posted by itself. A blocked microphone, no
+  microphone, no speech, a network failure and recognition ending by itself each get a plain line under the field. It uses the
+  browser's own speech recognition (no new dependency, nothing on the server) and is not shown where the browser has none
+  (Firefox). Privacy: in Chrome the browser sends the audio to Google's speech service; Shapewall never receives or stores it.
+  Dictation only starts from a press, and the first press says this once before anything listens. A hosted board's comment
+  share links now allow the microphone for the board page itself (`Permissions-Policy: microphone=(self)`); view-only links,
+  public boards and live HTML snapshots keep `microphone=()`. See [Dictation](website/src/docs/getting-started.md#dictation).
 
 ## 0.8.0 - 2026-11-16
 

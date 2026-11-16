@@ -140,6 +140,19 @@ test('guest sessions: one row per opened link, listed for admins, and an ended g
   assert.match(cookie, /^[A-Za-z0-9_-]{43}$/, 'a random token, not a signed payload')
   assert.equal(hosted.db.prepare('SELECT COUNT(*) AS n FROM guest_sessions WHERE token_hash = ?').get(cookie).n, 0, 'stored hashed')
   assert.equal((await ada.get(`/s/${sid}/api/info`)).json.user.name, 'Ada (guest)')
+  // A comment link's board may use the microphone (dictation), same origin only.
+  const guestShell = await ada.get(`/s/${sid}/`)
+  assert.equal(guestShell.headers['permissions-policy'], 'camera=(), microphone=(self), geolocation=()')
+  // A view-only link's board keeps it off.
+  const viewLink = await owner.browser.post(`/api/workspaces/${ws}/projects/${project.id}/shares`, { mode: 'view' })
+  assert.equal(viewLink.status, 201, viewLink.text)
+  const viewer = createBrowser(hosted.port, hosted.origin)
+  const viewOpened = await viewer.post(`/s/${viewLink.json.share.id}/open`, { token: new URL(viewLink.json.url).hash.slice(1) })
+  assert.equal(viewOpened.status, 200, viewOpened.text)
+  assert.equal(
+    (await viewer.get(`/s/${viewLink.json.share.id}/`)).headers['permissions-policy'],
+    'camera=(), microphone=(), geolocation=()',
+  )
 
   const base = `/api/workspaces/${ws}/projects/${project.id}/shares/${sid}/guests`
   const list = await owner.browser.get(base)

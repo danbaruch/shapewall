@@ -132,3 +132,73 @@ export async function observeChatReply(page) {
     }).observe(document.querySelector('[data-sw-chat-list]'), { subtree: true, childList: true, characterData: true, attributes: true })
   })
 }
+
+// A stand-in for the browser's recognizer, driven from the test through
+// window.__speech: say(text, final), fail(code), end(). `open` counts the
+// recognizers that still hold the (pretend) microphone.
+export function fakeSpeechRecognition() {
+  const speech = { made: [], starts: 0, stops: 0, aborts: 0 }
+  speech.open = () => speech.made.filter((item) => item.state === 'starting' || item.state === 'listening').length
+  speech.last = () => speech.made[speech.made.length - 1]
+  speech.say = (text, final = false) => {
+    const rec = speech.last()
+    const results = rec.results
+    const tail = results[results.length - 1]
+    const result = { isFinal: final, length: 1, 0: { transcript: text, confidence: 0.9 } }
+    if (tail && !tail.isFinal) results[results.length - 1] = result
+    else results.push(result)
+    rec.onresult?.({ resultIndex: results.length - 1, results: [...results] })
+  }
+  speech.fail = (code) => {
+    const rec = speech.last()
+    rec.state = 'ended'
+    rec.onerror?.({ error: code })
+    rec.onend?.()
+  }
+  speech.end = () => {
+    const rec = speech.last()
+    rec.state = 'ended'
+    rec.onend?.()
+  }
+  class FakeRecognition {
+    constructor() {
+      this.lang = ''
+      this.continuous = false
+      this.interimResults = false
+      this.state = 'new'
+      this.results = []
+      speech.made.push(this)
+    }
+    start() {
+      speech.starts += 1
+      this.state = 'starting'
+      setTimeout(() => {
+        if (this.state !== 'starting') return
+        this.state = 'listening'
+        this.onstart?.()
+      }, 20)
+    }
+    stop() {
+      speech.stops += 1
+      // The words still being heard settle, then the end.
+      setTimeout(() => {
+        const results = this.results
+        const tail = results[results.length - 1]
+        if (tail && !tail.isFinal && this.onresult) {
+          results[results.length - 1] = { ...tail, isFinal: true }
+          this.onresult({ resultIndex: results.length - 1, results: [...results] })
+        }
+        this.state = 'ended'
+        this.onend?.()
+      }, 20)
+    }
+    abort() {
+      speech.aborts += 1
+      this.state = 'ended'
+      setTimeout(() => this.onend?.(), 0)
+    }
+  }
+  window.__speech = speech
+  window.SpeechRecognition = undefined
+  window.webkitSpeechRecognition = FakeRecognition
+}
