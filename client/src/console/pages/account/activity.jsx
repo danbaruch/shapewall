@@ -5,16 +5,24 @@ import { usePagedLoad } from '../../state'
 
 // What happened to this account, newest first: sign-ins (and how), passkeys
 // added or removed, recovery codes, devices signed out.
+//
+// How a sign-in happened is the entry's `via` (src/hosted/auth-routes.js,
+// tailnet-routes.js, rebind.js): passkey, recovery_code, tailnet or rebind.
+// Only a passkey sign-in is called one; an entry that says none of these
+// says "Signed in" and nothing more.
+const SIGN_IN_LABEL = {
+  passkey: 'Signed in with a passkey',
+  tailnet: 'Signed in by tailnet',
+  recovery_code: 'Signed in with a recovery code',
+  rebind: 'Signed in after moving to a new address',
+}
+const NEW_DEVICE_LABEL = {
+  passkey: 'Signed in on a new device',
+  tailnet: 'Signed in by tailnet on a new device',
+}
 const SECURITY_LABEL = {
   account_created: () => 'Account created',
-  signed_in: (detail) =>
-    detail.via === 'recovery_code'
-      ? 'Signed in with a recovery code'
-      : detail.via === 'rebind'
-        ? 'Signed in after moving to a new address'
-        : detail.newDevice
-          ? 'Signed in on a new device'
-          : 'Signed in with a passkey',
+  signed_in: (detail) => (detail.newDevice && NEW_DEVICE_LABEL[detail.via]) || SIGN_IN_LABEL[detail.via] || 'Signed in',
   passkey_added: (detail) =>
     detail.via === 'rebind'
       ? 'Passkey added for the new address'
@@ -39,6 +47,7 @@ function securityExtra(event) {
   const detail = event.detail || {}
   const parts = []
   if (detail.device) parts.push(detail.device)
+  if (event.action === 'signed_in' && detail.via === 'tailnet' && typeof detail.tailnet === 'string') parts.push(detail.tailnet)
   if (detail.otherSessionsEnded) parts.push('other devices signed out')
   if (typeof detail.codesLeft === 'number') parts.push(`${detail.codesLeft} ${detail.codesLeft === 1 ? 'code' : 'codes'} left`)
   if (event.ip) parts.push(event.ip)
