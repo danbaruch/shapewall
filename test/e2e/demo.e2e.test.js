@@ -968,7 +968,7 @@ test('profile photo: browser-local upload, persistence, removal and reset at des
   }
 })
 
-test('dictation: a reply takes speech on the demo board under the site policy; snapshots never get the microphone; Reset asks again', async () => {
+test('dictation: a reply takes speech on the demo board under the site policy; snapshots never get the microphone', async () => {
   const { context, page, errors } = await open()
   await context.addInitScript(fakeSpeechRecognition)
   try {
@@ -982,10 +982,9 @@ test('dictation: a reply takes speech on the demo board under the site policy; s
     assert.equal(live.status(), 200)
     assert.match(live.headers()['permissions-policy'], /microphone=\(\)/)
     const thread = await openFirstThread(page)
-    const mic = `${thread} [data-sw-reply-media] [data-sw-dictate]`
+    // The microphone is in the reply field's corner; one press listens.
+    const mic = `${thread} [data-sw-reply-form] [data-sw-dictate]`
     await page.click(mic)
-    await page.waitForSelector(`${thread} [data-sw-dictation-note="privacy"]`)
-    await page.click(`${thread} [data-sw-dictation-start]`)
     await page.waitForSelector(`${mic}[aria-pressed="true"]`)
     await page.evaluate(() => window.__speech.say('looks great on the demo', true))
     await page.waitForFunction((sel) => document.querySelector(sel)?.value === 'Looks great on the demo', `${thread} [data-sw-reply-input]`)
@@ -993,13 +992,6 @@ test('dictation: a reply takes speech on the demo board under the site policy; s
     await page.keyboard.press('Escape')
     await page.waitForFunction(() => window.__speech.open() === 0)
     assert.equal(await page.locator(thread).count(), 1, 'Esc stopped dictation, not the thread')
-    assert.equal(await page.evaluate(() => window.localStorage.getItem('shapewall.dictation.seen')), '1')
-    await resetDemo(page)
-    assert.equal(
-      await page.evaluate(() => window.localStorage.getItem('shapewall.dictation.seen')),
-      null,
-      'Reset shows the privacy line again',
-    )
     assert.deepEqual(errors, [])
   } finally {
     await context.close()

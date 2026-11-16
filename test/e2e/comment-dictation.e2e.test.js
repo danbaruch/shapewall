@@ -4,12 +4,14 @@
 // started, words still being heard, settled words, errors, the end. Real
 // recognition against a real microphone is not covered here.
 //
-// What it checks: the first press shows the privacy line and starts nothing
-// until Start; the words land at the caret, live, and settle in place;
-// typing while listening carries on; nothing posts by itself; the microphone
-// is released on posting, Esc, Cancel, another thread and a hidden tab; the
-// errors read as plain lines; no button where the API is missing; and at
-// 390 px the button keeps 44 px without crowding the composer.
+// What it checks: the microphone sits inside the field's corner (28 px on a
+// desktop, a 44 px target on a phone) and text never runs under it; one press
+// listens; the words land at the caret, live, and settle in place; typing
+// while listening carries on; nothing posts by itself; starting, listening and
+// failing never move the field, the name, the buttons or the tools row by a
+// pixel; an error is a bubble at the microphone; the microphone is released on
+// posting, Esc, Cancel, another thread and a hidden tab; and there is no
+// button where the API is missing.
 import { after, before, test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -67,10 +69,9 @@ function noSpeech() {
   delete window.webkitSpeechRecognition
 }
 
-async function openBoard(contextOptions, { url = boardUrl, speech = true, seen = false } = {}) {
+async function openBoard(contextOptions, { url = boardUrl, speech = true } = {}) {
   const context = await browser.newContext(contextOptions)
   await context.addInitScript(speech ? fakeSpeechRecognition : noSpeech)
-  if (seen) await context.addInitScript(() => window.localStorage.setItem('shapewall.dictation.seen', '1'))
   const page = await context.newPage()
   const errors = []
   page.on('console', (message) => {
@@ -125,8 +126,79 @@ async function openComposer(page, x, y) {
 const composer = '[data-sw-composer-popover]'
 const mic = `${composer} [data-sw-dictate]`
 const field = `${composer} [data-sw-comment-input]`
+const bubble = (code) => `[data-sw-dictation-bubble="${code}"]`
 
-test('desktop 1440: the composer dictates at the caret, asks once, never posts by itself and lets go on post and Esc', async () => {
+// Where everything in a form is, to the pixel: the field, the microphone, the
+// name input, the buttons and the tools row. Dictation must never move any of
+// them.
+async function layout(page, form) {
+  return page.$eval(form, (root) => {
+    const pick = {
+      field: 'textarea',
+      mic: '[data-sw-dictate]',
+      name: '[data-sw-comment-author], [data-sw-reply-author]',
+      post: '[data-sw-save-comment], [data-sw-reply-send], [data-sw-edit-save]',
+      cancel: '[data-sw-composer-cancel], [data-sw-edit-cancel]',
+      tools: '[data-sw-composer-media], [data-sw-reply-media]',
+    }
+    const out = { form: root.getBoundingClientRect().toJSON() }
+    for (const [key, selector] of Object.entries(pick)) {
+      const element = root.querySelector(selector)
+      if (element) out[key] = element.getBoundingClientRect().toJSON()
+    }
+    return out
+  })
+}
+// The layout once nothing is animating and two looks agree: popovers and
+// sheets ease in, and the camera can still be gliding to a pin.
+async function settledLayout(page, form) {
+  let last = null
+  for (let tries = 0; tries < 40; tries += 1) {
+    await page.waitForFunction(() =>
+      document.getAnimations().every((item) => item.playState !== 'running' || item.effect?.getTiming().iterations === Infinity),
+    )
+    const now = await layout(page, form)
+    if (last && JSON.stringify(now) === JSON.stringify(last)) return now
+    last = now
+    await page.waitForTimeout(150)
+  }
+  return last
+}
+function assertSameLayout(before, after, label) {
+  for (const key of Object.keys(before)) {
+    for (const side of ['x', 'y', 'width', 'height']) {
+      assert.ok(
+        Math.abs(before[key][side] - after[key][side]) < 0.5,
+        `${label}: ${key}.${side} moved from ${before[key][side]} to ${after[key][side]}`,
+      )
+    }
+  }
+}
+// The microphone sits inside the field's border, in its bottom-right corner,
+// and the field keeps room on its right so text never runs under it.
+async function assertMicInField(page, form) {
+  await settledLayout(page, form)
+  const where = await page.$eval(form, (root) => {
+    const textarea = root.querySelector('textarea')
+    const face = root.querySelector('[data-sw-dictate-face]').getBoundingClientRect()
+    const box = textarea.getBoundingClientRect()
+    const style = getComputedStyle(textarea)
+    return {
+      face: face.toJSON(),
+      box: box.toJSON(),
+      textRight: box.right - parseFloat(style.paddingRight) - parseFloat(style.borderRightWidth),
+    }
+  })
+  assert.ok(where.face.left >= where.box.left && where.face.right <= where.box.right, 'inside the field, left to right')
+  assert.ok(where.face.top >= where.box.top && where.face.bottom <= where.box.bottom, 'inside the field, top to bottom')
+  assert.ok(where.box.right - where.face.right <= 8, 'at the right edge')
+  assert.ok(where.box.bottom - where.face.bottom <= 8, 'at the bottom edge')
+  assert.ok(where.textRight <= where.face.left, 'text stops before the microphone')
+  return where
+}
+const placeholder = (page, selector) => page.getAttribute(selector, 'placeholder')
+
+test('desktop 1440: the microphone is in the field; one press listens; words land at the caret; nothing moves; post and Esc let go', async () => {
   const { context, page, errors } = await openBoard({ viewport: { width: 1440, height: 900 } })
   try {
     await openComposer(page, 0.3, 0.6)
@@ -135,36 +207,46 @@ test('desktop 1440: the composer dictates at the caret, asks once, never posts b
     assert.equal(await page.getAttribute(mic, 'aria-pressed'), 'false')
     // The name field is named by its label, not its placeholder.
     assert.equal(await page.locator(composer).getByRole('textbox', { name: 'Your name', exact: true }).count(), 1)
-    await page.keyboard.type('The price table')
-    await shot(page, 'desktop-1440-idle')
+    // The tools row has no microphone: it is in the field.
+    assert.equal(await page.locator(`${composer} [data-sw-composer-media] [data-sw-dictate]`).count(), 0)
+    const idle = await settledLayout(page, `${composer} [data-sw-composer]`)
+    const face = await assertMicInField(page, `${composer} [data-sw-composer]`)
+    assert.ok(Math.abs(face.face.width - 28) < 0.5, `a 28 px button on desktop, got ${face.face.width}`)
+    // The tooltip says who hears the audio.
+    await page.hover(mic)
+    await page.waitForSelector('[role="tooltip"]')
+    assert.match(await page.textContent('[role="tooltip"]'), /browser's speech service/)
+    assert.match(await page.textContent('[role="tooltip"]'), /Shapewall never gets the audio/)
+    await page.mouse.move(10, 10)
 
-    // The first press only explains: nothing listens until Start.
+    // One press and it listens: no extra step, nothing added, nothing moved.
     await page.click(mic)
-    await page.waitForSelector(`${composer} [data-sw-dictation-note="privacy"]`)
-    const note = await page.textContent(`${composer} [data-sw-dictation-note="privacy"]`)
-    assert.match(note, /browser's speech service/)
-    assert.match(note, /Shapewall never receives or stores the audio/)
-    assert.equal((await speech(page)).made, 0, 'no recognizer before Start')
-    await shot(page, 'desktop-1440-privacy')
-    await page.click(`${composer} [data-sw-dictation-start]`)
     await page.waitForSelector(`${mic}[aria-pressed="true"]`)
-    await page.waitForSelector(`${composer} [data-sw-dictation-note="listening"]`)
-    assert.equal(await page.evaluate(() => window.localStorage.getItem('shapewall.dictation.seen')), '1', 'remembered')
+    await page.waitForSelector(`${mic}[data-sw-dictate="listening"]`)
+    assert.equal(await placeholder(page, field), 'Listening...', 'the empty field says it is listening')
     assert.equal(
       await page.evaluate(() => document.activeElement?.hasAttribute('data-sw-comment-input')),
       true,
-      'the caret is back in the field',
+      'a click keeps the caret in the field',
     )
+    assert.equal(await page.textContent(`${composer} [data-sw-dictation-status]`), 'Listening', 'said to a screen reader')
+    await page.waitForTimeout(250)
+    assertSameLayout(idle, await settledLayout(page, `${composer} [data-sw-composer]`), 'listening')
     const started = await speech(page)
     assert.equal(started.lang, await page.evaluate(() => navigator.language), 'the browser language')
     assert.equal(started.continuous, true)
     assert.equal(started.interim, true)
     assert.equal(await page.getAttribute(mic, 'aria-label'), 'Dictate', 'the toggle keeps its name')
+    await page.keyboard.press('Escape')
+    await waitClosed(page)
+    await page.waitForSelector(`${mic}[aria-pressed="false"]`)
 
-    // Words still being heard show live, then settle in place.
+    // Typed text, then words still being heard show live and settle in place.
+    await page.keyboard.type('The price table')
+    await page.click(mic)
+    await page.waitForSelector(`${mic}[data-sw-dictate="listening"]`)
     await say(page, 'wraps on')
     await expectValue(page, field, 'The price table wraps on')
-    await shot(page, 'desktop-1440-listening')
     await say(page, 'wraps on small screens', true)
     await expectValue(page, field, 'The price table wraps on small screens')
     // A second sentence: settled words are kept, the next ones follow.
@@ -179,7 +261,6 @@ test('desktop 1440: the composer dictates at the caret, asks once, never posts b
       const at = element.value.indexOf('small screens')
       element.setSelectionRange(at, at + 'small screens'.length)
     }, field)
-    await page.keyboard.up('Shift')
     await page.dispatchEvent(field, 'keyup')
     await say(page, 'phones', true)
     await expectValue(page, field, 'The price table wraps on phones. Could it scroll instead')
@@ -197,12 +278,10 @@ test('desktop 1440: the composer dictates at the caret, asks once, never posts b
     assert.equal(made.length, count + 1)
     assert.ok(made.some((item) => item.body === 'The price table wraps on phones. Could it scroll instead'))
 
-    // Seen before: a press starts straight away. Esc stops it and keeps the
-    // composer and its words; a second Esc closes the composer.
+    // Esc stops it and keeps the composer and its words.
     await openComposer(page, 0.3, 0.85)
     await page.click(mic)
     await page.waitForSelector(`${mic}[aria-pressed="true"]`)
-    assert.equal(await page.locator(`${composer} [data-sw-dictation-note="privacy"]`).count(), 0)
     await say(page, 'needs a border')
     await page.keyboard.press('Escape')
     await waitClosed(page)
@@ -223,8 +302,8 @@ test('desktop 1440: the composer dictates at the caret, asks once, never posts b
   }
 })
 
-test('desktop 1440: typing while listening carries on at the new caret; keyboard Tab, Enter and Space', async () => {
-  const { context, page, errors } = await openBoard({ viewport: { width: 1440, height: 900 } }, { seen: true })
+test('desktop 1440: typing while listening carries on at the new caret; a long comment never runs under the microphone; Tab, Enter and Space', async () => {
+  const { context, page, errors } = await openBoard({ viewport: { width: 1440, height: 900 } })
   try {
     await openComposer(page, 0.6, 0.5)
     await page.click(mic)
@@ -242,11 +321,17 @@ test('desktop 1440: typing while listening carries on at the new caret; keyboard
     await waitClosed(page)
     await page.waitForSelector(`${mic}[aria-pressed="false"]`)
     await expectValue(page, field, 'Make the button bigger and darker please')
-    assert.equal(
-      await page.evaluate(() => document.activeElement?.hasAttribute('data-sw-comment-input')),
-      true,
-      'a click keeps the caret in the field',
-    )
+
+    // A long comment, many lines: the microphone stays in its corner and the
+    // text wraps before it.
+    const long = Array.from(
+      { length: 9 },
+      (_, n) => `Line ${n + 1}: the pricing table needs more room between the plan names and prices`,
+    ).join('\n')
+    await page.fill(field, long)
+    await page.waitForTimeout(150)
+    await assertMicInField(page, `${composer} [data-sw-composer]`)
+    await shot(page, 'desktop-1440-long')
 
     // Reached by Tab from the field, worked by Enter and Space.
     await page.focus(field)
@@ -270,10 +355,12 @@ test('desktop 1440: typing while listening carries on at the new caret; keyboard
   }
 })
 
-test('desktop 1440: errors read as plain lines next to the field, and the mic is free after each', async () => {
-  const { context, page, errors } = await openBoard({ viewport: { width: 1440, height: 900 } }, { seen: true })
+test('desktop 1440: an error is a bubble at the microphone, never a row; it can be dismissed and goes by itself', async () => {
+  const { context, page, errors } = await openBoard({ viewport: { width: 1440, height: 900 } })
   try {
     await openComposer(page, 0.6, 0.75)
+    const form = `${composer} [data-sw-composer]`
+    const idle = await settledLayout(page, form)
     const cases = [
       ['not-allowed', /Microphone access is blocked/],
       ['audio-capture', /No microphone was found/],
@@ -284,22 +371,42 @@ test('desktop 1440: errors read as plain lines next to the field, and the mic is
       await page.click(mic)
       await page.waitForSelector(`${mic}[aria-pressed="true"]`)
       await page.evaluate((error) => window.__speech.fail(error), code)
-      await page.waitForSelector(`${composer} [data-sw-dictation-note="${code}"]`)
-      assert.match(await page.textContent(`${composer} [data-sw-dictation-note="${code}"]`), text)
+      await page.waitForSelector(bubble(code))
+      assert.match(await page.textContent(bubble(code)), text)
+      assert.match(await page.textContent(`${composer} [data-sw-dictation-status]`), text, 'said to a screen reader')
       assert.equal(await page.getAttribute(mic, 'aria-pressed'), 'false')
       assert.equal((await speech(page)).open, 0)
+      assertSameLayout(idle, await settledLayout(page, form), `error ${code}`)
+      // Below the microphone (over the tools, never the words), its right edge
+      // near the microphone's.
+      const [over, at] = await Promise.all([page.locator(bubble(code)).boundingBox(), page.locator(mic).boundingBox()])
+      assert.ok(over.y >= at.y + at.height, 'the bubble sits below the microphone')
+      assert.ok(Math.abs(over.x + over.width - (at.x + at.width)) < 16, 'and lines up with it')
+      assert.equal(
+        await page.evaluate(() => document.activeElement?.hasAttribute('data-sw-comment-input')),
+        true,
+        'the caret stays in the field',
+      )
       if (code === 'not-allowed') await shot(page, 'desktop-1440-error')
     }
-    // Typing clears the line.
+    // The bubble's own button dismisses it.
+    await page.click(`${bubble('network')} [data-sw-dictation-dismiss]`)
+    await page.waitForSelector(bubble('network'), { state: 'detached' })
+    // Typing dismisses it too.
+    await page.click(mic)
+    await page.evaluate(() => window.__speech.fail('no-speech'))
+    await page.waitForSelector(bubble('no-speech'))
     await page.focus(field)
     await page.keyboard.type('ok')
-    await page.waitForSelector(`${composer} [data-sw-dictation-note]`, { state: 'detached' })
-    // Ending by itself says so, calmly.
+    await page.waitForSelector(bubble('no-speech'), { state: 'detached' })
+    // Ending by itself says so, calmly, and the note goes by itself.
     await page.click(mic)
     await page.waitForSelector(`${mic}[aria-pressed="true"]`)
     await page.evaluate(() => window.__speech.end())
-    await page.waitForSelector(`${composer} [data-sw-dictation-note="ended"]`)
-    assert.match(await page.textContent(`${composer} [data-sw-dictation-note="ended"]`), /Press the microphone to keep going/)
+    await page.waitForSelector(bubble('ended'))
+    assert.match(await page.textContent(bubble('ended')), /Press the microphone to keep going/)
+    await page.waitForSelector(bubble('ended'), { state: 'detached', timeout: 6000 })
+    assertSameLayout(idle, await settledLayout(page, form), 'after the bubbles')
     // A hidden tab lets go.
     await page.click(mic)
     await page.waitForSelector(`${mic}[aria-pressed="true"]`)
@@ -315,20 +422,24 @@ test('desktop 1440: errors read as plain lines next to the field, and the mic is
   }
 })
 
-test('desktop 1440: the reply box and the edit box dictate, one microphone at a time; another thread or closing it lets go', async () => {
-  const { context, page, errors } = await openBoard(
-    { viewport: { width: 1440, height: 900 } },
-    { url: `${boardUrl}?c=${first.id}`, seen: true },
-  )
+test('desktop 1440: the reply box and the edit box dictate in their fields, one microphone at a time; another thread or closing it lets go', async () => {
+  const { context, page, errors } = await openBoard({ viewport: { width: 1440, height: 900 } }, { url: `${boardUrl}?c=${first.id}` })
   try {
     const popover = `[data-sw-thread-popover="${first.id}"]`
     await page.waitForSelector(popover)
-    const replyMic = `${popover} [data-sw-reply-media] [data-sw-dictate]`
+    const reply = `${popover} [data-sw-reply-form]`
+    const replyMic = `${reply} [data-sw-dictate]`
     // No name saved in this browser yet: the reply asks for one, named by its label.
     await page.waitForSelector(`${popover} [data-sw-reply-author]`)
     assert.equal(await page.locator(popover).getByRole('textbox', { name: 'Your name', exact: true }).count(), 1)
+    await assertMicInField(page, reply)
+    assert.equal(await page.locator(`${popover} [data-sw-reply-media] [data-sw-dictate]`).count(), 0, 'not in the tools row')
+    const idle = await settledLayout(page, reply)
     await page.click(replyMic)
     await page.waitForSelector(`${replyMic}[aria-pressed="true"]`)
+    assert.equal(await placeholder(page, `${popover} [data-sw-reply-input]`), 'Listening...')
+    await page.waitForTimeout(250)
+    assertSameLayout(idle, await settledLayout(page, reply), 'reply listening')
     await say(page, 'agreed let us try 48 pixels', true)
     await expectValue(page, `${popover} [data-sw-reply-input]`, 'Agreed let us try 48 pixels')
     // The edit box: starting there stops the reply's microphone (one at a
@@ -338,6 +449,7 @@ test('desktop 1440: the reply box and the edit box dictate, one microphone at a 
     await page.click('[role="menu"] [data-sw-edit]')
     const edit = `${popover} [data-sw-edit-form="${first.id}"]`
     await page.waitForSelector(edit)
+    await assertMicInField(page, edit)
     await page.focus(`${edit} textarea`)
     await page.keyboard.press('Control+End')
     await page.click(`${edit} [data-sw-dictate]`)
@@ -356,8 +468,8 @@ test('desktop 1440: the reply box and the edit box dictate, one microphone at a 
     const next = `[data-sw-thread-popover]:not([data-sw-thread-popover="${first.id}"])`
     await page.waitForSelector(next)
     await waitClosed(page)
-    await page.click(`${next} [data-sw-reply-media] [data-sw-dictate]`)
-    await page.waitForSelector(`${next} [data-sw-reply-media] [data-sw-dictate][aria-pressed="true"]`)
+    await page.click(`${next} [data-sw-reply-form] [data-sw-dictate]`)
+    await page.waitForSelector(`${next} [data-sw-reply-form] [data-sw-dictate][aria-pressed="true"]`)
     // Closing the thread releases it too.
     await page.click(`${next} [data-sw-thread-close]`)
     await page.waitForSelector(next, { state: 'detached' })
@@ -371,12 +483,14 @@ test('desktop 1440: the reply box and the edit box dictate, one microphone at a 
   }
 })
 
-test('desktop 1440: no microphone button where the browser has no speech recognition', async () => {
+test('desktop 1440: no microphone where the browser has no speech recognition, and the field keeps its full width', async () => {
   const { context, page, errors } = await openBoard({ viewport: { width: 1440, height: 900 } }, { speech: false })
   try {
     await openComposer(page, 0.75, 0.3)
     assert.equal(await page.locator('[data-sw-dictate]').count(), 0)
-    assert.equal(await page.locator('[data-sw-dictation-note]').count(), 0)
+    assert.equal(await page.locator('[data-sw-dictation-status]').count(), 0)
+    const padding = await page.$eval(field, (element) => parseFloat(getComputedStyle(element).paddingRight))
+    assert.ok(padding < 16, `no room kept for a microphone that is not there (${padding} px)`)
     assert.deepEqual(errors, [])
   } finally {
     await context.close()
@@ -385,7 +499,7 @@ test('desktop 1440: no microphone button where the browser has no speech recogni
 
 const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 }
 
-test('phone 390: the composer sheet and the reply sheet have a 44 px microphone that does not crowd them', async () => {
+test('phone 390: the microphone is a 44 px target inside the field; nothing moves; the reply sheet too', async () => {
   const { context, page, errors } = await openBoard(PHONE)
   try {
     await page.tap('[data-sw-comment-mode]')
@@ -414,26 +528,34 @@ test('phone 390: the composer sheet and the reply sheet have a 44 px microphone 
     await page.waitForTimeout(400)
     const box = await page.locator(button).boundingBox()
     assert.ok(box.width >= 44 && box.height >= 44, `44 px target, got ${box.width}x${box.height}`)
+    const where = await assertMicInField(page, sheet)
+    assert.ok(Math.abs(where.face.width - 32) < 0.5, `a 32 px circle drawn in the 44 px target, got ${where.face.width}`)
     const row = await page.$eval(`${sheet} [data-sw-composer-media]`, (element) => ({
       overflow: element.scrollWidth - element.clientWidth,
       right: element.getBoundingClientRect().right,
     }))
-    assert.ok(row.overflow <= 0, 'the media row does not overflow')
+    assert.ok(row.overflow <= 0, 'the tools row does not overflow')
     assert.ok(row.right <= 390, 'the row stays on screen')
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'no sideways scroll')
+    const idle = await settledLayout(page, sheet)
     await shot(page, 'phone-390-idle')
     await page.tap(button)
-    await page.waitForSelector(`${sheet} [data-sw-dictation-note="privacy"]`)
-    await shot(page, 'phone-390-privacy')
-    await page.tap(`${sheet} [data-sw-dictation-start]`)
     await page.waitForSelector(`${button}[aria-pressed="true"]`)
+    await page.waitForSelector(`${button}[data-sw-dictate="listening"]`)
+    assert.equal(await placeholder(page, `${sheet} [data-sw-comment-input]`), 'Listening...')
+    await page.waitForTimeout(250)
+    assertSameLayout(idle, await settledLayout(page, sheet), 'phone listening')
     await say(page, 'the header covers the logo')
     await expectValue(page, `${sheet} [data-sw-comment-input]`, 'The header covers the logo')
-    assert.match(await page.textContent(`${sheet} [data-sw-dictation-note="listening"]`), /Tap the microphone to stop/)
     await shot(page, 'phone-390-listening')
     await page.evaluate(() => window.__speech.fail('not-allowed'))
-    await page.waitForSelector(`${sheet} [data-sw-dictation-note="not-allowed"]`)
+    await page.waitForSelector(bubble('not-allowed'))
+    assertSameLayout(idle, await settledLayout(page, sheet), 'phone error')
+    const over = await page.locator(bubble('not-allowed')).boundingBox()
+    assert.ok(over.x >= 0 && over.x + over.width <= 390, 'the bubble stays on screen')
     await shot(page, 'phone-390-error')
+    await page.tap(`${bubble('not-allowed')} [data-sw-dictation-dismiss]`)
+    await page.waitForSelector(bubble('not-allowed'), { state: 'detached' })
     // Back closes the sheet and the microphone with it.
     await page.tap(button)
     await page.waitForSelector(`${button}[aria-pressed="true"]`)
@@ -445,18 +567,23 @@ test('phone 390: the composer sheet and the reply sheet have a 44 px microphone 
     await page.goto(`${boardUrl}?c=${second.id}`)
     const thread = `[data-sw-thread-sheet="${second.id}"]`
     await page.waitForSelector(thread)
-    const replyMic = `${thread} [data-sw-reply-media] [data-sw-dictate]`
+    const reply = `${thread} [data-sw-reply-form]`
+    const replyMic = `${reply} [data-sw-dictate]`
     await page.waitForSelector(replyMic)
     const replyBox = await page.locator(replyMic).boundingBox()
     assert.ok(replyBox.width >= 44 && replyBox.height >= 44)
+    await assertMicInField(page, reply)
+    const replyIdle = await settledLayout(page, reply)
     await page.tap(replyMic)
     await page.waitForSelector(`${replyMic}[aria-pressed="true"]`)
+    await page.waitForTimeout(250)
+    assertSameLayout(replyIdle, await settledLayout(page, reply), 'phone reply listening')
     await say(page, 'on phones too', true)
     await expectValue(page, `${thread} [data-sw-reply-input]`, 'On phones too')
+    await shot(page, 'phone-390-reply')
     await page.tap(`${thread} [data-sw-reply-send]`)
     await page.waitForSelector(`${thread} [data-sw-reply="1"]`)
     await waitClosed(page)
-    await shot(page, 'phone-390-reply')
     assert.deepEqual(errors, [])
   } finally {
     await context.close()

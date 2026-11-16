@@ -6,7 +6,7 @@ import { cn } from '../lib/utils'
 import { COMMENT_MAX, sendsOnEnter } from './commentInput'
 import { AttachButton, ComposerImages, DrawSheet, DrawTools, imageDropProps } from './CommentMedia'
 import { useDrawing } from './drawing'
-import { DictationButton, DictationNote } from './DictationButton'
+import { DictationButton, DictationStatus, dictationFieldClass, dictationPlaceholder } from './DictationButton'
 import { useCommentDictation } from './hooks/useCommentDictation'
 
 // A new comment: the text (Enter posts, Shift+Enter is a new line, Escape
@@ -16,7 +16,8 @@ import { useCommentDictation } from './hooks/useCommentDictation'
 // the screenshot the phone draws on in a full sheet).
 // `discard` ({ onDiscard, onKeep }): Esc was pressed on a comment that holds a
 // drawing or images, so the composer asks before dropping that work.
-// The microphone (DictationButton.jsx) writes at the caret; posting stops it.
+// The microphone in the field's corner (DictationButton.jsx) writes at the
+// caret; posting stops it.
 export function CommentComposer({
   draft,
   onChange,
@@ -52,7 +53,6 @@ export function CommentComposer({
     dictation.cancel()
     onSubmit()
   }
-  const mic = <DictationButton dictation={dictation} touch={touch} disabled={busy} />
   const describedBy = [images?.error ? 'sw-composer-image-error' : null, dictation.describedBy].filter(Boolean)
   return (
     <form
@@ -76,36 +76,39 @@ export function CommentComposer({
           {description}
         </p>
       ) : null}
-      <label className="block">
-        <span className="sr-only">Comment</span>
-        <MentionTextarea
-          size={touch ? 'touch' : 'sm'}
-          rows={lines}
-          value={body}
-          people={people}
-          className="resize-none"
-          onChange={(value) => {
-            const text = value.slice(0, COMMENT_MAX)
-            dictation.onInput(text)
-            onChange({ body: text })
-          }}
-          onKeyDown={(event) => {
-            if (sendsOnEnter(event, touch)) {
-              event.preventDefault()
-              post()
-            }
-          }}
-          inputRef={input}
-          {...dictation.fieldProps}
-          autoFocus
-          placeholder="Add a comment. @ to mention someone or @agent"
-          aria-describedby={describedBy.length ? describedBy.join(' ') : undefined}
-          data-sw-comment-input="true"
-        />
-      </label>
-      <DictationNote dictation={dictation} touch={touch} id={dictation.noteId} />
+      <div className="relative">
+        <label className="block">
+          <span className="sr-only">Comment</span>
+          <MentionTextarea
+            size={touch ? 'touch' : 'sm'}
+            rows={lines}
+            value={body}
+            people={people}
+            className={cn('resize-none', dictationFieldClass(dictation, touch))}
+            onChange={(value) => {
+              const text = value.slice(0, COMMENT_MAX)
+              dictation.onInput(text)
+              onChange({ body: text })
+            }}
+            onKeyDown={(event) => {
+              if (sendsOnEnter(event, touch)) {
+                event.preventDefault()
+                post()
+              }
+            }}
+            inputRef={input}
+            {...dictation.fieldProps}
+            autoFocus
+            placeholder={dictationPlaceholder(dictation, 'Add a comment. @ to mention someone or @agent')}
+            aria-describedby={describedBy.length ? describedBy.join(' ') : undefined}
+            data-sw-comment-input="true"
+          />
+        </label>
+        <DictationButton dictation={dictation} touch={touch} disabled={busy} />
+        <DictationStatus dictation={dictation} id={dictation.noteId} />
+      </div>
       {canAttach ? <ComposerImages draft={images} touch={touch} id="sw-composer-image-error" /> : null}
-      {canAttach || canDraw || media?.attachNote || dictation.supported ? (
+      {canAttach || canDraw || media?.attachNote ? (
         <div className="flex flex-wrap items-center gap-0.5" data-sw-composer-media="true">
           {canDraw && !touch ? (
             <DrawTools
@@ -113,21 +116,11 @@ export function CommentComposer({
               touch={false}
               compact
               className="flex-1"
-              leading={
-                canAttach || dictation.supported ? (
-                  <>
-                    {canAttach ? <AttachButton draft={images} touch={false} disabled={busy} /> : null}
-                    {mic}
-                  </>
-                ) : null
-              }
+              leading={canAttach ? <AttachButton draft={images} touch={false} disabled={busy} /> : null}
             />
-          ) : (
-            <>
-              {canAttach ? <AttachButton draft={images} touch={touch} disabled={busy} /> : null}
-              {mic}
-            </>
-          )}
+          ) : canAttach ? (
+            <AttachButton draft={images} touch={touch} disabled={busy} />
+          ) : null}
           {canDraw && touch && media.page ? (
             <Button size="touch" variant="ghost" onClick={() => setSheet(true)} data-sw-draw-open="true">
               <Brush size={16} aria-hidden="true" /> {shapes ? `Drawing (${shapes})` : 'Draw on the page'}

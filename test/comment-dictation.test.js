@@ -6,8 +6,11 @@ import assert from 'node:assert/strict'
 import {
   DICTATION_IDLE,
   DICTATION_MESSAGES,
+  DICTATION_STOP_TIP,
+  DICTATION_TIP,
+  bubbleMs,
+  dictationAnnouncement,
   dictationLang,
-  isActive,
   nextDictation,
   normalizeSpeech,
   spliceSpeech,
@@ -99,19 +102,10 @@ test('a caret out of range is clamped', () => {
 
 const run = (events, state = DICTATION_IDLE) => events.reduce(nextDictation, state)
 
-test('first press asks once (the privacy line); Start begins, Not now goes back', () => {
-  const asking = run([{ type: 'press', seen: false }])
-  assert.deepEqual(asking, { status: 'asking', notice: 'privacy' })
-  assert.equal(isActive(asking), false, 'nothing listens while asking')
-  assert.deepEqual(run(['consent'], asking), { status: 'starting', notice: null })
-  assert.deepEqual(run(['decline'], asking), DICTATION_IDLE)
-  assert.deepEqual(run([{ type: 'press' }], asking), DICTATION_IDLE, 'a second press on the mic also closes it')
-})
-
-test('seen before: a press starts, started listens, a press stops, the end is idle and quiet', () => {
+test('one press starts, started listens, a press stops, started listens, a press stops, the end is idle and quiet', () => {
   const states = []
   let state = DICTATION_IDLE
-  for (const event of [{ type: 'press', seen: true }, 'started', 'result', { type: 'press' }, 'ended']) {
+  for (const event of [{ type: 'press' }, 'started', 'result', { type: 'press' }, 'ended']) {
     state = nextDictation(state, event)
     states.push(state.status)
   }
@@ -120,7 +114,7 @@ test('seen before: a press starts, started listens, a press stops, the end is id
 })
 
 test('errors land on idle with a plain message; our own abort says nothing', () => {
-  const listening = run([{ type: 'press', seen: true }, 'started'])
+  const listening = run([{ type: 'press' }, 'started'])
   for (const code of ['not-allowed', 'audio-capture', 'no-speech', 'network', 'service-not-allowed', 'language-not-supported']) {
     const state = nextDictation(listening, { type: 'error', code })
     assert.deepEqual(state, { status: 'idle', notice: code })
@@ -131,28 +125,22 @@ test('errors land on idle with a plain message; our own abort says nothing', () 
   assert.deepEqual(nextDictation(listening, { type: 'error', code: 'aborted' }), DICTATION_IDLE)
   assert.deepEqual(nextDictation(listening, { type: 'error', code: 'something-new' }), { status: 'idle', notice: 'failed' })
   // A start that never came.
-  assert.deepEqual(
-    run([
-      { type: 'press', seen: true },
-      { type: 'error', code: 'start' },
-    ]),
-    { status: 'idle', notice: 'start' },
-  )
+  assert.deepEqual(run([{ type: 'press' }, { type: 'error', code: 'start' }]), { status: 'idle', notice: 'start' })
   // After a stop, a late error is just the end.
   assert.deepEqual(run([{ type: 'press' }, { type: 'error', code: 'no-speech' }], listening), DICTATION_IDLE)
 })
 
 test('ending by itself says so; a long quiet stops with the same note', () => {
-  const listening = run([{ type: 'press', seen: true }, 'started'])
+  const listening = run([{ type: 'press' }, 'started'])
   assert.deepEqual(nextDictation(listening, 'ended'), { status: 'idle', notice: 'ended' })
   assert.deepEqual(run(['quiet', 'ended'], listening), { status: 'idle', notice: 'ended' })
   assert.equal(DICTATION_MESSAGES.ended.tone, 'info')
 })
 
 test('cancel always lands on idle with nothing said; dismiss clears a note', () => {
-  const listening = run([{ type: 'press', seen: true }, 'started'])
+  const listening = run([{ type: 'press' }, 'started'])
   assert.deepEqual(nextDictation(listening, 'cancel'), DICTATION_IDLE)
-  assert.deepEqual(nextDictation({ status: 'asking', notice: 'privacy' }, 'cancel'), DICTATION_IDLE)
+  assert.deepEqual(nextDictation({ status: 'starting', notice: null }, 'cancel'), DICTATION_IDLE)
   const failed = nextDictation(listening, { type: 'error', code: 'network' })
   assert.deepEqual(nextDictation(failed, 'dismiss'), DICTATION_IDLE)
   assert.deepEqual(nextDictation(listening, 'dismiss'), listening, 'dismiss never stops a session')
@@ -160,10 +148,10 @@ test('cancel always lands on idle with nothing said; dismiss clears a note', () 
 })
 
 test('stray events do not start anything', () => {
-  for (const event of ['started', 'ended', 'quiet', 'consent', 'decline', { type: 'error', code: 'network' }]) {
+  for (const event of ['started', 'ended', 'quiet', 'dismiss', { type: 'error', code: 'network' }]) {
     assert.deepEqual(nextDictation(DICTATION_IDLE, event), DICTATION_IDLE, JSON.stringify(event))
   }
-  const stopping = run([{ type: 'press', seen: true }, 'started', { type: 'press' }])
+  const stopping = run([{ type: 'press' }, 'started', { type: 'press' }])
   assert.equal(nextDictation(stopping, { type: 'press' }), stopping, 'pressing while stopping waits for the end')
 })
 
@@ -175,7 +163,18 @@ test('the language: the browser first, then the page, then US English', () => {
   assert.equal(dictationLang(), 'en-US')
 })
 
-test('the privacy line says who transcribes and that Shapewall keeps nothing', () => {
-  assert.match(DICTATION_MESSAGES.privacy.text, /browser's speech service/)
-  assert.match(DICTATION_MESSAGES.privacy.text, /Shapewall never receives or stores the audio/)
+test('the tooltip says who transcribes and that Shapewall never gets the audio', () => {
+  assert.match(DICTATION_TIP, /browser's speech service/)
+  assert.match(DICTATION_TIP, /Shapewall never gets the audio/)
+  assert.match(DICTATION_STOP_TIP, /Esc/)
+  for (const text of [DICTATION_TIP, DICTATION_STOP_TIP]) assert.doesNotMatch(text, /\u2014/, 'no em dashes')
+})
+
+test('what a screen reader hears, and how long a bubble stays', () => {
+  assert.equal(dictationAnnouncement(DICTATION_IDLE), '')
+  assert.equal(dictationAnnouncement({ status: 'starting', notice: null }), 'Starting the microphone')
+  assert.equal(dictationAnnouncement({ status: 'listening', notice: null }), 'Listening')
+  assert.equal(dictationAnnouncement({ status: 'idle', notice: 'network' }), DICTATION_MESSAGES.network.text)
+  assert.equal(bubbleMs('not-allowed'), 8000, 'an error stays long enough to read')
+  assert.equal(bubbleMs('ended'), 4000, 'a note goes sooner')
 })

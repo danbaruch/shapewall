@@ -14,7 +14,6 @@ import { consoleTitle } from './titles'
 import { GUEST_NAME, STATE_VERSION, VIEW_AS, seedState } from './fixtures'
 import { NEEDS, roleAtLeast } from '../../../src/hosted/permissions.js'
 import { PAGE_COMMENT_KEY } from '../board/prefs'
-import { DICTATION_SEEN_KEY } from '../board/dictation'
 
 const STATE_KEY = 'shapewall.demo.state.v1'
 // Chat images kept across reloads (data URLs), up to this much in total.
@@ -250,8 +249,6 @@ export async function installDemo(app) {
           window.localStorage.removeItem(FILES_KEY)
           // The page bar's Comment button is pointed out again (board/prefs.js).
           window.localStorage.removeItem(PAGE_COMMENT_KEY)
-          // Dictation's one-time privacy line shows again (board/dictation.js).
-          window.localStorage.removeItem(DICTATION_SEEN_KEY)
         } catch {
           /* storage blocked: nothing was kept, the reload starts over anyway */
         }
