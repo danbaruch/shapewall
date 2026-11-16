@@ -1,6 +1,28 @@
-import { ArrowLeftRight, Camera, GitCompare, X } from 'lucide-react'
-import { Button, IconButton, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Spinner, Toggle } from '../components/ui'
+import { ArrowLeftRight, Camera, GitCompare, MessageSquareOff, X } from 'lucide-react'
+import {
+  Button,
+  IconButton,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Spinner,
+  Toggle,
+  Tooltip,
+} from '../components/ui'
 import { cn } from '../lib/utils'
+
+// Why there is no Comment tool while comparing. A comment belongs to a page
+// rather than to one environment -- the pins are drawn once, on the first
+// environment's frame (layout.js framePins) -- so a click on either capture
+// would be the same comment, and which capture you meant is a question the
+// board cannot answer for you. Reading, replying, resolving and jumping to a
+// comment all work while comparing; only placing a new one waits. The tools
+// show no Comment button in compare mode, and a button that is not there
+// explains nothing, so the bar says it in one line.
+const NO_COMMENTS = 'No new comments while comparing'
+const NO_COMMENTS_WHY = 'A comment belongs to a page, not to one environment. Leave compare to add one; replies and resolving work here.'
 
 // Compare mode controls: the two environments, the diff overlay, "changed
 // pages only", and a capture button for an environment with no captures yet.
@@ -13,6 +35,9 @@ export default function CompareBar({
   totalPages = 0,
   changedOnly,
   showDiff,
+  // This person may comment on this board, so the missing Comment tool is
+  // worth explaining. A viewer or a guest never had one.
+  canComment = false,
   canCapture,
   captureBusy,
   touch,
@@ -103,6 +128,22 @@ export default function CompareBar({
           </span>
         )}
       </span>
+      {canComment ? (
+        <span className="flex min-w-0 items-center gap-1 text-xs text-muted" data-sw-compare-no-comments="true">
+          <MessageSquareOff size={13} className="shrink-0" aria-hidden="true" />
+          {touch ? (
+            <span className="min-w-0">{NO_COMMENTS}</span>
+          ) : (
+            <Tooltip content={NO_COMMENTS_WHY}>
+              <span className="min-w-0 cursor-help underline decoration-dotted underline-offset-2" tabIndex={0}>
+                {NO_COMMENTS}
+              </span>
+            </Tooltip>
+          )}
+          {/* The whole reason, for a reader who cannot hover a tooltip. */}
+          <span className="sr-only">{NO_COMMENTS_WHY}</span>
+        </span>
+      ) : null}
       {canCapture
         ? missing.map((env) => (
             <Button key={env.id} size={touch ? 'touch' : 'sm'} disabled={captureBusy} onClick={() => onCapture(env.id)}>

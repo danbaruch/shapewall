@@ -130,6 +130,71 @@ test('variants take their page card size', () => {
   assert.ok(nodeOf(layout, 'app').position.x > variant.position.x + variant.width)
 })
 
+// A variant is one capture of one idea: there is no second environment of it,
+// so compare mode lays it out as the single-frame card it is, beside its
+// page's pair. 0.7.3 left variants out of the layout altogether while
+// comparing, which left a comment on one with no pin to fly to.
+test('comparing, a variant is a single-frame card beside its page pair', () => {
+  const layout = layoutBoard({
+    pages,
+    groups: ['Marketing'],
+    variants: [{ id: 'v1', pageId: 'admin', files: { desktop: { file: 'v1.png' } } }],
+    viewports,
+    mode: 'all',
+    compare: ['prod', 'staging'],
+  })
+  const admin = nodeOf(layout, 'admin')
+  const variant = nodeOf(layout, 'variant:v1')
+  assert.ok(variant, 'the variant is on the board while comparing')
+  // One frame, with no environment on it and so no diff overlay to draw.
+  assert.deepEqual(
+    variant.data.frames.map((frame) => `${frame.viewport}:${frame.env || 'none'}`),
+    ['desktop:none'],
+  )
+  // Its own width: the page's pair is two frames wide, the variant is one.
+  assert.ok(variant.width < admin.width, `variant ${variant.width} is narrower than the pair ${admin.width}`)
+  assert.equal(variant.width, admin.data.frames[0].w + 16)
+  assert.ok(variant.position.x >= admin.position.x + admin.width, 'the variant sits to the right of its page')
+  assert.ok(nodeOf(layout, 'app').position.x >= variant.position.x + variant.width, 'the next page clears the variant')
+  // A comment on it has a pin, inside the variant's own card.
+  const point = pinPoint(layout.targets, { pageId: 'variant:v1', viewport: 'desktop', x: 50, y: 50 })
+  const target = layout.targets['variant:v1']
+  assert.ok(point.x > target.x && point.x < target.x + target.w, 'the pin is inside the variant card')
+  assert.ok(framePins(variant.data.frames[0], { a: 'prod', b: 'staging' }), 'a variant frame draws its pins')
+})
+
+test('comparing, two variants beside one page each keep their own width and stay in the group', () => {
+  const variants = [
+    { id: 'v1', pageId: 'home', files: { desktop: { file: 'a.png' } } },
+    { id: 'v2', pageId: 'home', files: { desktop: { file: 'b.png' }, phone: { file: 'c.png' } } },
+  ]
+  const layout = layoutBoard({ pages, groups: ['Marketing'], variants, viewports, mode: 'all', compare: ['prod', 'staging'] })
+  const one = nodeOf(layout, 'variant:v1')
+  const two = nodeOf(layout, 'variant:v2')
+  assert.ok(two.width > one.width, 'a variant with two viewports is wider than one with one')
+  assert.ok(two.position.x >= one.position.x + one.width, 'the second variant clears the first')
+  const group = layout.nodes.find((node) => node.type === 'groupFrame')
+  for (const node of layout.nodes.filter((item) => item.type === 'page' || item.type === 'variant')) {
+    assert.ok(node.position.x + node.width <= group.position.x + group.width, `${node.id} inside its group`)
+    assert.ok(node.position.y + node.height <= group.position.y + group.height, `${node.id} inside its group`)
+  }
+})
+
+test('a variant with no file list of its own takes one frame per viewport, not the compare pair', () => {
+  const layout = layoutBoard({
+    pages,
+    groups: ['Marketing'],
+    variants: [{ id: 'v1', pageId: 'home' }],
+    viewports,
+    mode: 'all',
+    compare: ['prod', 'staging'],
+  })
+  assert.deepEqual(
+    nodeOf(layout, 'variant:v1').data.frames.map((frame) => `${frame.viewport}:${frame.env || 'none'}`),
+    ['desktop:none', 'phone:none'],
+  )
+})
+
 test('pins sit on the corner of their element, never on top of it', () => {
   // Pinned by position only: the stored point.
   assert.deepEqual(pinSpot({ x: 40, y: 30 }), { x: 40, y: 30, flipX: false, flipY: false })

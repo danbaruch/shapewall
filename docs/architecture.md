@@ -167,7 +167,9 @@ the same way. Scrolling inside a `nowheel` element (the frame bar, a live page b
 - Journeys fade the cards that are not in the journey, put numbered badges on the ones that are, and fly the camera to each step. A
   branching journey is shown one path at a time (`resolvePath` with the branches picked); the other branches' arrows are dashed.
 - Compare mode lays two frames per viewport side by side (one per environment) and shows screenshots only, with the cached diff mask
-  over the second.
+  over the second. A variant keeps its single frame there, beside its page's pair: it is one capture of one idea, with no second
+  environment to compare it against. New comments are off while comparing (a comment belongs to a page, not to one environment, so
+  which capture a click meant is unanswerable); the compare bar says so, and replies, resolving and "jump to comment" all work.
 - Each frame's label (viewport, environment, live) sits in a strip between the card header and the frame, never on the captured page.
 - The selected card's action bar belongs to one view: switching viewport, compare or a journey, and Fit view, clear the selection, and
   the bar hides while the frame is a thumbnail on screen (its longer side under 160 px). Tapping a thumbnail flies to it first, leaving

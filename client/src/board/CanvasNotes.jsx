@@ -63,6 +63,9 @@ export function CanvasNotes({
   // On a phone the open thread sheet owns the notice: it is a modal, so a
   // copy left here would be unreachable under it.
   noticeInSheet = false,
+  // A sheet is covering the board on a phone (a thread, the comments list,
+  // the composer, the menu, checks, the chat).
+  covered = false,
   dismissTip,
   modes,
   comparePair,
@@ -70,6 +73,13 @@ export function CanvasNotes({
   const modeLabel = (id) => modes.find((item) => item.id === id)?.label || id
   const revealed = revealNotice(viewNotice, modeLabel)
   const showNotice = Boolean(revealed) && !noticeInSheet
+  // Behind a phone sheet there is nothing to say: the sheet is a modal, so
+  // every note here would be dimmed under its backdrop, untappable and hidden
+  // from screen readers. They also sit in the strip of board the jump keeps
+  // clear for the pin (sheetFit.js), so the first-run tip was drawn over the
+  // pin the board had just flown to, 52 px of it, measured at 390 in compare
+  // mode. The notes come back when the sheet closes.
+  if (!wide && covered) return null
   // The tip names only what this person can do here.
   const tipText = wide
     ? `Scroll or drag to move, Ctrl+scroll or pinch to zoom. Click a page for its actions${canComment && !comparePair ? ': Comment is first. Or press C, or use the Comment tool below' : ''}.`

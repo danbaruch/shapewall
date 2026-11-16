@@ -1,6 +1,6 @@
 import { Dialog as DialogPrimitive } from 'radix-ui'
 import { cva } from 'class-variance-authority'
-import { X } from 'lucide-react'
+import { ChevronLeft, X } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { useOverlayEntry } from '../../lib/hooks'
 
@@ -52,6 +52,14 @@ export function Dialog({
   // A dialog showing something that cannot be shown again (a new token, a
   // share link) closes only from its own buttons, never a stray click or Escape.
   sticky = false,
+  // A sheet that came from a list: the name of what it goes back to
+  // ("Comments"). Closing it already returns there, but an X does not say so,
+  // so the way out leads the title row as a named back control instead.
+  back = null,
+  // A ceiling in screen pixels for the whole panel, over its own max-height.
+  // The phone thread sheet sets one so it always leaves a strip of board
+  // above itself (sheetFit.js).
+  maxHeight = null,
 }) {
   useOverlayEntry(open, onClose)
   return (
@@ -60,7 +68,7 @@ export function Dialog({
         <DialogOverlay />
         <DialogPrimitive.Content
           className={cn(panelVariants({ size }), className)}
-          style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+          style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)', ...(maxHeight ? { maxHeight } : null) }}
           onOpenAutoFocus={focusFirst}
           onCloseAutoFocus={onCloseAutoFocus}
           // A field that uses Escape itself (editing a message: Escape cancels
@@ -75,7 +83,24 @@ export function Dialog({
         >
           {/* The title (and its one-line description) centered on the 44px
               close; a description that wraps keeps the title at the top. */}
-          <div className={cn('flex gap-3 border-b border-line px-5 py-3.5', wrapDescription ? 'items-start' : 'items-center')}>
+          <div
+            className={cn(
+              'flex gap-3 border-b border-line py-3.5 pr-5',
+              back ? 'pl-2' : 'pl-5',
+              wrapDescription ? 'items-start' : 'items-center',
+            )}
+          >
+            {back ? (
+              <DialogPrimitive.Close
+                data-dialog-close
+                data-sw-dialog-back="true"
+                className="-my-1.5 inline-flex h-11 shrink-0 items-center gap-0.5 rounded-md pr-2 pl-1 text-sm font-medium text-muted hover:bg-surface-2 hover:text-fg focus-visible:outline-2 focus-visible:outline-accent"
+                aria-label={`Back to ${back}`}
+              >
+                <ChevronLeft size={18} aria-hidden="true" />
+                {back}
+              </DialogPrimitive.Close>
+            ) : null}
             <div className="min-w-0 flex-1">
               <DialogPrimitive.Title className="text-[15px] font-semibold text-fg">{title}</DialogPrimitive.Title>
               {description ? (
@@ -84,13 +109,17 @@ export function Dialog({
                 </DialogPrimitive.Description>
               ) : null}
             </div>
-            <DialogPrimitive.Close
-              data-dialog-close
-              className="-mr-2 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-muted hover:bg-surface-2 hover:text-fg focus-visible:outline-2 focus-visible:outline-accent"
-              aria-label="Close"
-            >
-              <X size={18} aria-hidden="true" />
-            </DialogPrimitive.Close>
+            {/* The way out is named once: a sheet that came from a list says
+                where it goes back to, and nothing else needs an X beside it. */}
+            {back ? null : (
+              <DialogPrimitive.Close
+                data-dialog-close
+                className="-mr-2 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-muted hover:bg-surface-2 hover:text-fg focus-visible:outline-2 focus-visible:outline-accent"
+                aria-label="Close"
+              >
+                <X size={18} aria-hidden="true" />
+              </DialogPrimitive.Close>
+            )}
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
           {footer ? <div className="flex justify-end gap-2 border-t border-line px-5 py-3">{footer}</div> : null}

@@ -3,13 +3,69 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.8.0 - 2026-11-16
 
 - **Opt-in error reports for your own server.** Set `SHAPEWALL_ERROR_DSN` (any Sentry-compatible DSN: Sentry, GlitchTip) and
   `shapewall serve` or `shapewall hosted` reports its unhandled errors there, and the pages it serves report browser errors to the
-  same place. Off by default: without the variable the SDK is never loaded and nothing is sent, and Shapewall has no DSN of its own.
-  Reports carry the error, stack trace, URL path, browser and release, never content, request bodies, cookies, query strings or
-  identities. See [Error reports](docs/deployment.md#error-reports-opt-in).
+  same place. Off by default: without the variable the reporting SDK is never loaded and nothing is sent, and the package has no
+  DSN of its own. A report is scrubbed before it leaves: it keeps the error, its stack trace, the URL path, the browser or runtime
+  and the release, and drops cookies, request bodies, headers other than the user agent, query strings, fragments, user identities,
+  local variables, console lines and clicks; quoted text in an error message is replaced, since that is where an input such as
+  board or comment content would appear. See [Error reports](docs/deployment.md#error-reports-opt-in). Our own deployments (the
+  shapewall.com website and its public demo) set our DSN and report the same scrubbed errors; that is their setting, not the
+  package's.
+- **On a phone, comparing two environments, the thread sheet covered the whole board.** Measured at 390 px wide on the demo
+  board: compare mode's bar pushes the canvas 247 px down the window, and the sheet kept taking its share of the window, 598 px
+  of 844, so it started at 246 px and the canvas ended at 844. The pin was placed correctly and the camera flew to it, behind
+  the sheet: 9 of the board's 20 comments landed where nobody could see them. The sheet is now measured against the canvas
+  rather than the window, so whatever sits over the canvas comes off the sheet instead of off the board: it is capped at
+  whatever leaves 120 px of board below the bars, which is the pin's own room and the gap the jump keeps above the sheet. On
+  the demo board at 390 px in compare mode that comes out as a sheet of 403 to 445 px with a strip of 129 to 171 px, where
+  before it was 598 px over a 597 px canvas; with nothing over the canvas the sheet is exactly as tall as it has been since
+  0.7.2. The same arithmetic covers every other bar that shortens the canvas (the notice bar, a migration banner, a hosted
+  board's approvals), because what is measured is the canvas's own box and the canvas is what they all shorten. Checked at
+  390 px on all 20 comments of the demo board while comparing, by what is drawn at the pin rather than by its coordinates:
+  none covered, where 9 of 20 were.
+- **On a phone, walking from one comment to the next.** The note a jump leaves ("Showing Phone for comment #12") lay over the
+  top of the thread, which is where the thread keeps previous, next, resolve and more, so for the six seconds it was up none of
+  them could be tapped, and the list itself is behind a modal sheet. It now sits in the thread's own flow, under its header,
+  and gives up a little of the thread's scrolling room rather than covering anything or making the sheet taller. The sheet's
+  steps lead its second row as one control, "previous, 16 of 20, next", and the sheet says what it goes back to, "Comments", in
+  place of an X that did the same thing without saying so. Stepping through the demo board's comments takes about 100 ms a
+  comment rather than 6.3 seconds, so walking all 20 at 390 px no longer spends about two minutes waiting for notes to clear.
+- **Comparing two environments, a variant is on the board.** Compare mode laid out no variants at all, so a comment on one had
+  no pin, and 0.7.3 answered that by leaving compare mode to show it. A variant is one capture of one idea and has no second
+  environment to compare against, so it is now laid out inside compare mode as the single-frame card it is, beside its page's
+  pair and at its own width. A comment on a variant has a pin, the board flies to it, and compare mode stays on. With that, the
+  one thing compare mode used to hide is gone, so "jump to comment" has one fewer view change to make, to say and to put back;
+  the machinery stays for the one that is left, "Changed pages only", which really does drop pages.
+- **Why there is no Comment tool while comparing.** A comment belongs to a page rather than to one environment (the pins are
+  drawn once, on the first environment's frame), so a click on either capture would be the same comment and the board cannot
+  know which capture was meant. The compare bar now says so in a line, with the whole reason in its tooltip and for a screen
+  reader, rather than leaving the missing tool unexplained. Reading, replying, resolving and jumping to a comment all work
+  while comparing, as they did.
+- **A pin near the top of a page could not be clicked.** The frame clipped its own pins, so a pin close to an edge was drawn
+  with half of it cut off and, worse, with its middle outside the clip box: it was not what the browser found at its own centre,
+  so a click went to the page behind it. Measured on a local board at 2% / 2%, in all four views (1440, compare 1440, 390,
+  compare 390). That spot matters because it is where `shapewall comments add` puts a pin with no `--selector`, and where it
+  falls back when a `--selector` no longer resolves in the latest capture, so a comment added from the command line could land
+  permanently unreachable. The page and everything drawn on it is still clipped to the frame; the pins are not, and hang over
+  the card's edge the way they do in Figma. The fallback spot itself is unchanged: with the clipping gone it reads as a note
+  about the page, which is what a comment with no element to point at is.
+- **On a phone, the first-run tip no longer sits where the pin lands.** The notes along the top of the canvas (the tip, the
+  links hints, a kept draft) stayed up under a sheet, where a modal backdrop leaves them dimmed, untappable and hidden from
+  screen readers; and they sit in exactly the strip of board the jump keeps clear, so at 390 in compare mode the tip was drawn
+  over the pin the board had just flown to. They step aside while a sheet covers the board and come back when it closes.
+- **Reopening a comment is in the audit log.** On a team server, resolving a comment was recorded and reopening it was not, on
+  both routes (the console's and the token API's), so the log showed work being closed and never being put back. It is now
+  `comment_reopened`, counted in Usage and offered in the Activity filters beside `comment_resolved` and `comment_deleted`, and
+  named in the activity list ("reopened comment #12"). The public demo's Activity records it too.
+- **`shapewall comments --remote` says when it was given less than the board has.** A claim-scoped token reads only the
+  comments its agent may take, which is deliberate, but the count read like the board's own: "2 comments on testbed" with a
+  third open and routed to another agent. The report now carries `routedElsewhere` beside `guestsHidden`, and the text says
+  "Not shown here: 1 is routed to another agent or not dispatched, so this token does not read them." Guests' comments, which
+  were counted but never mentioned, are named in the same line. A token without the claim scope is given everything, so it is
+  told nothing.
 
 ## 0.7.3 - 2026-11-14
 

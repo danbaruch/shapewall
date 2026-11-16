@@ -78,6 +78,7 @@ export function commentHelpers(ctx) {
       delete comment.agentBranch
       comment.reopenCount = (Number(comment.reopenCount) || 0) + 1
       comment.reopenedAt = iso()
+      auditBoard(access, 'comment_reopened', `${boardId}#${comment.id}`)
     }
   }
 
