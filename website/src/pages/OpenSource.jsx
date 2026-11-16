@@ -106,7 +106,7 @@ export default function OpenSource() {
           <div>
             <h2 className="text-[24px] font-bold tracking-tight">Start in your project</h2>
             <p className="mt-2 max-w-lg text-[15.5px] leading-7 text-zinc-400">
-              Install it into the project you want to review, with Node.js 22.13 or newer, then capture and open the board.{' '}
+              Install it into the project you want to review, with Node.js 22.19 or newer, then capture and open the board.{' '}
               <Link to="/docs/getting-started#install" className="font-medium text-wall-bright hover:text-white">
                 Read the install steps
               </Link>

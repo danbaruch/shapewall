@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { main } from '../src/cli.js'
 import { terminalSafe } from '../src/remote/terminal.js'
+import { missingPackageMessage } from '../src/missing-package.js'
 import { spawn } from 'node:child_process'
 import { BUZZ_CREDENTIAL_NAMES, withoutBuzzCredentials } from '../src/buzz/environment.js'
 
@@ -23,7 +24,7 @@ if (BUZZ_CREDENTIAL_NAMES.some((name) => process.env[name] !== undefined)) {
       if (code !== null) process.exitCode = code
     },
     (error) => {
-      console.error(`shapewall: ${terminalSafe(error.message)}`)
+      console.error(`shapewall: ${terminalSafe(missingPackageMessage(error) || error.message)}`)
       process.exitCode = 1
     },
   )

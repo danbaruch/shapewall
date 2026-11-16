@@ -5,6 +5,39 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+- **The agent panel no longer says a local agent asks before it acts.** It said "It asks before changing files or running
+  commands", but a local agent runs under its own permission settings, and Claude Code's adapter (0.106.0) starts new sessions in
+  its `auto` mode, which acts without asking. The panel now says the agent may change files or run commands without asking, names
+  the mode its session is in once there is one ("Its mode now is Auto, which acts without asking"), and links to how to restrict
+  it. The Connect dialog, the "Allow this?" dialog for a command, the agent settings and the docs say the same.
+- **A capture that was redirected to a sign-in page is no longer a silent "ok".** Each shot keeps the URL it landed on, the line
+  says "landed on /login/, not /app/", the run ends with a warning that points to Auth in docs/config.md, the board marks the card
+  "Redirected", and `capture --json` has `finalUrl` per shot and `redirectedShots`. `shapewall checks` now prints its warnings in
+  the terminal, not only in `--json`.
+- **`serve` on a port that is taken** says so in a sentence and suggests a port that is actually free (or that this project's own
+  server is already running there), instead of `listen EADDRINUSE`, and exits cleanly.
+- **`doctor` no longer says "Ready." for setups that cannot work.** It checks that the site in `baseUrl` answers (a warning with
+  the next step when it does not), that Shapewall's own dependencies are installed (a FAIL naming the missing ones), checks the
+  port `serve` last used for this project, and suggests only a free port. With warnings it ends "Ready, with N warnings above."
+- **Unknown config keys are warned about** by `doctor`, `capture` and `serve`, with the key that was most likely meant. A
+  required key under the wrong case (`"baseURL"`) says to rename it rather than "got undefined".
+- **A page that did not load says why in plain words**: "connection refused at http://127.0.0.1:4799 (is the site running?)" or
+  "host not found: … (check baseUrl)" instead of Playwright's `net::ERR_*` line, and a run where every shot failed the same way
+  ends with what to do next.
+- **`comments add --selector` that matches nothing** says where the pin sits until the board finds the element, and the board
+  no longer names an element from the selector's words for such a comment.
+- **`doctor --install-browser` on Fedora and other unlisted Linux distributions** prints one calm note instead of Playwright's
+  capitalised "BEWARE" three times, and leaves out the npx warning box that does not apply.
+- **Node 22.19 or newer**, now stated in `engines`: Shapewall's Lighthouse dependency needs it. The docs said 22.13.
+- **`shapewall comments delete ID`** deletes a comment and its replies from the terminal. It asks first; `--yes` skips the
+  question and is required when there is no terminal to ask in.
+- **`init` lists every page** when only a line or two would have been hidden behind "and 1 more".
+- **`watch` without `--exec`** says that every comment it prints is marked queued and how to set its status, in its output,
+  its help and the docs.
+- **A board, console or demo tab left open across an upgrade** reloads itself once to pick up the new build when it asks for
+  a file the new build no longer has, showing "Updating to the latest version…" meanwhile. If that does not fix it, it shows a
+  plain failure with a Reload button instead of a blank page. At most one automatic reload per page per release in ten minutes,
+  and none when the browser keeps no session storage. Error reports stay off unless `SHAPEWALL_ERROR_DSN` is set.
 - **Account activity called every tailnet sign-in a passkey sign-in.** On a server started with `--tailscale --tailnet-sign-in`,
   passkeys off, each sign-in read "Signed in with a passkey" while the device list beside it said "Signed in by tailnet". The
   audit entry was right (`via: tailnet`); the page's label fell back to "passkey" for any method it did not name. It now says

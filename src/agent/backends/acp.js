@@ -247,8 +247,9 @@ export function sessionChoices(session) {
 // the agent lists them (model, thinking level, mode, then any other), with
 // display text made showable and bounded. Never a credential, path, command
 // or permission setting, and never a mode or value that lets the agent act
-// without asking (bypass, yolo, accept edits, full access, ...): the panel
-// promises that the agent asks before it changes files or runs commands.
+// without asking (bypass, yolo, accept edits, full access, ...): the menu
+// never offers a switch to one. The mode the session is in now is listed
+// even when it is one of those, so the panel can say so.
 // An agent that reports its modes the older way (session/new `modes`, set
 // with session/set_mode) gets the same "mode" option, id MODE_OPTION_ID.
 const OPTION_VALUES_MAX = 60
@@ -271,13 +272,38 @@ const optionValues = (list) =>
       ...(item.description ? { description: showable(String(item.description)).slice(0, 160) } : {}),
     }))
 
+// What a mode lets the agent do on its own, when that can be told: 'acts'
+// (changes files or runs commands without asking), 'asks' (asks before an
+// edit or a command its own settings do not already allow) or 'reads' (does
+// not change files). Known agents by their modes' ids (read from each
+// adapter's source); any agent by a name that says it acts without asking.
+// Otherwise null: the panel then names the mode and says nothing more.
+const MODE_PERMISSIONS = {
+  claude: { default: 'asks', plan: 'reads' },
+  codex: { 'read-only': 'reads' },
+  goose: { approve: 'asks', chat: 'reads' },
+}
+export function modePermission(kind, value, name = '') {
+  if (UNSAFE_VALUE_RE.test(`${value} ${name}`)) return 'acts'
+  return MODE_PERMISSIONS[kind]?.[value] || null
+}
+const withPermissions = (kind, values) =>
+  values.map((item) => {
+    const permission = modePermission(kind, item.value, item.name)
+    return permission ? { ...item, permission } : item
+  })
+
+const modeValues = (category, kind, values) => (category === 'mode' ? withPermissions(kind, values) : values)
+
 // Only the current value and safe ones of a mode or an uncategorised option.
 const safeValues = (category, values, current) =>
   ['model', 'thought_level'].includes(category)
     ? values
     : values.filter((item) => item.value === current || !UNSAFE_VALUE_RE.test(`${item.value} ${item.name}`))
 
-export function sessionOptions(configOptions, modes = null) {
+// `kind`: the agent (acpAgentKind), for what each mode lets it do
+// (modePermission); a mode's values then carry `permission` when known.
+export function sessionOptions(configOptions, modes = null, kind = null) {
   const out = (Array.isArray(configOptions) ? configOptions : [])
     .filter(
       (option) =>
@@ -294,7 +320,7 @@ export function sessionOptions(configOptions, modes = null) {
         name: showable(String(option.name || option.category || option.id)).slice(0, 60),
         ...(option.description ? { description: showable(String(option.description)).slice(0, 160) } : {}),
         currentValue: option.currentValue,
-        values: safeValues(category, optionValues(option.options), option.currentValue),
+        values: modeValues(category, kind, safeValues(category, optionValues(option.options), option.currentValue)),
       }
     })
   const available = Array.isArray(modes?.availableModes) ? modes.availableModes : []
@@ -304,10 +330,14 @@ export function sessionOptions(configOptions, modes = null) {
       category: 'mode',
       name: 'Mode',
       currentValue: modes.currentModeId,
-      values: safeValues(
+      values: modeValues(
         'mode',
-        optionValues(available.map((item) => ({ value: item?.id, name: item?.name, description: item?.description }))),
-        modes.currentModeId,
+        kind,
+        safeValues(
+          'mode',
+          optionValues(available.map((item) => ({ value: item?.id, name: item?.name, description: item?.description }))),
+          modes.currentModeId,
+        ),
       ),
     })
   }
@@ -801,7 +831,7 @@ class AcpProcess {
       this.configOptions = Array.isArray(session.configOptions) ? session.configOptions : []
       this.modes = session.modes && typeof session.modes === 'object' ? session.modes : null
       // As the session started, before any chat's choices: what a new chat starts from.
-      this.startOptions = sessionOptions(this.configOptions, this.modes)
+      this.startOptions = sessionOptions(this.configOptions, this.modes, acpAgentKind(this.argv))
       this.state = 'ready'
       if (this.asks) await this.askingMode()
     } catch (error) {
@@ -1336,7 +1366,7 @@ class AcpProcess {
 
   // The composer's option menus, as sessionOptions lists them.
   options() {
-    return sessionOptions(this.configOptions, this.modes)
+    return sessionOptions(this.configOptions, this.modes, acpAgentKind(this.argv))
   }
   // The same menus with the values the session started with (the agent's
   // defaults): what the options cache keeps for the next new chat.

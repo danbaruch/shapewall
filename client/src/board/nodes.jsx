@@ -2,7 +2,7 @@ import { memo, useContext } from 'react'
 import { Handle, Position } from '@xyflow/react'
 import { ExternalLink, Lightbulb } from 'lucide-react'
 import { pageChangeAt } from './flow'
-import { CaptureWarnings } from './CaptureWarnings'
+import { CaptureWarnings, LandedChip } from './CaptureWarnings'
 import { cn } from '../lib/utils'
 import { CardTip } from './CardTip'
 import { BoardContext } from './boardContext'
@@ -111,6 +111,7 @@ export const PageNode = memo(function PageNode({ data, width }) {
             <span className="pointer-events-auto inline-flex">
               <CaptureWarnings pageId={page.id} title={page.title} entries={status} viewports={Object.keys(board.viewports)} />
             </span>
+            <LandedChip pageId={page.id} title={page.title} entries={status} viewports={Object.keys(board.viewports)} />
             <HistoryBadge pageId={page.id} />
             {page.url ? (
               <CardTip content="Open the page in a new tab">

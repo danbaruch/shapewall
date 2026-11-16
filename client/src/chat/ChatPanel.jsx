@@ -52,6 +52,7 @@ import {
   followUps as followUpsFor,
   isTextFile,
   mentionCandidates,
+  modeInEffect,
   readTextFile,
   slashInput,
 } from './composerModel.js'
@@ -706,6 +707,9 @@ export default function ChatPanel({
     onNotice: setNotice,
   })
   optionsRef.current = agentOptions
+  // A local agent's line says which mode its session is in, once one has started.
+  const mode = agent?.local ? modeInEffect(agentOptions.options) : null
+  const shownAgent = mode ? { ...agent, mode } : agent
   const threadQueue = queue.filter((entry) => entry.threadId === threadId)
 
   // Put the request of a failed or stopped turn back in the composer, to review.
@@ -813,7 +817,7 @@ export default function ChatPanel({
         <ChatHeader
           heading={heading}
           configured={configured}
-          agent={agent}
+          agent={shownAgent}
           agentState={agentState}
           picker={picker}
           voiceUri={voiceUri}
@@ -921,7 +925,7 @@ export default function ChatPanel({
                     remoteRunning={remoteRunning}
                     boardId={boardId}
                     pages={pages}
-                    agent={agent}
+                    agent={shownAgent}
                     speaker={speaker}
                     readAloud={readAloudProps}
                     touch={touch}

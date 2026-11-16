@@ -214,6 +214,19 @@ const selectorHelp = (pageId) =>
   'It takes steps like #id, button[data-testid="save"], nav[aria-label="Main"] or div:nth-of-type(2), joined by " > " ' +
   `(no classes or other CSS). List the ones on the page: shapewall comments selectors --page ${pageId} --text "words on the element"`
 
+// The note when --selector does not find exactly one element: what it
+// found, and where the pin goes meanwhile.
+export function unmatchedNote({ selector, viewport, pageId, none, mapFile = null }) {
+  const what = none
+    ? `finds no element in the latest ${viewport} capture`
+    : mapFile
+      ? `finds more than one element in the latest ${viewport} capture`
+      : `does not find exactly one element in the latest ${viewport} capture`
+  const where = `The comment is saved with the selector, and its pin sits near the top-left corner of the page (${DEFAULT_PIN.x}% across, ${DEFAULT_PIN.y}% down) until the board finds the element.`
+  const look = mapFile ? ` To pick another: shapewall comments selectors --page ${pageId} (or read ${mapFile}).` : ''
+  return `note: "${selector}" ${what}. ${where}${look}`
+}
+
 // `comments add --page ID --body TEXT [--viewport NAME] [--selector CSS] [--author NAME]`
 export async function addComment(config, board, flags, out, err = () => {}) {
   const pageId = typeof flags.page === 'string' ? flags.page.trim() : ''
@@ -246,14 +259,22 @@ export async function addComment(config, board, flags, out, err = () => {}) {
       let text = ''
       const live = page ? resolveFile(config, board.id, 'captures', `${page.id}.${viewport}.html`) : null
       const found = live ? anchorText(fs.readFileSync(live, 'utf8'), selector) : ''
+      // None at all (the map says so): the anchor says it, so the board
+      // does not name an element from the selector's words.
+      const none = Boolean(mapped && hits.length === 0)
       if (found === null || (mapped && hits.length !== 1)) {
-        const where = mapped
-          ? ` (its elements: ${path.relative(process.cwd(), mapped.file) || mapped.file}, or comments selectors --page ${pageId})`
-          : ''
-        err(`note: "${selector}" does not find exactly one element in the latest ${viewport} capture${where}; saved the selector anyway`)
+        err(
+          unmatchedNote({
+            selector,
+            viewport,
+            pageId,
+            none,
+            mapFile: mapped ? path.relative(process.cwd(), mapped.file) || mapped.file : null,
+          }),
+        )
       }
       if (found) text = found
-      anchor = { selector, text, dx: 0.5, dy: 0.5 }
+      anchor = { selector, text, dx: 0.5, dy: 0.5, ...(none ? { unmatched: true } : {}) }
     }
   }
   let comment

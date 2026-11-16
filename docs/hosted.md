@@ -50,7 +50,7 @@ value with the string `1` and nothing else. `=true`, `=on` and `=yes` leave the 
 have `SHAPEWALL_HOSTED_TAILNET_SIGN_IN=true` starts as an ordinary passkey server. Read the start log: it names the sign-in
 ("Sign-in: your Tailscale account ...") only when tailnet sign-in really came on.
 
-It needs Node 22.13 or newer (it uses the built-in `node:sqlite`). Passkeys need a secure context: `https://`, or `http://localhost`
+It needs Node 22.19 or newer, like the rest of Shapewall, and uses the built-in `node:sqlite`. Passkeys need a secure context: `https://`, or `http://localhost`
 for trying it on your own machine (`--origin http://localhost:4700`; not `127.0.0.1`, which is not a valid passkey RP ID).
 
 **The first account.** On an invite-only server with no accounts, the server makes a one-time setup link (valid 24 hours) and writes it

@@ -38,7 +38,7 @@ shapewall hosted --data ./hosted-data --tailscale
 ```
 
 One server for all your projects: passkey accounts, workspaces, invites, roles, share links and live presence. It runs on any machine
-that stays on: a spare computer at home, a server in the office, a small cloud machine. It needs Node 22.13 or newer and little else:
+that stays on: a spare computer at home, a server in the office, a small cloud machine. It needs Node 22.19 or newer and little else:
 it stores and serves boards, and runs no browser and no agent. The full guide is [the hosted operator guide](hosted.md).
 
 **Tailscale is the recommended way to reach it.** With `--tailscale` the server gets a private HTTPS address on the machine's tailnet

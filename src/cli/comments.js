@@ -1,9 +1,9 @@
-// `shapewall comments`: list, get, add, selectors, resolve, reopen, reply and status.
+// `shapewall comments`: list, get, add, selectors, resolve, reopen, reply, status and delete.
 
 import { getBoard, loadConfig } from '../config.js'
 import { addComment, authorFlag, listSelectors, showComment, sinceFilter } from '../comments-cli.js'
 import { feedback, formatFeedback, formatFeedbackForAgent, untrustedJson } from '../feedback.js'
-import { AGENT_STATUSES, addReply, setAgentStatus, updateComment } from '../store.js'
+import { AGENT_STATUSES, addReply, deleteComment, getComment, setAgentStatus, updateComment } from '../store.js'
 import { mentionFlag, withNotifications } from './notify.js'
 
 // Changes (resolve, reply, ...) send their notifications before the command exits.
@@ -81,5 +81,43 @@ async function commentAction(config, positional, flags, out, err) {
     out(flags.json ? JSON.stringify({ comment }, null, 2) : `#${comment.id} agent status: ${comment.agentStatus || 'none'}`)
     return
   }
-  throw new Error(`unknown comments action "${action}" (list, get, add, selectors, resolve, reopen, reply, status)`)
+  if (action === 'delete') return removeComment(config, board, positional[1], flags, out)
+  throw new Error(`unknown comments action "${action}" (list, get, add, selectors, resolve, reopen, reply, status, delete)`)
+}
+
+// `comments delete ID [--yes]`: the board's Delete thread, from a terminal.
+// It removes the comment, its replies and its images for good, so it asks
+// first; --yes skips the question, and without a terminal to ask in it is
+// required.
+export async function removeComment(config, board, id, flags, out, { ask = askYesNo, interactive = Boolean(process.stdin.isTTY) } = {}) {
+  if (!id) throw new Error('usage: shapewall comments delete ID [--yes]')
+  const comment = getComment(config, board.id, id)
+  const page = board.pages.find((item) => item.id === comment.pageId)
+  const replies = comment.replies?.length || 0
+  const what = `#${comment.id} on ${page?.title || comment.pageId}${replies ? `, with its ${replies} repl${replies === 1 ? 'y' : 'ies'}` : ''}`
+  if (!flags.yes) {
+    if (!interactive) throw new Error(`comments delete removes ${what} for good. Add --yes to confirm (there is no terminal to ask in).`)
+    const excerpt = String(comment.body || '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 80)
+    const yes = await ask(`Delete ${what}${excerpt ? ` ("${excerpt}")` : ''}? This cannot be undone. [y/N] `)
+    if (!yes) {
+      out('Nothing deleted.')
+      return 1
+    }
+  }
+  await deleteComment(config, board.id, comment.id)
+  out(flags.json ? JSON.stringify({ deleted: comment.id }, null, 2) : `Deleted ${what}.`)
+  return 0
+}
+
+async function askYesNo(question) {
+  const { createInterface } = await import('node:readline/promises')
+  const rl = createInterface({ input: process.stdin, output: process.stderr })
+  try {
+    return /^y(es)?$/i.test((await rl.question(question)).trim())
+  } finally {
+    rl.close()
+  }
 }

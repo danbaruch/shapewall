@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { TriangleAlert, X } from 'lucide-react'
+import { CornerDownRight, TriangleAlert, X } from 'lucide-react'
 import { IconButton, Popover, PopoverContent, PopoverTrigger } from '../components/ui'
 import { captureWarningText } from '../../../src/capture/network-summary.js'
 import { viewportIcon } from './viewports'
+import { CardTip } from './CardTip'
 
 // A page card's network chip: requests that failed while its screenshots
 // were taken (the capture still succeeded). Opens the details per device.
@@ -71,5 +72,43 @@ export function CaptureWarnings({ pageId, title, entries, viewports }) {
         </div>
       </PopoverContent>
     </Popover>
+  )
+}
+
+// A page card's "Redirected" chip: a shot landed on another page than the
+// card's (a sign-in redirect, most often), so its screenshot shows that page
+// under this card's title. The capture still succeeded.
+const landedPath = (entry) => {
+  try {
+    const to = new URL(entry.finalUrl)
+    const from = new URL(entry.url)
+    return to.origin === from.origin ? to.pathname + to.search : to.origin + to.pathname
+  } catch {
+    return ''
+  }
+}
+export function LandedChip({ pageId, title, entries, viewports }) {
+  const rows = viewports
+    .filter((name) => entries?.[name]?.status === 'ok' && entries[name].redirected)
+    .map((name) => name + ' landed on ' + (landedPath(entries[name]) || 'another page'))
+  if (!rows.length) return null
+  const text =
+    rows.join('; ') +
+    '. The screenshot shows that page under the title ' +
+    title +
+    '. A sign-in redirect? Record a login (Auth in the config docs).'
+  return (
+    <CardTip content={text}>
+      <span
+        role="img"
+        tabIndex={0}
+        className="nodrag nopan pointer-events-auto inline-flex h-5 items-center gap-1 rounded-full bg-warn/15 px-1.5 text-[10px] font-medium text-fg focus-visible:outline-2 focus-visible:outline-accent"
+        aria-label={text}
+        data-sw-capture-landed={pageId}
+      >
+        <CornerDownRight size={10} className="shrink-0 text-warn" aria-hidden="true" />
+        Redirected
+      </span>
+    </CardTip>
   )
 }

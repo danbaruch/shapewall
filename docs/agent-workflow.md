@@ -196,7 +196,9 @@ were `queued` or `working` when a previous watcher stopped are listed at start a
 one out again.
 
 - **Without `--exec`** each comment is printed as one line, `{"board":"site","comment":{...}}` with the item shape above, and stays
-  `queued`. Progress goes to stderr, so stdout can be piped.
+  `queued`: printing it is handing it out. Nothing moves it on by itself, so whatever reads the lines sets the status
+  (`shapewall comments status ID working`, then `done` or `needs-human`, or `clear` to hand it out again); the watcher says so on
+  stderr when it starts. To read comments without taking them, use `--no-claim`. Progress goes to stderr, so stdout can be piped.
 - **With `--exec`** the comment is set `working`, the command runs in the config's folder, and afterwards the status becomes `done` (exit 0 after the command replied to the comment) or `needs-human` with a reply from `shapewall` (other exit codes, a timeout, the watch stopping, or a silent exit 0 with no reply and no status). With `--remote` and no `--pass-token` the command cannot reply, so there exit 0 alone means `done`. If the command set the status
   itself (say, `needs-human` with a question) or resolved the comment, that is kept. The command gets:
   - the item JSON on **stdin** (`{ board, comment }`), and the same in the file `$SHAPEWALL_COMMENT_FILE`;

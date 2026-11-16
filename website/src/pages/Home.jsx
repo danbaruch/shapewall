@@ -85,7 +85,7 @@ function Hero() {
             <InstallCommand where="hero" />
             {LAUNCHED ? (
               <p className="text-[13px] text-faint">
-                Needs Node.js 22.13 or newer.{' '}
+                Needs Node.js 22.19 or newer.{' '}
                 <Link to="/docs/getting-started#install" className="font-medium text-wall hover:text-wall-deep">
                   Install steps
                 </Link>

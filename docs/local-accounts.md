@@ -1,7 +1,7 @@
 # Local accounts and profile images
 
 Local accounts are opt-in. Ordinary `shapewall serve` keeps its existing access model and does not create an account database.
-Use Node 22.13 or newer and start with `shapewall serve --accounts`. On a loopback listener its fixed origin uses `localhost` and
+Use Node 22.19 or newer and start with `shapewall serve --accounts`. On a loopback listener its fixed origin uses `localhost` and
 the serving port. Passkeys require a hostname; IP origins are rejected. Existing IP bookmarks redirect to the configured account
 hostname. Behind a proxy, pass `--accounts-origin https://wall.example.test` or set `SHAPEWALL_ACCOUNTS_ORIGIN`.
 `SHAPEWALL_ACCOUNTS=1` also enables the feature. A non-loopback account origin must use HTTPS. Changing the origin later requires
