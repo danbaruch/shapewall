@@ -3,25 +3,36 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.8.0 - 2026-11-16
 
+- **Opt-in error reports for your own server.** Set `SHAPEWALL_ERROR_DSN` (any Sentry-compatible DSN: Sentry, GlitchTip) and
+  `shapewall serve` or `shapewall hosted` reports its unhandled errors there, and the pages it serves report browser errors to the
+  same place. Off by default: without the variable the reporting SDK is never loaded and nothing is sent, and the package has no
+  DSN of its own. A report is scrubbed before it leaves: it keeps the error, its stack trace, the URL path, the browser or runtime
+  and the release, and drops cookies, request bodies, headers other than the user agent, query strings, fragments, user identities,
+  local variables, console lines and clicks; quoted text in an error message is replaced, since that is where an input such as
+  board or comment content would appear. See [Error reports](docs/deployment.md#error-reports-opt-in). Our own deployments (the
+  shapewall.com website and its public demo) set our DSN and report the same scrubbed errors; that is their setting, not the
+  package's.
 - **On a phone, comparing two environments, the thread sheet covered the whole board.** Measured at 390 px wide on the demo
   board: compare mode's bar pushes the canvas 247 px down the window, and the sheet kept taking its share of the window, 598 px
   of 844, so it started at 246 px and the canvas ended at 844. The pin was placed correctly and the camera flew to it, behind
   the sheet: 9 of the board's 20 comments landed where nobody could see them. The sheet is now measured against the canvas
-  rather than the window, so whatever sits over the canvas comes off the sheet instead of off the board: at 390 px in compare
-  mode it is 445 px tall and leaves a 129 px strip of board with the pin in it, and with nothing over the canvas it is exactly
-  as tall as it has been since 0.7.2. The same arithmetic covers every other bar that shortens the canvas (the notice bar, a
-  migration banner, a hosted board's approvals), because what is measured is the canvas's own box and the canvas is what they
-  all shorten. Checked at 390 px on all 20 comments of the demo board while comparing, by what is drawn at the pin rather than
-  by its coordinates: none covered, where 9 of 20 were.
+  rather than the window, so whatever sits over the canvas comes off the sheet instead of off the board: it is capped at
+  whatever leaves 120 px of board below the bars, which is the pin's own room and the gap the jump keeps above the sheet. On
+  the demo board at 390 px in compare mode that comes out as a sheet of 403 to 445 px with a strip of 129 to 171 px, where
+  before it was 598 px over a 597 px canvas; with nothing over the canvas the sheet is exactly as tall as it has been since
+  0.7.2. The same arithmetic covers every other bar that shortens the canvas (the notice bar, a migration banner, a hosted
+  board's approvals), because what is measured is the canvas's own box and the canvas is what they all shorten. Checked at
+  390 px on all 20 comments of the demo board while comparing, by what is drawn at the pin rather than by its coordinates:
+  none covered, where 9 of 20 were.
 - **On a phone, walking from one comment to the next.** The note a jump leaves ("Showing Phone for comment #12") lay over the
   top of the thread, which is where the thread keeps previous, next, resolve and more, so for the six seconds it was up none of
   them could be tapped, and the list itself is behind a modal sheet. It now sits in the thread's own flow, under its header,
   and gives up a little of the thread's scrolling room rather than covering anything or making the sheet taller. The sheet's
   steps lead its second row as one control, "previous, 16 of 20, next", and the sheet says what it goes back to, "Comments", in
   place of an X that did the same thing without saying so. Stepping through the demo board's comments takes about 100 ms a
-  comment rather than 6.3 seconds, and the whole rail at 390 px is walked in about two minutes rather than twenty-five.
+  comment rather than 6.3 seconds, so walking all 20 at 390 px no longer spends about two minutes waiting for notes to clear.
 - **Comparing two environments, a variant is on the board.** Compare mode laid out no variants at all, so a comment on one had
   no pin, and 0.7.3 answered that by leaving compare mode to show it. A variant is one capture of one idea and has no second
   environment to compare against, so it is now laid out inside compare mode as the single-frame card it is, beside its page's

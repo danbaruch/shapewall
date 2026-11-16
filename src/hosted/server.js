@@ -267,6 +267,9 @@ export async function startHosted({
       }
     }
 
+    // Opt-in error reports (SHAPEWALL_ERROR_DSN); nothing is loaded without it.
+    const { startErrorTracking } = await import('../error-tracking.js')
+    const errorTracking = await startErrorTracking(env, { log: (line) => out(line) })
     const warning = proxyWarning({ origin: publicOrigin, host, trustProxy })
     if (warning) out(warning)
     const common = {
@@ -282,6 +285,7 @@ export async function startHosted({
       turnstile,
       reportEmail,
       ownersSeeSignIns,
+      errorTracking,
       log: (line) => out(line),
     }
     const app = createHostedApp({

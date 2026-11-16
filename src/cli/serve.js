@@ -130,6 +130,9 @@ export async function serve(flags, out) {
   } else if (flags['accounts-origin']) {
     throw new Error('--accounts-origin needs --accounts.')
   }
+  // Opt-in error reports (SHAPEWALL_ERROR_DSN); nothing is loaded without it.
+  const { startErrorTracking } = await import('../error-tracking.js')
+  await startErrorTracking(process.env, { log: out })
   const app = createApp({
     config,
     readOnly,

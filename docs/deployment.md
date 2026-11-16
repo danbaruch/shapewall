@@ -137,12 +137,28 @@ stay read-only.
 The demo on shapewall.com goes further: `node scripts/demo-export.js` exports with the demo client (`npm run build:demo`, into
 `dist/demo-app`), which bundles the board and the hosted console with an in-browser backend (`client/src/demo/`). Visitors get a
 fictional workspace with people in every role, invites, share links, tokens, an audit log and a scripted agent in the chat, switch
-roles with View as, and keep their changes in localStorage. Nothing is sent to a server.
+roles with View as, and keep their changes in localStorage. Nothing they do is sent to a server.
 
 Serve the board from its folder with the trailing slash (`/demo/`, not `/demo`): its URLs are relative. If the host sends
 `X-Frame-Options` or a `frame-ancestors` policy, let the board frame its own `data/**/*.html` files (same origin).
 
 Treat an export like the site itself: if the captured pages are not public, do not publish the export publicly either.
+
+## Error reports (opt-in)
+
+Off by default: Shapewall has no telemetry, no usage stats and no update check, and it never sends anything to the Shapewall team. If
+you want your own server's errors reported to an error tracker you run or use (Sentry, GlitchTip or anything that accepts a Sentry DSN),
+set its DSN before `shapewall serve` or `shapewall hosted` starts:
+
+```sh
+SHAPEWALL_ERROR_DSN=https://<public key>@errors.example.com/<project id>
+SHAPEWALL_ERROR_ENVIRONMENT=production   # optional, default production
+```
+
+The server then reports its own unhandled errors, and the pages it serves report browser errors to the same DSN (their CSP allows that
+one origin). Without the variable the error-reporting SDK is never loaded, on the server or in the browser. A report holds the error, its
+stack trace, the URL path, the browser or Node version and the release. It never holds board, page or comment content, request bodies,
+cookies, headers other than the user agent, query strings, user identities, local variables or console output.
 
 ## Updates
 
