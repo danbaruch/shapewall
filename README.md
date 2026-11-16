@@ -8,352 +8,160 @@
 
 ![The demo board: every page of a small site, grouped, at desktop and phone width](docs/images/board-overview.png)
 
-With your dev server running, in its project folder:
+Shapewall captures each page of a running site at desktop and phone width and lays them out on one canvas. You pin a comment to the
+element that needs work. A coding agent reads the comment as JSON, fixes the code, and the next capture shows whether it worked.
+
+**[Live demo](https://shapewall.com/demo/)** (no install; comments you add stay in your browser) ·
+**[Docs](https://shapewall.com/docs)** · [Changelog](CHANGELOG.md)
+
+## Requirements
+
+- **Node.js 22.19 or newer**, on Linux, macOS or Windows. Linux is the primary tested platform. Check with `node -v`.
+- **Chromium for captures.** The first command below downloads it. To use a Chrome you already have instead, set
+  `"browser": { "channel": "chrome" }` in the config.
+- **A running site**: your dev server, a preview deploy, staging or production.
+- **On a minimal Linux** (a server, a container, WSL), Chromium also needs system libraries. See
+  [Linux system libraries](#linux-system-libraries).
+
+## Quickstart
+
+With your site running, in its project folder:
 
 ```sh
-npx shapewall doctor --install-browser                          # once: downloads the Chromium that captures use
-npx shapewall init --base-url http://localhost:3000             # your dev server: finds its pages
-npx shapewall capture                                           # every page, desktop and phone
-npx shapewall serve --open                                      # the board, in your browser
+npx shapewall doctor --install-browser                # downloads Chromium, checks that it starts
+npx shapewall init --base-url http://localhost:3000   # writes shapewall.config.json with your pages
+npx shapewall capture                                 # every page, desktop and phone
+npx shapewall serve --open                            # the board on http://127.0.0.1:4600/
 ```
 
-**[Live demo](https://shapewall.com/demo/)** (no install: a board of a fictional product, 26 pages, comments in every state; comments
-you add stay in your browser) · **[Docs](https://shapewall.com/docs)** · [Quickstart details](#quickstart)
+The first `npx shapewall` asks to download the package ("Ok to proceed? (y)"): answer `y`. Replace `http://localhost:3000` with
+your site's address. `init` reads `<address>/sitemap.xml` if there is one, else follows the links from the home page (two levels
+deep, up to 25 pages, same site only).
 
-Shapewall captures each page at desktop and phone width, lays them out on a canvas grouped by section, and lets you pin comments to the
-exact element that needs work. Zoom out to see the whole product at once; zoom in and the screenshot turns into the real, captured
-HTML, with responsive CSS intact and every script stripped. Comments come out as structured JSON, so a coding agent can read the
-feedback, fix the code, and you recapture to check.
+To pin one version for everyone on the project, add it as a dev dependency first (in an empty folder, run `npm init -y` before):
 
-- **Whole-site view.** Desktop, tablet and phone captures side by side, grouped (Marketing, App, ...), with per-page notes like
-  "signed-out state". Add your own viewports, such as a landscape phone.
-- **Screenshots far out, live HTML up close.** Zoomed out you see light thumbnails; zoomed in (or with "Open live") a frame swaps to a
-  self-contained HTML snapshot you can select text in. It runs no JavaScript: three independent locks keep it inert.
-- **Comments that stay put.** On live HTML a comment is anchored to the element under your click (a CSS selector plus its text), so after
-  the next capture the pin follows the button, not the old pixel. Resolve, reopen, edit, reply in a thread, and **@mention** people or
-  `@agent`. Search the comments and narrow them by state (agent working, needs a person, reopened, ...) or by who is mentioned.
-- **Variants.** Put another version of a page (a branch preview, a redesign) right beside the original.
-- **Journeys.** Name the path people take ("Sign up": home, pricing, sign in, dashboard) in the config or by clicking pages on the board,
-  then step through it with arrows between the steps. A journey can fork ("link works" or "link expired") and rejoin; pick a branch as
-  you step through. **Links** draws the links each capture found between your pages.
-- **Before and after.** Every recapture keeps the previous shot, so a resolved comment shows before and after near its pin, with a link
-  to the pull request or commit that fixed it.
-- **Page history.** Every page keeps its earlier captures: open a page's history to see an earlier capture beside the current one,
-  with the changed pixels in red and the comments that were made on each.
-- **Pages from your sitemap.** `shapewall sitemap https://www.example.com/sitemap.xml` fills the page list from a sitemap (or a sitemap
-  index), grouped by path, without repeats.
-- **Compare environments.** Capture staging and production, then see each page in both with the changed pixels in red, and filter to the
-  pages that changed.
-- **Installs as an app.** The board is a PWA: add it to a phone's home screen and it opens full screen.
-- **Made for the agent loop.** `shapewall comments --json` hands any coding agent the page, viewport, selector, element text, position and
-  screenshot path for each open comment. `shapewall watch` dispatches new comments to your agent by itself, and `shapewall mcp` gives it
-  tools. It fixes, recaptures, replies on the comment; the pins tell you if it worked.
-- **Works on a phone.** 44 px touch targets, a bottom sheet for comments, and Back closes the topmost panel instead of leaving the board.
-- **Agent usage you can see.** Every agent turn leaves a usage record (numbers and ids, never the question or the answer): the
-  local console's Usage page shows turns, tokens, time and reported cost by day and agent.
-- **Small and local.** Node 22, Playwright, Express, React Flow. Data is plain JSON files in `.shapewall/`. No account, no cloud.
-- **A team server when you want one.** `shapewall hosted` adds passkey accounts, workspaces with roles, share links and live presence
-  on a server you run. `shapewall agent connect` puts your Claude Code on the hosted board: teammates chat with it there, and it
-  reads the project and answers. When its own machine says so (`--approvals`), it also makes a fix for a comment on a new branch,
-  each edit allowed on the board. Each machine that watches a hosted board is an agent too, with a name, an
-  icon and a state; people send a comment to one by name, and each agent says whose work it takes. The console's **Usage** page
-  shows every agent turn with the tokens and cost each agent reported (never estimated), as charts and a grid, and **Activity**
-  shows who signed in, who changed which setting and who approved what.
-  [Multiplayer (beta)](#multiplayer-on-your-own-server).
-- **Switch local projects.** Serve each project on its own port; the site dropdown lists them together while keeping every project's
-  agent and files separate. [Several local projects](docs/deployment.md#several-local-projects).
+```sh
+npm install --save-dev shapewall
+```
+
+`npx shapewall` then runs that copy. The rest of this README shortens the command to `shapewall`.
+
+### Linux system libraries
+
+A Linux desktop usually has what Chromium needs. On a minimal install, `doctor` says "Playwright Chromium does not start". Install
+the libraries once, as root (put `sudo` in front if you are not root), then run `npx shapewall doctor --install-browser` again.
+
+On Debian and Ubuntu (in the project, if Shapewall is installed there, so the Playwright version matches; `doctor` prints the exact
+command):
+
+```sh
+npx playwright install-deps chromium
+```
+
+On Fedora, that command fails because it needs `apt-get`. Use `dnf`:
+
+```sh
+dnf install nss atk at-spi2-atk cups-libs libxkbcommon libXcomposite libXdamage libXrandr mesa-libgbm pango alsa-lib
+```
+
+On other distributions, install the same libraries with the system package manager. The repository's `Dockerfile` is based on the
+official Playwright image, which already has them ([In Docker](docs/deployment.md#in-docker)).
+
+## What to do next
+
+### Comment
+
+On the board, click a page and press **Comment** on the bar above it (or press C), click an element, and write what should change.
+Zoomed in, the page is the captured HTML itself, so the comment pins to that element and follows it through the next capture.
+Comments can carry images, a drawing on the page and dictated text. From the terminal:
+
+```sh
+shapewall comments selectors --page pricing --text Plus       # find a selector on the latest capture
+shapewall comments add --page pricing --selector 'button[data-testid="plus"]' --body "Make this button bigger"
+shapewall comments                                            # the open comments
+```
+
+### Hand comments to your coding agent
+
+Any agent that can run a shell command and read JSON can work from Shapewall:
+
+```sh
+shapewall comments --open --json
+```
+
+Each comment comes with its page, viewport, CSS selector, element text, position and screenshot path. The agent fixes the code,
+recaptures what it touched (`shapewall capture --only pricing`), then reports back:
+
+```sh
+shapewall comments reply 1 --body "Bigger button"
+shapewall comments status 1 done        # or needs-human, with a question
+shapewall comments resolve 1 --note "Bigger button"
+```
+
+To close the loop without typing commands, `shapewall watch` hands each new comment to your agent once, and `shapewall mcp` is an
+MCP server with the same tools (`claude mcp add shapewall -- npx shapewall mcp`). The board also has a chat panel: **Connect** next
+to an agent CLI it finds on your machine (Claude Code, Codex, goose, Gemini CLI) or an OpenAI-compatible endpoint, then press
+**Fix with agent** on a comment. Guides: [agent workflow](docs/agent-workflow.md), [agent recipes](docs/agent-recipes.md),
+[chat with an agent](docs/agents.md), [a sandboxed agent for shared boards](docs/starter-agent.md), and
+[keeping an agent safe](docs/agent-hardening.md) (comments are untrusted input).
+
+### Share the board
+
+`shapewall serve` listens on 127.0.0.1 only and has no login.
+
+- **Your other devices:** `shapewall serve --tailscale` serves it over HTTPS on your tailnet, and you pair each device.
+- **A read-only copy:** `shapewall export` writes a static copy any web host can serve.
+- **A team:** `shapewall hosted` runs a team server (beta) on a machine you choose: passkey or tailnet sign-in, workspaces with
+  roles, share links, live presence, and connected agents (`shapewall agent connect`). See [where to run Shapewall](docs/where-to-run.md)
+  and the [hosted guide](docs/hosted.md).
+
+More in [deployment](docs/deployment.md).
+
+### Try the demo board
+
+```sh
+git clone https://github.com/danbaruch/shapewall.git
+cd shapewall
+npm ci                                           # installs the locked dependencies and builds the board
+node bin/shapewall.js doctor --install-browser
+npm run demo                                     # captures the bundled demo site and serves its board
+npm run demo -- --full                           # the whole fictional product, as in the live demo
+```
+
+Then open http://127.0.0.1:4600/. In the full demo, the Status page fails on purpose (3 failed shots), to show a failed capture.
+
+## What else it does
+
+- **Live HTML up close.** Zoomed out you see screenshots; zoomed in, a frame turns into a self-contained HTML snapshot of the page,
+  responsive CSS intact, with every script stripped. It runs no JavaScript: it is sanitized at capture, served with a strict CSP
+  and framed in a sandbox ([security model](https://shapewall.com/docs/security), [architecture](docs/architecture.md)).
+- **Before and after.** Every recapture keeps the previous shot, so a resolved comment shows before and after near its pin, and each
+  page keeps its history with the changed pixels in red.
+- **Compare environments and variants.** Capture staging and production and see each page in both; put a branch preview or a
+  redesign beside the original ([before, after and staging](https://shapewall.com/docs/compare)).
+- **Journeys and links.** Name the path people take through your pages and step through it; see the links each capture found
+  ([journeys](docs/journeys.md)).
+- **Signed-in pages, menus, app states.** `shapewall auth record` saves a sign-in; page `actions` click, fill and wait before the
+  shot ([config](docs/config.md)).
+- **Capture on pull requests.** `shapewall init --ci` writes a GitHub Actions workflow that comments "4 of 23 pages changed" on each
+  pull request ([pull requests](docs/pull-requests.md)).
+- **GitHub, notifications, checks.** A comment becomes a GitHub issue and resolves when its pull request merges
+  ([GitHub](docs/github.md)); comment events go to a webhook, Slack, Discord or email ([notifications](docs/notifications.md));
+  page checks and Lighthouse audits ([page checks](docs/page-checks.md)).
+- **Works on a phone.** The board is a PWA with 44 px touch targets and a bottom sheet for comments.
+- **Small and local.** Node, Playwright, Express, React Flow. Data is plain JSON files in `.shapewall/`. No account, no telemetry.
 
 | Live HTML with an element-anchored comment                       | On a phone                                             |
 | ---------------------------------------------------------------- | ------------------------------------------------------ |
 | ![Live HTML with a pinned comment](docs/images/live-comment.png) | ![The board on a phone](docs/images/phone-comment.png) |
 
-![The Sign up journey: numbered steps and arrows between them, every other page faded](docs/images/journeys.png)
+## Reference
 
-## Quickstart
-
-### Requirements
-
-- Runs on Linux, macOS and Windows with Node.js **22.19 or newer**. Linux is the primary tested platform.
-- Chromium for captures: `shapewall doctor --install-browser` downloads Playwright's build, or use a Chrome you already have.
-  On a bare Linux server, a container or WSL, Chromium also needs system libraries: run
-  `sudo npx playwright install-deps chromium` once.
-
-### Install
-
-In the project you want to review, with its dev server running:
-
-```sh
-npm install --save-dev shapewall
-npx shapewall doctor --install-browser         # downloads the Chromium that captures use
-npx shapewall init --base-url http://localhost:3000
-npx shapewall capture
-npx shapewall serve --open
-```
-
-`--base-url` is your running dev server, staging or production. `init` finds its pages: `<base URL>/sitemap.xml` if there is one,
-else the links on the home page (two levels deep, up to 25 pages, same site only). If the site is not up it writes just the home page
-and says what to do next. `--sitemap URL|FILE` takes another sitemap; `--no-discover` skips the lookup.
-In an empty folder, run `npm init -y` before the install. Without the install, `npx shapewall ...` downloads the package on first use,
-as in the three lines at the top.
-
-`npx shapewall` runs the copy installed in the project. The rest of this README shortens the command to `shapewall`.
-
-For the latest unreleased build, install from GitHub with `npm install --save-dev github:danbaruch/shapewall` (npm clones the
-repository and builds the board: about a minute), or from a clone:
-
-```sh
-git clone https://github.com/danbaruch/shapewall.git
-cd shapewall
-npm ci        # installs the locked dependencies and builds the board
-npm link      # optional: puts `shapewall` on your PATH
-```
-
-Without `npm link`, run `node /absolute/path/to/shapewall/bin/shapewall.js` from your project. A global install straight from GitHub
-(`npm install -g github:...`) fails, because npm cannot build a git package in global mode.
-
-Good to know:
-
-- To capture with a Chrome you already have, set `"browser": { "channel": "chrome" }` and skip `--install-browser`.
-- `shapewall doctor` checks the browser (by starting it), the config, the output folder, the port and notifications.
-- `init` adds `.shapewall/`, `shapewall-export/` and `*.auth.json` to `.gitignore`. Captures and saved sign-ins of a private site are
-  private: keep them out of git.
-- Edits to titles, pages and journeys in the config show up on the next refresh of the board, with no restart.
-
-Next: [configuration and sign-in](docs/config.md#auth), [capture warnings and pacing](docs/capture-warnings.md),
-[local accounts](docs/local-accounts.md), [updates](docs/updates.md) and [deployment](docs/deployment.md). Not sure which shape you need? [Where to run Shapewall](docs/where-to-run.md).
-
-### Multiplayer on your own server
-
-**Beta.** The team server is in beta: keep backups and expect changes between releases.
-
-```sh
-shapewall hosted --data ./hosted-data --tailscale --tailscale-port 8443
-```
-
-Run that on one machine. Teammates open its HTTPS address over Tailscale, sign in with their own passkeys and join a workspace you
-invite them to. Captures still run on your machine: `shapewall share --remote URL` moves an existing project to the server, or `login`
-and `push` upload new captures. Comments, roles, scoped agents and live presence work on the shared server. A machine that runs
-`shapewall watch --remote URL` is an agent on that board, listed by name with its state; people send a comment to one agent or to
-any, and each agent takes work only from the people it is shared with. `shapewall agent connect --remote URL`, run in a project's
-folder, connects that machine's Claude Code for chat on the board: an admin approves it in the browser, members ask it questions
-from the Agents panel, and it reads the project and answers. By default it does not change files or run commands from the board.
-Edits are switched on only on the machine that has the code (`--approvals owner` or `admins`): **Fix with** on a comment then
-makes the fix on a new branch there, never in the checkout, and each edit is a card with the full diff that someone allows or
-denies on the board. It runs no commands from the board. Codex, goose and Gemini CLI are not offered by `agent connect` in this
-release; for them, `shapewall watch --remote` stays the way ([Connected agents](docs/hosted.md#connected-agents)). You need no public domain and no Shapewall account.
-
-The command runs in the foreground and sets up Tailscale Serve; running it as a service and backing it up are covered in
-[the hosted guide](docs/hosted.md), with a [checklist to walk through before you invite the team](docs/hosted.md#before-you-invite-the-team).
-`shapewall serve --tailscale` is the single-player counterpart: your own board on your other devices.
-
-### The demo
-
-```sh
-git clone https://github.com/danbaruch/shapewall.git
-cd shapewall
-npm ci                                           # also builds the clients
-node bin/shapewall.js doctor --install-browser   # once (no config needed); or use your installed Chrome (see Config)
-npm run demo                                     # captures the bundled demo site and serves its board
-npm run demo -- --full                           # the whole fictional product, as in the live demo (26 pages)
-```
-
-Open http://127.0.0.1:4600/ and try it: click a page and press **Comment** on the bar above it (or pick **Comment** in the tools at the bottom of the board, or press C), click a button on the page, write a note. Zoomed in, the page is live and the comment pins to the element you click.
-
-## How it works
-
-1. **Capture.** Playwright opens each page in Chromium at every viewport (default 1440x2200 desktop and 390x1800 phone; add a tablet
-   or your own; fixed frames, not full-page). It waits for the network to settle, your `waitFor` selector and any `actions`, and for images in view to finish loading. It
-   writes a PNG, a thumbnail of the same frame, a live HTML snapshot and its element map. Runs hold a lock, so two captures of one board never overlap; a
-   full run is written to a staging folder and swapped in at the end, so a failed run keeps the previous captures.
-2. **Board.** `shapewall serve` starts a small Express server (127.0.0.1 only by default) with the API and the React Flow client. The
-   canvas only loads full-size images and live HTML for frames that are big enough on screen, at most two live documents at a time.
-3. **Comments.** Stored in `.shapewall/<board>/comments.json`, written atomically under a file lock, so the server and the CLI can change
-   them at the same time.
-
-### How live HTML is sandboxed
-
-A captured page is turned into one self-contained document and shown inside the board. It must never run code from the captured site, so
-there are three independent layers, any one of which is enough on its own:
-
-1. **Sanitized at capture.** The rendered DOM is cloned in the page (so client-rendered content is included), then rebuilt by a strict
-   allowlist sanitizer in Node (parse5, the HTML spec parser): no `script`, `iframe`, `object`, `embed`, `base`, `link`, `template` or SVG
-   animation elements; no `on*` handlers, `srcset`, `formaction` or `target`; links only `http(s)`, `mailto`, `tel` and `#`; images and
-   fonts only as complete, inlined `data:` URIs; CSS without `@import`, `expression()` or remote `url()`, including when spelled with CSS
-   escapes. Hidden inputs and password values are dropped, so CSRF tokens and typed secrets never reach the file. Stylesheets keep their
-   `@media` rules, so the snapshot stays responsive. Images are re-encoded from the decoded pixels and identical images are stored once.
-2. **Served with a strict CSP.** `default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:; base-uri 'none';
-form-action 'none'; frame-ancestors 'self'`. No script source at all. The same policy is also embedded as a `<meta>` tag, for static
-   exports where no headers are sent.
-3. **Framed in a sandbox.** `<iframe sandbox="">` gives the document an opaque origin, with no scripts. Pins and click targets come
-   from the captured element map, so the board never reads the frame's DOM. Only older captures without a map on a local board keep
-   `allow-same-origin` until their next recapture; hosted boards and static exports always use an opaque frame.
-
-Details and limits: [docs/architecture.md](docs/architecture.md).
-
-## The agent loop
-
-Shapewall is vendor neutral: any coding agent that can run a shell command and read JSON can use it.
-
-```sh
-shapewall comments --open --json > feedback.json
-```
-
-One item of its `comments` array, from the demo board (abridged):
-
-```json
-{
-  "id": 1,
-  "status": "open",
-  "body": "Make the Plus button stand out more. Maybe show the yearly price too?",
-  "author": "Robin",
-  "page": { "id": "pricing", "path": "/pricing/", "title": "Pricing", "url": "http://127.0.0.1:4601/pricing/" },
-  "viewport": { "name": "desktop", "width": 1440, "height": 2200 },
-  "position": { "xPercent": 50, "yPercent": 27.05, "x": 720, "y": 595 },
-  "element": { "selector": "a[data-testid=\"plus-cta\"]", "text": "Try Plus free" },
-  "files": {
-    "screenshot": "/path/to/project/.shapewall/demo/captures/pricing.desktop.png",
-    "liveHtml": "/path/to/project/.shapewall/demo/captures/pricing.desktop.html"
-  },
-  "agentStatus": null,
-  "replies": []
-}
-```
-
-Then:
-
-1. **Comment** on the board (people do this part).
-2. **Fix.** Give the agent the JSON (or tell it to run the command). The selector and text point it at the element; the screenshot shows
-   what the reviewer saw.
-3. **Recapture** the pages it touched: `shapewall capture --only pricing`.
-4. **Report.** The agent replies and marks its work: `shapewall comments reply 1 --body "Bolder button, yearly price under it"` and
-   `shapewall comments status 1 done` (or `needs-human` with a question).
-5. **Check** the board. Pins on live HTML follow their elements; resolve what is done, or let the agent do it:
-   `shapewall comments resolve 1 --note "Bolder Plus button, yearly price under it"`.
-
-To close the loop without anyone typing a command:
-
-- `shapewall watch` hands every new open comment to an agent exactly once: as a JSON line on stdout, or by running your command per comment.
-- `shapewall watch --exec "claude -p '...'"` (or `codex exec '...'`) gets the comment JSON on stdin, no shell involved.
-- `shapewall watch --mention agent` only hands out comments that tag `@agent` (in the text or a reply), so people can talk first.
-- Its status goes `queued`, `working`, then `done` or `needs-human`; a restart or a second watcher never hands one out twice.
-- `shapewall mcp` is an MCP server with tools to list, read (with a crop of the screenshot), reply, set status, resolve and recapture.
-- Comments can carry images and a drawing on the page; agents get both
-  ([images and drawings on comments](docs/agent-workflow.md#images-and-drawings-on-comments)).
-- With Shapewall installed in your project: `claude mcp add shapewall -- npx shapewall mcp`; Codex and other clients in
-  [docs/agent-workflow.md](docs/agent-workflow.md).
-
-An agent you connect on the board edits the folder the config is in, shown as **Source folder on the Shapewall computer** in Settings.
-So put `shapewall.config.json` in the checkout the agent should change, and serve one project per repository. More in
-[source folder and agent sign-in](docs/agents.md#source-folder-and-agent-sign-in).
-
-### GitHub connect
-
-Set `"github": { "repo": "owner/name" }` in the config and a token in `GITHUB_TOKEN` (or `SHAPEWALL_GITHUB_TOKEN`; never in the config).
-Then a comment becomes a GitHub issue with one click (**GitHub issue** on the board, `shapewall github issue 12`, the API or MCP), with the
-comment text, page URL, element, screenshot link and a link back to the board. Pull requests that say `shapewall:12` or
-`Fixes shapewall#12` (or close the comment's issue) are linked to it by `shapewall github sync` or a signed webhook, and when one merges,
-the comment resolves with the PR as its fix. Details: [docs/github.md](docs/github.md).
-
-### Capture on pull requests
-
-`npx shapewall init --ci` writes a GitHub Actions workflow. Commit it, and every pull request gets one comment, updated on each push:
-"Shapewall: 4 of 23 pages changed", with each changed page and screen size, the share of pixels that changed, and the before, after and
-diff images as a workflow artifact. It builds and serves both branches (`ci.start` in the config) or captures your deploy preview, never
-fails the pull request, and turns off with `"ci": { "enabled": false }` or `[skip shapewall]` in a title.
-Details: [docs/pull-requests.md](docs/pull-requests.md).
-
-Prompts that work, the data shapes, and how to keep it safe (comments are untrusted input): [docs/agent-workflow.md](docs/agent-workflow.md).
-Copy-paste setups for Claude Code, Codex, goose, Ollama and chat bots: [docs/agent-recipes.md](docs/agent-recipes.md).
-Optional integrations: [notifications](#notifications), GitHub connect above, and a [bridge to agents in a Buzz chat](docs/buzz.md).
-
-### Chat with an agent
-
-The board has a chat panel: a thread for the board and one per comment, streaming answers, images (paste, drop, or a page or element
-crop from the board), voice in, and read aloud with the system voice or natural voices that run in your browser (Kokoro, a
-one-time download of about 90 MB; the text never leaves the browser). Connect any OpenAI-compatible endpoint with `"agent": { "baseUrl", "model" }` and the key
-in `SHAPEWALL_AGENT_API_KEY` (OpenAI, DeepSeek, OpenRouter, or Ollama with no key), or an agent CLI on your machine over ACP with its
-own subscription login: `shapewall serve --agent-acp "claude-agent-acp"` (also `codex-acp`, `goose acp`, `gemini --acp`). Or skip the
-flags: open the board with `shapewall serve --open` and click **Connect** next to the agent CLI it found on your machine. Board text
-goes to the agent as quoted data, never as instructions. Optional, on the Agents page: an agent CLI can
-[work on a branch](docs/agents.md#work-on-a-branch) instead of your checkout, and
-[fix several comments at once](docs/agents.md#fix-several-comments-at-once), one after another. Details: [docs/agents.md](docs/agents.md).
-
-### The sandboxed starter agent
-
-For shared boards, `shapewall agent run --comment 12` (or `agent watch`) works on a comment inside a podman or docker container: only a
-fresh checkout of the repo (no .git) mounted, egress to the package registry only, the model called from the host so the key never enters the container,
-fixed tools, shell commands only with your approval on the board, a per-board list of who may dispatch work (guest comments never), and
-budgets. The output is a branch, optionally a pull request, never a push to main. `shapewall agent doctor` checks the sandbox. Setup,
-threat model and what each runtime enforces: [docs/starter-agent.md](docs/starter-agent.md).
-
-## Config
-
-`shapewall.config.json` (all paths relative to the file):
-
-```json
-{
-  "title": "My site",
-  "baseUrl": "http://localhost:3000",
-  "publicUrl": "https://www.example.com",
-  "outputDir": ".shapewall",
-  "concurrency": 2,
-  "viewports": {
-    "desktop": { "width": 1440, "height": 2200 },
-    "phone": { "width": 390, "height": 1800 }
-  },
-  "auth": { "storageState": "./reviewer.auth.json" },
-  "groups": ["Marketing", "App"],
-  "pages": [
-    { "id": "home", "path": "/", "title": "Home", "group": "Marketing" },
-    { "id": "pricing", "path": "/pricing", "title": "Pricing", "group": "Marketing", "waitFor": ".plans" },
-    {
-      "id": "settings",
-      "path": "/settings?tab=billing",
-      "title": "Billing settings",
-      "group": "App",
-      "note": "Sample data",
-      "actions": [{ "click": "button[aria-label='Open billing']" }, { "waitFor": ".invoice-list" }]
-    }
-  ]
-}
-```
-
-| Key                    | What it does                                                                                                                                                        |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `baseUrl`              | Where pages are captured from (a dev server, a preview deploy). Required.                                                                                           |
-| `publicUrl`            | Optional. Links in live HTML and "Open page" use it instead of `baseUrl`.                                                                                           |
-| `pages[]`              | `id` (lowercase, dashes), `path` (starts with `/`, may have a query), `title`, `group`, `note`.                                                                     |
-| `pages[].waitFor`      | CSS selector that must be visible before the shot.                                                                                                                  |
-| `pages[].actions`      | Steps before the shot: `click`, `tap`, `fill`, `press`, `hover`, `wait`, `waitFor`, `waitForFunction`, `scrollTo`, `mouse`, `hold`, `keyDown`/`keyUp`.              |
-|                        | Any action may add `optional`, `viewports`, `timeout` and (for `click`, `tap`, `hover`, `fill`) `force`.                                                            |
-| `pages[].viewports`    | Only some viewports for this page, e.g. `["desktop"]`. Its card on the board shows only those frames.                                                               |
-| `pages[].frameHeight`  | This page's own frame height: a number, or `{ "desktop": 900, "phone": 844 }`. For screen-sized app pages beside long marketing pages.                              |
-| `pages[].localStorage` | Keys set before the page's scripts run, e.g. `{ "tutorialSeen": "1" }`. Also at the top level and per board.                                                        |
-| `pages[].timeout`      | Milliseconds this page may take, instead of `timeouts.page`.                                                                                                        |
-| `viewports`            | Keyed by name: `desktop`, `tablet`, `phone` or your own (`phone-landscape`), each `{ width, height }` plus optional `layoutHeight`, `mobile`, `touch`, `userAgent`. |
-| `setup`                | Actions run once per viewport (dismiss a cookie banner, start a game); the pages in scope start from the state they leave.                                          |
-| `block`                | Requests to block during capture: `"analytics"` (a built-in list) and URL patterns.                                                                                 |
-| `reducedMotion`        | `"reduce"` (default) or `"no-preference"`: what `prefers-reduced-motion` the capture browser reports.                                                               |
-| `sitemap`              | Default source for `shapewall sitemap`: a URL or file, or `{ source, limit?, group?, exclude? }`.                                                                   |
-| `auth.storageState`    | A saved sign-in (cookies, localStorage) for signed-in pages; `shapewall auth record` writes one. Keep it out of git.                                                |
-| `auth.loginScript`     | A module whose default export logs in: `async ({ page, context, baseUrl }) => {}`. Credentials from env vars.                                                       |
-| `browser.channel`      | `"chrome"` to use an installed Chrome instead of Playwright's Chromium (or `executablePath`).                                                                       |
-| `concurrency`          | Pages captured in parallel (1 to 8, default 2).                                                                                                                     |
-| `capturePacing`        | `{ intervalMs, rateLimitCooldownMs }` to slow captures down for a site that rate limits.                                                                            |
-| `timeouts`             | `{ "page": 45000, "settle": 8000 }` in ms.                                                                                                                          |
-| `liveHtml`             | `false` to capture screenshots only.                                                                                                                                |
-| `boards[]`             | Several boards in one file: each `{ id, title, baseUrl?, publicUrl?, groups?, pages }`, with its own `viewports`, `setup`, `auth`, `block`.                         |
-| `journeys[]`           | `{ id, name, steps, description? }`; steps are page ids, and may fork. See [docs/journeys.md](docs/journeys.md).                                                    |
-| `environments[]`       | `{ id, baseUrl, publicUrl?, title? }`; the first is the default. For `capture --env` and compare mode.                                                              |
-| `versions`             | Previous captures kept per page and viewport for before/after (default 5, `0` for none).                                                                            |
-| `checks`               | `{ seo, budgets }` for [page checks](docs/page-checks.md).                                                                                                          |
-| `notifications`        | Webhook, Slack, Discord and email messages for comment events. See [docs/notifications.md](docs/notifications.md).                                                  |
-| `github`               | `{ repo, boardUrl?, labels? }` for GitHub connect. The token comes from the environment only. See [docs/github.md](docs/github.md).                                 |
-| `agent`                | `{ baseUrl, model }` for the board chat. The key comes from the environment only. See [docs/agents.md](docs/agents.md).                                             |
-| `starterAgent`         | `{ trusted, testCommand, setupCommand, budget, ... }` for the sandboxed starter agent. See [docs/starter-agent.md](docs/starter-agent.md).                          |
-
-Full reference: [docs/config.md](docs/config.md). Example login hook:
-[examples/auth/login.example.mjs](https://github.com/danbaruch/shapewall/blob/main/examples/auth/login.example.mjs).
+- [Getting started](https://shapewall.com/docs/getting-started): each step above in more detail.
+- [Config reference](docs/config.md): every key in `shapewall.config.json`.
+- [CLI](#cli): every command and option, below.
+- [FAQ](https://shapewall.com/docs/faq): single-page apps, signed-in pages, where the data lives, Firefox, licenses.
+- [All guides](docs/README.md): agents, hosting, updates, local accounts, capture warnings, Buzz and more.
 
 ## CLI
 
@@ -365,7 +173,7 @@ shapewall auth record                                       sign in by hand and 
 shapewall capture [--only ID|PATH ...] [--env ID] [--json]  capture pages and check their links
 shapewall serve [--open] [--tailscale] [--accounts]         the board, on http://127.0.0.1:4600/
 shapewall comments [--open|--resolved|--all] [--json]       feedback for you or a coding agent
-shapewall comments reply|status|resolve|reopen ID ...       what the agent reports back
+shapewall comments add|reply|status|resolve|reopen|delete   add a comment, or what the agent reports back
 shapewall watch [--exec "CMD ARGS"] [--mention NAME]        hand each new comment to an agent
 shapewall mcp                                               MCP server for coding agents
 shapewall checks | audit                                    page checks and Lighthouse lab audits
@@ -698,64 +506,6 @@ Global
 ```
 
 </details>
-
-`shapewall capture` also checks the links on your pages and reports the broken ones (the summary, `shapewall links --broken`, a count
-on the board's Links button); a page with `"expectStatus": 404` is captured as an error page on purpose. `capture --json` prints a
-summary for CI. `shapewall export` writes a static, read-only copy of the boards that any static host can serve, compare data included.
-`--browser-comments` lets visitors comment anyway, kept only in their own browser (localStorage), as in the live demo.
-`shapewall sitemap` adds a sitemap's pages to the config: it follows sitemap indexes (and `.xml.gz`), keeps one site's URLs, skips paths
-already on the board and repeats, groups pages by their first path segment, and with more than `--limit` (default 100) keeps the
-shallowest. Run it again later to pick up only the new pages; `--dry-run` shows what it would add. More in
-[docs/config.md](docs/config.md#sitemap-import).
-`hosted`, `share`, `login`, `push` and `--remote` are the self-hosted team server and its clients (passkey accounts, workspaces,
-pushed boards, project tokens): see [docs/hosted.md](docs/hosted.md).
-
-![A variant beside its page](docs/images/variant.png)
-
-## Notifications
-
-Comment events (created, replied, mentioned, agent status changed, resolved, reopened) can go to a signed webhook, Slack, Discord or
-email through Resend, each message with a link to the comment on the board. Mentions route per person (`@robin` pings Robin's Slack id or
-emails Robin). Secrets live only in environment variables; the config names them. Sending never blocks the board, and failed sends
-retry with backoff. The quickest start is one variable:
-
-```sh
-SHAPEWALL_SLACK_WEBHOOK_URL=https://hooks.slack.com/services/... shapewall serve
-shapewall notify test slack
-```
-
-Everything else: [docs/notifications.md](docs/notifications.md).
-
-## Exposing the board
-
-`shapewall serve` has no login and listens on 127.0.0.1. It refuses requests whose `Host` header is not local (DNS rebinding) and accepts
-writes only as JSON (no cross-site form posts). For your own other devices, use `shapewall serve --tailscale` (or `--lan`) and pair
-each device. For a team, run [`shapewall hosted`](#multiplayer-on-your-own-server), or use `shapewall export` for a read-only copy. See
-[docs/deployment.md](docs/deployment.md).
-
-## FAQ
-
-**Does it work with single-page apps?** Yes. The capture snapshots the rendered DOM after your `waitFor` and `actions`, so client-rendered
-content is in both the screenshot and the live HTML. Scripts are removed, so the live HTML is a frozen state, not a running app.
-
-**Why fixed-height frames instead of full-page screenshots?** Comparable cards on one canvas, predictable memory, and the top of a page is
-what reviewers look at first. Make `height` larger for long pages.
-
-**My site needs a login.** Run `shapewall auth record`, sign in by hand in the fresh browser it opens, then press Enter to save. It
-prints the `auth.storageState` line to add to your config. A `loginScript` is the alternative for automation. Use a test account, and never commit credentials. See [guided sign-in](docs/config.md#auth).
-
-**Are captured pages safe to share?** Live HTML drops hidden inputs, password values, scripts and data attributes that could carry tokens,
-and links to private hosts are removed. Screenshots show exactly what the page showed, so capture with test data.
-
-**Can I use Firefox or WebKit?** No. Captures use Chromium, and thumbnails use a Chromium DevTools call.
-
-**Does it send anything anywhere?** Not by itself: there is no account and no telemetry. Captures load your pages; an agent endpoint,
-notifications, GitHub connect, a team server or an [error tracker](docs/deployment.md#error-reports-opt-in) you set up receive what you
-send them.
-
-**Where is my data?** In `outputDir` (default `.shapewall/`): PNGs, HTML snapshots, `manifest.json`, `comments.json`, `variants.json`,
-`journeys.json`, previous captures in `versions/`, other environments in `envs/`, cached diffs in `diffs/` and `agent/` (what
-`shapewall watch` handed to your command, with its log). Delete the folder to start over.
 
 ## Contributing
 

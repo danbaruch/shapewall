@@ -62,6 +62,13 @@ test('doctor: a missing browser, a missing config and a broken browser say how t
   })
   assert.match(byName(broken).browser.message, /does not start: error while loading shared libraries/)
   assert.match(byName(broken).browser.fix, /install-deps/)
+  if (process.platform === 'linux') {
+    assert.match(
+      byName(broken).browser.fix,
+      /Fedora and other distributions: https:\/\/shapewall\.com\/docs\/getting-started#linux-system-libraries/,
+    )
+    assert.match(byName(broken).browser.fix, /then "[^"]*doctor --install-browser" again/)
+  }
 })
 
 test('the Dockerfile uses the Playwright image of the installed Playwright', () => {

@@ -405,7 +405,7 @@ export function browserLaunchHelp(error, engine, { exists = fs.existsSync, platf
     .map((line) => line.trim())
     .filter(Boolean)[0]
   return platform === 'linux'
-    ? `Chromium is installed but does not start${why ? ` (${why.slice(0, 160)})` : ''}. On Linux that usually means missing system libraries: run "npx playwright install-deps chromium" once as root (with sudo), then try again. "${cliCommand('doctor')}" checks it.`
+    ? `Chromium is installed but does not start${why ? ` (${why.slice(0, 160)})` : ''}. On Linux that usually means missing system libraries: on Debian or Ubuntu run "npx playwright install-deps chromium" once as root (with sudo), then try again (Fedora and other distributions: https://shapewall.com/docs/getting-started#linux-system-libraries). "${cliCommand('doctor')}" checks it.`
     : `Chromium is installed but does not start${why ? ` (${why.slice(0, 160)})` : ''}. "${cliCommand('doctor')}" checks it; setting browser.channel to "chrome" in the config uses an installed Chrome instead.`
 }
 
