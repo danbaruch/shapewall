@@ -3,8 +3,21 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.9.0 - 2026-11-16
 
+- **Dictate a comment.** A microphone button under a new comment, a reply and an edit, on the desktop popover, the phone sheets,
+  hosted boards and the demo. Press it and talk: the words appear live at the caret (or replace the selection), with a space and
+  a capital where they join the text, and you can keep typing. Press again or Esc to stop; posting, Cancel, closing the thread
+  or sheet, another thread and a hidden tab stop it as well, and nothing is ever posted by itself. A blocked microphone, no
+  microphone, no speech, a network failure and recognition ending by itself each get a plain line under the field. It uses the
+  browser's own speech recognition (no new dependency) and is not shown where the browser has none (Firefox). Privacy: the
+  browser's speech service turns the audio into text, and in Chrome that service is Google's, so the audio goes to Google;
+  Shapewall's server is not involved and never receives or stores it.
+  Dictation only starts from a press, and the first press says this once before anything listens. A hosted board's comment
+  share links now allow the microphone for the board page itself (`Permissions-Policy: microphone=(self)`); view-only links,
+  public boards and live HTML snapshots keep `microphone=()`. See [Dictation](website/src/docs/getting-started.md#dictation).
+- **The minimum Node version is now 22.19**, stated in `engines`: Shapewall's Lighthouse dependency needs it. The docs said
+  22.13.
 - **The agent panel no longer says a local agent asks before it acts.** It said "It asks before changing files or running
   commands", but a local agent runs under its own permission settings, and Claude Code's adapter (0.106.0) starts new sessions in
   its `auto` mode, which acts without asking. The panel now says the agent may change files or run commands without asking, names
@@ -28,7 +41,6 @@ and the project uses [Semantic Versioning](https://semver.org/).
   no longer names an element from the selector's words for such a comment.
 - **`doctor --install-browser` on Fedora and other unlisted Linux distributions** prints one calm note instead of Playwright's
   capitalised "BEWARE" three times, and leaves out the npx warning box that does not apply.
-- **Node 22.19 or newer**, now stated in `engines`: Shapewall's Lighthouse dependency needs it. The docs said 22.13.
 - **`shapewall comments delete ID`** deletes a comment and its replies from the terminal. It asks first; `--yes` skips the
   question and is required when there is no terminal to ask in.
 - **`init` lists every page** when only a line or two would have been hidden behind "and 1 more".
@@ -47,16 +59,6 @@ and the project uses [Semantic Versioning](https://semver.org/).
   stored value (how a session came in is read from its tailnet login), so this is a record fix, not a security one. The
   migration rebuilds the `sessions` table in one transaction and keeps every session signed in; rollback is in
   [Migration 18 and rollback](docs/hosted.md#migration-18-and-rollback).
-- **Dictate a comment.** A microphone button under a new comment, a reply and an edit, on the desktop popover, the phone sheets,
-  hosted boards and the demo. Press it and talk: the words appear live at the caret (or replace the selection), with a space and
-  a capital where they join the text, and you can keep typing. Press again or Esc to stop; posting, Cancel, closing the thread
-  or sheet, another thread and a hidden tab stop it as well, and nothing is ever posted by itself. A blocked microphone, no
-  microphone, no speech, a network failure and recognition ending by itself each get a plain line under the field. It uses the
-  browser's own speech recognition (no new dependency, nothing on the server) and is not shown where the browser has none
-  (Firefox). Privacy: in Chrome the browser sends the audio to Google's speech service; Shapewall never receives or stores it.
-  Dictation only starts from a press, and the first press says this once before anything listens. A hosted board's comment
-  share links now allow the microphone for the board page itself (`Permissions-Policy: microphone=(self)`); view-only links,
-  public boards and live HTML snapshots keep `microphone=()`. See [Dictation](website/src/docs/getting-started.md#dictation).
 
 ## 0.8.0 - 2026-11-16
 
