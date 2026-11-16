@@ -71,12 +71,17 @@ test('a static export precomputes compare data and can keep comments in the brow
     const dir = capturesDir(config, 'sample', env)
     fs.mkdirSync(dir, { recursive: true })
     fs.writeFileSync(path.join(dir, 'home.desktop.png'), PNG.sync.write(image))
+    fs.writeFileSync(path.join(dir, 'home.desktop.html'), '<!doctype html><p>x</p>')
+    fs.writeFileSync(path.join(dir, 'home.desktop.elements.json'), '{}')
     fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({ capturedAt: '2026-11-01T00:00:00.000Z', pages: {} }))
   }
   const out = path.join(tempDir('export-compare-out'), 'site')
   await exportStatic(config, { out, clientDir: fakeClient(), browserComments: true, noindex: true })
   const board = path.join(out, 'data', 'boards', 'sample')
   assert.ok(fs.existsSync(path.join(board, 'envs', 'production', 'home.desktop.png')))
+  // Its element map, for a comment on that side; not its live HTML.
+  assert.ok(fs.existsSync(path.join(board, 'envs', 'production', 'home.desktop.elements.json')))
+  assert.ok(!fs.existsSync(path.join(board, 'envs', 'production', 'home.desktop.html')))
   assert.ok(!fs.existsSync(path.join(board, 'envs', 'staging')), 'the default environment is captures/')
   const compare = JSON.parse(fs.readFileSync(path.join(board, 'compare', 'staging_production.json'), 'utf8'))
   assert.equal(compare.pages.home.desktop.status, 'ok')

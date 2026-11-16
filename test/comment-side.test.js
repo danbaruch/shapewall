@@ -11,7 +11,9 @@ import { splitFrameKey } from '../client/src/board/viewports.js'
 import { feedback, feedbackContext, feedbackItem, fileKind, formatFeedbackItem } from '../src/feedback.js'
 import { capturesDir, commentOnOtherEnvironment, createComment, listComments, saveVariant, updateComment } from '../src/store.js'
 import { guestView } from '../src/hosted/guest-view.js'
-import { sampleConfig } from './helpers.js'
+import { createApp } from '../src/server/app.js'
+import { elementsUrl } from '../client/src/lib/api.js'
+import { request, sampleConfig, tempDir } from './helpers.js'
 
 const environments = [
   { id: 'production', title: 'Production', default: true },
@@ -156,4 +158,41 @@ test('a share link guest sees the side a comment is on', () => {
   const comment = { id: 1, pageId: 'home', viewport: 'desktop', x: 1, y: 2, body: 'b', author: 'a', replies: [], environment: 'staging' }
   assert.equal(guestView(comment, null).environment, 'staging')
   assert.equal('environment' in guestView({ ...comment, environment: undefined }, null), false)
+})
+
+test('a comment on another environment sticks to that capture: its element map, not the default one', async () => {
+  assert.equal(
+    elementsUrl('demo', 'captures', 'home.desktop.elements.json', '3'),
+    'api/boards/demo/elements/home.desktop.elements.json?v=3',
+  )
+  assert.equal(
+    elementsUrl('demo', 'envs/production', 'home.desktop.elements.json', '3'),
+    'api/boards/demo/env-elements/production/home.desktop.elements.json?v=3',
+  )
+  const config = sampleConfig('comment-side-maps', {
+    baseUrl: undefined,
+    environments: [
+      { id: 'staging', baseUrl: 'http://127.0.0.1:9' },
+      { id: 'production', baseUrl: 'http://127.0.0.1:9' },
+    ],
+  })
+  for (const env of ['staging', 'production']) {
+    const dir = capturesDir(config, 'sample', env)
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(path.join(dir, 'home.desktop.elements.json'), JSON.stringify({ env }))
+  }
+  const server = await new Promise((resolve) => {
+    const listening = createApp({ config, clientDir: tempDir('comment-side-client') }).listen(0, '127.0.0.1', () => resolve(listening))
+  })
+  try {
+    const port = server.address().port
+    const get = (url) => request(port, 'GET', url)
+    assert.deepEqual((await get('/api/boards/sample/elements/home.desktop.elements.json')).json, { env: 'staging' })
+    assert.deepEqual((await get('/api/boards/sample/env-elements/production/home.desktop.elements.json')).json, { env: 'production' })
+    assert.equal((await get('/api/boards/sample/env-elements/nope/home.desktop.elements.json')).status, 404)
+    assert.equal((await get('/api/boards/sample/env-elements/production/home.desktop.png')).status, 404)
+    assert.equal((await get('/api/boards/sample/env-elements/production/..%2Fmanifest.json')).status, 404)
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+  }
 })
