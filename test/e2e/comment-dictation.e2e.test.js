@@ -313,7 +313,7 @@ test('desktop 1440: errors read as plain lines next to the field, and the mic is
   }
 })
 
-test('desktop 1440: the reply box and the edit box dictate; another thread or closing it lets go', async () => {
+test('desktop 1440: the reply box and the edit box dictate, one microphone at a time; another thread or closing it lets go', async () => {
   const { context, page, errors } = await openBoard(
     { viewport: { width: 1440, height: 900 } },
     { url: `${boardUrl}?c=${first.id}`, seen: true },
@@ -326,6 +326,26 @@ test('desktop 1440: the reply box and the edit box dictate; another thread or cl
     await page.waitForSelector(`${replyMic}[aria-pressed="true"]`)
     await say(page, 'agreed let us try 48 pixels', true)
     await expectValue(page, `${popover} [data-sw-reply-input]`, 'Agreed let us try 48 pixels')
+    // The edit box: starting there stops the reply's microphone (one at a
+    // time), and its words join the comment's text. Esc stops dictation, not
+    // the edit.
+    await page.click(`${popover} [data-sw-thread-menu]`)
+    await page.click('[role="menu"] [data-sw-edit]')
+    const edit = `${popover} [data-sw-edit-form="${first.id}"]`
+    await page.waitForSelector(edit)
+    await page.focus(`${edit} textarea`)
+    await page.keyboard.press('Control+End')
+    await page.click(`${edit} [data-sw-dictate]`)
+    await page.waitForSelector(`${edit} [data-sw-dictate][aria-pressed="true"]`)
+    await page.waitForSelector(`${replyMic}[aria-pressed="false"]`)
+    assert.equal((await speech(page)).open, 1, 'one microphone at a time')
+    await say(page, 'on phones', true)
+    await expectValue(page, `${edit} textarea`, 'Logo feels small on phones')
+    await page.keyboard.press('Escape')
+    await waitClosed(page)
+    assert.equal(await page.locator(edit).count(), 1, 'the first Esc only stops dictation')
+    await page.click(`${edit} [data-sw-edit-cancel]`)
+    await page.waitForSelector(edit, { state: 'detached' })
     // Another thread: the first one's microphone is released.
     await page.click(`${popover} [data-sw-thread-next]`)
     const next = `[data-sw-thread-popover]:not([data-sw-thread-popover="${first.id}"])`
@@ -339,7 +359,7 @@ test('desktop 1440: the reply box and the edit box dictate; another thread or cl
     await waitClosed(page)
     const counts = await speech(page)
     assert.equal(counts.open, 0)
-    assert.equal(counts.starts, 2)
+    assert.equal(counts.starts, 3)
     assert.deepEqual(errors, [])
   } finally {
     await context.close()
