@@ -13,12 +13,16 @@ import { lazy, StrictMode, Suspense } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App'
 import { startErrorTracking } from '../lib/error-tracking'
+import { installChunkRecovery } from '../lib/chunk-reload'
+import { ChunkBoundary } from '../components/chunk-boundary'
 import '../lib/theme'
 import '../lib/scrollbars'
 import './console.css'
 
 // Opt-in, off unless the page says so (src/error-tracking.js).
 startErrorTracking()
+// One automatic reload when an upgrade left this tab asking for old chunk files.
+installChunkRecovery()
 
 const LocalConsole = __SHAPEWALL_DEMO__ ? null : lazy(() => import('./LocalConsole'))
 const LocalAccountsApp = __SHAPEWALL_DEMO__ ? null : lazy(() => import('./LocalAccountsApp'))
@@ -29,19 +33,21 @@ const localAccounts =
 const start = () =>
   createRoot(document.getElementById('root')).render(
     <StrictMode>
-      {localConsole ? (
-        <Suspense
-          fallback={
-            <p role="status" className="p-6 text-sm text-muted">
-              Loading console…
-            </p>
-          }
-        >
-          {localAccounts ? <LocalAccountsApp /> : <LocalConsole />}
-        </Suspense>
-      ) : (
-        <App />
-      )}
+      <ChunkBoundary>
+        {localConsole ? (
+          <Suspense
+            fallback={
+              <p role="status" className="p-6 text-sm text-muted">
+                Loading console…
+              </p>
+            }
+          >
+            {localAccounts ? <LocalAccountsApp /> : <LocalConsole />}
+          </Suspense>
+        ) : (
+          <App />
+        )}
+      </ChunkBoundary>
     </StrictMode>,
   )
 
