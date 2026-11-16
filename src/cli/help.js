@@ -80,7 +80,7 @@ export const SECTIONS = {
       --approve-on-host     paired devices cannot approve agent commands
       --open                also open the board in your browser, with agent settings
       --read-only           no comments or captures from the UI
-      --accounts            require local passkey accounts after owner setup (Node 22.13+)
+      --accounts            require local passkey accounts after owner setup (Node 22.19+)
       --accounts-origin URL fixed HTTPS origin (default: loopback URL or --tailscale URL)
       --no-capture          comments allowed, captures only from the CLI
       --buzz-bridge FILE    owner-only existing Buzz conversation (private operator map; docs/buzz.md)

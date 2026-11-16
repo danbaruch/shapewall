@@ -372,12 +372,12 @@ export function RecoveryCodes({ codes, onDone, doneLabel = 'Continue' }) {
       </p>
       <ol
         ref={list}
-        className="grid grid-cols-1 gap-1.5 rounded-lg border border-line bg-surface-2 p-3 font-mono text-[13px] text-fg sm:grid-cols-2"
+        className="grid grid-cols-[repeat(auto-fit,minmax(min(16.5rem,100%),1fr))] gap-x-4 gap-y-1.5 rounded-lg border border-line bg-surface-2 p-3 font-mono text-[13px] text-fg"
       >
         {codes.map((item, index) => (
           <li key={item} className="flex gap-2" data-sw-recovery-code-item>
             <span className="w-5 text-right text-faint tabular">{index + 1}.</span>
-            <span className="sw-secret select-all">{item}</span>
+            <span className="sw-secret select-all break-all">{item}</span>
           </li>
         ))}
       </ol>

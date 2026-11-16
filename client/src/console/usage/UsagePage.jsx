@@ -167,6 +167,7 @@ export function UsagePage() {
           label="View"
           value={tab}
           onChange={(next) => set({ tab: next === 'overview' ? null : next, row: null }, { push: true })}
+          itemClassName="h-11 px-3 lg:h-8"
           options={[
             { id: 'overview', label: 'Overview' },
             { id: 'turns', label: 'Turns' },

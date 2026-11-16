@@ -226,7 +226,10 @@ function NeedsRole({ section, least, role, workspaceId }) {
         {section} is for {least === 'member' ? 'members, admins and owners' : 'admins and owners'}. You are a{' '}
         {ROLE_LABEL[role].toLowerCase()} here; ask an admin if you need it.
       </p>
-      <Link to={`/w/${workspaceId}`} className="mt-4 inline-block text-sm font-medium text-accent underline-offset-2 hover:underline">
+      <Link
+        to={`/w/${workspaceId}`}
+        className="mt-2 inline-flex min-h-11 items-center text-sm font-medium text-accent underline-offset-2 hover:underline lg:mt-4 lg:min-h-0"
+      >
         Back to the projects
       </Link>
     </Card>

@@ -11,20 +11,7 @@ import { createPasskey } from '../../lib/webauthn'
 import { useAction, useSession, useToast } from '../../state'
 import { currentHash, navigate } from '../../lib/router'
 import { ADD_PASSKEY_EVENT } from '../../lib/events'
-
-// Where a passkey lives: synced by a cloud keychain or password manager
-// (backed up), only on one authenticator, or one that could sync but has not.
-const STORAGE_LABEL = { synced: 'Synced', device: 'This device only', unsynced: 'Not synced yet' }
-const TRANSPORT_LABEL = { internal: 'built in', hybrid: 'phone', usb: 'security key (USB)', nfc: 'security key (NFC)', ble: 'Bluetooth' }
-export function passkeyStorage(key) {
-  return STORAGE_LABEL[key.storage] || (key.synced ? STORAGE_LABEL.synced : STORAGE_LABEL.device)
-}
-export function passkeyTransports(key) {
-  return (key.transports || [])
-    .map((item) => TRANSPORT_LABEL[item])
-    .filter(Boolean)
-    .join(', ')
-}
+import { passkeyStorage, passkeyTransports } from '../../lib/security-labels'
 
 export function Passkeys() {
   const { me, refresh } = useSession()

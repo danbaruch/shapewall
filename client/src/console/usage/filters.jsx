@@ -28,7 +28,7 @@ import { FILTER_KEYS, RANGE_KEYS, VIEW_SKIP, toggled, useViews } from './data'
 import { PRESETS, dateInput, formatCount } from './format'
 
 const chip =
-  'inline-flex h-9 max-w-full items-center gap-1.5 rounded-md border px-2.5 text-xs font-medium outline-none focus-visible:outline-2 focus-visible:outline-accent'
+  'inline-flex h-11 max-w-full items-center gap-1.5 rounded-md border px-2.5 text-xs font-medium outline-none lg:h-9 focus-visible:outline-2 focus-visible:outline-accent'
 const chipOff = 'border-line bg-surface text-fg hover:bg-surface-2'
 const chipOn = 'border-accent/50 bg-accent/10 text-fg'
 // The empty value of a dimension (nobody asked, no model reported) in the address.
@@ -304,7 +304,7 @@ function IdSearch({ value, onChange }) {
       aria-label="Search by an id: a turn, an agent, a project, a board or a comment number"
       maxLength={80}
       wrapperClassName="w-full sm:w-44"
-      className="h-9"
+      className="h-11 lg:h-9"
       data-sw-usage-search
     />
   )
@@ -524,12 +524,12 @@ export function ViewsMenu({ workspaceId, page, search, onOpen, layout = null }) 
             placeholder="Name this view"
             aria-label="Name this view"
             maxLength={60}
-            className="h-9"
+            className="h-11 lg:h-9"
             wrapperClassName="w-40"
             onKeyDown={(event) => (event.key === 'Escape' ? setNaming(false) : null)}
           />
           {layout ? (
-            <label className="inline-flex h-9 cursor-pointer items-center gap-1.5 text-xs text-fg">
+            <label className="inline-flex h-11 lg:h-9 cursor-pointer items-center gap-1.5 text-xs text-fg">
               <input
                 type="checkbox"
                 checked={withLayout}
@@ -540,10 +540,10 @@ export function ViewsMenu({ workspaceId, page, search, onOpen, layout = null }) 
               Include this layout
             </label>
           ) : null}
-          <Button type="submit" size="md" variant="default" className="h-9" disabled={!name.trim() || save.isPending}>
+          <Button type="submit" size="md" variant="default" className="h-11 lg:h-9" disabled={!name.trim() || save.isPending}>
             Save
           </Button>
-          <Button size="md" variant="ghost" className="h-9" onClick={() => setNaming(false)}>
+          <Button size="md" variant="ghost" className="h-11 lg:h-9" onClick={() => setNaming(false)}>
             Cancel
           </Button>
         </form>
