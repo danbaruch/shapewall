@@ -1475,7 +1475,11 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     const { targetId, viewport } = splitFrameKey(keyboardTarget)
     const canvas = canvasRef.current
     const frame = window.requestAnimationFrame(() => {
-      canvas?.querySelector(`[data-sw-frame=${JSON.stringify(`${targetId}:${viewport}`)}]`)?.focus({ preventScroll: true })
+      // In compare mode the page is two frames, one per side: the first takes it.
+      const page =
+        canvas?.querySelector(`[data-sw-frame=${JSON.stringify(`${targetId}:${viewport}`)}]`) ||
+        canvas?.querySelector(`[data-sw-frame^=${JSON.stringify(`${targetId}:${viewport}:`)}][data-sw-comment-target]`)
+      page?.focus({ preventScroll: true })
     })
     return () => {
       window.cancelAnimationFrame(frame)

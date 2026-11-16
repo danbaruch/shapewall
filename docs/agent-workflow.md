@@ -75,6 +75,7 @@ item:
 | `files.version`    | The capture version those two are; the latest when the one it was made on is gone.               |
 | `files.latest*`    | `latestScreenshot`, `latestLiveHtml`, `latestVersion`: the page as it is now.                    |
 | `variant`          | Set when the comment is on a variant instead of the page.                                        |
+| `environment`      | Left on a non-default environment, in compare mode: its id. `files` are that capture.            |
 
 The fields from version 0.1 are unchanged; `agentStatus`, `agentStatusAt`, `replies`, `fixRef` and `captureVersion` were added (older
 comments read as `null`, `null`, `[]`, `null` and `null`), then `mentions` (handles mentioned in the text or a reply, `["robin",

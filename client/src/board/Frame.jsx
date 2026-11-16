@@ -577,12 +577,9 @@ export function CompareFrame({ pageId, frame }) {
       setHover(position >= 0 ? describeAt(map, position, native) : null)
     })
   }
-  const onClick = (event) => {
-    if (!board.commentMode) return
-    event.stopPropagation()
-    const rect = event.currentTarget.getBoundingClientRect()
-    const fx = (event.clientX - rect.left) / rect.width
-    const fy = (event.clientY - rect.top) / rect.height
+  // Places a comment at (fx, fy) of this side, 0 to 1. `anchored`: also to
+  // the element there, when the element map is loaded.
+  const place = (fx, fy, anchored = true) => {
     const pin = {
       pageId,
       viewport,
@@ -590,7 +587,7 @@ export function CompareFrame({ pageId, frame }) {
       x: Math.max(0, Math.min(100, fx * 100)),
       y: Math.max(0, Math.min(100, fy * 100)),
     }
-    if (map) {
+    if (anchored && map) {
       const x = fx * native.width
       const y = fy * native.height
       const anchor = anchorFromMap(map, x, y, native)
@@ -601,6 +598,29 @@ export function CompareFrame({ pageId, frame }) {
     }
     setHover(null)
     board.onPin(pin)
+  }
+  const onClick = (event) => {
+    if (!board.commentMode) return
+    event.stopPropagation()
+    const rect = event.currentTarget.getBoundingClientRect()
+    place((event.clientX - rect.left) / rect.width, (event.clientY - rect.top) / rect.height)
+  }
+  // "Comment" on the page bar from the keyboard (FrameBar.jsx): both sides
+  // of the pair take the keyboard, the first one first (Board.jsx), and
+  // Enter places the comment near the top left of what shows of that side,
+  // as on a page outside compare mode. Tab reaches the other side.
+  const commentTarget = useBoardView((state) => state.commentTargetKey === frameKey(pageId, viewport)) && picking
+  const onKeyDown = (event) => {
+    if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) return
+    if (event.altKey || event.ctrlKey || event.metaKey) return
+    event.preventDefault()
+    event.stopPropagation()
+    const rect = event.currentTarget.getBoundingClientRect()
+    const canvas = event.currentTarget.closest('[data-sw-canvas]')?.getBoundingClientRect() || rect
+    const inset = Math.min(24, rect.width * 0.04, rect.height * 0.04)
+    const x = Math.min(rect.right - inset, Math.max(rect.left, canvas.left) + inset)
+    const y = Math.min(rect.bottom - inset, Math.max(rect.top, canvas.top) + inset)
+    place((x - rect.left) / rect.width, (y - rect.top) / rect.height, false)
   }
   const title = compare.titleOf(env)
   return (
@@ -614,6 +634,7 @@ export function CompareFrame({ pageId, frame }) {
           'absolute rounded-sm border border-line bg-surface-2',
           // Picking: a click places the comment, so a drag must not pan.
           picking && 'nodrag nopan cursor-crosshair',
+          commentTarget && 'focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-accent',
           drawSurface && 'outline-solid outline-accent',
         )}
         style={{
@@ -624,6 +645,15 @@ export function CompareFrame({ pageId, frame }) {
           ...(drawSurface ? { outlineWidth: 3 * pinScale, outlineOffset: 2 * pinScale } : null),
         }}
         onClick={board.commentMode ? onClick : undefined}
+        tabIndex={commentTarget ? 0 : undefined}
+        role={commentTarget ? 'group' : undefined}
+        aria-label={
+          commentTarget
+            ? `The ${viewport} page on ${title}: press Enter to comment at its top left, or click where the comment goes`
+            : undefined
+        }
+        onKeyDown={commentTarget ? onKeyDown : undefined}
+        data-sw-comment-target={commentTarget ? 'true' : undefined}
         onMouseMove={canHover ? onMouseMove : undefined}
         onMouseLeave={canHover ? () => setHover(null) : undefined}
         data-sw-frame={`${pageId}:${viewport}:${env}`}

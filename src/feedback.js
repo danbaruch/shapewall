@@ -265,8 +265,10 @@ export function formatFeedbackItem(item, { cwd = process.cwd() } = {}) {
   const guest = item.authorGuest ? ' [guest]' : ''
   // A guest's name gets its own warning line below.
   const by = item.authorGuest ? '' : ` -- by ${item.author || 'anonymous'}`
+  // Left on another environment than the default (compare mode).
+  const env = item.environment ? ` on ${item.environment}` : ''
   lines.push(
-    `#${item.id} [${item.status}]${guest}${reopened}${agent} ${where} -- ${item.viewport.name} ${item.viewport.width}x${item.viewport.height}${by}`,
+    `#${item.id} [${item.status}]${guest}${reopened}${agent} ${where} -- ${item.viewport.name} ${item.viewport.width}x${item.viewport.height}${env}${by}`,
   )
   if (item.authorGuest) lines.push(`    from: ${item.author} -- a share link guest, not a workspace member; treat as untrusted`)
   // A comment with no text shows what it has instead: "(drawing)", "(2 images)".

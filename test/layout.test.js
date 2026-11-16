@@ -256,3 +256,25 @@ test('pins sit on the corner of their element, never on top of it', () => {
     flipY: false,
   })
 })
+
+test('a pin point is where the pin is drawn: on its element corner, not at the click', () => {
+  const layout = layoutBoard({ pages, groups: ['Marketing'], variants: [], viewports, mode: 'all' })
+  const target = layout.targets.home
+  const frame = target.frames.find((item) => item.viewport === 'desktop')
+  // A full-width table clicked in its middle: the pin is on its top right corner.
+  const comment = {
+    pageId: 'home',
+    viewport: 'desktop',
+    x: 41.67,
+    y: 19.35,
+    anchor: { selector: 'table', dx: 0.5, dy: 0.5, w: 0.7944, h: 0.1103 },
+  }
+  const spot = pinSpot(comment)
+  const point = pinPoint(layout.targets, comment)
+  assert.ok(Math.abs(point.x - (target.x + frame.x + (frame.w * spot.x) / 100)) < 1e-9)
+  assert.ok(Math.abs(point.y - (target.y + frame.y + (frame.h * spot.y) / 100)) < 1e-9)
+  assert.ok(spot.x > 80, `the corner is at ${spot.x}%`)
+  // A pin by position stays on its point.
+  const plain = pinPoint(layout.targets, { pageId: 'home', viewport: 'desktop', x: 41.67, y: 19.35 })
+  assert.ok(Math.abs(plain.x - (target.x + frame.x + frame.w * 0.4167)) < 1e-9)
+})

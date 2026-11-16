@@ -185,8 +185,14 @@ taken where it lands on the board, so it never starts autoscroll (Windows) or pa
   branching journey is shown one path at a time (`resolvePath` with the branches picked); the other branches' arrows are dashed.
 - Compare mode lays two frames per viewport side by side (one per environment) and shows screenshots only, with the cached diff mask
   over the second. A variant keeps its single frame there, beside its page's pair: it is one capture of one idea, with no second
-  environment to compare it against. New comments are off while comparing (a comment belongs to a page, not to one environment, so
-  which capture a click meant is unanswerable); the compare bar says so, and replies, resolving and "jump to comment" all work.
+  environment to compare it against. Comments work while comparing: a comment placed on one side stores that side's environment
+  (`environment`, an environment id; none outside compare mode, which is the default environment), and each side draws the
+  comments left on it (`commentSide.js`), so a pin is on its own side in every later compare, swapped too. A comment on an
+  environment that is not one of the two compared is drawn on the first, and its thread says so. Outside compare mode the board
+  shows the default environment, so a comment left on another one keeps its pin there and its thread names the environment it was
+  left on. Only the default environment keeps capture versions, so a comment on another one stores no `captureVersion`, and an
+  agent's `files` point at that environment's capture. On a phone the compare bar is one row (the two environments, swap, the view
+  options behind one button, leave), so the board and the thread sheet keep the room they have outside compare mode.
 - Each frame's label (viewport, environment, live) sits in a strip between the card header and the frame, never on the captured page.
 - The selected card's action bar belongs to one view: switching viewport, compare or a journey, and Fit view, clear the selection, and
   the bar hides while the frame is a thumbnail on screen (its longer side under 160 px). Tapping a thumbnail flies to it first, leaving
