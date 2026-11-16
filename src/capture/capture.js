@@ -43,9 +43,19 @@ import { observeCaptureNetwork, captureWarningText } from './network-summary.js'
 import { capturePacer } from './pacing.js'
 import { StepError, isTimeout, runActions, seconds, stepFailure } from './actions.js'
 import { installRequestRules, seedLocalStorage } from './requests.js'
+import { landedElsewhere, landedNote, landedWarning } from './destination.js'
+import { allFailedHint, netErrorCode, netErrorKind, plainLoadError } from './load-errors.js'
 
-// A navigation timeout says so plainly; other load errors keep their own first line.
-const loadFailure = (error, timeout) => (isTimeout(error) ? new StepError(`loading the page timed out after ${seconds(timeout)}`) : error)
+// A navigation timeout says so plainly, and so does a network error
+// (load-errors.js); other load errors keep their own first line.
+const loadFailure = (error, timeout, url) => {
+  if (isTimeout(error)) return new StepError(`loading the page timed out after ${seconds(timeout)}`)
+  const plain = plainLoadError(error?.message, url)
+  if (!plain) return error
+  const failure = new StepError(plain)
+  failure.netError = netErrorKind(netErrorCode(error?.message))
+  return failure
+}
 
 const IMAGE_WAIT_MS = 8000
 
@@ -158,6 +168,7 @@ export async function shootPage({
 }) {
   const began = Date.now()
   let httpStatus = null
+  let finalUrl = null
   let finishNetwork = null,
     networkSummary = null
   let skipped = []
@@ -192,7 +203,7 @@ export async function shootPage({
       if (response.status() < 400) responses.set(response.url().split('#')[0], response)
     })
     const response = await page.goto(url, { waitUntil: 'load', timeout: pageTimeout }).catch((error) => {
-      throw cancelled ? error : loadFailure(error, pageTimeout)
+      throw cancelled ? error : loadFailure(error, pageTimeout, url)
     })
     httpStatus = response ? response.status() : null
     // An error page on purpose ("expectStatus": 404) is captured like any
@@ -223,6 +234,9 @@ export async function shootPage({
     // A short pause for late renders, decodes and transitions.
     await sleep(400)
     stage = 'the screenshot'
+    // Where the shot really is: a redirect (to a sign-in page, say) or a
+    // client-side navigation may have moved it from the page asked for.
+    finalUrl = page.url()
     // The DevTools protocol can scale a clip, which Playwright's own
     // screenshot cannot: the thumbnail is the same frame, smaller.
     const cdp = await context.newCDPSession(page)
@@ -272,6 +286,8 @@ export async function shootPage({
     return {
       status: 'ok',
       url,
+      finalUrl,
+      ...(landedElsewhere(url, finalUrl) ? { redirected: true } : {}),
       httpStatus,
       networkSummary,
       ...(pageConfig.expectStatus?.length ? { expectedStatus: true } : {}),
@@ -288,6 +304,7 @@ export async function shootPage({
       url,
       httpStatus,
       networkSummary: networkSummary || finishNetwork?.() || null,
+      ...(!cancelled && error?.netError ? { netError: error.netError } : {}),
       error: message.slice(0, 300),
       ms: Date.now() - began,
     }
@@ -614,9 +631,11 @@ export async function runCapture({
         ? ` (skipped optional action${entry.skippedActions.length === 1 ? '' : 's'} ${entry.skippedActions.join(', ')})`
         : ''
       log(
-        `  ${entry.status === 'ok' ? 'ok  ' : 'FAIL'} ${page.id} ${viewportName} ${entry.status === 'ok' ? `${entry.ms} ms${expectedNote}${skippedNote}${liveNote}${warningNote}` : entry.error}`,
+        `  ${entry.status === 'ok' ? 'ok  ' : 'FAIL'} ${page.id} ${viewportName} ${entry.status === 'ok' ? `${entry.ms} ms${landedNote(entry.url, entry.finalUrl)}${expectedNote}${skippedNote}${liveNote}${warningNote}` : entry.error}`,
       )
     })
+    const ranEntries = () => tasks.map(({ page, viewportName }) => manifest.pages[page.id][viewportName])
+    const failedHint = () => allFailedHint(ranEntries(), baseUrl)
     let linksChecked = 0
     if (linkCheck) {
       let context = null
@@ -652,7 +671,10 @@ export async function runCapture({
     manifest.durationMs = Date.now() - started
     writeJsonAtomic(path.join(workDir, 'manifest.json'), manifest)
     if (!partial) {
-      if (status.failed === status.total) throw new Error('every shot failed; the previous captures were kept')
+      if (status.failed === status.total) {
+        const hint = failedHint()
+        throw new Error(`every shot failed; the previous captures were kept.${hint ? ` ${hint}` : ''}`)
+      }
       const old = `${finalDir}.prev`
       fs.rmSync(old, { recursive: true, force: true })
       if (fs.existsSync(finalDir)) fs.renameSync(finalDir, old)
@@ -691,6 +713,9 @@ export async function runCapture({
         page: page.id,
         viewport: viewportName,
         url: entry.url,
+        // Where the shot landed (null when it failed): differs from url after a redirect.
+        finalUrl: entry.finalUrl || null,
+        redirected: Boolean(entry.redirected),
         status: entry.status,
         httpStatus: entry.httpStatus ?? null,
         expectedStatus: Boolean(entry.expectedStatus),
@@ -707,6 +732,11 @@ export async function runCapture({
     if (brokenLinks.length) {
       log(`Broken links: ${brokenLinks.length} ("${cliCommand('links --broken')}" lists them)`)
       for (const line of formatBroken(brokenLinks, { max: 10 })) log(line)
+    }
+    for (const line of landedWarning(shots)) log(line)
+    if (partial) {
+      const hint = failedHint()
+      if (hint) log(hint)
     }
     return {
       ok: status.failed === 0,

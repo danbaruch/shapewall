@@ -40,14 +40,50 @@ export async function checksCommand(config, positional, flags, out, err = () => 
   }
   const failed = reports.filter((r) => r.state === 'failed').length
   const stopped = reports.stopped
+  if (flags.json) {
+    out(JSON.stringify({ schemaVersion: 1, reports, ...(stopped ? { stopped } : {}) }, null, 2))
+    return stopped ? CHECKS_STOPPED_EXIT : failed ? 2 : 0
+  }
+  const { lines, views } = warningLines(reports)
+  const warned = views ? ` ${views} with warnings.` : ''
   out(
-    flags.json
-      ? JSON.stringify({ schemaVersion: 1, reports, ...(stopped ? { stopped } : {}) }, null, 2)
-      : stopped
-        ? `Stopped after ${stopped.checked} of ${stopped.total} page views. ${failed} failed. Page views not checked keep their earlier results.`
-        : `Checked ${reports.length} page views. ${failed} failed. Reports are local and were not sent to an agent.`,
+    stopped
+      ? `Stopped after ${stopped.checked} of ${stopped.total} page views. ${failed} failed.${warned} Page views not checked keep their earlier results.`
+      : `Checked ${reports.length} page views. ${failed} failed.${warned} Reports are local and were not sent to an agent.`,
   )
+  for (const line of lines) out(line)
   return stopped ? CHECKS_STOPPED_EXIT : failed ? 2 : 0
+}
+
+// Findings of severity "warning" are worth reading in the terminal, not only
+// in --json and on the board: one line each, with its next step. Advisories
+// are counted. { lines, views }: views = page views with a warning.
+const WARNINGS_SHOWN = 20
+const NEXT_STEPS = {
+  // A sign-in redirect is the usual cause: say where logins are set up.
+  'destination-changed': 'If it is a sign-in page, record a login (Auth in docs/config.md); if the page moved, update its path.',
+}
+export function warningLines(reports) {
+  const rows = []
+  let advisories = 0
+  let views = 0
+  for (const report of reports || []) {
+    const findings = Array.isArray(report?.findings) ? report.findings : []
+    const warnings = findings.filter((item) => item?.severity === 'warning')
+    advisories += findings.filter((item) => item?.severity === 'advisory').length
+    if (warnings.length) views += 1
+    for (const item of warnings) {
+      const step = NEXT_STEPS[item.id] || item.nextAction
+      rows.push(`  warning ${report.pageId} ${report.viewport?.name || ''}: ${item.title}.${step ? ` ${step}` : ''}`)
+    }
+  }
+  const lines = rows.slice(0, WARNINGS_SHOWN)
+  if (rows.length > WARNINGS_SHOWN) lines.push(`  and ${rows.length - WARNINGS_SHOWN} more warnings`)
+  if (rows.length || advisories)
+    lines.push(
+      `${advisories ? `${advisories} advisor${advisories === 1 ? 'y' : 'ies'} not shown. ` : ''}Every finding is in --json and on the board's Checks.`,
+    )
+  return { lines, views }
 }
 
 const STOP_SIGNALS = ['SIGTERM', 'SIGINT']

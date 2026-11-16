@@ -6,6 +6,7 @@ import { readManifest } from '../store.js'
 import { cliCommand } from '../invocation.js'
 import { formatBroken } from '../broken-links.js'
 import { pageLinks } from '../links.js'
+import { keyWarningLines } from '../config-keys.js'
 
 // `capture`: one line per shot and a summary; with --json the summary is one
 // JSON document on stdout and the progress lines go to stderr. --yes is
@@ -13,6 +14,8 @@ import { pageLinks } from '../links.js'
 export async function capture(flags, out, err) {
   const config = loadConfig(flags.config)
   const json = Boolean(flags.json)
+  // Keys the config has but Shapewall does not use (a typo, most often).
+  for (const line of keyWarningLines(config.warnings)) (json ? err : out)(line)
   const result = await runCapture({
     config,
     boardId: flags.board,
@@ -36,6 +39,8 @@ export async function capture(flags, out, err) {
           durationMs: result.durationMs,
           dir: result.dir,
           failedShots: result.shots.filter((shot) => shot.status !== 'ok'),
+          // Shots that landed on another page than the one asked for (a sign-in redirect, say).
+          redirectedShots: result.shots.filter((shot) => shot.redirected),
           shots: result.shots,
           linksChecked: result.linksChecked,
           brokenLinks: result.brokenLinks,

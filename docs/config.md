@@ -10,6 +10,10 @@ each board (including a board's own `viewports`, `block`, `setup` and `auth`), `
 in the serve log and the board keeps the last good config. `outputDir`, `boardUrl`, `auth`, `browser`, `liveHtml`, `agent`,
 `starterAgent`, `notifications` and `github` still need a restart (the log says so).
 
+A key Shapewall does not use (a typo like `"viewport"` for `"viewports"`, or a page key such as `waitFor` set at the top level) is
+ignored, and `shapewall doctor`, `capture` and `serve` warn about it with the key it most likely meant. A required key under the
+wrong case (`"baseURL"`) is an error that says to rename it. `$schema` is allowed anywhere.
+
 ## Top level
 
 | Key             | Type                  | Default                             | Notes                                                                                                                                                         |
@@ -449,6 +453,11 @@ How fixes run, both off by default and also on the Agents page of the Workspace 
 [Fix several comments at once](agents.md#fix-several-comments-at-once).
 
 ## Auth
+
+A page that needs a sign-in usually redirects to the sign-in page, and without a login a capture is a picture of that page. Each
+shot keeps the URL it landed on (`finalUrl` in `capture --json`, with `redirected: true` when it is not the page asked for), the
+capture line says "landed on /login/, not /app/", the capture ends with a warning that points here, and the board marks the card
+"Redirected". `shapewall checks` prints the same as a warning.
 
 Never put credentials in the config. Two options:
 
