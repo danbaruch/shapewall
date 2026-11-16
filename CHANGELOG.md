@@ -5,12 +5,6 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
-- **Opt-in error reports for your own server.** Set `SHAPEWALL_ERROR_DSN` (any Sentry-compatible DSN: Sentry, GlitchTip) and
-  `shapewall serve` or `shapewall hosted` reports its unhandled errors there, and the pages it serves report browser errors to the
-  same place. Off by default: without the variable the SDK is never loaded and nothing is sent, and Shapewall has no DSN of its own.
-  Reports carry the error, stack trace, URL path, browser and release, never content, request bodies, cookies, query strings or
-  identities. See [Error reports](docs/deployment.md#error-reports-opt-in).
-
 - **The agent panel no longer says a local agent asks before it acts.** It said "It asks before changing files or running
   commands", but a local agent runs under its own permission settings, and Claude Code's adapter (0.106.0) starts new sessions in
   its `auto` mode, which acts without asking. The panel now says the agent may change files or run commands without asking, names
@@ -45,8 +39,17 @@ and the project uses [Semantic Versioning](https://semver.org/).
   plain failure with a Reload button instead of a blank page. At most one automatic reload per page per release in ten minutes,
   and none when the browser keeps no session storage. Error reports stay off unless `SHAPEWALL_ERROR_DSN` is set.
 
-## 0.8.0 - 2026-11-14
+## 0.8.0 - 2026-11-16
 
+- **Opt-in error reports for your own server.** Set `SHAPEWALL_ERROR_DSN` (any Sentry-compatible DSN: Sentry, GlitchTip) and
+  `shapewall serve` or `shapewall hosted` reports its unhandled errors there, and the pages it serves report browser errors to the
+  same place. Off by default: without the variable the reporting SDK is never loaded and nothing is sent, and the package has no
+  DSN of its own. A report is scrubbed before it leaves: it keeps the error, its stack trace, the URL path, the browser or runtime
+  and the release, and drops cookies, request bodies, headers other than the user agent, query strings, fragments, user identities,
+  local variables, console lines and clicks; quoted text in an error message is replaced, since that is where an input such as
+  board or comment content would appear. See [Error reports](docs/deployment.md#error-reports-opt-in). Our own deployments (the
+  shapewall.com website and its public demo) set our DSN and report the same scrubbed errors; that is their setting, not the
+  package's.
 - **On a phone, comparing two environments, the thread sheet covered the whole board.** Measured at 390 px wide on the demo
   board: compare mode's bar pushes the canvas 247 px down the window, and the sheet kept taking its share of the window, 598 px
   of 844, so it started at 246 px and the canvas ended at 844. The pin was placed correctly and the camera flew to it, behind
