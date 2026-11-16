@@ -133,7 +133,7 @@ For signed-in pages, run `shapewall auth record`: sign in by hand in the fresh b
 shapewall serve
 ```
 
-Open [http://127.0.0.1:4600/](http://127.0.0.1:4600/) (or add `--open` and Shapewall opens it for you). Scroll or drag to pan (Shift+scroll goes sideways, Space+drag and middle-drag work anywhere, and so does the **Hand** tool, H), Ctrl+scroll (Cmd+scroll on a Mac) or a pinch to zoom. Zoom in on a page and it switches
+Open [http://127.0.0.1:4600/](http://127.0.0.1:4600/) (or add `--open` and Shapewall opens it for you). Scroll or drag to pan (Shift+scroll goes sideways, Space+drag and middle-drag work anywhere, and so does the **Hand** tool, H), Ctrl+scroll (Cmd+scroll on a Mac) or a pinch to zoom at the cursor; + and - (with or without Ctrl/Cmd) zoom too, Ctrl/Cmd+0 or Shift+0 goes to 100% and Shift+1 fits the board. Zoom in on a page and it switches
 from a screenshot to live HTML. Click a page and press **Comment** on the bar that appears above it, or pick **Comment** in the tools at the bottom of the board (or press C). Then click an element on the page and write what should change.
 
 ### Images and drawings
