@@ -145,11 +145,28 @@ touch):
 | Space+drag, middle-button drag, drag on the board | Pan (Space and middle drag work over pages and in comment mode as well) |
 | The Hand tool (H): drag anywhere                  | Pan, over pages and pins too; a click selects and opens nothing         |
 | Touch: one finger, two-finger pinch               | Pan, zoom                                                               |
+| + or =, -, with or without Ctrl/Cmd               | Zoom in, zoom out (about the middle of the canvas)                      |
+| Ctrl/Cmd+0, Shift+0                               | Zoom to 100%                                                            |
+| Shift+1                                           | Fit the whole board                                                     |
 
 Space pans while the mouse is over the canvas, except in text fields and on a control reached with the keyboard (Space presses it).
 A Space+click never selects a page or starts a comment. Wheel and drag steps move the camera without saving it; the URL camera and the
 settled zoom update once it rests (150 ms after the last wheel event, or on mouse up). Safari's trackpad pinch (gesture events) zooms
 the same way. Scrolling inside a `nowheel` element (the frame bar, a live page being selected) scrolls it instead.
+
+Over something floating on the canvas (the zoom controls, the tools, a note, an open thread or composer, which live in a portal
+but sit over the canvas), a list that overflows in the wheel's axis scrolls itself and anything else pans the board, so there are no
+dead spots; the minimap keeps its own wheel, and a pinch there zooms the board, never the browser page. Wheel events less than
+120 ms apart are one gesture and stay where it started: a trackpad pan that carries on (momentum) while a thread slides under the
+still cursor keeps panning instead of scrolling the thread. The side panels and dialogs are outside the canvas and scroll as usual.
+
+Live pages: the wheel over a live page is always the board's (the frame lets go of the mouse), so a live page never traps a pan.
+To scroll or select inside one, use **Select text** on its bar; its second step (a click on the page) hands the mouse to the page
+until the pointer leaves it.
+
+The zoom keys take Ctrl/Cmd with +, - and 0 from the browser while the board has the keyboard, as Figma does; in a text field, a
+dialog, a menu or a list (and inside a live page that has focus) they stay the browser's page zoom. The middle button's press is
+taken where it lands on the board, so it never starts autoscroll (Windows) or pastes the primary selection (Linux).
 
 ## Board rendering
 

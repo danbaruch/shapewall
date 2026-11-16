@@ -13,7 +13,7 @@ import {
   Tooltip,
 } from '../components/ui'
 import { TITLE_ROOM } from './layout'
-import { isEditable } from './navigation'
+import { isEditable, zoomKey } from './navigation'
 import { motionDuration } from '../lib/motion'
 import { KeyTip } from './KeyTip'
 
@@ -57,19 +57,27 @@ function ZoomVars() {
   return null
 }
 
-// Shift+1 fits the board, Shift+0 goes to 100%, + and - zoom (not while typing).
+// The zoom keys (navigation.js zoomKey): + and - zoom, with or without
+// Ctrl/Cmd, Ctrl/Cmd+0 and Shift+0 go to 100%, Shift+1 fits the board. Not
+// while typing, and not with a dialog (other than a thread or composer), menu or list open: there Ctrl/Cmd
+// with +, - and 0 stay the browser's own page zoom.
 function useZoomKeys({ fitBoard, zoomTo }) {
   const flow = useReactFlow()
   useEffect(() => {
     const onKey = (event) => {
-      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || isEditable(event.target)) return
-      if (document.querySelector('[role="dialog"], [role="menu"], [role="listbox"]')) return
-      if (event.shiftKey && event.code === 'Digit1') fitBoard()
-      else if (event.shiftKey && event.code === 'Digit0') zoomTo(1)
-      else if (!event.shiftKey && (event.key === '=' || event.key === '+')) flow.zoomIn({ duration: motionDuration(200) })
-      else if (!event.shiftKey && event.key === '-') flow.zoomOut({ duration: motionDuration(200) })
-      else return
+      if (event.defaultPrevented || isEditable(event.target)) return
+      const action = zoomKey(event)
+      if (!action) return
+      // An open thread or composer is no reason to give up the keys; a modal is.
+      if (
+        document.querySelector('[role="dialog"]:not([data-sw-thread-popover], [data-sw-composer-popover]), [role="menu"], [role="listbox"]')
+      )
+        return
       event.preventDefault()
+      if (action === 'fit') fitBoard()
+      else if (action === 'actual') zoomTo(1)
+      else if (action === 'in') flow.zoomIn({ duration: motionDuration(200) })
+      else flow.zoomOut({ duration: motionDuration(200) })
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
