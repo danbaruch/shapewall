@@ -114,7 +114,7 @@ machine's tailnet user, checks their role and writes the audit entry. See
 
 ## What does it need to run?
 
-Node.js 22.13 or newer and Chromium, on Linux, macOS or Windows; Linux is the primary tested platform. `shapewall doctor
+Node.js 22.19 or newer and Chromium, on Linux, macOS or Windows; Linux is the primary tested platform. `shapewall doctor
 --install-browser` downloads the Chromium build, or you can use a Chrome you already have. See [install](/docs/getting-started#install).
 
 ## How is Shapewall licensed?

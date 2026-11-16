@@ -202,8 +202,13 @@ const ELEMENT_NAMES = {
   header: 'header',
   footer: 'footer',
 }
+// A selector that found nothing when it was pinned (`comments add
+// --selector` on a capture without that element) names no element: the
+// selector's own words ("nope" in a[data-testid="nope"]) are not one.
+export const UNMATCHED_ANCHOR_LABEL = 'a selector the capture did not have'
 export function anchorLabel(anchor) {
   if (!anchor) return null
+  if (anchor.unmatched && !String(anchor.text || '').trim()) return UNMATCHED_ANCHOR_LABEL
   const step = String(anchor.selector || '')
     .split(' > ')
     .pop()

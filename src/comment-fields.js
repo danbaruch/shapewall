@@ -94,6 +94,11 @@ export function validateAnchor(anchor) {
     clean.w = round(anchor.w)
     clean.h = round(anchor.h)
   }
+  // Optional: true when the selector found no element in the capture it was
+  // pinned on (`comments add --selector`), so nothing names an element that
+  // is not there. Kept only when true.
+  if (anchor.unmatched !== undefined && typeof anchor.unmatched !== 'boolean') throw bad('The anchor unmatched flag must be true or false.')
+  if (anchor.unmatched === true) clean.unmatched = true
   return clean
 }
 

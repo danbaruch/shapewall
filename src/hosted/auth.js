@@ -473,14 +473,17 @@ export function createAuth({ db, origin, rpId, rpName = 'Shapewall', now = () =>
   // passkey confirms it). `device` is a short label from the User-Agent
   // ("Chrome on macOS"), never the raw header.
   //
-  // A tailnet session is stored with via 'passkey' and its login in
-  // tailnet_login (the column's CHECK predates it, and a build before tailnet
-  // sign-in then reads it as a session that never passed a passkey check).
+  // A tailnet session is stored with via 'tailnet' and its login in
+  // tailnet_login (migration 18; before it, via said 'passkey'). What it is
+  // read as comes from tailnet_login all the same (viaOf): the login is
+  // what binds it to the identity, and a row that says 'passkey' with a
+  // login (written by a previous build run on this database) is a tailnet
+  // session too. It is never verified at sign-in: no passkey was checked.
   function createSession(userId, { verified = true, via = 'passkey', device = null, ip = null, tailnetLogin = null } = {}) {
     const token = randomToken(32)
+    if (!['passkey', 'recovery', 'tailnet'].includes(via)) throw new Error(`unknown sign-in method: ${via}`)
     if (via === 'tailnet' && !tailnetLogin) throw new Error('a tailnet session needs its login')
-    if (via === 'tailnet') via = 'passkey'
-    else tailnetLogin = null
+    if (via !== 'tailnet') tailnetLogin = null
     q.run(
       `INSERT INTO sessions (token_hash, id, user_id, created_at, last_seen_at, expires_at, verified_at, via, user_agent, ip, tailnet_login)
        VALUES (:hash, :id, :user, :at, :at, :expires, :verified, :via, :device, :ip, :tailnet)`,
@@ -490,7 +493,7 @@ export function createAuth({ db, origin, rpId, rpName = 'Shapewall', now = () =>
         user: userId,
         at: iso(),
         expires: iso(SESSION_DAYS * DAY),
-        verified: verified && via === 'passkey' && !tailnetLogin ? iso() : NEVER_VERIFIED,
+        verified: verified && via === 'passkey' ? iso() : NEVER_VERIFIED,
         via,
         tailnet: tailnetLogin,
         device: device ? String(device).slice(0, 80) : null,
@@ -506,8 +509,11 @@ export function createAuth({ db, origin, rpId, rpName = 'Shapewall', now = () =>
   // never use such a session as an ordinary one after a downgrade.
   const sessionHash = (token, tailnetLogin) => sha256(tailnetLogin ? `tailnet:${token}` : token)
 
-  // How a session came in, as the API and the audit log say it.
-  const viaOf = (row) => (row.tailnet_login ? 'tailnet' : row.via)
+  // How a session came in, as the API, the guards and the audit log say it:
+  // decided by tailnet_login (which the hash is bound to), not by the via
+  // column alone. A row without a login is never read as a tailnet session,
+  // and a row with one always is.
+  const viaOf = (row) => (row.tailnet_login ? 'tailnet' : row.via === 'tailnet' ? 'passkey' : row.via)
 
   // The account's live sessions for the Account page: ids, never hashes.
   function listSessions(userId, currentHash) {

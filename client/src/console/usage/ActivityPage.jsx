@@ -635,7 +635,7 @@ export function PersonPage({ userId }) {
                 <span className="block truncate text-fg">{session.device || 'An unknown device'}</span>
                 <span className="block text-caption text-muted">
                   Last seen <Time value={session.lastSeenAt} /> · signed in {formatDate(session.createdAt)}
-                  {session.via === 'recovery' ? ' with a recovery code' : ''}
+                  {session.via === 'recovery' ? ' with a recovery code' : session.via === 'tailnet' ? ' by tailnet' : ''}
                 </span>
               </li>
             ))}

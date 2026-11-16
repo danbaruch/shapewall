@@ -18,7 +18,7 @@ export const FAQ = [
   },
   {
     q: 'What does it need to run?',
-    a: 'Node.js 22.13 or newer and Chromium, which shapewall doctor --install-browser downloads, or a Chrome you already have. It runs on Linux, macOS and Windows; Linux is the primary tested platform. Point it at any running site: a local dev server, a preview deploy, staging or production.',
+    a: 'Node.js 22.19 or newer and Chromium, which shapewall doctor --install-browser downloads, or a Chrome you already have. It runs on Linux, macOS and Windows; Linux is the primary tested platform. Point it at any running site: a local dev server, a preview deploy, staging or production.',
   },
   {
     q: 'Is Shapewall a design tool?',

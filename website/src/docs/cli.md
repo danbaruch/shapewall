@@ -254,6 +254,7 @@ shapewall comments resolve ID [--note TEXT] [--ref URL|COMMIT] [--author NAME] [
 shapewall comments reopen ID [--author NAME] [--json]
 shapewall comments reply ID --body TEXT [--author NAME] [--json]
 shapewall comments status ID queued|working|done|needs-human|clear [--note TEXT] [--author NAME] [--json]
+shapewall comments delete ID [--yes] [--json]
 ```
 
 Prints comments as a work list. Plain text is for pasting into a chat; `--json` is for agents, with the page, viewport, selector,
@@ -266,10 +267,16 @@ with it. `--since` keeps comments after that comment id, or created or changed a
 one comment.
 
 `add` makes a comment like the board does (checks, events, mentions, notifications): `--viewport` defaults to the page's first,
-`--author` to `agent`, and `--selector` pins it to an element; without one the pin sits near the top-left corner. `comments selectors`
-prints the selectors `--selector` takes for a page, with each element's text, from the latest capture (`--text WORDS` keeps the
-elements whose text has them). `--author` on `resolve`, `reopen` and `status` names who did it in the events (default `agent`). See
+`--author` to `agent`, and `--selector` pins it to an element (the selector grammar comments show); without one the pin sits near the
+top-left corner. `comments selectors` prints the selectors `--selector` takes for a page, with each element's text, from the latest
+capture (`--text WORDS` keeps the elements whose text has them). A selector that finds no element in the latest capture is still
+saved: the command says so, the pin sits at that corner until the board finds the element, and the thread says it is pinned to "a
+selector the capture did not have" rather than naming an element. `--author` on `resolve`, `reopen` and `status` names who did it
+in the events (default `agent`). See
 [the agent workflow](/docs/agent-workflow).
+
+`delete` takes a comment back, like **Delete thread** on the board: the comment, its replies and its images go for good. It asks
+first; `--yes` skips the question, and without a terminal to ask in (a script, an agent) it is required.
 
 ## shapewall events
 
@@ -299,7 +306,9 @@ shapewall watch [--exec "CMD ARGS"] [--concurrency N] [--new-only] [--once] [--t
 ```
 
 Hands each new open comment to a coding agent, until you press Ctrl+C. With `--exec`, runs the command once per comment with the
-comment JSON on stdin (no shell is involved); without it, prints one JSON line per comment. `--mention agent` hands out only comments
+comment JSON on stdin (no shell is involved); without it, prints one JSON line per comment and marks it `queued`, so it is never
+handed out twice. Whatever reads those lines moves each one on (`shapewall comments status ID working`, then `done` or
+`needs-human`), or `status ID clear` hands it out again; `--no-claim` marks nothing. `--mention agent` hands out only comments
 that tag `@agent`, so people can discuss a comment first and tag the agent when it is ready. A command that exits `0` must leave a
 word: a reply (`shapewall comments reply`) makes the comment `done`, a status it sets itself is kept, and a silent exit `0` makes it
 `needs-human` with a note, since nothing says what the agent did. `--no-claim` hands out every open
@@ -582,6 +591,8 @@ Commands
   comments reopen ID        reopen a comment   [--author NAME] [--json]
   comments reply ID         add a reply   --body TEXT [--author NAME (default agent)] [--json]
   comments status ID S      agent status: queued, working, done, needs-human or clear   [--note TEXT] [--author NAME] [--json]
+  comments delete ID        delete a comment, its replies and its images for good; asks first
+                            [--yes (do not ask; needed without a terminal)] [--json]
       --board ID            board (default: the first); --remote URL for a hosted board (see push)
   events                    comment events from every process (the shared log); never claims anything
       --follow              keep printing new events until Ctrl+C
@@ -595,7 +606,8 @@ Commands
       --board ID | --env ID | --json
   watch                     hand each new open comment to an agent (runs until Ctrl+C)
       --exec "CMD ARGS"     run this command per comment (comment JSON on stdin; no shell)
-                            without --exec, print one JSON line per comment
+                            without --exec, print one JSON line per comment and mark it queued
+                            (the reader sets its status with "comments status"; --no-claim marks none)
       --concurrency N       commands at once, 1 to 4 (default 1)
       --recapture           recapture the comment page after a successful --exec (local only)
       --new-only            skip comments that exist when the watch starts

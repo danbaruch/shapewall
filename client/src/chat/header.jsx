@@ -14,7 +14,8 @@ import Disclosure from './Disclosure'
 import { STATE_DOT, STATE_TEXT } from './profiles'
 import { AgentPicker } from './AgentPicker'
 import { AgentFace, faceOf } from './agentIcons'
-import { DOCS_URL, QuickConnect } from './QuickConnect'
+import { DOCS_URL, HARDENING_URL, QuickConnect } from './QuickConnect'
+import { localPermissionLine } from './composerModel.js'
 import { SettingsHint } from '../settings/SettingsHint'
 
 // ---- Not connected -------------------------------------------------------------
@@ -125,9 +126,15 @@ export function AgentDestination({ agent, className }) {
   }
   if (agent?.local) {
     return (
-      <p className={cn('text-xs text-muted', className)} data-sw-chat-host="local">
-        <span className="text-fg">{agent.label}</span> works in this project with your login. It asks before changing files or running
-        commands.
+      <p
+        className={cn('text-xs text-muted', className)}
+        data-sw-chat-host="local"
+        data-sw-chat-mode={agent.mode?.permission || (agent.mode ? 'unknown' : undefined)}
+      >
+        <span className="text-fg">{agent.label}</span> works in this project with your login. {localPermissionLine(agent.mode)}{' '}
+        <a className="text-accent underline-offset-2 hover:underline" href={HARDENING_URL} target="_blank" rel="noreferrer">
+          Restrict its tools
+        </a>
       </p>
     )
   }
@@ -259,7 +266,7 @@ function agentTip(agent) {
   if (agent?.demo) return 'Scripted answers that run in this browser. Nothing is sent anywhere and nothing is changed.'
   if (agent?.hosted)
     return `Runs on its own computer${agent.machine ? ` (${agent.machine})` : ''}. Reads the project and answers; no edits, no commands.`
-  if (agent?.local) return 'Runs on the server’s computer, with its own login.'
+  if (agent?.local) return 'Runs on the server’s computer, with its own login and its own permission settings.'
   if (agent?.host) return `Messages go to ${agent.host}${agent.sendsKey ? ", with the server's API key" : ''}.`
   return null
 }

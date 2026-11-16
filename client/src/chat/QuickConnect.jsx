@@ -22,7 +22,7 @@ import { ConnectIdentity, identityValue, nameProblem, saveIdentity } from '../se
 import { logoForAgent } from '../../../src/agent/agent-logos.js'
 
 export const DOCS_URL = 'https://shapewall.com/docs/chat'
-const HARDENING_URL = `${DOCS_URL}#restrict-the-agents-own-tools`
+export const HARDENING_URL = `${DOCS_URL}#restrict-the-agents-own-tools`
 
 function OtherOptions({ onOpenSettings, docsUrl, touch, open = false }) {
   return (
@@ -209,7 +209,7 @@ export function QuickConnect({ agent, touch, onOpenSettings, onConnected }) {
       {ready.length ? (
         <p className="text-[11px] leading-4 text-muted" data-sw-chat-connect-note="true">
           Connect asks first, then runs that command on this machine, as you, with the agent’s own login. It brings its own tools (a shell,
-          file edits), which Shapewall does not sandbox:{' '}
+          file edits), which Shapewall does not sandbox, and its own permission settings, which may let it act without asking:{' '}
           <a className="text-accent underline-offset-2 hover:underline" href={HARDENING_URL} target="_blank" rel="noreferrer">
             use a restricted profile
           </a>

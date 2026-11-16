@@ -136,6 +136,10 @@ export function ConfirmDialog({
                 Shapewall starts it for each chat thread, with your login and a small environment. Anyone who can chat on this board drives
                 it. Only allow a command you installed yourself.
               </p>
+              <p className="text-xs text-fg" data-sw-settings-confirm-permissions="true">
+                It runs under its own permission settings, not Shapewall&rsquo;s, so it may change files or run commands without asking.
+                Shapewall shows a request only when the agent asks.
+              </p>
             </div>
           ) : (
             <div key={`host:${item.keyVar}@${item.host}`} className="space-y-1.5" data-sw-settings-confirm-item="host">

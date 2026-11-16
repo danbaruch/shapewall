@@ -3,7 +3,6 @@
 // that matches the bundled Playwright version.
 
 import fs from 'node:fs'
-import net from 'node:net'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
@@ -16,6 +15,9 @@ import { formatCommand, loginHint } from './agent/acp/command.js'
 import { acpHandshake } from './agent/backends/acp.js'
 import { cliCommand, invocation } from './invocation.js'
 import { listAgentBranches } from './agent/branch-mode.js'
+import { nextFreePort, portInUse, probePort } from './ports.js'
+import { DEFAULT_PORT, recordedServe } from './serve-state.js'
+import { formatKeyWarning } from './config-keys.js'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const PACKAGE = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'))
@@ -35,12 +37,16 @@ export const installHint = () => cliCommand('doctor --install-browser')
 // System libraries for Chromium, from the Playwright version Shapewall uses.
 const depsHint = () => `npx playwright@${playwrightVersion()} install-deps chromium`
 
-function checkNode(version = process.versions.node) {
-  const wanted = Number(/\d+/.exec(PACKAGE.engines?.node || '22')[0])
-  const major = Number(version.split('.')[0])
-  return major >= wanted
+// package.json's engines floor (">=22.19.0"), compared major, minor and patch.
+export function checkNode(version = process.versions.node, engines = PACKAGE.engines?.node || '>=22') {
+  const parts = (text) => (/(\d+)(?:\.(\d+))?(?:\.(\d+))?/.exec(String(text)) || []).slice(1, 4).map((part) => Number(part || 0))
+  const wanted = parts(engines)
+  const have = parts(version)
+  const order = have[0] - wanted[0] || have[1] - wanted[1] || have[2] - wanted[2]
+  const floor = wanted[1] || wanted[2] ? wanted.join('.') : String(wanted[0])
+  return order >= 0
     ? { name: 'node', status: 'ok', message: `Node ${version}` }
-    : { name: 'node', status: 'fail', message: `Node ${version}; Shapewall needs ${wanted} or newer`, fix: 'Install a current Node LTS.' }
+    : { name: 'node', status: 'fail', message: `Node ${version}; Shapewall needs ${floor} or newer`, fix: 'Install a current Node LTS.' }
 }
 
 async function checkBrowser(config, { launch = true, chromium = null } = {}) {
@@ -142,23 +148,101 @@ function checkStore(config) {
   }
 }
 
-export function checkPort(port, host = '127.0.0.1') {
-  return new Promise((resolve) => {
-    const server = net.createServer()
-    server.once('error', (error) =>
-      resolve(
-        error.code === 'EADDRINUSE'
-          ? {
-              name: 'port',
-              status: 'warn',
-              message: `Port ${port} on ${host} is in use`,
-              fix: `Use "${cliCommand(`serve --port ${port + 1}`)}" (or stop what is using it).`,
-            }
-          : { name: 'port', status: 'warn', message: `Port ${port} on ${host}: ${error.code || error.message}` },
-      ),
-    )
-    server.listen(port, host, () => server.close(() => resolve({ name: 'port', status: 'ok', message: `Port ${port} on ${host} is free` })))
-  })
+// The port serve will listen on: free, in use (with a port that is free
+// now), or this project's own running server. `running`: the URL of a live
+// `shapewall serve` for this project (serve.json), when there is one.
+export async function checkPort(port, host = '127.0.0.1', { running = null } = {}) {
+  const state = await probePort(port, host)
+  if (state === 'free') return { name: 'port', status: 'ok', message: `Port ${port} on ${host} is free` }
+  if (state !== 'in-use') return { name: 'port', status: 'warn', message: `Port ${port} on ${host}: ${state}` }
+  const mine = running && Number(new URL(running).port) === port ? running : null
+  if (mine) return { name: 'port', status: 'ok', message: `Shapewall is already serving this project at ${mine}` }
+  const free = await nextFreePort(port, host)
+  const { message, fix } = portInUse({ port, host, free, command: (next) => cliCommand(`serve --port ${next}`) })
+  return { name: 'port', status: 'warn', message: message.replace(/\.$/, ''), fix }
+}
+
+// Shapewall's own dependencies must be installed: a package.json for each,
+// where Node looks for it from here. A package left out of node_modules (an
+// interrupted install, a pruned folder) otherwise passes every check and
+// `serve` dies with "Cannot find package".
+// `lookIn(name)`: the node_modules folders Node would search, nearest first.
+export function checkInstall({
+  dependencies = PACKAGE.dependencies,
+  lookIn = (name) => require.resolve.paths(name) || [path.join(ROOT, 'node_modules')],
+  exists = fs.existsSync,
+} = {}) {
+  const missing = Object.keys(dependencies || {}).filter(
+    (name) => !lookIn(name).some((dir) => exists(path.join(dir, name, 'package.json'))),
+  )
+  if (!missing.length)
+    return { name: 'install', status: 'ok', message: `Dependencies installed (${Object.keys(dependencies || {}).length})` }
+  const shown = missing.slice(0, 5).join(', ') + (missing.length > 5 ? `, and ${missing.length - 5} more` : '')
+  return {
+    name: 'install',
+    status: 'fail',
+    message: `Shapewall's install is incomplete: ${missing.length === 1 ? 'a dependency is' : `${missing.length} dependencies are`} missing (${shown})`,
+    fix: 'Reinstall it: "npm install" in this project (or "npm install -g shapewall" for a global install), then run doctor again.',
+  }
+}
+
+// The site the config captures must answer, or capture fails every shot.
+// People run doctor before they start their dev server too, so a site
+// that does not answer is a warning that says what to do, not a FAIL:
+// serve works without it. Each board's default environment, a few at most.
+const SITE_TIMEOUT_MS = 5000
+const SITES_MAX = 4
+export async function checkSites(config, { fetchImpl = globalThis.fetch, network = true, timeoutMs = SITE_TIMEOUT_MS } = {}) {
+  if (!config) return []
+  const urls = [...new Set(config.boards.map((board) => board.environments?.[0]?.baseUrl || board.baseUrl).filter(Boolean))]
+  if (!network)
+    return urls.length ? [{ name: 'site', status: 'skip', message: `Not checked whether ${urls[0]} answers (no network checks)` }] : []
+  const checks = await Promise.all(urls.slice(0, SITES_MAX).map((url) => checkSite(url, { fetchImpl, timeoutMs })))
+  if (urls.length > SITES_MAX)
+    checks.push({ name: 'site', status: 'skip', message: `${urls.length - SITES_MAX} more base URLs not checked` })
+  return checks
+}
+
+export async function checkSite(url, { fetchImpl = globalThis.fetch, timeoutMs = SITE_TIMEOUT_MS } = {}) {
+  const start = `Start it (or fix baseUrl in the config) before "${cliCommand('capture')}"; serve works without it.`
+  try {
+    const response = await fetchImpl(url, { method: 'GET', redirect: 'manual', signal: AbortSignal.timeout(timeoutMs) })
+    response.body?.cancel?.().catch?.(() => {})
+    const status = response.status
+    if (status >= 500)
+      return {
+        name: 'site',
+        status: 'warn',
+        message: `${url} answers with HTTP ${status}`,
+        fix: 'Captures of an error page fail. Check the site.',
+      }
+    if (status === 401 || status === 403)
+      return {
+        name: 'site',
+        status: 'ok',
+        message: `${url} answers (HTTP ${status}: it needs a sign-in; see Auth in docs/config.md to capture signed in)`,
+      }
+    return { name: 'site', status: 'ok', message: `${url} answers (HTTP ${status})` }
+  } catch (error) {
+    const code = error?.cause?.code || error?.code
+    if (error?.name === 'TimeoutError' || error?.name === 'AbortError')
+      return { name: 'site', status: 'warn', message: `${url} did not answer within ${timeoutMs / 1000} s`, fix: start }
+    if (code === 'ECONNREFUSED')
+      return { name: 'site', status: 'warn', message: `Nothing answers at ${url} (connection refused): is the site running?`, fix: start }
+    if (code === 'ENOTFOUND' || code === 'EAI_AGAIN')
+      return {
+        name: 'site',
+        status: 'warn',
+        message: `The host of ${url} is not found`,
+        fix: 'Check baseUrl in the config (a typo, or a host only another network knows).',
+      }
+    return {
+      name: 'site',
+      status: 'warn',
+      message: `${url} could not be reached (${code || String(error?.message || error).slice(0, 120)})`,
+      fix: start,
+    }
+  }
 }
 
 function checkClient() {
@@ -270,7 +354,9 @@ export async function checkAgentBranches(config) {
 
 export async function runDoctor({
   configFile = null,
-  port = 4600,
+  // null: the port serve will use, the one this project's serve.json
+  // records (a running server, or the last one), else the default.
+  port = null,
   host = '127.0.0.1',
   launch = true,
   chromium = null,
@@ -282,12 +368,16 @@ export async function runDoctor({
 } = {}) {
   const { check: configCheck, config } = loadConfigCheck(configFile, { optional: configOptional })
   const useAcp = Boolean(acp || env.SHAPEWALL_AGENT_ACP || (config && agentSettings(config, env, { acp }).backend === 'acp'))
+  const recorded = recordedServe(config)
   const checks = [
     checkNode(),
+    checkInstall(),
     configCheck,
+    ...configWarningChecks(config),
     await checkBrowser(config, { launch, chromium }),
     checkStore(config),
-    await checkPort(port, host),
+    await checkPort(port ?? recorded?.port ?? DEFAULT_PORT, host, { running: recorded?.alive ? recorded.url : null }),
+    ...(await checkSites(config, { fetchImpl, network })),
     checkClient(),
     checkNotifications(config, env),
     useAcp ? await checkAcpAgent(config, env, { acp, launch }) : checkAgent(config, env),
@@ -302,13 +392,60 @@ export function formatDoctor(report) {
   const mark = { ok: 'ok  ', warn: 'warn', fail: 'FAIL', skip: 'skip' }
   const lines = report.checks.flatMap((check) => [`${mark[check.status]} ${check.message}`, ...(check.fix ? [`     ${check.fix}`] : [])])
   const how = invocation()
-  lines.push('', report.ok ? 'Ready.' : `Fix the FAIL lines above, then run "${how.command} doctor" again.`)
+  const warnings = report.checks.filter((check) => check.status === 'warn').length
+  lines.push(
+    '',
+    !report.ok
+      ? `Fix the FAIL lines above, then run "${how.command} doctor" again.`
+      : warnings
+        ? `Ready, with ${warnings} warning${warnings === 1 ? '' : 's'} above.`
+        : 'Ready.',
+  )
   if (how.note) lines.push(`(Commands above are written as "${how.command}": ${how.note}.)`)
   return lines.join('\n')
 }
 
 // A line of the box Playwright's installer draws around its npx warning.
 export const isInstallerBox = (line) => /^\s*[\u2554\u2551\u255A]/.test(line)
+
+// Playwright says this once per download (Chromium, its headless shell,
+// ffmpeg) on a Linux it does not list, Fedora or Arch among them, in capitals.
+const UNSUPPORTED_OS_RE = /^\s*BEWARE: your OS is not officially supported by Playwright/
+export const UNSUPPORTED_OS_NOTE =
+  'Note: Playwright does not list this Linux distribution, so it downloads its generic Linux build. That works on most distributions; if Chromium then does not start, doctor says which system libraries it needs.'
+
+// What to print for one line of the installer's output: the line, our note
+// instead of the first "BEWARE" (null for the others), or null for the box.
+// `state` remembers whether the note was printed.
+export function installerLine(line, state) {
+  if (isInstallerBox(line)) return null
+  if (UNSUPPORTED_OS_RE.test(line)) {
+    if (state.noted) return null
+    state.noted = true
+    return UNSUPPORTED_OS_NOTE
+  }
+  return line
+}
+
+// Line by line through installerLine into `write`; returns { push, end }.
+function installerFilter(write, state) {
+  let rest = ''
+  return {
+    push(chunk) {
+      const lines = (rest + chunk).split('\n')
+      rest = lines.pop()
+      for (const line of lines) {
+        const shown = installerLine(line, state)
+        if (shown !== null) write(`${shown}\n`)
+      }
+    },
+    end() {
+      const shown = rest ? installerLine(rest, state) : null
+      if (shown) write(shown)
+      rest = ''
+    },
+  }
+}
 
 // Downloads Chromium for the bundled Playwright (its own CLI, so the browser
 // build always matches). Resolves with the exit code.
@@ -318,26 +455,38 @@ export function installBrowser({ stdio = 'inherit' } = {}) {
     // meant for `npx playwright install` in a project without Playwright
     // ("install your project's dependencies first"). It does not apply here
     // (this Playwright is Shapewall's own) and reads as a failure, so the box
-    // is left out; every other line passes through.
+    // is left out, and its "BEWARE: your OS is not officially supported" (on
+    // stdout, once per download) becomes one calm note; every other line
+    // passes through. Its progress bar is then the plain one it prints when
+    // the output is not a terminal.
     const filter = stdio === 'inherit'
     const child = spawn(process.execPath, [playwrightCli(), 'install', 'chromium'], {
-      stdio: filter ? ['inherit', 'inherit', 'pipe'] : stdio,
+      stdio: filter ? ['inherit', 'pipe', 'pipe'] : stdio,
       shell: false,
     })
     if (filter) {
-      let rest = ''
-      const write = (text) => {
-        const lines = text.split('\n')
-        rest = lines.pop()
-        for (const line of lines) if (!isInstallerBox(line)) process.stderr.write(`${line}\n`)
+      const state = { noted: false }
+      for (const [stream, target] of [
+        [child.stdout, process.stdout],
+        [child.stderr, process.stderr],
+      ]) {
+        const lines = installerFilter((text) => target.write(text), state)
+        stream.setEncoding('utf8')
+        stream.on('data', (chunk) => lines.push(chunk))
+        stream.on('end', () => lines.end())
       }
-      child.stderr.setEncoding('utf8')
-      child.stderr.on('data', (chunk) => write(rest + chunk))
-      child.stderr.on('end', () => {
-        if (rest && !isInstallerBox(rest)) process.stderr.write(rest)
-      })
     }
     child.once('error', reject)
-    child.once('exit', (code) => resolve(code ?? 1))
+    // 'close', not 'exit': the last of its output is written by then.
+    child.once('close', (code) => resolve(code ?? 1))
   })
+}
+
+// A config key Shapewall does not use (a typo, most often): one warning
+// each, with the key it probably meant (config-keys.js).
+export function configWarningChecks(config) {
+  const warnings = config?.warnings || []
+  const checks = warnings.slice(0, 10).map((warning) => ({ name: 'config-key', status: 'warn', message: formatKeyWarning(warning) }))
+  if (warnings.length > 10) checks.push({ name: 'config-key', status: 'warn', message: `and ${warnings.length - 10} more unknown keys` })
+  return checks
 }

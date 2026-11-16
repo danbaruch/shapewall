@@ -17,7 +17,7 @@ for a team.
 
 ## What you need
 
-- Node.js 22.13 or newer, on Linux, macOS or Windows. Linux is the primary tested platform.
+- Node.js 22.19 or newer, on Linux, macOS or Windows. Linux is the primary tested platform.
 - Chromium for captures: Playwright's own (one install command) or a Chrome you already have.
 - A site to point it at: a local dev server, a preview deploy, staging or production.
 

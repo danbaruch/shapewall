@@ -9,7 +9,7 @@ Start with a running site, choose its pages, capture them and open the wall.
 
 <!-- /prelaunch -->
 
-Shapewall runs on Linux, macOS and Windows with **Node.js 22.13 or newer**. Linux is the primary tested platform.
+Shapewall runs on Linux, macOS and Windows with **Node.js 22.19 or newer**. Linux is the primary tested platform.
 
 On a bare Linux server, a container or WSL, the downloaded Chromium also needs system libraries: run
 `sudo npx playwright install-deps chromium` once (`shapewall doctor` tells you when this is the problem).
@@ -171,7 +171,10 @@ several repositories, serve one project per checkout and switch between them in 
 1. Capture the state you want reviewed. For a signed-in page, run `shapewall auth record` first.
 2. Pin a comment to the element that should change, on the desktop or phone frame where you see the problem.
 3. Connect your agent: click **Connect** next to the agent CLI the board found, or set up an endpoint in Settings.
-4. Press **Fix with agent**, answer its permission requests, and read the diff. The board recaptures the pages it changed.
+4. Press **Fix with agent** and read the diff. The board recaptures the pages it changed. The agent runs under its own permission
+   settings: in a mode that asks (Claude Code's `default`), its requests show in the panel for you to answer; in one that acts
+   without asking (Claude Code's `auto`, which `claude-agent-acp` 0.106.0 starts in when no mode is set), it edits and runs commands
+   straight away. The panel names the mode in effect.
 5. Check before and after in the comment's thread, then resolve it. If the agent's sign-in or model fails, the turn says so and waits.
 
 More in [chat with an agent](/docs/chat#source-folder-and-agent-sign-in).

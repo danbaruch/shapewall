@@ -1,7 +1,6 @@
 // `shapewall github` and `shapewall doctor`.
 
 import { getBoard, loadConfig } from '../config.js'
-import { DEFAULT_PORT } from '../serve-state.js'
 import { acpFlag } from './serve.js'
 
 export async function github(positional, flags, out) {
@@ -49,8 +48,9 @@ export async function doctor(flags, out) {
     const code = await installBrowser()
     if (code !== 0) throw new Error('the browser download failed (see above)')
   }
-  const port = flags.port === undefined ? DEFAULT_PORT : Number(flags.port)
-  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('--port must be a port number')
+  // No --port: the port serve would use (the one this project last served on, else the default).
+  const port = flags.port === undefined ? null : Number(flags.port)
+  if (port !== null && (!Number.isInteger(port) || port < 1 || port > 65535)) throw new Error('--port must be a port number')
   // --install-browser works anywhere (the demo runs it in the Shapewall clone): no config is a skip there.
   const report = await runDoctor({
     configFile: flags.config,

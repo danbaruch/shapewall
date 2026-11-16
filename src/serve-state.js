@@ -51,6 +51,22 @@ export function clearServeState(config) {
   }
 }
 
+// What serve.json records, running or not: { url, port, alive }, or null.
+// A file a crashed server left still says which port the project was last
+// served on, so doctor checks that one rather than the default.
+export function recordedServe(config) {
+  if (!config?.outputDir) return null
+  try {
+    const state = JSON.parse(fs.readFileSync(stateFile(config), 'utf8'))
+    if (typeof state?.url !== 'string' || !/^https?:\/\//.test(state.url)) return null
+    const port = Number(new URL(state.url).port)
+    if (!Number.isInteger(port) || port < 1 || port > 65535) return null
+    return { url: state.url, port, alive: alive(state.pid) }
+  } catch {
+    return null
+  }
+}
+
 // The running server's URL, or null.
 export function runningBoardUrl(config) {
   if (!config?.outputDir) return null
