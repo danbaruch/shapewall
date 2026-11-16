@@ -224,6 +224,24 @@ test('tailnet sign-in as it is by default: Tailscale is the only sign-in, no pas
   )
   for (const gone of ['[data-sw-passkeys]', '[data-sw-recovery]', '[data-sw-tailnet-unlink]'])
     assert.equal(await ada.page.locator(gone).count(), 0, gone)
+  // Account activity and the device list agree: every session and every sign-in is by tailnet, none by passkey
+  // (a server with passkeys off, as it starts by default; the session rows say so too).
+  await ada.page.locator('[data-sw-security-event="signed_in"]').first().waitFor()
+  await ada.page.locator('[data-sw-session-tailnet]').first().waitFor()
+  const sessionRows = plain.db.prepare("SELECT s.via FROM sessions s JOIN users u ON u.id = s.user_id WHERE u.handle = 'ada'").all()
+  assert.ok(sessionRows.length > 0)
+  assert.ok(
+    sessionRows.every((row) => row.via === 'tailnet'),
+    'stored as tailnet sessions',
+  )
+  assert.equal(await ada.page.locator('[data-sw-session-tailnet]').count(), sessionRows.length, 'every device: "Signed in by tailnet"')
+  const signIns = await ada.page.locator('[data-sw-security-event="signed_in"]').allTextContents()
+  assert.ok(signIns.length > 0)
+  for (const text of signIns) {
+    assert.match(text, /Signed in by tailnet/)
+    assert.doesNotMatch(text, /passkey/i)
+  }
+  assert.doesNotMatch(await ada.page.textContent('[data-sw-security-log]'), /Signed in with a passkey/)
   await shot(ada.page, 'only-3-account')
 
   // ---- Settings: nothing to switch on; what still asks is said ----

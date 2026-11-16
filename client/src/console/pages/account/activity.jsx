@@ -2,43 +2,17 @@ import { History, ShieldAlert, ShieldCheck } from 'lucide-react'
 import { Button, Spinner } from '../../../components/ui'
 import { Card, CardHeader, LoadError, Loading, Time } from '../../components'
 import { usePagedLoad } from '../../state'
+import { securityLabel } from '../../lib/security-labels'
 
 // What happened to this account, newest first: sign-ins (and how), passkeys
-// added or removed, recovery codes, devices signed out.
-const SECURITY_LABEL = {
-  account_created: () => 'Account created',
-  signed_in: (detail) =>
-    detail.via === 'recovery_code'
-      ? 'Signed in with a recovery code'
-      : detail.via === 'rebind'
-        ? 'Signed in after moving to a new address'
-        : detail.newDevice
-          ? 'Signed in on a new device'
-          : 'Signed in with a passkey',
-  passkey_added: (detail) =>
-    detail.via === 'rebind'
-      ? 'Passkey added for the new address'
-      : detail.viaRecovery
-        ? 'Passkey added after a recovery-code sign-in'
-        : detail.viaTailnet
-          ? 'First passkey added in a tailnet session (on hold for 24 hours)'
-          : 'Passkey added',
-  rebind_started: () => 'Started moving your sign-in to a new address',
-  passkey_removed: () => 'Passkey removed',
-  passkey_renamed: () => 'Passkey renamed',
-  recovery_codes_created: () => 'New recovery codes made',
-  sessions_revoked: () => 'Signed out every other device',
-  session_revoked: () => 'Signed out a device',
-  workspace_deleted: () => 'Deleted a workspace',
-}
-export function securityLabel(event) {
-  const label = SECURITY_LABEL[event.action]
-  return label ? label(event.detail || {}) : event.action.replaceAll('_', ' ')
-}
+// added or removed, recovery codes, devices signed out. The labels are in
+// client/src/console/lib/security-labels.js.
+
 function securityExtra(event) {
   const detail = event.detail || {}
   const parts = []
   if (detail.device) parts.push(detail.device)
+  if (event.action === 'signed_in' && detail.via === 'tailnet' && typeof detail.tailnet === 'string') parts.push(detail.tailnet)
   if (detail.otherSessionsEnded) parts.push('other devices signed out')
   if (typeof detail.codesLeft === 'number') parts.push(`${detail.codesLeft} ${detail.codesLeft === 1 ? 'code' : 'codes'} left`)
   if (event.ip) parts.push(event.ip)

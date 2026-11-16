@@ -260,8 +260,8 @@ Good to know:
   to the login, so a login handed to someone else later inherits neither the account nor its sessions: a request with the right
   login behind another user id is nobody ([an account is held to the tailnet user](#on-the-servers-own-machine)). The cookie is
   stored under the hash of `tailnet:<token>` rather than of the token alone, so a build without tailnet sign-in finds nothing for
-  it. It is marked "Signed in by tailnet" in the device list,
-  `via: tailnet` in the account's log, and `signedInBy: tailnet` on what it does in the workspace's audit log (Activity shows a
+  it. It is marked "Signed in by tailnet" in the device list and in Account activity,
+  `via: tailnet` on its session and in the account's log, and `signedInBy: tailnet` on what it does in the workspace's audit log (Activity shows a
   "tailnet" mark).
 - **Signing out** keeps that browser signed out until you press "Continue as ada@example.com" on the sign-in page. Arriving again
   would otherwise sign you straight back in; the page says so.
@@ -2040,7 +2040,8 @@ Old-host passkeys show "For old.example" on the Account page.
 Use the operator commands below for a consistent database and file copy. Copying the SQLite file alone, or copying files after an
 unlocked database snapshot, is not a complete backup of a board.
 
-**Migrations** run at start (`src/hosted/db.js`, `PRAGMA user_version`); each is additive. Back up before upgrading.
+**Migrations** run at start (`src/hosted/db.js`, `PRAGMA user_version` and the `schema_migrations` ledger); each is additive
+except 18, which rebuilds `sessions` ([Migration 18 and rollback](#migration-18-and-rollback)). Back up before upgrading.
 
 - **4** (hosted QA fixes): `invites.note TEXT` (the invite's note) and `users.security_seen_at TEXT` (when the account last dismissed
   the recovery-code notice). Rollback: an older build ignores both columns, so the simplest rollback is to run the older build on the
@@ -2496,7 +2497,9 @@ users_tailnet_login; ALTER TABLE users DROP COLUMN tailnet_login; ALTER TABLE us
 users DROP COLUMN tailnet_user_id; ALTER TABLE passkeys DROP COLUMN tailnet_added_from; DROP TABLE server_settings; ALTER TABLE
 sessions DROP COLUMN tailnet_login; ALTER TABLE invites DROP COLUMN tailnet_login; ALTER TABLE workspaces DROP COLUMN step_up;
 DELETE FROM schema_migrations WHERE version = 17;`, then set `PRAGMA user_version` to the highest version left in
-`schema_migrations` (16 where the saved Usage layouts are there, else 15).
+`schema_migrations` (16 where the saved Usage layouts are there, else 15). Where migration 18 ran, roll it back first
+([Migration 18 and rollback](#migration-18-and-rollback)): its check names `sessions.tailnet_login`, so the column cannot be
+dropped before.
 
 **A database from a build of this release before it was released.** While 0.7.0 was being made, the sign-in migration was
 numbered 16 for a while. A database such a build opened says "16 ran" in its ledger, which now means the Usage layouts. The
@@ -2508,6 +2511,84 @@ and do not depend on each other. The server keeps a ledger of what ran (`schema_
 either order: a database that ran only 16 runs 17 on the next start, and one that ran only 17 runs 16. `PRAGMA user_version` is
 the highest number applied, not a count. Rolling one back does not touch the other; remove only its own row from
 `schema_migrations`.
+
+### Migration 18 and rollback
+
+Migration 18 (0.9.0) records a tailnet sign-in as one. It is the first migration that rewrites a table instead of adding to one:
+
+- `sessions.via` may now be `tailnet` as well as `passkey` and `recovery`, and a check keeps `tailnet` to rows that carry a
+  `tailnet_login`;
+- `sessions.tailnet_login` is never the empty string (another check): it is a login or `NULL`;
+- every existing session with a `tailnet_login` is marked `tailnet` (before, such a session was stored as `passkey` with its
+  login beside it). A row whose login is `''` (no build writes one; only a hand-made row can have it) is copied with `NULL`
+  instead and keeps its `via`: the server's code read `''` as "no login" while its SQL read it as a login, and now both
+  read it as none. Such a row is then an ordinary session, found by the hash of its token; one stored under a tailnet hash is
+  never found.
+
+Why a rebuild: SQLite cannot change a `CHECK` in place, so the server makes the new `sessions` table, copies every row into it,
+drops the old one, renames the new one and makes its two indexes again (`sessions_user`, `sessions_id`), as SQLite documents.
+All of it runs in the same transaction as the ledger entry, so a failure leaves the database as it was and the server does not
+start. Nothing Shapewall makes references `sessions` (no foreign key, trigger or view), so dropping the old table touches nothing
+else. Two cases only a hand-made schema has:
+
+- **A view on `sessions`** makes the migration fail with `error in view <name>: no such table: main.sessions`. The server does not
+  start and the file is left as it was (still at 17). Drop the view, start the server, then make the view again.
+- **A trigger on `sessions`** is dropped with the old table, and the migration succeeds without it. Note its `CREATE TRIGGER`
+  first (`SELECT sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'sessions';`) and make it again afterwards.
+
+A session
+whose account no longer exists is not copied (it can only exist if foreign keys were switched off at some point, and it could
+never be used: signing in with it finds no account). Signed-in browsers stay signed in: the token hashes are copied as they are.
+
+What it does not change: who may do what. The server never decided anything from the stored `via`. How a session came in is read
+from `tailnet_login` (the column the session's hash is bound to): a row with a login is a tailnet session whatever `via` says,
+and a row without one never is. The `verified_at` of a tailnet session stays `1970-01-01T00:00:00.000Z`, the mark for "no
+passkey was checked at sign-in", until a passkey of the account confirms it.
+
+For rollback, prefer the pre-upgrade backup in a fresh data folder with the previous release. Running the previous build on the
+upgraded database also works with no change to it: the previous build reads how a session came in from `tailnet_login` as this
+one does, and the new check allows what it writes (a tailnet session stored as `passkey` with its login). Sessions it makes are
+stored that way, and stay so after upgrading again; they still show as tailnet sessions everywhere.
+
+To put the table back as it was (with the server stopped; any SQLite 3.25+ `sqlite3` shell, or Node's `node:sqlite`). Roll this
+back before rolling back migration 17, whose rollback drops `sessions.tailnet_login`:
+
+```sql
+BEGIN IMMEDIATE;
+CREATE TABLE sessions_v17 (
+  token_hash TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  verified_at TEXT NOT NULL,
+  via TEXT NOT NULL DEFAULT 'passkey' CHECK (via IN ('passkey', 'recovery')),
+  id TEXT,
+  user_agent TEXT,
+  ip TEXT,
+  admin_seen_at TEXT,
+  tailnet_login TEXT
+);
+INSERT INTO sessions_v17
+  (token_hash, user_id, created_at, last_seen_at, expires_at, verified_at, via, id, user_agent, ip, admin_seen_at, tailnet_login)
+  SELECT token_hash, user_id, created_at, last_seen_at, expires_at, verified_at,
+    CASE WHEN via = 'tailnet' THEN 'passkey' ELSE via END,
+    id, user_agent, ip, admin_seen_at, tailnet_login
+  FROM sessions;
+DROP TABLE sessions;
+ALTER TABLE sessions_v17 RENAME TO sessions;
+CREATE INDEX sessions_user ON sessions(user_id);
+CREATE UNIQUE INDEX sessions_id ON sessions(id);
+DELETE FROM schema_migrations WHERE version = 18;
+PRAGMA user_version = 17;
+COMMIT;
+```
+
+Every session survives it, tailnet sessions as `passkey` with their login (as before 0.9.0). A login that was `''` before the upgrade stays `NULL`. `PRAGMA user_version` is the
+highest version left in `schema_migrations`: 17 unless a later migration is there too. The next upgrade runs 18 again. Never
+reset the ledger any other way. Test a rollback on a copy first: `PRAGMA integrity_check;` says `ok`, and `SELECT via,
+tailnet_login IS NOT NULL, COUNT(*) FROM sessions GROUP BY 1, 2;` shows the same sessions as before, with `tailnet` back to
+`passkey`.
 
 ## Secrets, logs and legal review
 
