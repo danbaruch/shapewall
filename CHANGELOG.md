@@ -3,7 +3,7 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
-## 0.8.0 - 2026-11-16
+## Unreleased
 
 - **Dictate a comment.** A microphone button under a new comment, a reply and an edit, on the desktop popover, the phone sheets,
   hosted boards and the demo. Press it and talk: the words appear live at the caret (or replace the selection), with a space and
@@ -15,6 +15,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
   Dictation only starts from a press, and the first press says this once before anything listens. A hosted board's comment
   share links now allow the microphone for the board page itself (`Permissions-Policy: microphone=(self)`); view-only links,
   public boards and live HTML snapshots keep `microphone=()`. See [Dictation](website/src/docs/getting-started.md#dictation).
+
+## 0.8.0 - 2026-11-16
 
 - **Opt-in error reports for your own server.** Set `SHAPEWALL_ERROR_DSN` (any Sentry-compatible DSN: Sentry, GlitchTip) and
   `shapewall serve` or `shapewall hosted` reports its unhandled errors there, and the pages it serves report browser errors to the
