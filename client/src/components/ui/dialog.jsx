@@ -1,3 +1,4 @@
+import { useRef } from 'react'
 import { Dialog as DialogPrimitive } from 'radix-ui'
 import { cva } from 'class-variance-authority'
 import { ChevronLeft, X } from 'lucide-react'
@@ -62,6 +63,21 @@ export function Dialog({
   maxHeight = null,
 }) {
   useOverlayEntry(open, onClose)
+  // What had focus when the dialog opened (the button that opened it), read
+  // during the render that opens it, before the dialog moves focus. Without a
+  // Radix trigger nothing else knows it, and Escape left focus on the page body.
+  const opener = useRef(null)
+  const wasOpen = useRef(false)
+  if (open && !wasOpen.current && typeof document !== 'undefined') opener.current = document.activeElement
+  wasOpen.current = open
+  const restoreFocus = (event) => {
+    const target = opener.current
+    opener.current = null
+    if (target && target !== document.body && target.isConnected) {
+      event.preventDefault()
+      target.focus({ preventScroll: true })
+    }
+  }
   return (
     <DialogPrimitive.Root open={open} onOpenChange={(next) => (next ? null : onClose())}>
       <DialogPrimitive.Portal>
@@ -70,7 +86,7 @@ export function Dialog({
           className={cn(panelVariants({ size }), className)}
           style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)', ...(maxHeight ? { maxHeight } : null) }}
           onOpenAutoFocus={focusFirst}
-          onCloseAutoFocus={onCloseAutoFocus}
+          onCloseAutoFocus={onCloseAutoFocus || restoreFocus}
           // A field that uses Escape itself (editing a message: Escape cancels
           // the edit) marks itself data-sw-own-escape: the dialog stays open.
           onEscapeKeyDown={(event) => {

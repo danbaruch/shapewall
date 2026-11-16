@@ -58,6 +58,7 @@ export function TokensSection() {
   const shown = list.filter((item) => (filter === 'all' ? true : filter === 'active' ? item.status === 'active' : item.status !== 'active'))
   // A token works only while its maker is an admin here: these stopped.
   const orphans = list.filter((item) => item.status === 'inactive')
+  const counted = Boolean(tokens.data) && !tokens.error
   return (
     <>
       <PageHeader
@@ -94,10 +95,11 @@ export function TokensSection() {
           className="w-full sm:inline-flex sm:w-auto"
           itemClassName="h-11 px-3 lg:h-8"
           options={[
-            // Counts on every option, so "Not working" matches the notice above.
-            { id: 'active', label: 'Active', count: list.filter((item) => item.status === 'active').length },
-            { id: 'inactive', label: 'Not working', count: list.filter((item) => item.status !== 'active').length },
-            { id: 'all', label: 'All', count: list.length },
+            // Counts on every option, so "Not working" matches the notice above;
+            // none while the list has not loaded (a count of 0 would be a claim).
+            { id: 'active', label: 'Active', count: counted ? list.filter((item) => item.status === 'active').length : undefined },
+            { id: 'inactive', label: 'Not working', count: counted ? list.filter((item) => item.status !== 'active').length : undefined },
+            { id: 'all', label: 'All', count: counted ? list.length : undefined },
           ]}
         />
       </div>
@@ -199,7 +201,10 @@ export function TokenList({ tokens, onChanged, showProject = false }) {
                 Last used <Time value={token.lastUsedAt} empty="never" />
               </p>
               <p className="mt-0.5">
-                {token.expiresAt ? (
+                {/* A revoked token says when it stopped, not when it would have expired. */}
+                {token.status === 'revoked' && token.revokedAt ? (
+                  <Time value={token.revokedAt} prefix="Revoked " />
+                ) : token.expiresAt ? (
                   <Time value={token.expiresAt} prefix={token.status === 'expired' ? 'Expired ' : 'Expires '} />
                 ) : (
                   'No expiry'

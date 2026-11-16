@@ -1,11 +1,12 @@
-// The labels of Account activity (client/src/console/lib/security-labels.js),
-// without a browser: each sign-in method, with and without a new device, and
-// what an unknown, missing or inherited `via` says.
+// The console's plain label helpers, without a browser: Account activity (each
+// sign-in method, with and without a new device, and what an unknown, missing or
+// inherited `via` says), the passkey line, and a role inside a sentence.
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { passkeyStorage, passkeyTransports, securityLabel, signInLabel } from '../client/src/console/lib/security-labels.js'
 import { ACCOUNT_ACTIONS } from '../src/hosted/usage-shape.js'
+import { roleInSentence } from '../client/src/console/lib/role-words.js'
 
 test('a sign-in is labelled by how it happened, with and without a new device', () => {
   const cases = [
@@ -83,4 +84,12 @@ test('the passkey line reads in sentence case: where it lives and how it connect
   assert.equal(passkeyStorage({ storage: 'unsynced' }), 'Not synced yet')
   assert.equal(passkeyStorage({ synced: true }), 'Synced')
   assert.equal(passkeyStorage({ storage: 'toString' }), 'This device only')
+})
+
+test('a role inside a sentence takes its article: "is now an admin", "is now a member"', () => {
+  assert.equal(roleInSentence('admin'), 'an admin')
+  assert.equal(roleInSentence('owner'), 'an owner')
+  assert.equal(roleInSentence('member'), 'a member')
+  assert.equal(roleInSentence('viewer'), 'a viewer')
+  assert.equal(roleInSentence('constructor'), 'a member')
 })

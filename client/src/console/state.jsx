@@ -188,6 +188,7 @@ export function ReauthProvider({ children }) {
       ?.map((key) => key.onHoldUntil)
       .filter(Boolean)
       .sort()[0] || null
+  const held = Boolean(onHold) && !noPasskey
 
   return (
     <ReauthContext.Provider value={withReauth}>
@@ -195,7 +196,7 @@ export function ReauthProvider({ children }) {
       <Dialog
         open={Boolean(pending)}
         onClose={cancel}
-        title={typed ? 'Type to confirm' : askAdd ? 'Add a passkey first' : "Confirm it's you"}
+        title={typed ? 'Type to confirm' : askAdd ? (held ? 'Your new passkey is on hold' : 'Add a passkey first') : "Confirm it's you"}
         footer={
           typed ? (
             <>
@@ -214,6 +215,11 @@ export function ReauthProvider({ children }) {
                 Confirm
               </Button>
             </>
+          ) : askAdd && held ? (
+            // A passkey added in this session is on hold: another one would be too.
+            <Button size="touch" variant="default" onClick={cancel} data-sw-reauth-close className="lg:h-10">
+              Close
+            </Button>
           ) : askAdd ? (
             <>
               <Button size="touch" variant="ghost" onClick={cancel} className="lg:h-10">
@@ -271,13 +277,26 @@ export function ReauthProvider({ children }) {
             </form>
           ) : noPasskey ? (
             <p data-sw-reauth-no-passkey>{pending.message}</p>
+          ) : askAdd && held ? (
+            <>
+              <p data-sw-reauth-recovery data-sw-reauth-held>
+                You signed in with a recovery code. The passkey you added then can confirm changes like this one from{' '}
+                <span className="font-medium text-fg">{formatDateTime(onHold)}</span>: for your safety, not sooner.
+              </p>
+              <button
+                type="button"
+                className="text-[13px] font-medium text-accent underline-offset-2 hover:underline"
+                onClick={() => setTryExisting(true)}
+              >
+                I still have an older passkey: use it
+              </button>
+            </>
           ) : askAdd ? (
             <>
               <p data-sw-reauth-recovery>
                 You signed in with a recovery code, so there is no passkey to confirm this change with. Add a passkey first: for your
                 safety, a passkey added this way can confirm changes like this one 24 hours after it is added.
               </p>
-              {onHold ? <p>Your new passkey can confirm changes from {formatDateTime(onHold)}.</p> : null}
               <button
                 type="button"
                 className="text-[13px] font-medium text-accent underline-offset-2 hover:underline"

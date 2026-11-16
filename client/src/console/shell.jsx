@@ -170,6 +170,14 @@ export function AppShell({ children }) {
   return (
     <SectionsContext.Provider value={setPageSections}>
       <div className="flex min-h-dvh">
+        {/* The first stop for the keyboard: past the sidebar and the header to the page. */}
+        <a
+          href="#main"
+          className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-md focus:bg-surface focus:p-3 focus:text-fg focus:shadow-card focus:outline-2 focus:outline-accent"
+          data-sw-skip-link
+        >
+          Skip to content
+        </a>
         {wide ? (
           <AppRail
             expanded={expanded}
@@ -273,7 +281,11 @@ export function AppShell({ children }) {
               </Notice>
             </div>
           ) : null}
-          <main className="mx-auto w-full max-w-6xl flex-1 animate-fade-in px-3 pt-5 pb-10 sm:px-6 sm:pt-8" id="main">
+          <main
+            className="mx-auto w-full max-w-6xl flex-1 animate-fade-in px-3 pt-5 pb-10 outline-none sm:px-6 sm:pt-8"
+            id="main"
+            tabIndex={-1}
+          >
             {children}
           </main>
           <ConsoleFooter transport={api} />

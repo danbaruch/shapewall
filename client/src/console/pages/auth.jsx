@@ -176,11 +176,13 @@ export function SignIn() {
   return (
     <AuthLayout>
       <Card className="p-6 sm:p-8">
-        <h1 className="text-xl font-semibold text-fg">Sign in</h1>
+        <h1 className="text-xl font-semibold text-fg">{recovery ? 'Sign in with a recovery code' : 'Sign in'}</h1>
         <p className="mt-1 text-sm text-muted">
-          {!me && session?.tailnet && !['none', 'self', 'changed'].includes(session.tailnet.state)
-            ? 'On this server your tailnet login is the sign-in. A passkey works too, if you made one.'
-            : 'Use the passkey you made for Shapewall: on this device, in a password manager or on your phone.'}
+          {recovery
+            ? 'Your handle and one of the codes you saved when you made your account.'
+            : !me && session?.tailnet && !['none', 'self', 'changed'].includes(session.tailnet.state)
+              ? 'On this server your tailnet login is the sign-in. A passkey works too, if you made one.'
+              : 'Use the passkey you made for Shapewall: on this device, in a password manager or on your phone.'}
         </p>
         {moving ? (
           <Notice tone="info" className="mt-4" title={`This server is moving to ${hostOf(moving.to)}`} data-sw-moving-notice>
@@ -268,6 +270,8 @@ export function SignIn() {
               className="w-full"
               onClick={() => {
                 stopAutofill()
+                // A failed passkey attempt says nothing about the recovery code.
+                setError(null)
                 setRecovery(true)
               }}
             >
@@ -307,7 +311,14 @@ export function SignIn() {
             </Field>
             <FormError error={error} />
             <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-              <Button variant="ghost" size="touch" onClick={() => setRecovery(false)}>
+              <Button
+                variant="ghost"
+                size="touch"
+                onClick={() => {
+                  setError(null)
+                  setRecovery(false)
+                }}
+              >
                 Back
               </Button>
               <Button type="submit" variant="default" size="touch" disabled={busy || !handle || !code}>
@@ -376,7 +387,7 @@ export function RecoveryCodes({ codes, onDone, doneLabel = 'Continue' }) {
       >
         {codes.map((item, index) => (
           <li key={item} className="flex gap-2" data-sw-recovery-code-item>
-            <span className="w-5 text-right text-faint tabular">{index + 1}.</span>
+            <span className="w-6 shrink-0 text-right text-faint tabular">{index + 1}.</span>
             <span className="sw-secret select-all break-all">{item}</span>
           </li>
         ))}
