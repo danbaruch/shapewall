@@ -65,6 +65,9 @@ rely on one to make another safe, and never add `allow-scripts` to the frame or 
 
 Prettier (no semicolons, single quotes, 140 columns) and ESLint. Plain JavaScript (ESM), Node 22+. Comments explain why, not what.
 
+Board UI: use the kit in `client/src/components/ui/` and follow [the design system](docs/design-system.md), which covers the
+components, the tokens and the rules a new control has to keep.
+
 ## Releasing
 
 A release is a tag. Nobody publishes from a laptop, and no npm token or approval is involved.

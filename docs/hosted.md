@@ -25,23 +25,30 @@ SSRF surface. You capture on your machine or in CI (it can reach `localhost` and
 shapewall hosted --data /var/lib/shapewall-hosted --origin https://app.example.com --port 4700 --trust-proxy
 ```
 
-| Flag                    | Env                                      | Default                   | What                                                                                                                                                       |
-| ----------------------- | ---------------------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--data DIR`            | `SHAPEWALL_HOSTED_DATA`                  | `./shapewall-hosted-data` | Database, secret, pushed files                                                                                                                             |
-| `--origin URL`          | `SHAPEWALL_HOSTED_ORIGIN`                | `http://HOST:PORT`        | The public origin. Passkeys are bound to its host name (the RP ID).                                                                                        |
-| `--port`/`--host`       |                                          | `4700` on `127.0.0.1`     | Keep it on loopback behind a reverse proxy                                                                                                                 |
-| `--signup`              | `SHAPEWALL_HOSTED_SIGNUP`                | `invite`                  | `invite`: only invite links (and the setup link). `open`: anyone                                                                                           |
-| `--trust-proxy`         | `SHAPEWALL_HOSTED_TRUST_PROXY=1`         | off                       | Client IPs from `X-Forwarded-For` (only from a proxy on this host)                                                                                         |
-|                         | `SHAPEWALL_HOSTED_SECRET`                | `<data>/secret.key`       | Key for signed live-HTML URLs (made on first start, mode 0600)                                                                                             |
-|                         | `RESEND_API_KEY`                         | unset                     | With `SHAPEWALL_EMAIL_FROM`: invite emails through Resend                                                                                                  |
-|                         | `SHAPEWALL_EMAIL_FROM`                   | unset                     | Sender for invite emails, e.g. `Shapewall <invites@example.com>`                                                                                           |
-| `--previous-origin URL` | `SHAPEWALL_HOSTED_PREVIOUS_ORIGIN`       | unset                     | The old origin during a move ([Moving to a new origin](#moving-to-a-new-origin))                                                                           |
-| `--report-email ADDR`   | `SHAPEWALL_HOSTED_REPORT_EMAIL`          | unset                     | "Report this board" on public projects opens a mail to this address                                                                                        |
-| `--tailnet-sign-in`     | `SHAPEWALL_HOSTED_TAILNET_SIGN_IN=1`     | off                       | With `--tailscale`: a tailnet user is signed in as the account linked to their tailnet login, no passkey ([Tailnet sign-in](#tailnet-sign-in)). Linux only |
-| `--tailnet-passkeys`    | `SHAPEWALL_HOSTED_TAILNET_PASSKEYS=1`    | off                       | With `--tailnet-sign-in`: also allow passkeys ([With passkeys also allowed](#with-passkeys-also-allowed)); `hosted admin passkeys on\|off` wins over it    |
-| `--owners-see-sign-ins` | `SHAPEWALL_HOSTED_OWNERS_SEE_SIGN_INS=1` | off                       | Workspace owners see their members' sign-ins, passkey events and devices in Activity. For a server with one team ([Activity](#the-activity-page))          |
-|                         | `SHAPEWALL_TURNSTILE_SITE_KEY`           | unset                     | With `SHAPEWALL_TURNSTILE_SECRET`: a Cloudflare Turnstile check on open sign-up and comment share links                                                    |
-|                         | `SHAPEWALL_TURNSTILE_SECRET`             | unset                     | Turnstile secret key. Both keys or neither (one alone is a warning and stays off)                                                                          |
+| Flag                    | Env                                                | Default                         | What                                                                                                                                                                                                                                          |
+| ----------------------- | -------------------------------------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--data DIR`            | `SHAPEWALL_HOSTED_DATA`                            | `./shapewall-hosted-data`       | Database, secret, pushed files                                                                                                                                                                                                                |
+| `--origin URL`          | `SHAPEWALL_HOSTED_ORIGIN`                          | `http://HOST:PORT`              | The public origin. Passkeys are bound to its host name (the RP ID).                                                                                                                                                                           |
+| `--port`/`--host`       |                                                    | `4700` on `127.0.0.1`           | Keep it on loopback behind a reverse proxy                                                                                                                                                                                                    |
+| `--signup`              | `SHAPEWALL_HOSTED_SIGNUP`                          | `invite`                        | `invite`: only invite links (and the setup link). `open`: anyone                                                                                                                                                                              |
+| `--trust-proxy`         | `SHAPEWALL_HOSTED_TRUST_PROXY=1` or `=uniquelocal` | off; forced on by `--tailscale` | Client IPs from `X-Forwarded-For`. `1`: a proxy on this host. `uniquelocal`: a proxy on a private network, which is what the generated Compose file sets. `--tailscale` turns it on by itself ([what that means](#tailnet-deployment-mode-1)) |
+|                         | `SHAPEWALL_HOSTED_SECRET`                          | `<data>/secret.key`             | Key for signed live-HTML URLs (made on first start, mode 0600)                                                                                                                                                                                |
+|                         | `RESEND_API_KEY`                                   | unset                           | With `SHAPEWALL_EMAIL_FROM`: invite emails through Resend                                                                                                                                                                                     |
+|                         | `SHAPEWALL_EMAIL_FROM`                             | unset                           | Sender for invite emails, e.g. `Shapewall <invites@example.com>`                                                                                                                                                                              |
+| `--previous-origin URL` | `SHAPEWALL_HOSTED_PREVIOUS_ORIGIN`                 | unset                           | The old origin during a move ([Moving to a new origin](#moving-to-a-new-origin))                                                                                                                                                              |
+| `--report-email ADDR`   | `SHAPEWALL_HOSTED_REPORT_EMAIL`                    | unset                           | "Report this board" on public projects opens a mail to this address                                                                                                                                                                           |
+| `--tailnet-sign-in`     | `SHAPEWALL_HOSTED_TAILNET_SIGN_IN=1`               | off                             | With `--tailscale`: a tailnet user is signed in as the account linked to their tailnet login, no passkey ([Tailnet sign-in](#tailnet-sign-in)). Linux only                                                                                    |
+| `--tailnet-passkeys`    | `SHAPEWALL_HOSTED_TAILNET_PASSKEYS=1`              | off                             | With `--tailnet-sign-in`: also allow passkeys ([With passkeys also allowed](#with-passkeys-also-allowed)); `hosted admin passkeys on\|off` wins over it                                                                                       |
+| `--owners-see-sign-ins` | `SHAPEWALL_HOSTED_OWNERS_SEE_SIGN_INS=1`           | off                             | Workspace owners see their members' sign-ins, passkey events and devices in Activity. For a server with one team ([Activity](#the-activity-page))                                                                                             |
+| `--quotas FILE`         | `SHAPEWALL_HOSTED_QUOTAS`                          | `<data>/quotas.json`            | Storage and per-workspace limits ([Operator commands and quotas](#operator-commands-and-quotas)). The flag wins over the variable, and both over the file                                                                                     |
+|                         | `SHAPEWALL_TURNSTILE_SITE_KEY`                     | unset                           | With `SHAPEWALL_TURNSTILE_SECRET`: a Cloudflare Turnstile check on open sign-up and comment share links                                                                                                                                       |
+|                         | `SHAPEWALL_TURNSTILE_SECRET`                       | unset                           | Turnstile secret key. Both keys or neither (one alone is a warning and stays off)                                                                                                                                                             |
+
+**The switches above read only `1`.** `SHAPEWALL_HOSTED_TRUST_PROXY` (where `uniquelocal` is the one other accepted value),
+`SHAPEWALL_HOSTED_OWNERS_SEE_SIGN_INS`, `SHAPEWALL_HOSTED_TAILNET_SIGN_IN` and `SHAPEWALL_HOSTED_TAILNET_PASSKEYS` compare the
+value with the string `1` and nothing else. `=true`, `=on` and `=yes` leave the feature off, and nothing warns: a server meant to
+have `SHAPEWALL_HOSTED_TAILNET_SIGN_IN=true` starts as an ordinary passkey server. Read the start log: it names the sign-in
+("Sign-in: your Tailscale account ...") only when tailnet sign-in really came on.
 
 It needs Node 22.19 or newer, like the rest of Shapewall, and uses the built-in `node:sqlite`. Passkeys need a secure context: `https://`, or `http://localhost`
 for trying it on your own machine (`--origin http://localhost:4700`; not `127.0.0.1`, which is not a valid passkey RP ID).
@@ -233,9 +240,13 @@ How people get in:
   "Continue as ada@example.com" and links that login. From the command line:
   `shapewall hosted claim --data DIR --login LOGIN` on the server's machine ([From your coding agent](#from-your-coding-agent)).
   Opened from the server's own machine, the tailnet address links nothing: [why](#on-the-servers-own-machine).
-- **Someone the server does not know** sees "Ask an admin of a workspace here to invite ada@example.com", and nothing else. The
-  admins of every workspace see them under Members, "Arrived through the tailnet", and can invite them with a role or take them
-  off the list (kept 30 days, at most 200).
+- **Someone the server does not know** sees "Ask an admin of a workspace here to invite ada@example.com", and nothing else, on an
+  invite-only server, which is the default (`--signup invite`). The admins of every workspace see them under Members, "Arrived
+  through the tailnet", and can invite them with a role or take them off the list (kept 30 days, at most 200).
+- **With `--signup open` nobody waits for an invite.** A tailnet login the server does not know gets an account on arrival and a
+  new workspace of its own, which it owns, exactly as open sign-up does on any other server. Only the invite stage goes: the
+  account is still that one login's, and it is in no workspace of yours. Keep sign-up invite-only unless everyone your tailnet
+  reaches should be able to make a workspace here.
 - **An invite can be for one tailnet login** (Invite people, "Tailnet login"; `POST /invites` with `tailnetLogin`). Only that
   login can use it, whoever has the link. They join the next time they open the server, with the role of the invite.
 - **One login, one account.** (With passkeys allowed, an account that has a passkey links or unlinks its login on the
@@ -245,8 +256,12 @@ How people get in:
 Good to know:
 
 - **A tailnet session is bound to the identity.** It works only on requests that arrive as that login. Its cookie is worth
-  nothing off the tailnet, on another person's device, or through Funnel. It is marked "Signed in by tailnet" in the device list,
-  `via: tailnet` in the account's log, and `signedInBy: tailnet` on what it does in the workspace's audit log (Activity shows a
+  nothing off the tailnet, on another person's device, or through Funnel. It is held to Tailscale's own id of the user as well as
+  to the login, so a login handed to someone else later inherits neither the account nor its sessions: a request with the right
+  login behind another user id is nobody ([an account is held to the tailnet user](#on-the-servers-own-machine)). The cookie is
+  stored under the hash of `tailnet:<token>` rather than of the token alone, so a build without tailnet sign-in finds nothing for
+  it. It is marked "Signed in by tailnet" in the device list and in Account activity,
+  `via: tailnet` on its session and in the account's log, and `signedInBy: tailnet` on what it does in the workspace's audit log (Activity shows a
   "tailnet" mark).
 - **Signing out** keeps that browser signed out until you press "Continue as ada@example.com" on the sign-in page. Arriving again
   would otherwise sign you straight back in; the page says so.
@@ -659,7 +674,7 @@ Projects belong to a workspace, never to a person. Roles:
 | member                     | every project             | + comment, reply, react, resolve, reopen; edit and delete their own comments                                                                                           |
 | admin                      | every project             | + projects, API tokens, share links, invite links (up to admin), change and remove members and viewers, delete any comment, the Access overview, the audit log, rename |
 | owner                      | every project             | + change or remove admins and owners, invite owners, delete the workspace. A workspace always keeps one owner                                                          |
-| API token                  | one project               | Its scopes (below): read, comment, resolve, push. Signed as the token, marked as an agent                                                                              |
+| API token                  | one project               | Its scopes (below): `read`, `reply`, `status`, `claim`, `resolve`, `push`, `import`, `agent`. Signed as the token, marked as an agent                                  |
 | share link guest (view)    | one project, no workspace | See that project's boards and comments. Nothing else: no members, no other projects, no workspace data                                                                 |
 | share link guest (comment) | one project, no workspace | + add comments and replies, signed `<name> (guest)`. Never resolve, reopen, edit or delete; agents skip their comments by default                                      |
 
@@ -676,7 +691,8 @@ it (admins and owners). The secret, the scopes and the expiry do not change; wha
 revoked token is not renamed; the audit log records `token_renamed` with both names. A token that may take work is an agent with an
 icon, a state and rules of its own: see [Agents on a hosted board](#agents-on-a-hosted-board).
 
-**Invite links** hold a 32-byte token (stored hashed), a role, an expiry (1, 3, 7, 14 or 30 days; 7 by default), and work once. Opening
+**Invite links** hold a 32-byte token (stored hashed), a role, an expiry (the console offers 1, 3, 7, 14 or 30 days, 7 by
+default; the operator's `hosted admin invites create --days N` takes any whole number from 1 to 30), and work once. Opening
 one shows the workspace and role; a new person creates an account from it, an existing one joins with a click. The token sits in the
 URL fragment (`/invite#<token>`), and the setup link the same way (`/signup#setup=<code>`): browsers never send a fragment, so the token
 stays out of access logs and Referer headers. The console reads it, keeps it in session storage for the sign-in round trip, and previews
@@ -810,12 +826,19 @@ An admin creates a project and an **API token** for it (Workspace page, "API tok
 shown once, stored as SHA-256 with a 12-character display prefix, can expire, and are revoked with a click. Each token belongs to one
 project and has scopes:
 
-| Scope     | Allows                                                    |
-| --------- | --------------------------------------------------------- |
-| `read`    | Pages, comments, screenshots and live HTML of the project |
-| `comment` | Replies and agent status                                  |
-| `resolve` | Resolve and reopen                                        |
-| `push`    | Upload captures                                           |
+| Scope     | Allows                                                                                                                                  |
+| --------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `read`    | Pages, comments, screenshots and live HTML of the project                                                                               |
+| `reply`   | Replies                                                                                                                                 |
+| `status`  | An agent status on a comment                                                                                                            |
+| `claim`   | Take the comments sent to an agent. A token with it is an agent ([Agents on a hosted board](#agents-on-a-hosted-board))                 |
+| `resolve` | Resolve and reopen                                                                                                                      |
+| `push`    | Upload captures                                                                                                                         |
+| `import`  | The one-way move of a local project, granted only by a moving device login ([Move a local project](#move-a-local-project-to-your-team)) |
+| `agent`   | The link of a [connected agent](#connected-agents), granted only by approving `shapewall agent connect`                                 |
+
+`comment` is an older name and not a scope of its own: a token asked for it is made with `reply` and `status` instead, and gains
+no `claim` ([Scoped hosted agents](#scoped-hosted-agents)).
 
 The CLI takes the token from `$SHAPEWALL_TOKEN` or `--token-file FILE`, never from a flag (other users can read a process's arguments),
 and sends it only over https (plain http only to this machine).
@@ -881,8 +904,9 @@ The server treats every upload as untrusted, even from our CLI:
   the project, its other boards, its tokens and its share links stay. A later push of the same board id starts a new board: the
   captures are back, the comments are not. The audit log records who removed which board, and people who have the board open are
   told at once (`board.removed` on the event stream). API: `DELETE /api/workspaces/:ws/projects/:pid/boards/:bid`.
-- Limits: 5000 files and 1 GB per push, 500 pages per board, 10 boards per project (checked again at commit), 20 pushes per hour per
-  token, and 5 GB per workspace (committed boards plus open pushes). A push is open for an hour; after that it takes no more files and
+- Limits: 5000 files and 1 GB per push and 500 pages per board, which are fixed; and, by default, 10 boards per project (checked
+  again at commit), 20 pushes per hour per token and 5 GiB per workspace (committed boards plus open pushes), which are quotas the
+  operator can raise or lower ([Operator commands and quotas](#operator-commands-and-quotas)). A push is open for an hour; after that it takes no more files and
   a sweep (at start and every 10 minutes) removes its staging folder, staging folders without a push, and board folders a commit left
   behind.
 
@@ -900,7 +924,8 @@ fresh redirect. Guest URLs are bound to their share link and checked again on ev
 board API, which the server validates field by field on push, including its viewport dimensions (3 MB, at most 8000 elements).
 
 For a separate cookieless domain, run `shapewall hosted --origin https://app.example.com --usercontent-origin https://example-content.net`
-(or set `SHAPEWALL_USERCONTENT_ORIGIN`). Point both host names at this server through your TLS proxy, preserving Host. The content origin
+(or set `SHAPEWALL_USERCONTENT_ORIGIN`, for which `SHAPEWALL_HOSTED_USERCONTENT_ORIGIN` is an accepted second name). Point both
+host names at this server through your TLS proxy, preserving Host. The content origin
 serves only signed `/uc/` routes, ignores cookies and never sets one; the app origin refuses `/uc/`. Its CSP permits only the app origin
 to frame documents. Use a separate registrable domain for a separate site; a second port or subdomain alone is a different origin, and
 the opaque sandbox remains the main boundary. Separate usercontent must be https when the app is https.
@@ -1118,7 +1143,7 @@ asks for is not enough when it does not ask.
 
 The same rule holds for an agent saved on the machine: it can be connected only when its command starts Claude Code. For Codex,
 goose and Gemini CLI, `shapewall watch --remote` stays the way to work on a hosted board. How the check was done is in
-[agent-hardening.md](agent-hardening.md#connected-agents).
+[the agent hardening guide](agent-hardening.md#connected-agents).
 
 The same test decided what a fix session gets. A Claude Code session for a fix has its reading tools and its editing tools, and
 no shell tool: started with the shell tool, Claude Code ran commands it takes to be read-only (`ls`, `cat`) without asking anyone,
@@ -1147,7 +1172,7 @@ keeps what was set. They are explained under [Switching edits on](#switching-edi
 `shapewall --help` and is refused for Claude Code ([Commands](#commands-are-not-offered-for-claude-code)).
 
 - **Which program runs** is the machine's choice: an agent saved for this project on that machine, or Claude Code found on its
-  `PATH` with its ACP adapter, the same detection a local board uses ([agents.md](agents.md)). Codex, goose, Gemini CLI, a saved
+  `PATH` with its ACP adapter, the same detection a local board uses ([chat with an agent](agents.md)). Codex, goose, Gemini CLI, a saved
   agent that runs one of them, a program Shapewall does not know and a model endpoint are all refused with a message. Nothing the
   server sends names a command, an argument, a folder or an environment variable.
 - **`--audience owner` trusts the server's label.** The machine cannot check who really asked: it sees only what the server says
@@ -1367,7 +1392,7 @@ gone are removed with their records, so their branch names are free again. Ctrl+
 
 If files in the person's own checkout changed while the fix ran, the thread says so: "Files in the agent's own checkout changed
 during this fix. Check git status on its machine." Shapewall does not sandbox the agent's own tools
-([agent-hardening.md](agent-hardening.md#connected-agents)).
+([the agent hardening guide](agent-hardening.md#connected-agents)).
 
 ### Files that run something
 
@@ -1481,7 +1506,7 @@ An edit that went without asking is still a card in the thread, marked "Allowed 
 - **No commands for Claude Code.** Its fix session has no shell tool.
 - **The agent never holds its token.** Its process gets a small environment with no `SHAPEWALL_*` variable.
 
-What the machine cannot do is in [agent-hardening.md](agent-hardening.md#connected-agents): it does not sandbox the agent's own
+What the machine cannot do is in [the agent hardening guide](agent-hardening.md#connected-agents): it does not sandbox the agent's own
 tools, and with approvals on, a server that was broken into can forge an "allow" for an edit the agent really asked.
 
 ### When a connected agent is offline
@@ -1615,7 +1640,7 @@ Edit, Write and MultiEdit beside Read, Grep and Glob. It has no settings files, 
 bypass. Each edit it makes asks first, and the request goes through the machine's checks and a card
 ([Permission cards](#permission-cards)). Chat turns on the same machine keep the read-only session.
 
-This was shown on one machine with one adapter version ([agent-hardening.md](agent-hardening.md#connected-agents) says how). It
+This was shown on one machine with one adapter version ([the agent hardening guide](agent-hardening.md#connected-agents) says how). It
 is still a good idea to give a connected agent a profile of its own: a separate config folder, logged in for this purpose.
 
 ### Chat usage records and the audit log
@@ -1856,7 +1881,8 @@ member who filters by someone else gets an empty answer, not that person's rows.
 
 `/w/<workspace>/activity`. What people did, newest first, from the audit log: sign-in and sign-out, passkeys and sessions, members
 and invites, settings (with the value before and after), projects and pushes, share links and guests, tokens, agents (connected,
-audience, approval rule, revoked), approval cards (who allowed or denied what), agent work, and exports. Filter by person, kind of
+audience, approval rule, revoked), approval cards (who allowed or denied what), agent work, comments (resolved, reopened and deleted) and
+exports. Filter by person, kind of
 action, agent, project, where it came through (a person, a token, a share link guest, the server) and period; search; open an
 entry for the address and device it came from and exactly what was recorded. "Worth a look" keeps the security-relevant changes:
 roles, audiences, approval rules, the agent policy, share links switched on, a project made public, tokens made, passkeys
@@ -1988,7 +2014,7 @@ Old-host passkeys show "For old.example" on the Account page.
   workspace.
 - **Audit log.** Account events (sign-up, sign-in by passkey or recovery code, failures, passkeys, recovery codes, sessions, deleted
   workspaces) and workspace events (members, roles, invites, projects, tokens, share links and their guests, settings, pushes,
-  resolved and deleted comments), with the user, token or share link and IP. Admins read the workspace log in the console.
+  resolved, reopened and deleted comments), with the user, token or share link and IP. Admins read the workspace log in the console.
 - **Headers.** `nosniff`, `no-referrer`, COOP same-origin, `X-Robots-Tag: noindex`, HSTS on https, a strict CSP on the console and the
   board shell, `frame-ancestors 'none'` except for live HTML. The console has no inline script; its only inline styles are the ones
   Radix adds for dialogs and menus, allowed by a per-response nonce (`style-src 'self' 'nonce-...'`). It renders every value as text
@@ -2005,6 +2031,7 @@ Old-host passkeys show "For old.example" on the Account page.
 ```
 <data>/shapewall.db            SQLite (WAL): accounts, workspaces, comments, tokens, audit
 <data>/secret.key              HMAC key for signed URLs
+<data>/quotas.json             the operator's quotas, when there is one (or `--quotas FILE`)
 <data>/setup-link              the first account's setup link (0600), until it is used
 <data>/files/<ws>/<project>/<board>/   pushed captures, in the local layout
 <data>/staging/<push>/         pushes in progress (swept after an hour)
@@ -2013,28 +2040,46 @@ Old-host passkeys show "For old.example" on the Account page.
 Use the operator commands below for a consistent database and file copy. Copying the SQLite file alone, or copying files after an
 unlocked database snapshot, is not a complete backup of a board.
 
-**Migrations** run at start (`src/hosted/db.js`, `PRAGMA user_version`); each is additive. Back up before upgrading.
+**Migrations** run at start (`src/hosted/db.js`, `PRAGMA user_version` and the `schema_migrations` ledger); each is additive
+except 18, which rebuilds `sessions` ([Migration 18 and rollback](#migration-18-and-rollback)). Back up before upgrading.
 
 - **4** (hosted QA fixes): `invites.note TEXT` (the invite's note) and `users.security_seen_at TEXT` (when the account last dismissed
   the recovery-code notice). Rollback: an older build ignores both columns, so the simplest rollback is to run the older build on the
-  same file and set `PRAGMA user_version = 3` (it then skips nothing it knows). To drop them as well (SQLite 3.35+):
-  `ALTER TABLE invites DROP COLUMN note; ALTER TABLE users DROP COLUMN security_seen_at; PRAGMA user_version = 3;`. Notes and the
-  "seen" time are lost; nothing else depends on them.
+  same file and change nothing else. Setting `PRAGMA user_version` by hand does nothing here: what runs is decided by the
+  `schema_migrations` ledger, and the server writes `user_version` back from it at every start. To drop the columns as well
+  (SQLite 3.35+), with the server stopped: `ALTER TABLE invites DROP COLUMN note; ALTER TABLE users DROP COLUMN
+security_seen_at; DELETE FROM schema_migrations WHERE version = 4; PRAGMA user_version = 3;`. The `DELETE` is the part that
+  matters: without it the ledger still says migration 4 ran, so the next upgrade does not add the columns back and the newer
+  build runs against a database that no longer has them. Notes and the "seen" time are lost; nothing else depends on them.
 - **5** (hosted access): tables `device_logins` (pending `shapewall login` codes, hashed, results sealed), `guest_sessions` (one row
   per share link guest), `rebind_tokens` (move links, hashed) and `server_state` (the origin and a recorded move); columns
   `workspaces.public_projects`, `projects.public_id` (unique), `public_at`, `public_by`, `passkeys.rp_id` (filled with the current
   host name on first start) and `sessions.admin_seen_at`. Rollback: back up first. An older build ignores the new tables and columns,
   but its guest cookies are a different format (guests open their link again), pending device logins are lost, and public projects
-  stop answering (their routes do not exist there). Run the older build on the same file while keeping `user_version = 5`;
-  lowering it without removing migration 5 would make the next upgrade try to add its schema twice. To drop
-  everything as well (SQLite 3.35+): `DROP TABLE device_logins; DROP TABLE guest_sessions; DROP TABLE rebind_tokens; DROP TABLE
-server_state; DROP INDEX projects_public_id; ALTER TABLE projects DROP COLUMN public_id; ALTER TABLE projects DROP COLUMN
-public_at; ALTER TABLE projects DROP COLUMN public_by; ALTER TABLE workspaces DROP COLUMN public_projects; ALTER TABLE passkeys
-DROP COLUMN rp_id; ALTER TABLE sessions DROP COLUMN admin_seen_at; PRAGMA user_version = 4;`. Do not roll back during an origin
-  move: the old build cannot serve the old address.
+  stop answering (their routes do not exist there). Run the older build on the same file and leave the version alone:
+  `user_version` is not what decides what runs, the `schema_migrations` ledger is, and the server writes `user_version` back from
+  it at every start. To drop everything as well (SQLite 3.35+), with the server stopped: `DROP TABLE device_logins; DROP TABLE
+guest_sessions; DROP TABLE rebind_tokens; DROP TABLE server_state; DROP INDEX projects_public_id; ALTER TABLE projects DROP
+COLUMN public_id; ALTER TABLE projects DROP COLUMN public_at; ALTER TABLE projects DROP COLUMN public_by; ALTER TABLE workspaces
+DROP COLUMN public_projects; ALTER TABLE passkeys DROP COLUMN rp_id; ALTER TABLE sessions DROP COLUMN admin_seen_at; DELETE FROM
+schema_migrations WHERE version = 5; PRAGMA user_version = 4;`. Without that `DELETE` the ledger still says migration 5 ran, so
+  the next upgrade does not recreate any of it and the newer build runs against missing tables and columns. Do this only on a
+  database whose newest migration is 5: later migrations add to what this one made (8 adds `device_logins.purpose`), and
+  re-running 5 does not bring those additions back. Do not roll back during an origin move: the old build cannot serve the old
+  address.
 - **12** (agents, 0.4.0): tables `agents` and `agent_runs`, columns `projects.default_agent_id`, `comments.agent_id` and
   `agent_claims.agent_id`, and a backfill that turns every token with the `claim` scope into an agent that behaves as before. What a
   rollback loses is in [Migration 12 and rollback](#migration-12-and-rollback).
+
+**That is not every migration.** There are 17, numbered 1 to 17, and they all run at start. The ones with a rollback note are 4
+and 5 above; 7, in [Migration 7 and rollback](#migration-7-and-rollback); 8, one paragraph under
+[Move a local project to your team](#move-a-local-project-to-your-team); 12, and then one section each for 13, 14, 15, 16 and 17
+below. **Migrations 1, 2, 3, 6, 9, 10 and 11 have no rollback note anywhere:** 1 to 3 are the first schema and its early
+additions; 6 is scoped dispatch, project budgets and command approvals; 9 is profile images; 10 is `shares.include_checks`; 11 is
+comment and reply images and drawings, whose bytes live in `comment_files`. No recipe for them is written down, and this page does
+not invent one. What holds for all of them: an older build ignores additive tables and columns, the pre-upgrade backup in a fresh
+data folder is the rollback to prefer, and any hand rollback that drops a migration's schema must delete that migration's row
+from `schema_migrations` too, as the recipes below do.
 
 **Why SQLite through `node:sqlite`.** One host, one process, small metadata (images are files), so SQLite fits. `node:sqlite` ships with
 Node, so the npm package stays free of native addons for the many people who only use the CLI; `better-sqlite3` would download or build a
@@ -2095,10 +2140,23 @@ shapewall hosted --data ./hosted-data --tailscale --tailscale-port 8443 --funnel
 
 These commands change Tailscale Serve/Funnel configuration. Run them only when you intend to expose this server. Install Tailscale,
 connect the machine, enable MagicDNS and HTTPS certificates, and authorize your unprivileged user as a Tailscale operator first.
+That last step hands out real trust: the Tailscale operator can change the serve config, and with it pretend to be anyone on a
+tailnet sign-in server, so grant it only to a user you trust as you trust root there
+([what is still trusted](#how-the-server-knows-a-request-came-through-tailscale-serve)). Rewriting the serve config under a
+running server does not stay unnoticed: the server reads it again every 30 seconds and suspends tailnet sign-in until it is the
+one entry it made.
 Add `--tailnet-sign-in` to sign tailnet users in by their tailnet login instead of a passkey ([Tailnet sign-in](#tailnet-sign-in)).
 The console and passkey origin come from this machine's `*.ts.net` hostname. Do not also pass `--origin` or a non-loopback `--host`.
 An occupied HTTPS port is refused, including an existing mapping to the same target. SIGINT/SIGTERM removes mappings this process
 added only while they still match; after a crash inspect `tailscale serve status` and remove the stale mapping explicitly.
+
+**`--tailscale` turns `--trust-proxy` on by itself,** because `tailscale serve` is the proxy in front of the server. Client IPs for
+rate limits, the audit log and the device list then come from `X-Forwarded-For`. With `--tailnet-sign-in` that header is believed
+only behind the checks of [Tailnet sign-in](#how-the-server-knows-a-request-came-through-tailscale-serve) (the secret path, a
+root-owned peer, tailscaled's own whois), so who someone is stays sound. With plain `--tailscale` and no `--tailnet-sign-in`
+there are no such checks: any program on this machine can open the loopback port and set `X-Forwarded-For` to what it likes, so
+the addresses in the audit log and the per-address rate limits are that program's to choose. Sign-in itself is not affected, being
+a passkey either way, but do not read an address in such a server's log as proof of where a request came from.
 
 Funnel uses a second loopback listener and a different HTTPS port. It serves guest share pages, guest APIs, signed live HTML,
 static assets, legal/report routes and health only. Console, sign-in, signup, device login, invitations, member APIs and token APIs
@@ -2119,6 +2177,15 @@ builds and starts the Compose services and reads the first setup link privately 
 logs or monitoring. Manual equivalent: `docker compose up -d --build --wait`, then `docker compose exec shapewall cat /data/setup-link`.
 W6's `hosted setup-link` command can rotate an expired link; use it locally with `--data /data` in the container.
 
+**What is in that `.env`, besides the settings of this page.** Three variables there are read by Docker Compose itself, not by the
+server: `SHAPEWALL_SOURCE` (the build context, the checkout the image is built from), `SHAPEWALL_UID` and `SHAPEWALL_GID` (the
+user and group the container runs as, which must own the `data` and `backups` mounts; 1000 and 1000 when they are unset). The
+setup command writes all three. Changing them changes the stack, not a running server.
+
+**Two settings cannot be changed in that `.env`.** The generated Compose file puts `SHAPEWALL_HOSTED_DATA: /data` and
+`SHAPEWALL_HOSTED_TRUST_PROXY: uniquelocal` in its own `environment:` block, and a Compose `environment:` entry wins over
+`env_file`. Setting either in `.env` under the generated stack has no effect; edit the Compose file if you must change them.
+
 The image is built from a checkout using `Dockerfile.hosted`. It contains no installed capture browser: users push captures from
 local machines or CI. Data and backups are separate private mounts. Only Caddy publishes ports; the app trusts forwarded addresses
 from the private Compose network. Review network access and secrets before production. The setup command needs a checkout with the
@@ -2131,7 +2198,9 @@ Staging stays gated and noindex; the commented Caddy gate example leaves guest r
 
 ## Operator commands and quotas
 
-Run these on the machine that holds the data, as the data owner:
+These are the server-wide commands. `admin members`, `admin invites` and `admin projects`, which do for the operator what an owner
+would do in the console, are under [On the server's own machine](#on-the-servers-own-machine). Run these on the machine that holds
+the data, as the data owner:
 
 ```sh
 shapewall hosted admin list --data ./hosted-data
@@ -2160,7 +2229,8 @@ but writes return `workspace_suspended`. Resume restores the previous grants. Op
 operator log; suspension/resume also enter the workspace audit log. The CLI is privileged filesystem access, not a web-admin role.
 Do not give an untrusted workspace owner shell access to it. Reports remain private to the server operator.
 
-`--quotas FILE`, or `<data>/quotas.json`, controls storage, projects, boards per project, members, active share links per project and
+`--quotas FILE`, `SHAPEWALL_HOSTED_QUOTAS` or `<data>/quotas.json` (the flag wins over the variable, and both over the file in the
+data folder) controls storage, projects, boards per project, members, active share links per project and
 pushes per token per hour. Defaults: 5 GiB, 20 projects, 10 boards/project, 100 members, 20 links/project and 20 pushes/hour/token.
 Valid edits reload within 5 seconds; invalid edits preserve the previous limits and log a validation error. Example:
 
@@ -2173,14 +2243,15 @@ Valid edits reload within 5 seconds; invalid edits preserve the previous limits 
 
 Lowering a quota blocks new growth; it does not delete existing data. `storageGB` is binary GiB (1024 cubed bytes). Agent claims/day
 limits belong to the agent policy, not this config. Rate limits are in-memory and reset on process restart: the console and board
-APIs 1200 requests a minute per account (6000 for captures and other files), session requests 600/minute, device polling 60/minute,
-plus the limits listed above. Run one hosted process per data folder.
+APIs 1200 requests a minute per account (6000 for captures and other files), guest requests 600 a minute per share link and IP,
+public-project requests 600 a minute per IP, device polling 60/minute, plus the limits listed above. Run one hosted process per data folder.
 
 ## Retention, backup and restore
 
 Usage records (one small row per agent turn) are kept for 400 days unless a workspace has its own `--usage-days`; see
 [Retention, quota and export](#retention-quota-and-export). Current captures stay. By default retention keeps the newest two historical captures per page and viewport plus every historical
-capture a comment references, open or resolved. Variants are left alone. It runs at start and every 6 hours in-process when the
+capture a comment references, open or resolved, and every version a reply's drawing was made on, so that markup keeps rendering.
+Variants are left alone. It runs at start and every 6 hours in-process when the
 operator starts the hosted server. `--retention-hours 0` disables it; `--retention-keep N` changes the default. To preview or run it:
 
 ```sh
@@ -2196,9 +2267,15 @@ shapewall hosted restore --from ./backups --data ./restored-new-folder
 
 Backup holds a SQLite write lock only for a `VACUUM INTO` snapshot and the list of board folders; captures are copied after it is
 released, so reads and writes continue. A board pushed again while it is copied is copied again; boards and files deleted meanwhile
-are skipped and listed under `files.skipped` in `backup.json`. The backup includes account data, passkey
+are skipped and listed under `files.skipped` in `backup.json`. Anything written after the snapshot is not in the backup: it is a
+copy of a moment, not a continuous log. A `--to` inside the data folder is refused. The backup includes account data, passkey
 public keys, captures, comments, audit records, signing key and default-path quota config. If the HMAC key is supplied as a systemd
-credential or environment variable, give the backup command the same credential. Back up an external quota config separately.
+credential or environment variable, give the backup command the same credential: with `SHAPEWALL_HOSTED_SECRET` in the
+environment the backup writes that value into `<backup>/secret.key` in plain text, and restore copies it into the restored data
+folder, so a backup is as secret as the key. When no key is found in the environment and the data folder has no `secret.key`
+either, `backup.json` simply records `"secret": false` and nothing warns: check that field, because a restore without the key
+makes a new one on first start and the live-HTML URLs signed with the old one stop working (they last two minutes, so that is a
+blip, not an outage). Back up an external quota config separately.
 Backup folders are mode 0700, files 0600, and checksums cover database/capture/key files. Treat them as sensitive as the live server,
 encrypt offsite copies and test that you can recover them. Staging uploads and one-time setup links are excluded.
 
@@ -2208,6 +2285,19 @@ A monthly manual restore drill should be logged by the operator. `restore --chec
 checksums, row counts, board folders and health, then stops its temporary server and removes the scratch copy. Automated tests also
 sign in to a restored fixture with its software passkey; that does not verify real phones or hardware authenticators.
 
+Four things the commands above do not do for you, each enough to leave a dead instance:
+
+- **Nothing stops the server.** Neither `restore` nor the drill touches a running service, and two hosted processes against one
+  data folder is not supported. Stop the service yourself before you point it at restored data.
+- **Nothing sets the owner.** `restore` makes the folder 0700 and its files 0600, owned by whoever ran the command, and there is
+  no `chown` step anywhere. Restored under `sudo`, the data belongs to root, the service user cannot read it and the server does
+  not start. Run the restore as the user the service runs as, or change the owner afterwards yourself.
+- **The drill writes next to the backup, not inside it.** `restore --check` puts its scratch copy in the backup's **parent**
+  directory (`.restore-drill-<pid>-<timestamp>`), so a backup whose parent directory is read-only fails the drill. There is no
+  flag for that folder: copy the backup to a writable disk and drill the copy.
+- **`--from` pointed at a folder of backups picks the newest.** `restore --from ./backups` takes the newest
+  `shapewall-backup-*` it finds there without asking. Name the exact backup folder when you mean a particular one.
+
 Restore refuses a nonempty target. Keep the original origin (passkeys depend on it), inspect the restored copy, then change the
 runtime data pointer during an operator-approved maintenance window. Retain the previous release and data backup for rollback.
 Project/workspace deletion removes active files immediately after database deletion; backup copies age out only under the chosen
@@ -2215,10 +2305,18 @@ backup policy. Operators must replay deletion requests after restoring an older 
 
 ### Migration 7 and rollback
 
-Migration 7 adds workspace suspension/retention columns, operator log and abuse reports. A `schema_migrations` ledger records each
-actually-applied migration so reserved 5/6 can land later without being skipped by a higher `user_version`. Legacy versions 1-4
-are adopted into the ledger. Empty reservations are never marked applied. Back up before any upgrade and do not run a build that
-uses empty migration placeholders against retained data.
+Migration 7 adds workspace suspension and retention columns, the operator log and abuse reports. It is also where the
+`schema_migrations` ledger came in: it records every migration that actually ran, so migrations written in parallel can reach a
+database in either order. `PRAGMA user_version` is the highest number in the ledger, not a count, and the server writes it back
+from the ledger at every start. Migrations 5 and 6 were reservations when this was written; both have been filled in since
+(hosted access, and scoped dispatch with command approvals), and no migration is empty today. A database from before the ledger
+has contiguous versions 1 to 4, and those are adopted into the ledger on its first start with a newer build.
+
+**A database with no ledger and `user_version` above 4 is refused at start:** "Database has untracked migrations newer than
+version 4; restore its pre-upgrade backup before continuing." That is what a hand-raised `user_version` looks like, and the
+server will not guess which migrations ran. Restore the pre-upgrade backup instead.
+
+Back up before any upgrade.
 
 For rollback, prefer the pre-upgrade backup in a fresh data folder and the previous immutable release. Merely running an older build
 on the new database ignores additive columns but also removes suspension enforcement: keep affected workspaces blocked externally
@@ -2284,7 +2382,9 @@ Migration 14 (0.6.0) adds approvals and edits from a hosted board
 - table `chat_permissions` (one row per permission card a connected agent asked during a fix: what it asked, as hashed, its
   state, who answered and when);
 - columns `agent_runs.approvals_asked`, `agent_runs.approvals_allowed` and `agent_runs.approvals_denied` (how many requests a
-  fix asked and how they ended).
+  fix asked and how they ended);
+- column `agents.approval_rule_by` (who last set the agent's approval rule, so an agent whose machine says `--approvals owner`
+  goes without asking only while that rule is the connecting person's own).
 
 Nothing existing is rewritten: no token gains a scope, no agent changes its audience or its approval rule, and a connected agent
 reads and answers only until its own machine says more. `watch --remote` and `mcp --remote` work with the same tokens. Back up
@@ -2302,7 +2402,8 @@ database also works, since it ignores the new table and columns, but:
 
 To remove the schema as well (SQLite 3.35+), with the server stopped: `DROP TABLE chat_permissions; ALTER TABLE agent_runs DROP
 COLUMN approvals_asked; ALTER TABLE agent_runs DROP COLUMN approvals_allowed; ALTER TABLE agent_runs DROP COLUMN
-approvals_denied; DELETE FROM schema_migrations WHERE version = 14; PRAGMA user_version = 13;`. Never reset the ledger any other
+approvals_denied; ALTER TABLE agents DROP COLUMN approval_rule_by; DELETE FROM schema_migrations WHERE version = 14; PRAGMA
+user_version = 13;`. Never reset the ledger any other
 way. Test a rollback on a copy first.
 
 ### Migration 15 and rollback
@@ -2396,7 +2497,9 @@ users_tailnet_login; ALTER TABLE users DROP COLUMN tailnet_login; ALTER TABLE us
 users DROP COLUMN tailnet_user_id; ALTER TABLE passkeys DROP COLUMN tailnet_added_from; DROP TABLE server_settings; ALTER TABLE
 sessions DROP COLUMN tailnet_login; ALTER TABLE invites DROP COLUMN tailnet_login; ALTER TABLE workspaces DROP COLUMN step_up;
 DELETE FROM schema_migrations WHERE version = 17;`, then set `PRAGMA user_version` to the highest version left in
-`schema_migrations` (16 where the saved Usage layouts are there, else 15).
+`schema_migrations` (16 where the saved Usage layouts are there, else 15). Where migration 18 ran, roll it back first
+([Migration 18 and rollback](#migration-18-and-rollback)): its check names `sessions.tailnet_login`, so the column cannot be
+dropped before.
 
 **A database from a build of this release before it was released.** While 0.7.0 was being made, the sign-in migration was
 numbered 16 for a while. A database such a build opened says "16 ran" in its ledger, which now means the Usage layouts. The
@@ -2409,16 +2512,108 @@ either order: a database that ran only 16 runs 17 on the next start, and one tha
 the highest number applied, not a count. Rolling one back does not touch the other; remove only its own row from
 `schema_migrations`.
 
+### Migration 18 and rollback
+
+Migration 18 (0.9.0) records a tailnet sign-in as one. It is the first migration that rewrites a table instead of adding to one:
+
+- `sessions.via` may now be `tailnet` as well as `passkey` and `recovery`, and a check keeps `tailnet` to rows that carry a
+  `tailnet_login`;
+- `sessions.tailnet_login` is never the empty string (another check): it is a login or `NULL`;
+- every existing session with a `tailnet_login` is marked `tailnet` (before, such a session was stored as `passkey` with its
+  login beside it). A row whose login is `''` (no build writes one; only a hand-made row can have it) is copied with `NULL`
+  instead and keeps its `via`: the server's code read `''` as "no login" while its SQL read it as a login, and now both
+  read it as none. Such a row is then an ordinary session, found by the hash of its token; one stored under a tailnet hash is
+  never found.
+
+Why a rebuild: SQLite cannot change a `CHECK` in place, so the server makes the new `sessions` table, copies every row into it,
+drops the old one, renames the new one and makes its two indexes again (`sessions_user`, `sessions_id`), as SQLite documents.
+All of it runs in the same transaction as the ledger entry, so a failure leaves the database as it was and the server does not
+start. Nothing Shapewall makes references `sessions` (no foreign key, trigger or view), so dropping the old table touches nothing
+else. Two cases only a hand-made schema has:
+
+- **A view on `sessions`** makes the migration fail with `error in view <name>: no such table: main.sessions`. The server does not
+  start and the file is left as it was (still at 17). Drop the view, start the server, then make the view again.
+- **A trigger on `sessions`** is dropped with the old table, and the migration succeeds without it. Note its `CREATE TRIGGER`
+  first (`SELECT sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'sessions';`) and make it again afterwards.
+
+A session
+whose account no longer exists is not copied (it can only exist if foreign keys were switched off at some point, and it could
+never be used: signing in with it finds no account). Signed-in browsers stay signed in: the token hashes are copied as they are.
+
+What it does not change: who may do what. The server never decided anything from the stored `via`. How a session came in is read
+from `tailnet_login` (the column the session's hash is bound to): a row with a login is a tailnet session whatever `via` says,
+and a row without one never is. The `verified_at` of a tailnet session stays `1970-01-01T00:00:00.000Z`, the mark for "no
+passkey was checked at sign-in", until a passkey of the account confirms it.
+
+For rollback, prefer the pre-upgrade backup in a fresh data folder with the previous release. Running the previous build on the
+upgraded database also works with no change to it: the previous build reads how a session came in from `tailnet_login` as this
+one does, and the new check allows what it writes (a tailnet session stored as `passkey` with its login). Sessions it makes are
+stored that way, and stay so after upgrading again; they still show as tailnet sessions everywhere.
+
+To put the table back as it was (with the server stopped; any SQLite 3.25+ `sqlite3` shell, or Node's `node:sqlite`). Roll this
+back before rolling back migration 17, whose rollback drops `sessions.tailnet_login`:
+
+```sql
+BEGIN IMMEDIATE;
+CREATE TABLE sessions_v17 (
+  token_hash TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  verified_at TEXT NOT NULL,
+  via TEXT NOT NULL DEFAULT 'passkey' CHECK (via IN ('passkey', 'recovery')),
+  id TEXT,
+  user_agent TEXT,
+  ip TEXT,
+  admin_seen_at TEXT,
+  tailnet_login TEXT
+);
+INSERT INTO sessions_v17
+  (token_hash, user_id, created_at, last_seen_at, expires_at, verified_at, via, id, user_agent, ip, admin_seen_at, tailnet_login)
+  SELECT token_hash, user_id, created_at, last_seen_at, expires_at, verified_at,
+    CASE WHEN via = 'tailnet' THEN 'passkey' ELSE via END,
+    id, user_agent, ip, admin_seen_at, tailnet_login
+  FROM sessions;
+DROP TABLE sessions;
+ALTER TABLE sessions_v17 RENAME TO sessions;
+CREATE INDEX sessions_user ON sessions(user_id);
+CREATE UNIQUE INDEX sessions_id ON sessions(id);
+DELETE FROM schema_migrations WHERE version = 18;
+PRAGMA user_version = 17;
+COMMIT;
+```
+
+Every session survives it, tailnet sessions as `passkey` with their login (as before 0.9.0). A login that was `''` before the upgrade stays `NULL`. `PRAGMA user_version` is the
+highest version left in `schema_migrations`: 17 unless a later migration is there too. The next upgrade runs 18 again. Never
+reset the ledger any other way. Test a rollback on a copy first: `PRAGMA integrity_check;` says `ok`, and `SELECT via,
+tailnet_login IS NOT NULL, COUNT(*) FROM sessions GROUP BY 1, 2;` shows the same sessions as before, with `tailnet` back to
+`passkey`.
+
 ## Secrets, logs and legal review
 
 `SHAPEWALL_HOSTED_SECRET_FILE` and `RESEND_API_KEY_FILE` read private secret files. systemd `LoadCredential=shapewall-secret:...` and
-`LoadCredential=resend-api-key:...` are read from `$CREDENTIALS_DIRECTORY`; explicit environment values take precedence. Setup links
+`LoadCredential=resend-api-key:...` are read from `$CREDENTIALS_DIRECTORY`. **The order is: the variable itself, then its `_FILE`,
+then the credentials directory.** A value already in `SHAPEWALL_HOSTED_SECRET` or `RESEND_API_KEY` means the file is not read at
+all, so a stale variable quietly beats the file you meant to use. The two are not treated alike when the file is missing: a
+`_FILE` you named and the server cannot read is a startup error, while a file missing from `$CREDENTIALS_DIRECTORY` is skipped in
+silence and the server carries on as if the secret were unset (it then makes its own `<data>/secret.key`, and invite emails stay
+off). Check the start log for the names it loaded; it never prints a value. Setup links
 are written to `<data>/setup-link` (0600) and not journaled. Caddy deletes Cookie, Authorization, Set-Cookie and signed `s` query
 values from access logs. Invite/setup/share fragments are never sent in HTTP requests. App errors omit request values; email logs
 contain status only. Do not enable debug request-body logging. Review any proxy/hosting logs outside these examples independently.
 
-Fill `SHAPEWALL_HOSTED_TERMS_URL`, `_PRIVACY_URL`, `_AUP_URL`, `_SUBPROCESSORS_URL` and `_ABUSE_EMAIL` before inviting users. These
-appear on sign-in/signup and guest pages, plus `/report`. The legal templates deliberately require an operator, contact, actual
+Fill `SHAPEWALL_HOSTED_TERMS_URL`, `_PRIVACY_URL`, `_AUP_URL`, `_SUBPROCESSORS_URL` and `_ABUSE_EMAIL` before inviting users.
+**Setting them is the only way the legal links appear:** the server shows no Terms, Privacy, Acceptable use or Subprocessors link
+for a variable that is unset -- that is the "legal links not set" state, and each variable governs its own link alone. Where they
+are set, they appear on sign-in and signup and on guest pages, plus `/report`.
+
+**A bad value stops the server.** The four URLs are checked at start: each must begin `http://` or `https://` and hold no
+whitespace, quote or angle bracket, or the server throws `SHAPEWALL_HOSTED_TERMS_URL: an http(s) URL` (naming the one at fault)
+and does not start; `_ABUSE_EMAIL` must look like an email address (`SHAPEWALL_HOSTED_ABUSE_EMAIL: an email address`). A bare host name, a
+`mailto:` in a URL slot or a trailing comment is a refusal, not a warning. Unset is fine; wrong is fatal.
+
+The legal templates deliberately require an operator, contact, actual
 hosting region, provider list and retention policy. Dan's review and any required counsel review remain release gates. No legal
 text, Compose stack, Tailscale mapping, timer or staging deployment is activated by adding these files.
 

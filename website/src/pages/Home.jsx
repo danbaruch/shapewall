@@ -427,9 +427,9 @@ function OpenSourceSection() {
             <code>
               <span className="text-zinc-500"># in your project, with your dev server running</span>
               {'\n'}
-              <span className="text-wall-bright">$</span> shapewall init --base-url http://localhost:3000
+              <span className="text-wall-bright">$</span> npx shapewall init --base-url http://localhost:3000
               {'\n'}
-              <span className="text-wall-bright">$</span> shapewall capture
+              <span className="text-wall-bright">$</span> npx shapewall capture
               {'\n'}
               <span className="text-zinc-500">Capturing 7 pages (14 shots) from http://localhost:3000</span>
               {'\n'}
@@ -439,7 +439,7 @@ function OpenSourceSection() {
               {'\n'}
               <span className="text-zinc-500"> ...</span>
               {'\n'}
-              <span className="text-wall-bright">$</span> shapewall serve
+              <span className="text-wall-bright">$</span> npx shapewall serve
               {'\n'}
               <span className="text-zinc-500">Shapewall is serving 1 board at http://127.0.0.1:4600/</span>
             </code>

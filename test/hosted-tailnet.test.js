@@ -1714,8 +1714,13 @@ test('a tailnet session is stored so that a build from before tailnet sign-in ca
   assert.equal(olderBuildFinds(token), null)
   assert.ok(olderBuildFinds(ada.browser.jar.get('__Host-sw_session')))
   assert.ok(rows.some((row) => row.token_hash === sha(`tailnet:${token}`) && row.tailnet_login === 'ada@example.com'))
+  // A tailnet row cannot lose its login and keep saying tailnet (migration 18's check).
+  assert.throws(
+    () => server.db.prepare('UPDATE sessions SET tailnet_login = NULL WHERE token_hash = ?').run(sha(`tailnet:${token}`)),
+    /CHECK constraint failed/,
+  )
   // Nor can a row be read the other way round in this build: the login column and the hash must agree.
-  server.db.prepare('UPDATE sessions SET tailnet_login = NULL WHERE token_hash = ?').run(sha(`tailnet:${token}`))
+  server.db.prepare("UPDATE sessions SET tailnet_login = NULL, via = 'passkey' WHERE token_hash = ?").run(sha(`tailnet:${token}`))
   assert.equal((await phone.get(`/api/workspaces/${ada.workspaceId}`)).status, 401)
   server.db
     .prepare("UPDATE sessions SET tailnet_login = 'ada@example.com' WHERE token_hash = ?")

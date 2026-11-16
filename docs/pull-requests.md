@@ -48,7 +48,7 @@ commands in `ci.start`, waits for it to answer, and captures it:
 
 Each command is an argv array: a program found on `PATH` and its arguments, run without a shell. `url` is the local address the serve
 command listens on; `timeout` (default 180000 ms) bounds each step and the wait for the site. Both sides use the config of the pull
-request, so they are captured the same way. See [config.md](config.md#ci) for every `ci` setting.
+request, so they are captured the same way. See [Config reference](config.md#ci) for every `ci` setting.
 
 ### Preview URL mode
 

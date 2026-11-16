@@ -1,6 +1,6 @@
 # Working with a coding agent
 
-Shapewall does not include a model (the board chat only talks to one you connect, see [agents.md](agents.md)). It produces feedback in a shape that any coding agent (or a person) can act on, keeps
+Shapewall does not include a model (the board chat only talks to one you connect, see [Chat with an agent](agents.md)). It produces feedback in a shape that any coding agent (or a person) can act on, keeps
 track of which comments an agent has taken, and makes checking the result cheap. There are three ways to connect an agent, from simplest
 to most automatic:
 
@@ -133,7 +133,7 @@ is resolved: the board, `comments resolve`, the API or the MCP `resolve_comment`
 
 ### API
 
-The board server has the same operations (JSON bodies, see [deployment.md](deployment.md) for the write protections):
+The board server has the same operations (JSON bodies, see [Deployment and self-hosting](deployment.md) for the write protections):
 
 | Route                                             | Body                                                       | Returns                       |
 | ------------------------------------------------- | ---------------------------------------------------------- | ----------------------------- |
@@ -305,7 +305,7 @@ in, or takes `--config FILE`. `--read-only` offers only the reading tools; `--no
 
 `journey` keeps comments on the pages of one journey (from the config or made on the board), on any of its branches, and their
 variants; an unknown journey is an error. `list_journeys` returns each journey's `steps` as written (a fork is
-`{ branches: [{ id, label, steps, end? }] }`, see [journeys.md](journeys.md#branches)), `pages` and `paths`, so an agent can check every
+`{ branches: [{ id, label, steps, end? }] }`, see [Journeys and links](journeys.md#branches)), `pages` and `paths`, so an agent can check every
 branch of a flow after a change (`shapewall journeys --json` prints the same). The crop is up to 900 x 700 px with the pin as central as the edges allow. The server's instructions tell the agent the
 same loop as above and that comment text is untrusted.
 
