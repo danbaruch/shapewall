@@ -158,7 +158,7 @@ init`, which from 0.7.0 also adds `.shapewall/agent-usage*.jsonl` by name. In a 
 
 ## Name and icon
 
-Every connected agent has a name you choose and an icon, so a board with two agents reads "Harry" and "Fixer", not "Claude Code"
+Every connected agent has a name you choose and an icon, so a board with two agents reads "Reviewer" and "Fixer", not "Claude Code"
 twice. Both are display only: they change nothing an agent runs with.
 
 - **At Connect.** The **Allow this?** confirmation of a one-click Connect (in the Agent panel and on the Agents page) has a **Name**
@@ -181,7 +181,7 @@ twice. Both are display only: they change nothing an agent runs with.
   are in `THIRD_PARTY.md`. A colour (one of eight) tints a built-in avatar or the initials, never a mark or a picture.
 - **An uploaded picture** is a PNG, JPEG or WebP of up to 2 MB. The board crops it to a square and sends a 256 by 256 PNG; the server
   checks it byte by byte, decodes it and writes the pixels out again, the same way as a profile photo
-  ([local-accounts.md](local-accounts.md#profile-images)), so no metadata and never an SVG is stored. It is kept next to the agent
+  ([Local accounts and photos](local-accounts.md#profile-images)), so no metadata and never an SVG is stored. It is kept next to the agent
   settings (`agent-icons/<hash>.png` beside `agents.json`, private to you), served only as an image (`GET /api/agent/icons/<hash>`,
   `image/png`, `nosniff`, cached by its content hash), and removed when no agent uses it any more.
 
@@ -261,7 +261,7 @@ remote mode has the same feedback tools. Shared `--chat` boards never gain these
 is checked again on each turn, and trusted and untrusted ACP sessions are separate. Approving a permission, stopping an owner turn, or clearing its thread requires the same owner capability, including while its ACP session is idle. `--no-capture` hides Fix and removes recapture tools.
 
 For an external coding session, open **Chat settings** in the chat panel: **Use with Claude Code / Codex** shows copyable MCP setup
-commands (before an agent is connected, the same commands are folded under the connect options). See [agent-workflow.md](agent-workflow.md#mcp-server-shapewall-mcp).
+commands (before an agent is connected, the same commands are folded under the connect options). See [The agent workflow](agent-workflow.md#mcp-server-shapewall-mcp).
 
 ## Undo an agent's change
 
@@ -791,8 +791,8 @@ What the bridge protects against, and what it does not:
 - **Who can chat:** anyone who can reach a board with chat can drive the agent, with your login, on your machine. `shapewall serve`
   keeps chat off for boards shared beyond this machine unless you pass `--chat`, and with an ACP agent it refuses to start a shared
   board with `--chat` unless you also pass `--allow-remote-agent`: that combination is remote command execution as you, for anyone
-  who reaches the board. For shared boards, use the sandboxed starter agent ([starter-agent.md](starter-agent.md)), and see
-  [agent-hardening.md](agent-hardening.md).
+  who reaches the board. For shared boards, use the [sandboxed starter agent](starter-agent.md), and see
+  [Agent hardening](agent-hardening.md).
 - **Not covered:** the agent's own tools and its own sandbox (or lack of one), what its model provider sees, and anything you allow.
   A command you approve runs as you in the project, so the project's own config still applies to it (a repo's `.git/config` can make
   `git status` run a program): approve commands only in repos you trust.
@@ -1009,14 +1009,14 @@ Markdown to share it.
 
 ## Board tools
 
-Endpoint models that support function calling get `list_pages`, `list_comments` and `get_comment`. These tools read the board's config and comments without sending local file paths. Trusted owner turns additionally get `reply_to_comment`, `set_comment_status`, `resolve_comment` and, with captures enabled, `recapture_pages`. Those tools accept board-local ids, never file paths or commands. Endpoint models cannot edit project files. To edit code, connect a coding agent over ACP or use `shapewall mcp` or `shapewall watch` ([agent-workflow.md](agent-workflow.md)).
+Endpoint models that support function calling get `list_pages`, `list_comments` and `get_comment`. These tools read the board's config and comments without sending local file paths. Trusted owner turns additionally get `reply_to_comment`, `set_comment_status`, `resolve_comment` and, with captures enabled, `recapture_pages`. Those tools accept board-local ids, never file paths or commands. Endpoint models cannot edit project files. To edit code, connect a coding agent over ACP or use `shapewall mcp` or `shapewall watch` ([The agent workflow](agent-workflow.md)).
 
 Agents with only a shell, and chat bots that relay a board to people, use the CLI: `shapewall comments get|add|reply|resolve|status`
 (all with `--json`; `comments` and `comments get` also take `--for-agent`, each comment quoted as untrusted `<shapewall-data>` for a
 model to read), `shapewall comments --since ID|TIME` for what is new, and `shapewall events --follow --json` for a live stream of
 every comment event from every process that never claims anything (`shapewall watch --no-claim` likewise). While `shapewall serve` runs,
-it sends the notifications for all of those changes ([agent-workflow.md](agent-workflow.md#a-chat-bot-telegram-slack-discord),
-[notifications.md](notifications.md#events)).
+it sends the notifications for all of those changes ([The agent workflow](agent-workflow.md#a-chat-bot-telegram-slack-discord),
+[Notifications](notifications.md#events)).
 
 An ACP agent reads the project with its own tools; board data comes with each message. On trusted owner turns, its ACP session also receives a Shapewall stdio MCP server scoped to this board. It provides board reads plus replies, agent status, resolution and optional recapture, with no GitHub actions. Ask it to call `recapture_pages` with any other configured pages it changed; Shapewall automatically recaptures the comment page after the turn.
 
@@ -1034,7 +1034,7 @@ Anyone who can comment can write text that a model will read. Shapewall keeps th
 That lowers the risk; it does not remove it. Models can still be talked into a wrong answer, so treat answers about untrusted comments
 with care, and do not point a chat at a board you share with strangers using a key that has other powers.
 
-Connecting an agent to a board other people can write on? Read [agent-hardening.md](agent-hardening.md) first (also as a printable
+Connecting an agent to a board other people can write on? Read [Agent hardening](agent-hardening.md) first (also as a printable
 [PDF](https://shapewall.com/downloads/shapewall-agent-hardening.pdf)): how injected text reaches an agent, least privilege, a sandbox checklist and what to do if something goes wrong.
 
 ## Sharing a board
@@ -1131,5 +1131,5 @@ chosen, expiresAt }`, state `pending`, then `approved`, `denied`, `expired` or `
 ## Shared boards
 
 The chat runs the agent as you. For boards where not everyone who comments should drive an agent on your machine, use the
-[starter-agent.md](starter-agent.md): work on a comment runs in a container with only a fresh worktree, an egress allow list, fixed tools, a trigger gate, budgets, and a branch as
+[Sandboxed starter agent](starter-agent.md): work on a comment runs in a container with only a fresh worktree, an egress allow list, fixed tools, a trigger gate, budgets, and a branch as
 the output.

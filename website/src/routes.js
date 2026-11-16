@@ -15,7 +15,7 @@ export const DEMO_URL = '/demo/'
 // whatever the stealth setting.
 export const DEMO_SITE_PATHS = ['/lumen', '/lumen-staging']
 export const AUTHOR = 'Dan Baruch'
-// The agent hardening guide as a PDF: public/downloads/, printed from src/docs/agent-hardening.md by scripts/pdf.mjs.
+// The agent hardening guide as a PDF: public/downloads/, printed from the repository's docs/agent-hardening.md by scripts/pdf.mjs.
 export const HARDENING_PDF = '/downloads/shapewall-agent-hardening.pdf'
 
 export const PAGES = [
@@ -57,6 +57,13 @@ export const PAGES = [
     title: 'Privacy policy | Shapewall',
     description:
       'What the Shapewall tool keeps on your machine, what agents, integrations and sharing send when you connect them, and how shapewall.com counts visits.',
+    og: 'privacy',
+  },
+  {
+    path: '/terms',
+    title: 'Terms of use | Shapewall',
+    description:
+      'What these terms cover: this website and the public demo. The software is covered by its licenses, and a team server by its operator.',
     og: 'privacy',
   },
   {
@@ -177,10 +184,10 @@ export const DOC_GROUPS = [
         path: '/docs/journeys',
         file: 'journeys',
         repo: 'journeys',
-        nav: 'Journeys',
+        nav: 'Journeys and links',
         title: 'Journeys: real user paths across the wall | Shapewall',
         description:
-          'Journeys draw arrows between pages from the real links on them, and let you name a user path such as sign up to first project and step through it.',
+          'Turn on Links to see arrows drawn from the real links between your pages, and name a path such as sign up to first project to step through.',
       },
       {
         path: '/docs/compare',
@@ -208,6 +215,26 @@ export const DOC_GROUPS = [
         title: 'Page checks: SEO, Lighthouse and accessibility | Shapewall',
         description:
           'Check original pages for reliability, SEO, social images and accessibility. Compare retained lab reports, configure budgets and share diagnostics explicitly.',
+      },
+      {
+        path: '/docs/performance',
+        file: 'performance',
+        repo: 'performance',
+        nav: 'Lighthouse audits',
+        title: 'Lighthouse audits: local performance runs | Shapewall',
+        description:
+          'Run shapewall audit on your own pages: Lighthouse metrics, repeat samples, measurement profiles, signed-in runs, budgets and report history.',
+        og: 'docs-page-checks',
+      },
+      {
+        path: '/docs/interaction-audits',
+        file: 'interaction-audits',
+        repo: 'interaction-audits',
+        nav: 'Interaction flows and accessibility',
+        title: 'Interaction flows and accessibility checks | Shapewall',
+        description:
+          'Run a named click and fill flow with step budgets, and take a local axe-core accessibility snapshot: the flow file, actions and limits.',
+        og: 'docs-page-checks',
       },
     ],
   },

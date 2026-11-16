@@ -12,13 +12,17 @@ Messages that suggest a command (`doctor`, `init`, a missing browser) write it t
 ## shapewall init
 
 ```text
-shapewall init [--base-url URL] [--sitemap [URL|FILE]] [--force]
+shapewall init [--base-url URL] [--sitemap [URL|FILE] [--limit N] [--group NAME] [--exclude /PREFIX ...]] [--no-discover]
+               [--force] [--ci]
 ```
 
-Writes a starter `shapewall.config.json` in the current folder and adds `.shapewall/`, `shapewall-export/` and `*.auth.json` to
-`.gitignore`.
+Writes a starter `shapewall.config.json` in the current folder and adds `.shapewall/`, `shapewall-export/`, `*.auth.json`,
+`.shapewall/agent-worktrees/` and `.shapewall/agent-usage*.jsonl` to `.gitignore`.
 `--base-url` sets the site to capture (default `http://localhost:3000`). `--force` overwrites an existing config. `--sitemap` takes the
 pages from a sitemap instead of the three examples and records it in the config (it accepts the `shapewall sitemap` options too).
+`--no-discover` looks for no pages at all and writes the home page only. `--ci` also writes `.github/workflows/shapewall.yml` beside
+the config, so pull requests are captured ([pull requests](/docs/pull-requests)); an existing config is kept, and `--force` with
+`--ci` replaces only the workflow.
 
 ## shapewall sitemap
 
@@ -109,7 +113,9 @@ an error instead, with the status and the pages they are on, and exits with `2` 
 
 ```text
 shapewall serve [--port 4600] [--host 127.0.0.1] [--open] [--read-only] [--no-capture] [--allowed-host NAME] [--chat | --no-chat]
-                [--agent-acp "CMD"] [--allow-remote-agent]
+                [--agent-acp "CMD"] [--allow-remote-agent] [--tailscale[=print]] [--lan[=IP|INTERFACE]] [--no-identity]
+                [--no-remote-chat] [--approve-on-host] [--tls-cert FILE] [--tls-key FILE] [--accounts] [--accounts-origin URL]
+                [--buzz-bridge FILE]
 ```
 
 Serves the board and its API. Listens on 127.0.0.1 by default and refuses requests whose `Host` header is not local. While it runs,
@@ -134,6 +140,11 @@ the board asks on the first comment. A board shared beyond this machine never se
 | `--no-chat`            | The board chat off.                                                                                      |
 | `--agent-acp`          | Chat with an agent CLI over ACP ([chat](/docs/chat)). Also `SHAPEWALL_AGENT_ACP`; never from the config. |
 | `--allow-remote-agent` | With `--chat` on a shared board, allow an ACP agent anyway (anyone who reaches the board acts as you).   |
+
+That table is the everyday subset, not the whole list. The flags for reaching the board from another device
+(`--tailscale`, `--lan`, `--tls-cert`, `--tls-key`, `--no-identity`, `--no-remote-chat`, `--approve-on-host`) are in
+[self-hosting](/docs/self-hosting), `--accounts` and `--accounts-origin` in [local accounts](/docs/local-accounts), and
+`--buzz-bridge` in [the Buzz bridge](/docs/buzz). `shapewall serve --help` prints every one of them.
 
 ## shapewall buzz-bridge
 
@@ -180,7 +191,7 @@ for local `serve --tailscale` or `serve --lan`, separate from hosted workspace a
 
 ```text
 shapewall agent connect --remote URL [--agent claude|ID] [--name NAME] [--as NAME]
-                        [--audience owner|server] [--approvals none|owner|admins] [--auto none|edits]
+                        [--audience owner|server] [--approvals none|owner|admins] [--auto none|edits|commands|edits,commands]
                         [--allow-path FILE] [--base BRANCH] [--git-remote NAME]
                         [--takeover] [--concurrency N] [--token-file FILE]
 shapewall agent build-image [--runtime podman|docker] [--image NAME]
@@ -213,8 +224,9 @@ allowed on a new branch, `shapewall/comment-<n>-<slug>`. Chat messages never edi
 
 The flags that go with it, each saved for the connection:
 
-- `--auto none|edits`: what the server's "Allow without asking" rule may apply to. The default is `none`: every request waits for
-  a person.
+- `--auto none|edits|commands|edits,commands`: what the server's "Allow without asking" rule may apply to. The default is `none`:
+  every request waits for a person. `commands` is refused unless at least one `--allow-command` is already saved, so today, with no
+  agent that may run commands, only `none` and `edits` can be set.
 - `--allow-path FILE`: a file that runs something, which the agent may ask to edit. Dotfiles, `package.json` and lockfiles,
   build and tool configuration, package scripts, container and CI files, makefiles and test files are refused otherwise. A
   named one is always answered by a person, and a fix that changes one is never pushed from the machine.
@@ -223,7 +235,7 @@ The flags that go with it, each saved for the connection:
 - `--git-remote NAME|none`: where a finished fix is pushed (default `origin`). A fix that touches dependency manifests or CI
   config is not pushed. A pull request is opened when [GitHub connect](/docs/github) is set up on this machine.
 
-`--allow-command` is in the help text and is not available for Claude Code in Shapewall 0.6.0. Started with its shell tool, Claude
+`--allow-command` is in the help text and is not available for Claude Code in this release. Started with its shell tool, Claude
 Code runs commands it takes to be read-only (`ls`, `cat`) without asking anyone, and those can read outside the project. So a fix
 session of Claude Code gets no shell tool, the flag is refused with that explanation, and no connected agent runs a command from
 the board in this release. The whole of it, with the trust table: [the hosted guide](/docs/hosted#edits-from-the-board-the-trust-decision).
@@ -235,8 +247,9 @@ trusted-author prerequisites, budgets and approval limits. `shapewall agent --he
 
 ```text
 shapewall comments [--open|--resolved|--all] [--page ID] [--mention NAME] [--since ID|TIME] [--json]
-shapewall comments get ID [--json]
+shapewall comments get|show ID [--json]
 shapewall comments add --page ID --body TEXT [--viewport NAME] [--selector CSS] [--author NAME] [--json]
+shapewall comments selectors --page ID [--viewport NAME] [--text WORDS] [--json]
 shapewall comments resolve ID [--note TEXT] [--ref URL|COMMIT] [--author NAME] [--json]
 shapewall comments reopen ID [--author NAME] [--json]
 shapewall comments reply ID --body TEXT [--author NAME] [--json]
@@ -249,11 +262,13 @@ element text, position, file paths, replies, mentions and agent status of each c
 
 `resolve --ref` records what fixed it (a pull request URL or a commit), shown on the board as "Fixed in". Reopening clears the agent
 status. `reply` adds to the comment's thread (the author defaults to `agent`); `status` sets the agent status, and `--note` adds a reply
-with it. `--since` keeps comments after that comment id, or created or changed after that ISO time; `get` prints one comment.
+with it. `--since` keeps comments after that comment id, or created or changed after that ISO time; `get` (also spelled `show`) prints
+one comment.
 
 `add` makes a comment like the board does (checks, events, mentions, notifications): `--viewport` defaults to the page's first,
-`--author` to `agent`, and `--selector` pins it to an element (the selector grammar comments show); without one the pin sits near the
-top-left corner. `--author` on `resolve`, `reopen` and `status` names who did it in the events (default `agent`). See
+`--author` to `agent`, and `--selector` pins it to an element; without one the pin sits near the top-left corner. `comments selectors`
+prints the selectors `--selector` takes for a page, with each element's text, from the latest capture (`--text WORDS` keeps the
+elements whose text has them). `--author` on `resolve`, `reopen` and `status` names who did it in the events (default `agent`). See
 [the agent workflow](/docs/agent-workflow).
 
 ## shapewall events
@@ -335,12 +350,13 @@ the board's `baseUrl`; `--url` can point anywhere. The variant's id is `--id`, o
 ## shapewall export
 
 ```text
-shapewall export [--out shapewall-export] [--no-comments] [--browser-comments] [--noindex]
+shapewall export [--out shapewall-export] [--no-comments] [--browser-comments] [--noindex] [--include-checks]
 ```
 
 Writes a static, read-only copy of the boards that any static host can serve, with compare data for every pair of captured
 environments. `--no-comments` leaves the comments out. `--browser-comments` lets visitors add, resolve and reply to comments that stay
-in their own browser (localStorage), never on the host. `--noindex` adds a robots `noindex` tag if the client does not have one.
+in their own browser (localStorage), never on the host. `--noindex` adds a robots `noindex` tag if the client does not have one. An
+export leaves the private diagnostic reports out unless `--include-checks` explicitly asks for them.
 
 ## shapewall notify
 
@@ -357,14 +373,14 @@ changes from every process with its own environment; without it, each command se
 ## shapewall doctor
 
 ```text
-shapewall doctor [--install-browser] [--port 4600] [--agent-acp "CMD"] [--json]
+shapewall doctor [--install-browser] [--port 4600] [--no-launch] [--agent-acp "CMD"] [--json]
 ```
 
 Checks Node, the browser (by starting it), the config, the port, the output folder, the notification channels and the chat agent, and
 says what to fix. With `--agent-acp` (or `SHAPEWALL_AGENT_ACP`) it prints the agent command, starts the agent, does the ACP handshake
-(no prompt) and stops it. `--install-browser` downloads the Chromium build Shapewall's Playwright needs first; it needs no config (a
-missing one is a skip, not a FAIL, so it works in the Shapewall clone before the demo). Exits 1 when a check fails, so it works as a
-first CI step. A GitHub token that GitHub rejects (401) is a FAIL.
+(no prompt) and stops it. `--no-launch` finds the browser and the ACP agent without starting either. `--install-browser` downloads
+the Chromium build Shapewall's Playwright needs first; it needs no config (a missing one is a skip, not a FAIL, so it works in the
+Shapewall clone before the demo). Exits 1 when a check fails, so it works as a first CI step. A GitHub token that GitHub rejects (401) is a FAIL.
 
 ## shapewall login and share
 
@@ -387,6 +403,7 @@ shapewall hosted [--data DIR] [--origin URL] [--port 4700] [--signup invite|open
 
 ```text
   push                      upload the latest captures to a hosted project
+      --include-checks      explicitly include private diagnostic reports
       --remote URL          the hosted Shapewall (or $SHAPEWALL_REMOTE)
       --board ID            only this board (default: every board)
   comments | watch | mcp --remote URL
@@ -399,7 +416,7 @@ shapewall hosted [--data DIR] [--origin URL] [--port 4700] [--signup invite|open
       --data DIR            default ./shapewall-hosted-data (or $SHAPEWALL_HOSTED_DATA)
       --origin URL          public origin, e.g. https://app.example.com (default http://HOST:PORT)
       --port N | --host ADDR   default 4700 on 127.0.0.1
-      --signup invite|open  default invite (read the private setup link with hosted setup-link)
+      --signup invite|open  default invite (the first account uses the setup link)
       --trust-proxy         behind a reverse proxy on this host (client IPs from X-Forwarded-For)
 ```
 
@@ -415,6 +432,15 @@ The [hosted operator guide](/docs/hosted) covers `hosted setup-link`, `move-orig
 `admin`, quotas, retention, `backup` and `restore`, and has a checklist to walk through before you invite a team.
 `push --include-checks` explicitly adds private reports; ordinary uploads leave them out.
 
+## shapewall ci, join and admin
+
+Three commands have their prose elsewhere. `shapewall ci` captures a pull request and comments on it; the workflow
+`shapewall init --ci` writes is what calls it, and its subcommands, flags and config are in [pull requests](/docs/pull-requests).
+`shapewall join --remote URL` joins a workspace on a hosted server with tailnet sign-in, from a tailnet machine, with the invite an
+admin made for your tailnet login (`--invite LINK` takes a link or its code instead). `shapewall admin` runs a few admin commands
+(`projects`, `members`, `agents`, `invites`) against such a server as your tailnet user, which the server checks against your role.
+Both of those are in [the hosted operator guide](/docs/hosted), and `shapewall <command> --help` lists their options.
+
 ## Environment variables
 
 | Variable                                                       | Effect                                                                                        |
@@ -426,16 +452,22 @@ The [hosted operator guide](/docs/hosted) covers `hosted setup-link`, `move-orig
 | `SHAPEWALL_BROWSER_CHANNEL`                                    | Browser channel, e.g. `chrome`. Overrides the config.                                         |
 | `SHAPEWALL_BROWSER_PATH`                                       | Path to a Chromium-based browser. Overrides the config.                                       |
 | `SHAPEWALL_BOARD_URL`                                          | Where people open the board, for links in notifications.                                      |
+| `SHAPEWALL_USER_NAME`                                          | The name your comments on a local board are signed with, instead of `git config user.name`.   |
+| `SHAPEWALL_AGENT_ACP`                                          | The agent CLI to chat with over ACP, as `--agent-acp`. Never read from the config.            |
+| `SHAPEWALL_AGENT_BASE_URL`, `SHAPEWALL_AGENT_MODEL`            | The board chat's endpoint and model. Each wins over the config's `agent`.                     |
+| `SHAPEWALL_AGENT_API_KEY`, `SHAPEWALL_AGENT_KEY_HOSTS`         | The chat model's key (the default variable), and the extra hosts a key may be sent to.        |
 | `SHAPEWALL_SLACK_WEBHOOK_URL`, `SHAPEWALL_DISCORD_WEBHOOK_URL` | A Slack or Discord channel without any config.                                                |
 | `SHAPEWALL_WEBHOOK_URL`, `SHAPEWALL_WEBHOOK_SECRET`            | A signed webhook without any config.                                                          |
 | `RESEND_API_KEY`, `SHAPEWALL_EMAIL_FROM`, `SHAPEWALL_EMAIL_TO` | Email through Resend without any config.                                                      |
 | `SHAPEWALL_GITHUB_TOKEN`, `GITHUB_TOKEN`                       | The GitHub token for GitHub connect (the first one set wins).                                 |
 | `SHAPEWALL_GITHUB_REPO`                                        | The GitHub repo, `owner/name`. Wins over the config.                                          |
 | `SHAPEWALL_GITHUB_API_URL`                                     | GitHub Enterprise API URL. A config's `github.apiUrl` gets your token only when this matches. |
+| `SHAPEWALL_GITHUB_GH`                                          | `0` drops the `gh auth token` fallback, so only the token variables above are used.           |
 | `SHAPEWALL_BUZZ_SIGNER_CODEX`, `SHAPEWALL_BUZZ_SIGNER_CLAUDE`  | Signer files for the optional [Buzz bridge](/docs/buzz).                                      |
 | `SHAPEWALL_GITHUB_WEBHOOK_SECRET`                              | Turns on the GitHub webhook endpoint, with this secret.                                       |
 | `SHAPEWALL_REMOTE`, `SHAPEWALL_TOKEN`                          | Hosted URL and project token for `push` and `--remote`.                                       |
 | `SHAPEWALL_HOSTED_DATA`                                        | Data folder for `shapewall hosted`.                                                           |
+| The other `SHAPEWALL_HOSTED_*`, `SHAPEWALL_USERCONTENT_ORIGIN` | One for each `shapewall hosted` flag; [the hosted guide](/docs/hosted).                       |
 
 ## Every command and option
 
