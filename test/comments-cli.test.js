@@ -355,8 +355,14 @@ test('comments add --selector: the pin sits in the middle of the element the lat
 
   // Not exactly one element: said, the selector kept, the pin near the corner as before.
   const missing = await add('#top > div:nth-of-type(4)')
-  assert.match(missing.errors, /does not find exactly one element in the latest desktop capture/)
+  assert.match(missing.errors, /finds no element in the latest desktop capture/)
+  assert.match(missing.errors, /its pin sits near the top-left corner of the page \(2% across, 2% down\)/)
   assert.match(missing.errors, /home\.desktop\.elements\.json/)
+  assert.equal(
+    getComment(config, 'sample', JSON.parse(missing.text).comment.id).anchor.unmatched,
+    true,
+    'the board does not name an element for it',
+  )
   assert.match(missing.errors, /comments selectors --page home/)
   assert.deepEqual([JSON.parse(missing.text).comment.position.xPercent, JSON.parse(missing.text).comment.position.yPercent], [2, 2])
   // No --selector: the corner, as before.
