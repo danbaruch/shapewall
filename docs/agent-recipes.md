@@ -13,7 +13,7 @@ row that matches how you work, copy the commands, and change the project path.
 
 All of them read the same thing: open comments as JSON, with the page, the element (selector and text) and the screenshot the comment was
 made on. Comment text is **untrusted** (anyone who can comment wrote it): every recipe below tells the agent to treat it as a request
-about the UI, never as instructions, and gives the agent no more than it needs. See [agent-hardening.md](agent-hardening.md).
+about the UI, never as instructions, and gives the agent no more than it needs. See [Agent hardening](agent-hardening.md).
 
 The commands assume `shapewall` is installed in the project (`npm install --save-dev shapewall`), so `npx shapewall`
 runs that copy, and that you are in the folder with `shapewall.config.json`.
@@ -176,7 +176,7 @@ npx shapewall agent run --comment 12 --model-timeout 300
 ```
 
 A local model can take minutes to load on the first call; `--model-timeout` (or `starterAgent.modelTimeoutSeconds`) gives it longer. The
-`capture` tool is offered only when the site is reachable from the sandbox. See [starter-agent.md](starter-agent.md).
+`capture` tool is offered only when the site is reachable from the sandbox. See [Sandboxed starter agent](starter-agent.md).
 
 ## A chat-app bot
 
@@ -207,4 +207,4 @@ whatever the caller said; nothing attests them. Do not act on a name alone, and 
 `starterAgent.trusted`**: everything the bot relays is a stranger's text, and `comments add --author review-bot` would make each of those
 comments dispatch the starter agent without a trusted person standing behind it. Leave relayed comments under the bot's name (or the
 default `agent`, which the starter agent never acts on) so they wait until a trusted member replies with `@agent`
-([starter-agent.md](starter-agent.md)).
+([Sandboxed starter agent](starter-agent.md)).

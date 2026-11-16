@@ -6,7 +6,7 @@
 //   DATABASE_PATH                 default ./data/contact.sqlite
 //   CONTACT_ALLOWED_ORIGIN        the only accepted Origin header, default https://shapewall.com
 //   CONTACT_TELEGRAM_BOT_TOKEN    the bot token, or
-//   CONTACT_OPENCLAW_CONFIG       a JSON file holding it at channels.telegram.botToken
+//   CONTACT_TELEGRAM_CONFIG_FILE       a JSON file holding it at channels.telegram.botToken
 //   CONTACT_TELEGRAM_CHAT_ID      where messages go (no chat id or token: messages are stored only)
 //   CONTACT_TELEGRAM_THREAD_ID    optional forum topic
 //   CONTACT_TELEGRAM_API_BASE     optional, default https://api.telegram.org (a local stub in tests)
@@ -66,9 +66,9 @@ export function formatForTelegram(entry) {
 
 function readBotToken(env) {
   if (env.CONTACT_TELEGRAM_BOT_TOKEN) return env.CONTACT_TELEGRAM_BOT_TOKEN
-  if (!env.CONTACT_OPENCLAW_CONFIG) return null
+  if (!env.CONTACT_TELEGRAM_CONFIG_FILE) return null
   try {
-    return JSON.parse(fs.readFileSync(env.CONTACT_OPENCLAW_CONFIG, 'utf8'))?.channels?.telegram?.botToken || null
+    return JSON.parse(fs.readFileSync(env.CONTACT_TELEGRAM_CONFIG_FILE, 'utf8'))?.channels?.telegram?.botToken || null
   } catch {
     return null
   }

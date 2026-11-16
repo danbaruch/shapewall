@@ -19,8 +19,9 @@ otherwise the installed Chrome is discovered. An unsupported browser channel
 fails honestly. An optional `--browser-version` requires an exact installed
 browser version for reproducible CI comparisons.
 
-Run audits through the machine's capped browser wrapper, for example
-`browser-slot node ...` in local tooling. Each navigation gets its own private
+An audit launches a full Chrome, so give it a bounded share of the machine
+rather than running it beside a capture or a build: a container, a cgroup or a
+CI job with its own memory and CPU limits. Each navigation gets its own private
 browser profile beneath the configured output directory. The runner closes the
 browser and removes this profile on success or failure.
 

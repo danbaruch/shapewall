@@ -4,7 +4,7 @@
 checkout of your repo (with no `.git` in it), runs your tests, replies on the comment and leaves the change on a new branch (and, if you ask, a pull request). It is
 meant for **shared boards**, where the people writing comments are not all people you would hand a shell to.
 
-The board chat ([agents.md](agents.md)) runs an agent _as you_, on your machine. The starter agent assumes the comment may be hostile and
+The board chat ([Chat with an agent](agents.md)) runs an agent _as you_, on your machine. The starter agent assumes the comment may be hostile and
 puts walls around the agent instead: the container, an egress allow list, a fixed set of tools, a trigger gate, budgets and branch-only
 output. This page says what each wall does and, as plainly, what it does not.
 
@@ -78,7 +78,7 @@ Who counts as a member depends on the board:
 - **Hosted boards** (`--remote`): the account handle the server attests (`authorHandle`, `reply.handle`). Display names never count.
 - **Local boards**: the author name as typed. A local board has no accounts, so this is only as strong as who can reach the board. On
   a board shared through a proxy, anyone who can comment can type a trusted name: put real authentication in front (see
-  [deployment.md](deployment.md)) or use a hosted board.
+  [Deployment and self-hosting](deployment.md)) or use a hosted board.
 
 A comment is claimed with a compare-and-set on its agent status, so two runs never take the same comment. `--retry` takes one whose
 status is `done` or `needs-human`.
@@ -226,7 +226,7 @@ branch is pushed is a flag: `--git-remote`, `--fork-remote`).
 | `--fork-remote NAME`       |                                            | With `--pr`: push to this remote (your fork) and open the pull request from it.                        |
 | `--remote URL`             |                                            | A hosted board instead of the local one (`run` and `watch`).                                           |
 
-The model endpoint and key follow the chat's rules ([agents.md](agents.md)): a config cannot send your key to a host you did not
+The model endpoint and key follow the chat's rules ([Chat with an agent](agents.md)): a config cannot send your key to a host you did not
 confirm. The starter agent always uses the OpenAI-compatible endpoint, never the chat's ACP agent.
 
 ## Threat model
@@ -321,5 +321,5 @@ connect configured. The existing push guard still blocks CI/workflow-sensitive
 changes unless explicitly allowed by the runner. The GitHub credential remains
 on the runner; it is never uploaded with the board or given to the sandbox.
 Comments and captures are untrusted text. A shell-capable agent with a readable
-token remains a prompt-injection risk: read [agent-hardening.md](agent-hardening.md)
+token remains a prompt-injection risk: read [Agent hardening](agent-hardening.md)
 and keep both server claim budgets and per-run turns/tokens/minutes limits.

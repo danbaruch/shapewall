@@ -4,6 +4,7 @@ import Home from './pages/Home.jsx'
 import Features from './pages/Features.jsx'
 import OpenSource from './pages/OpenSource.jsx'
 import Privacy from './pages/Privacy.jsx'
+import Terms from './pages/Terms.jsx'
 import Contact from './pages/Contact.jsx'
 import LegalTemplate from './pages/legal/LegalTemplate.jsx'
 import NotFound from './pages/NotFound.jsx'
@@ -18,6 +19,7 @@ export default function App() {
         <Route path="/features" element={<Features />} />
         <Route path="/open-source" element={<OpenSource />} />
         <Route path="/privacy" element={<Privacy />} />
+        <Route path="/terms" element={<Terms />} />
         <Route path="/contact" element={<Contact />} />
         <Route path="/legal/terms" element={<LegalTemplate slug="terms" />} />
         <Route path="/legal/privacy" element={<LegalTemplate slug="privacy" />} />

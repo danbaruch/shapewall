@@ -25,7 +25,7 @@ for a team.
 
 - [Getting started](/docs/getting-started): install, write a config, capture and open the board.
 - [Config reference](/docs/config): every key in `shapewall.config.json`.
-- [Journeys](/docs/journeys) and [before, after and staging](/docs/compare): flows through your pages and comparing versions.
+- [Journeys and links](/docs/journeys) and [before, after and staging](/docs/compare): flows through your pages and comparing versions.
 - [The agent workflow](/docs/agent-workflow): hand comments to Claude Code, Codex or any agent, with the
   [images and drawings on a comment](/docs/agent-workflow#images-and-drawings-on-comments) (how to add them:
   [Getting started](/docs/getting-started#images-and-drawings)).
@@ -37,7 +37,8 @@ for a team.
   webhook, Slack, Discord or email.
 - [Sandboxed starter agent](/docs/starter-agent): let an agent work on comments from a shared board, inside a container.
 - [Security model](/docs/security): why captured pages can never run code.
-- [Page checks and performance](/docs/page-checks): reliability, SEO, social images, Lighthouse, accessibility and report comparisons.
+- [Page checks and performance](/docs/page-checks): reliability, SEO, social images and report comparisons, with
+  [Lighthouse audits](/docs/performance) and [interaction flows and accessibility](/docs/interaction-audits) on their own pages.
 - [Capture warnings and pacing](/docs/capture-warnings): API failures and rate limits alongside usable screenshots.
 - [Local accounts and profile photos](/docs/local-accounts) and [manual updates](/docs/updates).
 - [Hosted operator guide](/docs/hosted) (beta): run a team server with passkey accounts, workspaces, roles and share links.

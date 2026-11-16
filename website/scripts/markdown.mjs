@@ -11,6 +11,8 @@ import { GITHUB_URL, INSTALL_PACKAGE, LAUNCHED } from '../src/launch.js'
 
 const REPO_DOCS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../docs')
 // Repository guides that are site pages: file name in docs/ -> route. Everything else links to GitHub.
+// Publishing one of docs/*.md needs three lists to agree: a `repo:` entry in src/routes.js, the name here (or
+// SITE_PATHS below when the route is not /docs/<file name>), and the brace list in src/pages/Docs.jsx.
 const SAME_NAME = [
   'agent-hardening',
   'agent-recipes',
@@ -20,10 +22,12 @@ const SAME_NAME = [
   'config',
   'github',
   'hosted',
+  'interaction-audits',
   'journeys',
   'local-accounts',
   'notifications',
   'page-checks',
+  'performance',
   'pull-requests',
   'starter-agent',
   'updates',
@@ -38,13 +42,16 @@ const SITE_PATHS = {
 function siteHref(href) {
   if (href.startsWith('https://shapewall.com/')) return href.slice('https://shapewall.com'.length)
   if (/^[a-z]+:/i.test(href) || href.startsWith('#') || href.startsWith('/')) return href
-  const [file, hash] = href.split('#')
+  // SITE_PATHS is keyed by bare file name, so `./config.md` has to lose the `./` or it would leak to GitHub.
+  const [file, hash] = href.replace(/^\.\//, '').split('#')
   const anchor = hash ? `#${hash}` : ''
   if (SITE_PATHS[file]) return SITE_PATHS[file] + anchor
   return `${GITHUB_URL}/blob/main/${path.posix.normalize(path.posix.join('docs', file))}${anchor}`
 }
 
 // A guide from ../docs as a site page. Fenced code is left alone.
+// Writing a guide: an image only drops out when `![alt](images/x.png)` is the whole line. An inline one, or one under
+// another folder, stays and its href becomes a GitHub blob URL, which is a picture the site cannot show.
 export function fromRepoDoc(source) {
   return source
     .replace(/^# .*\n+/, '')
@@ -52,7 +59,10 @@ export function fromRepoDoc(source) {
     .map((part) =>
       part.startsWith('```')
         ? part
-        : part.replace(/^!\[[^\]]*\]\(images\/[^)]*\)\n+/gm, '').replace(/\]\(([^)\s]+)\)/g, (all, href) => `](${siteHref(href)})`),
+        : part
+            .replace(/^!\[[^\]]*\]\(images\/[^)]*\)\n+/gm, '')
+            // The optional second group keeps a link title, `](config.md "Config")`, which the href alone would drop.
+            .replace(/\]\(([^)\s]+)(\s+"[^"]*")?\)/g, (all, href, title = '') => `](${siteHref(href)}${title})`),
     )
     .join('')
 }
