@@ -6,8 +6,8 @@ There is a printable one-page checklist at the end ([Checklist](#checklist)), an
 
 ## Who this is for
 
-You connect an agent to a board: the chat panel (an OpenAI-compatible endpoint or an agent CLI over ACP, [agents.md](agents.md)),
-`shapewall watch --exec`, `shapewall mcp`, or a script that reads `shapewall comments --json` ([agent-workflow.md](agent-workflow.md)).
+You connect an agent to a board: the chat panel (an OpenAI-compatible endpoint or an agent CLI over ACP, [Chat with an agent](agents.md)),
+`shapewall watch --exec`, `shapewall mcp`, or a script that reads `shapewall comments --json` ([The agent workflow](agent-workflow.md)).
 
 If the board is yours alone, on your machine, the risk is small and most of this guide is optional. It matters once **other people can
 write text the agent reads**: a board shared with your team, a hosted project with members, a share link with comments on, a public site
@@ -481,7 +481,7 @@ Keep the Shapewall token outside the agent's container: a process running as the
 The sandboxed starter agent (`shapewall agent run|watch|doctor`) is built for exactly this, and is the recommended way to put an agent
 on a shared board: a container with only a fresh checkout mounted, an egress allow list, model calls relayed through the host so the
 key never enters the container, fixed tools, per-command shell approval, budgets, a per-board list of members who may dispatch work,
-and output as a branch. `shapewall agent doctor` checks each wall on your machine. Setup and threat model: [starter-agent.md](starter-agent.md).
+and output as a branch. `shapewall agent doctor` checks each wall on your machine. Setup and threat model: [Sandboxed starter agent](starter-agent.md).
 
 ## Keys and tokens
 

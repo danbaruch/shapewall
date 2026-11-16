@@ -108,7 +108,7 @@ function lastCommit(paths) {
     return null
   }
 }
-const PAGE_FILES = { '/': 'Home', '/features': 'Features', '/open-source': 'OpenSource', '/privacy': 'Privacy' }
+const PAGE_FILES = { '/': 'Home', '/features': 'Features', '/open-source': 'OpenSource', '/privacy': 'Privacy', '/terms': 'Terms' }
 out(
   'sitemap.xml',
   sitemapXml((route) =>
