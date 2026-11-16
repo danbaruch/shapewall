@@ -63,6 +63,34 @@ after(async () => {
   await setup?.close()
 })
 
+// Waits until a Checks surface's animations have finished, so what is
+// measured next is the settled layout. A phone sheet slides in under the
+// pointer the test left where it clicked the menu's Checks item (at 390 that
+// spot is on the tab row's path), so a tab carried past it starts a hover
+// colour transition and, a frame later as the sheet moves on, reverses it.
+// The browser cancels the first transition (CSS Transitions: a reversed
+// transition replaces the running one), and its `finished` rejects with
+// AbortError -- which is what failed "Checks tabs ... at 390px" now and
+// then. That is not a fault: the reversal is a new transition, and nobody on
+// a phone has a pointer parked there. So a cancelled CSS transition sends the
+// wait round again for whatever is running now, and a cancelled CSS animation
+// (the sheet's own sheet-in, which only a remount or a lost class can
+// cancel) still fails the test, naming it.
+async function settled(surface) {
+  const outcome = await surface.evaluate(async (element) => {
+    for (let round = 0; round < 10; round += 1) {
+      const animations = element.getAnimations({ subtree: true })
+      const results = await Promise.allSettled(animations.map((animation) => animation.finished))
+      const cancelled = animations.filter((animation, index) => results[index].status === 'rejected')
+      if (!cancelled.length) return 'settled'
+      const real = cancelled.find((animation) => !(animation instanceof CSSTransition))
+      if (real) return `cancelled ${real.constructor.name} ${real.animationName || ''} on <${real.effect?.target?.tagName?.toLowerCase()}>`
+    }
+    return 'transitions still being cancelled after 10 rounds'
+  })
+  assert.equal(outcome, 'settled')
+}
+
 for (const { width, colorScheme } of [1440, 1024, 768, 390, 320].flatMap((width) =>
   ['light', 'dark'].map((colorScheme) => ({ width, colorScheme })),
 ))
@@ -97,7 +125,7 @@ for (const { width, colorScheme } of [1440, 1024, 768, 390, 320].flatMap((width)
         assert.equal(await surface.evaluate((element) => element.contains(document.activeElement)), true)
       }
       // Measure after the sheet's enter animation (a transform) settles.
-      await surface.evaluate((element) => Promise.all(element.getAnimations({ subtree: true }).map((a) => a.finished)))
+      await settled(surface)
       const initialTargets = await surface.locator('button:visible').evaluateAll((elements) =>
         elements.map((element) => ({
           name: element.getAttribute('aria-label') || element.textContent,
@@ -402,7 +430,7 @@ for (const width of [1280, 390, 320])
       const panel = page.locator('[data-sw-checks-panel]')
       await panel.getByText('Error responses during load', { exact: true }).first().waitFor()
       const surface = width < 1024 ? page.getByRole('dialog') : page.getByRole('complementary', { name: 'Checks', exact: true })
-      await surface.evaluate((element) => Promise.all(element.getAnimations({ subtree: true }).map((a) => a.finished)))
+      await settled(surface)
       const tablist = panel.getByRole('tablist', { name: 'Checks view' })
       const styles = () => panel.locator('[data-sw-tabs-variant]').evaluateAll((els) => els.map((el) => el.dataset.swTabsVariant))
       const layout = () =>
