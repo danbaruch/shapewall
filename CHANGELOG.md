@@ -3,7 +3,7 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.8.0 - 2026-11-16
 
 - **Account activity called every tailnet sign-in a passkey sign-in.** On a server started with `--tailscale --tailnet-sign-in`,
   passkeys off, each sign-in read "Signed in with a passkey" while the device list beside it said "Signed in by tailnet". The
@@ -17,12 +17,13 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 - **Opt-in error reports for your own server.** Set `SHAPEWALL_ERROR_DSN` (any Sentry-compatible DSN: Sentry, GlitchTip) and
   `shapewall serve` or `shapewall hosted` reports its unhandled errors there, and the pages it serves report browser errors to the
-  same place. Off by default: without the variable the SDK is never loaded and nothing is sent, and Shapewall has no DSN of its own.
-  Reports carry the error, stack trace, URL path, browser and release, never content, request bodies, cookies, query strings or
-  identities. See [Error reports](docs/deployment.md#error-reports-opt-in).
-
-## 0.8.0 - 2026-11-14
-
+  same place. Off by default: without the variable the reporting SDK is never loaded and nothing is sent, and the package has no
+  DSN of its own. A report is scrubbed before it leaves: it keeps the error, its stack trace, the URL path, the browser or runtime
+  and the release, and drops cookies, request bodies, headers other than the user agent, query strings, fragments, user identities,
+  local variables, console lines and clicks; quoted text in an error message is replaced, since that is where an input such as
+  board or comment content would appear. See [Error reports](docs/deployment.md#error-reports-opt-in). Our own deployments (the
+  shapewall.com website and its public demo) set our DSN and report the same scrubbed errors; that is their setting, not the
+  package's.
 - **On a phone, comparing two environments, the thread sheet covered the whole board.** Measured at 390 px wide on the demo
   board: compare mode's bar pushes the canvas 247 px down the window, and the sheet kept taking its share of the window, 598 px
   of 844, so it started at 246 px and the canvas ended at 844. The pin was placed correctly and the camera flew to it, behind
