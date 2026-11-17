@@ -52,8 +52,10 @@ export function CommentComposer({
     if (startDraw && drawable) setSheet(true)
   }, [startDraw, drawable])
   const shapes = useDrawing((value) => (value?.owner === 'composer' ? value.shapes.length : 0))
-  // Drawing: the draw tools fill the row, so Cancel moves under the box.
-  const drawingOn = useDrawing((value) => value?.owner === 'composer')
+  // Drawing (a tool picked, or shapes drawn): the draw tools fill the row,
+  // so Cancel moves under the box. The composer holds a session from the
+  // start, so the session alone does not count.
+  const drawingOn = useDrawing((value) => value?.owner === 'composer' && Boolean(value.tool || value.shapes.length))
   const images = media?.images
   const canAttach = Boolean(media?.attach && images)
   const canDraw = Boolean(media?.draw)
