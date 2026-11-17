@@ -2,15 +2,16 @@ Shapewall puts every page of your product on one zoomable wall. You point at wha
 and the wall shows you the result in place. These docs cover installing it, configuring your pages, the agent workflow and running it
 for a team.
 
-![The Shapewall board with the pages of a demo product, grouped, at desktop and phone width](/images/board-overview.webp)
+![The Shapewall board with the pages of a demo product, grouped, at desktop, tablet and phone width, with the comments panel](/images/board-overview.webp)
 
 ## How it works
 
 1. **Capture.** Playwright opens each page in your config at every viewport (by default 1440 x 2200 desktop and 390 x 1800 phone; add a tablet or your own). It
    writes a screenshot, a thumbnail and a live HTML snapshot with every script removed.
 2. **The wall.** `shapewall serve` starts a small local server with the board: a canvas with your pages grouped into sections. Zoomed
-   out you see thumbnails of everything; zoomed in, a tile turns into the captured page itself.
-3. **Comments.** Click a page and press **Comment** on its bar (or pick **Comment** in the tools at the bottom of the board), click an element, write what should change. On live HTML the comment is anchored to the element
+   out you see thumbnails of everything; zoomed in, a tile turns into the captured page itself. It pans and zooms like a design
+   tool: wheel or trackpad to pan, a pinch or Ctrl/Cmd+wheel to zoom at the cursor.
+3. **Comments.** Click a page and press **Comment** on its bar (or pick **Comment** in the tools at the bottom of the board), click an element, and type or dictate what should change. On live HTML the comment is anchored to the element
    (a selector plus its text), so it follows that element through the next capture.
 4. **The agent loop.** `shapewall comments --open --json`, `shapewall watch` or the MCP server give any coding agent precise,
    structured work. It changes the code, recaptures the pages it touched, replies, and you check before and after on the wall.

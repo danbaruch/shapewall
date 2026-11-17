@@ -189,6 +189,27 @@ section.bg-night {
   height: auto;
 }
 
+/* The home hero's entrance, in CSS so it starts with the first paint and needs no JavaScript. The screenshot only
+   moves (it is always fully visible, so it never holds back the largest paint); the two notes beside it then settle
+   in. 240 ms, decelerating, no overshoot. Reduce motion turns both off (below). */
+@keyframes hero-rise {
+  from {
+    transform: translateY(14px) scale(0.985);
+  }
+}
+@keyframes hero-note {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+.hero-rise {
+  animation: hero-rise 240ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+.hero-note {
+  animation: hero-note 240ms cubic-bezier(0.2, 0, 0, 1) 160ms backwards;
+}
+
 /* Docs article typography (HTML from src/docs/*.md). */
 .prose-docs {
   @apply text-[15.5px] leading-7 text-ink/90;

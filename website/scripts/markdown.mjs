@@ -4,6 +4,7 @@
 // Two sources: src/docs/*.md (pages written for the site) and ../docs/*.md (the repository's own guides, shown on
 // the site as they are, so the two cannot drift). A repository guide is adapted on the way in: its title goes (the
 // page header shows it), links to other guides become site routes, and links to other repository files point at GitHub.
+import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Marked, Renderer } from 'marked'
@@ -100,7 +101,33 @@ const decode = (html) =>
     .replace(/&gt;/g, '>')
     .replace(/&amp;/g, '&')
 
-export function renderMarkdown(source) {
+const PUBLIC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../public')
+const escapeAttr = (value) => String(value).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
+
+// Width and height of a WebP or PNG in public/, read from its header. Null for anything else.
+export function siteImageSize(href) {
+  if (!href.startsWith('/images/')) return null
+  let data
+  try {
+    data = fs.readFileSync(path.join(PUBLIC, href.slice(1)))
+  } catch {
+    return null
+  }
+  if (data.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
+    return { width: data.readUInt32BE(16), height: data.readUInt32BE(20) }
+  }
+  if (data.toString('ascii', 0, 4) !== 'RIFF' || data.toString('ascii', 8, 12) !== 'WEBP') return null
+  const chunk = data.toString('ascii', 12, 16)
+  if (chunk === 'VP8 ') return { width: data.readUInt16LE(26) & 0x3fff, height: data.readUInt16LE(28) & 0x3fff }
+  if (chunk === 'VP8L') {
+    const bits = data.readUInt32LE(21)
+    return { width: (bits & 0x3fff) + 1, height: ((bits >> 14) & 0x3fff) + 1 }
+  }
+  if (chunk === 'VP8X') return { width: data.readUIntLE(24, 3) + 1, height: data.readUIntLE(27, 3) + 1 }
+  return null
+}
+
+export function renderMarkdown(source, { idPrefix = '' } = {}) {
   const headings = []
   const used = new Map()
   const marked = new Marked({
@@ -109,7 +136,7 @@ export function renderMarkdown(source) {
       heading({ tokens, depth }) {
         const inner = this.parser.parseInline(tokens)
         if (depth !== 2 && depth !== 3) return `<h${depth}>${inner}</h${depth}>\n`
-        const base = slugify(inner) || 'section'
+        const base = idPrefix + (slugify(inner) || 'section')
         const count = used.get(base) || 0
         used.set(base, count + 1)
         const id = count ? `${base}-${count}` : base
@@ -134,6 +161,12 @@ export function renderMarkdown(source) {
         const body = token.text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
         return `<div class="code"${label ? ` data-label="${label}"` : ''}><pre><code${lang ? ` class="language-${lang}"` : ''}>${body}</code></pre></div>\n`
       },
+      image({ href, title, text }) {
+        // A site image (public/images) gets its real size, so the page does not move as it loads, and loads lazily.
+        const size = siteImageSize(href)
+        const attrs = size ? ` width="${size.width}" height="${size.height}"` : ''
+        return `<img src="${href}" alt="${escapeAttr(text)}"${title ? ` title="${escapeAttr(title)}"` : ''}${attrs} loading="lazy" decoding="async">`
+      },
       link({ href, title, tokens }) {
         const text = this.parser.parseInline(tokens)
         const external = /^https?:\/\//.test(href)
@@ -154,6 +187,46 @@ export function renderMarkdown(source) {
   return { html, headings, text }
 }
 
+// The repository's CHANGELOG.md as the /changelog page: one entry per version, from the same file, so the page never
+// drifts from it. Its links are relative to the repository root: guides that are site pages become routes, other files
+// point at GitHub. Text such as "Left on <environment>" is text, not a tag.
+export const CHANGELOG = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../CHANGELOG.md')
+
+function changelogHref(href) {
+  if (/^[a-z]+:/i.test(href) || href.startsWith('#') || href.startsWith('/')) return href
+  const [file, hash] = href.replace(/^\.\//, '').split('#')
+  const anchor = hash ? `#${hash}` : ''
+  if (file.startsWith('docs/') && !file.slice(5).includes('/')) return siteHref(file.slice(5) + anchor)
+  const page = /^website\/src\/docs\/([\w-]+)\.md$/.exec(file)
+  if (page) return (page[1] === 'index' ? '/docs' : `/docs/${page[1]}`) + anchor
+  return `${GITHUB_URL}/blob/main/${path.posix.normalize(file)}${anchor}`
+}
+
+const textNotTags = (markdownText) =>
+  markdownText
+    .split(/(^```[\s\S]*?^```$|`[^`\n]*`)/m)
+    .map((part, index) => (index % 2 ? part : part.replace(/</g, '&lt;')))
+    .join('')
+
+export function renderChangelog(source) {
+  const [head, ...entries] = source.replace(/^# .*\n+/, '').split(/^## /m)
+  const links = (text) => text.replace(/\]\(([^)\s]+)(\s+"[^"]*")?\)/g, (all, href, title = '') => `](${changelogHref(href)}${title})`)
+  // Work merged but not yet released (Keep a Changelog's "## Unreleased") stays off the site until it ships.
+  const versions = entries
+    .filter((entry) => !/^Unreleased\s*\n/i.test(entry))
+    .map((entry) => {
+      const [title, ...body] = entry.split('\n')
+      const match = /^(\d+\.\d+\.\d+(?:-[\w.]+)?)\s+-\s+(\d{4}-\d{2}-\d{2})\s*$/.exec(title)
+      if (!match) throw new Error(`CHANGELOG.md: a version heading reads "## ${title}"; expected "## 1.2.3 - YYYY-MM-DD"`)
+      const id = `v${match[1].replace(/\./g, '-')}`
+      const rendered = renderMarkdown(textNotTags(links(body.join('\n').trim())), { idPrefix: `${id}-` })
+      // A local address quoted in an entry (an error message, say) stays text: on this site it would link to the reader's machine.
+      const html = rendered.html.replace(/<a href="https?:\/\/(?:127\.0\.0\.1|localhost)[^"]*"[^>]*>([^<]*)<\/a>/g, '$1')
+      return { version: match[1], date: match[2], id, html, headings: rendered.headings }
+    })
+  return { intro: renderMarkdown(textNotTags(links(head.trim()))).html, versions }
+}
+
 export function markdown() {
   return {
     name: 'shapewall-markdown',
@@ -161,6 +234,7 @@ export function markdown() {
     transform(source, id) {
       const file = id.split('?')[0]
       if (!file.endsWith('.md')) return null
+      if (path.resolve(file) === CHANGELOG) return { code: `export default ${JSON.stringify(renderChangelog(source))}`, map: null }
       const fromRepo = path.resolve(file).startsWith(REPO_DOCS + path.sep)
       const text = applyLaunch(fromRepo ? fromRepoDoc(source) : source)
       return { code: `export default ${JSON.stringify(renderMarkdown(text))}`, map: null }

@@ -19,12 +19,15 @@ import { GitHubIcon } from '../components/brand.jsx'
 import { Badge, Button, Container, GetStarted, InstallCommand, LiveDemo, SectionHead, Shot } from '../components/ui.jsx'
 import { BeforeAfter, CaptureIllustration, JourneyIllustration, MapIllustration } from '../components/illustrations.jsx'
 import { AgentTerminal } from '../components/terminal.jsx'
+import { Reveal, stagger } from '../components/motion.jsx'
 import { Faq } from '../components/faq.jsx'
 import { GITHUB_URL } from '../routes.js'
 import { GITHUB_LABEL, LAUNCHED, LICENSE_SUMMARY } from '../launch.js'
-import boardOverview from '../assets/shots/board-overview.webp'
 import boardOverview960 from '../assets/shots/board-overview-960.webp'
+import boardOverview1440 from '../assets/shots/board-overview-1440.webp'
+import boardOverview2048 from '../assets/shots/board-overview-2048.webp'
 import liveComment960 from '../assets/shots/live-comment-960.webp'
+import liveComment1440 from '../assets/shots/live-comment-1440.webp'
 
 export default function Home() {
   return (
@@ -95,22 +98,23 @@ function Hero() {
         </div>
         <div className="relative mx-auto mt-14 max-w-5xl sm:mt-16">
           <Shot
-            src={boardOverview}
-            srcSet={`${boardOverview960} 960w, ${boardOverview} 1440w`}
+            src={boardOverview1440}
+            srcSet={`${boardOverview960} 960w, ${boardOverview1440} 1440w, ${boardOverview2048} 2048w`}
             sizes="(min-width: 1100px) 1024px, 100vw"
             width="1440"
             height="900"
             eager
-            alt="The Shapewall board: the pages of a demo product at desktop and phone width, grouped into Marketing, Content, Get started, App and Admin, with numbered comment pins and a comments panel"
+            className="hero-rise"
+            alt="The Shapewall board: the pages of a demo product at desktop, tablet and phone width, grouped into Marketing, Content, Get started and App, with comment pins and the comments panel"
           />
-          <div className="absolute -bottom-6 -left-3 hidden w-72 rounded-xl border border-line bg-card p-3.5 shadow-xl shadow-black/10 md:block lg:-left-10">
+          <div className="hero-note absolute -bottom-6 -left-3 hidden w-72 rounded-xl border border-line bg-card p-3.5 shadow-xl shadow-black/10 md:block lg:-left-10">
             <p className="flex items-center gap-2 text-[12px] font-semibold text-wall">
               <Bot className="size-4" aria-hidden="true" /> Agent resolved #1
             </p>
             <p className="mt-1.5 text-[13.5px] leading-snug text-ink">The Plus card now uses the primary button. Pricing recaptured.</p>
           </div>
-          <div className="absolute -top-5 -right-3 hidden items-center gap-2 rounded-full border border-line bg-card py-1.5 pr-3.5 pl-2 text-[13px] font-medium text-ink shadow-lg shadow-black/10 md:flex lg:-right-8">
-            <span className="grid size-6 place-items-center rounded-full bg-pin text-[11px] font-bold text-night">19</span>
+          <div className="hero-note absolute -top-5 -right-3 hidden items-center gap-2 rounded-full border border-line bg-card py-1.5 pr-3.5 pl-2 text-[13px] font-medium text-ink shadow-lg shadow-black/10 md:flex lg:-right-8">
+            <span className="grid size-6 place-items-center rounded-full bg-pin text-[11px] font-bold text-night">20</span>
             open comments on 26 pages
           </div>
         </div>
@@ -140,10 +144,12 @@ const STEPS = [
       <div className="wall-dots flex aspect-[4/3] items-center rounded-2xl p-4 sm:p-5">
         <Shot
           src={liveComment960}
-          width="960"
-          height="600"
+          srcSet={`${liveComment960} 960w, ${liveComment1440} 1440w`}
+          sizes="(min-width: 768px) 360px, 100vw"
+          width="1440"
+          height="900"
           bar={false}
-          alt="Live HTML of a pricing page with a comment pinned to the Try Plus free button"
+          alt="Live HTML of a pricing page with a new comment on the Try Plus free button: the comment box holds image and drawing tools, a microphone and Post"
         />
       </div>
     ),
@@ -159,14 +165,14 @@ function HowItWorks() {
         </SectionHead>
         <ol className="mt-14 grid gap-10 md:grid-cols-3 md:gap-6 lg:gap-8">
           {STEPS.map((step, index) => (
-            <li key={step.title}>
+            <Reveal as="li" key={step.title} delay={stagger(index)}>
               {step.art}
               <div className="mt-6 flex items-center gap-3">
                 <span className="grid size-8 place-items-center rounded-lg bg-ink text-[14px] font-bold text-card">{index + 1}</span>
                 <h3 className="text-[19px] font-semibold tracking-tight text-ink">{step.title}</h3>
               </div>
               <p className="mt-3 text-[15.5px] leading-7 text-slate">{step.text}</p>
-            </li>
+            </Reveal>
           ))}
         </ol>
       </Container>
@@ -188,7 +194,7 @@ const FEATURES = [
   {
     icon: MapPin,
     title: 'Comments on the element',
-    text: 'A pin stores the selector and text of what you clicked, so it follows the button through the next capture. Add images or draw on the page.',
+    text: 'A pin stores the selector and text of what you clicked, so it follows the button through the next capture. Type, dictate, attach images or draw on the page.',
   },
   {
     icon: Bot,
@@ -198,7 +204,7 @@ const FEATURES = [
   {
     icon: GitCompare,
     title: 'Before and after, with history',
-    text: 'Every recapture keeps the old shot. See a fix around its pin, compare any earlier capture with changed pixels in red, or put staging beside production.',
+    text: 'Every recapture keeps the old shot. See a fix around its pin, compare any earlier capture with changed pixels in red, or put staging beside production and comment on either side.',
   },
   {
     icon: FolderOpen,
@@ -222,7 +228,7 @@ function FeatureGrid() {
             All features <ArrowRight className="size-4" aria-hidden="true" />
           </Link>
         </div>
-        <ul className="mt-12 grid gap-px overflow-hidden rounded-2xl border border-line bg-line sm:grid-cols-2 lg:grid-cols-3">
+        <Reveal as="ul" className="mt-12 grid gap-px overflow-hidden rounded-2xl border border-line bg-line sm:grid-cols-2 lg:grid-cols-3">
           {FEATURES.map((feature) => (
             <li key={feature.title} className="bg-card p-6">
               <div className="flex items-center justify-between">
@@ -233,7 +239,7 @@ function FeatureGrid() {
               <p className="mt-2 text-[14.5px] leading-6 text-slate">{feature.text}</p>
             </li>
           ))}
-        </ul>
+        </Reveal>
       </Container>
     </section>
   )
@@ -255,14 +261,14 @@ function AgentLoop() {
           </SectionHead>
           <ol className="mt-10 space-y-5">
             {loop.map((item, index) => (
-              <li key={item.title} className="flex gap-4">
+              <Reveal as="li" key={item.title} className="flex gap-4" delay={stagger(index)}>
                 <span className="grid size-8 shrink-0 place-items-center rounded-full border border-wall-bright/40 text-[13px] font-bold text-wall-bright">
                   {index + 1}
                 </span>
                 <p className="pt-1 text-[16px] leading-6 text-zinc-300">
                   <strong className="font-semibold text-white">{item.title}</strong> {item.text}
                 </p>
-              </li>
+              </Reveal>
             ))}
           </ol>
           <div className="mt-10 flex flex-wrap gap-3">
@@ -271,7 +277,9 @@ function AgentLoop() {
             </Button>
           </div>
         </div>
-        <AgentTerminal />
+        <Reveal className="min-w-0">
+          <AgentTerminal />
+        </Reveal>
       </Container>
     </section>
   )
@@ -293,9 +301,9 @@ function Journeys() {
             How journeys work <ArrowRight className="size-4" aria-hidden="true" />
           </Link>
         </div>
-        <div className="mt-12">
+        <Reveal className="mt-12">
           <JourneyIllustration />
-        </div>
+        </Reveal>
       </Container>
     </section>
   )
@@ -324,7 +332,9 @@ function BeforeAfterSection() {
             ))}
           </ul>
         </div>
-        <BeforeAfter />
+        <Reveal className="min-w-0">
+          <BeforeAfter />
+        </Reveal>
       </Container>
     </section>
   )
@@ -374,14 +384,14 @@ function Teams() {
           </div>
         </div>
         <dl className="grid gap-x-8 gap-y-8 sm:grid-cols-2">
-          {TEAM_POINTS.map((point) => (
-            <div key={point.title}>
+          {TEAM_POINTS.map((point, index) => (
+            <Reveal key={point.title} delay={stagger(index)}>
               <dt className="flex items-center gap-2.5 text-[15.5px] font-semibold text-ink">
                 <point.icon className="size-[18px] text-wall" aria-hidden="true" />
                 {point.title}
               </dt>
               <dd className="mt-2 text-[14.5px] leading-6 text-slate">{point.text}</dd>
-            </div>
+            </Reveal>
           ))}
         </dl>
       </Container>

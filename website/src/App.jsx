@@ -6,37 +6,42 @@ import OpenSource from './pages/OpenSource.jsx'
 import Privacy from './pages/Privacy.jsx'
 import Terms from './pages/Terms.jsx'
 import Contact from './pages/Contact.jsx'
+import Changelog from './pages/Changelog.jsx'
 import LegalTemplate from './pages/legal/LegalTemplate.jsx'
 import NotFound from './pages/NotFound.jsx'
 import { DocsLayout, DocPage } from './pages/Docs.jsx'
 import { DOCS } from './routes.js'
+import { MotionRoot } from './components/motion.jsx'
 
 export default function App() {
   return (
-    <Routes>
-      <Route element={<Layout />}>
-        <Route path="/" element={<Home />} />
-        <Route path="/features" element={<Features />} />
-        <Route path="/open-source" element={<OpenSource />} />
-        <Route path="/privacy" element={<Privacy />} />
-        <Route path="/terms" element={<Terms />} />
-        <Route path="/contact" element={<Contact />} />
-        <Route path="/legal/terms" element={<LegalTemplate slug="terms" />} />
-        <Route path="/legal/privacy" element={<LegalTemplate slug="privacy" />} />
-        <Route path="/legal/subprocessors" element={<LegalTemplate slug="subprocessors" />} />
-        <Route path="/legal/acceptable-use" element={<LegalTemplate slug="acceptable-use" />} />
-        <Route path="/docs" element={<DocsLayout />}>
-          {DOCS.map((doc) =>
-            doc.path === '/docs' ? (
-              <Route key={doc.path} index element={<DocPage doc={doc} />} />
-            ) : (
-              <Route key={doc.path} path={doc.path.slice('/docs/'.length)} element={<DocPage doc={doc} />} />
-            ),
-          )}
-          <Route path="*" element={<NotFound inDocs />} />
+    <MotionRoot>
+      <Routes>
+        <Route element={<Layout />}>
+          <Route path="/" element={<Home />} />
+          <Route path="/features" element={<Features />} />
+          <Route path="/open-source" element={<OpenSource />} />
+          <Route path="/privacy" element={<Privacy />} />
+          <Route path="/terms" element={<Terms />} />
+          <Route path="/contact" element={<Contact />} />
+          <Route path="/changelog" element={<Changelog />} />
+          <Route path="/legal/terms" element={<LegalTemplate slug="terms" />} />
+          <Route path="/legal/privacy" element={<LegalTemplate slug="privacy" />} />
+          <Route path="/legal/subprocessors" element={<LegalTemplate slug="subprocessors" />} />
+          <Route path="/legal/acceptable-use" element={<LegalTemplate slug="acceptable-use" />} />
+          <Route path="/docs" element={<DocsLayout />}>
+            {DOCS.map((doc) =>
+              doc.path === '/docs' ? (
+                <Route key={doc.path} index element={<DocPage doc={doc} />} />
+              ) : (
+                <Route key={doc.path} path={doc.path.slice('/docs/'.length)} element={<DocPage doc={doc} />} />
+              ),
+            )}
+            <Route path="*" element={<NotFound inDocs />} />
+          </Route>
+          <Route path="*" element={<NotFound />} />
         </Route>
-        <Route path="*" element={<NotFound />} />
-      </Route>
-    </Routes>
+      </Routes>
+    </MotionRoot>
   )
 }

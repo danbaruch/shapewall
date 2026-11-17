@@ -1,5 +1,6 @@
 // Regenerates the 1200x630 share cards in public/og/, one per route (src/routes.js `og`). The only text on a card
-// is the wordmark; the rest is real product imagery. Dev tool (needs Playwright from the CLI package):
+// is the wordmark; the rest is real product imagery. The home card (home.jpg) has a line of copy and comes from
+// scripts/social.mjs, with the GitHub social preview. Dev tool (needs Playwright from the CLI package):
 // node scripts/og.mjs
 import fs from 'node:fs'
 import path from 'node:path'
@@ -19,9 +20,10 @@ const img = (name) => `data:image/webp;base64,${fs.readFileSync(path.join(SHOTS,
 const frame = (name, style = '') =>
   `<div class="frame" style="${style}"><div class="bar"><i></i><i></i><i></i></div><img src="${img(name)}"></div>`
 const LAYOUTS = {
-  board: () => frame('board-overview', 'right:-120px;top:150px;width:860px'),
-  live: () => frame('live-comment', 'right:-140px;top:150px;width:860px'),
-  variant: () => frame('variant', 'right:-120px;top:150px;width:860px'),
+  board: () => frame('board-overview-1440', 'right:-120px;top:150px;width:860px'),
+  live: () => frame('live-comment-1440', 'right:-140px;top:150px;width:860px'),
+  compare: () => frame('compare-comment-1440', 'right:-140px;top:150px;width:860px'),
+  variant: () => frame('variant-1440', 'right:-120px;top:150px;width:860px'),
   phones: () =>
     `<div class="phone" style="right:300px;top:120px"><img src="${img('phone-overview')}"></div>` +
     `<div class="phone" style="right:40px;top:200px"><img src="${img('phone-comment')}"></div>`,
@@ -34,10 +36,11 @@ const LAYOUTS = {
 }
 
 const CARDS = {
-  home: { dark: false, art: LAYOUTS.board },
+  home: { social: true },
   features: { dark: false, art: LAYOUTS.live },
   'open-source': { dark: false, art: LAYOUTS.phones },
   privacy: { dark: false, art: LAYOUTS.mark },
+  changelog: { dark: false, art: LAYOUTS.board },
   'docs-index': { dark: true, art: LAYOUTS.board },
   'docs-getting-started': { dark: true, art: () => LAYOUTS.tiles(['page-home', 'page-pricing', 'page-login', 'page-dashboard']) },
   'docs-config': { dark: true, art: () => LAYOUTS.tiles(['page-pricing', 'page-home', 'page-dashboard', 'page-login']) },
@@ -47,7 +50,7 @@ const CARDS = {
   'docs-chat': { dark: true, art: LAYOUTS.live },
   'docs-starter-agent': { dark: true, art: LAYOUTS.variant },
   'docs-journeys': { dark: true, art: () => LAYOUTS.tiles(['page-home', 'page-pricing', 'page-login', 'page-dashboard']) },
-  'docs-compare': { dark: true, art: LAYOUTS.beforeAfter },
+  'docs-compare': { dark: true, art: LAYOUTS.compare },
   'docs-page-checks': { dark: true, art: LAYOUTS.beforeAfter },
   'docs-github': { dark: true, art: LAYOUTS.live },
   'docs-notifications': { dark: true, art: () => LAYOUTS.tiles(['page-login', 'page-dashboard', 'page-pricing', 'page-home']) },
@@ -94,6 +97,7 @@ try {
   for (const slug of slugs) {
     const card = CARDS[slug]
     if (!card) throw new Error(`no share card layout for "${slug}"`)
+    if (card.social) continue
     await page.setContent(
       `<!doctype html><html><head><style>${css(card.dark)}</style></head><body>
         <div class="logo">${logo(card.dark)}</div>
@@ -104,7 +108,7 @@ try {
     await page.waitForFunction(() => [...document.images].every((image) => image.complete))
     await page.screenshot({ path: path.join(OUT, `${slug}.jpg`), type: 'jpeg', quality: 82 })
   }
-  console.log(`og: ${slugs.length} cards in public/og`)
+  console.log(`og: ${slugs.length - 1} cards in public/og (home.jpg is scripts/social.mjs)`)
 } finally {
   await browser.close()
 }
