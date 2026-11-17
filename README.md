@@ -148,8 +148,9 @@ Then open http://127.0.0.1:4600/. In the full demo the Status page answers 404 o
   and framed in a sandbox ([security model](https://shapewall.com/docs/security), [architecture](docs/architecture.md)).
 - **Before and after.** Every recapture keeps the previous shot, so a resolved comment shows before and after near its pin, and each
   page keeps its history with the changed pixels in red.
-- **Compare environments and variants.** Capture staging and production and see each page in both; put a branch preview or a
-  redesign beside the original ([before, after and staging](https://shapewall.com/docs/compare)).
+- **Compare environments and variants.** Capture staging and production and see each page in both, and comment on either side:
+  the pin stays with the environment it was left on. Put a branch preview or a redesign beside the original
+  ([before, after and staging](https://shapewall.com/docs/compare)).
 - **Journeys and links.** Name the path people take through your pages and step through it; see the links each capture found
   ([journeys](docs/journeys.md)).
 - **Signed-in pages, menus, app states.** `shapewall auth record` saves a sign-in; page `actions` click, fill and wait before the
@@ -162,9 +163,11 @@ Then open http://127.0.0.1:4600/. In the full demo the Status page answers 404 o
 - **Works on a phone.** The board is a PWA with 44 px touch targets and a bottom sheet for comments.
 - **Small and local.** Node, Playwright, Express, React Flow. Data is plain JSON files in `.shapewall/`. No account, no telemetry.
 
-| Live HTML with an element-anchored comment                       | On a phone                                             |
-| ---------------------------------------------------------------- | ------------------------------------------------------ |
-| ![Live HTML with a pinned comment](docs/images/live-comment.png) | ![The board on a phone](docs/images/phone-comment.png) |
+| A new comment on an element, in live HTML                                                                                                     | On a phone, comparing staging with production                                                                      |
+| --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| ![The comment box on the Try Plus free button: image and drawing tools, the microphone and Post inside the box](docs/images/live-comment.png) | ![The phone board in compare mode, a thread sheet for a comment left on Production](docs/images/phone-comment.png) |
+
+![Compare mode: Pricing on staging beside production, changed pixels in red, and a comment left on the Production side](docs/images/compare-comment.png)
 
 ## Reference
 

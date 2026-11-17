@@ -881,7 +881,7 @@ export async function addReply(config, boardId, commentId, input, { now = new Da
           createdAt: now.toISOString(),
         }
         // Written by the board's own agent under the name its owner gave it
-        // ("Harry"): the flag says it is an agent, since the name no longer
+        // ("Ada"): the flag says it is an agent, since the name no longer
         // does. Only the server's own agent tools set it, never a request body.
         if (input?.agent === true) reply.agent = true
         if (images.length) reply.images = images

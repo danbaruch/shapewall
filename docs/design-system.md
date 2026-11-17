@@ -154,29 +154,39 @@ the attention colour when an agent needs a person, green for a moment when the l
 The tools you use on the board float at the bottom centre of the canvas, the way FigJam, Miro and tldraw do it
 (`client/src/board/BoardTools.jsx`, their state in `tools.js`): **Select** (V, the default pointer: a click selects a page or
 opens a pin, a drag on empty canvas pans), **Hand** (H: a drag anywhere pans, a click opens nothing; desktop only), a hairline,
-then **Comment** (C), **Draw** (click a page to draw on it; with a comment or a reply open it draws on that comment's page)
-and, on desktop when the board has live pages, **Select text**. One tool is in use at a time (`aria-pressed`): Comment, Draw
-and Select text are the filled accent button, because they change what a click does; Select and Hand in use are quiet, the
+then **Comment** (C) and **Draw** (click a page to draw on it; with a comment or a reply open it draws on that comment's page).
+Selecting text on a live page is not a tool: it is **Select text** on the page bar. One tool is in use at a time
+(`aria-pressed`): Comment and Draw are the filled accent button, because they change what a click does; Select and Hand in use are quiet, the
 neutral fill of a chosen segment (`bg-surface-2` with an inset hairline). Esc goes back a step at a time and ends on Select. The pill is the zoom controls' pill (`rounded-lg border border-line bg-surface/95 p-0.5 shadow-pop
 backdrop-blur`, 32 px icon buttons), a labelled `role="toolbar"` with one tab stop: the arrow keys, Home and End move between
 the tools, and each has a tooltip with its shortcut. A person who may not comment has no Comment or Draw tool, and with only
-Select left there is no toolbar (a viewer on a phone). On a desktop they keep Select and Hand, and Select text while a page
-is live.
+Select left there is no toolbar (a viewer on a phone). On a desktop they keep Select and Hand.
 
 The note for the tool in use sits just above the tools, one at a time: the comment hint ("Click a page to comment ...", or
-"Click where the comment goes on Pricing" when Comment was pressed on that page's bar),
-"Commenting on ..." while the composer is open, the drawing bar, or the select-text note. Select has none. The tools, their note,
+"Click where the comment goes on Pricing" when Comment was pressed on that page's bar; on a live page, while an element is
+outlined under the pointer, it cross-fades to "Click to comment. Hold Alt to pick its container." in the same place),
+"Commenting on ..." while the composer is open, or the drawing bar. Select has none. The tools, their note,
 an open journey's bar and the toast are one column (the tool dock), so they never overlap. The tools are centred on the canvas,
 not the window, and never sit over the zoom controls (bottom left) or the minimap (bottom right): on a narrow canvas they shift
 off centre, then the zoom controls compact to out, level and in, then the minimap steps aside (`toolDock.js`, unit-tested). On a
 phone the tools are the bottom bar: 44 px targets above the safe-area inset, hidden while a sheet or the keyboard is up.
+
+### Element outlines on a page
+
+Picking an element on a live page reads like the browser's element picker and Figma's inspect hover
+(`client/src/board/Frame.jsx`): a 2 px accent outline with a 6% accent fill (a large block: a 1.5 px dashed outline, no fill)
+and a 20 px accent tab with the element's kind in semibold and its name ("Card · Free"). The tab sits 4 px clear of the outline, outside the
+element's top left corner, flips below it or inside it when there is no room, and stays on the page and on screen. Stroke and
+tab are the same size on screen at any zoom. The element a comment is attached to keeps a solid outline while its composer is
+open; the open thread's element, and the element of a hovered pin or comment row, get a quiet 1.5 px outline at 55% accent with
+a 5% fill. The page being drawn on has a 3 px accent frame at any zoom.
 
 ### The page bar
 
 A selected page has a bar of its actions floating beside it in screen pixels (`client/src/board/FrameBar.jsx`): above the card, else
 to its right or left, never over the notes at the top of the canvas or the tool dock at the bottom, and one "..." button when
 there is no room (`frameBarPlace.js`). In order: the page's name and screen size, **Comment**, **Open live** (or **Select text**
-once the page is live), **Checks**, **History**, **Capture**, open in a new tab, close.
+once the page is live; while it is on, the same button reads **Done**, pressed, and that is the only sign of it), **Checks**, **History**, **Capture**, open in a new tab, close.
 
 **Comment** is first because it is the main thing people do with a page, and the tools at the bottom are easy to miss. It is the
 `soft` button at rest (accent text on a light accent tint) and the filled accent while on (`aria-pressed`); its tooltip is

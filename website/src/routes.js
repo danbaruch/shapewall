@@ -45,6 +45,13 @@ export const PAGES = [
     alt: 'Shapewall licenses and self-hosting: Apache 2.0 local tool, Functional Source License team server',
   },
   {
+    path: '/changelog',
+    title: 'Changelog: what changed in each release | Shapewall',
+    description: 'Every Shapewall release, newest first: new features, changes and fixes, from the CHANGELOG.md in the repository.',
+    og: 'changelog',
+    alt: 'The Shapewall changelog: every release, newest first',
+  },
+  {
     path: '/contact',
     title: 'Contact: feedback and feature requests | Shapewall',
     description:
@@ -195,7 +202,7 @@ export const DOC_GROUPS = [
         nav: 'Before, after and staging',
         title: 'Before and after, staging and production | Shapewall',
         description:
-          'See each resolved comment before and after the change, put a branch preview beside the page as a variant, and compare staging with production.',
+          'See each resolved comment before and after, put a branch preview beside the page, and compare staging with production, commenting on either side.',
       },
       {
         path: '/docs/pull-requests',

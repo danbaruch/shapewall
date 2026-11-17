@@ -4,6 +4,7 @@ import { Menu, X } from 'lucide-react'
 import { GitHubIcon, Logo } from './brand.jsx'
 import { Container, GetStarted, IconButton, cx } from './ui.jsx'
 import { ThemeMenu, ThemeSwitch } from './theme.jsx'
+import { AnimatePresence, DURATION, EASE, drop, m } from './motion.jsx'
 import { track } from '../analytics.js'
 import { DEMO_URL, DOC_GROUPS, GITHUB_URL, NOT_FOUND, SITE_URL, canonicalUrl, routeFor } from '../routes.js'
 import { GITHUB_LABEL, LAUNCHED } from '../launch.js'
@@ -119,36 +120,51 @@ function Header() {
             label={open ? 'Close menu' : 'Open menu'}
             onClick={() => setOpen((value) => !value)}
           >
-            {open ? <X className="size-5" aria-hidden="true" /> : <Menu className="size-5" aria-hidden="true" />}
+            <AnimatePresence initial={false} mode="popLayout">
+              <m.span
+                key={open ? 'close' : 'open'}
+                className="grid place-items-center"
+                initial={{ opacity: 0, rotate: open ? -90 : 90, scale: 0.8 }}
+                animate={{ opacity: 1, rotate: 0, scale: 1 }}
+                exit={{ opacity: 0, rotate: open ? 90 : -90, scale: 0.8 }}
+                transition={{ duration: DURATION.base, ease: EASE.standard }}
+              >
+                {open ? <X className="size-5" aria-hidden="true" /> : <Menu className="size-5" aria-hidden="true" />}
+              </m.span>
+            </AnimatePresence>
           </IconButton>
         </div>
       </Container>
-      <div id="mobile-nav" hidden={!open} className="border-t border-hairline bg-paper md:hidden">
-        <Container className="flex flex-col gap-1 py-3">
-          {NAV.map((item) => (
-            <Link key={item.to} to={item.to} className="rounded-xl px-3 py-3 text-[16px] font-medium text-ink hover:bg-ink/5">
-              {item.label}
-            </Link>
-          ))}
-          <a
-            href={DEMO_URL}
-            onClick={() => track('live-demo', { where: 'mobile-menu' })}
-            className="rounded-xl px-3 py-3 text-[16px] font-medium text-ink hover:bg-ink/5"
-          >
-            Live demo
-          </a>
-          <a href={GITHUB_URL} className="flex items-center gap-2 rounded-xl px-3 py-3 text-[16px] font-medium text-ink hover:bg-ink/5">
-            <GitHubIcon className="size-[18px]" /> {GITHUB_LABEL}
-          </a>
-          <div className="px-1 pt-2 pb-1 [&>a]:w-full">
-            <GetStarted where="mobile-menu" />
-          </div>
-          <div className="flex items-center justify-between gap-3 border-t border-line px-3 pt-3 pb-1">
-            <span className="text-[14.5px] font-medium text-slate">Theme</span>
-            <ThemeSwitch />
-          </div>
-        </Container>
-      </div>
+      <AnimatePresence initial={false}>
+        {open ? (
+          <m.div key="mobile-nav" id="mobile-nav" className="border-t border-hairline bg-paper md:hidden" {...drop}>
+            <Container className="flex flex-col gap-1 py-3">
+              {NAV.map((item) => (
+                <Link key={item.to} to={item.to} className="rounded-xl px-3 py-3 text-[16px] font-medium text-ink hover:bg-ink/5">
+                  {item.label}
+                </Link>
+              ))}
+              <a
+                href={DEMO_URL}
+                onClick={() => track('live-demo', { where: 'mobile-menu' })}
+                className="rounded-xl px-3 py-3 text-[16px] font-medium text-ink hover:bg-ink/5"
+              >
+                Live demo
+              </a>
+              <a href={GITHUB_URL} className="flex items-center gap-2 rounded-xl px-3 py-3 text-[16px] font-medium text-ink hover:bg-ink/5">
+                <GitHubIcon className="size-[18px]" /> {GITHUB_LABEL}
+              </a>
+              <div className="px-1 pt-2 pb-1 [&>a]:w-full">
+                <GetStarted where="mobile-menu" />
+              </div>
+              <div className="flex items-center justify-between gap-3 border-t border-line px-3 pt-3 pb-1">
+                <span className="text-[14.5px] font-medium text-slate">Theme</span>
+                <ThemeSwitch />
+              </div>
+            </Container>
+          </m.div>
+        ) : null}
+      </AnimatePresence>
     </header>
   )
 }
@@ -181,7 +197,7 @@ function Footer() {
             LAUNCHED
               ? [
                   { href: GITHUB_URL, label: GITHUB_LABEL },
-                  { href: `${GITHUB_URL}/blob/main/CHANGELOG.md`, label: 'Changelog' },
+                  { to: '/changelog', label: 'Changelog' },
                   { href: `${GITHUB_URL}/blob/main/SECURITY.md`, label: 'Security policy' },
                   { to: '/privacy', label: 'Privacy' },
                   { to: '/terms', label: 'Terms' },
@@ -190,6 +206,7 @@ function Footer() {
               : [
                   { href: GITHUB_URL, label: GITHUB_LABEL },
                   { to: '/docs/security', label: 'Security model' },
+                  { to: '/changelog', label: 'Changelog' },
                   { to: '/privacy', label: 'Privacy' },
                   { to: '/terms', label: 'Terms' },
                   { to: '/contact', label: 'Contact' },

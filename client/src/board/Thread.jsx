@@ -48,6 +48,7 @@ import { ComposerBox, composerFieldClass } from './ComposerBox'
 import { useCommentDictation } from './hooks/useCommentDictation'
 import { viewportIcon } from './viewports'
 import { frameKey } from './commentSide'
+import { useAnchorName } from './anchorNames'
 import SendToAgent from './SendToAgent'
 import FixWithAgent from './FixWithAgent'
 import HostedFix from './HostedFix'
@@ -59,7 +60,6 @@ import {
   FixRef,
   GithubLinks,
   ReopenedChip,
-  anchorLabel,
   commentAuthor,
   exactTime,
   replyAuthor,
@@ -453,6 +453,7 @@ export function ThreadView({
 }) {
   const [editing, setEditing] = useState(false)
   const [confirming, setConfirming] = useState(false)
+  const pinnedTo = useAnchorName(comment)
   const scroller = useRef(null)
   useEffect(() => {
     setEditing(false)
@@ -727,7 +728,7 @@ export function ThreadView({
                 >
                   <Crosshair size={11} className="shrink-0" aria-hidden="true" />
                   <span className="shrink-0">Pinned to</span>
-                  <span className="truncate text-fg">{anchorLabel(comment.anchor)}</span>
+                  <span className="truncate text-fg">{pinnedTo}</span>
                 </p>
               </Tooltip>
             ) : null}

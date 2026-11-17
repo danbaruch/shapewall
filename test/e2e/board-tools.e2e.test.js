@@ -1,8 +1,8 @@
 // End to end, the board's tools: a floating toolbar at the bottom centre of
-// the canvas (Select, Hand, Comment, Draw, Select text) instead of a Comment button
+// the canvas (Select, Hand, Comment, Draw) instead of a Comment button
 // in the top bar. One tool at a time, Esc ends on Select, the note for the
 // tool in use sits just above the tools, the arrow keys move between them,
-// nothing overlaps at any width, compare mode drops only Select text, and on a phone
+// nothing overlaps at any width, compare mode keeps them all, and on a phone
 // they are the bottom bar and step aside for a sheet.
 // Set SHAPEWALL_SHOTS=<dir> to keep screenshots of each step.
 import { after, before, test } from 'node:test'
@@ -162,7 +162,6 @@ test('desktop: the tools float at the bottom centre of the canvas, the top bar h
         ['hand', 'Hand'],
         ['comment', 'Comment'],
         ['draw', 'Draw'],
-        ['text', 'Select text'],
       ],
     )
     assert.equal(await active(page), 'select')
@@ -315,12 +314,13 @@ test('keyboard: the tools are one tab stop; the arrows, Home and End move betwee
     assert.equal(await focused(), 'comment')
     await page.keyboard.press('ArrowRight')
     assert.equal(await focused(), 'draw')
+    await page.keyboard.press('Home')
     await page.keyboard.press('End')
-    assert.equal(await focused(), 'text')
+    assert.equal(await focused(), 'draw')
     await page.keyboard.press('ArrowRight')
     assert.equal(await focused(), 'select', 'wraps')
     await page.keyboard.press('ArrowLeft')
-    assert.equal(await focused(), 'text')
+    assert.equal(await focused(), 'draw')
     await page.keyboard.press('Home')
     assert.equal(await focused(), 'select')
     assert.equal(await camera(), before, 'the arrows did not move the board')
@@ -438,61 +438,81 @@ test('desktop: Draw, then a page, goes straight to drawing with the bar above th
   }
 })
 
-test('desktop: Select text is offered on a live page and says so otherwise; compare mode keeps the rest, Draw too', async () => {
+test('desktop: Select text is on the page bar, not a tool: quiet, Select stays in use; Esc, Comment or a click away ends it; compare keeps the tools', async () => {
   const { context, page, errors } = await openBoard(DESKTOP)
   try {
     await page.waitForSelector(TOOLS)
-    // No live page selected: the tool says what it needs, and stays off.
-    await page.click(tool('text'))
-    await page.waitForSelector('[data-sw-toast]')
-    assert.match(await page.textContent('[data-sw-toast]'), /Select text works on a live page/)
-    assert.equal(await active(page), 'select')
-    // The toast sits above the tools.
-    const toast = await rect(page, '[data-sw-toast]')
-    const tools = await rect(page, TOOLS)
-    assert.ok(toast.bottom <= tools.top, 'the toast is above the tools')
+    assert.equal(await page.locator(`${TOOLS} [data-sw-tool="text"]`).count(), 0, 'no Select text tool')
 
     const frame = '[data-sw-frame="pricing:desktop"]'
     await page.click(frame)
+    // A capture (not live): the bar offers Open live, never Select text.
+    await page.waitForSelector('[data-sw-open-live="pricing|desktop"]')
+    assert.equal(await page.locator('[data-sw-select-text="pricing|desktop"]').count(), 0, 'nothing to select on a capture')
     await page.click('[data-sw-open-live="pricing|desktop"]')
     await page.waitForSelector(`${frame}[data-sw-live="ready"]`, { timeout: 15000 })
-    await page.click(tool('text'))
-    await page.waitForSelector('[data-sw-select-text-note="armed"]')
-    assert.equal(await active(page), 'text')
-    assert.deepEqual(await pressedTools(page), ['text'])
-    assert.equal(await page.getAttribute(frame, 'data-sw-select-text-state'), 'armed')
-    // The card's own bar (when it is not folded into its one button) agrees.
-    const cardButton = page.locator('[data-sw-select-text="pricing|desktop"]')
-    if (await cardButton.count()) assert.equal(await cardButton.getAttribute('aria-pressed'), 'true', 'the card bar agrees')
-    const row = await bottomRow(page)
-    assertClear(row, 'select text')
-    assert.ok(row.note.bottom <= row.tools.top, 'the note is above the tools')
-    // The selected card's bar keeps clear of the note and the tools.
-    const frameBar = await maybeRect(page, '[data-sw-frame-bar], [data-sw-frame-bar-toggle]')
-    assert.equal(overlap(frameBar, row.note), false)
-    assert.equal(overlap(frameBar, row.tools), false)
-    await shot(page, 'tools-7-select-text')
-    // Esc: back to Select.
-    await page.keyboard.press('Escape')
-    await page.waitForSelector('[data-sw-select-text-note]', { state: 'detached' })
+    const barButton = '[data-sw-select-text="pricing|desktop"]'
+    // A page that fills the canvas folds its bar into one button; a narrow
+    // bar folds Select text into its More menu.
+    const startSelecting = async () => {
+      if (await page.locator('[data-sw-frame-bar-toggle]').count()) await page.click('[data-sw-frame-bar-toggle]')
+      if (await page.locator(`[data-sw-frame-bar] ${barButton}`).count()) await page.click(`[data-sw-frame-bar] ${barButton}`)
+      else {
+        await page.click('[data-sw-frame-more="pricing|desktop"]')
+        await page.click(`[role="menu"] ${barButton}`)
+      }
+      await page.waitForSelector(`${frame}[data-sw-select-text-state="armed"]`)
+    }
+    await startSelecting()
+    // Quiet: no note above the tools, Select stays the tool in use, and the
+    // page bar's own button is the one sign (Done, pressed).
+    assert.equal(await page.locator('[data-sw-tool-note]').count(), 0, 'no note')
     assert.equal(await active(page), 'select')
-    // On, then Comment takes over; one tool at a time.
-    await page.click(tool('text'))
-    await page.waitForSelector('[data-sw-select-text-note="armed"]')
+    assert.deepEqual(await pressedTools(page), ['select'])
+    const done = `[data-sw-frame-bar] ${barButton}`
+    if (!(await page.locator(done).count())) await page.click('[data-sw-frame-bar-toggle]')
+    assert.equal(await page.getAttribute(done, 'aria-pressed'), 'true')
+    assert.match(await page.textContent(done), /Done/)
+    await shot(page, 'tools-7-select-text')
+    // Esc: off.
+    await page.keyboard.press('Escape')
+    await page.waitForSelector(`${frame}[data-sw-select-text-state]`, { state: 'detached' })
+    // On, then Comment takes over; one thing at a time.
+    await startSelecting()
     await page.click(tool('comment'))
     await page.waitForSelector('[data-sw-comment-hint="element"]')
-    assert.equal(await page.locator('[data-sw-select-text-note]').count(), 0)
+    assert.equal(await page.locator(`${frame}[data-sw-select-text-state]`).count(), 0)
     assert.deepEqual(await pressedTools(page), ['comment'])
     await page.keyboard.press('Escape')
-    // (The selected card keeps its own history entry: nothing to wait for but the tool.)
     await page.waitForSelector(`${TOOLS}[data-sw-tools="select"]`)
+    // On, then a click on the empty canvas: off (and the page lets go).
+    if (!(await page.locator('[data-sw-frame-bar="pricing|desktop"]').count())) await page.click(frame)
+    await startSelecting()
+    // The page fills the canvas: pan (the wheel is still the board's while
+    // armed) until some bare canvas shows, then click it.
+    const pane = await rect(page, '[data-sw-canvas]')
+    await page.mouse.move(pane.left + pane.width / 2, pane.top + pane.height / 2)
+    await page.mouse.wheel(0, -700)
+    await page.waitForTimeout(400)
+    assert.equal(await page.getAttribute(frame, 'data-sw-select-text-state'), 'armed', 'panning keeps it on')
+    const empty = await page.evaluate(() => {
+      const box = document.querySelector('[data-sw-canvas]').getBoundingClientRect()
+      for (let y = box.top + 80; y < box.bottom - 80; y += 20) {
+        for (let x = box.left + 20; x < box.right - 20; x += 20) {
+          if (document.elementFromPoint(x, y)?.classList.contains('react-flow__pane')) return [x, y]
+        }
+      }
+      return null
+    })
+    assert.ok(empty, 'some bare canvas to click')
+    await page.mouse.click(...empty)
+    await page.waitForSelector(`${frame}[data-sw-select-text-state]`, { state: 'detached' })
 
-    // Compare shows screenshots only, so Select text goes; comments work on
-    // either side, so Comment and Draw stay.
+    // Compare shows screenshots only; comments work on either side, so the
+    // tools stay as they are.
     await page.click('[data-sw-view-menu]')
     await page.click('[role="menu"] [data-sw-compare-toggle]')
     await page.waitForSelector('[data-sw-compare-bar]')
-    await page.waitForSelector(`${TOOLS} [data-sw-tool="select-text"]`, { state: 'detached' })
     assert.deepEqual(
       await page.$$eval('[data-sw-tools] [data-sw-tool]', (nodes) => nodes.map((node) => node.getAttribute('data-sw-tool'))),
       ['select', 'hand', 'comment', 'draw'],

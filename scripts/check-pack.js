@@ -40,6 +40,7 @@ export const USER_GUIDES = [
 
 export const USER_GUIDE_IMAGES = [
   'docs/images/board-overview.png',
+  'docs/images/compare-comment.png',
   'docs/images/journeys.png',
   'docs/images/live-comment.png',
   'docs/images/phone-comment.png',

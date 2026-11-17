@@ -344,7 +344,7 @@ export function agentRouter({
     }
     cached = backends.get(key)
     // A rename since the backend was made: what it says next ("Starting
-    // Harry") uses the new name. Nothing is restarted for it.
+    // Ada") uses the new name. Nothing is restarted for it.
     Object.assign(cached.live, { label: current.label, icon: current.icon, tint: current.tint })
     return cached.backend
   }

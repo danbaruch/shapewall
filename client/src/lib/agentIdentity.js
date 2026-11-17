@@ -1,5 +1,5 @@
 // The connected agents by name, for the places that only have a name to go
-// on: a reply on a comment thread says who wrote it ("Harry"), not which
+// on: a reply on a comment thread says who wrote it ("Ada"), not which
 // agent that is. The board remembers every agent it is told about
 // (/api/agent/status and its profiles, a chat thread's `agent`), and the
 // comment avatar (components/ui/avatar.jsx) asks here whether an agent

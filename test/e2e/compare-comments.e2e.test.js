@@ -352,17 +352,12 @@ test('phone: a tap on the Production side places a comment there', async () => {
   }
 })
 
-test('desktop: Esc leaves compare only once nothing else is open; a hint toast does not outlive entering compare', async () => {
+test('desktop: Esc leaves compare only once nothing else is open', async () => {
   const { context, page, errors } = await openBoard(DESKTOP)
   try {
-    // "Select text" with no live page picked says how, in a timed toast.
-    await page.click('[data-sw-tool="text"]')
-    await page.waitForSelector('[data-sw-toast]:has-text("Select text works on a live page")')
-    // Entering compare drops it at once, long before its six seconds.
     await page.click('[data-sw-view-menu]')
     await page.click('[data-sw-views-menu] [data-sw-compare-toggle]')
     await page.waitForSelector('[data-sw-compare-bar]')
-    await page.waitForSelector('[data-sw-toast]', { state: 'detached', timeout: 1500 })
     await settle(page)
 
     // Comment mode, then a composer at a spot: the first Esc closes the

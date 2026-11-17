@@ -9,32 +9,30 @@
 //   Draw         click a page to draw on it: a box, an arrow or the pen. A
 //                drawing is part of a comment, so with a comment or a reply
 //                open, Draw draws on that comment's page
-//   Select text  on the selected live page (desktop)
 // The board toolbar at the top keeps what you look AT (the board, the screen
 // sizes, Views, the side panels). The tools a person may not use are not
-// shown; with only Select left there is no toolbar at all. Someone who may
-// not comment gets Select and Select text only while a page is live.
+// shown; with only Select left there is no toolbar at all. (Selecting text on
+// a live page is on that page's own bar, not a tool: FrameBar.jsx.)
 //
 // The dock is one column along the bottom of the canvas, so nothing in it
 // can overlap: the toast, the journey bar, the note for the tool in use (the
-// comment hint, "Commenting on ...", the drawing bar, the select-text note)
+// comment hint, "Commenting on ...", the drawing bar)
 // and the tools last. toolDock.js keeps the tools clear of the zoom controls
 // and the minimap.
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { Brush, Hand, MessageSquarePlus, MousePointer2, TextSelect } from 'lucide-react'
+import { Brush, Hand, MessageSquarePlus, MousePointer2 } from 'lucide-react'
 import { cn } from '../lib/utils'
 import { Button, Tooltip } from '../components/ui'
-import { useBoardView } from './boardView'
 import { KeyTip } from './KeyTip'
 import { POINTER_TOOLS, hasDivider } from './tools'
 import { LayoutMotion, SPRING, m, rise } from '../lib/animate'
+import { useBoardView } from './boardView'
 
 export const TOOLS = {
   select: { label: 'Select', tip: 'Select: click a page or a pin', keys: ['V'], shortcut: 'V', icon: MousePointer2 },
   hand: { label: 'Hand', tip: 'Hand: drag anywhere to move, opens nothing', keys: ['H'], shortcut: 'H', icon: Hand },
   comment: { label: 'Comment', tip: 'Comment: click a page to pin a note', keys: ['C'], shortcut: 'C', icon: MessageSquarePlus },
   draw: { label: 'Draw', tip: 'Draw on a page: box, arrow or pen', keys: [], icon: Brush },
-  text: { label: 'Select text', tip: 'Select text on the selected live page', keys: [], icon: TextSelect },
 }
 
 // The column along the bottom of the canvas. It takes no pointer itself and
@@ -96,7 +94,7 @@ export function BoardTools({ tools, active, onTool, touch, shift = 0 }) {
           const on = id === active
           // Select and Hand in use are quiet: the neutral fill of a chosen
           // segment (the screen-size switch). The filled accent is for the
-          // tools that change what a click does: Comment, Draw, Select text.
+          // tools that change what a click does: Comment and Draw.
           const quiet = on && POINTER_TOOLS.has(id)
           // The fill of the tool in use is one shape that slides to the next
           // tool (layoutId) and takes its look on the way, quiet or accent.
@@ -159,6 +157,9 @@ export function BoardTools({ tools, active, onTool, touch, shift = 0 }) {
   )
 }
 
+// Two lines of a note in one grid cell, cross-fading.
+const STACKED = 'col-start-1 row-start-1 transition-opacity duration-(--motion-fast) ease-(--ease-standard)'
+
 const NOTE =
   'pointer-events-auto relative z-30 flex w-max max-w-full items-center gap-2 rounded-[18px] py-0.5 pr-0.5 pl-3 text-xs font-medium shadow-pop'
 
@@ -168,10 +169,15 @@ const NOTE =
 //              ({ key, title, keyboard }): Comment was pressed on that page's
 //              bar, so the note names it
 //   composing  a target is picked, its composer is open ({ target, onCancel })
-//   selectText "Select text" is on for a page ({ title, onDone })
-export function ToolNote({ wide, picking = null, composing = null, selectText = null, onDone }) {
-  // "Select text" on a live page: armed, or the page has the mouse.
-  const reading = useBoardView((state) => Boolean(state.readingKey))
+// While an element of a live page is outlined under the pointer, the
+// picking note says how to pick its container instead (Alt, Frame.jsx): the
+// two lines share one place, so the note does not jump.
+const ALT_KEY =
+  typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '') ? 'Option' : 'Alt'
+const isTargetHover = (state) => state.targetHover
+
+export function ToolNote({ wide, picking = null, composing = null, onDone }) {
+  const targetHover = useBoardView(isTargetHover)
   if (composing) {
     // The note says what the comment is on, and Esc (or Cancel) goes back
     // one step, to picking.
@@ -200,7 +206,9 @@ export function ToolNote({ wide, picking = null, composing = null, selectText = 
     const text = picking.draw
       ? `${verb} a page to draw on it. The drawing goes with your comment.`
       : picking.live
-        ? `${verb} an element on the live page to comment on it.`
+        ? wide
+          ? 'Click an element on the live page to comment on it.'
+          : 'Tap an element to comment on it.'
         : wide
           ? 'Click a page to comment. Zoom in until the page goes live to pin it to an element.'
           : 'Tap a page to pin a comment.'
@@ -219,6 +227,15 @@ export function ToolNote({ wide, picking = null, composing = null, selectText = 
             {verb} where the comment goes on <span className="font-semibold">{page.title}</span>
             {page.keyboard ? ', or press Enter' : null}
           </span>
+        ) : picking.live && wide && !picking.draw ? (
+          <span className="grid min-w-0" data-sw-comment-hint-alt={targetHover ? 'true' : undefined}>
+            <span className={cn(STACKED, targetHover && 'opacity-0')} aria-hidden={targetHover || undefined}>
+              {text}
+            </span>
+            <span className={cn(STACKED, !targetHover && 'opacity-0')} aria-hidden={!targetHover || undefined}>
+              Click to comment. Hold {ALT_KEY} to pick its container.
+            </span>
+          </span>
         ) : (
           <span className="min-w-0">{text}</span>
         )}
@@ -230,29 +247,6 @@ export function ToolNote({ wide, picking = null, composing = null, selectText = 
           data-sw-comment-hint-done="true"
         >
           Done{wide ? ' (Esc)' : ''}
-        </Button>
-      </m.div>
-    )
-  }
-  if (selectText) {
-    // "Select text" is a mode with two steps; this says which, and how to
-    // get the board's scrolling and zoom back.
-    return (
-      <m.div
-        {...rise}
-        className={cn(NOTE, 'border border-line bg-surface text-fg')}
-        role="status"
-        data-sw-tool-note="true"
-        data-sw-select-text-note={reading ? 'reading' : 'armed'}
-      >
-        <TextSelect size={13} className="shrink-0 text-accent" aria-hidden="true" />
-        <span className="min-w-0">
-          {reading
-            ? `Selecting text on ${selectText.title}. Move the pointer off the page to scroll and zoom the board again.`
-            : `Select text is on for ${selectText.title}: click the page, then select and copy.`}
-        </span>
-        <Button size="xs" variant="ghost" className="shrink-0 rounded-full" onClick={selectText.onDone} data-sw-select-text-done="true">
-          Done
         </Button>
       </m.div>
     )

@@ -12,7 +12,7 @@ import {
   anchorFromMap,
   cleanElementMap,
   describeAt,
-  plainLabel,
+  nameOnMap,
   selectorTag,
   hitTest,
   matchSelector,
@@ -162,28 +162,109 @@ test('anchorFromMap and describeAt: what a click stores and what hover shows', (
   })
   assert.equal(anchorFromMap(map, 5000, 10, NATIVE), null)
   assert.deepEqual(describeAt(map, 8, NATIVE), {
-    name: 'Button: Start',
+    id: 8,
+    kind: 'Button',
+    name: 'Start',
+    text: 'Button · Start',
     label: 'button[data-testid="cta"] "Start"',
     large: false,
     rect: { left: 40, top: 420, width: 200, height: 50 },
   })
   assert.equal(describeAt(map, 6, NATIVE).large, true)
   assert.equal(describeAt(map, 6, NATIVE).label, 'main:nth-of-type(1) "Long text Start"')
-  assert.equal(describeAt(map, 6, NATIVE).name, 'Whole section: Long text Start')
+  // A container is never named by the text of everything in it.
+  assert.equal(describeAt(map, 6, NATIVE).text, 'Main')
+  assert.equal(describeAt(map, 2, NATIVE).text, 'Navigation · Main')
+  assert.equal(describeAt(map, 7, NATIVE).text, 'Paragraph')
 })
 
-test('plainLabel and selectorTag: what a reviewer calls an element', () => {
-  assert.equal(plainLabel('h1', 'Notes that keep up with how you think, every single day'), 'Heading: Notes that keep up with how y...')
-  assert.equal(plainLabel('a', 'Pricing'), 'Link: Pricing')
-  assert.equal(plainLabel('img', ''), 'Image')
-  assert.equal(plainLabel('div', ''), 'Section')
-  assert.equal(plainLabel('div', 'Three plans', { large: true }), 'Whole section: Three plans')
-  assert.equal(plainLabel('p', 'Plain words'), 'Text: Plain words')
-  assert.equal(plainLabel('custom-el', ''), 'Element')
-  assert.equal(plainLabel('', 'Words'), 'Text: Words')
+test('selectorTag: the tag a selector ends on', () => {
   assert.equal(selectorTag('nav[aria-label="Main"] > a:nth-of-type(2)'), 'a')
   assert.equal(selectorTag('main:nth-of-type(1) > button[data-testid="cta"]'), 'button')
   assert.equal(selectorTag('#hero'), '')
+})
+
+// The demo's pricing page, as the capture maps it (trimmed): a header whose
+// wrapper holds the nav and the calls to action, a section with an h1, a
+// lead paragraph and three plan cards, each with an h3, a price (with a
+// <small>), a list and a link.
+function pricingMap() {
+  const elements = []
+  const add = (t, p, b, extra = {}) => {
+    const n = elements.filter((item) => item.p === p && item.t === t).length + 1
+    elements.push({ t, n, p, b, ...extra, z: elements.length })
+    return elements.length - 1
+  }
+  elements.push({ t: 'body', n: 1, p: -1, b: [0, 0, 1280, 1000], x: 'Lumen Notes Features Pricing', l: 1 })
+  const header = add('header', 0, [0, 0, 1280, 64], { x: 'Lumen Notes Features Pricing Sign in Start free' })
+  const wrap = add('div', header, [120, 0, 1040, 64], { x: 'Lumen Notes Features Pricing Sign in Start free' })
+  const nav = add('nav', wrap, [300, 20, 300, 24], { r: 'Main', h: 'nav[aria-label="Main"]', x: 'Features Pricing' })
+  add('a', nav, [300, 20, 80, 24], { x: 'Features' })
+  add('a', wrap, [1000, 14, 120, 36], { x: 'Start free' })
+  const main = add('main', 0, [0, 64, 1280, 860], { x: 'Simple pricing Start free.', l: 1 })
+  const section = add('section', main, [0, 64, 1280, 860], { x: 'Simple pricing Start free.', l: 1 })
+  const inner = add('div', section, [120, 100, 1040, 800], { x: 'Simple pricing Start free.', l: 1 })
+  add('h1', inner, [120, 120, 400, 60], { x: 'Simple pricing' })
+  add('p', inner, [120, 190, 600, 50], { x: 'Start free. Upgrade when your notes outgrow one device. Pay yearly and save 17%.' })
+  const grid = add('div', inner, [120, 260, 1040, 300], { x: 'Free $0 forever Plus $6 per month', l: 1 })
+  for (const [index, plan] of ['Free', 'Plus', 'Team'].entries()) {
+    const left = 120 + index * 350
+    const card = add('div', grid, [left, 260, 330, 300], { x: plan + ' $0 forever 1 device Unlimited notes Start free' })
+    add('h3', card, [left + 20, 280, 100, 24], { x: plan })
+    const price = add('div', card, [left + 20, 320, 200, 40], { x: '$0 forever' })
+    add('small', price, [left + 70, 335, 60, 16], { x: 'forever' })
+    const list = add('ul', card, [left + 20, 370, 290, 70], { x: '1 device Unlimited notes' })
+    add('li', list, [left + 20, 370, 290, 20], { x: '1 device' })
+    add('a', card, [left + 20, 500, 290, 36], { x: 'Start free' })
+  }
+  add('hr', inner, [120, 600, 1040, 1])
+  const footer = add('footer', 0, [0, 924, 1280, 76], { x: 'Lumen Notes is a fictional product.' })
+  add('span', footer, [120, 950, 400, 20], { x: 'Lumen Notes is a fictional product.' })
+  return { v: 1, width: 1280, height: 1000, elements }
+}
+
+test('nameOnMap: what a reviewer calls each part of a real page', () => {
+  const map = pricingMap()
+  const at = (x, y, up = 0) => {
+    const position = hitTest(map, x, y, up)
+    return position < 0 ? null : nameOnMap(map, position).text
+  }
+  const cases = [
+    [[310, 30], 'Link · Features', 'a nav link'],
+    [[700, 30], 'Header', "the header's wrapper is the header"],
+    [[1050, 30], 'Link · Start free', 'a call to action'],
+    [[200, 150], 'Heading · Simple pricing', 'the page heading'],
+    [[200, 210], 'Paragraph', 'a long paragraph is not its text'],
+    [[300, 470], 'Card · Free', 'a gap in a card: the card, by its own heading'],
+    [[145, 290], 'Heading · Free', "the card's heading"],
+    [[190, 340], 'Text · $0 forever', 'the <small> in a price: the price'],
+    [[200, 380], 'List item · 1 device', 'a short list item'],
+    [[200, 515], 'Link · Start free', "the card's link"],
+    [[460, 280], 'Group', 'the gap between the cards: the grid, named by nothing inside it'],
+    [[600, 700], 'Section · Simple pricing', 'the section, by its h1'],
+    [[300, 960], 'Text · Lumen Notes is a fictional…', 'footer text, cut at a word'],
+    [[600, 600], 'Section · Simple pricing', 'a 1 px rule is never the target'],
+    [[200, 380, 1], 'List', 'Alt: one container out'],
+    [[145, 290, 1], 'Card · Free', "Alt on a card's heading: the card"],
+  ]
+  for (const [[x, y, up], want, why] of cases) assert.equal(at(x, y, up), want, why)
+})
+
+test('hitTest: inline words mean their block, never a page-sized wrapper', () => {
+  const map = pricingMap()
+  const small = map.elements.findIndex((item) => item.t === 'small')
+  assert.equal(map.elements[hitTest(map, 190, 340)].t, 'div', 'the price, not its <small>')
+  assert.notEqual(hitTest(map, 190, 340), small)
+  // A wrapper as big as the page is the background.
+  const page = structuredClone(map)
+  page.elements.push({ t: 'div', n: 9, p: 0, b: [0, 0, 1280, 1000], z: page.elements.length })
+  assert.equal(page.elements[hitTest(page, 5, 990)].t, 'footer')
+  const lone = { ...page, elements: [page.elements[0], { ...page.elements.at(-1), p: 0, z: 0 }] }
+  assert.equal(hitTest(lone, 5, 990), -1)
+  // Mostly off the page: not a target.
+  const off = structuredClone(map)
+  off.elements.push({ t: 'div', n: 9, p: 0, b: [1200, 900, 400, 400], z: off.elements.length })
+  assert.equal(off.elements[hitTest(off, 1250, 950)].t, 'footer')
 })
 
 test('parseSelector and matchSelector: the anchor grammar on the map, with CSS escapes', () => {
@@ -217,6 +298,7 @@ test('resolveOnMap: by selector checked against the text, then by text alone, el
     x: 2,
     y: 1.25,
     box: { left: 2, top: 1.25, right: 10, bottom: 6.25 },
+    element: 3,
   })
   // A long text: the stored 80 characters match the start.
   assert.ok(at({ selector: 'main:nth-of-type(1) > p:nth-of-type(1)', text: 'x'.repeat(80), dx: 0, dy: 0 }))

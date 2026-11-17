@@ -4,6 +4,7 @@
 
 import { splitNextSteps } from '../../../src/agent/next-steps.js'
 import { commentText } from '../../../src/comment-fields.js'
+import { anchorName } from '../../../src/capture/element-name.js'
 
 const clip = (text, max) => {
   const value = String(text || '')
@@ -73,9 +74,10 @@ export function mentionCandidates({ pages = [], comments = [], journeys = [], pe
       key: `element:${comment.id}`,
       kind: 'element',
       id: comment.id,
-      label: clip(anchor.text || anchor.selector, 40),
+      // What the element is ("Card · Free"), as the board names it.
+      label: anchor.selector ? anchorName(anchor) : clip(anchor.text, 40),
       hint: `${titles.get(comment.pageId) || comment.pageId} · ${comment.viewport} · #${comment.id}`,
-      search: anchor.selector || '',
+      search: [anchor.selector, anchor.text].filter(Boolean).join(' '),
     })
   }
   for (const person of people) {

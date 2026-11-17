@@ -61,12 +61,32 @@ shapewall capture                    # staging, the default
 shapewall capture --env production
 ```
 
-On the board, **Compare** shows each page in two environments side by side, with the changed pixels in red over the second one, the
-changed share on each card and a **Changed pages only** filter. Diffs are computed with pixelmatch and cached until either capture
-changes. A static export (`shapewall export`) includes compare data for every pair of captured environments.
+On the board, **Compare** (in **Views**, or in the board menu on a phone) shows each page in two environments side by side, with the
+changed pixels in red over the second one, the changed share on each card and a **Changed pages only** filter. Pick the two
+environments in the compare bar, and swap them with the arrows between. Diffs are computed with pixelmatch and cached until either
+capture changes. A static export (`shapewall export`) includes compare data for every pair of captured environments.
+
+## Comments while comparing
+
+Comments work in compare mode, on either side of a card. Pick **Comment** (or press C), click the Staging or the Production side of a
+page and write as usual: images, drawing and dictation all work there. The comment is left on the environment you clicked:
+
+![Pricing on staging beside production, the changed pixels in red, and a comment thread marked Left on Production](/images/compare-comment.webp)
+
+- **The pin stays with its environment.** It is on that side in every later compare, swapped too, and it sticks to that side's
+  elements. A drawing goes on that side's capture.
+- **The thread says where it was left**, for example "Left on Production". Outside compare mode the board shows the default
+  environment; a comment left on another one keeps its pin there, and its thread names the environment.
+- **On a phone** the compare bar is one row: the two environments, swap, and the options (with the number of changed pages on the
+  button). The thread sheet keeps its full height and the pin lands on screen above it.
+- **Esc** leaves compare once nothing else is open: a thread, the comment box, a menu or comment mode closes first.
+
+Agents see it too: in `shapewall comments --json` a comment left on another environment than the default carries that
+environment's id in `environment`, and its files are that environment's capture. Only the default environment keeps capture
+versions, so before and after on a resolved comment is for comments left on the default environment.
 
 ## Which one to use
 
 - **A fix** to an existing page: just resolve the comment and look at before and after.
 - **A direction** you are not sure about: a variant, so the original stays.
-- **A release**: environments, staging next to production, page by page.
+- **A release**: environments, staging next to production, page by page, with comments on either side.

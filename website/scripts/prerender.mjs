@@ -21,7 +21,8 @@ const SITE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const DIST = path.join(SITE, 'dist')
 const SSR = path.join(SITE, '.ssr')
 
-const { render } = await import(pathToFileURL(path.join(SSR, 'entry-server.js')).href)
+const { prepare, render } = await import(pathToFileURL(path.join(SSR, 'entry-server.js')).href)
+await prepare()
 const { NOT_FOUND, ROUTES, SITE_HOST } = await import(pathToFileURL(path.join(SITE, 'src/routes.js')).href)
 const { headTags, robotsTxt, sitemapXml } = await import(pathToFileURL(path.join(SITE, 'src/seo.js')).href)
 const { LAUNCHED } = await import(pathToFileURL(path.join(SITE, 'src/launch.js')).href)
@@ -114,9 +115,11 @@ out(
   sitemapXml((route) =>
     route.path.startsWith('/legal/')
       ? lastCommit(['src/pages/legal'])
-      : route.kind === 'doc'
-        ? lastCommit([route.repo ? `../docs/${route.repo}.md` : `src/docs/${route.file}.md`])
-        : lastCommit([`src/pages/${PAGE_FILES[route.path]}.jsx`]),
+      : route.path === '/changelog'
+        ? lastCommit(['../CHANGELOG.md', 'src/pages/Changelog.jsx'])
+        : route.kind === 'doc'
+          ? lastCommit([route.repo ? `../docs/${route.repo}.md` : `src/docs/${route.file}.md`])
+          : lastCommit([`src/pages/${PAGE_FILES[route.path]}.jsx`]),
   ),
 )
 

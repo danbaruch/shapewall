@@ -333,7 +333,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   }, [layout.nodes, setNodes])
   const nodesReady = useNodesInitialized()
   const [settledZoom, setSettledZoom] = useSettledZoom(nodesReady)
-  // The selected card (its frame bar) and "select text" belong to one view:
+  // The selected card (its frame bar) and selecting text on it belong to one view:
   // switching viewport, compare, a journey or fitting the board clears them.
   const [focusedKey, setFocusedKey] = useState(null)
   const [selectingKey, setSelectingKey] = useState(null)
@@ -667,10 +667,15 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   useEffect(() => {
     if (selectingKey && !liveKeys.has(selectingKey)) setSelectingKey(null)
   }, [liveKeys, selectingKey])
-  // One tool at a time: Comment or Draw (the tools, C, the palette) takes over from "Select text".
+  // One tool at a time: Comment or Draw (the tools, C, the palette) stops text selection.
   useEffect(() => {
     if (commentMode) setSelectingKey(null)
   }, [commentMode])
+  // Selecting text belongs to the selected page: a click on another page (or
+  // away from every page) ends it.
+  useEffect(() => {
+    if (selectingKey && selectingKey !== focusedKey) setSelectingKey(null)
+  }, [focusedKey, selectingKey])
 
   // ---- Journeys ------------------------------------------------------------
   const { openJourney, closeJourney, goStep, chooseJourneyBranch, startBuilder, addBuilderStep, saveBuilder, removeJourney } =
@@ -772,10 +777,13 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
             y: draft.y,
             anchor: draft.anchor,
             environment: draft.environment || null,
+            // What the picked element is called (a phone flashes its name).
+            targetKind: draft.targetKind || null,
+            targetName: draft.targetName || null,
           }
         : null,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [draft?.pageId, draft?.viewport, draft?.x, draft?.y, draft?.anchor, draft?.environment],
+    [draft?.pageId, draft?.viewport, draft?.x, draft?.y, draft?.anchor, draft?.environment, draft?.targetKind, draft?.targetName],
   )
   // A cluster of pins: zoom in until they come apart; at the closest zoom,
   // open the first one (the thread's arrows reach the rest).
@@ -1416,32 +1424,18 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   // Only what this person may use here; with Select alone there is no toolbar.
   // Compare mode too: a comment goes on the side it is placed on (commentSide.js).
   const commenting = canComment
-  const hasLive = useMemo(
-    () =>
-      !comparePair &&
-      (Object.values(data?.captures || {}).some((sizes) => Object.values(sizes || {}).some((image) => image?.live)) ||
-        (data?.variants || []).some((variant) => Object.values(variant.files || {}).some((file) => file?.live))),
-    [comparePair, data?.captures, data?.variants],
-  )
-  // Select text: beside Comment and Draw whenever the board has live pages;
-  // for someone who may not comment, only while a page is live (a pointer
-  // and a tool that cannot be used yet would be noise).
-  const tools = toolList({
-    wide,
-    commenting,
-    draw: commentMedia.draw,
-    liveBoard: hasLive,
-    livePage: liveKeys.size > 0 || Boolean(selectingKey),
-  })
+  // Selecting text on a live page is not a tool: it is on the page's bar
+  // (FrameBar.jsx), and Select stays the tool in use while it is on.
+  const tools = toolList({ wide, commenting, draw: commentMedia.draw })
   const activeTool = toolInUse({
     drawing: drawingOn,
     commentMode: commentMode && commenting,
     drawArmed,
-    selecting: Boolean(selectingKey) && wide,
     hand: hand && wide,
   })
   handRef.current = activeTool === 'hand'
-  // One tool at a time: Comment, Draw or Select text takes over from Hand.
+  // One tool at a time: Comment or Draw takes over from Hand, and so does
+  // selecting text on a page.
   useEffect(() => {
     if (commentMode || selectingKey || drawingOn) setHand(false)
   }, [commentMode, selectingKey, drawingOn])
@@ -1519,23 +1513,9 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
         setCommentMode(true)
         setDrawArmed(true)
       }
-    } else if (id === 'text') {
-      if (selectingKey) setSelectingKey(null)
-      else if (focusedKey && liveKeys.has(focusedKey) && readyKeys.has(focusedKey)) {
-        if (session?.tool) drawing.set({ tool: null })
-        setCommentMode(false)
-        setSelectingKey(focusedKey)
-      } else {
-        setToast({
-          at: Date.now(),
-          text: 'Select text works on a live page: click a page, then Open live (or zoom in until it goes live).',
-          // A hint about the board as it is: it goes when compare starts.
-          hint: true,
-        })
-      }
     }
   }
-  // Esc leaves "Select text" (back to Select), unless it closes something
+  // Esc stops selecting text on a page, unless it closes something
   // first. Read in the capture phase and used up, as comment mode's Esc is
   // (useCommentModeKeys), so the same key does not also leave a journey.
   // Esc from Hand goes to Select the same way.
@@ -1553,7 +1533,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   }, [selectingKey, hand, commentMode])
   // Esc leaves compare mode once nothing else is open. Everything that Esc
   // closes first (a thread, the composer, a menu, a dialog, comment mode,
-  // Select text, Hand, a journey) uses the key up before it gets here
+  // selecting text, Hand, a journey) uses the key up before it gets here
   // (preventDefault, or a capture-phase listener), so the first Esc closes
   // that and the next one leaves compare.
   const leaveCompareRef = useRef(null)
@@ -1582,10 +1562,10 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     return () => window.removeEventListener('keydown', onKey)
   }, [comparing])
   // Starting (or changing) a comparison drops a hint about the board as it
-  // was ("Select text works on a live page"): it would sit over the new view.
+  // was: it would sit over the new view.
   const compareKey = comparePair ? comparePair.join('_') : ''
   useEffect(() => {
-    if (compareKey) setToast((current) => (current?.hint || current?.untilSheet ? null : current))
+    if (compareKey) setToast((current) => (current?.untilSheet ? null : current))
   }, [compareKey, setToast])
   // V is Select, H is Hand (tools.js: not while typing or with a dialog,
   // menu or list open; the same guard as C).
@@ -1607,15 +1587,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     return () => window.removeEventListener('keydown', onKey)
   }, [toolKeys])
   // The note for the tool in use, above the tools: one at a time.
-  const toolNote = drawingOn
-    ? 'drawing'
-    : commentState === 'composing'
-      ? 'composing'
-      : commentMode && commenting
-        ? 'picking'
-        : selectingKey && wide
-          ? 'text'
-          : null
+  const toolNote = drawingOn ? 'drawing' : commentState === 'composing' ? 'composing' : commentMode && commenting ? 'picking' : null
   // Phones: the tools are the bottom bar; they step aside for a sheet (the
   // composer, a thread, the lists, the menu) and for the keyboard.
   const keyboardUp = useKeyboardUp(!wide)
@@ -2206,14 +2178,6 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                                     keyboard: commentTarget.keyboard,
                                   }
                                 : null,
-                            }
-                          : null
-                      }
-                      selectText={
-                        toolNote === 'text'
-                          ? {
-                              title: `${targetTitle(splitFrameKey(selectingKey).targetId)} · ${viewportLabel(splitFrameKey(selectingKey).viewport)}`,
-                              onDone: () => setSelectingKey(null),
                             }
                           : null
                       }
