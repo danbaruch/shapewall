@@ -3,7 +3,9 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.11.0 - 2026-11-17
+
+Picking what to comment on now reads like a design tool, the toolbar is down to four tools, and shapewall.com has a changelog.
 
 - The board toolbar is Select, Hand, Comment and Draw: the Select text tool and its long hint pill are gone. Selecting text on a
   live page stays on the page's own bar (Select text, then Done), quietly: no note, Select stays the tool in use, and Esc, a click
@@ -23,6 +25,13 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - On a phone the element under the finger is outlined and named from touch-down, a drag on a page pans the board in comment mode
   (it did nothing before) and a pinch zooms, and only a tap pins; the picked element's name then shows for a moment.
 - The frame around a page being drawn on is the same width on screen at any zoom.
+- **Compare mode: a page that is not on one environment reads calmly.** When one side of a compare card answered 404 (a page
+  that is new on Staging and not on Production yet), the card says "No page here on Production (HTTP 404)" instead of
+  "Capture failed: HTTP 404". Other failures still say the capture failed, with the reason.
+- **shapewall.com:** a [changelog page](https://shapewall.com/changelog) built from this file, linked from the footer and the
+  docs; new product screenshots and share images with the four-tool toolbar; the Features page and docs cover dictation,
+  comments while comparing and canvas navigation; and short, reduced-motion-aware animations on the marketing pages.
+- Development: ESLint 10.15 (its `minimatch` is now 11.0.9, which clears a moderate advisory in the dev dependencies).
 
 ## 0.10.0 - 2026-11-16
 
@@ -842,7 +851,7 @@ usage records are not shown until you upgrade again. Details and the SQL to remo
 - Hosted console, "Sign in a terminal": if you close the passkey check that Approve asks for, the page now says the login was not
   approved and why. Before, Approve looked as if it had done nothing.
 - Agents have a name you choose and an icon. Connect asks for the name: the **Allow this?** confirmation has a Name field, filled in
-  with "Claude Code", "Codex" and so on, so you can call it "Harry" before it is connected, and an optional icon. Later, **Edit** on
+  with "Claude Code", "Codex" and so on, so you can call it "Ada" before it is connected, and an optional icon. Later, **Edit** on
   each connected agent's row of the Agents page changes the name, the icon and a colour. Saving restarts nothing, runs no test, and
   works while the agent is answering. Before, the name could only be typed in the full settings form, the one-click Connect gave no
   chance to name an agent, and every agent showed two initials.
@@ -868,7 +877,7 @@ usage records are not shown until you upgrade again. Details and the SQL to remo
 - Hosted server: a token name over 60 characters is refused when the token is made ("Token name: 1 to 60 characters."), as on a
   rename. Before, it was cut to 60 without a word.
 - Hosted server: an API token can be renamed on the token lists (admins and owners, like revoking it), so a watcher shows up as
-  "Harry" instead of "laptop (shapewall login)". The token itself, its scopes and what it already wrote do not change.
+  "Ada" instead of "laptop (shapewall login)". The token itself, its scopes and what it already wrote do not change.
 - Website contact page: the "Thanks, your message is on its way" heading no longer shows a focus rectangle, and the form's spacing
   is even (the character count sits beside the hint, above the field).
 
