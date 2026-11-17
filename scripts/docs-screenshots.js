@@ -1,177 +1,291 @@
-// Regenerates the README screenshots in docs/images from the demo site:
-// capture, add a variant and a few comments, then shoot the board at desktop
-// and phone widths. Run: node scripts/docs-screenshots.js [outDir]
+// Regenerates every product screenshot of the board: the README's PNGs in docs/images and the website's WebP copies
+// (website/src/assets/shots, and the unhashed ones the docs pages link in website/public/images). All of them come
+// from the public live demo (scripts/demo-export.js: the fictional "Lumen Notes", staging and production), shot at
+// twice the pixel density in the light theme, at 1440 x 900 on a desktop and 390 x 844 on a phone, so the README,
+// the website and the share cards show the same current board.
+//
+// Run: node scripts/docs-screenshots.js [--export DIR] [--only name,name]
+//   --export DIR   reuse a demo export made by `node scripts/demo-export.js DIR` (it needs `npm run build:demo`);
+//                  without it the script builds one under test/.output/docs-screenshots/.
+//   --only         shoot some of the shots (the names below), leave the others as they are.
+// Needs Playwright's Chromium and ImageMagick (`magick`). Comments placed for a shot stay in that browser.
+// Then: `node website/scripts/og.mjs` and `node website/scripts/social.mjs` for the share images that use them.
 import fs from 'node:fs'
+import http from 'node:http'
 import path from 'node:path'
+import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
-import { startDemoSite } from '../examples/demo-site/server.js'
-import { joinUrl, normalizeConfig } from '../src/config.js'
-import { captureVariant, runCapture } from '../src/capture/capture.js'
-import { createApp } from '../src/server/app.js'
-import { createComment, saveVariant, updateComment } from '../src/store.js'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const out = path.resolve(process.argv[2] || path.join(ROOT, 'docs', 'images'))
-const work = path.join(ROOT, 'test', '.output', 'docs-screenshots')
-fs.rmSync(work, { recursive: true, force: true })
-fs.mkdirSync(out, { recursive: true })
+const WORK = path.join(ROOT, 'test', '.output', 'docs-screenshots')
+const README_IMAGES = path.join(ROOT, 'docs', 'images')
+const SITE_SHOTS = path.join(ROOT, 'website', 'src', 'assets', 'shots')
+const SITE_PUBLIC = path.join(ROOT, 'website', 'public', 'images')
+export const SHOTS = ['board-overview', 'live-comment', 'compare-comment', 'variant', 'journeys', 'phone-overview', 'phone-comment']
 
-const site = await startDemoSite({ port: 0 })
-const raw = JSON.parse(fs.readFileSync(path.join(ROOT, 'examples', 'demo-site', 'shapewall.config.json'), 'utf8'))
-raw.baseUrl = `http://127.0.0.1:${site.address().port}`
-raw.outputDir = path.join(work, '.shapewall')
-const config = normalizeConfig(raw, { dir: work })
-const board = config.boards[0]
-let server
-let browser
+const args = process.argv.slice(2)
+const option = (name) => {
+  const at = args.indexOf(name)
+  return at >= 0 ? args[at + 1] : null
+}
+const only = option('--only')?.split(',') || null
+for (const name of only || []) if (!SHOTS.includes(name)) throw new Error(`unknown shot "${name}" (${SHOTS.join(', ')})`)
+const wanted = (name) => !only || only.includes(name)
+
+fs.mkdirSync(WORK, { recursive: true })
+let demo = option('--export') && path.resolve(option('--export'))
+if (!demo) {
+  demo = path.join(WORK, 'demo')
+  fs.rmSync(demo, { recursive: true, force: true })
+  execFileSync(process.execPath, [path.join(ROOT, 'scripts', 'demo-export.js'), demo], { stdio: 'inherit' })
+}
+if (!fs.existsSync(path.join(demo, 'index.html'))) throw new Error(`no demo export in ${demo}`)
+
+// The export, served the way a static host serves it.
+const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml' }
+const server = http.createServer((req, res) => {
+  let name = decodeURIComponent(new URL(req.url, 'http://local').pathname)
+  if (name.endsWith('/')) name += 'index.html'
+  const target = path.join(demo, name)
+  if (!target.startsWith(demo + path.sep) || !fs.existsSync(target) || fs.statSync(target).isDirectory()) return res.writeHead(404).end()
+  res.writeHead(200, { 'content-type': TYPES[path.extname(target)] || 'application/octet-stream' })
+  fs.createReadStream(target).pipe(res)
+})
+await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+const base = `http://127.0.0.1:${server.address().port}/`
+
+// Outputs. A desktop shot is 2880 x 1800 (1440 x 900 at 2x), a phone shot 780 x 1688 (390 x 844 at 2x).
+const magick = (...parts) => execFileSync('magick', parts.flat())
+const webp = (input, output, width) =>
+  magick(input, width ? ['-resize', `${width}x`] : [], '-strip', '-quality', '82', '-define', 'webp:method=6', output)
+// The README keeps PNG, which every Markdown viewer shows. 1600 px stays sharp at the width GitHub shows it, at 2x.
+const png = (input, output, width) =>
+  magick(input, width ? ['-resize', `${width}x`] : [], '-strip', '-define', 'png:compression-level=9', output)
+
+// The website picks a width with srcset: 960 (phones at 2x, small cards), 1440, 2048 (a 1024 px wide hero at 2x).
+export const DESKTOP_WIDTHS = [960, 1440, 2048]
+function publishDesktop(name, raw, { docs = false, site = true } = {}) {
+  if (site) for (const width of DESKTOP_WIDTHS) webp(raw, path.join(SITE_SHOTS, `${name}-${width}.webp`), width)
+  if (docs) webp(raw, path.join(SITE_PUBLIC, `${name}.webp`), 1440)
+  png(raw, path.join(README_IMAGES, `${name}.png`), 1600)
+}
+function publishPhone(name, raw) {
+  webp(raw, path.join(SITE_SHOTS, `${name}.webp`), 640)
+  png(raw, path.join(README_IMAGES, `${name}.png`), 780)
+}
+
+// The board as someone using it sees it: light theme, no first-visit tips, no "Try this" card, and no demo banner
+// (that strip belongs to the demo; a real board has none).
+const quiet = (context) =>
+  context.addInitScript(() => {
+    window.localStorage.setItem('shapewall.appearance', JSON.stringify({ mode: 'light', theme: 'default' }))
+    window.localStorage.setItem('shapewall.tip.board', '1')
+    window.localStorage.setItem('shapewall.tip.pageComment', '1')
+    window.localStorage.setItem('shapewall.demo.try', '1')
+  })
+const settle = (page, ms = 900) => page.waitForTimeout(ms)
+const imagesLoaded = (page) =>
+  page.waitForFunction(() => [...document.querySelectorAll('[data-sw-frame] img')].every((img) => img.complete && img.naturalWidth > 0), null, {
+    timeout: 30000,
+  })
+async function open(page, query, selector = '[data-sw-node]') {
+  await page.goto(base + query)
+  await page.waitForSelector(selector, { timeout: 30000 })
+  await page.addStyleTag({ content: '[data-sw-demo-banner]{display:none!important}' })
+  await imagesLoaded(page)
+  await settle(page, 1200)
+}
+// A camera (?v=x,y,zoom) that frames some elements with a margin, worked out from the camera the board opened with.
+const frameNodes = (page, selectors, margin = 0.9, offset = { x: 0, y: 0 }) =>
+  page.evaluate(
+    ({ selectors, margin, offset }) => {
+      const viewport = document.querySelector('.react-flow__viewport')
+      const match = /translate\(([-\d.]+)px, ([-\d.]+)px\) scale\(([-\d.]+)\)/.exec(viewport.style.transform)
+      const [tx, ty, zoom] = match.slice(1).map(Number)
+      const pane = document.querySelector('[data-sw-canvas]').getBoundingClientRect()
+      const toCanvas = (x, y) => ({ x: (x - pane.left - tx) / zoom, y: (y - pane.top - ty) / zoom })
+      const boxes = selectors.map((selector) => {
+        const node = document.querySelector(selector)
+        if (!node) throw new Error(`nothing matches ${selector}`)
+        return node.getBoundingClientRect()
+      })
+      const start = toCanvas(Math.min(...boxes.map((b) => b.left)), Math.min(...boxes.map((b) => b.top)))
+      const end = toCanvas(Math.max(...boxes.map((b) => b.right)), Math.max(...boxes.map((b) => b.bottom)))
+      const width = end.x - start.x
+      const height = end.y - start.y
+      const next = Math.min((pane.width * margin) / width, (pane.height * margin) / height)
+      const x = Math.round(pane.width / 2 - (start.x + width / 2) * next + offset.x)
+      const y = Math.round(pane.height / 2 - (start.y + height / 2) * next + offset.y)
+      return `${x},${y},${next.toFixed(3)}`
+    },
+    { selectors, margin, offset },
+  )
+// A camera that makes one element `share` of the canvas wide, its top `top` px below the canvas's top edge.
+const frameTop = (page, selector, share, top) =>
+  page.evaluate(
+    ({ selector, share, top }) => {
+      const viewport = document.querySelector('.react-flow__viewport')
+      const match = /translate\(([-\d.]+)px, ([-\d.]+)px\) scale\(([-\d.]+)\)/.exec(viewport.style.transform)
+      const [tx, ty, zoom] = match.slice(1).map(Number)
+      const pane = document.querySelector('[data-sw-canvas]').getBoundingClientRect()
+      const box = document.querySelector(selector).getBoundingClientRect()
+      const left = (box.left - pane.left - tx) / zoom
+      const y = (box.top - pane.top - ty) / zoom
+      const width = box.width / zoom
+      const next = (pane.width * share) / width
+      return `${Math.round(pane.width / 2 - (left + width / 2) * next)},${Math.round(top - y * next)},${next.toFixed(3)}`
+    },
+    { selector, share, top },
+  )
+async function commentMode(page, tap = false) {
+  if ((await page.getAttribute('[data-sw-comment-mode]', 'aria-pressed')) === 'true') return
+  if (tap) await page.tap('[data-sw-comment-mode]')
+  else await page.click('[data-sw-comment-mode]')
+}
+// The demo keeps a visitor's comments in the browser: forget them, so the next shot shows the board as exported.
+const forget = (page) =>
+  page.evaluate(() => {
+    for (const key of Object.keys(window.localStorage)) if (key.startsWith('shapewall.demo.') && key !== 'shapewall.demo.try') window.localStorage.removeItem(key)
+  })
+const write = (page, text) => page.keyboard.type(text, { delay: 6 })
+
+const browser = await chromium.launch()
+const RAW = path.join(WORK, 'raw')
+fs.mkdirSync(RAW, { recursive: true })
 try {
-  await runCapture({ config, log: () => {} })
-  await captureVariant({
-    config,
-    boardId: board.id,
-    pageId: 'pricing',
-    variantId: 'yearly-toggle',
-    url: joinUrl(board.baseUrl, '/pricing-v2/'),
+  const desktop = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2, colorScheme: 'light' })
+  await quiet(desktop)
+  const phone = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    deviceScaleFactor: 2,
+    isMobile: true,
+    hasTouch: true,
+    colorScheme: 'light',
   })
-  await saveVariant(config, board.id, {
-    id: 'yearly-toggle',
-    pageId: 'pricing',
-    title: 'Yearly toggle',
-    note: 'Billing switch, clearer Plus card',
-    source: 'branch pricing-v2',
-    createdAt: new Date().toISOString(),
-  })
-  browser = await chromium.launch()
-  // Where an element sits in a capture, in percent, as a click would store it.
-  const pinAt = async (viewportName, pagePath, selector) => {
-    const size = config.viewports[viewportName]
-    const mobile = viewportName !== 'desktop'
-    const page = await browser.newPage({ viewport: size, isMobile: mobile, hasTouch: mobile })
-    await page.goto(joinUrl(board.baseUrl, pagePath))
-    const box = await page.locator(selector).boundingBox()
+  await quiet(phone)
+  const raw = (name) => path.join(RAW, `${name}.png`)
+
+  // The whole product: every group but System at all three widths, with the comments panel.
+  if (wanted('board-overview')) {
+    const page = await desktop.newPage()
+    await open(page, '?vp=all&v=40,30,0.15')
+    await page.screenshot({ path: raw('board-overview') })
+    publishDesktop('board-overview', raw('board-overview'), { docs: true })
     await page.close()
-    const round = (value) => Math.round(value * 100) / 100
-    return { x: round(((box.x + box.width / 2) / size.width) * 100), y: round(((box.y + box.height / 2) / size.height) * 100) }
   }
-  const anchor = (selector, text) => ({ selector, text, dx: 0.5, dy: 0.5 })
-  await createComment(config, board, {
-    pageId: 'pricing',
-    viewport: 'desktop',
-    ...(await pinAt('desktop', '/pricing/', 'a[data-testid="plus-cta"]')),
-    body: 'Make the Plus button stand out more. Maybe show the yearly price too?',
-    author: 'Robin',
-    anchor: anchor('a[data-testid="plus-cta"]', 'Try Plus free'),
-  })
-  await createComment(config, board, {
-    pageId: 'home',
-    viewport: 'phone',
-    ...(await pinAt('phone', '/', 'a[data-testid="hero-cta"]')),
-    body: 'Shorter label on phones: "Start free"',
-    author: 'Robin',
-    anchor: anchor('a[data-testid="hero-cta"]', 'Start writing free'),
-  })
-  await createComment(config, board, {
-    pageId: 'blog',
-    viewport: 'desktop',
-    x: 30,
-    y: 14,
-    body: 'Covers feel heavy next to the titles.',
-    author: 'Jo',
-  })
-  const done = await createComment(config, board, {
-    pageId: 'features',
-    viewport: 'desktop',
-    x: 50,
-    y: 8,
-    body: 'Typo in the hero',
-    author: 'Jo',
-  })
-  await updateComment(config, board.id, done.id, { status: 'resolved', resolution: 'Fixed in features/index.html' })
 
-  const app = createApp({ config })
-  server = await new Promise((resolve) => {
-    const instance = app.listen(0, '127.0.0.1', () => resolve(instance))
-  })
-  const url = `http://127.0.0.1:${server.address().port}/`
-  const settle = (page) => page.waitForTimeout(900)
-  const thumbsLoaded = (page) =>
-    page.waitForFunction(() => [...document.querySelectorAll('[data-sw-frame] img')].every((img) => img.complete && img.naturalWidth > 0))
+  // A new comment on an element: Pricing's live page, the Plus button, and the comment box with its image and drawing
+  // tools, the microphone and Post inside it.
+  if (wanted('live-comment')) {
+    const page = await desktop.newPage()
+    await open(page, '?vp=desktop&panel=off')
+    const camera = await frameTop(page, '[data-sw-frame="pricing:desktop"]', 0.9, 28)
+    await open(page, `?vp=desktop&panel=off&v=${camera}`)
+    // Zoomed in this far the page is live HTML by itself (an element comment needs it).
+    await page.waitForSelector('[data-sw-frame="pricing:desktop"][data-sw-live="ready"]', { timeout: 30000 })
+    await settle(page)
+    await commentMode(page)
+    const button = await page.frameLocator('[data-sw-frame="pricing:desktop"] iframe').locator('a[data-testid="plus-cta"]').boundingBox()
+    await page.mouse.click(button.x + button.width / 2, button.y + button.height / 2)
+    await page.waitForSelector('[data-sw-composer-popover] [data-sw-comment-input]')
+    await write(page, 'Make the Plus button stand out more, and show the yearly price under it.')
+    await page.mouse.move(1435, 895)
+    await settle(page, 700)
+    await page.screenshot({ path: raw('live-comment') })
+    publishDesktop('live-comment', raw('live-comment'), { docs: true })
+    await page.close()
+  }
 
-  // Desktop overview, both viewports.
-  const desktop = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 })
-  await desktop.goto(`${url}?vp=all`)
-  await desktop.waitForSelector('[data-sw-node="home"]')
-  await thumbsLoaded(desktop)
-  await settle(desktop)
-  await desktop.screenshot({ path: path.join(out, 'board-overview.png') })
+  // Commenting while comparing: staging beside production, a comment left on the Production side of Pricing, and its
+  // thread saying where it was left.
+  if (wanted('compare-comment')) {
+    const page = await desktop.newPage()
+    await open(page, '?vp=desktop&panel=off&cmp=staging_production', '[data-sw-compare-bar]')
+    // The pair as wide as the canvas allows, from the top: the pages' lower halves are empty.
+    const camera = await frameTop(page, '[data-sw-node="pricing"]', 0.92, 40)
+    await open(page, `?vp=desktop&panel=off&cmp=staging_production&v=${camera}`, '[data-sw-compare-bar]')
+    await commentMode(page)
+    // On the Plus card, where production still has the old price.
+    const side = await page.$eval('[data-sw-frame="pricing:desktop:production"]', (node) => node.getBoundingClientRect().toJSON())
+    await page.mouse.click(side.left + side.width * 0.42, side.top + side.height * 0.21)
+    await page.waitForSelector('[data-sw-composer-popover] [data-sw-comment-input]')
+    await write(page, 'Production still has the old Plus price. Ship the yearly copy from staging with it.')
+    await page.keyboard.press('Enter')
+    await page.waitForSelector('[data-sw-thread-popover] [data-sw-thread-side]', { timeout: 15000 })
+    // Back to the pointer tool, so the "click a page to comment" hint is gone.
+    await page.click('[data-sw-tool="select"]').catch(() => {})
+    await page.mouse.move(1435, 895)
+    await settle(page, 900)
+    await page.screenshot({ path: raw('compare-comment') })
+    publishDesktop('compare-comment', raw('compare-comment'))
+    await forget(page)
+    await page.close()
+  }
 
-  // Live HTML of the pricing page with its element comment selected.
-  await desktop.goto(url)
-  await desktop.waitForSelector('[data-sw-node="pricing"]')
-  await settle(desktop)
-  await desktop.click('[data-sw-frame="pricing:desktop"]')
-  await desktop.click('[data-sw-open-live="pricing|desktop"]')
-  await desktop.waitForSelector('[data-sw-frame="pricing:desktop"][data-sw-live="ready"]')
-  await desktop.click('[data-sw-comment="1"]')
-  await settle(desktop)
-  await desktop.mouse.click(5, 450)
-  await settle(desktop)
-  await desktop.screenshot({ path: path.join(out, 'live-comment.png') })
+  // A variant beside its page.
+  if (wanted('variant')) {
+    const page = await desktop.newPage()
+    await open(page, '?vp=desktop&panel=off', '[data-sw-node="variant:yearly-toggle"]')
+    const camera = await frameNodes(page, ['[data-sw-node="pricing"]', '[data-sw-node="variant:yearly-toggle"]'], 0.9)
+    await open(page, `?vp=desktop&panel=off&v=${camera}`, '[data-sw-node="variant:yearly-toggle"]')
+    await page.screenshot({ path: raw('variant') })
+    publishDesktop('variant', raw('variant'), { docs: true })
+    await page.close()
+  }
 
-  // The variant beside its page.
-  await desktop.goto(url)
-  await desktop.waitForSelector('[data-sw-node="variant:yearly-toggle"]')
-  await settle(desktop)
-  // Frame the page and its variant: read the fitted camera, then reopen the
-  // board with a camera (the ?v= parameter) around the two nodes.
-  const camera = await desktop.evaluate(() => {
-    const viewport = document.querySelector('.react-flow__viewport')
-    const match = /translate\(([-\d.]+)px, ([-\d.]+)px\) scale\(([-\d.]+)\)/.exec(viewport.style.transform)
-    const [tx, ty, zoom] = match.slice(1).map(Number)
-    const pane = document.querySelector('[data-sw-canvas]').getBoundingClientRect()
-    const a = document.querySelector('[data-sw-node="pricing"]').getBoundingClientRect()
-    const b = document.querySelector('[data-sw-node="variant:yearly-toggle"]').getBoundingClientRect()
-    const toCanvas = (x, y) => ({ x: (x - pane.left - tx) / zoom, y: (y - pane.top - ty) / zoom })
-    const start = toCanvas(a.left, a.top)
-    const end = toCanvas(b.right, b.bottom)
-    const width = end.x - start.x
-    const height = end.y - start.y
-    const next = Math.min((pane.width * 0.92) / width, (pane.height * 0.92) / height)
-    return `${Math.round(pane.width / 2 - (start.x + width / 2) * next)},${Math.round(pane.height / 2 - (start.y + height / 2) * next)},${next.toFixed(3)}`
-  })
-  await desktop.goto(`${url}?v=${camera}&panel=off`)
-  await desktop.waitForSelector('[data-sw-node="variant:yearly-toggle"]')
-  await settle(desktop)
-  await thumbsLoaded(desktop)
-  await desktop.screenshot({ path: path.join(out, 'variant.png') })
+  // A journey over the board: numbered steps, arrows, the rest faded.
+  if (wanted('journeys')) {
+    const page = await desktop.newPage()
+    await open(page, '?vp=desktop&panel=off&j=sign-up&step=2', '[data-sw-journey-bar]')
+    await page.keyboard.press('Shift+1')
+    await settle(page, 1200)
+    await imagesLoaded(page)
+    await page.screenshot({ path: raw('journeys') })
+    publishDesktop('journeys', raw('journeys'), { site: false }) // the README's journeys guide only
+    await page.close()
+  }
 
-  // A journey over the whole board: numbered steps, arrows, the rest faded.
-  await desktop.goto(`${url}?j=sign-up&step=2&panel=off`)
-  await desktop.waitForSelector('[data-sw-journey-bar]')
-  await settle(desktop)
-  await desktop.click('.react-flow__controls-fitview')
-  await settle(desktop)
-  await thumbsLoaded(desktop)
-  await desktop.screenshot({ path: path.join(out, 'journeys.png') })
-
-  // Phone.
-  const phone = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true })
-  await phone.goto(`${url}?vp=phone`)
-  await phone.waitForSelector('[data-sw-node="home"]')
-  await thumbsLoaded(phone)
-  await settle(phone)
-  await phone.screenshot({ path: path.join(out, 'phone-overview.png') })
-  await phone.click('[data-sw-frame="home:phone"]')
-  await phone.click('[data-sw-open-live="home|phone"]')
-  await phone.waitForSelector('[data-sw-frame="home:phone"][data-sw-live="ready"]')
-  await phone.click('[data-sw-pin="2"]')
-  await phone.waitForSelector('[role="dialog"]')
-  await settle(phone)
-  await phone.screenshot({ path: path.join(out, 'phone-comment.png') })
-  console.log(`Screenshots in ${out}`)
+  // The phone: the board, then compare mode with its one-row bar and a comment on the Production side in the thread
+  // sheet.
+  if (wanted('phone-overview')) {
+    const page = await phone.newPage()
+    await open(page, '?vp=phone')
+    await page.screenshot({ path: raw('phone-overview') })
+    publishPhone('phone-overview', raw('phone-overview'))
+    await page.close()
+  }
+  if (wanted('phone-comment')) {
+    const page = await phone.newPage()
+    // Home's pair at full width, the top of both pages in view (a fixed camera: the phone opens with a fly-in).
+    await open(page, '?vp=phone&cmp=staging_production&v=-53,-130,0.96', '[data-sw-compare-bar]')
+    await commentMode(page, true)
+    await settle(page, 600)
+    // The headline on the Production side: production has not shipped the new one yet. A first tap can select the
+    // page instead, so tap again until the comment sheet opens.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await page.touchscreen.tap(262, 246)
+      if (await page.waitForSelector('[role="dialog"] [data-sw-comment-input]', { timeout: 4000 }).catch(() => null)) break
+    }
+    await page.waitForSelector('[role="dialog"] [data-sw-comment-input]', { timeout: 4000 })
+    await write(page, 'Production still has the old headline. Ship the new one with this release.')
+    await page.tap('[role="dialog"] [data-sw-save-comment]')
+    // Posted, the sheet closes on the page it was placed on; its pin opens the thread.
+    await page.waitForSelector('[role="dialog"] [data-sw-comment-input]', { state: 'detached', timeout: 15000 })
+    await settle(page, 800)
+    await page.tap('[data-sw-frame="home:phone:production"] [data-sw-pin]')
+    await page.waitForSelector('[role="dialog"] [data-sw-thread-side]', { timeout: 15000 }).catch(async (error) => {
+      await page.screenshot({ path: raw('phone-comment-failed') })
+      throw error
+    })
+    await settle(page, 1000)
+    await page.screenshot({ path: raw('phone-comment') })
+    publishPhone('phone-comment', raw('phone-comment'))
+    await forget(page)
+    await page.close()
+  }
+  console.log(`screenshots: raw shots in ${path.relative(ROOT, RAW)}, README PNGs in docs/images, WebP in website/src/assets/shots`)
 } finally {
-  await browser?.close()
-  server?.close()
-  site.close()
+  await browser.close()
+  server.close()
 }
