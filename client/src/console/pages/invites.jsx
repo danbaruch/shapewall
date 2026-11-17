@@ -32,6 +32,7 @@ import {
   PageHeader,
   RoleBadge,
   SecretResultDialog,
+  ShownOnceNotice,
   Time,
   useSecretResult,
 } from '../components'
@@ -261,10 +262,10 @@ export function InviteDialog({ open, onClose, onCreated }) {
               , works once and expires <Time value={made.invite.expiresAt} />.
             </Notice>
           ) : (
-            <Notice tone="info" title="Copy the link now: it is shown once">
+            <ShownOnceNotice>
               It makes one {ROLE_LABEL[made.invite.role].toLowerCase()} and expires <Time value={made.invite.expiresAt} />. Send it to one
               person.
-            </Notice>
+            </ShownOnceNotice>
           )}
           <CopyField value={made.url} testId="invite" />
         </>

@@ -17,7 +17,7 @@ import {
   Users,
 } from 'lucide-react'
 import { cn } from '../../lib/utils'
-import { Card, LoadError, Loading, RoleBadge } from '../components'
+import { Card, LoadError, Loading } from '../components'
 import { api, wsUrl } from '../lib/api'
 import { ROLE_LABEL, roleAtLeast } from '../lib/format'
 import { Link } from '../lib/router'
@@ -140,13 +140,8 @@ export function WorkspacePage({ workspaceId, section, projectId, subjectId = nul
 
   return (
     <WorkspaceContext.Provider value={value}>
-      <div className="mb-5 flex flex-wrap items-center gap-2 lg:hidden">
-        {/* Not a heading: each section brings the page's h1. */}
-        <p className="min-w-0 truncate text-lg font-semibold text-fg">{data.workspace.name}</p>
-        <RoleBadge role={role} />
-      </div>
+      {/* The workspace's name is in the switcher at the top of the page (shell.jsx); each section brings its own h1. */}
       <SidebarSections
-        label={data.workspace.name}
         sections={visible.map(([id, label, Icon]) => ({
           id: `ws-${id}`,
           label,

@@ -207,11 +207,16 @@ export function flow(items, cols = LAYOUT_COLS) {
   for (const given of items) {
     const w = Math.min(given.w, cols)
     let spot = null
-    for (let y = from.y; !spot; y += 1)
+    for (let y = from.y; !spot;) {
       for (let x = y === from.y ? from.x : 0; x + w <= cols && !spot; x += 1) {
         const at = { ...given, w, x, y }
         if (!firstHit(placed, at)) spot = at
       }
+      // Nothing fits on this row: the next row where anything could is where a widget above ends (no row
+      // between frees a cell). The drawn grid has a fine row per pixel, so this skips the rows in between.
+      const next = Math.min(...placed.map((one) => one.y + one.h).filter((end) => end > y))
+      y = Number.isFinite(next) ? next : y + 1
+    }
     placed.push(spot)
     // The next one starts after this one (on its row, to its right).
     from = { x: spot.x + 1, y: spot.y }
@@ -599,15 +604,38 @@ export function fill(items, cols = LAYOUT_COLS) {
 // on the page, not at the rows it is stored with: a breakdown of two
 // projects is no taller than two rows of bars. So the grid is drawn on finer
 // rows, LAYOUT_SUB to a row: a stored height of h is drawn h * LAYOUT_SUB
-// fine rows tall, the same pixels as ever.
-export const LAYOUT_SUB = 4
+// fine rows tall, the same pixels as ever. A fine row is one pixel, so a
+// card is exactly as tall as what it holds. (It was four to a row, 18 px
+// each, which left up to 17 px of empty card under a short list.) Only the
+// drawing uses fine rows: a stored layout is in whole rows, and reads the
+// same whatever LAYOUT_SUB is.
+export const LAYOUT_SUB = LAYOUT_ROW + LAYOUT_GAP
 // A fine row's pitch in pixels (one fine row and the gap after it), and the
 // height a fine row is given to the grid so that h fine rows and the gaps
-// between them come to the same pixels as a stored row.
+// between them come to the same pixels as a stored row. The grid draws n
+// fine rows as n * row + (n - 1) * gap pixels and puts fine row y at
+// y * (row + gap): with a pitch of 1 px the row is 1 - gap (negative), so a
+// widget n fine rows tall is n - gap pixels, the gap below it the rest.
 export const LAYOUT_SUB_PITCH = (LAYOUT_ROW + LAYOUT_GAP) / LAYOUT_SUB
 export const LAYOUT_SUB_ROW = LAYOUT_SUB_PITCH - LAYOUT_GAP
+// The least a card as tall as its content is drawn: a heading and a line.
+export const LAYOUT_FIT_LEAST = 92
 // The fine rows a widget whose card is `px` tall takes (never fewer than a heading needs).
-export const subRowsFor = (px) => Math.max(6, Math.ceil((px + LAYOUT_GAP) / LAYOUT_SUB_PITCH))
+export const subRowsFor = (px) => Math.ceil((Math.max(px, LAYOUT_FIT_LEAST) + LAYOUT_GAP) / LAYOUT_SUB_PITCH)
+// The fine rows each widget as tall as its content was drawn at, kept in a
+// browser between visits so a reload draws them at once. Keyed by the size
+// of a fine row: heights kept at another size are never read, and go.
+export const fitKeyOf = (workspaceId) => `sw-usage-fit:${LAYOUT_SUB}:${workspaceId}`
+export function readFitted(storage, workspaceId) {
+  try {
+    storage.removeItem(`sw-usage-fit:${workspaceId}`)
+    const kept = JSON.parse(storage.getItem(fitKeyOf(workspaceId)) || '{}')
+    if (!kept || typeof kept !== 'object' || Array.isArray(kept)) return {}
+    return Object.fromEntries(Object.entries(kept).filter(([, rows]) => Number.isInteger(rows) && rows > 0 && rows <= 20 * LAYOUT_SUB))
+  } catch {
+    return {}
+  }
+}
 // Whether a widget is drawn at the height of its content.
 export const fitsContent = (item) => Boolean(item.auto && WIDGETS[item.type]?.auto)
 
@@ -686,23 +714,24 @@ export function settle(items, cols = LAYOUT_COLS, fitted = {}) {
 function settleBand(items, cols, stretches, fitted) {
   const placed = flow(items, cols)
   const end = placed.reduce((low, item) => Math.max(low, item.y + item.h), 0)
-  const taken = (c, row, self) =>
-    placed.some((other) => other !== self && other.x <= c && c < other.x + other.w && other.y <= row && row < other.y + other.h)
   const reach = (item) => {
     const under = (other) => other !== item && other.y >= item.y + item.h && other.x < item.x + item.w && item.x < other.x + other.w
     const below = Math.min(end, ...placed.filter(under).map((other) => other.y))
-    const free = (row) => !Array.from({ length: item.w }, (_, at) => item.x + at).some((c) => taken(c, row, item))
-    while (item.y + item.h < below && free(item.y + item.h)) item.h += 1
+    // It grows a row at a time while the row under it is free in its columns: it stops where another widget in
+    // those columns begins, or at once where one already reaches past its bottom.
+    const bottom = item.y + item.h
+    const across = (other) => other !== item && other.x < item.x + item.w && item.x < other.x + other.w && other.y + other.h > bottom
+    const stop = Math.min(below, ...placed.filter(across).map((other) => Math.max(other.y, bottom)))
+    if (stop > bottom) item.h = stop - item.y
   }
   // The charts first (a plot can take the room). Then whatever still ends short of the band (a short list
   // beside a longer one, a breakdown with nothing that fits under it) reaches down too, so no hole is left
   // and the band ends on one line: its card ends there, what it holds stays at its top.
   for (const item of placed) if (stretches(item)) reach(item)
   for (const item of placed) if (!stretches(item) && fitted.has(item.id)) reach(item)
-  const used = new Set(placed.map((item) => item.x + item.w))
-  const right = Math.max(...used)
-  let holes = 0
-  for (let c = 0; c < right; c += 1) for (let row = 0; row < end; row += 1) if (!taken(c, row, null)) holes += 1
+  // (Nothing overlaps, so the empty cells are the band's area less the widgets'.)
+  const right = Math.max(...placed.map((item) => item.x + item.w))
+  const holes = right * end - placed.reduce((sum, item) => sum + item.w * item.h, 0)
   return { placed, end, holes }
 }
 

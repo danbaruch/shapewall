@@ -104,6 +104,12 @@ colours meet WCAG AA on `surface` and `surface-2` (7:1 for High contrast), in li
 | `Collapsible` (+ Trigger, Content), `Disclosure`                                          | Show and hide a section in place; replaces native `<details>`. The trigger has a turning chevron and is 44 px below `lg`. `Disclosure` = `title`, `meta`, children, `defaultOpen`; extra props (`data-sw-*`) go on the root.                                      |
 | `Skeleton`                                                                                | A loading placeholder shaped like what is coming (`className` sets the size). `aria-hidden`; give the screen one `role="status"` label.                                                                                                                           |
 
+In the Console, an action that cannot be taken back and ends a whole thing (delete a project, a workspace or an account, leave a
+workspace) sits in a `DangerCard` (a red edge) as a `DangerButton`: the `danger` variant with a hairline red border, 44 px on touch
+and 36 px from `lg`. Row actions in a list (revoke, remove, end a session) stay plain `danger` buttons. A secret shown only once (a
+new token, invite link or share link) has a `ShownOnceNotice` above it: the `warn` tone, "Copy it now: it is shown once". Both live in
+`client/src/console/components.jsx`.
+
 Local installations offer **Workspace Console** from the board profile menu, including when no agent is connected or the agent owner key is absent.
 The local Console uses the hosted Console's header, sidebar and card layout with real boards from this installation. Its **Agents** section
 holds everything about agents (the Agents card, the connection details and the endpoint form); its **Settings** section covers this

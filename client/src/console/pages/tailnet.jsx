@@ -10,7 +10,7 @@
 // Being on the tailnet gives nothing by itself: an admin invites a login
 // with a role. What the server says decides everything shown here.
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ArrowRight, Network, UserPlus, X } from 'lucide-react'
 import { Badge, Button, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Spinner } from '../../components/ui'
 import { Card, CardHeader, ConfirmDialog, Field, FormError, Notice, Time } from '../components'
@@ -33,6 +33,12 @@ export function TailnetArrival({ tailnet, signup, onSignedIn, passkeysOff = fals
   const [handle, setHandle] = useState(tailnet.suggested?.handle || '')
   const [name, setName] = useState(tailnet.suggested?.displayName || tailnet.name || '')
   const go = useAction()
+  // The server said the handle is someone else's: said under the field (until it is changed), which takes the focus.
+  const [taken, setTaken] = useState(null)
+  const handleField = useRef(null)
+  useEffect(() => {
+    if (taken) handleField.current?.focus()
+  }, [taken])
   if (tailnet.state === 'self')
     return (
       <Notice tone="info" className="mt-4" title="This is the server’s own machine" data-sw-tailnet="self">
@@ -95,7 +101,17 @@ export function TailnetArrival({ tailnet, signup, onSignedIn, passkeysOff = fals
   const mayOpen = !invited && signup === 'open'
   const join = (event) => {
     event.preventDefault()
-    go.run(async () => onSignedIn(await api.post('/auth/tailnet/join', { handle, displayName: name })))
+    go.run(async () => {
+      let result
+      try {
+        result = await api.post('/auth/tailnet/join', { handle, displayName: name })
+      } catch (failure) {
+        if (failure?.code !== 'handle_taken') throw failure
+        setTaken({ handle, message: failure.message })
+        return
+      }
+      onSignedIn(result)
+    })
   }
   return (
     <div className="mt-4 space-y-4" data-sw-tailnet={tailnet.state}>
@@ -132,10 +148,15 @@ export function TailnetArrival({ tailnet, signup, onSignedIn, passkeysOff = fals
               />
             )}
           </Field>
-          <Field label="Handle" hint="People @mention you with it. Lowercase letters, digits and dashes.">
+          <Field
+            label="Handle"
+            hint="People @mention you with it. Lowercase letters, digits and dashes."
+            error={taken?.handle === handle ? taken.message : null}
+          >
             {(props) => (
               <Input
                 {...props}
+                ref={handleField}
                 size="touch"
                 value={handle}
                 onChange={(event) => setHandle(event.target.value.toLowerCase().replace(/\s+/g, '-'))}
@@ -152,7 +173,7 @@ export function TailnetArrival({ tailnet, signup, onSignedIn, passkeysOff = fals
             variant="default"
             size="touch"
             className="w-full text-[15px]"
-            disabled={go.busy || !name.trim() || handle.length < 3}
+            disabled={go.busy || !name.trim() || handle.length < 3 || taken?.handle === handle}
             data-sw-tailnet-join
           >
             {go.busy ? <Spinner /> : <ArrowRight size={17} aria-hidden="true" />}

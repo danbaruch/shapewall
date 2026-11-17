@@ -27,6 +27,7 @@ import {
   Loading,
   Notice,
   SecretResultDialog,
+  ShownOnceNotice,
   Time,
   useSecretResult,
 } from '../components'
@@ -274,11 +275,11 @@ export function CreateShare({ open, onClose, project, onCreated }) {
       doneProps={{ 'data-sw-share-done': true }}
       renderResult={(made) => (
         <>
-          <Notice tone="warn" title="Copy it now: it is shown once">
+          <ShownOnceNotice>
             Anyone with this link{made.share.passcode ? ' and the passcode' : ''} can{' '}
             {made.share.mode === 'comment' ? 'see and comment on' : 'see'} this project's boards until <Time value={made.share.expiresAt} />
             .{made.share.passcode ? ' Send the passcode separately.' : ''}
-          </Notice>
+          </ShownOnceNotice>
           <CopyField value={made.url} testId="share" />
         </>
       )}

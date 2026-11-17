@@ -88,6 +88,8 @@ import {
   settle,
   stepMove,
   subRowsFor,
+  fitKeyOf,
+  readFitted,
   visibleItems,
 } from '../../../../src/hosted/usage-layout.js'
 import { Card, ConfirmDialog, LoadError } from '../components'
@@ -316,13 +318,10 @@ export function Dashboard({ filter, isAdmin, board, editing, onEditing }) {
   const ordered = useMemo(() => readingOrder(shown), [shown])
   // The fine rows each widget that is as tall as its content needs, measured on the page (usage-layout.js, settle).
   // (Kept in this browser between visits, so a reload draws them at once instead of shrinking them once the data is in.)
-  const fitKey = `sw-usage-fit:${workspaceId}`
+  const fitKey = fitKeyOf(workspaceId)
   const [fitted, setFitted] = useState(() => {
     try {
-      const kept = JSON.parse(window.localStorage.getItem(fitKey) || '{}')
-      return kept && typeof kept === 'object' && !Array.isArray(kept)
-        ? Object.fromEntries(Object.entries(kept).filter(([, rows]) => Number.isInteger(rows) && rows > 0 && rows < 200))
-        : {}
+      return readFitted(window.localStorage, workspaceId)
     } catch {
       return {}
     }
@@ -542,7 +541,9 @@ export function Dashboard({ filter, isAdmin, board, editing, onEditing }) {
   const compactor = useMemo(
     () => ({
       type: 'vertical',
-      allowOverlap: false,
+      // (The grid library would push a widget it overlaps down a fine row at a time, a pixel at a time here. The
+      // answer below places every widget anyway, so nothing is ever left overlapping.)
+      allowOverlap: true,
       compact(given) {
         const now = gesture.current
         if (!now) return given.map((entry) => ({ ...entry }))
