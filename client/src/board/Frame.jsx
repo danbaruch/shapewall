@@ -15,6 +15,7 @@ import { cn } from '../lib/utils'
 import { useBoardView, useBoardViewStore } from './boardView'
 import { BoardContext } from './boardContext'
 import { FrameDrawing } from './CommentMedia'
+import { compareSideNote } from './compareSideNote'
 import { drawingsFor, hasDrawing, useDrawing } from './drawing'
 import { entryVersion } from './flow'
 
@@ -866,6 +867,7 @@ export function CompareFrame({ pageId, frame }) {
     place((x - rect.left) / rect.width, (y - rect.top) / rect.height, false)
   }
   const title = compare.titleOf(env)
+  const note = compareSideNote(failure, title)
   return (
     <>
       <FrameLabel frame={frame}>
@@ -919,8 +921,12 @@ export function CompareFrame({ pageId, frame }) {
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-2 p-4 text-center">
               <ImageOff size={22} className="text-faint" aria-hidden="true" />
-              <p className="text-[11px] leading-4 text-muted" data-sw-compare-failed={failure ? 'true' : undefined}>
-                {failure ? `Capture failed: ${failure}` : `Not captured in ${title} yet.`}
+              <p
+                className="text-[11px] leading-4 text-muted"
+                data-sw-compare-failed={note.failed ? 'true' : undefined}
+                data-sw-compare-missing={failure && !note.failed ? 'true' : undefined}
+              >
+                {note.text}
               </p>
             </div>
           )}
