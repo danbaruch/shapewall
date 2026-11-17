@@ -14,37 +14,42 @@ const element = (tagName, { type = null, editable = false } = {}) => ({
 })
 const key = (value, extra = {}) => ({ key: value, target: element('DIV'), ...extra })
 
-test('the order is Select, Hand, then Comment, Draw, Select text; Select and Hand are the pointer tools', () => {
-  assert.deepEqual(TOOL_ORDER, ['select', 'hand', 'comment', 'draw', 'text'])
+test('the order is Select, Hand, then Comment and Draw; Select and Hand are the pointer tools', () => {
+  assert.deepEqual(TOOL_ORDER, ['select', 'hand', 'comment', 'draw'])
   assert.deepEqual([...POINTER_TOOLS], ['select', 'hand'])
 })
 
-test('a desktop commenter has every tool; Select text needs a board with live pages', () => {
-  assert.deepEqual(toolList({ wide: true, commenting: true, draw: true, liveBoard: true }), ['select', 'hand', 'comment', 'draw', 'text'])
+test('a desktop commenter has every tool, and there is no Select text tool (it is on the page bar)', () => {
   assert.deepEqual(toolList({ wide: true, commenting: true, draw: true }), ['select', 'hand', 'comment', 'draw'])
+  // Old callers that still pass the live flags get the same four.
+  assert.deepEqual(toolList({ wide: true, commenting: true, draw: true, liveBoard: true, livePage: true }), [
+    'select',
+    'hand',
+    'comment',
+    'draw',
+  ])
   // A static export that keeps comments in the browser: comments, no drawings.
-  assert.deepEqual(toolList({ wide: true, commenting: true, liveBoard: true }), ['select', 'hand', 'comment', 'text'])
+  assert.deepEqual(toolList({ wide: true, commenting: true }), ['select', 'hand', 'comment'])
   // Draw is never offered without Comment.
   assert.deepEqual(toolList({ wide: true, draw: true }), ['select', 'hand'])
 })
 
-test('someone who may not comment has Select and Hand on desktop, and Select text only while a page is live', () => {
-  assert.deepEqual(toolList({ wide: true, liveBoard: true }), ['select', 'hand'])
-  assert.deepEqual(toolList({ wide: true, liveBoard: true, livePage: true }), ['select', 'hand', 'text'])
-  assert.deepEqual(toolList({ wide: true, livePage: true }), ['select', 'hand'], 'not without live pages on the board')
+test('someone who may not comment has Select and Hand on desktop, live page or not', () => {
+  assert.deepEqual(toolList({ wide: true }), ['select', 'hand'])
+  assert.deepEqual(toolList({ wide: true, liveBoard: true, livePage: true }), ['select', 'hand'])
 })
 
-test('phones: no Hand (a finger pans already) and no Select text; a viewer is left with Select alone, so no toolbar', () => {
-  assert.deepEqual(toolList({ commenting: true, draw: true, liveBoard: true, livePage: true }), ['select', 'comment', 'draw'])
+test('phones: no Hand (a finger pans already); a viewer is left with Select alone, so no toolbar', () => {
+  assert.deepEqual(toolList({ commenting: true, draw: true }), ['select', 'comment', 'draw'])
   assert.deepEqual(toolList({ liveBoard: true, livePage: true }), ['select'])
   assert.deepEqual(toolList(), ['select'])
 })
 
-test('one tool is in use at a time: Draw over Comment over Select text over Hand; Select is the rest', () => {
+test('one tool is in use at a time: Draw over Comment over Hand; Select is the rest (selecting text too)', () => {
   assert.equal(activeTool(), 'select')
+  assert.equal(activeTool({ selecting: true }), 'select', 'selecting text on a page is not a tool')
   assert.equal(activeTool({ hand: true }), 'hand')
-  assert.equal(activeTool({ hand: true, selecting: true }), 'text')
-  assert.equal(activeTool({ hand: true, selecting: true, commentMode: true }), 'comment')
+  assert.equal(activeTool({ hand: true, commentMode: true }), 'comment')
   assert.equal(activeTool({ commentMode: true, drawArmed: true }), 'draw')
   assert.equal(activeTool({ drawing: true }), 'draw', 'drawing on a reply, outside comment mode')
   // Draw armed means nothing once comment mode is off.
@@ -53,7 +58,7 @@ test('one tool is in use at a time: Draw over Comment over Select text over Hand
 
 test('the divider sits after Hand only when there are tools on both sides', () => {
   assert.equal(hasDivider(['select', 'hand', 'comment', 'draw']), true)
-  assert.equal(hasDivider(['select', 'hand', 'text']), true)
+  assert.equal(hasDivider(['select', 'hand', 'comment']), true)
   assert.equal(hasDivider(['select', 'hand']), false)
   assert.equal(hasDivider(['select', 'comment', 'draw']), false, 'phones have no Hand')
 })

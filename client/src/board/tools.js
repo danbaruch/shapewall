@@ -8,39 +8,34 @@
 //            nothing (H; holding Space in any tool is a temporary hand)
 //   comment  click a page to pin a comment (C)
 //   draw     click a page to draw on it
-//   text     select text on the selected live page
+// (Selecting text on a live page is not a tool: it is on the page's own bar,
+// FrameBar.jsx, and Select is the tool in use while it is on.)
 import { isEditable } from './navigation.js'
 
-export const TOOL_ORDER = ['select', 'hand', 'comment', 'draw', 'text']
+export const TOOL_ORDER = ['select', 'hand', 'comment', 'draw']
 // Select and Hand move around; the rest change what a click does. A thin
 // divider sits between the two groups, and only the second fills with the
 // accent while in use.
 export const POINTER_TOOLS = new Set(['select', 'hand'])
 
 // The tools on offer, in order.
-//   wide        a desktop layout (phones pan with a finger: no Hand; and
-//               "Select text" is a mouse thing)
-//   commenting  this person may comment here (and the board is not comparing)
+//   wide        a desktop layout (phones pan with a finger: no Hand)
+//   commenting  this person may comment here
 //   draw        and may draw
-//   liveBoard   the board has live pages at all
-//   livePage    one is live (or being selected in) right now
-// Someone who may not comment gets Select text only while a page is live.
-export function toolList({ wide = false, commenting = false, draw = false, liveBoard = false, livePage = false } = {}) {
+export function toolList({ wide = false, commenting = false, draw = false } = {}) {
   const has = {
     select: true,
     hand: wide,
     comment: commenting,
     draw: commenting && draw,
-    text: wide && liveBoard && (commenting || livePage),
   }
   return TOOL_ORDER.filter((id) => has[id])
 }
 
 // The tool in use, one at a time.
-export function activeTool({ drawing = false, commentMode = false, drawArmed = false, selecting = false, hand = false } = {}) {
+export function activeTool({ drawing = false, commentMode = false, drawArmed = false, hand = false } = {}) {
   if (drawing || (commentMode && drawArmed)) return 'draw'
   if (commentMode) return 'comment'
-  if (selecting) return 'text'
   return hand ? 'hand' : 'select'
 }
 

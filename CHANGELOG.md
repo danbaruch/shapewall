@@ -3,6 +3,12 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+- The board toolbar is Select, Hand, Comment and Draw: the Select text tool and its long hint pill are gone. Selecting text on a
+  live page stays on the page's own bar (Select text, then Done), quietly: no note, Select stays the tool in use, and Esc, a click
+  away from the page, or Comment or Draw ends it.
+
 ## 0.10.0 - 2026-11-16
 
 Comments in compare mode, Figma-style canvas navigation, a pass over the hosted console, calmer motion everywhere, and an
