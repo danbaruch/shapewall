@@ -1,7 +1,7 @@
 // /w/:ws/...: a workspace with its sections. Admin sections show only to
 // admins and owners (the server refuses them to anyone else anyway).
 
-import { Suspense, createContext, lazy, useCallback, useContext, useEffect, useRef, useState } from 'react'
+import { Suspense, createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import {
   Activity,
   BarChart3,
@@ -36,10 +36,11 @@ import { AgentFeedbackView } from './agent-feedback'
 import { AgentsSection } from './local-agents'
 import { AgentsOverview, ProjectAgentsPage } from './agents'
 import { DEMO } from '../../lib/demo'
+import { PanelBoundary, lazyPanel } from '../../components/chunk-boundary'
 
 // Usage and Activity bring the charts and the data grid with them: loaded
 // only when one of the two pages opens, so no other page pays for them.
-const UsageArea = lazy(() => import('../usage/index.jsx'))
+const UsageArea = lazyPanel(() => import('../usage/index.jsx'))
 
 const WorkspaceContext = createContext(null)
 export const useWorkspace = () => useContext(WorkspaceContext)
@@ -130,9 +131,11 @@ export function WorkspacePage({ workspaceId, section, projectId, subjectId = nul
   else if (current === 'agents') body = DEMO ? <AgentsSection /> : <AgentsOverview />
   else if (current === 'usage' || current === 'activity')
     body = (
-      <Suspense fallback={<Loading label="Loading the page" rows={4} />}>
-        <UsageArea section={current} subjectId={subjectId} />
-      </Suspense>
+      <PanelBoundary retry={UsageArea}>
+        <Suspense fallback={<Loading label="Loading the page" rows={4} />}>
+          <UsageArea section={current} subjectId={subjectId} />
+        </Suspense>
+      </PanelBoundary>
     )
   else if (current === 'settings') body = <SettingsSection />
   else if (current === 'feedback') body = <AgentFeedbackView baseUrl={wsUrl(workspaceId, '/agent-feedback')} get={api.get} />

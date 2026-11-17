@@ -204,8 +204,8 @@ test('desktop: a comment goes on the side it is placed on, stays there, and its 
     await page.keyboard.press('Escape')
     await filter('Open')
 
-    // Swapped, every comment keeps its side.
-    await page.keyboard.press('Escape')
+    // Swapped, every comment keeps its side. (Nothing is open here, so an
+    // Esc now would leave compare mode: see the Esc test below.)
     await page.click('[data-sw-compare-swap]')
     await page.waitForSelector('[data-sw-compare-bar="production_staging"]')
     await page.waitForSelector(`[data-sw-pin="${onProduction.id}"]`)
@@ -275,7 +275,7 @@ test('phone: the compare bar is one row and the thread is the full sheet, with i
       const box = await rect(page, control)
       assert.ok(box.top >= bar.top && box.bottom <= bar.bottom + 1, `${control} is in the row`)
       assert.ok(box.left >= 0 && box.right <= 390, `${control} is on screen`)
-      assert.ok(box.height >= 44, `${control} is a 44 px target`)
+      assert.ok(box.height >= 44, `${control} is a 44 px target (${box.height})`)
     }
     await shot(page, 'compare-phone-bar')
     // The options hold the toggles and the count.
@@ -346,6 +346,50 @@ test('phone: a tap on the Production side places a comment there', async () => {
     await page.waitForSelector(`[data-sw-pin="${made.id}"]`)
     assert.equal(await pinFrame(page, made.id), 'home:phone:production')
     await shot(page, 'compare-phone-comment-production')
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})
+
+test('desktop: Esc leaves compare only once nothing else is open; a hint toast does not outlive entering compare', async () => {
+  const { context, page, errors } = await openBoard(DESKTOP)
+  try {
+    // "Select text" with no live page picked says how, in a timed toast.
+    await page.click('[data-sw-tool="text"]')
+    await page.waitForSelector('[data-sw-toast]:has-text("Select text works on a live page")')
+    // Entering compare drops it at once, long before its six seconds.
+    await page.click('[data-sw-view-menu]')
+    await page.click('[data-sw-views-menu] [data-sw-compare-toggle]')
+    await page.waitForSelector('[data-sw-compare-bar]')
+    await page.waitForSelector('[data-sw-toast]', { state: 'detached', timeout: 1500 })
+    await settle(page)
+
+    // Comment mode, then a composer at a spot: the first Esc closes the
+    // composer, the second leaves comment mode, and compare is still on.
+    await page.keyboard.press('c')
+    await page.waitForSelector('[data-sw-comment-mode][aria-pressed="true"]')
+    const box = await rect(page, '[data-sw-frame="home:desktop:staging"]')
+    await page.mouse.click(box.left + box.width * 0.5, box.top + box.height * 0.3)
+    await page.waitForSelector('[data-sw-composer-popover] [data-sw-comment-input]')
+    await page.keyboard.press('Escape')
+    await page.waitForSelector('[data-sw-composer-popover]', { state: 'detached' })
+    assert.equal(await page.locator('[data-sw-compare-bar]').count(), 1, 'Esc closed the composer, not compare')
+    await page.keyboard.press('Escape')
+    await page.waitForSelector('[data-sw-comment-mode][aria-pressed="false"]')
+    assert.equal(await page.locator('[data-sw-compare-bar]').count(), 1, 'Esc left comment mode, not compare')
+
+    // A menu open: Esc closes the menu first.
+    await page.click('[data-sw-view-menu]')
+    await page.waitForSelector('[data-sw-views-menu]')
+    await page.keyboard.press('Escape')
+    await page.waitForSelector('[data-sw-views-menu]', { state: 'detached' })
+    assert.equal(await page.locator('[data-sw-compare-bar]').count(), 1, 'Esc closed the menu, not compare')
+
+    // Nothing else open: Esc leaves compare, and the address bar says so.
+    await page.keyboard.press('Escape')
+    await page.waitForSelector('[data-sw-compare-bar]', { state: 'detached' })
+    await page.waitForFunction(() => !new URLSearchParams(window.location.search).has('cmp'))
     assert.deepEqual(errors, [])
   } finally {
     await context.close()

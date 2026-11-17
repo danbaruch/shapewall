@@ -24,6 +24,12 @@ Loaded only when the console's Usage or Activity page opens. Bundled into those 
 | [react-grid-layout](https://github.com/react-grid-layout/react-grid-layout) 2.3                                                                                  | Drag, resize and placement of the Usage dashboard's widgets | MIT                       |
 | react-grid-layout's dependencies: react-draggable, react-resizable, prop-types, clsx, fast-equals                                                                | Pointer and touch handling for it                           | MIT                       |
 
+## UI animation (`client/src/lib/animate.jsx`, built into the board and the console)
+
+| Component                                                           | What it is                                                            | License |
+| ------------------------------------------------------------------- | --------------------------------------------------------------------- | ------- |
+| [Motion](https://github.com/motiondivision/motion) 14.10 (`motion`) | Enter, layout and drag animations; its feature code loads after paint | MIT     |
+
 ## Natural read-aloud voices (`client/src/chat/tts`, built as `assets/tts-*`)
 
 Loaded only when someone turns natural voices on (docs/agents.md, "Natural voices"). Everything runs in the browser.

@@ -1,5 +1,6 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { ChatSkeleton } from '../components/app-states'
+import { PanelBoundary, lazyPanel } from '../components/chunk-boundary'
 import { Dialog } from '../components/ui'
 import { cn } from '../lib/utils'
 import CommentsPanel from './CommentsPanel'
@@ -10,8 +11,9 @@ import { publishSidePanelWidth } from './sidePanelWidth'
 import { SIDE_PANEL } from './toolbarFit'
 import { CommentComposer } from './CommentComposer'
 import { ThreadView } from './Thread'
-const ChecksPanel = lazy(() => import('./ChecksPanel'))
-const BoardChat = lazy(() => import('../chat/BoardChat'))
+// Each loads on its own; one that fails shows a retry in its place (PanelBoundary).
+const ChecksPanel = lazyPanel(() => import('./ChecksPanel'))
+const BoardChat = lazyPanel(() => import('../chat/BoardChat'))
 
 // Beside the canvas on desktop: checks, the agent chat or the comments.
 // `hostedAgent`: a hosted board's Agent panel (who is listening, what runs,
@@ -29,15 +31,19 @@ export function SidePanel({
 }) {
   return wide && checksOpen ? (
     <Rail key="checks" panel="checks" aria-label="Checks">
-      <Suspense fallback={<p className="p-4 text-sm text-muted">Loading checks…</p>}>
-        <ChecksPanel {...checksProps} />
-      </Suspense>
+      <PanelBoundary retry={ChecksPanel}>
+        <Suspense fallback={<p className="p-4 text-sm text-muted">Loading checks…</p>}>
+          <ChecksPanel {...checksProps} />
+        </Suspense>
+      </PanelBoundary>
     </Rail>
   ) : wide && chatThread ? (
     <Rail key="agent" panel="agent" aria-label="Agent">
-      <Suspense fallback={<ChatSkeleton />}>
-        <BoardChat {...chatProps} onClose={() => updateParams({ chat: null })} />
-      </Suspense>
+      <PanelBoundary retry={BoardChat}>
+        <Suspense fallback={<ChatSkeleton />}>
+          <BoardChat {...chatProps} onClose={() => updateParams({ chat: null })} />
+        </Suspense>
+      </PanelBoundary>
     </Rail>
   ) : wide && hostedAgent ? (
     <Rail key="hosted-agent" panel="agent" aria-label="Agent">
@@ -205,18 +211,22 @@ export function PhoneSheets({
       {checksOpen ? (
         <Dialog open onClose={closeChecks} title="Checks" size="md">
           <div className="flex h-[78dvh] min-h-0 flex-col">
-            <Suspense fallback={<p>Loading checks…</p>}>
-              <ChecksPanel {...checksProps} />
-            </Suspense>
+            <PanelBoundary retry={ChecksPanel}>
+              <Suspense fallback={<p>Loading checks…</p>}>
+                <ChecksPanel {...checksProps} />
+              </Suspense>
+            </PanelBoundary>
           </div>
         </Dialog>
       ) : null}
       {chatAvailable ? (
         <Dialog open={Boolean(chatThread)} onClose={() => updateParams({ chat: null })} title="Agent" size="md">
           <div className="flex h-[78dvh] flex-col">
-            <Suspense fallback={<ChatSkeleton heading={false} />}>
-              <BoardChat {...chatProps} heading={false} />
-            </Suspense>
+            <PanelBoundary retry={BoardChat}>
+              <Suspense fallback={<ChatSkeleton heading={false} />}>
+                <BoardChat {...chatProps} heading={false} />
+              </Suspense>
+            </PanelBoundary>
           </div>
         </Dialog>
       ) : null}
