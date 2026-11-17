@@ -309,6 +309,7 @@ test('the changelog page shows every release from CHANGELOG.md', () => {
     assert.ok(html.includes(`<time dateTime="${date}"`), `${version}: dated`)
   }
   assert.equal(html.match(/<h1[\s>]/g)?.length, 1, 'one h1')
+  assert.doesNotMatch(html, />Unreleased</, 'work not yet released stays off the page')
   assert.doesNotMatch(html, /<environment>/, 'placeholders in angle brackets are text, not tags')
   assert.doesNotMatch(html, /href="https?:\/\/(127\.0\.0\.1|localhost)/, 'no links to the reader\u2019s own machine')
   assert.match(html, /href="\/docs\/agent-hardening(#[^"]*)?"/, 'links to guides that are site pages stay on the site')

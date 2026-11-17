@@ -211,16 +211,19 @@ const textNotTags = (markdownText) =>
 export function renderChangelog(source) {
   const [head, ...entries] = source.replace(/^# .*\n+/, '').split(/^## /m)
   const links = (text) => text.replace(/\]\(([^)\s]+)(\s+"[^"]*")?\)/g, (all, href, title = '') => `](${changelogHref(href)}${title})`)
-  const versions = entries.map((entry) => {
-    const [title, ...body] = entry.split('\n')
-    const match = /^(\d+\.\d+\.\d+(?:-[\w.]+)?)\s+-\s+(\d{4}-\d{2}-\d{2})\s*$/.exec(title)
-    if (!match) throw new Error(`CHANGELOG.md: a version heading reads "## ${title}"; expected "## 1.2.3 - YYYY-MM-DD"`)
-    const id = `v${match[1].replace(/\./g, '-')}`
-    const rendered = renderMarkdown(textNotTags(links(body.join('\n').trim())), { idPrefix: `${id}-` })
-    // A local address quoted in an entry (an error message, say) stays text: on this site it would link to the reader's machine.
-    const html = rendered.html.replace(/<a href="https?:\/\/(?:127\.0\.0\.1|localhost)[^"]*"[^>]*>([^<]*)<\/a>/g, '$1')
-    return { version: match[1], date: match[2], id, html, headings: rendered.headings }
-  })
+  // Work merged but not yet released (Keep a Changelog's "## Unreleased") stays off the site until it ships.
+  const versions = entries
+    .filter((entry) => !/^Unreleased\s*\n/i.test(entry))
+    .map((entry) => {
+      const [title, ...body] = entry.split('\n')
+      const match = /^(\d+\.\d+\.\d+(?:-[\w.]+)?)\s+-\s+(\d{4}-\d{2}-\d{2})\s*$/.exec(title)
+      if (!match) throw new Error(`CHANGELOG.md: a version heading reads "## ${title}"; expected "## 1.2.3 - YYYY-MM-DD"`)
+      const id = `v${match[1].replace(/\./g, '-')}`
+      const rendered = renderMarkdown(textNotTags(links(body.join('\n').trim())), { idPrefix: `${id}-` })
+      // A local address quoted in an entry (an error message, say) stays text: on this site it would link to the reader's machine.
+      const html = rendered.html.replace(/<a href="https?:\/\/(?:127\.0\.0\.1|localhost)[^"]*"[^>]*>([^<]*)<\/a>/g, '$1')
+      return { version: match[1], date: match[2], id, html, headings: rendered.headings }
+    })
   return { intro: renderMarkdown(textNotTags(links(head.trim()))).html, versions }
 }
 
