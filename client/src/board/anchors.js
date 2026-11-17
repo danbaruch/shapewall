@@ -91,12 +91,24 @@ export function selectorFor(doc, element) {
 // in. Null on the page background, a few pixels, or a page-sized wrapper
 // (as hitTest() on an element map). `up`: that many containers out.
 export function elementAt(doc, x, y, up = 0) {
-  const hit = frameDom.elementFromPoint(doc, x, y)
   const root = frameDom.documentElement(doc)
   const body = frameDom.body(doc)
-  if (!hit || hit === root || hit === body) return null
-  let element = hit.closest?.(PREFERRED) || blockOf(hit, body)
-  if (!pointable(doc, element)) return null
+  // The topmost element under the point that is worth pointing at.
+  let hit = null
+  for (const node of frameDom.elementsFromPoint(doc, x, y)) {
+    if (node === root || node === body) break
+    if (pointable(doc, node)) {
+      hit = node
+      break
+    }
+  }
+  if (!hit) return null
+  const preferred = hit.closest?.(PREFERRED)
+  if (preferred) {
+    const rect = preferred.getBoundingClientRect()
+    if (!rect.width || !rect.height) return null
+  }
+  let element = preferred || blockOf(hit, body)
   for (let step = 0; step < up; step += 1) {
     const outer = outerOf(doc, element)
     if (!outer) break
