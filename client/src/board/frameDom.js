@@ -30,6 +30,7 @@ export const frameDom = {
   querySelector: (doc, selector) => DOC.querySelector.call(doc, selector),
   querySelectorAll: (doc, selector) => DOC.querySelectorAll.call(doc, selector),
   elementFromPoint: (doc, x, y) => (isDocument(doc) ? DOC.elementFromPoint.call(doc, x, y) : null),
+  elementsFromPoint: (doc, x, y) => (isDocument(doc) ? Array.from(DOC.elementsFromPoint.call(doc, x, y)) : []),
   addEventListener: (target, ...args) => EventTarget.prototype.addEventListener.call(target, ...args),
   removeEventListener: (target, ...args) => EventTarget.prototype.removeEventListener.call(target, ...args),
 }

@@ -117,15 +117,31 @@ map keep the DOM path and `allow-same-origin` until recaptured; hosted boards an
 
 When a comment is made on live HTML, the element under the click is turned into an anchor:
 
-- The element itself, or the nearest interactive ancestor (link, button, input, label, image, ...).
+- The element itself, or the nearest interactive ancestor (link, button, input, label, image, ...). A run of inline words (a
+  `<strong>`, a `<small>`) means the block it is in, never anything a few pixels big, mostly off the page or as big as the whole
+  page (`hitTest()` in `src/capture/element-map.js`, `elementAt()` in `client/src/board/anchors.js` on the DOM). Holding Alt
+  (Option on a Mac) while picking steps out to the container around it, and the click pins to that container.
 - A selector path from the closest stable hook: a unique `#id`, `[data-testid]` or `[aria-label]`, then `:nth-of-type()` steps. The server
   accepts only this grammar, so a stored selector can never be an arbitrary CSS expression.
 - The element's text (first 80 characters) and the click offset inside it.
 - The element's size as a share of the page (`w`, `h`), so the pin sits on the element's corner (top right, outside it; top left near
   the right edge, below it near the top) in screenshot mode too, instead of on top of what it is about.
 
-In comment mode the element a click would pin to is outlined while the mouse is over a live page, with the last step of its selector
-and its text; a large element (a fifth of the page or more) is dashed and labelled as a whole section.
+In comment mode the element a click would pin to is outlined while the mouse is over a live page (a large element, a fifth of the
+page or more, is dashed), with what a person would call it in a small tab outside its top left corner: a short kind and, when it
+helps, a short name ("Card · Free", "Heading · Simple pricing", "Link · Start free", "Navigation · Main", "Paragraph"). The names
+come from one pure function, `elementName()` in `src/capture/element-name.js`: the ARIA role, then the tag (and an input's type),
+then aria-label, alt, the field's label or placeholder; a container is named by its own heading (the first and only heading at
+the highest level inside it), never by the text of everything in it, and a wrapper with no name of its own is called what it
+wraps. Words are cut at a word boundary. The same names are used for the composer's "Commenting on", a thread's "Pinned to"
+(learnt from the live page's element map when it has been live, else from the stored selector and text: `anchorName()`) and the
+chat's element mentions. The stored anchor and its selector are unchanged. The tab sits above the element, below it at the top of
+the page, else inside its top edge held at the top of the screen; it never leaves the page or the visible canvas, and it and the
+outline keep one size on screen at any zoom (`--sw-inv`). The outline goes once a click picks the element (the picked element
+keeps a solid outline while the composer is open) and while the page's thread is open (a click then closes the thread, as in
+Figma); the open thread's element, and the element of a pin or comment row under the mouse, get a quiet outline. On a touch
+screen the element under the finger is outlined and named from touch-down; a drag pans and a second finger pinches, and only a
+tap pins, after which the picked element's name shows for a moment.
 
 To place the pin later: the selector is tried first and accepted only if the text still matches; otherwise the first element of the same
 tag with exactly that text wins. If neither is found the pin stays at its stored position with a dashed ring ("this moved"). In screenshot

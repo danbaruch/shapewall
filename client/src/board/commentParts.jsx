@@ -3,6 +3,7 @@
 import { Bot, CircleDot, GitMerge, GitPullRequest, GitPullRequestClosed, RotateCcw } from 'lucide-react'
 import { Avatar, Badge } from '../components/ui'
 import { cn, formatRelative, shownTime } from '../lib/utils'
+import { anchorName } from '../../../src/capture/element-name.js'
 
 // A fix reference is linked only when it is an http(s) URL; anything else
 // (a commit, a ticket id) is shown as text.
@@ -176,58 +177,18 @@ export const replyAuthor = (reply) => ({ name: reply.author, handle: reply.handl
 
 export const repliesLabel = (count) => `${count} ${count === 1 ? 'reply' : 'replies'}`
 
-// What a pinned element is, in words: 'the "Create account" button', 'the
-// empty cta link'. The selector is agent context: the thread shows this
-// and keeps the selector for a tooltip.
-const ELEMENT_NAMES = {
-  a: 'link',
-  button: 'button',
-  input: 'field',
-  textarea: 'text box',
-  select: 'menu',
-  img: 'image',
-  svg: 'icon',
-  h1: 'heading',
-  h2: 'heading',
-  h3: 'heading',
-  h4: 'heading',
-  p: 'text',
-  li: 'list item',
-  label: 'label',
-  nav: 'navigation',
-  table: 'table',
-  th: 'column header',
-  td: 'table cell',
-  form: 'form',
-  header: 'header',
-  footer: 'footer',
-}
 // A selector that found nothing when it was pinned (`comments add
 // --selector` on a capture without that element) names no element: the
 // selector's own words ("nope" in a[data-testid="nope"]) are not one.
 export const UNMATCHED_ANCHOR_LABEL = 'a selector the capture did not have'
+// What a pinned element is, in words, from the stored anchor alone ("Button ·
+// Create account", "Heading · Simple pricing"). The selector is agent
+// context: the thread shows this and keeps the selector for a tooltip. A
+// thread names the element from its live page when it can (anchorNames.js).
 export function anchorLabel(anchor) {
   if (!anchor) return null
   if (anchor.unmatched && !String(anchor.text || '').trim()) return UNMATCHED_ANCHOR_LABEL
-  const step = String(anchor.selector || '')
-    .split(' > ')
-    .pop()
-  const tag = /^([a-z][a-z0-9-]*)/i.exec(step)?.[1]?.toLowerCase() || ''
-  const kind = ELEMENT_NAMES[tag] || 'element'
-  const text = String(anchor.text || '')
-    .replace(/\s+/g, ' ')
-    .trim()
-  if (text) {
-    const short = text.length > 48 ? `${text.slice(0, 47)}…` : text
-    return kind === 'text' || kind === 'element' ? `“${short}”` : `the “${short}” ${kind}`
-  }
-  const named = /\[(?:data-testid|aria-label|name|id)="([^"]+)"\]/.exec(step)?.[1] || /#([\w-]+)/.exec(step)?.[1] || ''
-  const words = named
-    .replace(/[-_]+/g, ' ')
-    .replace(/([a-z])([A-Z])/g, '$1 $2')
-    .toLowerCase()
-    .trim()
-  return words ? `the ${words} ${kind}` : `a ${kind}`
+  return anchorName(anchor)
 }
 
 // "Tue, Nov 4, 10:12 AM" for a time's tooltip.

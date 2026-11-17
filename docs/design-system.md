@@ -163,12 +163,23 @@ the tools, and each has a tooltip with its shortcut. A person who may not commen
 Select left there is no toolbar (a viewer on a phone). On a desktop they keep Select and Hand.
 
 The note for the tool in use sits just above the tools, one at a time: the comment hint ("Click a page to comment ...", or
-"Click where the comment goes on Pricing" when Comment was pressed on that page's bar),
+"Click where the comment goes on Pricing" when Comment was pressed on that page's bar; on a live page, while an element is
+outlined under the pointer, it cross-fades to "Click to comment. Hold Alt to pick its container." in the same place),
 "Commenting on ..." while the composer is open, or the drawing bar. Select has none. The tools, their note,
 an open journey's bar and the toast are one column (the tool dock), so they never overlap. The tools are centred on the canvas,
 not the window, and never sit over the zoom controls (bottom left) or the minimap (bottom right): on a narrow canvas they shift
 off centre, then the zoom controls compact to out, level and in, then the minimap steps aside (`toolDock.js`, unit-tested). On a
 phone the tools are the bottom bar: 44 px targets above the safe-area inset, hidden while a sheet or the keyboard is up.
+
+### Element outlines on a page
+
+Picking an element on a live page reads like the browser's element picker and Figma's inspect hover
+(`client/src/board/Frame.jsx`): a 2 px accent outline with a 6% accent fill (a large block: a 1.5 px dashed outline, no fill)
+and a 20 px accent tab with the element's kind in semibold and its name ("Card · Free"). The tab sits 4 px clear of the outline, outside the
+element's top left corner, flips below it or inside it when there is no room, and stays on the page and on screen. Stroke and
+tab are the same size on screen at any zoom. The element a comment is attached to keeps a solid outline while its composer is
+open; the open thread's element, and the element of a hovered pin or comment row, get a quiet 1.5 px outline at 55% accent with
+a 5% fill. The page being drawn on has a 3 px accent frame at any zoom.
 
 ### The page bar
 

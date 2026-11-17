@@ -26,6 +26,7 @@ import { Button, Tooltip } from '../components/ui'
 import { KeyTip } from './KeyTip'
 import { POINTER_TOOLS, hasDivider } from './tools'
 import { LayoutMotion, SPRING, m, rise } from '../lib/animate'
+import { useBoardView } from './boardView'
 
 export const TOOLS = {
   select: { label: 'Select', tip: 'Select: click a page or a pin', keys: ['V'], shortcut: 'V', icon: MousePointer2 },
@@ -156,6 +157,9 @@ export function BoardTools({ tools, active, onTool, touch, shift = 0 }) {
   )
 }
 
+// Two lines of a note in one grid cell, cross-fading.
+const STACKED = 'col-start-1 row-start-1 transition-opacity duration-(--motion-fast) ease-(--ease-standard)'
+
 const NOTE =
   'pointer-events-auto relative z-30 flex w-max max-w-full items-center gap-2 rounded-[18px] py-0.5 pr-0.5 pl-3 text-xs font-medium shadow-pop'
 
@@ -165,7 +169,15 @@ const NOTE =
 //              ({ key, title, keyboard }): Comment was pressed on that page's
 //              bar, so the note names it
 //   composing  a target is picked, its composer is open ({ target, onCancel })
+// While an element of a live page is outlined under the pointer, the
+// picking note says how to pick its container instead (Alt, Frame.jsx): the
+// two lines share one place, so the note does not jump.
+const ALT_KEY =
+  typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '') ? 'Option' : 'Alt'
+const isTargetHover = (state) => state.targetHover
+
 export function ToolNote({ wide, picking = null, composing = null, onDone }) {
+  const targetHover = useBoardView(isTargetHover)
   if (composing) {
     // The note says what the comment is on, and Esc (or Cancel) goes back
     // one step, to picking.
@@ -194,7 +206,9 @@ export function ToolNote({ wide, picking = null, composing = null, onDone }) {
     const text = picking.draw
       ? `${verb} a page to draw on it. The drawing goes with your comment.`
       : picking.live
-        ? `${verb} an element on the live page to comment on it.`
+        ? wide
+          ? 'Click an element on the live page to comment on it.'
+          : 'Tap an element to comment on it.'
         : wide
           ? 'Click a page to comment. Zoom in until the page goes live to pin it to an element.'
           : 'Tap a page to pin a comment.'
@@ -212,6 +226,15 @@ export function ToolNote({ wide, picking = null, composing = null, onDone }) {
           <span className="min-w-0 truncate">
             {verb} where the comment goes on <span className="font-semibold">{page.title}</span>
             {page.keyboard ? ', or press Enter' : null}
+          </span>
+        ) : picking.live && wide && !picking.draw ? (
+          <span className="grid min-w-0" data-sw-comment-hint-alt={targetHover ? 'true' : undefined}>
+            <span className={cn(STACKED, targetHover && 'opacity-0')} aria-hidden={targetHover || undefined}>
+              {text}
+            </span>
+            <span className={cn(STACKED, !targetHover && 'opacity-0')} aria-hidden={!targetHover || undefined}>
+              Click to comment. Hold {ALT_KEY} to pick its container.
+            </span>
           </span>
         ) : (
           <span className="min-w-0">{text}</span>

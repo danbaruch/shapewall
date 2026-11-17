@@ -28,16 +28,17 @@ const PIN_TOLERANCE = 4
 let setup
 let browser
 
-// The board's DOM code as one script for the page: anchors.js and frameDom.js
-// without their module syntax.
+// The board's DOM code as one script for the page: element-name.js,
+// frameDom.js and anchors.js without their module syntax.
 function domCode() {
-  const read = (name) => fs.readFileSync(path.join(ROOT_DIR, 'client', 'src', 'board', name), 'utf8')
+  const read = (name) =>
+    fs.readFileSync(path.join(ROOT_DIR, ...(name.startsWith('src/') ? [name] : ['client', 'src', 'board', name])), 'utf8')
   const strip = (source) =>
     source
       .replace(/^import .*$/gm, '')
       .replace(/^export const /gm, 'const ')
       .replace(/^export function /gm, 'function ')
-  return `${strip(read('frameDom.js'))}\n${strip(read('anchors.js'))}\nwindow.__sw = { anchorAt, resolveAnchor }`
+  return `${strip(read('src/capture/element-name.js'))}\n${strip(read('frameDom.js'))}\n${strip(read('anchors.js'))}\nwindow.__sw = { anchorAt, resolveAnchor }`
 }
 
 before(async () => {

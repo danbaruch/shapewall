@@ -20,6 +20,8 @@
 //                    seen (hooks/useCameraMoves.js)
 //   commentTargetKey the frame a page bar's Comment was pressed for (the
 //                    keyboard can pin there: Frame.jsx)
+//   targetHover      an element on a live page is outlined under the
+//                    pointer while picking (the comment hint mentions Alt)
 import { createContext, useCallback, useContext, useSyncExternalStore } from 'react'
 
 const NO_IDS = new Set()
@@ -35,6 +37,7 @@ const INITIAL = {
   hoveredId: null,
   landedId: null,
   commentTargetKey: null,
+  targetHover: false,
 }
 
 export function createBoardView(initial = null) {
