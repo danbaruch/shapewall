@@ -452,8 +452,10 @@ test('desktop: Select text is on the page bar, not a tool: quiet, Select stays i
     await page.click('[data-sw-open-live="pricing|desktop"]')
     await page.waitForSelector(`${frame}[data-sw-live="ready"]`, { timeout: 15000 })
     const barButton = '[data-sw-select-text="pricing|desktop"]'
-    // The bar may fold Select text into its More menu at this width.
+    // A page that fills the canvas folds its bar into one button; a narrow
+    // bar folds Select text into its More menu.
     const startSelecting = async () => {
+      if (await page.locator('[data-sw-frame-bar-toggle]').count()) await page.click('[data-sw-frame-bar-toggle]')
       if (await page.locator(`[data-sw-frame-bar] ${barButton}`).count()) await page.click(`[data-sw-frame-bar] ${barButton}`)
       else {
         await page.click('[data-sw-frame-more="pricing|desktop"]')
@@ -468,6 +470,7 @@ test('desktop: Select text is on the page bar, not a tool: quiet, Select stays i
     assert.equal(await active(page), 'select')
     assert.deepEqual(await pressedTools(page), ['select'])
     const done = `[data-sw-frame-bar] ${barButton}`
+    if (!(await page.locator(done).count())) await page.click('[data-sw-frame-bar-toggle]')
     assert.equal(await page.getAttribute(done, 'aria-pressed'), 'true')
     assert.match(await page.textContent(done), /Done/)
     await shot(page, 'tools-7-select-text')
