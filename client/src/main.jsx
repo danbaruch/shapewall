@@ -5,6 +5,7 @@ import { registerServiceWorker } from './lib/pwa'
 import { startErrorTracking } from './lib/error-tracking'
 import { installChunkRecovery } from './lib/chunk-reload'
 import { ChunkBoundary } from './components/chunk-boundary'
+import { AnimationRoot } from './lib/animate'
 import './lib/theme'
 import './lib/scrollbars'
 import './styles.css'
@@ -18,7 +19,9 @@ const start = () =>
   createRoot(document.getElementById('root')).render(
     <StrictMode>
       <ChunkBoundary>
-        <App />
+        <AnimationRoot>
+          <App />
+        </AnimationRoot>
       </ChunkBoundary>
     </StrictMode>,
   )
@@ -32,7 +35,9 @@ if (__SHAPEWALL_DEMO__) {
     import('./settings/Management').then(({ default: Management }) =>
       createRoot(document.getElementById('root')).render(
         <ChunkBoundary>
-          <Management />
+          <AnimationRoot>
+            <Management />
+          </AnimationRoot>
         </ChunkBoundary>,
       ),
     )

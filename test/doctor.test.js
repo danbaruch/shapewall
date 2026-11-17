@@ -78,6 +78,17 @@ test('the Dockerfile uses the Playwright image of the installed Playwright', () 
   for (const tag of tags) assert.equal(tag, playwrightVersion())
 })
 
+test('the Linux docs offer the Playwright image of the installed Playwright for other distributions', () => {
+  for (const file of ['README.md', 'website/src/docs/getting-started.md']) {
+    const text = fs.readFileSync(path.join(ROOT, file), 'utf8')
+    const tags = [...text.matchAll(/mcr\.microsoft\.com\/playwright:v([0-9.]+)-/g)].map((match) => match[1])
+    assert.ok(tags.length > 0, file)
+    for (const tag of tags) assert.equal(tag, playwrightVersion(), file)
+    assert.match(text, /Shapewall's Playwright, ([0-9.]+)\)/, file)
+    assert.equal(text.match(/Shapewall's Playwright, ([0-9.]+)\)/)[1], playwrightVersion(), file)
+  }
+})
+
 test('png: crop keeps pixels, clamps to the edges, and round-trips RGBA', () => {
   const width = 50
   const height = 40

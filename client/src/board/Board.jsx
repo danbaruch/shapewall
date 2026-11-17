@@ -82,6 +82,7 @@ import { CanvasControls } from './CanvasControls'
 import { FocusedFrameBar } from './FrameBar'
 import { BatchConfirm, useBatchFixes } from './BatchFixes'
 import { motionDuration } from '../lib/motion'
+import { AnimatePresence } from '../lib/animate'
 
 const noop = () => {}
 const NO_IDS = new Set()
@@ -1528,6 +1529,8 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
         setToast({
           at: Date.now(),
           text: 'Select text works on a live page: click a page, then Open live (or zoom in until it goes live).',
+          // A hint about the board as it is: it goes when compare starts.
+          hint: true,
         })
       }
     }
@@ -1548,6 +1551,42 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
   }, [selectingKey, hand, commentMode])
+  // Esc leaves compare mode once nothing else is open. Everything that Esc
+  // closes first (a thread, the composer, a menu, a dialog, comment mode,
+  // Select text, Hand, a journey) uses the key up before it gets here
+  // (preventDefault, or a capture-phase listener), so the first Esc closes
+  // that and the next one leaves compare.
+  const leaveCompareRef = useRef(null)
+  leaveCompareRef.current =
+    comparePair && !journey
+      ? () => {
+          setCompare(null)
+          canvasRef.current?.focus({ preventScroll: true })
+        }
+      : null
+  const comparing = Boolean(comparePair) && !journey
+  useEffect(() => {
+    if (!comparing) return undefined
+    const onKey = (event) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing || isEditable(event.target)) return
+      if (
+        document.querySelector(
+          '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [data-sw-thread-popover], [data-sw-composer-popover]',
+        )
+      )
+        return
+      event.preventDefault()
+      leaveCompareRef.current?.()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [comparing])
+  // Starting (or changing) a comparison drops a hint about the board as it
+  // was ("Select text works on a live page"): it would sit over the new view.
+  const compareKey = comparePair ? comparePair.join('_') : ''
+  useEffect(() => {
+    if (compareKey) setToast((current) => (current?.hint || current?.untilSheet ? null : current))
+  }, [compareKey, setToast])
   // V is Select, H is Hand (tools.js: not while typing or with a dialog,
   // menu or list open; the same guard as C).
   const pickToolRef = useRef(pickTool)
@@ -1833,32 +1872,35 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
               </Suspense>
             ) : null}
             <NoticeBar notice={notice} setNotice={setNotice} wide={wide} />
-            {comparePair ? (
-              <CompareBar
-                environments={environments}
-                pair={comparePair}
-                // A failed comparison is an error, not a spinner that never ends.
-                loading={compareQuery.loading || (!compareData && !compareQuery.error)}
-                error={compareQuery.error ? compareQuery.error.message || 'The comparison could not be loaded.' : null}
-                changedPages={compareData?.changedPages ?? 0}
-                totalPages={data?.board?.pages?.length || 0}
-                changedOnly={changedOnly}
-                showDiff={showDiff}
-                canCapture={canCapture}
-                captureBusy={busy || Boolean(capture?.running)}
-                touch={!wide}
-                onPair={(pair) => setCompare(pair)}
-                onChangedOnly={setChangedOnly}
-                onShowDiff={(value) => updateParams({ diff: value ? null : 'off' })}
-                onCapture={(env) => startCapture(env)}
-                onClose={() => {
-                  setCompare(null)
-                  // The bar and its button go: the keyboard goes back to the
-                  // board rather than to the top of the page.
-                  canvasRef.current?.focus({ preventScroll: true })
-                }}
-              />
-            ) : null}
+            <AnimatePresence initial={false}>
+              {comparePair ? (
+                <CompareBar
+                  key="compare"
+                  environments={environments}
+                  pair={comparePair}
+                  // A failed comparison is an error, not a spinner that never ends.
+                  loading={compareQuery.loading || (!compareData && !compareQuery.error)}
+                  error={compareQuery.error ? compareQuery.error.message || 'The comparison could not be loaded.' : null}
+                  changedPages={compareData?.changedPages ?? 0}
+                  totalPages={data?.board?.pages?.length || 0}
+                  changedOnly={changedOnly}
+                  showDiff={showDiff}
+                  canCapture={canCapture}
+                  captureBusy={busy || Boolean(capture?.running)}
+                  touch={!wide}
+                  onPair={(pair) => setCompare(pair)}
+                  onChangedOnly={setChangedOnly}
+                  onShowDiff={(value) => updateParams({ diff: value ? null : 'off' })}
+                  onCapture={(env) => startCapture(env)}
+                  onClose={() => {
+                    setCompare(null)
+                    // The bar and its button go: the keyboard goes back to the
+                    // board rather than to the top of the page.
+                    canvasRef.current?.focus({ preventScroll: true })
+                  }}
+                />
+              ) : null}
+            </AnimatePresence>
             <div className="flex min-h-0 flex-1 overflow-hidden">
               <div
                 ref={canvasRef}

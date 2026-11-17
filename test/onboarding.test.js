@@ -95,6 +95,12 @@ test('init: the hint names only what is left; a bad --base-url fails before writ
   )
   for (const fromSitemap of [false, true]) {
     assert.match(initNextHint({ baseUrl: 'x', givenBaseUrl: true, fromSitemap }), /\nApp screens behind Start.*Capturing an app/)
+    // npx users have no docs/ folder: the pointer is the website, never a repository path.
+    assert.match(
+      initNextHint({ baseUrl: 'x', givenBaseUrl: true, fromSitemap }),
+      /https:\/\/shapewall\.com\/docs\/config#capturing-an-app-not-just-its-landing-page/,
+    )
+    assert.doesNotMatch(initNextHint({ baseUrl: 'x', givenBaseUrl: true, fromSitemap }), /docs\/config\.md/)
   }
 })
 

@@ -1,11 +1,21 @@
-import { lazy, Suspense } from 'react'
+import { Suspense } from 'react'
 import { fileUrl } from '../lib/api'
 import { useOpened } from '../lib/hooks'
 import { Button, Dialog } from '../components/ui'
-const SettingsDialog = lazy(() => import('../settings/AgentSettings').then((module) => ({ default: module.SettingsDialog })))
-const HistoryDialog = lazy(() => import('./History'))
-const ShareDialog = lazy(() => import('../share/ShareDialog').then((module) => ({ default: module.ShareDialog })))
-const LocalSettings = lazy(() => import('../settings/LocalSettings'))
+import { PanelBoundary, PanelFailed, lazyPanel } from '../components/chunk-boundary'
+const SettingsDialog = lazyPanel(() => import('../settings/AgentSettings').then((module) => ({ default: module.SettingsDialog })))
+const HistoryDialog = lazyPanel(() => import('./History'))
+const ShareDialog = lazyPanel(() => import('../share/ShareDialog').then((module) => ({ default: module.ShareDialog })))
+const LocalSettings = lazyPanel(() => import('../settings/LocalSettings'))
+
+// A dialog whose code did not load: the same place, a small dialog with the retry.
+const failedDialog =
+  (title, open, onClose) =>
+  ({ error, retry }) => (
+    <Dialog open={open} onClose={onClose} title={title}>
+      <PanelFailed error={error} onRetry={retry} compact />
+    </Dialog>
+  )
 
 // The board's dialogs: share, agent and local settings, page history and the
 // capture confirmation. The lazy ones load the first time they open.
@@ -44,58 +54,69 @@ export function BoardDialogs({
   return (
     <>
       {info?.shareEnabled && shareOpened ? (
-        <Suspense fallback={null}>
-          <ShareDialog open={shareOpen} onClose={() => setShareOpen(false)} boardId={boardId} onMoved={refetchView} />
-        </Suspense>
+        <PanelBoundary retry={ShareDialog} fallback={failedDialog('Share', shareOpen, () => setShareOpen(false))}>
+          <Suspense fallback={null}>
+            <ShareDialog open={shareOpen} onClose={() => setShareOpen(false)} boardId={boardId} onMoved={refetchView} />
+          </Suspense>
+        </PanelBoundary>
       ) : null}
       {settingsAvailable && settingsOpened ? (
-        <Suspense fallback={null}>
-          <SettingsDialog
-            open={settingsOpen}
-            onClose={() => updateParams({ settings: null })}
-            onSaved={onInfoChanged}
-            touch={!wide}
-            // Buzz text only on installs with the Buzz bridge on.
-            buzz={info?.buzzAvailable === true}
-          />
-        </Suspense>
+        <PanelBoundary
+          retry={SettingsDialog}
+          fallback={failedDialog('Agent settings', settingsOpen, () => updateParams({ settings: null }))}
+        >
+          <Suspense fallback={null}>
+            <SettingsDialog
+              open={settingsOpen}
+              onClose={() => updateParams({ settings: null })}
+              onSaved={onInfoChanged}
+              touch={!wide}
+              // Buzz text only on installs with the Buzz bridge on.
+              buzz={info?.buzzAvailable === true}
+            />
+          </Suspense>
+        </PanelBoundary>
       ) : null}
       {generalSettingsOpen ? (
-        <Suspense fallback={null}>
-          <LocalSettings
-            open
-            onClose={() => updateParams({ settings: null })}
-            info={info}
-            boardCount={boards.length}
-            onSaved={onInfoChanged}
-            touch={!wide}
-            onOpenUpdates={() => {
-              updateParams({ settings: null })
-              updates.current?.open()
-            }}
-          />
-        </Suspense>
+        <PanelBoundary retry={LocalSettings} fallback={failedDialog('Settings', true, () => updateParams({ settings: null }))}>
+          <Suspense fallback={null}>
+            <LocalSettings
+              open
+              onClose={() => updateParams({ settings: null })}
+              info={info}
+              boardCount={boards.length}
+              onSaved={onInfoChanged}
+              touch={!wide}
+              onOpenUpdates={() => {
+                updateParams({ settings: null })
+                updates.current?.open()
+              }}
+            />
+          </Suspense>
+        </PanelBoundary>
       ) : null}
 
       {historyPage ? (
-        <Suspense fallback={null}>
-          <HistoryDialog
-            open={Boolean(historyPage)}
-            onClose={closeHistory}
-            page={historyPage}
-            viewport={historyViewport}
-            data={data}
-            comments={comments.filter((comment) => comment.pageId === historyPageId && comment.viewport === historyViewport)}
-            urlFor={(entry, thumb) => fileUrl(boardId, entry.kind, thumb ? entry.thumb : entry.file, entry.version)}
-            onPickComment={(comment) => {
-              closeHistory()
-              updateParams({ filter: comment.status === 'resolved' && filter === 'open' ? 'all' : null })
-              focusComment(comment)
-            }}
-            touch={!wide}
-            onImageError={onImageError}
-          />
-        </Suspense>
+        <PanelBoundary retry={HistoryDialog} fallback={failedDialog('History', Boolean(historyPage), closeHistory)}>
+          <Suspense fallback={null}>
+            <HistoryDialog
+              open={Boolean(historyPage)}
+              onClose={closeHistory}
+              page={historyPage}
+              viewport={historyViewport}
+              data={data}
+              comments={comments.filter((comment) => comment.pageId === historyPageId && comment.viewport === historyViewport)}
+              urlFor={(entry, thumb) => fileUrl(boardId, entry.kind, thumb ? entry.thumb : entry.file, entry.version)}
+              onPickComment={(comment) => {
+                closeHistory()
+                updateParams({ filter: comment.status === 'resolved' && filter === 'open' ? 'all' : null })
+                focusComment(comment)
+              }}
+              touch={!wide}
+              onImageError={onImageError}
+            />
+          </Suspense>
+        </PanelBoundary>
       ) : null}
 
       <Dialog

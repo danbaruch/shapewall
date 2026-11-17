@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { Brush } from 'lucide-react'
-import { Button, Input, Kbd } from '../components/ui'
+import { Button, Input, Kbd, Tooltip } from '../components/ui'
 import { MentionTextarea } from './Mentions'
 import { cn } from '../lib/utils'
 import { COMMENT_MAX, sendsOnEnter } from './commentInput'
@@ -24,8 +24,11 @@ const GROW_TOUCH = { min: 3, max: 8 }
 // drawing or images, so the composer asks before dropping that work.
 // One composer box (ComposerBox.jsx): the text on top, growing with it; the
 // image and drawing tools, the microphone (DictationButton.jsx, it writes at
-// the caret; posting stops it) and Post along its bottom. The name, the keys
-// and Cancel sit under the box.
+// the caret; posting stops it) and Post along its bottom. On a desktop
+// Cancel sits left of Post, as in the edit box, and the keys are Post's
+// tooltip; under the box there is at most one quiet line (who it is signed
+// as, or the length near the limit). On a phone, where the row is full,
+// Cancel stays under the box.
 export function CommentComposer({
   draft,
   onChange,
@@ -63,6 +66,42 @@ export function CommentComposer({
   const near = body.length > COMMENT_MAX - 200
   const signed = Boolean(hosted && signedInAs)
   const describedBy = [images?.error ? 'sw-composer-image-error' : null, dictation.describedBy].filter(Boolean)
+  const postButton = (
+    <Button
+      size={touch ? 'touch' : 'xs'}
+      variant="default"
+      type="submit"
+      disabled={busy || reading || (!body.trim() && !shapes && !images?.images.length)}
+      data-sw-save-comment="true"
+    >
+      {busy ? (images?.images.length ? 'Uploading...' : 'Posting...') : 'Post'}
+    </Button>
+  )
+  const cancel = (
+    <Button
+      size={touch ? 'touch' : 'xs'}
+      variant="ghost"
+      onClick={() => {
+        dictation.cancel()
+        onCancel()
+      }}
+      disabled={busy}
+      data-sw-composer-cancel="true"
+    >
+      Cancel
+    </Button>
+  )
+  // One quiet line under the box: the length near the limit, else who it is
+  // signed as. Nothing at all when there is nothing to say.
+  const note = near ? (
+    <span className="tabular" data-sw-composer-count="true">
+      {body.length}/{COMMENT_MAX}
+    </span>
+  ) : signed ? (
+    <span className="truncate" data-sw-composer-signed="true">
+      As {signedInAs}
+    </span>
+  ) : null
   return (
     <form
       className="space-y-2"
@@ -112,16 +151,15 @@ export function CommentComposer({
         }
         actions={
           <>
-            <DictationButton dictation={dictation} touch={touch} disabled={busy} bubbleSide="top" />
-            <Button
-              size={touch ? 'touch' : 'xs'}
-              variant="default"
-              type="submit"
-              disabled={busy || reading || (!body.trim() && !shapes && !images?.images.length)}
-              data-sw-save-comment="true"
-            >
-              {busy ? (images?.images.length ? 'Uploading...' : 'Posting...') : 'Post'}
-            </Button>
+            <DictationButton dictation={dictation} touch={touch} disabled={busy} bubbleSide={touch ? 'top' : 'bottom'} />
+            {touch || discard ? null : cancel}
+            {touch ? (
+              postButton
+            ) : (
+              <Tooltip content={<PostKeys />} side="bottom" align="end">
+                {postButton}
+              </Tooltip>
+            )}
           </>
         }
       >
@@ -205,39 +243,34 @@ export function CommentComposer({
             Keep
           </Button>
         </div>
-      ) : (
-        // Under the box: who it is signed as (or the length near the limit),
-        // the keys on a desktop, and Cancel.
-        <div className="flex items-center gap-2">
-          <div className="min-w-0 flex-1 text-[11px] text-faint">
-            {near ? (
-              <span className="tabular">
-                {body.length}/{COMMENT_MAX}
-              </span>
-            ) : signed ? (
-              <p className="truncate">As {signedInAs}</p>
-            ) : null}
-            {touch || near ? null : (
-              <p className="flex items-center gap-1 overflow-hidden whitespace-nowrap" data-sw-composer-keys="true">
-                <Kbd>Enter</Kbd> posts, <Kbd>Shift</Kbd>+<Kbd>Enter</Kbd> new line, <Kbd>Esc</Kbd> cancels
-              </p>
-            )}
-          </div>
-          <Button
-            size={touch ? 'touch' : 'xs'}
-            variant="ghost"
-            className="self-end"
-            onClick={() => {
-              dictation.cancel()
-              onCancel()
-            }}
-            disabled={busy}
-            data-sw-composer-cancel="true"
-          >
-            Cancel
-          </Button>
+      ) : touch ? (
+        // A phone: the line and Cancel, at a 44 px target, under the box.
+        <div className="flex items-center gap-3 pl-1" data-sw-composer-footer="true">
+          <p className="min-w-0 flex-1 truncate text-xs text-faint">{note}</p>
+          {cancel}
         </div>
-      )}
+      ) : note ? (
+        <p className="flex px-1 text-[11px] leading-4 text-faint" data-sw-composer-footer="true">
+          {note}
+        </p>
+      ) : null}
     </form>
+  )
+}
+
+// Post's tooltip on a desktop: the keys, once, in the order they are used.
+function PostKeys() {
+  return (
+    <span className="flex items-center gap-1.5 whitespace-nowrap" data-sw-composer-keys="true">
+      <span>Post</span>
+      <Kbd>Enter</Kbd>
+      <span className="opacity-60">·</span>
+      <span>New line</span>
+      <Kbd>Shift</Kbd>
+      <Kbd>Enter</Kbd>
+      <span className="opacity-60">·</span>
+      <span>Cancel</span>
+      <Kbd>Esc</Kbd>
+    </span>
   )
 }

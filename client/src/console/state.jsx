@@ -2,6 +2,7 @@
 // (the passkey check the server asks for before sensitive actions).
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { AnimatePresence, LayoutMotion, m, rise, usePresenceProps } from '../lib/animate'
 import { KeyRound, ShieldCheck } from 'lucide-react'
 import { Button, Dialog, Input, Spinner } from '../components/ui'
 import { api, ApiError, setConfirmed } from './lib/api'
@@ -63,21 +64,34 @@ export function ToastProvider({ children }) {
         aria-live="polite"
         data-sw-toasts
       >
-        {toasts.map((item) => (
-          <div
-            key={item.id}
-            className={
-              item.tone === 'bad'
-                ? 'pointer-events-auto max-w-md animate-pop-in rounded-lg border border-bad/40 bg-surface px-4 py-2.5 text-sm text-bad shadow-pop'
-                : 'pointer-events-auto max-w-md animate-pop-in rounded-lg border border-line bg-fg px-4 py-2.5 text-sm text-surface shadow-pop'
-            }
-            data-sw-toast={item.tone}
-          >
-            {item.message}
-          </div>
-        ))}
+        {/* In from below, out with a fade; the rest close the gap (layout). */}
+        <LayoutMotion>
+          <AnimatePresence initial={false}>
+            {toasts.map((item) => (
+              <ConsoleToast key={item.id} item={item} />
+            ))}
+          </AnimatePresence>
+        </LayoutMotion>
       </div>
     </ToastContext.Provider>
+  )
+}
+
+function ConsoleToast({ item }) {
+  const presence = usePresenceProps({ 'data-sw-toast': item.tone })
+  return (
+    <m.div
+      layout
+      {...rise}
+      className={
+        item.tone === 'bad'
+          ? 'pointer-events-auto max-w-md rounded-lg border border-bad/40 bg-surface px-4 py-2.5 text-sm text-bad shadow-pop'
+          : 'pointer-events-auto max-w-md rounded-lg border border-line bg-fg px-4 py-2.5 text-sm text-surface shadow-pop'
+      }
+      {...presence}
+    >
+      {item.message}
+    </m.div>
   )
 }
 

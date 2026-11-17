@@ -15,6 +15,7 @@ import App from './App'
 import { startErrorTracking } from '../lib/error-tracking'
 import { installChunkRecovery } from '../lib/chunk-reload'
 import { ChunkBoundary } from '../components/chunk-boundary'
+import { AnimationRoot } from '../lib/animate'
 import '../lib/theme'
 import '../lib/scrollbars'
 import './console.css'
@@ -34,19 +35,21 @@ const start = () =>
   createRoot(document.getElementById('root')).render(
     <StrictMode>
       <ChunkBoundary>
-        {localConsole ? (
-          <Suspense
-            fallback={
-              <p role="status" className="p-6 text-sm text-muted">
-                Loading console…
-              </p>
-            }
-          >
-            {localAccounts ? <LocalAccountsApp /> : <LocalConsole />}
-          </Suspense>
-        ) : (
-          <App />
-        )}
+        <AnimationRoot>
+          {localConsole ? (
+            <Suspense
+              fallback={
+                <p role="status" className="p-6 text-sm text-muted">
+                  Loading console…
+                </p>
+              }
+            >
+              {localAccounts ? <LocalAccountsApp /> : <LocalConsole />}
+            </Suspense>
+          ) : (
+            <App />
+          )}
+        </AnimationRoot>
       </ChunkBoundary>
     </StrictMode>,
   )

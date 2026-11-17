@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useRef } from 'react'
+import { Suspense, useEffect, useRef } from 'react'
 import {
   ArrowUpRight,
   BarChart3,
@@ -24,9 +24,10 @@ import { GeneralSettings } from '../settings/LocalSettings'
 import { Card, LoadError, Loading, Logo, PageHeader } from './components'
 import { AgentFeedbackView } from './pages/agent-feedback'
 import { AGENTS_DESCRIPTION, AgentsPage } from './pages/local-agents'
+import { PanelBoundary, lazyPanel } from '../components/chunk-boundary'
 
 // The Usage view brings the charts with it: loaded when it opens.
-const LocalUsage = lazy(() => import('./usage/LocalUsage.jsx'))
+const LocalUsage = lazyPanel(() => import('./usage/LocalUsage.jsx'))
 
 const SECTIONS = [
   ['projects', 'Projects', FolderKanban],
@@ -226,9 +227,11 @@ export default function LocalConsole({ account = null, onSignOut = null }) {
                 ) : section === 'feedback' ? (
                   <AgentFeedbackView baseUrl="/api/agent/feedback" get={api.get} touch={!wide} />
                 ) : section === 'usage' ? (
-                  <Suspense fallback={<Loading label="Loading usage" rows={4} />}>
-                    <LocalUsage />
-                  </Suspense>
+                  <PanelBoundary retry={LocalUsage}>
+                    <Suspense fallback={<Loading label="Loading usage" rows={4} />}>
+                      <LocalUsage />
+                    </Suspense>
+                  </PanelBoundary>
                 ) : section === 'agents' ? (
                   <>
                     <PageHeader title="Agents" description={AGENTS_DESCRIPTION} />

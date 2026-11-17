@@ -14,6 +14,7 @@ import {
   Toggle,
 } from '../components/ui'
 import { cn } from '../lib/utils'
+import { drop, m, usePresenceProps } from '../lib/animate'
 
 // "3 of 26 pages changed", "1 page changed".
 export function changedText(changedPages, totalPages = 0) {
@@ -159,7 +160,7 @@ export default function CompareBar({
         ? 'Compare options, the comparison failed'
         : `Compare options, ${changedText(changedPages, totalPages)}`
     return (
-      <div
+      <BarFrame
         className="flex shrink-0 items-center gap-1 border-b border-line bg-surface px-2 py-1.5"
         role="region"
         aria-label="Compare environments"
@@ -198,12 +199,12 @@ export default function CompareBar({
           </PopoverContent>
         </Popover>
         {close}
-      </div>
+      </BarFrame>
     )
   }
 
   return (
-    <div
+    <BarFrame
       className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line bg-surface px-3 py-2"
       role="region"
       aria-label="Compare environments"
@@ -222,6 +223,18 @@ export default function CompareBar({
       {status}
       {captures}
       {close}
-    </div>
+    </BarFrame>
+  )
+}
+
+// The bar drops in under the toolbar when compare starts and fades as it
+// leaves (Board.jsx keeps it through its exit). Leaving, it is already gone
+// for the app and for assistive tech (lib/animate.jsx).
+function BarFrame({ className, children, ...props }) {
+  const { style, ...presence } = usePresenceProps(props, { role: true })
+  return (
+    <m.div {...drop} className={className} style={style} {...presence}>
+      {children}
+    </m.div>
   )
 }

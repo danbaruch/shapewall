@@ -177,8 +177,9 @@ test('desktop: the tools float at the bottom centre of the canvas, the top bar h
     // the accent); the accent is for the tools that change what a click does.
     const paint = (id) =>
       page.$eval(tool(id), (node) => {
-        const style = getComputedStyle(node)
-        return { look: node.getAttribute('data-sw-tool-look'), background: style.backgroundColor, color: style.color }
+        // The fill is its own shape that slides between tools (BoardTools.jsx).
+        const style = getComputedStyle(node.querySelector('[data-sw-tool-fill]') || node)
+        return { look: node.getAttribute('data-sw-tool-look'), background: style.backgroundColor, color: getComputedStyle(node).color }
       })
     const accent = await page.evaluate(() => {
       const probe = document.createElement('span')
@@ -230,7 +231,10 @@ test('desktop: the tools float at the bottom centre of the canvas, the top bar h
     // (The pointer off it: hover lightens the fill; and the colour fades in.)
     await page.mouse.move(600, 300)
     await page.waitForFunction(
-      ([selector, want]) => getComputedStyle(document.querySelector(selector)).backgroundColor === want,
+      ([selector, want]) => {
+        const button = document.querySelector(selector)
+        return getComputedStyle(button.querySelector('[data-sw-tool-fill]') || button).backgroundColor === want
+      },
       [tool('comment'), accent],
     )
     assert.equal((await paint('select')).look, null, 'and Select is plain again')
