@@ -526,12 +526,13 @@ function ElementOutline({ box, tone, large = false, ...data }) {
   return (
     <div
       className={cn(
-        'pointer-events-none absolute rounded-[2px]',
-        tone === 'quiet' ? 'z-[4] border-accent/55 bg-accent/[0.05]' : 'z-[5] border-accent',
+        'pointer-events-none absolute rounded-[2px] outline-offset-0',
+        tone === 'quiet' ? 'z-[4] bg-accent/[0.05] outline-accent/55' : 'z-[5] outline-accent',
         tone === 'hover' && !large && 'bg-accent/[0.06]',
-        large ? 'border-dashed' : 'border-solid',
+        large ? 'outline-dashed' : 'outline-solid',
       )}
-      style={{ ...boxStyle(box), borderWidth: `calc(${large ? 1.5 : STROKE[tone]}px * var(--sw-inv, 1))` }}
+      // An outline, not a border: the stroke goes around the element, never over its text.
+      style={{ ...boxStyle(box), outlineWidth: `calc(${large ? 1.5 : STROKE[tone]}px * var(--sw-inv, 1))` }}
       {...data}
     />
   )
@@ -551,7 +552,8 @@ function TargetLabel({ box, frame, kind, name, ...data }) {
     const inv = 1 / zoom
     const width = node.offsetWidth * inv
     const height = node.offsetHeight * inv
-    const gap = 4 * inv
+    // 4 px clear of the 2 px outline.
+    const gap = 6 * inv
     const left = (box.left / 100) * frame.w
     const top = (box.top / 100) * frame.h
     const bottom = (box.bottom / 100) * frame.h

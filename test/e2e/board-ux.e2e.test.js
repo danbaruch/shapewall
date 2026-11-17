@@ -304,7 +304,7 @@ test('desktop: once a target is picked the page is calm; an empty draft moves, a
     // An empty draft: a click elsewhere moves the target, and the outline
     // and the composer follow.
     await page.mouse.click(...middle(heading))
-    await page.waitForFunction(() => /Heading:/.test(document.querySelector('[data-sw-composer-target]')?.textContent || ''))
+    await page.waitForFunction(() => /Heading · /.test(document.querySelector('[data-sw-composer-target]')?.textContent || ''))
     const moved = await rect(page, '[data-sw-picked-outline]')
     assert.ok(Math.abs(moved.left - heading.left) < 3 && Math.abs(moved.top - heading.top) < 3, 'the outline moved with the target')
     assert.equal(await page.locator('[data-sw-draft-pin]').count(), 1)
@@ -314,7 +314,7 @@ test('desktop: once a target is picked the page is calm; an empty draft moves, a
     await page.fill('[data-sw-comment-input]', 'This heading is long')
     await page.mouse.click(...middle(cta))
     await page.waitForSelector(`${composer}[data-sw-composer-nudged]`)
-    assert.match(await page.textContent('[data-sw-composer-target]'), /Heading:/, 'the target stayed')
+    assert.match(await page.textContent('[data-sw-composer-target]'), /Heading · /, 'the target stayed')
     const still = await rect(page, '[data-sw-picked-outline]')
     assert.ok(Math.abs(still.left - moved.left) < 1 && Math.abs(still.top - moved.top) < 1)
     assert.equal(await page.inputValue('[data-sw-comment-input]'), 'This heading is long')
@@ -530,7 +530,7 @@ test('desktop: the composer keeps off its element, a written comment is never re
     await page.waitForSelector(`${composer} ${input}`)
     await apart(composer, '[data-sw-picked-outline]', 'the button')
     await page.mouse.click(...middle(heading))
-    await page.waitForFunction(() => /Heading:/.test(document.querySelector('[data-sw-composer-target]')?.textContent || ''))
+    await page.waitForFunction(() => /Heading · /.test(document.querySelector('[data-sw-composer-target]')?.textContent || ''))
     await apart(composer, '[data-sw-picked-outline]', 'the heading')
     await shot(page, 'ux-flow-4-composer-off-target')
 
@@ -553,7 +553,7 @@ test('desktop: the composer keeps off its element, a written comment is never re
     )
     assert.equal(await page.inputValue(input), 'Keep me')
     assert.equal(new URL(page.url()).searchParams.get('c'), null)
-    assert.match(await page.textContent('[data-sw-composer-target]'), /Heading:/, 'still on the heading')
+    assert.match(await page.textContent('[data-sw-composer-target]'), /Heading · /, 'still on the heading')
 
     // Posted: its thread opens at the pin, and keeps off the element too.
     await page.focus(input)

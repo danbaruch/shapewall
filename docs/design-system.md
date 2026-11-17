@@ -175,7 +175,7 @@ phone the tools are the bottom bar: 44 px targets above the safe-area inset, hid
 
 Picking an element on a live page reads like the browser's element picker and Figma's inspect hover
 (`client/src/board/Frame.jsx`): a 2 px accent outline with a 6% accent fill (a large block: a 1.5 px dashed outline, no fill)
-and a 20 px accent tab with the element's kind in semibold and its name ("Card · Free"). The tab sits 4 px outside the
+and a 20 px accent tab with the element's kind in semibold and its name ("Card · Free"). The tab sits 4 px clear of the outline, outside the
 element's top left corner, flips below it or inside it when there is no room, and stays on the page and on screen. Stroke and
 tab are the same size on screen at any zoom. The element a comment is attached to keeps a solid outline while its composer is
 open; the open thread's element, and the element of a hovered pin or comment row, get a quiet 1.5 px outline at 55% accent with

@@ -107,12 +107,17 @@ export function elementAt(doc, x, y, up = 0) {
 
 const TEXT_BLOCK = 'p, h1, h2, h3, h4, h5, h6, li, dd, dt, td, th, blockquote, figcaption, label, summary, caption, legend'
 
+// As pointable() on an element map: the page is the frame's viewport (the
+// capture's native size).
 function pointable(doc, element) {
   const rect = element.getBoundingClientRect()
   if (rect.width < 3 || rect.height < 3) return false
-  const root = frameDom.documentElement(doc)
-  const pageWidth = root?.scrollWidth || rect.width
-  const pageHeight = root?.scrollHeight || rect.height
+  const view = frameDom.defaultView(doc)
+  const pageWidth = view?.innerWidth || rect.width
+  const pageHeight = view?.innerHeight || rect.height
+  const shownWidth = Math.max(0, Math.min(rect.right, pageWidth) - Math.max(rect.left, 0))
+  const shownHeight = Math.max(0, Math.min(rect.bottom, pageHeight) - Math.max(rect.top, 0))
+  if ((shownWidth * shownHeight) / (rect.width * rect.height) < 0.4) return false
   return !(rect.width >= pageWidth * 0.98 && rect.height >= pageHeight * 0.95)
 }
 
