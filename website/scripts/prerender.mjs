@@ -114,9 +114,11 @@ out(
   sitemapXml((route) =>
     route.path.startsWith('/legal/')
       ? lastCommit(['src/pages/legal'])
-      : route.kind === 'doc'
-        ? lastCommit([route.repo ? `../docs/${route.repo}.md` : `src/docs/${route.file}.md`])
-        : lastCommit([`src/pages/${PAGE_FILES[route.path]}.jsx`]),
+      : route.path === '/changelog'
+        ? lastCommit(['../CHANGELOG.md', 'src/pages/Changelog.jsx'])
+        : route.kind === 'doc'
+          ? lastCommit([route.repo ? `../docs/${route.repo}.md` : `src/docs/${route.file}.md`])
+          : lastCommit([`src/pages/${PAGE_FILES[route.path]}.jsx`]),
   ),
 )
 

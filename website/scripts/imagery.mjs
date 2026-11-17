@@ -50,7 +50,6 @@ try {
   webp(find(/(^|\/)pricing\.desktop\.png$/), 'before.webp', ['-crop', '1440x900+0+0', '+repage', '-resize', '960x'])
   const after = path.join(WORK, '.shapewall', board.id, 'variants', 'yearly.desktop.png')
   webp(after, 'after.webp', ['-crop', '1440x900+0+0', '+repage', '-resize', '960x'])
-  webp(after, 'page-pricing-v2.webp', ['-crop', '1440x1100+0+0', '+repage', '-resize', '640x'])
 } finally {
   site.close()
 }

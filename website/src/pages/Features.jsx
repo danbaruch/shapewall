@@ -5,7 +5,6 @@ import { Badge, Container, Shot } from '../components/ui.jsx'
 import {
   BeforeAfter,
   CaptureIllustration,
-  CompareIllustration,
   GithubIllustration,
   JourneyIllustration,
   MapIllustration,
@@ -15,10 +14,12 @@ import {
 import { AgentTerminal } from '../components/terminal.jsx'
 import { FinalCta } from './Home.jsx'
 import { HARDENING_PDF } from '../routes.js'
-import liveComment from '../assets/shots/live-comment.webp'
 import liveComment960 from '../assets/shots/live-comment-960.webp'
-import variant from '../assets/shots/variant.webp'
+import liveComment1440 from '../assets/shots/live-comment-1440.webp'
+import compareComment960 from '../assets/shots/compare-comment-960.webp'
+import compareComment1440 from '../assets/shots/compare-comment-1440.webp'
 import variant960 from '../assets/shots/variant-960.webp'
+import variant1440 from '../assets/shots/variant-1440.webp'
 import phoneComment from '../assets/shots/phone-comment.webp'
 
 // The workspace of the public demo (client/src/demo/fixtures.js WORKSPACE_ID), in its console.
@@ -44,9 +45,11 @@ const SECTIONS = [
     title: 'The whole product on one wall',
     text: 'Pages are grouped into sections, such as Marketing, App and Settings, on a zoomable canvas. Zoom out to see every page at every size at once. Zoom in and the tile becomes the captured page, with text you can select.',
     points: [
-      'Per-page notes such as "signed-out state"',
+      'Moves like a design tool: the wheel or a trackpad pans, a pinch or Ctrl/Cmd+wheel zooms at the cursor, Space+drag pans from anywhere',
       'Thumbnails far out, full images and live HTML up close',
+      'Per-page notes such as "signed-out state"',
       'A minimap and URL state, so a link opens the same view',
+      'A panel that fails to load says so and offers Try again; the rest of the board keeps working',
     ],
     art: <MapIllustration />,
   },
@@ -56,20 +59,21 @@ const SECTIONS = [
     title: 'Comments on the exact element',
     text: 'Click Comment, click the button that needs work and say what should change. The comment stores a selector and the element text, so after the next capture the pin follows the button, not the old pixel. If the element is gone, the pin says so.',
     points: [
+      'One comment box with everything inside it: attach images, draw boxes, arrows and pen strokes on the page, dictate, and Post',
+      'Dictation uses your browser\u2019s own speech service to turn speech into text; Shapewall never receives the audio',
       'Resolve, reopen, search and filter by state',
-      'Images and a drawing on the page: boxes, arrows and pen strokes',
       '@mention people, or @agent to hand it to your coding agent',
       'Replies from the agent on what it changed',
       'Works in screenshot mode too, by position',
     ],
     art: (
       <Shot
-        src={liveComment}
-        srcSet={`${liveComment960} 960w, ${liveComment} 1440w`}
+        src={liveComment1440}
+        srcSet={`${liveComment960} 960w, ${liveComment1440} 1440w`}
         sizes="(min-width: 1024px) 560px, 100vw"
         width="1440"
         height="900"
-        alt="A comment pinned to the Try Plus free button on live HTML"
+        alt="A new comment on the Try Plus free button on live HTML, its box holding image and drawing tools, a microphone and Post"
       />
     ),
   },
@@ -147,9 +151,24 @@ const SECTIONS = [
     id: 'compare',
     nav: 'Staging',
     title: 'Staging beside production',
-    text: 'Point one board at several environments. Capture staging and production with the same pages, and see them side by side before you ship. Variants put a branch preview or a redesign right next to the page it would replace.',
-    points: ['Environments share one page list', 'Changed pixels in red, changed pages only', 'Variants for directions, not just fixes'],
-    art: <CompareIllustration />,
+    text: 'Point one board at several environments. Capture staging and production with the same pages, and see them side by side before you ship. Comment on either side while you compare: the pin stays with the environment it was left on.',
+    points: [
+      'Environments share one page list',
+      'Changed pixels in red, and a filter for changed pages only',
+      'A comment\u2019s thread says where it was left, such as \u201cLeft on Production\u201d',
+      'On a phone the compare bar is one row, so the thread sheet keeps its height',
+    ],
+    links: [{ to: '/docs/compare#comments-while-comparing', label: 'Commenting while comparing' }],
+    art: (
+      <Shot
+        src={compareComment1440}
+        srcSet={`${compareComment960} 960w, ${compareComment1440} 1440w`}
+        sizes="(min-width: 1024px) 560px, 100vw"
+        width="1440"
+        height="900"
+        alt="Compare mode: Pricing on staging beside production, changed pixels in red, and a comment thread marked Left on Production"
+      />
+    ),
   },
   {
     id: 'variants',
@@ -163,8 +182,8 @@ const SECTIONS = [
     ],
     art: (
       <Shot
-        src={variant}
-        srcSet={`${variant960} 960w, ${variant} 1440w`}
+        src={variant1440}
+        srcSet={`${variant960} 960w, ${variant1440} 1440w`}
         sizes="(min-width: 1024px) 560px, 100vw"
         width="1440"
         height="900"
@@ -177,7 +196,7 @@ const SECTIONS = [
     nav: 'Teams',
     badge: 'Beta',
     title: 'Workspaces, roles and share links',
-    text: 'Host the team server and people sign in with a passkey. Each workspace has owners, admins, members and viewers. Admins invite people, hand out expiring share links to clients, issue API tokens for agents and read an audit log of who changed what. A Usage page shows every agent turn with the tokens and cost each agent reported, as a dashboard each person arranges for themselves (drag, resize, hide and duplicate its charts), and Activity shows who signed in, who changed which setting and who approved what. The live demo has the roles, the links and both pages, with made-up numbers: switch who you are with View as.',
+    text: 'Host the team server and people sign in with a passkey, or, on a server in your tailnet, with their Tailscale identity and nothing to type. Each workspace has owners, admins, members and viewers. Admins invite people, hand out expiring share links to clients, issue API tokens for agents and read an audit log of who changed what. A Usage page shows every agent turn with the tokens and cost each agent reported, as a dashboard each person arranges for themselves (drag, resize, hide and duplicate its charts), and Activity shows who signed in, who changed which setting and who approved what. The live demo has the roles, the links and both pages, with made-up numbers: switch who you are with View as.',
     points: [
       'Four roles, checked on every request',
       'Invites and share links that expire',
@@ -196,15 +215,20 @@ const SECTIONS = [
     nav: 'Phone',
     title: 'The wall in your pocket',
     text: 'The board works on a phone: 44 px touch targets, a bottom sheet for comments, and Back closes the topmost panel instead of leaving the board. Add it to your home screen and it opens like an app.',
-    points: ['Installable board app', 'Pinch to zoom, tap to comment', 'Same comments, same pins'],
+    points: [
+      'Installable board app',
+      'Pinch to zoom, tap to comment, dictate with the microphone',
+      'Compare environments in one row',
+      'Same comments, same pins',
+    ],
     art: (
       <div className="wall-dots flex items-center justify-center gap-4 rounded-2xl p-6">
         <div className="w-44 overflow-hidden rounded-[22px] border-4 border-device shadow-xl sm:w-52">
           <img
             src={phoneComment}
-            alt="The Shapewall board on a phone with a comment sheet open"
-            width="520"
-            height="1125"
+            alt="The Shapewall board on a phone comparing staging with production, a comment thread open in a sheet"
+            width="640"
+            height="1385"
             loading="lazy"
             className="block h-auto w-full"
           />

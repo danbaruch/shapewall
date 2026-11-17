@@ -22,9 +22,11 @@ import { AgentTerminal } from '../components/terminal.jsx'
 import { Faq } from '../components/faq.jsx'
 import { GITHUB_URL } from '../routes.js'
 import { GITHUB_LABEL, LAUNCHED, LICENSE_SUMMARY } from '../launch.js'
-import boardOverview from '../assets/shots/board-overview.webp'
 import boardOverview960 from '../assets/shots/board-overview-960.webp'
+import boardOverview1440 from '../assets/shots/board-overview-1440.webp'
+import boardOverview2048 from '../assets/shots/board-overview-2048.webp'
 import liveComment960 from '../assets/shots/live-comment-960.webp'
+import liveComment1440 from '../assets/shots/live-comment-1440.webp'
 
 export default function Home() {
   return (
@@ -95,13 +97,13 @@ function Hero() {
         </div>
         <div className="relative mx-auto mt-14 max-w-5xl sm:mt-16">
           <Shot
-            src={boardOverview}
-            srcSet={`${boardOverview960} 960w, ${boardOverview} 1440w`}
+            src={boardOverview1440}
+            srcSet={`${boardOverview960} 960w, ${boardOverview1440} 1440w, ${boardOverview2048} 2048w`}
             sizes="(min-width: 1100px) 1024px, 100vw"
             width="1440"
             height="900"
             eager
-            alt="The Shapewall board: the pages of a demo product at desktop and phone width, grouped into Marketing, Content, Get started, App and Admin, with numbered comment pins and a comments panel"
+            alt="The Shapewall board: the pages of a demo product at desktop, tablet and phone width, grouped into Marketing, Content, Get started and App, with comment pins and the comments panel"
           />
           <div className="absolute -bottom-6 -left-3 hidden w-72 rounded-xl border border-line bg-card p-3.5 shadow-xl shadow-black/10 md:block lg:-left-10">
             <p className="flex items-center gap-2 text-[12px] font-semibold text-wall">
@@ -110,7 +112,7 @@ function Hero() {
             <p className="mt-1.5 text-[13.5px] leading-snug text-ink">The Plus card now uses the primary button. Pricing recaptured.</p>
           </div>
           <div className="absolute -top-5 -right-3 hidden items-center gap-2 rounded-full border border-line bg-card py-1.5 pr-3.5 pl-2 text-[13px] font-medium text-ink shadow-lg shadow-black/10 md:flex lg:-right-8">
-            <span className="grid size-6 place-items-center rounded-full bg-pin text-[11px] font-bold text-night">19</span>
+            <span className="grid size-6 place-items-center rounded-full bg-pin text-[11px] font-bold text-night">20</span>
             open comments on 26 pages
           </div>
         </div>
@@ -140,10 +142,12 @@ const STEPS = [
       <div className="wall-dots flex aspect-[4/3] items-center rounded-2xl p-4 sm:p-5">
         <Shot
           src={liveComment960}
-          width="960"
-          height="600"
+          srcSet={`${liveComment960} 960w, ${liveComment1440} 1440w`}
+          sizes="(min-width: 768px) 360px, 100vw"
+          width="1440"
+          height="900"
           bar={false}
-          alt="Live HTML of a pricing page with a comment pinned to the Try Plus free button"
+          alt="Live HTML of a pricing page with a new comment on the Try Plus free button: the comment box holds image and drawing tools, a microphone and Post"
         />
       </div>
     ),
@@ -188,7 +192,7 @@ const FEATURES = [
   {
     icon: MapPin,
     title: 'Comments on the element',
-    text: 'A pin stores the selector and text of what you clicked, so it follows the button through the next capture. Add images or draw on the page.',
+    text: 'A pin stores the selector and text of what you clicked, so it follows the button through the next capture. Type, dictate, attach images or draw on the page.',
   },
   {
     icon: Bot,
@@ -198,7 +202,7 @@ const FEATURES = [
   {
     icon: GitCompare,
     title: 'Before and after, with history',
-    text: 'Every recapture keeps the old shot. See a fix around its pin, compare any earlier capture with changed pixels in red, or put staging beside production.',
+    text: 'Every recapture keeps the old shot. See a fix around its pin, compare any earlier capture with changed pixels in red, or put staging beside production and comment on either side.',
   },
   {
     icon: FolderOpen,

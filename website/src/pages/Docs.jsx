@@ -150,6 +150,20 @@ function Sidebar({ onPick }) {
           </ul>
         </div>
       ))}
+      <div>
+        <h2 className="px-3 text-[12px] font-semibold tracking-wide text-faint uppercase">Releases</h2>
+        <ul className="mt-2 space-y-0.5">
+          <li>
+            <Link
+              to="/changelog"
+              onClick={onPick}
+              className="block rounded-lg px-3 py-1.5 text-[14.5px] text-slate transition-colors hover:bg-ink/[0.04] hover:text-ink"
+            >
+              Changelog
+            </Link>
+          </li>
+        </ul>
+      </div>
     </nav>
   )
 }

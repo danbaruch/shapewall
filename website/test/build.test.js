@@ -234,7 +234,8 @@ test('early access (the default): said in the hero badge and the install box, no
   for (const route of ROUTES) {
     const html = read(fileFor(route.path))
     assert.ok(!/invited users|maintainer-supplied|supplied (release )?tarball/i.test(html), `${route.path}: no leftover access wording`)
-    if (route.kind !== 'doc') {
+    // The docs and the changelog (a record of each release, quoting what it added) may show install commands.
+    if (route.kind !== 'doc' && route.path !== '/changelog') {
       assert.ok(!html.includes('github:danbaruch/shapewall'), `${route.path}: no install command before launch`)
       assert.ok(!html.includes('npm install --save-dev shapewall'), `${route.path}: no install command before launch`)
     }
@@ -262,7 +263,8 @@ test('launched: install command, plain GitHub links, a free Offer, no early acce
   assert.match(home, /"price":"0"/)
   const version = JSON.parse(read(path.join(SITE, '..', 'package.json'))).version
   assert.ok(home.includes(`"softwareVersion":"${version}"`), 'structured data carries the package version')
-  assert.match(home, /href="https:\/\/github\.com\/danbaruch\/shapewall\/blob\/main\/CHANGELOG\.md"/)
+  assert.match(home, /href="\/changelog"/, 'the footer links the changelog page')
+  assert.match(read(fileFor('/changelog')), /href="https:\/\/github\.com\/danbaruch\/shapewall\/blob\/main\/CHANGELOG\.md"/)
   assert.match(home, /href="https:\/\/github\.com\/danbaruch\/shapewall\/blob\/main\/SECURITY\.md"/)
   assert.match(read(fileFor('/docs/config')), /blob\/main\/docs\/config\.md"/)
   assert.match(read(fileFor('/docs/config')), /Edit on GitHub/)
@@ -280,6 +282,40 @@ test('launched: install command, plain GitHub links, a free Offer, no early acce
   // The Features section nav wraps on wider screens rather than clipping items it cannot scroll to.
   assert.match(read(fileFor('/features')), /aria-label="Features on this page"[\s\S]{0,400}md:flex-wrap/)
   checkLinks()
+})
+
+// The changelog page is CHANGELOG.md, rendered at build time: every version, newest first, each with an anchor.
+// Runs on the dist the tests above left (launched).
+test('the changelog page shows every release from CHANGELOG.md', () => {
+  const source = read(path.join(SITE, '..', 'CHANGELOG.md'))
+  const versions = [...source.matchAll(/^## (\d+\.\d+\.\d+\S*) - (\d{4}-\d{2}-\d{2})$/gm)].map((match) => ({
+    version: match[1],
+    date: match[2],
+  }))
+  assert.ok(versions.length > 10, 'CHANGELOG.md has its versions')
+  assert.equal(
+    versions[0].version,
+    JSON.parse(read(path.join(SITE, '..', 'package.json'))).version,
+    'the newest entry is the package version',
+  )
+  const html = read(fileFor('/changelog'))
+  let last = -1
+  for (const { version, date } of versions) {
+    const id = `v${version.replace(/\./g, '-')}`
+    const at = html.indexOf(`<li id="${id}"`)
+    assert.ok(at > last, `${version}: rendered, after the newer releases`)
+    last = at
+    assert.ok(html.includes(`href="#${id}"`), `${version}: in the version list`)
+    assert.ok(html.includes(`<time dateTime="${date}"`), `${version}: dated`)
+  }
+  assert.equal(html.match(/<h1[\s>]/g)?.length, 1, 'one h1')
+  assert.doesNotMatch(html, /<environment>/, 'placeholders in angle brackets are text, not tags')
+  assert.doesNotMatch(html, /href="https?:\/\/(127\.0\.0\.1|localhost)/, 'no links to the reader\u2019s own machine')
+  assert.match(html, /href="\/docs\/agent-hardening(#[^"]*)?"/, 'links to guides that are site pages stay on the site')
+  assert.match(read(fileFor('/docs')), /<a[^>]*href="\/changelog"[^>]*>Changelog<\/a>/, 'the docs navigation links it')
+  assert.match(read(fileFor('/features')), /<a[^>]*href="\/changelog"[^>]*>Changelog<\/a>/, 'the footer links it')
+  const sitemap = read(path.join(DIST, 'sitemap.xml'))
+  assert.match(sitemap, new RegExp(`<loc>${SITE_URL}/changelog</loc>`), 'in the sitemap')
 })
 
 test('the two licenses are stated wherever the site names a license', () => {

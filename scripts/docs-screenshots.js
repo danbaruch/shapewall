@@ -86,9 +86,13 @@ const quiet = (context) =>
   })
 const settle = (page, ms = 900) => page.waitForTimeout(ms)
 const imagesLoaded = (page) =>
-  page.waitForFunction(() => [...document.querySelectorAll('[data-sw-frame] img')].every((img) => img.complete && img.naturalWidth > 0), null, {
-    timeout: 30000,
-  })
+  page.waitForFunction(
+    () => [...document.querySelectorAll('[data-sw-frame] img')].every((img) => img.complete && img.naturalWidth > 0),
+    null,
+    {
+      timeout: 30000,
+    },
+  )
 async function open(page, query, selector = '[data-sw-node]') {
   await page.goto(base + query)
   await page.waitForSelector(selector, { timeout: 30000 })
@@ -146,7 +150,8 @@ async function commentMode(page, tap = false) {
 // The demo keeps a visitor's comments in the browser: forget them, so the next shot shows the board as exported.
 const forget = (page) =>
   page.evaluate(() => {
-    for (const key of Object.keys(window.localStorage)) if (key.startsWith('shapewall.demo.') && key !== 'shapewall.demo.try') window.localStorage.removeItem(key)
+    for (const key of Object.keys(window.localStorage))
+      if (key.startsWith('shapewall.demo.') && key !== 'shapewall.demo.try') window.localStorage.removeItem(key)
   })
 const write = (page, text) => page.keyboard.type(text, { delay: 6 })
 
@@ -218,7 +223,7 @@ try {
     await page.mouse.move(1435, 895)
     await settle(page, 900)
     await page.screenshot({ path: raw('compare-comment') })
-    publishDesktop('compare-comment', raw('compare-comment'))
+    publishDesktop('compare-comment', raw('compare-comment'), { docs: true })
     await forget(page)
     await page.close()
   }

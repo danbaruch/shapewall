@@ -6,6 +6,7 @@ import OpenSource from './pages/OpenSource.jsx'
 import Privacy from './pages/Privacy.jsx'
 import Terms from './pages/Terms.jsx'
 import Contact from './pages/Contact.jsx'
+import Changelog from './pages/Changelog.jsx'
 import LegalTemplate from './pages/legal/LegalTemplate.jsx'
 import NotFound from './pages/NotFound.jsx'
 import { DocsLayout, DocPage } from './pages/Docs.jsx'
@@ -21,6 +22,7 @@ export default function App() {
         <Route path="/privacy" element={<Privacy />} />
         <Route path="/terms" element={<Terms />} />
         <Route path="/contact" element={<Contact />} />
+        <Route path="/changelog" element={<Changelog />} />
         <Route path="/legal/terms" element={<LegalTemplate slug="terms" />} />
         <Route path="/legal/privacy" element={<LegalTemplate slug="privacy" />} />
         <Route path="/legal/subprocessors" element={<LegalTemplate slug="subprocessors" />} />

@@ -24,7 +24,6 @@ import homePhone from '../assets/shots/page-home-phone.webp'
 import pricingPhone from '../assets/shots/page-pricing-phone.webp'
 import before from '../assets/shots/before.webp'
 import after from '../assets/shots/after.webp'
-import pricingV2 from '../assets/shots/page-pricing-v2.webp'
 
 function Tile({ src, label, phone = false, className, highlight = false, dim = false, crop = false }) {
   return (
@@ -219,29 +218,6 @@ export function BeforeAfter() {
         <span className="absolute top-3 left-3 rounded-md bg-zinc-900/80 px-2 py-1 text-[11px] font-semibold tracking-wide text-white uppercase">
           {view}
         </span>
-      </div>
-    </div>
-  )
-}
-
-// Staging beside production.
-export function CompareIllustration() {
-  return (
-    <div className="wall-dots grid grid-cols-2 gap-3 rounded-2xl p-4 sm:gap-4 sm:p-6">
-      {[
-        { label: 'Production', src: pricing, tone: 'bg-sunk-3 text-slate' },
-        { label: 'Staging', src: pricingV2, tone: 'bg-pin text-night' },
-      ].map((side) => (
-        <div key={side.label}>
-          <span className={cx('mb-2 inline-flex rounded-md px-2 py-0.5 text-[11px] font-semibold tracking-wide uppercase', side.tone)}>
-            {side.label}
-          </span>
-          <Tile src={side.src} />
-        </div>
-      ))}
-      <div className="col-span-2 flex items-center gap-2 rounded-xl border border-line bg-card px-3 py-2 text-[13px] text-slate">
-        <MessageSquare className="size-4 shrink-0 text-wall" aria-hidden="true" />
-        <span className="min-w-0 truncate">Pricing differs: yearly switch and new Plus card on staging only</span>
       </div>
     </div>
   )

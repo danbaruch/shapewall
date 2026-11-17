@@ -181,7 +181,7 @@ function Footer() {
             LAUNCHED
               ? [
                   { href: GITHUB_URL, label: GITHUB_LABEL },
-                  { href: `${GITHUB_URL}/blob/main/CHANGELOG.md`, label: 'Changelog' },
+                  { to: '/changelog', label: 'Changelog' },
                   { href: `${GITHUB_URL}/blob/main/SECURITY.md`, label: 'Security policy' },
                   { to: '/privacy', label: 'Privacy' },
                   { to: '/terms', label: 'Terms' },
@@ -190,6 +190,7 @@ function Footer() {
               : [
                   { href: GITHUB_URL, label: GITHUB_LABEL },
                   { to: '/docs/security', label: 'Security model' },
+                  { to: '/changelog', label: 'Changelog' },
                   { to: '/privacy', label: 'Privacy' },
                   { to: '/terms', label: 'Terms' },
                   { to: '/contact', label: 'Contact' },

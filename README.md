@@ -163,8 +163,8 @@ Then open http://127.0.0.1:4600/. In the full demo the Status page answers 404 o
 - **Works on a phone.** The board is a PWA with 44 px touch targets and a bottom sheet for comments.
 - **Small and local.** Node, Playwright, Express, React Flow. Data is plain JSON files in `.shapewall/`. No account, no telemetry.
 
-| A new comment on an element, in live HTML                                                                           | On a phone, comparing staging with production                                                                          |
-| ------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| A new comment on an element, in live HTML                                                                                                     | On a phone, comparing staging with production                                                                      |
+| --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
 | ![The comment box on the Try Plus free button: image and drawing tools, the microphone and Post inside the box](docs/images/live-comment.png) | ![The phone board in compare mode, a thread sheet for a comment left on Production](docs/images/phone-comment.png) |
 
 ![Compare mode: Pricing on staging beside production, changed pixels in red, and a comment left on the Production side](docs/images/compare-comment.png)
