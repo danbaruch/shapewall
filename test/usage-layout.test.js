@@ -38,6 +38,11 @@ import {
   stepResize,
   subRowsFor,
   LAYOUT_FIT_LEAST,
+  LAYOUT_GAP,
+  LAYOUT_ROW,
+  LAYOUT_SUB_ROW,
+  fitKeyOf,
+  readFitted,
   visibleItems,
 } from '../src/hosted/usage-layout.js'
 
@@ -805,4 +810,52 @@ test('resize: the last widget of a full row made narrower gives its width to the
   const taller = resizeItem(layout, 'outcomes', 6, 7)
   assert.equal(at(taller, 'breakdown').h, 5)
   assert.equal(at(taller, 'breakdown').auto, true)
+})
+
+test('drawn heights: a card as tall as its content to the pixel, the stored rows the same pixels as ever', () => {
+  // The grid draws n fine rows as n * row + (n - 1) * gap pixels at y * (row + gap) (react-grid-layout's own math).
+  const pixels = (n) => n * LAYOUT_SUB_ROW + Math.max(0, n - 1) * LAYOUT_GAP
+  const top = (y) => y * (LAYOUT_SUB_ROW + LAYOUT_GAP)
+  // A stored row of h is drawn as it always was: h rows of 56 px and the gaps between them.
+  for (const h of [1, 2, 5, 10]) assert.equal(pixels(h * LAYOUT_SUB), h * LAYOUT_ROW + (h - 1) * LAYOUT_GAP, `${h} rows`)
+  assert.equal(top(3 * LAYOUT_SUB), 3 * (LAYOUT_ROW + LAYOUT_GAP))
+  // A card as tall as what it holds: drawn at exactly that height, whatever it is (no empty strip under it).
+  for (const px of [92, 129, 145, 183, 266, 280, 431]) assert.equal(pixels(subRowsFor(px)), px, `${px} px`)
+  // Never shorter than a heading and a line.
+  assert.equal(pixels(subRowsFor(10)), LAYOUT_FIT_LEAST)
+})
+
+test('drawn heights kept in the browser: only at this size of fine row; what an older build kept goes', () => {
+  const store = (entries) => {
+    const map = new Map(Object.entries(entries))
+    return {
+      map,
+      getItem: (key) => (map.has(key) ? map.get(key) : null),
+      setItem: (key, value) => map.set(key, String(value)),
+      removeItem: (key) => map.delete(key),
+    }
+  }
+  const ws = 'ws_0123456789abcdef01234567'
+  assert.equal(fitKeyOf(ws), `sw-usage-fit:${LAYOUT_SUB}:${ws}`)
+  // Kept by an older build (four fine rows to a row): never read as pixels, and removed.
+  const old = store({ [`sw-usage-fit:${ws}`]: JSON.stringify({ breakdown: 11 }) })
+  assert.deepEqual(readFitted(old, ws), {})
+  assert.equal(old.map.has(`sw-usage-fit:${ws}`), false)
+  // Kept by this build: read back, anything that is not a sensible height dropped.
+  const kept = store({ [fitKeyOf(ws)]: JSON.stringify({ breakdown: 184, top: 267, zero: 0, half: 1.5, huge: 99999, text: '12' }) })
+  assert.deepEqual(readFitted(kept, ws), { breakdown: 184, top: 267 })
+  // Broken or odd values: nothing kept.
+  assert.deepEqual(readFitted(store({ [fitKeyOf(ws)]: '{not json' }), ws), {})
+  assert.deepEqual(readFitted(store({ [fitKeyOf(ws)]: '[1,2]' }), ws), {})
+  assert.deepEqual(readFitted(store({}), ws), {})
+  // A storage that throws (private mode, blocked site data): nothing kept, no error.
+  const blocked = {
+    getItem() {
+      throw new Error('blocked')
+    },
+    removeItem() {
+      throw new Error('blocked')
+    },
+  }
+  assert.deepEqual(readFitted(blocked, ws), {})
 })
