@@ -8,11 +8,32 @@ import { anchorName, elementName, ownHeading, shorten } from '../src/capture/ele
 test('elementName: a short kind and, when it helps, a short name', () => {
   const cases = [
     // [facts, expected, why]
-    [{ tag: 'div', text: 'Free $0 forever 1 device Unlimited notes', heading: 'Free', headingLevel: 3 }, 'Card · Free', 'a card, by its heading'],
-    [{ tag: 'div', text: 'Simple pricing Start free', heading: 'Simple pricing', headingLevel: 1 }, 'Section · Simple pricing', 'a top-level block'],
+    [
+      { tag: 'div', text: 'Free $0 forever 1 device Unlimited notes', heading: 'Free', headingLevel: 3 },
+      'Card · Free',
+      'a card, by its heading',
+    ],
+    [
+      { tag: 'div', text: 'Simple pricing Start free', heading: 'Simple pricing', headingLevel: 1 },
+      'Section · Simple pricing',
+      'a top-level block',
+    ],
     [{ tag: 'div', text: 'Lumen Notes Features Pricing Templates Blog Sign in' }, 'Group', 'a wrapper never dumps its text'],
-    [{ tag: 'section', text: 'Everything in one calm place Three things', heading: 'Everything in one calm place, always', headingLevel: 2 }, 'Section · Everything in one calm place…', 'cut at a word'],
-    [{ tag: 'p', text: 'Start free. Upgrade when your notes outgrow one device. Pay yearly and save 17%.' }, 'Paragraph', 'a long paragraph'],
+    [
+      {
+        tag: 'section',
+        text: 'Everything in one calm place Three things',
+        heading: 'Everything in one calm place, always',
+        headingLevel: 2,
+      },
+      'Section · Everything in one calm place…',
+      'cut at a word',
+    ],
+    [
+      { tag: 'p', text: 'Start free. Upgrade when your notes outgrow one device. Pay yearly and save 17%.' },
+      'Paragraph',
+      'a long paragraph',
+    ],
     [{ tag: 'p', text: 'Yes.' }, 'Paragraph · Yes.', 'a short one'],
     [{ tag: 'h1', text: 'Simple pricing' }, 'Heading · Simple pricing', ''],
     [{ tag: 'h2', text: 'Notes that keep up with how you think, every single day' }, 'Heading · Notes that keep up with how…', ''],
@@ -60,9 +81,30 @@ test('shorten: at a word boundary, never mid-word, with an ellipsis', () => {
 
 test('ownHeading: the first, only heading at the highest level inside', () => {
   assert.deepEqual(ownHeading([{ level: 3, text: 'Free' }]), { level: 3, text: 'Free' })
-  assert.equal(ownHeading([{ level: 3, text: 'Free' }, { level: 3, text: 'Plus' }]), null, 'a grid of cards')
-  assert.deepEqual(ownHeading([{ level: 1, text: 'Pricing' }, { level: 3, text: 'Free' }, { level: 3, text: 'Plus' }]), { level: 1, text: 'Pricing' })
-  assert.equal(ownHeading([{ level: 3, text: 'Free' }, { level: 2, text: 'Later' }]), null, 'the top heading is not first')
+  assert.equal(
+    ownHeading([
+      { level: 3, text: 'Free' },
+      { level: 3, text: 'Plus' },
+    ]),
+    null,
+    'a grid of cards',
+  )
+  assert.deepEqual(
+    ownHeading([
+      { level: 1, text: 'Pricing' },
+      { level: 3, text: 'Free' },
+      { level: 3, text: 'Plus' },
+    ]),
+    { level: 1, text: 'Pricing' },
+  )
+  assert.equal(
+    ownHeading([
+      { level: 3, text: 'Free' },
+      { level: 2, text: 'Later' },
+    ]),
+    null,
+    'the top heading is not first',
+  )
   assert.equal(ownHeading([]), null)
   assert.equal(ownHeading([{ level: 2, text: '  ' }]), null)
 })

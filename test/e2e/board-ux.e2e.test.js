@@ -298,7 +298,7 @@ test('desktop: once a target is picked the page is calm; an empty draft moves, a
     assert.notEqual(await cursorOn(...middle(heading)), 'crosshair')
     assert.equal(await page.getAttribute('[data-sw-comment-hint]', 'data-sw-comment-hint'), 'composing')
     assert.match(await page.textContent('[data-sw-comment-hint-target]'), /Commenting on Link · Try Plus free/)
-    assert.match(await page.textContent('[data-sw-composer-target]'), /Pricing · Desktop · Link: Try Plus free/)
+    assert.match(await page.textContent('[data-sw-composer-target]'), /Pricing · Desktop · Link · Try Plus free/)
     await shot(page, 'ux-flow-1-composing')
 
     // An empty draft: a click elsewhere moves the target, and the outline

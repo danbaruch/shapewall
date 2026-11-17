@@ -8,6 +8,21 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - The board toolbar is Select, Hand, Comment and Draw: the Select text tool and its long hint pill are gone. Selecting text on a
   live page stays on the page's own bar (Select text, then Done), quietly: no note, Select stays the tool in use, and Esc, a click
   away from the page, or Comment or Draw ends it.
+- **Picking an element to comment on reads like a design tool.** The hover label names the thing the way a person would: a short
+  kind and a short name ("Card · Free", "Heading · Simple pricing", "Link · Start free", "Navigation · Main", "Paragraph")
+  instead of the raw text of everything inside it, and the same name is used in "Commenting on", a thread's "Pinned to" and
+  the chat's element mentions. Stored anchors and selectors are unchanged.
+- The label is a small tab outside the element's top left corner (below or inside it when there is no room) that never leaves
+  the page or the screen, and it and the outline keep one size on screen at any zoom. The outline only changes when the
+  element does, read once per frame.
+- Targeting prefers the block over inline words in it, and never picks the page body, a page-sized wrapper, a 1 px rule or
+  something mostly off the page. Hold Alt (Option on a Mac) to pick the container around the element; the hint says so while
+  an element is outlined.
+- After a pin is placed the hover outline goes; while a page's thread is open a click on the page closes the thread first (as in
+  Figma). The open thread's element, and the element of a pin or comment row under the mouse, get a quiet outline.
+- On a phone the element under the finger is outlined and named from touch-down, a drag on a page pans the board in comment mode
+  (it did nothing before) and a pinch zooms, and only a tap pins; the picked element's name then shows for a moment.
+- The frame around a page being drawn on is the same width on screen at any zoom.
 
 ## 0.10.0 - 2026-11-16
 

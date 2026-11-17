@@ -777,10 +777,13 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
             y: draft.y,
             anchor: draft.anchor,
             environment: draft.environment || null,
+            // What the picked element is called (a phone flashes its name).
+            targetKind: draft.targetKind || null,
+            targetName: draft.targetName || null,
           }
         : null,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [draft?.pageId, draft?.viewport, draft?.x, draft?.y, draft?.anchor, draft?.environment],
+    [draft?.pageId, draft?.viewport, draft?.x, draft?.y, draft?.anchor, draft?.environment, draft?.targetKind, draft?.targetName],
   )
   // A cluster of pins: zoom in until they come apart; at the closest zoom,
   // open the first one (the thread's arrows reach the rest).

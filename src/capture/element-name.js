@@ -233,7 +233,17 @@ export function elementName(facts = {}) {
   let name = ''
   if (label) name = label
   else if (kind === 'Image' || kind === 'Icon') name = alt || title
-  else if (kind === 'Input' || kind === 'Text area' || kind === 'Select' || kind === 'Search field' || kind === 'Checkbox' || kind === 'Radio button' || kind === 'Switch' || kind === 'Slider' || kind === 'File input')
+  else if (
+    kind === 'Input' ||
+    kind === 'Text area' ||
+    kind === 'Select' ||
+    kind === 'Search field' ||
+    kind === 'Checkbox' ||
+    kind === 'Radio button' ||
+    kind === 'Switch' ||
+    kind === 'Slider' ||
+    kind === 'File input'
+  )
     name = field || placeholder || title || (kind === 'Checkbox' || kind === 'Radio button' || kind === 'Switch' ? words : '')
   else if (CONTAINERS.has(kind)) name = heading || title
   else if (WORDY.has(kind)) name = words || collapse(facts.value) || alt || title
@@ -290,4 +300,18 @@ export function anchorName(anchor) {
   return elementName(facts).text
 }
 
-const CONTAINER_TAGS = new Set(['div', 'section', 'article', 'main', 'aside', 'header', 'footer', 'nav', 'form', 'ul', 'ol', 'table', 'figure'])
+const CONTAINER_TAGS = new Set([
+  'div',
+  'section',
+  'article',
+  'main',
+  'aside',
+  'header',
+  'footer',
+  'nav',
+  'form',
+  'ul',
+  'ol',
+  'table',
+  'figure',
+])

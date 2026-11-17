@@ -172,7 +172,8 @@ const NOTE =
 // While an element of a live page is outlined under the pointer, the
 // picking note says how to pick its container instead (Alt, Frame.jsx): the
 // two lines share one place, so the note does not jump.
-const ALT_KEY = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '') ? 'Option' : 'Alt'
+const ALT_KEY =
+  typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '') ? 'Option' : 'Alt'
 const isTargetHover = (state) => state.targetHover
 
 export function ToolNote({ wide, picking = null, composing = null, onDone }) {
@@ -205,7 +206,9 @@ export function ToolNote({ wide, picking = null, composing = null, onDone }) {
     const text = picking.draw
       ? `${verb} a page to draw on it. The drawing goes with your comment.`
       : picking.live
-        ? `${verb} an element on the live page to comment on it.`
+        ? wide
+          ? 'Click an element on the live page to comment on it.'
+          : 'Tap an element to comment on it.'
         : wide
           ? 'Click a page to comment. Zoom in until the page goes live to pin it to an element.'
           : 'Tap a page to pin a comment.'

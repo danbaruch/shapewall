@@ -93,11 +93,7 @@ export function useCommentDraft({
   }
   // What the comment is attached to, in plain words: the picked element
   // ("Heading · Notes that keep up…"), or the spot on a screenshot.
-  const draftTarget = draft
-    ? draft.anchor
-      ? draft.target || anchorName(draft.anchor)
-      : `a spot on ${targetTitle(draft.pageId)}`
-    : ''
+  const draftTarget = draft ? (draft.anchor ? draft.target || anchorName(draft.anchor) : `a spot on ${targetTitle(draft.pageId)}`) : ''
   const draftDescription = draft
     ? [
         targetTitle(draft.pageId),

@@ -234,6 +234,8 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
   }
   const onPointerDown = (event) => {
     if (!canPress || event.pointerType !== 'touch') return
+    // A pin on the page is its own button.
+    if (event.target.closest?.('[data-sw-pin], [data-sw-cluster]')) return
     if (pressing.current && pressing.current.id !== event.pointerId) {
       pressing.current.moved = true
       setPress(null)
@@ -364,7 +366,7 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
           top: frame.y,
           width: frame.w,
           height: frame.h,
-          ...(drawSurface ? { outlineWidth: 3 * pinScale, outlineOffset: 2 * pinScale } : null),
+          ...(drawSurface ? DRAW_OUTLINE : null),
         }}
         onClick={onClick}
         tabIndex={commentTarget ? 0 : undefined}
@@ -434,13 +436,17 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
               <Info size={10} className="mt-px shrink-0" aria-hidden="true" /> {note}
             </p>
           ) : null}
-          {openHere?.anchor && !drawingOn ? <AnchorTarget comment={openHere} box={positions?.get(openHere.id)?.box || null} thread /> : null}
+          {openHere?.anchor && !drawingOn ? (
+            <AnchorTarget comment={openHere} box={positions?.get(openHere.id)?.box || null} thread />
+          ) : null}
           {hoveredAnchored && hoveredAnchored !== openHere && !draft && !drawingOn ? (
             <AnchorTarget comment={hoveredAnchored} box={positions?.get(hoveredAnchored.id)?.box || null} />
           ) : null}
           {hover ? <HoverOutline hover={hover} native={native} frame={frame} /> : null}
           {press && canPress ? <HoverOutline hover={press} native={native} frame={frame} /> : null}
-          {draft?.anchor && !drawingOn ? <PickedOutline key={`${draft.x},${draft.y}`} draft={draft} frame={frame} flash={board.touch} /> : null}
+          {draft?.anchor && !drawingOn ? (
+            <PickedOutline key={`${draft.x},${draft.y}`} draft={draft} frame={frame} flash={board.touch} />
+          ) : null}
           <FrameDrawing frameKey={liveKey} native={native} shown={shownDrawing} />
         </div>
         <FramePins
@@ -478,6 +484,8 @@ function FrameLabel({ frame, children }) {
 }
 
 const isComposing = (state) => Boolean(state.draftSpot)
+// The page being drawn on: a strong frame, the same weight on screen at any zoom.
+const DRAW_OUTLINE = { outlineWidth: 'calc(3px * var(--sw-inv, 1))', outlineOffset: 'calc(2px * var(--sw-inv, 1))' }
 const toolOn = (value) => Boolean(value?.tool)
 
 // Outlines on a page, all the same weight on screen at any zoom (the stroke
@@ -577,17 +585,15 @@ function TargetLabel({ box, frame, kind, name, ...data }) {
   return (
     <span
       ref={ref}
-      className="pointer-events-none invisible absolute top-0 left-0 z-[6] flex h-5 origin-top-left items-center gap-1 overflow-hidden rounded-[5px] bg-accent px-1.5 text-[11px] leading-5 whitespace-nowrap text-accent-fg shadow-card"
+      className="pointer-events-none invisible absolute top-0 left-0 z-[6] block h-5 origin-top-left truncate rounded-[5px] bg-accent px-1.5 text-[11px] leading-5 whitespace-nowrap text-accent-fg shadow-card"
       style={{ maxWidth: Math.max(80, Math.min(280, frame.w * (zoom || 1) - 8)) }}
       {...data}
     >
-      <span className="shrink-0 font-semibold">{kind}</span>
+      <span className="font-semibold">{kind}</span>
       {name ? (
         <>
-          <span className="shrink-0 opacity-60" aria-hidden="true">
-            ·
-          </span>
-          <span className="min-w-0 truncate font-medium">{name}</span>
+          <span className="opacity-60">{' · '}</span>
+          <span className="font-medium">{name}</span>
         </>
       ) : null}
     </span>
@@ -725,7 +731,11 @@ function useHoverTarget({ enabled, map, doc, native }) {
   const onMouseMove = (event) => {
     if (!enabled) return
     const rect = event.currentTarget.getBoundingClientRect()
-    update(((event.clientX - rect.left) / rect.width) * native.width, ((event.clientY - rect.top) / rect.height) * native.height, event.altKey ? 1 : 0)
+    update(
+      ((event.clientX - rect.left) / rect.width) * native.width,
+      ((event.clientY - rect.top) / rect.height) * native.height,
+      event.altKey ? 1 : 0,
+    )
   }
   return { hover: enabled ? hover : null, onMouseMove, onMouseLeave: clear, describe, clear }
 }
@@ -873,7 +883,7 @@ export function CompareFrame({ pageId, frame }) {
           top: frame.y,
           width: frame.w,
           height: frame.h,
-          ...(drawSurface ? { outlineWidth: 3 * pinScale, outlineOffset: 2 * pinScale } : null),
+          ...(drawSurface ? DRAW_OUTLINE : null),
         }}
         onClick={board.commentMode ? onClick : undefined}
         tabIndex={commentTarget ? 0 : undefined}
@@ -922,9 +932,13 @@ export function CompareFrame({ pageId, frame }) {
             />
           ) : null}
           {openHere?.anchor && !drawingOn ? <AnchorTarget comment={openHere} box={null} thread /> : null}
-          {hoveredAnchored && hoveredAnchored !== openHere && !draft && !drawingOn ? <AnchorTarget comment={hoveredAnchored} box={null} /> : null}
+          {hoveredAnchored && hoveredAnchored !== openHere && !draft && !drawingOn ? (
+            <AnchorTarget comment={hoveredAnchored} box={null} />
+          ) : null}
           {hover ? <HoverOutline hover={hover} native={native} frame={frame} /> : null}
-          {draft?.anchor && !drawingOn ? <PickedOutline key={`${draft.x},${draft.y}`} draft={draft} frame={frame} flash={board.touch} /> : null}
+          {draft?.anchor && !drawingOn ? (
+            <PickedOutline key={`${draft.x},${draft.y}`} draft={draft} frame={frame} flash={board.touch} />
+          ) : null}
           <FrameDrawing frameKey={key} native={native} shown={shownDrawing} />
         </div>
         <FramePins
