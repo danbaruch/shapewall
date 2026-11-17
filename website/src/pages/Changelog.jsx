@@ -3,8 +3,10 @@ import { PageHeader } from '../components/page.jsx'
 import { Badge, Container } from '../components/ui.jsx'
 import { GITHUB_URL } from '../routes.js'
 import { LAUNCHED } from '../launch.js'
-// The repository's CHANGELOG.md, split into versions at build time by scripts/markdown.mjs (renderChangelog).
-import changelog from '../../../CHANGELOG.md'
+import { useEffect, useState } from 'react'
+// The repository's CHANGELOG.md, split into versions at build time by scripts/markdown.mjs (renderChangelog), in a
+// chunk of its own (src/changelog.js).
+import { loadChangelog, loadedChangelog } from '../changelog.js'
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
 // "2026-11-16" -> "November 16, 2026". Done by hand, not with the locale, so the server and the browser agree.
@@ -13,10 +15,10 @@ export function longDate(iso) {
   return `${MONTHS[month - 1]} ${day}, ${year}`
 }
 
-function VersionList({ className }) {
+function VersionList({ versions, className }) {
   return (
     <ul className={className}>
-      {changelog.versions.map((entry) => (
+      {versions.map((entry) => (
         <li key={entry.id}>
           <a
             href={`#${entry.id}`}
@@ -32,17 +34,31 @@ function VersionList({ className }) {
 }
 
 export default function Changelog() {
+  const [changelog, setChangelog] = useState(loadedChangelog)
+  useEffect(() => {
+    if (!changelog) loadChangelog().then(setChangelog, () => {})
+  }, [changelog])
+  const header = (
+    <PageHeader eyebrow="Changelog" title="What changed in each release">
+      Every Shapewall release, newest first. This page is built from CHANGELOG.md in the repository, so the two always match.
+    </PageHeader>
+  )
+  if (!changelog)
+    return (
+      <>
+        {header}
+        <div className="min-h-[60vh]" aria-busy="true" />
+      </>
+    )
   const latest = changelog.versions[0]
   return (
     <>
-      <PageHeader eyebrow="Changelog" title="What changed in each release">
-        Every Shapewall release, newest first. This page is built from CHANGELOG.md in the repository, so the two always match.
-      </PageHeader>
+      {header}
       <Container className="max-w-6xl lg:grid lg:grid-cols-[200px_minmax(0,1fr)] lg:gap-14">
         <aside className="hidden lg:block" aria-label="Versions">
           <div className="sticky top-16 max-h-[calc(100dvh-4rem)] overflow-y-auto py-12 pr-1">
             <h2 className="px-3 text-[12px] font-semibold tracking-wide text-faint uppercase">Versions</h2>
-            <VersionList className="mt-2 space-y-0.5" />
+            <VersionList versions={changelog.versions} className="mt-2 space-y-0.5" />
           </div>
         </aside>
         <div className="min-w-0 py-10 lg:py-12">
@@ -53,7 +69,7 @@ export default function Changelog() {
               </span>
               <ChevronDown className="size-4 text-faint transition-transform group-open:rotate-180" aria-hidden="true" />
             </summary>
-            <VersionList className="max-h-72 space-y-0.5 overflow-y-auto border-t border-line p-1.5" />
+            <VersionList versions={changelog.versions} className="max-h-72 space-y-0.5 overflow-y-auto border-t border-line p-1.5" />
           </details>
           <ol className="space-y-14">
             {changelog.versions.map((entry) => (

@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot, hydrateRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import App from './App.jsx'
+import { loadChangelog } from './changelog.js'
 import { registerServiceWorker } from './pwa.js'
 import './styles.css'
 
@@ -13,9 +14,11 @@ const app = (
     </BrowserRouter>
   </StrictMode>
 )
-// Built pages arrive prerendered (scripts/prerender.mjs); the dev server sends an empty shell.
-if (root.firstElementChild) hydrateRoot(root, app)
-else createRoot(root).render(app)
+// Built pages arrive prerendered (scripts/prerender.mjs); the dev server sends an empty shell. The changelog page
+// hydrates once its data (a chunk of its own) is here, so the first client render matches the HTML.
+const start = () => (root.firstElementChild ? hydrateRoot(root, app) : createRoot(root).render(app))
+if (/^\/changelog\/?$/.test(window.location.pathname)) loadChangelog().then(start, start)
+else start()
 
 registerServiceWorker()
 

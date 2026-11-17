@@ -3,6 +3,10 @@ import { StrictMode } from 'react'
 import { renderToString } from 'react-dom/server'
 import { StaticRouter } from 'react-router-dom'
 import App from './App.jsx'
+import { loadChangelog } from './changelog.js'
+
+// Data some pages load on their own in the browser, loaded once before any render.
+export const prepare = () => loadChangelog()
 
 export function render(path) {
   return renderToString(
