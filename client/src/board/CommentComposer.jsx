@@ -153,7 +153,13 @@ export function CommentComposer({
           <>
             <DictationButton dictation={dictation} touch={touch} disabled={busy} bubbleSide={touch ? 'top' : 'bottom'} />
             {touch || discard ? null : cancel}
-            {touch ? postButton : <Tooltip content={<PostKeys />}>{postButton}</Tooltip>}
+            {touch ? (
+              postButton
+            ) : (
+              <Tooltip content={<PostKeys />} side="bottom" align="end">
+                {postButton}
+              </Tooltip>
+            )}
           </>
         }
       >
