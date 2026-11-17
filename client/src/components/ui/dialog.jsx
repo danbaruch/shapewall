@@ -194,7 +194,7 @@ function DialogPanel({
             'relative flex gap-3 border-b border-line py-3.5 pr-5',
             back ? 'pl-2' : 'pl-5',
             wrapDescription ? 'items-start' : 'items-center',
-            draggable && 'touch-none',
+            draggable && 'touch-none select-none',
           )}
           data-sw-dialog-header="true"
           onPointerDown={
