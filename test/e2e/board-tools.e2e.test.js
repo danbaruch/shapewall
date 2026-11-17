@@ -488,7 +488,13 @@ test('desktop: Select text is on the page bar, not a tool: quiet, Select stays i
     // On, then a click on the empty canvas: off (and the page lets go).
     if (!(await page.locator('[data-sw-frame-bar="pricing|desktop"]').count())) await page.click(frame)
     await startSelecting()
-    // A spot of bare canvas (the pane, not a card or a bar).
+    // The page fills the canvas: pan (the wheel is still the board's while
+    // armed) until some bare canvas shows, then click it.
+    const pane = await rect(page, '[data-sw-canvas]')
+    await page.mouse.move(pane.left + pane.width / 2, pane.top + pane.height / 2)
+    await page.mouse.wheel(0, -700)
+    await page.waitForTimeout(400)
+    assert.equal(await page.getAttribute(frame, 'data-sw-select-text-state'), 'armed', 'panning keeps it on')
     const empty = await page.evaluate(() => {
       const box = document.querySelector('[data-sw-canvas]').getBoundingClientRect()
       for (let y = box.top + 80; y < box.bottom - 80; y += 20) {
