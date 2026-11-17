@@ -37,8 +37,8 @@ export function RevealNotice({ notice, onUndo, modeLabel, compact = false, inShe
 
 // The notes along the top of the canvas, about what the canvas shows: the
 // links hints, the first-visit tip, a draft put aside and the viewport switch
-// notice. The note for the tool in use (the comment hint, the drawing bar,
-// "Select text") sits above the tools at the bottom (BoardTools.jsx).
+// notice. The note for the tool in use (the comment hint, the drawing bar)
+// sits above the tools at the bottom (BoardTools.jsx).
 export function CanvasNotes({
   wide,
   commentMode,

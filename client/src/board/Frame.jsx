@@ -121,10 +121,11 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
   const scalesPins = pins.length > 0 || Boolean(draft) || (board.commentMode && live)
   const { pinScale, compactPins } = usePinLook(board, frame, { active: scalesPins, drafting: Boolean(draft) })
   const selecting = useBoardView((state) => state.selectingKey === liveKey) && live
-  // "Select text" has two steps, so the wheel stays the board's: armed (the
-  // page looks ready, the board still pans and zooms over it) and, after a
-  // click on the page, reading (the page has the mouse: select, copy) until
-  // the pointer leaves the page or Esc. CanvasNotes says which it is.
+  // Selecting text (Select text on the page's bar) has two steps, so the
+  // wheel stays the board's: armed (a text cursor; the board still pans and
+  // zooms over the page) and, after a click on the page, reading (the page
+  // has the mouse: select, copy) until the pointer leaves the page. Esc, a
+  // click away from the page or Done on its bar ends it (Board.jsx).
   const selectable = selecting && !board.commentMode
   const reading = useBoardView((state) => state.readingKey === liveKey) && selectable
   const { onReading } = board
@@ -229,7 +230,7 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
 
   const onClick = (event) => {
     event.stopPropagation()
-    // "Select text" is on: this click hands the mouse to the page.
+    // Selecting text: this click hands the mouse to the page.
     if (selectable) {
       if (!reading) onReading(liveKey)
       return

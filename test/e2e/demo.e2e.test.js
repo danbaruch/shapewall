@@ -156,7 +156,7 @@ test('view as: each role sees what it may do, on the board and in the console', 
     assert.match(await page.textContent('[data-sw-demo-banner]'), /Viewer/)
     assert.equal(await page.locator('[data-sw-comment-mode]').count(), 0, 'a viewer cannot comment')
     assert.equal(await page.locator('[data-sw-tool="draw"]').count(), 0, 'nor draw')
-    // A viewer moves around: Select and Hand. Select text joins them only while a page is live.
+    // A viewer moves around: Select and Hand, live page or not (Select text is on the page bar).
     assert.deepEqual(
       await page.$$eval('[data-sw-tools] [data-sw-tool]', (nodes) => nodes.map((node) => node.getAttribute('data-sw-tool'))),
       ['select', 'hand'],
@@ -170,11 +170,14 @@ test('view as: each role sees what it may do, on the board and in the console', 
     await page.waitForSelector('[data-sw-tools]')
     assert.deepEqual(
       await page.$$eval('[data-sw-tools] [data-sw-tool]', (nodes) => nodes.map((node) => node.getAttribute('data-sw-tool'))),
-      ['select', 'hand', 'text'],
+      ['select', 'hand'],
+    )
+    assert.ok(
+      (await page.locator('[data-sw-frame-bar] [data-sw-select-text], [data-sw-frame-more]').count()) > 0,
+      'Select text (or More) on the page bar',
     )
     await shot(page, '2-viewer-live')
     await page.click('.react-flow__controls-fitview')
-    await page.waitForSelector('[data-sw-tools] [data-sw-tool="text"]', { state: 'detached' })
     await shot(page, '2-viewer')
 
     // A member comments; in the console it has no admin sections.

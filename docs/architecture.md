@@ -161,8 +161,10 @@ dead spots; the minimap keeps its own wheel, and a pinch there zooms the board, 
 still cursor keeps panning instead of scrolling the thread. The side panels and dialogs are outside the canvas and scroll as usual.
 
 Live pages: the wheel over a live page is always the board's (the frame lets go of the mouse), so a live page never traps a pan.
-To scroll or select inside one, use **Select text** on its bar; its second step (a click on the page) hands the mouse to the page
-until the pointer leaves it.
+To scroll or select inside one, use **Select text** on the page's bar (it is not a board tool; Select stays the tool in use): the
+page gets a text cursor, and a click on it hands the mouse to the page until the pointer leaves it. Esc, a click away from the page,
+Comment or Draw, or **Done** (the same button, pressed) ends it. A capture that is not live has no text, so its bar offers **Open
+live** instead.
 
 The zoom keys take Ctrl/Cmd with +, - and 0 from the browser while the board has the keyboard, as Figma does; in a text field, a
 dialog, a menu or a list (and inside a live page that has focus) they stay the browser's page zoom. The middle button's press is
@@ -209,7 +211,7 @@ taken where it lands on the board, so it never starts autoscroll (Windows) or pa
   on a page drawn small zooms to it first, so the next tap can pin to an element.
 - The desktop toolbar never truncates: below 1440 px (1600 px with Capture and Agent) Links and Compare drop their labels, below
   1280 px the lists become icons and the capture time moves into a tooltip. Notes about what the canvas shows (the tip, the
-  viewport switch, the links note) are pills in one stack at its top. The board tools (Select, Hand, Comment, Draw, Select text) float at
+  viewport switch, the links note) are pills in one stack at its top. The board tools (Select, Hand, Comment, Draw) float at
   the bottom centre of the canvas, with the note for the tool in use (the comment hint, the drawing bar) just above them, so
   turning comment mode on never moves the canvas; they stay clear of the zoom controls and the minimap at every width
   (`client/src/board/toolDock.js`), and on a phone they are the bottom bar. The minimap

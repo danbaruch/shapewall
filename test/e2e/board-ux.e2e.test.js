@@ -739,7 +739,7 @@ test('desktop: a thread or composer card is dragged by its header, stays on the 
   }
 })
 
-test("desktop: over a live page the wheel is always the board's; Select text hands the mouse to the page only after a click, and says so", async () => {
+test("desktop: over a live page the wheel is always the board's; Select text (page bar) hands the mouse to the page only after a click, quietly", async () => {
   const { context, page, errors } = await openBoard(DESKTOP)
   try {
     const frame = '[data-sw-frame="pricing:desktop"]'
@@ -786,24 +786,20 @@ test("desktop: over a live page the wheel is always the board's; Select text han
     await page.mouse.click(...at)
     await boardHasTheWheel('after a click on the live page')
 
-    // Select text, step one (armed): the note says so, and the wheel is still the board's.
+    // Select text, step one (armed): a text cursor, no note, and the wheel is still the board's.
     if (await page.locator('[data-sw-frame-bar-toggle]').count()) await page.click('[data-sw-frame-bar-toggle]')
     await page.click('[data-sw-select-text]')
-    await page.waitForSelector('[data-sw-select-text-note="armed"]')
-    assert.match(await page.textContent('[data-sw-select-text-note]'), /Select text is on for Pricing · Desktop: click the page/)
-    assert.equal(await page.getAttribute(frame, 'data-sw-select-text-state'), 'armed')
+    await page.waitForSelector(`${frame}[data-sw-select-text-state="armed"]`)
+    assert.equal(await page.locator('[data-sw-tool-note]').count(), 0, 'no note above the tools')
+    assert.equal(await page.$eval(frame, (node) => getComputedStyle(node).cursor), 'text')
+    assert.equal(await page.getAttribute('[data-sw-tools]', 'data-sw-tools'), 'select', 'Select stays the tool in use')
     assert.equal(await page.$eval(`${frame} iframe`, (node) => getComputedStyle(node).pointerEvents), 'none')
     await boardHasTheWheel('Select text on, before a click')
 
     // Step two (reading): a click hands the mouse to the page, for selecting and copying.
     await page.mouse.click(...at)
-    await page.waitForSelector('[data-sw-select-text-note="reading"]')
-    assert.equal(await page.getAttribute(frame, 'data-sw-select-text-state'), 'reading')
+    await page.waitForSelector(`${frame}[data-sw-select-text-state="reading"]`)
     assert.notEqual(await page.$eval(`${frame} iframe`, (node) => getComputedStyle(node).pointerEvents), 'none')
-    assert.match(
-      await page.textContent('[data-sw-select-text-note]'),
-      /Selecting text on Pricing · Desktop\. Move the pointer off the page/,
-    )
     // The page takes the mouse: a double click in it selects a word there
     // (the frame is another origin, so the board itself cannot read it).
     const heading = await liveElementBox(page, frame, 'h1')
@@ -820,13 +816,13 @@ test("desktop: over a live page the wheel is always the board's; Select text han
 
     // The pointer leaves the page: armed again, and the wheel is the board's.
     await page.mouse.move(canvas.right + 200, 400, { steps: 6 })
-    await page.waitForSelector('[data-sw-select-text-note="armed"]')
+    await page.waitForSelector(`${frame}[data-sw-select-text-state="armed"]`)
     await boardHasTheWheel('Select text on, after reading and leaving the page')
 
-    // Done ends it.
-    await page.click('[data-sw-select-text-done]')
-    await page.waitForSelector('[data-sw-select-text-note]', { state: 'detached' })
-    assert.equal(await page.getAttribute(frame, 'data-sw-select-text-state'), null)
+    // Done (the same button on the page bar, pressed) ends it.
+    if (await page.locator('[data-sw-frame-bar-toggle]').count()) await page.click('[data-sw-frame-bar-toggle]')
+    await page.click('[data-sw-frame-bar] [data-sw-select-text][aria-pressed="true"]')
+    await page.waitForSelector(`${frame}[data-sw-select-text-state]`, { state: 'detached' })
 
     // Ctrl+wheel over a bar floating on the canvas zooms the board too.
     const controls = await rect(page, '[data-sw-canvas] .react-flow__panel, [data-sw-zoom-controls]').catch(() => null)

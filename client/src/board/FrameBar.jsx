@@ -38,7 +38,7 @@ const TITLE_ROW_PX = 30
 // rule as the Comment tool at the bottom of the board): it starts a comment
 // on this page, and it is the bar's primary button, labelled at every width:
 // a soft accent tint at rest, the solid fill while it is on (pressed). The
-// rest are quiet: Open live or Select text, Checks and History (with their
+// rest are quiet: Open live or Select text (Done while it is on), Checks and History (with their
 // counts, the same as the card header's badges),
 // Capture, then after a hairline the utilities (More, open in a new tab,
 // close). The page's name leads, with its screen size as a small chip. The
@@ -208,6 +208,7 @@ export default function FrameBar({
       label: 'Select text',
       name: 'Select text',
       icon: TextSelect,
+      tip: 'Select and copy text on the live page',
       disabled: !ready,
       pressed: false,
       onSelect: onToggleSelect,
