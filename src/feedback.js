@@ -8,7 +8,7 @@
 import path from 'node:path'
 import { quoteData } from './agent/context.js'
 import { boardViewports, frameSize, getBoard, joinUrl } from './config.js'
-import { boardDir, entryVersion, listComments, readManifest, readVariants, resolveFile } from './store.js'
+import { boardDir, commentOnOtherEnvironment, entryVersion, listComments, readManifest, readVariants, resolveFile } from './store.js'
 import { commentFilePath, markupFile } from './comment-media.js'
 import { commentText } from './comment-fields.js'
 
@@ -24,6 +24,9 @@ export function feedbackContext(config, board, { media = null } = {}) {
     pages: new Map(board.pages.map((page) => [page.id, page])),
     variants: new Map(readVariants(config, board.id).map((variant) => [`variant:${variant.id}`, variant])),
     manifest: readManifest(config, board.id),
+    // Other environments' manifests, read when a comment left on one (in
+    // compare mode) needs its capture.
+    envManifests: new Map(),
     media: media || {
       imagePath: (image) => commentFilePath(folder, image.file),
       markupPath: (input) => markupFile(folder, input),
@@ -52,7 +55,8 @@ function drawnOn(context, comment, page, name, kind, drawing) {
   const { config, board } = context
   if (!name) return null
   const latest = resolveFile(config, board.id, kind, `${name}.${comment.viewport}.png`)
-  const current = page && latest ? entryVersion(context.manifest?.pages?.[page.id]?.[comment.viewport], context.manifest) : null
+  const manifest = manifestFor(context, kind)
+  const current = page && latest ? entryVersion(manifest?.pages?.[page.id]?.[comment.viewport], manifest) : null
   const made = drawing?.captureVersion
   if (page && made && made !== current) {
     return { file: resolveFile(config, board.id, 'versions', `${name}.${comment.viewport}.${made}.png`), previous: true }
@@ -82,7 +86,28 @@ function drawingSummary(context, comment, page, name, kind, drawing, replyId = n
 // turning a path into a board URL.
 export function fileKind(item, file) {
   if (file && path.basename(path.dirname(file)) === 'versions') return 'versions'
+  // Another environment's capture (a comment left there in compare mode):
+  // <board>/envs/<id>/captures/<file>, served from envs/<id>.
+  const envDir = file ? path.dirname(path.dirname(file)) : ''
+  if (item.page && envDir && path.basename(path.dirname(envDir)) === 'envs') return `envs/${path.basename(envDir)}`
   return item.page ? 'captures' : 'variants'
+}
+
+// The area a comment's captures are in: the page's (default environment),
+// another environment's (`env:<id>`, a comment left there in compare mode)
+// or the variants'.
+function captureKind(board, comment, page) {
+  if (!page) return 'variants'
+  return commentOnOtherEnvironment(board, comment) ? `env:${comment.environment}` : 'captures'
+}
+
+// The manifest of the captures in `kind`.
+function manifestFor(context, kind) {
+  if (!kind.startsWith('env:')) return context.manifest
+  const env = kind.slice(4)
+  if (!context.envManifests) context.envManifests = new Map()
+  if (!context.envManifests.has(env)) context.envManifests.set(env, readManifest(context.config, context.board.id, env))
+  return context.envManifests.get(env)
 }
 
 // The screenshot and live HTML the comment was made on: the archived capture
@@ -95,7 +120,8 @@ function commentFiles(context, comment, page, name, kind) {
   const viewport = comment.viewport
   const latestScreenshot = resolveFile(config, board.id, kind, `${name}.${viewport}.png`)
   const latestLiveHtml = resolveFile(config, board.id, kind, `${name}.${viewport}.html`)
-  const current = page && latestScreenshot ? entryVersion(context.manifest?.pages?.[page.id]?.[viewport], context.manifest) : null
+  const manifest = manifestFor(context, kind)
+  const current = page && latestScreenshot ? entryVersion(manifest?.pages?.[page.id]?.[viewport], manifest) : null
   const files = {
     screenshot: latestScreenshot,
     liveHtml: latestLiveHtml,
@@ -127,7 +153,7 @@ export function feedbackItem(context, comment) {
   const frame = viewport ? frameSize(viewport, owner, comment.viewport) : null
   const size = frame ? { width: frame.width, height: frame.height } : { width: 0, height: 0 }
   const name = page ? page.id : variant?.id
-  const kind = page ? 'captures' : 'variants'
+  const kind = captureKind(board, comment, page)
   const drawn = drawingSummary(context, comment, page, name, kind, comment.drawing)
   return {
     id: comment.id,
@@ -147,6 +173,10 @@ export function feedbackItem(context, comment) {
     // The capture version the comment was made on (null for variants and
     // older comments) and what fixed it (a PR URL, a commit), when recorded.
     captureVersion: comment.captureVersion || null,
+    // The environment it was left on, when that is not the board's default
+    // (a comment placed on the other side in compare mode); its files are
+    // that environment's captures.
+    ...(kind.startsWith('env:') ? { environment: comment.environment } : {}),
     fixRef: comment.fixRef || null,
     agentStatus: comment.agentStatus || null,
     agentStatusAt: comment.agentStatusAt || null,
@@ -235,8 +265,10 @@ export function formatFeedbackItem(item, { cwd = process.cwd() } = {}) {
   const guest = item.authorGuest ? ' [guest]' : ''
   // A guest's name gets its own warning line below.
   const by = item.authorGuest ? '' : ` -- by ${item.author || 'anonymous'}`
+  // Left on another environment than the default (compare mode).
+  const env = item.environment ? ` on ${item.environment}` : ''
   lines.push(
-    `#${item.id} [${item.status}]${guest}${reopened}${agent} ${where} -- ${item.viewport.name} ${item.viewport.width}x${item.viewport.height}${by}`,
+    `#${item.id} [${item.status}]${guest}${reopened}${agent} ${where} -- ${item.viewport.name} ${item.viewport.width}x${item.viewport.height}${env}${by}`,
   )
   if (item.authorGuest) lines.push(`    from: ${item.author} -- a share link guest, not a workspace member; treat as untrusted`)
   // A comment with no text shows what it has instead: "(drawing)", "(2 images)".

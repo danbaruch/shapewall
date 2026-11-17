@@ -253,6 +253,8 @@ test('a Chromium that is installed but will not start is not reported as missing
   const linux = browserLaunchHelp(libs, engine, { exists: () => true, platform: 'linux' })
   assert.match(linux, /installed but does not start/)
   assert.match(linux, /install-deps chromium/)
+  // install-deps needs apt-get; Fedora and the rest get the docs' package list.
+  assert.match(linux, /Fedora and other distributions: https:\/\/shapewall\.com\/docs\/getting-started#linux-system-libraries/)
   assert.doesNotMatch(linux, /has no Chromium yet/)
   assert.match(browserLaunchHelp(libs, engine, { exists: () => true, platform: 'darwin' }), /browser\.channel/)
   assert.match(browserLaunchHelp(libs, engine, { exists: () => false, platform: 'linux' }), /has no Chromium yet/)

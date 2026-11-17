@@ -229,10 +229,13 @@ export function commentFileUrl(boardId, file) {
 
 // URL of a live page's element map (src/capture/element-map.js): JSON the
 // board places pins from, so it never reads the live frame's DOM.
+// `kind`: captures, variants, or envs/<id> (another environment's capture,
+// one side of a compare card).
 export function elementsUrl(boardId, kind, file, version) {
   if (DEMO) return demoFile(boardId, kind, file)
   if (STATIC) return `data/boards/${enc(boardId)}/${kind}/${enc(file)}`
-  return `api/boards/${enc(boardId)}/${kind === 'variants' ? 'variant-elements' : 'elements'}/${enc(file)}?v=${enc(version || '0')}`
+  const route = kind.startsWith('envs/') ? `env-elements/${enc(kind.slice(5))}` : kind === 'variants' ? 'variant-elements' : 'elements'
+  return `api/boards/${enc(boardId)}/${route}/${enc(file)}?v=${enc(version || '0')}`
 }
 
 // URL of a live HTML document (served with a strict CSP).

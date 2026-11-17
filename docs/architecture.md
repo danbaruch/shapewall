@@ -145,11 +145,28 @@ touch):
 | Space+drag, middle-button drag, drag on the board | Pan (Space and middle drag work over pages and in comment mode as well) |
 | The Hand tool (H): drag anywhere                  | Pan, over pages and pins too; a click selects and opens nothing         |
 | Touch: one finger, two-finger pinch               | Pan, zoom                                                               |
+| + or =, -, with or without Ctrl/Cmd               | Zoom in, zoom out (about the middle of the canvas)                      |
+| Ctrl/Cmd+0, Shift+0                               | Zoom to 100%                                                            |
+| Shift+1                                           | Fit the whole board                                                     |
 
 Space pans while the mouse is over the canvas, except in text fields and on a control reached with the keyboard (Space presses it).
 A Space+click never selects a page or starts a comment. Wheel and drag steps move the camera without saving it; the URL camera and the
 settled zoom update once it rests (150 ms after the last wheel event, or on mouse up). Safari's trackpad pinch (gesture events) zooms
 the same way. Scrolling inside a `nowheel` element (the frame bar, a live page being selected) scrolls it instead.
+
+Over something floating on the canvas (the zoom controls, the tools, a note, an open thread or composer, which live in a portal
+but sit over the canvas), a list that overflows in the wheel's axis scrolls itself and anything else pans the board, so there are no
+dead spots; the minimap keeps its own wheel, and a pinch there zooms the board, never the browser page. Wheel events less than
+120 ms apart are one gesture and stay where it started: a trackpad pan that carries on (momentum) while a thread slides under the
+still cursor keeps panning instead of scrolling the thread. The side panels and dialogs are outside the canvas and scroll as usual.
+
+Live pages: the wheel over a live page is always the board's (the frame lets go of the mouse), so a live page never traps a pan.
+To scroll or select inside one, use **Select text** on its bar; its second step (a click on the page) hands the mouse to the page
+until the pointer leaves it.
+
+The zoom keys take Ctrl/Cmd with +, - and 0 from the browser while the board has the keyboard, as Figma does; in a text field, a
+dialog, a menu or a list (and inside a live page that has focus) they stay the browser's page zoom. The middle button's press is
+taken where it lands on the board, so it never starts autoscroll (Windows) or pastes the primary selection (Linux).
 
 ## Board rendering
 
@@ -168,8 +185,16 @@ the same way. Scrolling inside a `nowheel` element (the frame bar, a live page b
   branching journey is shown one path at a time (`resolvePath` with the branches picked); the other branches' arrows are dashed.
 - Compare mode lays two frames per viewport side by side (one per environment) and shows screenshots only, with the cached diff mask
   over the second. A variant keeps its single frame there, beside its page's pair: it is one capture of one idea, with no second
-  environment to compare it against. New comments are off while comparing (a comment belongs to a page, not to one environment, so
-  which capture a click meant is unanswerable); the compare bar says so, and replies, resolving and "jump to comment" all work.
+  environment to compare it against. Comments work while comparing: a comment placed on one side stores that side's environment
+  (`environment`, an environment id; none outside compare mode, which is the default environment), and each side draws the
+  comments left on it (`commentSide.js`), so a pin is on its own side in every later compare, swapped too. It sticks to that
+  side's elements: each environment's element map is served on its own route (`/api/boards/:id/env-elements/:env/:file`)
+  and a static export carries them under `envs/<id>/`. A comment on an
+  environment that is not one of the two compared is drawn on the first, and its thread says so. Outside compare mode the board
+  shows the default environment, so a comment left on another one keeps its pin there and its thread names the environment it was
+  left on. Only the default environment keeps capture versions, so a comment on another one stores no `captureVersion`, and an
+  agent's `files` point at that environment's capture. On a phone the compare bar is one row (the two environments, swap, the view
+  options behind one button, leave), so the board and the thread sheet keep the room they have outside compare mode.
 - Each frame's label (viewport, environment, live) sits in a strip between the card header and the frame, never on the captured page.
 - The selected card's action bar belongs to one view: switching viewport, compare or a journey, and Fit view, clear the selection, and
   the bar hides while the frame is a thumbnail on screen (its longer side under 160 px). Tapping a thumbnail flies to it first, leaving

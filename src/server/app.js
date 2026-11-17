@@ -567,11 +567,14 @@ export function createApp({
   app.get('/api/boards/:id/live/:file', sendLive('captures'))
   app.get('/api/boards/:id/variant-live/:file', sendLive('variants'))
   // Element maps: where each element of a live page is, so the board places
-  // pins without reading the frame (src/capture/element-map.js).
+  // pins without reading the frame (src/capture/element-map.js). `kind` as
+  // sendImage's.
   const sendElements = (kind) =>
     withBoard((req, res, board) => {
       const name = req.params.file
-      const file = name.endsWith('.elements.json') ? resolveFile(config, board.id, kind, name) : null
+      const file = name.endsWith('.elements.json')
+        ? resolveFile(config, board.id, typeof kind === 'function' ? kind(req) : kind, name)
+        : null
       if (!file) return fail(res, 404, 'not_found', 'No such element map.')
       res.setHeader('Cache-Control', req.query.v ? 'private, max-age=604800, immutable' : 'private, no-cache')
       res.setHeader('Cross-Origin-Resource-Policy', 'same-origin')
@@ -579,6 +582,11 @@ export function createApp({
     })
   app.get('/api/boards/:id/elements/:file', sendElements('captures'))
   app.get('/api/boards/:id/variant-elements/:file', sendElements('variants'))
+  // Another environment's, for a comment placed on its side of a compare card.
+  app.get(
+    '/api/boards/:id/env-elements/:env/:file',
+    sendElements((req) => `env:${req.params.env}`),
+  )
 
   // Images on comments: only names Shapewall wrote, as the image type they
   // are (checked when stored), never rendered as a document.

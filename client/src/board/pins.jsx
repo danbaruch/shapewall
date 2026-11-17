@@ -10,6 +10,7 @@ import { pinSpot } from './layout'
 import { MentionText } from './Mentions'
 import { AuthorAvatar, AuthorLabel, commentAuthor, isAgentAuthor, repliesLabel } from './commentParts'
 import { commentText } from '../../../src/comment-fields.js'
+import { DURATION, EASE, SPRING, m } from '../lib/animate'
 
 // The pin's pointed corner is on its spot (pinSpot).
 const TAIL = {
@@ -344,17 +345,25 @@ export function clusterPins(items, frame, zoom, keep = null, distance = CLUSTER_
 // Where a new comment will go, while it is being written: your own bubble.
 export function DraftPin({ draft, scale, name, colorKey }) {
   const spot = pinSpot(draft)
+  // The pin lands where it was placed: it grows from its point (the tail
+  // corner) with a short, critically damped spring. The outer box keeps the
+  // place and the size, so nothing measuring the pin sees it move.
   return (
-    <span
-      className={cn(
-        'pointer-events-none absolute z-20 flex h-7 w-7 items-center justify-center rounded-full border-2 border-white text-[11px] font-semibold text-white shadow-pop ring-[3px] ring-accent',
-        TAIL[`${spot.flipX},${spot.flipY}`],
-      )}
-      style={{ ...place(spot, scale), background: personColor(colorKey || name || 'you') }}
-      aria-hidden="true"
-      data-sw-draft-pin="true"
-    >
-      {initials(name || 'You')}
+    <span className="pointer-events-none absolute z-20 flex h-7 w-7" style={place(spot, scale)} aria-hidden="true" data-sw-draft-pin="true">
+      <m.span
+        className={cn(
+          'flex h-full w-full items-center justify-center rounded-full border-2 border-white text-[11px] font-semibold text-white shadow-pop ring-[3px] ring-accent',
+          TAIL[`${spot.flipX},${spot.flipY}`],
+        )}
+        style={{
+          background: personColor(colorKey || name || 'you'),
+          transformOrigin: `${spot.flipY ? 'top' : 'bottom'} ${spot.flipX ? 'right' : 'left'}`,
+        }}
+        initial={{ scale: 0.4, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1, transition: { opacity: { duration: DURATION.fast, ease: EASE.standard }, scale: SPRING } }}
+      >
+        {initials(name || 'You')}
+      </m.span>
     </span>
   )
 }

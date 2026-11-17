@@ -949,13 +949,14 @@ async function pinBox(page, id) {
   return last
 }
 
-test('desktop: comparing, the pins are on the first environment frame, and a row in the list lands on one', async () => {
+test('desktop: comparing, comments made outside compare are on the default environment frame, and a row in the list lands on one', async () => {
   const { context, page, errors } = await openBoard(DESKTOP, { query: '?cmp=staging_production' })
   try {
     await page.waitForSelector('[data-sw-compare-bar]')
     await page.waitForSelector('[data-sw-pin], [data-sw-pin-cluster]')
-    // Every pin is on a Staging frame: one per comment, never the same one
-    // on both frames of a pair, and the diff overlay beside it stays clear.
+    // Every pin is on a Staging frame (Staging is the default environment,
+    // which every comment made outside compare mode is on): one per comment,
+    // never the same one on both frames of a pair.
     const on = await page.$$eval('[data-sw-pin], [data-sw-pin-cluster]', (nodes) =>
       nodes.map((node) => node.closest('[data-sw-frame]')?.getAttribute('data-sw-frame')),
     )
@@ -1030,11 +1031,11 @@ test('phone: comparing, a row in the list lands on a pin you can see, not behind
     const panel = await sheetPanel(page, phoneComment.id)
     const canvas = await rect(page, '[data-sw-canvas]')
     const bar = await rect(page, '[data-sw-compare-bar]')
-    // Compare mode's bar pushes the canvas well down the window: that is the
-    // shape of board this has to work on, and what 0.7.3's sheet knew nothing
-    // about (it took its share of the window and covered the lot).
-    assert.ok(bar.height > 60, `the compare bar is ${Math.round(bar.height)} px tall at 390`)
-    assert.ok(canvas.top > 160, `the canvas starts ${Math.round(canvas.top)} px down the window`)
+    // Compare mode's bar is one row on a phone (it was four, 145 px at 390,
+    // and what 0.7.3's sheet knew nothing about): the canvas starts one row
+    // lower than outside compare mode, not a third of the way down.
+    assert.ok(bar.height <= 60, `the compare bar is ${Math.round(bar.height)} px tall at 390`)
+    assert.ok(canvas.top < 200, `the canvas starts ${Math.round(canvas.top)} px down the window`)
     // The sheet leaves a strip of board above itself, measured from the top
     // of the canvas rather than the top of the window.
     const strip = panel.top - canvas.top

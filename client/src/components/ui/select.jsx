@@ -3,6 +3,7 @@ import { cva } from 'class-variance-authority'
 import { Check, ChevronDown } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { useOverlayOpen } from './use-overlay-open'
+import { FloatingPanel } from './popover'
 
 // A custom select (never the OS picker). The list opens as a popover under
 // the trigger on every screen; items are 44 px below the lg breakpoint.
@@ -69,13 +70,15 @@ export function SelectTrigger({ size, tone, className, children, onKeyDown, ...p
 export function SelectContent({ className, children, align = 'start', ...props }) {
   return (
     <SelectPrimitive.Portal>
-      <SelectPrimitive.Content
+      <FloatingPanel
+        Content={SelectPrimitive.Content}
+        origin="var(--radix-select-content-transform-origin)"
         position="popper"
         sideOffset={4}
         align={align}
         collisionPadding={8}
         className={cn(
-          'z-[60] max-h-[min(var(--radix-select-content-available-height),24rem)] min-w-[max(var(--radix-select-trigger-width),10rem)] max-w-[calc(100vw-16px)] animate-pop-in overflow-hidden rounded-lg border border-line bg-surface text-fg shadow-pop',
+          'z-[60] max-h-[min(var(--radix-select-content-available-height),24rem)] min-w-[max(var(--radix-select-trigger-width),10rem)] max-w-[calc(100vw-16px)] overflow-hidden rounded-lg border border-line bg-surface text-fg shadow-pop',
           className,
         )}
         {...props}
@@ -83,7 +86,7 @@ export function SelectContent({ className, children, align = 'start', ...props }
         <SelectPrimitive.Viewport className="p-1" nonce={globalThis.__webpack_nonce__}>
           {children}
         </SelectPrimitive.Viewport>
-      </SelectPrimitive.Content>
+      </FloatingPanel>
     </SelectPrimitive.Portal>
   )
 }

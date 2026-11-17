@@ -27,6 +27,7 @@ import { Button, Tooltip } from '../components/ui'
 import { useBoardView } from './boardView'
 import { KeyTip } from './KeyTip'
 import { POINTER_TOOLS, hasDivider } from './tools'
+import { LayoutMotion, SPRING, m, rise } from '../lib/animate'
 
 export const TOOLS = {
   select: { label: 'Select', tip: 'Select: click a page or a pin', keys: ['V'], shortcut: 'V', icon: MousePointer2 },
@@ -76,69 +77,85 @@ export function BoardTools({ tools, active, onTool, touch, shift = 0 }) {
     buttons[next].focus()
   }
   return (
-    <div
-      ref={bar}
-      className={cn(
-        'pointer-events-auto relative z-30 flex items-center gap-0.5 rounded-lg border border-line bg-surface/95 p-0.5 shadow-pop backdrop-blur',
-        touch && 'rounded-xl',
-      )}
-      style={shift ? { transform: `translateX(${shift}px)` } : undefined}
-      role="toolbar"
-      aria-label="Board tools"
-      aria-orientation="horizontal"
-      onKeyDown={onKeyDown}
-      data-sw-tools={active}
-    >
-      {tools.map((id) => {
-        const tool = TOOLS[id]
-        const on = id === active
-        // Select and Hand in use are quiet: the neutral fill of a chosen
-        // segment (the screen-size switch). The filled accent is for the
-        // tools that change what a click does: Comment, Draw, Select text.
-        const quiet = on && POINTER_TOOLS.has(id)
-        const button = (
-          <Button
-            key={id}
-            variant={on && !quiet ? 'default' : 'ghost'}
-            size={touch ? 'icon' : 'icon-sm'}
-            className={cn(
-              'shadow-none focus-visible:outline-offset-1',
-              touch && 'rounded-lg',
-              !on && 'text-fg/80 hover:text-fg',
-              quiet && 'bg-surface-2 text-fg ring-1 ring-line-strong/70 ring-inset hover:bg-surface-2',
-            )}
-            data-sw-tool-look={on ? (quiet ? 'quiet' : 'accent') : undefined}
-            aria-label={tool.label}
-            aria-pressed={on}
-            aria-keyshortcuts={tool.shortcut}
-            tabIndex={on ? 0 : -1}
-            onClick={() => onTool(id)}
-            data-sw-tool={id}
-            // The name the tests and the docs' screenshots have always used.
-            data-sw-comment-mode={id === 'comment' ? 'true' : undefined}
-          >
-            <tool.icon size={touch ? 19 : 16} aria-hidden="true" />
-          </Button>
-        )
-        // Touch screens have no hover (and a tap would leave the tip up).
-        const item = touch ? (
-          button
-        ) : (
-          <Tooltip key={id} content={<KeyTip label={tool.tip} keys={tool.keys} />} side="top">
-            {button}
-          </Tooltip>
-        )
-        // A hairline between moving around (Select, Hand) and the rest.
-        return id === 'hand' && divided ? (
-          <Fragment key={id}>
-            {item}
-            <span className="mx-0.5 h-5 w-px shrink-0 bg-line" aria-hidden="true" data-sw-tools-divider="true" />
-          </Fragment>
-        ) : (
-          item
-        )
-      })}
-    </div>
+    <LayoutMotion>
+      <div
+        ref={bar}
+        className={cn(
+          'pointer-events-auto relative z-30 flex items-center gap-0.5 rounded-lg border border-line bg-surface/95 p-0.5 shadow-pop backdrop-blur',
+          touch && 'rounded-xl',
+        )}
+        style={shift ? { transform: `translateX(${shift}px)` } : undefined}
+        role="toolbar"
+        aria-label="Board tools"
+        aria-orientation="horizontal"
+        onKeyDown={onKeyDown}
+        data-sw-tools={active}
+      >
+        {tools.map((id) => {
+          const tool = TOOLS[id]
+          const on = id === active
+          // Select and Hand in use are quiet: the neutral fill of a chosen
+          // segment (the screen-size switch). The filled accent is for the
+          // tools that change what a click does: Comment, Draw, Select text.
+          const quiet = on && POINTER_TOOLS.has(id)
+          // The fill of the tool in use is one shape that slides to the next
+          // tool (layoutId) and takes its look on the way, quiet or accent.
+          const button = (
+            <Button
+              key={id}
+              variant="ghost"
+              size={touch ? 'icon' : 'icon-sm'}
+              className={cn(
+                'relative isolate shadow-none focus-visible:outline-offset-1',
+                touch && 'rounded-lg',
+                !on && 'text-fg/80 hover:text-fg',
+                on && (quiet ? 'text-fg hover:bg-transparent' : 'text-accent-fg hover:bg-transparent hover:text-accent-fg'),
+              )}
+              data-sw-tool-look={on ? (quiet ? 'quiet' : 'accent') : undefined}
+              aria-label={tool.label}
+              aria-pressed={on}
+              aria-keyshortcuts={tool.shortcut}
+              tabIndex={on ? 0 : -1}
+              onClick={() => onTool(id)}
+              data-sw-tool={id}
+              // The name the tests and the docs' screenshots have always used.
+              data-sw-comment-mode={id === 'comment' ? 'true' : undefined}
+            >
+              {on ? (
+                <m.span
+                  layoutId="sw-tool-fill"
+                  aria-hidden="true"
+                  className={cn(
+                    'absolute inset-0 -z-10 rounded-[inherit]',
+                    quiet ? 'bg-surface-2 ring-1 ring-line-strong/70 ring-inset' : 'bg-accent',
+                  )}
+                  transition={{ layout: SPRING }}
+                  data-sw-tool-fill="true"
+                />
+              ) : null}
+              <tool.icon size={touch ? 19 : 16} aria-hidden="true" />
+            </Button>
+          )
+          // Touch screens have no hover (and a tap would leave the tip up).
+          const item = touch ? (
+            button
+          ) : (
+            <Tooltip key={id} content={<KeyTip label={tool.tip} keys={tool.keys} />} side="top">
+              {button}
+            </Tooltip>
+          )
+          // A hairline between moving around (Select, Hand) and the rest.
+          return id === 'hand' && divided ? (
+            <Fragment key={id}>
+              {item}
+              <span className="mx-0.5 h-5 w-px shrink-0 bg-line" aria-hidden="true" data-sw-tools-divider="true" />
+            </Fragment>
+          ) : (
+            item
+          )
+        })}
+      </div>
+    </LayoutMotion>
   )
 }
 
@@ -159,7 +176,8 @@ export function ToolNote({ wide, picking = null, composing = null, selectText = 
     // The note says what the comment is on, and Esc (or Cancel) goes back
     // one step, to picking.
     return (
-      <div
+      <m.div
+        {...rise}
         className={cn(NOTE, 'border border-line bg-surface text-fg')}
         role="status"
         data-sw-tool-note="true"
@@ -172,7 +190,7 @@ export function ToolNote({ wide, picking = null, composing = null, selectText = 
         <Button size="xs" variant="ghost" className="shrink-0 rounded-full" onClick={composing.onCancel} data-sw-comment-hint-cancel="true">
           Cancel (Esc)
         </Button>
-      </div>
+      </m.div>
     )
   }
   if (picking) {
@@ -187,7 +205,8 @@ export function ToolNote({ wide, picking = null, composing = null, selectText = 
           ? 'Click a page to comment. Zoom in until the page goes live to pin it to an element.'
           : 'Tap a page to pin a comment.'
     return (
-      <div
+      <m.div
+        {...rise}
         className={cn(NOTE, 'bg-accent text-accent-fg')}
         role="status"
         data-sw-tool-note="true"
@@ -212,14 +231,15 @@ export function ToolNote({ wide, picking = null, composing = null, selectText = 
         >
           Done{wide ? ' (Esc)' : ''}
         </Button>
-      </div>
+      </m.div>
     )
   }
   if (selectText) {
     // "Select text" is a mode with two steps; this says which, and how to
     // get the board's scrolling and zoom back.
     return (
-      <div
+      <m.div
+        {...rise}
         className={cn(NOTE, 'border border-line bg-surface text-fg')}
         role="status"
         data-sw-tool-note="true"
@@ -234,7 +254,7 @@ export function ToolNote({ wide, picking = null, composing = null, selectText = 
         <Button size="xs" variant="ghost" className="shrink-0 rounded-full" onClick={selectText.onDone} data-sw-select-text-done="true">
           Done
         </Button>
-      </div>
+      </m.div>
     )
   }
   return null

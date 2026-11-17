@@ -28,7 +28,7 @@ export function useJourneyKeys({ journey, builder, goStep, step, closeJourney })
 }
 
 // Comment mode keys: C turns it on and off, Esc leaves it.
-export function useCommentModeKeys({ commentMode, setCommentMode, canComment, comparePair, setDraft, keepDraft }) {
+export function useCommentModeKeys({ commentMode, setCommentMode, canComment, setDraft, keepDraft }) {
   useEffect(() => {
     if (!commentMode) return undefined
     // Escape leaves comment mode, unless it is closing something first (the
@@ -48,9 +48,10 @@ export function useCommentModeKeys({ commentMode, setCommentMode, canComment, co
     return () => window.removeEventListener('keydown', onKey, true)
   }, [commentMode, setCommentMode])
 
-  // C turns comment mode on and off (not while typing or in a dialog).
+  // C turns comment mode on and off (not while typing or in a dialog), in
+  // compare mode too.
   useEffect(() => {
-    if (!canComment || comparePair) return undefined
+    if (!canComment) return undefined
     const onKey = (event) => {
       if ((event.defaultPrevented && !isIgnoredTypeahead(event)) || event.altKey || event.ctrlKey || event.metaKey || event.repeat) return
       if (event.key !== 'c' && event.key !== 'C') return
@@ -65,7 +66,7 @@ export function useCommentModeKeys({ commentMode, setCommentMode, canComment, co
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [canComment, comparePair, keepDraft, setCommentMode, setDraft])
+  }, [canComment, keepDraft, setCommentMode, setDraft])
 }
 
 // J opens the next journey, Shift+J the previous one; past either end the

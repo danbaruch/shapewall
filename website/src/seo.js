@@ -53,7 +53,7 @@ function jsonLd(route) {
           url: `${SITE_URL}/`,
           description: route.description,
           applicationCategory: 'DeveloperApplication',
-          operatingSystem: 'macOS, Linux, Windows (Node.js 22 or newer)',
+          operatingSystem: 'macOS, Linux, Windows (Node.js 22.19 or newer)',
           softwareVersion: VERSION,
           license: LICENSES,
           // Free to use once it is public. Before launch there is nothing a visitor can get, so no Offer.

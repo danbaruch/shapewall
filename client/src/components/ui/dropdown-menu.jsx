@@ -1,5 +1,6 @@
 import { DropdownMenu as MenuPrimitive } from 'radix-ui'
 import { cn } from '../../lib/utils'
+import { FloatingPanel } from './popover'
 import { useOverlayOpen } from './use-overlay-open'
 
 // A menu of actions. Back closes it while it is open (see useOverlayOpen).
@@ -11,19 +12,23 @@ export function DropdownMenu({ open, onOpenChange, defaultOpen, ...props }) {
 export const DropdownMenuTrigger = MenuPrimitive.Trigger
 export const DropdownMenuGroup = MenuPrimitive.Group
 
-export function DropdownMenuContent({ className, sideOffset = 4, align = 'end', ...props }) {
+export function DropdownMenuContent({ className, sideOffset = 4, align = 'end', children, ...props }) {
   return (
     <MenuPrimitive.Portal>
-      <MenuPrimitive.Content
+      <FloatingPanel
+        Content={MenuPrimitive.Content}
+        origin="var(--radix-dropdown-menu-content-transform-origin)"
         sideOffset={sideOffset}
         align={align}
         collisionPadding={8}
         className={cn(
-          'z-[60] max-h-[var(--radix-dropdown-menu-content-available-height)] min-w-44 overflow-y-auto data-[state=open]:animate-pop-in rounded-lg border border-line bg-surface p-1 text-fg shadow-pop',
+          'z-[60] max-h-[var(--radix-dropdown-menu-content-available-height)] min-w-44 overflow-y-auto rounded-lg border border-line bg-surface p-1 text-fg shadow-pop',
           className,
         )}
         {...props}
-      />
+      >
+        {children}
+      </FloatingPanel>
     </MenuPrimitive.Portal>
   )
 }

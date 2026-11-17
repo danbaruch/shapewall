@@ -104,6 +104,12 @@ colours meet WCAG AA on `surface` and `surface-2` (7:1 for High contrast), in li
 | `Collapsible` (+ Trigger, Content), `Disclosure`                                          | Show and hide a section in place; replaces native `<details>`. The trigger has a turning chevron and is 44 px below `lg`. `Disclosure` = `title`, `meta`, children, `defaultOpen`; extra props (`data-sw-*`) go on the root.                                      |
 | `Skeleton`                                                                                | A loading placeholder shaped like what is coming (`className` sets the size). `aria-hidden`; give the screen one `role="status"` label.                                                                                                                           |
 
+In the Console, an action that cannot be taken back and ends a whole thing (delete a project, a workspace or an account, leave a
+workspace) sits in a `DangerCard` (a red edge) as a `DangerButton`: the `danger` variant with a hairline red border, 44 px on touch
+and 36 px from `lg`. Row actions in a list (revoke, remove, end a session) stay plain `danger` buttons. A secret shown only once (a
+new token, invite link or share link) has a `ShownOnceNotice` above it: the `warn` tone, "Copy it now: it is shown once". Both live in
+`client/src/console/components.jsx`.
+
 Local installations offer **Workspace Console** from the board profile menu, including when no agent is connected or the agent owner key is absent.
 The local Console uses the hosted Console's header, sidebar and card layout with real boards from this installation. Its **Agents** section
 holds everything about agents (the Agents card, the connection details and the endpoint form); its **Settings** section covers this
@@ -178,7 +184,8 @@ once the page is live), **Checks**, **History**, **Capture**, open in a new tab,
 the page, the next click on it pins (to the element, on a live page), and a click anywhere else is comment mode's as ever. From
 the keyboard, Enter on the button moves the focus to the page, and Enter there opens the composer near the top left of what
 shows of it; Esc gives the focus back to the button. Only people who have the Comment tool have the button (the same rule: not
-viewers, view-only links, compare mode or static exports). The first time someone who has not started a comment in this browser
+viewers, view-only links or static exports). In compare mode a page is two frames: from the keyboard, Enter on the button moves
+the focus to the first one, Tab to the second, and Enter places the comment on that side. The first time someone who has not started a comment in this browser
 selects a page, the button wears an accent ring for about two and a half seconds (`shapewall.tip.pageComment` in local storage;
 the demo's Reset forgets it). It is a ring, not an animation, so reduced motion needs no other path.
 

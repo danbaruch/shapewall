@@ -151,7 +151,13 @@ test('desktop 1440: attach by picker and paste, draw a box and an arrow, post, t
     // the hint makes way.
     const camera = () => page.$eval('.react-flow__viewport', (node) => node.style.transform)
     const start = await camera()
+    // Before drawing, Cancel sits beside Post inside the box; while drawing
+    // (the tools fill that row) it moves to the line under the box.
+    const cancelInRow = () => page.locator(`${composer} [data-sw-composer-actions] [data-sw-composer-cancel]`).count()
+    assert.equal(await cancelInRow(), 1, 'Cancel is in the action row before drawing')
     await page.click(`${composer} [data-sw-draw-tool="box"]`)
+    await page.waitForSelector(`${composer} [data-sw-composer-footer] [data-sw-composer-cancel]`, { state: 'attached' })
+    assert.equal(await cancelInRow(), 0, 'Cancel is under the box while drawing')
     const bar = '[data-sw-draw-bar="composer"]'
     await page.waitForSelector(bar)
     assert.equal(await page.getAttribute(`${bar} [data-sw-draw-tool="box"]`, 'aria-pressed'), 'true')

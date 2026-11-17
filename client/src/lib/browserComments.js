@@ -141,6 +141,10 @@ export async function browserCommentsRequest(method, url, body, fetchJson) {
       body: cleanBody(body?.body),
       author: cleanAuthor(body?.author),
       ...(body?.anchor && typeof body.anchor === 'object' ? { anchor: body.anchor } : {}),
+      // The side of a compare card it was placed on (an environment id).
+      ...(typeof body?.environment === 'string' && /^[a-z0-9][a-z0-9-]{0,63}$/.test(body.environment)
+        ? { environment: body.environment }
+        : {}),
       captureVersion: null,
       status: 'open',
       createdAt: now,

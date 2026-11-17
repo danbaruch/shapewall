@@ -99,17 +99,18 @@ export async function exportStatic(
   return { out: target, boards: config.boards.length, files }
 }
 
-// Every ordered pair of captured environments: their screenshots under
-// envs/<id>/, the diff masks under diffs/<a>_<b>/, and the answer the
+// Every ordered pair of captured environments: their screenshots (and
+// element maps, for comments on that side) under envs/<id>/, the diff masks under diffs/<a>_<b>/, and the answer the
 // server's /compare would give in compare/<a>_<b>.json.
 async function exportCompare(config, board, dir) {
   const captured = board.environments.filter((env) => readManifest(config, board.id, env.id))
   if (captured.length < 2) return 0
   const png = (name) => name.endsWith('.png')
+  const shot = (name) => png(name) || name.endsWith('.elements.json')
   let files = 0
   for (const env of captured) {
     // The default environment's screenshots are already in captures/.
-    if (env !== board.environments[0]) files += copyMatching(capturesDir(config, board.id, env.id), path.join(dir, 'envs', env.id), png)
+    if (env !== board.environments[0]) files += copyMatching(capturesDir(config, board.id, env.id), path.join(dir, 'envs', env.id), shot)
   }
   fs.mkdirSync(path.join(dir, 'compare'), { recursive: true })
   for (const a of captured) {

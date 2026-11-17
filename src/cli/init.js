@@ -194,7 +194,9 @@ export async function initCi(flags, out, { fetch }) {
 export function initNextHint({ baseUrl, givenBaseUrl, fromSitemap, found = null, file = CONFIG_FILE }) {
   const run = `run "${cliCommand('capture')}" and then "${cliCommand('serve --open')}"`
   // Links and sitemaps stop at an app's front door, so say so where people start.
-  const app = 'App screens behind Start, a guest entry or sign-in need their own pages with actions (docs/config.md, "Capturing an app").'
+  // A URL, not a repository path: someone who ran npx has no docs/ folder.
+  const app =
+    'App screens behind Start, a guest entry or sign-in need their own pages with actions ("Capturing an app": https://shapewall.com/docs/config#capturing-an-app-not-just-its-landing-page).'
   if (fromSitemap) return `Next: make sure ${baseUrl} is up, then ${run}.\n${app}`
   if (found === 'sitemap' || found === 'links') return `Next: ${run}.\n${app}`
   if (found === 'none')

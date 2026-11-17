@@ -138,6 +138,12 @@ export function commentRoutes(ctx) {
         if (!page && !variant) fail(404, 'unknown_page', 'That page is not on this board.')
         const allowed = page ? page.viewports || [] : Object.keys(view.viewports || {})
         if (!allowed.includes(body?.viewport)) fail(400, 'invalid_viewport', `Viewport must be one of ${allowed.join(', ')}.`)
+        // Placed on one side of a compare card: that environment (src/store.js
+        // validateCommentEnvironment, the same rules).
+        const envIds = (view.environments || []).map((env) => env.id)
+        const environment = body?.environment ?? null
+        if (environment !== null && environment !== '' && (typeof environment !== 'string' || variant || !envIds.includes(environment)))
+          fail(400, 'invalid_environment', variant ? 'A variant has no environments.' : `Environment must be one of ${envIds.join(', ')}.`)
         const { x, y } = body
         if (
           typeof x !== 'number' ||
@@ -164,6 +170,7 @@ export function commentRoutes(ctx) {
           body: text,
           ...authorOf(access),
           ...(anchor ? { anchor } : {}),
+          ...(environment ? { environment } : {}),
           captureVersion: null,
           status: 'open',
           createdAt: at,

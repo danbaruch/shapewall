@@ -33,6 +33,9 @@ export function useCompare({ boardId, params, updateParams, environmentList, set
     return {
       a,
       b,
+      // The pair and the board's environments: which side a comment is on (commentSide.js).
+      pair: comparePair,
+      environments,
       files: compareData?.files || {},
       failures: compareData?.failures || {},
       pages: compareData?.pages || {},

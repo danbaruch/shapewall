@@ -2,7 +2,7 @@
 // the canvas (Select, Hand, Comment, Draw, Select text) instead of a Comment button
 // in the top bar. One tool at a time, Esc ends on Select, the note for the
 // tool in use sits just above the tools, the arrow keys move between them,
-// nothing overlaps at any width, compare mode keeps Select and Hand only, and on a phone
+// nothing overlaps at any width, compare mode drops only Select text, and on a phone
 // they are the bottom bar and step aside for a sheet.
 // Set SHAPEWALL_SHOTS=<dir> to keep screenshots of each step.
 import { after, before, test } from 'node:test'
@@ -177,8 +177,9 @@ test('desktop: the tools float at the bottom centre of the canvas, the top bar h
     // the accent); the accent is for the tools that change what a click does.
     const paint = (id) =>
       page.$eval(tool(id), (node) => {
-        const style = getComputedStyle(node)
-        return { look: node.getAttribute('data-sw-tool-look'), background: style.backgroundColor, color: style.color }
+        // The fill is its own shape that slides between tools (BoardTools.jsx).
+        const style = getComputedStyle(node.querySelector('[data-sw-tool-fill]') || node)
+        return { look: node.getAttribute('data-sw-tool-look'), background: style.backgroundColor, color: getComputedStyle(node).color }
       })
     const accent = await page.evaluate(() => {
       const probe = document.createElement('span')
@@ -230,7 +231,10 @@ test('desktop: the tools float at the bottom centre of the canvas, the top bar h
     // (The pointer off it: hover lightens the fill; and the colour fades in.)
     await page.mouse.move(600, 300)
     await page.waitForFunction(
-      ([selector, want]) => getComputedStyle(document.querySelector(selector)).backgroundColor === want,
+      ([selector, want]) => {
+        const button = document.querySelector(selector)
+        return getComputedStyle(button.querySelector('[data-sw-tool-fill]') || button).backgroundColor === want
+      },
       [tool('comment'), accent],
     )
     assert.equal((await paint('select')).look, null, 'and Select is plain again')
@@ -434,7 +438,7 @@ test('desktop: Draw, then a page, goes straight to drawing with the bar above th
   }
 })
 
-test('desktop: Select text is offered on a live page and says so otherwise; compare mode keeps only Select and Hand', async () => {
+test('desktop: Select text is offered on a live page and says so otherwise; compare mode keeps the rest, Draw too', async () => {
   const { context, page, errors } = await openBoard(DESKTOP)
   try {
     await page.waitForSelector(TOOLS)
@@ -483,19 +487,63 @@ test('desktop: Select text is offered on a live page and says so otherwise; comp
     // (The selected card keeps its own history entry: nothing to wait for but the tool.)
     await page.waitForSelector(`${TOOLS}[data-sw-tools="select"]`)
 
-    // Compare shows screenshots only and takes no comments: Select and Hand are left.
+    // Compare shows screenshots only, so Select text goes; comments work on
+    // either side, so Comment and Draw stay.
     await page.click('[data-sw-view-menu]')
     await page.click('[role="menu"] [data-sw-compare-toggle]')
     await page.waitForSelector('[data-sw-compare-bar]')
-    await page.waitForSelector('[data-sw-comment-mode]', { state: 'detached' })
+    await page.waitForSelector(`${TOOLS} [data-sw-tool="select-text"]`, { state: 'detached' })
     assert.deepEqual(
       await page.$$eval('[data-sw-tools] [data-sw-tool]', (nodes) => nodes.map((node) => node.getAttribute('data-sw-tool'))),
-      ['select', 'hand'],
+      ['select', 'hand', 'comment', 'draw'],
     )
-    assert.equal(await page.locator('[data-sw-tools-divider]').count(), 0, 'no divider with nothing after it')
-    await shot(page, 'tools-8-compare-select-and-hand')
+    await shot(page, 'tools-8-compare-tools')
+    // The comparison loaded and the camera done fitting the pairs.
+    await page.waitForSelector('[data-sw-compare-status="ready"]')
+    let camera = null
+    for (let tries = 0; tries < 40; tries += 1) {
+      const now = await page.evaluate(() => document.querySelector('.react-flow__viewport')?.style.transform)
+      if (now === camera) break
+      camera = now
+      await page.waitForTimeout(150)
+    }
+    // Draw, then the Production side of a page: drawing on that capture.
+    await page.click(tool('draw'))
+    await page.waitForSelector('[data-sw-comment-hint="draw"]')
+    const side = '[data-sw-frame="features:desktop:production"]'
+    await page.waitForSelector(side)
+    // The part of it the canvas shows (the camera may have it half under the panel).
+    const sideBox = await rect(page, side)
+    const view = await rect(page, '[data-sw-canvas]')
+    const left = Math.max(sideBox.left, view.left)
+    const right = Math.min(sideBox.right, view.right)
+    await page.mouse.click((left + right) / 2, Math.max(sideBox.top, view.top) + 60)
+    const drawBar = '[data-sw-draw-bar="composer"]'
+    await page.waitForSelector(drawBar)
+    assert.equal(await page.textContent(`${drawBar} [data-sw-draw-bar-title]`), 'Drawing on Features · Desktop · Production')
+    await page.waitForSelector(`${side} [data-sw-draw-input="box"]`)
+    await page.waitForTimeout(700)
+    const drawn = await rect(page, side)
+    const canvas = await rect(page, '[data-sw-canvas]')
+    const dx = Math.max(drawn.left, canvas.left) + 60
+    const dy = Math.max(drawn.top, canvas.top) + 80
+    await page.mouse.move(dx, dy)
+    await page.mouse.down()
+    await page.mouse.move(dx + 120, dy + 70, { steps: 5 })
+    await page.mouse.up()
+    await page.waitForSelector(`${drawBar} [data-sw-draw-count="1"]`)
+    await shot(page, 'tools-9-compare-drawing')
+    await page.click(`${drawBar} [data-sw-draw-bar-done]`)
+    await page.waitForSelector('[data-sw-composer-popover] [data-sw-draw-count="1"]')
+    assert.match(await page.textContent('[data-sw-composer-popover]'), /Production/)
+    // Dropping the drawing asks first.
+    await page.focus('[data-sw-comment-input]')
+    await page.keyboard.press('Escape')
+    await page.waitForSelector('[data-sw-composer-discard]')
+    await page.click('[data-sw-composer-discard-yes]')
+    await page.waitForSelector('[data-sw-composer-popover]', { state: 'detached' })
     await page.click('[data-sw-compare-close]')
-    await page.waitForSelector('[data-sw-comment-mode]')
+    await page.waitForSelector('[data-sw-compare-bar]', { state: 'detached' })
     assert.deepEqual(errors, [])
   } finally {
     await context.close()
@@ -1061,7 +1109,7 @@ test('page bar: a live page pins the comment to the element under the click', as
   }
 })
 
-test('page bar: a read-only board, and compare mode, have no Comment on it', async () => {
+test('page bar: a read-only board has no Comment on it; compare mode does', async () => {
   const viewer = await listen(createApp({ config, readOnly: true }))
   const home = boardUrl
   try {
@@ -1084,14 +1132,14 @@ test('page bar: a read-only board, and compare mode, have no Comment on it', asy
     boardUrl = home
     await new Promise((resolve) => viewer.close(resolve))
   }
-  // Compare mode: pages are selected, nobody comments.
+  // Compare mode: Comment on the bar too (a comment goes on the side it is placed on).
   const { context, page, errors } = await openBoard(DESKTOP, { query: '?cmp=staging_production' })
   try {
     await page.waitForSelector('[data-sw-compare-bar]')
     await page.click('[data-sw-page-jump]')
     await page.click('[role="listbox"] [data-sw-option="pricing"]')
     await page.waitForSelector('[data-sw-frame-bar]')
-    assert.equal(await page.locator('[data-sw-frame-comment]').count(), 0, 'no Comment while comparing')
+    assert.equal(await page.locator('[data-sw-frame-comment]').count(), 1, 'Comment while comparing')
     assert.deepEqual(errors, [])
   } finally {
     await context.close()

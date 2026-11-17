@@ -3,6 +3,50 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## 0.10.0 - 2026-11-16
+
+Comments in compare mode, Figma-style canvas navigation, a pass over the hosted console, calmer motion everywhere, and an
+easier first run.
+
+- **Comment in compare mode.** A comment can be placed on either side of a compare card and stays on the environment it was
+  placed on: its pin is on that side in later compares (swapped too), its thread says "Left on <environment>", and replies,
+  resolve and reopen, edits, images, drawing and dictation all work there. A drawing goes on that side's capture. On a phone the
+  compare bar is one row, so the thread sheet keeps its full height and the pin lands on screen above it.
+- **Compare mode, smaller things.** Esc leaves compare once nothing else is open (a thread, the composer, a menu or comment
+  mode closes first), and the "Select text works on a live page" hint no longer lingers after compare starts.
+- **Canvas navigation like a design tool.** The wheel and trackpad pan the board everywhere, including over the zoom controls,
+  the tools, notes and an open thread or composer (a list that scrolls still scrolls); a pinch there zooms the board, never
+  the page. A trackpad's momentum pan keeps panning when a thread slides under the pointer. The zoom keys follow Figma:
+  + and - with or without Ctrl/Cmd, Ctrl/Cmd+0 and Shift+0 for 100%, Shift+1 to fit. A middle-button press on the board is
+  the board's (no autoscroll, no paste).
+- **Motion.** Dialogs, sheets, menus, popovers, toasts and the drawer in the usage dashboard now come and go with short,
+  critically damped animations (120 to 240 ms, nothing bouncy): sheets spring up from the bottom on a phone and can be pulled
+  down by their header to close, the canvas's thread and composer cards pop in at their pin, a new comment's pin lands where it
+  is placed, the microphone settles in as it goes live, the comment list animates rows coming, going and reordering, the
+  compare bar drops in, and the fill of the tool in use slides to the next tool. Closing is instant for the app (focus, Esc,
+  clicks); only a picture of the closing layer animates. Everything follows "reduce motion": movement is dropped and only a
+  short fade remains. The animation code ([Motion](https://motion.dev), MIT) loads after the first paint, in its own files.
+- **A calmer new-comment box.** On a desktop, Cancel sits beside Post inside the box (as in the edit box) and the keys
+  (Enter posts, Shift+Enter new line, Esc cancels) are Post's tooltip, so under the box there is at most one quiet line: who
+  the comment is signed as, or the length near the limit.
+- **One failed panel no longer takes the board down.** When the code for Checks, the agent chat, a settings, share or
+  history dialog, or the console's usage pages fails to load, that panel shows "This panel did not load" with Try again (and
+  Reload), and the rest of the board or console keeps working.
+- **Hosted console.** Closing a dialog returns focus to the button that opened it; a "Skip to content" link; the recovery
+  code sign-in has its own heading and no stale passkey error; after a recovery-code sign-in a sensitive change says the new
+  passkey is on hold and until when; account activity in sentence case; 44 px touch targets on the usage filters, back links
+  and the phone header's logo. The workspace name now shows once (in the switcher) instead of four times. "That handle is
+  taken" appears under the Handle field and focuses it. New tokens, invite links and share links share one "shown once"
+  notice, and every destructive action of its kind (delete project, delete workspace, leave workspace, delete account) uses
+  the same danger button.
+- **Usage dashboard cards fit their content exactly.** Content-sized cards (lists, breakdowns, budgets) no longer carry up to
+  17 px of empty space at the bottom. Saved layouts are unchanged.
+- **An easier first run.** The README and Getting started lead with the shortest path; the Linux system libraries steps were
+  checked on fresh Debian and Fedora installs, and for other distributions the docs now offer the official Playwright Docker
+  image. `shapewall init` points to the config guide on shapewall.com rather than a repository path someone who ran `npx` does
+  not have. `npm run demo -- --full` now ends with every shot ok: its Status page answers 404 on purpose and is captured as an
+  expected error page. The website states the real Node.js floor, 22.19.
+
 ## 0.9.1 - 2026-11-16
 
 A cleaner comment composer. Each comment, reply and edit is now one box with the image and drawing tools, the microphone and

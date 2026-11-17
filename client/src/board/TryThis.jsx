@@ -10,6 +10,7 @@
 import { useState } from 'react'
 import { BarChart3, Bot, Check, ChevronDown, MessageSquare, MessageSquarePlus, Sparkles, X } from 'lucide-react'
 import { Button, IconButton } from '../components/ui'
+import { m, pop } from '../lib/animate'
 import { cn } from '../lib/utils'
 
 const KEY = 'shapewall.demo.try'
@@ -86,9 +87,11 @@ export function TryThis({ touch, chip = false, done, onOpenComment, onComment, o
     )
   }
   return (
-    <section
+    <m.section
+      {...pop}
+      style={{ transformOrigin: touch ? 'bottom center' : 'bottom left' }}
       className={cn(
-        'pointer-events-auto absolute z-30 animate-pop-in rounded-xl border border-line bg-surface/95 p-3 text-fg shadow-pop backdrop-blur',
+        'pointer-events-auto absolute z-30 rounded-xl border border-line bg-surface/95 p-3 text-fg shadow-pop backdrop-blur',
         touch ? 'inset-x-2 bottom-[calc(4rem+env(safe-area-inset-bottom,0px))]' : 'bottom-16 left-3 w-72',
       )}
       aria-label="Try this"
@@ -171,6 +174,6 @@ export function TryThis({ touch, chip = false, done, onOpenComment, onComment, o
       <p className="mt-2 border-t border-line px-2 pt-2 text-xs text-muted" data-sw-try-nav="true">
         {touch ? 'Drag to move around, pinch to zoom.' : 'Scroll to move, Ctrl+scroll or pinch to zoom, Space+drag to pan.'}
       </p>
-    </section>
+    </m.section>
   )
 }

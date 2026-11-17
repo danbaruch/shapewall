@@ -75,6 +75,7 @@ item:
 | `files.version`    | The capture version those two are; the latest when the one it was made on is gone.               |
 | `files.latest*`    | `latestScreenshot`, `latestLiveHtml`, `latestVersion`: the page as it is now.                    |
 | `variant`          | Set when the comment is on a variant instead of the page.                                        |
+| `environment`      | Left on a non-default environment, in compare mode: its id. `files` are that capture.            |
 
 The fields from version 0.1 are unchanged; `agentStatus`, `agentStatusAt`, `replies`, `fixRef` and `captureVersion` were added (older
 comments read as `null`, `null`, `[]`, `null` and `null`), then `mentions` (handles mentioned in the text or a reply, `["robin",
@@ -115,6 +116,15 @@ shapewall comments selectors --page signup --viewport phone --text "create accou
 
 `--text` keeps the elements whose text contains those words (any case); `--json` prints `{ selectors: [{ selector, text }] }`. The list
 comes from the capture's element map (`<output>/<board>/captures/<page>.<viewport>.elements.json`), so capture the page first.
+
+### Deleting a comment
+
+```sh
+shapewall comments delete 12
+```
+
+This removes the comment, its replies and its images for good, so it asks first. Without a terminal to ask in (a script, an agent's
+shell) it refuses unless you add `--yes`. To close a comment and keep its history, resolve it instead.
 
 ### Agent status
 

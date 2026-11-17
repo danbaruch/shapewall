@@ -385,8 +385,10 @@ changes from every process with its own environment; without it, each command se
 shapewall doctor [--install-browser] [--port 4600] [--no-launch] [--agent-acp "CMD"] [--json]
 ```
 
-Checks Node, the browser (by starting it), the config, the port, the output folder, the notification channels and the chat agent, and
-says what to fix. With `--agent-acp` (or `SHAPEWALL_AGENT_ACP`) it prints the agent command, starts the agent, does the ACP handshake
+Checks Node, Shapewall's own dependencies, the config (and warns about keys it does not know, with the one most likely meant), the
+browser (by starting it), the output folder, the port (the one `serve` last used for this project, and only suggests a free one),
+whether the site in `baseUrl` answers, the board client, the notification channels, the chat agent and GitHub connect, and says what
+to fix. It ends "Ready." or "Ready, with N warnings above."; a FAIL line says what to run next. With `--agent-acp` (or `SHAPEWALL_AGENT_ACP`) it prints the agent command, starts the agent, does the ACP handshake
 (no prompt) and stops it. `--no-launch` finds the browser and the ACP agent without starting either. `--install-browser` downloads
 the Chromium build Shapewall's Playwright needs first; it needs no config (a missing one is a skip, not a FAIL, so it works in the
 Shapewall clone before the demo). Exits 1 when a check fails, so it works as a first CI step. A GitHub token that GitHub rejects (401) is a FAIL.
@@ -562,7 +564,7 @@ Commands
       --approve-on-host     paired devices cannot approve agent commands
       --open                also open the board in your browser, with agent settings
       --read-only           no comments or captures from the UI
-      --accounts            require local passkey accounts after owner setup (Node 22.13+)
+      --accounts            require local passkey accounts after owner setup (Node 22.19+)
       --accounts-origin URL fixed HTTPS origin (default: loopback URL or --tailscale URL)
       --no-capture          comments allowed, captures only from the CLI
       --buzz-bridge FILE    owner-only existing Buzz conversation (private operator map; docs/buzz.md)

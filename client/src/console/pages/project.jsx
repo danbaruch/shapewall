@@ -4,7 +4,21 @@
 import { useState } from 'react'
 import { ArrowLeft, ArrowUpRight, Globe, KeyRound, LayoutDashboard, Link2, Plus, Trash2 } from 'lucide-react'
 import { Button, EmptyState } from '../../components/ui'
-import { Card, CardHeader, ConfirmDialog, CopyField, FormError, LoadError, Loading, Notice, PageHeader, Switch, Time } from '../components'
+import {
+  Card,
+  CardHeader,
+  ConfirmDialog,
+  CopyField,
+  DangerButton,
+  DangerCard,
+  FormError,
+  LoadError,
+  Loading,
+  Notice,
+  PageHeader,
+  Switch,
+  Time,
+} from '../components'
 import { api, serverOrigin, wsUrl } from '../lib/api'
 import { formatDate } from '../lib/format'
 import { Link, leaveTo, withParam } from '../lib/router'
@@ -230,24 +244,18 @@ export function ProjectPage({ projectId }) {
         {isAdmin ? <AgentPolicySection workspaceId={workspaceId} projectId={projectId} /> : null}
 
         {isAdmin ? (
-          <Card className="border-bad/30">
+          <DangerCard>
             <CardHeader
               icon={Trash2}
               title="Delete project"
               description="Its boards, captures, comments, tokens and share links go with it."
               actions={
-                <Button
-                  size="touch"
-                  variant="danger"
-                  onClick={() => setDeleting(true)}
-                  className="border border-bad/40 lg:h-9"
-                  data-sw-delete-project
-                >
+                <DangerButton onClick={() => setDeleting(true)} data-sw-delete-project>
                   Delete project
-                </Button>
+                </DangerButton>
               }
             />
-          </Card>
+          </DangerCard>
         ) : null}
       </div>
       {isAdmin ? (

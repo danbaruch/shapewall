@@ -1,6 +1,4 @@
-Start with a running site, choose its pages, capture them and open the wall.
-
-## Install
+Start with a running site, then capture its pages and open the board. Four commands get you there.
 
 <!-- prelaunch -->
 
@@ -9,62 +7,77 @@ Start with a running site, choose its pages, capture them and open the wall.
 
 <!-- /prelaunch -->
 
-Shapewall runs on Linux, macOS and Windows with **Node.js 22.19 or newer**. Linux is the primary tested platform.
+## Install
 
-On a bare Linux server, a container or WSL, the downloaded Chromium also needs system libraries: run
-`sudo npx playwright install-deps chromium` once (`shapewall doctor` tells you when this is the problem).
+You need:
 
-### In your project
+- **Node.js 22.19 or newer**, on Linux, macOS or Windows. Linux is the primary tested platform. Check with `node -v`.
+- **Chromium for captures.** `shapewall doctor --install-browser` downloads the build Shapewall needs. To use a Chrome you already
+  have instead, set `"browser": { "channel": "chrome" }` in the config and skip the download.
+- **A site to point it at**, already running: your dev server, a preview deploy, staging or production.
+
+### Linux system libraries
+
+A Linux desktop usually has everything Chromium needs. A minimal install (a server, a container, WSL) does not: there
+`shapewall doctor` reports "Playwright Chromium does not start". Install the libraries once, as root (put `sudo` in front if you
+are not root).
+
+On **Debian and Ubuntu**:
 
 ```sh
-npm install --save-dev %INSTALL_PACKAGE%
+npx playwright install-deps chromium
+```
+
+If Shapewall is installed in the project, run that there, so it uses Shapewall's own Playwright version. `shapewall doctor` prints
+the exact command, version included.
+
+On **Fedora**, that command fails (it needs `apt-get`). Install the libraries with `dnf`:
+
+```sh
+dnf install nss atk at-spi2-atk cups-libs libxkbcommon libXcomposite libXdamage libXrandr mesa-libgbm pango alsa-lib
+```
+
+On **any other distribution**, the simplest answer is the official Playwright Docker image, which has Chromium and every
+library it needs. Capture inside it, in your project folder (the image's version matches Shapewall's Playwright, 1.64.1):
+
+```sh
+docker run --rm --ipc=host --network host -v "$PWD":/work -w /work mcr.microsoft.com/playwright:v1.64.1-noble \
+  npx shapewall capture
+```
+
+`--network host` lets it reach a site on your localhost. The board itself (`npx shapewall serve`) runs on the host as usual.
+
+Or install the same libraries with the system package manager.
+
+Then run `npx shapewall doctor --install-browser` again. It should say "Playwright Chromium starts".
+
+## Quickstart
+
+With your site running, in its project folder:
+
+```sh
 npx shapewall doctor --install-browser
 npx shapewall init --base-url http://localhost:3000
 npx shapewall capture
 npx shapewall serve --open
 ```
 
-In an empty folder, run `npm init -y` first. `npx shapewall` runs the copy installed in the project. The rest of these docs shorten
-the command to `shapewall`. To try it without adding it to a project, the same `npx shapewall ...` lines work on their own: npx
-downloads the package the first time.
+1. `doctor --install-browser` downloads Chromium and checks that it starts. Before `init`, it skips the config check.
+2. `init` writes `shapewall.config.json` with the pages it finds on your site.
+3. `capture` takes every page at desktop and phone width.
+4. `serve --open` starts the board on http://127.0.0.1:4600/ and opens it in your browser.
 
-### From GitHub
-
-For the latest unreleased build, install from the repository: `npm install --save-dev github:danbaruch/shapewall` (add
-`#<commit or tag>` to pin one). npm clones the repository and builds the board, which takes about a minute.
-
-### From a clone
+The first `npx shapewall` asks to download the package ("Ok to proceed? (y)"): answer `y`. To keep one version for everyone on the
+project, add it as a dev dependency first:
 
 ```sh
-git clone https://github.com/danbaruch/shapewall.git
-cd shapewall
-npm ci        # installs the locked dependencies and builds the board
-npm link      # optional: puts `shapewall` on your PATH
+npm install --save-dev %INSTALL_PACKAGE%
 ```
 
-Without `npm link`, run `node /absolute/path/to/shapewall/bin/shapewall.js` from your project. A global install straight from GitHub
-(`npm install -g github:...`) does not work, because npm cannot build a git package in global mode; use the clone.
+In an empty folder, run `npm init -y` before that. `npx shapewall` then runs the copy installed in the project. The rest of these
+docs shorten the command to `shapewall`.
 
-### The browser
-
-Captures use Chromium. `shapewall doctor --install-browser` downloads the Playwright build this version needs (no config required);
-it does not install Linux system libraries, so on a bare Linux server use the repository's Playwright-based Docker image instead. To
-use a Chrome you already have, set `"browser": { "channel": "chrome" }` in the config. `shapewall doctor` then starts the browser and
-checks the config, output folder, port and notifications. See [deployment](/docs/self-hosting).
-
-## Console, accounts and updates
-
-`shapewall serve` has a **Workspace Console** at `/console` that lists your local boards; open it from the profile menu. The version
-at the bottom of the board opens **About & Updates**. Updates are manual: see [manual updates](/docs/updates).
-
-Accounts are optional. `shapewall serve --accounts` adds a local owner account with a passkey: open the private owner link the server
-prints, create the passkey and save the recovery codes, which are shown once. Use the printed `localhost` address, not an IP, because a
-passkey is bound to a hostname. The profile menu then has **Account and security**: profile photo, sessions, passkeys and recovery.
-Accounts keep your existing captures and comments. See [local accounts and profile photos](/docs/local-accounts).
-
-On a Tailscale account board, agent settings are changed from the Shapewall computer with the **Host agent settings** command the
-server prints: [local account setup](/docs/local-accounts#tailscale-account-origin) and
-[host-only agent management](/docs/chat#host-only-agent-management).
+The sections below go through each step in more detail.
 
 ## Create a config
 
@@ -130,7 +143,7 @@ For signed-in pages, run `shapewall auth record`: sign in by hand in the fresh b
 shapewall serve
 ```
 
-Open [http://127.0.0.1:4600/](http://127.0.0.1:4600/) (or add `--open` and Shapewall opens it for you). Scroll or drag to pan (Shift+scroll goes sideways, Space+drag and middle-drag work anywhere, and so does the **Hand** tool, H), Ctrl+scroll (Cmd+scroll on a Mac) or a pinch to zoom. Zoom in on a page and it switches
+Open [http://127.0.0.1:4600/](http://127.0.0.1:4600/) (or add `--open` and Shapewall opens it for you). Scroll or drag to pan (Shift+scroll goes sideways, Space+drag and middle-drag work anywhere, and so does the **Hand** tool, H), Ctrl+scroll (Cmd+scroll on a Mac) or a pinch to zoom at the cursor; + and - (with or without Ctrl/Cmd) zoom too, Ctrl/Cmd+0 or Shift+0 goes to 100% and Shift+1 fits the board. Zoom in on a page and it switches
 from a screenshot to live HTML. Click a page and press **Comment** on the bar that appears above it, or pick **Comment** in the tools at the bottom of the board (or press C). Then click an element on the page and write what should change.
 
 ### Images and drawings
@@ -139,7 +152,7 @@ A comment or a reply can show as well as tell:
 
 - **Images.** Attach up to 4 with the image button, or paste or drop them into the comment. PNG, JPEG, WebP or GIF, up to 5 MB each.
   The thread shows them as thumbnails; click one to see it large (Esc closes it).
-- **Drawing.** Pick **Box**, **Arrow** or **Pen** under the comment and draw right on the page; pick an ink, **Undo** or **Clear**.
+- **Drawing.** Pick **Box**, **Arrow** or **Pen** in the row along the bottom of the comment box and draw right on the page; pick an ink, **Undo** or **Clear**.
   Or start from the drawing: pick **Draw** in the tools at the bottom of the board and click a page. Either way the drawing is
   part of a comment. Esc stops drawing first, then leaves comment mode. On a phone, **Draw on the page** opens the page full
   screen to draw on with a finger.
@@ -180,7 +193,56 @@ several repositories, serve one project per checkout and switch between them in 
    straight away. The panel names the mode in effect.
 5. Check before and after in the comment's thread, then resolve it. If the agent's sign-in or model fails, the turn says so and waits.
 
-More in [chat with an agent](/docs/chat#source-folder-and-agent-sign-in).
+More in [chat with an agent](/docs/chat#source-folder-and-agent-sign-in). From the terminal instead, `shapewall comments --open --json`
+gives an agent the same comments with their selectors and screenshots, and `shapewall mcp` gives it tools: see
+[the agent workflow](/docs/agent-workflow).
+
+## Share the board
+
+`shapewall serve` listens on 127.0.0.1 only and has no login, so at first it is yours alone. To go further:
+
+- **Your other devices:** `shapewall serve --tailscale` serves the board over HTTPS on your tailnet; you pair each device.
+- **A read-only copy:** `shapewall export` writes a static copy any web host can serve. See [deployment](/docs/self-hosting).
+- **A team:** `shapewall hosted` runs a server (beta) with accounts, workspaces, roles, share links and connected agents. Start with
+  [where to run Shapewall](/docs/where-to-run), then the [hosted operator guide](/docs/hosted).
+
+## Console, accounts and updates
+
+`shapewall serve` has a **Workspace Console** at `/console` that lists your local boards; open it from the profile menu. The version
+at the bottom of the board opens **About & Updates**. Updates are manual: see [manual updates](/docs/updates).
+
+Accounts are optional. `shapewall serve --accounts` adds a local owner account with a passkey: open the private owner link the server
+prints, create the passkey and save the recovery codes, which are shown once. Use the printed `localhost` address, not an IP, because a
+passkey is bound to a hostname. The profile menu then has **Account and security**: profile photo, sessions, passkeys and recovery.
+Accounts keep your existing captures and comments. See [local accounts and profile photos](/docs/local-accounts).
+
+On a Tailscale account board, agent settings are changed from the Shapewall computer with the **Host agent settings** command the
+server prints: [local account setup](/docs/local-accounts#tailscale-account-origin) and
+[host-only agent management](/docs/chat#host-only-agent-management).
+
+## Other ways to install
+
+### From GitHub
+
+For the latest unreleased build, install from the repository: `npm install --save-dev github:danbaruch/shapewall` (add
+`#<commit or tag>` to pin one). npm clones the repository and builds the board, which takes a minute or two.
+
+### From a clone
+
+```sh
+git clone https://github.com/danbaruch/shapewall.git
+cd shapewall
+npm ci        # installs the locked dependencies and builds the board
+npm link      # optional: puts `shapewall` on your PATH
+```
+
+Without `npm link`, run `node /absolute/path/to/shapewall/bin/shapewall.js` from your project. A global install straight from GitHub
+(`npm install -g github:...`) does not work, because npm cannot build a git package in global mode; use the clone.
+
+### In Docker
+
+The repository's `Dockerfile` is based on the official Playwright image, so Chromium and its system libraries are already in it. See
+[deployment](/docs/self-hosting).
 
 ## Try the demo first
 
@@ -193,10 +255,13 @@ npm run demo
 ```
 
 The clone has no `shapewall.config.json` of its own (the demo brings one), so `doctor` only installs the browser here and skips the
-config check. That captures the demo site (a fictional notes app) and serves its board at the same address. Leave a few comments and try the loop.
+config check. `npm run demo` captures the demo site (a fictional notes app) and serves its board on http://127.0.0.1:4600/. Leave a
+few comments and try the loop. `npm run demo -- --full` captures the whole fictional product, as in the [live demo](/demo/); its Status page answers
+404 on purpose and is captured as an expected error page (`"expectStatus": 404`), so every shot ends ok.
 
 ## Next steps
 
 - Signed-in pages, menus that need a click first, more viewports: [config reference](/docs/config).
 - Hand the comments to your coding agent: [the agent workflow](/docs/agent-workflow).
+- Every command and option: [CLI reference](/docs/cli).
 - Share the board with a team: [deployment and self-hosting](/docs/self-hosting).

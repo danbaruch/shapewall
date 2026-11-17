@@ -391,6 +391,9 @@ changed share on each card and a **Changed pages only** filter. Diffs (pixelmatc
 compare mode or after an environment capture, and cached in `.shapewall/<board>/diffs/<a>_<b>/` until either capture changes. Compare
 works in a static export too: `shapewall export` computes every pair of captured environments.
 
+Comments work in compare mode: a comment placed on one side is on that environment, and its pin stays on that side in every later
+compare. Outside compare mode the board shows the default environment, and the thread of a comment left on another one says which.
+
 ## Versions
 
 When a page is captured again, the shot it replaces (PNG, thumbnail and live HTML) moves to `.shapewall/<board>/versions/` as

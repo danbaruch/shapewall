@@ -3,6 +3,7 @@
 // lights up its pin (and a hovered pin lights up its row), and threads with
 // news since you last opened them carry a dot.
 import { useEffect, useRef } from 'react'
+import { AnimatePresence, LayoutMotion, listItem, m, usePresenceProps } from '../lib/animate'
 import { useBoardView, useBoardViewStore } from './boardView'
 import { viewportIcon } from './viewports'
 import {
@@ -82,7 +83,7 @@ function RowState({ comment }) {
 }
 
 // `pick`: Select mode for batch fixes ({ checked, onChange, disabled }), or null.
-function Row({ comment, title, selected, unread, touch, onFocus, onHover, pick = null }) {
+function Row({ comment, title, selected, unread, touch, onFocus, onHover, pick = null, order = '' }) {
   // Its own answer from the view store: hovering a pin re-renders one row.
   const hovered = useBoardView((state) => state.hoveredId === comment.id)
   const author = commentAuthor(comment)
@@ -92,15 +93,25 @@ function Row({ comment, title, selected, unread, touch, onFocus, onHover, pick =
   const imageCount = thread.reduce((sum, item) => sum + (item.images?.length || 0), 0)
   const drawn = thread.some((item) => item.drawing?.shapes?.length)
   const ViewportIcon = viewportIcon(comment.viewport)
+  const { style: exitStyle, ...presence } = usePresenceProps({ 'data-sw-batch-row': pick ? comment.id : undefined })
   return (
-    <li
+    // In and out with a fade (a row leaving folds its height, so the rest
+    // close up), and a move to its new place when the order changes. Only
+    // the order is a reason to measure (layoutDependency): hovering a pin
+    // re-renders a row and must not measure the whole list.
+    <m.li
+      layout="position"
+      layoutDependency={order}
+      {...listItem}
+      exit={{ ...listItem.exit, height: 0, overflow: 'hidden' }}
+      style={exitStyle}
       className={cn(
         'relative',
         selected ? 'bg-accent/10 shadow-[inset_3px_0_0_var(--accent)]' : hovered ? 'bg-surface-2' : '',
         comment.status === 'resolved' && !selected && 'opacity-80',
         pick && 'flex items-start',
       )}
-      data-sw-batch-row={pick ? comment.id : undefined}
+      {...presence}
     >
       {pick ? (
         <span className={cn('flex shrink-0 items-center', touch ? 'pt-1.5 pl-1' : 'pt-3 pl-1.5')}>
@@ -193,7 +204,7 @@ function Row({ comment, title, selected, unread, touch, onFocus, onHover, pick =
           {comment.imported && comment.agentStatus ? <span className="mt-1 block text-xs text-faint">Imported history</span> : null}
         </span>
       </button>
-    </li>
+    </m.li>
   )
 }
 
@@ -246,6 +257,8 @@ export default function CommentsPanel({
   const candidates = selecting ? comments.filter(batchable) : []
   const chosen = selecting ? batch.selected.filter((id) => candidates.some((comment) => comment.id === id)) : []
   const size = touch ? 'touch' : 'xs'
+  const listKey = [filter, narrow?.query || '', narrow?.state || '', narrow?.mention || '', journeyFilter?.on ? 'journey' : ''].join('|')
+  const order = comments.map((comment) => comment.id).join(',')
   return (
     <>
       <div className="shrink-0 border-b border-line">
@@ -443,52 +456,59 @@ export default function CommentsPanel({
           </Button>
         </div>
       ) : null}
-      <ul ref={listRef} className="min-h-0 flex-1 divide-y divide-line overflow-y-auto" data-sw-comment-list="true">
-        {comments.length ? (
-          comments.map((comment) => (
-            <Row
-              key={comment.id}
-              comment={comment}
-              title={targetTitle(comment.pageId)}
-              selected={selectedId === comment.id}
-              unread={unread.has(comment.id)}
-              touch={touch}
-              onFocus={onFocus}
-              onHover={onHover}
-              pick={
-                selecting && comment.status === 'open'
-                  ? {
-                      checked: chosen.includes(comment.id),
-                      disabled: !batchable(comment),
-                      onChange: () => batch.toggle(comment.id),
-                    }
-                  : null
-              }
-            />
-          ))
-        ) : (
-          <li>
-            {narrowing ? (
-              <EmptyState icon={Search} title="No comments match">
-                <Button variant="link" size={touch ? 'touch' : 'xs'} className="shadow-none" onClick={narrow.onClear}>
-                  Clear the search and filters
-                </Button>
-              </EmptyState>
-            ) : (
-              <EmptyState
-                icon={MessageSquare}
-                title={filter === 'resolved' ? 'Nothing resolved yet' : filter === 'open' ? 'No open comments' : 'No comments yet'}
-              >
-                {!canAct
-                  ? 'This board is read-only.'
-                  : touch
-                    ? 'Tap a page and then Comment, or the Comment tool at the bottom of the board, then tap the page to pin a note.'
-                    : 'Click a page and press Comment, or pick the Comment tool at the bottom of the board (C), then click the page to pin a note.'}
-              </EmptyState>
-            )}
-          </li>
-        )}
-      </ul>
+      <LayoutMotion>
+        <m.ul ref={listRef} layoutScroll className="min-h-0 flex-1 divide-y divide-line overflow-y-auto" data-sw-comment-list="true">
+          {/* A new filter or search is a new list: it shows at once, with no
+            rows animating in or out (keyed). Within one list, comments come,
+            go and reorder with motion. */}
+          <AnimatePresence key={listKey} initial={false}>
+            {comments.map((comment) => (
+              <Row
+                key={comment.id}
+                order={order}
+                comment={comment}
+                title={targetTitle(comment.pageId)}
+                selected={selectedId === comment.id}
+                unread={unread.has(comment.id)}
+                touch={touch}
+                onFocus={onFocus}
+                onHover={onHover}
+                pick={
+                  selecting && comment.status === 'open'
+                    ? {
+                        checked: chosen.includes(comment.id),
+                        disabled: !batchable(comment),
+                        onChange: () => batch.toggle(comment.id),
+                      }
+                    : null
+                }
+              />
+            ))}
+          </AnimatePresence>
+          {comments.length ? null : (
+            <li>
+              {narrowing ? (
+                <EmptyState icon={Search} title="No comments match">
+                  <Button variant="link" size={touch ? 'touch' : 'xs'} className="shadow-none" onClick={narrow.onClear}>
+                    Clear the search and filters
+                  </Button>
+                </EmptyState>
+              ) : (
+                <EmptyState
+                  icon={MessageSquare}
+                  title={filter === 'resolved' ? 'Nothing resolved yet' : filter === 'open' ? 'No open comments' : 'No comments yet'}
+                >
+                  {!canAct
+                    ? 'This board is read-only.'
+                    : touch
+                      ? 'Tap a page and then Comment, or the Comment tool at the bottom of the board, then tap the page to pin a note.'
+                      : 'Click a page and press Comment, or pick the Comment tool at the bottom of the board (C), then click the page to pin a note.'}
+                </EmptyState>
+              )}
+            </li>
+          )}
+        </m.ul>
+      </LayoutMotion>
     </>
   )
 }

@@ -27,3 +27,13 @@ test('every command and every option it takes is in its help section', () => {
     }
   }
 })
+
+test('no Node version the help names is older than the one package.json requires', () => {
+  const minimum = JSON.parse(read('package.json'))
+    .engines.node.match(/(\d+)\.(\d+)/)
+    .slice(1)
+    .map(Number)
+  const named = [...HELP.matchAll(/Node (\d+)\.(\d+)/g)].map((match) => [Number(match[1]), Number(match[2])])
+  for (const [major, minor] of named)
+    assert.ok(major > minimum[0] || (major === minimum[0] && minor >= minimum[1]), 'help says Node ' + major + '.' + minor)
+})

@@ -1,7 +1,7 @@
 // /w/:ws/...: a workspace with its sections. Admin sections show only to
 // admins and owners (the server refuses them to anyone else anyway).
 
-import { Suspense, createContext, lazy, useCallback, useContext, useEffect, useRef, useState } from 'react'
+import { Suspense, createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import {
   Activity,
   BarChart3,
@@ -17,7 +17,7 @@ import {
   Users,
 } from 'lucide-react'
 import { cn } from '../../lib/utils'
-import { Card, LoadError, Loading, RoleBadge } from '../components'
+import { Card, LoadError, Loading } from '../components'
 import { api, wsUrl } from '../lib/api'
 import { ROLE_LABEL, roleAtLeast } from '../lib/format'
 import { Link } from '../lib/router'
@@ -36,10 +36,11 @@ import { AgentFeedbackView } from './agent-feedback'
 import { AgentsSection } from './local-agents'
 import { AgentsOverview, ProjectAgentsPage } from './agents'
 import { DEMO } from '../../lib/demo'
+import { PanelBoundary, lazyPanel } from '../../components/chunk-boundary'
 
 // Usage and Activity bring the charts and the data grid with them: loaded
 // only when one of the two pages opens, so no other page pays for them.
-const UsageArea = lazy(() => import('../usage/index.jsx'))
+const UsageArea = lazyPanel(() => import('../usage/index.jsx'))
 
 const WorkspaceContext = createContext(null)
 export const useWorkspace = () => useContext(WorkspaceContext)
@@ -86,7 +87,10 @@ export function WorkspacePage({ workspaceId, section, projectId, subjectId = nul
       <Card className="p-8 text-center">
         <h1 className="text-lg font-semibold text-fg">Workspace not found</h1>
         <p className="mt-1 text-sm text-muted">It does not exist, or you are not in it.</p>
-        <Link to="/" className="mt-4 inline-block text-sm font-medium text-accent underline-offset-2 hover:underline">
+        <Link
+          to="/"
+          className="mt-2 inline-flex min-h-11 items-center text-sm font-medium text-accent underline-offset-2 hover:underline lg:mt-4 lg:min-h-0"
+        >
           Back to your workspaces
         </Link>
       </Card>
@@ -127,9 +131,11 @@ export function WorkspacePage({ workspaceId, section, projectId, subjectId = nul
   else if (current === 'agents') body = DEMO ? <AgentsSection /> : <AgentsOverview />
   else if (current === 'usage' || current === 'activity')
     body = (
-      <Suspense fallback={<Loading label="Loading the page" rows={4} />}>
-        <UsageArea section={current} subjectId={subjectId} />
-      </Suspense>
+      <PanelBoundary retry={UsageArea}>
+        <Suspense fallback={<Loading label="Loading the page" rows={4} />}>
+          <UsageArea section={current} subjectId={subjectId} />
+        </Suspense>
+      </PanelBoundary>
     )
   else if (current === 'settings') body = <SettingsSection />
   else if (current === 'feedback') body = <AgentFeedbackView baseUrl={wsUrl(workspaceId, '/agent-feedback')} get={api.get} />
@@ -137,13 +143,8 @@ export function WorkspacePage({ workspaceId, section, projectId, subjectId = nul
 
   return (
     <WorkspaceContext.Provider value={value}>
-      <div className="mb-5 flex flex-wrap items-center gap-2 lg:hidden">
-        {/* Not a heading: each section brings the page's h1. */}
-        <p className="min-w-0 truncate text-lg font-semibold text-fg">{data.workspace.name}</p>
-        <RoleBadge role={role} />
-      </div>
+      {/* The workspace's name is in the switcher at the top of the page (shell.jsx); each section brings its own h1. */}
       <SidebarSections
-        label={data.workspace.name}
         sections={visible.map(([id, label, Icon]) => ({
           id: `ws-${id}`,
           label,
@@ -226,7 +227,10 @@ function NeedsRole({ section, least, role, workspaceId }) {
         {section} is for {least === 'member' ? 'members, admins and owners' : 'admins and owners'}. You are a{' '}
         {ROLE_LABEL[role].toLowerCase()} here; ask an admin if you need it.
       </p>
-      <Link to={`/w/${workspaceId}`} className="mt-4 inline-block text-sm font-medium text-accent underline-offset-2 hover:underline">
+      <Link
+        to={`/w/${workspaceId}`}
+        className="mt-2 inline-flex min-h-11 items-center text-sm font-medium text-accent underline-offset-2 hover:underline lg:mt-4 lg:min-h-0"
+      >
         Back to the projects
       </Link>
     </Card>

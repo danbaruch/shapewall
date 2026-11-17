@@ -159,7 +159,8 @@ export function AppShell({ children }) {
     ...(board ? [{ id: 'board', label: 'Board', icon: LayoutDashboard, href: board }] : []),
     {
       id: 'workspace',
-      label: workspace ? `Workspace: ${workspace.name}` : 'Workspaces',
+      // (Its name is in the switcher at the top of the page, once.)
+      label: workspace ? 'Workspace' : 'Workspaces',
       icon: Building2,
       to: workspace ? `/w/${workspace.id}` : '/',
       active: path !== '/account' && path !== '/device',
@@ -170,13 +171,21 @@ export function AppShell({ children }) {
   return (
     <SectionsContext.Provider value={setPageSections}>
       <div className="flex min-h-dvh">
+        {/* The first stop for the keyboard: past the sidebar and the header to the page. */}
+        <a
+          href="#main"
+          className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-md focus:bg-surface focus:p-3 focus:text-fg focus:shadow-card focus:outline-2 focus:outline-accent"
+          data-sw-skip-link
+        >
+          Skip to content
+        </a>
         {wide ? (
           <AppRail
             expanded={expanded}
             onToggle={toggle}
             homeTo="/"
             homeLabel="Shapewall, your workspaces"
-            title={workspace?.name || 'Shapewall'}
+            title="Shapewall"
             link={Link}
             logo={<Logo />}
             items={railItems}
@@ -191,10 +200,12 @@ export function AppShell({ children }) {
             <div className="mx-auto flex h-14 max-w-6xl items-center gap-2 px-3 sm:px-6">
               {wide ? null : (
                 <>
+                  {/* A finger's size (44 px) around the logo, which stays its own size. */}
                   <Link
                     to="/"
-                    className="flex shrink-0 items-center gap-2 rounded-md px-1 py-1 outline-none focus-visible:outline-2 focus-visible:outline-accent"
+                    className="-ml-1 flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-2 rounded-md px-1 outline-none focus-visible:outline-2 focus-visible:outline-accent"
                     aria-label="Shapewall, your workspaces"
+                    data-sw-header-home
                   >
                     <Logo />
                     <span className="hidden text-[15px] font-semibold text-fg sm:inline">Shapewall</span>
@@ -273,7 +284,11 @@ export function AppShell({ children }) {
               </Notice>
             </div>
           ) : null}
-          <main className="mx-auto w-full max-w-6xl flex-1 animate-fade-in px-3 pt-5 pb-10 sm:px-6 sm:pt-8" id="main">
+          <main
+            className="mx-auto w-full max-w-6xl flex-1 animate-fade-in px-3 pt-5 pb-10 outline-none sm:px-6 sm:pt-8"
+            id="main"
+            tabIndex={-1}
+          >
             {children}
           </main>
           <ConsoleFooter transport={api} />

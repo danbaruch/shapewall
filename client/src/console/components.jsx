@@ -92,6 +92,25 @@ export function Notice({ tone = 'info', title, children, action, className, ...r
   )
 }
 
+// Beside a secret shown only once (a new token, invite link or share link): one notice, one tone, the same words,
+// wherever it is made.
+export function ShownOnceNotice({ title = 'Copy it now: it is shown once', children, ...rest }) {
+  return (
+    <Notice tone="warn" title={title} data-sw-shown-once {...rest}>
+      {children}
+    </Notice>
+  )
+}
+
+// A card for something that cannot be taken back (deleting a project, a workspace or an account, leaving a
+// workspace): a red edge, and its one action as a DangerButton. Every such card in the console looks the same.
+export function DangerCard({ className, ...props }) {
+  return <Card className={cn('border-bad/30', className)} data-sw-danger-card {...props} />
+}
+export function DangerButton({ className, ...props }) {
+  return <Button size="touch" variant="danger" className={cn('border border-bad/40 lg:h-9', className)} data-sw-danger-action {...props} />
+}
+
 export function FormError({ error }) {
   if (!error) return null
   return (

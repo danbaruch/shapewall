@@ -1,6 +1,7 @@
 // The pin layer of a frame, in one place so every frame that shows a page
 // draws its comments the same way: the page's own frame (Frame) and, in
-// compare mode, the environment frame beside it (CompareFrame). Same look,
+// compare mode, each environment's frame (CompareFrame), which draws the
+// comments left on its side. Same look,
 // same sizes at a zoom, same clustering, same selected pin and the same
 // arrival ring after "jump to comment".
 import { useContext, useMemo } from 'react'
@@ -9,6 +10,7 @@ import { pinSpot } from './layout'
 import { useBoardView } from './boardView'
 import { BoardContext } from './boardContext'
 import { DOT_CLUSTER_PX, Pin, PinCluster, clusterPins, pinLookAt } from './pins'
+import { onSide } from './commentSide'
 
 const NONE = []
 
@@ -20,14 +22,22 @@ export function isWorking(board, comment) {
 
 // The comments this frame draws: the ones the filter shows, plus the open
 // thread's own, which keeps its pin even when the filter hides it (just
-// resolved). `shows` is false on a frame that must stay bare -- compare
-// mode's second environment, which carries the diff overlay instead.
-export function useFramePins(board, targetId, viewport, shows = true) {
+// resolved). `shows` is false on a frame that must stay bare. `env`: the
+// environment of a compare frame, which draws only the comments on its side
+// (commentSide.js); null on every other frame.
+export function useFramePins(board, targetId, viewport, shows = true, env = null) {
+  const pair = env ? board.compare?.pair : null
+  const environments = board.environments
+  const here = (comment) => !pair || onSide(comment, env, pair, environments)
   const openHere = useBoardView((state) => {
     const open = state.selectedComment
-    return shows && open && open.pageId === targetId && open.viewport === viewport ? open : null
+    return shows && open && open.pageId === targetId && open.viewport === viewport && here(open) ? open : null
   })
-  const listed = shows ? board.pinsFor(targetId, viewport) : NONE
+  const all = shows ? board.pinsFor(targetId, viewport) : NONE
+  const listed = useMemo(
+    () => (pair ? all.filter((comment) => onSide(comment, env, pair, environments)) : all),
+    [all, env, pair, environments],
+  )
   const pins = useMemo(() => (openHere && !listed.includes(openHere) ? [...listed, openHere] : listed), [listed, openHere])
   return { pins, openHere, selectedCommentId: openHere?.id ?? null }
 }
@@ -84,7 +94,7 @@ export function useLandedPin(pins) {
 
 // The pins themselves, one bubble per comment and a numbered bubble where
 // several merge.
-export function FramePins({ targetId, viewport, clusters, scale, compact = false, selectedCommentId = null, landedId = null }) {
+export function FramePins({ targetId, viewport, env = null, clusters, scale, compact = false, selectedCommentId = null, landedId = null }) {
   const board = useContext(BoardContext)
   return clusters.map((group) =>
     group.items.length === 1 ? (
@@ -110,7 +120,7 @@ export function FramePins({ targetId, viewport, clusters, scale, compact = false
         touch={board.touch}
         working={group.items.some((item) => isWorking(board, item.comment))}
         scale={scale}
-        onOpen={(items) => board.onOpenCluster(targetId, viewport, items)}
+        onOpen={(items) => board.onOpenCluster(targetId, viewport, items, env)}
       />
     ),
   )
