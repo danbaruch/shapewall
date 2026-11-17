@@ -1,16 +1,18 @@
 // One frame of a card: the screenshot (or the page's live HTML), its pins,
 // the draft pin and the hover outline; and a compare frame.
-import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useStore } from '@xyflow/react'
 import { ImageOff, Info } from 'lucide-react'
 import { defaultEnvironment, environmentOf, frameKey } from './commentSide'
-import { anchorAt, describeElement, elementAt, resolveAnchor } from './anchors'
+import { anchorAt, describeElement, elementAt, nameOf, resolveAnchor } from './anchors'
 import { frameDom } from './frameDom'
 import { useElementMap } from './elementMaps'
-import { anchorFromMap, describeAt, hitTest, plainLabel, resolveOnMap } from '../../../src/capture/element-map.js'
+import { anchorOnMap, describeAt, hitTest, nameOnMap, resolveOnMap } from '../../../src/capture/element-map.js'
+import { anchorNames } from './anchorNames'
 import { DraftPin } from './pins'
 import { FramePins, useFrameClusters, useFramePins, useLandedPin, usePinLook } from './framePins'
 import { cn } from '../lib/utils'
-import { useBoardView } from './boardView'
+import { useBoardView, useBoardViewStore } from './boardView'
 import { BoardContext } from './boardContext'
 import { FrameDrawing } from './CommentMedia'
 import { drawingsFor, hasDrawing, useDrawing } from './drawing'
@@ -164,6 +166,11 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
     // layoutTick re-resolves after the document resizes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [live, map, doc, pins, native, layoutTick])
+  // What each pinned element is called here, for its thread's "Pinned to".
+  useEffect(() => {
+    if (!map || !positions) return
+    for (const [id, point] of positions) if (point.element !== undefined) anchorNames.set(id, nameOnMap(map, point.element).text)
+  }, [map, positions])
   const landedId = useLandedPin(pins)
   const clusters = useFrameClusters({ pins, positions, frame, compact: compactPins, selectedCommentId })
   useEffect(() => {
@@ -201,31 +208,58 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
   const drawingOn = useDrawing(toolOn)
   const drawSurface = useDrawing((value) => Boolean(value?.tool) && value.key === liveKey)
   const picking = board.commentMode && !composing && !drawingOn
-  // Picking on live HTML: outline the element a click would pin to, with a
-  // short label, so a click in a gap does not land on a whole section
-  // unnoticed. Mouse only (a tap has no hover).
-  const [hover, setHover] = useState(null)
-  const hoverFrame = useRef(0)
-  const canHover = picking && live && Boolean(map || doc) && !board.touch
+  // Picking on live HTML: outline the element a click would pin to, with
+  // what it is, so a click in a gap does not land on a whole section
+  // unnoticed. Not while this page's thread is open: a click then closes it
+  // (as in Figma), and the thread's element keeps a quiet outline instead.
+  const anchorsReady = live && Boolean(map || doc)
+  const canHover = picking && !openHere && anchorsReady && !board.touch
+  const { hover, onMouseMove, onMouseLeave, describe, clear: clearHover } = useHoverTarget({ enabled: canHover, map, doc, native })
+  const hoveredAnchored = useHoveredAnchored(pins)
+  // A touch screen has no hover: the element under the finger is outlined
+  // and named from touch-down, and a drag (a pan) or a second finger (a
+  // pinch) drops it, so only a tap pins.
+  const canPress = picking && anchorsReady && Boolean(board.touch)
+  const [press, setPress] = useState(null)
+  const pressing = useRef(null)
   useEffect(() => {
-    if (!canHover) setHover(null)
-  }, [canHover])
-  useEffect(() => () => window.cancelAnimationFrame(hoverFrame.current), [])
-  const onMouseMove = (event) => {
-    if (!canHover) return
-    const rect = event.currentTarget.getBoundingClientRect()
-    const x = ((event.clientX - rect.left) / rect.width) * native.width
-    const y = ((event.clientY - rect.top) / rect.height) * native.height
-    window.cancelAnimationFrame(hoverFrame.current)
-    hoverFrame.current = window.requestAnimationFrame(() => {
-      if (map) {
-        const position = hitTest(map, x, y)
-        setHover(position >= 0 ? describeAt(map, position, native) : null)
-        return
-      }
-      const element = elementAt(doc, x, y)
-      setHover(element ? describeElement(doc, element, native) : null)
-    })
+    if (!canPress) {
+      pressing.current = null
+      setPress(null)
+    }
+  }, [canPress])
+  const pointAt = (target, clientX, clientY) => {
+    const rect = target.getBoundingClientRect()
+    return [((clientX - rect.left) / rect.width) * native.width, ((clientY - rect.top) / rect.height) * native.height]
+  }
+  const onPointerDown = (event) => {
+    if (!canPress || event.pointerType !== 'touch') return
+    if (pressing.current && pressing.current.id !== event.pointerId) {
+      pressing.current.moved = true
+      setPress(null)
+      return
+    }
+    pressing.current = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: false }
+    const [x, y] = pointAt(event.currentTarget, event.clientX, event.clientY)
+    setPress(describe(x, y))
+  }
+  const onPointerMove = (event) => {
+    const at = pressing.current
+    if (!at || at.id !== event.pointerId || at.moved) return
+    if (Math.hypot(event.clientX - at.x, event.clientY - at.y) > 10) {
+      at.moved = true
+      setPress(null)
+    }
+  }
+  const onPointerEnd = (event) => {
+    const at = pressing.current
+    if (!at || at.id !== event.pointerId) return
+    if (event.type === 'pointercancel') at.moved = true
+    // The tap's click comes next; a press that ended any other way just goes.
+    window.setTimeout(() => {
+      if (pressing.current === at) pressing.current = null
+      setPress(null)
+    }, 350)
   }
 
   const onClick = (event) => {
@@ -241,11 +275,21 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
       board.onFocusFrame(targetId, frame.viewport)
       return
     }
-    pinAt(event.currentTarget.getBoundingClientRect(), event.clientX, event.clientY)
+    // A drag or a pinch on a touch screen is not a tap.
+    const pressed = pressing.current
+    pressing.current = null
+    setPress(null)
+    if (pressed?.moved) return
+    // This page's thread is open: the click closes it, and the next one pins.
+    if (picking && openHere && !board.touch) {
+      board.onCloseThread()
+      return
+    }
+    pinAt(event.currentTarget.getBoundingClientRect(), event.clientX, event.clientY, true, event.altKey ? 1 : 0)
   }
   // Starts a comment at a point of the screen that is on this page. `anchored`:
   // on a live page, also to the element under it.
-  const pinAt = (rect, clientX, clientY, anchored = true) => {
+  const pinAt = (rect, clientX, clientY, anchored = true, up = 0) => {
     const fx = (clientX - rect.left) / rect.width
     const fy = (clientY - rect.top) / rect.height
     const pin = {
@@ -259,13 +303,17 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
     if (anchored && live && (map || doc)) {
       const x = fx * native.width
       const y = fy * native.height
-      const anchor = map ? anchorFromMap(map, x, y, native) : anchorAt(doc, x, y, native)
+      const position = map ? hitTest(map, x, y, up) : -1
+      const anchor = map ? (position >= 0 ? anchorOnMap(map, position, x, y, native) : null) : anchorAt(doc, x, y, native, up)
       if (anchor) {
+        const named = map ? nameOnMap(map, position) : nameOf(elementAt(doc, x, y, up))
         pin.anchor = anchor
-        pin.target = plainLabel(map ? map.elements[hitTest(map, x, y)]?.t : elementAt(doc, x, y)?.tagName.toLowerCase(), anchor.text)
+        pin.target = named.text
+        pin.targetKind = named.kind
+        pin.targetName = named.name
       }
     }
-    setHover(null)
+    clearHover()
     board.onPin(pin)
   }
   // "Comment" on this page's bar was pressed (FrameBar.jsx): the page takes
@@ -300,7 +348,8 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
           'absolute rounded-sm border border-line bg-surface-2',
           // Picking: a click picks, so a drag must not pan. With a target
           // picked the page drags the canvas again, like any other page.
-          picking && 'nodrag nopan cursor-crosshair',
+          // On a touch screen a drag still pans: only a tap pins (onClick).
+          picking && (board.touch ? 'cursor-crosshair' : 'nodrag nopan cursor-crosshair'),
           selectable && !reading && 'cursor-text',
           live && 'border-accent/60',
           focused && !drawSurface && 'outline-2 outline-offset-2 outline-accent',
@@ -327,7 +376,11 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
         onKeyDown={commentTarget ? onKeyDown : undefined}
         data-sw-comment-target={commentTarget ? 'true' : undefined}
         onMouseMove={canHover ? onMouseMove : undefined}
-        onMouseLeave={canHover ? () => setHover(null) : undefined}
+        onMouseLeave={canHover ? onMouseLeave : undefined}
+        onPointerDown={canPress ? onPointerDown : undefined}
+        onPointerMove={canPress ? onPointerMove : undefined}
+        onPointerUp={canPress ? onPointerEnd : undefined}
+        onPointerCancel={canPress ? onPointerEnd : undefined}
         data-sw-frame={`${targetId}:${frame.viewport}`}
         data-sw-image={src ? (full ? 'full' : 'thumb') : 'none'}
         data-sw-live={live ? (ready ? 'ready' : 'loading') : 'off'}
@@ -381,9 +434,13 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
               <Info size={10} className="mt-px shrink-0" aria-hidden="true" /> {note}
             </p>
           ) : null}
-          {hover && canHover ? <HoverOutline hover={hover} native={native} scale={pinScale} /> : null}
-          {draft?.anchor && !drawingOn ? <PickedOutline draft={draft} scale={pinScale} /> : null}
-          {openHere?.anchor ? <ThreadTarget comment={openHere} box={positions?.get(openHere.id)?.box || null} /> : null}
+          {openHere?.anchor && !drawingOn ? <AnchorTarget comment={openHere} box={positions?.get(openHere.id)?.box || null} thread /> : null}
+          {hoveredAnchored && hoveredAnchored !== openHere && !draft && !drawingOn ? (
+            <AnchorTarget comment={hoveredAnchored} box={positions?.get(hoveredAnchored.id)?.box || null} />
+          ) : null}
+          {hover ? <HoverOutline hover={hover} native={native} frame={frame} /> : null}
+          {press && canPress ? <HoverOutline hover={press} native={native} frame={frame} /> : null}
+          {draft?.anchor && !drawingOn ? <PickedOutline key={`${draft.x},${draft.y}`} draft={draft} frame={frame} flash={board.touch} /> : null}
           <FrameDrawing frameKey={liveKey} native={native} shown={shownDrawing} />
         </div>
         <FramePins
@@ -423,84 +480,263 @@ function FrameLabel({ frame, children }) {
 const isComposing = (state) => Boolean(state.draftSpot)
 const toolOn = (value) => Boolean(value?.tool)
 
-// The element the comment being written is attached to: a calm solid
-// outline that stays while the composer is open. Its box comes from the
-// draft itself (the click point and where in the element it landed), so it
-// shows on a screenshot as well as on the live page.
-function PickedOutline({ draft, scale }) {
-  const { anchor } = draft
-  if (!anchor.w || !anchor.h) return null
+// Outlines on a page, all the same weight on screen at any zoom (the stroke
+// and the label scale by --sw-inv, 1 / zoom: CanvasControls.jsx):
+//   hover     the element a click would pin to, with its name above it
+//   picked    the element the comment being written is attached to
+//   quiet     the element of the open thread, or of the pin or comment row
+//             under the mouse: a soft outline, so you see what it is about
+// Boxes are { left, top, right, bottom } in percent of the page.
+const boxStyle = (box) => ({
+  left: `${box.left}%`,
+  top: `${box.top}%`,
+  width: `${box.right - box.left}%`,
+  height: `${box.bottom - box.top}%`,
+})
+
+const rectBox = (rect, native) => ({
+  left: (rect.left / native.width) * 100,
+  top: (rect.top / native.height) * 100,
+  right: ((rect.left + rect.width) / native.width) * 100,
+  bottom: ((rect.top + rect.height) / native.height) * 100,
+})
+
+// A comment's element box from its own anchor (where in the element the
+// pin landed, and the element's size), for a screenshot or before the live
+// page has resolved it.
+function anchorBox(item) {
+  const { anchor } = item
+  if (!anchor?.w || !anchor?.h) return null
+  const left = item.x - anchor.dx * anchor.w * 100
+  const top = item.y - anchor.dy * anchor.h * 100
+  return { left, top, right: left + anchor.w * 100, bottom: top + anchor.h * 100 }
+}
+
+const STROKE = { hover: 2, picked: 2, quiet: 1.5 }
+
+function ElementOutline({ box, tone, large = false, ...data }) {
   return (
     <div
-      className="pointer-events-none absolute z-[5] rounded-[2px] border-solid border-accent"
-      style={{
-        left: `${draft.x - anchor.dx * anchor.w * 100}%`,
-        top: `${draft.y - anchor.dy * anchor.h * 100}%`,
-        width: `${anchor.w * 100}%`,
-        height: `${anchor.h * 100}%`,
-        borderWidth: 2 * scale,
-      }}
-      data-sw-picked-outline="true"
+      className={cn(
+        'pointer-events-none absolute rounded-[2px]',
+        tone === 'quiet' ? 'z-[4] border-accent/55 bg-accent/[0.05]' : 'z-[5] border-accent',
+        tone === 'hover' && !large && 'bg-accent/[0.06]',
+        large ? 'border-dashed' : 'border-solid',
+      )}
+      style={{ ...boxStyle(box), borderWidth: `calc(${large ? 1.5 : STROKE[tone]}px * var(--sw-inv, 1))` }}
+      {...data}
     />
   )
 }
 
-// The element the open thread is on: nothing to see, only its box, so the
-// thread's popover can keep off it (ThreadPopover.jsx). From the live page
-// when the pin was resolved on it (`box`, in percent), else from the
-// comment's own anchor.
-function ThreadTarget({ comment, box }) {
-  const { anchor } = comment
-  if (!box && (!anchor.w || !anchor.h)) return null
-  const style = box
-    ? { left: `${box.left}%`, top: `${box.top}%`, width: `${box.right - box.left}%`, height: `${box.bottom - box.top}%` }
-    : {
-        left: `${comment.x - anchor.dx * anchor.w * 100}%`,
-        top: `${comment.y - anchor.dy * anchor.h * 100}%`,
-        width: `${anchor.w * 100}%`,
-        height: `${anchor.h * 100}%`,
+// What an element is, in a small tab outside its top left corner, the way
+// Figma and the browser's element picker name what is under the pointer.
+// Above the element when there is room on the page (and on screen), else
+// below it, else just inside its top; never past the page's edges. The
+// same size on screen at any zoom.
+function TargetLabel({ box, frame, kind, name, ...data }) {
+  const ref = useRef(null)
+  const zoom = useStore((state) => state.transform[2])
+  useLayoutEffect(() => {
+    const node = ref.current
+    if (!node || !zoom) return
+    const inv = 1 / zoom
+    const width = node.offsetWidth * inv
+    const height = node.offsetHeight * inv
+    const gap = 4 * inv
+    const left = (box.left / 100) * frame.w
+    const top = (box.top / 100) * frame.h
+    const bottom = (box.bottom / 100) * frame.h
+    // The part of the page on screen: a label above the fold is no use.
+    let shown = { left: 0, top: 0, right: frame.w, bottom: frame.h }
+    const page = node.parentElement?.getBoundingClientRect()
+    const canvas = node.closest('[data-sw-canvas]')?.getBoundingClientRect()
+    if (page && canvas) {
+      shown = {
+        left: Math.max(0, (canvas.left - page.left) * inv),
+        top: Math.max(0, (canvas.top - page.top) * inv),
+        right: Math.min(frame.w, (canvas.right - page.left) * inv),
+        bottom: Math.min(frame.h, (canvas.bottom - page.top) * inv),
       }
-  return <div className="pointer-events-none absolute" style={style} aria-hidden="true" data-sw-thread-target={comment.id} />
+    }
+    // Above; below when the element starts at the top of the page; else
+    // inside its top edge, held at the top of the screen while the element
+    // runs past it (like a sticky header).
+    let place = 'above'
+    let y = top - height - gap
+    if (y < shown.top) {
+      place = top >= shown.top && bottom + gap + height <= shown.bottom ? 'below' : 'inside'
+      y = place === 'below' ? bottom + gap : Math.max(top, shown.top) + gap
+    }
+    const inset = place === 'inside' ? gap : 0
+    const x = Math.max(shown.left + inset, Math.min(Math.max(left, shown.left) + inset, shown.right - width - inset))
+    node.style.transform = `translate(${x}px, ${y}px) scale(${inv})`
+    node.style.visibility = 'visible'
+    node.dataset.swLabelPlace = place
+  })
+  return (
+    <span
+      ref={ref}
+      className="pointer-events-none invisible absolute top-0 left-0 z-[6] flex h-5 origin-top-left items-center gap-1 overflow-hidden rounded-[5px] bg-accent px-1.5 text-[11px] leading-5 whitespace-nowrap text-accent-fg shadow-card"
+      style={{ maxWidth: Math.max(80, Math.min(280, frame.w * (zoom || 1) - 8)) }}
+      {...data}
+    >
+      <span className="shrink-0 font-semibold">{kind}</span>
+      {name ? (
+        <>
+          <span className="shrink-0 opacity-60" aria-hidden="true">
+            ·
+          </span>
+          <span className="min-w-0 truncate font-medium">{name}</span>
+        </>
+      ) : null}
+    </span>
+  )
 }
 
 // The element a click would pin a comment to, outlined, with what it is in
-// plain words ("Button: Start free"). Its selector stays on the element as
+// plain words ("Button · Start free"). Its selector stays on the label as
 // data-sw-hover-selector, for tests and the curious.
-function HoverOutline({ hover, native, scale }) {
-  const { rect } = hover
-  const percent = (value, size) => `${(value / size) * 100}%`
-  const below = rect.top / native.height < 0.04
+function HoverOutline({ hover, native, frame }) {
+  const box = rectBox(hover.rect, native)
   return (
-    <div
-      className={cn(
-        'pointer-events-none absolute z-[5] rounded-[2px] border-accent bg-accent/5',
-        hover.large ? 'border-dashed' : 'border-solid',
-      )}
-      style={{
-        left: percent(rect.left, native.width),
-        top: percent(rect.top, native.height),
-        width: percent(rect.width, native.width),
-        height: percent(rect.height, native.height),
-        borderWidth: 2 * scale,
-      }}
-      data-sw-hover-outline={hover.large ? 'large' : 'element'}
-    >
-      <span
-        className="absolute left-0 max-w-[320px] truncate rounded-sm bg-accent px-1.5 text-[11px] leading-[18px] font-medium whitespace-nowrap text-accent-fg"
-        style={{
-          [below ? 'top' : 'bottom']: '100%',
-          transform: `scale(${scale})`,
-          transformOrigin: below ? 'top left' : 'bottom left',
-          marginTop: below ? 2 * scale : 0,
-          marginBottom: below ? 0 : 2 * scale,
-        }}
+    <>
+      <ElementOutline box={box} tone="hover" large={hover.large} data-sw-hover-outline={hover.large ? 'large' : 'element'} />
+      <TargetLabel
+        box={box}
+        frame={frame}
+        kind={hover.kind}
+        name={hover.name}
         data-sw-hover-label="true"
         data-sw-hover-selector={hover.label}
-      >
-        {hover.name}
-      </span>
-    </div>
+      />
+    </>
   )
+}
+
+// The element the comment being written is attached to: a calm solid
+// outline that stays while the composer is open. Its box comes from the
+// draft itself (the click point and where in the element it landed), so it
+// shows on a screenshot as well as on the live page. On a touch screen,
+// where nothing showed it before the tap, its name shows for a moment too.
+const FLASH_MS = 1600
+function PickedOutline({ draft, frame, flash }) {
+  const box = anchorBox(draft)
+  const [named, setNamed] = useState(Boolean(flash && draft.targetKind))
+  useEffect(() => {
+    if (!named) return undefined
+    const timer = window.setTimeout(() => setNamed(false), FLASH_MS)
+    return () => window.clearTimeout(timer)
+  }, [named])
+  if (!box) return null
+  return (
+    <>
+      <ElementOutline box={box} tone="picked" data-sw-picked-outline="true" />
+      {named ? <TargetLabel box={box} frame={frame} kind={draft.targetKind} name={draft.targetName} data-sw-picked-label="true" /> : null}
+    </>
+  )
+}
+
+// The element a comment is on: the open thread's (the thread's popover
+// keeps off it: ThreadPopover.jsx), or the one whose pin or list row is
+// under the mouse. From the live page when the pin was resolved on it
+// (`box`, in percent), else from the comment's own anchor.
+function AnchorTarget({ comment, box, thread = false }) {
+  const shown = box || anchorBox(comment)
+  if (!shown) return null
+  return (
+    <ElementOutline
+      box={shown}
+      tone="quiet"
+      aria-hidden="true"
+      data-sw-thread-target={thread ? comment.id : undefined}
+      data-sw-anchor-highlight={comment.id}
+    />
+  )
+}
+
+// Hover on a live page while picking: which element a click would pin to.
+// Read once per animation frame from the element map (or the frame's DOM),
+// and a new outline only when the element changes, so moving across a big
+// page costs one hit test a frame and nothing flickers. Holding Alt (Option
+// on a Mac) steps out to the container around the element; the click then
+// pins to that container. `describe(x, y, up)` answers for any point.
+function useHoverTarget({ enabled, map, doc, native }) {
+  const [hover, setHover] = useState(null)
+  const request = useRef(0)
+  const last = useRef(null)
+  const view = useBoardViewStore()
+  const describe = useCallback(
+    (x, y, up = 0) => {
+      if (map) {
+        const position = hitTest(map, x, y, up)
+        return position >= 0 ? describeAt(map, position, native) : null
+      }
+      if (!doc) return null
+      const element = elementAt(doc, x, y, up)
+      return element ? describeElement(doc, element, native) : null
+    },
+    [map, doc, native],
+  )
+  const update = useCallback(
+    (x, y, up) => {
+      last.current = { x, y, up }
+      window.cancelAnimationFrame(request.current)
+      request.current = window.requestAnimationFrame(() => {
+        const next = describe(x, y, up)
+        setHover((previous) => (previous && next && previous.id === next.id ? previous : next))
+      })
+    },
+    [describe],
+  )
+  const clear = useCallback(() => {
+    last.current = null
+    window.cancelAnimationFrame(request.current)
+    setHover(null)
+  }, [])
+  useEffect(() => {
+    if (!enabled) clear()
+  }, [enabled, clear])
+  useEffect(() => () => window.cancelAnimationFrame(request.current), [])
+  useEffect(() => {
+    if (!enabled) return undefined
+    const onKey = (event) => {
+      if (event.key !== 'Alt') return
+      // A lone Alt would focus the browser's menu on some systems.
+      if (event.type === 'keyup') event.preventDefault()
+      const at = last.current
+      const up = event.type === 'keydown' ? 1 : 0
+      if (at && at.up !== up) update(at.x, at.y, up)
+    }
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('keyup', onKey)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('keyup', onKey)
+    }
+  }, [enabled, update])
+  // The comment hint mentions Alt only while something is outlined.
+  const shown = enabled && Boolean(hover)
+  useEffect(() => {
+    if (!shown) return undefined
+    view.set({ targetHover: true })
+    return () => view.set({ targetHover: false })
+  }, [shown, view])
+  const onMouseMove = (event) => {
+    if (!enabled) return
+    const rect = event.currentTarget.getBoundingClientRect()
+    update(((event.clientX - rect.left) / rect.width) * native.width, ((event.clientY - rect.top) / rect.height) * native.height, event.altKey ? 1 : 0)
+  }
+  return { hover: enabled ? hover : null, onMouseMove, onMouseLeave: clear, describe, clear }
+}
+
+// The pin or comment row under the mouse, when it is one of this frame's
+// pins on an element (the same comment object, so the answer is stable).
+function useHoveredAnchored(pins) {
+  return useBoardView((state) => {
+    if (state.hoveredId === null) return null
+    return pins.find((item) => item.id === state.hoveredId && item.anchor) || null
+  })
 }
 
 // Compare mode: one environment's screenshot of the page. The second
@@ -560,27 +796,12 @@ export function CompareFrame({ pageId, frame }) {
       env === defaultEnvironment(board.environments) ? entryVersion(board.manifest?.pages?.[pageId]?.[viewport], board.manifest) : null
     return { id: drawn.id, ...drawingsFor(drawn, current) }
   }, [drawn, env, pageId, viewport, board.manifest, board.environments])
-  const [hover, setHover] = useState(null)
-  const hoverFrame = useRef(0)
-  const canHover = picking && Boolean(map) && !board.touch
-  useEffect(() => {
-    if (!canHover) setHover(null)
-  }, [canHover])
-  useEffect(() => () => window.cancelAnimationFrame(hoverFrame.current), [])
-  const onMouseMove = (event) => {
-    if (!canHover) return
-    const rect = event.currentTarget.getBoundingClientRect()
-    const x = ((event.clientX - rect.left) / rect.width) * native.width
-    const y = ((event.clientY - rect.top) / rect.height) * native.height
-    window.cancelAnimationFrame(hoverFrame.current)
-    hoverFrame.current = window.requestAnimationFrame(() => {
-      const position = hitTest(map, x, y)
-      setHover(position >= 0 ? describeAt(map, position, native) : null)
-    })
-  }
+  const canHover = picking && !openHere && Boolean(map) && !board.touch
+  const { hover, onMouseMove, onMouseLeave, clear: clearHover } = useHoverTarget({ enabled: canHover, map, doc: null, native })
+  const hoveredAnchored = useHoveredAnchored(pins)
   // Places a comment at (fx, fy) of this side, 0 to 1. `anchored`: also to
   // the element there, when the element map is loaded.
-  const place = (fx, fy, anchored = true) => {
+  const place = (fx, fy, anchored = true, up = 0) => {
     const pin = {
       pageId,
       viewport,
@@ -591,20 +812,29 @@ export function CompareFrame({ pageId, frame }) {
     if (anchored && map) {
       const x = fx * native.width
       const y = fy * native.height
-      const anchor = anchorFromMap(map, x, y, native)
+      const position = hitTest(map, x, y, up)
+      const anchor = position >= 0 ? anchorOnMap(map, position, x, y, native) : null
       if (anchor) {
+        const named = nameOnMap(map, position)
         pin.anchor = anchor
-        pin.target = plainLabel(map.elements[hitTest(map, x, y)]?.t, anchor.text)
+        pin.target = named.text
+        pin.targetKind = named.kind
+        pin.targetName = named.name
       }
     }
-    setHover(null)
+    clearHover()
     board.onPin(pin)
   }
   const onClick = (event) => {
     if (!board.commentMode) return
     event.stopPropagation()
+    // This side's thread is open: the click closes it, and the next one pins.
+    if (picking && openHere && !board.touch) {
+      board.onCloseThread()
+      return
+    }
     const rect = event.currentTarget.getBoundingClientRect()
-    place((event.clientX - rect.left) / rect.width, (event.clientY - rect.top) / rect.height)
+    place((event.clientX - rect.left) / rect.width, (event.clientY - rect.top) / rect.height, true, event.altKey ? 1 : 0)
   }
   // "Comment" on the page bar from the keyboard (FrameBar.jsx): both sides
   // of the pair take the keyboard, the first one first (Board.jsx), and
@@ -656,7 +886,7 @@ export function CompareFrame({ pageId, frame }) {
         onKeyDown={commentTarget ? onKeyDown : undefined}
         data-sw-comment-target={commentTarget ? 'true' : undefined}
         onMouseMove={canHover ? onMouseMove : undefined}
-        onMouseLeave={canHover ? () => setHover(null) : undefined}
+        onMouseLeave={canHover ? onMouseLeave : undefined}
         data-sw-frame={`${pageId}:${viewport}:${env}`}
         data-sw-image={src ? (full ? 'full' : 'thumb') : 'none'}
         data-sw-draw-surface={drawSurface ? 'true' : undefined}
@@ -691,9 +921,10 @@ export function CompareFrame({ pageId, frame }) {
               data-sw-diff-overlay="true"
             />
           ) : null}
-          {hover && canHover ? <HoverOutline hover={hover} native={native} scale={pinScale} /> : null}
-          {draft?.anchor && !drawingOn ? <PickedOutline draft={draft} scale={pinScale} /> : null}
-          {openHere?.anchor ? <ThreadTarget comment={openHere} box={null} /> : null}
+          {openHere?.anchor && !drawingOn ? <AnchorTarget comment={openHere} box={null} thread /> : null}
+          {hoveredAnchored && hoveredAnchored !== openHere && !draft && !drawingOn ? <AnchorTarget comment={hoveredAnchored} box={null} /> : null}
+          {hover ? <HoverOutline hover={hover} native={native} frame={frame} /> : null}
+          {draft?.anchor && !drawingOn ? <PickedOutline key={`${draft.x},${draft.y}`} draft={draft} frame={frame} flash={board.touch} /> : null}
           <FrameDrawing frameKey={key} native={native} shown={shownDrawing} />
         </div>
         <FramePins

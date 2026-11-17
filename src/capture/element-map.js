@@ -24,6 +24,8 @@
 //   c  its box clipped by scrolling/hidden ancestors, when that differs from b
 //   a  the element a click on it means (nearest link, button, ...); -1: none
 
+import { INLINE_TAGS, elementName, headingLevel, ownHeading } from './element-name.js'
+
 export const ELEMENT_MAP_VERSION = 1
 export const ELEMENT_MAP_LIMITS = {
   elements: 8000,
@@ -317,59 +319,156 @@ export function selectorOf(map, position) {
 }
 
 // The element a click at page coordinates (x, y) means, or -1 on the page
-// background: the topmost element under it, then its nearest interactive
-// ancestor (as elementAt() did on the DOM).
-export function hitTest(map, x, y) {
+// background: the topmost element under it that is worth pointing at, then
+// its nearest interactive ancestor (as elementAt() did on the DOM), and a
+// run of inline words means the block they are in (a <strong> in a
+// paragraph picks the paragraph). Never <body>, nothing a few pixels big,
+// nothing that is mostly off the page and nothing as big as the whole page.
+// `up`: that many steps out, to the containers around it (each step one
+// that is bigger on screen; Alt while picking, Frame.jsx).
+export function hitTest(map, x, y, up = 0) {
+  const elements = map?.elements || []
   let best = -1
   let bestRank = -1
-  const elements = map?.elements || []
   for (let position = 0; position < elements.length; position += 1) {
     const item = elements[position]
     if (item.z === undefined || item.z <= bestRank) continue
     const [left, top, width, height] = item.c || item.b
-    if (x >= left && x < left + width && y >= top && y < top + height) {
+    if (x >= left && x < left + width && y >= top && y < top + height && pointable(map, item)) {
       best = position
       bestRank = item.z
     }
   }
   if (best < 0) return -1
   const target = elements[best].a
-  return target === undefined ? best : target
+  if (target === -1) return -1
+  let found = target === undefined ? blockOf(map, best) : target
+  for (let step = 0; step < up; step += 1) {
+    const outer = outerOf(map, found)
+    if (outer < 0) break
+    found = outer
+  }
+  return found
 }
 
-// What a reviewer would call an element, from its tag: "Heading", "Button",
-// "Image". Containers are a "Section"; other tags with words in them are "Text".
-const KINDS = {
-  h1: 'Heading',
-  h2: 'Heading',
-  h3: 'Heading',
-  h4: 'Heading',
-  h5: 'Heading',
-  h6: 'Heading',
-  a: 'Link',
-  button: 'Button',
-  summary: 'Button',
-  img: 'Image',
-  picture: 'Image',
-  svg: 'Image',
-  video: 'Video',
-  input: 'Field',
-  textarea: 'Field',
-  select: 'Field',
-  label: 'Label',
-  li: 'List item',
-  ul: 'List',
-  ol: 'List',
-  table: 'Table',
-  form: 'Form',
-  nav: 'Navigation',
-  header: 'Header',
-  footer: 'Footer',
-  section: 'Section',
-  article: 'Section',
-  main: 'Section',
-  aside: 'Section',
-  div: 'Section',
+// Worth pointing at: a few pixels or more each way, mostly on the page, and
+// not the whole page (a wrapper the size of <body> is the background).
+function pointable(map, item) {
+  const [left, top, width, height] = item.b
+  if (width < 3 || height < 3) return false
+  const pageWidth = map.width || 1
+  const pageHeight = map.height || 1
+  const shownWidth = Math.max(0, Math.min(left + width, pageWidth) - Math.max(left, 0))
+  const shownHeight = Math.max(0, Math.min(top + height, pageHeight) - Math.max(top, 0))
+  if ((shownWidth * shownHeight) / (width * height) < 0.4) return false
+  return !(width >= pageWidth * 0.98 && height >= pageHeight * 0.95)
+}
+
+const TEXT_BLOCKS = new Set([
+  'p',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'li',
+  'dd',
+  'dt',
+  'td',
+  'th',
+  'blockquote',
+  'figcaption',
+  'label',
+  'summary',
+  'caption',
+  'legend',
+])
+
+// The block a run of inline words belongs to: up through inline parents to a
+// text block, or a <div> that holds only words. Anything else stays.
+function blockOf(map, position) {
+  const elements = map.elements
+  if (!INLINE_TAGS.has(elements[position].t)) return position
+  let node = position
+  for (let guard = 0; guard < 4; guard += 1) {
+    const parent = elements[node].p
+    if (parent <= 0) return position
+    const tag = elements[parent].t
+    if (TEXT_BLOCKS.has(tag) || ((tag === 'div' || tag.includes('-')) && factsOnMap(map, parent).leaf)) return parent
+    if (!INLINE_TAGS.has(tag)) return position
+    node = parent
+  }
+  return position
+}
+
+// The next container out that is bigger on screen than `position` (a
+// wrapper of the same size is skipped), or -1 at <body>.
+function outerOf(map, position) {
+  const elements = map.elements
+  const [, , width, height] = elements[position].b
+  let node = elements[position].p
+  while (node > 0) {
+    const [, , outerWidth, outerHeight] = elements[node].b
+    if (outerWidth > width + 1 || outerHeight > height + 1) return pointable(map, elements[node]) ? node : -1
+    node = elements[node].p
+  }
+  return -1
+}
+
+// The end (exclusive) of an element's descendants: elements are in document
+// order, so they follow it. Capped, so a huge container costs little.
+const SUBTREE_SCAN = 800
+function subtreeEnd(map, position) {
+  const elements = map.elements
+  const last = Math.min(elements.length, position + 1 + SUBTREE_SCAN)
+  for (let index = position + 1; index < last; index += 1) {
+    let node = elements[index].p
+    while (node > position) node = elements[node].p
+    if (node !== position) return index
+  }
+  return last
+}
+
+// The facts elementName() needs about map element `position`.
+function factsOnMap(map, position) {
+  const elements = map.elements
+  const item = elements[position]
+  const end = subtreeEnd(map, position)
+  const headings = []
+  let block = false
+  for (let index = position + 1; index < end; index += 1) {
+    const inner = elements[index]
+    const level = headingLevel(inner.t)
+    if (level) headings.push({ level, text: inner.x || '' })
+    if (inner.p === position && !INLINE_TAGS.has(inner.t)) block = true
+  }
+  const own = ownHeading(headings)
+  const text = item.l ? `${item.x || ''} …` : item.x || ''
+  const facts = { tag: item.t, label: item.r || '', text, heading: own?.text || '', headingLevel: own?.level || 0, leaf: !block }
+  if (item.t === 'img' || item.t === 'svg') facts.alt = item.x || ''
+  if (item.t === 'input' || item.t === 'textarea' || item.t === 'select') facts.placeholder = item.x || ''
+  return facts
+}
+
+// What a person calls map element `position` ({ kind, name, text }). A
+// wrapper with no heading or label of its own (the <div> inside a <header>)
+// is called what it wraps when it is its parent's only block or fills it.
+export function nameOnMap(map, position, depth = 0) {
+  const elements = map.elements
+  const result = elementName(factsOnMap(map, position))
+  const item = elements[position]
+  if (depth < 4 && result.kind === 'Group' && !result.name && item.p > 0) {
+    const parent = elements[item.p]
+    let siblings = 0
+    for (let index = item.p + 1; index < elements.length && siblings < 2; index += 1) {
+      if (elements[index].p === item.p && !INLINE_TAGS.has(elements[index].t)) siblings += 1
+      else if (elements[index].p < item.p) break
+    }
+    const fills = item.b[2] * item.b[3] >= parent.b[2] * parent.b[3] * 0.85
+    if (siblings === 1 || fills) return nameOnMap(map, item.p, depth + 1)
+  }
+  return result
 }
 
 // The tag a selector ends on ('' when its last step is an #id).
@@ -381,20 +480,11 @@ export function selectorTag(selector) {
   return match ? match[1] : ''
 }
 
-// A plain name for an element: its kind and its text ("Heading: Notes that
-// keep up...", "Button: Start free", "Section"). `large`: it covers a big
-// part of the page, so a section says it is the whole of it.
-export function plainLabel(tag, text = '', { large = false, max = 32 } = {}) {
-  const words = String(text || '').trim()
-  let kind = KINDS[tag] || (words ? 'Text' : 'Element')
-  if (large && kind === 'Section') kind = 'Whole section'
-  return words ? `${kind}: ${clip(words, max)}` : kind
-}
-
 // What hovering shows for the element a comment would pin to (as
-// anchors.js describeElement): `name`, its plain label; `label`, the last
-// selector step and its text (for people who read selectors); and `large`
-// when it covers a fifth of the page or more.
+// anchors.js describeElement): `kind` and `name` ("Card", "Free") and
+// `text`, the two as one ("Card · Free"); `label`, the last selector step and
+// its text (for people who read selectors); and `large` when it covers a
+// fifth of the page or more.
 export function describeAt(map, position, native) {
   const item = map.elements[position]
   const selector = selectorOf(map, position)
@@ -402,19 +492,28 @@ export function describeAt(map, position, native) {
   const text = item.x || ''
   const [left, top, width, height] = item.b
   const area = native?.width && native?.height ? (width * height) / (native.width * native.height) : 0
-  const large = area > 0.2
+  const named = nameOnMap(map, position)
   return {
-    name: plainLabel(item.t, text, { large }),
+    id: position,
+    kind: named.kind,
+    name: named.name,
+    text: named.text,
     label: `${clip(step, 48)}${text ? ` "${clip(text, 28)}"` : ''}`,
-    large,
+    large: area > 0.2,
     rect: { left, top, width, height },
   }
 }
 
 // A click at page coordinates as an anchor, or null (as anchors.js anchorAt).
-export function anchorFromMap(map, x, y, native = null) {
-  const position = hitTest(map, x, y)
+// `up`: as hitTest().
+export function anchorFromMap(map, x, y, native = null, up = 0) {
+  const position = hitTest(map, x, y, up)
   if (position < 0) return null
+  return anchorOnMap(map, position, x, y, native)
+}
+
+// Element `position` as an anchor, for a click at (x, y).
+export function anchorOnMap(map, position, x, y, native = null) {
   const item = map.elements[position]
   const [left, top, width, height] = item.b
   if (!width || !height) return null
@@ -529,7 +628,32 @@ function lastTag(selector) {
 // alone among elements of the same tag. { x, y, box } in percent of the
 // native page, or null when it is gone.
 export function resolveOnMap(map, anchor, native) {
-  if (!map?.elements?.length || !anchor?.selector || !native || !ANCHOR_SELECTOR_RE.test(anchor.selector)) return null
+  if (!native) return null
+  const found = findOnMap(map, anchor)
+  if (found < 0) return null
+  const elements = map.elements
+  const [left, top, width, height] = elements[found].b
+  if (!width && !height) return null
+  const percent = (value, size) => Math.max(0, Math.min(100, (value / size) * 100))
+  const dx = Number.isFinite(anchor.dx) ? anchor.dx : 0.5
+  const dy = Number.isFinite(anchor.dy) ? anchor.dy : 0.5
+  return {
+    x: percent(left + dx * width, native.width),
+    y: percent(top + dy * height, native.height),
+    box: {
+      left: percent(left, native.width),
+      top: percent(top, native.height),
+      right: percent(left + width, native.width),
+      bottom: percent(top + height, native.height),
+    },
+    element: found,
+  }
+}
+
+// The map element an anchor is on, or -1: by selector (checked against the
+// saved text), then by its text alone.
+export function findOnMap(map, anchor) {
+  if (!map?.elements?.length || !anchor?.selector || !ANCHOR_SELECTOR_RE.test(anchor.selector)) return -1
   const wanted = String(anchor.text || '')
   const elements = map.elements
   let found = matchSelector(map, anchor.selector)
@@ -549,22 +673,7 @@ export function resolveOnMap(map, anchor, native) {
       }
     }
   }
-  if (found < 0) return null
-  const [left, top, width, height] = elements[found].b
-  if (!width && !height) return null
-  const percent = (value, size) => Math.max(0, Math.min(100, (value / size) * 100))
-  const dx = Number.isFinite(anchor.dx) ? anchor.dx : 0.5
-  const dy = Number.isFinite(anchor.dy) ? anchor.dy : 0.5
-  return {
-    x: percent(left + dx * width, native.width),
-    y: percent(top + dy * height, native.height),
-    box: {
-      left: percent(left, native.width),
-      top: percent(top, native.height),
-      right: percent(left + width, native.width),
-      bottom: percent(top + height, native.height),
-    },
-  }
+  return found
 }
 
 // The file name of the map that goes with a live HTML file.

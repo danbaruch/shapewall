@@ -5,7 +5,7 @@ import { imagesPayload, useImageDraft } from '../commentImages'
 import { drawing, drawingPayload } from '../drawing'
 import { viewportLabel } from '../viewports'
 import { frameKey } from '../commentSide'
-import { plainLabel, selectorTag } from '../../../../src/capture/element-map.js'
+import { anchorName } from '../../../../src/capture/element-name.js'
 
 // The new comment being written (`draft`, placed by a click in comment mode):
 // saving it, the line that says where it goes, and the composer's props.
@@ -92,10 +92,10 @@ export function useCommentDraft({
     }
   }
   // What the comment is attached to, in plain words: the picked element
-  // ("Heading: Notes that keep up..."), or the spot on a screenshot.
+  // ("Heading · Notes that keep up…"), or the spot on a screenshot.
   const draftTarget = draft
     ? draft.anchor
-      ? draft.target || plainLabel(selectorTag(draft.anchor.selector), draft.anchor.text)
+      ? draft.target || anchorName(draft.anchor)
       : `a spot on ${targetTitle(draft.pageId)}`
     : ''
   const draftDescription = draft

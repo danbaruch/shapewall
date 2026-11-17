@@ -3,7 +3,7 @@
 // robust reference to an element, and later to find that element again, so
 // a pin follows its element when the page is recaptured.
 
-import { plainLabel } from '../../../src/capture/element-map.js'
+import { INLINE_TAGS, elementName, headingLevel, ownHeading } from '../../../src/capture/element-name.js'
 import { frameDom } from './frameDom'
 
 const SELECTOR_MAX = 600
@@ -87,20 +87,116 @@ export function selectorFor(doc, element) {
 }
 
 // The element a tap at document coordinates means: the element under it, or
-// its nearest interactive ancestor. Null on the page background.
-export function elementAt(doc, x, y) {
+// its nearest interactive ancestor, and the block a run of inline words is
+// in. Null on the page background, a few pixels, or a page-sized wrapper
+// (as hitTest() on an element map). `up`: that many containers out.
+export function elementAt(doc, x, y, up = 0) {
   const hit = frameDom.elementFromPoint(doc, x, y)
-  if (!hit || hit === frameDom.documentElement(doc) || hit === frameDom.body(doc)) return null
-  const element = hit.closest?.(PREFERRED) || hit
-  const rect = element.getBoundingClientRect()
-  return rect.width && rect.height ? element : null
+  const root = frameDom.documentElement(doc)
+  const body = frameDom.body(doc)
+  if (!hit || hit === root || hit === body) return null
+  let element = hit.closest?.(PREFERRED) || blockOf(hit, body)
+  if (!pointable(doc, element)) return null
+  for (let step = 0; step < up; step += 1) {
+    const outer = outerOf(doc, element)
+    if (!outer) break
+    element = outer
+  }
+  return element
 }
 
-// What hovering shows for the element a comment would pin to: `name`, a
-// plain label ("Button: Start free"); `label`, the last step of its selector
-// and its text ('a[data-testid="cta"] "Start free"'); and `large` when it
-// covers a big part of the page, so the board can say the pin goes on a
-// whole section.
+const TEXT_BLOCK = 'p, h1, h2, h3, h4, h5, h6, li, dd, dt, td, th, blockquote, figcaption, label, summary, caption, legend'
+
+function pointable(doc, element) {
+  const rect = element.getBoundingClientRect()
+  if (rect.width < 3 || rect.height < 3) return false
+  const root = frameDom.documentElement(doc)
+  const pageWidth = root?.scrollWidth || rect.width
+  const pageHeight = root?.scrollHeight || rect.height
+  return !(rect.width >= pageWidth * 0.98 && rect.height >= pageHeight * 0.95)
+}
+
+const isLeaf = (element) => Array.from(element.children).every((child) => INLINE_TAGS.has(child.tagName.toLowerCase()))
+
+function blockOf(element, body) {
+  if (!INLINE_TAGS.has(element.tagName.toLowerCase())) return element
+  let node = element
+  for (let guard = 0; guard < 4; guard += 1) {
+    const parent = node.parentElement
+    if (!parent || parent === body) return element
+    const tag = parent.tagName.toLowerCase()
+    if (parent.matches(TEXT_BLOCK) || ((tag === 'div' || tag.includes('-')) && isLeaf(parent))) return parent
+    if (!INLINE_TAGS.has(tag)) return element
+    node = parent
+  }
+  return element
+}
+
+function outerOf(doc, element) {
+  const body = frameDom.body(doc)
+  const { width, height } = element.getBoundingClientRect()
+  for (let node = element.parentElement; node && node !== body; node = node.parentElement) {
+    const rect = node.getBoundingClientRect()
+    if (rect.width > width + 1 || rect.height > height + 1) return pointable(doc, node) ? node : null
+  }
+  return null
+}
+
+// The facts elementName() needs, read from the element.
+function factsOf(element) {
+  const tag = element.tagName.toLowerCase()
+  const attr = (name) => element.getAttribute?.(name) || ''
+  const headings = []
+  for (const heading of Array.from(element.querySelectorAll('h1, h2, h3, h4, h5, h6, [role="heading"]')).slice(0, 60)) {
+    const level = Number(heading.getAttribute('aria-level')) || headingLevel(heading.tagName.toLowerCase()) || 2
+    headings.push({ level, text: textOf(heading) })
+  }
+  const own = ownHeading(headings)
+  let label = attr('aria-label')
+  if (!label && attr('aria-labelledby')) {
+    const doc = element.ownerDocument
+    label = attr('aria-labelledby')
+      .split(/\s+/)
+      .map((id) => textOf(doc?.getElementById(id)))
+      .join(' ')
+  }
+  return {
+    tag,
+    role: attr('role'),
+    type: attr('type'),
+    label,
+    alt: attr('alt'),
+    title: attr('title'),
+    placeholder: attr('placeholder'),
+    field: element.labels?.[0] ? textOf(element.labels[0]) : '',
+    value: tag === 'input' ? attr('value') : '',
+    text: textOf(element),
+    heading: own?.text || '',
+    headingLevel: own?.level || 0,
+    leaf: isLeaf(element),
+  }
+}
+
+// What a person calls the element ({ kind, name, text }), as nameOnMap(): a
+// wrapper with no name of its own is called what it wraps.
+export function nameOf(element, depth = 0) {
+  const result = elementName(factsOf(element))
+  const parent = element.parentElement
+  const body = element.ownerDocument?.body
+  if (depth < 4 && result.kind === 'Group' && !result.name && parent && parent !== body) {
+    const blocks = Array.from(parent.children).filter((child) => !INLINE_TAGS.has(child.tagName.toLowerCase()))
+    const own = element.getBoundingClientRect()
+    const outer = parent.getBoundingClientRect()
+    if (blocks.length === 1 || own.width * own.height >= outer.width * outer.height * 0.85) return nameOf(parent, depth + 1)
+  }
+  return result
+}
+
+// What hovering shows for the element a comment would pin to: `kind`,
+// `name` and `text` ("Button · Start free"); `label`, the last step of its
+// selector and its text ('a[data-testid="cta"] "Start free"'); and `large`
+// when it covers a big part of the page, so the outline says it is a whole
+// block.
 const clip = (value, max) => (value.length > max ? `${value.slice(0, max - 3)}...` : value)
 
 export function describeElement(doc, element, native) {
@@ -109,11 +205,14 @@ export function describeElement(doc, element, native) {
   const text = textOf(element)
   const rect = element.getBoundingClientRect()
   const area = native?.width && native?.height ? (rect.width * rect.height) / (native.width * native.height) : 0
-  const large = area > 0.2
+  const named = nameOf(element)
   return {
-    name: plainLabel(element.tagName.toLowerCase(), text, { large }),
+    id: element,
+    kind: named.kind,
+    name: named.name,
+    text: named.text,
     label: `${clip(step, 48)}${text ? ` "${clip(text, 28)}"` : ''}`,
-    large,
+    large: area > 0.2,
     rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
   }
 }
@@ -121,8 +220,8 @@ export function describeElement(doc, element, native) {
 // Turns a tap at document coordinates into an anchor, or null. `native` (the
 // page size) adds the element's size as a share of the page (w, h), so the
 // pin can sit on the element's corner in screenshot mode too.
-export function anchorAt(doc, x, y, native = null) {
-  const element = elementAt(doc, x, y)
+export function anchorAt(doc, x, y, native = null, up = 0) {
+  const element = elementAt(doc, x, y, up)
   if (!element) return null
   const rect = element.getBoundingClientRect()
   const clamp = (value) => Math.max(0, Math.min(1, value))

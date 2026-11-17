@@ -227,7 +227,7 @@ test('desktop: comment mode outlines the element under the mouse, the hint sits 
     await page.mouse.move((target.left + target.right) / 2, (target.top + target.bottom) / 2)
     await page.waitForSelector('[data-sw-hover-outline="element"]')
     // The label is in plain words; the selector stays on it for those who want it.
-    assert.equal(await page.textContent('[data-sw-hover-label]'), 'Link: Try Plus free')
+    assert.equal(await page.textContent('[data-sw-hover-label]'), 'Link · Try Plus free')
     assert.match(await page.getAttribute('[data-sw-hover-label]', 'data-sw-hover-selector'), /plus-cta.*Try Plus free/)
     const outline = await rect(page, '[data-sw-hover-outline]')
     assert.ok(Math.abs(outline.left - target.left) < 3 && Math.abs(outline.top - target.top) < 3, 'the outline is on the button')
@@ -280,7 +280,7 @@ test('desktop: once a target is picked the page is calm; an empty draft moves, a
     await page.waitForSelector(`${canvas}[data-sw-comment-flow="picking"]`)
     await page.mouse.move(...middle(cta))
     await page.waitForSelector('[data-sw-hover-outline="element"]')
-    assert.equal(await page.textContent('[data-sw-hover-label]'), 'Link: Try Plus free')
+    assert.equal(await page.textContent('[data-sw-hover-label]'), 'Link · Try Plus free')
     assert.equal(await cursorOn(...middle(cta)), 'crosshair')
 
     // Composing: picking is over. The picked element keeps a solid outline,
@@ -297,7 +297,7 @@ test('desktop: once a target is picked the page is calm; an empty draft moves, a
     assert.equal(await page.locator('[data-sw-hover-outline]').count(), 0, 'no hover outline while composing')
     assert.notEqual(await cursorOn(...middle(heading)), 'crosshair')
     assert.equal(await page.getAttribute('[data-sw-comment-hint]', 'data-sw-comment-hint'), 'composing')
-    assert.match(await page.textContent('[data-sw-comment-hint-target]'), /Commenting on Link: Try Plus free/)
+    assert.match(await page.textContent('[data-sw-comment-hint-target]'), /Commenting on Link · Try Plus free/)
     assert.match(await page.textContent('[data-sw-composer-target]'), /Pricing · Desktop · Link: Try Plus free/)
     await shot(page, 'ux-flow-1-composing')
 
