@@ -52,6 +52,8 @@ export function CommentComposer({
     if (startDraw && drawable) setSheet(true)
   }, [startDraw, drawable])
   const shapes = useDrawing((value) => (value?.owner === 'composer' ? value.shapes.length : 0))
+  // Drawing: the draw tools fill the row, so Cancel moves under the box.
+  const drawingOn = useDrawing((value) => value?.owner === 'composer')
   const images = media?.images
   const canAttach = Boolean(media?.attach && images)
   const canDraw = Boolean(media?.draw)
@@ -151,8 +153,8 @@ export function CommentComposer({
         }
         actions={
           <>
-            <DictationButton dictation={dictation} touch={touch} disabled={busy} bubbleSide={touch ? 'top' : 'bottom'} />
-            {touch || discard ? null : cancel}
+            <DictationButton dictation={dictation} touch={touch} disabled={busy} bubbleSide="top" />
+            {touch || discard || drawingOn ? null : cancel}
             {touch ? (
               postButton
             ) : (
@@ -247,6 +249,11 @@ export function CommentComposer({
         // A phone: the line and Cancel, at a 44 px target, under the box.
         <div className="flex items-center gap-3 pl-1" data-sw-composer-footer="true">
           <p className="min-w-0 flex-1 truncate text-xs text-faint">{note}</p>
+          {cancel}
+        </div>
+      ) : drawingOn ? (
+        <div className="flex items-center gap-2 pl-1" data-sw-composer-footer="true">
+          <p className="min-w-0 flex-1 truncate text-[11px] leading-4 text-faint">{note}</p>
           {cancel}
         </div>
       ) : note ? (

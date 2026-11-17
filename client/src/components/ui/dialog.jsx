@@ -120,8 +120,10 @@ export function Dialog({
       <DialogPrimitive.Portal>
         <MotionOverlay />
         {/* A phone sheet can be pulled down to close: drag is in the larger
-            animation chunk (lib/animate.jsx). */}
-        {phone && !sticky ? <LayoutMotion>{panel}</LayoutMotion> : panel}
+            animation chunk (lib/animate.jsx). Always wrapped, so the tree
+            never changes shape: a form turning dirty (sticky) or a resize
+            past the phone width must not remount the panel and lose input. */}
+        <LayoutMotion>{panel}</LayoutMotion>
       </DialogPrimitive.Portal>
     </DialogPrimitive.Root>
   )
