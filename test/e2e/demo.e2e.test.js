@@ -173,8 +173,8 @@ test('view as: each role sees what it may do, on the board and in the console', 
       ['select', 'hand'],
     )
     assert.ok(
-      (await page.locator('[data-sw-frame-bar] [data-sw-select-text], [data-sw-frame-more]').count()) > 0,
-      'Select text (or More) on the page bar',
+      (await page.locator('[data-sw-frame-bar] [data-sw-select-text], [data-sw-frame-more], [data-sw-frame-bar-toggle]').count()) > 0,
+      'Select text is on the page bar (or its More menu, or its folded button)',
     )
     await shot(page, '2-viewer-live')
     await page.click('.react-flow__controls-fitview')
