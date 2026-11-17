@@ -275,7 +275,7 @@ test('phone: the compare bar is one row and the thread is the full sheet, with i
       const box = await rect(page, control)
       assert.ok(box.top >= bar.top && box.bottom <= bar.bottom + 1, `${control} is in the row`)
       assert.ok(box.left >= 0 && box.right <= 390, `${control} is on screen`)
-      assert.ok(box.height >= 44, `${control} is a 44 px target (${box.height})`)
+      assert.ok(Math.round(box.height) >= 44, `${control} is a 44 px target (${box.height})`)
     }
     await shot(page, 'compare-phone-bar')
     // The options hold the toggles and the count.

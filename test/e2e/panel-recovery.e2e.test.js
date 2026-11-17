@@ -32,7 +32,8 @@ after(async () => {
 })
 
 test('desktop 1440: the Checks panel failing to load shows a retry in the panel, the board stays, and Try again loads it', async () => {
-  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  // No service worker: it precaches the app's files, and its fetches bypass page.route.
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, serviceWorkers: 'block' })
   await context.addInitScript(() => {
     if (window === window.top) window.localStorage.setItem('shapewall.tip.board', '1')
   })
