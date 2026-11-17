@@ -1,10 +1,11 @@
-import { useLayoutEffect, useRef } from 'react'
+import { useRef } from 'react'
 import { Dialog as DialogPrimitive } from 'radix-ui'
 import { cva } from 'class-variance-authority'
 import { ChevronLeft, X } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { useOverlayEntry } from '../../lib/hooks'
-import { AnimatePresence, LayoutMotion, fade, m, pop, sheet, useDragControls, usePresenceProps, useSheetLayout } from '../../lib/animate'
+import { LayoutMotion, fade, m, pop, sheet, useDragControls, useSheetLayout } from '../../lib/animate'
+import { useExitGhost } from '../../lib/exit-ghost'
 
 const panelVariants = cva(
   // A bottom sheet on phones, centered from the sm breakpoint up.
@@ -27,12 +28,13 @@ export function DialogOverlay({ className, ...props }) {
   return <DialogPrimitive.Overlay className={cn('fixed inset-0 z-50 animate-fade-in bg-black/40', className)} {...props} />
 }
 
-// The same scrim, faded in and out by Motion (inside AnimatePresence).
+// The same scrim, faded in by Motion and out by its ghost (lib/exit-ghost.js).
 export function MotionOverlay({ className, ...props }) {
-  const presence = usePresenceProps()
+  const ref = useRef(null)
+  useExitGhost(ref, 'fade')
   return (
-    <DialogPrimitive.Overlay forceMount asChild {...props}>
-      <m.div className={cn('fixed inset-0 z-50 bg-black/40', className)} {...fade} {...presence} />
+    <DialogPrimitive.Overlay asChild {...props}>
+      <m.div ref={ref} className={cn('fixed inset-0 z-50 bg-black/40', className)} {...fade} />
     </DialogPrimitive.Overlay>
   )
 }
@@ -50,6 +52,11 @@ function focusFirst(event) {
 // press outside. `onClose` may refuse (a save in flight) by doing nothing.
 // `description` is one line; `wrapDescription` lets a full sentence wrap.
 // Escape in a field marked data-sw-own-escape="true" is that field's, not the dialog's.
+//
+// Motion: centred, it pops in; on a phone it is a sheet that springs up from
+// the bottom and can be pulled down by its header to close. Closing is
+// immediate for the app (focus, Escape, the rest of the page); a picture of
+// the panel plays the exit (lib/exit-ghost.js).
 export function Dialog({
   open,
   onClose,
@@ -80,7 +87,6 @@ export function Dialog({
   const opener = useRef(null)
   const wasOpen = useRef(false)
   if (open && !wasOpen.current && typeof document !== 'undefined') opener.current = document.activeElement
-  const closing = wasOpen.current && !open
   wasOpen.current = open
   const restoreFocus = (event) => {
     const target = opener.current
@@ -90,22 +96,6 @@ export function Dialog({
       target.focus({ preventScroll: true })
     }
   }
-  // Focus goes back the moment the dialog closes, not when its exit
-  // animation ends: the closing panel is already inert (lib/animate.jsx).
-  const closeFocus = useRef(null)
-  closeFocus.current = onCloseAutoFocus || restoreFocus
-  useLayoutEffect(() => {
-    if (!closing) return
-    let prevented = false
-    closeFocus.current({
-      preventDefault() {
-        prevented = true
-      },
-      get defaultPrevented() {
-        return prevented
-      },
-    })
-  }, [closing])
   const phone = useSheetLayout()
   const panel = (
     <DialogPanel
@@ -120,22 +110,19 @@ export function Dialog({
       wrapDescription={wrapDescription}
       footer={footer}
       onClose={onClose}
+      onCloseAutoFocus={onCloseAutoFocus || restoreFocus}
     >
       {children}
     </DialogPanel>
   )
   return (
     <DialogPrimitive.Root open={open} onOpenChange={(next) => (next ? null : onClose())}>
-      <AnimatePresence>
-        {open ? (
-          <DialogPrimitive.Portal forceMount>
-            <MotionOverlay />
-            {/* A phone sheet can be pulled down to close: drag needs the
-                larger animation chunk, loaded the first time one opens. */}
-            {phone && !sticky ? <LayoutMotion>{panel}</LayoutMotion> : panel}
-          </DialogPrimitive.Portal>
-        ) : null}
-      </AnimatePresence>
+      <DialogPrimitive.Portal>
+        <MotionOverlay />
+        {/* A phone sheet can be pulled down to close: drag is in the larger
+            animation chunk (lib/animate.jsx). */}
+        {phone && !sticky ? <LayoutMotion>{panel}</LayoutMotion> : panel}
+      </DialogPrimitive.Portal>
     </DialogPrimitive.Root>
   )
 }
@@ -145,17 +132,30 @@ const DISMISS_DISTANCE = 96
 const DISMISS_VELOCITY = 600
 const NOT_A_HANDLE = 'button, a, input, textarea, select, [role="button"], [role="menuitem"]'
 
-function DialogPanel({ phone, size, className, maxHeight, sticky, back, title, description, wrapDescription, footer, onClose, children }) {
-  const { style: exitStyle, ...presence } = usePresenceProps({}, { role: true })
+function DialogPanel({
+  phone,
+  size,
+  className,
+  maxHeight,
+  sticky,
+  back,
+  title,
+  description,
+  wrapDescription,
+  footer,
+  onClose,
+  onCloseAutoFocus,
+  children,
+}) {
+  const ref = useRef(null)
+  useExitGhost(ref, phone ? 'sheet' : 'pop')
   const drag = useDragControls()
   const draggable = phone && !sticky
   return (
     <DialogPrimitive.Content
-      forceMount
       asChild
       onOpenAutoFocus={focusFirst}
-      // Focus was handed back when the dialog closed (Dialog, above).
-      onCloseAutoFocus={(event) => event.preventDefault()}
+      onCloseAutoFocus={onCloseAutoFocus}
       // A field that uses Escape itself (editing a message: Escape cancels
       // the edit) marks itself data-sw-own-escape: the dialog stays open.
       onEscapeKeyDown={(event) => {
@@ -167,8 +167,9 @@ function DialogPanel({ phone, size, className, maxHeight, sticky, back, title, d
       {...(description ? {} : { 'aria-describedby': undefined })}
     >
       <m.div
+        ref={ref}
         className={cn(panelVariants({ size }), className)}
-        style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)', ...(maxHeight ? { maxHeight } : null), ...exitStyle }}
+        style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)', ...(maxHeight ? { maxHeight } : null) }}
         {...(phone ? sheet : pop)}
         {...(draggable
           ? {
@@ -183,7 +184,6 @@ function DialogPanel({ phone, size, className, maxHeight, sticky, back, title, d
               },
             }
           : null)}
-        {...presence}
         data-sw-sheet={phone ? 'true' : undefined}
       >
         {/* The title (and its one-line description) centered on the 44px

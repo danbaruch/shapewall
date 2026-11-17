@@ -1529,6 +1529,8 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
         setToast({
           at: Date.now(),
           text: 'Select text works on a live page: click a page, then Open live (or zoom in until it goes live).',
+          // A hint about the board as it is: it goes when compare starts.
+          hint: true,
         })
       }
     }
@@ -1549,6 +1551,42 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
   }, [selectingKey, hand, commentMode])
+  // Esc leaves compare mode once nothing else is open. Everything that Esc
+  // closes first (a thread, the composer, a menu, a dialog, comment mode,
+  // Select text, Hand, a journey) uses the key up before it gets here
+  // (preventDefault, or a capture-phase listener), so the first Esc closes
+  // that and the next one leaves compare.
+  const leaveCompareRef = useRef(null)
+  leaveCompareRef.current =
+    comparePair && !journey
+      ? () => {
+          setCompare(null)
+          canvasRef.current?.focus({ preventScroll: true })
+        }
+      : null
+  const comparing = Boolean(comparePair) && !journey
+  useEffect(() => {
+    if (!comparing) return undefined
+    const onKey = (event) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing || isEditable(event.target)) return
+      if (
+        document.querySelector(
+          '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [data-sw-thread-popover], [data-sw-composer-popover]',
+        )
+      )
+        return
+      event.preventDefault()
+      leaveCompareRef.current?.()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [comparing])
+  // Starting (or changing) a comparison drops a hint about the board as it
+  // was ("Select text works on a live page"): it would sit over the new view.
+  const compareKey = comparePair ? comparePair.join('_') : ''
+  useEffect(() => {
+    if (compareKey) setToast((current) => (current?.hint || current?.untilSheet ? null : current))
+  }, [compareKey, setToast])
   // V is Select, H is Hand (tools.js: not while typing or with a dialog,
   // menu or list open; the same guard as C).
   const pickToolRef = useRef(pickTool)
@@ -2002,53 +2040,45 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                       onComment={commenting ? commentOnPage : null}
                       commentTargetKey={commentMode && !drawArmed ? commentTarget?.key || null : null}
                     />
-                    {/* The canvas cards (ThreadPopover.jsx) pop in at their pin and
-                        fade out when closed; switching threads keeps the card. */}
-                    <AnimatePresence>
-                      {wide && draft && !draftParked && !modalOpen ? (
-                        <ComposerPopover
-                          key="composer"
-                          point={pinPoint(layout.targets, draft)}
-                          // Re-aimed at another spot: a card that was dragged goes back to its pin.
-                          resetKey={`${frameKey(draft.pageId, draft.viewport, draft.environment)}|${draft.x}|${draft.y}`}
-                          stowed={drawingOn}
-                          onClose={() => (busy ? null : setDraft(null))}
-                          onEscape={() => {
-                            // Esc while being asked is "Keep".
-                            if (discardAsk) {
-                              setDiscardAsk(false)
-                              return false
-                            }
-                            if (!draftHasMedia()) return true
-                            setDiscardAsk(true)
+                    {wide && draft && !draftParked && !modalOpen ? (
+                      <ComposerPopover
+                        point={pinPoint(layout.targets, draft)}
+                        // Re-aimed at another spot: a card that was dragged goes back to its pin.
+                        resetKey={`${frameKey(draft.pageId, draft.viewport, draft.environment)}|${draft.x}|${draft.y}`}
+                        stowed={drawingOn}
+                        onClose={() => (busy ? null : setDraft(null))}
+                        onEscape={() => {
+                          // Esc while being asked is "Keep".
+                          if (discardAsk) {
+                            setDiscardAsk(false)
                             return false
-                          }}
-                        >
-                          <CommentComposer
-                            {...composerProps}
-                            touch={false}
-                            description={draftDescription}
-                            discard={discardAsk ? { onDiscard: () => setDraft(null), onKeep: () => setDiscardAsk(false) } : null}
-                          />
-                        </ComposerPopover>
-                      ) : null}
-                    </AnimatePresence>
-                    <AnimatePresence>
-                      {wide && threadProps && !draft && !modalOpen ? (
-                        <ThreadPopover
-                          key="thread"
-                          comment={selectedComment}
-                          point={pinPoint(layout.targets, selectedComment)}
-                          onClose={closeThread}
-                          stowed={drawingOn}
-                          onPrev={() => stepThread(-1)}
-                          onNext={() => stepThread(1)}
-                          editingRef={editingRef}
-                        >
-                          <ThreadView {...threadProps} onClose={closeThread} />
-                        </ThreadPopover>
-                      ) : null}
-                    </AnimatePresence>
+                          }
+                          if (!draftHasMedia()) return true
+                          setDiscardAsk(true)
+                          return false
+                        }}
+                      >
+                        <CommentComposer
+                          {...composerProps}
+                          touch={false}
+                          description={draftDescription}
+                          discard={discardAsk ? { onDiscard: () => setDraft(null), onKeep: () => setDiscardAsk(false) } : null}
+                        />
+                      </ComposerPopover>
+                    ) : null}
+                    {wide && threadProps && !draft && !modalOpen ? (
+                      <ThreadPopover
+                        comment={selectedComment}
+                        point={pinPoint(layout.targets, selectedComment)}
+                        onClose={closeThread}
+                        stowed={drawingOn}
+                        onPrev={() => stepThread(-1)}
+                        onNext={() => stepThread(1)}
+                        editingRef={editingRef}
+                      >
+                        <ThreadView {...threadProps} onClose={closeThread} />
+                      </ThreadPopover>
+                    ) : null}
                     <CanvasControls
                       wide={wide}
                       clearFocus={clearFocus}

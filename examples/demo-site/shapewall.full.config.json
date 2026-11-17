@@ -93,7 +93,8 @@
       "path": "/status/",
       "title": "Status page",
       "group": "System",
-      "note": "Fails on purpose: shows what a failed capture looks like"
+      "note": "Not built yet: answers 404, captured as an expected error page",
+      "expectStatus": 404
     }
   ],
   "journeys": [

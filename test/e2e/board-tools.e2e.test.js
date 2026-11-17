@@ -231,7 +231,10 @@ test('desktop: the tools float at the bottom centre of the canvas, the top bar h
     // (The pointer off it: hover lightens the fill; and the colour fades in.)
     await page.mouse.move(600, 300)
     await page.waitForFunction(
-      ([selector, want]) => getComputedStyle(document.querySelector(selector)).backgroundColor === want,
+      ([selector, want]) => {
+        const button = document.querySelector(selector)
+        return getComputedStyle(button.querySelector('[data-sw-tool-fill]') || button).backgroundColor === want
+      },
       [tool('comment'), accent],
     )
     assert.equal((await paint('select')).look, null, 'and Select is plain again')

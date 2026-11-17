@@ -64,8 +64,18 @@ On Fedora, that command fails because it needs `apt-get`. Use `dnf`:
 dnf install nss atk at-spi2-atk cups-libs libxkbcommon libXcomposite libXdamage libXrandr mesa-libgbm pango alsa-lib
 ```
 
-On other distributions, install the same libraries with the system package manager. The repository's `Dockerfile` is based on the
-official Playwright image, which already has them ([In Docker](docs/deployment.md#in-docker)).
+On any other distribution, the simplest answer is the official Playwright Docker image, which has Chromium and every library it
+needs. Capture inside it, in your project folder (the image's version matches Shapewall's Playwright, 1.64.1):
+
+```sh
+docker run --rm --ipc=host --network host -v "$PWD":/work -w /work mcr.microsoft.com/playwright:v1.64.1-noble \
+  npx shapewall capture
+```
+
+`--network host` lets it reach a site on your localhost. The board itself (`npx shapewall serve`) runs on the host as usual.
+
+Or install the same libraries with the system package manager. The repository's own `Dockerfile` is based on that image too
+([In Docker](docs/deployment.md#in-docker)).
 
 ## What to do next
 
@@ -128,7 +138,8 @@ npm run demo                                     # captures the bundled demo sit
 npm run demo -- --full                           # the whole fictional product, as in the live demo
 ```
 
-Then open http://127.0.0.1:4600/. In the full demo, the Status page fails on purpose (3 failed shots), to show a failed capture.
+Then open http://127.0.0.1:4600/. In the full demo the Status page answers 404 on purpose and is captured as an expected error page
+(`"expectStatus": 404`), so the run ends with every shot ok.
 
 ## What else it does
 

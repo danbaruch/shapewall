@@ -1,49 +1,35 @@
-import { createContext, useContext } from 'react'
 import { DropdownMenu as MenuPrimitive } from 'radix-ui'
 import { cn } from '../../lib/utils'
-import { AnimatePresence } from '../../lib/animate'
 import { FloatingPanel } from './popover'
 import { useOverlayOpen } from './use-overlay-open'
-
-// Whether the menu is open, so its content can play an exit (popover.jsx).
-const OpenContext = createContext(false)
 
 // A menu of actions. Back closes it while it is open (see useOverlayOpen).
 export function DropdownMenu({ open, onOpenChange, defaultOpen, ...props }) {
   const [isOpen, setOpen] = useOverlayOpen(open, onOpenChange, defaultOpen)
-  return (
-    <OpenContext.Provider value={isOpen}>
-      <MenuPrimitive.Root open={isOpen} onOpenChange={setOpen} {...props} />
-    </OpenContext.Provider>
-  )
+  return <MenuPrimitive.Root open={isOpen} onOpenChange={setOpen} {...props} />
 }
 
 export const DropdownMenuTrigger = MenuPrimitive.Trigger
 export const DropdownMenuGroup = MenuPrimitive.Group
 
 export function DropdownMenuContent({ className, sideOffset = 4, align = 'end', children, ...props }) {
-  const open = useContext(OpenContext)
   return (
-    <AnimatePresence>
-      {open ? (
-        <MenuPrimitive.Portal forceMount>
-          <FloatingPanel
-            Content={MenuPrimitive.Content}
-            origin="var(--radix-dropdown-menu-content-transform-origin)"
-            sideOffset={sideOffset}
-            align={align}
-            collisionPadding={8}
-            className={cn(
-              'z-[60] max-h-[var(--radix-dropdown-menu-content-available-height)] min-w-44 overflow-y-auto rounded-lg border border-line bg-surface p-1 text-fg shadow-pop',
-              className,
-            )}
-            {...props}
-          >
-            {children}
-          </FloatingPanel>
-        </MenuPrimitive.Portal>
-      ) : null}
-    </AnimatePresence>
+    <MenuPrimitive.Portal>
+      <FloatingPanel
+        Content={MenuPrimitive.Content}
+        origin="var(--radix-dropdown-menu-content-transform-origin)"
+        sideOffset={sideOffset}
+        align={align}
+        collisionPadding={8}
+        className={cn(
+          'z-[60] max-h-[var(--radix-dropdown-menu-content-available-height)] min-w-44 overflow-y-auto rounded-lg border border-line bg-surface p-1 text-fg shadow-pop',
+          className,
+        )}
+        {...props}
+      >
+        {children}
+      </FloatingPanel>
+    </MenuPrimitive.Portal>
   )
 }
 
