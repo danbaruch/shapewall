@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { Indicator, Reveal, useIndicator } from './motion.jsx'
 import { ArrowRight, Check, Copy, MousePointerClick } from 'lucide-react'
 import { track } from '../analytics.js'
 import { DEMO_URL } from '../routes.js'
@@ -30,7 +31,7 @@ const BUTTON_SIZES = {
 
 export function buttonClass({ variant = 'primary', size = 'md', className } = {}) {
   return cx(
-    'inline-flex shrink-0 items-center justify-center gap-2 font-semibold transition-colors select-none disabled:pointer-events-none disabled:opacity-35',
+    'inline-flex shrink-0 items-center justify-center gap-2 font-semibold transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-[cubic-bezier(0.2,0,0,1)] select-none active:scale-[0.97] disabled:pointer-events-none disabled:opacity-35 motion-reduce:active:scale-100',
     BUTTON_VARIANTS[variant],
     BUTTON_SIZES[size],
     className,
@@ -68,23 +69,27 @@ export function IconButton({ label, variant = 'quiet', size = 'icon-sm', childre
   )
 }
 
-// One choice out of a few (the board kit's ToggleGroup). options: [{ id, label }]
+// One choice out of a few (the board kit's ToggleGroup). options: [{ id, label }]. The chosen fill slides between them.
 export function ToggleGroup({ label, options, value, onChange, className }) {
+  const { measured, box, itemRef } = useIndicator(value)
   return (
     <div
-      className={cx('flex rounded-lg border border-line bg-sunk p-0.5 text-[13px] font-medium', className)}
+      className={cx('relative flex rounded-lg border border-line bg-sunk p-0.5 text-[13px] font-medium', className)}
       role="group"
       aria-label={label}
     >
+      <Indicator box={box} className="rounded-md bg-card shadow-sm" />
       {options.map((option) => (
         <button
           key={option.id}
+          ref={itemRef(option.id)}
           type="button"
           onClick={() => onChange(option.id)}
           aria-pressed={value === option.id}
           className={cx(
-            'h-8 rounded-md px-3 transition-colors',
-            value === option.id ? 'bg-card text-ink shadow-sm' : 'text-slate hover:text-ink',
+            'relative h-8 rounded-md px-3 transition-colors',
+            value === option.id ? 'text-ink' : 'text-slate hover:text-ink',
+            value === option.id && !measured && 'bg-card shadow-sm',
           )}
         >
           {option.label}
@@ -207,7 +212,7 @@ export function Eyebrow({ children, dark = false }) {
 
 export function SectionHead({ eyebrow, title, children, dark = false, center = false }) {
   return (
-    <div className={cx('max-w-2xl', center && 'mx-auto text-center')}>
+    <Reveal className={cx('max-w-2xl', center && 'mx-auto text-center')}>
       {eyebrow ? <Eyebrow dark={dark}>{eyebrow}</Eyebrow> : null}
       <h2
         className={cx(
@@ -218,7 +223,7 @@ export function SectionHead({ eyebrow, title, children, dark = false, center = f
         {title}
       </h2>
       {children ? <p className={cx('mt-4 text-[17px] leading-7 text-pretty', dark ? 'text-zinc-400' : 'text-slate')}>{children}</p> : null}
-    </div>
+    </Reveal>
   )
 }
 

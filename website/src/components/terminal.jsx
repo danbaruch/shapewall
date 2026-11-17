@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { cx } from './ui.jsx'
+import { Indicator, useIndicator } from './motion.jsx'
 
 const Prompt = () => <span className="text-wall-bright select-none">$</span>
 const Dim = ({ children }) => <span className="text-zinc-400">{children}</span>
@@ -96,16 +97,19 @@ const TABS = [
 export function AgentTerminal() {
   const [tab, setTab] = useState('json')
   const active = TABS.find((item) => item.id === tab)
+  const { measured, box, itemRef } = useIndicator(tab)
   return (
     <div className="min-w-0 overflow-hidden rounded-2xl border border-night-line bg-night-2 shadow-2xl shadow-black/40">
       <div
-        className="flex items-center gap-1 overflow-x-auto border-b border-night-line px-2 py-2"
+        className="relative flex items-center gap-1 overflow-x-auto border-b border-night-line px-2 py-2"
         role="tablist"
         aria-label="Agent interfaces"
       >
+        <Indicator box={box} className="rounded-lg bg-white/10" />
         {TABS.map((item) => (
           <button
             key={item.id}
+            ref={itemRef(item.id)}
             type="button"
             role="tab"
             id={`tab-${item.id}`}
@@ -131,8 +135,9 @@ export function AgentTerminal() {
               document.getElementById(`tab-${TABS[next].id}`)?.focus()
             }}
             className={cx(
-              'inline-flex h-11 shrink-0 items-center gap-1.5 rounded-lg px-3 font-mono text-[12.5px] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-wall-bright lg:h-8',
-              tab === item.id ? 'bg-white/10 text-white' : 'text-zinc-400 hover:text-white',
+              'relative inline-flex h-11 shrink-0 items-center gap-1.5 rounded-lg px-3 font-mono text-[12.5px] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-wall-bright lg:h-8',
+              tab === item.id ? 'text-white' : 'text-zinc-400 hover:text-white',
+              tab === item.id && !measured && 'bg-white/10',
             )}
           >
             {item.label}

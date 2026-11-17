@@ -21,6 +21,7 @@ import compareComment1440 from '../assets/shots/compare-comment-1440.webp'
 import variant960 from '../assets/shots/variant-960.webp'
 import variant1440 from '../assets/shots/variant-1440.webp'
 import phoneComment from '../assets/shots/phone-comment.webp'
+import { Reveal } from '../components/motion.jsx'
 
 // The workspace of the public demo (client/src/demo/fixtures.js WORKSPACE_ID), in its console.
 const DEMO_CONSOLE = '/demo/console.html#/w/ws_4c756d000000000000000001'
@@ -344,7 +345,7 @@ export default function Features() {
           }
         >
           <Container className={`grid items-center gap-10 ${section.wide ? '' : 'lg:grid-cols-2 lg:gap-16'}`}>
-            <div className={index % 2 && !section.wide ? 'lg:order-2' : section.wide ? 'max-w-2xl' : undefined}>
+            <Reveal className={index % 2 && !section.wide ? 'lg:order-2' : section.wide ? 'max-w-2xl' : undefined}>
               {section.badge ? <Badge tone={section.dark ? 'dark' : 'amber'}>{section.badge}</Badge> : null}
               <h2
                 className={`mt-3 text-[28px] leading-tight font-bold tracking-[-0.02em] text-balance sm:text-[34px] ${section.dark ? 'text-white' : 'text-ink'}`}
@@ -383,8 +384,10 @@ export default function Features() {
                   })}
                 </p>
               ) : null}
-            </div>
-            <div className={`min-w-0 ${index % 2 && !section.wide ? 'lg:order-1' : ''}`}>{section.art}</div>
+            </Reveal>
+            <Reveal className={`min-w-0 ${index % 2 && !section.wide ? 'lg:order-1' : ''}`} delay={0.06}>
+              {section.art}
+            </Reveal>
           </Container>
         </section>
       ))}
