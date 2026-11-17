@@ -3,7 +3,8 @@
 
 import { Dialog as DialogPrimitive } from 'radix-ui'
 import { ArrowDownRight, ArrowUpRight, FlaskConical, Minus, X } from 'lucide-react'
-import { DialogOverlay, Skeleton, Tooltip } from '../../components/ui'
+import { MotionOverlay, Skeleton, Tooltip } from '../../components/ui'
+import { AnimatePresence, DURATION, EASE, SHEET_SPRING, m, sheet, usePresenceProps, useSheetLayout } from '../../lib/animate'
 import { DEMO } from '../../lib/demo'
 import { cn } from '../../lib/utils'
 import { OUTCOME_GROUP_LABEL, OUTCOME_LABEL, outcomeGroup } from '../../../../src/hosted/usage-shape.js'
@@ -155,33 +156,56 @@ export function StatTile({
 export function Drawer({ open, onClose, title, description, children, testId }) {
   return (
     <DialogPrimitive.Root open={open} onOpenChange={(next) => (next ? null : onClose())}>
-      <DialogPrimitive.Portal>
-        <DialogOverlay className="bg-black/30" />
-        <DialogPrimitive.Content
-          className="fixed inset-x-0 bottom-0 z-50 flex max-h-[90dvh] w-full animate-sheet-in flex-col overflow-hidden rounded-t-2xl border border-line bg-surface text-fg shadow-pop outline-none sm:inset-x-auto sm:inset-y-0 sm:right-0 sm:max-h-none sm:w-[440px] sm:animate-fade-in sm:rounded-none sm:border-y-0 sm:border-r-0"
-          style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
-          {...(description ? {} : { 'aria-describedby': undefined })}
-          data-sw-drawer={testId}
-        >
-          <div className="flex items-center gap-3 border-b border-line px-5 py-3">
-            <div className="min-w-0 flex-1">
-              <DialogPrimitive.Title className="truncate text-[15px] font-semibold text-fg">{title}</DialogPrimitive.Title>
-              {description ? (
-                <DialogPrimitive.Description className="mt-0.5 truncate text-xs text-muted">{description}</DialogPrimitive.Description>
-              ) : null}
-            </div>
-            <DialogPrimitive.Close
-              className="-mr-2 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-muted hover:bg-surface-2 hover:text-fg focus-visible:outline-2 focus-visible:outline-accent"
-              aria-label="Close"
-              data-sw-drawer-close
-            >
-              <X size={18} aria-hidden="true" />
-            </DialogPrimitive.Close>
-          </div>
-          <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
-        </DialogPrimitive.Content>
-      </DialogPrimitive.Portal>
+      <AnimatePresence>
+        {open ? (
+          <DialogPrimitive.Portal forceMount>
+            <MotionOverlay className="bg-black/30" />
+            <DrawerPanel title={title} description={description} testId={testId}>
+              {children}
+            </DrawerPanel>
+          </DialogPrimitive.Portal>
+        ) : null}
+      </AnimatePresence>
     </DialogPrimitive.Root>
+  )
+}
+
+// In from the right edge on a wide screen, up from the bottom on a phone.
+const fromRight = {
+  initial: { x: '100%' },
+  animate: { x: 0, transition: SHEET_SPRING },
+  exit: { x: '100%', transition: { duration: DURATION.base, ease: EASE.exit } },
+}
+
+function DrawerPanel({ title, description, testId, children }) {
+  const phone = useSheetLayout()
+  const { style: exitStyle, ...presence } = usePresenceProps({ 'data-sw-drawer': testId }, { role: true })
+  return (
+    <DialogPrimitive.Content forceMount asChild {...(description ? {} : { 'aria-describedby': undefined })}>
+      <m.div
+        className="fixed inset-x-0 bottom-0 z-50 flex max-h-[90dvh] w-full flex-col overflow-hidden rounded-t-2xl border border-line bg-surface text-fg shadow-pop outline-none sm:inset-x-auto sm:inset-y-0 sm:right-0 sm:max-h-none sm:w-[440px] sm:rounded-none sm:border-y-0 sm:border-r-0"
+        style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)', ...exitStyle }}
+        {...(phone ? sheet : fromRight)}
+        {...presence}
+      >
+        <div className="flex items-center gap-3 border-b border-line px-5 py-3">
+          <div className="min-w-0 flex-1">
+            <DialogPrimitive.Title className="truncate text-[15px] font-semibold text-fg">{title}</DialogPrimitive.Title>
+            {description ? (
+              <DialogPrimitive.Description className="mt-0.5 truncate text-xs text-muted">{description}</DialogPrimitive.Description>
+            ) : null}
+          </div>
+          <DialogPrimitive.Close
+            className="-mr-2 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-muted hover:bg-surface-2 hover:text-fg focus-visible:outline-2 focus-visible:outline-accent"
+            aria-label="Close"
+            data-sw-drawer-close
+          >
+            <X size={18} aria-hidden="true" />
+          </DialogPrimitive.Close>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
+      </m.div>
+    </DialogPrimitive.Content>
   )
 }
 

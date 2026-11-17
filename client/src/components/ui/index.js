@@ -4,7 +4,7 @@ export { AGENT_COLOR, Avatar, PERSON_COLORS, initials, personColor } from './ava
 export { Badge, CommentDot, badgeVariants } from './badge'
 export { Button, IconButton, buttonVariants } from './button'
 export { Collapsible, CollapsibleContent, CollapsibleTrigger, Disclosure } from './collapsible'
-export { Dialog, DialogOverlay } from './dialog'
+export { Dialog, DialogOverlay, MotionOverlay } from './dialog'
 export {
   DropdownMenu,
   DropdownMenuContent,

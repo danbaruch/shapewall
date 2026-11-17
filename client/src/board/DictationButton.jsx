@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { Mic, X } from 'lucide-react'
 import { Popover, PopoverAnchor, PopoverContent, Tooltip } from '../components/ui'
 import { cn } from '../lib/utils'
+import { SPRING, fade, m } from '../lib/animate'
 import { DICTATION_MESSAGES, DICTATION_STOP_TIP, DICTATION_TIP, dictationAnnouncement } from './dictation'
 
 // Dictation lives in the composer box (ComposerBox.jsx), like the microphone
@@ -52,7 +53,11 @@ export function DictationButton({ dictation, touch, disabled = false, bubbleSide
       )}
       data-sw-dictate={status}
     >
-      <span
+      {/* Going live, the face settles in from a touch smaller as it fills
+          with the accent: a press you can see, then the halo while it listens. */}
+      <m.span
+        animate={on ? { scale: [0.86, 1] } : { scale: 1 }}
+        transition={SPRING}
         className={cn(
           'flex items-center justify-center rounded-full transition-[background-color,color,box-shadow,opacity] duration-(--motion-base) ease-out',
           touch ? 'size-8' : 'size-7',
@@ -64,7 +69,7 @@ export function DictationButton({ dictation, touch, disabled = false, bubbleSide
         data-sw-dictate-face="true"
       >
         <Mic size={touch ? 18 : 15} aria-hidden="true" />
-      </span>
+      </m.span>
     </button>
   )
   return (
@@ -132,8 +137,9 @@ function SheetNotice({ sheet, message, code, onDismiss }) {
       className="pointer-events-none absolute right-[60px] left-3 z-10 flex items-center py-2"
       style={{ top: sheet.top, minHeight: sheet.height }}
     >
-      <div
-        className="pointer-events-auto flex w-full animate-fade-in items-start gap-1 rounded-lg border border-line bg-surface py-1.5 pr-1 pl-3 text-[13px] leading-[18px] shadow-pop"
+      <m.div
+        {...fade}
+        className="pointer-events-auto flex w-full items-start gap-1 rounded-lg border border-line bg-surface py-1.5 pr-1 pl-3 text-[13px] leading-[18px] shadow-pop"
         data-sw-dictation-bubble={code}
       >
         <p className={cn('min-w-0 flex-1 py-[7px]', message.tone === 'error' ? 'text-fg' : 'text-muted')}>{message.text}</p>
@@ -146,7 +152,7 @@ function SheetNotice({ sheet, message, code, onDismiss }) {
         >
           <X size={14} aria-hidden="true" />
         </button>
-      </div>
+      </m.div>
     </div>,
     sheet.panel,
   )

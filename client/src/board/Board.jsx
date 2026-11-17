@@ -82,6 +82,7 @@ import { CanvasControls } from './CanvasControls'
 import { FocusedFrameBar } from './FrameBar'
 import { BatchConfirm, useBatchFixes } from './BatchFixes'
 import { motionDuration } from '../lib/motion'
+import { AnimatePresence } from '../lib/animate'
 
 const noop = () => {}
 const NO_IDS = new Set()
@@ -1833,32 +1834,35 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
               </Suspense>
             ) : null}
             <NoticeBar notice={notice} setNotice={setNotice} wide={wide} />
-            {comparePair ? (
-              <CompareBar
-                environments={environments}
-                pair={comparePair}
-                // A failed comparison is an error, not a spinner that never ends.
-                loading={compareQuery.loading || (!compareData && !compareQuery.error)}
-                error={compareQuery.error ? compareQuery.error.message || 'The comparison could not be loaded.' : null}
-                changedPages={compareData?.changedPages ?? 0}
-                totalPages={data?.board?.pages?.length || 0}
-                changedOnly={changedOnly}
-                showDiff={showDiff}
-                canCapture={canCapture}
-                captureBusy={busy || Boolean(capture?.running)}
-                touch={!wide}
-                onPair={(pair) => setCompare(pair)}
-                onChangedOnly={setChangedOnly}
-                onShowDiff={(value) => updateParams({ diff: value ? null : 'off' })}
-                onCapture={(env) => startCapture(env)}
-                onClose={() => {
-                  setCompare(null)
-                  // The bar and its button go: the keyboard goes back to the
-                  // board rather than to the top of the page.
-                  canvasRef.current?.focus({ preventScroll: true })
-                }}
-              />
-            ) : null}
+            <AnimatePresence initial={false}>
+              {comparePair ? (
+                <CompareBar
+                  key="compare"
+                  environments={environments}
+                  pair={comparePair}
+                  // A failed comparison is an error, not a spinner that never ends.
+                  loading={compareQuery.loading || (!compareData && !compareQuery.error)}
+                  error={compareQuery.error ? compareQuery.error.message || 'The comparison could not be loaded.' : null}
+                  changedPages={compareData?.changedPages ?? 0}
+                  totalPages={data?.board?.pages?.length || 0}
+                  changedOnly={changedOnly}
+                  showDiff={showDiff}
+                  canCapture={canCapture}
+                  captureBusy={busy || Boolean(capture?.running)}
+                  touch={!wide}
+                  onPair={(pair) => setCompare(pair)}
+                  onChangedOnly={setChangedOnly}
+                  onShowDiff={(value) => updateParams({ diff: value ? null : 'off' })}
+                  onCapture={(env) => startCapture(env)}
+                  onClose={() => {
+                    setCompare(null)
+                    // The bar and its button go: the keyboard goes back to the
+                    // board rather than to the top of the page.
+                    canvasRef.current?.focus({ preventScroll: true })
+                  }}
+                />
+              ) : null}
+            </AnimatePresence>
             <div className="flex min-h-0 flex-1 overflow-hidden">
               <div
                 ref={canvasRef}
@@ -1998,45 +2002,53 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                       onComment={commenting ? commentOnPage : null}
                       commentTargetKey={commentMode && !drawArmed ? commentTarget?.key || null : null}
                     />
-                    {wide && draft && !draftParked && !modalOpen ? (
-                      <ComposerPopover
-                        point={pinPoint(layout.targets, draft)}
-                        // Re-aimed at another spot: a card that was dragged goes back to its pin.
-                        resetKey={`${frameKey(draft.pageId, draft.viewport, draft.environment)}|${draft.x}|${draft.y}`}
-                        stowed={drawingOn}
-                        onClose={() => (busy ? null : setDraft(null))}
-                        onEscape={() => {
-                          // Esc while being asked is "Keep".
-                          if (discardAsk) {
-                            setDiscardAsk(false)
+                    {/* The canvas cards (ThreadPopover.jsx) pop in at their pin and
+                        fade out when closed; switching threads keeps the card. */}
+                    <AnimatePresence>
+                      {wide && draft && !draftParked && !modalOpen ? (
+                        <ComposerPopover
+                          key="composer"
+                          point={pinPoint(layout.targets, draft)}
+                          // Re-aimed at another spot: a card that was dragged goes back to its pin.
+                          resetKey={`${frameKey(draft.pageId, draft.viewport, draft.environment)}|${draft.x}|${draft.y}`}
+                          stowed={drawingOn}
+                          onClose={() => (busy ? null : setDraft(null))}
+                          onEscape={() => {
+                            // Esc while being asked is "Keep".
+                            if (discardAsk) {
+                              setDiscardAsk(false)
+                              return false
+                            }
+                            if (!draftHasMedia()) return true
+                            setDiscardAsk(true)
                             return false
-                          }
-                          if (!draftHasMedia()) return true
-                          setDiscardAsk(true)
-                          return false
-                        }}
-                      >
-                        <CommentComposer
-                          {...composerProps}
-                          touch={false}
-                          description={draftDescription}
-                          discard={discardAsk ? { onDiscard: () => setDraft(null), onKeep: () => setDiscardAsk(false) } : null}
-                        />
-                      </ComposerPopover>
-                    ) : null}
-                    {wide && threadProps && !draft && !modalOpen ? (
-                      <ThreadPopover
-                        comment={selectedComment}
-                        point={pinPoint(layout.targets, selectedComment)}
-                        onClose={closeThread}
-                        stowed={drawingOn}
-                        onPrev={() => stepThread(-1)}
-                        onNext={() => stepThread(1)}
-                        editingRef={editingRef}
-                      >
-                        <ThreadView {...threadProps} onClose={closeThread} />
-                      </ThreadPopover>
-                    ) : null}
+                          }}
+                        >
+                          <CommentComposer
+                            {...composerProps}
+                            touch={false}
+                            description={draftDescription}
+                            discard={discardAsk ? { onDiscard: () => setDraft(null), onKeep: () => setDiscardAsk(false) } : null}
+                          />
+                        </ComposerPopover>
+                      ) : null}
+                    </AnimatePresence>
+                    <AnimatePresence>
+                      {wide && threadProps && !draft && !modalOpen ? (
+                        <ThreadPopover
+                          key="thread"
+                          comment={selectedComment}
+                          point={pinPoint(layout.targets, selectedComment)}
+                          onClose={closeThread}
+                          stowed={drawingOn}
+                          onPrev={() => stepThread(-1)}
+                          onNext={() => stepThread(1)}
+                          editingRef={editingRef}
+                        >
+                          <ThreadView {...threadProps} onClose={closeThread} />
+                        </ThreadPopover>
+                      ) : null}
+                    </AnimatePresence>
                     <CanvasControls
                       wide={wide}
                       clearFocus={clearFocus}

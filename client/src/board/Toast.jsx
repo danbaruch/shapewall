@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { X } from 'lucide-react'
 import { cn } from '../lib/utils'
 import { Button, IconButton } from '../components/ui'
+import { AnimatePresence, m, rise, usePresenceProps } from '../lib/animate'
 
 // A short-lived note with Undo (resolve, delete), over the canvas, at the top
 // of the tool dock. It closes
@@ -41,10 +42,19 @@ function useGoneUnderSheet(toast, setToast) {
 
 export function BoardToast({ toast, setToast, onHold, wide }) {
   useGoneUnderSheet(toast, setToast)
-  if (!toast) return null
+  // One toast at a time: a new one waits for the old one's (short) exit.
   return (
-    <div
-      key={toast.at}
+    <AnimatePresence mode="wait" initial={false}>
+      {toast ? <ToastCard key={toast.at} toast={toast} setToast={setToast} onHold={onHold} wide={wide} /> : null}
+    </AnimatePresence>
+  )
+}
+
+function ToastCard({ toast, setToast, onHold, wide }) {
+  const presence = usePresenceProps({ role: 'status', 'data-sw-toast': 'true' })
+  return (
+    <m.div
+      {...rise}
       onMouseEnter={() => onHold?.(true)}
       onMouseLeave={() => onHold?.(false)}
       onFocus={() => onHold?.(true)}
@@ -53,9 +63,8 @@ export function BoardToast({ toast, setToast, onHold, wide }) {
       }}
       // A child of the tool dock (BoardTools.jsx): above the board's tools
       // and whatever else is docked at the bottom of the canvas.
-      className="pointer-events-auto relative z-[80] flex w-max max-w-full animate-pop-in items-center gap-2 rounded-lg bg-fg py-1 pr-1 pl-3 text-xs font-medium text-surface shadow-pop"
-      role="status"
-      data-sw-toast="true"
+      className="pointer-events-auto relative z-[80] flex w-max max-w-full items-center gap-2 rounded-lg bg-fg py-1 pr-1 pl-3 text-xs font-medium text-surface shadow-pop"
+      {...presence}
     >
       <span className="min-w-0">{toast.text}</span>
       {toast.undo ? (
@@ -74,7 +83,7 @@ export function BoardToast({ toast, setToast, onHold, wide }) {
       <IconButton size={wide ? 'icon-xs' : 'icon'} variant="inverse" onClick={() => setToast(null)} label="Dismiss">
         <X size={13} aria-hidden="true" />
       </IconButton>
-    </div>
+    </m.div>
   )
 }
 
