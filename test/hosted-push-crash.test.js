@@ -157,6 +157,105 @@ test('a commit that dies anywhere in the folder swap leaves every board one whol
   }
 })
 
+// Review follow-ups to 02: the renames are synced to disk before COMMIT (a
+// power loss must not keep the commit and lose the folders), and a commit
+// that fails puts the folders back while it still holds the write lock.
+test('the swap is on disk before COMMIT, and a failed commit puts the folders back inside the lock', async () => {
+  const hosted = await startHostedServer('push-durable')
+  const prepared = []
+  let ws
+  try {
+    const owner = await signUp(hosted, { handle: 'durable' })
+    ws = owner.workspaceId
+    for (const name of ['Synced', 'Failing']) {
+      const project = await createProject(owner, ws, name)
+      const remote = createRemote({ origin: hosted.origin, token: await createToken(owner, ws, project.id) })
+      const full = sampleConfig(`push-durable-${name}-old`)
+      writeLocalCaptures(full, 'sample')
+      await pushBoard(remote, full, { commit: true })
+      const fewer = sampleConfig(`push-durable-${name}-new`, {
+        pages: full.boards[0].pages.slice(0, 2).map(({ id, path: p, title }) => ({ id, path: p, title })),
+      })
+      writeLocalCaptures(fewer, 'sample')
+      const open = await pushBoard(remote, fewer, { commit: false })
+      prepared.push({ project: project.id, push: open.id, manifestFile: open.manifestFile })
+    }
+  } finally {
+    await hosted.close()
+  }
+  const db = await openDatabase(path.join(hosted.dataDir, 'shapewall.db'))
+  const events = []
+  const fds = new Map()
+  const { openSync, fsyncSync, renameSync, closeSync } = fs
+  let failAt = null
+  fs.openSync = (file, ...rest) => {
+    const fd = openSync(file, ...rest)
+    fds.set(fd, path.resolve(String(file)))
+    return fd
+  }
+  fs.closeSync = (fd) => {
+    fds.delete(fd)
+    return closeSync(fd)
+  }
+  fs.fsyncSync = (fd) => {
+    events.push(['sync', fds.get(fd), db.isTransaction])
+    return fsyncSync(fd)
+  }
+  fs.renameSync = (from, to) => {
+    renameSync(from, to)
+    events.push(['rename', path.resolve(String(to)), db.isTransaction])
+    // The staging folder went in, and then the file system reports a failure.
+    if (failAt && path.resolve(String(to)) === failAt) {
+      failAt = null
+      throw Object.assign(new Error('input/output error'), { code: 'EIO' })
+    }
+  }
+  const commit = (item) =>
+    createPushStore(tenant(db, ws), { db, dataDir: hosted.dataDir }).commit({
+      pushId: item.push,
+      projectId: item.project,
+      manifest: JSON.parse(fs.readFileSync(item.manifestFile, 'utf8')),
+      variants: [],
+    })
+  try {
+    const [ok, failing] = prepared
+    const target = (item) => path.resolve(hosted.dataDir, 'files', ws, item.project, 'sample')
+    commit(ok)
+    const swapped = events.findIndex(([kind, file]) => kind === 'rename' && file === target(ok))
+    assert.ok(swapped >= 0)
+    const synced = events
+      .slice(swapped)
+      .filter(([kind, , inside]) => kind === 'sync' && inside)
+      .map(([, file]) => file)
+    assert.ok(synced.includes(path.dirname(target(ok))), 'the project folder is synced before COMMIT')
+    assert.ok(synced.includes(path.resolve(hosted.dataDir, 'staging')), 'and the staging folder')
+    assert.equal(generationOf(db, hosted.dataDir, ws, ok.project), 2)
+
+    events.length = 0
+    failAt = target(failing)
+    assert.throws(() => commit(failing), /input\/output error/)
+    const after = events.findIndex(([kind, file]) => kind === 'rename' && file === target(failing))
+    const putBack = events.slice(after + 1).filter(([kind]) => kind === 'rename')
+    assert.deepEqual(
+      putBack.map(([, file, inside]) => [path.basename(file), inside]),
+      [
+        [failing.push, true],
+        ['sample', true],
+      ],
+      'the new folder back to staging and the old one back in place, both before the lock is let go',
+    )
+    assert.equal(generationOf(db, hosted.dataDir, ws, failing.project), 3, 'the old generation')
+    assert.equal(db.prepare('SELECT status FROM pushes WHERE id = ?').get(failing.push).status, 'open')
+    assert.ok(fs.existsSync(path.join(hosted.dataDir, 'staging', failing.push, 'captures')), 'the uploads are back')
+    assert.deepEqual(fs.readdirSync(path.join(hosted.dataDir, 'swaps')), [], 'settled, the journal gone')
+    commit(failing)
+    assert.equal(generationOf(db, hosted.dataDir, ws, failing.project), 2, 'and it commits when asked again')
+  } finally {
+    Object.assign(fs, { openSync, fsyncSync, renameSync, closeSync })
+    db.close()
+  }
+})
+
 test('the sweep removes an old board folder only when its push committed, and leaves an unknown one alone', async () => {
   const hosted = await startHostedServer('push-crash-sweep')
   try {
