@@ -48,6 +48,16 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Website: the privacy page now says that the contact form also stores the User-Agent your browser sends, and that, if the site
   operator has set it up, your message, topic and email address are forwarded to a messaging service.
 - Website: a link with a broken fragment (for example one cut off while copying) no longer stops the page from loading.
+For operators of a hosted server, before upgrading:
+
+- **Deploy stop-then-start.** Never run the old and new server on one data folder at the same time, also not briefly during a
+  deploy: the new server's startup sweep could roll back a push the old one is committing. After a downgrade to 0.11.0, that
+  version's sweep (which deletes old board folders without asking the database) is back.
+- **`shapewall hosted backup` can now exit 1**, when a board's folder is missing and the backup is not a complete recovery
+  point. Check timers and scripts that run it.
+- **Older backups can now fail `restore --check`.** A backup made before this release that recorded skipped boards in
+  `backup.json` never held all of its files; the drill now says so. That is correct, not a regression: make a new backup.
+
 - **Hosted: the operator's role change revokes what the old role handed out.** `shapewall hosted admin members add --role` on
   an existing member now revokes the same invites, share links and API tokens as a role change in the console, writes the same
   `member_grants_revoked` audit entry, and says what it revoked. Before, a demotion there only hid those grants, and promoting
@@ -62,16 +72,19 @@ and the project uses [Semantic Versioning](https://semver.org/).
   either all of its previous captures or all of the new ones, and an uncommitted push gets its uploads back. The sweep no
   longer deletes a `<board>.old-<push>` folder unless the database shows that push committed; one it cannot account for is
   left in place and named in the server log. A commit whose uploads are gone is refused (`push_incomplete`) instead of
-  replacing the board with an empty one.
+  replacing the board with an empty one. The folder swap is synced to disk before the database commit, and a commit that
+  fails puts the folders back before anyone else can write.
 - **Hosted: a push keeps the screenshots a discussion points at.** Pushing from a checkout that has less history than the
   server (a second machine, CI) no longer removes the capture a hosted comment is pinned to or a reply's drawing was made on:
-  the commit copies those versions over from the board it replaces, and their bytes count once in the board's storage.
+  the commit copies those versions over from the board it replaces, and their bytes count once in the board's storage. Each
+  copy is made under a temporary name and renamed when whole, so a crash mid-copy never leaves a cut-short screenshot behind.
 - **Hosted: a backup is one moment, and the drill checks it.** `shapewall hosted backup` now pins the board files under the
   same lock as the database snapshot (hard links inside the data folder, copied afterwards), so a push, a deletion or a
   retention run while the backup is copied no longer gives it files from a different moment or leaves them out. A board whose
   folder is missing marks the backup incomplete: the command prints a warning and exits with status 1. `restore --check` now
   also fails when a capture a board's manifest lists is missing, and when the backup left files out, including backups made
-  by earlier versions that listed skipped files in `backup.json`.
+  by earlier versions that listed skipped files in `backup.json`. Where the data folder cannot take hard links, the files are
+  copied straight into the backup under the lock (the backup says so), never a second time into the data folder.
 - **Connected agents: a held fix goes back only to the connection that made it.** A fix held on the agent's machine (an
   edit in it went without asking) now records the server, workspace, project and agent it was made for, and "Push this fix"
   offers it only to that same connection, so one folder connected to two projects or servers never shows one's fix to the

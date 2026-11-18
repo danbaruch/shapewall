@@ -2047,6 +2047,11 @@ committed push keeps the new folder and removes `<board>.old-<push>`, anything e
 uploads return to `staging/` (the push can be committed again or expires). An old folder the database cannot account for is
 left in place and named in the log (`left ... in place; check it by hand`).
 
+Deploy by stopping the old server before starting the new one, never side by side. The sweep runs when a server starts: with
+two processes on one data folder, the new one's sweep can roll back a push the old one is committing at that moment. After a
+downgrade to 0.11.0 or earlier, that version's sweep is back: it removes every `<board>.old-<push>` folder whatever the
+database says, and ignores `swaps/`.
+
 Use the operator commands below for a consistent database and file copy. Copying the SQLite file alone, or copying files after an
 unlocked database snapshot, is not a complete backup of a board.
 
@@ -2116,7 +2121,8 @@ Try these on the real server, at its real address, before the team depends on it
 5. **Check operation and recovery.** Give the server a lifecycle independent of an interactive shell or coding-agent session. The
    foreground command stops when its process stops; example service/Compose files need deliberate operator setup. Probe `/api/health`
    from a second device, choose monitoring and backup arrangements, and restore a backup to a separate folder before relying on it.
-   Do not start two hosted processes against one data directory. Record the data and immutable release to use for rollback.
+   Do not start two hosted processes against one data directory, also not for a moment during a deploy: stop the old one, then
+   start the new one. Record the data and immutable release to use for rollback.
 6. **Try the passkeys your team uses.** Shapewall's tests use virtual authenticators, so check iCloud, Google or password-manager
    sync, hardware keys and phone autofill yourself, whichever the team will rely on. Origin migration is optional
    until the address changes, but preserve the old origin and recovery codes before attempting it.
@@ -2283,7 +2289,9 @@ and the database in a backup are the same moment. The pin is copied to the backu
 writes continue, and then removed; a pin left by a crashed backup is removed by the next backup after a day. When the data
 folder cannot take the pin, the files are copied under the lock instead, which holds the lock longer. A board row whose folder
 is missing is listed under `files.skipped.missing` in `backup.json`, the backup is marked `"complete": false` and the backup
-command prints a warning and exits with status 1. Anything written after the snapshot is not in the backup: it is a
+command prints a warning and exits with status 1 (a timer or script that runs it sees the failure). Backups made by
+earlier versions that recorded skipped boards under `files.skipped` now fail the restore drill: they never held every board's
+files, so that is the drill being right, not a regression. Anything written after the snapshot is not in the backup: it is a
 copy of a moment, not a continuous log. A `--to` inside the data folder is refused. The backup includes account data, passkey
 public keys, captures, comments, audit records, signing key and default-path quota config. If the HMAC key is supplied as a systemd
 credential or environment variable, give the backup command the same credential: with `SHAPEWALL_HOSTED_SECRET` in the
