@@ -146,3 +146,16 @@ test('capture-compare refuses an --out with its own images, summary or overlappi
   compare(out)
   assert.deepEqual(fs.readdirSync(out).sort(), ['shapewall.config.json', 'summary.json', 'summary.md'])
 })
+
+test('capture-compare with URLs refuses a foreign --out before capturing anything into it', async () => {
+  const dir = tempDir('ci-safe-urls')
+  const file = path.join(dir, 'shapewall.config.json')
+  fs.writeFileSync(file, JSON.stringify(SAMPLE))
+  const out = path.join(dir, 'project')
+  sentinels(out)
+  fs.mkdirSync(path.join(out, 'images'))
+  const args = ['ci', 'capture-compare', '--config', file, '--base-url', 'http://127.0.0.1:9', '--head-url', 'http://127.0.0.1:9']
+  await assert.rejects(main([...args, '--out', out], { out: () => {} }), /Shapewall did not write/)
+  assertSentinels(out)
+  assert.deepEqual(fs.readdirSync(out).sort(), ['images', 'notes.txt', 'src'], 'no .captures folder was made')
+})

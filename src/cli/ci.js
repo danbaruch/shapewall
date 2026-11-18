@@ -11,7 +11,7 @@ import path from 'node:path'
 import { CONFIG_FILE, findConfigFile, getBoard, loadConfig } from '../config.js'
 import { CI_DEFAULTS } from '../ci/settings.js'
 import { captureSide, ciPages, prepareSideDir, sideDirProblem } from '../ci/capture.js'
-import { compareCaptures } from '../ci/compare.js'
+import { checkResultDir, compareCaptures } from '../ci/compare.js'
 import { headline, percent } from '../ci/summary.js'
 import { commentFromResult, prContext, skipRequested } from '../ci/github.js'
 import { startRefusal, startSite, waitForUrl } from '../ci/start.js'
@@ -175,6 +175,12 @@ async function captureCompare(flags, out, env) {
         "capture-compare: give --head-url URL (and --base-url URL, default the config's baseUrl), or --base-dir and --head-dir",
       )
     const work = path.join(target, '.captures')
+    // --out is checked before anything is captured into it, so a refused folder gets nothing written.
+    checkResultDir(target, [path.join(work, 'base'), path.join(work, 'head')])
+    for (const side of ['base', 'head']) {
+      const problem = sideDirProblem(path.join(work, side))
+      if (problem) throw new Error(`--out: ${problem}`)
+    }
     out(`Before: ${baseUrl}`)
     const before = await captureSide({ config, board, baseUrl, dir: path.join(work, 'base'), maxPages, log: out })
     out(`After: ${headUrl}`)

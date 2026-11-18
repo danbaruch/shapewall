@@ -46,7 +46,7 @@ const within = (child, parent) => child === parent || child.startsWith(parent.en
 // The result folder replaces summary.json, summary.md and images/. They are
 // only replaced when they are an earlier result (its summary.json says so),
 // and the folder must not be, or be inside, a capture folder being compared.
-function checkResultDir(target, sources) {
+export function checkResultDir(target, sources) {
   const real = realPath(target)
   for (const source of sources) {
     const from = realPath(source)
