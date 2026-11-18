@@ -26,7 +26,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Website: a link with a broken fragment (for example one cut off while copying) no longer stops the page from loading.
 - **An agent's Undo never erases your own edit.** Before, Undo in the chat put back every file that changed during the agent's
   turn, so a file you saved in your editor while the agent worked on another one was rolled back with it. Now Undo puts back only
-  the files the agent edited with its own file tools. Anything else that changed meanwhile (your saves, a command the agent ran)
+  the files the agent edited with its own file tools (an edit you denied, or one that failed, does not count). Anything else that changed meanwhile (your saves, a command the agent ran)
   is listed on the card and left as it is, and the Undo dialog says how many files it leaves. A turn in which the agent edited
   nothing itself offers no Undo.
 - **A board file is never replaced by a cut-off copy.** When the disk wrote only part of a comments, manifest or image file

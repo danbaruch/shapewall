@@ -271,7 +271,7 @@ The summary card under an owner's answer has **Undo** when Shapewall can undo th
   (up to 1 MB each and 32 MB in all; never `.git`, `node_modules`, build folders, the `.shapewall` store, or files that usually hold
   secrets such as `.env`, keys and credentials; never through a symlink). After the turn it compares, and keeps what the changed files
   were before in the server's memory, never on disk, in the model's context or in a log. Undo puts back only the files the agent
-  edited with its own file tools (its edit, delete and move tool calls, and its writes through Shapewall): changed files get their
+  edited with its own file tools (its edit, delete and move tool calls that completed, and its writes through Shapewall): changed files get their
   earlier text, deleted ones come back, added ones are removed. A file that changed during the turn some other way, saved by you in
   your editor or changed by a command the agent ran, is listed on the card but left as it is, since nothing can tell whose change it
   was. Undo checks every file first and changes nothing if any of them is no longer what the agent left (an edit since, by you or a

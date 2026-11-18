@@ -21,7 +21,7 @@ import {
   undoStarterBranch,
 } from '../src/agent/turn-changes.js'
 import { AGENT_AUTHOR } from '../src/agent/starter/worktree.js'
-import { editedPaths } from '../src/agent/backends/acp.js'
+import { completedEdits, editedPaths } from '../src/agent/backends/acp.js'
 import { REFS_RULE, SYSTEM_PROMPT, ACP_PREAMBLE } from '../src/agent/context.js'
 import { SAMPLE, request, tempDir } from './helpers.js'
 
@@ -144,6 +144,47 @@ test("the files an ACP agent's own file tools name are what its Undo may put bac
   for (const kind of ['edit', 'delete', 'move']) assert.deepEqual(editedPaths(update, kind), ['/p/a.txt', '/p/b.txt'], kind)
   for (const kind of ['read', 'execute', 'fetch', 'search', 'other', undefined])
     assert.deepEqual(editedPaths(update, kind), [], String(kind))
+})
+
+test("a denied or failed edit is not the agent's: a person saving that file during the turn keeps the save after Undo", async () => {
+  const config = setup('summary-denied-edit')
+  write(config, 'a.txt', 'a0\n')
+  write(config, 'b.txt', 'b0\n')
+  const file = (rel) => path.join(config.dir, rel)
+  // The tool call records as acp.js keeps them between updates.
+  const run = (updates) => {
+    const tools = new Map()
+    const edited = new Set()
+    for (const update of updates) {
+      const known = tools.get(update.toolCallId) || {}
+      const tool = {
+        kind: update.kind || known.kind || 'other',
+        status: update.status || known.status || 'pending',
+        paths: known.paths || [],
+        reported: Boolean(known.reported),
+      }
+      tools.set(update.toolCallId, tool)
+      for (const item of completedEdits(tool, update)) edited.add(item)
+    }
+    return edited
+  }
+  const baseline = await beginTurnChanges(config)
+  // The agent's edit of b.txt is denied (it fails); its edit of a.txt completes, with the path only on the first update.
+  const edited = run([
+    { toolCallId: 'denied', kind: 'edit', status: 'pending', locations: [{ path: file('b.txt') }] },
+    { toolCallId: 'denied', status: 'failed' },
+    { toolCallId: 'ok', kind: 'edit', status: 'pending', locations: [{ path: file('a.txt') }] },
+    { toolCallId: 'ok', status: 'in_progress' },
+    { toolCallId: 'ok', status: 'completed' },
+    { toolCallId: 'ok', status: 'completed' },
+  ])
+  assert.deepEqual([...edited], [file('a.txt')], 'reported once, on completion only')
+  write(config, 'a.txt', 'a1 by the agent\n')
+  write(config, 'b.txt', 'b1 saved by a person\n')
+  const { undo } = await finishTurnChanges(config, baseline, { board: config.boards[0], agentFiles: edited })
+  assert.deepEqual(undoFiles(config, undo), ['a.txt'])
+  assert.equal(read(config, 'a.txt'), 'a0\n')
+  assert.equal(read(config, 'b.txt'), 'b1 saved by a person\n')
 })
 
 test('Undo changes nothing when a file was edited after the turn', async () => {

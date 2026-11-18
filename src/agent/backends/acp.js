@@ -603,6 +603,19 @@ export function editedPaths(update, kind) {
   return [...new Set(paths.filter((item) => typeof item === 'string' && item && item.length <= 4096))].slice(0, 50)
 }
 
+// Collects the files a tool call names across its updates (`tool`: its
+// record, kept between updates) and returns them once, when the call
+// completes. A call that was denied, failed or never finished changed
+// nothing of the agent's, so its files are never the agent's to undo.
+export function completedEdits(tool, update) {
+  const paths = new Set(tool.paths || [])
+  for (const file of editedPaths(update, 'edit')) if (paths.size < 50) paths.add(file)
+  tool.paths = [...paths]
+  if (tool.status !== 'completed' || tool.reported || !FILE_TOOL_KINDS.has(tool.kind)) return []
+  tool.reported = true
+  return tool.paths
+}
+
 // ACP's auth_required is -32000; agents also say it in words. goose with no
 // provider set up says "Failed to resolve provider": the same fix (configure).
 const AUTH_TEXT_RE =
@@ -1482,7 +1495,7 @@ class AcpProcess {
     else if (kind === 'tool_call' || kind === 'tool_call_update') {
       turn.queue.push(this.toolEvent(update))
       const known = this.tools.get(String(update.toolCallId || ''))
-      for (const file of editedPaths(update, known?.kind)) turn.queue.push({ type: 'edited', path: file })
+      if (known) for (const file of completedEdits(known, update)) turn.queue.push({ type: 'edited', path: file })
     } else if (kind === 'plan' && Array.isArray(update.entries)) {
       turn.queue.push({
         type: 'plan',
@@ -1505,6 +1518,9 @@ class AcpProcess {
       // ACP diff content ({ type: 'diff', path, oldText, newText }), for the
       // approval card if the agent asks about this call later.
       diffs: Array.isArray(update.content) ? diffContent(update.content) : known.diffs || null,
+      // The files it names so far, and whether they were reported (completedEdits).
+      paths: known.paths || [],
+      reported: Boolean(known.reported),
     }
     this.tools.set(id, tool)
     if (this.tools.size > 500) this.tools.delete(this.tools.keys().next().value)
