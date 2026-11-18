@@ -136,8 +136,9 @@ for (const [name, options] of [
       await shot(page, `compare-badge-${name}`, badge)
       await shot(page, `compare-board-${name}`)
       // In the changed-page count: Home is the only page with a change.
-      const changed = Number(await page.getAttribute('[data-sw-compare-changed]', 'data-sw-compare-changed'))
-      assert.equal(changed, 1)
+      // (On a phone the count is on the compare options button.)
+      if (name === 'desktop') assert.equal(await page.getAttribute('[data-sw-compare-changed]', 'data-sw-compare-changed'), '1')
+      else assert.match(await page.getAttribute('[data-sw-compare-options]', 'aria-label'), /\b1 of \d+ pages changed/)
       // Its frame on the second side carries the overlay and says the share.
       const frame = `[data-sw-frame="home:${name}:production"]`
       await page.waitForSelector(`${frame} [data-sw-diff-overlay]`, { state: 'attached' })
