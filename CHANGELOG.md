@@ -36,6 +36,10 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - The website's deploy script checks all of its arguments before it does anything. Before, `--help`, a misspelled command
   such as `smok`, or a lone `--dry-run` fell through to a full build and release of the live site. Now help prints the usage,
   and anything it does not know is refused without running a build, an upload or a server command.
+- **Undo and Discard leave a branch you have checked out.** Before, deleting an agent's branch (Undo of a starter agent run,
+  Discard in branch mode, and the cleanup after Apply) checked only that the branch still pointed at the agent's commit, so a
+  branch you had checked out in another worktree to review it could be deleted under you, leaving that worktree on a missing
+  branch. Now Undo refuses and says where the branch is checked out, and Discard and Apply leave the branch in place.
 - **`shapewall ci` never deletes a folder it did not write.** Before, `ci capture --out DIR` deleted DIR and a folder next to
   it named `DIR.work` with everything in them, and `capture-compare` deleted any `images/` folder in its `--out`, so a
   mistyped path could erase a project. Now `--out` must be new, empty or an earlier Shapewall result; anything else is refused

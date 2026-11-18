@@ -390,6 +390,13 @@ test('the starter agent summary reads its commit, and Undo deletes only its own 
   gitIn(repo, ['update-ref', 'refs/remotes/origin/feature', commit])
   await assert.rejects(undoStarterBranch(config, { boardId: 'sample', commentId: 1, branch, commit }), /was pushed/)
   gitIn(repo, ['update-ref', '-d', 'refs/remotes/origin/feature'])
+  // Checked out in another worktree (someone reviewing it): left as it is, that worktree's HEAD intact.
+  const review = path.join(tempDir('summary-starter-review'), 'review')
+  gitIn(repo, ['worktree', 'add', '-q', review, branch])
+  await assert.rejects(undoStarterBranch(config, { boardId: 'sample', commentId: 1, branch, commit }), /checked out in/)
+  assert.equal(gitIn(repo, ['rev-parse', 'refs/heads/' + branch]), commit)
+  assert.equal(gitIn(review, ['symbolic-ref', 'HEAD']), 'refs/heads/' + branch)
+  gitIn(repo, ['worktree', 'remove', '--force', review])
   await undoStarterBranch(config, { boardId: 'sample', commentId: 1, branch, commit })
   assert.equal(gitIn(repo, ['branch', '--list', branch]), '')
   assert.equal(gitIn(repo, ['rev-parse', 'main']), base, 'the base branch is untouched')

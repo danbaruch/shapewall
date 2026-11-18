@@ -102,6 +102,25 @@ export function git(args, { cwd, env = process.env, extraEnv = {}, input = null,
   })
 }
 
+// The worktree folder where `ref` (refs/heads/<name>) is checked out, or
+// null. Every worktree of the repository counts, the main one too: deleting
+// a branch checked out there would leave that worktree's HEAD pointing at
+// nothing. When Git cannot list them, the branch counts as in use.
+export async function checkedOutAt(cwd, ref) {
+  let out
+  try {
+    out = await git(['worktree', 'list', '--porcelain'], { cwd, timeoutMs: 20000 })
+  } catch {
+    return '(unknown: the worktrees could not be listed)'
+  }
+  let dir = null
+  for (const line of out.split('\n')) {
+    if (line.startsWith('worktree ')) dir = line.slice('worktree '.length)
+    else if (line === `branch ${ref}`) return dir || '(another worktree)'
+  }
+  return null
+}
+
 // The repository's configured filter, merge and diff drivers, each overridden
 // with an empty command (-c filter.<name>.process= and so on), so a git call
 // that would check files out, merge or compare them runs none of the

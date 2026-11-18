@@ -39,6 +39,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import {
+  checkedOutAt,
   createWorktree,
   commitWorktree,
   filterNames,
@@ -445,14 +446,17 @@ export async function commitAgentBranch(config, { tree, meta, root, message }) {
 }
 
 // The worktree, its record and (when it still points at the agent's commit)
-// its branch. -> { branchDeleted, branchMoved }
+// its branch. A branch checked out in a worktree (someone reviewing it) is
+// left as it is. -> { branchDeleted, branchMoved, branchInUse }
 export async function discardAgentBranch(config, meta) {
   const root = agentWorktreeRoot(config)
   let branchDeleted = false
   let branchMoved = false
+  let branchInUse = false
   if (meta.commit) {
     const tip = await refTip(config, meta.branch)
-    if (tip === meta.commit) {
+    if (tip === meta.commit && (await checkedOutAt(config.dir, `refs/heads/${meta.branch}`))) branchInUse = true
+    else if (tip === meta.commit) {
       await git(['update-ref', '-m', 'shapewall: discard agent branch', '-d', `refs/heads/${meta.branch}`, meta.commit], {
         cwd: config.dir,
         timeoutMs: 20000,
@@ -462,7 +466,7 @@ export async function discardAgentBranch(config, meta) {
   }
   await removeWorktree({ tree: { dir: path.join(root, meta.id), root, runId: meta.id } })
   fs.rmSync(metaFile(root, meta.id), { force: true })
-  return { branchDeleted, branchMoved }
+  return { branchDeleted, branchMoved, branchInUse }
 }
 
 // Git on the person's checkout, with its git dir and work tree named, and

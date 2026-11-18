@@ -242,8 +242,39 @@ test('merge when the checkout moved on; a conflict changes nothing; a dirty chec
   const moved = readMeta(config, second.work.meta.id)
   sh(dir, 'branch', '-f', moved.branch, 'HEAD')
   await assert.rejects(applyAgentBranch(config, moved), /has moved/)
-  assert.deepEqual(await discardAgentBranch(config, moved), { branchDeleted: false, branchMoved: true })
+  assert.deepEqual(await discardAgentBranch(config, moved), { branchDeleted: false, branchMoved: true, branchInUse: false })
   assert.equal(sh(dir, 'branch', '--list', moved.branch).trim(), moved.branch)
+  assert.equal(hookRan(marker), '')
+})
+
+test('discard and apply cleanup leave a branch someone has checked out in another worktree', async () => {
+  const { dir, config, marker } = repo('branch-in-use')
+  const review = path.join(tempDir('branch-in-use-review'), 'review')
+  const headOf = (cwd) => [sh(cwd, 'symbolic-ref', 'HEAD'), sh(cwd, 'rev-parse', 'HEAD')]
+
+  // Discard while a person reviews the branch in a worktree of their own.
+  const first = await branchWithEdit(config)
+  sh(dir, 'worktree', 'add', '-q', review, first.work.meta.branch)
+  const discarded = await discardAgentBranch(config, readMeta(config, first.work.meta.id))
+  assert.deepEqual(discarded, { branchDeleted: false, branchMoved: false, branchInUse: true })
+  assert.equal(sh(dir, 'rev-parse', 'refs/heads/' + first.work.meta.branch), first.commit.commit)
+  assert.deepEqual(headOf(review), ['refs/heads/' + first.work.meta.branch, first.commit.commit])
+  assert.equal(readMeta(config, first.work.meta.id), null, "the agent's own worktree and record still go")
+  sh(dir, 'worktree', 'remove', '--force', review)
+
+  // Apply: the merge goes through; the cleanup after it leaves the reviewed branch.
+  const second = await branchWithEdit(config, { commentId: 2, content: '<h1>Agent two</h1>\n' })
+  sh(dir, 'worktree', 'add', '-q', review, second.work.meta.branch)
+  await applyAgentBranch(config, readMeta(config, second.work.meta.id))
+  assert.equal(fs.readFileSync(path.join(dir, 'index.html'), 'utf8'), '<h1>Agent two</h1>\n')
+  assert.deepEqual(headOf(review), ['refs/heads/' + second.work.meta.branch, second.commit.commit])
+  sh(dir, 'worktree', 'remove', '--force', review)
+
+  // Unused and still at the agent's commit: discard deletes it.
+  const third = await branchWithEdit(config, { commentId: 3, content: '<h1>Agent three</h1>\n' })
+  const result = await discardAgentBranch(config, readMeta(config, third.work.meta.id))
+  assert.equal(result.branchDeleted, true)
+  assert.equal(sh(dir, 'branch', '--list', third.work.meta.branch), '')
   assert.equal(hookRan(marker), '')
 })
 

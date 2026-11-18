@@ -35,7 +35,7 @@ import path from 'node:path'
 import { createHash, randomBytes } from 'node:crypto'
 import { AgentError } from './errors.js'
 import { diffForCard } from './text-diff.js'
-import { AGENT_AUTHOR, git, readEntry } from './starter/worktree.js'
+import { AGENT_AUTHOR, checkedOutAt, git, readEntry } from './starter/worktree.js'
 
 const SKIP = new Set(['.git', 'node_modules', 'dist', 'build', '.next', '.cache', 'coverage', '.output', '.shapewall'])
 // Shapewall's own folders, whatever they are called (.shapewall, .shapewall-export, ...).
@@ -524,6 +524,14 @@ export async function undoStarterBranch(config, { boardId, commentId, branch, co
   const remotes = (await run(['for-each-ref', '--contains', commit, '--format=%(refname)', 'refs/remotes'])).trim()
   if (remotes)
     throw new AgentError('undo_unavailable', 'The branch was pushed, so it was left as it is. Close its pull request instead.', 409)
+  // Checked out somewhere (someone reviewing it): deleting it would leave that worktree on a missing branch.
+  const usedAt = await checkedOutAt(config.dir, ref)
+  if (usedAt)
+    throw new AgentError(
+      'undo_conflict',
+      `The branch is checked out in ${usedAt}, so it was left as it is. Switch away from it first.`,
+      409,
+    )
   await run(['update-ref', '-m', 'shapewall: undo starter agent run', '-d', ref, commit])
   return { branch }
 }

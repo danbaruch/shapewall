@@ -277,7 +277,8 @@ The summary card under an owner's answer has **Undo** when Shapewall can undo th
   was. Undo checks every file first and changes nothing if any of them is no longer what the agent left (an edit since, by you or a
   later turn, is never overwritten). The stored summary keeps bounded diffs of changed text files only, never of a secrets file.
 - **The starter agent** (`shapewall agent run`) never touches your checkout: Undo deletes the branch it made, only while that branch
-  still points at the agent's own commit for this comment and no remote branch contains it. A pushed branch or an open pull request is
+  still points at the agent's own commit for this comment, no remote branch contains it and no worktree has it checked out. A pushed
+  branch or an open pull request is
   yours to close.
 
 Undo is not offered when the turn made a Git commit (revert it with Git), ran at the same time as another agent turn in the project,
@@ -333,7 +334,8 @@ The prefix is letters, digits, `-`, `_` and `/`, up to 40 characters; the defaul
   deleted, and for a fix the page is recaptured with before and after, as a direct fix would be.
 - **Open folder** opens the copy in your file manager (on the computer running Shapewall).
 - **Copy branch name** copies it, for `git diff main..shapewall/comment-12-...` or a pull request.
-- **Discard** asks first, then deletes the branch and its folder. Your checkout is not touched.
+- **Discard** asks first, then deletes the branch and its folder. Your checkout is not touched. A branch you checked out in a worktree
+  of your own (to try it) is left as it is, here and after Apply.
 
 **Undo:** before Apply, Undo is Discard. After Apply, Undo adds a commit that reverts what Apply brought in, only while your branch
 is still where Apply left it and has no uncommitted changes, and never over a file Git does not track; otherwise it says why and
