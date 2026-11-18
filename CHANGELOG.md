@@ -3,6 +3,19 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+- **Compare no longer calls a small change "Same".** A change of a few pixels on a long page (one changed letter or price) was
+  rounded to 0% and shown as "Same", without its red overlay and outside the changed-page count, while the PR comparison counted
+  it. Compare now decides on the changed pixel count and shows such a change as "<0.01%".
+- Compare: when the latest capture of a page failed on one side, that side says the capture failed instead of comparing the
+  older screenshot still on disk as if it were current.
+- Pixel diffs of two screenshots where one is taller and the other wider no longer count the corner that neither screenshot has.
+- Deleting a comment waits for its toast: Undo keeps working for as long as it shows, also when the pointer or keyboard holds the
+  toast past six seconds. Before, the delete went through after six seconds anyway and a later Undo did nothing.
+- Hosted boards: "Approve agent run" asks for a passkey only when the server asks for one, so approving from the
+  board works on servers with passkeys off (tailnet sign-in) and in workspaces that do not require a passkey for it.
+
 ## 0.11.0 - 2026-11-17
 
 Picking what to comment on now reads like a design tool, the toolbar is down to four tools, and shapewall.com has a changelog.
