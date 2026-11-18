@@ -10,7 +10,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { CONFIG_FILE, findConfigFile, getBoard, loadConfig } from '../config.js'
 import { CI_DEFAULTS } from '../ci/settings.js'
-import { captureSide, ciPages } from '../ci/capture.js'
+import { captureSide, ciPages, prepareSideDir, sideDirProblem } from '../ci/capture.js'
 import { compareCaptures } from '../ci/compare.js'
 import { headline, percent } from '../ci/summary.js'
 import { commentFromResult, prContext, skipRequested } from '../ci/github.js'
@@ -107,9 +107,7 @@ async function captureOne({ config, board, url, flags, out, env, dir }) {
     site = await startSite(start, { cwd: checkout, url: siteUrl, env, log: out })
   } catch (error) {
     // Recorded like a failed capture, so the comment says what went wrong.
-    const target = path.resolve(dir)
-    fs.rmSync(target, { recursive: true, force: true })
-    fs.mkdirSync(target, { recursive: true })
+    const target = prepareSideDir(dir)
     const pages = ciPages(config, board, { maxPages }).pages.map((page) => ({ id: page.id, title: page.title, path: page.path }))
     const side = { source: siteUrl, board: board.id, pages, error: `ci.start: ${error.message}`.slice(0, 300) }
     fs.writeFileSync(path.join(target, 'side.json'), `${JSON.stringify(side, null, 2)}\n`)
@@ -132,6 +130,9 @@ async function capture(flags, out, env) {
   }
   const out_ = given(flags.out)
   if (!out_) throw new Error('ci capture needs --out DIR')
+  // Checked before ci.start runs anything.
+  const problem = sideDirProblem(out_)
+  if (problem) throw new Error(`--out: ${problem}`)
   const board = getBoard(config, flags.board)
   const result = await captureOne({ config, board, url: urlFlag(flags.url, 'url'), flags, out, env, dir: out_ })
   if (flags.json) out(JSON.stringify(result, null, 2))

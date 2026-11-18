@@ -31,6 +31,11 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - The website's deploy script checks all of its arguments before it does anything. Before, `--help`, a misspelled command
   such as `smok`, or a lone `--dry-run` fell through to a full build and release of the live site. Now help prints the usage,
   and anything it does not know is refused without running a build, an upload or a server command.
+- **`shapewall ci` never deletes a folder it did not write.** Before, `ci capture --out DIR` deleted DIR and a folder next to
+  it named `DIR.work` with everything in them, and `capture-compare` deleted any `images/` folder in its `--out`, so a
+  mistyped path could erase a project. Now `--out` must be new, empty or an earlier Shapewall result; anything else is refused
+  with every file left in place, and a `capture-compare --out` that is or is inside a capture folder being compared is refused
+  too. Running again over an earlier result still works.
 
 ## 0.11.0 - 2026-11-17
 
