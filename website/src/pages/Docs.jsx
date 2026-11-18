@@ -6,6 +6,8 @@ import { track } from '../analytics.js'
 import { DOCS, DOC_GROUPS, GITHUB_URL } from '../routes.js'
 import { LAUNCHED } from '../launch.js'
 import { routerHref } from '../links.js'
+import { FilmFrame } from '../components/video.jsx'
+import { FILMS } from '../videos.js'
 
 // Markdown turned into { html, headings, text } by scripts/markdown.mjs at build time. A doc with `repo` is the
 // repository's own guide in docs/ (one source for GitHub, the npm package and this site); the rest are src/docs/*.md.
@@ -246,6 +248,18 @@ export function DocPage({ doc }) {
             <Download className="size-4" aria-hidden="true" />
             Download the PDF <span className="font-normal text-faint">({doc.pdf.size})</span>
           </a>
+        ) : null}
+        {doc.video ? (
+          <div className="mt-8 max-w-3xl" data-doc-video={doc.video}>
+            <FilmFrame
+              id={doc.video}
+              title={FILMS[doc.video].name}
+              cta="Watch the quickstart"
+              sizes="(min-width: 1024px) 768px, 100vw"
+              alt=""
+            />
+            <p className="mt-3 text-[14px] text-slate">The video is silent and shows the same steps as the text below.</p>
+          </div>
         ) : null}
         <div ref={article} className="prose-docs mt-8 max-w-3xl" dangerouslySetInnerHTML={{ __html: md.html }} />
         <div className="mt-14 grid max-w-3xl gap-3 border-t border-line pt-8 sm:grid-cols-2">

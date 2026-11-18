@@ -70,17 +70,19 @@ export function assertMedia({ manifest = readManifest(), dir = MEDIA_DIR, env = 
 // deploy.sh: `node scripts/media-lib.mjs files` prints the referenced files (one per line); `check` exits 1 with the
 // problem when one is missing.
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  // SHAPEWALL_MEDIA_MANIFEST / SHAPEWALL_MEDIA_DIR point elsewhere (deploy.sh's tests use fixtures).
   const command = process.argv[2]
-  const manifest = readManifest()
+  const dir = path.resolve(process.env.SHAPEWALL_MEDIA_DIR || MEDIA_DIR)
+  const manifest = readManifest(path.resolve(process.env.SHAPEWALL_MEDIA_MANIFEST || MANIFEST_PATH))
   if (command === 'files') {
     for (const { file, bytes } of manifestFiles(manifest)) console.log(`${file}\t${bytes}`)
   } else if (command === 'check') {
-    const result = checkMediaFiles(manifest)
+    const result = checkMediaFiles(manifest, dir)
     if (!result.ok) {
-      console.error(mediaProblem(result))
+      console.error(mediaProblem(result, dir))
       process.exit(1)
     }
-    console.log(`media ok: ${manifestFiles(manifest).length} files in ${path.relative(process.cwd(), MEDIA_DIR) || MEDIA_DIR}/`)
+    console.log(`media ok: ${manifestFiles(manifest).length} files in ${path.relative(process.cwd(), dir) || dir}/`)
   } else {
     console.error('usage: node scripts/media-lib.mjs files|check')
     process.exit(2)

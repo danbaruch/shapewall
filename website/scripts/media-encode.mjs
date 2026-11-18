@@ -6,7 +6,7 @@
 //
 // What it makes:
 // - the launch film, the tour and the docs quickstart: H.264 (High, CRF 27, faststart, AAC 128k when the film has sound)
-//   and VP9 WebM (CRF 34, Opus 128k), each at 1080p (source frame rate) and 720p (30 fps);
+//   and VP9 WebM (CRF 40, Opus 128k; measured the same SSIM as the H.264 at a smaller size), each at 1080p (source frame rate) and 720p (30 fps);
 // - the feature clips: their MP4 and WebM as they are (already small, silent, made to loop);
 // - every poster as WebP (full size and half) plus a JPEG fallback;
 // - the tour's captions (WebVTT) as they are.
@@ -26,7 +26,9 @@ const THREADS = '4' // at most 4 workers on the build machine
 
 const FILMS = [
   { id: 'launch-film', master: 'shapewall-launch-film.mp4', poster: 'shapewall-launch-film-poster.png', heights: [1080, 720] },
-  { id: 'tour', master: 'tour.mp4', poster: 'tour-poster.png', captions: 'tour.vtt', heights: [1080, 720] },
+  // The tour's own poster is its end card; on the site it gets a frame of the product instead (a comment being pinned on
+  // Pricing), so the play button sits on the product, not on a second set of buttons. posterAt: seconds into the master.
+  { id: 'tour', master: 'tour.mp4', posterAt: 33.5, captions: 'tour.vtt', heights: [1080, 720] },
   { id: 'docs-quickstart', master: 'docs-quickstart.mp4', poster: 'docs-quickstart.jpg', heights: [1080, 720] },
 ]
 
@@ -99,12 +101,12 @@ function vp9(src, height, fps, audio) {
   const args = (out) => [
     '-hide_banner', '-loglevel', 'error', '-y', '-i', src,
     '-vf', `scale=-2:${height}:flags=lanczos`, '-r', String(outFps),
-    '-c:v', 'libvpx-vp9', '-crf', '34', '-b:v', '0', '-deadline', 'good', '-cpu-used', '3', '-row-mt', '1',
+    '-c:v', 'libvpx-vp9', '-crf', '40', '-b:v', '0', '-deadline', 'good', '-cpu-used', '4', '-row-mt', '1',
     '-tile-columns', '2', '-pix_fmt', 'yuv420p', '-g', String(outFps * 2), '-threads', THREADS,
     ...(audio ? ['-c:a', 'libopus', '-b:a', '128k', '-ac', '2'] : ['-an']),
     ...META, out,
   ]
-  return { key: `vp9|crf34|good3|${height}|${outFps}|${audio}`, args }
+  return { key: `vp9|crf40|good4|${height}|${outFps}|${audio}`, args }
 }
 
 // Poster: WebP at full width and half, plus a JPEG fallback at full width.
@@ -121,6 +123,13 @@ function posters(id, src, width) {
     run('magick', [src, '-resize', `${width}x`, '-strip', '-quality', '80', '-sampling-factor', '4:2:0', '-interlace', 'Plane', o]),
   )
   return { webp, jpg: { ...publish(id, 'poster', jpgOut), width } }
+}
+
+// One frame of a master as a PNG (for a poster taken from the film itself).
+function frameAt(src, hash, seconds) {
+  return cached(`frame-${seconds}.png`, `${hash}|frame|${seconds}`, (o) =>
+    run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-ss', String(seconds), '-i', src, '-frames:v', '1', '-f', 'image2', '-c:v', 'png', o]),
+  )
 }
 
 function film(def, dir) {
@@ -147,7 +156,7 @@ function film(def, dir) {
     duration: info.duration,
     audio: info.audio,
     sources,
-    poster: posters(def.id, path.join(dir, def.poster), 1920),
+    poster: posters(def.id, def.posterAt === undefined ? path.join(dir, def.poster) : frameAt(src, hash, def.posterAt), 1920),
   }
   if (def.captions) {
     const vtt = path.join(dir, def.captions)

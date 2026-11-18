@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   ArrowRight,
@@ -21,6 +22,8 @@ import { BeforeAfter, CaptureIllustration, JourneyIllustration, MapIllustration 
 import { AgentTerminal } from '../components/terminal.jsx'
 import { Reveal, stagger } from '../components/motion.jsx'
 import { Faq } from '../components/faq.jsx'
+import { FilmOverlay } from '../components/video.jsx'
+import { FILMS } from '../videos.js'
 import { GITHUB_URL } from '../routes.js'
 import { BETA, GITHUB_LABEL, LAUNCHED, LICENSE_SUMMARY } from '../launch.js'
 import boardOverview960 from '../assets/shots/board-overview-960.webp'
@@ -47,6 +50,9 @@ export default function Home() {
 }
 
 function Hero() {
+  // The launch film plays in the hero screenshot's own window (below its title bar), so the page never moves. The
+  // screenshot stays the poster and the largest paint; the film loads only after the button is pressed.
+  const [filmPlaying, setFilmPlaying] = useState(false)
   return (
     <section className="relative overflow-hidden">
       <div
@@ -115,14 +121,22 @@ function Hero() {
             eager
             className="hero-rise"
             alt="The Shapewall board: the pages of a demo product at desktop, tablet and phone width, grouped into Marketing, Content, Get started and App, with comment pins and the comments panel"
-          />
-          <div className="hero-note absolute -bottom-6 -left-3 hidden w-72 rounded-xl border border-line bg-card p-3.5 shadow-xl shadow-black/10 md:block lg:-left-10">
+          >
+            <FilmOverlay
+              id="launch-film"
+              title={FILMS['launch-film'].name}
+              cta="Watch the launch film"
+              inset="inset-x-0 top-7 bottom-0"
+              onActiveChange={setFilmPlaying}
+            />
+          </Shot>
+          <div hidden={filmPlaying} className="hero-note absolute -bottom-6 -left-3 hidden w-72 rounded-xl border border-line bg-card p-3.5 shadow-xl shadow-black/10 md:block lg:-left-10">
             <p className="flex items-center gap-2 text-[12px] font-semibold text-wall">
               <Bot className="size-4" aria-hidden="true" /> Agent resolved #1
             </p>
             <p className="mt-1.5 text-[13.5px] leading-snug text-ink">The Plus card now uses the primary button. Pricing recaptured.</p>
           </div>
-          <div className="hero-note absolute -top-5 -right-3 hidden items-center gap-2 rounded-full border border-line bg-card py-1.5 pr-3.5 pl-2 text-[13px] font-medium text-ink shadow-lg shadow-black/10 md:flex lg:-right-8">
+          <div hidden={filmPlaying} className="hero-note absolute -top-5 -right-3 hidden items-center gap-2 rounded-full border border-line bg-card py-1.5 pr-3.5 pl-2 text-[13px] font-medium text-ink shadow-lg shadow-black/10 md:flex lg:-right-8">
             <span className="grid size-6 place-items-center rounded-full bg-pin text-[11px] font-bold text-night">20</span>
             open comments on 26 pages
           </div>

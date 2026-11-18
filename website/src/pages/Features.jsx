@@ -22,10 +22,15 @@ import variant960 from '../assets/shots/variant-960.webp'
 import variant1440 from '../assets/shots/variant-1440.webp'
 import phoneComment from '../assets/shots/phone-comment.webp'
 import { Reveal } from '../components/motion.jsx'
+import { Clip, ClipTabs, FilmFrame } from '../components/video.jsx'
+import { FILMS } from '../videos.js'
 
 // The workspace of the public demo (client/src/demo/fixtures.js WORKSPACE_ID), in its console.
 const DEMO_CONSOLE = '/demo/console.html#/w/ws_4c756d000000000000000001'
 
+// Each section's looping clip (src/media.json, made from the films' clips): `clip` is one, `clips` several behind tabs.
+// A section with a clip shows it instead of its illustration. No clip: Capture, Before/after, GitHub, Notifications,
+// Variants (they keep their illustrations).
 const SECTIONS = [
   {
     id: 'capture',
@@ -42,6 +47,7 @@ const SECTIONS = [
   },
   {
     id: 'wall',
+    clip: { id: 'clip-wall', label: 'The wall zooming from every page of a demo site in to its pricing page at three widths, and back out' },
     nav: 'The wall',
     title: 'The whole product on one wall',
     text: 'Pages are grouped into sections, such as Marketing, App and Settings, on a zoomable canvas. Zoom out to see every page at every size at once. Zoom in and the tile becomes the captured page, with text you can select.',
@@ -56,6 +62,10 @@ const SECTIONS = [
   },
   {
     id: 'comments',
+    clips: [
+      { id: 'clip-pin', tab: 'Pin a comment', label: 'A comment pinned to the Try Plus free button and posted' },
+      { id: 'clip-say', tab: 'Say it or draw it', label: 'A dictated comment with a box drawn round the button, then posted' },
+    ],
     nav: 'Comments',
     title: 'Comments on the exact element',
     text: 'Click Comment, click the button that needs work and say what should change. The comment stores a selector and the element text, so after the next capture the pin follows the button, not the old pixel. If the element is gone, the pin says so.',
@@ -80,6 +90,7 @@ const SECTIONS = [
   },
   {
     id: 'agent',
+    clip: { id: 'clip-agent', label: 'Fix with agent: the agent plans, asks before it acts, changes one file and resolves the comment' },
     nav: 'Agents',
     title: 'An agent loop that runs on its own',
     text: 'shapewall comments --json hands any agent the page, viewport, selector, text, position and screenshot path for each open comment. shapewall watch runs your agent once per new comment, and the MCP server gives Claude Code, Codex and other agents tools to list, reply, recapture and resolve.',
@@ -99,6 +110,7 @@ const SECTIONS = [
   },
   {
     id: 'journeys',
+    clip: { id: 'clip-journeys', label: 'The Sign up journey stepping from Home to Pricing, Sign up and the Dashboard' },
     nav: 'Journeys',
     title: 'Journeys across real links',
     text: 'During a capture Shapewall reads the links on each page and keeps the ones that lead to other pages on the wall. They become arrows. Name the paths that matter, such as visitor to first note, highlight one, and step through it page by page.',
@@ -150,6 +162,7 @@ const SECTIONS = [
   },
   {
     id: 'compare',
+    clip: { id: 'clip-compare', label: 'Pricing on staging beside production, the diff overlay, and a comment left on production' },
     nav: 'Staging',
     title: 'Staging beside production',
     text: 'Point one board at several environments. Capture staging and production with the same pages, and see them side by side before you ship. Comment on either side while you compare: the pin stays with the environment it was left on.',
@@ -194,6 +207,12 @@ const SECTIONS = [
   },
   {
     id: 'teams',
+    clips: [
+      { id: 'clip-team', tab: 'Invite and roles', label: 'Inviting a person and changing a member\u2019s role' },
+      { id: 'clip-multi', tab: 'Multiplayer', label: 'Three people\u2019s named cursors on one board, and a pin arriving live' },
+      { id: 'clip-log', tab: 'Activity and usage', label: 'The Activity log and the Usage chart of agent turns' },
+      { id: 'clip-share', tab: 'Share links', label: 'Creating a share link for an agency review and copying it' },
+    ],
     nav: 'Teams',
     badge: 'Beta',
     title: 'Workspaces, roles and share links',
@@ -213,6 +232,7 @@ const SECTIONS = [
   },
   {
     id: 'phone',
+    clip: { id: 'clip-phone', label: 'The board on a phone: a tap on the headline, a comment in the sheet, Post' },
     nav: 'Phone',
     title: 'The wall in your pocket',
     text: 'The board works on a phone: 44 px touch targets, a bottom sheet for comments, and Back closes the topmost panel instead of leaving the board. Add it to your home screen and it opens like an app.',
@@ -242,6 +262,7 @@ const SECTIONS = [
   },
   {
     id: 'checks',
+    clip: { id: 'clip-checks', label: 'The Checks panel, then a before and after Lighthouse comparison' },
     nav: 'Page checks',
     title: 'See what needs attention, then verify the fix',
     text: 'Check your pages for reliability, SEO, social images and accessibility. Run Lighthouse for local performance metrics, compare saved reports and keep a performance budget beside the page.',
@@ -276,6 +297,9 @@ const SECTIONS = [
     ),
   },
 ]
+
+const CLIP_SIZES = '(min-width: 1280px) 560px, (min-width: 1024px) 45vw, 100vw'
+const CLIP_SIZES_WIDE = '(min-width: 1024px) 896px, 100vw'
 
 const ROLES = [
   ['Robin', 'Owner', 'Everything, including deleting the workspace'],
@@ -317,6 +341,17 @@ export default function Features() {
       <PageHeader eyebrow="Features" title="Everything between “change this” and “it is changed”">
         Capture every page, review it on one wall, hand precise comments to your coding agent and check the result where you asked for it.
       </PageHeader>
+      <Container className="pt-10 pb-12 sm:pt-12 sm:pb-16">
+        <FilmFrame
+          id="tour"
+          title={FILMS.tour.name}
+          cta="Take the tour"
+          sizes="(min-width: 960px) 896px, 100vw"
+          eager
+          className="mx-auto max-w-4xl"
+        />
+        <p className="mx-auto mt-3 max-w-4xl text-center text-[13.5px] text-faint">Narrated, with English subtitles.</p>
+      </Container>
       <nav className="sticky top-16 z-30 border-b border-line bg-paper/90 backdrop-blur" aria-label="Features on this page">
         {/* Phone: one row that scrolls sideways, faded at both edges so clipped items read as more. Wider: the row wraps,
             so every item is always visible. */}
@@ -385,8 +420,17 @@ export default function Features() {
                 </p>
               ) : null}
             </Reveal>
-            <Reveal className={`min-w-0 ${index % 2 && !section.wide ? 'lg:order-1' : ''}`} delay={0.06}>
-              {section.art}
+            <Reveal
+              className={`min-w-0 ${index % 2 && !section.wide ? 'lg:order-1' : ''} ${section.wide && (section.clip || section.clips) ? 'mx-auto w-full max-w-4xl' : ''}`}
+              delay={0.06}
+            >
+              {section.clips ? (
+                <ClipTabs clips={section.clips} dark={section.dark} sizes={section.wide ? CLIP_SIZES_WIDE : CLIP_SIZES} />
+              ) : section.clip ? (
+                <Clip id={section.clip.id} label={section.clip.label} dark={section.dark} sizes={section.wide ? CLIP_SIZES_WIDE : CLIP_SIZES} />
+              ) : (
+                section.art
+              )}
             </Reveal>
           </Container>
         </section>

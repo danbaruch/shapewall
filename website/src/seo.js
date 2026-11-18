@@ -4,6 +4,11 @@ import fs from 'node:fs'
 import { AUTHOR, DEMO_SITE_PATHS, GITHUB_URL, ROUTES, SITE_URL, canonicalUrl } from './routes.js'
 import { LAUNCHED } from './launch.js'
 import { FAQ } from './faq-data.js'
+import { videoObject } from './videos.js'
+
+// The films a page shows, as VideoObject data: the launch film on the home page, the tour on the features page.
+const PAGE_VIDEOS = { '/': ['launch-film'], '/features': ['tour'] }
+const videosFor = (route) => (PAGE_VIDEOS[route.path] || []).map((id) => videoObject(id, SITE_URL)).filter(Boolean)
 
 // The version people install: the root package.json, so a release bump reaches the structured data by itself.
 const VERSION = JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version
@@ -62,6 +67,7 @@ function jsonLd(route) {
           author: { '@type': 'Person', name: AUTHOR },
           publisher: { '@id': `${SITE_URL}/#organization` },
         },
+        ...videosFor(route),
       ],
     }
   }
@@ -99,6 +105,7 @@ function jsonLd(route) {
         publisher: organization,
       },
       breadcrumbs(route, url),
+      ...videosFor(route),
     ],
   }
 }
