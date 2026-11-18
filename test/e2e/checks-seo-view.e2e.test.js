@@ -118,12 +118,16 @@ for (const colorScheme of ['light', 'dark'])
       await panel.locator('[data-sw-seo-page="home"] [data-sw-seo-serp]').waitFor()
       // Measure after the sheet's enter animation (a transform) settles.
       await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished)))
+      // The targets are 44 px in layout (h-11; offsetHeight is that, whole pixels). The drawn box can come out a
+      // hair under (43.9999, every target in a row alike) while the sheet's Motion spring, which
+      // document.getAnimations() does not always list, settles its last sub-pixel of transform: a 0.5 px
+      // tolerance for that, while the layout height must still be the full 44.
       const small = await panel
         .locator('button:visible, [role=tab]:visible')
-        .evaluateAll((els) => els.map((el) => [el.textContent.trim().slice(0, 30), el.getBoundingClientRect().height]))
+        .evaluateAll((els) => els.map((el) => [el.textContent.trim().slice(0, 30), el.getBoundingClientRect().height, el.offsetHeight]))
       assert.ok(
-        small.every(([, h]) => h >= 44),
-        JSON.stringify(small.filter(([, h]) => h < 44)),
+        small.every(([, h, layout]) => h >= 43.5 && layout >= 44),
+        JSON.stringify(small.filter(([, h, layout]) => h < 43.5 || layout < 44)),
       )
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false)
       if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `seo-local-390-${colorScheme}.png`) })
