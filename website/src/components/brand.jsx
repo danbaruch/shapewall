@@ -1,3 +1,5 @@
+import { BETA_TAG_NOTE } from '../launch.js'
+
 // The Shapewall mark (brand/shapewall-mark.svg) and the wordmark lockup, inline so they never flash in.
 export function Mark({ className = 'size-7', title }) {
   return (
@@ -17,6 +19,23 @@ export function Logo({ dark = false }) {
     <span className="inline-flex items-center gap-2.5">
       <Mark className="size-7" />
       <span className={`text-[19px] font-bold tracking-[-0.025em] ${dark ? 'text-white' : 'text-ink'}`}>Shapewall</span>
+    </span>
+  )
+}
+
+// The "Beta" tag after the wordmark in the header lockup: the Badge family (teal tint, uppercase, tracked) at lockup
+// size, nudged up 1px so it centers on the wordmark's cap height rather than its line box. The logo link's own name
+// says "beta", so the tag is hidden from assistive tech and never takes focus; its title gives mouse users the longer
+// note on hover.
+export function BetaTag() {
+  return (
+    <span
+      data-beta-tag=""
+      title={BETA_TAG_NOTE}
+      aria-hidden="true"
+      className="inline-flex h-[18px] -translate-y-px items-center rounded-full bg-wall-tint px-[7px] text-[10px] leading-none font-semibold tracking-[0.08em] text-wall-deep uppercase select-none"
+    >
+      Beta
     </span>
   )
 }

@@ -17,6 +17,10 @@ For operators of a hosted server, before upgrading:
 
 Changes:
 
+- Shapewall is in early access (beta): the site header shows a Beta tag next to the logo, the home page and the README say we are
+  still working out the mechanics and ask for feedback (contact form or GitHub issues).
+- Website: between 768 and 1023 px wide the header uses the menu button instead of the inline links, which used to wrap onto two
+  lines and push the page sideways.
 - **An agent's Undo never erases your own edit.** Before, Undo in the chat put back every file that changed during the agent's
   turn, so a file you saved in your editor while the agent worked on another one was rolled back with it. Now Undo puts back only
   the files the agent edited with its own file tools (an edit you denied, or one that failed, does not
