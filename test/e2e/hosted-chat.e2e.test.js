@@ -477,8 +477,10 @@ test('access ends with the chat open: demoted or signed out, the panel says so o
     const at = seen.length
     await page.waitForTimeout(11_000)
     assert.equal(seen.length, at, `asked the thread again ${seen.length - at} times after the notice`)
+    // The refused requests themselves, and the board's presence socket, which retries with its own backoff
+    // (board/presence/runtime.js, up to 30 s) and is refused the same way, are what the browser logs.
     assert.deepEqual(
-      realErrors(errors).filter((text) => !/40[13]/.test(text)),
+      realErrors(errors).filter((text) => !/40[13]|\/presence' failed: .*Unexpected response code: 40[134]/.test(text)),
       [],
     )
   }
