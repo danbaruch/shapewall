@@ -158,8 +158,10 @@ function BranchActions({ message, summary, owner, touch, onBranch }) {
       {ready ? <p>Your checkout is untouched until you apply it. Uncommitted changes in your checkout were not carried over.</p> : null}
       {branch.state === 'applied' && branch.applied ? (
         <p data-sw-chat-branch-applied={branch.applied.mode}>
-          {branch.applied.mode === 'fast-forward' ? 'Fast-forwarded your checkout.' : 'Merged into your checkout.'} The branch and its
-          folder are gone.
+          {branch.applied.mode === 'fast-forward' ? 'Fast-forwarded your checkout.' : 'Merged into your checkout.'}{' '}
+          {branch.applied.kept
+            ? `${keptBranchText({ branch: branch.name, kept: branch.applied.kept })} Its folder is gone.`
+            : 'The branch and its folder are gone.'}
         </p>
       ) : null}
       {ready ? (

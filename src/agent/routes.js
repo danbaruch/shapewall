@@ -1905,6 +1905,11 @@ export function agentRouter({
       let comment = null
       if (meta.commentId) {
         try {
+          if (applied.kept)
+            await addReply(config, board.id, meta.commentId, {
+              author: 'shapewall',
+              body: `The agent’s work was applied to your checkout. ${keptText(meta.branch, applied.kept)}`,
+            })
           const moved = await setAgentStatus(config, board.id, meta.commentId, 'working', { onlyFrom: [BRANCH_READY], actor: 'shapewall' })
           if (moved.changed && allowCapture) {
             await finishFix({

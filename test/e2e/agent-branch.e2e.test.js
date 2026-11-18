@@ -174,6 +174,23 @@ test('branch mode: turn on, fix, Fix ready on branch, Apply with recapture, Disc
     assert.match(fs.readFileSync(source, 'utf8'), /Changed by hand/)
     assert.equal(sh(dir, 'status', '--porcelain', '--untracked-files=no'), '')
     assert.equal(getComment(config, board.id, third.id).agentStatus, 'branch-ready', 'still waiting on its branch')
+    // Apply while a person has the branch checked out elsewhere: applied, the branch kept, and the card says where.
+    await page.locator('[data-sw-chat-branch-discard]').last().click()
+    await page.locator('[data-sw-chat-branch-discard-confirm]').click()
+    await page.locator('[data-sw-chat-branch="discarded"]').last().waitFor({ timeout: 15000 })
+    const fourth = await newComment('Kept branch heading', 80)
+    await fixFromBoard(fourth)
+    const keptName = getComment(config, board.id, fourth.id).agentBranch
+    const review = path.join(tempDir('branch-browser-review'), 'review')
+    sh(dir, 'worktree', 'add', '-q', review, keptName)
+    await page.locator('[data-sw-chat-branch-apply]').last().click()
+    const applied = page.locator('[data-sw-chat-branch="applied"]').last()
+    await applied.waitFor({ timeout: 30000 })
+    const appliedText = await applied.locator('[data-sw-chat-branch-applied]').textContent()
+    assert.match(appliedText, new RegExp(`Kept branch ${keptName.replace('/', '\\/')}: it is checked out in .*review\\.`), appliedText)
+    assert.doesNotMatch(appliedText, /The branch and its folder are gone/)
+    assert.equal(sh(review, 'symbolic-ref', 'HEAD'), `refs/heads/${keptName}`)
+    sh(dir, 'worktree', 'remove', '--force', review)
     assert.equal(await page.getByText('Files in your own checkout changed').count(), 0, 'nothing wrote to the checkout during a turn')
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false)
     if (process.env.SHAPEWALL_SHOTS) {

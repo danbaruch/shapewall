@@ -687,8 +687,9 @@ export async function applyAgentBranch(config, meta, { message = null } = {}) {
     mode = 'merge'
   }
   const after = (await run(['rev-parse', '--verify', 'HEAD'])).trim()
-  await discardAgentBranch(config, meta).catch(() => {})
-  return { mode, before, after, branch: repo.branch }
+  // The cleanup after Apply; a branch someone has checked out stays, and the chat says so.
+  const discarded = await discardAgentBranch(config, meta).catch(() => null)
+  return { mode, before, after, branch: repo.branch, ...(discarded?.kept ? { kept: discarded.kept } : {}) }
 }
 
 // Undo after Apply: new commits that revert what Apply brought in, only
