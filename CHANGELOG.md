@@ -3,7 +3,11 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.12.1 - 2026-11-18
+
+Videos on the website (the launch film, the narrated tour, feature clips and the quickstart, all self-hosted), and follow-up
+fixes: Undo and branch mode say what they keep, a hosted chat whose access ended stops asking, and
+`shapewall watch --remote --once` fails when its scan fails.
 
 ### Added
 
