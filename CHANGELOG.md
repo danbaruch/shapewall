@@ -5,6 +5,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Added
+
 - Website: videos. The home page plays the launch film inside the hero screenshot's window (from the pill on the screenshot or a "Watch the film"
   control in the hero), the features page opens with the
   narrated product tour (English subtitles) and each feature with a clip gets a short silent loop, and Getting started opens with
@@ -15,6 +17,26 @@ and the project uses [Semantic Versioning](https://semver.org/).
   every release (`deploy.sh --dry-run` and `deploy.sh media --dry-run` print the plan; `deploy.sh media-prune` lists media no
   release on the host still uses, and deletes it only with `--yes`). The launch film and the tour carry
   VideoObject structured data.
+
+### Fixed
+
+- **Undo no longer gets stuck behind a turn that changed nothing itself.** If you saved a file while a later agent turn was
+  running, that turn (which only listed your file and offered no Undo) counted as the latest change, so the earlier turn said
+  "a later answer changed things" and could never be undone. Only turns in which the agent itself edited files, made a commit or
+  a branch count now. Undo still never puts back a file that changed since the agent's turn.
+- **The Undo card says which files it leaves alone.** A turn that also lists files changed outside the agent now says "Undo
+  leaves 1 file changed outside the agent as it is." and, after Undo, "Not undone: 1 file changed outside the agent."
+- **Branch mode: Apply says when it keeps the branch.** When the agent's branch is checked out in another worktree, Apply now
+  says "Kept branch X: it is checked out in DIR." on the card and in a reply on the comment, as Discard does. Before, the card
+  said the branch was gone and the comment said nothing.
+- **Branch mode: the comment says when Undo keeps the branch.** The card already said it; the comment's reply now does too.
+- **Hosted: a chat whose access ended stops asking.** When you are signed out, or your role no longer reaches the board's chat
+  (demoted or removed), an open chat now says "You have been signed out." (with Sign in) or "You no longer have access to this
+  board." and stops checking the thread. Before, it said nothing and kept asking every few seconds.
+- **`shapewall watch --remote --once` fails when the scan fails.** A scan error (the server could not be reached) was logged and
+  the command still exited 0, as if nothing were open. It now exits with the error, like `shapewall watch --once` since 0.12.0.
+- **Website privacy page names no vendors.** It now describes the analytics and the content delivery network in generic words.
+  What the site does and collects is unchanged.
 
 ## 0.12.0 - 2026-11-17
 
