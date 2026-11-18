@@ -35,8 +35,8 @@ function useVideoFailure(ref, onFail, active) {
     const fail = () => onFail()
     last?.addEventListener('error', fail)
     video.addEventListener('error', fail)
-    // A source that failed before this effect ran: no source is left to try.
-    if (video.networkState === 3 /* NETWORK_NO_SOURCE */) onFail()
+    // Failed before this effect ran (networkState is not a test: it reads "no source" while the browser is still choosing).
+    if (video.error) onFail()
     return () => {
       last?.removeEventListener('error', fail)
       video.removeEventListener('error', fail)
@@ -105,14 +105,14 @@ export function FilmOverlay({ id, title, cta, onActiveChange, inset = 'inset-0',
   if (state === 'playing') {
     return (
       <div
-        className={cx('absolute z-10 bg-black', inset, className)}
+        className={cx('absolute z-10 bg-night', inset, className)}
         onKeyDown={(event) => {
           if (event.key === 'Escape') close()
         }}
       >
         <video
           ref={videoRef}
-          className="size-full bg-black object-contain"
+          className="size-full bg-night object-contain"
           controls
           playsInline
           preload="auto"

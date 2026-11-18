@@ -29,7 +29,8 @@ const FILMS = [
   // The tour's own poster is its end card; on the site it gets a frame of the product instead (a comment being pinned on
   // Pricing), so the play button sits on the product, not on a second set of buttons. posterAt: seconds into the master.
   { id: 'tour', master: 'tour.mp4', posterAt: 33.5, captions: 'tour.vtt', heights: [1080, 720] },
-  { id: 'docs-quickstart', master: 'docs-quickstart.mp4', poster: 'docs-quickstart.jpg', heights: [1080, 720] },
+  // The quickstart's own poster is its title card, which the play button would cover: a finished capture step instead.
+  { id: 'docs-quickstart', master: 'docs-quickstart.mp4', posterAt: 33, heights: [1080, 720] },
 ]
 
 function run(cmd, args) {

@@ -10,8 +10,8 @@
       "audio": true,
       "sources": [
         {
-          "file": "launch-film-1080.6e9eebf692.webm",
-          "bytes": 34024931,
+          "file": "launch-film-1080.ef15a62ab7.webm",
+          "bytes": 21874870,
           "type": "video/webm; codecs=\"vp9, opus\"",
           "height": 1080
         },
@@ -22,8 +22,8 @@
           "height": 1080
         },
         {
-          "file": "launch-film-720.5eefc2cdcf.webm",
-          "bytes": 12102311,
+          "file": "launch-film-720.629ace6742.webm",
+          "bytes": 8421545,
           "type": "video/webm; codecs=\"vp9, opus\"",
           "height": 720
         },
@@ -58,30 +58,30 @@
       "kind": "film",
       "width": 1920,
       "height": 1080,
-      "duration": 97.62,
+      "duration": 103.61,
       "audio": true,
       "sources": [
         {
-          "file": "tour-1080.b8bc3b61b7.webm",
-          "bytes": 38299499,
+          "file": "tour-1080.d8c3b468d3.webm",
+          "bytes": 24448034,
           "type": "video/webm; codecs=\"vp9, opus\"",
           "height": 1080
         },
         {
-          "file": "tour-1080.0dcb77cb62.mp4",
-          "bytes": 17244781,
+          "file": "tour-1080.44d3bdb6f9.mp4",
+          "bytes": 17688648,
           "type": "video/mp4; codecs=\"avc1.640028, mp4a.40.2\"",
           "height": 1080
         },
         {
-          "file": "tour-720.6f5f5b8af8.webm",
-          "bytes": 13649443,
+          "file": "tour-720.d77eb64677.webm",
+          "bytes": 9568987,
           "type": "video/webm; codecs=\"vp9, opus\"",
           "height": 720
         },
         {
-          "file": "tour-720.2b76c8c793.mp4",
-          "bytes": 8666575,
+          "file": "tour-720.71ea983f20.mp4",
+          "bytes": 9028809,
           "type": "video/mp4; codecs=\"avc1.640028, mp4a.40.2\"",
           "height": 720
         }
@@ -89,19 +89,19 @@
       "poster": {
         "webp": [
           {
-            "file": "tour-poster-1920.dc59530ec6.webp",
-            "bytes": 43990,
+            "file": "tour-poster-1920.b673a7b232.webp",
+            "bytes": 33432,
             "width": 1920
           },
           {
-            "file": "tour-poster-960.f4e7ecedfc.webp",
-            "bytes": 18808,
+            "file": "tour-poster-960.056b0153ae.webp",
+            "bytes": 14784,
             "width": 960
           }
         ],
         "jpg": {
-          "file": "tour-poster.710cc1708f.jpg",
-          "bytes": 103599,
+          "file": "tour-poster.eecc69edd2.jpg",
+          "bytes": 98455,
           "width": 1920
         }
       },
@@ -123,8 +123,8 @@
       "audio": false,
       "sources": [
         {
-          "file": "docs-quickstart-1080.8114b6de4f.webm",
-          "bytes": 8170938,
+          "file": "docs-quickstart-1080.b634302718.webm",
+          "bytes": 5301973,
           "type": "video/webm; codecs=\"vp9\"",
           "height": 1080
         },
@@ -135,8 +135,8 @@
           "height": 1080
         },
         {
-          "file": "docs-quickstart-720.444512b65b.webm",
-          "bytes": 4146948,
+          "file": "docs-quickstart-720.050ee90052.webm",
+          "bytes": 2760711,
           "type": "video/webm; codecs=\"vp9\"",
           "height": 720
         },
@@ -150,19 +150,19 @@
       "poster": {
         "webp": [
           {
-            "file": "docs-quickstart-poster-1920.36bcd00191.webp",
-            "bytes": 25516,
+            "file": "docs-quickstart-poster-1920.a3c90bea4f.webp",
+            "bytes": 51218,
             "width": 1920
           },
           {
-            "file": "docs-quickstart-poster-960.cfb0944fab.webp",
-            "bytes": 10190,
+            "file": "docs-quickstart-poster-960.be995a43eb.webp",
+            "bytes": 22368,
             "width": 960
           }
         ],
         "jpg": {
-          "file": "docs-quickstart-poster.3685d7d00c.jpg",
-          "bytes": 63809,
+          "file": "docs-quickstart-poster.3e244cfd1a.jpg",
+          "bytes": 112316,
           "width": 1920
         }
       }
