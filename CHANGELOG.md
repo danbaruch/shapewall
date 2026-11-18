@@ -19,6 +19,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
   slides (at most once an hour), with the same security attributes, and still ends 90 days after sign-in as documented.
 - Starter agent: cancelling a run now always stops it. A cancel before or during setup (for example while the image is being
   pulled) starts no agent and commits nothing, and a cancelled run never pushes its branch or opens a pull request.
+- Website: the live demo links in Getting Started open the demo again. An ordinary click used to show the site's "page not found"
+  page; the docs now hand only the site's own pages to in-page navigation.
 
 ## 0.11.0 - 2026-11-17
 
