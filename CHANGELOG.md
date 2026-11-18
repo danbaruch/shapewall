@@ -5,6 +5,18 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+For operators of a hosted server, before upgrading:
+
+- **Deploy stop-then-start.** Never run the old and new server on one data folder at the same time, also not briefly during a
+  deploy: the new server's startup sweep could roll back a push the old one is committing. After a downgrade to 0.11.0, that
+  version's sweep (which deletes old board folders without asking the database) is back.
+- **`shapewall hosted backup` can now exit 1**, when a board's folder is missing and the backup is not a complete recovery
+  point. Check timers and scripts that run it.
+- **Older backups can now fail `restore --check`.** A backup made before this release that recorded skipped boards in
+  `backup.json` never held all of its files; the drill now says so. That is correct, not a regression: make a new backup.
+
+Changes:
+
 - **An agent's Undo never erases your own edit.** Before, Undo in the chat put back every file that changed during the agent's
   turn, so a file you saved in your editor while the agent worked on another one was rolled back with it. Now Undo puts back only
   the files the agent edited with its own file tools (an edit you denied, or one that failed, does not
@@ -48,16 +60,6 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Website: the privacy page now says that the contact form also stores the User-Agent your browser sends, and that, if the site
   operator has set it up, your message, topic and email address are forwarded to a messaging service.
 - Website: a link with a broken fragment (for example one cut off while copying) no longer stops the page from loading.
-For operators of a hosted server, before upgrading:
-
-- **Deploy stop-then-start.** Never run the old and new server on one data folder at the same time, also not briefly during a
-  deploy: the new server's startup sweep could roll back a push the old one is committing. After a downgrade to 0.11.0, that
-  version's sweep (which deletes old board folders without asking the database) is back.
-- **`shapewall hosted backup` can now exit 1**, when a board's folder is missing and the backup is not a complete recovery
-  point. Check timers and scripts that run it.
-- **Older backups can now fail `restore --check`.** A backup made before this release that recorded skipped boards in
-  `backup.json` never held all of its files; the drill now says so. That is correct, not a regression: make a new backup.
-
 - **Hosted: the operator's role change revokes what the old role handed out.** `shapewall hosted admin members add --role` on
   an existing member now revokes the same invites, share links and API tokens as a role change in the console, writes the same
   `member_grants_revoked` audit entry, and says what it revoked. Before, a demotion there only hid those grants, and promoting
