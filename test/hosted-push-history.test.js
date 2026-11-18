@@ -136,3 +136,57 @@ test('a push from a checkout with less history keeps every version a hosted comm
     await hosted.close()
   }
 })
+
+// Review follow-up to 04: a carried version is copied under a temporary name
+// and renamed when whole, so a crash mid-copy never leaves a cut-short file
+// under a name the retried push installs; such a leftover is not installed.
+test('carried versions are copied whole or not at all, and a cut-short leftover is never installed', async () => {
+  const hosted = await startHostedServer('push-carry-temp')
+  try {
+    const owner = await signUp(hosted, { handle: 'carry' })
+    const ws = owner.workspaceId
+    const project = await createProject(owner, ws, 'Site')
+    const remote = createRemote({ origin: hosted.origin, token: await createToken(owner, ws, project.id) })
+    const OLDEST = '20261020T100000000Z-aaaa'
+    await push(remote, checkout('carry-temp-a', '20261101T100000000Z-ab12', [200, 0, 0], { [OLDEST]: [0, 0, 200] }))
+    const board = `/w/${ws}/p/${project.id}/api/boards/sample`
+    const made = await owner.browser.post(`${board}/comments`, { pageId: 'home', viewport: 'desktop', x: 10, y: 10, body: 'Blue' })
+    assert.equal(made.status, 201, made.text)
+    hosted.db.prepare('UPDATE comments SET capture_version = ? WHERE workspace_id = ? AND number = ?').run(OLDEST, ws, made.json.comment.id)
+    // The next push, uploaded; a crashed earlier commit of it left a cut-short copy behind.
+    const config = checkout('carry-temp-b', '20261117T100000000Z-bbbb', [0, 200, 0])
+    const sample = config.boards[0]
+    const started = await remote.startPush(pushDefinition(config, sample))
+    for (const [area, name, file] of pushFiles(config, sample)) await remote.pushFile(started.id, area, name, fs.readFileSync(file))
+    const stagedVersions = path.join(hosted.dataDir, 'staging', started.id, 'versions')
+    fs.mkdirSync(stagedVersions, { recursive: true })
+    fs.writeFileSync(path.join(stagedVersions, `home.desktop.${OLDEST}.png.carrying`), 'cut sh')
+    const copies = []
+    const originalCopy = fs.copyFileSync
+    fs.copyFileSync = (from, to, ...rest) => {
+      copies.push(String(to))
+      return originalCopy(from, to, ...rest)
+    }
+    try {
+      const manifest = JSON.parse(fs.readFileSync(path.join(config.outputDir, 'sample', 'captures', 'manifest.json'), 'utf8'))
+      await remote.commitPush(started.id, { manifest, variants: [] })
+    } finally {
+      fs.copyFileSync = originalCopy
+    }
+    const carriedCopies = copies.filter((file) => file.includes(`${path.sep}staging${path.sep}`))
+    assert.ok(carriedCopies.length > 0, 'something was carried')
+    assert.ok(
+      carriedCopies.every((file) => file.endsWith('.carrying')),
+      `never straight to its final name: ${carriedCopies.join(', ')}`,
+    )
+    const stored = path.join(hosted.dataDir, 'files', ws, project.id, 'sample', 'versions')
+    assert.deepEqual(
+      fs.readdirSync(stored).filter((name) => name.endsWith('.carrying')),
+      [],
+      'no temporary file installed',
+    )
+    assert.equal(pixels(fs.readFileSync(path.join(stored, `home.desktop.${OLDEST}.png`))), pixels(solidPng([0, 0, 200])))
+  } finally {
+    await hosted.close()
+  }
+})

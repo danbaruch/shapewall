@@ -575,8 +575,10 @@ export function createPushStore(
       const dir = path.join(staging, area)
       if (!fs.existsSync(dir)) continue
       for (const name of fs.readdirSync(dir)) {
-        // Files of variants that are not in the final list go.
-        if (area === 'variants' && !parseName(area, name, board, variantIds)) fs.rmSync(path.join(dir, name), { force: true })
+        // Files of variants that are not in the final list go, and so does a
+        // carried version a crash cut short (it never got its own name).
+        if ((area === 'variants' && !parseName(area, name, board, variantIds)) || name.endsWith(CARRYING))
+          fs.rmSync(path.join(dir, name), { force: true })
         else files.add(`${area}/${name}`)
       }
     }
@@ -657,8 +659,13 @@ export function createPushStore(
       if (others + commentFileBytes(t) + bytes > workspaceQuota)
         throw new PushError(413, 'quota_exceeded', 'This workspace is over its storage quota.')
       if (plan.length) fs.mkdirSync(path.join(staging, 'versions'), { recursive: true })
+      // Each under a temporary name, renamed when whole: a crash mid-copy
+      // never leaves a cut-short file under a name a retry would install.
       for (const item of plan) {
-        fs.copyFileSync(item.from, item.to)
+        const temp = `${item.to}${CARRYING}`
+        fs.copyFileSync(item.from, temp)
+        carried.push(temp)
+        fs.renameSync(temp, item.to)
         carried.push(item.to)
       }
       const definition = JSON.stringify(push.definition)
@@ -716,6 +723,8 @@ export function createPushStore(
 // expire). Nothing is deleted that the database does not show replaced.
 
 const swapsDir = (dataDir) => path.join(dataDir, 'swaps')
+// A carried version file while it is copied (push.js commit).
+const CARRYING = '.carrying'
 const swapFile = (dataDir, pushId) => {
   if (!ID_PATTERNS.push.test(pushId)) throw new Error('invalid push id')
   return path.join(swapsDir(dataDir), `${pushId}.json`)
