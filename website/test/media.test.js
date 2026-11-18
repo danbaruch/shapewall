@@ -170,26 +170,56 @@ test('prerendered pages: posters only, with sizes; real, labelled play buttons; 
   }
   const ld = (html) =>
     [...html.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)].flatMap((match) => JSON.parse(match[1])['@graph'])
-  // Home: the screenshot stays the poster (and the largest paint); the button names the film, its length and sound.
-  assert.match(pages.home, /<button type="button"[^>]*aria-label="Play Shapewall launch film, 1:32, with sound"/)
-  assert.match(pages.home, />Watch the launch film</)
+  // Home: the narrated tour, the site's one film. The screenshot stays the poster (and the largest paint); the button
+  // names the film, its length and sound, and is described as narrated with English subtitles.
+  const tourLength = clock(MEDIA.tour.duration)
+  assert.equal(tourLength, '1:44')
+  const pill = pages.home.match(/<button type="button"[^>]*data-film="tour"[^>]*>/)?.[0]
+  assert.ok(pill, 'home: the play pill on the screenshot is the tour')
+  assert.match(pill, /aria-label="Play Shapewall product tour, 1:44, with sound"/)
+  const noteId = pill.match(/aria-describedby="([^"]+)"/)?.[1]
+  assert.ok(noteId, 'home: the pill has an accessible description')
+  assert.match(pages.home, new RegExp(`<span id="${noteId}"[^>]*>Narrated, with English subtitles\\.</span>`))
+  assert.match(pages.home, />Watch the tour</)
+  assert.ok(!/launch film|data-film="launch-film"|\/media\/launch-film/i.test(pages.home), 'home: no launch film')
+  // The player carries the tour's English subtitles (a <track>, off until the captions button turns it on).
+  assert.equal(MEDIA.tour.tracks[0].kind, 'subtitles')
+  assert.match(fs.readFileSync(path.join(SITE, 'src/components/video.jsx'), 'utf8'), /<track key=\{track\.file\} kind=\{track\.kind\}/)
   // The hero also offers the film: a quiet button in the row from sm up, a text link under the buttons on phone.
   for (const where of ['desktop', 'phone']) {
     const control = pages.home.match(new RegExp(`<button type="button"[^>]*data-film-link="${where}"[^>]*>([\\s\\S]*?)</button>`))
-    assert.ok(control, `home: the ${where} "Watch the film" control is a real button`)
-    assert.match(control[0], /aria-label="Watch the launch film, 1:32, with sound"/, `${where}: names the film, length and sound`)
-    assert.match(control[1], /Watch the film/)
-    assert.match(control[1], /1:32/)
+    assert.ok(control, `home: the ${where} "Watch the tour" control is a real button`)
+    assert.match(control[0], /aria-label="Watch the tour, 1:44, with sound"/, `${where}: names the film, length and sound`)
+    assert.match(control[0], new RegExp(`aria-describedby="${noteId}"`), `${where}: described as narrated, with subtitles`)
+    assert.match(control[1], /Watch the tour/)
+    assert.match(control[1], new RegExp(tourLength))
   }
   // Only one of the two shows at a time: the row button is inside a wrapper hidden below sm, the link is hidden from sm up.
   assert.match(pages.home, /<span class="hidden sm:contents"><button type="button"[^>]*data-film-link="desktop"/)
   assert.match(pages.home, /<button type="button"[^>]*data-film-link="phone"[^>]*class="[^"]*\bsm:hidden\b[^"]*"/)
   const homeMarkup = pages.home.replace(/<script type="application\/ld\+json">[\s\S]*?<\/script>/g, '')
   assert.ok(!homeMarkup.includes('/media/'), 'home: nothing from /media/ loads with the page (the structured data only names it)')
-  assert.ok(ld(pages.home).some((item) => item['@type'] === 'VideoObject' && item.name === FILMS['launch-film'].name))
-  // Features: the tour (eager poster, at the top) and twelve clips with lazy posters, each with its own width and height.
-  assert.match(pages.features, /aria-label="Play Shapewall product tour, \d:\d\d, with sound"/)
-  assert.ok(ld(pages.features).some((item) => item['@type'] === 'VideoObject' && item.name === FILMS.tour.name))
+  const homeVideos = ld(pages.home).filter((item) => item['@type'] === 'VideoObject')
+  assert.equal(homeVideos.length, 1, 'home: one VideoObject')
+  assert.equal(homeVideos[0].name, FILMS.tour.name)
+  assert.equal(homeVideos[0].duration, 'PT1M44S')
+  assert.match(homeVideos[0].contentUrl, /\/media\/tour-1080\.[0-9a-f]{10}\.mp4$/)
+  assert.ok(homeVideos[0].thumbnailUrl.every((url) => url.includes('/media/tour-poster')))
+  // Features: no tour (it stays in the manifest for later, but the page neither shows nor names it). A still hero
+  // instead: the headline, the two primary actions and one eager screenshot with its size. Then the clips with lazy
+  // posters, each with its own width and height.
+  assert.ok(!/product tour|Take the tour|Narrated, with English subtitles/.test(pages.features), 'features: no tour player')
+  assert.ok(!pages.features.includes('/media/tour-'), 'features: nothing from the tour is referenced')
+  assert.ok(!ld(pages.features).some((item) => item['@type'] === 'VideoObject'), 'features: no VideoObject')
+  const hero = pages.features.match(/<section[^>]*>(?:(?!<\/section>)[\s\S])*?<h1[\s\S]*?<\/section>/)?.[0] || ''
+  assert.match(hero, /<h1[^>]*>Everything between/, 'features: the hero holds the headline')
+  assert.match(hero, /<a[^>]*href="\/docs\/getting-started"[^>]*>Get started/, 'features hero: Get started')
+  assert.match(hero, /<a[^>]*href="[^"]*demo[^"]*"[^>]*>[\s\S]*?Live demo/, 'features hero: Live demo')
+  const heroImg = hero.match(/<img[^>]*>/)?.[0] || ''
+  assert.match(heroImg, /width="1440"[^>]*height="900"/, 'features hero: the screenshot declares its size')
+  assert.match(heroImg, /loading="eager"/, 'features hero: the screenshot (the largest paint) loads eagerly')
+  assert.match(heroImg, /alt="The Shapewall board on a pricing page: [^"]+"/, 'features hero: the screenshot has alt text')
+  assert.ok(!/<video|data-clip|<button/.test(hero), 'features hero: still, nothing to play')
   const clips = [...pages.features.matchAll(/<figure[^>]*data-clip="(clip-[a-z-]+)"[^>]*>([\s\S]*?)<\/figure>/g)]
   assert.equal(clips.length, 8, 'eight sections with a clip (two of them with tabs; the first tab is rendered)')
   for (const [, id, body] of clips) {
@@ -205,7 +235,8 @@ test('prerendered pages: posters only, with sizes; real, labelled play buttons; 
   assert.match(pages.start, /aria-label="Play Shapewall quickstart, 1:27, silent"/)
   assert.match(pages.start, /shows the same steps as the text below/)
   // Every page keeps its frame size: each video frame declares its aspect ratio.
-  for (const html of [pages.features, pages.start]) assert.match(html, /aspect-ratio:1920 \/ 1080/)
+  assert.match(pages.start, /aspect-ratio:1920 \/ 1080/)
+  assert.equal((pages.features.match(/aspect-ratio:1440 \/ 900/g) || []).length, 8, 'features: each clip frame')
 })
 
 test('the service worker leaves /media/ alone (no caching of videos, byte ranges go straight to the server)', () => {

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   ArrowRight,
@@ -51,13 +51,16 @@ export default function Home() {
 }
 
 function Hero() {
-  // The launch film plays in the hero screenshot's own window (below its title bar), so the page never moves. The
-  // screenshot stays the poster and the largest paint; the film loads only after the button is pressed.
+  // The narrated tour plays in the hero screenshot's own window (below its title bar), so the page never moves. The
+  // screenshot stays the poster and the largest paint; the film loads only after a button is pressed. Every control that
+  // starts it is described by the same line: narrated, with English subtitles (the player's captions button turns them on).
+  // The launch film is not shown on the site (it stays in src/media.json for use elsewhere).
   const [filmPlaying, setFilmPlaying] = useState(false)
   const [filmRequest, setFilmRequest] = useState(0)
   const watchFilm = () => setFilmRequest((n) => n + 1)
-  const filmClock = clock(MEDIA['launch-film'].duration)
-  const filmLabel = `Watch the launch film, ${filmClock}, with sound`
+  const filmClock = clock(MEDIA.tour.duration)
+  const filmLabel = `Watch the tour, ${filmClock}, with sound`
+  const filmNote = useId()
   return (
     <section className="relative overflow-hidden">
       <div
@@ -92,8 +95,15 @@ function Hero() {
               <GitHubIcon className="size-[18px]" /> {GITHUB_LABEL}
             </Button>
             <span className="hidden sm:contents">
-              <Button variant="ghost" size="lg" onClick={watchFilm} data-film-link="desktop" aria-label={filmLabel}>
-                <Play className="size-4" aria-hidden="true" /> Watch the film
+              <Button
+                variant="ghost"
+                size="lg"
+                onClick={watchFilm}
+                data-film-link="desktop"
+                aria-label={filmLabel}
+                aria-describedby={filmNote}
+              >
+                <Play className="size-4" aria-hidden="true" /> Watch the tour
                 <span className="font-medium text-faint tabular-nums">{filmClock}</span>
               </Button>
             </span>
@@ -103,11 +113,15 @@ function Hero() {
             onClick={watchFilm}
             data-film-link="phone"
             aria-label={filmLabel}
+            aria-describedby={filmNote}
             className="mx-auto mt-4 inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[14.5px] font-medium text-slate underline-offset-4 hover:text-ink hover:underline focus-visible:outline-2 focus-visible:outline-wall sm:hidden"
           >
-            <Play className="size-3.5" aria-hidden="true" /> Watch the film
+            <Play className="size-3.5" aria-hidden="true" /> Watch the tour
             <span className="text-faint tabular-nums">{filmClock}</span>
           </button>
+          <span id={filmNote} className="sr-only">
+            Narrated, with English subtitles.
+          </span>
           <p className="mt-4 text-[13.5px] text-slate">
             The live demo runs in your browser: comments, the agent chat and the team console, with nothing to install.
           </p>
@@ -144,9 +158,10 @@ function Hero() {
             alt="The Shapewall board: the pages of a demo product at desktop, tablet and phone width, grouped into Marketing, Content, Get started and App, with comment pins and the comments panel"
           >
             <FilmOverlay
-              id="launch-film"
-              title={FILMS['launch-film'].name}
-              cta="Watch the launch film"
+              id="tour"
+              title={FILMS.tour.name}
+              cta="Watch the tour"
+              describedBy={filmNote}
               inset="inset-x-0 top-7 bottom-0"
               onActiveChange={setFilmPlaying}
               playRequest={filmRequest}
