@@ -11,6 +11,7 @@ import {
   Link2,
   MapPin,
   MousePointerClick,
+  Play,
   Radio,
   ShieldCheck,
   Smartphone,
@@ -23,7 +24,7 @@ import { AgentTerminal } from '../components/terminal.jsx'
 import { Reveal, stagger } from '../components/motion.jsx'
 import { Faq } from '../components/faq.jsx'
 import { FilmOverlay } from '../components/video.jsx'
-import { FILMS } from '../videos.js'
+import { FILMS, MEDIA, clock } from '../videos.js'
 import { GITHUB_URL } from '../routes.js'
 import { BETA, GITHUB_LABEL, LAUNCHED, LICENSE_SUMMARY } from '../launch.js'
 import boardOverview960 from '../assets/shots/board-overview-960.webp'
@@ -53,6 +54,10 @@ function Hero() {
   // The launch film plays in the hero screenshot's own window (below its title bar), so the page never moves. The
   // screenshot stays the poster and the largest paint; the film loads only after the button is pressed.
   const [filmPlaying, setFilmPlaying] = useState(false)
+  const [filmRequest, setFilmRequest] = useState(0)
+  const watchFilm = () => setFilmRequest((n) => n + 1)
+  const filmClock = clock(MEDIA['launch-film'].duration)
+  const filmLabel = `Watch the launch film, ${filmClock}, with sound`
   return (
     <section className="relative overflow-hidden">
       <div
@@ -86,7 +91,23 @@ function Hero() {
             <Button href={GITHUB_URL} variant="secondary" size="lg">
               <GitHubIcon className="size-[18px]" /> {GITHUB_LABEL}
             </Button>
+            <span className="hidden sm:contents">
+              <Button variant="ghost" size="lg" onClick={watchFilm} data-film-link="desktop" aria-label={filmLabel}>
+                <Play className="size-4" aria-hidden="true" /> Watch the film
+                <span className="font-medium text-faint tabular-nums">{filmClock}</span>
+              </Button>
+            </span>
           </div>
+          <button
+            type="button"
+            onClick={watchFilm}
+            data-film-link="phone"
+            aria-label={filmLabel}
+            className="mx-auto mt-4 inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[14.5px] font-medium text-slate underline-offset-4 hover:text-ink hover:underline focus-visible:outline-2 focus-visible:outline-wall sm:hidden"
+          >
+            <Play className="size-3.5" aria-hidden="true" /> Watch the film
+            <span className="text-faint tabular-nums">{filmClock}</span>
+          </button>
           <p className="mt-4 text-[13.5px] text-slate">
             The live demo runs in your browser: comments, the agent chat and the team console, with nothing to install.
           </p>
@@ -128,6 +149,7 @@ function Hero() {
               cta="Watch the launch film"
               inset="inset-x-0 top-7 bottom-0"
               onActiveChange={setFilmPlaying}
+              playRequest={filmRequest}
             />
           </Shot>
           <div

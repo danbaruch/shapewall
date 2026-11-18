@@ -173,6 +173,17 @@ test('prerendered pages: posters only, with sizes; real, labelled play buttons; 
   // Home: the screenshot stays the poster (and the largest paint); the button names the film, its length and sound.
   assert.match(pages.home, /<button type="button"[^>]*aria-label="Play Shapewall launch film, 1:32, with sound"/)
   assert.match(pages.home, />Watch the launch film</)
+  // The hero also offers the film: a quiet button in the row from sm up, a text link under the buttons on phone.
+  for (const where of ['desktop', 'phone']) {
+    const control = pages.home.match(new RegExp(`<button type="button"[^>]*data-film-link="${where}"[^>]*>([\\s\\S]*?)</button>`))
+    assert.ok(control, `home: the ${where} "Watch the film" control is a real button`)
+    assert.match(control[0], /aria-label="Watch the launch film, 1:32, with sound"/, `${where}: names the film, length and sound`)
+    assert.match(control[1], /Watch the film/)
+    assert.match(control[1], /1:32/)
+  }
+  // Only one of the two shows at a time: the row button is inside a wrapper hidden below sm, the link is hidden from sm up.
+  assert.match(pages.home, /<span class="hidden sm:contents"><button type="button"[^>]*data-film-link="desktop"/)
+  assert.match(pages.home, /<button type="button"[^>]*data-film-link="phone"[^>]*class="[^"]*\bsm:hidden\b[^"]*"/)
   const homeMarkup = pages.home.replace(/<script type="application\/ld\+json">[\s\S]*?<\/script>/g, '')
   assert.ok(!homeMarkup.includes('/media/'), 'home: nothing from /media/ loads with the page (the structured data only names it)')
   assert.ok(ld(pages.home).some((item) => item['@type'] === 'VideoObject' && item.name === FILMS['launch-film'].name))

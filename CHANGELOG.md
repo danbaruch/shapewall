@@ -5,7 +5,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
-- Website: videos. The home page plays the launch film inside the hero screenshot's window, the features page opens with the
+- Website: videos. The home page plays the launch film inside the hero screenshot's window (from the pill on the screenshot or a "Watch the film"
+  control in the hero), the features page opens with the
   narrated product tour (English subtitles) and each feature with a clip gets a short silent loop, and Getting started opens with
   the quickstart. Only posters load with a page; a clip loads when it scrolls into view and pauses when it leaves, never starts by
   itself with "reduce motion", and every clip has a pause button. Films play only on a click. The files are self-hosted, outside

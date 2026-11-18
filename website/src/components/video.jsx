@@ -69,9 +69,12 @@ function Sources({ video }) {
 
 // The play button and, after it is pressed, the film itself, over whatever box it is put in (a poster, or the home
 // page's screenshot). `cta` is the visible label, e.g. "Watch the launch film".
-export function FilmOverlay({ id, title, cta, onActiveChange, inset = 'inset-0', className, tone = 'dark' }) {
+// `playRequest`: a number another control (the home hero's "Watch the film") raises to open the film from elsewhere: the
+// frame scrolls into view (at once with reduce motion) and the film starts there, as if its own button was pressed.
+export function FilmOverlay({ id, title, cta, onActiveChange, playRequest = 0, inset = 'inset-0', className, tone = 'dark' }) {
   const video = MEDIA[id]
   const [state, setState] = useState('poster') // poster | playing | failed
+  const rootRef = useRef(null)
   const videoRef = useRef(null)
   const buttonRef = useRef(null)
   const restoreFocus = useRef(false)
@@ -92,6 +95,14 @@ export function FilmOverlay({ id, title, cta, onActiveChange, inset = 'inset-0',
   useVideoFailure(videoRef, failed, state === 'playing')
 
   useEffect(() => {
+    if (!playRequest) return
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    const frame = rootRef.current?.closest('figure') || rootRef.current
+    frame?.scrollIntoView({ block: 'center', behavior: reduce ? 'auto' : 'smooth' })
+    setActive('playing')
+  }, [playRequest, setActive])
+
+  useEffect(() => {
     if (state === 'playing') {
       const element = videoRef.current
       element?.focus({ preventScroll: true })
@@ -105,6 +116,7 @@ export function FilmOverlay({ id, title, cta, onActiveChange, inset = 'inset-0',
   if (state === 'playing') {
     return (
       <div
+        ref={rootRef}
         className={cx('absolute z-10 bg-night', inset, className)}
         onKeyDown={(event) => {
           if (event.key === 'Escape') close()
@@ -140,7 +152,7 @@ export function FilmOverlay({ id, title, cta, onActiveChange, inset = 'inset-0',
   }
 
   return (
-    <div className={cx('absolute z-10', inset, className)}>
+    <div ref={rootRef} className={cx('absolute z-10', inset, className)}>
       <button
         ref={buttonRef}
         type="button"
