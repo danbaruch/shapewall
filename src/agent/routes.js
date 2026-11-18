@@ -877,12 +877,15 @@ export function agentRouter({
               },
             )
           : null
+        // The files the agent's own tools edited: the only ones its Undo may put back.
+        const agentFiles = new Set()
         const reply = await runTurn({
           config,
           board,
           threadId,
           messages,
           backend,
+          editedFiles: agentFiles,
           model: current.model,
           // The composer's model picker (an endpoint's own list), owner turns only.
           modelOverride: ownerWrites ? chosenModel(current, `${board.id}/${threadId}`) : null,
@@ -930,6 +933,7 @@ export function agentRouter({
               pageIds: [...requestedPages],
               commentId,
               overlapped: overlappedAtStart || serial !== turnSerial || runs.size > 1,
+              agentFiles,
             })
             if (summary) reply.summary = summary
             if (undo) rememberUndo(`${board.id}/${threadId}/${reply.id}`, undo)

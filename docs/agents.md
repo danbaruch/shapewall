@@ -270,16 +270,19 @@ The summary card under an owner's answer has **Undo** when Shapewall can undo th
 - **An ACP agent's edits** (Claude Code, Codex, ...): before an owner's turn, Shapewall reads the project's small files into memory
   (up to 1 MB each and 32 MB in all; never `.git`, `node_modules`, build folders, the `.shapewall` store, or files that usually hold
   secrets such as `.env`, keys and credentials; never through a symlink). After the turn it compares, and keeps what the changed files
-  were before in the server's memory, never on disk, in the model's context or in a log. Undo puts exactly those files back: changed
-  files get their earlier text, deleted ones come back, added ones are removed. It checks every file first and changes nothing if any of
-  them is no longer what the agent left (an edit since, by you or a later turn, is never overwritten). The stored summary keeps
-  bounded diffs of changed text files only, never of a secrets file.
+  were before in the server's memory, never on disk, in the model's context or in a log. Undo puts back only the files the agent
+  edited with its own file tools (its edit, delete and move tool calls, and its writes through Shapewall): changed files get their
+  earlier text, deleted ones come back, added ones are removed. A file that changed during the turn some other way, saved by you in
+  your editor or changed by a command the agent ran, is listed on the card but left as it is, since nothing can tell whose change it
+  was. Undo checks every file first and changes nothing if any of them is no longer what the agent left (an edit since, by you or a
+  later turn, is never overwritten). The stored summary keeps bounded diffs of changed text files only, never of a secrets file.
 - **The starter agent** (`shapewall agent run`) never touches your checkout: Undo deletes the branch it made, only while that branch
   still points at the agent's own commit for this comment and no remote branch contains it. A pushed branch or an open pull request is
   yours to close.
 
 Undo is not offered when the turn made a Git commit (revert it with Git), ran at the same time as another agent turn in the project,
-changed more than 50 files, or changed a file whose earlier text was not kept (too big, a secrets file); the card says why. It stays
+changed more than 50 files, changed a file whose earlier text was not kept (too big, a secrets file), or changed only files the
+agent did not edit with its own tools; the card says why. It stays
 available until the board server restarts or newer answers take its place (20 answers, 64 MB). Only the thread's latest change offers Undo:
 once a later answer in the thread changed something too, undo that one first, so changes come off newest first. An earlier version
 of an answer (after **Regenerate**, or one an edit replaced) never offers Undo; switching back to it with the version arrows does not
@@ -1120,8 +1123,9 @@ A batch is `{ id, state, stopReason, max, requested, current, waiting, items: [{
 An attachment is `{ name, mediaType, data }` (base64), with an optional `source: { kind: "page" | "element", pageId, viewport,
 commentId? }`. The stream sends `user` (the stored message), then any of `status`, `reasoning`, `text`, `tool`, and finally `done` with
 the stored answer (`status` is `done`, `stopped` or `error`, with `error: { code, message }`). Closing the connection stops the model too.
-An owner's answer that changed something has `summary: { kind, files: [{ path, status, added, removed, diff }], added, removed,
-commit, pr, resolved, recapture, undo: { kind, available, reason? }, undone }`; an answer whose board tools read comments or pages has
+An owner's answer that changed something has `summary: { kind, files: [{ path, status, added, removed, diff, outside? }], added, removed,
+commit, pr, resolved, recapture, undo: { kind, available, reason?, files?, others? }, undone }` (`files` and `others`: how many
+files Undo puts back, and how many changed files it leaves because the agent did not edit them itself, each marked `outside`); an answer whose board tools read comments or pages has
 `refs: { comments, pages }`.
 
 After a regenerate, `user` is the original request and the stored answer has `versions`: the earlier answers, oldest first. Rating

@@ -353,7 +353,13 @@ function UndoDialog({ open, summary, busy, error, onCancel, onConfirm, touch }) 
   const branch = summary.undo?.kind === 'branch'
   // Agent branch mode, after Apply: Undo reverts what Apply brought in.
   const revert = summary.undo?.kind === 'agent-branch'
-  const files = summary.files || []
+  // Only the files the agent edited itself; others that changed meanwhile stay (turn-changes.js).
+  const undoable = (summary.files || []).filter((file) => !file.outside)
+  const count = summary.undo?.files ?? undoable.length
+  const others = summary.undo?.others || 0
+  const kept = others
+    ? ` ${plural(others, 'other changed file')} ${others === 1 ? 'was' : 'were'} not edited by the agent itself and ${others === 1 ? 'stays' : 'stay'} as ${others === 1 ? 'it is' : 'they are'}.`
+    : ''
   return (
     <Dialog
       open={open}
@@ -364,9 +370,9 @@ function UndoDialog({ open, summary, busy, error, onCancel, onConfirm, touch }) 
           ? `This adds a commit that reverts ${summary.branch?.name || 'the branch'} in your checkout. Nothing changes if your checkout moved on or has uncommitted changes.`
           : branch
             ? `This deletes the branch ${summary.undo.branch} and the agent's commit on it. Your own checkout is not touched.`
-            : files.length === 1
-              ? 'This puts 1 file back the way it was before this answer. Nothing is undone if it changed since.'
-              : `This puts ${plural(files.length, 'file')} back the way they were before this answer. Nothing is undone if any of them changed since.`
+            : count === 1
+              ? `This puts 1 file back the way it was before this answer. Nothing is undone if it changed since.${kept}`
+              : `This puts ${plural(count, 'file')} back the way they were before this answer. Nothing is undone if any of them changed since.${kept}`
       }
       wrapDescription
       footer={
@@ -381,9 +387,9 @@ function UndoDialog({ open, summary, busy, error, onCancel, onConfirm, touch }) 
       }
     >
       <div className="space-y-2 px-4 pb-1">
-        {!branch && !revert && files.length ? (
+        {!branch && !revert && undoable.length ? (
           <ul className="max-h-48 space-y-0.5 overflow-y-auto font-mono text-caption text-muted">
-            {files.map((file) => (
+            {undoable.map((file) => (
               <li key={file.path} className="truncate">
                 {file.status === 'added' ? 'remove ' : file.status === 'deleted' ? 'restore ' : 'revert '}
                 {file.path}

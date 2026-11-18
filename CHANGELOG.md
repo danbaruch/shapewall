@@ -24,6 +24,11 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Website: the privacy page now says that the contact form also stores the User-Agent your browser sends, and that, if the site
   operator has set it up, your message, topic and email address are forwarded to a messaging service.
 - Website: a link with a broken fragment (for example one cut off while copying) no longer stops the page from loading.
+- **An agent's Undo never erases your own edit.** Before, Undo in the chat put back every file that changed during the agent's
+  turn, so a file you saved in your editor while the agent worked on another one was rolled back with it. Now Undo puts back only
+  the files the agent edited with its own file tools. Anything else that changed meanwhile (your saves, a command the agent ran)
+  is listed on the card and left as it is, and the Undo dialog says how many files it leaves. A turn in which the agent edited
+  nothing itself offers no Undo.
 - **A board file is never replaced by a cut-off copy.** When the disk wrote only part of a comments, manifest or image file
   and reported no error, the half-written file could replace the good one. Shapewall now writes every byte before the swap,
   and keeps the old file when the disk fills part way. The event log works the same way: a batch is only marked logged once
