@@ -43,8 +43,10 @@ export default function Privacy() {
             site, and apart from the two analytics tools above, no third-party scripts.
           </p>
           <p id="contact-form">
-            The <Link to="/contact">contact form</Link> stores your message, the topic you chose, your email address if you gave one, and a
-            one-way hash of your IP address for rate limiting. It is used only to reply to you and to improve Shapewall.
+            The <Link to="/contact">contact form</Link> stores your message, the topic you chose, your email address if you gave one, the
+            User-Agent your browser sends (its name, version and operating system), and a one-way hash of your IP address for rate limiting.
+            If the site operator has set it up, your message, the topic and your email address are also forwarded to a messaging service so
+            we see it sooner. It is used only to reply to you and to improve Shapewall.
           </p>
           <p>
             The site installs a small service worker so pages load fast and work offline. It caches this site&apos;s own files in your

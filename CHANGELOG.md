@@ -21,6 +21,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
   pulled) starts no agent and commits nothing, and a cancelled run never pushes its branch or opens a pull request.
 - Website: the live demo links in Getting Started open the demo again. An ordinary click used to show the site's "page not found"
   page; the docs now hand only the site's own pages to in-page navigation.
+- Website: the privacy page now says that the contact form also stores the User-Agent your browser sends, and that, if the site
+  operator has set it up, your message, topic and email address are forwarded to a messaging service.
 
 ## 0.11.0 - 2026-11-17
 
