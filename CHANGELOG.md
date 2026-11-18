@@ -28,6 +28,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
   and reported no error, the half-written file could replace the good one. Shapewall now writes every byte before the swap,
   and keeps the old file when the disk fills part way. The event log works the same way: a batch is only marked logged once
   all of it is written, and a failed write leaves no half line behind.
+- The website's deploy script checks all of its arguments before it does anything. Before, `--help`, a misspelled command
+  such as `smok`, or a lone `--dry-run` fell through to a full build and release of the live site. Now help prints the usage,
+  and anything it does not know is refused without running a build, an upload or a server command.
 
 ## 0.11.0 - 2026-11-17
 
