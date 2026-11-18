@@ -2,3 +2,5 @@ node_modules/
 dist/
 .ssr/
 .brand-*/
+media/
+.media-work/
