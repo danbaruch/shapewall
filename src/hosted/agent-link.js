@@ -41,6 +41,7 @@ import { FRAME_LIMITS, cleanEvent, cleanReply, usageOf } from './chat-frames.js'
 import { createPermissionStore, permissionView } from './chat-permissions.js'
 import { buildJob } from './chat-job.js'
 import { INTERRUPTED_MESSAGE } from './chat-store.js'
+import { agentPolicy } from './agent-policy.js'
 import { LINK_KINDS, LINK_TURNS_MAX } from './agents.js'
 import { rowToComment } from './comments.js'
 import { transaction } from './db.js'
@@ -141,17 +142,29 @@ export function createChatService({ db, hub, links, events, chatFor, now = () =>
     if (live) for (const card of cancelled) hub.push(live, 'tool', permissionView(card, { name: nameOf(t) }))
     return cancelled
   }
-  // A fix that ended without its machine (it went away, was revoked, or the
-  // server restarted): the comment is not left "working" under a claim
-  // nobody holds. It needs a person; the claim ends with its usage record.
+  // A fix, or a review of a comment sent to an agent by name, that ended
+  // without its machine (it went away, was revoked, or the server
+  // restarted): the comment is not left "working" under a claim nobody
+  // holds, using up the project's open claims. It needs a person; the claim
+  // ends with its usage record.
   // `status`: where the comment stands ("branch-ready" when the fix left a branch).
-  function releaseFix(t, row, status = 'needs-human') {
-    if (row.kind !== 'fix' || !row.comment_number) return
+  // `interrupted`: the turn ended without its machine. A review the machine
+  // finished keeps its claim: the machine posts its reply and status next.
+  function releaseFix(t, row, status = 'needs-human', { interrupted = false } = {}) {
+    if (!(row.kind === 'fix' || (row.kind === 'comment' && interrupted)) || !row.comment_number) return
     const at = now().toISOString()
     // Bound to this turn's own claim: when that claim is over already (the
     // comment was taken again since, by another fix), this write is stale
-    // and changes nothing.
-    const claim = t.get('SELECT claim_id FROM agent_runs WHERE workspace_id = :ws AND id = :run', { run: row.run_id })?.claim_id || null
+    // and changes nothing. A review's claim is the one its agent took on
+    // the comment (the token's status write) before the turn was opened.
+    const claim =
+      row.kind === 'fix'
+        ? t.get('SELECT claim_id FROM agent_runs WHERE workspace_id = :ws AND id = :run', { run: row.run_id })?.claim_id || null
+        : t.get(
+            `SELECT id FROM agent_claims WHERE workspace_id = :ws AND project_id = :project AND board_id = :board
+               AND comment_number = :number AND agent_id = :agent AND ended_at IS NULL ORDER BY created_at DESC LIMIT 1`,
+            { project: row.project_id, board: row.board_id, number: row.comment_number, agent: row.agent_id },
+          )?.id || null
     if (!claim) return
     const ended = t.run('UPDATE agent_claims SET ended_at = :at WHERE workspace_id = :ws AND id = :claim AND ended_at IS NULL', {
       claim,
@@ -229,7 +242,7 @@ export function createChatService({ db, hub, links, events, chatFor, now = () =>
     const stored = transaction(db, () => {
       cancelCards(t, row, live)
       const made = chatFor(t).interrupt(row, { state, message, agentName, partial: live ? partialOf(live) : null })
-      if (made) releaseFix(t, row)
+      if (made) releaseFix(t, row, 'needs-human', { interrupted: true })
       return made
     })
     if (live) hub.close(live, 'done', stored ? { message: stored } : null)
@@ -966,6 +979,9 @@ export function mountAgentLink(
           throw new HttpError(409, 'agent_running', 'This thread already has an answer on the way.')
         if (hub.ofAgent(req.t.workspaceId, req.agent.id).length >= LINK_TURNS_MAX + LINK_LIMITS.queued)
           throw new HttpError(429, 'agent_busy', 'This agent has too many turns open.')
+        // A review counts as a turn of the day, as a person's chat does (chat-routes.js).
+        if (store.turnsToday(req.project.id) >= agentPolicy(req.t, req.project.id, ctx.board.id).dailyTurns)
+          throw new HttpError(429, 'turn_budget', "This project has used today's agent turns (the agent policy sets the number).")
         const { created } = store.ensure(req.project.id, ctx.board.id, threadId, {
           userId: comment.dispatch_by || null,
           agentId: req.agent.id,
