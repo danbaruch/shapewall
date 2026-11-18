@@ -90,6 +90,42 @@ shapewall.com {
 }
 ```
 
+## Videos
+
+The launch film (home page), the product tour (top of the features page), the feature clips (features page sections) and the
+quickstart (Getting started) are self-hosted: no third-party player, embed or CDN. They are not in git and not in the release
+folders.
+
+- `src/media.json` (committed) pins exactly which files the pages show: per video its sources, posters, captions, size and
+  duration. Every file name carries its content hash (`launch-film-1080.2413b6572d.mp4`), so a URL never changes meaning.
+- `website/media/` (git-ignored) holds the files. Make them from the film masters (the films' own repository, `out/` folder):
+  `node scripts/media-encode.mjs <masters folder>`. It encodes the launch film, the tour and the quickstart at 1080p and 720p
+  (H.264 CRF 27 with AAC 128k, faststart; VP9 CRF 40 with Opus 128k), copies the clips as they are, makes WebP and JPEG posters,
+  copies the tour's captions, writes `src/media.json` and prints the sizes. Encodes are cached in `.media-work/`, so after one
+  film changes only that film is redone. Commit the new `src/media.json`.
+- The build fails, naming each file, when one that `src/media.json` references is missing from `website/media/` or has the wrong
+  size. `SHAPEWALL_MEDIA_CHECK=0` skips the check (the tests and CI, which have no media; pages then point at files that are not
+  there). `deploy.sh` always checks.
+- `npm run dev` and `npm run preview` serve `website/media/` at `/media/`, with byte ranges.
+- On the server the files live in `/var/www/shapewall.com/media/`, shared by every release; each release's `media` is a symlink
+  to `../../media`. `deploy.sh` uploads only the files the host does not have yet (into a temporary folder, then renamed into
+  place), checks every size on the host before it uploads the release, and never deletes a media file, so `rollback` keeps
+  working. `deploy.sh --dry-run` prints the whole plan; `deploy.sh media [--dry-run]` does only the media step.
+- Caching: the names are immutable, so `/media/*` should be served with `Cache-Control: public, max-age=31536000, immutable`.
+  The live Caddyfile does not say so yet (`/media/*` then gets the site default, `max-age=0, must-revalidate`: it works, with a
+  revalidation per view). The block to add next to `@bundles`:
+
+  ```caddyfile
+  @media path /media/*
+  header @media Cache-Control "public, max-age=31536000, immutable"
+  ```
+
+- The players (`src/components/video.jsx`): a page's HTML holds only posters with their width and height. Films start only on
+  a click, inline, with sound and the browser's controls (Close or Escape goes back). Clips are muted, `playsinline` loops that
+  load when they reach the screen, play while at least a third is visible and pause when they leave; with "reduce motion" they
+  show a play button instead, and each has a pause button. A video that fails to load leaves the poster.
+- Music in the launch film and the tour: "Minimal Technology" by NastelBom (Pixabay Content License, no attribution required).
+
 ## Live demo
 
 `deploy/deploy.sh` also builds the live demo into `dist/demo/` (`npm run build && npm run build:demo` in the root, then

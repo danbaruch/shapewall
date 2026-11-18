@@ -3,6 +3,17 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+- Website: videos. The home page plays the launch film inside the hero screenshot's window, the features page opens with the
+  narrated product tour (English subtitles) and each feature with a clip gets a short silent loop, and Getting started opens with
+  the quickstart. Only posters load with a page; a clip loads when it scrolls into view and pauses when it leaves, never starts by
+  itself with "reduce motion", and every clip has a pause button. Films play only on a click. The files are self-hosted, outside
+  the git repository and outside the release folders: `website/scripts/media-encode.mjs` makes the web encodes and
+  `src/media.json`, the build fails when a file it names is missing, and `deploy.sh` uploads new files to a media folder shared by
+  every release (`deploy.sh --dry-run` and `deploy.sh media --dry-run` print the plan). The launch film and the tour carry
+  VideoObject structured data.
+
 ## 0.12.0 - 2026-11-17
 
 Fixes from a full code review: an agent's Undo never erases your edit, hosted pushes and backups survive a crash, `shapewall ci`
