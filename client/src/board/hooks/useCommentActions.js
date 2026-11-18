@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { api } from '../../lib/api'
 import { confirmHostedPasskey } from '../HostedApprovals'
+import { sendWithStepUp } from '../stepUp'
 
 // What can be done to a comment that exists: status, replies, edits,
 // reactions, links, GitHub issues, sending to the agent and deleting (with
@@ -138,8 +139,12 @@ export function useCommentActions({
     }
   }
 
-  // Delete waits a few seconds so Undo can take it back; the comment is
-  // hidden at once. Leaving the page sends any waiting delete straight away.
+  // Delete waits while its toast shows, so Undo can take it back; the
+  // comment is hidden at once. The toast is the one deadline: it closes
+  // after six seconds, held while the pointer or focus is on it, and the
+  // delete goes when it closes (useToast's onClose), so a visible Undo
+  // always still works. Leaving the page sends any waiting delete straight
+  // away.
   const forgetDelete = (id) => {
     pendingDeletes.current.delete(id)
     setDeletingIds((current) => {
@@ -150,9 +155,10 @@ export function useCommentActions({
     })
   }
   const commitDelete = async (comment) => {
-    const pending = pendingDeletes.current.get(comment.id)
-    if (!pending) return
-    window.clearTimeout(pending.timer)
+    if (!pendingDeletes.current.has(comment.id)) return
+    // Taken out before the request: a second close (the toast, the page
+    // leaving) must not send it twice, and Undo from now on is too late.
+    pendingDeletes.current.delete(comment.id)
     try {
       await api.delete(`${commentsUrl}/${comment.id}`)
       applyComment(comment, true)
@@ -177,22 +183,27 @@ export function useCommentActions({
   const removeComment = async (comment) => {
     if (selectedCommentId === comment.id) closeThread()
     setDeletingIds((current) => new Set(current).add(comment.id))
-    const timer = window.setTimeout(() => commitDeleteRef.current(comment), 6000)
-    pendingDeletes.current.set(comment.id, { comment, timer })
+    pendingDeletes.current.set(comment.id, { comment })
     setToast({
       at: Date.now(),
       text: `Deleted comment #${comment.id}.`,
       undo: () => {
-        window.clearTimeout(timer)
+        if (!pendingDeletes.current.has(comment.id)) {
+          setNotice({ tone: 'bad', text: `Comment #${comment.id} was already deleted. Undo came too late.` })
+          return
+        }
         forgetDelete(comment.id)
       },
+      onClose: () => commitDeleteRef.current(comment),
     })
   }
 
-  // Hosted boards: hand the comment to the agent (an admin approves the run; with a passkey when the workspace asks for one).
+  // Hosted boards: hand the comment to the agent (an admin approves the run;
+  // with a passkey only when the server asks for one: 403 reauth_required).
   // The server takes the comment only as this person saw it: `dispatchHash`
-  // is read from the comment on screen at the click, before the passkey
-  // prompt, so an edit made meanwhile is never sent unread.
+  // is read from the comment on screen at the click, and the retry after a
+  // passkey prompt sends that same hash, so an edit made meanwhile is never
+  // sent unread.
   // `agentId`: one of the project's agents, null for any agent; left out,
   // the server uses the project's default agent (and an approval keeps
   // where the comment was already going).
@@ -201,12 +212,8 @@ export function useCommentActions({
     const approve = Boolean(comment.needsRunApproval && ['admin', 'owner'].includes(info.role))
     setBusy(true)
     try {
-      if (approve) await confirmHostedPasskey()
-      const result = await api.post(`${commentsUrl}/${comment.id}/send-to-agent`, {
-        dispatchHash,
-        approve,
-        ...(agentId !== undefined ? { agentId } : {}),
-      })
+      const body = { dispatchHash, approve, ...(agentId !== undefined ? { agentId } : {}) }
+      const result = await sendWithStepUp(() => api.post(`${commentsUrl}/${comment.id}/send-to-agent`, body), confirmHostedPasskey)
       applyComment(result.comment)
       onAgentsChanged?.()
     } catch (error) {

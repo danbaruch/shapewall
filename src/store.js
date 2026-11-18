@@ -198,11 +198,21 @@ export function captureFailures(config, board, envId = null) {
   return out
 }
 
-export function captureFiles(config, board, envId = null) {
+// Page -> viewport -> the capture's files. `current`: leave out a shot whose
+// latest capture failed; a failed partial recapture leaves the older
+// screenshot in place, and compare must not show it as today's page.
+export function captureFiles(config, board, envId = null, { current = false } = {}) {
   const dir = capturesDir(config, board.id, envId)
   if (!fs.existsSync(dir)) return {}
   const names = dirNames(dir)
-  return Object.fromEntries(board.pages.map((page) => [page.id, fileSet(names, page.id, page.viewports)]))
+  const failed = current ? captureFailures(config, board, envId) : {}
+  return Object.fromEntries(
+    board.pages.map((page) => {
+      const files = fileSet(names, page.id, page.viewports)
+      for (const viewport of Object.keys(failed[page.id] || {})) delete files[viewport]
+      return [page.id, files]
+    }),
+  )
 }
 
 // Absolute path of a file Shapewall wrote, or null when the name is not one

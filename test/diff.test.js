@@ -5,7 +5,7 @@ import path from 'node:path'
 import { PNG } from 'pngjs'
 import { compareEnvironments, diffPngs } from '../src/diff.js'
 import { DIFF_COLOR, diffPixels } from '../src/pixeldiff.js'
-import { capturesDir, diffsDir, resolveFile } from '../src/store.js'
+import { captureFailures, captureFiles, capturesDir, diffsDir, resolveFile } from '../src/store.js'
 import { request, sampleConfig, tempDir } from './helpers.js'
 import { createApp } from '../src/server/app.js'
 
@@ -93,7 +93,7 @@ test('environments are compared per page and viewport, and cached until a captur
   fs.writeFileSync(path.join(production, 'pricing.desktop.png'), png(50, 40, { x: 0, y: 0, w: 10, h: 20 }))
 
   const first = await compareEnvironments(config, board, 'staging', 'production')
-  assert.deepEqual(first.pages.home.desktop, { status: 'ok', percent: 0, diff: 'home.desktop.png' })
+  assert.deepEqual(first.pages.home.desktop, { status: 'ok', percent: 0, changed: 0, total: 2000, diff: 'home.desktop.png' })
   assert.equal(first.pages.pricing.desktop.percent, 10)
   assert.equal(first.pages.home.phone.status, 'missing')
   assert.equal(first.changedPages, 1)
@@ -153,6 +153,85 @@ test('compare API: environments are checked, files are allowlisted', async () =>
     ]) {
       assert.equal((await request(port, 'GET', url)).status, 404, url)
     }
+  } finally {
+    server.close()
+  }
+})
+
+test('a change too small for a two-decimal share still counts as changed (finding 31)', async () => {
+  // One glyph on a long desktop page: 100 of 4,000,000 pixels, 0.0025%.
+  const result = diffPngs(png(1000, 4000), png(1000, 4000, { x: 10, y: 10, w: 10, h: 10 }))
+  assert.equal(result.changed, 100)
+  assert.equal(result.total, 4000000)
+
+  const config = envConfig('diff-tiny')
+  const board = config.boards[0]
+  const staging = capturesDir(config, 'sample', 'staging')
+  const production = capturesDir(config, 'sample', 'production')
+  fs.mkdirSync(staging, { recursive: true })
+  fs.mkdirSync(production, { recursive: true })
+  fs.writeFileSync(path.join(staging, 'home.desktop.png'), png(1000, 4000))
+  fs.writeFileSync(path.join(production, 'home.desktop.png'), png(1000, 4000, { x: 10, y: 10, w: 10, h: 10 }))
+  for (const round of ['fresh', 'cached']) {
+    const compared = await compareEnvironments(config, board, 'staging', 'production')
+    const shot = compared.pages.home.desktop
+    assert.equal(shot.status, 'ok', round)
+    assert.equal(shot.changed, 100, round)
+    assert.equal(shot.total, 4000000, round)
+    assert.equal(compared.changedPages, 1, `${round}: the page counts as changed`)
+  }
+})
+
+test('crossed sizes count only the pixels one image has, never the corner neither has (finding 32)', () => {
+  const white = (width, height) => ({ width, height, data: new Uint8Array(width * height * 4).fill(255) })
+  // 2x1 against 1x2: the shared pixel is the same, (1,0) is only in the
+  // first, (0,1) only in the second, and (1,1) is in neither.
+  const result = diffPixels(white(2, 1), white(1, 2))
+  assert.equal(result.changed, 2)
+  assert.equal(result.total, 3)
+  assert.equal(result.percent, 66.67)
+  const alpha = (x, y) => result.data[(y * 2 + x) * 4 + 3]
+  assert.equal(alpha(0, 0), 0)
+  assert.equal(alpha(1, 0), 255)
+  assert.equal(alpha(0, 1), 255)
+  assert.equal(alpha(1, 1), 0, 'the corner neither image covers stays transparent')
+})
+
+test('a shot whose latest capture failed is not compared with its old screenshot (finding 33)', async () => {
+  const config = envConfig('diff-failed')
+  const board = config.boards[0]
+  const staging = capturesDir(config, 'sample', 'staging')
+  const production = capturesDir(config, 'sample', 'production')
+  fs.mkdirSync(staging, { recursive: true })
+  fs.mkdirSync(production, { recursive: true })
+  fs.writeFileSync(path.join(staging, 'home.desktop.png'), png(20, 20))
+  fs.writeFileSync(path.join(production, 'home.desktop.png'), png(20, 20))
+  const first = await compareEnvironments(config, board, 'staging', 'production')
+  assert.equal(first.pages.home.desktop.status, 'ok')
+  // A partial recapture of production failed: the old PNG is still there,
+  // the manifest says the latest attempt failed.
+  fs.writeFileSync(
+    path.join(production, 'manifest.json'),
+    JSON.stringify({ pages: { home: { desktop: { status: 'failed', error: 'HTTP 500' } } } }),
+  )
+  const after = await compareEnvironments(config, board, 'staging', 'production')
+  assert.equal(after.pages.home.desktop.status, 'failed')
+  assert.equal(after.pages.home.desktop.diff, undefined)
+  assert.equal(after.changedPages, 0)
+  // The compare view lists no current image for it, so the card says why.
+  assert.equal(captureFiles(config, board, 'production', { current: true }).home.desktop, undefined)
+  assert.equal(captureFiles(config, board, 'production').home.desktop.file, 'home.desktop.png')
+  assert.equal(captureFailures(config, board, 'production').home.desktop, 'HTTP 500')
+
+  const server = await new Promise((resolve) => {
+    const instance = createApp({ config, clientDir: tempDir('diff-failed-client') }).listen(0, '127.0.0.1', () => resolve(instance))
+  })
+  try {
+    const compared = await request(server.address().port, 'GET', '/api/boards/sample/compare?a=staging&b=production')
+    assert.equal(compared.json.pages.home.desktop.status, 'failed')
+    assert.equal(compared.json.files.production.home.desktop, undefined)
+    assert.equal(compared.json.files.staging.home.desktop.file, 'home.desktop.png')
+    assert.equal(compared.json.failures.production.home.desktop, 'HTTP 500')
   } finally {
     server.close()
   }

@@ -558,7 +558,7 @@ export function createApp({
       const result = await compareEnvironments(config, board, a, b)
       res.json({
         ...result,
-        files: { [a]: captureFiles(config, board, a), [b]: captureFiles(config, board, b) },
+        files: { [a]: captureFiles(config, board, a, { current: true }), [b]: captureFiles(config, board, b, { current: true }) },
         // Why a frame has no picture: "HTTP 404" says more than "not captured".
         failures: { [a]: captureFailures(config, board, a), [b]: captureFailures(config, board, b) },
       })

@@ -55,7 +55,7 @@ export const PageNode = memo(function PageNode({ data, width }) {
   const only = onlyLabel(page.viewports, board.viewports)
   const change = board.compare ? pageChangeAt(board.compare, page.id) : null
   // Compare: changed pages stand out, unchanged ones step back.
-  const changed = Boolean(change?.percent > 0)
+  const changed = Boolean(change?.changed)
   const same = Boolean(board.compare) && change && !changed
   const working = board.agentWorkingPages?.has(page.id)
   const liveSingle = useLiveSingleFrame(page.id, frames, files)

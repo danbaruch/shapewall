@@ -41,19 +41,20 @@ export function useLiveSingleFrame(targetId, frames, files) {
 // size on screen, so changed pages read at any zoom.
 export function ChangeBadge({ change, named }) {
   if (!change) return null
-  const { percent, viewport } = change
-  const text = percent > 0 ? `${percent}%${named ? ` ${viewport}` : ''}` : 'Same'
+  const { changed, text: share, viewport } = change
+  const text = changed ? `${share}${named ? ` ${viewport}` : ''}` : 'Same'
   return (
-    <CardTip content={percent > 0 ? `Most changed: the ${viewport} capture, ${percent}% of its pixels` : 'No visual change'}>
+    <CardTip content={changed ? `Most changed: the ${viewport} capture, ${share} of its pixels` : 'No visual change'}>
       <span
         tabIndex={-1}
         className={cn(
           badgeVariants({ shape: 'count' }),
           'tabular pointer-events-auto absolute -top-2.5 -right-2.5 z-20 origin-top-right shadow-pop',
-          percent > 0 ? 'bg-accent text-accent-fg' : 'bg-surface-2 text-muted',
+          changed ? 'bg-accent text-accent-fg' : 'bg-surface-2 text-muted',
         )}
         style={{ transform: 'scale(min(var(--sw-inv, 1), 14))' }}
-        data-sw-change={percent}
+        data-sw-change={change.percent}
+        data-sw-changed={changed ? 'true' : 'false'}
         data-sw-change-viewport={viewport}
       >
         <Diff size={10} aria-hidden="true" /> {text}

@@ -224,24 +224,49 @@ export function cropAround(native, xPercent, yPercent, { minWidth = 320, share =
   return { left, top, width, height }
 }
 
+// Whether a compared shot changed at all. `percent` is rounded to two
+// decimals, so a glyph on a long page reads 0: decide on the pixel count.
+export function shotChanged(item) {
+  return typeof item?.changed === 'number' ? item.changed > 0 : item?.percent > 0
+}
+
+// The unrounded changed share of a shot (0-100), for ordering and counting.
+function exactShare(item) {
+  if (typeof item?.changed === 'number' && item.total > 0) return (item.changed / item.total) * 100
+  return shotChanged(item) ? Math.max(item?.percent || 0, Number.MIN_VALUE) : 0
+}
+
+// A shot's changed share as people read it: never "0%" for a real change,
+// never "100%" when some pixels stayed the same.
+export function changeText(item) {
+  if (!shotChanged(item)) return '0%'
+  if (!(item.percent >= 0.01)) return '<0.01%'
+  if (item.percent >= 100 && item.total > 0 && item.changed < item.total) return '>99.99%'
+  return `${item.percent}%`
+}
+
 // The largest changed share of a page across its viewports, or null.
 export function pageChange(compare, pageId) {
   const viewports = compare?.pages?.[pageId]
   if (!viewports) return null
   const values = Object.values(viewports)
     .filter((item) => item.status === 'ok')
-    .map((item) => item.percent)
+    .map(exactShare)
   return values.length ? Math.max(...values) : null
 }
 
-// The most changed viewport of a page: { viewport, percent }, or null. The
-// card header names it, so its share never reads as the frame's own.
+// The most changed viewport of a page: { viewport, percent, changed, text },
+// or null. The card header names it, so its share never reads as the
+// frame's own.
 export function pageChangeAt(compare, pageId) {
   const viewports = compare?.pages?.[pageId]
   if (!viewports) return null
   let best = null
+  let bestShare = -1
   for (const [viewport, item] of Object.entries(viewports)) {
-    if (item?.status === 'ok' && (!best || item.percent > best.percent)) best = { viewport, percent: item.percent }
+    if (item?.status !== 'ok' || exactShare(item) <= bestShare) continue
+    bestShare = exactShare(item)
+    best = { viewport, percent: item.percent, changed: shotChanged(item), text: changeText(item) }
   }
   return best
 }

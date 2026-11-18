@@ -119,7 +119,8 @@ async function exportCompare(config, board, dir) {
       const result = await compareEnvironments(config, board, a.id, b.id)
       const pair = `${a.id}_${b.id}`
       files += copyMatching(diffsDir(config, board.id, a.id, b.id), path.join(dir, 'diffs', pair), png)
-      const filesByEnv = { [a.id]: captureFiles(config, board, a.id), [b.id]: captureFiles(config, board, b.id) }
+      const current = { current: true }
+      const filesByEnv = { [a.id]: captureFiles(config, board, a.id, current), [b.id]: captureFiles(config, board, b.id, current) }
       const failures = { [a.id]: captureFailures(config, board, a.id), [b.id]: captureFailures(config, board, b.id) }
       fs.writeFileSync(path.join(dir, 'compare', `${pair}.json`), JSON.stringify({ ...result, files: filesByEnv, failures }))
     }
