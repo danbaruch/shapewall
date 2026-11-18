@@ -29,3 +29,30 @@ test('the contact-form notice says messages may be forwarded to a messaging serv
   assert.match(contactParagraph, /If the site operator has set it up, .*forwarded to a messaging service/)
   assert.ok(!/telegram/i.test(contactParagraph), 'no vendor name')
 })
+
+// Privacy docs stay generic: the page says what each service gets, never which vendor runs it.
+test('the privacy page names no analytics, hosting, error-tracking or messaging vendor', () => {
+  const vendors = [
+    'umami',
+    'cloudflare',
+    'cloudflareinsights',
+    'glitchtip',
+    'sentry',
+    'telegram',
+    'digitalocean',
+    'droplet',
+    'caddy',
+    'plausible',
+    'google analytics',
+    'resend',
+    'tailscale',
+  ]
+  const text = privacy.toLowerCase()
+  for (const name of vendors) assert.ok(!text.includes(name), `names ${name}`)
+  // The facts stay: both analytics tools, what they keep, and the content delivery network.
+  const flat = privacy.replace(/\s+/g, ' ')
+  assert.match(flat, /a privacy-friendly analytics service we host ourselves/)
+  assert.match(flat, /served through a content delivery network/)
+  assert.match(flat, /reports page views and load times/)
+  assert.match(flat, /apart from the two analytics tools above, no third-party scripts/)
+})
