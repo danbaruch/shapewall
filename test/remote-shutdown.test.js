@@ -191,3 +191,26 @@ for (const phase of ['change', 'headers', 'body', 'unauthorized', 'wrong-type'])
     assert.equal(getEventListeners(controller.signal, 'abort').length, 0, 'external abort listener is released')
   })
 }
+
+test('watch --remote --once fails when the scan fails instead of exiting as if nothing were open', async () => {
+  const logged = []
+  const remote = {
+    comments: async () => {
+      throw new Error('the server could not be reached')
+    },
+  }
+  await assert.rejects(
+    watchRemote({
+      remote,
+      boardId: 'main',
+      projectId: 'pr_' + '1'.repeat(24),
+      once: true,
+      cwd: tempDir('remote-watch-once-fail'),
+      out: () => {},
+      log: (line) => logged.push(line),
+      env: { PATH: process.env.PATH },
+    }),
+    /could not be reached/,
+  )
+  assert.ok(logged.some((line) => /could not be reached/.test(line)))
+})
