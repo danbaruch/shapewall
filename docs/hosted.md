@@ -418,8 +418,10 @@ there proves only that something on the machine made it. What to use there inste
      shapewall hosted admin passkeys list|remove ID --login ada@example.com --data ./hosted-data
      ```
 
-     `members add` puts an existing account in at once (or changes its role); a tailnet login with no account yet gets an
-     invite that only that login can take. `members remove` also revokes the invites, share links and API tokens that person made. With
+     `members add` puts an existing account in at once (or changes its role), while the workspace has a free seat (the
+     `members` quota; a role change needs none); a tailnet login with no account yet gets an invite that only that login can
+     take. Adding the same login again replaces its pending invite, as an invite from the console does: one login has one
+     pending invite per workspace. `members remove` also revokes the invites, share links and API tokens that person made. With
      several workspaces add `--workspace ID`. Every one of these is in the operator log and in the workspace's audit log as
      "Server operator".
 
@@ -1545,7 +1547,7 @@ tools, and with approvals on, a server that was broken into can forge an "allow"
 | What                                | Limit                                                                                                        |
 | ----------------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | Messages one person sends           | 20 a minute                                                                                                  |
-| Chat turns in a project             | 200 a day (`dailyTurns` in the agent policy)                                                                 |
+| Chat turns in a project             | 200 a day (`dailyTurns` in the agent policy), answers to comments sent to an agent by name included          |
 | Answers one agent gives at once     | `--concurrency` (1 to 4), plus 5 waiting; after that it answers "busy"                                       |
 | A message                           | 8,000 characters, 8 mentions, 3 text files of 100 KB                                                         |
 | An answer                           | 100,000 characters                                                                                           |
@@ -1559,7 +1561,7 @@ tools, and with approvals on, a server that was broken into can forge an "allow"
 
 The daily budget is counted from the usage records, so deleting a thread gives no turns back. `dailyTurns` is part of the
 project's agent policy. The console's form has no field for it yet (and keeps the value when you save
-the form): read the policy with `GET /api/workspaces/:ws/projects/:pid/agent`, set `dailyTurns` (0 to 100000; 0 stops chat turns)
+the form): read the policy with `GET /api/workspaces/:ws/projects/:pid/agent`, set `dailyTurns` (0 to 100000; 0 stops chat turns and answers to comments sent by name)
 and `PUT` the whole policy back. The link has its own request budget on the token API, so a streamed answer does not use up the
 agent's budget for comments.
 
