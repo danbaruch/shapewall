@@ -241,21 +241,26 @@ export async function watchRemote({
     })
   const graceSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms).unref?.())
   let failures = 0
+  // The last scan's error: --once reports it instead of exiting as if nothing were open.
+  let scanError = null
   try {
     if (!once) log(`Watching hosted board "${boardId}" for new comments (every ${Math.round(pollMs / 1000)}s). Ctrl+C stops.`)
     for (;;) {
       try {
         await scan()
         failures = 0
+        scanError = null
       } catch (error) {
         // A refused token, a missing scope or a board that is gone will not
         // fix itself: stop with an error (non-zero exit). Anything else (the
         // network, a restart) is retried on the next poll.
         if (fatalWatchError(error)) throw error
         failures += 1
+        scanError = error
         log(`watch: ${error.message}${failures > 1 ? ` (${failures} times in a row, still trying)` : ''}`)
       }
       if (once) {
+        if (scanError) throw scanError
         if (!running.size || stopped) break
         await Promise.race([...running.values()].map((entry) => entry.done))
         continue

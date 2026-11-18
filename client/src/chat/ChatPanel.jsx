@@ -66,6 +66,15 @@ const PAGE_ITEMS_MAX = 40
 export const OWNER_ONLY =
   'Only the owner can run this agent. Open the owner link from your terminal (shapewall serve --open), or use a paired device.'
 
+// A hosted board whose thread or its stream answers 401 or 403: this tab was
+// signed out, or its role no longer reaches the chat (demoted, removed). The
+// panel stops polling and says so once, instead of asking again every few seconds.
+export const ACCESS_LOST_TEXT = {
+  signed_out: 'You have been signed out.',
+  no_access: 'You no longer have access to this board.',
+}
+const lostAccessKind = (error) => (error?.status === 401 ? 'signed_out' : error?.status === 403 ? 'no_access' : null)
+
 export { threadForComment } from './threads'
 export { commentOfThread }
 // ---- The panel -------------------------------------------------------------------
@@ -117,10 +126,18 @@ export default function ChatPanel({
   // runs on the server and the agent's machine, other members share the
   // board's threads, and the agent only reads and answers.
   const hosted = Boolean(defaultAgent?.hosted)
+  // Hosted: access to this board ended while the panel was open ({ boardId, kind }).
+  const [lost, setLost] = useState(null)
+  const accessLost = hosted && lost?.boardId === boardId ? lost.kind : null
   const thread = useResource(defaultAgent ? threadPath(boardId, threadId) : null, {
     // Hosted: a look every few seconds finds a turn another member started.
-    pollMs: starterBusy || remoteBusy ? 3000 : hosted ? 5000 : 0,
+    // Never again once access ended: every look would be refused.
+    pollMs: accessLost ? 0 : starterBusy || remoteBusy ? 3000 : hosted ? 5000 : 0,
   })
+  const lostKind = hosted ? lostAccessKind(thread.error) : null
+  useEffect(() => {
+    if (lostKind) setLost({ boardId, kind: lostKind })
+  }, [lostKind, boardId])
   const threads = useResource(defaultAgent ? `/api/agent/boards/${encodeURIComponent(boardId)}/threads` : null)
   // useResource loads the thread; a changed agent (connected, settings saved)
   // loads it again.
@@ -218,7 +235,7 @@ export default function ChatPanel({
     )
   }, [messages])
   // Hosted: a turn this tab did not start is joined live (useHostedTurn.js).
-  useHostedTurn({ enabled: hosted, boardId, threadId, thread, run })
+  useHostedTurn({ enabled: hosted && !accessLost, boardId, threadId, thread, run })
   const remoteRunning = Boolean(selectedThread?.running) && !run
   useEffect(() => setRemoteBusy(remoteRunning), [remoteRunning])
   const running = Boolean(run) || selectingProfile || remoteRunning
@@ -954,7 +971,26 @@ export default function ChatPanel({
               </HostedPush.Provider>
             </HostedAnswer.Provider>
           </AllowForChat.Provider>
-          {hostedBlocked ? (
+          {accessLost ? (
+            <div className="shrink-0 p-3" data-sw-chat-access-lost={accessLost}>
+              <p
+                className="flex flex-wrap items-start gap-2 rounded-lg border border-line bg-surface-2/60 px-3 py-2.5 text-ui text-muted"
+                role="alert"
+              >
+                <Lock size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
+                <span className="min-w-0 flex-1">{ACCESS_LOST_TEXT[accessLost]}</span>
+                {accessLost === 'signed_out' ? (
+                  <a
+                    href={`/signin?next=${encodeURIComponent(window.location.pathname + window.location.search)}`}
+                    className="inline-flex min-h-11 items-center font-medium text-accent underline-offset-2 hover:underline lg:min-h-0"
+                    data-sw-chat-access-signin="true"
+                  >
+                    Sign in
+                  </a>
+                ) : null}
+              </p>
+            </div>
+          ) : hostedBlocked ? (
             <div className="shrink-0 p-3" data-sw-chat-blocked={hostedBlocked.code || 'true'}>
               <p
                 className="flex items-start gap-2 rounded-lg border border-line bg-surface-2/60 px-3 py-2.5 text-ui text-muted"

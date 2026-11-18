@@ -448,6 +448,44 @@ test('dark, and the phone: the Agents sheet, then the chat in its sheet', async 
   await device.page.waitForSelector('[data-sw-device-done="denied"]')
 })
 
+test('access ends with the chat open: demoted or signed out, the panel says so once and stops asking', async () => {
+  const threadRequests = (page) => {
+    const seen = []
+    page.on('request', (request) => {
+      if (/\/api\/agent\/boards\/sample\/threads\/board(\/events)?(\?|$)/.test(new URL(request.url()).pathname + '?')) seen.push(Date.now())
+    })
+    return seen
+  }
+  for (const kind of ['no_access', 'signed_out']) {
+    const handle = kind === 'no_access' ? 'eve' : 'fay'
+    const person = await signUp(hosted, { handle, displayName: handle, invite: await invite(ada, ws, 'member') })
+    const { page, errors } = await open(person)
+    const seen = threadRequests(page)
+    await page.goto(boardPage('&chat=board&ha=1'))
+    await page.waitForSelector('[data-sw-chat-input]', { timeout: 20_000 })
+    if (kind === 'no_access') hosted.db.prepare("UPDATE memberships SET role = 'viewer' WHERE user_id = ?").run(person.user.id)
+    else hosted.db.prepare('DELETE FROM sessions WHERE user_id = ?').run(person.user.id)
+    const notice = page.locator(`[data-sw-chat-access-lost="${kind}"]`)
+    await notice.waitFor({ timeout: 15_000 })
+    assert.equal(
+      (await notice.textContent()).trim(),
+      kind === 'no_access' ? 'You no longer have access to this board.' : 'You have been signed out.Sign in',
+    )
+    assert.equal(await page.locator('[data-sw-chat-input]').count(), 0, 'no composer that would be refused')
+    if (kind === 'signed_out') assert.match(await page.locator('[data-sw-chat-access-signin]').getAttribute('href'), /^\/signin\?next=/)
+    // No more polling (it was every 5 s) and no reconnect loop.
+    const at = seen.length
+    await page.waitForTimeout(11_000)
+    assert.equal(seen.length, at, `asked the thread again ${seen.length - at} times after the notice`)
+    // The refused requests themselves, and the board's presence socket, which retries with its own backoff
+    // (board/presence/runtime.js, up to 30 s) and is refused the same way, are what the browser logs.
+    assert.deepEqual(
+      realErrors(errors).filter((text) => !/40[13]|\/presence' failed: .*Unexpected response code: 40[134]/.test(text)),
+      [],
+    )
+  }
+})
+
 test('offline: stopping the command takes the agent offline at once, and chat says so instead of sending', async () => {
   const { page } = await open(ada)
   await openAgents(page)

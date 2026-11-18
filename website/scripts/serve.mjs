@@ -40,8 +40,54 @@ export function resolveFile(urlPath) {
   return null
 }
 
+// /media/<hashed name>: the videos and posters from website/media/ (git-ignored, scripts/media-encode.mjs), the way the
+// production server serves its shared media folder: byte ranges (a video seeks with them) and a year of caching, since
+// every name carries its content hash. Returns false for any other path.
+const MEDIA = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'media')
+const MEDIA_TYPES = {
+  '.mp4': 'video/mp4',
+  '.webm': 'video/webm',
+  '.vtt': 'text/vtt; charset=utf-8',
+  '.jpg': 'image/jpeg',
+  '.webp': 'image/webp',
+}
+export function serveMedia(req, res) {
+  const match = /^\/media\/([a-z0-9][a-z0-9-]*\.[0-9a-f]{10}\.(mp4|webm|vtt|jpg|webp))(?:\?.*)?$/.exec(req.url || '')
+  if (!match) return false
+  const file = path.join(MEDIA, match[1])
+  if (!fs.existsSync(file)) {
+    res.writeHead(404, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' })
+    res.end('not found')
+    return true
+  }
+  const size = fs.statSync(file).size
+  const headers = {
+    'Content-Type': MEDIA_TYPES[path.extname(file)],
+    'Accept-Ranges': 'bytes',
+    'Cache-Control': 'public, max-age=31536000, immutable',
+    'X-Content-Type-Options': 'nosniff',
+  }
+  const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '')
+  if (range && (range[1] || range[2])) {
+    const start = range[1] ? Number(range[1]) : Math.max(0, size - Number(range[2]))
+    const end = range[1] && range[2] ? Math.min(Number(range[2]), size - 1) : size - 1
+    if (start > end || start >= size) {
+      res.writeHead(416, { 'Content-Range': `bytes */${size}` })
+      res.end()
+      return true
+    }
+    res.writeHead(206, { ...headers, 'Content-Range': `bytes ${start}-${end}/${size}`, 'Content-Length': end - start + 1 })
+    fs.createReadStream(file, { start, end }).pipe(res)
+    return true
+  }
+  res.writeHead(200, { ...headers, 'Content-Length': size })
+  fs.createReadStream(file).pipe(res)
+  return true
+}
+
 export function createServer() {
   return http.createServer((req, res) => {
+    if (serveMedia(req, res)) return
     const file = resolveFile(req.url || '/')
     const status = file ? 200 : 404
     const target = file || path.join(DIST, '404.html')

@@ -61,7 +61,7 @@ export default [
     // The website (website/): React pages, build scripts and Playwright helpers.
     files: ['website/**/*.{js,jsx,mjs}'],
     languageOptions: {
-      ecmaVersion: 2024,
+      ecmaVersion: 2025, // import attributes: src/videos.js reads src/media.json in Vite and in Node
       sourceType: 'module',
       globals: { ...globals.browser, ...globals.node, ...globals.serviceworker },
       parserOptions: { ecmaFeatures: { jsx: true } },

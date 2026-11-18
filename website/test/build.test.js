@@ -20,7 +20,8 @@ const UMAMI_ID = '00000000-0000-4000-8000-000000000000'
 function build(env) {
   execFileSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['run', 'build'], {
     cwd: SITE,
-    env: { ...process.env, SHAPEWALL_STEALTH: '', SHAPEWALL_UMAMI_ID: '', SHAPEWALL_LAUNCHED: '', ...env },
+    // No media check: CI has no website/media/ (test/media.test.js covers the check itself).
+    env: { ...process.env, SHAPEWALL_STEALTH: '', SHAPEWALL_UMAMI_ID: '', SHAPEWALL_LAUNCHED: '', SHAPEWALL_MEDIA_CHECK: '0', ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
 }

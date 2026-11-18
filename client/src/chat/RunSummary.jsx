@@ -158,8 +158,10 @@ function BranchActions({ message, summary, owner, touch, onBranch }) {
       {ready ? <p>Your checkout is untouched until you apply it. Uncommitted changes in your checkout were not carried over.</p> : null}
       {branch.state === 'applied' && branch.applied ? (
         <p data-sw-chat-branch-applied={branch.applied.mode}>
-          {branch.applied.mode === 'fast-forward' ? 'Fast-forwarded your checkout.' : 'Merged into your checkout.'} The branch and its
-          folder are gone.
+          {branch.applied.mode === 'fast-forward' ? 'Fast-forwarded your checkout.' : 'Merged into your checkout.'}{' '}
+          {branch.applied.kept
+            ? `${keptBranchText({ branch: branch.name, kept: branch.applied.kept })} Its folder is gone.`
+            : 'The branch and its folder are gone.'}
         </p>
       ) : null}
       {ready ? (
@@ -432,6 +434,14 @@ export default function RunSummary({ message, owner = false, touch = false, onUn
   if (remote) onRecapture = null
   const waiting = summary.branch?.state === 'ready'
   const canUndo = Boolean(owner && onUndo && summary.undo?.available && !undone && !waiting)
+  // Files changed during the turn but not by the agent's own edits: Undo leaves them as they are (turn-changes.js).
+  const outside = summary.undo?.kind === 'files' ? files.filter((file) => file.outside).length : 0
+  const outsideLine =
+    outside && undone?.kind === 'files'
+      ? `Not undone: ${plural(outside, 'file')} changed outside the agent.`
+      : outside && canUndo
+        ? `Undo leaves ${plural(outside, 'file')} changed outside the agent as ${outside === 1 ? 'it is' : 'they are'}.`
+        : null
   const resolved = (summary.resolved || []).map((id) => resolveToken(refs?.index, 'comment', id) || { id, plain: true })
   const commit = summary.branch?.name ? null : summary.commit
   const short = commit?.sha ? commit.sha.slice(0, 7) : null
@@ -583,6 +593,11 @@ export default function RunSummary({ message, owner = false, touch = false, onUn
                 : undone.kind === 'revert'
                   ? `Reverted ${undone.branch} in your checkout.`
                   : `Put ${plural(undone.files || files.length, 'file')} back.`}
+            </p>
+          ) : null}
+          {outsideLine ? (
+            <p className="text-caption text-muted" data-sw-chat-summary-outside={outside}>
+              {outsideLine}
             </p>
           ) : null}
         </footer>

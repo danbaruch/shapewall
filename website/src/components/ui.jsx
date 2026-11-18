@@ -181,9 +181,9 @@ export function InstallCommand({ dark = false, where, command = INSTALL_COMMAND,
 }
 
 // A product screenshot. `src` is an imported asset; `srcSet` optional.
-export function Shot({ src, srcSet, sizes, alt, width, height, className, eager = false, bar = true }) {
+export function Shot({ src, srcSet, sizes, alt, width, height, className, eager = false, bar = true, children }) {
   return (
-    <figure className={cx('shot', className)}>
+    <figure className={cx('shot', children && 'relative', className)}>
       {bar ? (
         <div className="flex h-7 items-center gap-1.5 border-b border-hairline bg-sunk px-3" aria-hidden="true">
           <span className="size-2.5 rounded-full bg-line-strong" />
@@ -202,6 +202,7 @@ export function Shot({ src, srcSet, sizes, alt, width, height, className, eager 
         decoding="async"
         fetchPriority={eager ? 'high' : undefined}
       />
+      {children}
     </figure>
   )
 }

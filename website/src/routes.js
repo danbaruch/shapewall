@@ -125,6 +125,8 @@ export const DOC_GROUPS = [
         path: '/docs/getting-started',
         file: 'getting-started',
         nav: 'Getting started',
+        // The quickstart video above the steps (src/media.json, components/video.jsx).
+        video: 'docs-quickstart',
         title: 'Getting started: install, capture, serve | Shapewall',
         description:
           'Install Shapewall, create a config with shapewall init, capture your pages at desktop and phone width, and open the board with shapewall serve.',

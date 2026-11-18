@@ -273,8 +273,10 @@ test('discard and apply cleanup leave a branch someone has checked out in anothe
   // Apply: the merge goes through; the cleanup after it leaves the reviewed branch.
   const second = await branchWithEdit(config, { commentId: 2, content: '<h1>Agent two</h1>\n' })
   sh(dir, 'worktree', 'add', '-q', review, second.work.meta.branch)
-  await applyAgentBranch(config, readMeta(config, second.work.meta.id))
+  const appliedKept = await applyAgentBranch(config, readMeta(config, second.work.meta.id))
   assert.equal(fs.readFileSync(path.join(dir, 'index.html'), 'utf8'), '<h1>Agent two</h1>\n')
+  assert.equal(appliedKept.kept.reason, 'in_use', 'Apply says the branch was kept')
+  assert.equal(fs.realpathSync(appliedKept.kept.dir), fs.realpathSync(review))
   assert.deepEqual(headOf(review), ['refs/heads/' + second.work.meta.branch, second.commit.commit])
   sh(dir, 'worktree', 'remove', '--force', review)
 
@@ -538,7 +540,7 @@ test('fix with agent in branch mode: branch-ready, discard by Undo, apply, rever
   }
 })
 
-test('Undo and Discard of a branch someone has checked out keep it, and the card and the comment say so', async () => {
+test('Undo, Discard and Apply of a branch someone has checked out keep it, and the card and the comment say so', async () => {
   const { dir, config } = repo('branch-route-kept')
   const home = tempDir('branch-route-kept-home')
   const env = { ...process.env, XDG_CONFIG_HOME: home, SHAPEWALL_AGENT_SETTINGS_FILE: path.join(home, 'agents.json') }
@@ -580,6 +582,9 @@ test('Undo and Discard of a branch someone has checked out keep it, and the card
     assert.equal(fs.realpathSync(kept.dir), fs.realpathSync(one))
     assert.equal(sh(dir, 'branch', '--list', first.branch.name).replace('+', '').trim(), first.branch.name, 'the branch stays')
     assert.equal(sh(one, 'symbolic-ref', 'HEAD'), 'refs/heads/' + first.branch.name)
+    const undoReply = getComment(config, 'sample', first.comment.id).replies.at(-1).body
+    assert.match(undoReply, /undone from the chat/)
+    assert.match(undoReply, /Kept branch shapewall\/comment-1-fix-the-heading: it is checked out in /)
 
     // Discard from the branch card, the same way.
     const second = await fixed('Fix it again')
@@ -593,6 +598,21 @@ test('Undo and Discard of a branch someone has checked out keep it, and the card
     const reply = getComment(config, 'sample', second.comment.id).replies.at(-1).body
     assert.match(reply, /Kept branch shapewall\/comment-2-fix-it-again: it is checked out in /)
     assert.doesNotMatch(reply, /branch .* was discarded/)
+
+    // Apply while a person has the branch checked out: applied, the branch kept, and both say so.
+    const third = await fixed('Fix it a third time')
+    const three = path.join(reviews, 'three')
+    sh(dir, 'worktree', 'add', '-q', three, third.branch.name)
+    const applied = await request(port, 'POST', '/api/agent/branches/' + third.branch.id + '/apply', { headers, body: {} })
+    assert.equal(applied.status, 200, JSON.stringify(applied.json))
+    assert.equal(applied.json.applied.kept.reason, 'in_use')
+    assert.equal(applied.json.message.summary.branch.applied.kept.reason, 'in_use', 'the card has it')
+    assert.equal(sh(three, 'symbolic-ref', 'HEAD'), 'refs/heads/' + third.branch.name)
+    const applyReplies = getComment(config, 'sample', third.comment.id).replies.map((item) => item.body)
+    assert.ok(
+      applyReplies.some((body) => /Kept branch shapewall\/comment-3-fix-it-a-third-time: it is checked out in /.test(body)),
+      JSON.stringify(applyReplies),
+    )
   } finally {
     stopChildren(app)
     await new Promise((resolve) => server.close(resolve))

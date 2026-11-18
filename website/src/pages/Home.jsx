@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   ArrowRight,
@@ -10,6 +11,7 @@ import {
   Link2,
   MapPin,
   MousePointerClick,
+  Play,
   Radio,
   ShieldCheck,
   Smartphone,
@@ -21,6 +23,8 @@ import { BeforeAfter, CaptureIllustration, JourneyIllustration, MapIllustration 
 import { AgentTerminal } from '../components/terminal.jsx'
 import { Reveal, stagger } from '../components/motion.jsx'
 import { Faq } from '../components/faq.jsx'
+import { FilmOverlay } from '../components/video.jsx'
+import { FILMS, MEDIA, clock } from '../videos.js'
 import { GITHUB_URL } from '../routes.js'
 import { BETA, GITHUB_LABEL, LAUNCHED, LICENSE_SUMMARY } from '../launch.js'
 import boardOverview960 from '../assets/shots/board-overview-960.webp'
@@ -47,6 +51,13 @@ export default function Home() {
 }
 
 function Hero() {
+  // The launch film plays in the hero screenshot's own window (below its title bar), so the page never moves. The
+  // screenshot stays the poster and the largest paint; the film loads only after the button is pressed.
+  const [filmPlaying, setFilmPlaying] = useState(false)
+  const [filmRequest, setFilmRequest] = useState(0)
+  const watchFilm = () => setFilmRequest((n) => n + 1)
+  const filmClock = clock(MEDIA['launch-film'].duration)
+  const filmLabel = `Watch the launch film, ${filmClock}, with sound`
   return (
     <section className="relative overflow-hidden">
       <div
@@ -80,7 +91,23 @@ function Hero() {
             <Button href={GITHUB_URL} variant="secondary" size="lg">
               <GitHubIcon className="size-[18px]" /> {GITHUB_LABEL}
             </Button>
+            <span className="hidden sm:contents">
+              <Button variant="ghost" size="lg" onClick={watchFilm} data-film-link="desktop" aria-label={filmLabel}>
+                <Play className="size-4" aria-hidden="true" /> Watch the film
+                <span className="font-medium text-faint tabular-nums">{filmClock}</span>
+              </Button>
+            </span>
           </div>
+          <button
+            type="button"
+            onClick={watchFilm}
+            data-film-link="phone"
+            aria-label={filmLabel}
+            className="mx-auto mt-4 inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[14.5px] font-medium text-slate underline-offset-4 hover:text-ink hover:underline focus-visible:outline-2 focus-visible:outline-wall sm:hidden"
+          >
+            <Play className="size-3.5" aria-hidden="true" /> Watch the film
+            <span className="text-faint tabular-nums">{filmClock}</span>
+          </button>
           <p className="mt-4 text-[13.5px] text-slate">
             The live demo runs in your browser: comments, the agent chat and the team console, with nothing to install.
           </p>
@@ -115,14 +142,29 @@ function Hero() {
             eager
             className="hero-rise"
             alt="The Shapewall board: the pages of a demo product at desktop, tablet and phone width, grouped into Marketing, Content, Get started and App, with comment pins and the comments panel"
-          />
-          <div className="hero-note absolute -bottom-6 -left-3 hidden w-72 rounded-xl border border-line bg-card p-3.5 shadow-xl shadow-black/10 md:block lg:-left-10">
+          >
+            <FilmOverlay
+              id="launch-film"
+              title={FILMS['launch-film'].name}
+              cta="Watch the launch film"
+              inset="inset-x-0 top-7 bottom-0"
+              onActiveChange={setFilmPlaying}
+              playRequest={filmRequest}
+            />
+          </Shot>
+          <div
+            hidden={filmPlaying}
+            className="hero-note absolute -bottom-6 -left-3 hidden w-72 rounded-xl border border-line bg-card p-3.5 shadow-xl shadow-black/10 md:block lg:-left-10"
+          >
             <p className="flex items-center gap-2 text-[12px] font-semibold text-wall">
               <Bot className="size-4" aria-hidden="true" /> Agent resolved #1
             </p>
             <p className="mt-1.5 text-[13.5px] leading-snug text-ink">The Plus card now uses the primary button. Pricing recaptured.</p>
           </div>
-          <div className="hero-note absolute -top-5 -right-3 hidden items-center gap-2 rounded-full border border-line bg-card py-1.5 pr-3.5 pl-2 text-[13px] font-medium text-ink shadow-lg shadow-black/10 md:flex lg:-right-8">
+          <div
+            hidden={filmPlaying}
+            className="hero-note absolute -top-5 -right-3 hidden items-center gap-2 rounded-full border border-line bg-card py-1.5 pr-3.5 pl-2 text-[13px] font-medium text-ink shadow-lg shadow-black/10 md:flex lg:-right-8"
+          >
             <span className="grid size-6 place-items-center rounded-full bg-pin text-[11px] font-bold text-night">20</span>
             open comments on 26 pages
           </div>

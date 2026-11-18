@@ -6,6 +6,8 @@
 // the prompt and as readable files outside the worktree through get_comment.
 // slow: like edit, after a pause of 1.5 s that session/cancel ends (the turn
 // then stops as cancelled, nothing edited), so a batch can be cancelled mid-item.
+// edit-outside: like edit, and it also writes notes.txt itself, not through
+// ACP, as a person saving a file would (listed as changed outside the agent).
 import fs from 'node:fs'
 import readline from 'node:readline'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
@@ -88,6 +90,7 @@ lines.on('line', async (line) => {
       path: `${cwd}/index.html`,
       content: '<!doctype html><html><body><h1>Fixed fixture heading</h1></body></html>',
     })
+    if (mode === 'edit-outside') fs.writeFileSync(cwd + '/notes.txt', 'Saved by a person during the turn.\n')
     if (mode === 'fail') throw new Error('Fixture stops after an edit')
     // Verify the actual injected MCP process, not only a model tool schema.
     const server = servers[0]
