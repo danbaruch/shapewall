@@ -152,6 +152,36 @@ test('undo-state: only the thread’s latest change offers Undo; undone ones ste
   assert.equal(withUndoAvailability([messages[1]], () => true, messages)[0].summary.undo.available, true)
 })
 
+test('undo-state: a later turn whose agent edited nothing does not block Undo of the earlier one', () => {
+  // A person saved a file while the later turn ran: that turn lists it as
+  // changed outside the agent and offers no Undo of its own.
+  const outsideOnly = {
+    kind: 'files',
+    files: [{ path: 'b.txt', status: 'modified', outside: true }],
+    commit: null,
+    undo: { kind: 'files', available: false, reason: 'the agent did not edit these files itself' },
+  }
+  const messages = [
+    { id: 'q1', role: 'user' },
+    { id: 'a1', role: 'assistant', summary: summary({ kind: 'files' }) },
+    { id: 'q2', role: 'user' },
+    { id: 'a2', role: 'assistant', summary: outsideOnly },
+    { id: 'q3', role: 'user' },
+    { id: 'a3', role: 'assistant', summary: { kind: 'files', files: [], resolved: ['c1'], undo: null } },
+  ]
+  assert.equal(latestChange(messages), 'a1')
+  const shown = withUndoAvailability(messages, (message) => message.id === 'a1')
+  assert.equal(shown[1].summary.undo.available, true)
+  assert.equal(shown[1].summary.undo.reason, undefined)
+  assert.equal(shown[3].summary.undo.available, false)
+  // A later turn with an agent edit (or a commit) still blocks it.
+  messages.push({ id: 'a4', role: 'assistant', summary: { ...outsideOnly, commit: { sha: 'abc' } } })
+  assert.equal(latestChange(messages), 'a4')
+  messages[6].summary = summary({ kind: 'files' }, { files: [{ path: 'b.txt', status: 'modified', outside: true }, { path: 'c.txt' }] })
+  assert.equal(latestChange(messages), 'a4')
+  assert.equal(withUndoAvailability(messages, () => true)[1].summary.undo.reason, LATER_CHANGE)
+})
+
 // The least of an export the scripted agent needs: a board and no comments.
 const EXPORT = {
   'data/boards/demo.json': {

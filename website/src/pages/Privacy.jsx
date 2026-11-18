@@ -29,14 +29,20 @@ export default function Privacy() {
           </p>
           <h2 id="this-website">This website</h2>
           <p>
-            shapewall.com uses self-hosted, cookieless analytics (Umami) to count page views and a few clicks, such as opening the getting
-            started guide. Umami sets no analytics cookies and writes no analytics identifiers to your device. It respects Do Not Track and
-            does not build a profile of you. We see totals: pages, referrers, countries, browsers and device types.
+            shapewall.com uses a privacy-friendly analytics service we host ourselves to count page views and a few clicks, such as opening
+            the getting started guide. It is cookieless: it sets no analytics cookies and writes no analytics identifiers to your device. It
+            respects Do Not Track and does not build a profile of you. We see totals: pages, referrers, countries, browsers and device
+            types.
           </p>
           <p>
-            The site is served through Cloudflare, which adds Cloudflare Web Analytics: a script from static.cloudflareinsights.com that
-            reports page views and load times to cloudflareinsights.com. It is cookieless too, stores nothing on your device and gives us
-            aggregate numbers only, not a record of what one visitor did.
+            The site is served through a content delivery network, which adds its own web analytics: a script from the network&apos;s domain
+            that reports page views and load times back to it. It is cookieless too, stores nothing on your device and gives us aggregate
+            numbers only, not a record of what one visitor did.
+          </p>
+          <p id="error-reports">
+            When error reporting is turned on for this site, an error in a page sends a report to an error-tracking service we host
+            ourselves: the error message with any quoted text removed, where in our code it happened, the page path, the pages and requests
+            just before it, and your browser&apos;s User-Agent. Reports never carry cookies, form contents, query strings or what you typed.
           </p>
           <p>
             The docs search runs in your browser. What you type is never sent anywhere. There are no newsletter signups and no ads on this

@@ -1697,7 +1697,7 @@ export function agentRouter({
             if (changed.changed) {
               await addReply(config, board.id, commentId, {
                 author: 'shapewall',
-                body: 'The agent’s change was undone from the chat. The page shows the earlier version again once it is recaptured.',
+                body: `The agent’s change was undone from the chat.${undone.kept ? ` ${keptText(undone.branch, undone.kept)}` : ''} The page shows the earlier version again once it is recaptured.`,
               })
             }
           } catch (error) {
@@ -1905,6 +1905,11 @@ export function agentRouter({
       let comment = null
       if (meta.commentId) {
         try {
+          if (applied.kept)
+            await addReply(config, board.id, meta.commentId, {
+              author: 'shapewall',
+              body: `The agent’s work was applied to your checkout. ${keptText(meta.branch, applied.kept)}`,
+            })
           const moved = await setAgentStatus(config, board.id, meta.commentId, 'working', { onlyFrom: [BRANCH_READY], actor: 'shapewall' })
           if (moved.changed && allowCapture) {
             await finishFix({
