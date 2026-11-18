@@ -233,32 +233,43 @@ test('backup restores a live snapshot, boots it and signs in with the fixture pa
   }
 })
 
-test('backup copies files after the lock: swapped, deleted and pruned board files are listed, not fatal', async () => {
+// Review finding 03: files were copied after the lock, so a backup could hold
+// a newer generation than its database, or leave files out, and the drill
+// still passed. Now the lock pins the snapshot's files (hard links); what
+// happens on the server after the lock does not reach the backup.
+test('backup holds the snapshot generation: a push, a deletion and a prune after the lock do not reach it', async () => {
   const { hosted, ws, project } = await fixture('ops-backup-live')
   try {
+    const rel = `${ws}/${project.id}`
     const board = path.join(hosted.dataDir, 'files', ws, project.id, 'sample')
+    const vanish = path.join(hosted.dataDir, 'files', ws, project.id, 'vanish')
     hosted.db
       .prepare(
         `INSERT INTO boards (workspace_id, project_id, board_id, definition, pushed_at, push_count, bytes, created_at)
          SELECT workspace_id, project_id, 'vanish', definition, pushed_at, push_count, bytes, created_at FROM boards WHERE board_id = 'sample'`,
       )
       .run()
+    fs.cpSync(board, vanish, { recursive: true })
     const pruned = 'pricing.phone.png'
+    const original = fs.readFileSync(path.join(board, 'captures', 'home.desktop.png'))
     const originalCopy = fs.copyFileSync
-    let swapped = false
-    let seen = 0
-    fs.copyFileSync = (from, ...rest) => {
-      if (!swapped) {
-        // A push commit lands mid-copy: a new folder is renamed into place.
-        // The board after it is deleted meanwhile (rows first, then files).
-        swapped = true
-        hosted.db.prepare("DELETE FROM boards WHERE board_id = 'vanish'").run()
+    let changedLive = false
+    fs.copyFileSync = (...args) => {
+      if (!changedLive) {
+        // After the lock, before the first file is copied: a push commit
+        // swaps in a new folder, another board is deleted (rows, then files)
+        // and a capture is removed.
+        changedLive = true
         fs.cpSync(board, `${board}.next`, { recursive: true })
+        fs.writeFileSync(`${board}.next/captures/home.desktop.png`, 'a newer generation')
         fs.renameSync(board, `${board}.prev`)
         fs.renameSync(`${board}.next`, board)
         fs.rmSync(`${board}.prev`, { recursive: true })
-      } else if (path.basename(from) === pruned && ++seen === 2) fs.rmSync(from) // deleted during the second copy
-      return originalCopy(from, ...rest)
+        hosted.db.prepare("DELETE FROM boards WHERE board_id = 'vanish'").run()
+        fs.rmSync(vanish, { recursive: true })
+        fs.rmSync(path.join(board, 'captures', pruned))
+      }
+      return originalCopy(...args)
     }
     let saved
     try {
@@ -266,61 +277,62 @@ test('backup copies files after the lock: swapped, deleted and pruned board file
     } finally {
       fs.copyFileSync = originalCopy
     }
-    const rel = `${ws}/${project.id}`
-    assert.deepEqual(saved.manifest.files.skipped, {
-      vanished: [`${rel}/vanish`],
-      changed: [`${rel}/sample`],
-      missing: [`${rel}/sample/captures/${pruned}`],
-    })
-    assert.ok(!fs.existsSync(path.join(saved.dir, 'files', rel, 'sample', 'captures', pruned)))
+    assert.equal(changedLive, true)
+    assert.equal(saved.manifest.complete, true)
+    assert.equal(saved.manifest.files.skipped, undefined)
+    const backedUp = (...parts) => path.join(saved.dir, 'files', rel, ...parts)
+    assert.deepEqual(fs.readFileSync(backedUp('sample', 'captures', 'home.desktop.png')), original, 'the snapshot generation')
+    assert.ok(fs.existsSync(backedUp('sample', 'captures', pruned)))
+    assert.ok(fs.existsSync(backedUp('vanish', 'captures', 'manifest.json')))
+    assert.deepEqual(
+      fs.readdirSync(hosted.dataDir).filter((name) => name.startsWith('.backup-pin-')),
+      [],
+      'the pin is gone',
+    )
     const drill = await restoreDrill({ from: saved.dir, out: () => {} })
     assert.equal(drill.ok, true, JSON.stringify(drill.checks))
+    assert.ok(drill.checks.some((check) => check.name === 'board files' && check.ok))
   } finally {
     await hosted.close()
   }
 })
 
-// Runs `onCopyStart` when the backup first looks at the board folder after
-// the lock is released (the first look is under the lock).
-async function backupWithHook(hosted, board, onCopyStart, to) {
-  const originalStat = fs.statSync
-  let looks = 0
-  fs.statSync = (file, ...rest) => {
-    if (file === board && ++looks === 2) onCopyStart()
-    return originalStat(file, ...rest)
-  }
+test('backup: a capture its manifest names but the board lacks fails the drill', async () => {
+  const { hosted, ws, project } = await fixture('ops-backup-missing-png')
   try {
-    return await backup({ dataDir: hosted.dataDir, to: tempDir(to) })
+    fs.rmSync(path.join(hosted.dataDir, 'files', ws, project.id, 'sample', 'captures', 'pricing.phone.png'))
+    const saved = await backup({ dataDir: hosted.dataDir, to: tempDir('backups-missing-png') })
+    const lines = []
+    const drill = await restoreDrill({ from: saved.dir, out: (line) => lines.push(line) })
+    assert.equal(drill.ok, false)
+    const files = drill.checks.find((check) => check.name === 'board files')
+    assert.equal(files.ok, false)
+    assert.match(files.detail, /sample\/captures\/pricing\.phone\.png missing/)
+    assert.ok(lines.some((line) => line.startsWith('FAIL board files')))
   } finally {
-    fs.statSync = originalStat
+    await hosted.close()
   }
-}
+})
 
-test('backup: a board folder briefly missing during a push swap is waited for, not called deleted', async () => {
-  const { hosted, ws, project } = await fixture('ops-backup-swap-gap')
+test('backup: a backup that left files out is not a recovery point, also one from before the pin', async () => {
+  const { hosted, ws, project } = await fixture('ops-backup-legacy')
   try {
-    const board = path.join(hosted.dataDir, 'files', ws, project.id, 'sample')
-    let restored = null
-    const saved = await backupWithHook(
-      hosted,
-      board,
-      () => {
-        // The push commit's first rename has run, the second has not yet.
-        fs.renameSync(board, `${board}.old`)
-        restored = new Promise((resolve) =>
-          setTimeout(() => {
-            fs.renameSync(`${board}.old`, board)
-            resolve()
-          }, 120),
-        )
-      },
-      'backups-swap-gap',
-    )
-    await restored
-    assert.equal(saved.manifest.files.skipped, undefined)
-    assert.ok(Object.keys(saved.manifest.hashes).some((name) => name.startsWith(`files/${ws}/${project.id}/sample/`)))
+    const saved = await backup({ dataDir: hosted.dataDir, to: tempDir('backups-legacy') })
+    // As an older build wrote it: a capture deleted while copying was left
+    // out and listed, and nothing said the backup was incomplete.
+    const rel = `${ws}/${project.id}`
+    const file = path.join(saved.dir, 'files', rel, 'sample', 'captures', 'pricing.phone.png')
+    fs.rmSync(file)
+    const manifest = JSON.parse(fs.readFileSync(path.join(saved.dir, 'backup.json'), 'utf8'))
+    delete manifest.complete
+    delete manifest.hashes[`files/${rel}/sample/captures/pricing.phone.png`]
+    manifest.files.files -= 1
+    manifest.files.skipped = { vanished: [], changed: [], missing: [`${rel}/sample/captures/pricing.phone.png`] }
+    fs.writeFileSync(path.join(saved.dir, 'backup.json'), JSON.stringify(manifest))
     const drill = await restoreDrill({ from: saved.dir, out: () => {} })
-    assert.equal(drill.ok, true, JSON.stringify(drill.checks))
+    assert.equal(drill.ok, false)
+    assert.equal(drill.checks.find((check) => check.name === 'recovery point complete').ok, false)
+    assert.equal(drill.checks.find((check) => check.name === 'board files').ok, false)
   } finally {
     await hosted.close()
   }
@@ -338,30 +350,20 @@ test('backup: a missing board folder whose row is still live is listed as missin
     const saved = await backup({ dataDir: hosted.dataDir, to: tempDir('backups-orphan') })
     const rel = `${ws}/${project.id}`
     assert.deepEqual(saved.manifest.files.skipped, { vanished: [], changed: [], missing: [`${rel}/orphan/`] })
+    assert.equal(saved.manifest.complete, false)
     const drill = await restoreDrill({ from: saved.dir, out: () => {} })
     assert.equal(drill.ok, false)
     assert.ok(drill.checks.some((check) => check.name === 'board folders' && !check.ok))
-  } finally {
-    await hosted.close()
-  }
-})
-
-test('backup: a push that commits after the snapshot but before its folder is copied is listed as changed', async () => {
-  const { hosted, ws, project } = await fixture('ops-backup-pre-copy')
-  try {
-    const board = path.join(hosted.dataDir, 'files', ws, project.id, 'sample')
-    const saved = await backupWithHook(
-      hosted,
-      board,
-      () => {
-        fs.cpSync(board, `${board}.next`, { recursive: true })
-        fs.renameSync(board, `${board}.prev`)
-        fs.renameSync(`${board}.next`, board)
-        fs.rmSync(`${board}.prev`, { recursive: true })
-      },
-      'backups-pre-copy',
+    assert.ok(drill.checks.some((check) => check.name === 'recovery point complete' && !check.ok))
+    // The backup command says so and exits non-zero, so a timer's failure shows.
+    const { hostedCommand } = await import('../src/hosted/ops-cli.js')
+    const lines = []
+    const status = await hostedCommand(['backup'], { data: hosted.dataDir, to: tempDir('backups-orphan-cli') }, (line) => lines.push(line))
+    assert.equal(status, 1)
+    assert.ok(
+      lines.some((line) => line.includes('INCOMPLETE: 1 board folders')),
+      lines.join('\n'),
     )
-    assert.deepEqual(saved.manifest.files.skipped, { vanished: [], changed: [`${ws}/${project.id}/sample`], missing: [] })
   } finally {
     await hosted.close()
   }

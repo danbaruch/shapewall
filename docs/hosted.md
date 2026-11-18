@@ -2274,9 +2274,13 @@ shapewall hosted restore --from ./backups --check
 shapewall hosted restore --from ./backups --data ./restored-new-folder
 ```
 
-Backup holds a SQLite write lock only for a `VACUUM INTO` snapshot and the list of board folders; captures are copied after it is
-released, so reads and writes continue. A board pushed again while it is copied is copied again; boards and files deleted meanwhile
-are skipped and listed under `files.skipped` in `backup.json`. Anything written after the snapshot is not in the backup: it is a
+Backup holds a SQLite write lock for a `VACUUM INTO` snapshot and for pinning the board files that go with it: each file is
+hard-linked into a `.backup-pin-<id>` folder inside the data folder (copied instead when the disk cannot link), so the files
+and the database in a backup are the same moment. The pin is copied to the backup after the lock is released, so reads and
+writes continue, and then removed; a pin left by a crashed backup is removed by the next backup after a day. When the data
+folder cannot take the pin, the files are copied under the lock instead, which holds the lock longer. A board row whose folder
+is missing is listed under `files.skipped.missing` in `backup.json`, the backup is marked `"complete": false` and the backup
+command prints a warning and exits with status 1. Anything written after the snapshot is not in the backup: it is a
 copy of a moment, not a continuous log. A `--to` inside the data folder is refused. The backup includes account data, passkey
 public keys, captures, comments, audit records, signing key and default-path quota config. If the HMAC key is supplied as a systemd
 credential or environment variable, give the backup command the same credential: with `SHAPEWALL_HOSTED_SECRET` in the
@@ -2291,7 +2295,8 @@ encrypt offsite copies and test that you can recover them. Staging uploads and o
 `--keep-days 30` deletes only recognizable older backup folders in the destination; it does not schedule anything. The example
 backup service/timer is disabled until the operator explicitly installs and enables it. Installation never starts a backup timer.
 A monthly manual restore drill should be logged by the operator. `restore --check` creates a scratch copy beside the backup, verifies
-checksums, row counts, board folders and health, then stops its temporary server and removes the scratch copy. Automated tests also
+checksums, row counts, board folders, that every capture a board's manifest lists is there, that the backup is complete (one
+that left files out, also one from an older version that listed them under `files.skipped`, fails), and health, then stops its temporary server and removes the scratch copy. Automated tests also
 sign in to a restored fixture with its software passkey; that does not verify real phones or hardware authenticators.
 
 Four things the commands above do not do for you, each enough to leave a dead instance:

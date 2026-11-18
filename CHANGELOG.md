@@ -66,6 +66,12 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - **Hosted: a push keeps the screenshots a discussion points at.** Pushing from a checkout that has less history than the
   server (a second machine, CI) no longer removes the capture a hosted comment is pinned to or a reply's drawing was made on:
   the commit copies those versions over from the board it replaces, and their bytes count once in the board's storage.
+- **Hosted: a backup is one moment, and the drill checks it.** `shapewall hosted backup` now pins the board files under the
+  same lock as the database snapshot (hard links inside the data folder, copied afterwards), so a push, a deletion or a
+  retention run while the backup is copied no longer gives it files from a different moment or leaves them out. A board whose
+  folder is missing marks the backup incomplete: the command prints a warning and exits with status 1. `restore --check` now
+  also fails when a capture a board's manifest lists is missing, and when the backup left files out, including backups made
+  by earlier versions that listed skipped files in `backup.json`.
 
 ## 0.11.0 - 2026-11-17
 

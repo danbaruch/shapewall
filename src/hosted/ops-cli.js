@@ -544,9 +544,10 @@ async function backupCommand(flags, out) {
     to: flags.to,
     keepDays: intFlag(flags, 'keep-days', { min: 1, max: 3650, fallback: null }),
   })
+  const incomplete = result.manifest.complete === false
   if (flags.json) {
     out(JSON.stringify({ dir: result.dir, manifest: result.manifest, pruned: result.pruned }, null, 2))
-    return 0
+    return incomplete ? 1 : 0
   }
   const { counts, files } = result.manifest
   out(`Backed up to ${result.dir}`)
@@ -555,6 +556,12 @@ async function backupCommand(flags, out) {
   )
   if (result.pruned.length) out(`  Removed ${result.pruned.length} backups older than ${flags['keep-days']} days`)
   out('  It holds everything, the signing key included: keep it as private as the server.')
+  if (incomplete) {
+    const missing = files.skipped?.missing ?? []
+    out(`  INCOMPLETE: ${missing.length} board folders are missing from the data folder, so this is not a recovery point:`)
+    for (const rel of missing.slice(0, 20)) out(`    ${rel}`)
+    return 1
+  }
   return 0
 }
 
