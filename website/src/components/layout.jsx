@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import { Menu, X } from 'lucide-react'
-import { GitHubIcon, Logo } from './brand.jsx'
+import { BetaTag, GitHubIcon, Logo } from './brand.jsx'
 import { Container, GetStarted, IconButton, cx } from './ui.jsx'
 import { ThemeMenu, ThemeSwitch } from './theme.jsx'
 import { AnimatePresence, DURATION, EASE, drop, m } from './motion.jsx'
 import { track } from '../analytics.js'
 import { DEMO_URL, DOC_GROUPS, GITHUB_URL, NOT_FOUND, SITE_URL, canonicalUrl, routeFor } from '../routes.js'
-import { GITHUB_LABEL, LAUNCHED } from '../launch.js'
+import { BETA, GITHUB_LABEL, LAUNCHED } from '../launch.js'
 import { hashId } from '../links.js'
 
 // Set by vite.config.js from SHAPEWALL_STEALTH, the same switch scripts/prerender.mjs reads.
@@ -79,8 +79,13 @@ function Header() {
   return (
     <header className="sticky top-0 z-40 border-b border-hairline bg-paper/85 backdrop-blur-md supports-[backdrop-filter]:bg-paper/75">
       <Container className="flex h-16 items-center gap-6">
-        <Link to="/" className="shrink-0 rounded-lg" aria-label="Shapewall home">
+        <Link
+          to="/"
+          className="inline-flex shrink-0 items-center gap-2 rounded-lg"
+          aria-label={BETA ? 'Shapewall home, beta' : 'Shapewall home'}
+        >
           <Logo />
+          {BETA ? <BetaTag /> : null}
         </Link>
         <nav className="hidden items-center gap-1 md:flex" aria-label="Main">
           {NAV.map((item) => (

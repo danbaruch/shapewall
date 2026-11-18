@@ -6,6 +6,8 @@
 
 **Every page of your site on one zoomable wall, with comments pinned to elements that your coding agent can act on.**
 
+**Early access (beta).** We are still working out the mechanics and would love early feedback: [open an issue](https://github.com/danbaruch/shapewall/issues) or use the [contact form](https://shapewall.com/contact).
+
 ![The demo board: every page of a small site, grouped, at desktop and phone width](docs/images/board-overview.png)
 
 Shapewall captures each page of a running site at desktop and phone width and lays them out on one canvas. You pin a comment to the

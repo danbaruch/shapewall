@@ -22,7 +22,7 @@ import { AgentTerminal } from '../components/terminal.jsx'
 import { Reveal, stagger } from '../components/motion.jsx'
 import { Faq } from '../components/faq.jsx'
 import { GITHUB_URL } from '../routes.js'
-import { GITHUB_LABEL, LAUNCHED, LICENSE_SUMMARY } from '../launch.js'
+import { BETA, GITHUB_LABEL, LAUNCHED, LICENSE_SUMMARY } from '../launch.js'
 import boardOverview960 from '../assets/shots/board-overview-960.webp'
 import boardOverview1440 from '../assets/shots/board-overview-1440.webp'
 import boardOverview2048 from '../assets/shots/board-overview-2048.webp'
@@ -92,6 +92,15 @@ function Hero() {
                 <Link to="/docs/getting-started#install" className="font-medium text-wall hover:text-wall-deep">
                   Install steps
                 </Link>
+              </p>
+            ) : null}
+            {BETA ? (
+              <p data-early-access-note="" className="text-[13px] text-pretty text-faint">
+                Early access: we are still working out the mechanics and want your{' '}
+                <Link to="/contact" className="font-medium text-wall hover:text-wall-deep">
+                  feedback
+                </Link>
+                .
               </p>
             ) : null}
           </div>
