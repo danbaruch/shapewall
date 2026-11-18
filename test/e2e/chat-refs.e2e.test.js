@@ -8,7 +8,8 @@
 // - A real board with the OpenAI-compatible stub: only references the board
 //   has become chips; unknown ids stay plain text; a chip jumps the canvas.
 // - A real board with a scripted ACP agent and the owner's settings token:
-//   the turn's file shows in the summary, Undo restores the project file,
+//   the turn's file shows in the summary, Undo restores the project file and
+//   leaves (and says it leaves) a file changed outside the agent,
 //   and a tab without the token gets no Undo.
 // Nothing may log an error. Set SHAPEWALL_SHOTS=<dir> to keep screenshots.
 import { after, before, test } from 'node:test'
@@ -81,7 +82,7 @@ before(async () => {
     config: acpSetup.config,
     env: { PATH: process.env.PATH, HOME: process.env.HOME || '/tmp' },
     settingsToken: TOKEN,
-    agentAcp: `${process.execPath} ${ACP_FIX} edit`,
+    agentAcp: `${process.execPath} ${ACP_FIX} edit-outside`,
     capture: async () => ({ ok: true, failed: 0, total: 1 }),
   })
   acpServer = await listen(acpApp)
@@ -321,6 +322,13 @@ test('real board, ACP agent: the owner sees what the turn changed and Undo resto
     await summary.waitFor({ timeout: 30000 })
     assert.ok(fs.existsSync(source), 'the agent wrote the file')
     assert.match(await summary.locator('[data-sw-chat-summary-file="index.html"]').getAttribute('data-status'), /added/)
+    // A file changed outside the agent during the turn: listed, and the card says Undo leaves it alone.
+    const notes = path.join(acpSetup.config.dir, 'notes.txt')
+    assert.equal(await summary.locator('[data-sw-chat-summary-file="notes.txt"]').count(), 1)
+    assert.equal(
+      await summary.locator('[data-sw-chat-summary-outside]').textContent(),
+      'Undo leaves 1 file changed outside the agent as it is.',
+    )
     assert.equal(await summary.locator('[data-sw-chat-summary-recapture="pricing"]').count(), 1)
     await shot(page, 'refs-acp-summary')
 
@@ -335,6 +343,8 @@ test('real board, ACP agent: the owner sees what the turn changed and Undo resto
     await page.click('[data-sw-chat-undo-confirm]')
     await summary.locator('[data-sw-chat-summary-undone]').waitFor()
     assert.equal(fs.existsSync(source), false, 'Undo removed the file the agent added')
+    assert.equal(fs.readFileSync(notes, 'utf8'), 'Saved by a person during the turn.\n', 'the outside file stays')
+    assert.equal(await summary.locator('[data-sw-chat-summary-outside]').textContent(), 'Not undone: 1 file changed outside the agent.')
     // Reloaded, the answer still says it was undone and offers no Undo.
     await page.reload()
     await page.waitForSelector('[data-sw-chat-summary-undone]', { timeout: 20000 })
