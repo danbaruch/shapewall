@@ -62,6 +62,10 @@ import { transaction } from './db.js'
 import { HttpError, fail } from './http.js'
 import { roleAtLeast } from './permissions.js'
 import { LIMITS } from './ratelimit.js'
+import { roleIn } from './tenancy.js'
+
+// A Git commit id (SHA-1 or SHA-256): which held fix "Push this fix" means.
+const COMMIT_RE = /^[0-9a-f]{40}([0-9a-f]{24})?$/
 
 const MENTIONS_MAX = 8
 // One viewer's stream of a turn: how much may wait for a slow reader, and
@@ -96,6 +100,10 @@ export function mountChatRoutes(
     workspaceQuota = undefined,
     policyFor = null,
     stepUpOrThrow = () => {},
+    // Whether the session a stream was opened with still signs its person in
+    // (src/hosted/guards.js stillSignedIn). Without it a stream ends at its
+    // first event: never a stream that outlives the access it started with.
+    stillSignedIn = null,
     now = () => new Date(),
   },
 ) {
@@ -362,6 +370,12 @@ export function mountChatRoutes(
     // `drain`, in order. Only a viewer that stays stuck is let go (too much
     // waiting, or no progress for too long); it comes back with the id of
     // the last event it has (`after`), and misses nothing.
+    //
+    // Access is decided again for every write, not once at subscribe: the
+    // session must still sign this person in, they must still be a member
+    // of the workspace and the project must still be there, and whether
+    // they see diffs is read anew. Lost access ends the stream before the
+    // next byte; a narrower view re-renders what waits in the queue.
     const queue = []
     let queued = 0
     let blocked = false
@@ -372,12 +386,26 @@ export function mountChatRoutes(
       clearInterval(timer)
       clearTimeout(stuck)
       unsubscribe()
+      queue.length = 0
+      queued = 0
       res.end()
     }
+    const accessNow = () => {
+      if (!stillSignedIn || !stillSignedIn(req)) return null
+      const role = roleIn(db, req.user.id, req.t.workspaceId)
+      if (!roleAtLeast(role, 'member') || !req.projects.get(req.project.id)) return null
+      const viewer = { user: req.user, t: req.t, project: req.project, role }
+      return { sees: seesDiffs(viewer, live.boardId, live.agentId, live.startedBy) }
+    }
     const pump = () => {
+      // One check per pass: everything written in it goes out at one moment.
+      let access = null
       while (queue.length && !blocked && !done) {
-        const text = queue.shift()
-        queued -= text.length
+        access ||= accessNow()
+        if (!access) return finish()
+        const item = queue.shift()
+        queued -= item.text.length
+        const text = item.event && item.sees && !access.sees ? render(item.event, false) : item.text
         if (!res.write(text)) {
           blocked = true
           stuck = setTimeout(finish, FOLLOW.stuckMs)
@@ -391,17 +419,18 @@ export function mountChatRoutes(
       }
       if (ending && !queue.length && !blocked) finish()
     }
-    const send = (text) => {
+    const send = (text, event = null, sees = false) => {
       if (done) return
-      queue.push(text)
+      queue.push({ text, event, sees })
       queued += text.length
       if (queued > FOLLOW.queueBytes) return finish()
       pump()
     }
-    const timer = setInterval(() => send(': keepalive\n\n'), 15_000)
+    // A keepalive checks access too: a quiet turn does not keep a stream
+    // open for someone who lost it.
+    const timer = setInterval(() => (accessNow() ? send(': keepalive\n\n') : finish()), 15_000)
     timer.unref()
-    const sees = seesDiffs(req, live.boardId, live.agentId, live.startedBy)
-    const shown = (event) =>
+    const shown = (event, sees) =>
       sees
         ? event.data
         : event.name === 'tool'
@@ -409,13 +438,16 @@ export function mountChatRoutes(
           : event.name === 'done' && event.data?.message
             ? { ...event.data, message: messageFor(event.data.message, false) }
             : event.data
+    const render = (event, sees) => `id: ${event.seq}\nevent: ${event.name}\ndata: ${JSON.stringify(shown(event, sees))}\n\n`
     const subscribed = hub.subscribe(live, after, (event) => {
       if (done) return
       if (event.name === 'end') {
         ending = true
         return pump()
       }
-      send(`id: ${event.seq}\nevent: ${event.name}\ndata: ${JSON.stringify(shown(event))}\n\n`)
+      const access = accessNow()
+      if (!access) return finish()
+      send(render(event, access.sees), event, access.sees)
     })
     if (!subscribed) {
       send(`event: status\ndata: ${JSON.stringify({ text: 'Too many people are watching this answer. Reload in a moment.' })}\n\n`)
@@ -594,11 +626,13 @@ export function mountChatRoutes(
     const sends = rateLimiter.hit('chatSend', req.user.id, LIMITS.chatSend)
     if (!sends.ok) throw new HttpError(429, 'rate_limited', 'That is a lot of requests. Wait a moment and try again.')
     const author = { name: req.user.display_name, handle: req.user.handle }
+    // The fix whose card was clicked (its summary's commit): the agent offers that one only.
+    const commit = typeof req.body?.commit === 'string' && COMMIT_RE.test(req.body.commit) ? req.body.commit : null
     const made = transaction(db, () => {
       const message = store.append(req.project.id, ctx.board.id, threadId, {
         role: 'user',
         userId: req.user.id,
-        body: { text: `Push the fix of comment #${number}.`, sent: { comment: number }, push: true, author },
+        body: { text: `Push the fix of comment #${number}.`, sent: { comment: number }, push: true, ...(commit ? { commit } : {}), author },
       })
       const turn = store.createTurn({
         projectId: req.project.id,

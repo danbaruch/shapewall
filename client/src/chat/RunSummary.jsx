@@ -320,7 +320,7 @@ function RemoteBranch({ summary, touch }) {
           onClick={async () => {
             setAsking(true)
             try {
-              await push()
+              await push(branch.commit)
             } finally {
               setAsking(false)
             }

@@ -1478,7 +1478,10 @@ without asking**.
   **Push this fix** card with the whole changed-files diff. Someone who may answer the agent's cards allows it,
   under the same rules as any card (the hash, once, the machine's own recheck); it waits 10 minutes. Denied or not
   answered, the fix stays on the machine and the result offers **Push this fix** again, as often as needed. A fix too large to
-  show in full cannot be pushed from the board at all.
+  show in full cannot be pushed from the board at all. A held fix belongs to the connection that made it (the server's
+  address, the workspace, the project and the agent): one folder connected twice never offers one connection's fix to the
+  other, and **Push this fix** offers the very fix whose result it is on, not a newer one of the same comment. A fix held by
+  a version before this was recorded is not offered again: ask the agent for a fresh fix.
 - **If the machine connects again without it**, the stored rule is set back to "ask" at once, and that is in the audit log.
 
 An edit that went without asking is still a card in the thread, marked "Allowed automatically", and is counted and audited.
@@ -2035,7 +2038,19 @@ Old-host passkeys show "For old.example" on the Account page.
 <data>/setup-link              the first account's setup link (0600), until it is used
 <data>/files/<ws>/<project>/<board>/   pushed captures, in the local layout
 <data>/staging/<push>/         pushes in progress (swept after an hour)
+<data>/swaps/<push>.json       a push commit's folder swap while it runs (settled by the sweep after a crash)
 ```
+
+A push commit swaps the board's folder for the uploaded one inside the database transaction that records it. Before the first
+rename it writes `swaps/<push>.json`; if the server dies mid-swap, the sweep at the next start follows the database: a
+committed push keeps the new folder and removes `<board>.old-<push>`, anything else gets the previous folder back and the
+uploads return to `staging/` (the push can be committed again or expires). An old folder the database cannot account for is
+left in place and named in the log (`left ... in place; check it by hand`).
+
+Deploy by stopping the old server before starting the new one, never side by side. The sweep runs when a server starts: with
+two processes on one data folder, the new one's sweep can roll back a push the old one is committing at that moment. After a
+downgrade to 0.11.0 or earlier, that version's sweep is back: it removes every `<board>.old-<push>` folder whatever the
+database says, and ignores `swaps/`.
 
 Use the operator commands below for a consistent database and file copy. Copying the SQLite file alone, or copying files after an
 unlocked database snapshot, is not a complete backup of a board.
@@ -2106,7 +2121,8 @@ Try these on the real server, at its real address, before the team depends on it
 5. **Check operation and recovery.** Give the server a lifecycle independent of an interactive shell or coding-agent session. The
    foreground command stops when its process stops; example service/Compose files need deliberate operator setup. Probe `/api/health`
    from a second device, choose monitoring and backup arrangements, and restore a backup to a separate folder before relying on it.
-   Do not start two hosted processes against one data directory. Record the data and immutable release to use for rollback.
+   Do not start two hosted processes against one data directory, also not for a moment during a deploy: stop the old one, then
+   start the new one. Record the data and immutable release to use for rollback.
 6. **Try the passkeys your team uses.** Shapewall's tests use virtual authenticators, so check iCloud, Google or password-manager
    sync, hardware keys and phone autofill yourself, whichever the team will rely on. Origin migration is optional
    until the address changes, but preserve the old origin and recovery codes before attempting it.
@@ -2251,7 +2267,9 @@ public-project requests 600 a minute per IP, device polling 60/minute, plus the 
 Usage records (one small row per agent turn) are kept for 400 days unless a workspace has its own `--usage-days`; see
 [Retention, quota and export](#retention-quota-and-export). Current captures stay. By default retention keeps the newest two historical captures per page and viewport plus every historical
 capture a comment references, open or resolved, and every version a reply's drawing was made on, so that markup keeps rendering.
-Variants are left alone. It runs at start and every 6 hours in-process when the
+A push that replaces a board keeps those referenced versions too: when the pushing machine no longer has one (a second checkout,
+CI), the commit copies it over from the board it replaces and counts its bytes in the board's storage once. Other history follows
+the pushing machine. Variants are left alone. It runs at start and every 6 hours in-process when the
 operator starts the hosted server. `--retention-hours 0` disables it; `--retention-keep N` changes the default. To preview or run it:
 
 ```sh
@@ -2265,9 +2283,15 @@ shapewall hosted restore --from ./backups --check
 shapewall hosted restore --from ./backups --data ./restored-new-folder
 ```
 
-Backup holds a SQLite write lock only for a `VACUUM INTO` snapshot and the list of board folders; captures are copied after it is
-released, so reads and writes continue. A board pushed again while it is copied is copied again; boards and files deleted meanwhile
-are skipped and listed under `files.skipped` in `backup.json`. Anything written after the snapshot is not in the backup: it is a
+Backup holds a SQLite write lock for a `VACUUM INTO` snapshot and for pinning the board files that go with it: each file is
+hard-linked into a `.backup-pin-<id>` folder inside the data folder (copied instead when the disk cannot link), so the files
+and the database in a backup are the same moment. The pin is copied to the backup after the lock is released, so reads and
+writes continue, and then removed; a pin left by a crashed backup is removed by the next backup after a day. When the data
+folder cannot take the pin, the files are copied under the lock instead, which holds the lock longer. A board row whose folder
+is missing is listed under `files.skipped.missing` in `backup.json`, the backup is marked `"complete": false` and the backup
+command prints a warning and exits with status 1 (a timer or script that runs it sees the failure). Backups made by
+earlier versions that recorded skipped boards under `files.skipped` now fail the restore drill: they never held every board's
+files, so that is the drill being right, not a regression. Anything written after the snapshot is not in the backup: it is a
 copy of a moment, not a continuous log. A `--to` inside the data folder is refused. The backup includes account data, passkey
 public keys, captures, comments, audit records, signing key and default-path quota config. If the HMAC key is supplied as a systemd
 credential or environment variable, give the backup command the same credential: with `SHAPEWALL_HOSTED_SECRET` in the
@@ -2282,7 +2306,8 @@ encrypt offsite copies and test that you can recover them. Staging uploads and o
 `--keep-days 30` deletes only recognizable older backup folders in the destination; it does not schedule anything. The example
 backup service/timer is disabled until the operator explicitly installs and enables it. Installation never starts a backup timer.
 A monthly manual restore drill should be logged by the operator. `restore --check` creates a scratch copy beside the backup, verifies
-checksums, row counts, board folders and health, then stops its temporary server and removes the scratch copy. Automated tests also
+checksums, row counts, board folders, that every capture a board's manifest lists is there, that the backup is complete (one
+that left files out, also one from an older version that listed them under `files.skipped`, fails), and health, then stops its temporary server and removes the scratch copy. Automated tests also
 sign in to a restored fixture with its software passkey; that does not verify real phones or hardware authenticators.
 
 Four things the commands above do not do for you, each enough to leave a dead instance:

@@ -178,6 +178,8 @@ export async function runAgentLink({
   let taking = Boolean(takeover)
 
   const clean = (value) => redact(value, token)
+  // This connection, as the server said at hello: a held fix is bound to it (agent-fix.js readHeld).
+  const ownerOf = () => ({ origin, workspace: agent?.workspace?.id, project: agent?.project?.id, agent: agent?.id })
 
   // ---- One turn ----
 
@@ -421,9 +423,21 @@ export async function runAgentLink({
         const record =
           policy.approvals === 'none' || !fix
             ? null
-            : await readHeld({ config: fix.config, env: fix.env, board: job.turn.board, comment: job.turn.comment })
+            : await readHeld({
+                config: fix.config,
+                env: fix.env,
+                board: job.turn.board,
+                comment: job.turn.comment,
+                owner: ownerOf(),
+                commit: job.turn.commit,
+              })
         if (!record) {
-          await finish(refused("No fix of this comment is waiting to be pushed on the agent's machine.", 'no_held_fix'))
+          await finish(
+            refused(
+              'This fix is no longer available to push: it was already pushed, a newer fix replaced it, or it was made before an update. Ask the agent for a fresh fix.',
+              'no_held_fix',
+            ),
+          )
           return
         }
         entry.thread = `${job.turn.board}/${job.turn.thread}`
@@ -533,6 +547,7 @@ export async function runAgentLink({
             prepared: done,
             job,
             approved,
+            owner: ownerOf(),
             // Stop is honoured between every step: nothing is committed, pushed or opened after it.
             signal: controller.signal,
             env: fix.env,

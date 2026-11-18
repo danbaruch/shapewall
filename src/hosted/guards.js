@@ -68,6 +68,15 @@ export function createGuards({
       setCookie(req.res, SESSION_COOKIE, token, Math.max(0, Math.floor((req.auth.renewedUntil - now().getTime()) / 1000)))
     return req.auth
   }
+  // Whether the session a long request (a live stream) was admitted with
+  // still signs the same person in now: read again, never from the request's
+  // cache. Signed out, expired, ended elsewhere or passkeys switched off: false.
+  function stillSignedIn(req) {
+    if (!req.auth || !req.user) return false
+    const found = readSession(req, parseCookies(req.headers.cookie)[SESSION_COOKIE]) || null
+    if (!found || (found.session.via !== 'tailnet' && !passkeys.on())) return false
+    return found.user.id === req.user.id
+  }
   // Passkey routes on a server where passkeys are off: a clear answer, before anything else looks at them.
   // One of them stays open: taking away a passkey that a tailnet session added and that is still on hold
   // ("Not you? Remove it", shown on every page). The person must be able to do that whatever the switch says.
@@ -458,6 +467,7 @@ export function createGuards({
     setCookie,
     limit,
     sessionOf,
+    stillSignedIn,
     guardWrites,
     needSession,
     needFresh,

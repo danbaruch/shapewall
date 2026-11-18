@@ -4,16 +4,21 @@
 // A backup is one folder, <to>/shapewall-backup-<UTC time>/ (0700):
 //   shapewall.db    the database through VACUUM INTO: one consistent snapshot,
 //                   taken while the server runs (WAL readers never block)
-//   files/          pushed captures, copied after the snapshot
+//   files/          pushed captures: exactly the generation the snapshot names
 //   secret.key      the signing key (0600), when the server made one
 //   quotas.json     the operator's quotas, when there is one
 //   backup.json     what it holds: schema version, row counts, the database's
-//                   SHA-256, file count and bytes
-// A SQLite write lock spans only the database snapshot and the listing of
-// its board folders; the files are copied after it is released, so pushes and
-// metadata writes keep working. A board folder that a later push swapped is
-// copied again until it holds still, and files or folders that vanish while
-// copying (retention, deletions) are skipped; backup.json lists both.
+//                   SHA-256, file count and bytes, and whether it is complete
+// A SQLite write lock spans the database snapshot and a pin of its board
+// folders: every file of every board the snapshot lists is hard-linked into a
+// pin folder inside the data folder (a copy where links do not work). Push
+// commits, retention and deletions take the same lock, and they only ever
+// rename or unlink board files, never rewrite one, so the pin holds the very
+// files the snapshot's rows describe. The pin is copied into the backup after
+// the lock is released, so pushes and metadata writes keep working, and then
+// removed. A board the snapshot lists with no folder makes the backup
+// incomplete (`complete: false`, listed under files.skipped.missing): the
+// backup command and the restore drill both fail on it.
 // Open pushes (staging/) are not backed up; they would expire anyway.
 //
 // A backup holds everything: accounts, passkey public keys, comments and
@@ -107,81 +112,77 @@ function copyTree(from, to, stats, attempt = 0) {
   }
 }
 
-// The identity of a board folder: a push commit swaps in a new folder by
-// rename, so a changed identity means the folder was replaced.
-function folderId(dir) {
-  try {
-    const st = fs.statSync(dir, { bigint: true })
-    return `${st.dev}:${st.ino}:${st.birthtimeNs}`
-  } catch (error) {
-    if (error.code === 'ENOENT') return null
-    throw error
-  }
-}
+// A hard link the pin could not make (another file system, one without
+// links): the pin is given up, and the files are copied into the backup instead.
+class NoLinks extends Error {}
 
-const MISSING_RETRIES = 5
-const MISSING_PAUSE_MS = 50
-const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
-
-// Copies one board folder after the lock is released. Files that vanish while
-// copying are skipped and listed; a folder swapped mid-copy is copied again.
-// `locked` is the folder's identity read under the snapshot's lock: a push
-// that committed after the snapshot but before this copy started shows up as
-// a different identity. A push commit renames the old folder away before
-// renaming the new one in, so a missing folder is looked for again a few
-// times; it only counts as deleted once the live database has no row for it.
-async function copyBoard(from, to, stats, rel, { locked, rowExists }) {
-  let changed = false
-  for (let attempt = 0, misses = 0; ;) {
-    const id = folderId(from)
-    if (!id) {
-      if (misses < MISSING_RETRIES) {
-        misses += 1
-        await pause(MISSING_PAUSE_MS)
-        continue
-      }
-      if (!rowExists()) return { vanished: true }
-      return { changed, missing: [`${rel}/`] }
-    }
-    if (id !== locked) changed = true
-    const local = { files: 0, bytes: 0, missing: [] }
-    fs.rmSync(to, { recursive: true, force: true })
-    copyLive(from, to, local, rel)
-    if (folderId(from) === id || attempt >= 3) {
-      stats.files += local.files
-      stats.bytes += local.bytes
-      return { changed: changed || attempt > 0, missing: local.missing }
-    }
-    attempt += 1
-  }
-}
-
-function copyLive(from, to, stats, rel) {
+// Pins one board folder under the snapshot's lock: every file hard-linked
+// into `to`. The tree holds still while this runs (every writer of board
+// folders waits for the same lock), so whatever is here is the generation
+// the snapshot's row describes. A link that cannot be made throws NoLinks:
+// copying into the pin would write the whole capture store into the data
+// folder a second time. `link` false: a copy, made 0600, straight into the
+// backup. -> false when the folder is not there.
+function pinTree(from, to, link = true) {
   let entries
   try {
     entries = fs.readdirSync(from, { withFileTypes: true })
   } catch (error) {
-    if (error.code !== 'ENOENT') throw error
-    stats.missing.push(`${rel}/`)
-    return
+    if (error.code === 'ENOENT') return false
+    throw error
   }
   fs.mkdirSync(to, { recursive: true, mode: 0o700 })
   for (const entry of entries) {
     const source = path.join(from, entry.name)
     const target = path.join(to, entry.name)
-    if (entry.isDirectory()) copyLive(source, target, stats, `${rel}/${entry.name}`)
+    if (entry.isDirectory()) pinTree(source, target, link)
     else if (entry.isSymbolicLink()) throw new BackupError('backup files must not contain symbolic links')
     else if (entry.isFile()) {
-      try {
-        fs.copyFileSync(source, target, fs.constants.COPYFILE_FICLONE)
-      } catch (error) {
-        if (error.code !== 'ENOENT') throw error
-        stats.missing.push(`${rel}/${entry.name}`)
-        continue
+      if (link) {
+        try {
+          fs.linkSync(source, target)
+          continue
+        } catch (error) {
+          if (['EXDEV', 'EPERM', 'ENOTSUP', 'EMLINK', 'EOPNOTSUPP'].includes(error.code)) throw new NoLinks(error.code)
+          throw error
+        }
       }
+      fs.copyFileSync(source, target, fs.constants.COPYFILE_FICLONE)
       fs.chmodSync(target, 0o600)
+    }
+  }
+  return true
+}
+
+function countTree(dir, stats) {
+  let entries
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true })
+  } catch (error) {
+    if (error.code === 'ENOENT') return
+    throw error
+  }
+  for (const entry of entries) {
+    const file = path.join(dir, entry.name)
+    if (entry.isDirectory()) countTree(file, stats)
+    else if (entry.isFile()) {
       stats.files += 1
-      stats.bytes += fs.statSync(target).size
+      stats.bytes += fs.statSync(file).size
+    }
+  }
+}
+
+// Pin folders a backup that died left in the data folder: older than a day
+// (a running backup holds its pin for minutes at most).
+const PIN_RE = /^\.backup-pin-[0-9a-f-]{36}$/
+function sweepPins(source, now) {
+  for (const name of fs.readdirSync(source)) {
+    if (!PIN_RE.test(name)) continue
+    const dir = path.join(source, name)
+    try {
+      if (now.getTime() - fs.statSync(dir).mtimeMs > 86_400_000) fs.rmSync(dir, { recursive: true, force: true })
+    } catch {
+      /* another backup's, or gone */
     }
   }
 }
@@ -208,7 +209,7 @@ function copySmall(from, to) {
   return true
 }
 
-export async function backup({ dataDir, to, now = new Date(), keepDays = null }) {
+export async function backup({ dataDir, to, now = new Date(), keepDays = null, log = () => {} }) {
   const source = path.resolve(dataDir)
   const dbFile = path.join(source, 'shapewall.db')
   if (!fs.existsSync(dbFile)) throw new BackupError(`no hosted database at ${dbFile} (is --data right?)`)
@@ -226,62 +227,77 @@ export async function backup({ dataDir, to, now = new Date(), keepDays = null })
     let rows
     let boards
     const stats = { files: 0, bytes: 0 }
-    try {
-      // Push commits, retention and deletions all take the same SQLite write
-      // lock. Hold it only for the snapshot and the board list; the files are
-      // copied after it is released so the server's writes do not wait.
-      conn.exec('BEGIN IMMEDIATE')
-      const reader = await openRaw(dbFile, { readOnly: true })
-      try {
-        reader.prepare('VACUUM INTO ?').run(path.join(partial, 'shapewall.db'))
-      } finally {
-        reader.close()
-      }
-      fs.chmodSync(path.join(partial, 'shapewall.db'), 0o600)
-      const copy = await openRaw(path.join(partial, 'shapewall.db'), { readOnly: true })
-      try {
-        schema = copy.prepare('PRAGMA user_version').get().user_version
-        rows = counts(copy)
-        boards = copy.prepare('SELECT workspace_id, project_id, board_id FROM boards ORDER BY workspace_id, project_id, board_id').all()
-      } finally {
-        copy.close()
-      }
-      // Each board folder's identity while the lock is still held, so a push
-      // that commits before its folder is copied is noticed.
-      for (const row of boards) {
-        if (!ID_PATTERNS.workspace.test(row.workspace_id) || !ID_PATTERNS.project.test(row.project_id) || !ID_RE.test(row.board_id))
-          continue
-        row.folderId = folderId(path.join(source, 'files', row.workspace_id, row.project_id, row.board_id))
-      }
-      conn.exec('COMMIT')
-    } finally {
-      conn.close()
-    }
-    const vanished = []
-    const changed = []
     const missing = []
-    // The live database, read only: is a board whose folder is gone deleted?
-    const live = await openRaw(dbFile, { readOnly: true })
-    try {
-      const boardRow = live.prepare('SELECT 1 FROM boards WHERE workspace_id = ? AND project_id = ? AND board_id = ?')
-      for (const row of boards) {
-        const rel = `${row.workspace_id}/${row.project_id}/${row.board_id}`
-        if (!ID_PATTERNS.workspace.test(row.workspace_id) || !ID_PATTERNS.project.test(row.project_id) || !ID_RE.test(row.board_id))
-          continue
-        const result = await copyBoard(path.join(source, 'files', rel), path.join(partial, 'files', rel), stats, rel, {
-          locked: row.folderId,
-          rowExists: () => Boolean(boardRow.get(row.workspace_id, row.project_id, row.board_id)),
-        })
-        if (result.vanished) vanished.push(rel)
-        else {
-          if (result.changed) changed.push(rel)
-          missing.push(...result.missing)
-        }
-      }
-    } finally {
-      live.close()
+    sweepPins(source, now)
+    // The pin goes in the data folder (links need the same file system). A
+    // data folder this user may only read, or files that cannot be linked:
+    // the files are copied straight into the backup under the lock instead
+    // (correct, but the lock is held for the whole copy).
+    let pin = path.join(source, `.backup-pin-${randomUUID()}`)
+    let link = true
+    const copyUnderLock = (why) => {
+      log(`backup: ${why}, so the files are copied under the write lock: pushes and comments wait until the copy is done`)
+      pin = partial
+      link = false
     }
-    if (vanished.length || changed.length || missing.length) stats.skipped = { vanished, changed, missing }
+    try {
+      fs.mkdirSync(pin, { mode: 0o700 })
+    } catch (error) {
+      if (!['EACCES', 'EPERM', 'EROFS'].includes(error.code)) throw error
+      copyUnderLock('the data folder is read-only for this user')
+    }
+    try {
+      try {
+        // Push commits, retention and deletions all take the same SQLite
+        // write lock. Hold it for the snapshot and the pin of its board
+        // folders (links, not copies); the files are copied after it is
+        // released so the server's writes do not wait for the copy.
+        conn.exec('BEGIN IMMEDIATE')
+        const reader = await openRaw(dbFile, { readOnly: true })
+        try {
+          reader.prepare('VACUUM INTO ?').run(path.join(partial, 'shapewall.db'))
+        } finally {
+          reader.close()
+        }
+        fs.chmodSync(path.join(partial, 'shapewall.db'), 0o600)
+        const copy = await openRaw(path.join(partial, 'shapewall.db'), { readOnly: true })
+        try {
+          schema = copy.prepare('PRAGMA user_version').get().user_version
+          rows = counts(copy)
+          boards = copy.prepare('SELECT workspace_id, project_id, board_id FROM boards ORDER BY workspace_id, project_id, board_id').all()
+        } finally {
+          copy.close()
+        }
+        const pinAll = () => {
+          missing.length = 0
+          for (const row of boards) {
+            if (!ID_PATTERNS.workspace.test(row.workspace_id) || !ID_PATTERNS.project.test(row.project_id) || !ID_RE.test(row.board_id))
+              continue
+            const rel = `${row.workspace_id}/${row.project_id}/${row.board_id}`
+            if (!pinTree(path.join(source, 'files', rel), path.join(pin, 'files', rel), link)) missing.push(`${rel}/`)
+          }
+        }
+        try {
+          pinAll()
+        } catch (error) {
+          if (!(error instanceof NoLinks)) throw error
+          // Never a second copy of the capture store in the data folder.
+          fs.rmSync(pin, { recursive: true, force: true })
+          copyUnderLock(`hard links do not work in the data folder (${error.message})`)
+          pinAll()
+        }
+        conn.exec('COMMIT')
+      } finally {
+        conn.close()
+      }
+      if (link) copyTree(path.join(pin, 'files'), path.join(partial, 'files'), stats)
+      else countTree(path.join(partial, 'files'), stats)
+    } finally {
+      if (link) fs.rmSync(pin, { recursive: true, force: true })
+    }
+    // The pin makes vanished and changed boards impossible; the keys stay
+    // for readers of older backups.
+    if (missing.length) stats.skipped = { vanished: [], changed: [], missing }
     const { loadCredentials } = await import('./server.js')
     loadCredentials()
     let secret
@@ -302,6 +318,8 @@ export async function backup({ dataDir, to, now = new Date(), keepDays = null })
         bytes: fs.statSync(path.join(partial, 'shapewall.db')).size,
         sha256: sha256File(path.join(partial, 'shapewall.db')),
       },
+      // Every board the snapshot lists, with its files: a recovery point.
+      complete: missing.length === 0,
       files: stats,
       hashes: fileDigests(partial),
       secret,
@@ -406,10 +424,48 @@ export async function restore({ from, data }) {
   }
 }
 
+// One restored board's folder against its row (`definition`, JSON): its
+// manifest is there and lists exactly the row's pages, and every capture the
+// manifest says was taken (a screenshot, and live HTML when it says so) is
+// there. -> ["<board>/<file> missing", ...]
+function boardProblems(dir, rel, definition) {
+  let manifest
+  let pages
+  try {
+    manifest = JSON.parse(fs.readFileSync(path.join(dir, 'captures', 'manifest.json'), 'utf8'))
+  } catch {
+    return [`${rel}/captures/manifest.json missing or unreadable`]
+  }
+  try {
+    pages = JSON.parse(definition).board.pages.map((page) => page.id)
+  } catch {
+    return [`${rel}: the board row is unreadable`]
+  }
+  const problems = []
+  const listed = Object.keys(manifest?.pages || {})
+  if (JSON.stringify([...listed].sort()) !== JSON.stringify([...pages].sort()))
+    problems.push(`${rel}: its files are not the generation its row describes`)
+  for (const [pageId, views] of Object.entries(manifest?.pages || {}))
+    for (const [viewport, entry] of Object.entries(views || {})) {
+      if (entry?.status !== 'ok') continue
+      const base = `${pageId}.${viewport}`
+      if (!/^[a-z0-9][a-z0-9-]*\.[a-z][a-z0-9-]*$/.test(base)) {
+        problems.push(`${rel}: a manifest entry with a bad name`)
+        continue
+      }
+      if (!fs.existsSync(path.join(dir, 'captures', `${base}.png`))) problems.push(`${rel}/captures/${base}.png missing`)
+      if (entry.html?.status === 'ok' && !fs.existsSync(path.join(dir, 'captures', `${base}.html`)))
+        problems.push(`${rel}/captures/${base}.html missing`)
+    }
+  return problems
+}
+
 // The restore drill: restore into a scratch folder beside the backup (on the
 // same disk, not a RAM /tmp), start a server on a free loopback port, check
-// /api/health, the row counts and that every board's folder is there, stop
-// it and remove the scratch folder. Returns { ok, checks: [...] }.
+// /api/health, the row counts, that the backup is a complete recovery point
+// (nothing was left out while backing up), and that every board's folder is
+// there with every capture its manifest names, stop it and remove the
+// scratch folder. Returns { ok, checks: [...] }.
 export async function restoreDrill({ from, scratch = null, out = () => {} }) {
   const dir = findBackup(from)
   const scratchDir = path.resolve(scratch || path.join(path.dirname(dir), `.restore-drill-${process.pid}-${Date.now()}`))
@@ -431,20 +487,35 @@ export async function restoreDrill({ from, scratch = null, out = () => {} }) {
       check(`rows in ${table}`, restored.counts[table] === expected, `${restored.counts[table]} (backup says ${expected})`)
     }
     conn = await openDatabase(path.join(scratchDir, 'shapewall.db'))
-    const boards = conn.prepare('SELECT workspace_id, project_id, board_id FROM boards').all()
-    // Boards deleted after the snapshot, while files were copied, are listed.
-    const vanished = new Set(restored.manifest.files.skipped?.vanished || [])
-    const missing = boards.filter(
-      (row) =>
-        !vanished.has(`${row.workspace_id}/${row.project_id}/${row.board_id}`) &&
-        !fs.existsSync(path.join(scratchDir, 'files', row.workspace_id, row.project_id, row.board_id)),
-    )
+    const boards = conn.prepare('SELECT workspace_id, project_id, board_id, definition FROM boards').all()
+    // What backing up could not take (a board with no folder; in backups from
+    // before the pin, boards deleted, re-pushed or pruned while copying): the
+    // restored data is not the snapshot's, so this is not a recovery point.
+    const skipped = restored.manifest.files.skipped || {}
+    const left = ['missing', 'vanished', 'changed'].flatMap((key) => (Array.isArray(skipped[key]) ? skipped[key] : []))
     check(
-      'board folders',
-      !missing.length,
-      missing.length
-        ? `${missing.length} of ${boards.length} missing`
-        : `${boards.length - vanished.size} present${vanished.size ? `, ${vanished.size} deleted while backing up` : ''}`,
+      'recovery point complete',
+      restored.manifest.complete !== false && !left.length,
+      left.length ? `backing up left out ${left.length}: ${left.slice(0, 5).join(', ')}${left.length > 5 ? ', ...' : ''}` : '',
+    )
+    const missing = boards.filter((row) => !fs.existsSync(path.join(scratchDir, 'files', row.workspace_id, row.project_id, row.board_id)))
+    check('board folders', !missing.length, missing.length ? `${missing.length} of ${boards.length} missing` : `${boards.length} present`)
+    // Each board's files against its row: the captures its manifest names
+    // are there, and the manifest is of the generation the row describes.
+    const problems = []
+    for (const row of boards) {
+      const rel = `${row.workspace_id}/${row.project_id}/${row.board_id}`
+      if (!ID_PATTERNS.workspace.test(row.workspace_id) || !ID_PATTERNS.project.test(row.project_id) || !ID_RE.test(row.board_id)) continue
+      const dir = path.join(scratchDir, 'files', rel)
+      if (!fs.existsSync(dir)) continue
+      problems.push(...boardProblems(dir, rel, row.definition))
+    }
+    check(
+      'board files',
+      !problems.length,
+      problems.length
+        ? `${problems.length} missing or mismatched: ${problems.slice(0, 5).join(', ')}${problems.length > 5 ? ', ...' : ''}`
+        : '',
     )
     const { createHostedApp } = await import('./app.js')
     const { readSecret } = await import('./server.js')
