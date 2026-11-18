@@ -39,6 +39,11 @@ export default function Privacy() {
             that reports page views and load times back to it. It is cookieless too, stores nothing on your device and gives us aggregate
             numbers only, not a record of what one visitor did.
           </p>
+          <p id="error-reports">
+            When error reporting is turned on for this site, an error in a page sends a report to an error-tracking service we host
+            ourselves: the error message with any quoted text removed, where in our code it happened, the page path, the pages and requests
+            just before it, and your browser&apos;s User-Agent. Reports never carry cookies, form contents, query strings or what you typed.
+          </p>
           <p>
             The docs search runs in your browser. What you type is never sent anywhere. There are no newsletter signups and no ads on this
             site, and apart from the two analytics tools above, no third-party scripts.

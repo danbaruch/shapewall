@@ -56,3 +56,37 @@ test('the privacy page names no analytics, hosting, error-tracking or messaging 
   assert.match(flat, /reports page views and load times/)
   assert.match(flat, /apart from the two analytics tools above, no third-party scripts/)
 })
+
+// The error-reports paragraph matches what the site's error setup sends (src/main.jsx, src/errors.js and the shared
+// scrubber ../src/error-scrub.js): only with a build-time DSN, only on the real site, and scrubbed before it leaves.
+test('the error-reports notice matches what the site sends, and names no vendor', () => {
+  const main = read('../src/main.jsx')
+  const errors = read('../src/errors.js')
+  const scrub = read('../../src/error-scrub.js')
+  const paragraph = (/<p id="error-reports">([\s\S]*?)<\/p>/.exec(privacy)?.[1] || '').replace(/\s+/g, ' ')
+  assert.ok(paragraph, 'the paragraph is there')
+  // Off unless the build turns it on, and only on shapewall.com itself.
+  assert.match(main, /if \(__SHAPEWALL_ERROR_DSN__ && window\.location\.hostname === 'shapewall\.com'\)/)
+  assert.match(paragraph, /When error reporting is turned on for this site/)
+  // Scrubbed before sending: no identities, no default personal data, no console lines or clicks.
+  assert.match(errors, /sendDefaultPii: false/)
+  assert.match(errors, /beforeSend: \(event\) => scrubEvent\(event\)/)
+  assert.match(errors, /breadcrumbsIntegration\(\{ console: false, dom: false,/)
+  assert.match(scrub, /const bare = value\.replace\(\/\[\?#\]/, 'query strings and fragments are cut from every URL')
+  assert.match(
+    scrub,
+    /\.\.\.\(typeof userAgent === 'string' \? \{ headers: \{ 'User-Agent': userAgent \} \} : \{\}\)/,
+    'only the User-Agent header',
+  )
+  assert.match(scrub, /export function scrubMessage/)
+  for (const said of [
+    'the error message with any quoted text removed',
+    'where in our code it happened',
+    'the page path',
+    'the pages and requests just before it',
+    'User-Agent',
+    'never carry cookies, form contents, query strings or what you typed',
+    'an error-tracking service we host ourselves',
+  ])
+    assert.ok(paragraph.includes(said), `says: ${said}`)
+})
