@@ -5,6 +5,27 @@ import tailwindcss from '@tailwindcss/vite'
 import { markdown } from './scripts/markdown.mjs'
 import debugIds from '../scripts/vite-debug-ids.mjs'
 import sourcemapsStep from '../scripts/vite-sourcemaps-step.mjs'
+import { assertMedia } from './scripts/media-lib.mjs'
+import { serveMedia } from './scripts/serve.mjs'
+
+// The videos (src/media.json) are not in git: the client build stops with a clear message when a file the manifest
+// names is missing from website/media/ (SHAPEWALL_MEDIA_CHECK=0 skips that, for tests and CI only). The dev server
+// serves website/media/ at /media/, as the production server does from its shared media folder.
+function media({ ssr }) {
+  let command = 'build'
+  return {
+    name: 'shapewall-media',
+    config(_, env) {
+      command = env.command
+    },
+    buildStart() {
+      if (command === 'build' && !ssr) assertMedia()
+    },
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => (serveMedia(req, res) ? undefined : next()))
+    },
+  }
+}
 
 // The site is prerendered: `vite build` (client), `vite build --ssr src/entry-server.jsx` (renderer), then
 // scripts/prerender.mjs writes one HTML file per route into dist/. Docs pages are markdown in src/docs/, turned
@@ -31,7 +52,7 @@ try {
 // The prerender (--ssr) build makes none.
 export default defineConfig(({ isSsrBuild }) => ({
   base: '/',
-  plugins: [markdown(), react(), tailwindcss(), debugIds(), sourcemapsStep({ release: revision })],
+  plugins: [media({ ssr: isSsrBuild }), markdown(), react(), tailwindcss(), debugIds(), sourcemapsStep({ release: revision })],
   // The launch switch, read by src/launch.js.
   // __SHAPEWALL_STEALTH__ lets client-side navigation keep the robots tag the prerender wrote (src/components/layout.jsx).
   define: {
