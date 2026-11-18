@@ -40,6 +40,8 @@ export function mountBoardRoutes(
     usercontent,
     guardWrites,
     needSession,
+    // Whether a stream's session still signs its person in (guards.js).
+    stillSignedIn = null,
     limit,
     inWorkspace,
     inProject,
@@ -233,6 +235,7 @@ export function mountBoardRoutes(
           workspaceQuota,
           policyFor,
           stepUpOrThrow,
+          stillSignedIn,
           now,
         })
       : null

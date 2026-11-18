@@ -64,21 +64,59 @@ export function ciConfig(config, board, { baseUrl, outputDir, maxPages } = {}) {
   return { ...config, outputDir, versions: 0, liveHtml: false, boards: [ciBoard] }
 }
 
-// Captures one side into `dir` (replaced). Never throws for a capture that
-// failed: side.json then holds the error and the folder has no manifest.
-// Returns { ok, dir, error, shots, failed }.
-export async function captureSide({ config, board, baseUrl, dir, maxPages, log = () => {}, chromium = null }) {
+// What a side folder holds once captured: side.json, the manifest and the screenshots.
+const isSideFile = (entry) =>
+  entry.isFile() && (entry.name === 'side.json' || entry.name === 'manifest.json' || entry.name.endsWith('.png'))
+
+// Why `dir` cannot take a side, or null: it is missing, empty, or an earlier
+// side (its side.json, and nothing but the files a side holds). Anything else
+// may be someone's work, so it is never emptied.
+export function sideDirProblem(dir) {
   const target = path.resolve(dir)
-  const work = `${target}.work`
-  fs.rmSync(target, { recursive: true, force: true })
-  fs.rmSync(work, { recursive: true, force: true })
+  let entries
+  try {
+    entries = fs.readdirSync(target, { withFileTypes: true })
+  } catch (error) {
+    if (error.code === 'ENOENT') return null
+    if (error.code === 'ENOTDIR') return `${target} is a file, not a folder`
+    throw error
+  }
+  if (!entries.length) return null
+  const foreign = entries.filter((entry) => !isSideFile(entry)).map((entry) => entry.name)
+  if (foreign.length || !entries.some((entry) => entry.name === 'side.json')) {
+    const names = foreign.length ? ` (${foreign.slice(0, 3).join(', ')})` : ''
+    return `${target} has files Shapewall did not write${names}; give a new or empty folder`
+  }
+  return null
+}
+
+// Makes `dir` an empty folder for a side: an earlier side's files are removed
+// one by one, anything else is refused (see sideDirProblem).
+export function prepareSideDir(dir) {
+  const target = path.resolve(dir)
+  const problem = sideDirProblem(target)
+  if (problem) throw new Error(problem)
   fs.mkdirSync(target, { recursive: true })
+  for (const name of fs.readdirSync(target)) fs.rmSync(path.join(target, name))
+  return target
+}
+
+// Captures one side into `dir`. An earlier side there is replaced; a folder
+// with anything else is refused before anything runs. Never throws for a
+// capture that failed: side.json then holds the error and the folder has no
+// manifest. Returns { ok, dir, error, shots, failed }.
+export async function captureSide({ config, board, baseUrl, dir, maxPages, log = () => {}, chromium = null }) {
+  const target = prepareSideDir(dir)
+  // A new folder of its own next to the result, so the screenshots are only renamed into place.
+  const work = fs.mkdtempSync(`${target}.work-`)
   const sideConfig = ciConfig(config, board, { baseUrl, outputDir: work, maxPages })
   const sideBoard = sideConfig.boards[0]
   const side = {
     source: baseUrl,
     board: board.id,
     pages: sideBoard.pages.map((page) => ({ id: page.id, title: page.title, path: page.path })),
+    // Pages the page limit (ci.maxPages) left out, so the comment can say so.
+    pagesLeftOut: ciPages(config, board, { maxPages }).left,
     error: null,
   }
   let result = null

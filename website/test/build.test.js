@@ -11,7 +11,7 @@ import { DEMO_SITE_PATHS, HARDENING_PDF, NOT_FOUND, ROUTES, SITE_URL } from '../
 import { FAQ } from '../src/faq-data.js'
 import { DEMO_SITES } from '../../scripts/demo-publish.js'
 import { THEME_KEY } from '../src/theme.js'
-import { BETA_NOTE } from '../src/launch.js'
+import { BETA, BETA_NOTE, BETA_TAG_NOTE } from '../src/launch.js'
 
 const SITE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const DIST = path.join(SITE, 'dist')
@@ -248,14 +248,40 @@ test('early access (the default): said in the hero badge and the install box, no
   assert.match(install, /npm install --save-dev shapewall\b/)
   assert.match(install, /npm install --save-dev github:danbaruch\/shapewall/, 'GitHub stays the install for unreleased builds')
   assert.doesNotMatch(install, /Edit on GitHub/)
+  checkBetaTag()
   checkLinks()
 })
+
+// Early access (beta), launched or not: every page's header lockup carries the Beta tag inside the home link, which
+// names it for screen readers (the tag itself is hidden from them and takes no focus); the home page asks for feedback.
+function checkBetaTag() {
+  assert.equal(BETA, true, 'update this check when the beta ends')
+  for (const route of [...ROUTES.filter((r) => !r.path.startsWith('/demo')), NOT_FOUND]) {
+    const file = route === NOT_FOUND ? path.join(DIST, '404.html') : fileFor(route.path)
+    if (!fs.existsSync(file)) continue
+    const header = (read(file).match(/<header[\s\S]*?<\/header>/) || [])[0] || ''
+    const home = header.match(/<a [^>]*aria-label="([^"]*)"[^>]*href="\/"[^>]*>([\s\S]*?)<\/a>/)
+    assert.ok(home, `${route.path}: the header has a home link`)
+    assert.equal(home[1], 'Shapewall home, beta', `${route.path}: the home link says beta`)
+    const tag = home[2].match(/<span[^>]*data-beta-tag[^>]*>([^<]*)<\/span>/)
+    assert.ok(tag, `${route.path}: the Beta tag sits in the header lockup`)
+    assert.equal(tag[1], 'Beta')
+    assert.match(tag[0], /aria-hidden="true"/, `${route.path}: the tag is not read twice`)
+    assert.ok(decode(tag[0]).includes(`title="${BETA_TAG_NOTE}"`), `${route.path}: the tag explains itself on hover`)
+    assert.doesNotMatch(tag[0], /tabindex/, `${route.path}: the tag takes no focus`)
+  }
+  const note = read(fileFor('/')).match(/<p[^>]*data-early-access-note[^>]*>([\s\S]*?)<\/p>/)
+  assert.ok(note, 'the home page has the early access note')
+  assert.match(note[1], /Early access: we are still working out the mechanics and want your/)
+  assert.match(note[1], /<a [^>]*href="\/contact"[^>]*>feedback<\/a>/)
+}
 
 test('launched: install command, plain GitHub links, a free Offer, no early access wording', () => {
   build({ SHAPEWALL_LAUNCHED: '1', SHAPEWALL_STEALTH: '0' })
   for (const route of ROUTES) {
     const html = checkPage(route, { stealth: false })
-    assert.ok(!/early access|invite only|invited (users|repository|GitHub)/i.test(html), `${route.path}: no pre-launch wording`)
+    // "Early access (beta)" is the BETA note and stays after launch; "Private early access" is the pre-launch wording.
+    assert.ok(!/private early access|invite only|invited (users|repository|GitHub)/i.test(html), `${route.path}: no pre-launch wording`)
   }
   const home = read(fileFor('/'))
   assert.match(home, /npm install --save-dev shapewall\b/)
@@ -278,6 +304,7 @@ test('launched: install command, plain GitHub links, a free Offer, no early acce
     assert.equal(html.includes(BETA_NOTE), route.path === '/open-source', `${route.path}: the beta sentence is on /open-source only`)
     assert.ok(!/tested with automated browsers|not yet verified|is planned|has not launched/i.test(html), `${route.path}: no process notes`)
   }
+  checkBetaTag()
   assert.match(read(fileFor('/docs/security')), /id="known-limits"/)
   // The Features section nav wraps on wider screens rather than clipping items it cannot scroll to.
   assert.match(read(fileFor('/features')), /aria-label="Features on this page"[\s\S]{0,400}md:flex-wrap/)

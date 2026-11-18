@@ -559,15 +559,18 @@ export function createAuth({ db, origin, rpId, rpName = 'Shapewall', now = () =>
     }
     const user = q.get('SELECT * FROM users WHERE id = :id', { id: session.user_id })
     if (!user) return null
+    // renewedUntil: when it slid, the new expiry (ms), for the browser cookie (src/hosted/guards.js sessionOf).
+    let renewedUntil = null
     if (now().getTime() - Date.parse(session.last_seen_at) > 3_600_000) {
       const cap = Date.parse(session.created_at) + SESSION_MAX_DAYS * DAY
+      renewedUntil = Math.min(now().getTime() + SESSION_DAYS * DAY, cap)
       q.run('UPDATE sessions SET last_seen_at = :at, expires_at = :expires WHERE token_hash = :hash', {
         at: iso(),
-        expires: new Date(Math.min(now().getTime() + SESSION_DAYS * DAY, cap)).toISOString(),
+        expires: new Date(renewedUntil).toISOString(),
         hash,
       })
     }
-    return { user, session: { ...session, via: viaOf(session), hash } }
+    return { user, session: { ...session, via: viaOf(session), hash }, renewedUntil }
   }
 
   const markVerified = (sessionHash) =>

@@ -124,7 +124,7 @@ export function useChatTurn({
     const choices = optionChoices()
     const withOptions = (value) => (choices && Object.keys(choices).length ? { ...value, options: choices } : value)
     const body = push
-      ? { push: true }
+      ? { push: true, ...(typeof push === 'string' ? { commit: push } : {}) }
       : remoteFix
         ? { fix: true, ...(remoteFix.agentId ? { agentId: remoteFix.agentId } : {}), dispatchHash: remoteFix.dispatchHash }
         : regenerate

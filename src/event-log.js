@@ -18,6 +18,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { withFileLock } from './lock.js'
+import { writeAll } from './write-all.js'
 import { commentText } from './comment-fields.js'
 
 export const LOG_FILE = 'events.jsonl'
@@ -111,7 +112,19 @@ export async function appendEvents(config, events, { maxBytes = LOG_MAX_BYTES } 
       if (size > 0 && size + data.length > maxBytes) fs.renameSync(file, rotatedFile(config))
       const fd = fs.openSync(file, 'a', 0o600)
       try {
-        fs.writeSync(fd, data)
+        const start = fs.fstatSync(fd).size
+        try {
+          writeAll(fd, data)
+        } catch (error) {
+          // A write that failed part way is cut back off, so the next batch
+          // does not start in the middle of a half line.
+          try {
+            fs.ftruncateSync(fd, start)
+          } catch {
+            /* the log keeps the damaged line; readers skip it */
+          }
+          throw error
+        }
       } finally {
         fs.closeSync(fd)
       }

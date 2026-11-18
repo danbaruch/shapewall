@@ -12,9 +12,13 @@
 // the stored summary holds diffs of the changed text files only, and never
 // of a file that looks like it holds secrets.
 //
-// Undo restores exactly the turn's files to what they were before it, and
-// only when every one of them is still what the agent left (same content
-// hash): an edit made since, by a person or a later turn, is never
+// Undo covers only the files the agent itself named as edited during the
+// turn (its edit tool calls and its writes through Shapewall). A file that
+// changed during the turn some other way, a person saving it in their
+// editor or a command the agent ran, is listed but never undone: nothing
+// can tell whose change it was. Undo restores those files to what they
+// were before the turn, and only when every one of them is still what the
+// agent left (same content hash): an edit made since, by a person or a later turn, is never
 // overwritten, and nothing is undone partly. It is not offered when the turn
 // overlapped another agent turn in the project, made a Git commit, or
 // changed a file whose earlier content was not kept (too big, too many, a
@@ -31,7 +35,7 @@ import path from 'node:path'
 import { createHash, randomBytes } from 'node:crypto'
 import { AgentError } from './errors.js'
 import { diffForCard } from './text-diff.js'
-import { AGENT_AUTHOR, git, readEntry } from './starter/worktree.js'
+import { AGENT_AUTHOR, checkedOutAt, git, keptBranchText, readEntry } from './starter/worktree.js'
 
 const SKIP = new Set(['.git', 'node_modules', 'dist', 'build', '.next', '.cache', 'coverage', '.output', '.shapewall'])
 // Shapewall's own folders, whatever they are called (.shapewall, .shapewall-export, ...).
@@ -247,8 +251,12 @@ export async function beginTurnChanges(config, { comments = [], files = true } =
 export async function finishTurnChanges(
   config,
   baseline,
-  { comments = [], board, reply, pageIds = [], commentId = null, overlapped = false } = {},
+  { comments = [], board, reply, pageIds = [], commentId = null, overlapped = false, agentFiles = null } = {},
 ) {
+  // The files the agent itself named as edited during the turn (its edit
+  // tool calls and its writes through Shapewall: acp.js), relative paths.
+  const mine = agentRelPaths(config.dir, agentFiles)
+  let others = 0
   const resolvedComments = comments
     .filter(
       (comment) => comment.status === 'resolved' && baseline.statuses.has(comment.id) && baseline.statuses.get(comment.id) !== 'resolved',
@@ -278,12 +286,11 @@ export async function finishTurnChanges(
       const now = after.files.get(rel)
       if (was && now && was.stamp === now.stamp) continue
       let nowData = null
+      let unreadable = false
       if (now) {
         const entry = readEntry(config.dir, rel)
         nowData = entry.kind === 'entry' && entry.mode !== '120000' ? entry.data : null
-        if (!nowData && entry.kind !== 'missing') {
-          undoReason = undoReason || `${rel} could not be read`
-        }
+        unreadable = !nowData && entry.kind !== 'missing'
         if (was?.data && nowData && was.data.equals(nowData)) continue
       }
       if (changed.length >= CHANGED_MAX) {
@@ -292,6 +299,15 @@ export async function finishTurnChanges(
       }
       const status = !was ? 'added' : !now ? 'deleted' : 'modified'
       changed.push(fileEntry(rel, status, was?.data || null, nowData, budget))
+      // Changed during the turn, but not by the agent's own edits: a person
+      // saving a file, a dev server, or a command the agent ran. Undo cannot
+      // tell whose change it is, so it leaves the file as it is.
+      if (!mine.has(rel)) {
+        changed.at(-1).outside = true
+        others += 1
+        continue
+      }
+      if (unreadable) undoReason = undoReason || `${rel} could not be read`
       if (was && !was.data) undoReason = undoReason || `the earlier version of ${rel} was not kept`
       undoFiles.push({
         path: rel,
@@ -310,6 +326,8 @@ export async function finishTurnChanges(
     }
   }
   if (overlapped && changed.length) undoReason = undoReason || 'another agent turn ran at the same time'
+  if (changed.length && !undoFiles.length)
+    undoReason = undoReason || 'the agent did not edit these files itself (a command or someone else changed them)'
   const pr = PR_RE.exec(reply?.text || '')?.[0] || null
   if (!changed.length && !resolved.length && !commit) return { summary: null, undo: null }
   const knownPages = new Set((board?.pages || []).map((page) => page.id))
@@ -326,11 +344,36 @@ export async function finishTurnChanges(
     undo: changed.length
       ? undoReason
         ? { kind: 'files', available: false, reason: undoReason }
-        : { kind: 'files', available: true }
+        : others
+          ? // Undo puts back the agent's own files only; the others stay as they are.
+            { kind: 'files', available: true, files: undoFiles.length, others }
+          : { kind: 'files', available: true }
       : null,
     undone: null,
   }
   return { summary, undo: changed.length && !undoReason ? { files: undoFiles, at: Date.now() } : null }
+}
+
+// `files` (absolute paths, or relative to the project folder) as paths
+// relative to the project folder, for the files inside it.
+function agentRelPaths(dir, files) {
+  const rels = new Set()
+  if (!files) return rels
+  const roots = [path.resolve(dir)]
+  try {
+    const real = fs.realpathSync(dir)
+    if (real !== roots[0]) roots.push(real)
+  } catch {
+    /* the folder is gone: nothing to match */
+  }
+  for (const file of files) {
+    if (typeof file !== 'string' || !file || file.includes('\0')) continue
+    for (const root of roots) {
+      const rel = path.relative(root, path.resolve(root, file))
+      if (rel && rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel)) rels.add(rel.split(path.sep).join('/'))
+    }
+  }
+  return rels
 }
 
 // Whether `rel`'s folders are real folders or missing (to be created), never
@@ -481,6 +524,9 @@ export async function undoStarterBranch(config, { boardId, commentId, branch, co
   const remotes = (await run(['for-each-ref', '--contains', commit, '--format=%(refname)', 'refs/remotes'])).trim()
   if (remotes)
     throw new AgentError('undo_unavailable', 'The branch was pushed, so it was left as it is. Close its pull request instead.', 409)
+  // Checked out somewhere (someone reviewing it): deleting it would leave that worktree on a missing branch.
+  const used = await checkedOutAt(config.dir, ref)
+  if (used) throw new AgentError('undo_conflict', `${keptBranchText(branch, used)} Switch away from it first.`, 409)
   await run(['update-ref', '-m', 'shapewall: undo starter agent run', '-d', ref, commit])
   return { branch }
 }

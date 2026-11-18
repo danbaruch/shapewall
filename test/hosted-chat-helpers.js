@@ -169,7 +169,8 @@ export function startLink(
       : null,
     hello: { kind, machine: 'studio', version: '0.5.0', maxTurns },
     policy: edits ? machinePolicy : policy,
-    remote: remote ? createRemote({ origin: hosted.origin, token }) : null,
+    // `remote`: true for the real token API, or a client of the test's own.
+    remote: remote === true ? createRemote({ origin: hosted.origin, token }) : remote || null,
     fetchImpl,
     signal: controller.signal,
     log: (line) => logs.push(line),

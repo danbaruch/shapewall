@@ -16,6 +16,7 @@ import { THREAD_RE } from '../agent/thread-history.js'
 import { ID_RE } from '../config.js'
 
 export const TURN_ID_RE = /^turn_[a-f0-9]{24}$/
+const COMMIT_RE = /^[0-9a-f]{40}([0-9a-f]{24})?$/
 export const JOB_BYTES_MAX = 2 * 1024 * 1024
 const HISTORY_MAX = 40
 const COMMENTS_MAX = 30
@@ -92,7 +93,15 @@ export function cleanJob(raw) {
   const context = raw.context && typeof raw.context === 'object' ? raw.context : {}
   const board = context.board && typeof context.board === 'object' ? context.board : {}
   return {
-    turn: { id: turn.id, board: turn.board, thread: turn.thread, kind, comment },
+    turn: {
+      id: turn.id,
+      board: turn.board,
+      thread: turn.thread,
+      kind,
+      comment,
+      // "Push this fix": the commit of the fix that was shown (null: the newest held one).
+      ...(kind === 'push' ? { commit: COMMIT_RE.test(String(turn.commit || '')) ? turn.commit : null } : {}),
+    },
     agent: { name: text(raw.agent?.name, 60) || null },
     asker: { name: text(raw.asker?.name, 80) || null, handle: text(raw.asker?.handle, 40) || null, owner: raw.asker?.owner === true },
     // `byOwner`: the server says the person who connected this agent set the rule themself.

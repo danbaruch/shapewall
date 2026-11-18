@@ -624,7 +624,8 @@ export default function ChatPanel({
   // "Push this fix" on a held fix: for people who may ask this agent for a fix.
   const canPush = hosted && agent?.edits?.fix?.ok === true && !running
   const hostedPush = useMemo(
-    () => (canPush ? () => submitRef.current('', false, { push: true }) : null),
+    // `commit`: the fix whose card was clicked, so the agent offers that one and no other.
+    () => (canPush ? (commit) => submitRef.current('', false, { push: typeof commit === 'string' && commit ? commit : true }) : null),
 
     [canPush],
   )

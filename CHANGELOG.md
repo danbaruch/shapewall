@@ -3,6 +3,134 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## 0.12.0 - 2026-11-17
+
+Fixes from a full code review: an agent's Undo never erases your edit, hosted pushes and backups survive a crash, `shapewall ci`
+never deletes a folder it did not write, the PR comment never calls a failed comparison a pass, and Shapewall is now marked as
+early access (beta).
+
+For operators of a hosted server, before upgrading:
+
+- **Deploy stop-then-start.** Never run the old and new server on one data folder at the same time, also not briefly during a
+  deploy: the new server's startup sweep could roll back a push the old one is committing. After a downgrade to 0.11.0, that
+  version's sweep (which deletes old board folders without asking the database) is back.
+- **`shapewall hosted backup` can now exit 1**, when a board's folder is missing and the backup is not a complete recovery
+  point. Check timers and scripts that run it.
+- **Older backups can now fail `restore --check`.** A backup made before this release that recorded skipped boards in
+  `backup.json` never held all of its files; the drill now says so. That is correct, not a regression: make a new backup.
+
+Changes:
+
+- Shapewall is in early access (beta): the site header shows a Beta tag next to the logo, the home page and the README say we are
+  still working out the mechanics and ask for feedback (contact form or GitHub issues).
+- Website: between 768 and 1023 px wide the header uses the menu button instead of the inline links, which used to wrap onto two
+  lines and push the page sideways.
+- **An agent's Undo never erases your own edit.** Before, Undo in the chat put back every file that changed during the agent's
+  turn, so a file you saved in your editor while the agent worked on another one was rolled back with it. Now Undo puts back only
+  the files the agent edited with its own file tools (an edit you denied, or one that failed, does not
+  count). Anything else that changed meanwhile (your saves, a command the agent ran) is listed on the card and left as it is,
+  and the Undo dialog says how many files it leaves. A turn in which the agent edited nothing itself offers no Undo.
+- **A board file is never replaced by a cut-off copy.** When the disk wrote only part of a comments, manifest or image file
+  and reported no error, the half-written file could replace the good one. Shapewall now writes every byte before the swap,
+  and keeps the old file when the disk fills part way. The event log works the same way: a batch is only marked logged once
+  all of it is written, and a failed write leaves no half line behind. The same goes for a file the agent writes in your
+  project (now also flushed to disk before it replaces yours, with no temporary file left after a failure), the agent usage log
+  and lock files.
+- **Undo and Discard leave a branch you have checked out.** Before, deleting an agent's branch (Undo of a starter agent run,
+  Discard in branch mode, and the cleanup after Apply) checked only that the branch still pointed at the agent's commit, so a
+  branch you had checked out in another worktree to review it could be deleted under you, leaving that worktree on a missing
+  branch. Now the starter agent's Undo refuses and says where the branch is checked out, and Discard, Apply and Undo in
+  branch mode leave the branch in place. After Discard the card and the comment say "Kept branch X: it is checked out in
+  (folder)" instead of saying it was deleted (after an Undo, the card says so).
+- **`shapewall ci` never deletes a folder it did not write.** Before, `ci capture --out DIR` deleted DIR and a folder next to
+  it named `DIR.work` with everything in them, and `capture-compare` deleted any `images/` folder in its `--out`, so a
+  mistyped path could erase a project. Now `--out` must be new, empty or an earlier Shapewall result; anything else is refused
+  with every file left in place, and a `capture-compare --out` that is or is inside a capture folder being compared is refused
+  too. Running again over an earlier result still works.
+- **The pull request comment never calls a failed comparison "no visual changes".** Before, when every shot failed (a timeout,
+  an HTTP 500 on each page), the headline said "no visual changes on 2 pages", the comment was folded away like a pass, and the
+  footer counted the failed shots as compared. Now the headline leads with what could not be compared: "comparison failed, none
+  of the 2 pages could be compared" ("capture failed" when a whole side failed), "1 of 2 pages could not be compared, no
+  changes in the rest", or "1 of 3 pages changed, 1 could not be compared". The footer counts only shots that were compared,
+  and the comment stays open.
+- **The comment says how many pages the page limit left out.** Before, a board with more pages than `ci.maxPages` (default 50)
+  was captured up to the limit and the rest were silently dropped, so a 70-page board got a plain "no visual changes on 50
+  pages". `ci capture` now records the count in `side.json`, and the headline and footer say "20 more left out by the page
+  limit".
+- **`ci capture-compare --fail-on-change` no longer passes when nothing was compared.** It exited 0 when every shot or a whole
+  side failed. It now exits 3 when anything changed and 4 when nothing changed but not everything could be compared, and 0 only
+  for a full pass. Pages left out by `ci.maxPages` do not fail the run. See "Commands" in docs/pull-requests.md.
+- **`shapewall watch --once` fails when it cannot read the comments.** Before, an error while scanning (an unreadable
+  comments file) was logged and the command still exited 0, as if nothing were open. It now exits with the error.
+- **Compare no longer calls a small change "Same".** A change of a few pixels on a long page (one changed letter or price) was
+  rounded to 0% and shown as "Same", without its red overlay and outside the changed-page count, while the PR comparison counted
+  it. Compare now decides on the changed pixel count and shows such a change as "<0.01%".
+- Compare: when the latest capture of a page failed on one side, that side says the capture failed instead of comparing the
+  older screenshot still on disk as if it were current.
+- Pixel diffs of two screenshots where one is taller and the other wider no longer count the corner that neither screenshot has.
+- Deleting a comment waits for its toast: Undo keeps working for as long as it shows, also when the pointer or keyboard holds the
+  toast past six seconds. Before, the delete went through after six seconds anyway and a later Undo did nothing.
+- Starter agent: cancelling a run now always stops it. A cancel before or during setup (for example while the image is being
+  pulled) starts no agent and commits nothing, and a cancelled run never pushes its branch or opens a pull request.
+- Hosted boards: "Approve agent run" asks for a passkey only when the server asks for one, so approving from the
+  board works on servers with passkeys off (tailnet sign-in) and in workspaces that do not require a passkey for it.
+- Hosted: an active browser session now stays signed in past 30 days. The sign-in cookie is renewed whenever the session
+  slides (at most once an hour), with the same security attributes, and still ends 90 days after sign-in as documented.
+- Website: the deploy script checks all of its arguments before it does anything. Before, `--help`, a misspelled command
+  such as `smok`, or a lone `--dry-run` fell through to a full build and release of the live site. Now help prints the usage,
+  and anything it does not know is refused without running a build, an upload or a server command.
+- Website: the live demo links in Getting Started open the demo again. An ordinary click used to show the site's "page not found"
+  page; the docs now hand only the site's own pages to in-page navigation.
+- Website: the privacy page now says that the contact form also stores the User-Agent your browser sends, and that, if the site
+  operator has set it up, your message, topic and email address are forwarded to a messaging service.
+- Website: a link with a broken fragment (for example one cut off while copying) no longer stops the page from loading.
+- **Hosted: the operator's role change revokes what the old role handed out.** `shapewall hosted admin members add --role` on
+  an existing member now revokes the same invites, share links and API tokens as a role change in the console, writes the same
+  `member_grants_revoked` audit entry, and says what it revoked. Before, a demotion there only hid those grants, and promoting
+  the person again later brought them back.
+- **Hosted: an open chat stream follows access changes.** A board chat that is being watched live now checks, before each
+  update it sends, that the viewer is still signed in and still a member of the workspace, and whether they may still see
+  source diffs. Someone removed, demoted to viewer or signed out stops receiving at once (the stream ends), and someone who
+  is no longer trusted with diffs gets the following permission cards without them. Before, the access a viewer had when the
+  stream opened was kept until the turn ended.
+- **Hosted: a crash during a push can no longer split a board from its files.** A push commit now writes down its folder swap
+  before it starts, and the sweep at the next start finishes or undoes it by what the database recorded: the board keeps
+  either all of its previous captures or all of the new ones, and an uncommitted push gets its uploads back. The sweep no
+  longer deletes a `<board>.old-<push>` folder unless the database shows that push committed; one it cannot account for is
+  left in place and named in the server log. A commit whose uploads are gone is refused (`push_incomplete`) instead of
+  replacing the board with an empty one. The folder swap is synced to disk before the database commit, and a commit that
+  fails puts the folders back before anyone else can write.
+- **Hosted: a push keeps the screenshots a discussion points at.** Pushing from a checkout that has less history than the
+  server (a second machine, CI) no longer removes the capture a hosted comment is pinned to or a reply's drawing was made on:
+  the commit copies those versions over from the board it replaces, and their bytes count once in the board's storage. Each
+  copy is made under a temporary name and renamed when whole, so a crash mid-copy never leaves a cut-short screenshot behind.
+- **Hosted: a backup is one moment, and the drill checks it.** `shapewall hosted backup` now pins the board files under the
+  same lock as the database snapshot (hard links inside the data folder, copied afterwards), so a push, a deletion or a
+  retention run while the backup is copied no longer gives it files from a different moment or leaves them out. A board whose
+  folder is missing marks the backup incomplete: the command prints a warning and exits with status 1. `restore --check` now
+  also fails when a capture a board's manifest lists is missing, and when the backup left files out, including backups made
+  by earlier versions that listed skipped files in `backup.json`. Where the data folder cannot take hard links, the files are
+  copied straight into the backup under the lock (the backup says so), never a second time into the data folder.
+- **Connected agents: a held fix goes back only to the connection that made it.** A fix held on the agent's machine (an
+  edit in it went without asking) now records the server, workspace, project and agent it was made for, and "Push this fix"
+  offers it only to that same connection, so one folder connected to two projects or servers never shows one's fix to the
+  other. The button also names the exact fix it is on, so an older result no longer opens a newer fix of the same comment.
+  Fixes held by an earlier version are not offered again; ask the agent for a fresh fix.
+- **Hosted: inviting someone twice no longer stops them joining.** Two pending invites for one tailnet login in one workspace
+  (the operator's `members add --login` run twice, or an admin's invite on top of it) made their first sign-in fail with
+  "already in this workspace", and no account was made. A new invite for a login now replaces the pending one, and joining
+  takes one invite per workspace (with older duplicates, the one with the least access).
+- **Hosted: the operator's `members add` keeps to the seat limit.** Adding an existing account now refuses when the workspace
+  has reached its `members` quota, as accepting an invite does. Changing a member's role needs no free seat.
+- **Connected agents: answers to comments count against the day's turns.** A comment sent to an agent by name now opens its
+  turn only while the project has turns left today (`dailyTurns`), as a person's chat does.
+- **Connected agents: a comment is no longer stuck "queued".** When the server refuses to open a comment's turn (busy, the
+  day's turns used up), the agent lets the comment go instead of holding it; a comment it already holds is opened when it
+  next looks; and an answer cut short (the machine went away, the server restarted) ends its claim and marks the comment as
+  needing a person. Before, three such comments used up the project's open claims and stopped every agent in it.
+- **Connected agents: every board of a project is read.** The agent looked for comments sent to it on the first 50 boards
+  only; it now reads all of them, 50 at a time.
+
 ## 0.11.0 - 2026-11-17
 
 Picking what to comment on now reads like a design tool, the toolbar is down to four tools, and shapewall.com has a changelog.

@@ -58,11 +58,24 @@ export function createGuards({
   function sessionOf(req) {
     if (req.sessionChecked) return req.auth
     req.sessionChecked = true
-    req.auth = readSession(req, parseCookies(req.headers.cookie)[SESSION_COOKIE]) || null
+    const token = parseCookies(req.headers.cookie)[SESSION_COOKIE]
+    req.auth = readSession(req, token) || null
     // With passkeys off (a tailnet sign-in server, the default there) only the tailnet signs anyone in:
     // a session a passkey or a recovery code started, from before they were switched off, does not count.
     if (req.auth && req.auth.session.via !== 'tailnet' && !passkeys.on()) req.auth = null
+    // The session slid (at most once an hour): the browser cookie slides with it, same attributes.
+    if (req.auth?.renewedUntil && req.res && !req.res.headersSent)
+      setCookie(req.res, SESSION_COOKIE, token, Math.max(0, Math.floor((req.auth.renewedUntil - now().getTime()) / 1000)))
     return req.auth
+  }
+  // Whether the session a long request (a live stream) was admitted with
+  // still signs the same person in now: read again, never from the request's
+  // cache. Signed out, expired, ended elsewhere or passkeys switched off: false.
+  function stillSignedIn(req) {
+    if (!req.auth || !req.user) return false
+    const found = readSession(req, parseCookies(req.headers.cookie)[SESSION_COOKIE]) || null
+    if (!found || (found.session.via !== 'tailnet' && !passkeys.on())) return false
+    return found.user.id === req.user.id
   }
   // Passkey routes on a server where passkeys are off: a clear answer, before anything else looks at them.
   // One of them stays open: taking away a passkey that a tailnet session added and that is still on hold
@@ -454,6 +467,7 @@ export function createGuards({
     setCookie,
     limit,
     sessionOf,
+    stillSignedIn,
     guardWrites,
     needSession,
     needFresh,

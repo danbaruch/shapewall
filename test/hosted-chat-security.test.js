@@ -648,3 +648,112 @@ test('a compromised server cannot make the machine act: jobs name no command, un
   assert.match(joined, /\\u003c\/shapewall-data\\u003e/)
   await entry.stop()
 })
+
+// Review finding 05: an open stream decided who may see what once, at
+// subscribe. Access is now decided again before every write.
+test('an open chat stream stops delivering when access changes: role, membership, session and diff visibility', async () => {
+  const http = await import('node:http')
+  const { randomBytes } = await import('node:crypto')
+  const hub = hosted.app.locals.chat.hub
+  const watch = (user, thread) => {
+    const cookie = [...user.browser.jar].map(([name, value]) => `${name}=${value}`).join('; ')
+    let text = ''
+    let ended = false
+    const done = new Promise((resolve, reject) => {
+      const req = http.request(
+        {
+          host: '127.0.0.1',
+          port: hosted.port,
+          method: 'GET',
+          path: chatUrl(thread, '/events'),
+          headers: { Host: new URL(hosted.origin).host, Cookie: cookie },
+        },
+        (res) => {
+          assert.equal(res.statusCode, 200)
+          res.setEncoding('utf8')
+          res.on('data', (chunk) => (text += chunk))
+          res.on('end', () => {
+            ended = true
+            resolve()
+          })
+          res.on('error', reject)
+        },
+      )
+      req.on('error', reject)
+      req.end()
+    })
+    return { text: () => text, ended: () => ended, done }
+  }
+  const openTurn = () =>
+    hub.open({
+      id: `turn_${randomBytes(12).toString('hex')}`,
+      workspaceId: ws,
+      projectId: project.id,
+      boardId: 'sample',
+      threadId: 'board',
+      agentId: builder.agentId,
+      startedBy: ada.user.id,
+    })
+  const card = (id, secret) => ({
+    id,
+    kind: 'permission',
+    name: 'edit',
+    label: 'Edit index.html',
+    diff: { preview: secret },
+    options: [{ id: 'allow', label: 'Allow' }],
+    hash: 'a'.repeat(64),
+  })
+  await fresh(ada)
+  const fay = await signUp(hosted, { handle: 'fay-stream', displayName: 'Fay', invite: await invite(ada, ws, 'member') })
+  const setRole = (role) =>
+    hosted.db.prepare('UPDATE memberships SET role = ? WHERE workspace_id = ? AND user_id = ?').run(role, ws, fay.user.id)
+  const cases = {
+    // Demoted to viewer behind the console's back: the role alone decides.
+    role: () => setRole('viewer'),
+    removed: () => hosted.db.prepare('DELETE FROM memberships WHERE workspace_id = ? AND user_id = ?').run(ws, fay.user.id),
+    // Signed out everywhere, or the session expired.
+    session: () => hosted.db.prepare('DELETE FROM sessions WHERE user_id = ?').run(fay.user.id),
+  }
+  for (const [name, revoke] of Object.entries(cases)) {
+    if (name !== 'role' && !hosted.db.prepare('SELECT 1 FROM memberships WHERE workspace_id = ? AND user_id = ?').get(ws, fay.user.id))
+      hosted.db
+        .prepare("INSERT INTO memberships (workspace_id, user_id, role, created_at) VALUES (?, ?, 'member', ?)")
+        .run(ws, fay.user.id, new Date().toISOString())
+    else setRole('member')
+    const live = openTurn()
+    try {
+      const stream = watch(fay, 'board')
+      hub.push(live, 'text', { text: `BEFORE-${name}` })
+      await until(() => stream.text().includes(`BEFORE-${name}`), `${name}: the first event`)
+      revoke()
+      hub.push(live, 'text', { text: `AFTER-${name}` })
+      hub.push(live, 'tool', card(`c-${name}`, `SECRET-${name}`))
+      await until(() => stream.ended(), `${name}: the stream to end`)
+      assert.ok(!stream.text().includes(`AFTER-${name}`), `${name}: nothing after the change`)
+      assert.ok(!stream.text().includes(`SECRET-${name}`), `${name}: no diff after the change`)
+    } finally {
+      hub.close(live)
+    }
+  }
+  // Narrowed, not removed: still a member, no longer trusted by the project,
+  // so diffs are hidden from the next event on, and the stream goes on.
+  const viewer = await signUp(hosted, { handle: 'gus-stream', displayName: 'Gus', invite: await invite(ada, ws, 'member') })
+  const live = openTurn()
+  try {
+    const stream = watch(viewer, 'board')
+    hub.push(live, 'tool', card('c-wide', 'SECRET-WIDE'))
+    await until(() => stream.text().includes('c-wide'), 'the first card')
+    assert.ok(stream.text().includes('SECRET-WIDE'), 'a trusted member in the audience sees the diff')
+    await fresh(ada)
+    assert.equal((await api(ada, 'PUT', consoleUrl('/agent'), { trustedRoles: ['admin', 'owner'], approveNonAdmin: false })).status, 200)
+    hub.push(live, 'tool', card('c-narrow', 'SECRET-NARROW'))
+    hub.push(live, 'text', { text: 'STILL-HERE' })
+    await until(() => stream.text().includes('STILL-HERE'), 'the stream goes on')
+    assert.ok(stream.text().includes('c-narrow'), 'the card is shown')
+    assert.ok(!stream.text().includes('SECRET-NARROW'), 'without its diff')
+  } finally {
+    hub.close(live)
+    await fresh(ada)
+    await api(ada, 'PUT', consoleUrl('/agent'), { trustedRoles: ['member', 'admin', 'owner'], approveNonAdmin: false })
+  }
+})

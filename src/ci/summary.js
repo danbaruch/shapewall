@@ -168,13 +168,50 @@ function pageCell(shot) {
   return shot.path ? `${title} (${plain(shot.path, 80)})` : title
 }
 
-// The headline: "Shapewall: 4 of 23 pages changed".
-export function headline(summary) {
+// What could not be compared: whether a side failed as a whole, the pages
+// with a shot that failed, and how many shots were compared. A failed shot
+// is never counted as compared.
+export function coverage(summary) {
   const { totals } = summary
   const sideFailed = summary.failures.some((failure) => failure.page === null)
-  if (sideFailed && !totals.changedPages) return 'Shapewall: capture failed'
-  if (!totals.changedPages) return `Shapewall: no visual changes on ${plural(totals.pages, 'page')}`
-  return `Shapewall: ${totals.changedPages} of ${plural(totals.pages, 'page')} changed`
+  const pages = new Set(summary.failures.filter((failure) => failure.page !== null).map((failure) => failure.page))
+  for (const shot of summary.shots) if (shot.status === 'failed') pages.add(shot.page)
+  return {
+    sideFailed,
+    failedPages: sideFailed ? totals.pages : Math.min(pages.size, totals.pages),
+    compared: Math.max(0, totals.shots - totals.failedShots),
+  }
+}
+
+// True when every shot it was asked for was compared (pages left out by the
+// page limit were not asked for). `ci capture-compare --fail-on-change`
+// exits 4 when this is false and nothing changed.
+export function comparedInFull(summary) {
+  return !summary.failures.length && !summary.totals.failedShots && summary.totals.shots > 0
+}
+
+// The headline, e.g. "Shapewall: 4 of 23 pages changed". A failure always
+// shows in it, so a run that could not compare never reads as a pass.
+export function headline(summary) {
+  const { totals } = summary
+  const { sideFailed, failedPages, compared } = coverage(summary)
+  const pages = plural(totals.pages, 'page')
+  const left = totals.pagesNotCompared ? `, ${totals.pagesNotCompared} more left out by the page limit` : ''
+  if (!compared && (sideFailed || failedPages || totals.failedShots)) {
+    const what =
+      totals.pages === 0
+        ? 'nothing could be compared'
+        : totals.pages === 1
+          ? 'the page could not be compared'
+          : `none of the ${pages} could be compared`
+    return `Shapewall: ${sideFailed ? 'capture' : 'comparison'} failed, ${what}${left}`
+  }
+  if (!totals.shots) return `Shapewall: nothing to compare, no pages were captured${left}`
+  if (failedPages && totals.changedPages)
+    return `Shapewall: ${totals.changedPages} of ${pages} changed, ${failedPages} could not be compared${left}`
+  if (failedPages) return `Shapewall: ${failedPages} of ${pages} could not be compared, no changes in the rest${left}`
+  if (!totals.changedPages) return `Shapewall: no visual changes on ${pages}${left}`
+  return `Shapewall: ${totals.changedPages} of ${pages} changed${left}`
 }
 
 // `imageUrl(path)`: a URL for a file of the result folder (images branch), or
@@ -186,7 +223,8 @@ export function renderSummary(summary, { artifactUrl = null, runUrl = null, imag
   const title = headline(summary)
   const changed = summary.shots.filter((shot) => shot.changed)
   const failed = summary.failures
-  const quiet = !changed.length && !failed.length
+  // Folded away only for a full pass: no change, nothing failed, nothing left out.
+  const quiet = !changed.length && comparedInFull(summary) && !totals.pagesNotCompared
   if (quiet) lines.push('<details>', `<summary>${title}</summary>`, '')
   else lines.push(`### ${title}`, '')
 
@@ -223,11 +261,12 @@ export function renderSummary(summary, { artifactUrl = null, runUrl = null, imag
     lines.push('')
   }
 
-  const facts = [`${plural(totals.shots, 'shot')} compared`]
+  const facts = [`${plural(coverage(summary).compared, 'shot')} compared`]
   if (totals.unchangedShots) facts.push(`${totals.unchangedShots} unchanged`)
+  if (totals.failedShots) facts.push(`${totals.failedShots} could not be compared`)
   if (totals.newPages) facts.push(plural(totals.newPages, 'new page'))
   if (totals.removedPages) facts.push(plural(totals.removedPages, 'removed page'))
-  if (totals.pagesNotCompared) facts.push(`${plural(totals.pagesNotCompared, 'page')} left out by the page limit`)
+  if (totals.pagesNotCompared) facts.push(`${plural(totals.pagesNotCompared, 'page')} left out by the page limit (ci.maxPages)`)
   facts.push(`a shot counts as changed from ${thresholdPercent(summary.threshold)} of its pixels`)
   lines.push(`${facts.join(', ')}.`)
   const links = []

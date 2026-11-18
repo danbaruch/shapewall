@@ -19,6 +19,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { randomBytes } from 'node:crypto'
+import { writeAll } from '../../write-all.js'
 
 export const READ_BYTES_MAX = 4 * 1024 * 1024
 export const WRITE_BYTES_MAX = 4 * 1024 * 1024
@@ -144,11 +145,14 @@ export function createSandbox({ root, protect = [], sensitivePaths = [] }) {
       const temp = path.join(dir, `.${path.basename(final)}.${randomBytes(6).toString('hex')}.tmp`)
       const fd = fs.openSync(temp, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | O_NOFOLLOW, mode ?? 0o644)
       try {
-        fs.writeSync(fd, content)
-      } finally {
-        fs.closeSync(fd)
-      }
-      try {
+        // Every byte, on disk, before the rename: a short or failed write
+        // never replaces the person's file, and leaves no temporary file.
+        try {
+          writeAll(fd, content)
+          fs.fsyncSync(fd)
+        } finally {
+          fs.closeSync(fd)
+        }
         fs.renameSync(temp, final)
       } catch (error) {
         fs.rmSync(temp, { force: true })

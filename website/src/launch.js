@@ -33,3 +33,9 @@ export const LICENSE_SUMMARY =
 // The team server (`shapewall hosted`) is in beta. Other pages show a Beta badge; this sentence, on the Licenses
 // page only, says what that means for the reader.
 export const BETA_NOTE = 'The team server is in beta: keep backups and expect changes between releases.'
+
+// Shapewall as a whole is in early access (beta), launched or not: the header lockup carries a Beta tag and the home
+// page asks for feedback. Independent of LAUNCHED; set to false when the mechanics settle.
+export const BETA = true
+// The Beta tag's hover note (components/brand.jsx).
+export const BETA_TAG_NOTE = 'Early access: still changing, feedback welcome'

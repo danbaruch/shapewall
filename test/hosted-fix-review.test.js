@@ -256,7 +256,10 @@ test('1, 5: files that run something are refused or always asked; a fix made wit
   const denied = (await again.done).final
   assert.equal(denied.summary.branch.held, true)
   assert.equal(auto.onRemote().includes(branch), false)
-  const third = post(ada, second.id, { push: true })
+  // Asked with another commit than the fix on the card: not offered (review 08).
+  const wrong = (await post(ada, second.id, { push: true, commit: 'f'.repeat(40) }).done).final
+  assert.equal(wrong.error.code, 'no_held_fix')
+  const third = post(ada, second.id, { push: true, commit: held.final.summary.branch.commit })
   await fresh(ada)
   assert.equal((await answer(ada, second.id, await card(second.id, ada, [card2.id]), 'allow')).status, 200)
   const done = (await third.done).final
@@ -266,6 +269,7 @@ test('1, 5: files that run something are refused or always asked; a fix made wit
   // Nothing is held any more: asking again says so.
   const none = (await post(ada, second.id, { push: true }).done).final
   assert.equal(none.error.code, 'no_held_fix')
+  assert.match(none.error.message, /no longer available to push.*Ask the agent for a fresh fix\./)
   await auto.link.stop()
 })
 

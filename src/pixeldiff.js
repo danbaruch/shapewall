@@ -10,9 +10,13 @@ export const DIFF_THRESHOLD = 0.1
 export const DIFF_COLOR = [239, 68, 68]
 
 // Compares two images ({ width, height, data } with RGBA bytes). Different
-// sizes are compared over the shared area; the rest counts as changed.
-// Returns { width, height, changed, total, percent, data } where data is the
-// mask (red where changed, transparent elsewhere) at the larger size.
+// sizes are compared over the shared area; pixels only one image has count
+// as changed, and the corner neither has (one image taller, the other
+// wider) counts for nothing. Returns { width, height, changed, total,
+// percent, data } where data is the mask (red where changed, transparent
+// elsewhere) at the larger size. `percent` is rounded for display: decide
+// "changed" on `changed`, never on `percent` (a glyph on a long page rounds
+// to 0).
 export function diffPixels(a, b, { threshold = DIFF_THRESHOLD } = {}) {
   const width = Math.max(a.width, b.width)
   const height = Math.max(a.height, b.height)
@@ -34,8 +38,10 @@ export function diffPixels(a, b, { threshold = DIFF_THRESHOLD } = {}) {
   })
   for (let y = 0; y < shared.height; y += 1) data.set(sharedMask.subarray(y * shared.width * 4, (y + 1) * shared.width * 4), y * width * 4)
   // Area only one image has.
+  const has = (image, x, y) => x < image.width && y < image.height
   for (let y = 0; y < height; y += 1) {
     for (let x = y < shared.height ? shared.width : 0; x < width; x += 1) {
+      if (!has(a, x, y) && !has(b, x, y)) continue
       const offset = (y * width + x) * 4
       data[offset] = DIFF_COLOR[0]
       data[offset + 1] = DIFF_COLOR[1]
@@ -44,6 +50,6 @@ export function diffPixels(a, b, { threshold = DIFF_THRESHOLD } = {}) {
       changed += 1
     }
   }
-  const total = width * height
+  const total = a.width * a.height + b.width * b.height - shared.width * shared.height
   return { width, height, changed, total, percent: total ? Math.round((changed / total) * 10000) / 100 : 0, data }
 }

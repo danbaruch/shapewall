@@ -15,6 +15,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { randomBytes } from 'node:crypto'
+import { writeAll } from './write-all.js'
 
 // Field 22 of /proc/<pid>/stat (clock ticks since boot); null when unknown.
 export function processStartTime(pid) {
@@ -72,7 +73,7 @@ function tryCreate(file, body) {
     throw error
   }
   try {
-    fs.writeSync(fd, body)
+    writeAll(fd, body)
   } finally {
     fs.closeSync(fd)
   }

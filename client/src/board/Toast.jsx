@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 import { cn } from '../lib/utils'
 import { Button, IconButton } from '../components/ui'
@@ -8,13 +8,21 @@ import { AnimatePresence, m, rise, usePresenceProps } from '../lib/animate'
 // of the tool dock. It closes
 // itself after six seconds, but not while the pointer or the keyboard focus
 // is on it (`hold`): Undo must not vanish under someone reaching for it. The
-// six seconds start again when they leave.
+// six seconds start again when they leave. `toast.onClose` runs once it is
+// gone, however it went (timer, Dismiss, Undo, a newer toast, the board
+// closing): a delete with Undo waits for exactly that, so the two share one
+// deadline.
 export function useToast() {
   const [toast, setToast] = useState(null)
   const [held, hold] = useState(false)
+  const shown = useRef(null)
   useEffect(() => {
     if (!toast) hold(false)
+    const previous = shown.current
+    shown.current = toast
+    if (previous && previous !== toast) previous.onClose?.()
   }, [toast])
+  useEffect(() => () => shown.current?.onClose?.(), [])
   useEffect(() => {
     if (!toast || held) return undefined
     const timer = window.setTimeout(() => setToast((current) => (current === toast ? null : current)), 6000)

@@ -34,6 +34,7 @@ import path from 'node:path'
 import { execFile, spawn } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
 import { absoluteProgram } from '../../which.js'
+import { writeAll } from '../../write-all.js'
 
 export const SAFE_GIT_FLAGS = [
   '-c',
@@ -100,6 +101,33 @@ export function git(args, { cwd, env = process.env, extraEnv = {}, input = null,
       child.stdin.end(input)
     }
   })
+}
+
+// Where `ref` (refs/heads/<name>) is checked out: { dir } (the worktree
+// folder), or null when no worktree has it. Every worktree of the repository
+// counts, the main one too: deleting a branch checked out there would leave
+// that worktree's HEAD pointing at nothing. When Git cannot list them, the
+// branch counts as in use: { dir: null, unknown: true }.
+export async function checkedOutAt(cwd, ref) {
+  let out
+  try {
+    out = await git(['worktree', 'list', '--porcelain'], { cwd, timeoutMs: 20000 })
+  } catch {
+    return { dir: null, unknown: true }
+  }
+  let dir = null
+  for (const line of out.split('\n')) {
+    if (line.startsWith('worktree ')) dir = line.slice('worktree '.length)
+    else if (line === `branch ${ref}`) return { dir, unknown: false }
+  }
+  return null
+}
+
+// Why a branch was kept, as the chat says it.
+export function keptBranchText(branch, used) {
+  return used?.dir
+    ? `Kept branch ${branch}: it is checked out in ${used.dir}.`
+    : `Kept branch ${branch}: could not check whether it is in use.`
 }
 
 // The repository's configured filter, merge and diff drivers, each overridden
@@ -277,7 +305,7 @@ export async function materializeTree({ gitDir, cwd, commit, dir }) {
       const mode = entry.mode === '100755' ? 0o755 : 0o644
       const fd = fs.openSync(entry.full, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, mode)
       try {
-        fs.writeSync(fd, data)
+        writeAll(fd, data)
       } finally {
         fs.closeSync(fd)
       }

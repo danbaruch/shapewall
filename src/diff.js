@@ -10,9 +10,10 @@ import path from 'node:path'
 import { PNG } from 'pngjs'
 import { withFileLock } from './lock.js'
 import { DIFF_THRESHOLD, diffPixels } from './pixeldiff.js'
-import { capturesDir, diffsDir, readJson, writeFileAtomic, writeJsonAtomic } from './store.js'
+import { capturesDir, diffsDir, readJson, readManifest, writeFileAtomic, writeJsonAtomic } from './store.js'
 
-const CACHE_FORMAT = 1
+// 2: crossed sizes no longer count the corner neither image has.
+const CACHE_FORMAT = 2
 
 // Compares two PNG buffers (see diffPixels). Returns { width, height,
 // changed, total, percent, png } where png is the diff mask (red where
@@ -36,13 +37,18 @@ function stamp(file) {
 const yieldToLoop = () => new Promise((resolve) => setImmediate(resolve))
 
 // Compares environment `a` with `b` for every page and viewport of the board.
-// Returns { a, b, pages: { [pageId]: { [viewport]: { status, percent?, diff? } } }, changedPages }
-// status: 'ok' (diff is the mask file name), 'missing' (one side has no capture).
+// Returns { a, b, pages: { [pageId]: { [viewport]: { status, percent?, changed?, total?, diff? } } }, changedPages }
+// status: 'ok' (diff is the mask file name; changed is the exact pixel
+// count, percent only its rounded share), 'missing' (one side has no
+// capture), 'failed' (one side's latest capture of it failed: an older
+// screenshot left behind by a partial recapture is not current).
 export async function compareEnvironments(config, board, a, b, { onlyPages = null } = {}) {
   const dir = diffsDir(config, board.id, a, b)
   const indexFile = path.join(dir, 'index.json')
   const dirA = capturesDir(config, board.id, a)
   const dirB = capturesDir(config, board.id, b)
+  const failedOn = [readManifest(config, board.id, a), readManifest(config, board.id, b)]
+  const failed = (pageId, viewport) => failedOn.some((manifest) => manifest?.pages?.[pageId]?.[viewport]?.status === 'failed')
   return withFileLock(
     indexFile,
     async () => {
@@ -58,6 +64,10 @@ export async function compareEnvironments(config, board, a, b, { onlyPages = nul
           const fileA = path.join(dirA, name)
           const fileB = path.join(dirB, name)
           const key = `${page.id}.${viewport}`
+          if (failed(page.id, viewport)) {
+            pages[page.id][viewport] = { status: 'failed' }
+            continue
+          }
           const sa = stamp(fileA)
           const sb = stamp(fileB)
           if (!sa || !sb) {
@@ -66,7 +76,7 @@ export async function compareEnvironments(config, board, a, b, { onlyPages = nul
           }
           const hit = entries[key]
           if (hit && hit.a === sa && hit.b === sb && fs.existsSync(path.join(dir, name))) {
-            pages[page.id][viewport] = { status: 'ok', percent: hit.percent, diff: name }
+            pages[page.id][viewport] = { status: 'ok', percent: hit.percent, changed: hit.changed, total: hit.total, diff: name }
             continue
           }
           let result
@@ -79,14 +89,14 @@ export async function compareEnvironments(config, board, a, b, { onlyPages = nul
           writeFileAtomic(path.join(dir, name), result.png)
           entries[key] = { a: sa, b: sb, percent: result.percent, changed: result.changed, total: result.total }
           dirty = true
-          pages[page.id][viewport] = { status: 'ok', percent: result.percent, diff: name }
+          pages[page.id][viewport] = { status: 'ok', percent: result.percent, changed: result.changed, total: result.total, diff: name }
           // Big boards: let the server answer other requests between pages.
           await yieldToLoop()
         }
       }
       if (dirty) writeJsonAtomic(indexFile, { format: CACHE_FORMAT, entries })
       const changedPages = Object.values(pages).filter((viewports) =>
-        Object.values(viewports).some((item) => item.status === 'ok' && item.percent > 0),
+        Object.values(viewports).some((item) => item.status === 'ok' && item.changed > 0),
       ).length
       return { a, b, pages, changedPages }
     },

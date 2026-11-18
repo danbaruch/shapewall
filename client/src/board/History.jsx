@@ -4,7 +4,7 @@ import { Badge, Button, CommentDot, Dialog, EmptyState, Toggle, ToggleGroup } fr
 import { cn, formatRelative, shownTime } from '../lib/utils'
 import { useImageDiff } from '../lib/imageDiff'
 import { CompareSlider } from './BeforeAfter'
-import { pageHistory } from './flow'
+import { changeText, pageHistory } from './flow'
 import { scrollBehavior } from '../lib/motion'
 import { commentText } from '../../../src/comment-fields.js'
 
@@ -18,7 +18,7 @@ function diffText(diff) {
   if (diff.status === 'loading') return 'Finding changes…'
   if (diff.status === 'error') return 'Could not compare these captures.'
   if (diff.status !== 'ok') return ''
-  return diff.changed ? `${diff.percent}% changed` : 'No pixel changes'
+  return diff.changed ? `${changeText(diff)} changed` : 'No pixel changes'
 }
 
 // Where the first changed pixel is, as a fraction of the height (0..1), read

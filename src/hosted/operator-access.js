@@ -15,8 +15,10 @@ import { OperatorError, logOperator } from './operator.js'
 import { setTailnetPasskeys, tailnetPasskeysOffAt, tailnetPasskeysSetting } from './passkey-policy.js'
 import { STEP_UP_GROUPS } from './step-up.js'
 import { stepUpSettings } from './step-up-settings.js'
+import { replacePendingInvites, revokeGrants } from './membership.js'
 import { ROLES } from './permissions.js'
 import { accounts, allWorkspaces, audit, auditAccount, tenant } from './tenancy.js'
+import { createQuotas } from './quotas.js'
 import { cleanTailnetLogin } from '../tailnet-proof.js'
 
 const DAY = 86_400_000
@@ -136,6 +138,10 @@ export function createInvite(db, { workspaceId, login = null, origin = null, rol
     const token = randomToken(32)
     const id = newId('iv')
     const expiresAt = new Date(now.getTime() + length * DAY).toISOString()
+    // One pending invite per tailnet login: running the command again replaces it.
+    const replaced = tailnetLogin ? replacePendingInvites(t, tailnetLogin, at) : []
+    for (const old of replaced)
+      audit(t, { action: 'invite_revoked', target: old, at, detail: { by: 'operator', operator, replacedBy: id } })
     t.run(
       'INSERT INTO invites (workspace_id, id, token_hash, role, created_by, created_at, expires_at, email, note, tailnet_login) VALUES (:ws, :id, :hash, :role, :owner, :at, :expires, NULL, :note, :tailnet)',
       {
@@ -159,12 +165,13 @@ export function createInvite(db, { workspaceId, login = null, origin = null, rol
       operator,
       action: 'invite_create',
       target: workspace.id,
-      detail: { invite: id, role: wanted, tailnet: tailnetLogin },
+      detail: { invite: id, role: wanted, tailnet: tailnetLogin, ...(replaced.length ? { replaced } : {}) },
       at,
     })
     return {
       workspace: { id: workspace.id, name: workspace.name },
       invite: { id, role: wanted, expiresAt, tailnetLogin },
+      replaced,
       url: tailnetLogin ? null : `${String(origin).replace(/\/+$/, '')}/invite#${token}`,
     }
   })
@@ -187,7 +194,9 @@ export function revokeInvite(db, { workspaceId, id, operator, now = new Date() }
 // Puts someone in a workspace. An account that exists (by handle, or by the
 // tailnet login it is linked to) is a member at once, or gets the new role.
 // A tailnet login with no account yet gets an invite only it can take.
-export function addMember(db, { workspaceId, handle, login, role, operator, now = new Date() }) {
+// `quotas`: the server's quotas (src/hosted/quotas.js); someone new takes a
+// seat only while the workspace has one free, as when an invite is accepted.
+export function addMember(db, { workspaceId, handle, login, role, operator, quotas = null, now = new Date() }) {
   const workspace = workspaceOf(db, workspaceId)
   const wanted = roleOf(role)
   const who = accountBy(db, { handle, login })
@@ -199,6 +208,7 @@ export function addMember(db, { workspaceId, handle, login, role, operator, now 
   const t = tenant(db, workspace.id)
   const at = now.toISOString()
   return transaction(db, () => {
+    let revoked = null
     const current = t.get('SELECT role FROM memberships WHERE workspace_id = :ws AND user_id = :user', { user: who.user.id })
     if (current?.role === wanted) throw new OperatorError(`@${who.user.handle} is already ${wanted} in ${workspace.name}`)
     if (current) {
@@ -211,7 +221,18 @@ export function addMember(db, { workspaceId, handle, login, role, operator, now 
         at,
         detail: { from: current.role, to: wanted, by: 'operator', operator },
       })
+      // The same cascade as the console's role change (src/hosted/membership.js
+      // revokeGrants): what they may no longer hand out is revoked now, so a
+      // later promotion does not bring it back.
+      revoked = revokeGrants(t, who.user.id, wanted, { at })
+      if (revoked.invites || revoked.shares || revoked.tokens)
+        audit(t, { action: 'member_grants_revoked', target: who.user.id, at, detail: { ...revoked, by: 'operator', operator } })
     } else {
+      const most = (quotas || createQuotas()).of(workspace.id).members
+      if (t.get('SELECT COUNT(*) AS n FROM memberships WHERE workspace_id = :ws').n >= most)
+        throw new OperatorError(
+          `${workspace.name} has reached its limit of ${most} people: raise "members" in the quotas file, or remove someone first`,
+        )
       t.run('INSERT INTO memberships (workspace_id, user_id, role, created_at) VALUES (:ws, :user, :role, :at)', {
         user: who.user.id,
         role: wanted,
@@ -223,13 +244,14 @@ export function addMember(db, { workspaceId, handle, login, role, operator, now 
       operator,
       action: current ? 'member_role' : 'member_add',
       target: workspace.id,
-      detail: { handle: who.user.handle, role: wanted, ...(current ? { from: current.role } : {}) },
+      detail: { handle: who.user.handle, role: wanted, ...(current ? { from: current.role } : {}), ...(revoked || {}) },
       at,
     })
     return {
       workspace: { id: workspace.id, name: workspace.name },
       member: { handle: who.user.handle, tailnetLogin: who.user.tailnet_login || null, role: wanted },
       changedFrom: current?.role || null,
+      ...(revoked ? { revoked } : {}),
     }
   })
 }

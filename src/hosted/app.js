@@ -269,6 +269,7 @@ export function createHostedApp({
     setCookie,
     limit,
     sessionOf,
+    stillSignedIn,
     guardWrites,
     needSession,
     needFresh,
@@ -517,6 +518,7 @@ export function createHostedApp({
     usercontent,
     guardWrites,
     needSession,
+    stillSignedIn,
     limit,
     inWorkspace,
     inProject,
@@ -623,7 +625,7 @@ export function createHostedApp({
   // process alive). app.locals.close() stops it and the cleaner's workers.
   const sweep = () => {
     try {
-      sweepStaging({ db, dataDir, now: now() })
+      sweepStaging({ db, dataDir, now: now(), log })
       sweepStagedImages(db, now())
     } catch (error) {
       log(`staging sweep: ${error.message}`)

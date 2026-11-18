@@ -27,6 +27,7 @@ import { randomBytes } from 'node:crypto'
 import { cleanNetworkSummary } from './capture/network-summary.js'
 import { ID_RE, VIEWPORT_NAMES, boardViewports } from './config.js'
 import { isLockLive, readLock, withFileLock } from './lock.js'
+import { writeAll } from './write-all.js'
 import { commentMentions } from './mentions.js'
 import { publicReactions, toggleReaction } from './reactions.js'
 import { createdEvents, emitCommentEvents, replyEvents, updateEvents } from './events.js'
@@ -104,7 +105,7 @@ export function writeFileAtomic(file, data) {
   const fd = fs.openSync(temp, 'w', 0o644)
   try {
     try {
-      fs.writeSync(fd, data)
+      writeAll(fd, data)
       fs.fsyncSync(fd)
     } finally {
       fs.closeSync(fd)
@@ -198,11 +199,21 @@ export function captureFailures(config, board, envId = null) {
   return out
 }
 
-export function captureFiles(config, board, envId = null) {
+// Page -> viewport -> the capture's files. `current`: leave out a shot whose
+// latest capture failed; a failed partial recapture leaves the older
+// screenshot in place, and compare must not show it as today's page.
+export function captureFiles(config, board, envId = null, { current = false } = {}) {
   const dir = capturesDir(config, board.id, envId)
   if (!fs.existsSync(dir)) return {}
   const names = dirNames(dir)
-  return Object.fromEntries(board.pages.map((page) => [page.id, fileSet(names, page.id, page.viewports)]))
+  const failed = current ? captureFailures(config, board, envId) : {}
+  return Object.fromEntries(
+    board.pages.map((page) => {
+      const files = fileSet(names, page.id, page.viewports)
+      for (const viewport of Object.keys(failed[page.id] || {})) delete files[viewport]
+      return [page.id, files]
+    }),
+  )
 }
 
 // Absolute path of a file Shapewall wrote, or null when the name is not one

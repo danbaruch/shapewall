@@ -178,6 +178,8 @@ export async function watchComments({
   let scanning = null
   let again = false
   let wake = null
+  // The last scan's error: --once reports it instead of exiting as if nothing were open.
+  let scanError = null
 
   const left = claim
     ? listComments(config, board.id, { status: 'open' }).filter((comment) => ['queued', 'working'].includes(comment.agentStatus))
@@ -336,7 +338,9 @@ export async function watchComments({
         again = false
         try {
           await scan()
+          scanError = null
         } catch (error) {
+          scanError = error
           log(`watch: ${error.message}`)
         }
       } while (again && !stopped)
@@ -367,6 +371,7 @@ export async function watchComments({
       // queue is empty and every command has finished.
       for (;;) {
         await runScan()
+        if (scanError) throw scanError
         if (!running.size || stopped) break
         await Promise.race([...running.values()].map((entry) => entry.done))
       }

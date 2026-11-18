@@ -47,6 +47,8 @@ function machine(name, { files, policy = {} } = {}) {
   const branches = () => git('branch', '--format=%(refname:short)').split('\n').filter(Boolean).sort()
   return { dir, git, bare, env, config, onRemote, branches, policy: cleanMachinePolicy({ approvals: 'owner', ...policy }) }
 }
+// The connection a fix is made for (agent hello: origin, workspace, project, agent).
+const OWNER = { origin: 'https://boards.example', workspace: 'ws_one', project: 'pr_one', agent: 'ag_one' }
 // Writes `text` to a file of the fix's folder, as the agent would after an allowed edit.
 const write = (prepared, rel, data) => {
   const file = path.join(prepared.work.tree.projectDir, rel)
@@ -246,6 +248,7 @@ test('an edit nobody looked at: the fix is committed here and pushed nowhere, un
     prepared,
     job: jobFor(3),
     approved,
+    owner: OWNER,
     env: m.env,
     push: async () => (pushed += 1),
   })
@@ -255,9 +258,9 @@ test('an edit nobody looked at: the fix is committed here and pushed nowhere, un
   assert.match(out.line, /not pushed until someone has looked at its whole diff on the board \(Push this fix\)/)
   assert.deepEqual(m.onRemote(), [])
   // The held fix is found again, by comment, with this machine's own repository (never a path from its record).
-  const record = await readHeld({ config: m.config, env: m.env, board: 'sample', comment: 3 })
+  const record = await readHeld({ config: m.config, env: m.env, board: 'sample', comment: 3, owner: OWNER })
   assert.equal(record.branch, out.summary.branch.name)
-  assert.equal(await readHeld({ config: m.config, env: m.env, board: 'sample', comment: 4 }), null)
+  assert.equal(await readHeld({ config: m.config, env: m.env, board: 'sample', comment: 4, owner: OWNER }), null)
   // The card shows the whole diff: every file.
   const diff = await heldDiff(record)
   assert.match(diff.preview, /Hi/)
@@ -265,15 +268,15 @@ test('an edit nobody looked at: the fix is committed here and pushed nowhere, un
   // A record someone tampered with (another commit, another repository) is not a fix to push.
   const raw = JSON.parse(fs.readFileSync(record.file, 'utf8'))
   fs.writeFileSync(record.file, JSON.stringify({ ...raw, gitDir: '/somewhere/else/.git', commit: m.git('rev-parse', 'main') }))
-  assert.equal(await readHeld({ config: m.config, env: m.env, board: 'sample', comment: 3 }), null)
+  assert.equal(await readHeld({ config: m.config, env: m.env, board: 'sample', comment: 3, owner: OWNER }), null)
   fs.writeFileSync(record.file, JSON.stringify({ ...raw, files: raw.files.slice(0, 1) }))
   assert.equal(
-    await readHeld({ config: m.config, env: m.env, board: 'sample', comment: 3 }),
+    await readHeld({ config: m.config, env: m.env, board: 'sample', comment: 3, owner: OWNER }),
     null,
     'the commit changes more than the record says',
   )
   fs.writeFileSync(record.file, JSON.stringify({ ...raw, gitDir: '/somewhere/else/.git' }))
-  const again = await readHeld({ config: m.config, env: m.env, board: 'sample', comment: 3 })
+  const again = await readHeld({ config: m.config, env: m.env, board: 'sample', comment: 3, owner: OWNER })
   assert.notEqual(again.gitDir, '/somewhere/else/.git')
   // After the card: pushed, that branch only.
   const done = await pushFix({ config: m.config, policy: m.policy, record: again, env: m.env })
@@ -293,6 +296,59 @@ test('an edit nobody looked at: the fix is committed here and pushed nowhere, un
   assert.equal(kept.summary.branch.pushed, false)
   assert.match(kept.notes.join('\n'), /Not pushed: the fix changes run\.sh, which runs on install, build, test or CI/)
   assert.deepEqual(m.onRemote(), [record.branch])
+})
+
+// Review finding 08: held fixes were found by board and comment only, so two
+// connections sharing one checkout (the same folder connected to two
+// projects or servers, whose ids overlap) could open each other's fix, and
+// an older summary's "Push this fix" could open a newer fix of the comment.
+test('a held fix is offered only to the connection that made it, and only the fix that was asked for', async () => {
+  const m = machine('held-owner')
+  const one = OWNER
+  const two = { origin: 'https://other.example', workspace: 'ws_two', project: 'pr_two', agent: 'ag_two' }
+  const hold = async (owner, text) => {
+    const prepared = await prepareFix({ config: m.config, policy: m.policy, job: jobFor(7), env: m.env })
+    write(prepared, 'index.html', text)
+    const approved = new Map([['index.html', { hash: sha(text), auto: true }]])
+    const out = await finishFix({
+      config: m.config,
+      policy: m.policy,
+      prepared,
+      job: jobFor(7),
+      approved,
+      owner,
+      env: m.env,
+      push: async () => {},
+    })
+    assert.equal(out.summary.branch.held, true)
+    return out.summary.branch
+  }
+  const ofOne = await hold(one, '<h1>One</h1>\n')
+  // A moment later (record names sort by time), the other connection's fix of its own comment 7.
+  await new Promise((resolve) => setTimeout(resolve, 1100))
+  const ofTwo = await hold(two, '<h1>Two</h1>\n')
+  const read = (owner, commit = null) => readHeld({ config: m.config, env: m.env, board: 'sample', comment: 7, owner, commit })
+  assert.equal((await read(one)).commit, ofOne.commit, 'connection one gets its own fix, not the newer one')
+  assert.equal((await read(two)).commit, ofTwo.commit)
+  for (const key of Object.keys(one)) assert.equal(await read({ ...one, [key]: `${one[key]}x` }), null, `another ${key}`)
+  assert.equal(await read(null), null, 'no connection named: nothing')
+  assert.equal(await read({ ...one, agent: '' }), null, 'a connection named in part: nothing')
+  // The exact fix: the one the card was on, and no other of the comment.
+  assert.equal((await read(one, ofOne.commit)).commit, ofOne.commit)
+  assert.equal(await read(one, ofTwo.commit), null, "the other connection's commit")
+  assert.equal(await read(one, 'f'.repeat(40)), null, 'a commit nobody holds')
+  assert.equal(await read(one, 'not a commit'), null)
+  await new Promise((resolve) => setTimeout(resolve, 1100))
+  const newer = await hold(one, '<h1>One again</h1>\n')
+  assert.equal((await read(one)).commit, newer.commit, 'no commit named: the newest of its own')
+  assert.equal((await read(one, ofOne.commit)).commit, ofOne.commit, 'an older summary opens its own fix, not the newer one')
+  // A record from before owners were recorded is never offered: the comment needs a fresh fix.
+  const legacy = await read(two)
+  const raw = JSON.parse(fs.readFileSync(legacy.file, 'utf8'))
+  delete raw.owner
+  fs.writeFileSync(legacy.file, JSON.stringify(raw))
+  assert.equal(await read(two), null)
+  assert.equal(await read(two, ofTwo.commit), null)
 })
 
 test('copies a dead process left are swept, at the next fix and at connect, and their branch names are free again', async () => {

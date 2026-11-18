@@ -53,6 +53,7 @@ import {
   commitAgentBranch,
   createAgentBranch,
   discardAgentBranch,
+  keptText,
   listAgentBranches,
   readMeta,
   revertAppliedBranch,
@@ -877,12 +878,15 @@ export function agentRouter({
               },
             )
           : null
+        // The files the agent's own tools edited: the only ones its Undo may put back.
+        const agentFiles = new Set()
         const reply = await runTurn({
           config,
           board,
           threadId,
           messages,
           backend,
+          editedFiles: agentFiles,
           model: current.model,
           // The composer's model picker (an endpoint's own list), owner turns only.
           modelOverride: ownerWrites ? chosenModel(current, `${board.id}/${threadId}`) : null,
@@ -930,6 +934,7 @@ export function agentRouter({
               pageIds: [...requestedPages],
               commentId,
               overlapped: overlappedAtStart || serial !== turnSerial || runs.size > 1,
+              agentFiles,
             })
             if (summary) reply.summary = summary
             if (undo) rememberUndo(`${board.id}/${threadId}/${reply.id}`, undo)
@@ -1664,8 +1669,9 @@ export function agentRouter({
             const meta = readMeta(config, summary.branch.id)
             if (!meta || meta.messageId !== messageId)
               return fail(res, 410, 'undo_unavailable', 'That branch is no longer here: it was applied or removed outside the chat.')
-            await discardAgentBranch(config, meta)
-            undone = { kind: 'branch', branch: meta.branch }
+            const discarded = await discardAgentBranch(config, meta)
+            // A branch someone has checked out (or that moved on) stays, and the card says so.
+            undone = { kind: 'branch', branch: meta.branch, ...(discarded.kept ? { kept: discarded.kept } : {}) }
             branchState = 'discarded'
           } else if (summary.branch.state === 'applied' && summary.branch.applied) {
             const reverted = await revertAppliedBranch(config, summary.branch.applied)
@@ -1932,7 +1938,13 @@ export function agentRouter({
         item.summary = {
           ...item.summary,
           branch: { ...item.summary.branch, state: 'discarded' },
-          undone: { kind: 'branch', branch: meta.branch, at, by: req.shapewallAccess?.name || null },
+          undone: {
+            kind: 'branch',
+            branch: meta.branch,
+            ...(result.kept ? { kept: result.kept } : {}),
+            at,
+            by: req.shapewallAccess?.name || null,
+          },
         }
       })
       if (meta.commentId) {
@@ -1944,7 +1956,9 @@ export function agentRouter({
           if (changed.changed)
             await addReply(config, board.id, meta.commentId, {
               author: 'shapewall',
-              body: `The agent’s branch ${meta.branch} was discarded. Your checkout was not touched.`,
+              body: result.kept
+                ? `The agent’s work was discarded. ${keptText(meta.branch, result.kept)} Your checkout was not touched.`
+                : `The agent’s branch ${meta.branch} was discarded. Your checkout was not touched.`,
             })
         } catch (error) {
           log(`branch mode: after discard: ${error.message}`)

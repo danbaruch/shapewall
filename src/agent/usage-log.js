@@ -17,6 +17,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { withFileLock } from '../lock.js'
+import { writeAll } from '../write-all.js'
 import { OUTCOME_GROUP_IDS, outcomeGroup, usageRecordOf } from '../hosted/usage-shape.js'
 
 export const USAGE_FILE = 'agent-usage.jsonl'
@@ -94,7 +95,18 @@ export async function recordLocalTurn(config, row, { maxBytes = LOG_MAX_BYTES } 
       try {
         // A log that was made wider is narrowed again.
         fs.fchmodSync(fd, 0o600)
-        fs.writeSync(fd, data)
+        const start = fs.fstatSync(fd).size
+        try {
+          writeAll(fd, data)
+        } catch (error) {
+          // No half line left for the next record to start in.
+          try {
+            fs.ftruncateSync(fd, start)
+          } catch {
+            /* readers skip a damaged line */
+          }
+          throw error
+        }
       } finally {
         fs.closeSync(fd)
       }

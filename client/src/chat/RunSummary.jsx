@@ -38,6 +38,15 @@ const STATUS = {
 }
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
 
+// After Undo or Discard of a branch: deleted, or kept and why (src/agent/branch-mode.js keptText).
+function keptBranchText(undone) {
+  const kept = undone.kept
+  if (!kept) return `Deleted the branch ${undone.branch}.`
+  if (kept.reason === 'in_use') return `Kept branch ${undone.branch}: it is checked out in ${kept.dir}.`
+  if (kept.reason === 'moved') return `Kept branch ${undone.branch}: it moved on from the agent's commit.`
+  return `Kept branch ${undone.branch}: could not check whether it is in use.`
+}
+
 function FileRow({ file, touch }) {
   const [open, setOpen] = useState(false)
   const status = STATUS[file.status] || STATUS.modified
@@ -311,7 +320,7 @@ function RemoteBranch({ summary, touch }) {
           onClick={async () => {
             setAsking(true)
             try {
-              await push()
+              await push(branch.commit)
             } finally {
               setAsking(false)
             }
@@ -353,7 +362,13 @@ function UndoDialog({ open, summary, busy, error, onCancel, onConfirm, touch }) 
   const branch = summary.undo?.kind === 'branch'
   // Agent branch mode, after Apply: Undo reverts what Apply brought in.
   const revert = summary.undo?.kind === 'agent-branch'
-  const files = summary.files || []
+  // Only the files the agent edited itself; others that changed meanwhile stay (turn-changes.js).
+  const undoable = (summary.files || []).filter((file) => !file.outside)
+  const count = summary.undo?.files ?? undoable.length
+  const others = summary.undo?.others || 0
+  const kept = others
+    ? ` ${plural(others, 'other changed file')} ${others === 1 ? 'was' : 'were'} not edited by the agent itself and ${others === 1 ? 'stays' : 'stay'} as ${others === 1 ? 'it is' : 'they are'}.`
+    : ''
   return (
     <Dialog
       open={open}
@@ -364,9 +379,9 @@ function UndoDialog({ open, summary, busy, error, onCancel, onConfirm, touch }) 
           ? `This adds a commit that reverts ${summary.branch?.name || 'the branch'} in your checkout. Nothing changes if your checkout moved on or has uncommitted changes.`
           : branch
             ? `This deletes the branch ${summary.undo.branch} and the agent's commit on it. Your own checkout is not touched.`
-            : files.length === 1
-              ? 'This puts 1 file back the way it was before this answer. Nothing is undone if it changed since.'
-              : `This puts ${plural(files.length, 'file')} back the way they were before this answer. Nothing is undone if any of them changed since.`
+            : count === 1
+              ? `This puts 1 file back the way it was before this answer. Nothing is undone if it changed since.${kept}`
+              : `This puts ${plural(count, 'file')} back the way they were before this answer. Nothing is undone if any of them changed since.${kept}`
       }
       wrapDescription
       footer={
@@ -381,9 +396,9 @@ function UndoDialog({ open, summary, busy, error, onCancel, onConfirm, touch }) 
       }
     >
       <div className="space-y-2 px-4 pb-1">
-        {!branch && !revert && files.length ? (
+        {!branch && !revert && undoable.length ? (
           <ul className="max-h-48 space-y-0.5 overflow-y-auto font-mono text-caption text-muted">
-            {files.map((file) => (
+            {undoable.map((file) => (
               <li key={file.path} className="truncate">
                 {file.status === 'added' ? 'remove ' : file.status === 'deleted' ? 'restore ' : 'revert '}
                 {file.path}
@@ -564,7 +579,7 @@ export default function RunSummary({ message, owner = false, touch = false, onUn
           {undone ? (
             <p className="text-caption text-muted">
               {undone.kind === 'branch'
-                ? `Deleted the branch ${undone.branch}.`
+                ? keptBranchText(undone)
                 : undone.kind === 'revert'
                   ? `Reverted ${undone.branch} in your checkout.`
                   : `Put ${plural(undone.files || files.length, 'file')} back.`}

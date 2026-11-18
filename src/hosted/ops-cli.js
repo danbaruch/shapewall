@@ -337,17 +337,29 @@ async function admin(positional, flags, out) {
           return 0
         }
         if (target === 'add') {
-          const result = access.addMember(db, { ...where, handle: flags.handle, login: flags.login, role: flags.role })
+          const { createQuotas } = await import('./quotas.js')
+          const quotaFile = flags.quotas || (fs.existsSync(path.join(dir, 'quotas.json')) ? path.join(dir, 'quotas.json') : null)
+          const result = access.addMember(db, {
+            ...where,
+            handle: flags.handle,
+            login: flags.login,
+            role: flags.role,
+            quotas: createQuotas({ file: quotaFile }),
+          })
           if (flags.json) return json(result)
           if (result.invited)
             return say(
               `${show(result.invite.tailnetLogin)} has no account here yet: invited to ${show(result.workspace.name)} as ${result.invite.role}. ` +
                 'Only that tailnet login can take it: they open the server from one of their tailnet devices.',
             )
+          const revoked = result.revoked
           return say(
-            result.changedFrom
+            (result.changedFrom
               ? `@${show(result.member.handle)} is now ${result.member.role} in ${show(result.workspace.name)} (was ${result.changedFrom}).`
-              : `@${show(result.member.handle)} is in ${show(result.workspace.name)} as ${result.member.role}.`,
+              : `@${show(result.member.handle)} is in ${show(result.workspace.name)} as ${result.member.role}.`) +
+              (revoked && (revoked.invites || revoked.shares || revoked.tokens)
+                ? ` Revoked: ${revoked.invites} invites, ${revoked.shares} share links, ${revoked.tokens} API tokens they made.`
+                : ''),
           )
         }
         if (target === 'remove') {
@@ -539,10 +551,13 @@ async function backupCommand(flags, out) {
     dataDir: dataDirOf(flags),
     to: flags.to,
     keepDays: intFlag(flags, 'keep-days', { min: 1, max: 3650, fallback: null }),
+    // Not into --json output: that stays one JSON document.
+    log: flags.json ? () => {} : out,
   })
+  const incomplete = result.manifest.complete === false
   if (flags.json) {
     out(JSON.stringify({ dir: result.dir, manifest: result.manifest, pruned: result.pruned }, null, 2))
-    return 0
+    return incomplete ? 1 : 0
   }
   const { counts, files } = result.manifest
   out(`Backed up to ${result.dir}`)
@@ -551,6 +566,12 @@ async function backupCommand(flags, out) {
   )
   if (result.pruned.length) out(`  Removed ${result.pruned.length} backups older than ${flags['keep-days']} days`)
   out('  It holds everything, the signing key included: keep it as private as the server.')
+  if (incomplete) {
+    const missing = files.skipped?.missing ?? []
+    out(`  INCOMPLETE: ${missing.length} board folders are missing from the data folder, so this is not a recovery point:`)
+    for (const rel of missing.slice(0, 20)) out(`    ${rel}`)
+    return 1
+  }
   return 0
 }
 

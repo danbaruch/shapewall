@@ -80,6 +80,41 @@ export function runRetention({
   return result
 }
 
+// The capture versions a board's discussion points at, as a Set of
+// "page\0viewport\0version": every version a comment was made on, open or
+// resolved, and every version a reply's drawing was made on (the capture
+// that was current when it was posted), so its markup keeps rendering.
+// Retention keeps these, and a push that replaces the board carries them
+// over (src/hosted/push.js). Call it inside the caller's transaction.
+export function referencedVersions(t, projectId, boardId) {
+  const referenced = new Set(
+    t
+      .all(
+        `SELECT DISTINCT page_id, viewport, capture_version FROM comments
+         WHERE workspace_id = :ws AND project_id = :project AND board_id = :board AND capture_version IS NOT NULL`,
+        { project: projectId, board: boardId },
+      )
+      .map((comment) => `${comment.page_id}\u0000${comment.viewport}\u0000${comment.capture_version}`),
+  )
+  for (const comment of t.all(
+    `SELECT page_id, viewport, replies FROM comments
+     WHERE workspace_id = :ws AND project_id = :project AND board_id = :board AND replies LIKE '%"drawing"%'`,
+    { project: projectId, board: boardId },
+  )) {
+    let replies = []
+    try {
+      replies = JSON.parse(comment.replies)
+    } catch {
+      /* unreadable: nothing referenced */
+    }
+    for (const reply of Array.isArray(replies) ? replies : []) {
+      const version = reply?.drawing?.captureVersion
+      if (typeof version === 'string') referenced.add(`${comment.page_id}\u0000${comment.viewport}\u0000${version}`)
+    }
+  }
+  return referenced
+}
+
 function pruneBoard(db, t, dataDir, projectId, boardId, keep, dryRun) {
   return transaction(db, () => {
     const row = t.get('SELECT * FROM boards WHERE workspace_id = :ws AND project_id = :project AND board_id = :board', {
@@ -88,33 +123,7 @@ function pruneBoard(db, t, dataDir, projectId, boardId, keep, dryRun) {
     })
     if (!row) return { files: 0, bytes: 0 }
     const config = boardConfig(dataDir, t.workspaceId, projectId, row)
-    const referenced = new Set(
-      t
-        .all(
-          `SELECT DISTINCT page_id, viewport, capture_version FROM comments
-           WHERE workspace_id = :ws AND project_id = :project AND board_id = :board AND capture_version IS NOT NULL`,
-          { project: projectId, board: boardId },
-        )
-        .map((comment) => `${comment.page_id}\u0000${comment.viewport}\u0000${comment.capture_version}`),
-    )
-    // A reply's drawing is on the capture that was current when it was
-    // posted: that version stays too, so its markup keeps rendering.
-    for (const comment of t.all(
-      `SELECT page_id, viewport, replies FROM comments
-       WHERE workspace_id = :ws AND project_id = :project AND board_id = :board AND replies LIKE '%"drawing"%'`,
-      { project: projectId, board: boardId },
-    )) {
-      let replies = []
-      try {
-        replies = JSON.parse(comment.replies)
-      } catch {
-        /* unreadable: nothing referenced */
-      }
-      for (const reply of Array.isArray(replies) ? replies : []) {
-        const version = reply?.drawing?.captureVersion
-        if (typeof version === 'string') referenced.add(`${comment.page_id}\u0000${comment.viewport}\u0000${version}`)
-      }
-    }
+    const referenced = referencedVersions(t, projectId, boardId)
     const names = planBoardRetention(listVersions(config, boardId), referenced, keep)
     const dir = path.join(config.outputDir, boardId, 'versions')
     let bytes = 0
