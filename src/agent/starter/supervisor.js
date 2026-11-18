@@ -290,6 +290,8 @@ export async function runStarter({
   const comment = await source.get(id)
   const gate = gateComment(comment, { trusted: settings.trustedFor(source.board.id), hosted: source.hosted })
   if (!gate.dispatch && (source.hosted || gate.final || !overrideGate)) throw gateError(id, gate)
+  // Cancelled before it started: nothing is claimed.
+  if (signal?.aborted) throw new StarterError('stopped', `#${id}: the run was stopped before it started`)
   const { changed } = await source.claim(id, claimFrom)
   if (!changed)
     throw new StarterError(
@@ -352,6 +354,8 @@ export async function runStarter({
   const stopRun = (reason) => controller.abort(reason)
   const onOuterAbort = () => stopRun('stopped')
   signal?.addEventListener('abort', onOuterAbort, { once: true })
+  // A listener added to an already-aborted signal never fires.
+  if (signal?.aborted) onOuterAbort()
 
   // Progress in the comment's chat thread (local boards): one message, updated.
   let messageId = null
@@ -428,6 +432,8 @@ export async function runStarter({
     })
     log(`#${id}: egress proxy up, allowing ${allow.map((entry) => `${entry.host}:${entry.port}`).join(', ')}`)
 
+    // Cancelled during setup (the worktree, the egress proxy, an image pull): the agent never starts.
+    if (controller.signal.aborted) throw new StarterError('stopped', 'the run was stopped before the agent started')
     const args = agentRunArgs({ runtime: runtime.name, runId, image, worktree: tree.dir, uid, gid, limits: settings.limits })
     cleanup.unshift(() => runtime.exec(['rm', '-f', names.agent]))
     const child = runtime.spawn(args)
@@ -625,6 +631,7 @@ export async function runStarter({
       killTimer = setTimeout(() => runtime.exec(['kill', names.agent]).catch(() => {}), KILL_GRACE_MS)
     }
     controller.signal.addEventListener('abort', onStop, { once: true })
+    if (controller.signal.aborted) onStop()
     const exit = await exited
     stopDisk()
     clearTimeout(hardStop)
@@ -665,7 +672,9 @@ export async function runStarter({
     for (const item of made.refused) writeLog(`[commit] left out ${item.path}: ${item.reason}\n`)
     commit = made.committed ? made : null
     status = finalStatus(result, commit)
-    if (commit && pr) {
+    // A cancelled run publishes nothing: the branch stays local for review.
+    if (commit && pr && signal?.aborted) writeLog('[run] stopped: the branch was not pushed\n')
+    else if (commit && pr) {
       // A pushed branch runs CI, with the repository's secrets, before anyone
       // reviews it: no push of changes to CI config, manifests or build files
       // unless the person said so for this run.

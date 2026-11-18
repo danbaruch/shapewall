@@ -17,6 +17,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
   board works on servers with passkeys off (tailnet sign-in) and in workspaces that do not require a passkey for it.
 - Hosted: an active browser session now stays signed in past 30 days. The sign-in cookie is renewed whenever the session
   slides (at most once an hour), with the same security attributes, and still ends 90 days after sign-in as documented.
+- Starter agent: cancelling a run now always stops it. A cancel before or during setup (for example while the image is being
+  pulled) starts no agent and commits nothing, and a cancelled run never pushes its branch or opens a pull request.
 
 ## 0.11.0 - 2026-11-17
 
