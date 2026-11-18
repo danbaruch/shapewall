@@ -94,10 +94,13 @@ going) and a 25 minute capture timeout.
 `shapewall ci capture-compare --out DIR` writes:
 
 - `summary.json`: schema `shapewall-ci-summary`, version 1. Totals (pages, changed pages, shots, changed, unchanged and failed shots,
-  new and removed pages), then each page and viewport: `status` (`changed`, `unchanged`, `new`, `removed` or `failed`), `changed`,
+  new and removed pages, pages left out by `ci.maxPages`), then each page and viewport: `status` (`changed`, `unchanged`, `new`, `removed` or `failed`), `changed`,
   `ratio` (share of pixels changed), `changedPixels`, `dimensionsChanged` with both sizes, image paths, the error and any capture
   warnings. Also `failures` and `warnings` lists.
-- `summary.md`: the comment body.
+- `summary.md`: the comment body. Its headline never reads as a pass when something could not be compared: "comparison failed,
+  none of the 3 pages could be compared" (or "capture failed" when a whole side failed), "1 of 3 pages could not be compared, no
+  changes in the rest", or "2 of 3 pages changed, 1 could not be compared". Pages left out by `ci.maxPages` are named too ("no visual
+  changes on 50 pages, 20 more left out by the page limit"). Only a full pass with nothing left out is folded away.
 - `images/<page>.<viewport>/`: `before.png`, `after.png`, `diff.png` (the after shot faded, changed pixels in red) and a 320 pixel wide
   `.thumb.png` of each, for changed shots only.
 
@@ -197,4 +200,12 @@ shapewall ci enabled           writes enabled=true|false to $GITHUB_OUTPUT
 shapewall ci wait --url URL [--timeout SECONDS]
 ```
 
-`capture-compare` exits 0 whatever it found (3 with `--fail-on-change` when something changed, 1 on a usage or config error).
+`capture-compare` exits 0 whatever it found, so it never fails the pull request on its own. With `--fail-on-change` it exits:
+
+- 3 when anything changed (even if some shots could not be compared);
+- 4 when nothing changed but not everything could be compared: a shot failed, a whole side failed, or there was nothing to compare.
+  A run that compared nothing is never a pass;
+- 0 when every page it was asked for was compared and nothing changed. Pages left out by `ci.maxPages` were not asked for, so they do
+  not fail the run; the comment says how many there were.
+
+It exits 1 on a usage or config error.
