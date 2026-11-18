@@ -34,6 +34,7 @@ import path from 'node:path'
 import { execFile, spawn } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
 import { absoluteProgram } from '../../which.js'
+import { writeAll } from '../../write-all.js'
 
 export const SAFE_GIT_FLAGS = [
   '-c',
@@ -304,7 +305,7 @@ export async function materializeTree({ gitDir, cwd, commit, dir }) {
       const mode = entry.mode === '100755' ? 0o755 : 0o644
       const fd = fs.openSync(entry.full, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, mode)
       try {
-        fs.writeSync(fd, data)
+        writeAll(fd, data)
       } finally {
         fs.closeSync(fd)
       }
