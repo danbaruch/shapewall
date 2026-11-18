@@ -13,6 +13,34 @@ import { audit, inviteUsable, tenant, workspacesForUser } from './tenancy.js'
 
 const WORKSPACES_PER_USER = 10
 
+// What someone handed out that goes when they leave (role null) or get
+// `role`: the rows behind revokeGrantsOf below, shared with the operator's
+// commands (src/hosted/operator-access.js) so that every way a role changes
+// revokes the same things. A role check alone would only hide them: a later
+// promotion would bring them back. Runs inside the caller's transaction.
+// -> { invites, shares, tokens } (counts)
+export function revokeGrants(t, userId, role, { revokeTokens = null, at }) {
+  const plan = grantsToRevoke(role)
+  if (revokeTokens === null) revokeTokens = plan.tokens
+  const pending =
+    'UPDATE invites SET revoked_at = :at WHERE workspace_id = :ws AND created_by = :user AND used_at IS NULL AND revoked_at IS NULL'
+  const invites =
+    plan.invites === 'none' ? 0 : t.run(plan.invites === 'owner' ? `${pending} AND role = 'owner'` : pending, { at, user: userId }).changes
+  const shares = !plan.shares
+    ? 0
+    : t.run('UPDATE shares SET revoked_at = :at WHERE workspace_id = :ws AND created_by = :user AND revoked_at IS NULL', {
+        at,
+        user: userId,
+      }).changes
+  const tokens = revokeTokens
+    ? t.run('UPDATE api_tokens SET revoked_at = :at WHERE workspace_id = :ws AND created_by = :user AND revoked_at IS NULL', {
+        at,
+        user: userId,
+      }).changes
+    : 0
+  return { invites, shares, tokens }
+}
+
 export function createMembership({ db, quotas, iso, auditOf, agentsFor = null }) {
   function publicUser(user) {
     return { id: user.id, handle: user.handle, displayName: user.display_name, avatarUrl: avatarUrl(db, user.id) }
@@ -91,27 +119,7 @@ export function createMembership({ db, quotas, iso, auditOf, agentsFor = null })
   // maker leaves), but whoever removes someone is asked, and `revokeTokens`
   // revokes every live token that person made in this workspace.
   function revokeGrantsOf(req, userId, role, { revokeTokens = null, t = req.t } = {}) {
-    const plan = grantsToRevoke(role)
-    if (revokeTokens === null) revokeTokens = plan.tokens
-    const at = iso()
-    const pending =
-      'UPDATE invites SET revoked_at = :at WHERE workspace_id = :ws AND created_by = :user AND used_at IS NULL AND revoked_at IS NULL'
-    const invites =
-      plan.invites === 'none'
-        ? 0
-        : t.run(plan.invites === 'owner' ? `${pending} AND role = 'owner'` : pending, { at, user: userId }).changes
-    const shares = !plan.shares
-      ? 0
-      : t.run('UPDATE shares SET revoked_at = :at WHERE workspace_id = :ws AND created_by = :user AND revoked_at IS NULL', {
-          at,
-          user: userId,
-        }).changes
-    const tokens = revokeTokens
-      ? t.run('UPDATE api_tokens SET revoked_at = :at WHERE workspace_id = :ws AND created_by = :user AND revoked_at IS NULL', {
-          at,
-          user: userId,
-        }).changes
-      : 0
+    const { invites, shares, tokens } = revokeGrants(t, userId, role, { revokeTokens, at: iso() })
     if (invites || shares || tokens) auditOf(req, 'member_grants_revoked', userId, { invites, shares, tokens }, t)
     // A revoked token that was an agent lets go of what it held and what
     // waited for it (src/hosted/agents.js releaseGone).

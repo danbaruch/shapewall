@@ -128,6 +128,63 @@ test('demoting an admin below admin revokes their tokens; owner to admin and bac
   assert.ok(audit.json.entries.some((entry) => entry.target === person.user.id && entry.detail.tokens === 1))
 })
 
+// Review finding 11: the operator's demotion revoked nothing, so a later
+// promotion brought the old invite, share link and token back to life.
+test('a demotion revokes grants through every entry point: re-promotion after the console or operator demotion revives none', async () => {
+  const grantsOf = async (person, tag) => {
+    await fresh(person)
+    const made = await namedToken(person, `${tag}-ci`)
+    const pending = await person.browser.post(`/api/workspaces/${ws}/invites`, { role: 'member' })
+    assert.equal(pending.status, 201, pending.text)
+    const share = await person.browser.post(`/api/workspaces/${ws}/projects/${project.id}/shares`, { name: `${tag} link`, mode: 'view' })
+    assert.equal(share.status, 201, share.text)
+    return { ...made, inviteToken: new URL(pending.json.url).hash.slice(1), shareUrl: share.json.url }
+  }
+  const rows = (userId) => ({
+    invites: hosted.db.prepare('SELECT revoked_at FROM invites WHERE workspace_id = ? AND created_by = ?').all(ws, userId),
+    shares: hosted.db.prepare('SELECT revoked_at FROM shares WHERE workspace_id = ? AND created_by = ?').all(ws, userId),
+    tokens: hosted.db.prepare('SELECT revoked_at FROM api_tokens WHERE workspace_id = ? AND created_by = ?').all(ws, userId),
+  })
+  const { addMember } = await import('../src/hosted/operator-access.js')
+  const entryPoints = {
+    console: async (person, role) => {
+      await fresh(owner)
+      const changed = await api(owner, 'PATCH', `/api/workspaces/${ws}/members/${person.user.id}`, { role })
+      assert.equal(changed.status, 200, changed.text)
+    },
+    operator: async (person, role) => addMember(hosted.db, { workspaceId: ws, handle: person.user.handle, role, operator: 'review-test' }),
+  }
+  await fresh(owner)
+  assert.equal((await api(owner, 'PATCH', `/api/workspaces/${ws}/settings`, { shareLinks: true })).status, 200)
+  for (const [how, setRole] of Object.entries(entryPoints)) {
+    await fresh(owner)
+    const handle = `grants-${how}`
+    const person = await signUp(hosted, { handle, displayName: handle, invite: await invite(owner, ws, 'admin') })
+    const grants = await grantsOf(person, how)
+    assert.equal((await tokenCall(hosted, grants.token, 'GET', '/api/v1/project')).status, 200)
+    await setRole(person, 'member')
+    await setRole(person, 'admin')
+    // Back as an admin: every grant from before the demotion stays revoked.
+    const after = rows(person.user.id)
+    for (const [kind, list] of Object.entries(after)) {
+      assert.ok(list.length > 0, `${how}: ${kind} were made`)
+      assert.ok(
+        list.every((row) => row.revoked_at),
+        `${how}: every ${kind} row stays revoked`,
+      )
+    }
+    assert.equal(await tokenStatus(grants.id), 'revoked', how)
+    assert.equal((await tokenCall(hosted, grants.token, 'GET', '/api/v1/project')).status, 401, how)
+    const audit = hosted.db
+      .prepare("SELECT detail FROM audit_log WHERE workspace_id = ? AND action = 'member_grants_revoked' AND target = ?")
+      .all(ws, person.user.id)
+      .map((row) => JSON.parse(row.detail))
+    assert.equal(audit.length, 1, `${how}: one audit entry for the demotion`)
+    assert.deepEqual([audit[0].invites, audit[0].shares, audit[0].tokens], [1, 1, 1], how)
+    if (how === 'operator') assert.equal(audit[0].by, 'operator')
+  }
+})
+
 test('deleting an account always revokes its tokens (no opt-out), planned inside its transaction', async () => {
   const { person, id } = await adminWithToken('dex')
   await fresh(person)

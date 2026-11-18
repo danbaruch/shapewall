@@ -48,6 +48,10 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Website: the privacy page now says that the contact form also stores the User-Agent your browser sends, and that, if the site
   operator has set it up, your message, topic and email address are forwarded to a messaging service.
 - Website: a link with a broken fragment (for example one cut off while copying) no longer stops the page from loading.
+- **Hosted: the operator's role change revokes what the old role handed out.** `shapewall hosted admin members add --role` on
+  an existing member now revokes the same invites, share links and API tokens as a role change in the console, writes the same
+  `member_grants_revoked` audit entry, and says what it revoked. Before, a demotion there only hid those grants, and promoting
+  the person again later brought them back.
 
 ## 0.11.0 - 2026-11-17
 

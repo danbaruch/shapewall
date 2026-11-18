@@ -15,6 +15,7 @@ import { OperatorError, logOperator } from './operator.js'
 import { setTailnetPasskeys, tailnetPasskeysOffAt, tailnetPasskeysSetting } from './passkey-policy.js'
 import { STEP_UP_GROUPS } from './step-up.js'
 import { stepUpSettings } from './step-up-settings.js'
+import { revokeGrants } from './membership.js'
 import { ROLES } from './permissions.js'
 import { accounts, allWorkspaces, audit, auditAccount, tenant } from './tenancy.js'
 import { cleanTailnetLogin } from '../tailnet-proof.js'
@@ -199,6 +200,7 @@ export function addMember(db, { workspaceId, handle, login, role, operator, now 
   const t = tenant(db, workspace.id)
   const at = now.toISOString()
   return transaction(db, () => {
+    let revoked = null
     const current = t.get('SELECT role FROM memberships WHERE workspace_id = :ws AND user_id = :user', { user: who.user.id })
     if (current?.role === wanted) throw new OperatorError(`@${who.user.handle} is already ${wanted} in ${workspace.name}`)
     if (current) {
@@ -211,6 +213,12 @@ export function addMember(db, { workspaceId, handle, login, role, operator, now 
         at,
         detail: { from: current.role, to: wanted, by: 'operator', operator },
       })
+      // The same cascade as the console's role change (src/hosted/membership.js
+      // revokeGrants): what they may no longer hand out is revoked now, so a
+      // later promotion does not bring it back.
+      revoked = revokeGrants(t, who.user.id, wanted, { at })
+      if (revoked.invites || revoked.shares || revoked.tokens)
+        audit(t, { action: 'member_grants_revoked', target: who.user.id, at, detail: { ...revoked, by: 'operator', operator } })
     } else {
       t.run('INSERT INTO memberships (workspace_id, user_id, role, created_at) VALUES (:ws, :user, :role, :at)', {
         user: who.user.id,
@@ -223,13 +231,14 @@ export function addMember(db, { workspaceId, handle, login, role, operator, now 
       operator,
       action: current ? 'member_role' : 'member_add',
       target: workspace.id,
-      detail: { handle: who.user.handle, role: wanted, ...(current ? { from: current.role } : {}) },
+      detail: { handle: who.user.handle, role: wanted, ...(current ? { from: current.role } : {}), ...(revoked || {}) },
       at,
     })
     return {
       workspace: { id: workspace.id, name: workspace.name },
       member: { handle: who.user.handle, tailnetLogin: who.user.tailnet_login || null, role: wanted },
       changedFrom: current?.role || null,
+      ...(revoked ? { revoked } : {}),
     }
   })
 }

@@ -344,10 +344,14 @@ async function admin(positional, flags, out) {
               `${show(result.invite.tailnetLogin)} has no account here yet: invited to ${show(result.workspace.name)} as ${result.invite.role}. ` +
                 'Only that tailnet login can take it: they open the server from one of their tailnet devices.',
             )
+          const revoked = result.revoked
           return say(
-            result.changedFrom
+            (result.changedFrom
               ? `@${show(result.member.handle)} is now ${result.member.role} in ${show(result.workspace.name)} (was ${result.changedFrom}).`
-              : `@${show(result.member.handle)} is in ${show(result.workspace.name)} as ${result.member.role}.`,
+              : `@${show(result.member.handle)} is in ${show(result.workspace.name)} as ${result.member.role}.`) +
+              (revoked && (revoked.invites || revoked.shares || revoked.tokens)
+                ? ` Revoked: ${revoked.invites} invites, ${revoked.shares} share links, ${revoked.tokens} API tokens they made.`
+                : ''),
           )
         }
         if (target === 'remove') {
