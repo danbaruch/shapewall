@@ -35,8 +35,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
   board." and stops checking the thread. Before, it said nothing and kept asking every few seconds.
 - **`shapewall watch --remote --once` fails when the scan fails.** A scan error (the server could not be reached) was logged and
   the command still exited 0, as if nothing were open. It now exits with the error, like `shapewall watch --once` since 0.12.0.
-- **Website privacy page names no vendors.** It now describes the analytics and the content delivery network in generic words.
-  What the site does and collects is unchanged.
+- **Website privacy page names no vendors.** It now describes the analytics and the content delivery network in generic words,
+  and says what the site's own error reports carry. What the site does and collects is unchanged.
 
 ## 0.12.0 - 2026-11-17
 
