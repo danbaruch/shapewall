@@ -19,6 +19,33 @@
 #      needs the root package installed and Playwright's Chromium),
 #      SHAPEWALL_SITE_URL (default https://shapewall.com: where the smoke checks look).
 set -euo pipefail
+
+# The whole argument list is checked before anything runs: help, a misspelled command or a stray flag must never fall
+# through to a release.
+usage() {
+  echo "usage: deploy.sh                     build and release, check the live site, then prune old releases"
+  echo "       deploy.sh rollback            swap current and previous"
+  echo "       deploy.sh smoke               only the checks a release ends with, against the live site (read-only)"
+  echo "       deploy.sh prune [--dry-run]   only the release retention (--dry-run prints the plan, deletes nothing)"
+}
+COMMAND=release
+if [ $# -gt 0 ]; then
+  COMMAND="$1"
+  case "$COMMAND" in
+    -h | --help | help) [ $# -eq 1 ] && {
+      usage
+      exit 0
+    } ;;
+    smoke | rollback) [ $# -eq 1 ] ;;
+    prune) [ $# -eq 1 ] || { [ $# -eq 2 ] && [ "$2" = --dry-run ]; } ;;
+    *) false ;;
+  esac || {
+    echo "deploy.sh: unknown command or option: $*" >&2
+    usage >&2
+    exit 2
+  }
+fi
+
 HOST="${DEPLOY_HOST:-droplet}"
 ROOT=/var/www/shapewall.com
 SITE="${SHAPEWALL_SITE_URL:-https://shapewall.com}"
@@ -44,12 +71,11 @@ prune() {
     || echo "[retention] WARNING: release retention failed; old releases not pruned (the release itself is fine)" >&2
 }
 
-if [ "${1:-}" = smoke ]; then
+if [ "$COMMAND" = smoke ]; then
   smoke
   exit
 fi
-if [ "${1:-}" = prune ]; then
-  [[ "${2:-}" == "" || "${2:-}" == --dry-run ]] || { echo "usage: deploy.sh prune [--dry-run]" >&2; exit 2; }
+if [ "$COMMAND" = prune ]; then
   prune "${2:-}"
   exit 0
 fi
@@ -59,7 +85,7 @@ export SHAPEWALL_ERROR_DSN="${SHAPEWALL_ERROR_DSN-https://04e1aacf286d4ab6856abb
 export SHAPEWALL_ERROR_ENVIRONMENT="${SHAPEWALL_ERROR_ENVIRONMENT:-production}"
 # Readable stack traces for those reports: the site and demo builds upload their source maps (scripts/sourcemaps.mjs).
 export SHAPEWALL_SOURCEMAPS="${SHAPEWALL_SOURCEMAPS:-1}"
-if [ "${1:-}" = rollback ]; then
+if [ "$COMMAND" = rollback ]; then
   ssh "$HOST" "cd $ROOT && prev=\$(readlink previous) && cur=\$(readlink current) && ln -sfn \"\$prev\" current && ln -sfn \"\$cur\" previous && echo now \$prev"
   exit 0
 fi

@@ -39,6 +39,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import {
+  checkedOutAt,
   createWorktree,
   commitWorktree,
   filterNames,
@@ -444,25 +445,41 @@ export async function commitAgentBranch(config, { tree, meta, root, message }) {
   return result
 }
 
+// What the chat says about a branch Discard kept (discardAgentBranch's `kept`).
+export function keptText(branch, kept) {
+  if (kept?.reason === 'in_use') return `Kept branch ${branch}: it is checked out in ${kept.dir}.`
+  if (kept?.reason === 'moved') return `Kept branch ${branch}: it moved on from the agent's commit.`
+  return `Kept branch ${branch}: could not check whether it is in use.`
+}
+
 // The worktree, its record and (when it still points at the agent's commit)
-// its branch. -> { branchDeleted, branchMoved }
+// its branch. A branch checked out in a worktree (someone reviewing it) is
+// left as it is. -> { branchDeleted, branchMoved, branchInUse, kept }, `kept`
+// saying why a branch stayed: { reason: 'in_use', dir }, { reason: 'unknown' }
+// (the worktrees could not be listed) or { reason: 'moved' }; null otherwise.
 export async function discardAgentBranch(config, meta) {
   const root = agentWorktreeRoot(config)
   let branchDeleted = false
   let branchMoved = false
+  let kept = null
   if (meta.commit) {
     const tip = await refTip(config, meta.branch)
-    if (tip === meta.commit) {
+    const used = tip === meta.commit ? await checkedOutAt(config.dir, `refs/heads/${meta.branch}`) : null
+    if (used) kept = used.dir ? { reason: 'in_use', dir: used.dir } : { reason: 'unknown' }
+    else if (tip === meta.commit) {
       await git(['update-ref', '-m', 'shapewall: discard agent branch', '-d', `refs/heads/${meta.branch}`, meta.commit], {
         cwd: config.dir,
         timeoutMs: 20000,
       })
       branchDeleted = true
-    } else if (tip) branchMoved = true
+    } else if (tip) {
+      branchMoved = true
+      kept = { reason: 'moved' }
+    }
   }
   await removeWorktree({ tree: { dir: path.join(root, meta.id), root, runId: meta.id } })
   fs.rmSync(metaFile(root, meta.id), { force: true })
-  return { branchDeleted, branchMoved }
+  return { branchDeleted, branchMoved, branchInUse: Boolean(kept && kept.reason !== 'moved'), kept }
 }
 
 // Git on the person's checkout, with its git dir and work tree named, and

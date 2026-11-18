@@ -123,6 +123,9 @@ export async function runTurn({
   preamble = null,
   // What the owner called this agent (identity.js): the author of its replies.
   agentName = null,
+  // A Set that collects the files the agent's own tools edited or wrote
+  // this turn (acp.js 'edited' events), for the run summary's Undo.
+  editedFiles = null,
   // The neutral messages, already built (a connected agent's turn, whose
   // conversation comes from the hosted server: src/remote/agent-job.js).
   // Without it they are built from this board's own store (modelMessages).
@@ -275,6 +278,9 @@ export async function runTurn({
             answeredBy: event.answeredBy ? String(event.answeredBy).slice(0, 80) : null,
             expiresAt: event.expiresAt || null,
           })
+        } else if (event.type === 'edited') {
+          // A file the agent's own tool edited or wrote (acp.js): what the turn's Undo may put back.
+          if (editedFiles && editedFiles.size < 10000 && typeof event.path === 'string') editedFiles.add(event.path)
         } else if (event.type === 'tool_call') {
           calls.push(event)
         } else if (event.type === 'done') {

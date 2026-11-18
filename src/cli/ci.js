@@ -10,8 +10,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { CONFIG_FILE, findConfigFile, getBoard, loadConfig } from '../config.js'
 import { CI_DEFAULTS } from '../ci/settings.js'
-import { captureSide, ciPages } from '../ci/capture.js'
-import { compareCaptures } from '../ci/compare.js'
+import { captureSide, ciPages, prepareSideDir, sideDirProblem } from '../ci/capture.js'
+import { checkResultDir, compareCaptures } from '../ci/compare.js'
 import { headline, percent } from '../ci/summary.js'
 import { commentFromResult, prContext, skipRequested } from '../ci/github.js'
 import { startRefusal, startSite, waitForUrl } from '../ci/start.js'
@@ -107,9 +107,7 @@ async function captureOne({ config, board, url, flags, out, env, dir }) {
     site = await startSite(start, { cwd: checkout, url: siteUrl, env, log: out })
   } catch (error) {
     // Recorded like a failed capture, so the comment says what went wrong.
-    const target = path.resolve(dir)
-    fs.rmSync(target, { recursive: true, force: true })
-    fs.mkdirSync(target, { recursive: true })
+    const target = prepareSideDir(dir)
     const pages = ciPages(config, board, { maxPages }).pages.map((page) => ({ id: page.id, title: page.title, path: page.path }))
     const side = { source: siteUrl, board: board.id, pages, error: `ci.start: ${error.message}`.slice(0, 300) }
     fs.writeFileSync(path.join(target, 'side.json'), `${JSON.stringify(side, null, 2)}\n`)
@@ -132,6 +130,9 @@ async function capture(flags, out, env) {
   }
   const out_ = given(flags.out)
   if (!out_) throw new Error('ci capture needs --out DIR')
+  // Checked before ci.start runs anything.
+  const problem = sideDirProblem(out_)
+  if (problem) throw new Error(`--out: ${problem}`)
   const board = getBoard(config, flags.board)
   const result = await captureOne({ config, board, url: urlFlag(flags.url, 'url'), flags, out, env, dir: out_ })
   if (flags.json) out(JSON.stringify(result, null, 2))
@@ -174,6 +175,12 @@ async function captureCompare(flags, out, env) {
         "capture-compare: give --head-url URL (and --base-url URL, default the config's baseUrl), or --base-dir and --head-dir",
       )
     const work = path.join(target, '.captures')
+    // --out is checked before anything is captured into it, so a refused folder gets nothing written.
+    checkResultDir(target, [path.join(work, 'base'), path.join(work, 'head')])
+    for (const side of ['base', 'head']) {
+      const problem = sideDirProblem(path.join(work, side))
+      if (problem) throw new Error(`--out: ${problem}`)
+    }
     out(`Before: ${baseUrl}`)
     const before = await captureSide({ config, board, baseUrl, dir: path.join(work, 'base'), maxPages, log: out })
     out(`After: ${headUrl}`)

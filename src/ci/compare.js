@@ -31,6 +31,34 @@ function readJson(file) {
   }
 }
 
+// The real path of `file`, or of its nearest existing parent with the rest appended.
+function realPath(file) {
+  const resolved = path.resolve(file)
+  try {
+    return fs.realpathSync(resolved)
+  } catch {
+    const parent = path.dirname(resolved)
+    return parent === resolved ? resolved : path.join(realPath(parent), path.basename(resolved))
+  }
+}
+const within = (child, parent) => child === parent || child.startsWith(parent.endsWith(path.sep) ? parent : parent + path.sep)
+
+// The result folder replaces summary.json, summary.md and images/. They are
+// only replaced when they are an earlier result (its summary.json says so),
+// and the folder must not be, or be inside, a capture folder being compared.
+export function checkResultDir(target, sources) {
+  const real = realPath(target)
+  for (const source of sources) {
+    const from = realPath(source)
+    if (within(real, from) || within(from, path.join(real, 'images')))
+      throw new Error(`--out ${target} overlaps the capture folder ${path.resolve(source)}; give a folder of its own`)
+  }
+  const ours = readJson(path.join(target, 'summary.json'))?.schema === SUMMARY_SCHEMA
+  const taken = ['summary.json', 'summary.md', 'images'].filter((name) => fs.existsSync(path.join(target, name)))
+  if (taken.length && !ours)
+    throw new Error(`--out ${target} has files Shapewall did not write (${taken.join(', ')}); give a new or empty folder`)
+}
+
 // { manifest, side } of a capture folder; manifest is null when there is none.
 export function readCaptureDir(dir) {
   const manifest = readJson(path.join(dir, 'manifest.json'))
@@ -94,9 +122,10 @@ export function compareCaptures({
   head: headSource = null,
   now = new Date(),
 }) {
+  const target = path.resolve(out)
+  checkResultDir(target, [baseDir, headDir])
   const base = readCaptureDir(baseDir)
   const head = readCaptureDir(headDir)
-  const target = path.resolve(out)
   fs.rmSync(path.join(target, 'images'), { recursive: true, force: true })
   fs.mkdirSync(target, { recursive: true })
   const { pages, truncated } = pageList({ board, base, head, maxPages })

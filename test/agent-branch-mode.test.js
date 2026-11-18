@@ -242,8 +242,47 @@ test('merge when the checkout moved on; a conflict changes nothing; a dirty chec
   const moved = readMeta(config, second.work.meta.id)
   sh(dir, 'branch', '-f', moved.branch, 'HEAD')
   await assert.rejects(applyAgentBranch(config, moved), /has moved/)
-  assert.deepEqual(await discardAgentBranch(config, moved), { branchDeleted: false, branchMoved: true })
+  assert.deepEqual(await discardAgentBranch(config, moved), {
+    branchDeleted: false,
+    branchMoved: true,
+    branchInUse: false,
+    kept: { reason: 'moved' },
+  })
   assert.equal(sh(dir, 'branch', '--list', moved.branch).trim(), moved.branch)
+  assert.equal(hookRan(marker), '')
+})
+
+test('discard and apply cleanup leave a branch someone has checked out in another worktree', async () => {
+  const { dir, config, marker } = repo('branch-in-use')
+  const review = path.join(tempDir('branch-in-use-review'), 'review')
+  const headOf = (cwd) => [sh(cwd, 'symbolic-ref', 'HEAD'), sh(cwd, 'rev-parse', 'HEAD')]
+
+  // Discard while a person reviews the branch in a worktree of their own.
+  const first = await branchWithEdit(config)
+  sh(dir, 'worktree', 'add', '-q', review, first.work.meta.branch)
+  const discarded = await discardAgentBranch(config, readMeta(config, first.work.meta.id))
+  assert.deepEqual(
+    { ...discarded, kept: { ...discarded.kept, dir: fs.realpathSync(discarded.kept.dir) } },
+    { branchDeleted: false, branchMoved: false, branchInUse: true, kept: { reason: 'in_use', dir: fs.realpathSync(review) } },
+  )
+  assert.equal(sh(dir, 'rev-parse', 'refs/heads/' + first.work.meta.branch), first.commit.commit)
+  assert.deepEqual(headOf(review), ['refs/heads/' + first.work.meta.branch, first.commit.commit])
+  assert.equal(readMeta(config, first.work.meta.id), null, "the agent's own worktree and record still go")
+  sh(dir, 'worktree', 'remove', '--force', review)
+
+  // Apply: the merge goes through; the cleanup after it leaves the reviewed branch.
+  const second = await branchWithEdit(config, { commentId: 2, content: '<h1>Agent two</h1>\n' })
+  sh(dir, 'worktree', 'add', '-q', review, second.work.meta.branch)
+  await applyAgentBranch(config, readMeta(config, second.work.meta.id))
+  assert.equal(fs.readFileSync(path.join(dir, 'index.html'), 'utf8'), '<h1>Agent two</h1>\n')
+  assert.deepEqual(headOf(review), ['refs/heads/' + second.work.meta.branch, second.commit.commit])
+  sh(dir, 'worktree', 'remove', '--force', review)
+
+  // Unused and still at the agent's commit: discard deletes it.
+  const third = await branchWithEdit(config, { commentId: 3, content: '<h1>Agent three</h1>\n' })
+  const result = await discardAgentBranch(config, readMeta(config, third.work.meta.id))
+  assert.equal(result.branchDeleted, true)
+  assert.equal(sh(dir, 'branch', '--list', third.work.meta.branch), '')
   assert.equal(hookRan(marker), '')
 })
 
@@ -493,6 +532,67 @@ test('fix with agent in branch mode: branch-ready, discard by Undo, apply, rever
     assert.match(fs.readFileSync(path.join(dir, 'index.html'), 'utf8'), /Fixed fixture heading/)
     assert.notEqual(getComment(config, 'sample', third.id).agentStatus, 'branch-ready')
     assert.deepEqual(await listAgentBranches(config), [])
+  } finally {
+    stopChildren(app)
+    await new Promise((resolve) => server.close(resolve))
+  }
+})
+
+test('Undo and Discard of a branch someone has checked out keep it, and the card and the comment say so', async () => {
+  const { dir, config } = repo('branch-route-kept')
+  const home = tempDir('branch-route-kept-home')
+  const env = { ...process.env, XDG_CONFIG_HOME: home, SHAPEWALL_AGENT_SETTINGS_FILE: path.join(home, 'agents.json') }
+  delete env.SHAPEWALL_AGENT_BRANCH_MODE
+  const app = createApp({
+    config,
+    env,
+    settingsToken: token,
+    agentAcp: process.execPath + ' ' + fixture + ' edit',
+    agentLimits: { burst: 100 },
+  })
+  const server = await new Promise((resolve) => {
+    const listening = app.listen(0, '127.0.0.1', () => resolve(listening))
+  })
+  const port = server.address().port
+  const headers = { Origin: 'http://127.0.0.1:' + port, 'X-Shapewall-Settings-Token': token }
+  const thread = (id) => '/api/agent/boards/sample/threads/comment-' + id
+  const fixed = async (body) => {
+    const comment = await createComment(config, config.boards[0], { pageId: 'home', viewport: 'desktop', x: 1, y: 1, body })
+    assert.equal(
+      (await request(port, 'POST', thread(comment.id) + '/messages', { headers, body: { text: 'Fix it', fix: true } })).status,
+      200,
+    )
+    const answer = (await request(port, 'GET', thread(comment.id), { headers })).json.messages.at(-1)
+    return { comment, answer, branch: answer.summary.branch }
+  }
+  const reviews = tempDir('branch-route-kept-review')
+  try {
+    await request(port, 'POST', '/api/agent/settings/branch-mode', { headers, body: { enabled: true } })
+
+    // Undo (before Apply, that is Discard) while a person has the branch checked out.
+    const first = await fixed('Fix the heading')
+    const one = path.join(reviews, 'one')
+    sh(dir, 'worktree', 'add', '-q', one, first.branch.name)
+    const undone = await request(port, 'POST', thread(first.comment.id) + '/messages/' + first.answer.id + '/undo', { headers, body: {} })
+    assert.equal(undone.status, 200, JSON.stringify(undone.json))
+    const kept = undone.json.message.summary.undone.kept
+    assert.equal(kept.reason, 'in_use')
+    assert.equal(fs.realpathSync(kept.dir), fs.realpathSync(one))
+    assert.equal(sh(dir, 'branch', '--list', first.branch.name).replace('+', '').trim(), first.branch.name, 'the branch stays')
+    assert.equal(sh(one, 'symbolic-ref', 'HEAD'), 'refs/heads/' + first.branch.name)
+
+    // Discard from the branch card, the same way.
+    const second = await fixed('Fix it again')
+    const two = path.join(reviews, 'two')
+    sh(dir, 'worktree', 'add', '-q', two, second.branch.name)
+    const discarded = await request(port, 'POST', '/api/agent/branches/' + second.branch.id + '/discard', { headers, body: {} })
+    assert.equal(discarded.status, 200, JSON.stringify(discarded.json))
+    assert.equal(discarded.json.branchDeleted, false)
+    assert.equal(discarded.json.message.summary.undone.kept.reason, 'in_use')
+    assert.equal(sh(two, 'symbolic-ref', 'HEAD'), 'refs/heads/' + second.branch.name)
+    const reply = getComment(config, 'sample', second.comment.id).replies.at(-1).body
+    assert.match(reply, /Kept branch shapewall\/comment-2-fix-it-again: it is checked out in /)
+    assert.doesNotMatch(reply, /branch .* was discarded/)
   } finally {
     stopChildren(app)
     await new Promise((resolve) => server.close(resolve))

@@ -230,3 +230,53 @@ test('writeFileAtomic leaves no temporary file behind when the write fails', () 
   assert.equal(fs.readFileSync(path.join(dir, 'ok.json'), 'utf8'), 'fine')
   assert.deepEqual(fs.readdirSync(dir).sort(), ['ok.json', 'taken'])
 })
+
+// A short write (fewer bytes than asked, no error) must not reach the rename.
+function withShortWrites(plan, run) {
+  const real = fs.writeSync
+  let call = 0
+  fs.writeSync = (fd, data, ...rest) => {
+    const step = plan[call++] ?? 'full'
+    if (step === 'full') return real(fd, data, ...rest)
+    if (step === 'enospc') throw Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' })
+    const buffer =
+      Buffer.isBuffer(data) || ArrayBuffer.isView(data)
+        ? Buffer.from(data.buffer, data.byteOffset, data.byteLength)
+        : Buffer.from(String(data))
+    const offset = typeof rest[0] === 'number' ? rest[0] : 0
+    return real(fd, buffer, offset, Math.min(step, buffer.length - offset))
+  }
+  try {
+    return run()
+  } finally {
+    fs.writeSync = real
+  }
+}
+
+test('writeFileAtomic writes every byte after a short write, and keeps the old file when the disk fills mid-write', () => {
+  const dir = tempDir('atomic-short')
+  const target = path.join(dir, 'comments.json')
+  const good = `${JSON.stringify({ comments: [{ id: 1, body: 'keep me' }] }, null, 2)}\n`
+  fs.writeFileSync(target, good)
+  const next = `${JSON.stringify(
+    {
+      comments: [
+        { id: 1, body: 'keep me' },
+        { id: 2, body: 'a second comment' },
+      ],
+    },
+    null,
+    2,
+  )}\n`
+
+  withShortWrites([4], () => writeFileAtomic(target, next))
+  assert.equal(fs.readFileSync(target, 'utf8'), next)
+
+  const image = Buffer.alloc(4096, 7)
+  withShortWrites([10], () => writeFileAtomic(path.join(dir, 'frame.png'), image))
+  assert.deepEqual(fs.readFileSync(path.join(dir, 'frame.png')), image)
+
+  assert.throws(() => withShortWrites([4, 'enospc'], () => writeFileAtomic(target, next + 'more')), /ENOSPC/)
+  assert.equal(fs.readFileSync(target, 'utf8'), next)
+  assert.deepEqual(fs.readdirSync(dir).sort(), ['comments.json', 'frame.png'])
+})

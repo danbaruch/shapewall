@@ -117,6 +117,10 @@ npx shapewall ci capture-compare --base-dir before/ --head-dir after/ --out shap
 A capture folder is what `shapewall capture` writes (`.shapewall/<board>/captures/`) or what `shapewall ci capture --url URL --out DIR`
 writes. `ci.ignore` is applied while capturing, so it has no effect on folders captured without it.
 
+`--out` is a new or empty folder, or one an earlier run wrote: Shapewall replaces only its own result there and refuses a folder
+that has anything else in it (or, for `capture-compare`, one that is or is inside a capture folder being compared), so a
+mistyped path never deletes your files.
+
 ## Images in the comment
 
 A pull request comment cannot show files from a workflow artifact, so by default the comment links to the artifact (a zip download

@@ -326,3 +326,45 @@ test(
     }
   },
 )
+
+test('event log: a short write still logs the whole batch; a write that fails part way leaves the log as it was', async () => {
+  const config = makeConfig('evlog-short')
+  const event = (id) => ({ id: 'ev-' + id, type: 'comment.created', at: '2026-01-01T00:00:00.000Z', boardId: 'sample', commentId: id })
+  const real = fs.writeSync
+  let plan = []
+  // Only the log's own writes are cut short, not the lock file's.
+  fs.writeSync = (fd, data, ...rest) => {
+    const buffer = Buffer.isBuffer(data) ? data : null
+    if (!buffer || !buffer.includes('comment.created') || !plan.length) return real(fd, data, ...rest)
+    const step = plan.shift()
+    if (step === 'enospc') throw Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' })
+    const offset = typeof rest[0] === 'number' ? rest[0] : 0
+    return real(fd, buffer, offset, Math.min(step, buffer.length - offset))
+  }
+  try {
+    plan = [7]
+    const first = [event(1), event(2)]
+    assert.equal(await appendEvents(config, first), true)
+    assert.deepEqual(
+      readEventLog(config).map((record) => record.id),
+      ['ev-1', 'ev-2'],
+    )
+    assert.ok(first.every((item) => item[LOGGED]))
+
+    const before = fs.readFileSync(eventLogFile(config))
+    plan = [9, 'enospc']
+    const failed = [event(3)]
+    assert.equal(await appendEvents(config, failed), false)
+    assert.equal(failed[0][LOGGED], undefined)
+    assert.deepEqual(fs.readFileSync(eventLogFile(config)), before, 'no half line is left behind')
+
+    plan = []
+    assert.equal(await appendEvents(config, [event(4)]), true)
+    assert.deepEqual(
+      readEventLog(config).map((record) => record.id),
+      ['ev-1', 'ev-2', 'ev-4'],
+    )
+  } finally {
+    fs.writeSync = real
+  }
+})

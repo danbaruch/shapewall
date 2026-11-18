@@ -5,6 +5,27 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+- **An agent's Undo never erases your own edit.** Before, Undo in the chat put back every file that changed during the agent's
+  turn, so a file you saved in your editor while the agent worked on another one was rolled back with it. Now Undo puts back only
+  the files the agent edited with its own file tools (an edit you denied, or one that failed, does not
+  count). Anything else that changed meanwhile (your saves, a command the agent ran) is listed on the card and left as it is,
+  and the Undo dialog says how many files it leaves. A turn in which the agent edited nothing itself offers no Undo.
+- **A board file is never replaced by a cut-off copy.** When the disk wrote only part of a comments, manifest or image file
+  and reported no error, the half-written file could replace the good one. Shapewall now writes every byte before the swap,
+  and keeps the old file when the disk fills part way. The event log works the same way: a batch is only marked logged once
+  all of it is written, and a failed write leaves no half line behind. The same goes for a file the agent writes in your
+  project (now also flushed to disk before it replaces yours, with no temporary file left after a failure), the agent usage log
+  and lock files.
+- **Undo and Discard leave a branch you have checked out.** Before, deleting an agent's branch (Undo of a starter agent run,
+  Discard in branch mode, and the cleanup after Apply) checked only that the branch still pointed at the agent's commit, so a
+  branch you had checked out in another worktree to review it could be deleted under you, leaving that worktree on a missing
+  branch. Now Undo refuses and says where the branch is checked out, and Discard and Apply leave the branch in place.
+  The card and the comment then say "Kept branch X: it is checked out in (folder)" instead of saying it was deleted.
+- **`shapewall ci` never deletes a folder it did not write.** Before, `ci capture --out DIR` deleted DIR and a folder next to
+  it named `DIR.work` with everything in them, and `capture-compare` deleted any `images/` folder in its `--out`, so a
+  mistyped path could erase a project. Now `--out` must be new, empty or an earlier Shapewall result; anything else is refused
+  with every file left in place, and a `capture-compare --out` that is or is inside a capture folder being compared is refused
+  too. Running again over an earlier result still works.
 - **Compare no longer calls a small change "Same".** A change of a few pixels on a long page (one changed letter or price) was
   rounded to 0% and shown as "Same", without its red overlay and outside the changed-page count, while the PR comparison counted
   it. Compare now decides on the changed pixel count and shows such a change as "<0.01%".
@@ -13,12 +34,15 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Pixel diffs of two screenshots where one is taller and the other wider no longer count the corner that neither screenshot has.
 - Deleting a comment waits for its toast: Undo keeps working for as long as it shows, also when the pointer or keyboard holds the
   toast past six seconds. Before, the delete went through after six seconds anyway and a later Undo did nothing.
+- Starter agent: cancelling a run now always stops it. A cancel before or during setup (for example while the image is being
+  pulled) starts no agent and commits nothing, and a cancelled run never pushes its branch or opens a pull request.
 - Hosted boards: "Approve agent run" asks for a passkey only when the server asks for one, so approving from the
   board works on servers with passkeys off (tailnet sign-in) and in workspaces that do not require a passkey for it.
 - Hosted: an active browser session now stays signed in past 30 days. The sign-in cookie is renewed whenever the session
   slides (at most once an hour), with the same security attributes, and still ends 90 days after sign-in as documented.
-- Starter agent: cancelling a run now always stops it. A cancel before or during setup (for example while the image is being
-  pulled) starts no agent and commits nothing, and a cancelled run never pushes its branch or opens a pull request.
+- Website: the deploy script checks all of its arguments before it does anything. Before, `--help`, a misspelled command
+  such as `smok`, or a lone `--dry-run` fell through to a full build and release of the live site. Now help prints the usage,
+  and anything it does not know is refused without running a build, an upload or a server command.
 - Website: the live demo links in Getting Started open the demo again. An ordinary click used to show the site's "page not found"
   page; the docs now hand only the site's own pages to in-page navigation.
 - Website: the privacy page now says that the contact form also stores the User-Agent your browser sends, and that, if the site
