@@ -196,3 +196,10 @@ test('prerendered pages: posters only, with sizes; real, labelled play buttons; 
   // Every page keeps its frame size: each video frame declares its aspect ratio.
   for (const html of [pages.features, pages.start]) assert.match(html, /aspect-ratio:1920 \/ 1080/)
 })
+
+test('the service worker leaves /media/ alone (no caching of videos, byte ranges go straight to the server)', () => {
+  const sw = fs.readFileSync(path.join(SITE, 'scripts/sw.template.js'), 'utf8')
+  assert.ok(!sw.includes('/media'), 'sw.template.js does not route /media/')
+  const routed = [...sw.matchAll(/startsWith\('([^']+)'\)|\^\\\/\(([^)]+)\)/g)].map((match) => match[1] || match[2])
+  assert.ok(routed.length > 0 && routed.every((prefix) => !prefix.includes('media')))
+})
