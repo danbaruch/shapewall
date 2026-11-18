@@ -244,7 +244,11 @@ export function Badge({ children, tone = 'teal' }) {
   )
 }
 
-export function Container({ className, children }) {
+export function Container({ className, children, ref }) {
   const width = /(^|\s)max-w-/.test(className || '') ? '' : 'max-w-6xl'
-  return <div className={cx('mx-auto w-full px-5 sm:px-8', width, className)}>{children}</div>
+  return (
+    <div ref={ref} className={cx('mx-auto w-full px-5 sm:px-8', width, className)}>
+      {children}
+    </div>
+  )
 }
