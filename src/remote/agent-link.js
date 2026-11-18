@@ -51,6 +51,10 @@ export const LINK_DEFAULTS = {
   sendRetryMs: 60_000,
   queued: 5,
   commentRetryMs: 60_000,
+  // Boards one scan for comments reads; a project with more is read in
+  // pages of this many, one after the other, this far apart.
+  boardsPerScan: 50,
+  boardPageMs: 2000,
   // How long "Push this fix" waits for someone to look at the whole diff.
   pushCardMs: 10 * 60_000,
 }
@@ -726,6 +730,9 @@ export async function runAgentLink({
 
   let scanning = false
   let scanAgain = false
+  // Where the next scan starts in the project's boards (more than one page of them).
+  let boardCursor = 0
+  let nextPage = null
   async function scanComments() {
     if (!remote || !agent || stopping) return
     if (scanning) {
@@ -733,23 +740,36 @@ export async function runAgentLink({
       return
     }
     scanning = true
+    clearTimeout(nextPage)
+    let more = false
     try {
       const project = await remote.project()
-      for (const board of (project?.boards || []).slice(0, 50)) {
-        if (!ID_RE.test(String(board?.id || ''))) continue
+      const boards = (project?.boards || []).filter((board) => ID_RE.test(String(board?.id || '')))
+      if (boardCursor >= boards.length) boardCursor = 0
+      const page = boards.slice(boardCursor, boardCursor + limit.boardsPerScan)
+      for (const board of page) {
         const report = await remote.comments(board.id, { status: 'open' })
         for (const item of report?.comments || []) {
           const id = item?.id
           if (!Number.isSafeInteger(id) || id < 1) continue
           // Only a comment sent to this agent by name: "any agent" work
           // stays with the watchers that can fix it.
-          if (!item.dispatchable || item.agentStatus || item.authorGuest || item.agentId !== agent.id) continue
+          if (!item.dispatchable || item.authorGuest || item.agentId !== agent.id) continue
+          // Taken already, its turn not opened (the answer was lost, or this
+          // process restarted in between): opened now. The server opens at
+          // most one turn for it, and only for the agent that holds it.
+          const held = item.agentStatus === 'queued'
+          if (item.agentStatus && !held) continue
           const key = `${board.id}#${id}`
           if (Date.now() - (failedComments.get(key) || 0) < limit.commentRetryMs) continue
           if (running.size + waiting.length >= maxTurns + limit.queued) return
+          let taken = held
           try {
-            const taken = await remote.setAgentStatus(board.id, id, 'queued', { onlyFrom: [null] })
-            if (!taken?.changed) continue
+            if (!held) {
+              const claimed = await remote.setAgentStatus(board.id, id, 'queued', { onlyFrom: [null] })
+              if (!claimed?.changed) continue
+              taken = true
+            }
             const opened = await api.openTurn({ board: board.id, comment: id })
             await remote.setAgentStatus(board.id, id, 'working', { onlyFrom: ['queued'] }).catch(() => {})
             start(opened?.turn?.id)
@@ -757,9 +777,26 @@ export async function runAgentLink({
             if (fatalLinkError(error)) throw error
             failedComments.set(key, Date.now())
             log(`comment #${id}: ${error.message}`)
+            // Refused (busy, the day's turns used up, the comment changed): the
+            // comment is let go, so it is not left queued under a claim that
+            // uses up the project's open claims; it is taken again later. Not
+            // when its turn is running already, when another agent holds it,
+            // or when no answer came (the turn may be open: asked again later).
+            if (
+              taken &&
+              error instanceof RemoteError &&
+              error.status >= 400 &&
+              error.status < 500 &&
+              !['agent_running', 'claim_owner'].includes(error.code)
+            )
+              await remote.setAgentStatus(board.id, id, null, { onlyFrom: ['queued'] }).catch(() => {})
           }
         }
       }
+      // The whole page was read: the next one, or the first again.
+      const next = boardCursor + page.length
+      boardCursor = next < boards.length ? next : 0
+      more = boardCursor !== 0
     } catch (error) {
       if (fatalLinkError(error)) fatal = error
       else log(`comments: ${error.message}`)
@@ -768,6 +805,10 @@ export async function runAgentLink({
       if (scanAgain && !stopping) {
         scanAgain = false
         scanComments()
+      } else if (more && !stopping) {
+        // The rest of the project's boards, a page at a time.
+        nextPage = setTimeout(scanComments, limit.boardPageMs)
+        nextPage.unref?.()
       }
     }
   }
@@ -905,6 +946,7 @@ export async function runAgentLink({
     }
   } finally {
     stopping = true
+    clearTimeout(nextPage)
     waiting.length = 0
     for (const entry of running.values()) entry.controller.abort('shutdown')
     // Each turn posts what it has (a stopped answer) before this returns.

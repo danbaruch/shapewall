@@ -107,6 +107,20 @@ Changes:
   offers it only to that same connection, so one folder connected to two projects or servers never shows one's fix to the
   other. The button also names the exact fix it is on, so an older result no longer opens a newer fix of the same comment.
   Fixes held by an earlier version are not offered again; ask the agent for a fresh fix.
+- **Hosted: inviting someone twice no longer stops them joining.** Two pending invites for one tailnet login in one workspace
+  (the operator's `members add --login` run twice, or an admin's invite on top of it) made their first sign-in fail with
+  "already in this workspace", and no account was made. A new invite for a login now replaces the pending one, and joining
+  takes one invite per workspace (with older duplicates, the one with the least access).
+- **Hosted: the operator's `members add` keeps to the seat limit.** Adding an existing account now refuses when the workspace
+  has reached its `members` quota, as accepting an invite does. Changing a member's role needs no free seat.
+- **Connected agents: answers to comments count against the day's turns.** A comment sent to an agent by name now opens its
+  turn only while the project has turns left today (`dailyTurns`), as a person's chat does.
+- **Connected agents: a comment is no longer stuck "queued".** When the server refuses to open a comment's turn (busy, the
+  day's turns used up), the agent lets the comment go instead of holding it; a comment it already holds is opened when it
+  next looks; and an answer cut short (the machine went away, the server restarted) ends its claim and marks the comment as
+  needing a person. Before, three such comments used up the project's open claims and stopped every agent in it.
+- **Connected agents: every board of a project is read.** The agent looked for comments sent to it on the first 50 boards
+  only; it now reads all of them, 50 at a time.
 
 ## 0.11.0 - 2026-11-17
 
