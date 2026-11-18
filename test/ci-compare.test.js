@@ -8,8 +8,9 @@ import path from 'node:path'
 import vm from 'node:vm'
 import { PNG } from 'pngjs'
 import { compareCaptures, SUMMARY_SCHEMA, SUMMARY_VERSION } from '../src/ci/compare.js'
-import { renderMissing, renderSummary, plain } from '../src/ci/summary.js'
-import { ciConfig, ciPages, settleExpression } from '../src/ci/capture.js'
+import { headline, renderMissing, renderSummary, plain } from '../src/ci/summary.js'
+import { captureSide, ciConfig, ciPages, settleExpression } from '../src/ci/capture.js'
+import { main } from '../src/cli.js'
 import { thumbnail } from '../src/ci/images.js'
 import { sampleConfig, tempDir } from './helpers.js'
 
@@ -194,6 +195,95 @@ test('max pages: later pages are left out and counted', () => {
   assert.equal(summary.totals.pagesNotCompared, 1)
 })
 
+test('a failed comparison is never "no visual changes": the headline leads with what could not be compared', () => {
+  const failed = (error) => ({ status: 'failed', httpStatus: null, error })
+  const ok = { home: { desktop: same() }, pricing: { desktop: same() } }
+  // Every shot failed: nothing was compared.
+  const none = run(
+    captureDir('ci-none-a', ok),
+    captureDir('ci-none-b', { home: { desktop: failed('timed out') }, pricing: { desktop: failed('HTTP 500') } }),
+  ).summary
+  assert.equal(headline(none), 'Shapewall: comparison failed, none of the 2 pages could be compared')
+  const noneMd = renderSummary(none)
+  assert.ok(noneMd.includes('### Shapewall: comparison failed'), 'not folded away like a quiet pass')
+  assert.ok(!noneMd.includes('<details>'))
+  assert.ok(noneMd.includes('0 shots compared, 2 could not be compared,'), noneMd)
+  // Some compared, some failed, nothing changed.
+  const mixed = run(
+    captureDir('ci-mixed-a', ok),
+    captureDir('ci-mixed-b', { home: { desktop: same() }, pricing: { desktop: failed('HTTP 500') } }),
+  )
+  assert.equal(headline(mixed.summary), 'Shapewall: 1 of 2 pages could not be compared, no changes in the rest')
+  assert.ok(renderSummary(mixed.summary).includes('1 shot compared, 1 unchanged, 1 could not be compared,'))
+  // Changes and failures.
+  const both = run(
+    captureDir('ci-both-a', { ...ok, about: { desktop: same() } }),
+    captureDir('ci-both-b', {
+      home: { desktop: png(100, 80, { box: { x: 0, y: 0, width: 50, height: 50 } }) },
+      pricing: { desktop: failed('HTTP 500') },
+      about: { desktop: same() },
+    }),
+  )
+  assert.equal(headline(both.summary), 'Shapewall: 1 of 3 pages changed, 1 could not be compared')
+  // A whole side that failed says so.
+  const empty = tempDir('ci-none-side')
+  fs.writeFileSync(path.join(empty, 'side.json'), JSON.stringify({ error: 'ci.start: npm run build failed', pages: [{ id: 'home' }] }))
+  assert.equal(
+    headline(run(empty, captureDir('ci-none-side-b', { home: { desktop: same() } })).summary),
+    'Shapewall: capture failed, the page could not be compared',
+  )
+  // A real pass still reads as one, folded away.
+  const pass = run(captureDir('ci-pass-a', ok), captureDir('ci-pass-b', ok)).summary
+  assert.equal(headline(pass), 'Shapewall: no visual changes on 2 pages')
+  assert.ok(renderSummary(pass).includes('<summary>Shapewall: no visual changes on 2 pages</summary>'))
+})
+
+test('pages left out by the page limit at capture time are counted once and named in the headline', () => {
+  const pages = { home: { desktop: same() }, pricing: { desktop: same() } }
+  const side = { pages: [{ id: 'home' }, { id: 'pricing' }], pagesLeftOut: 20 }
+  const { summary } = run(captureDir('ci-left-a', pages, { side }), captureDir('ci-left-b', pages, { side }))
+  assert.equal(summary.totals.pagesNotCompared, 20, 'both sides left out the same 20 pages')
+  assert.equal(headline(summary), 'Shapewall: no visual changes on 2 pages, 20 more left out by the page limit')
+  const md = renderSummary(summary)
+  assert.ok(!md.includes('<details>'), 'not folded away: part of the board was never looked at')
+  assert.ok(md.includes('20 pages left out by the page limit (ci.maxPages)'), md)
+})
+
+test('ci capture records how many pages the page limit left out', async () => {
+  const config = sampleConfig('ci-left-capture')
+  const board0 = config.boards[0]
+  const all = ciPages(config, board0, { maxPages: 500 }).pages.length
+  assert.ok(all > 1, 'the sample has more than one page')
+  const dir = path.join(tempDir('ci-left-side'), 'base')
+  const noBrowser = { launch: async () => Promise.reject(new Error('no browser in this test')) }
+  await captureSide({ config, board: board0, baseUrl: 'http://127.0.0.1:9', dir, maxPages: 1, chromium: noBrowser })
+  const written = JSON.parse(fs.readFileSync(path.join(dir, 'side.json'), 'utf8'))
+  assert.equal(written.pages.length, 1)
+  assert.equal(written.pagesLeftOut, all - 1)
+})
+
+test('ci capture-compare --fail-on-change: 3 for changes, 4 when not everything could be compared, 0 for a clean pass', async () => {
+  const exit = (base, head) =>
+    main(['ci', 'capture-compare', '--base-dir', base, '--head-dir', head, '--out', tempDir('ci-exit-out'), '--fail-on-change'], {
+      out: () => {},
+    })
+  const ok = { home: { desktop: same() } }
+  const failed = { home: { desktop: { status: 'failed', httpStatus: null, error: 'HTTP 500' } } }
+  const changed = { home: { desktop: png(100, 80, { box: { x: 0, y: 0, width: 50, height: 50 } }) } }
+  assert.equal(await exit(captureDir('ci-exit-a', ok), captureDir('ci-exit-b', ok)), 0)
+  assert.equal(await exit(captureDir('ci-exit-c', ok), captureDir('ci-exit-d', changed)), 3)
+  assert.equal(await exit(captureDir('ci-exit-e', ok), captureDir('ci-exit-f', failed)), 4, 'nothing compared is not a pass')
+  const two = { ...ok, pricing: { desktop: same() } }
+  assert.equal(
+    await exit(captureDir('ci-exit-g', two), captureDir('ci-exit-h', { ...failed, pricing: { desktop: same() } })),
+    4,
+    'part of it',
+  )
+  const sideFailed = tempDir('ci-exit-side')
+  fs.writeFileSync(path.join(sideFailed, 'side.json'), JSON.stringify({ error: 'ci.start: npm run build failed', pages: [{ id: 'home' }] }))
+  assert.equal(await exit(sideFailed, captureDir('ci-exit-i', ok)), 4, 'a side that failed as a whole')
+})
+
 test('warnings from the capture (network, skipped optional actions) are kept per shot', () => {
   const warned = {
     status: 'ok',
@@ -288,7 +378,7 @@ test('summary rendering (golden): headline, table, failures, links; repository t
     md,
     [
       '<!-- shapewall-ci -->',
-      '### Shapewall: 4 of 23 pages changed',
+      '### Shapewall: 4 of 23 pages changed, 1 could not be compared',
       '',
       '| Page | Screen size | Pixels changed |',
       '| --- | --- | --- |',
@@ -300,7 +390,7 @@ test('summary rendering (golden): headline, table, failures, links; repository t
       '',
       '- login phone (after): HTTP 500',
       '',
-      '46 shots compared, 41 unchanged, 1 new page, a shot counts as changed from 0.10% of its pixels.',
+      '45 shots compared, 41 unchanged, 1 could not be compared, 1 new page, a shot counts as changed from 0.10% of its pixels.',
       '',
       '[Before, after and diff images](https://github.com/acme/site/actions/runs/7/artifacts/9) (the "shapewall-ci" artifact of this run), [the workflow run](https://github.com/acme/site/actions/runs/7).',
       '',

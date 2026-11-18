@@ -12,7 +12,7 @@ import { CONFIG_FILE, findConfigFile, getBoard, loadConfig } from '../config.js'
 import { CI_DEFAULTS } from '../ci/settings.js'
 import { captureSide, ciPages, prepareSideDir, sideDirProblem } from '../ci/capture.js'
 import { checkResultDir, compareCaptures } from '../ci/compare.js'
-import { headline, percent } from '../ci/summary.js'
+import { comparedInFull, headline, percent } from '../ci/summary.js'
 import { commentFromResult, prContext, skipRequested } from '../ci/github.js'
 import { startRefusal, startSite, waitForUrl } from '../ci/start.js'
 
@@ -108,8 +108,9 @@ async function captureOne({ config, board, url, flags, out, env, dir }) {
   } catch (error) {
     // Recorded like a failed capture, so the comment says what went wrong.
     const target = prepareSideDir(dir)
-    const pages = ciPages(config, board, { maxPages }).pages.map((page) => ({ id: page.id, title: page.title, path: page.path }))
-    const side = { source: siteUrl, board: board.id, pages, error: `ci.start: ${error.message}`.slice(0, 300) }
+    const selected = ciPages(config, board, { maxPages })
+    const pages = selected.pages.map((page) => ({ id: page.id, title: page.title, path: page.path }))
+    const side = { source: siteUrl, board: board.id, pages, pagesLeftOut: selected.left, error: `ci.start: ${error.message}`.slice(0, 300) }
     fs.writeFileSync(path.join(target, 'side.json'), `${JSON.stringify(side, null, 2)}\n`)
     out(side.error)
     return { ok: false, dir: target, error: side.error }
@@ -199,8 +200,11 @@ async function captureCompare(flags, out, env) {
       out(`  not captured: ${failure.page ? `${failure.page} ${failure.viewport} ` : ''}(${failure.side || 'compare'}) ${failure.error}`)
     out(`Result in ${target} (summary.json, summary.md, images/)`)
   }
-  // Never fails the pull request unless asked to.
-  return flags['fail-on-change'] && summary.totals.changedShots ? 3 : 0
+  // Never fails the pull request unless asked to. With --fail-on-change: 3
+  // for any change, else 4 when not everything could be compared.
+  if (!flags['fail-on-change']) return 0
+  if (summary.totals.changedShots) return 3
+  return comparedInFull(summary) ? 0 : 4
 }
 
 async function comment(flags, out, env, fetchImpl) {

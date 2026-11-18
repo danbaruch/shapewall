@@ -38,6 +38,21 @@ Changes:
   mistyped path could erase a project. Now `--out` must be new, empty or an earlier Shapewall result; anything else is refused
   with every file left in place, and a `capture-compare --out` that is or is inside a capture folder being compared is refused
   too. Running again over an earlier result still works.
+- **The pull request comment never calls a failed comparison "no visual changes".** Before, when every shot failed (a timeout,
+  an HTTP 500 on each page), the headline said "no visual changes on 2 pages", the comment was folded away like a pass, and the
+  footer counted the failed shots as compared. Now the headline leads with what could not be compared: "comparison failed, none
+  of the 2 pages could be compared" ("capture failed" when a whole side failed), "1 of 2 pages could not be compared, no
+  changes in the rest", or "1 of 3 pages changed, 1 could not be compared". The footer counts only shots that were compared,
+  and the comment stays open.
+- **The comment says how many pages the page limit left out.** Before, a board with more pages than `ci.maxPages` (default 50)
+  was captured up to the limit and the rest were silently dropped, so a 70-page board got a plain "no visual changes on 50
+  pages". `ci capture` now records the count in `side.json`, and the headline and footer say "20 more left out by the page
+  limit".
+- **`ci capture-compare --fail-on-change` no longer passes when nothing was compared.** It exited 0 when every shot or a whole
+  side failed. It now exits 3 when anything changed and 4 when nothing changed but not everything could be compared, and 0 only
+  for a full pass. Pages left out by `ci.maxPages` do not fail the run. See "Commands" in docs/pull-requests.md.
+- **`shapewall watch --once` fails when it cannot read the comments.** Before, an error while scanning (an unreadable
+  comments file) was logged and the command still exited 0, as if nothing were open. It now exits with the error.
 - **Compare no longer calls a small change "Same".** A change of a few pixels on a long page (one changed letter or price) was
   rounded to 0% and shown as "Same", without its red overlay and outside the changed-page count, while the PR comparison counted
   it. Compare now decides on the changed pixel count and shows such a change as "<0.01%".

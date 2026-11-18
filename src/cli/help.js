@@ -206,7 +206,7 @@ export const SECTIONS = {
       --out DIR             the result folder (default shapewall-ci)
       --threshold RATIO     share of pixels below which a shot is unchanged (default ci.threshold, 0.00001)
       --max-pages N         compare at most N pages (default ci.maxPages, 50)
-      --fail-on-change      exit 3 when something changed (default: always 0, never fails the pull request)
+      --fail-on-change      exit 3 when something changed, 4 when not everything could be compared (default: always 0)
   ci capture --out DIR      capture one side into a folder, from --url URL, or with --allow-start
       --allow-start         run ci.start (install, build, serve; argv arrays, no shell) in --checkout DIR
                             and capture its url; only inside a CI job (GITHUB_ACTIONS or CI is "true")

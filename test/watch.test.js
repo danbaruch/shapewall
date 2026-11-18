@@ -208,3 +208,11 @@ test('findProgram looks a bare name up on absolute PATH entries only', () => {
     process.chdir(cwd)
   }
 })
+
+test('--once fails when the scan fails, instead of exiting 0 as if nothing were open', async () => {
+  const { config } = setup('watch-once-error')
+  const board = config.boards[0]
+  await createComment(config, board, { ...valid, body: 'One' })
+  fs.writeFileSync(path.join(boardDir(config, board.id), 'comments.json'), '{not json')
+  await assert.rejects(watchComments({ config, once: true, claim: false, out: quiet, log: quiet }), /not valid JSON/)
+})

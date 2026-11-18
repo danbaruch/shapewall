@@ -86,7 +86,11 @@ function pageList({ board, base, head, maxPages }) {
   // Without manifests (a side failed as a whole), the pages that side was asked for.
   for (const side of [head.side, base.side]) for (const page of Array.isArray(side.pages) ? side.pages : []) listed.add(page?.id)
   const all = [...meta.values()].filter((page) => listed.has(page.id))
-  return { pages: all.slice(0, maxPages), truncated: Math.max(0, all.length - maxPages) }
+  // Pages each side's capture already left out (ci.maxPages, side.json):
+  // both sides use the same limit, so the larger count, not the sum.
+  const leftOut = (side) => (Number.isSafeInteger(side.pagesLeftOut) && side.pagesLeftOut > 0 ? side.pagesLeftOut : 0)
+  const captureLeft = Math.max(leftOut(base.side), leftOut(head.side))
+  return { pages: all.slice(0, maxPages), truncated: Math.max(0, all.length - maxPages) + captureLeft }
 }
 
 function viewportSize(manifest, name) {

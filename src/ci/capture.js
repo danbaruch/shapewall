@@ -115,6 +115,8 @@ export async function captureSide({ config, board, baseUrl, dir, maxPages, log =
     source: baseUrl,
     board: board.id,
     pages: sideBoard.pages.map((page) => ({ id: page.id, title: page.title, path: page.path })),
+    // Pages the page limit (ci.maxPages) left out, so the comment can say so.
+    pagesLeftOut: ciPages(config, board, { maxPages }).left,
     error: null,
   }
   let result = null
