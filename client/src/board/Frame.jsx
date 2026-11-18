@@ -17,7 +17,7 @@ import { BoardContext } from './boardContext'
 import { FrameDrawing } from './CommentMedia'
 import { compareSideNote } from './compareSideNote'
 import { drawingsFor, hasDrawing, useDrawing } from './drawing'
-import { entryVersion } from './flow'
+import { changeText, entryVersion, shotChanged } from './flow'
 
 // Device pixels per CSS pixel, capped: a dpr 3 phone does not need 3x images.
 const dpr = typeof window !== 'undefined' ? Math.min(window.devicePixelRatio || 1, 2) : 1
@@ -790,7 +790,7 @@ export function CompareFrame({ pageId, frame }) {
   const result = compare.pages?.[pageId]?.[viewport]
   const failure = image ? null : compare.failures?.[env]?.[pageId]?.[viewport] || null
   const second = env === compare.b
-  const diff = second && compare.showDiff && result?.status === 'ok' && result.percent > 0 ? result.diff : null
+  const diff = second && compare.showDiff && result?.status === 'ok' && shotChanged(result) ? result.diff : null
   // The capture's element map, read once the page is drawn big enough to
   // point at its elements while commenting: a comment then sticks to the
   // element, and the pointer outlines what a click would pin to.
@@ -872,7 +872,7 @@ export function CompareFrame({ pageId, frame }) {
     <>
       <FrameLabel frame={frame}>
         {viewport} · {title}
-        {second && result?.status === 'ok' ? <span className="text-accent"> · {result.percent}% changed</span> : null}
+        {second && result?.status === 'ok' ? <span className="text-accent"> · {changeText(result)} changed</span> : null}
       </FrameLabel>
       <div
         className={cn(

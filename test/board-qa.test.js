@@ -3,7 +3,7 @@
 // pixels, short cards for variants made for another viewport.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { countLinks, flowEdges, globalTargets, pageChangeAt } from '../client/src/board/flow.js'
+import { changeText, countLinks, flowEdges, globalTargets, pageChange, pageChangeAt } from '../client/src/board/flow.js'
 import { contentShare } from '../client/src/board/contentExtent.js'
 import { layoutBoard } from '../client/src/board/layout.js'
 
@@ -33,8 +33,28 @@ test('the compare badge names the most changed viewport', () => {
   const compare = {
     pages: { home: { desktop: { status: 'ok', percent: 0.27 }, phone: { status: 'ok', percent: 2.3 }, tablet: { status: 'missing' } } },
   }
-  assert.deepEqual(pageChangeAt(compare, 'home'), { viewport: 'phone', percent: 2.3 })
+  assert.deepEqual(pageChangeAt(compare, 'home'), { viewport: 'phone', percent: 2.3, changed: true, text: '2.3%' })
   assert.equal(pageChangeAt(compare, 'nope'), null)
+})
+
+test('compare: a change too small for a two-decimal share still reads as changed (finding 31)', () => {
+  // One glyph on a 1280x4000 desktop page: the server rounds 0.002% to 0.
+  const glyph = { status: 'ok', percent: 0, changed: 100, total: 5120000 }
+  const same = { status: 'ok', percent: 0, changed: 0, total: 1000 }
+  const compare = { pages: { home: { desktop: glyph, phone: same }, about: { desktop: same } } }
+  assert.deepEqual(pageChangeAt(compare, 'home'), { viewport: 'desktop', percent: 0, changed: true, text: '<0.01%' })
+  assert.ok(pageChange(compare, 'home') > 0, 'the page counts for "Changed pages only"')
+  assert.deepEqual(pageChangeAt(compare, 'about'), { viewport: 'desktop', percent: 0, changed: false, text: '0%' })
+  assert.equal(pageChange(compare, 'about'), 0)
+  assert.equal(changeText(glyph), '<0.01%')
+  assert.equal(changeText({ percent: 100, changed: 999999, total: 1000000 }), '>99.99%')
+  assert.equal(changeText({ percent: 100, changed: 10, total: 10 }), '100%')
+  assert.equal(changeText({ percent: 2.5, changed: 25, total: 1000 }), '2.5%')
+  // The board's own page-history diff has no total.
+  assert.equal(changeText({ percent: 0, changed: 3 }), '<0.01%')
+  assert.equal(changeText({ percent: 0, changed: 0 }), '0%')
+  // A shot whose latest capture failed (finding 33) is never a change.
+  assert.equal(pageChangeAt({ pages: { home: { desktop: { status: 'failed' } } } }, 'home'), null)
 })
 
 test('content height: the lowest row that differs from the plain background below it', () => {
