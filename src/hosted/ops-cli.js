@@ -543,6 +543,8 @@ async function backupCommand(flags, out) {
     dataDir: dataDirOf(flags),
     to: flags.to,
     keepDays: intFlag(flags, 'keep-days', { min: 1, max: 3650, fallback: null }),
+    // Not into --json output: that stays one JSON document.
+    log: flags.json ? () => {} : out,
   })
   const incomplete = result.manifest.complete === false
   if (flags.json) {

@@ -297,6 +297,54 @@ test('backup holds the snapshot generation: a push, a deletion and a prune after
   }
 })
 
+test('backup: where hard links fail, files are copied straight into the backup, never a second time into the data folder', async () => {
+  const { hosted } = await fixture('ops-backup-nolink')
+  try {
+    const originalLink = fs.linkSync
+    const originalCopy = fs.copyFileSync
+    const copiedInto = []
+    let links = 0
+    fs.linkSync = () => {
+      links += 1
+      throw Object.assign(new Error('cross-device link not permitted'), { code: 'EXDEV' })
+    }
+    fs.copyFileSync = (from, to, ...rest) => {
+      copiedInto.push(path.resolve(String(to)))
+      return originalCopy(from, to, ...rest)
+    }
+    const lines = []
+    let saved
+    try {
+      saved = await backup({ dataDir: hosted.dataDir, to: tempDir('backups-nolink'), log: (line) => lines.push(line) })
+    } finally {
+      fs.linkSync = originalLink
+      fs.copyFileSync = originalCopy
+    }
+    assert.equal(links, 1, 'given up at the first link that failed')
+    const data = path.resolve(hosted.dataDir) + path.sep
+    assert.deepEqual(
+      copiedInto.filter((file) => file.startsWith(data)),
+      [],
+      'nothing copied into the data folder',
+    )
+    assert.deepEqual(
+      fs.readdirSync(hosted.dataDir).filter((name) => name.startsWith('.backup-pin-')),
+      [],
+      'no pin left',
+    )
+    assert.ok(
+      lines.some((line) => /hard links/.test(line) && /lock/.test(line)),
+      lines.join('\n'),
+    )
+    assert.equal(saved.manifest.complete, true)
+    assert.ok(saved.manifest.files.files > 0)
+    const drill = await restoreDrill({ from: saved.dir, out: () => {} })
+    assert.equal(drill.ok, true, JSON.stringify(drill.checks))
+  } finally {
+    await hosted.close()
+  }
+})
+
 test('backup: a capture its manifest names but the board lacks fails the drill', async () => {
   const { hosted, ws, project } = await fixture('ops-backup-missing-png')
   try {

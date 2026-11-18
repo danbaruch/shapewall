@@ -112,13 +112,17 @@ function copyTree(from, to, stats, attempt = 0) {
   }
 }
 
+// A hard link the pin could not make (another file system, one without
+// links): the pin is given up, and the files are copied into the backup instead.
+class NoLinks extends Error {}
+
 // Pins one board folder under the snapshot's lock: every file hard-linked
-// into `to` (copied where a link cannot be made: another file system, a
-// file system without links). The tree holds still while this runs (every
-// writer of board folders waits for the same lock), so whatever is here is
-// the generation the snapshot's row describes. `link` false: always a copy,
-// made 0600 (a copy straight into the backup). -> false when the folder is
-// not there.
+// into `to`. The tree holds still while this runs (every writer of board
+// folders waits for the same lock), so whatever is here is the generation
+// the snapshot's row describes. A link that cannot be made throws NoLinks:
+// copying into the pin would write the whole capture store into the data
+// folder a second time. `link` false: a copy, made 0600, straight into the
+// backup. -> false when the folder is not there.
 function pinTree(from, to, link = true) {
   let entries
   try {
@@ -139,11 +143,12 @@ function pinTree(from, to, link = true) {
           fs.linkSync(source, target)
           continue
         } catch (error) {
-          if (!['EXDEV', 'EPERM', 'ENOTSUP', 'EMLINK', 'EOPNOTSUPP'].includes(error.code)) throw error
+          if (['EXDEV', 'EPERM', 'ENOTSUP', 'EMLINK', 'EOPNOTSUPP'].includes(error.code)) throw new NoLinks(error.code)
+          throw error
         }
       }
       fs.copyFileSync(source, target, fs.constants.COPYFILE_FICLONE)
-      if (!link) fs.chmodSync(target, 0o600)
+      fs.chmodSync(target, 0o600)
     }
   }
   return true
@@ -204,7 +209,7 @@ function copySmall(from, to) {
   return true
 }
 
-export async function backup({ dataDir, to, now = new Date(), keepDays = null }) {
+export async function backup({ dataDir, to, now = new Date(), keepDays = null, log = () => {} }) {
   const source = path.resolve(dataDir)
   const dbFile = path.join(source, 'shapewall.db')
   if (!fs.existsSync(dbFile)) throw new BackupError(`no hosted database at ${dbFile} (is --data right?)`)
@@ -225,16 +230,21 @@ export async function backup({ dataDir, to, now = new Date(), keepDays = null })
     const missing = []
     sweepPins(source, now)
     // The pin goes in the data folder (links need the same file system). A
-    // data folder this user may only read: the files are copied straight
-    // into the backup under the lock instead (correct, the lock is longer).
+    // data folder this user may only read, or files that cannot be linked:
+    // the files are copied straight into the backup under the lock instead
+    // (correct, but the lock is held for the whole copy).
     let pin = path.join(source, `.backup-pin-${randomUUID()}`)
     let link = true
+    const copyUnderLock = (why) => {
+      log(`backup: ${why}, so the files are copied under the write lock: pushes and comments wait until the copy is done`)
+      pin = partial
+      link = false
+    }
     try {
       fs.mkdirSync(pin, { mode: 0o700 })
     } catch (error) {
       if (!['EACCES', 'EPERM', 'EROFS'].includes(error.code)) throw error
-      pin = partial
-      link = false
+      copyUnderLock('the data folder is read-only for this user')
     }
     try {
       try {
@@ -258,11 +268,23 @@ export async function backup({ dataDir, to, now = new Date(), keepDays = null })
         } finally {
           copy.close()
         }
-        for (const row of boards) {
-          if (!ID_PATTERNS.workspace.test(row.workspace_id) || !ID_PATTERNS.project.test(row.project_id) || !ID_RE.test(row.board_id))
-            continue
-          const rel = `${row.workspace_id}/${row.project_id}/${row.board_id}`
-          if (!pinTree(path.join(source, 'files', rel), path.join(pin, 'files', rel), link)) missing.push(`${rel}/`)
+        const pinAll = () => {
+          missing.length = 0
+          for (const row of boards) {
+            if (!ID_PATTERNS.workspace.test(row.workspace_id) || !ID_PATTERNS.project.test(row.project_id) || !ID_RE.test(row.board_id))
+              continue
+            const rel = `${row.workspace_id}/${row.project_id}/${row.board_id}`
+            if (!pinTree(path.join(source, 'files', rel), path.join(pin, 'files', rel), link)) missing.push(`${rel}/`)
+          }
+        }
+        try {
+          pinAll()
+        } catch (error) {
+          if (!(error instanceof NoLinks)) throw error
+          // Never a second copy of the capture store in the data folder.
+          fs.rmSync(pin, { recursive: true, force: true })
+          copyUnderLock(`hard links do not work in the data folder (${error.message})`)
+          pinAll()
         }
         conn.exec('COMMIT')
       } finally {
