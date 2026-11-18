@@ -61,6 +61,9 @@ test('an unknown command or a stray flag is refused before any tool runs', (t) =
     ['--dry-run', 'extra'],
     ['media', '--force'],
     ['media', 'now'],
+    ['media-prune', '--force'],
+    ['media-prune', '--yes', '--dry-run'],
+    ['media-prune', 'yes'],
     ['release'],
     ['deploy'],
     ['smoke', '--dry-run'],
@@ -197,4 +200,89 @@ test('media fails when the host still lacks a file after the upload', (t) => {
   assert.equal(result.status, 1)
   assert.match(result.out, /FAIL on the host: launch-film-1080\.0123456789\.mp4 missing or wrong size/)
   assert.match(result.out, /nothing was released/)
+})
+
+// media-prune on a fake host: releases with the manifests they were built with, a shared media folder.
+function pruneHost(t) {
+  const host = fs.mkdtempSync(path.join(os.tmpdir(), 'deploy-prune-'))
+  t.after(() => fs.rmSync(host, { recursive: true, force: true }))
+  const media = path.join(host, 'media')
+  fs.mkdirSync(media)
+  const old = new Date(Date.now() - 24 * 3600 * 1000)
+  const file = (name, { recent = false } = {}) => {
+    fs.writeFileSync(path.join(media, name), name)
+    if (!recent) fs.utimesSync(path.join(media, name), old, old)
+  }
+  const release = (stamp, files, { manifest = true } = {}) => {
+    const dir = path.join(host, 'releases', stamp)
+    fs.mkdirSync(dir, { recursive: true })
+    fs.symlinkSync('../../media', path.join(dir, 'media'))
+    if (manifest) {
+      const sources = files.map((name) => ({ file: name, bytes: name.length, type: 'video/mp4', height: 720 }))
+      fs.writeFileSync(
+        path.join(dir, '.media-manifest.json'),
+        JSON.stringify({ videos: { x: { sources, poster: { webp: [] } } } }, null, 2),
+      )
+    }
+  }
+  // An older release from before the videos: no media link, no manifest.
+  fs.mkdirSync(path.join(host, 'releases', '20261101T000000Z-aaaaaaa'), { recursive: true })
+  release('20261117T000000Z-bbbbbbb', ['film-720.1111111111.mp4', 'film-poster.2222222222.jpg'])
+  release('20261118T000000Z-ccccccc', ['film-720.3333333333.mp4', 'film-poster.2222222222.jpg'])
+  fs.symlinkSync('releases/20261118T000000Z-ccccccc', path.join(host, 'current'))
+  fs.symlinkSync('releases/20261117T000000Z-bbbbbbb', path.join(host, 'previous'))
+  for (const name of ['film-720.1111111111.mp4', 'film-poster.2222222222.jpg', 'film-720.3333333333.mp4']) file(name)
+  file('gone-720.4444444444.mp4') // no release names it: the only file to remove
+  file('fresh-720.5555555555.mp4', { recent: true }) // a release being uploaded right now
+  file('notes.txt') // not a media name: never touched
+  return { host, media, release }
+}
+const PRUNE_SCRIPT = fileURLToPath(new URL('../deploy/media-prune.sh', import.meta.url))
+
+test('media-prune is a dry run by default: it lists only files no kept release names, and deletes nothing', (t) => {
+  const { host, media } = pruneHost(t)
+  const run = stubs(t, { bodies: { ssh: FAKE_SSH }, env: { FAKE_HOST: host } })
+  for (const args of [['media-prune'], ['media-prune', '--dry-run']]) {
+    const result = run(...args)
+    assert.equal(result.status, 0, result.out)
+    assert.match(result.out, /remove: gone-720\.4444444444\.mp4/)
+    assert.match(result.out, /keep \(changed in the last 3 h\): fresh-720\.5555555555\.mp4/)
+    assert.match(result.out, /keep \(not a media file name, left alone\): notes\.txt/)
+    assert.match(result.out, /3 files referenced by 2 release manifests/)
+    assert.match(result.out, /dry run: nothing deleted/)
+    assert.equal((result.out.match(/remove: /g) || []).length, 1, args.join(' '))
+    assert.equal(fs.readdirSync(media).length, 6, 'nothing deleted')
+    assert.match(result.calls[0], /^ssh deploy-stub\.invalid bash -s -- \/var\/www\/shapewall\.com$/)
+  }
+})
+
+test('media-prune --yes deletes exactly the listed files', (t) => {
+  const { host, media } = pruneHost(t)
+  const run = stubs(t, { bodies: { ssh: FAKE_SSH }, env: { FAKE_HOST: host } })
+  const result = run('media-prune', '--yes')
+  assert.equal(result.status, 0, result.out)
+  assert.match(result.out, /deleted 1 files/)
+  assert.deepEqual(fs.readdirSync(media).sort(), [
+    'film-720.1111111111.mp4',
+    'film-720.3333333333.mp4',
+    'film-poster.2222222222.jpg',
+    'fresh-720.5555555555.mp4',
+    'notes.txt',
+  ])
+})
+
+test('media-prune refuses when a release links media but carries no manifest', (t) => {
+  const { host, media, release } = pruneHost(t)
+  release('20261118T120000Z-ddddddd', [], { manifest: false })
+  const result = spawnSync('bash', [PRUNE_SCRIPT, '--yes', host], { encoding: 'utf8' })
+  assert.equal(result.status, 1)
+  assert.match(result.stdout + result.stderr, /links media\/ but has no \.media-manifest\.json: cannot tell what it uses; nothing pruned/)
+  assert.equal(fs.readdirSync(media).length, 6, 'nothing deleted')
+})
+
+test('a release carries the manifest it was built with (for media-prune)', () => {
+  const script = fs.readFileSync(SCRIPT, 'utf8')
+  const copy = script.indexOf('cp "$MANIFEST" dist/.media-manifest.json')
+  assert.ok(copy > 0, 'deploy.sh copies the manifest into the release')
+  assert.ok(copy < script.indexOf('tar -C dist -cf - .'), 'before the release is uploaded')
 })

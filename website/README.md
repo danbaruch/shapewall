@@ -99,8 +99,9 @@ folders.
 - `src/media.json` (committed) pins exactly which files the pages show: per video its sources, posters, captions, size and
   duration. Every file name carries its content hash (`launch-film-1080.2413b6572d.mp4`), so a URL never changes meaning.
 - `website/media/` (git-ignored) holds the files. Make them from the film masters (the films' own repository, `out/` folder):
-  `node scripts/media-encode.mjs <masters folder>`. It encodes the launch film, the tour and the quickstart at 1080p and 720p
-  (H.264 CRF 27 with AAC 128k, faststart; VP9 CRF 40 with Opus 128k), copies the clips as they are, makes WebP and JPEG posters,
+  `node scripts/media-encode.mjs <masters folder>`. It encodes the launch film, the tour and the quickstart as H.264 at 1080p and
+  720p (CRF 27, AAC 128k, faststart) plus a 720p VP9 WebM (CRF 40, Opus 128k) as the fallback for a browser without H.264 (at
+  1080p the VP9 was the bigger file), copies the clips as they are, makes WebP and JPEG posters,
   copies the tour's captions, writes `src/media.json` and prints the sizes. Encodes are cached in `.media-work/`, so after one
   film changes only that film is redone. Commit the new `src/media.json`.
 - The build fails, naming each file, when one that `src/media.json` references is missing from `website/media/` or has the wrong
@@ -111,6 +112,10 @@ folders.
   to `../../media`. `deploy.sh` uploads only the files the host does not have yet (into a temporary folder, then renamed into
   place), checks every size on the host before it uploads the release, and never deletes a media file, so `rollback` keeps
   working. `deploy.sh --dry-run` prints the whole plan; `deploy.sh media [--dry-run]` does only the media step.
+- Each release carries the manifest it was built with (`.media-manifest.json`). `deploy.sh media-prune` (`deploy/media-prune.sh`
+  on the host) lists the media files that no release still on the host names, keeping anything changed in the last 3 hours;
+  it deletes them only with `--yes`, and refuses when a release links `media/` without a manifest. Run it after release
+  retention, by hand; a release never prunes media.
 - Caching: the names are immutable, so `/media/*` should be served with `Cache-Control: public, max-age=31536000, immutable`.
   The live Caddyfile does not say so yet (`/media/*` then gets the site default, `max-age=0, must-revalidate`: it works, with a
   revalidation per view). The block to add next to `@bundles`:

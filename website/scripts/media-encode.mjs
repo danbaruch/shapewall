@@ -6,7 +6,8 @@
 //
 // What it makes:
 // - the launch film, the tour and the docs quickstart: H.264 (High, CRF 27, faststart, AAC 128k when the film has sound)
-//   and VP9 WebM (CRF 40, Opus 128k; measured the same SSIM as the H.264 at a smaller size), each at 1080p (source frame rate) and 720p (30 fps);
+//   at 1080p (source frame rate) and 720p (30 fps), plus a VP9 WebM at 720p only (CRF 40, Opus 128k), the fallback for a
+//   browser without H.264. Every browser that can show 1080p plays H.264, and at 1080p the VP9 was the bigger file;
 // - the feature clips: their MP4 and WebM as they are (already small, silent, made to loop);
 // - every poster as WebP (full size and half) plus a JPEG fallback;
 // - the tour's captions (WebVTT) as they are.
@@ -211,6 +212,7 @@ function film(def, dir) {
       ['webm', vp9, info.audio ? 'video/webm; codecs="vp9, opus"' : 'video/webm; codecs="vp9"'],
       ['mp4', h264, info.audio ? 'video/mp4; codecs="avc1.640028, mp4a.40.2"' : 'video/mp4; codecs="avc1.640028"'],
     ]) {
+      if (codec === 'webm' && height >= 1080) continue // WebM is the fallback, at 720p only
       const job = make(src, height, info.fps, info.audio)
       const out = cached(`${def.id}-${height}.${codec}`, `${hash}|${job.key}`, (o) => run('ffmpeg', job.args(o)))
       // A master replaced while it was being read (a render finishing) would leave a mixed encode under the old hash.

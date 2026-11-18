@@ -11,7 +11,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
   itself with "reduce motion", and every clip has a pause button. Films play only on a click. The files are self-hosted, outside
   the git repository and outside the release folders: `website/scripts/media-encode.mjs` makes the web encodes and
   `src/media.json`, the build fails when a file it names is missing, and `deploy.sh` uploads new files to a media folder shared by
-  every release (`deploy.sh --dry-run` and `deploy.sh media --dry-run` print the plan). The launch film and the tour carry
+  every release (`deploy.sh --dry-run` and `deploy.sh media --dry-run` print the plan; `deploy.sh media-prune` lists media no
+  release on the host still uses, and deletes it only with `--yes`). The launch film and the tour carry
   VideoObject structured data.
 
 ## 0.12.0 - 2026-11-17

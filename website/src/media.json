@@ -10,12 +10,6 @@
       "audio": true,
       "sources": [
         {
-          "file": "launch-film-1080.ef15a62ab7.webm",
-          "bytes": 21874870,
-          "type": "video/webm; codecs=\"vp9, opus\"",
-          "height": 1080
-        },
-        {
           "file": "launch-film-1080.2413b6572d.mp4",
           "bytes": 16061584,
           "type": "video/mp4; codecs=\"avc1.640028, mp4a.40.2\"",
@@ -61,12 +55,6 @@
       "duration": 103.61,
       "audio": true,
       "sources": [
-        {
-          "file": "tour-1080.d8c3b468d3.webm",
-          "bytes": 24448034,
-          "type": "video/webm; codecs=\"vp9, opus\"",
-          "height": 1080
-        },
         {
           "file": "tour-1080.44d3bdb6f9.mp4",
           "bytes": 17688648,
@@ -122,12 +110,6 @@
       "duration": 87,
       "audio": false,
       "sources": [
-        {
-          "file": "docs-quickstart-1080.b634302718.webm",
-          "bytes": 5301973,
-          "type": "video/webm; codecs=\"vp9\"",
-          "height": 1080
-        },
         {
           "file": "docs-quickstart-1080.00a41ae49a.mp4",
           "bytes": 6059166,

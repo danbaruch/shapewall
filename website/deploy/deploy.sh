@@ -3,6 +3,7 @@
 # Usage: website/deploy/deploy.sh                     build and release, check the live site, then prune old releases
 #        website/deploy/deploy.sh --dry-run           print what a release would build, upload and switch; runs nothing remote
 #        website/deploy/deploy.sh media [--dry-run]   only upload the videos and posters to the shared media folder
+#        website/deploy/deploy.sh media-prune [--yes] list (or, with --yes, delete) media files no release on the host uses
 #        website/deploy/deploy.sh rollback            swap current and previous
 #        website/deploy/deploy.sh smoke               only the checks a release ends with, against the live site (read-only)
 #        website/deploy/deploy.sh prune [--dry-run]   only the release retention (--dry-run prints the plan, deletes nothing)
@@ -16,7 +17,7 @@
 # served name is never half written), checks every referenced file's size on the host, and only then uploads the
 # release, whose own media/ is a symlink to ../../media. Releases stay small, rollback keeps working (an older release's
 # files are still there), and release retention never touches media/ (it only removes release folders; a symlink inside
-# one is removed as a link). Nothing here ever deletes a media file.
+# one is removed as a link). A release never deletes a media file; only "deploy.sh media-prune --yes" does.
 #
 # Env: SHAPEWALL_LAUNCHED (default 0: private early access; 1: launched, see website/README.md "Launch runbook"),
 #      SHAPEWALL_STEALTH (default 1: noindex; 0: indexable), SHAPEWALL_UMAMI_ID (required for analytics),
@@ -37,6 +38,7 @@ usage() {
   echo "usage: deploy.sh                     build and release, check the live site, then prune old releases"
   echo "       deploy.sh --dry-run           print what a release would build, upload and switch; runs nothing remote"
   echo "       deploy.sh media [--dry-run]   only upload the videos and posters to the shared media folder"
+  echo "       deploy.sh media-prune [--yes] list media files no release on the host uses (--yes deletes them)"
   echo "       deploy.sh rollback            swap current and previous"
   echo "       deploy.sh smoke               only the checks a release ends with, against the live site (read-only)"
   echo "       deploy.sh prune [--dry-run]   only the release retention (--dry-run prints the plan, deletes nothing)"
@@ -53,6 +55,7 @@ if [ $# -gt 0 ]; then
     --dry-run) [ $# -eq 1 ] && COMMAND=release && DRY_RUN=1 ;;
     smoke | rollback) [ $# -eq 1 ] ;;
     prune | media) [ $# -eq 1 ] || { [ $# -eq 2 ] && [ "$2" = --dry-run ] && DRY_RUN=1; } ;;
+    media-prune) [ $# -eq 1 ] || { [ $# -eq 2 ] && { [ "$2" = --dry-run ] || [ "$2" = --yes ]; }; } ;;
     *) false ;;
   esac || {
     echo "deploy.sh: unknown command or option: $*" >&2
@@ -155,6 +158,16 @@ if [ "$COMMAND" = prune ]; then
   prune "${2:-}"
   exit 0
 fi
+# Media pruning (deploy/media-prune.sh, run on the host): keeps every file a release still on the host names in its
+# .media-manifest.json, and anything changed in the last 3 hours. A dry run unless --yes is given. Never part of a release.
+if [ "$COMMAND" = media-prune ]; then
+  if [ "${2:-}" = --yes ]; then
+    ssh "$HOST" "bash -s -- --yes $ROOT" <deploy/media-prune.sh
+  else
+    ssh "$HOST" "bash -s -- $ROOT" <deploy/media-prune.sh
+  fi
+  exit
+fi
 if [ "$COMMAND" = media ]; then
   media_read
   if [ -n "$DRY_RUN" ]; then
@@ -184,9 +197,9 @@ if [ -n "$DRY_RUN" ]; then
   [ "${SHAPEWALL_DEMO:-1}" = 1 ] && echo "[dry-run] demo: npm run build && npm run build:demo in the repo root, then scripts/demo-export.js into dist/demo"
   media_read
   media_plan "$STAMP"
-  echo "[dry-run] release: dist/ -> $HOST:$ROOT/releases/$STAMP/ (owned by root, world-readable), plus the media link above"
+  echo "[dry-run] release: dist/ -> $HOST:$ROOT/releases/$STAMP/ (owned by root, world-readable), plus the media link above and .media-manifest.json (the manifest it was built with, for media-prune)"
   echo "[dry-run] switch: $ROOT/previous -> the old current, $ROOT/current -> releases/$STAMP"
-  echo "[dry-run] then: smoke checks against $SITE, release retention (--keep 3; media/ untouched)"
+  echo "[dry-run] then: smoke checks against $SITE, release retention (--keep 3; media/ untouched; deploy.sh media-prune lists unused media)"
   echo "[dry-run] nothing was built, uploaded or switched"
   exit 0
 fi
@@ -198,6 +211,8 @@ if [ "${SHAPEWALL_DEMO:-1}" = 1 ]; then
   node ../scripts/demo-export.js dist/demo --publish dist # the board, and its Lumen Notes site as /lumen and /lumen-staging
 fi
 [ -e dist/media ] && { echo "dist/media exists: media files must never be inside a release" >&2; exit 1; }
+# The release carries the manifest it was built with, so media-prune knows which files it uses.
+cp "$MANIFEST" dist/.media-manifest.json
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)-$(git rev-parse --short HEAD)"
 media_upload
 ssh "$HOST" "mkdir -p $ROOT/releases/$STAMP"
