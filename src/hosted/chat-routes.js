@@ -64,6 +64,9 @@ import { roleAtLeast } from './permissions.js'
 import { LIMITS } from './ratelimit.js'
 import { roleIn } from './tenancy.js'
 
+// A Git commit id (SHA-1 or SHA-256): which held fix "Push this fix" means.
+const COMMIT_RE = /^[0-9a-f]{40}([0-9a-f]{24})?$/
+
 const MENTIONS_MAX = 8
 // One viewer's stream of a turn: how much may wait for a slow reader, and
 // how long a blocked socket is waited for.
@@ -623,11 +626,13 @@ export function mountChatRoutes(
     const sends = rateLimiter.hit('chatSend', req.user.id, LIMITS.chatSend)
     if (!sends.ok) throw new HttpError(429, 'rate_limited', 'That is a lot of requests. Wait a moment and try again.')
     const author = { name: req.user.display_name, handle: req.user.handle }
+    // The fix whose card was clicked (its summary's commit): the agent offers that one only.
+    const commit = typeof req.body?.commit === 'string' && COMMIT_RE.test(req.body.commit) ? req.body.commit : null
     const made = transaction(db, () => {
       const message = store.append(req.project.id, ctx.board.id, threadId, {
         role: 'user',
         userId: req.user.id,
-        body: { text: `Push the fix of comment #${number}.`, sent: { comment: number }, push: true, author },
+        body: { text: `Push the fix of comment #${number}.`, sent: { comment: number }, push: true, ...(commit ? { commit } : {}), author },
       })
       const turn = store.createTurn({
         projectId: req.project.id,

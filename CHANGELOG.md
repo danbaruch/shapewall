@@ -72,6 +72,11 @@ and the project uses [Semantic Versioning](https://semver.org/).
   folder is missing marks the backup incomplete: the command prints a warning and exits with status 1. `restore --check` now
   also fails when a capture a board's manifest lists is missing, and when the backup left files out, including backups made
   by earlier versions that listed skipped files in `backup.json`.
+- **Connected agents: a held fix goes back only to the connection that made it.** A fix held on the agent's machine (an
+  edit in it went without asking) now records the server, workspace, project and agent it was made for, and "Push this fix"
+  offers it only to that same connection, so one folder connected to two projects or servers never shows one's fix to the
+  other. The button also names the exact fix it is on, so an older result no longer opens a newer fix of the same comment.
+  Fixes held by an earlier version are not offered again; ask the agent for a fresh fix.
 
 ## 0.11.0 - 2026-11-17
 

@@ -1478,7 +1478,10 @@ without asking**.
   **Push this fix** card with the whole changed-files diff. Someone who may answer the agent's cards allows it,
   under the same rules as any card (the hash, once, the machine's own recheck); it waits 10 minutes. Denied or not
   answered, the fix stays on the machine and the result offers **Push this fix** again, as often as needed. A fix too large to
-  show in full cannot be pushed from the board at all.
+  show in full cannot be pushed from the board at all. A held fix belongs to the connection that made it (the server's
+  address, the workspace, the project and the agent): one folder connected twice never offers one connection's fix to the
+  other, and **Push this fix** offers the very fix whose result it is on, not a newer one of the same comment. A fix held by
+  a version before this was recorded is not offered again: ask the agent for a fresh fix.
 - **If the machine connects again without it**, the stored rule is set back to "ask" at once, and that is in the audit log.
 
 An edit that went without asking is still a card in the thread, marked "Allowed automatically", and is counted and audited.

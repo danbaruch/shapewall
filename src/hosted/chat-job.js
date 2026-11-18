@@ -28,6 +28,8 @@ import { commentMentions } from '../mentions.js'
 
 export const JOB_LIMITS = { history: 40, comments: 60, text: 8000, person: 10 }
 
+// A Git commit id (SHA-1 or SHA-256).
+const COMMIT_RE = /^[0-9a-f]{40}([0-9a-f]{24})?$/
 const cut = (value, max) => {
   const text = String(value ?? '')
     .replace(/\s+/g, ' ')
@@ -168,10 +170,20 @@ export function buildJob({ ctx, turn, agent, rows, inAudience, asker, commentIte
     }
   })
   const commentNumber = /^comment-(\d+)$/.exec(turn.thread_id)?.[1]
+  // "Push this fix" names the fix it was asked on (chat-routes.js startPush).
+  const pushed = turn.kind === 'push' ? parse(rows.find((row) => row.id === turn.user_message_id) || {}) : null
+  const commit = typeof pushed?.commit === 'string' && COMMIT_RE.test(pushed.commit) ? pushed.commit : null
   const comment = commentNumber && readable.has(Number(commentNumber)) ? commentItem(Number(commentNumber)) : null
   const open = comments.filter((item) => item.status === 'open' && item.id !== Number(commentNumber || 0)).sort((a, b) => b.id - a.id)
   return {
-    turn: { id: turn.id, kind: turn.kind, board: board.id, thread: turn.thread_id, comment: commentNumber ? Number(commentNumber) : null },
+    turn: {
+      id: turn.id,
+      kind: turn.kind,
+      board: board.id,
+      thread: turn.thread_id,
+      comment: commentNumber ? Number(commentNumber) : null,
+      ...(commit ? { commit } : {}),
+    },
     agent: { id: agent.id, name: agent.name },
     // Who asked. `owner`: the person who connected this agent.
     asker,

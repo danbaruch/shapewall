@@ -322,6 +322,9 @@ export async function finishFix({
   prepared,
   job,
   approved,
+  // Which connection made it: { origin, workspace, project, agent }. A held
+  // fix is offered again only to the same one (readHeld).
+  owner = null,
   signal = null,
   env = process.env,
   fetchImpl = undefined,
@@ -417,6 +420,7 @@ export async function finishFix({
       repo: tree.repo,
       board: job.turn.board,
       comment: job.turn.comment,
+      owner: heldOwner(owner),
       subject,
       files: commit.files.map((rel) => ({
         rel,
@@ -542,11 +546,30 @@ export async function pushFix({
   return out
 }
 
+// Which connection a held fix belongs to: the server's origin, and the
+// workspace, project and agent registration it said it was (agent hello).
+// One checkout can serve several connections (the same folder, connected to
+// two projects or servers): their board and comment ids can be the same.
+// -> the owner, or null when any part of it is missing.
+export function heldOwner(owner) {
+  const part = (value) => (typeof value === 'string' && value.length > 0 && value.length <= 300 ? value : null)
+  const out = { origin: part(owner?.origin), workspace: part(owner?.workspace), project: part(owner?.project), agent: part(owner?.agent) }
+  return Object.values(out).every(Boolean) ? out : null
+}
+const sameOwner = (a, b) => Boolean(a && b) && ['origin', 'workspace', 'project', 'agent'].every((key) => a[key] === b[key])
+
 // The newest held fix of a comment on this machine, checked field by field
 // (the folder is the person's, but everything that reaches git is checked
 // again), and only while its branch still is the commit that was made and
-// that commit changes exactly the files the record names.
-export async function readHeld({ config, env = process.env, board, comment }) {
+// that commit changes exactly the files the record names. Only a fix this
+// same connection made (`owner`, see heldOwner): a record without one (made
+// before it was recorded) is never offered, the comment needs a fresh fix.
+// `commit`: the exact fix the board asked for (its summary's commit), when
+// it said; then no other fix of the comment is offered in its place.
+export async function readHeld({ config, env = process.env, board, comment, owner = null, commit = null }) {
+  const wanted = heldOwner(owner)
+  if (!wanted) return null
+  if (commit !== null && !SHA_RE.test(String(commit))) return null
   let root
   let names = []
   try {
@@ -565,6 +588,8 @@ export async function readHeld({ config, env = process.env, board, comment }) {
       continue
     }
     if (raw?.board !== board || raw?.comment !== comment) continue
+    if (!sameOwner(heldOwner(raw.owner), wanted)) continue
+    if (commit !== null && raw.commit !== commit) continue
     if (!validBranchName(raw.branch) || !SHA_RE.test(String(raw.commit || '')) || !SHA_RE.test(String(raw.base || ''))) continue
     const listed = Array.isArray(raw.files) ? raw.files : []
     const files = listed.filter(
@@ -586,6 +611,7 @@ export async function readHeld({ config, env = process.env, board, comment }) {
       repo: repo.top,
       board,
       comment,
+      owner: wanted,
       subject: inertLine(raw.subject),
       files: files.map((item) => ({ rel: item.rel, path: item.path, status: item.status })),
       file: path.join(root, name),
