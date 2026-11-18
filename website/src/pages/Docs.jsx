@@ -5,6 +5,7 @@ import { Container, cx } from '../components/ui.jsx'
 import { track } from '../analytics.js'
 import { DOCS, DOC_GROUPS, GITHUB_URL } from '../routes.js'
 import { LAUNCHED } from '../launch.js'
+import { routerHref } from '../links.js'
 
 // Markdown turned into { html, headings, text } by scripts/markdown.mjs at build time. A doc with `repo` is the
 // repository's own guide in docs/ (one source for GitHub, the npm package and this site); the rest are src/docs/*.md.
@@ -218,10 +219,9 @@ export function DocPage({ doc }) {
     const onClick = (event) => {
       const link = event.target.closest('a')
       if (!link || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
-      const href = link.getAttribute('href')
-      if (!href || !href.startsWith('/') || href.startsWith('//')) return
-      // Files (the PDF download) load as themselves, not as a route.
-      if (link.hasAttribute('download') || /\.[a-z0-9]+$/i.test(href.split(/[?#]/)[0])) return
+      // Only this site's own pages: the live demo (/demo/) and files load as themselves (src/links.js).
+      const href = routerHref(link.getAttribute('href'))
+      if (!href || link.hasAttribute('download')) return
       event.preventDefault()
       navigate(href)
     }

@@ -1022,6 +1022,94 @@ test('the disk cap: a checkout over the limit stops the run at once, nothing is 
   assert.throws(() => starterSettings(ctx.config, { env: {}, flags: { 'max-disk': '100g' } }), /max-disk/)
 })
 
+// Cancelling (Ctrl+C, the watcher's stop) at any point: before the run, during
+// setup (a first run pulls the image in `create`), or while the agent works.
+// Nothing is pushed and no PR opened; a cancel before the agent starts commits
+// nothing and the agent container never starts.
+async function cancelCase(name, { abortOn = null, abortBefore = false, container = null } = {}) {
+  const ctx = await setup(name, { script: EDIT_SCRIPT })
+  const bare = fs.realpathSync(tempDir(`${name}-remote`))
+  gitIn(bare, 'init', '-q', '--bare')
+  gitIn(ctx.dir, 'remote', 'add', 'origin', bare)
+  const outer = new AbortController()
+  if (abortBefore) outer.abort()
+  const runtime = fakeRuntime({ container: container && ((options) => container({ ...options, outer })) })
+  const exec = runtime.exec
+  runtime.exec = async (args) => {
+    if (abortOn && args[0] === abortOn) outer.abort()
+    return exec(args)
+  }
+  const prs = []
+  const run = runStarter({
+    source: ctx.source,
+    settings: ctx.settings,
+    runtime,
+    image: 'img',
+    commentId: 1,
+    projectDir: ctx.dir,
+    workDir: ctx.workDir,
+    env: ctx.env,
+    signal: outer.signal,
+    pr: async (value) => {
+      prs.push(value)
+      return { url: 'https://example.invalid/pr/1' }
+    },
+    wallMs: 2000,
+    hostGraceMs: 100,
+  })
+  const steps = () => runtime.calls.map(([kind, args]) => `${kind} ${args.slice(0, 2).join(' ')}`)
+  const pushed = () => gitIn(bare, 'for-each-ref', '--format=%(refname)').trim()
+  const branches = () => gitIn(ctx.dir, 'for-each-ref', '--format=%(refname)', 'refs/heads/shapewall-agent/').trim()
+  return { ctx, run, runtime, steps, prs, pushed, branches }
+}
+
+test('a cancel before the run starts claims nothing and starts nothing', async () => {
+  const { ctx, run, runtime, prs, pushed } = await cancelCase('starter-cancel-before', { abortBefore: true })
+  await assert.rejects(run, /stopped/)
+  assert.equal(runtime.calls.length, 0)
+  assert.equal(getComment(ctx.config, 'site', 1).agentStatus, null, 'not claimed')
+  assert.equal(prs.length, 0)
+  assert.equal(pushed(), '')
+})
+
+test('a cancel during setup: the agent never starts, nothing is committed, pushed or opened as a PR', async () => {
+  const { ctx, run, steps, prs, pushed, branches } = await cancelCase('starter-cancel-setup', { abortOn: 'create' })
+  const result = await run
+  assert.equal(result.failure?.code, 'stopped')
+  assert.equal(result.branch, null)
+  assert.equal(result.pr, null)
+  assert.ok(!steps().includes('spawn run --rm'), 'the agent container never started')
+  assert.ok(steps().includes('exec rm -f'), 'the proxy is removed')
+  assert.equal(prs.length, 0)
+  assert.equal(pushed(), '', 'nothing pushed')
+  assert.equal(branches(), '', 'nothing committed')
+  assert.equal(gitIn(ctx.dir, 'worktree', 'list').trim().split('\n').length, 1, 'the worktree is removed')
+  assert.equal(getComment(ctx.config, 'site', 1).agentStatus, 'needs-human')
+})
+
+test('a cancel while the agent works stops the container and publishes nothing', async () => {
+  let stopSeen = false
+  const { run, steps, prs, pushed } = await cancelCase('starter-cancel-run', {
+    container: ({ child, mount, outer }) =>
+      new Promise((resolve) => {
+        fs.writeFileSync(path.join(mount, 'src', 'hero.html'), '<h1>Hello</h1>\n')
+        child.stdin.on('data', (chunk) => {
+          if (!String(chunk).includes('"t":"stop"')) return
+          stopSeen = true
+          child.stdout.write(`${JSON.stringify({ t: 'result', stop: 'stopped', text: '', status: null })}\n`)
+          resolve()
+        })
+        setImmediate(() => outer.abort())
+      }),
+  })
+  const result = await run
+  assert.equal(stopSeen, true, 'the container was told to stop')
+  assert.ok(steps().includes('spawn run --rm'))
+  assert.equal(result.pr, null)
+  assert.equal(prs.length, 0, 'no PR')
+  assert.equal(pushed(), '', 'nothing pushed')
+})
+
 test('where the branch is pushed is a flag, never the config', () => {
   assert.throws(
     () =>

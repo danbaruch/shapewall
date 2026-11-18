@@ -58,10 +58,14 @@ export function createGuards({
   function sessionOf(req) {
     if (req.sessionChecked) return req.auth
     req.sessionChecked = true
-    req.auth = readSession(req, parseCookies(req.headers.cookie)[SESSION_COOKIE]) || null
+    const token = parseCookies(req.headers.cookie)[SESSION_COOKIE]
+    req.auth = readSession(req, token) || null
     // With passkeys off (a tailnet sign-in server, the default there) only the tailnet signs anyone in:
     // a session a passkey or a recovery code started, from before they were switched off, does not count.
     if (req.auth && req.auth.session.via !== 'tailnet' && !passkeys.on()) req.auth = null
+    // The session slid (at most once an hour): the browser cookie slides with it, same attributes.
+    if (req.auth?.renewedUntil && req.res && !req.res.headersSent)
+      setCookie(req.res, SESSION_COOKIE, token, Math.max(0, Math.floor((req.auth.renewedUntil - now().getTime()) / 1000)))
     return req.auth
   }
   // Passkey routes on a server where passkeys are off: a clear answer, before anything else looks at them.

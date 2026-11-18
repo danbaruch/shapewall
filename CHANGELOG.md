@@ -15,6 +15,15 @@ and the project uses [Semantic Versioning](https://semver.org/).
   toast past six seconds. Before, the delete went through after six seconds anyway and a later Undo did nothing.
 - Hosted boards: "Approve agent run" asks for a passkey only when the server asks for one, so approving from the
   board works on servers with passkeys off (tailnet sign-in) and in workspaces that do not require a passkey for it.
+- Hosted: an active browser session now stays signed in past 30 days. The sign-in cookie is renewed whenever the session
+  slides (at most once an hour), with the same security attributes, and still ends 90 days after sign-in as documented.
+- Starter agent: cancelling a run now always stops it. A cancel before or during setup (for example while the image is being
+  pulled) starts no agent and commits nothing, and a cancelled run never pushes its branch or opens a pull request.
+- Website: the live demo links in Getting Started open the demo again. An ordinary click used to show the site's "page not found"
+  page; the docs now hand only the site's own pages to in-page navigation.
+- Website: the privacy page now says that the contact form also stores the User-Agent your browser sends, and that, if the site
+  operator has set it up, your message, topic and email address are forwarded to a messaging service.
+- Website: a link with a broken fragment (for example one cut off while copying) no longer stops the page from loading.
 
 ## 0.11.0 - 2026-11-17
 
