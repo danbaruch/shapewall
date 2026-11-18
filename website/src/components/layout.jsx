@@ -87,7 +87,7 @@ function Header() {
           <Logo />
           {BETA ? <BetaTag /> : null}
         </Link>
-        <nav className="hidden items-center gap-1 md:flex" aria-label="Main">
+        <nav className="hidden items-center gap-1 lg:flex" aria-label="Main">
           {NAV.map((item) => (
             <NavLink
               key={item.to}
@@ -110,7 +110,7 @@ function Header() {
         <div className="ml-auto flex items-center gap-2">
           <a
             href={GITHUB_URL}
-            className="hidden h-10 items-center gap-2 rounded-xl px-3 text-[14.5px] font-medium text-slate transition-colors hover:text-ink sm:inline-flex"
+            className="hidden h-10 items-center gap-2 rounded-xl px-3 text-[14.5px] font-medium text-slate transition-colors hover:text-ink md:inline-flex"
           >
             <GitHubIcon className="size-[18px]" />
             {GITHUB_LABEL}
@@ -118,11 +118,11 @@ function Header() {
           <span className="hidden sm:inline-flex">
             <GetStarted where="header" size="md" />
           </span>
-          <ThemeMenu className="hidden md:block" />
+          <ThemeMenu className="hidden lg:block" />
           <IconButton
             variant="ghost"
             size="icon"
-            className="md:hidden"
+            className="lg:hidden"
             aria-expanded={open}
             aria-controls="mobile-nav"
             label={open ? 'Close menu' : 'Open menu'}
@@ -145,7 +145,7 @@ function Header() {
       </Container>
       <AnimatePresence initial={false}>
         {open ? (
-          <m.div key="mobile-nav" id="mobile-nav" className="border-t border-hairline bg-paper md:hidden" {...drop}>
+          <m.div key="mobile-nav" id="mobile-nav" className="border-t border-hairline bg-paper lg:hidden" {...drop}>
             <Container className="flex flex-col gap-1 py-3">
               {NAV.map((item) => (
                 <Link key={item.to} to={item.to} className="rounded-xl px-3 py-3 text-[16px] font-medium text-ink hover:bg-ink/5">

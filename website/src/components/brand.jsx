@@ -24,15 +24,16 @@ export function Logo({ dark = false }) {
 }
 
 // The "Beta" tag after the wordmark in the header lockup: the Badge family (teal tint, uppercase, tracked) at lockup
-// size. The logo link's own name says "beta", so the tag is hidden from assistive tech and never takes focus; its title
-// gives mouse users the longer note on hover.
+// size, nudged up 1px so it centers on the wordmark's cap height rather than its line box. The logo link's own name
+// says "beta", so the tag is hidden from assistive tech and never takes focus; its title gives mouse users the longer
+// note on hover.
 export function BetaTag() {
   return (
     <span
       data-beta-tag=""
       title={BETA_TAG_NOTE}
       aria-hidden="true"
-      className="inline-flex h-[18px] translate-y-[1px] items-center rounded-full bg-wall-tint px-[7px] text-[10px] leading-none font-semibold tracking-[0.08em] text-wall-deep uppercase select-none"
+      className="inline-flex h-[18px] -translate-y-px items-center rounded-full bg-wall-tint px-[7px] text-[10px] leading-none font-semibold tracking-[0.08em] text-wall-deep uppercase select-none"
     >
       Beta
     </span>
