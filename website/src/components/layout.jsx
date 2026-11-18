@@ -8,6 +8,7 @@ import { AnimatePresence, DURATION, EASE, drop, m } from './motion.jsx'
 import { track } from '../analytics.js'
 import { DEMO_URL, DOC_GROUPS, GITHUB_URL, NOT_FOUND, SITE_URL, canonicalUrl, routeFor } from '../routes.js'
 import { GITHUB_LABEL, LAUNCHED } from '../launch.js'
+import { hashId } from '../links.js'
 
 // Set by vite.config.js from SHAPEWALL_STEALTH, the same switch scripts/prerender.mjs reads.
 /* global __SHAPEWALL_STEALTH__ */
@@ -52,8 +53,10 @@ function useHeadSync(pathname) {
 
 function useScrollOnNavigate(location) {
   useEffect(() => {
-    if (location.hash) {
-      const target = document.getElementById(decodeURIComponent(location.hash.slice(1)))
+    // A malformed fragment (a cut link) is no id here, and must not throw while the page mounts (src/links.js).
+    const id = hashId(location.hash)
+    if (id) {
+      const target = document.getElementById(id)
       if (target) {
         target.scrollIntoView()
         return

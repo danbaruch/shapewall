@@ -12,3 +12,14 @@ export function routerHref(href) {
   if (/\.[a-z0-9]+$/i.test(pathname)) return null
   return routeFor(pathname) ? href : null
 }
+
+// The element id a location hash ("#getting-started") points at, or null. A malformed escape (a copied or
+// cut link: "#%E0%A4%A") is not an id on the page, and must not throw while the page mounts.
+export function hashId(hash) {
+  if (typeof hash !== 'string' || hash.length < 2) return null
+  try {
+    return decodeURIComponent(hash.slice(1))
+  } catch {
+    return null
+  }
+}

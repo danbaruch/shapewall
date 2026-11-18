@@ -1,9 +1,9 @@
 // In-page links: which docs links the router takes (only its own pages; the live demo and files load as
-// themselves).
+// themselves), and location hashes, including a malformed one, which must not break the page.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { routerHref } from '../src/links.js'
+import { hashId, routerHref } from '../src/links.js'
 import { DEMO_URL, ROUTES } from '../src/routes.js'
 
 test('docs links: the router takes its own pages, never the live demo or a file', () => {
@@ -23,4 +23,14 @@ test('every root-relative link in Getting Started is either a router page or loa
   const demo = links.filter((href) => href.startsWith('/demo'))
   assert.ok(demo.length >= 2, 'the guide links the live demo')
   for (const href of demo) assert.equal(routerHref(href), null, `${href} is a full page load`)
+})
+
+test('location hashes: an encoded anchor decodes, a missing one is null, a malformed escape does not throw', () => {
+  assert.equal(hashId('#getting-started'), 'getting-started')
+  assert.equal(hashId('#caf%C3%A9'), 'café')
+  assert.equal(hashId(''), null)
+  assert.equal(hashId('#'), null)
+  assert.equal(hashId(undefined), null)
+  assert.equal(hashId('#%E0%A4%A'), null)
+  assert.equal(hashId('#100%'), null)
 })

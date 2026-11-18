@@ -23,6 +23,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
   page; the docs now hand only the site's own pages to in-page navigation.
 - Website: the privacy page now says that the contact form also stores the User-Agent your browser sends, and that, if the site
   operator has set it up, your message, topic and email address are forwarded to a messaging service.
+- Website: a link with a broken fragment (for example one cut off while copying) no longer stops the page from loading.
 
 ## 0.11.0 - 2026-11-17
 
