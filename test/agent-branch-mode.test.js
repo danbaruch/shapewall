@@ -580,6 +580,9 @@ test('Undo and Discard of a branch someone has checked out keep it, and the card
     assert.equal(fs.realpathSync(kept.dir), fs.realpathSync(one))
     assert.equal(sh(dir, 'branch', '--list', first.branch.name).replace('+', '').trim(), first.branch.name, 'the branch stays')
     assert.equal(sh(one, 'symbolic-ref', 'HEAD'), 'refs/heads/' + first.branch.name)
+    const undoReply = getComment(config, 'sample', first.comment.id).replies.at(-1).body
+    assert.match(undoReply, /undone from the chat/)
+    assert.match(undoReply, /Kept branch shapewall\/comment-1-fix-the-heading: it is checked out in /)
 
     // Discard from the branch card, the same way.
     const second = await fixed('Fix it again')

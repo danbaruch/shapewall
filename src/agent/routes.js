@@ -1697,7 +1697,7 @@ export function agentRouter({
             if (changed.changed) {
               await addReply(config, board.id, commentId, {
                 author: 'shapewall',
-                body: 'The agent’s change was undone from the chat. The page shows the earlier version again once it is recaptured.',
+                body: `The agent’s change was undone from the chat.${undone.kept ? ` ${keptText(undone.branch, undone.kept)}` : ''} The page shows the earlier version again once it is recaptured.`,
               })
             }
           } catch (error) {
