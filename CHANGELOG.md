@@ -15,6 +15,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
   toast past six seconds. Before, the delete went through after six seconds anyway and a later Undo did nothing.
 - Hosted boards: "Approve agent run" asks for a passkey only when the server asks for one, so approving from the
   board works on servers with passkeys off (tailnet sign-in) and in workspaces that do not require a passkey for it.
+- Hosted: an active browser session now stays signed in past 30 days. The sign-in cookie is renewed whenever the session
+  slides (at most once an hour), with the same security attributes, and still ends 90 days after sign-in as documented.
 
 ## 0.11.0 - 2026-11-17
 
