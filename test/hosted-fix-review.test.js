@@ -269,6 +269,7 @@ test('1, 5: files that run something are refused or always asked; a fix made wit
   // Nothing is held any more: asking again says so.
   const none = (await post(ada, second.id, { push: true }).done).final
   assert.equal(none.error.code, 'no_held_fix')
+  assert.match(none.error.message, /no longer available to push.*Ask the agent for a fresh fix\./)
   await auto.link.stop()
 })
 

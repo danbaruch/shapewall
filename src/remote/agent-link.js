@@ -432,7 +432,12 @@ export async function runAgentLink({
                 commit: job.turn.commit,
               })
         if (!record) {
-          await finish(refused("No fix of this comment is waiting to be pushed on the agent's machine.", 'no_held_fix'))
+          await finish(
+            refused(
+              'This fix is no longer available to push: it was already pushed, a newer fix replaced it, or it was made before an update. Ask the agent for a fresh fix.',
+              'no_held_fix',
+            ),
+          )
           return
         }
         entry.thread = `${job.turn.board}/${job.turn.thread}`
