@@ -6,8 +6,9 @@ import { LAUNCHED } from './launch.js'
 import { FAQ } from './faq-data.js'
 import { videoObject } from './videos.js'
 
-// The films a page shows, as VideoObject data: the launch film on the home page, the tour on the features page.
-const PAGE_VIDEOS = { '/': ['launch-film'], '/features': ['tour'] }
+// The films a page shows, as VideoObject data: the narrated tour on the home page. (The launch film is in src/media.json
+// but no page shows it, so no page names it.)
+const PAGE_VIDEOS = { '/': ['tour'] }
 const videosFor = (route) => (PAGE_VIDEOS[route.path] || []).map((id) => videoObject(id, SITE_URL)).filter(Boolean)
 
 // The version people install: the root package.json, so a release bump reaches the structured data by itself.
