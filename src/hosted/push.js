@@ -23,6 +23,7 @@ import { FILE_MAX as HTML_MAX, withCspMeta } from '../capture/live.js'
 import { CssTooLargeError, sanitizeDocument } from '../capture/sanitize.js'
 import { ELEMENT_MAP_LIMITS, ElementMapError, parseElementMap } from '../capture/element-map.js'
 import { CAPTURE_FILE_RE, VERSION_FILE_RE, VERSION_RE } from '../store.js'
+import { referencedVersions } from './retention.js'
 import { ID_PATTERNS, newId } from './crypto.js'
 import { transaction } from './db.js'
 import { commentFileBytes } from './comment-files.js'
@@ -285,6 +286,55 @@ function cleanManifest(raw, board, viewports, files) {
   return manifest
 }
 
+// The files to copy from the board being replaced (`target`) into the push
+// (`staging`) so that every version its comments and reply drawings point at
+// (`referenced`, retention.js referencedVersions) still resolves to the same
+// pixels: the sender may keep less history than the server has. A version
+// the push brings itself (in versions/, or as its new current capture) is
+// left alone; otherwise it comes from the old board's versions/ or, when it
+// was the old board's current capture, from its captures/.
+// -> [{ from, to, bytes }]
+function planCarry(referenced, target, staging, nextManifest) {
+  const plan = []
+  let oldManifest = null
+  try {
+    oldManifest = JSON.parse(fs.readFileSync(path.join(target, 'captures', 'manifest.json'), 'utf8'))
+  } catch {
+    oldManifest = null
+  }
+  const size = (file) => {
+    try {
+      const stat = fs.lstatSync(file)
+      return stat.isFile() ? stat.size : null
+    } catch {
+      return null
+    }
+  }
+  for (const key of referenced) {
+    const [pageId, viewport, version] = key.split('\u0000')
+    const base = `${pageId}.${viewport}.${version}`
+    if (!VERSION_FILE_RE.test(`${base}.png`)) continue
+    if (nextManifest.pages?.[pageId]?.[viewport]?.version === version) continue
+    if (size(path.join(staging, 'versions', `${base}.png`)) !== null) continue
+    const fromVersions = size(path.join(target, 'versions', `${base}.png`)) !== null
+    const wasCurrent =
+      !fromVersions &&
+      oldManifest?.pages?.[pageId]?.[viewport]?.version === version &&
+      size(path.join(target, 'captures', `${pageId}.${viewport}.png`)) !== null
+    if (!fromVersions && !wasCurrent) continue
+    for (const suffix of ['.png', '.thumb.png', '.html']) {
+      const from = fromVersions
+        ? path.join(target, 'versions', `${base}${suffix}`)
+        : path.join(target, 'captures', `${pageId}.${viewport}${suffix}`)
+      const to = path.join(staging, 'versions', `${base}${suffix}`)
+      const bytes = size(from)
+      if (bytes === null || size(to) !== null) continue
+      plan.push({ from, to, bytes })
+    }
+  }
+  return plan
+}
+
 function cleanVariants(raw, board) {
   const pages = new Set(board.pages.map((page) => page.id))
   const text = (value, max) => (typeof value === 'string' ? value.trim().slice(0, max) : '')
@@ -536,7 +586,8 @@ export function createPushStore(
       for (const r of keptReports) fs.writeFileSync(path.join(staging, 'checks', `${r.id}.json`), JSON.stringify(r))
     }
     fs.mkdirSync(path.join(staging, 'captures'), { recursive: true })
-    fs.writeFileSync(path.join(staging, 'captures', 'manifest.json'), JSON.stringify(cleanManifest(manifest, board, viewports, files)))
+    const nextManifest = cleanManifest(manifest, board, viewports, files)
+    fs.writeFileSync(path.join(staging, 'captures', 'manifest.json'), JSON.stringify(nextManifest))
     fs.writeFileSync(path.join(staging, 'variants.json'), JSON.stringify({ variants: cleanList }))
     const target = path.join(projectDir(dataDir, t.workspaceId, projectId), board.id)
     const old = `${target}.old-${push.id}`
@@ -545,6 +596,9 @@ export function createPushStore(
     // can be put right from the database's word (recoverSwaps).
     const swap = { push: push.id, workspace: t.workspaceId, project: projectId, board: board.id, hadTarget: fs.existsSync(target) }
     writeSwap(dataDir, swap)
+    // History the board's comments point at, copied over from the board
+    // being replaced (carryReferenced); taken out again if the commit fails.
+    let carried = []
     try {
       transaction(db, () => {
         const at = now.toISOString()
@@ -559,13 +613,21 @@ export function createPushStore(
           }).n
           if (count >= boardsPerProject) throw new PushError(409, 'too_many_boards', `A project holds at most ${boardsPerProject} boards.`)
         }
-        const bytes = push.bytes + checkBytes
+        // Read in the transaction: no comment can pin a version between this
+        // and the swap. Their bytes count once, with the board's.
+        const plan = existing ? planCarry(referencedVersions(t, projectId, board.id), target, staging, nextManifest) : []
+        const bytes = push.bytes + checkBytes + plan.reduce((n, item) => n + item.bytes, 0)
         const others = t.get(
           'SELECT COALESCE(SUM(bytes), 0) AS n FROM boards WHERE workspace_id = :ws AND NOT (project_id = :project AND board_id = :board)',
           { project: projectId, board: board.id },
         ).n
         if (others + commentFileBytes(t) + bytes > workspaceQuota)
           throw new PushError(413, 'quota_exceeded', 'This workspace is over its storage quota.')
+        if (plan.length) fs.mkdirSync(path.join(staging, 'versions'), { recursive: true })
+        for (const item of plan) {
+          fs.copyFileSync(item.from, item.to)
+          carried.push(item.to)
+        }
         const definition = JSON.stringify(push.definition)
         if (existing) {
           t.run(
@@ -595,6 +657,8 @@ export function createPushStore(
       // journal stays and the next sweep does it.
       try {
         if (settleSwap(dataDir, swap, pushStatus(db, push.id) === 'committed') !== 'kept') removeSwap(dataDir, push.id)
+        // The push is open again with only its own uploads (a retry carries again).
+        for (const file of carried) fs.rmSync(file, { force: true })
       } catch {
         /* the sweep settles it */
       }

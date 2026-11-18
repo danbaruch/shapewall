@@ -63,6 +63,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
   longer deletes a `<board>.old-<push>` folder unless the database shows that push committed; one it cannot account for is
   left in place and named in the server log. A commit whose uploads are gone is refused (`push_incomplete`) instead of
   replacing the board with an empty one.
+- **Hosted: a push keeps the screenshots a discussion points at.** Pushing from a checkout that has less history than the
+  server (a second machine, CI) no longer removes the capture a hosted comment is pinned to or a reply's drawing was made on:
+  the commit copies those versions over from the board it replaces, and their bytes count once in the board's storage.
 
 ## 0.11.0 - 2026-11-17
 

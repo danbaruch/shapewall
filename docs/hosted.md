@@ -2258,7 +2258,9 @@ public-project requests 600 a minute per IP, device polling 60/minute, plus the 
 Usage records (one small row per agent turn) are kept for 400 days unless a workspace has its own `--usage-days`; see
 [Retention, quota and export](#retention-quota-and-export). Current captures stay. By default retention keeps the newest two historical captures per page and viewport plus every historical
 capture a comment references, open or resolved, and every version a reply's drawing was made on, so that markup keeps rendering.
-Variants are left alone. It runs at start and every 6 hours in-process when the
+A push that replaces a board keeps those referenced versions too: when the pushing machine no longer has one (a second checkout,
+CI), the commit copies it over from the board it replaces and counts its bytes in the board's storage once. Other history follows
+the pushing machine. Variants are left alone. It runs at start and every 6 hours in-process when the
 operator starts the hosted server. `--retention-hours 0` disables it; `--retention-keep N` changes the default. To preview or run it:
 
 ```sh
