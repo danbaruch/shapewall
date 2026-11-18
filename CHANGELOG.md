@@ -3,7 +3,11 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.12.0 - 2026-11-17
+
+Fixes from a full code review: an agent's Undo never erases your edit, hosted pushes and backups survive a crash, `shapewall ci`
+never deletes a folder it did not write, the PR comment never calls a failed comparison a pass, and Shapewall is now marked as
+early access (beta).
 
 For operators of a hosted server, before upgrading:
 
@@ -35,8 +39,9 @@ Changes:
 - **Undo and Discard leave a branch you have checked out.** Before, deleting an agent's branch (Undo of a starter agent run,
   Discard in branch mode, and the cleanup after Apply) checked only that the branch still pointed at the agent's commit, so a
   branch you had checked out in another worktree to review it could be deleted under you, leaving that worktree on a missing
-  branch. Now Undo refuses and says where the branch is checked out, and Discard and Apply leave the branch in place.
-  The card and the comment then say "Kept branch X: it is checked out in (folder)" instead of saying it was deleted.
+  branch. Now the starter agent's Undo refuses and says where the branch is checked out, and Discard, Apply and Undo in
+  branch mode leave the branch in place. After Discard the card and the comment say "Kept branch X: it is checked out in
+  (folder)" instead of saying it was deleted (after an Undo, the card says so).
 - **`shapewall ci` never deletes a folder it did not write.** Before, `ci capture --out DIR` deleted DIR and a folder next to
   it named `DIR.work` with everything in them, and `capture-compare` deleted any `images/` folder in its `--out`, so a
   mistyped path could erase a project. Now `--out` must be new, empty or an earlier Shapewall result; anything else is refused
