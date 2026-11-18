@@ -1,7 +1,7 @@
 // Videos on the marketing pages. The rules:
 // - The prerendered HTML holds only the poster (a <picture>, WebP with a JPEG fallback, with its width and height), so
 //   nothing but the poster loads before someone asks for the video, and the box never changes size.
-// - Films (the launch film, the tour, the quickstart) never play by themselves: a real button with the film's name and
+// - Films (the tour, the quickstart) never play by themselves: a real button with the film's name and
 //   length starts them inline, with sound and the browser's own controls. Close (or Escape) goes back to the poster.
 // - Feature clips are silent loops: muted, playsinline, loaded and played only while on screen and paused off screen.
 //   With "reduce motion" they never start by themselves: the poster shows a play button instead. Every clip has a
@@ -68,10 +68,11 @@ function Sources({ video }) {
 }
 
 // The play button and, after it is pressed, the film itself, over whatever box it is put in (a poster, or the home
-// page's screenshot). `cta` is the visible label, e.g. "Watch the launch film".
-// `playRequest`: a number another control (the home hero's "Watch the film") raises to open the film from elsewhere: the
+// page's screenshot). `cta` is the visible label, e.g. "Watch the tour". `describedBy`: the id of a line that describes
+// the film (e.g. "Narrated, with English subtitles."), for the play button's accessible description.
+// `playRequest`: a number another control (the home hero's "Watch the tour") raises to open the film from elsewhere: the
 // frame scrolls into view (at once with reduce motion) and the film starts there, as if its own button was pressed.
-export function FilmOverlay({ id, title, cta, onActiveChange, playRequest = 0, inset = 'inset-0', className, tone = 'dark' }) {
+export function FilmOverlay({ id, title, cta, describedBy, onActiveChange, playRequest = 0, inset = 'inset-0', className, tone = 'dark' }) {
   const video = MEDIA[id]
   const [state, setState] = useState('poster') // poster | playing | failed
   const rootRef = useRef(null)
@@ -159,6 +160,7 @@ export function FilmOverlay({ id, title, cta, onActiveChange, playRequest = 0, i
         onClick={() => setActive('playing')}
         className="film-play group absolute inset-0 grid w-full cursor-pointer place-items-center focus-visible:outline-none"
         aria-label={`Play ${title}, ${length}${video.audio ? ', with sound' : ', silent'}`}
+        aria-describedby={describedBy}
         data-film={id}
       >
         <span

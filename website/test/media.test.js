@@ -170,23 +170,41 @@ test('prerendered pages: posters only, with sizes; real, labelled play buttons; 
   }
   const ld = (html) =>
     [...html.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)].flatMap((match) => JSON.parse(match[1])['@graph'])
-  // Home: the screenshot stays the poster (and the largest paint); the button names the film, its length and sound.
-  assert.match(pages.home, /<button type="button"[^>]*aria-label="Play Shapewall launch film, 1:32, with sound"/)
-  assert.match(pages.home, />Watch the launch film</)
+  // Home: the narrated tour, the site's one film. The screenshot stays the poster (and the largest paint); the button
+  // names the film, its length and sound, and is described as narrated with English subtitles.
+  const tourLength = clock(MEDIA.tour.duration)
+  assert.equal(tourLength, '1:44')
+  const pill = pages.home.match(/<button type="button"[^>]*data-film="tour"[^>]*>/)?.[0]
+  assert.ok(pill, 'home: the play pill on the screenshot is the tour')
+  assert.match(pill, /aria-label="Play Shapewall product tour, 1:44, with sound"/)
+  const noteId = pill.match(/aria-describedby="([^"]+)"/)?.[1]
+  assert.ok(noteId, 'home: the pill has an accessible description')
+  assert.match(pages.home, new RegExp(`<span id="${noteId}"[^>]*>Narrated, with English subtitles\\.</span>`))
+  assert.match(pages.home, />Watch the tour</)
+  assert.ok(!/launch film|data-film="launch-film"|\/media\/launch-film/i.test(pages.home), 'home: no launch film')
+  // The player carries the tour's English subtitles (a <track>, off until the captions button turns it on).
+  assert.equal(MEDIA.tour.tracks[0].kind, 'subtitles')
+  assert.match(fs.readFileSync(path.join(SITE, 'src/components/video.jsx'), 'utf8'), /<track key=\{track\.file\} kind=\{track\.kind\}/)
   // The hero also offers the film: a quiet button in the row from sm up, a text link under the buttons on phone.
   for (const where of ['desktop', 'phone']) {
     const control = pages.home.match(new RegExp(`<button type="button"[^>]*data-film-link="${where}"[^>]*>([\\s\\S]*?)</button>`))
-    assert.ok(control, `home: the ${where} "Watch the film" control is a real button`)
-    assert.match(control[0], /aria-label="Watch the launch film, 1:32, with sound"/, `${where}: names the film, length and sound`)
-    assert.match(control[1], /Watch the film/)
-    assert.match(control[1], /1:32/)
+    assert.ok(control, `home: the ${where} "Watch the tour" control is a real button`)
+    assert.match(control[0], /aria-label="Watch the tour, 1:44, with sound"/, `${where}: names the film, length and sound`)
+    assert.match(control[0], new RegExp(`aria-describedby="${noteId}"`), `${where}: described as narrated, with subtitles`)
+    assert.match(control[1], /Watch the tour/)
+    assert.match(control[1], new RegExp(tourLength))
   }
   // Only one of the two shows at a time: the row button is inside a wrapper hidden below sm, the link is hidden from sm up.
   assert.match(pages.home, /<span class="hidden sm:contents"><button type="button"[^>]*data-film-link="desktop"/)
   assert.match(pages.home, /<button type="button"[^>]*data-film-link="phone"[^>]*class="[^"]*\bsm:hidden\b[^"]*"/)
   const homeMarkup = pages.home.replace(/<script type="application\/ld\+json">[\s\S]*?<\/script>/g, '')
   assert.ok(!homeMarkup.includes('/media/'), 'home: nothing from /media/ loads with the page (the structured data only names it)')
-  assert.ok(ld(pages.home).some((item) => item['@type'] === 'VideoObject' && item.name === FILMS['launch-film'].name))
+  const homeVideos = ld(pages.home).filter((item) => item['@type'] === 'VideoObject')
+  assert.equal(homeVideos.length, 1, 'home: one VideoObject')
+  assert.equal(homeVideos[0].name, FILMS.tour.name)
+  assert.equal(homeVideos[0].duration, 'PT1M44S')
+  assert.match(homeVideos[0].contentUrl, /\/media\/tour-1080\.[0-9a-f]{10}\.mp4$/)
+  assert.ok(homeVideos[0].thumbnailUrl.every((url) => url.includes('/media/tour-poster')))
   // Features: no tour (it stays in the manifest for later, but the page neither shows nor names it). A still hero
   // instead: the headline, the two primary actions and one eager screenshot with its size. Then the clips with lazy
   // posters, each with its own width and height.

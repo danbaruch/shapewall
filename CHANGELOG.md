@@ -7,9 +7,12 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Website: one film on the site, the narrated tour, on the home page. It replaces the launch film in the hero screenshot's
+  player ("Watch the tour 1:44" on the screenshot and in the hero), plays inline with sound, and has English subtitles in the
+  player's captions menu. The home page's VideoObject data is now the tour. The launch film is no longer shown anywhere on the
+  site; its files stay in the media manifest.
 - Website: the features page opens with a still hero instead of the tour player: the headline and its sentence beside one
-  screenshot of a comment being left on a button, with Get started and Live demo. The tour stays encoded for later use; the
-  feature clips are unchanged.
+  screenshot of a comment being left on a button, with Get started and Live demo. The feature clips are unchanged.
 
 ## 0.12.1 - 2026-11-18
 
