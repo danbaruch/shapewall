@@ -403,14 +403,22 @@ test('the staging sweep clears expired pushes, orphan folders and leftover board
     const owner = await signUp(hosted, { handle: 'swee' })
     const project = await createProject(owner, owner.workspaceId, 'Site')
     const token = await createToken(owner, owner.workspaceId, project.id)
+    // A board folder a committed push left behind (its removal failed): the
+    // database proves it replaced, so it goes. One of a push the database
+    // does not know stays (src/hosted/push.js recoverSwaps).
+    const committed = (await startPush(hosted, token)).json
+    assert.equal((await tokenCall(hosted, token, 'POST', `/api/v1/pushes/${committed.id}/commit`, { body: {} })).status, 200)
     const open = (await startPush(hosted, token)).json
     const stale = (await startPush(hosted, token)).json
     hosted.db.prepare('UPDATE pushes SET created_at = ? WHERE id = ?').run(new Date(Date.now() - 2 * HOUR).toISOString(), stale.id)
     const orphan = path.join(hosted.dataDir, 'staging', 'ps_000000000000000000000000')
     fs.mkdirSync(orphan, { recursive: true })
-    const leftover = path.join(hosted.dataDir, 'files', owner.workspaceId, project.id, 'sample.old-ps_111111111111111111111111')
+    const leftover = path.join(hosted.dataDir, 'files', owner.workspaceId, project.id, `sample.old-${committed.id}`)
     fs.mkdirSync(leftover, { recursive: true })
+    const unknown = path.join(hosted.dataDir, 'files', owner.workspaceId, project.id, 'sample.old-ps_111111111111111111111111')
+    fs.mkdirSync(unknown, { recursive: true })
     assert.equal(sweepStaging({ db: hosted.db, dataDir: hosted.dataDir, now: time.now() }), 3)
+    assert.ok(fs.existsSync(unknown), 'not provably replaced: left for the operator')
     assert.ok(fs.existsSync(path.join(hosted.dataDir, 'staging', open.id)), 'a live push keeps its folder')
     assert.ok(!fs.existsSync(path.join(hosted.dataDir, 'staging', stale.id)))
     assert.ok(!fs.existsSync(orphan))

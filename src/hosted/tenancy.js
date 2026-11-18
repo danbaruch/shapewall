@@ -365,3 +365,8 @@ export function openPushIds(db) {
       .map((row) => row.id),
   )
 }
+// One push's status by id, in any workspace, or null when there is no such
+// push: what settles a board-folder swap a crash interrupted (push.js recoverSwaps).
+export function pushStatus(db, id) {
+  return prepare(db, 'SELECT status FROM pushes WHERE id = :id').get({ id })?.status ?? null
+}

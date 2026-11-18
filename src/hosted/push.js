@@ -26,7 +26,7 @@ import { CAPTURE_FILE_RE, VERSION_FILE_RE, VERSION_RE } from '../store.js'
 import { ID_PATTERNS, newId } from './crypto.js'
 import { transaction } from './db.js'
 import { commentFileBytes } from './comment-files.js'
-import { openPushIds, staleOpenPushes, tenant } from './tenancy.js'
+import { openPushIds, pushStatus, staleOpenPushes, tenant } from './tenancy.js'
 import { mergeCheckEnvironments, validateCheckEnvironments } from '../checks/environments.js'
 import { projectDir } from './projects.js'
 import { CHECKS_BUNDLE_MAX, validateChecksBundle } from '../checks/transport.js'
@@ -442,6 +442,10 @@ export function createPushStore(
     const push = openPush(pushId, projectId, now)
     const { board, viewports } = push.definition
     const staging = stagingDir(push.id)
+    // start() made the folder: without it the uploads are gone (a crash, or a
+    // restored backup), and committing would replace the board with nothing.
+    if (!fs.existsSync(staging))
+      throw new PushError(409, 'push_incomplete', 'The files of this push are not on the server any more; start a new push.')
     let cleanChecks = { schemaVersion: 1, reports: [] }
     if (checks !== undefined) {
       try {
@@ -537,61 +541,212 @@ export function createPushStore(
     const target = path.join(projectDir(dataDir, t.workspaceId, projectId), board.id)
     const old = `${target}.old-${push.id}`
     fs.mkdirSync(path.dirname(target), { recursive: true })
-    transaction(db, () => {
-      const at = now.toISOString()
-      const existing = t.get('SELECT board_id FROM boards WHERE workspace_id = :ws AND project_id = :project AND board_id = :board', {
-        project: projectId,
-        board: board.id,
-      })
-      // Rechecked here: other pushes may have committed since this one started.
-      if (!existing) {
-        const count = t.get('SELECT COUNT(*) AS n FROM boards WHERE workspace_id = :ws AND project_id = :project', { project: projectId }).n
-        if (count >= boardsPerProject) throw new PushError(409, 'too_many_boards', `A project holds at most ${boardsPerProject} boards.`)
-      }
-      const bytes = push.bytes + checkBytes
-      const others = t.get(
-        'SELECT COALESCE(SUM(bytes), 0) AS n FROM boards WHERE workspace_id = :ws AND NOT (project_id = :project AND board_id = :board)',
-        { project: projectId, board: board.id },
-      ).n
-      if (others + commentFileBytes(t) + bytes > workspaceQuota)
-        throw new PushError(413, 'quota_exceeded', 'This workspace is over its storage quota.')
-      const definition = JSON.stringify(push.definition)
-      if (existing) {
-        t.run(
-          'UPDATE boards SET definition = :definition, pushed_at = :at, push_count = push_count + 1, bytes = :bytes WHERE workspace_id = :ws AND project_id = :project AND board_id = :board',
-          { definition, at, bytes, project: projectId, board: board.id },
-        )
-      } else {
-        t.run(
-          `INSERT INTO boards (workspace_id, project_id, board_id, definition, pushed_at, push_count, bytes, created_at)
+    // Written down before the first rename, so a crash anywhere in the swap
+    // can be put right from the database's word (recoverSwaps).
+    const swap = { push: push.id, workspace: t.workspaceId, project: projectId, board: board.id, hadTarget: fs.existsSync(target) }
+    writeSwap(dataDir, swap)
+    try {
+      transaction(db, () => {
+        const at = now.toISOString()
+        const existing = t.get('SELECT board_id FROM boards WHERE workspace_id = :ws AND project_id = :project AND board_id = :board', {
+          project: projectId,
+          board: board.id,
+        })
+        // Rechecked here: other pushes may have committed since this one started.
+        if (!existing) {
+          const count = t.get('SELECT COUNT(*) AS n FROM boards WHERE workspace_id = :ws AND project_id = :project', {
+            project: projectId,
+          }).n
+          if (count >= boardsPerProject) throw new PushError(409, 'too_many_boards', `A project holds at most ${boardsPerProject} boards.`)
+        }
+        const bytes = push.bytes + checkBytes
+        const others = t.get(
+          'SELECT COALESCE(SUM(bytes), 0) AS n FROM boards WHERE workspace_id = :ws AND NOT (project_id = :project AND board_id = :board)',
+          { project: projectId, board: board.id },
+        ).n
+        if (others + commentFileBytes(t) + bytes > workspaceQuota)
+          throw new PushError(413, 'quota_exceeded', 'This workspace is over its storage quota.')
+        const definition = JSON.stringify(push.definition)
+        if (existing) {
+          t.run(
+            'UPDATE boards SET definition = :definition, pushed_at = :at, push_count = push_count + 1, bytes = :bytes WHERE workspace_id = :ws AND project_id = :project AND board_id = :board',
+            { definition, at, bytes, project: projectId, board: board.id },
+          )
+        } else {
+          t.run(
+            `INSERT INTO boards (workspace_id, project_id, board_id, definition, pushed_at, push_count, bytes, created_at)
            VALUES (:ws, :project, :board, :definition, :at, 1, :bytes, :at)`,
-          { project: projectId, board: board.id, definition, at, bytes },
-        )
-      }
-      t.run("UPDATE pushes SET status = 'committed', finished_at = :at WHERE workspace_id = :ws AND id = :id", { id: push.id, at })
-      // Inside the transaction: if the swap fails, the rows roll back too.
-      if (fs.existsSync(target)) fs.renameSync(target, old)
+            { project: projectId, board: board.id, definition, at, bytes },
+          )
+        }
+        t.run("UPDATE pushes SET status = 'committed', finished_at = :at WHERE workspace_id = :ws AND id = :id", { id: push.id, at })
+        // Inside the transaction: if the swap fails, the rows roll back too.
+        if (fs.existsSync(target)) fs.renameSync(target, old)
+        try {
+          fs.renameSync(staging, target)
+        } catch (error) {
+          if (fs.existsSync(old)) fs.renameSync(old, target)
+          throw error
+        }
+      })
+    } catch (error) {
+      // Rolled back, also when COMMIT itself failed after both renames: the
+      // folders go back to how they were. If that cannot be done now, the
+      // journal stays and the next sweep does it.
       try {
-        fs.renameSync(staging, target)
-      } catch (error) {
-        if (fs.existsSync(old)) fs.renameSync(old, target)
-        throw error
+        if (settleSwap(dataDir, swap, pushStatus(db, push.id) === 'committed') !== 'kept') removeSwap(dataDir, push.id)
+      } catch {
+        /* the sweep settles it */
       }
-    })
-    fs.rmSync(old, { recursive: true, force: true })
+      throw error
+    }
+    try {
+      settleSwap(dataDir, swap, true)
+      removeSwap(dataDir, push.id)
+    } catch {
+      /* committed: the sweep removes the old folder */
+    }
     return { board: board.id, files: files.size, pages: board.pages.length, checks: cleanChecks.reports.length }
   }
 
   return { start, receive, commit, get, expire }
 }
 
-// The whole data folder, at start and then every few minutes: open pushes
-// past their hour fail and lose their staging folder, staging folders with
-// no open push (a crash mid-push) go, and so do board folders a commit left
-// behind (`<board>.old-<push>`).
-export function sweepStaging({ db, dataDir, now = new Date() }) {
+// ---- The swap, recoverable ----
+//
+// A commit renames the board's folder aside (`<board>.old-<push>`) and the
+// staging folder in, inside the transaction that marks the push committed.
+// SQLite cannot roll back a rename: a crash between the renames and COMMIT
+// would leave the old row without its files, or pointing at the new ones.
+// So before the first rename a journal (<data>/swaps/<push>.json, synced)
+// names the folders, and it goes once the outcome is settled. settleSwap
+// then follows the database: committed, the new folder stays and the old
+// one goes; not committed, the folders are put back as they were before the
+// commit (the staging folder too, so the push can be committed again or
+// expire). Nothing is deleted that the database does not show replaced.
+
+const swapsDir = (dataDir) => path.join(dataDir, 'swaps')
+const swapFile = (dataDir, pushId) => {
+  if (!ID_PATTERNS.push.test(pushId)) throw new Error('invalid push id')
+  return path.join(swapsDir(dataDir), `${pushId}.json`)
+}
+function syncDir(dir) {
+  let fd = null
+  try {
+    fd = fs.openSync(dir, 'r')
+    fs.fsyncSync(fd)
+  } catch {
+    /* not every platform syncs a folder */
+  } finally {
+    if (fd !== null) fs.closeSync(fd)
+  }
+}
+function writeSwap(dataDir, swap) {
+  fs.mkdirSync(swapsDir(dataDir), { recursive: true, mode: 0o700 })
+  const file = swapFile(dataDir, swap.push)
+  const temp = `${file}.tmp`
+  const fd = fs.openSync(temp, 'w', 0o600)
+  try {
+    fs.writeFileSync(fd, JSON.stringify(swap))
+    fs.fsyncSync(fd)
+  } finally {
+    fs.closeSync(fd)
+  }
+  fs.renameSync(temp, file)
+  syncDir(swapsDir(dataDir))
+}
+function removeSwap(dataDir, pushId) {
+  fs.rmSync(swapFile(dataDir, pushId), { force: true })
+}
+// -> 'committed' | 'restored' | 'kept' (both folders there: left for the operator).
+function settleSwap(dataDir, swap, committed) {
+  const target = path.join(projectDir(dataDir, swap.workspace, swap.project), swap.board)
+  const old = `${target}.old-${swap.push}`
+  const staging = path.join(dataDir, 'staging', swap.push)
+  if (committed) {
+    fs.rmSync(old, { recursive: true, force: true })
+    return 'committed'
+  }
+  const has = (file) => fs.existsSync(file)
+  // The new folder went in (its staging folder is gone, and the target is
+  // either new or the old one was moved aside): take it back out.
+  if (!has(staging) && has(target) && (has(old) || !swap.hadTarget)) {
+    fs.mkdirSync(path.dirname(staging), { recursive: true })
+    fs.renameSync(target, staging)
+  }
+  if (has(old)) {
+    if (has(target)) return 'kept'
+    fs.renameSync(old, target)
+  }
+  return 'restored'
+}
+
+// Swaps a crash left unsettled: the journals first, then `<board>.old-<push>`
+// folders without one (from a build before the journal). -> { settled, kept }
+export function recoverSwaps({ db, dataDir, log = () => {} }) {
+  const result = { settled: 0, kept: [] }
+  const journals = safeList(swapsDir(dataDir))
+  for (const name of journals) {
+    const file = path.join(swapsDir(dataDir), name)
+    if (name.endsWith('.tmp')) {
+      // Never got as far as a rename.
+      fs.rmSync(file, { force: true })
+      continue
+    }
+    let swap
+    try {
+      swap = JSON.parse(fs.readFileSync(file, 'utf8'))
+    } catch {
+      result.kept.push(`swaps/${name}`)
+      continue
+    }
+    if (
+      !ID_PATTERNS.push.test(String(swap?.push)) ||
+      name !== `${swap.push}.json` ||
+      !ID_PATTERNS.workspace.test(String(swap.workspace)) ||
+      !ID_PATTERNS.project.test(String(swap.project)) ||
+      !ID_RE.test(String(swap.board))
+    ) {
+      result.kept.push(`swaps/${name}`)
+      continue
+    }
+    const outcome = settleSwap(dataDir, swap, pushStatus(db, swap.push) === 'committed')
+    if (outcome === 'kept') result.kept.push(`files/${swap.workspace}/${swap.project}/${swap.board}.old-${swap.push}`)
+    else {
+      removeSwap(dataDir, swap.push)
+      result.settled += 1
+    }
+  }
+  const files = path.join(dataDir, 'files')
+  for (const ws of safeList(files)) {
+    if (!ID_PATTERNS.workspace.test(ws)) continue
+    for (const project of safeList(path.join(files, ws))) {
+      if (!ID_PATTERNS.project.test(project)) continue
+      for (const name of safeList(path.join(files, ws, project))) {
+        const match = /^(.+)\.old-(ps_[a-f0-9]+)$/.exec(name)
+        if (!match || !ID_RE.test(match[1]) || !ID_PATTERNS.push.test(match[2])) continue
+        // An old folder exists only after the first rename: the board had one.
+        const swap = { push: match[2], workspace: ws, project, board: match[1], hadTarget: true }
+        const status = pushStatus(db, swap.push)
+        // A push this database does not know: nothing proves the folder replaced.
+        const outcome = status === null ? 'kept' : settleSwap(dataDir, swap, status === 'committed')
+        if (outcome === 'kept') result.kept.push(`files/${ws}/${project}/${name}`)
+        else result.settled += 1
+      }
+    }
+  }
+  result.kept = [...new Set(result.kept)]
+  for (const item of result.kept) log(`staging sweep: left ${item} in place; check it by hand`)
+  return result
+}
+
+// The whole data folder, at start and then every few minutes: unsettled
+// swaps are settled first (recoverSwaps), then open pushes past their hour
+// fail and lose their staging folder, and staging folders with no open push
+// (a crash mid-push) go.
+export function sweepStaging({ db, dataDir, now = new Date(), log = () => {} }) {
   const cutoff = new Date(now.getTime() - PUSH_LIMITS.openMs).toISOString()
-  let removed = 0
+  let removed = recoverSwaps({ db, dataDir, log }).settled
   for (const row of staleOpenPushes(db, cutoff)) {
     createPushStore(tenant(db, row.workspace_id), { db, dataDir }).expire(row.id, now)
     removed += 1
@@ -602,16 +757,6 @@ export function sweepStaging({ db, dataDir, now = new Date() }) {
     if (open.has(name)) continue
     fs.rmSync(path.join(staging, name), { recursive: true, force: true })
     removed += 1
-  }
-  const files = path.join(dataDir, 'files')
-  for (const ws of fs.existsSync(files) ? fs.readdirSync(files) : []) {
-    for (const project of safeList(path.join(files, ws))) {
-      for (const name of safeList(path.join(files, ws, project))) {
-        if (!/\.old-ps_[a-f0-9]+$/.test(name)) continue
-        fs.rmSync(path.join(files, ws, project, name), { recursive: true, force: true })
-        removed += 1
-      }
-    }
   }
   return removed
 }

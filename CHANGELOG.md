@@ -57,6 +57,12 @@ and the project uses [Semantic Versioning](https://semver.org/).
   source diffs. Someone removed, demoted to viewer or signed out stops receiving at once (the stream ends), and someone who
   is no longer trusted with diffs gets the following permission cards without them. Before, the access a viewer had when the
   stream opened was kept until the turn ended.
+- **Hosted: a crash during a push can no longer split a board from its files.** A push commit now writes down its folder swap
+  before it starts, and the sweep at the next start finishes or undoes it by what the database recorded: the board keeps
+  either all of its previous captures or all of the new ones, and an uncommitted push gets its uploads back. The sweep no
+  longer deletes a `<board>.old-<push>` folder unless the database shows that push committed; one it cannot account for is
+  left in place and named in the server log. A commit whose uploads are gone is refused (`push_incomplete`) instead of
+  replacing the board with an empty one.
 
 ## 0.11.0 - 2026-11-17
 

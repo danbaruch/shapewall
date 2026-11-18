@@ -2035,7 +2035,14 @@ Old-host passkeys show "For old.example" on the Account page.
 <data>/setup-link              the first account's setup link (0600), until it is used
 <data>/files/<ws>/<project>/<board>/   pushed captures, in the local layout
 <data>/staging/<push>/         pushes in progress (swept after an hour)
+<data>/swaps/<push>.json       a push commit's folder swap while it runs (settled by the sweep after a crash)
 ```
+
+A push commit swaps the board's folder for the uploaded one inside the database transaction that records it. Before the first
+rename it writes `swaps/<push>.json`; if the server dies mid-swap, the sweep at the next start follows the database: a
+committed push keeps the new folder and removes `<board>.old-<push>`, anything else gets the previous folder back and the
+uploads return to `staging/` (the push can be committed again or expires). An old folder the database cannot account for is
+left in place and named in the log (`left ... in place; check it by hand`).
 
 Use the operator commands below for a consistent database and file copy. Copying the SQLite file alone, or copying files after an
 unlocked database snapshot, is not a complete backup of a board.
