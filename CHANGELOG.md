@@ -52,6 +52,11 @@ and the project uses [Semantic Versioning](https://semver.org/).
   an existing member now revokes the same invites, share links and API tokens as a role change in the console, writes the same
   `member_grants_revoked` audit entry, and says what it revoked. Before, a demotion there only hid those grants, and promoting
   the person again later brought them back.
+- **Hosted: an open chat stream follows access changes.** A board chat that is being watched live now checks, before each
+  update it sends, that the viewer is still signed in and still a member of the workspace, and whether they may still see
+  source diffs. Someone removed, demoted to viewer or signed out stops receiving at once (the stream ends), and someone who
+  is no longer trusted with diffs gets the following permission cards without them. Before, the access a viewer had when the
+  stream opened was kept until the turn ended.
 
 ## 0.11.0 - 2026-11-17
 
