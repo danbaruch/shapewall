@@ -102,23 +102,31 @@ export function git(args, { cwd, env = process.env, extraEnv = {}, input = null,
   })
 }
 
-// The worktree folder where `ref` (refs/heads/<name>) is checked out, or
-// null. Every worktree of the repository counts, the main one too: deleting
-// a branch checked out there would leave that worktree's HEAD pointing at
-// nothing. When Git cannot list them, the branch counts as in use.
+// Where `ref` (refs/heads/<name>) is checked out: { dir } (the worktree
+// folder), or null when no worktree has it. Every worktree of the repository
+// counts, the main one too: deleting a branch checked out there would leave
+// that worktree's HEAD pointing at nothing. When Git cannot list them, the
+// branch counts as in use: { dir: null, unknown: true }.
 export async function checkedOutAt(cwd, ref) {
   let out
   try {
     out = await git(['worktree', 'list', '--porcelain'], { cwd, timeoutMs: 20000 })
   } catch {
-    return '(unknown: the worktrees could not be listed)'
+    return { dir: null, unknown: true }
   }
   let dir = null
   for (const line of out.split('\n')) {
     if (line.startsWith('worktree ')) dir = line.slice('worktree '.length)
-    else if (line === `branch ${ref}`) return dir || '(another worktree)'
+    else if (line === `branch ${ref}`) return { dir, unknown: false }
   }
   return null
+}
+
+// Why a branch was kept, as the chat says it.
+export function keptBranchText(branch, used) {
+  return used?.dir
+    ? `Kept branch ${branch}: it is checked out in ${used.dir}.`
+    : `Kept branch ${branch}: could not check whether it is in use.`
 }
 
 // The repository's configured filter, merge and diff drivers, each overridden

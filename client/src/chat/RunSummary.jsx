@@ -38,6 +38,15 @@ const STATUS = {
 }
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
 
+// After Undo or Discard of a branch: deleted, or kept and why (src/agent/branch-mode.js keptText).
+function keptBranchText(undone) {
+  const kept = undone.kept
+  if (!kept) return `Deleted the branch ${undone.branch}.`
+  if (kept.reason === 'in_use') return `Kept branch ${undone.branch}: it is checked out in ${kept.dir}.`
+  if (kept.reason === 'moved') return `Kept branch ${undone.branch}: it moved on from the agent's commit.`
+  return `Kept branch ${undone.branch}: could not check whether it is in use.`
+}
+
 function FileRow({ file, touch }) {
   const [open, setOpen] = useState(false)
   const status = STATUS[file.status] || STATUS.modified
@@ -570,7 +579,7 @@ export default function RunSummary({ message, owner = false, touch = false, onUn
           {undone ? (
             <p className="text-caption text-muted">
               {undone.kind === 'branch'
-                ? `Deleted the branch ${undone.branch}.`
+                ? keptBranchText(undone)
                 : undone.kind === 'revert'
                   ? `Reverted ${undone.branch} in your checkout.`
                   : `Put ${plural(undone.files || files.length, 'file')} back.`}

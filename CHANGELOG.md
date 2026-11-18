@@ -40,6 +40,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
   Discard in branch mode, and the cleanup after Apply) checked only that the branch still pointed at the agent's commit, so a
   branch you had checked out in another worktree to review it could be deleted under you, leaving that worktree on a missing
   branch. Now Undo refuses and says where the branch is checked out, and Discard and Apply leave the branch in place.
+  The card and the comment then say "Kept branch X: it is checked out in (folder)" instead of saying it was deleted.
 - **`shapewall ci` never deletes a folder it did not write.** Before, `ci capture --out DIR` deleted DIR and a folder next to
   it named `DIR.work` with everything in them, and `capture-compare` deleted any `images/` folder in its `--out`, so a
   mistyped path could erase a project. Now `--out` must be new, empty or an earlier Shapewall result; anything else is refused
