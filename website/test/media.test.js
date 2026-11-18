@@ -187,9 +187,21 @@ test('prerendered pages: posters only, with sizes; real, labelled play buttons; 
   const homeMarkup = pages.home.replace(/<script type="application\/ld\+json">[\s\S]*?<\/script>/g, '')
   assert.ok(!homeMarkup.includes('/media/'), 'home: nothing from /media/ loads with the page (the structured data only names it)')
   assert.ok(ld(pages.home).some((item) => item['@type'] === 'VideoObject' && item.name === FILMS['launch-film'].name))
-  // Features: the tour (eager poster, at the top) and twelve clips with lazy posters, each with its own width and height.
-  assert.match(pages.features, /aria-label="Play Shapewall product tour, \d:\d\d, with sound"/)
-  assert.ok(ld(pages.features).some((item) => item['@type'] === 'VideoObject' && item.name === FILMS.tour.name))
+  // Features: no tour (it stays in the manifest for later, but the page neither shows nor names it). A still hero
+  // instead: the headline, the two primary actions and one eager screenshot with its size. Then the clips with lazy
+  // posters, each with its own width and height.
+  assert.ok(!/product tour|Take the tour|Narrated, with English subtitles/.test(pages.features), 'features: no tour player')
+  assert.ok(!pages.features.includes('/media/tour-'), 'features: nothing from the tour is referenced')
+  assert.ok(!ld(pages.features).some((item) => item['@type'] === 'VideoObject'), 'features: no VideoObject')
+  const hero = pages.features.match(/<section[^>]*>(?:(?!<\/section>)[\s\S])*?<h1[\s\S]*?<\/section>/)?.[0] || ''
+  assert.match(hero, /<h1[^>]*>Everything between/, 'features: the hero holds the headline')
+  assert.match(hero, /<a[^>]*href="\/docs\/getting-started"[^>]*>Get started/, 'features hero: Get started')
+  assert.match(hero, /<a[^>]*href="[^"]*demo[^"]*"[^>]*>[\s\S]*?Live demo/, 'features hero: Live demo')
+  const heroImg = hero.match(/<img[^>]*>/)?.[0] || ''
+  assert.match(heroImg, /width="1440"[^>]*height="900"/, 'features hero: the screenshot declares its size')
+  assert.match(heroImg, /loading="eager"/, 'features hero: the screenshot (the largest paint) loads eagerly')
+  assert.match(heroImg, /alt="The Shapewall board on a pricing page: [^"]+"/, 'features hero: the screenshot has alt text')
+  assert.ok(!/<video|data-clip|<button/.test(hero), 'features hero: still, nothing to play')
   const clips = [...pages.features.matchAll(/<figure[^>]*data-clip="(clip-[a-z-]+)"[^>]*>([\s\S]*?)<\/figure>/g)]
   assert.equal(clips.length, 8, 'eight sections with a clip (two of them with tabs; the first tab is rendered)')
   for (const [, id, body] of clips) {
@@ -205,7 +217,8 @@ test('prerendered pages: posters only, with sizes; real, labelled play buttons; 
   assert.match(pages.start, /aria-label="Play Shapewall quickstart, 1:27, silent"/)
   assert.match(pages.start, /shows the same steps as the text below/)
   // Every page keeps its frame size: each video frame declares its aspect ratio.
-  for (const html of [pages.features, pages.start]) assert.match(html, /aspect-ratio:1920 \/ 1080/)
+  assert.match(pages.start, /aspect-ratio:1920 \/ 1080/)
+  assert.equal((pages.features.match(/aspect-ratio:1440 \/ 900/g) || []).length, 8, 'features: each clip frame')
 })
 
 test('the service worker leaves /media/ alone (no caching of videos, byte ranges go straight to the server)', () => {

@@ -1,7 +1,6 @@
 import { Link } from 'react-router-dom'
 import { ArrowRight, Check, Download } from 'lucide-react'
-import { PageHeader } from '../components/page.jsx'
-import { Badge, Container, Shot } from '../components/ui.jsx'
+import { Badge, Container, Eyebrow, GetStarted, LiveDemo, Shot } from '../components/ui.jsx'
 import {
   BeforeAfter,
   CaptureIllustration,
@@ -16,14 +15,14 @@ import { FinalCta } from './Home.jsx'
 import { HARDENING_PDF } from '../routes.js'
 import liveComment960 from '../assets/shots/live-comment-960.webp'
 import liveComment1440 from '../assets/shots/live-comment-1440.webp'
+import liveComment2048 from '../assets/shots/live-comment-2048.webp'
 import compareComment960 from '../assets/shots/compare-comment-960.webp'
 import compareComment1440 from '../assets/shots/compare-comment-1440.webp'
 import variant960 from '../assets/shots/variant-960.webp'
 import variant1440 from '../assets/shots/variant-1440.webp'
 import phoneComment from '../assets/shots/phone-comment.webp'
 import { Reveal } from '../components/motion.jsx'
-import { Clip, ClipTabs, FilmFrame } from '../components/video.jsx'
-import { FILMS } from '../videos.js'
+import { Clip, ClipTabs } from '../components/video.jsx'
 
 // The workspace of the public demo (client/src/demo/fixtures.js WORKSPACE_ID), in its console.
 const DEMO_CONSOLE = '/demo/console.html#/w/ws_4c756d000000000000000001'
@@ -338,23 +337,51 @@ function RolesIllustration() {
   )
 }
 
+// The page's hero: the promise on the left, one still of the thing it describes on the right (a comment being left on
+// the exact button, the "change this" half of the headline). Stacks on phones: text, buttons, then the screenshot. The
+// screenshot is the largest paint, so it loads eagerly; it only moves with the home hero's entrance.
+function FeaturesHero() {
+  return (
+    <section className="relative overflow-hidden border-b border-line">
+      <div
+        className="wall-dots absolute inset-x-0 top-0 h-[560px] [mask-image:linear-gradient(to_bottom,black_40%,transparent)]"
+        aria-hidden="true"
+      />
+      <Container className="relative grid items-center gap-12 pt-14 pb-16 sm:pt-20 sm:pb-20 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.12fr)] lg:gap-14 lg:pt-24 lg:pb-24">
+        <div className="max-w-2xl">
+          <Eyebrow>Features</Eyebrow>
+          <h1 className="mt-4 text-[34px] leading-[1.06] font-extrabold tracking-[-0.035em] text-balance text-ink min-[380px]:text-[36px] sm:text-[52px] lg:text-[42px] xl:text-[52px]">
+            Everything between <span className="whitespace-nowrap">“change this”</span> and{' '}
+            <span className="whitespace-nowrap text-wall">“it is changed”</span>
+          </h1>
+          <p className="mt-6 text-[17px] leading-7 text-pretty text-slate sm:text-[19px] sm:leading-8">
+            Capture every page, review it on one wall, hand precise comments to your coding agent and check the result where you asked for
+            it.
+          </p>
+          <div className="mt-8 flex flex-wrap gap-3">
+            <GetStarted where="features-hero" />
+            <LiveDemo where="features-hero" />
+          </div>
+        </div>
+        <Shot
+          src={liveComment1440}
+          srcSet={`${liveComment960} 960w, ${liveComment1440} 1440w, ${liveComment2048} 2048w`}
+          sizes="(min-width: 1400px) 660px, (min-width: 1024px) 46vw, 100vw"
+          width="1440"
+          height="900"
+          eager
+          className="hero-rise min-[1400px]:-mr-28"
+          alt="The Shapewall board on a pricing page: a new comment pinned to the Try Plus free button asks for it to stand out more and to show the yearly price"
+        />
+      </Container>
+    </section>
+  )
+}
+
 export default function Features() {
   return (
     <>
-      <PageHeader eyebrow="Features" title="Everything between “change this” and “it is changed”">
-        Capture every page, review it on one wall, hand precise comments to your coding agent and check the result where you asked for it.
-      </PageHeader>
-      <Container className="pt-10 pb-12 sm:pt-12 sm:pb-16">
-        <FilmFrame
-          id="tour"
-          title={FILMS.tour.name}
-          cta="Take the tour"
-          sizes="(min-width: 960px) 896px, 100vw"
-          eager
-          className="mx-auto max-w-4xl"
-        />
-        <p className="mx-auto mt-3 max-w-4xl text-center text-[13.5px] text-faint">Narrated, with English subtitles.</p>
-      </Container>
+      <FeaturesHero />
       <nav className="sticky top-16 z-30 border-b border-line bg-paper/90 backdrop-blur" aria-label="Features on this page">
         {/* Phone: one row that scrolls sideways, faded at both edges so clipped items read as more. Wider: the row wraps,
             so every item is always visible. */}

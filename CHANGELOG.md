@@ -3,6 +3,14 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Changed
+
+- Website: the features page opens with a still hero instead of the tour player: the headline and its sentence beside one
+  screenshot of a comment being left on a button, with Get started and Live demo. The tour stays encoded for later use; the
+  feature clips are unchanged.
+
 ## 0.12.1 - 2026-11-18
 
 Videos on the website (the launch film, the narrated tour, feature clips and the quickstart, all self-hosted), and follow-up

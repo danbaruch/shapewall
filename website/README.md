@@ -92,9 +92,9 @@ shapewall.com {
 
 ## Videos
 
-The launch film (home page), the product tour (top of the features page), the feature clips (features page sections) and the
-quickstart (Getting started) are self-hosted: no third-party player, embed or CDN. They are not in git and not in the release
-folders.
+The launch film (home page), the product tour (encoded and in `src/media.json`, but no page shows it right now), the feature clips
+(features page sections) and the quickstart (Getting started) are self-hosted: no third-party player, embed or CDN. They are not in
+git and not in the release folders.
 
 - `src/media.json` (committed) pins exactly which files the pages show: per video its sources, posters, captions, size and
   duration. Every file name carries its content hash (`launch-film-1080.2413b6572d.mp4`), so a URL never changes meaning.
