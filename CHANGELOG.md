@@ -24,6 +24,10 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Website: the privacy page now says that the contact form also stores the User-Agent your browser sends, and that, if the site
   operator has set it up, your message, topic and email address are forwarded to a messaging service.
 - Website: a link with a broken fragment (for example one cut off while copying) no longer stops the page from loading.
+- **A board file is never replaced by a cut-off copy.** When the disk wrote only part of a comments, manifest or image file
+  and reported no error, the half-written file could replace the good one. Shapewall now writes every byte before the swap,
+  and keeps the old file when the disk fills part way. The event log works the same way: a batch is only marked logged once
+  all of it is written, and a failed write leaves no half line behind.
 
 ## 0.11.0 - 2026-11-17
 

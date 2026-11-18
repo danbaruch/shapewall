@@ -27,6 +27,7 @@ import { randomBytes } from 'node:crypto'
 import { cleanNetworkSummary } from './capture/network-summary.js'
 import { ID_RE, VIEWPORT_NAMES, boardViewports } from './config.js'
 import { isLockLive, readLock, withFileLock } from './lock.js'
+import { writeAll } from './write-all.js'
 import { commentMentions } from './mentions.js'
 import { publicReactions, toggleReaction } from './reactions.js'
 import { createdEvents, emitCommentEvents, replyEvents, updateEvents } from './events.js'
@@ -104,7 +105,7 @@ export function writeFileAtomic(file, data) {
   const fd = fs.openSync(temp, 'w', 0o644)
   try {
     try {
-      fs.writeSync(fd, data)
+      writeAll(fd, data)
       fs.fsyncSync(fd)
     } finally {
       fs.closeSync(fd)
