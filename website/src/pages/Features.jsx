@@ -1,3 +1,4 @@
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowRight, Check, Download } from 'lucide-react'
 import { Badge, Container, Eyebrow, GetStarted, LiveDemo, Shot } from '../components/ui.jsx'
@@ -29,10 +30,12 @@ const DEMO_CONSOLE = '/demo/console.html#/w/ws_4c756d000000000000000001'
 
 // Each section's looping clip (src/media.json, made from the films' clips): `clip` is one, `clips` several behind tabs.
 // A section with a clip shows it instead of its illustration. No clip: Capture, Before/after, GitHub, Notifications,
-// Variants (they keep their illustrations).
+// Variants (they keep their illustrations). The order tells a story in chapters (`group`, shown above each title and
+// as rules in the nav): the loop from capture to a verified fix, more ways to look, working together, anywhere.
 const SECTIONS = [
   {
     id: 'capture',
+    group: 'The loop',
     nav: 'Capture',
     title: 'Every page, at desktop, tablet and phone width',
     text: 'List your pages in shapewall.config.json or import them from your sitemap. Shapewall opens each page in Chromium at every viewport, waits for the network, your selectors and any scripted actions such as opening a menu, then saves a fixed-size shot and a live HTML snapshot.',
@@ -46,6 +49,7 @@ const SECTIONS = [
   },
   {
     id: 'wall',
+    group: 'The loop',
     clip: {
       id: 'clip-wall',
       label: 'The wall zooming from every page of a demo site in to its pricing page at three widths, and back out',
@@ -64,6 +68,7 @@ const SECTIONS = [
   },
   {
     id: 'comments',
+    group: 'The loop',
     clips: [
       { id: 'clip-pin', tab: 'Pin a comment', label: 'A comment pinned to the Try Plus free button and posted' },
       { id: 'clip-say', tab: 'Say it or draw it', label: 'A dictated comment with a box drawn round the button, then posted' },
@@ -92,6 +97,7 @@ const SECTIONS = [
   },
   {
     id: 'agent',
+    group: 'The loop',
     clip: { id: 'clip-agent', label: 'Fix with agent: the agent plans, asks before it acts, changes one file and resolves the comment' },
     nav: 'Agents',
     title: 'An agent loop that runs on its own',
@@ -111,22 +117,8 @@ const SECTIONS = [
     dark: true,
   },
   {
-    id: 'journeys',
-    clip: { id: 'clip-journeys', label: 'The Sign up journey stepping from Home to Pricing, Sign up and the Dashboard' },
-    nav: 'Journeys',
-    title: 'Journeys across real links',
-    text: 'During a capture Shapewall reads the links on each page and keeps the ones that lead to other pages on the wall. They become arrows. Name the paths that matter, such as visitor to first note, highlight one, and step through it page by page.',
-    points: [
-      'Arrows from real links, not guesses',
-      'Named journeys in the config or made on the wall',
-      'Step through with the keyboard or the arrow buttons',
-    ],
-    art: <JourneyIllustration />,
-    dark: true,
-    wide: true,
-  },
-  {
     id: 'before-after',
+    group: 'The loop',
     nav: 'Before/after',
     title: 'Before and after, in place',
     text: 'Every comment remembers the capture it was made on, and a recapture keeps the old shot. Open a resolved comment to see before and after around the pin, on the page where the change was asked for.',
@@ -139,131 +131,8 @@ const SECTIONS = [
     art: <BeforeAfter />,
   },
   {
-    id: 'github',
-    nav: 'GitHub',
-    title: 'Comments, issues and pull requests, linked',
-    text: 'Name your repo in the config and give Shapewall a token in the environment. A comment becomes a GitHub issue with one click, carrying the text, the page, the element and a link to the screenshot. A pull request that says shapewall:12 is linked to comment 12, and when it merges the comment resolves with the PR as its fix.',
-    points: [
-      'From the board, shapewall github issue, the API or MCP',
-      'PRs linked by hand, by shapewall github sync, or by a signed webhook',
-      'The token is read from the environment only, never stored',
-    ],
-    art: <GithubIllustration />,
-  },
-  {
-    id: 'notifications',
-    nav: 'Notifications',
-    title: 'Tell the right people, where they already are',
-    text: 'Comment events (created, replied, mentioned, agent status, resolved, reopened) go to a signed webhook, Slack, Discord or email through Resend. Every message links to the comment on the board, and an @mention reaches the person it names once you map their handle.',
-    points: [
-      'Per-person routing: @robin pings Robin on Slack or emails Robin',
-      'Sent in the background with retries; the board never waits',
-      'Secrets live in environment variables; shapewall notify test checks a channel',
-    ],
-    art: <NotifyIllustration />,
-  },
-  {
-    id: 'compare',
-    clip: { id: 'clip-compare', label: 'Pricing on staging beside production, the diff overlay, and a comment left on production' },
-    nav: 'Staging',
-    title: 'Staging beside production',
-    text: 'Point one board at several environments. Capture staging and production with the same pages, and see them side by side before you ship. Comment on either side while you compare: the pin stays with the environment it was left on.',
-    points: [
-      'Environments share one page list',
-      'Changed pixels in red, and a filter for changed pages only',
-      'A comment\u2019s thread says where it was left, such as \u201cLeft on Production\u201d',
-      'On a phone the compare bar is one row, so the thread sheet keeps its height',
-    ],
-    links: [{ to: '/docs/compare#comments-while-comparing', label: 'Commenting while comparing' }],
-    art: (
-      <Shot
-        src={compareComment1440}
-        srcSet={`${compareComment960} 960w, ${compareComment1440} 1440w`}
-        sizes="(min-width: 1024px) 560px, 100vw"
-        width="1440"
-        height="900"
-        alt="Compare mode: Pricing on staging beside production, changed pixels in red, and a comment thread marked Left on Production"
-      />
-    ),
-  },
-  {
-    id: 'variants',
-    nav: 'Variants',
-    title: 'Variants for trying a direction',
-    text: 'When a comment asks for a direction ("try a calmer hero"), have the agent build it on a branch and put it beside the page instead of replacing it. Reviewers comment on the variant too.',
-    points: [
-      'shapewall variant add home --url ... --title "Calmer hero"',
-      'Joined to its page by a dashed edge',
-      'Remove it when the decision is made',
-    ],
-    art: (
-      <Shot
-        src={variant1440}
-        srcSet={`${variant960} 960w, ${variant1440} 1440w`}
-        sizes="(min-width: 1024px) 560px, 100vw"
-        width="1440"
-        height="900"
-        alt="A pricing page with its redesigned variant beside it on the wall"
-      />
-    ),
-  },
-  {
-    id: 'teams',
-    clips: [
-      { id: 'clip-team', tab: 'Invite and roles', label: 'Inviting a person and changing a member\u2019s role' },
-      { id: 'clip-multi', tab: 'Multiplayer', label: 'Three people\u2019s named cursors on one board, and a pin arriving live' },
-      { id: 'clip-log', tab: 'Activity and usage', label: 'The Activity log and the Usage chart of agent turns' },
-      { id: 'clip-share', tab: 'Share links', label: 'Creating a share link for an agency review and copying it' },
-    ],
-    nav: 'Teams',
-    badge: 'Beta',
-    title: 'Workspaces, roles and share links',
-    text: 'Host the team server and people sign in with a passkey, or, on a server in your tailnet, with their Tailscale identity and nothing to type. Each workspace has owners, admins, members and viewers. Admins invite people, hand out expiring share links to clients, issue API tokens for agents and read an audit log of who changed what. A Usage page shows every agent turn with the tokens and cost each agent reported, as a dashboard each person arranges for themselves (drag, resize, hide and duplicate its charts), and Activity shows who signed in, who changed which setting and who approved what. The live demo has the roles, the links and both pages, with made-up numbers: switch who you are with View as.',
-    points: [
-      'Four roles, checked on every request',
-      'Invites and share links that expire',
-      'Agent usage as charts and a grid, never estimated',
-      'People\u2019s activity and an access review',
-    ],
-    // The demo's console, with made-up numbers (client/src/demo/usage).
-    links: [
-      { href: `${DEMO_CONSOLE}/usage`, label: 'See Usage in the live demo' },
-      { href: `${DEMO_CONSOLE}/activity`, label: 'See Activity in the live demo' },
-    ],
-    art: <RolesIllustration />,
-  },
-  {
-    id: 'phone',
-    clip: { id: 'clip-phone', label: 'The board on a phone: a tap on the headline, a comment in the sheet, Post' },
-    nav: 'Phone',
-    title: 'The wall in your pocket',
-    text: 'The board works on a phone: 44 px touch targets, a bottom sheet for comments, and Back closes the topmost panel instead of leaving the board. Add it to your home screen and it opens like an app.',
-    points: [
-      'Installable board app',
-      'Pinch to zoom, tap to comment, dictate with the microphone',
-      'Compare environments in one row',
-      'Same comments, same pins',
-    ],
-    art: (
-      <div className="wall-dots flex items-center justify-center gap-4 rounded-2xl p-6">
-        <div className="w-44 overflow-hidden rounded-[22px] border-4 border-device shadow-xl sm:w-52">
-          <img
-            src={phoneComment}
-            alt="The Shapewall board on a phone comparing staging with production, a comment thread open in a sheet"
-            width="640"
-            height="1385"
-            loading="lazy"
-            className="block h-auto w-full"
-          />
-        </div>
-        <div className="hidden sm:block">
-          <PhonePair />
-        </div>
-      </div>
-    ),
-  },
-  {
     id: 'checks',
+    group: 'The loop',
     clip: { id: 'clip-checks', label: 'The Checks panel, then a before and after Lighthouse comparison' },
     nav: 'Page checks',
     title: 'See what needs attention, then verify the fix',
@@ -295,6 +164,152 @@ const SECTIONS = [
         </div>
         <p className="border-t border-line pt-3 text-sm text-slate">Recorded budget: LCP under 2.5 seconds</p>
         <p className="text-xs text-faint">Example values.</p>
+      </div>
+    ),
+  },
+  {
+    id: 'journeys',
+    group: 'More ways to look',
+    clip: { id: 'clip-journeys', label: 'The Sign up journey stepping from Home to Pricing, Sign up and the Dashboard' },
+    nav: 'Journeys',
+    title: 'Journeys across real links',
+    text: 'During a capture Shapewall reads the links on each page and keeps the ones that lead to other pages on the wall. They become arrows. Name the paths that matter, such as visitor to first note, highlight one, and step through it page by page.',
+    points: [
+      'Arrows from real links, not guesses',
+      'Named journeys in the config or made on the wall',
+      'Step through with the keyboard or the arrow buttons',
+    ],
+    art: <JourneyIllustration />,
+    dark: true,
+    wide: true,
+  },
+  {
+    id: 'compare',
+    group: 'More ways to look',
+    clip: { id: 'clip-compare', label: 'Pricing on staging beside production, the diff overlay, and a comment left on production' },
+    nav: 'Staging',
+    title: 'Staging beside production',
+    text: 'Point one board at several environments. Capture staging and production with the same pages, and see them side by side before you ship. Comment on either side while you compare: the pin stays with the environment it was left on.',
+    points: [
+      'Environments share one page list',
+      'Changed pixels in red, and a filter for changed pages only',
+      'A comment\u2019s thread says where it was left, such as \u201cLeft on Production\u201d',
+      'On a phone the compare bar is one row, so the thread sheet keeps its height',
+    ],
+    links: [{ to: '/docs/compare#comments-while-comparing', label: 'Commenting while comparing' }],
+    art: (
+      <Shot
+        src={compareComment1440}
+        srcSet={`${compareComment960} 960w, ${compareComment1440} 1440w`}
+        sizes="(min-width: 1024px) 560px, 100vw"
+        width="1440"
+        height="900"
+        alt="Compare mode: Pricing on staging beside production, changed pixels in red, and a comment thread marked Left on Production"
+      />
+    ),
+  },
+  {
+    id: 'variants',
+    group: 'More ways to look',
+    nav: 'Variants',
+    title: 'Variants for trying a direction',
+    text: 'When a comment asks for a direction ("try a calmer hero"), have the agent build it on a branch and put it beside the page instead of replacing it. Reviewers comment on the variant too.',
+    points: [
+      'shapewall variant add home --url ... --title "Calmer hero"',
+      'Joined to its page by a dashed edge',
+      'Remove it when the decision is made',
+    ],
+    art: (
+      <Shot
+        src={variant1440}
+        srcSet={`${variant960} 960w, ${variant1440} 1440w`}
+        sizes="(min-width: 1024px) 560px, 100vw"
+        width="1440"
+        height="900"
+        alt="A pricing page with its redesigned variant beside it on the wall"
+      />
+    ),
+  },
+  {
+    id: 'github',
+    group: 'Work together',
+    nav: 'GitHub',
+    title: 'Comments, issues and pull requests, linked',
+    text: 'Name your repo in the config and give Shapewall a token in the environment. A comment becomes a GitHub issue with one click, carrying the text, the page, the element and a link to the screenshot. A pull request that says shapewall:12 is linked to comment 12, and when it merges the comment resolves with the PR as its fix.',
+    points: [
+      'From the board, shapewall github issue, the API or MCP',
+      'PRs linked by hand, by shapewall github sync, or by a signed webhook',
+      'The token is read from the environment only, never stored',
+    ],
+    art: <GithubIllustration />,
+  },
+  {
+    id: 'notifications',
+    group: 'Work together',
+    nav: 'Notifications',
+    title: 'Tell the right people, where they already are',
+    text: 'Comment events (created, replied, mentioned, agent status, resolved, reopened) go to a signed webhook, Slack, Discord or email through Resend. Every message links to the comment on the board, and an @mention reaches the person it names once you map their handle.',
+    points: [
+      'Per-person routing: @robin pings Robin on Slack or emails Robin',
+      'Sent in the background with retries; the board never waits',
+      'Secrets live in environment variables; shapewall notify test checks a channel',
+    ],
+    art: <NotifyIllustration />,
+  },
+  {
+    id: 'teams',
+    group: 'Work together',
+    clips: [
+      { id: 'clip-team', tab: 'Invite and roles', label: 'Inviting a person and changing a member\u2019s role' },
+      { id: 'clip-multi', tab: 'Multiplayer', label: 'Three people\u2019s named cursors on one board, and a pin arriving live' },
+      { id: 'clip-log', tab: 'Activity and usage', label: 'The Activity log and the Usage chart of agent turns' },
+      { id: 'clip-share', tab: 'Share links', label: 'Creating a share link for an agency review and copying it' },
+    ],
+    nav: 'Teams',
+    badge: 'Beta',
+    title: 'Workspaces, roles and share links',
+    text: 'Host the team server and people sign in with a passkey, or, on a server in your tailnet, with their Tailscale identity and nothing to type. Each workspace has owners, admins, members and viewers. Admins invite people, hand out expiring share links to clients, issue API tokens for agents and read an audit log of who changed what. A Usage page shows every agent turn with the tokens and cost each agent reported, as a dashboard each person arranges for themselves (drag, resize, hide and duplicate its charts), and Activity shows who signed in, who changed which setting and who approved what. The live demo has the roles, the links and both pages, with made-up numbers: switch who you are with View as.',
+    points: [
+      'Four roles, checked on every request',
+      'Invites and share links that expire',
+      'Agent usage as charts and a grid, never estimated',
+      'People\u2019s activity and an access review',
+    ],
+    // The demo's console, with made-up numbers (client/src/demo/usage).
+    links: [
+      { href: `${DEMO_CONSOLE}/usage`, label: 'See Usage in the live demo' },
+      { href: `${DEMO_CONSOLE}/activity`, label: 'See Activity in the live demo' },
+    ],
+    art: <RolesIllustration />,
+  },
+  {
+    id: 'phone',
+    group: 'Anywhere',
+    clip: { id: 'clip-phone', label: 'The board on a phone: a tap on the headline, a comment in the sheet, Post' },
+    nav: 'Phone',
+    title: 'The wall in your pocket',
+    text: 'The board works on a phone: 44 px touch targets, a bottom sheet for comments, and Back closes the topmost panel instead of leaving the board. Add it to your home screen and it opens like an app.',
+    points: [
+      'Installable board app',
+      'Pinch to zoom, tap to comment, dictate with the microphone',
+      'Compare environments in one row',
+      'Same comments, same pins',
+    ],
+    art: (
+      <div className="wall-dots flex items-center justify-center gap-4 rounded-2xl p-6">
+        <div className="w-44 overflow-hidden rounded-[22px] border-4 border-device shadow-xl sm:w-52">
+          <img
+            src={phoneComment}
+            alt="The Shapewall board on a phone comparing staging with production, a comment thread open in a sheet"
+            width="640"
+            height="1385"
+            loading="lazy"
+            className="block h-auto w-full"
+          />
+        </div>
+        <div className="hidden sm:block">
+          <PhonePair />
+        </div>
       </div>
     ),
   },
@@ -378,22 +393,64 @@ function FeaturesHero() {
   )
 }
 
+// The section in the band across the middle of the screen, for the nav's "you are here". Null above the first one.
+function useCurrentSection() {
+  const [current, setCurrent] = useState(null)
+  useEffect(() => {
+    if (typeof IntersectionObserver === 'undefined') return undefined
+    const seen = new Map()
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) seen.set(entry.target.id, entry.isIntersecting)
+        setCurrent(SECTIONS.find((section) => seen.get(section.id))?.id ?? null)
+      },
+      { rootMargin: '-45% 0px -50% 0px' },
+    )
+    for (const section of SECTIONS) {
+      const node = document.getElementById(section.id)
+      if (node) observer.observe(node)
+    }
+    return () => observer.disconnect()
+  }, [])
+  return current
+}
+
 export default function Features() {
+  const current = useCurrentSection()
+  const navRow = useRef(null)
+  // On a phone the nav is one row that scrolls sideways: keep the current item in view. This moves the row only,
+  // never the page.
+  useEffect(() => {
+    const row = navRow.current
+    const link = current && row?.querySelector(`a[href="#${current}"]`)
+    if (!link || row.scrollWidth <= row.clientWidth) return
+    const left = link.offsetLeft - (row.clientWidth - link.offsetWidth) / 2
+    row.scrollTo({ left: Math.max(0, left), behavior: 'smooth' })
+  }, [current])
   return (
     <>
       <FeaturesHero />
       <nav className="sticky top-16 z-30 border-b border-line bg-paper/90 backdrop-blur" aria-label="Features on this page">
         {/* Phone: one row that scrolls sideways, faded at both edges so clipped items read as more. Wider: the row wraps,
             so every item is always visible. */}
-        <Container className="flex snap-x snap-proximity gap-1 overflow-x-auto py-2 pr-12 [mask-image:linear-gradient(to_right,transparent,black_1.25rem,black_calc(100%-3rem),transparent)] [scrollbar-width:none] sm:pr-12 md:flex-wrap md:gap-y-1 md:overflow-visible md:pr-8 md:[mask-image:none]">
-          {SECTIONS.map((section) => (
-            <a
-              key={section.id}
-              href={`#${section.id}`}
-              className="shrink-0 scroll-ml-5 snap-start rounded-lg px-2.5 py-1.5 text-[13.5px] font-medium text-slate hover:bg-ink/5 hover:text-ink"
-            >
-              {section.nav}
-            </a>
+        <Container
+          ref={navRow}
+          className="relative flex snap-x snap-proximity gap-1 overflow-x-auto py-2 pr-12 [mask-image:linear-gradient(to_right,transparent,black_1.25rem,black_calc(100%-3rem),transparent)] [scrollbar-width:none] sm:pr-12 md:flex-wrap md:gap-y-1 md:overflow-visible md:pr-8 md:[mask-image:none]"
+        >
+          {SECTIONS.map((section, index) => (
+            <Fragment key={section.id}>
+              {/* A thin rule where one chapter (The loop, More ways to look, ...) gives way to the next. */}
+              {index > 0 && SECTIONS[index - 1].group !== section.group ? (
+                <span aria-hidden="true" className="mx-1 my-2 w-px shrink-0 self-stretch bg-line" />
+              ) : null}
+              <a
+                href={`#${section.id}`}
+                aria-current={current === section.id ? 'location' : undefined}
+                className={`shrink-0 scroll-ml-5 snap-start rounded-lg px-2 py-1.5 text-[13.5px] font-medium transition-colors hover:bg-ink/5 hover:text-ink ${current === section.id ? 'bg-wall/10 text-wall' : 'text-slate'}`}
+              >
+                {section.nav}
+              </a>
+            </Fragment>
           ))}
         </Container>
       </nav>
@@ -411,7 +468,10 @@ export default function Features() {
         >
           <Container className={`grid items-center gap-10 ${section.wide ? '' : 'lg:grid-cols-2 lg:gap-16'}`}>
             <Reveal className={index % 2 && !section.wide ? 'lg:order-2' : section.wide ? 'max-w-2xl' : undefined}>
-              {section.badge ? <Badge tone={section.dark ? 'dark' : 'amber'}>{section.badge}</Badge> : null}
+              <div className="flex flex-wrap items-center gap-3">
+                <Eyebrow dark={section.dark}>{section.group}</Eyebrow>
+                {section.badge ? <Badge tone={section.dark ? 'dark' : 'amber'}>{section.badge}</Badge> : null}
+              </div>
               <h2
                 className={`mt-3 text-[28px] leading-tight font-bold tracking-[-0.02em] text-balance sm:text-[34px] ${section.dark ? 'text-white' : 'text-ink'}`}
               >
