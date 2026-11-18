@@ -130,13 +130,19 @@ function Hero() {
               onActiveChange={setFilmPlaying}
             />
           </Shot>
-          <div hidden={filmPlaying} className="hero-note absolute -bottom-6 -left-3 hidden w-72 rounded-xl border border-line bg-card p-3.5 shadow-xl shadow-black/10 md:block lg:-left-10">
+          <div
+            hidden={filmPlaying}
+            className="hero-note absolute -bottom-6 -left-3 hidden w-72 rounded-xl border border-line bg-card p-3.5 shadow-xl shadow-black/10 md:block lg:-left-10"
+          >
             <p className="flex items-center gap-2 text-[12px] font-semibold text-wall">
               <Bot className="size-4" aria-hidden="true" /> Agent resolved #1
             </p>
             <p className="mt-1.5 text-[13.5px] leading-snug text-ink">The Plus card now uses the primary button. Pricing recaptured.</p>
           </div>
-          <div hidden={filmPlaying} className="hero-note absolute -top-5 -right-3 hidden items-center gap-2 rounded-full border border-line bg-card py-1.5 pr-3.5 pl-2 text-[13px] font-medium text-ink shadow-lg shadow-black/10 md:flex lg:-right-8">
+          <div
+            hidden={filmPlaying}
+            className="hero-note absolute -top-5 -right-3 hidden items-center gap-2 rounded-full border border-line bg-card py-1.5 pr-3.5 pl-2 text-[13px] font-medium text-ink shadow-lg shadow-black/10 md:flex lg:-right-8"
+          >
             <span className="grid size-6 place-items-center rounded-full bg-pin text-[11px] font-bold text-night">20</span>
             open comments on 26 pages
           </div>

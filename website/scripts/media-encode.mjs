@@ -86,12 +86,35 @@ const META = ['-map_metadata', '-1', '-map_chapters', '-1', '-fflags', '+bitexac
 function h264(src, height, fps, audio) {
   const outFps = height >= 1080 ? fps : Math.min(fps, 30)
   const args = (out) => [
-    '-hide_banner', '-loglevel', 'error', '-y', '-i', src,
-    '-vf', `scale=-2:${height}:flags=lanczos`, '-r', String(outFps),
-    '-c:v', 'libx264', '-preset', 'slow', '-crf', '27', '-profile:v', 'high', '-pix_fmt', 'yuv420p',
-    '-g', String(outFps * 2), '-threads', THREADS,
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-y',
+    '-i',
+    src,
+    '-vf',
+    `scale=-2:${height}:flags=lanczos`,
+    '-r',
+    String(outFps),
+    '-c:v',
+    'libx264',
+    '-preset',
+    'slow',
+    '-crf',
+    '27',
+    '-profile:v',
+    'high',
+    '-pix_fmt',
+    'yuv420p',
+    '-g',
+    String(outFps * 2),
+    '-threads',
+    THREADS,
     ...(audio ? ['-c:a', 'aac', '-b:a', '128k', '-ac', '2'] : ['-an']),
-    ...META, '-movflags', '+faststart', out,
+    ...META,
+    '-movflags',
+    '+faststart',
+    out,
   ]
   return { key: `h264|crf27|slow|${height}|${outFps}|${audio}`, args }
 }
@@ -99,12 +122,39 @@ function h264(src, height, fps, audio) {
 function vp9(src, height, fps, audio) {
   const outFps = height >= 1080 ? fps : Math.min(fps, 30)
   const args = (out) => [
-    '-hide_banner', '-loglevel', 'error', '-y', '-i', src,
-    '-vf', `scale=-2:${height}:flags=lanczos`, '-r', String(outFps),
-    '-c:v', 'libvpx-vp9', '-crf', '40', '-b:v', '0', '-deadline', 'good', '-cpu-used', '4', '-row-mt', '1',
-    '-tile-columns', '2', '-pix_fmt', 'yuv420p', '-g', String(outFps * 2), '-threads', THREADS,
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-y',
+    '-i',
+    src,
+    '-vf',
+    `scale=-2:${height}:flags=lanczos`,
+    '-r',
+    String(outFps),
+    '-c:v',
+    'libvpx-vp9',
+    '-crf',
+    '40',
+    '-b:v',
+    '0',
+    '-deadline',
+    'good',
+    '-cpu-used',
+    '4',
+    '-row-mt',
+    '1',
+    '-tile-columns',
+    '2',
+    '-pix_fmt',
+    'yuv420p',
+    '-g',
+    String(outFps * 2),
+    '-threads',
+    THREADS,
     ...(audio ? ['-c:a', 'libopus', '-b:a', '128k', '-ac', '2'] : ['-an']),
-    ...META, out,
+    ...META,
+    out,
   ]
   return { key: `vp9|crf40|good4|${height}|${outFps}|${audio}`, args }
 }
@@ -128,7 +178,23 @@ function posters(id, src, width) {
 // One frame of a master as a PNG (for a poster taken from the film itself).
 function frameAt(src, hash, seconds) {
   return cached(`frame-${seconds}.png`, `${hash}|frame|${seconds}`, (o) =>
-    run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-ss', String(seconds), '-i', src, '-frames:v', '1', '-f', 'image2', '-c:v', 'png', o]),
+    run('ffmpeg', [
+      '-hide_banner',
+      '-loglevel',
+      'error',
+      '-y',
+      '-ss',
+      String(seconds),
+      '-i',
+      src,
+      '-frames:v',
+      '1',
+      '-f',
+      'image2',
+      '-c:v',
+      'png',
+      o,
+    ]),
   )
 }
 
@@ -146,6 +212,11 @@ function film(def, dir) {
     ]) {
       const job = make(src, height, info.fps, info.audio)
       const out = cached(`${def.id}-${height}.${codec}`, `${hash}|${job.key}`, (o) => run('ffmpeg', job.args(o)))
+      // A master replaced while it was being read (a render finishing) would leave a mixed encode under the old hash.
+      if (sha(src) !== hash) {
+        fs.rmSync(out, { force: true })
+        throw new Error(`${def.master} changed while it was being encoded; run the script again when it is finished`)
+      }
       sources.push({ ...publish(def.id, String(height), out), type, height })
     }
   }

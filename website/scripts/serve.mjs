@@ -44,7 +44,13 @@ export function resolveFile(urlPath) {
 // production server serves its shared media folder: byte ranges (a video seeks with them) and a year of caching, since
 // every name carries its content hash. Returns false for any other path.
 const MEDIA = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'media')
-const MEDIA_TYPES = { '.mp4': 'video/mp4', '.webm': 'video/webm', '.vtt': 'text/vtt; charset=utf-8', '.jpg': 'image/jpeg', '.webp': 'image/webp' }
+const MEDIA_TYPES = {
+  '.mp4': 'video/mp4',
+  '.webm': 'video/webm',
+  '.vtt': 'text/vtt; charset=utf-8',
+  '.jpg': 'image/jpeg',
+  '.webp': 'image/webp',
+}
 export function serveMedia(req, res) {
   const match = /^\/media\/([a-z0-9][a-z0-9-]*\.[0-9a-f]{10}\.(mp4|webm|vtt|jpg|webp))(?:\?.*)?$/.exec(req.url || '')
   if (!match) return false

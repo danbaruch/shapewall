@@ -60,7 +60,12 @@ export function mediaProblem(result, dir = MEDIA_DIR) {
 }
 
 // The build's check. SHAPEWALL_MEDIA_CHECK=0 skips it (tests and CI, which have no media); deploy.sh never sets it.
-export function assertMedia({ manifest = readManifest(), dir = MEDIA_DIR, env = process.env } = {}) {
+// SHAPEWALL_MEDIA_DIR points the check at another folder (the tests use an empty one).
+export function assertMedia({
+  manifest = readManifest(),
+  env = process.env,
+  dir = path.resolve(env.SHAPEWALL_MEDIA_DIR || MEDIA_DIR),
+} = {}) {
   if ((env.SHAPEWALL_MEDIA_CHECK ?? '1').trim() === '0') return { skipped: true }
   const result = checkMediaFiles(manifest, dir)
   if (!result.ok) throw new Error(mediaProblem(result, dir))

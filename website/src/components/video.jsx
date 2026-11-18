@@ -9,7 +9,7 @@
 // - If a video cannot load, the poster stays, with a short note. The page never shows a broken player.
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { Pause, Play, X } from 'lucide-react'
-import { MEDIA, clock, mediaUrl, orderedSources } from '../videos.js'
+import { MEDIA, clipState, clock, mediaUrl, orderedSources } from '../videos.js'
 import { cx } from './ui.jsx'
 
 function usePrefersReducedMotion() {
@@ -48,11 +48,7 @@ export function Poster({ video, alt = '', sizes, eager = false, className }) {
   const { poster } = video
   return (
     <picture>
-      <source
-        type="image/webp"
-        srcSet={poster.webp.map((image) => `${mediaUrl(image.file)} ${image.width}w`).join(', ')}
-        sizes={sizes}
-      />
+      <source type="image/webp" srcSet={poster.webp.map((image) => `${mediaUrl(image.file)} ${image.width}w`).join(', ')} sizes={sizes} />
       <img
         src={mediaUrl(poster.jpg.file)}
         alt={alt}
@@ -150,7 +146,7 @@ export function FilmOverlay({ id, title, cta, onActiveChange, inset = 'inset-0',
         type="button"
         onClick={() => setActive('playing')}
         className="film-play group absolute inset-0 grid w-full cursor-pointer place-items-center focus-visible:outline-none"
-        aria-label={`Play ${title}, ${length}, with sound`}
+        aria-label={`Play ${title}, ${length}${video.audio ? ', with sound' : ', silent'}`}
         data-film={id}
       >
         <span
@@ -204,7 +200,7 @@ export function Clip({ id, label, sizes = '(min-width: 1024px) 560px, 100vw', cl
   useEffect(() => {
     const element = frame.current
     if (!element || typeof IntersectionObserver === 'undefined') return undefined
-    const loader = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && setNear(true), { rootMargin: '200px 0px' })
+    const loader = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && setNear(true))
     const viewer = new IntersectionObserver((entries) => setInView(entries[entries.length - 1].isIntersecting), { threshold: 0.35 })
     loader.observe(element)
     viewer.observe(element)
@@ -214,8 +210,7 @@ export function Clip({ id, label, sizes = '(min-width: 1024px) 560px, 100vw', cl
     }
   }, [])
 
-  const wantsPlay = userChoice ? userChoice === 'play' && inView : inView && !reduce
-  const mounted = !failed && (userChoice === 'play' || (near && !reduce))
+  const { wantsPlay, mounted, large } = clipState({ reduce, near, inView, userChoice, playing, failed })
   useVideoFailure(videoRef, onFail, mounted)
 
   useEffect(() => {
@@ -226,7 +221,6 @@ export function Clip({ id, label, sizes = '(min-width: 1024px) 560px, 100vw', cl
   }, [wantsPlay, mounted])
 
   const toggle = () => setUserChoice(playing || wantsPlay ? 'pause' : 'play')
-  const showButtonLarge = !playing && (reduce || userChoice === 'pause')
 
   return (
     <figure
@@ -258,7 +252,7 @@ export function Clip({ id, label, sizes = '(min-width: 1024px) 560px, 100vw', cl
           <Sources video={video} />
         </video>
       ) : null}
-      {failed ? null : showButtonLarge ? (
+      {failed ? null : large ? (
         <button
           type="button"
           onClick={toggle}
@@ -279,7 +273,11 @@ export function Clip({ id, label, sizes = '(min-width: 1024px) 560px, 100vw', cl
           className="absolute right-2.5 bottom-2.5 grid size-9 place-items-center rounded-full bg-night/65 text-white ring-1 ring-white/15 backdrop-blur-md hover:bg-night/85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-wall-bright"
           aria-label={`${playing || wantsPlay ? 'Pause' : 'Play'} video: ${label}`}
         >
-          {playing || wantsPlay ? <Pause className="size-4 fill-current" aria-hidden="true" /> : <Play className="size-4 translate-x-px fill-current" aria-hidden="true" />}
+          {playing || wantsPlay ? (
+            <Pause className="size-4 fill-current" aria-hidden="true" />
+          ) : (
+            <Play className="size-4 translate-x-px fill-current" aria-hidden="true" />
+          )}
         </button>
       )}
     </figure>

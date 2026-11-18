@@ -47,7 +47,10 @@ const SECTIONS = [
   },
   {
     id: 'wall',
-    clip: { id: 'clip-wall', label: 'The wall zooming from every page of a demo site in to its pricing page at three widths, and back out' },
+    clip: {
+      id: 'clip-wall',
+      label: 'The wall zooming from every page of a demo site in to its pricing page at three widths, and back out',
+    },
     nav: 'The wall',
     title: 'The whole product on one wall',
     text: 'Pages are grouped into sections, such as Marketing, App and Settings, on a zoomable canvas. Zoom out to see every page at every size at once. Zoom in and the tile becomes the captured page, with text you can select.',
@@ -427,7 +430,12 @@ export default function Features() {
               {section.clips ? (
                 <ClipTabs clips={section.clips} dark={section.dark} sizes={section.wide ? CLIP_SIZES_WIDE : CLIP_SIZES} />
               ) : section.clip ? (
-                <Clip id={section.clip.id} label={section.clip.label} dark={section.dark} sizes={section.wide ? CLIP_SIZES_WIDE : CLIP_SIZES} />
+                <Clip
+                  id={section.clip.id}
+                  label={section.clip.label}
+                  dark={section.dark}
+                  sizes={section.wide ? CLIP_SIZES_WIDE : CLIP_SIZES}
+                />
               ) : (
                 section.art
               )}

@@ -55,7 +55,8 @@ export function orderedSources(video) {
     .map((source) => ({
       ...source,
       src: mediaUrl(source.file),
-      media: video.kind === 'film' && source.height >= 1080 && video.sources.some((s) => s.height < 1080) ? '(min-width: 768px)' : undefined,
+      media:
+        video.kind === 'film' && source.height >= 1080 && video.sources.some((s) => s.height < 1080) ? '(min-width: 768px)' : undefined,
     }))
 }
 
@@ -76,4 +77,18 @@ export function videoObject(id, siteUrl) {
     height: video.height,
     inLanguage: 'en',
   }
+}
+
+// What a clip does, from what is true right now (pure, so the tests can walk every case):
+// - mounted: the <video> exists (and so starts loading). Never before the clip reaches the screen, never with reduce
+//   motion until the visitor presses play, never after it failed (the poster stays).
+// - wantsPlay: it should be playing. On screen, unless reduce motion is on or the visitor paused it; a visitor's play
+//   wins over reduce motion. Off screen it always pauses.
+// - large: the big centred play button over the poster (reduce motion, or paused by the visitor) instead of the small
+//   corner pause/play button.
+export function clipState({ reduce, near, inView, userChoice, playing, failed }) {
+  const wantsPlay = userChoice ? userChoice === 'play' && inView : inView && !reduce
+  const mounted = !failed && (userChoice === 'play' || (near && !reduce))
+  const large = !failed && !playing && (reduce || userChoice === 'pause')
+  return { wantsPlay, mounted, large }
 }
