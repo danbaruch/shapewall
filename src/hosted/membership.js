@@ -8,7 +8,7 @@ import { newId } from './crypto.js'
 import { transaction } from './db.js'
 import { HttpError, cleanWorkspaceName } from './http.js'
 import { workspaceSuspended } from './operator.js'
-import { grantsToRevoke } from './permissions.js'
+import { ROLES, grantsToRevoke } from './permissions.js'
 import { audit, inviteUsable, tenant, workspacesForUser } from './tenancy.js'
 
 const WORKSPACES_PER_USER = 10
@@ -39,6 +39,37 @@ export function revokeGrants(t, userId, role, { revokeTokens = null, at }) {
       }).changes
     : 0
   return { invites, shares, tokens }
+}
+
+// One pending invite per workspace and tailnet login: a new one replaces
+// what was pending (revoked here, in the caller's transaction; the caller
+// audits it). Two would make joining try to accept both. -> revoked ids
+export function replacePendingInvites(t, login, at) {
+  const ids = t
+    .all('SELECT id FROM invites WHERE workspace_id = :ws AND tailnet_login = :login AND used_at IS NULL AND revoked_at IS NULL', { login })
+    .map((row) => row.id)
+  if (ids.length)
+    t.run(
+      'UPDATE invites SET revoked_at = :at WHERE workspace_id = :ws AND tailnet_login = :login AND used_at IS NULL AND revoked_at IS NULL',
+      {
+        at,
+        login,
+      },
+    )
+  return ids
+}
+
+// The invites one join takes: one per workspace, in the order given. Data
+// from before replacePendingInvites can hold several for one login and one
+// workspace: the one with the least access is taken (never more than any of
+// them gives), the others stay unused.
+export function onePerWorkspace(rows) {
+  const kept = new Map()
+  for (const row of rows) {
+    const before = kept.get(row.workspace_id)
+    if (!before || ROLES.indexOf(row.role) < ROLES.indexOf(before.role)) kept.set(row.workspace_id, row)
+  }
+  return [...kept.values()]
 }
 
 export function createMembership({ db, quotas, iso, auditOf, agentsFor = null }) {

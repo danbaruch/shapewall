@@ -6,6 +6,8 @@
 // is never signed in by its tailnet identity.
 // With passkeys allowed: test/hosted-tailnet.test.js.
 
+import fs from 'node:fs'
+import path from 'node:path'
 import assert from 'node:assert/strict'
 import test, { after } from 'node:test'
 import { hostedCommand } from '../src/hosted/ops-cli.js'
@@ -656,4 +658,105 @@ test('Tailscale gave the person a new user id: the page says what to ask for, an
     ['tailnet_linked', 'operator', 'benjamin@example.com'],
     ['tailnet_unlinked', 'operator', 'benjamin@example.com'],
   ])
+})
+
+// Review findings 59 and 60. Two pending invites for one login and one
+// workspace (the operator's `members add --login` run twice, an admin's
+// invite on top of it, or older data) made joining fail: the second accept
+// found the first one's membership and rolled back the whole join, the new
+// account included. A new invite for a login now replaces the pending one,
+// and joining takes one invite per workspace (the least access, for older
+// duplicates). And the operator's add of an existing account keeps to the
+// workspace's seat limit, as accepting an invite does.
+test('59: duplicate invites for one login never block joining, for a new or an existing account', async () => {
+  const server = await tailnet('tailnet-only-duplicate-invites')
+  const ada = await claim(server)
+  const ws = ada.workspaceId
+  const other = await ada.browser.post('/api/workspaces', { name: 'Second' })
+  assert.equal(other.status, 201, other.text)
+  const ws2 = other.json.workspace?.id || other.json.id || other.json.workspaceId
+  assert.match(String(ws2), /^ws_/)
+  // The operator adds Cyd twice (admin, then member), an admin invites Cyd too: one invite stands, the newest.
+  const firstAdd = await admin(server, ['members', 'add'], { workspace: ws, login: CYD.login, role: 'admin' })
+  assert.equal(firstAdd.code, 0, firstAdd.text)
+  assert.equal((await admin(server, ['members', 'add'], { workspace: ws, login: CYD.login, role: 'member' })).code, 0)
+  const pending = (id) =>
+    server.db
+      .prepare(
+        'SELECT role FROM invites WHERE workspace_id = ? AND tailnet_login = ? AND used_at IS NULL AND revoked_at IS NULL ORDER BY created_at',
+      )
+      .all(id, CYD.login)
+      .map((row) => row.role)
+  assert.deepEqual(pending(ws), ['member'], 'the second add replaced the first')
+  const made = await ada.browser.post(`/api/workspaces/${ws}/invites`, { role: 'viewer', tailnetLogin: CYD.login })
+  assert.equal(made.status, 201, made.text)
+  assert.deepEqual(pending(ws), ['viewer'], "the admin's invite replaced the operator's")
+  // Older data with duplicates (made before this): the join takes the least access of them.
+  const copy = server.db
+    .prepare('SELECT * FROM invites WHERE workspace_id = ? AND tailnet_login = ? AND used_at IS NULL AND revoked_at IS NULL')
+    .get(ws, CYD.login)
+  server.db
+    .prepare(
+      'INSERT INTO invites (workspace_id, id, token_hash, role, created_by, created_at, expires_at, email, note, tailnet_login) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)',
+    )
+    .run(ws, 'iv_legacyduplicate0001', 'f'.repeat(64), 'admin', copy.created_by, copy.created_at, copy.expires_at, CYD.login)
+  // And a valid invite to a second workspace, taken in the same join.
+  assert.equal((await ada.browser.post(`/api/workspaces/${ws2}/invites`, { role: 'member', tailnetLogin: CYD.login })).status, 201)
+  const cyd = (await server.device(CYD)).browser()
+  const joined = await cyd.post('/auth/tailnet/join', {})
+  assert.equal(joined.status, 201, joined.text)
+  const roles = (await me(cyd)).json.workspaces.map((item) => [item.id, item.role]).sort()
+  assert.deepEqual(
+    roles,
+    [
+      [ws, 'viewer'],
+      [ws2, 'member'],
+    ].sort(),
+  )
+  // An existing account: two pending invites to a third workspace (older data), then join again.
+  const third = await ada.browser.post('/api/workspaces', { name: 'Third' })
+  const ws3 = third.json.workspace?.id || third.json.id || third.json.workspaceId
+  assert.equal((await ada.browser.post(`/api/workspaces/${ws3}/invites`, { role: 'member', tailnetLogin: CYD.login })).status, 201)
+  const again = server.db
+    .prepare('SELECT * FROM invites WHERE workspace_id = ? AND tailnet_login = ? AND used_at IS NULL AND revoked_at IS NULL')
+    .get(ws3, CYD.login)
+  server.db
+    .prepare(
+      'INSERT INTO invites (workspace_id, id, token_hash, role, created_by, created_at, expires_at, email, note, tailnet_login) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)',
+    )
+    .run(ws3, 'iv_legacyduplicate0002', 'e'.repeat(64), 'viewer', again.created_by, again.created_at, again.expires_at, CYD.login)
+  const second = await cyd.post('/auth/tailnet/join', {})
+  assert.equal(second.status, 200, second.text)
+  assert.deepEqual(second.json.joined, [ws3])
+  assert.equal((await me(cyd)).json.workspaces.find((item) => item.id === ws3).role, 'viewer', 'the least access of the duplicates')
+})
+
+test('60: the operator adds an existing account only while the workspace has a free seat; a role change needs none', async () => {
+  const server = await tailnet('tailnet-only-seat-limit')
+  const ada = await claim(server)
+  const ws = ada.workspaceId
+  await join(server, ada, BEN, 'member')
+  // Cyd has an account (in a workspace of their own), not in Ada's.
+  const cydDevice = await server.device(CYD)
+  const cydBrowser = cydDevice.browser()
+  await ada.browser.post(`/api/workspaces/${ws}/invites`, { role: 'member', tailnetLogin: CYD.login })
+  assert.equal((await cydBrowser.post('/auth/tailnet/join', {})).status, 201)
+  assert.equal((await admin(server, ['members', 'remove'], { workspace: ws, handle: (await me(cydBrowser)).json.user.handle })).code, 0)
+  const handle = (await me(cydBrowser)).json.user.handle
+  const seats = () => server.db.prepare('SELECT COUNT(*) AS n FROM memberships WHERE workspace_id = ?').get(ws).n
+  assert.equal(seats(), 2)
+  // The limit: two people.
+  fs.writeFileSync(path.join(server.dataDir, 'quotas.json'), JSON.stringify({ default: { members: 2 } }))
+  const full = await admin(server, ['members', 'add'], { workspace: ws, handle, role: 'member' })
+  assert.notEqual(full.code, 0)
+  assert.match(full.text, /limit of 2 people/)
+  assert.equal(seats(), 2, 'nobody was added')
+  // A member's new role takes no seat.
+  const promoted = await admin(server, ['members', 'add'], { workspace: ws, handle: 'ben', role: 'admin' })
+  assert.equal(promoted.code, 0, promoted.text)
+  // A seat free again: the add works.
+  fs.writeFileSync(path.join(server.dataDir, 'quotas.json'), JSON.stringify({ default: { members: 3 } }))
+  const added = await admin(server, ['members', 'add'], { workspace: ws, handle, role: 'member' })
+  assert.equal(added.code, 0, added.text)
+  assert.equal(seats(), 3)
 })

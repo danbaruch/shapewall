@@ -337,7 +337,15 @@ async function admin(positional, flags, out) {
           return 0
         }
         if (target === 'add') {
-          const result = access.addMember(db, { ...where, handle: flags.handle, login: flags.login, role: flags.role })
+          const { createQuotas } = await import('./quotas.js')
+          const quotaFile = flags.quotas || (fs.existsSync(path.join(dir, 'quotas.json')) ? path.join(dir, 'quotas.json') : null)
+          const result = access.addMember(db, {
+            ...where,
+            handle: flags.handle,
+            login: flags.login,
+            role: flags.role,
+            quotas: createQuotas({ file: quotaFile }),
+          })
           if (flags.json) return json(result)
           if (result.invited)
             return say(

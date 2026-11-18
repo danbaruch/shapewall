@@ -11,6 +11,7 @@ import { transaction } from './db.js'
 import { mountDeviceApprovals } from './device-routes.js'
 import { HttpError, fail, cleanInviteNote, cleanName, cleanWorkspaceName } from './http.js'
 import { cleanEmail } from './mail.js'
+import { replacePendingInvites } from './membership.js'
 import { NEEDS, canInvite, canManage, canRemoveMember, leavesNoOwner } from './permissions.js'
 import { roleChangeTouchesAdmin, roleChangeTouchesOwner } from './step-up.js'
 import { stepUpSettings } from './step-up-settings.js'
@@ -333,6 +334,10 @@ export function mountConsoleRoutes(consoleApi, deps) {
       const token = randomToken(32)
       const id = newId('iv')
       const expiresAt = iso(days * DAY)
+      // One pending invite per tailnet login: this one replaces what was pending.
+      if (tailnetLogin)
+        for (const old of replacePendingInvites(req.t, tailnetLogin, iso()))
+          auditOf(req, 'invite_revoked', old, { replacedBy: id, tailnet: tailnetLogin })
       req.t.run(
         'INSERT INTO invites (workspace_id, id, token_hash, role, created_by, created_at, expires_at, email, note, tailnet_login) VALUES (:ws, :id, :hash, :role, :user, :at, :expires, :email, :note, :tailnet)',
         { id, hash: sha256(token), role, user: req.user.id, at: iso(), expires: expiresAt, email, note, tailnet: tailnetLogin },

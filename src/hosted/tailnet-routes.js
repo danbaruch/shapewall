@@ -24,6 +24,7 @@ import { sha256 } from './crypto.js'
 import { transaction } from './db.js'
 import { HttpError } from './http.js'
 import { NEEDS } from './permissions.js'
+import { onePerWorkspace } from './membership.js'
 import { removeSetupLink } from './setup-link.js'
 import { cleanTailnetLogin } from './tailnet-identity.js'
 import { tailnetOutCookie } from './tailnet.js'
@@ -73,7 +74,9 @@ export function mountTailnetAuth(authRouter, deps) {
   const identityOf = (req) => (on ? tailnet.identityOf(req) : null)
   const sameOrigin = (req) => req.headers['sec-fetch-site'] === 'same-origin'
   const signedOutHere = (req) => parseCookies(req.headers.cookie)[OUT_COOKIE] === '1'
-  const usableInvites = (login) => findInvitesForTailnetLogin(db, login).filter((row) => inviteUsable(row, iso()))
+  // One per workspace (membership.js onePerWorkspace): a second accept for
+  // the same workspace would roll the whole join back.
+  const usableInvites = (login) => onePerWorkspace(findInvitesForTailnetLogin(db, login).filter((row) => inviteUsable(row, iso())))
 
   function arrived(req) {
     const identity = identityOf(req)
