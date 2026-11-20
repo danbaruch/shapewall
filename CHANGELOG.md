@@ -5,6 +5,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## 0.12.2 - 2026-11-20
+
 ### Changed
 
 - Website: one film on the site, the narrated tour, on the home page. It replaces the launch film in the hero screenshot's
