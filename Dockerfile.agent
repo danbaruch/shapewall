@@ -32,7 +32,7 @@ COPY --from=deps /opt/shapewall/node_modules ./node_modules
 COPY package.json LICENSE NOTICE ./
 COPY bin ./bin
 COPY src ./src
-RUN chmod -R a+rX,go-w /opt/shapewall && ln -s /opt/shapewall/bin/shapewall.js /usr/local/bin/shapewall
+RUN chmod -R a+rX,go-w /opt/shapewall && chmod 0755 /opt/shapewall/bin/shapewall.js && ln -s /opt/shapewall/bin/shapewall.js /usr/local/bin/shapewall
 # The agent runs from a copy of node that its user may execute but not read.
 # Linux marks a process started from an unreadable program as not dumpable:
 # then nothing else running as the same user (a test command, an approved
