@@ -26,7 +26,7 @@ function copyMatching(fromDir, toDir, test) {
 
 // Options: includeComments (default true); browserComments lets visitors add,
 // resolve and reply to comments that stay in their own browser
-// (localStorage), for a public demo; noindex asks search engines to skip it.
+// (IndexedDB), for a public demo; noindex asks search engines to skip it.
 export async function exportStatic(
   config,
   { out, clientDir = CLIENT_DIR, includeComments = true, includeChecks = false, browserComments = false, noindex = false } = {},

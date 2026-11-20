@@ -726,19 +726,42 @@ test('static export with browser comments: under a sub-path, comments stay in th
     await page.waitForSelector('[data-sw-node="home"]')
     await page.waitForSelector('[data-sw-browser-comments]')
     const seeded = await page.locator('[data-sw-comment]').count()
-    const frame = await goLive(page, 'pricing', 'desktop')
-    await page.click('[data-sw-comment-mode]')
-    const point = await pointInLive(page, frame, 'h1')
-    await page.mouse.click(point.x, point.y)
-    await page.waitForSelector('[data-sw-composer] [data-sw-comment-input]')
-    await page.fill('[data-sw-comment-input]', 'Only in this browser')
-    await page.keyboard.press('Enter')
-    await page.waitForSelector('[data-sw-composer]', { state: 'detached' })
+    const other = await context.newPage()
+    await other.goto(page.url())
+    await other.waitForSelector('[data-sw-browser-comments]')
+    for (const [tab, body] of [
+      [page, 'Only in this browser'],
+      [other, 'Written in another tab'],
+    ]) {
+      const frame = await goLive(tab, 'pricing', 'desktop')
+      await tab.click('[data-sw-comment-mode]')
+      const point = await pointInLive(tab, frame, 'h1')
+      await tab.mouse.click(point.x, point.y)
+      await tab.fill('[data-sw-comment-input]', body)
+    }
+    // Hold both seed reads until both posts are in flight. The second
+    // transaction must see the first tab's new comment when it allocates its ID.
+    const reads = []
+    for (const tab of [page, other]) {
+      await tab.route(
+        '**/comments.json',
+        (route) => {
+          reads.push(route)
+          if (reads.length === 2) for (const waiting of reads) void waiting.continue()
+        },
+        { times: 1 },
+      )
+    }
+    await Promise.all([page.keyboard.press('Enter'), other.keyboard.press('Enter')])
+    for (const tab of [page, other]) await tab.waitForSelector('[data-sw-composer]', { state: 'detached' })
+    await other.close()
     await page.keyboard.press('Escape')
     await page.waitForSelector('[data-sw-pin-anchor="element"]')
     await page.reload()
-    await page.waitForSelector('[data-sw-comment-list] :text("Only in this browser")')
-    assert.equal(await page.locator('[data-sw-comment]').count(), seeded + 1)
+    const list = page.locator('[data-sw-comment-list]')
+    await list.getByText('Only in this browser', { exact: true }).waitFor()
+    await list.getByText('Written in another tab', { exact: true }).waitFor()
+    assert.equal(await page.locator('[data-sw-comment]').count(), seeded + 2)
     assert.equal(listComments(setup.config, 'demo').length, stored, 'nothing reached the board files')
     await page.click('[data-sw-browser-comments-reset]')
     await page.waitForFunction((count) => document.querySelectorAll('[data-sw-comment]').length === count, seeded)
@@ -756,9 +779,60 @@ test('static export with browser comments: under a sub-path, comments stay in th
     await page.waitForSelector('[data-sw-node="dashboard"][data-sw-current-step="true"]')
     await shot(page, 'static-browser-comments')
     assert.deepEqual(errors, [])
+
+    // A visitor returning after the upgrade can still read and reply to a
+    // comment they made with the former localStorage-backed export.
+    const returning = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+    try {
+      const previous = await returning.newPage()
+      await previous.goto(page.url().split('?')[0])
+      const legacyKey = 'shapewall-browser-comments:/demo/:demo'
+      await previous.evaluate((key) => {
+        const comment = {
+          id: 81,
+          pageId: 'home',
+          viewport: 'desktop',
+          x: 50,
+          y: 50,
+          body: 'Before the upgrade',
+          author: 'Reviewer',
+          status: 'open',
+          createdAt: '2026-01-20T00:00:00Z',
+          replies: [],
+        }
+        localStorage.setItem(key, JSON.stringify({ nextId: 82, comments: [comment] }))
+      }, legacyKey)
+      await previous.reload()
+      await previous.getByText('Before the upgrade', { exact: true }).click()
+      const detail = previous.locator('[data-sw-selected-comment="81"]')
+      await detail.locator('[data-sw-reply-form] textarea').fill('After the upgrade')
+      await detail.locator('[data-sw-reply-send]').click()
+      await detail.getByText('After the upgrade', { exact: true }).waitFor()
+      assert.equal(await previous.evaluate((key) => localStorage.getItem(key), legacyKey), null)
+      await previous.reload()
+      await previous.getByText('After the upgrade', { exact: true }).waitFor()
+    } finally {
+      await returning.close()
+    }
   } finally {
     await context.close()
     await new Promise((resolve) => fileServer.close(resolve))
+  }
+})
+
+test('comments can retry a failed initial load without claiming the queue is empty', async () => {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  try {
+    const page = await context.newPage()
+    await page.route('**/api/boards/demo/comments', (route) => route.fulfill({ status: 503, json: {} }), { times: 1 })
+    await page.goto(boardUrl)
+    await page.getByText('Could not load comments.', { exact: true }).waitFor()
+    assert.equal(await page.getByText('No open comments', { exact: true }).count(), 0)
+    await page.getByRole('button', { name: 'Retry', exact: true }).click()
+    await page.getByRole('alert').filter({ hasText: 'Could not load comments.' }).waitFor({ state: 'detached' })
+    await page.waitForFunction(() => document.querySelector('[data-sw-comment]') || document.body.textContent.includes('No open comments'))
+  } finally {
+    await context.close()
   }
 })
 

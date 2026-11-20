@@ -364,7 +364,7 @@ shapewall export [--out shapewall-export] [--no-comments] [--browser-comments] [
 
 Writes a static, read-only copy of the boards that any static host can serve, with compare data for every pair of captured
 environments. `--no-comments` leaves the comments out. `--browser-comments` lets visitors add, resolve and reply to comments that stay
-in their own browser (localStorage), never on the host. `--noindex` adds a robots `noindex` tag if the client does not have one. An
+in their own browser (IndexedDB). `--noindex` adds a robots `noindex` tag if the client does not have one. An
 export leaves the private diagnostic reports out unless `--include-checks` explicitly asks for them.
 
 ## shapewall notify

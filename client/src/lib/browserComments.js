@@ -1,6 +1,6 @@
 // Comments that live in this browser only, for a public static export made
 // with `shapewall export --browser-comments` (the demo on shapewall.com).
-// The exported comments seed a copy in localStorage; adding, resolving,
+// The exported comments seed a copy in IndexedDB; adding, resolving,
 // replying and deleting change that copy, never the files on the host.
 // It answers the same comment API calls the server does.
 
@@ -23,38 +23,88 @@ class LocalError extends Error {
 
 const storageKey = (boardId) => `shapewall-browser-comments:${window.location.pathname}:${boardId}`
 
-function read(boardId) {
+// Exports made before the transactional store kept the same board key in
+// localStorage. Import the legacy value on first use. A reset stores a null
+// marker so the legacy copy can never reappear, even in another tab.
+function legacy(key) {
   try {
-    const value = JSON.parse(window.localStorage.getItem(storageKey(boardId)) || 'null')
+    const value = JSON.parse(window.localStorage.getItem(key) || 'null')
     return value && Array.isArray(value.comments) ? value : null
   } catch {
     return null
   }
 }
 
-function write(boardId, store) {
-  try {
-    window.localStorage.setItem(storageKey(boardId), JSON.stringify(store))
-  } catch {
-    throw new LocalError(507, 'storage_full', 'This browser would not save the comment (storage is full or blocked).')
-  }
+const storageFailure = () =>
+  new LocalError(507, 'storage_full', 'This browser could not save the comments. Check site storage and try again.')
+
+// IndexedDB serializes read/write transactions across tabs. The read,
+// validation, ID allocation and write all take place in the same transaction.
+function transact(key, mode, change) {
+  return new Promise((resolve, reject) => {
+    let opening
+    try {
+      opening = window.indexedDB.open('shapewall-browser-comments', 1)
+    } catch {
+      reject(storageFailure())
+      return
+    }
+    opening.onupgradeneeded = () => opening.result.createObjectStore('boards')
+    opening.onerror = () => reject(storageFailure())
+    opening.onsuccess = () => {
+      const db = opening.result
+      const tx = db.transaction('boards', mode)
+      const boards = tx.objectStore('boards')
+      let result
+      let failure
+      let wrote = false
+      const read = boards.get(key)
+      read.onsuccess = () => {
+        try {
+          const saved = read.result === undefined ? legacy(key) : read.result
+          result = change(saved, (value) => {
+            boards.put(value, key)
+            wrote = true
+          })
+        } catch (error) {
+          failure = error
+          tx.abort()
+        }
+      }
+      tx.onabort = () => {
+        db.close()
+        reject(failure || storageFailure())
+      }
+      tx.oncomplete = () => {
+        db.close()
+        if (wrote) {
+          try {
+            window.localStorage.removeItem(key)
+          } catch {
+            // The committed IndexedDB value takes precedence.
+          }
+        }
+        resolve(result)
+      }
+    }
+  })
 }
 
-async function load(boardId, fetchJson) {
-  const saved = read(boardId)
-  if (saved) return saved
+async function seed(boardId, fetchJson) {
   const data = await fetchJson(`data/boards/${boardId}/comments.json`)
   const comments = Array.isArray(data?.comments) ? data.comments : []
   return { nextId: Math.max(0, ...comments.map((item) => Number(item.id) || 0)) + 1, comments }
 }
 
-// Forgets this browser's changes, back to the exported comments.
+async function storedComments(boardId, fetchJson) {
+  const key = storageKey(boardId)
+  // Even with browser storage blocked, an export's original comments can be read.
+  const saved = await transact(key, 'readonly', (value) => value).catch(() => legacy(key))
+  return saved || seed(boardId, fetchJson)
+}
+
 export function resetBrowserComments(boardId) {
-  try {
-    window.localStorage.removeItem(storageKey(boardId))
-  } catch {
-    /* nothing saved */
-  }
+  return transact(storageKey(boardId), 'readwrite', (_, save) => save(null))
 }
 
 function cleanBody(value) {
@@ -113,18 +163,35 @@ export async function browserCommentsRequest(method, url, body, fetchJson) {
   if (!commentsPath) {
     if (method !== 'GET') return undefined
     // The board view: comment counts from this browser's copy.
-    const [view, store] = await Promise.all([fetchJson(`data/boards/${boardId}.json`), load(boardId, fetchJson)])
-    return { ...view, commentCounts: countsOf(store.comments) }
+    const [view, store] = await Promise.all([
+      fetchJson(`data/boards/${boardId}.json`),
+      storedComments(boardId, fetchJson).catch(() => null),
+    ])
+    return { ...view, commentCounts: store ? countsOf(store.comments) : view.commentCounts }
   }
-  const store = await load(boardId, fetchJson)
+  if (method === 'GET') {
+    if (idText) return undefined
+    const store = await storedComments(boardId, fetchJson)
+    return {
+      comments: store.comments
+        .map(withFields)
+        .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : b.id - a.id)),
+    }
+  }
+  // Fetching the seed is asynchronous and cannot hold an IndexedDB
+  // transaction open. Check again inside the transaction that writes.
+  const key = storageKey(boardId)
+  const update = (saved, save) => applyBrowserComment(saved, save, method, idText, action, body)
+  const missing = Symbol('unseeded')
+  const result = await transact(key, 'readwrite', (saved, save) => (saved ? update(saved, save) : missing))
+  if (result !== missing) return result
+  const original = await seed(boardId, fetchJson)
+  return transact(key, 'readwrite', (saved, save) => update(saved || original, save))
+}
+
+export function applyBrowserComment(store, save, method, idText, action, body) {
   const now = new Date().toISOString()
   if (!idText) {
-    if (method === 'GET')
-      return {
-        comments: store.comments
-          .map(withFields)
-          .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : b.id - a.id)),
-      }
     if (method !== 'POST') return undefined
     if (store.comments.length >= COMMENTS_MAX) throw new LocalError(409, 'too_many_comments', 'That is a lot of comments for a demo.')
     const x = Number(body?.x)
@@ -155,14 +222,14 @@ export async function browserCommentsRequest(method, url, body, fetchJson) {
       agentStatus: null,
       agentStatusAt: null,
     }
-    write(boardId, { nextId: store.nextId + 1, comments: [...store.comments, comment] })
+    save({ nextId: store.nextId + 1, comments: [...store.comments, comment] })
     return { comment: withFields(comment) }
   }
   const id = Number(idText)
   const comment = store.comments.find((item) => item.id === id)
   if (!comment) throw new LocalError(404, 'unknown_comment', 'That comment does not exist.')
   if (method === 'DELETE' && !action) {
-    write(boardId, { ...store, comments: store.comments.filter((item) => item.id !== id) })
+    save({ ...store, comments: store.comments.filter((item) => item.id !== id) })
     return { ok: true }
   }
   let next = null
@@ -200,7 +267,7 @@ export async function browserCommentsRequest(method, url, body, fetchJson) {
       replyId === null
         ? { ...comment, reactions: result.reactions }
         : { ...comment, replies: replies.map((item) => (item === target ? { ...item, reactions: result.reactions } : item)) }
-    write(boardId, { ...store, comments: store.comments.map((item) => (item.id === id ? updated : item)) })
+    save({ ...store, comments: store.comments.map((item) => (item.id === id ? updated : item)) })
     return { comment: withFields(updated), added: result.added }
   } else if (method === 'PATCH' && !action) {
     next = { ...comment }
@@ -221,6 +288,6 @@ export async function browserCommentsRequest(method, url, body, fetchJson) {
     return undefined
   }
   next.updatedAt = now
-  write(boardId, { ...store, comments: store.comments.map((item) => (item.id === id ? next : item)) })
+  save({ ...store, comments: store.comments.map((item) => (item.id === id ? next : item)) })
   return reply ? { comment: withFields(next), reply } : { comment: withFields(next) }
 }

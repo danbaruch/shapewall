@@ -124,6 +124,24 @@ test('the overview: tiles agree with the API, charts draw, each has a table, swi
   assert.deepEqual(errors, [])
 })
 
+test('browser history restores the exact previous Usage filters on Back and Forward', async () => {
+  const { page } = await open(s.ada)
+  await page.goto(url('/usage?range=7d'))
+  await page.locator('[data-sw-option="turns"]').click()
+  await page.waitForURL((at) => at.searchParams.get('tab') === 'turns')
+  const turns = page.url()
+  await page.locator('[data-sw-period]').click()
+  await page.locator('[data-sw-period-preset="30d"]').click()
+  await page.waitForURL((at) => at.search !== new URL(turns).search)
+  const changed = page.url()
+  await page.goBack()
+  await page.waitForURL(turns)
+  await page.locator('[data-sw-option="turns"][aria-checked="true"], [data-sw-grid="table"]').first().waitFor()
+  await page.goForward()
+  await page.waitForURL(changed)
+  await page.context().close()
+})
+
 test('a filter round trip: pick, see it in the address and the numbers, reload, press a chart row, clear', async () => {
   const { page, errors } = await open(s.ada)
   await page.goto(url('/usage'))

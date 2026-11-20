@@ -131,7 +131,7 @@ server. Live HTML files carry their CSP as a `<meta>` tag because static hosts d
 the diff masks) is computed at export time.
 
 `--browser-comments` makes a public demo out of it: visitors can add, resolve, reply to and delete comments, but those live in their own
-browser's localStorage (seeded from the exported comments) and never reach the host; the comments panel says so and has a Reset. Journeys
+browser's IndexedDB (seeded from the exported comments or this browser's earlier localStorage copy) and never reach the host; the comments panel says so and has a Reset. Journeys
 stay read-only.
 
 The demo on shapewall.com goes further: `node scripts/demo-export.js` exports with the demo client (`npm run build:demo`, into

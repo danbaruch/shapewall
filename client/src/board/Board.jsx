@@ -1212,6 +1212,9 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   const panelProps = {
     batch: batchProps,
     comments: visibleComments,
+    loadError: commentsQuery.error,
+    commentsLoaded: Boolean(commentsQuery.data),
+    onRetry: commentsQuery.refetch,
     filter,
     counts,
     onFilter: (value) => updateParams({ filter: value === 'open' ? null : value }),
@@ -1238,8 +1241,13 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     touch: !wide,
     // Demo exports: say where comments go, and let visitors start over.
     onResetBrowserComments: BROWSER_COMMENTS
-      ? () => {
-          resetBrowserComments(boardId)
+      ? async () => {
+          try {
+            await resetBrowserComments(boardId)
+          } catch (error) {
+            setNotice({ tone: 'bad', text: error.message || 'Could not reset comments.' })
+            return
+          }
           updateParams({ c: null })
           commentsQuery.refetch()
           view.refetch()
