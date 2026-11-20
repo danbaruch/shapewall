@@ -80,13 +80,26 @@ async function goLive(page, target, viewport) {
   const openLive = `[data-sw-open-live="${target}|${viewport}"]`
   // (On a touch screen the page bar is compact: Open live is in its More menu.)
   const more = `[data-sw-frame-more="${target}|${viewport}"]`
-  await page.waitForSelector(`${openLive}, ${more}, ${frame}[data-sw-live="ready"]`, { timeout: 15000 })
-  if (!(await page.locator(openLive).count()) && (await page.locator(more).count())) {
-    await page.click(more)
-    await page.waitForSelector(openLive)
+  const live = `${frame}:is([data-sw-live="loading"], [data-sw-live="ready"])`
+  await page.waitForSelector(`${openLive}, ${more}, ${live}`, { timeout: 15000 })
+  // More closes whenever the canvas pans or zooms. Its trigger can sit
+  // still on screen while the card is still flying into place.
+  const card = await page.locator(frame).elementHandle()
+  await card.waitForElementState('stable')
+  if (!(await page.locator(live).count())) {
+    if (!(await page.locator(openLive).count())) {
+      // The camera can finish its flight as More opens. In that case the
+      // action switches to Select text and the live frame is already loading.
+      await page.click(more)
+      await page.waitForSelector(`${openLive}, ${live}`, { timeout: 15000 })
+    }
+    if (await page.locator(openLive).isVisible()) await page.click(openLive)
   }
-  if (await page.locator(openLive).count()) await page.click(openLive)
   await page.waitForSelector(`${frame}[data-sw-live="ready"]`, { timeout: 15000 })
+  if (await page.locator(`[data-sw-frame-more-menu="${target}|${viewport}"]`).isVisible()) await page.keyboard.press('Escape')
+  // Opening the live frame can start a second camera flight. Its contents
+  // must be stationary before the caller uses screen coordinates to pin.
+  await card.waitForElementState('stable')
   // The sandbox is in place: no scripts and an opaque origin, so the board
   // cannot reach into the document (pins come from its element map).
   const sandbox = await page.getAttribute(`${frame} iframe`, 'sandbox')
@@ -170,6 +183,10 @@ test('phone 390: phone frames, live HTML, comment sheet, Back closes it', async 
     await page.waitForTimeout(600)
     await shot(page, 'phone-1-overview')
     const frame = await goLive(page, 'home', 'phone')
+    // A focused live frame still offers More, but no longer offers Open live.
+    // Selecting it again must leave the frame ready and the menu closed.
+    await goLive(page, 'home', 'phone')
+    assert.equal(await page.locator('[data-sw-frame-more-menu]').count(), 0)
     await shot(page, 'phone-2-live')
     const comment = await addAnchoredComment(page, frame, 'a[data-testid="hero-cta"]', 'Shorter label on phones')
     // The pin opens the comment in the sheet; resolve it there.
