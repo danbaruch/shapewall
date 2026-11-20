@@ -296,6 +296,7 @@ test('release pointer changes preserve rollback across an installation and a fai
   for (const name of ['a', 'b', 'c']) fs.mkdirSync(path.join(root, 'releases', name), { recursive: true })
   assert.equal(change('a').status, 0)
   assert.equal(change('b').status, 0)
+  assert.equal(change('b').status, 0, 'repeating activation keeps the original rollback release')
   assert.deepEqual(pointers(), ['releases/b', 'releases/a'])
   assert.equal(change('rollback').status, 0)
   assert.deepEqual(pointers(), ['releases/a', 'releases/b'])

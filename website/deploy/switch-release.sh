@@ -19,6 +19,11 @@ else
   target="releases/$2"
 fi
 [[ -d "$target" ]] || { echo "Missing release: $target" >&2; exit 1; }
+# An activation can be retried after the connection carrying its reply is lost.
+if [[ current -ef "$target" ]]; then
+  echo "already $target"
+  exit 0
+fi
 tmp=$(mktemp -d .switch-XXXXXXXX)
 trap 'rm -f -- "$tmp/current" "$tmp/previous" "$tmp/backup"; rmdir -- "$tmp"' EXIT
 ln -s -- "$target" "$tmp/current"
