@@ -216,3 +216,47 @@ test('--once fails when the scan fails, instead of exiting 0 as if nothing were 
   fs.writeFileSync(path.join(boardDir(config, board.id), 'comments.json'), '{not json')
   await assert.rejects(watchComments({ config, once: true, claim: false, out: quiet, log: quiet }), /not valid JSON/)
 })
+
+test('stopping --once waits for its command and TERM-resistant descendant', { timeout: 15000 }, async () => {
+  const { config, dir } = setup('watch-stop-tree')
+  const comment = await createComment(config, config.boards[0], { ...valid, body: 'Run the fixture' })
+  const child = path.join(dir, 'descendant.cjs')
+  const parent = path.join(dir, 'launcher.cjs')
+  const marker = path.join(dir, 'ready')
+  fs.writeFileSync(
+    child,
+    "process.on('SIGTERM', () => {}); require('node:fs').writeFileSync('ready', String(process.pid)); setInterval(() => {}, 1000)",
+  )
+  fs.writeFileSync(
+    parent,
+    "require('node:child_process').spawn(process.execPath, ['descendant.cjs'], {stdio: 'ignore'}); setInterval(() => {}, 1000)",
+  )
+  const controller = new AbortController()
+  const waiting = watchComments({ config, exec: `"${process.execPath}" "${parent}"`, once: true, signal: controller.signal, log: quiet })
+  try {
+    for (let i = 0; i < 200 && !fs.existsSync(marker); ++i) await new Promise((resolve) => setTimeout(resolve, 20))
+    assert.ok(fs.existsSync(marker))
+  } finally {
+    controller.abort()
+    await waiting
+  }
+  const pid = Number(fs.readFileSync(marker, 'utf8'))
+  try {
+    if (process.platform === 'linux') {
+      try {
+        assert.match(fs.readFileSync(`/proc/${pid}/stat`, 'utf8'), /\) [ZX] /)
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error
+      }
+    } else {
+      assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' })
+    }
+  } finally {
+    try {
+      process.kill(pid, 'SIGKILL')
+    } catch {
+      /* already gone */
+    }
+  }
+  assert.equal(getComment(config, config.boards[0].id, comment.id).agentStatus, 'needs-human')
+})

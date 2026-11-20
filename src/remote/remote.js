@@ -100,7 +100,7 @@ export async function readBounded(response, limit = RESPONSE_MAX) {
 }
 
 export function createRemote({ origin, token, source = null, fetchImpl = fetch, maxResponseBytes = RESPONSE_MAX }) {
-  async function call(method, pathname, { json, body, contentType } = {}) {
+  async function call(method, pathname, { json, body, contentType, signal } = {}) {
     const headers = { Authorization: `Bearer ${token}`, Accept: 'application/json' }
     let payload
     if (json !== undefined) {
@@ -110,7 +110,7 @@ export function createRemote({ origin, token, source = null, fetchImpl = fetch, 
       headers['Content-Type'] = contentType || 'application/octet-stream'
       payload = body
     }
-    const response = await fetchImpl(`${origin}${pathname}`, { method, headers, body: payload, redirect: 'error' })
+    const response = await fetchImpl(`${origin}${pathname}`, { method, headers, body: payload, redirect: 'error', signal })
     const type = response.headers.get('content-type') || ''
     if (!response.ok) {
       let data = null
@@ -136,10 +136,10 @@ export function createRemote({ origin, token, source = null, fetchImpl = fetch, 
   // A file URL from a comment (files.screenshot, a comment image) as bytes.
   // Only this origin's API; of the query only the guests opt-in is kept (a
   // share link guest's image is served with it).
-  async function download(url) {
+  async function download(url, { signal } = {}) {
     const target = new URL(url)
     if (target.origin !== origin || !target.pathname.startsWith('/api/v1/boards/')) throw new Error('not a file of this Shapewall')
-    return call('GET', `${target.pathname}${target.searchParams.get('guests') === '1' ? '?guests=1' : ''}`)
+    return call('GET', `${target.pathname}${target.searchParams.get('guests') === '1' ? '?guests=1' : ''}`, { signal })
   }
 
   return {
@@ -147,20 +147,21 @@ export function createRemote({ origin, token, source = null, fetchImpl = fetch, 
     project: () => call('GET', '/api/v1/project'),
     pages: (boardId) => call('GET', `${board(boardId)}/pages`),
     // Guest comments (share links) only with `guests: true`.
-    comments: (boardId, { status = 'open', page = null, mention = null, guests = false } = {}) => {
+    comments: (boardId, { status = 'open', page = null, mention = null, guests = false, signal } = {}) => {
       const query = new URLSearchParams({ status })
       if (page) query.set('page', page)
       if (mention) query.set('mention', mention)
       if (guests) query.set('guests', '1')
-      return call('GET', `${board(boardId)}/comments?${query}`)
+      return call('GET', `${board(boardId)}/comments?${query}`, { signal })
     },
     // Acting on one comment: a share link guest's needs `guests: true` too
     // (the server refuses it otherwise), the same opt-in as listing them.
-    comment: (boardId, id, { guests = false } = {}) => call('GET', one(boardId, id, '', guests)),
+    comment: (boardId, id, { guests = false, signal } = {}) => call('GET', one(boardId, id, '', guests), { signal }),
     // Replies are signed with the token's name on the server (no author here).
-    reply: (boardId, id, { body, guests = false }) => call('POST', one(boardId, id, '/replies', guests), { json: { body } }),
-    setAgentStatus: (boardId, id, agentStatus, { onlyFrom = null, guests = false } = {}) =>
-      call('POST', one(boardId, id, '/agent-status', guests), { json: { agentStatus, onlyFrom } }),
+    reply: (boardId, id, { body, guests = false, signal }) =>
+      call('POST', one(boardId, id, '/replies', guests), { json: { body }, signal }),
+    setAgentStatus: (boardId, id, agentStatus, { onlyFrom = null, guests = false, signal } = {}) =>
+      call('POST', one(boardId, id, '/agent-status', guests), { json: { agentStatus, onlyFrom }, signal }),
     resolve: (boardId, id, { note, fixRef, agentStatus, guests = false } = {}) =>
       call('POST', one(boardId, id, '/resolve', guests), { json: { note, fixRef, agentStatus } }),
     reopen: (boardId, id, { guests = false } = {}) => call('POST', one(boardId, id, '/reopen', guests), { json: {} }),
