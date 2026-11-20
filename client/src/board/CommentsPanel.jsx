@@ -210,6 +210,9 @@ function Row({ comment, title, selected, unread, touch, onFocus, onHover, pick =
 
 export default function CommentsPanel({
   comments,
+  commentsLoaded,
+  loadError,
+  onRetry,
   filter,
   counts,
   onFilter,
@@ -278,7 +281,10 @@ export default function CommentsPanel({
             onChange={onFilter}
             large={touch}
             className="w-full"
-            options={FILTERS.map((item) => ({ ...item, count: item.id === 'all' ? counts.open + counts.resolved : counts[item.id] }))}
+            options={FILTERS.map((item) => ({
+              ...item,
+              count: commentsLoaded ? (item.id === 'all' ? counts.open + counts.resolved : counts[item.id]) : undefined,
+            }))}
           />
         </div>
       </div>
@@ -485,7 +491,20 @@ export default function CommentsPanel({
               />
             ))}
           </AnimatePresence>
-          {comments.length ? null : (
+          {loadError ? (
+            <li role="alert" className="space-y-1 px-3 py-3 text-sm">
+              <p>{commentsLoaded ? 'Could not refresh comments. Showing the last loaded comments.' : 'Could not load comments.'}</p>
+              <Button size={size} variant="link" onClick={onRetry}>
+                Retry
+              </Button>
+            </li>
+          ) : null}
+          {!commentsLoaded && !loadError ? (
+            <li role="status" className="px-3 py-3 text-sm text-muted">
+              Loading comments…
+            </li>
+          ) : null}
+          {comments.length || !commentsLoaded || loadError ? null : (
             <li>
               {narrowing ? (
                 <EmptyState icon={Search} title="No comments match">

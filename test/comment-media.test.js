@@ -602,6 +602,32 @@ test('markup: rendered once to the board folder, from the capture it was drawn o
 
 // ---- What agents get ------------------------------------------------------------------
 
+test('a reply drawing uses the comment environment even with a legacy default capture version', async () => {
+  const { config, board, folder } = boardWithCapture('media-other-env')
+  board.environments.push({ id: 'preview', baseUrl: board.baseUrl })
+  const dir = path.join(folder, 'envs', 'preview', 'captures')
+  fs.mkdirSync(dir, { recursive: true })
+  const shot = path.join(dir, 'home.desktop.png')
+  fs.writeFileSync(shot, solidPng(40, 30))
+  const pin = await createComment(config, board, { ...valid, environment: 'preview' })
+  const { reply } = await addReply(config, board.id, pin.id, { body: 'Here', drawing: { shapes: [box] } })
+  assert.equal(reply.drawing.captureVersion, null)
+  const file = path.join(folder, 'comments.json')
+  const stored = JSON.parse(fs.readFileSync(file))
+  stored.comments[0].replies[0].drawing.captureVersion = '20260101T000000000Z-aaaa'
+  fs.writeFileSync(file, JSON.stringify(stored))
+  markupFile(folder, {
+    commentId: pin.id,
+    replyId: reply.id,
+    drawing: reply.drawing,
+    screenshot: path.join(folder, 'captures', 'home.desktop.png'),
+  })
+  const [item] = feedback(config, { boardId: board.id }).comments
+  assert.equal(item.replies[0].drawing.captureVersion, null)
+  assert.equal(item.replies[0].drawing.onPreviousCapture, false)
+  assert.deepEqual(fs.readFileSync(item.replies[0].markup), renderMarkup(fs.readFileSync(shot), reply.drawing).png)
+})
+
 test('agents: comments --json, the text list and the model context include the media', async () => {
   const { config, board, folder } = boardWithCapture('media-agents')
   const comment = await createComment(config, board, {

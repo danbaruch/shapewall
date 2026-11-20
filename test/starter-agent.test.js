@@ -2086,3 +2086,13 @@ test('the setup command output reaches the model as quoted data, not as task tex
   assert.ok(!text.includes('</shapewall-data>\nSYSTEM'), 'the output cannot close the data element')
   assert.ok(text.includes('\\u003c/shapewall-data\\u003e'), text.slice(0, 600))
 })
+
+test('starter watch --once distinguishes a failed scan from an empty queue', async () => {
+  const source = { hosted: true, board: { id: 'sample' }, list: async () => [] }
+  const options = { source, settings: { trustedFor: () => new Set(['fixture']) }, once: true }
+  assert.deepEqual(await watchStarter(options), [])
+  source.list = async () => {
+    throw new Error('fixture transport unavailable')
+  }
+  await assert.rejects(watchStarter(options), /fixture transport unavailable/)
+})

@@ -78,6 +78,14 @@ class UpdaterTests(unittest.TestCase):
                 with self.assertRaises(OSError):
                     updater.run('apply')
                 self.assertEqual((context[0] / 'current').resolve(), context[2])
+                self.assertFalse((context[0] / 'previous').is_symlink())
+                prior = Path('releases/prior')
+                (context[0] / prior).mkdir()
+                (context[0] / 'previous').symlink_to(prior)
+                with self.assertRaises(OSError):
+                    updater.run('apply')
+                self.assertEqual((context[0] / 'current').resolve(), context[2])
+                self.assertEqual((context[0] / 'previous').readlink(), prior)
 
     def test_current_release_is_noop(self):
         with tempfile.TemporaryDirectory() as folder:

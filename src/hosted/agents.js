@@ -799,7 +799,7 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
     const ended = t.all(
       `SELECT r.id, r.claim_id, r.board_id, r.comment_number, c.ended_at FROM agent_runs r
        JOIN agent_claims c ON c.id = r.claim_id AND c.workspace_id = r.workspace_id
-       WHERE r.workspace_id = :ws AND r.project_id = :project AND r.ended_at IS NULL AND c.ended_at IS NOT NULL`,
+       WHERE r.workspace_id = :ws AND r.project_id = :project AND r.kind != 'review' AND r.ended_at IS NULL AND c.ended_at IS NOT NULL`,
       { project: projectId },
     )
     for (const run of ended) {

@@ -99,46 +99,33 @@ test('narrowComments: search text, people, pages, replies and ids; states; menti
 })
 
 test('browser-only comments read mentions and count reopens', async () => {
-  const storage = new Map()
-  globalThis.window = {
-    location: { pathname: '/demo/' },
-    localStorage: {
-      getItem: (key) => (storage.has(key) ? storage.get(key) : null),
-      setItem: (key, value) => storage.set(key, String(value)),
-      removeItem: (key) => storage.delete(key),
-    },
+  const { applyBrowserComment } = await import('../client/src/lib/browserComments.js')
+  let store = {
+    nextId: 2,
+    comments: [
+      { id: 1, pageId: 'home', viewport: 'desktop', x: 1, y: 1, body: 'Ask @jo', status: 'resolved', createdAt: '2026-11-01T00:00:00Z' },
+    ],
   }
-  try {
-    const { browserCommentsRequest } = await import('../client/src/lib/browserComments.js')
-    const seed = {
-      comments: [
-        { id: 1, pageId: 'home', viewport: 'desktop', x: 1, y: 1, body: 'Ask @jo', status: 'resolved', createdAt: '2026-11-01T00:00:00Z' },
-      ],
-    }
-    const fetchJson = async () => seed
-    const listed = await browserCommentsRequest('GET', '/api/boards/demo/comments', undefined, fetchJson)
-    assert.deepEqual(listed.comments[0].mentions, ['jo'])
-    const { comment: reopened } = await browserCommentsRequest('POST', '/api/boards/demo/comments/1/reopen', {}, fetchJson)
-    assert.equal(reopened.reopenCount, 1)
-    assert.ok(reopened.reopenedAt)
-    const { comment: replied } = await browserCommentsRequest(
-      'POST',
-      '/api/boards/demo/comments/1/replies',
-      { body: '@agent take it', author: 'Jo' },
-      fetchJson,
+  const apply = (method, id, action, body) =>
+    applyBrowserComment(
+      store,
+      (next) => {
+        store = next
+      },
+      method,
+      id,
+      action,
+      body,
     )
-    assert.deepEqual(replied.mentions, ['jo', 'agent'])
-    const { comment: edited } = await browserCommentsRequest('PATCH', '/api/boards/demo/comments/1', { body: 'Ask @sam' }, fetchJson)
-    assert.deepEqual(edited.mentions, ['sam', 'agent'])
-    const { comment: created } = await browserCommentsRequest(
-      'POST',
-      '/api/boards/demo/comments',
-      { pageId: 'home', viewport: 'desktop', x: 5, y: 5, body: 'New for @robin' },
-      fetchJson,
-    )
-    assert.deepEqual(created.mentions, ['robin'])
-    assert.equal(created.reopenCount, 0)
-  } finally {
-    delete globalThis.window
-  }
+  const { comment: reopened } = apply('POST', '1', 'reopen', {})
+  assert.deepEqual(reopened.mentions, ['jo'])
+  assert.equal(reopened.reopenCount, 1)
+  assert.ok(reopened.reopenedAt)
+  const { comment: replied } = apply('POST', '1', 'replies', { body: '@agent take it', author: 'Jo' })
+  assert.deepEqual(replied.mentions, ['jo', 'agent'])
+  const { comment: edited } = apply('PATCH', '1', null, { body: 'Ask @sam' })
+  assert.deepEqual(edited.mentions, ['sam', 'agent'])
+  const { comment: created } = apply('POST', null, null, { pageId: 'home', viewport: 'desktop', x: 5, y: 5, body: 'New for @robin' })
+  assert.deepEqual(created.mentions, ['robin'])
+  assert.equal(created.reopenCount, 0)
 })

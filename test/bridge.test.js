@@ -10,9 +10,10 @@ import { saveCredential } from '../src/remote/credentials.js'
 import { createRemote } from '../src/remote/remote.js'
 import { importBatches, portableComment, portableManifest, portableVariants, shareFiles, share } from '../src/remote/share.js'
 import { hash, mapFile, readMap, updateMap } from '../src/remote/share-state.js'
-import { cleanImportedComment } from '../src/hosted/import.js'
-import { createBrowser, createProject, signUp, startHostedServer, tokenCall, writeLocalCaptures } from './hosted-helpers.js'
-import { SAMPLE, tempDir } from './helpers.js'
+import { tenant } from '../src/hosted/tenancy.js'
+import { cleanImportedComment, importBatch } from '../src/hosted/import.js'
+import { createBrowser, createProject, signUp, startHostedServer, tinyPng, tokenCall, writeLocalCaptures } from './hosted-helpers.js'
+import { SAMPLE, sampleConfig, tempDir } from './helpers.js'
 
 let hosted, owner, project, config, dir, token, remote
 const opts = () => ({ config, env: { SHAPEWALL_TOKEN: token }, fetchImpl: fetch })
@@ -305,8 +306,17 @@ test('all boards import before grant consumption, rich threads use byte-sized ba
     ['sample', 'second', 'second'],
   )
   assert.equal(seen.at(-1).commit, true)
-  const retry = await share({ remote: hosted.origin }, () => {}, { config: rich, env: { SHAPEWALL_TOKEN: token } })
-  assert.equal(retry.code, 0)
+  for (const board of rich.boards) assert.equal(readMigration(rich, board.id), null, 'lost close restores editable boards')
+  const checkpoint = readMap(rich, hosted.origin).pending
+  const retry = () => share({ remote: hosted.origin }, () => {}, { config: rich, env: { SHAPEWALL_TOKEN: token } })
+  assert.equal((await retry()).code, 0)
+  // Before credential and closing-board metadata existed, the original
+  // token could still prove the successful close with its server receipt.
+  updateMap(rich, hosted.origin, (data) => {
+    data.pending = { projectId: checkpoint.projectId, sessionId: checkpoint.sessionId }
+  })
+  rich.boards.reverse() // the old final board is no longer the first replay candidate
+  assert.equal((await retry()).code, 0)
   assert.equal(readMigration(rich, 'sample').pending, false)
   assert.equal(readMigration(rich, 'second').readOnly, true)
   const destination = login.approve.json.project.id
@@ -544,4 +554,134 @@ test('a held commit never restores concurrently removed token scopes', async () 
   } finally {
     held.cancel()
   }
+})
+
+test('the receipt for a final commit fits after either 99 or 100 data batches', async () => {
+  for (const count of [99, 100]) {
+    const credential = (await moveLogin()).token
+    const grant = hosted.db.prepare('SELECT id FROM api_tokens WHERE token_hash=?').get(key(credential))
+    const options = {
+      db: hosted.db,
+      t: tenant(hosted.db, owner.workspaceId),
+      projectId: project.id,
+      board: config.boards[0],
+      token: grant,
+      tokenHash: key(credential),
+    }
+    const comment = portableComment(listComments(config, 'sample')[0], 'boundary fixture', 'sample')
+    const send = (i, commit = false) =>
+      importBatch({
+        ...options,
+        input: { sessionId: key(`boundary-${count}`), batchKey: key(i), comments: commit ? [] : [comment], commit },
+      })
+    for (let i = 0; i < count; i++) send(i)
+    if (count === 100)
+      assert.throws(
+        () => send('overflow'),
+        (error) => error.code === 'too_many_batches',
+      )
+    const receipt = send('close', true)
+    assert.equal(receipt.committed, true)
+    assert.deepEqual(send('close', true), receipt)
+  }
+})
+
+test('replacing the import credential resumes a partial move, including legacy pending maps', async () => {
+  for (const legacy of [false, true]) {
+    const local = sampleConfig(`bridge-replace-${legacy}`)
+    writeLocalCaptures(local, 'sample')
+    const source = await createComment(local, local.boards[0], {
+      pageId: 'home',
+      viewport: 'desktop',
+      x: 1,
+      y: 1,
+      body: 'Rotated login fixture',
+      author: 'Local',
+    })
+    const first = (await moveLogin()).token
+    const flags = { remote: hosted.origin }
+    const options = { config: local, env: { SHAPEWALL_TOKEN: first } }
+    await assert.rejects(
+      () =>
+        share(flags, () => {}, {
+          ...options,
+          fetchImpl: (url, opts) => {
+            if (String(url).endsWith('/import') && JSON.parse(opts.body).commit) throw Error('Fixture interrupted close')
+            return fetch(url, opts)
+          },
+        }),
+      /interrupted close/,
+    )
+    const prior = readMap(local, hosted.origin)
+    if (legacy)
+      updateMap(local, hosted.origin, (map) => {
+        delete map.pending.tokenId
+        delete map.pending.commitBoard
+      })
+    const next = (await moveLogin()).token
+    assert.equal((await share(flags, () => {}, { ...options, env: { SHAPEWALL_TOKEN: next } })).code, 0)
+    const current = readMap(local, hosted.origin)
+    assert.equal(current.pending, undefined)
+    assert.equal(current.boards.sample.comments[source.id].remoteId, prior.boards.sample.comments[source.id].remoteId)
+    assert.equal(readMigration(local, 'sample').readOnly, true)
+  }
+})
+
+test('a missing comment or reply attachment preserves the hosted copy and local write choice', async () => {
+  const local = sampleConfig('bridge-missing-media')
+  writeLocalCaptures(local, 'sample')
+  const c = await createComment(local, local.boards[0], {
+    pageId: 'home',
+    viewport: 'desktop',
+    x: 1,
+    y: 1,
+    body: 'Attached fixture',
+    author: 'Local',
+  })
+  await addReply(local, 'sample', c.id, { body: 'Reply fixture', author: 'Local' })
+  const folder = path.join(local.outputDir, 'sample')
+  const file = path.join(folder, 'comments.json')
+  const stored = JSON.parse(fs.readFileSync(file))
+  const media = path.join(folder, 'comment-files')
+  fs.mkdirSync(media, { recursive: true })
+  const names = ['a'.repeat(24) + '.png', 'b'.repeat(24) + '.png']
+  for (const [index, target] of [stored.comments[0], stored.comments[0].replies[0]].entries()) {
+    target.images = [{ file: names[index], name: 'fixture.png' }]
+    fs.writeFileSync(path.join(media, names[index]), tinyPng())
+  }
+  fs.writeFileSync(file, JSON.stringify(stored))
+  const credential = (await moveLogin()).token
+  const options = { config: local, env: { SHAPEWALL_TOKEN: credential } }
+  const flags = { remote: hosted.origin }
+  await share(flags, () => {}, options)
+  const number = readMap(local, hosted.origin).boards.sample.comments[c.id].remoteId
+  await writeMigration(local, 'sample', null)
+  for (const name of names) {
+    fs.renameSync(path.join(media, name), path.join(media, name + '.saved'))
+    await assert.rejects(() => share(flags, () => {}, options), /cannot read attachment/)
+    const row = hosted.db.prepare('SELECT images, replies FROM comments WHERE project_id=? AND number=?').get(project.id, number)
+    assert.equal(JSON.parse(row.images).length, 1)
+    assert.equal(JSON.parse(row.replies)[0].images.length, 1)
+    assert.equal(readMigration(local, 'sample'), null)
+    fs.renameSync(path.join(media, name + '.saved'), path.join(media, name))
+  }
+})
+
+test('a pin from a different environment leaves the local board editable and never goes on the default capture', async () => {
+  const local = sampleConfig('bridge-env-pin')
+  writeLocalCaptures(local, 'sample')
+  const board = local.boards[0]
+  board.environments = [
+    { ...board.environments[0], id: 'production' },
+    { ...board.environments[0], id: 'staging' },
+  ]
+  await createComment(local, board, { pageId: 'home', viewport: 'desktop', environment: 'staging', x: 2, y: 3, body: 'Alternate capture' })
+  const noRequest = () => {
+    throw Error('Unexpected request')
+  }
+  const move = () => share({ remote: hosted.origin }, () => {}, { config: local, env: {}, fetchImpl: noRequest })
+  await assert.rejects(move, /pinned to environment "staging"/)
+  board.environments.pop()
+  await assert.rejects(move, /pinned to environment "staging"/)
+  assert.equal(readMigration(local, board.id), null)
 })

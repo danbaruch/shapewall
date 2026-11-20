@@ -3,6 +3,7 @@
 // limits.
 import { after, before, test } from 'node:test'
 import assert from 'node:assert/strict'
+import { createAuth } from '../src/hosted/auth.js'
 import { sha256 } from '../src/hosted/crypto.js'
 import { createAuthenticator, createBrowser, invite, signUp, startHostedServer, askAgain } from './hosted-helpers.js'
 
@@ -47,6 +48,27 @@ test('a sign-up ceremony stores only the hash of its invite token, and the invit
   assert.equal(done.status, 201, done.text)
   assert.equal(done.json.workspaceId, owner.workspaceId)
   hosted.rateLimiter.reset() // later tests count their own ceremonies
+})
+
+test('a credential removed while its assertion is being verified cannot finish sign-in', async () => {
+  hosted.rateLimiter.reset()
+  const person = await signUp(hosted, { handle: 'retired-key', invite: await invite(owner, owner.workspaceId) })
+  const auth = createAuth({ db: hosted.db, origin: hosted.origin, rpId: new URL(hosted.origin).hostname })
+  async function verifyingWithCounter(signCount, concurrentCount) {
+    const challenge = await auth.authenticationOptions({})
+    const response = person.authenticator.assert(challenge.options, { signCount })
+    const verified = auth.finishAuthentication(challenge.ceremony, response)
+    // A concurrent assertion reached the database first.
+    hosted.db.prepare('UPDATE passkeys SET counter=? WHERE id=?').run(concurrentCount, response.id)
+    return verified
+  }
+  assert.equal((await verifyingWithCounter(3, 2)).id, person.user.id)
+  await assert.rejects(verifyingWithCounter(4, 5), (error) => error.code === 'passkey_failed')
+  const challenge = await auth.authenticationOptions({})
+  const assertion = person.authenticator.assert(challenge.options, { signCount: 6 })
+  const signingIn = auth.finishAuthentication(challenge.ceremony, assertion)
+  hosted.db.prepare('DELETE FROM passkeys WHERE id = ? AND user_id = ?').run(assertion.id, person.user.id)
+  await assert.rejects(signingIn, (error) => error.code === 'passkey_failed')
 })
 
 test('the session cookie is HttpOnly, SameSite=Lax, and stored only as a hash', async () => {

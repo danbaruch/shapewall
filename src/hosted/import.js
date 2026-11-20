@@ -247,6 +247,7 @@ export function importBatch({ db, t, projectId, board, token, tokenHash, input, 
     )
       throw new CommentError(409, 'too_many_imports', 'Too many import sessions for this token. Finish a pending move.')
     if (
+      !commit &&
       t.get('SELECT COUNT(*) AS n FROM import_batches WHERE workspace_id = :ws AND project_id=:project AND session_id=:session', session)
         .n >= 100
     )

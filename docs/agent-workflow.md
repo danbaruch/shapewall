@@ -270,6 +270,10 @@ the webhook, Slack, Discord and email notifications for the bot's changes too, w
 start `.cmd` shims (such as `npx.cmd`) without a shell, so point `--exec` at `node your-script.mjs` or an `.exe`, or run the watcher in
 WSL.
 
+On Linux and macOS, cancellation and timeouts stop the command's process group. Shapewall allows two seconds for a graceful exit
+before forcing remaining group members to stop. On Windows, Shapewall uses `taskkill /T /F` while the command is running and waits
+for the command to exit. Keep the Windows launcher running until its workers finish. Once it exits, Shapewall can no longer identify its descendants.
+
 ### With Claude Code
 
 ```sh

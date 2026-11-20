@@ -214,3 +214,31 @@ test('watch --remote --once fails when the scan fails instead of exiting as if n
   )
   assert.ok(logged.some((line) => /could not be reached/.test(line)))
 })
+
+test('shutdown during a remote download cancels the read and never starts the command', async () => {
+  const controller = new AbortController()
+  const statuses = []
+  const comment = { id: 1, status: 'open', agentStatus: null, files: { screenshot: 'fixture' } }
+  await watchRemote({
+    remote: {
+      comments: async () => ({ comments: [comment] }),
+      setAgentStatus: async (_board, _id, status) => {
+        statuses.push(status)
+        return { changed: true, comment }
+      },
+      download: async (_url, { signal }) => {
+        controller.abort()
+        assert.equal(signal.aborted, true)
+        return Buffer.from('unused')
+      },
+    },
+    boardId: 'sample',
+    projectId: 'pr_' + '1'.repeat(24),
+    cwd: tempDir('cancel-download'),
+    signal: controller.signal,
+    once: true,
+    exec: process.execPath,
+    log: () => {},
+  })
+  assert.deepEqual(statuses, ['queued', 'needs-human'])
+})

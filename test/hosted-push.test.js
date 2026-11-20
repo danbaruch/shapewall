@@ -9,7 +9,8 @@ import { fileURLToPath } from 'node:url'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { main } from '../src/cli.js'
-import { createRemote, remoteSettings } from '../src/remote/remote.js'
+import { sha256 } from '../src/hosted/crypto.js'
+import { createRemote, pushDefinition, remoteSettings } from '../src/remote/remote.js'
 import { createRemoteMcpServer } from '../src/remote/remote-mcp.js'
 import { watchRemote } from '../src/remote/remote-watch.js'
 import { PUSH_LIMITS, createPushStore } from '../src/hosted/push.js'
@@ -364,4 +365,34 @@ test('a second push replaces the files and keeps the comments', async () => {
   assert.ok(committed.length >= 2)
   for (const row of committed) assert.equal(fs.existsSync(path.join(hosted.dataDir, 'staging', row.id)), false, 'staging is cleaned up')
   assert.equal(fs.readdirSync(path.dirname(stored())).filter((name) => name.includes('.old-')).length, 0)
+})
+
+test('push commit checks the admitted credential and its current scope under the write lock', async () => {
+  const separate = await createToken(owner, owner.workspaceId, project.id, ['read', 'push'])
+  const remote = createRemote({ origin: hosted.origin, token: separate })
+  const push = await remote.startPush(pushDefinition(config, config.boards[0]))
+  const hash = sha256(separate)
+  const { id } = hosted.db.prepare('SELECT id FROM api_tokens WHERE token_hash=?').get(hash)
+  const credential = { id, hash, now: () => new Date() }
+  const store = createPushStore(tenant(hosted.db, owner.workspaceId), { db: hosted.db, dataDir: hosted.dataDir })
+  const commit = () => store.commit({ pushId: push.id, projectId: project.id, manifest: {}, variants: [], credential })
+  const count = () =>
+    hosted.db.prepare('SELECT push_count FROM boards WHERE project_id=? AND board_id=?').get(project.id, 'sample')?.push_count
+  const before = count()
+  hosted.db.prepare('UPDATE api_tokens SET scopes=? WHERE id=?').run('["read"]', credential.id)
+  assert.throws(commit, (error) => error.code === 'missing_scope')
+  hosted.db.prepare('UPDATE api_tokens SET revoked_at=? WHERE id=?').run(new Date().toISOString(), credential.id)
+  assert.throws(commit, (error) => error.code === 'bad_token')
+  assert.equal(count(), before)
+  assert.equal(store.get(push.id).status, 'open')
+})
+
+test('a preexisting restored push cannot recreate its missing staging folder by sending another file', async () => {
+  const remote = createRemote({ origin: hosted.origin, token })
+  const started = await remote.startPush(pushDefinition(config, config.boards[0]))
+  const staged = path.join(hosted.dataDir, 'staging', started.id)
+  fs.renameSync(staged, staged + '.fixture')
+  await assert.rejects(remote.pushFile(started.id, 'captures', 'home.desktop.png', tinyPng()), (error) => error.code === 'push_incomplete')
+  await assert.rejects(remote.commitPush(started.id, { manifest: {}, variants: [] }), (error) => error.code === 'push_incomplete')
+  assert.equal(fs.existsSync(staged), false)
 })

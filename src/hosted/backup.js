@@ -19,7 +19,7 @@
 // removed. A board the snapshot lists with no folder makes the backup
 // incomplete (`complete: false`, listed under files.skipped.missing): the
 // backup command and the restore drill both fail on it.
-// Open pushes (staging/) are not backed up; they would expire anyway.
+// Open pushes have no staging files in the backup. Restore closes those rows.
 //
 // A backup holds everything: accounts, passkey public keys, comments and
 // captures, and the signing key. Keep it as private as the server itself.
@@ -414,10 +414,13 @@ export async function restore({ from, data }) {
     copySmall(path.join(dir, 'quotas.json'), path.join(target, 'quotas.json'))
     // Newer migrations, when this build is newer than the backup.
     const conn = await openDatabase(path.join(target, 'shapewall.db'))
-    const schema = conn.prepare('PRAGMA user_version').get().user_version
-    const rows = counts(conn)
-    conn.close()
-    return { from: dir, data: target, manifest, schema, counts: rows, files: stats }
+    try {
+      conn.prepare("UPDATE pushes SET status = 'failed', finished_at = ? WHERE status = 'open'").run(new Date().toISOString())
+      const schema = conn.prepare('PRAGMA user_version').get().user_version
+      return { from: dir, data: target, manifest, schema, counts: counts(conn), files: stats }
+    } finally {
+      conn.close()
+    }
   } catch (error) {
     fs.rmSync(target, { recursive: true, force: true })
     throw error

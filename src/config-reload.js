@@ -23,6 +23,7 @@ export const RELOADED_KEYS = [
   'versions',
   'block',
   'reducedMotion',
+  'checks',
 ]
 const RESTART_KEYS = ['outputDir', 'boardUrl', 'auth', 'browser', 'liveHtml', 'agent', 'starterAgent', 'notifications', 'github']
 const DEBOUNCE_MS = 150

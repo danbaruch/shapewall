@@ -109,11 +109,21 @@ def run(action):
         # the prepared channel, but another update may have finished.
         pointers, candidate, current, latest = context()
         if candidate != current:
+            previous = pointers / 'previous'
+            try:
+                rollback = previous.readlink()
+            except FileNotFoundError:
+                rollback = None
             replace_link(pointers, 'previous', current)
             try:
                 replace_link(pointers, 'current', candidate)
             except Exception:
-                replace_link(pointers, 'current', current)
+                # replace_link switches current by rename, so a failed
+                # replacement leaves current intact. Restore the old rollback.
+                if rollback is None:
+                    previous.unlink()
+                else:
+                    replace_link(pointers, 'previous', rollback)
                 raise
     # The app acknowledges the request, then exits with 75. Its existing
     # Restart=on-failure service loads current. No elevated helper, timer,

@@ -157,14 +157,18 @@ export function createChatService({ db, hub, links, events, chatFor, now = () =>
     // comment was taken again since, by another fix), this write is stale
     // and changes nothing. A review's claim is the one its agent took on
     // the comment (the token's status write) before the turn was opened.
+    // Older review turns did not record the claim id. Recover only an open
+    // claim that already existed when such a turn began.
+    const recorded = t.get('SELECT claim_id FROM agent_runs WHERE workspace_id = :ws AND id = :run', { run: row.run_id })?.claim_id
     const claim =
-      row.kind === 'fix'
-        ? t.get('SELECT claim_id FROM agent_runs WHERE workspace_id = :ws AND id = :run', { run: row.run_id })?.claim_id || null
-        : t.get(
-            `SELECT id FROM agent_claims WHERE workspace_id = :ws AND project_id = :project AND board_id = :board
-               AND comment_number = :number AND agent_id = :agent AND ended_at IS NULL ORDER BY created_at DESC LIMIT 1`,
-            { project: row.project_id, board: row.board_id, number: row.comment_number, agent: row.agent_id },
-          )?.id || null
+      recorded ||
+      (row.kind === 'comment' &&
+        t.get(
+          `SELECT id FROM agent_claims WHERE workspace_id = :ws AND project_id = :project AND board_id = :board
+       AND comment_number = :number AND agent_id = :agent AND ended_at IS NULL AND created_at <= :started
+       ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+          { project: row.project_id, board: row.board_id, number: row.comment_number, agent: row.agent_id, started: row.created_at },
+        )?.id)
     if (!claim) return
     const ended = t.run('UPDATE agent_claims SET ended_at = :at WHERE workspace_id = :ws AND id = :claim AND ended_at IS NULL', {
       claim,
@@ -678,8 +682,8 @@ export function mountAgentLink(
         // A comment reaches this agent only when the person asking wrote it,
         // or the agent holds it, or its author is in the agent's audience
         // and the token API would show it to this agent's token (sent to an
-        // agent, and not to another one). Never a guest's, an imported one
-        // or another agent's.
+        // agent, and not to another one). An imported human comment must be
+        // the exact vouched content this agent claimed for this turn.
         commentVisible: (comment) => {
           let stored
           try {
@@ -687,7 +691,32 @@ export function mountAgentLink(
           } catch {
             return false
           }
-          if (stored.author_share_id || !stored.author_user_id) return false
+          if (stored.author_share_id || stored.author_token_id) return false
+          if (stored.imported || stored.imported_by) {
+            if (
+              !['comment', 'fix'].includes(row.kind) ||
+              stored.number !== row.comment_number ||
+              !['queued', 'working'].includes(stored.agent_status) ||
+              !policyFor(req.t).state(req.project.id, ctx.board.id, stored).dispatchable
+            )
+              return false
+            return Boolean(
+              req.t.get(
+                `SELECT 1 FROM agent_claims c JOIN agent_runs r ON r.workspace_id = c.workspace_id AND r.claim_id = c.id
+                 WHERE c.workspace_id = :ws AND c.project_id = :project AND c.board_id = :board
+                   AND c.comment_number = :number AND c.token_id = :token AND c.hash = :hash AND c.ended_at IS NULL AND r.id = :run`,
+                {
+                  project: req.project.id,
+                  board: ctx.board.id,
+                  number: stored.number,
+                  token: req.token.id,
+                  hash: stored.dispatch_hash,
+                  run: row.run_id,
+                },
+              ),
+            )
+          }
+          if (!stored.author_user_id) return false
           if (row.started_by && stored.author_user_id === row.started_by) return true
           if (agents.holds(req.agent, req.project.id, stored)) return true
           if (!agents.inAudience(req.agent, stored.author_user_id) || !agents.trusted(req.project.id, row.board_id, stored.author_user_id))
@@ -970,7 +999,12 @@ export function mountAgentLink(
         if (!policyFor(req.t).state(req.project.id, ctx.board.id, { ...comment, status: 'open' }).dispatchable)
           throw new HttpError(404, 'unknown_comment', 'No dispatched comment at that id.')
         // Only the agent that holds the comment answers it in its thread.
-        if (!agents.holds(req.agent, req.project.id, comment))
+        const claim = req.t.get(
+          `SELECT id FROM agent_claims WHERE workspace_id = :ws AND project_id = :project AND board_id = :board
+           AND comment_number = :number AND token_id = :token AND hash = :hash AND ended_at IS NULL`,
+          { project: req.project.id, board: ctx.board.id, number, token: req.token.id, hash: comment.dispatch_hash },
+        )
+        if (!claim || !agents.holds(req.agent, req.project.id, comment))
           throw new HttpError(403, 'claim_owner', 'Take the comment first (agent status queued).')
         if (comment.author_share_id) throw new HttpError(403, 'guest_comment', 'A share link guest wrote this comment.')
         const store = chatFor(req.t)
@@ -1015,6 +1049,7 @@ export function mountAgentLink(
           userId: comment.dispatch_by || null,
           userMessageId: message.id,
           commentNumber: number,
+          claimId: claim.id,
         })
         said(req)('agent_turn_started', row.id, {
           project: req.project.id,

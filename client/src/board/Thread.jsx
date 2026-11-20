@@ -48,7 +48,7 @@ import { ComposerBox, composerFieldClass } from './ComposerBox'
 import { useCommentDictation } from './hooks/useCommentDictation'
 import { viewportIcon } from './viewports'
 import { frameKey } from './commentSide'
-import { useAnchorName } from './anchorNames'
+import { useResolvedAnchorName } from './anchorNames'
 import SendToAgent from './SendToAgent'
 import FixWithAgent from './FixWithAgent'
 import HostedFix from './HostedFix'
@@ -60,6 +60,7 @@ import {
   FixRef,
   GithubLinks,
   ReopenedChip,
+  anchorLabel,
   commentAuthor,
   exactTime,
   replyAuthor,
@@ -453,7 +454,7 @@ export function ThreadView({
 }) {
   const [editing, setEditing] = useState(false)
   const [confirming, setConfirming] = useState(false)
-  const pinnedTo = useAnchorName(comment)
+  const pinnedTo = useResolvedAnchorName(media?.boardId, comment) || anchorLabel(comment.anchor)
   const scroller = useRef(null)
   useEffect(() => {
     setEditing(false)

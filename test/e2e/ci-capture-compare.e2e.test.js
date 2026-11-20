@@ -95,6 +95,32 @@ test('URL mode: one changed page, one new page, the clock ignored', async () => 
   assert.equal(strict.code, 3)
 })
 
+test('a comparison selecting only an added page recognizes it in either direction', async () => {
+  const file = config('only-changelog', { pages: ['changelog'], viewports: ['desktop'] })
+  const out = path.join(OUTPUT, 'only-new')
+  const result = await run(['ci', 'capture-compare', '--config', file, '--base-url', baseUrl, '--head-url', headUrl, '--out', out])
+  assert.equal(result.code, 0)
+  const added = JSON.parse(fs.readFileSync(path.join(out, 'summary.json')))
+  assert.deepEqual(added.newPages, ['changelog'])
+  assert.deepEqual(added.failures, [])
+  const reversed = path.join(OUTPUT, 'only-removed')
+  await run([
+    'ci',
+    'capture-compare',
+    '--config',
+    file,
+    '--base-dir',
+    path.join(out, '.captures', 'head'),
+    '--head-dir',
+    path.join(out, '.captures', 'base'),
+    '--out',
+    reversed,
+  ])
+  const removed = JSON.parse(fs.readFileSync(path.join(reversed, 'summary.json')))
+  assert.deepEqual(removed.removedPages, ['changelog'])
+  assert.deepEqual(removed.failures, [])
+})
+
 test('folder mode: ci capture twice, then compare the folders', async () => {
   const file = config('dirs')
   const a = path.join(OUTPUT, 'side-base')

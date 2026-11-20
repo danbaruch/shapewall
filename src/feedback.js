@@ -58,7 +58,7 @@ function drawnOn(context, comment, page, name, kind, drawing) {
   const manifest = manifestFor(context, kind)
   const current = page && latest ? entryVersion(manifest?.pages?.[page.id]?.[comment.viewport], manifest) : null
   const made = drawing?.captureVersion
-  if (page && made && made !== current) {
+  if (kind === 'captures' && page && made && made !== current) {
     return { file: resolveFile(config, board.id, 'versions', `${name}.${comment.viewport}.${made}.png`), previous: true }
   }
   return { file: latest, previous: false }
