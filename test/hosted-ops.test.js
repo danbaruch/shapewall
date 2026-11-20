@@ -169,7 +169,10 @@ test('retention keeps the newest two older captures plus a referenced older vers
 })
 
 test('backup restores a live snapshot, boots it and signs in with the fixture passkey', async () => {
-  const { hosted, owner, ws } = await fixture('ops-backup')
+  const { hosted, owner, ws, token } = await fixture('ops-backup')
+  const remote = createRemote({ origin: hosted.origin, token })
+  const config = sampleConfig('ops-backup-partial')
+  const partial = await remote.startPush(pushDefinition(config, config.boards[0]))
   let server, db, app
   try {
     fs.writeFileSync(path.join(hosted.dataDir, 'secret.key'), 'fixture-secret-value-for-backup-012345')
@@ -204,6 +207,8 @@ test('backup restores a live snapshot, boots it and signs in with the fixture pa
     const target = path.join(tempDir('restore-parent'), 'restored')
     await restore({ from: saved.dir, data: target })
     db = await openDatabase(path.join(target, 'shapewall.db'))
+    assert.equal(db.prepare('SELECT status FROM pushes WHERE id=?').get(partial.id).status, 'failed')
+    assert.equal(hosted.db.prepare('SELECT status FROM pushes WHERE id=?').get(partial.id).status, 'open')
     app = createHostedApp({ db, dataDir: target, origin: hosted.origin, secret: 'fixture-secret-value-for-backup-012345', sweepEveryMs: 0 })
     server = http.createServer(app)
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))

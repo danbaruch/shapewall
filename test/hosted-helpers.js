@@ -67,13 +67,13 @@ export function createAuthenticator({ origin, rpId = new URL(origin).hostname })
   }
 
   // Signs with `credentialId`, or the first credential allowed (or any).
-  function assert(options, { credentialId = null, userHandle = undefined, badOrigin = null, tamper = false } = {}) {
+  function assert(options, { credentialId = null, userHandle = undefined, badOrigin = null, tamper = false, signCount = 0 } = {}) {
     const allowed = (options.allowCredentials || []).map((item) => item.id)
     const id = credentialId || allowed.find((item) => credentials.has(item)) || [...credentials.keys()][0]
     const credential = credentials.get(id)
     if (!credential) throw new Error('no credential')
-    credential.counter += 0 // synced passkeys report 0
     const counter = Buffer.alloc(4)
+    counter.writeUInt32BE(signCount) // synced passkeys report zero
     const authData = Buffer.concat([sha(rpId), Buffer.from([0x05]), counter])
     const clientData = Buffer.from(
       JSON.stringify({ type: 'webauthn.get', challenge: options.challenge, origin: badOrigin || origin, crossOrigin: false }),

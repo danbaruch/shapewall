@@ -437,6 +437,7 @@ export function mountTokenApi({
         variants: req.body?.variants,
         checks: req.body?.checks,
         now: now(),
+        credential: { id: req.token.id, hash: req.authTokenHash, now },
       })
       auditOf(req, 'push_committed', `${req.project.id}/${result.board}`, { files: result.files })
       res.json({ ...result, url: `${publicOrigin}/w/${req.t.workspaceId}/p/${req.project.id}/?board=${result.board}` })
