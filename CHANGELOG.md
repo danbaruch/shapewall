@@ -14,6 +14,24 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Website: the features page opens with a still hero instead of the tour player: the headline and its sentence beside one
   screenshot of a comment being left on a button, with Get started and Live demo. The feature clips are unchanged.
 
+### Fixed
+
+- Hosted restore closes incomplete uploads. Board moves check attachments and comment environments before moving feedback,
+  support retries after a change of credential, and can finish after the hundredth data batch.
+- Hosted push commits recheck the token. Passkey sign-in rechecks the credential after verification, and a connected agent
+  can read the imported comment it was approved to review.
+- Stopping a watcher cancels its running command. One-shot starter scans report failures. Cleanup preserves containers and
+  networks whose ownership it cannot inspect.
+- Drawings on replies use the comment's environment. Removing a variant clears its capture files, including retired
+  viewport sizes. Static exports copy only the files of variants shown on the board.
+- Page check freshness reflects the setup and settings used for that page. Running servers pick up changes to the checks
+  policy. PR comparison recognizes a single added or removed page when the opposite side returns HTTP 404.
+- Browser-only comments survive simultaneous changes from multiple tabs. The board shows comment-loading failures with
+  a retry, uses the correct board's element label, and allows touch panning while placing a compare comment.
+- Console Back and Forward restore the selected filters. Docs search exposes the highlighted result to assistive technology.
+- Managed updates and website deployment preserve the rollback release if activation fails. The hosted image starts with
+  writable data storage, and the starter image installs an executable CLI.
+
 ## 0.12.1 - 2026-11-18
 
 Videos on the website (the launch film, the narrated tour, feature clips and the quickstart, all self-hosted), and follow-up
