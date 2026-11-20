@@ -508,6 +508,13 @@ function readJsonStrict(file) {
 function readCommentStore(config, boardId) {
   const raw = readJsonStrict(commentsFile(config, boardId))
   const comments = Array.isArray(raw?.comments) ? raw.comments.filter((item) => item && Number.isSafeInteger(item.id)) : []
+  // Older releases stamped reply drawings with the default environment's
+  // version. Other environments have no archive of their own.
+  const board = config.boards?.find((item) => item.id === boardId)
+  for (const comment of comments) {
+    if (!commentOnOtherEnvironment(board, comment) || !Array.isArray(comment.replies)) continue
+    for (const reply of comment.replies) if (reply?.drawing?.captureVersion) reply.drawing.captureVersion = null
+  }
   const nextId = Math.max(Number(raw?.nextId) || 1, ...comments.map((item) => item.id + 1))
   return { nextId, comments }
 }

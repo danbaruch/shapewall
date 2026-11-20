@@ -610,11 +610,22 @@ test('a reply drawing uses the comment environment even with a legacy default ca
   const shot = path.join(dir, 'home.desktop.png')
   fs.writeFileSync(shot, solidPng(40, 30))
   const pin = await createComment(config, board, { ...valid, environment: 'preview' })
-  const { comment, reply } = await addReply(config, board.id, pin.id, { body: 'Here', drawing: { shapes: [box] } })
+  const { reply } = await addReply(config, board.id, pin.id, { body: 'Here', drawing: { shapes: [box] } })
   assert.equal(reply.drawing.captureVersion, null)
-  comment.replies[0].drawing.captureVersion = '20260101T000000000Z-aaaa'
-  const context = feedbackContext(config, board, { media: { markupPath: ({ screenshot }) => screenshot } })
-  assert.equal(feedbackItem(context, comment).replies[0].markup, shot)
+  const file = path.join(folder, 'comments.json')
+  const stored = JSON.parse(fs.readFileSync(file))
+  stored.comments[0].replies[0].drawing.captureVersion = '20260101T000000000Z-aaaa'
+  fs.writeFileSync(file, JSON.stringify(stored))
+  markupFile(folder, {
+    commentId: pin.id,
+    replyId: reply.id,
+    drawing: reply.drawing,
+    screenshot: path.join(folder, 'captures', 'home.desktop.png'),
+  })
+  const [item] = feedback(config, { boardId: board.id }).comments
+  assert.equal(item.replies[0].drawing.captureVersion, null)
+  assert.equal(item.replies[0].drawing.onPreviousCapture, false)
+  assert.deepEqual(fs.readFileSync(item.replies[0].markup), renderMarkup(fs.readFileSync(shot), reply.drawing).png)
 })
 
 test('agents: comments --json, the text list and the model context include the media', async () => {
