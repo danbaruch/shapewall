@@ -49,6 +49,8 @@ test(
       )
       assert.equal(built.code, 0, built.stderr.slice(-2000))
     }
+    const cli = await runtime.exec(['run', '--rm', '--pull', 'never', '--network', 'none', image, 'shapewall', '--version'])
+    assert.equal(cli.code, 0, cli.stderr)
     // Something listening on the host, on every address: the sandbox must not reach it.
     const listener = net.createServer((socket) => socket.end('host\n'))
     await new Promise((resolve) => listener.listen(0, '0.0.0.0', resolve))

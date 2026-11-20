@@ -51,6 +51,7 @@ export async function watchStarter({
         comments = (await source.list()).filter((item) => item.agentStatus === null).sort((a, b) => a.id - b.id)
       } catch (error) {
         log(`agent watch: ${error.message}`)
+        if (once) throw error
       }
       for (const comment of comments) {
         if (signal?.aborted) break

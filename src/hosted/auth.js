@@ -312,15 +312,22 @@ export function createAuth({ db, origin, rpId, rpName = 'Shapewall', now = () =>
     if (!verification.verified) throw fail()
     // rp_id: which host name the passkey belongs to (known once it signs in
     // here; set at registration since migration 5).
-    q.run('UPDATE passkeys SET counter = :counter, last_used_at = :at, backed_up = :backed, rp_id = COALESCE(rp_id, :rp) WHERE id = :id', {
-      counter: verification.authenticationInfo.newCounter || 0,
-      at: iso(),
-      backed: verification.authenticationInfo.credentialBackedUp ? 1 : 0,
-      rp: rpId,
-      id: key.id,
-    })
-    // `trusted`: this passkey may confirm sensitive actions (not on hold).
-    return { ...user, trusted: !onHold(key), passkeyId: key.id }
+    const current = q.get(
+      `UPDATE passkeys SET counter = :counter, last_used_at = :at, backed_up = :backed, rp_id = COALESCE(rp_id, :rp)
+       WHERE id = :id AND user_id = :user AND public_key = :key AND (counter < :counter OR (counter = 0 AND :counter = 0))
+       RETURNING id, recovery_added_at`,
+      {
+        counter: verification.authenticationInfo.newCounter || 0,
+        at: iso(),
+        backed: verification.authenticationInfo.credentialBackedUp ? 1 : 0,
+        rp: rpId,
+        id: key.id,
+        user: key.user_id,
+        key: key.public_key,
+      },
+    )
+    if (!current) throw fail()
+    return { ...user, trusted: !onHold(current), passkeyId: current.id }
   }
 
   // `at`: the moment to judge the hold at (now, unless passkeys are off on this server and holds stand still).

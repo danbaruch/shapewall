@@ -170,8 +170,9 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
   // What each pinned element is called here, for its thread's "Pinned to".
   useEffect(() => {
     if (!map || !positions) return
-    for (const [id, point] of positions) if (point.element !== undefined) anchorNames.set(id, nameOnMap(map, point.element).text)
-  }, [map, positions])
+    for (const [id, point] of positions)
+      if (point.element !== undefined) anchorNames.set(board.boardId, id, nameOnMap(map, point.element).text)
+  }, [board.boardId, map, positions])
   const landedId = useLandedPin(pins)
   const clusters = useFrameClusters({ pins, positions, frame, compact: compactPins, selectedCommentId })
   useEffect(() => {
@@ -221,50 +222,7 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
   // and named from touch-down, and a drag (a pan) or a second finger (a
   // pinch) drops it, so only a tap pins.
   const canPress = picking && anchorsReady && Boolean(board.touch)
-  const [press, setPress] = useState(null)
-  const pressing = useRef(null)
-  useEffect(() => {
-    if (!canPress) {
-      pressing.current = null
-      setPress(null)
-    }
-  }, [canPress])
-  const pointAt = (target, clientX, clientY) => {
-    const rect = target.getBoundingClientRect()
-    return [((clientX - rect.left) / rect.width) * native.width, ((clientY - rect.top) / rect.height) * native.height]
-  }
-  const onPointerDown = (event) => {
-    if (!canPress || event.pointerType !== 'touch') return
-    // A pin on the page is its own button.
-    if (event.target.closest?.('[data-sw-pin], [data-sw-cluster]')) return
-    if (pressing.current && pressing.current.id !== event.pointerId) {
-      pressing.current.moved = true
-      setPress(null)
-      return
-    }
-    pressing.current = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: false }
-    const [x, y] = pointAt(event.currentTarget, event.clientX, event.clientY)
-    setPress(describe(x, y))
-  }
-  const onPointerMove = (event) => {
-    const at = pressing.current
-    if (!at || at.id !== event.pointerId || at.moved) return
-    if (Math.hypot(event.clientX - at.x, event.clientY - at.y) > 10) {
-      at.moved = true
-      setPress(null)
-    }
-  }
-  const onPointerEnd = (event) => {
-    const at = pressing.current
-    if (!at || at.id !== event.pointerId) return
-    if (event.type === 'pointercancel') at.moved = true
-    // The tap's click comes next; a press that ended any other way just goes.
-    window.setTimeout(() => {
-      if (pressing.current === at) pressing.current = null
-      setPress(null)
-    }, 350)
-  }
-
+  const { press, pressEvents, consumedDrag } = useTouchTarget(canPress, describe, native)
   const onClick = (event) => {
     event.stopPropagation()
     // Selecting text: this click hands the mouse to the page.
@@ -279,10 +237,7 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
       return
     }
     // A drag or a pinch on a touch screen is not a tap.
-    const pressed = pressing.current
-    pressing.current = null
-    setPress(null)
-    if (pressed?.moved) return
+    if (consumedDrag()) return
     // This page's thread is open: the click closes it, and the next one pins.
     if (picking && openHere && !board.touch) {
       board.onCloseThread()
@@ -380,10 +335,7 @@ export function Frame({ targetId, frame, image, kind, version, emptyText, note }
         data-sw-comment-target={commentTarget ? 'true' : undefined}
         onMouseMove={canHover ? onMouseMove : undefined}
         onMouseLeave={canHover ? onMouseLeave : undefined}
-        onPointerDown={canPress ? onPointerDown : undefined}
-        onPointerMove={canPress ? onPointerMove : undefined}
-        onPointerUp={canPress ? onPointerEnd : undefined}
-        onPointerCancel={canPress ? onPointerEnd : undefined}
+        {...pressEvents}
         data-sw-frame={`${targetId}:${frame.viewport}`}
         data-sw-image={src ? (full ? 'full' : 'thumb') : 'none'}
         data-sw-live={live ? (ready ? 'ready' : 'loading') : 'off'}
@@ -664,6 +616,65 @@ function AnchorTarget({ comment, box, thread = false }) {
   )
 }
 
+// Both ordinary and compare frames let a touch drag pan, while a tap picks
+// the element previewed under the finger.
+function useTouchTarget(canPress, describe, native) {
+  const [press, setPress] = useState(null)
+  const pressing = useRef(null)
+  useEffect(() => {
+    if (!canPress) {
+      pressing.current = null
+      setPress(null)
+    }
+  }, [canPress])
+  const pointAt = (target, clientX, clientY) => {
+    const rect = target.getBoundingClientRect()
+    return [((clientX - rect.left) / rect.width) * native.width, ((clientY - rect.top) / rect.height) * native.height]
+  }
+  const onPointerDown = (event) => {
+    if (!canPress || event.pointerType !== 'touch') return
+    // A pin on the page is its own button.
+    if (event.target.closest?.('[data-sw-pin], [data-sw-cluster]')) return
+    if (pressing.current && pressing.current.id !== event.pointerId) {
+      pressing.current.moved = true
+      setPress(null)
+      return
+    }
+    pressing.current = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: false }
+    const [x, y] = pointAt(event.currentTarget, event.clientX, event.clientY)
+    setPress(describe(x, y))
+  }
+  const onPointerMove = (event) => {
+    const at = pressing.current
+    if (!at || at.id !== event.pointerId || at.moved) return
+    if (Math.hypot(event.clientX - at.x, event.clientY - at.y) > 10) {
+      at.moved = true
+      setPress(null)
+    }
+  }
+  const onPointerEnd = (event) => {
+    const at = pressing.current
+    if (!at || at.id !== event.pointerId) return
+    if (event.type === 'pointercancel') at.moved = true
+    // The tap's click comes next; a press that ended any other way just goes.
+    window.setTimeout(() => {
+      if (pressing.current === at) {
+        pressing.current = null
+        setPress(null)
+      }
+    }, 350)
+  }
+
+  const consumedDrag = () => {
+    const moved = pressing.current?.moved
+    pressing.current = null
+    setPress(null)
+    return moved
+  }
+  const pressEvents = canPress ? { onPointerDown, onPointerMove, onPointerUp: onPointerEnd, onPointerCancel: onPointerEnd } : {}
+  return { press, pressEvents, consumedDrag }
+}
+
 // Hover on a live page while picking: which element a click would pin to.
 // Read once per animation frame from the element map (or the frame's DOM),
 // and a new outline only when the element changes, so moving across a big
@@ -810,7 +821,8 @@ export function CompareFrame({ pageId, frame }) {
     return { id: drawn.id, ...drawingsFor(drawn, current) }
   }, [drawn, env, pageId, viewport, board.manifest, board.environments])
   const canHover = picking && !openHere && Boolean(map) && !board.touch
-  const { hover, onMouseMove, onMouseLeave, clear: clearHover } = useHoverTarget({ enabled: canHover, map, doc: null, native })
+  const { hover, onMouseMove, onMouseLeave, describe, clear: clearHover } = useHoverTarget({ enabled: canHover, map, doc: null, native })
+  const { press, pressEvents, consumedDrag } = useTouchTarget(picking && board.touch, describe, native)
   const hoveredAnchored = useHoveredAnchored(pins)
   // Places a comment at (fx, fy) of this side, 0 to 1. `anchored`: also to
   // the element there, when the element map is loaded.
@@ -841,6 +853,7 @@ export function CompareFrame({ pageId, frame }) {
   const onClick = (event) => {
     if (!board.commentMode) return
     event.stopPropagation()
+    if (consumedDrag()) return
     // This side's thread is open: the click closes it, and the next one pins.
     if (picking && openHere && !board.touch) {
       board.onCloseThread()
@@ -877,8 +890,7 @@ export function CompareFrame({ pageId, frame }) {
       <div
         className={cn(
           'absolute rounded-sm border border-line bg-surface-2',
-          // Picking: a click places the comment, so a drag must not pan.
-          picking && 'nodrag nopan cursor-crosshair',
+          picking && (board.touch ? 'cursor-crosshair' : 'nodrag nopan cursor-crosshair'),
           commentTarget && 'focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-accent',
           drawSurface && 'outline-solid outline-accent',
         )}
@@ -899,6 +911,7 @@ export function CompareFrame({ pageId, frame }) {
         }
         onKeyDown={commentTarget ? onKeyDown : undefined}
         data-sw-comment-target={commentTarget ? 'true' : undefined}
+        {...pressEvents}
         onMouseMove={canHover ? onMouseMove : undefined}
         onMouseLeave={canHover ? onMouseLeave : undefined}
         data-sw-frame={`${pageId}:${viewport}:${env}`}
@@ -944,6 +957,7 @@ export function CompareFrame({ pageId, frame }) {
             <AnchorTarget comment={hoveredAnchored} box={null} />
           ) : null}
           {hover ? <HoverOutline hover={hover} native={native} frame={frame} /> : null}
+          {press && picking ? <HoverOutline hover={press} native={native} frame={frame} /> : null}
           {draft?.anchor && !drawingOn ? (
             <PickedOutline key={`${draft.x},${draft.y}`} draft={draft} frame={frame} flash={board.touch} />
           ) : null}

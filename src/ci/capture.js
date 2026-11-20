@@ -104,7 +104,7 @@ export function prepareSideDir(dir) {
 // Captures one side into `dir`. An earlier side there is replaced; a folder
 // with anything else is refused before anything runs. Never throws for a
 // capture that failed: side.json then holds the error and the folder has no
-// manifest. Returns { ok, dir, error, shots, failed }.
+// manifest unless a shot recorded an HTTP 404. Returns { ok, dir, error, shots, failed }.
 export async function captureSide({ config, board, baseUrl, dir, maxPages, log = () => {}, chromium = null }) {
   const target = prepareSideDir(dir)
   // A new folder of its own next to the result, so the screenshots are only renamed into place.
@@ -129,6 +129,14 @@ export async function captureSide({ config, board, baseUrl, dir, maxPages, log =
         fs.renameSync(path.join(captured, name), path.join(target, name))
     }
   } catch (error) {
+    // The board kept its previous captures. CI can still compare a confirmed
+    // missing page, even when it was the only page selected on this side.
+    if (error.captureManifest) {
+      const shots = Object.values(error.captureManifest.pages).flatMap((page) => Object.values(page))
+      result = { total: shots.length, failed: shots.length }
+      if (shots.some((shot) => shot.httpStatus === 404))
+        fs.writeFileSync(path.join(target, 'manifest.json'), JSON.stringify(error.captureManifest))
+    }
     side.error = String(error?.message || error)
       .split('\n')[0]
       .slice(0, 300)

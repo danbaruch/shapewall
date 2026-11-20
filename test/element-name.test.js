@@ -126,3 +126,12 @@ test('anchorName: a stored anchor named without the page', () => {
   for (const [anchor, want] of cases) assert.equal(anchorName(anchor), want, anchor.selector)
   assert.equal(anchorName(null), null)
 })
+
+test('live target labels stay on the board where the comment was resolved', async () => {
+  const { anchorNames } = await import('../client/src/board/anchorNames.js')
+  anchorNames.set('first', 1, 'Button · Sign in')
+  assert.equal(anchorNames.get('second', 1), null)
+  anchorNames.set('second', 1, 'Heading · Profile')
+  assert.equal(anchorNames.get('first', 1), 'Button · Sign in')
+  assert.equal(anchorNames.get('second', 1), 'Heading · Profile')
+})

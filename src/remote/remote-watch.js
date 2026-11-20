@@ -16,15 +16,13 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { spawn } from 'node:child_process'
+import { runWatchCommand } from '../watch-command.js'
 import { ID_RE } from '../config.js'
 import { ID_PATTERNS } from './ids.js'
 import { findProgram, splitCommand } from '../watch.js'
 import { RemoteError } from './remote.js'
 
 const validCommentId = (id) => Number.isSafeInteger(id) && id > 0
-
-const KILL_GRACE_MS = 5000
 
 // Files under .shapewall/remote/ are written without following a symlink, so
 // a project that plants agent/comment-1.png -> ~/.bashrc cannot have server
@@ -68,24 +66,41 @@ export async function watchRemote({
   const agentDir = path.join(cwd, '.shapewall', 'remote', projectId, boardId, 'agent')
   fs.mkdirSync(agentDir, { recursive: true })
   const list = async () =>
-    (await remote.comments(boardId, { status: 'open', mention, guests: includeGuests })).comments.filter(
+    (await remote.comments(boardId, { status: 'open', mention, guests: includeGuests, signal })).comments.filter(
       (item) => includeGuests || !item.authorGuest,
     )
-  const baseline = newOnly
-    ? Math.max(0, ...(await remote.comments(boardId, { status: 'all', guests: true })).comments.map((item) => item.id))
-    : 0
+  let baseline = 0
+  if (newOnly) {
+    try {
+      const { comments } = await remote.comments(boardId, { status: 'all', guests: true, signal })
+      baseline = Math.max(0, ...comments.map((item) => item.id))
+    } catch (error) {
+      if (signal?.aborted) return
+      throw error
+    }
+  }
   // SIGINT can arrive while the initial baseline request is in flight,
   // before the loop's abort listener is installed.
   if (signal?.aborted) return
   const running = new Map()
+  const lifetime = new AbortController()
+  // Allow a final status update after cancellation, even if the command took
+  // the full TERM grace to stop. An unreachable server cannot hold up exit.
+  const reporting = new AbortController()
+  const reportOptions = { guests: includeGuests, signal: reporting.signal }
+  let reportTimer
   let stopped = false
 
   const save = async (url, file) => {
+    lifetime.signal.throwIfAborted()
     if (!url) return ''
     try {
-      fs.writeFileSync(file, await remote.download(url), { mode: 0o600, flag: WRITE_FLAGS })
+      const bytes = await remote.download(url, { signal: lifetime.signal })
+      lifetime.signal.throwIfAborted()
+      fs.writeFileSync(file, bytes, { mode: 0o600, flag: WRITE_FLAGS })
       return file
     } catch (error) {
+      lifetime.signal.throwIfAborted()
       log(`could not download ${url}: ${error.message}`)
       return ''
     }
@@ -105,53 +120,27 @@ export async function watchRemote({
     const logFd = fs.openSync(logFile, WRITE_FLAGS, 0o600)
     let result
     try {
-      await remote.setAgentStatus(boardId, item.id, 'working', { guests: includeGuests })
+      await remote.setAgentStatus(boardId, item.id, 'working', reportOptions)
       log(`#${item.id} working: ${path.basename(argv[0])} (log ${path.relative(cwd, logFile) || logFile})`)
-      result = await new Promise((resolve) => {
-        let child
-        try {
-          child = spawn(argv[0], argv.slice(1), {
-            cwd,
-            env: {
-              ...childEnv,
-              SHAPEWALL_COMMENT_ID: String(item.id),
-              SHAPEWALL_BOARD: boardId,
-              SHAPEWALL_PAGE_ID: item.page?.id || item.variant?.pageId || '',
-              SHAPEWALL_VARIANT_ID: item.variant?.id || '',
-              SHAPEWALL_PAGE_URL: item.page?.url || '',
-              SHAPEWALL_VIEWPORT: item.viewport.name,
-              SHAPEWALL_SCREENSHOT: screenshot,
-              SHAPEWALL_LIVE_HTML: liveHtml,
-              SHAPEWALL_COMMENT_FILE: commentFile,
-              SHAPEWALL_REMOTE: remote.origin,
-            },
-            stdio: ['pipe', logFd, logFd],
-            shell: false,
-            windowsHide: true,
-          })
-        } catch (error) {
-          resolve({ code: null, error })
-          return
-        }
-        const entry = running.get(item.id)
-        if (entry) entry.child = child
-        let killTimer = null
-        const timer = setTimeout(() => {
-          child.kill('SIGTERM')
-          killTimer = setTimeout(() => child.kill('SIGKILL'), KILL_GRACE_MS)
-        }, timeoutMs)
-        child.stdin.on('error', () => {})
-        child.stdin.end(json)
-        child.once('error', (error) => {
-          clearTimeout(timer)
-          clearTimeout(killTimer)
-          resolve({ code: null, error })
-        })
-        child.once('exit', (code, exitSignal) => {
-          clearTimeout(timer)
-          clearTimeout(killTimer)
-          resolve({ code, signal: exitSignal, timedOut: Date.now() - began >= timeoutMs })
-        })
+      result = await runWatchCommand(argv, {
+        cwd,
+        env: {
+          ...childEnv,
+          SHAPEWALL_COMMENT_ID: String(item.id),
+          SHAPEWALL_BOARD: boardId,
+          SHAPEWALL_PAGE_ID: item.page?.id || item.variant?.pageId || '',
+          SHAPEWALL_VARIANT_ID: item.variant?.id || '',
+          SHAPEWALL_PAGE_URL: item.page?.url || '',
+          SHAPEWALL_VIEWPORT: item.viewport.name,
+          SHAPEWALL_SCREENSHOT: screenshot,
+          SHAPEWALL_LIVE_HTML: liveHtml,
+          SHAPEWALL_COMMENT_FILE: commentFile,
+          SHAPEWALL_REMOTE: remote.origin,
+        },
+        logFd,
+        input: json,
+        timeoutMs,
+        signal: lifetime.signal,
       })
     } finally {
       fs.closeSync(logFd)
@@ -159,7 +148,7 @@ export async function watchRemote({
     const seconds = Math.round((Date.now() - began) / 1000)
     let comment = null
     try {
-      comment = (await remote.comment(boardId, item.id, { guests: includeGuests })).comment
+      comment = (await remote.comment(boardId, item.id, reportOptions)).comment
     } catch {
       /* deleted while the agent ran */
     }
@@ -173,23 +162,22 @@ export async function watchRemote({
     // agent without the token (no --pass-token) cannot reply, so there exit 0
     // is enough.
     const replied = (comment.replies || []).length > repliesBefore
-    if (result.code === 0 && (replied || !passToken)) {
-      await remote.setAgentStatus(boardId, item.id, 'done', { guests: includeGuests })
+    if (!stopped && !result.timedOut && result.code === 0 && (replied || !passToken)) {
+      await remote.setAgentStatus(boardId, item.id, 'done', reportOptions)
       log(`#${item.id} done (exit 0, ${seconds}s)`)
       return
     }
-    const why =
-      result.code === 0
-        ? 'the agent command exited 0 without a reply or a status change, so nothing says what it did'
-        : stopped
-          ? 'shapewall watch stopped while the agent command was running'
-          : result.error
-            ? `the agent command could not start (${result.error.code || result.error.message})`
-            : result.timedOut
-              ? `the agent command ran past the ${Math.round(timeoutMs / 60000)} minute timeout and was stopped`
-              : `the agent command exited with ${result.code === null ? `signal ${result.signal}` : `code ${result.code}`}`
-    await remote.reply(boardId, item.id, { body: `Needs a person: ${why}. The log is on the machine that ran it.`, guests: includeGuests })
-    await remote.setAgentStatus(boardId, item.id, 'needs-human', { guests: includeGuests })
+    const why = stopped
+      ? 'shapewall watch stopped while the agent command was running'
+      : result.timedOut
+        ? `the agent command ran past the ${Math.round(timeoutMs / 60000)} minute timeout and was stopped`
+        : result.error
+          ? `the agent command could not start (${result.error.code || result.error.message})`
+          : result.code === 0
+            ? 'the agent command exited 0 without a reply or a status change, so nothing says what it did'
+            : `the agent command exited with ${result.code === null ? `signal ${result.signal}` : `code ${result.code}`}`
+    await remote.reply(boardId, item.id, { body: `Needs a person: ${why}. The log is on the machine that ran it.`, ...reportOptions })
+    await remote.setAgentStatus(boardId, item.id, 'needs-human', reportOptions)
     log(`#${item.id} needs-human: ${why}`)
   }
 
@@ -201,21 +189,21 @@ export async function watchRemote({
       if (stopped || (argv && running.size >= concurrency)) break
       const { comment: claimed, changed } = await remote.setAgentStatus(boardId, candidate.id, 'queued', {
         onlyFrom: [null],
-        guests: includeGuests,
+        ...reportOptions,
       })
       if (!changed) continue
       if (!argv) {
         out(JSON.stringify({ board: boardId, comment: claimed }))
         continue
       }
-      const entry = { child: null, done: null }
+      const entry = { done: null }
       running.set(claimed.id, entry)
       entry.done = runCommand(claimed)
         .catch(async (error) => {
           log(`#${claimed.id} error: ${error.message}`)
           // Not left queued or working for good: a person looks at it (unless the agent set a status itself).
           await remote
-            .setAgentStatus(boardId, claimed.id, 'needs-human', { onlyFrom: ['queued', 'working'], guests: includeGuests })
+            .setAgentStatus(boardId, claimed.id, 'needs-human', { onlyFrom: ['queued', 'working'], ...reportOptions })
             .catch(() => {})
         })
         .finally(() => running.delete(claimed.id))
@@ -223,12 +211,15 @@ export async function watchRemote({
   }
 
   const onAbort = () => {
+    if (stopped) return
     stopped = true
+    lifetime.abort()
+    reportTimer = setTimeout(() => reporting.abort(), 5000)
   }
   signal?.addEventListener('abort', onAbort, { once: true })
   // The wait between polls is what keeps the process alive between them
   // (nothing else is pending), so it is a normal, ref'd timer, cleared on
-  // Ctrl+C. Only the shutdown grace below may let the process go.
+  // Ctrl+C.
   const pause = (ms) =>
     new Promise((resolve) => {
       const timer = setTimeout(done, ms)
@@ -239,7 +230,6 @@ export async function watchRemote({
       }
       signal?.addEventListener('abort', done, { once: true })
     })
-  const graceSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms).unref?.())
   let failures = 0
   // The last scan's error: --once reports it instead of exiting as if nothing were open.
   let scanError = null
@@ -254,6 +244,7 @@ export async function watchRemote({
         // A refused token, a missing scope or a board that is gone will not
         // fix itself: stop with an error (non-zero exit). Anything else (the
         // network, a restart) is retried on the next poll.
+        if (stopped) break
         if (fatalWatchError(error)) throw error
         failures += 1
         scanError = error
@@ -274,16 +265,13 @@ export async function watchRemote({
       if (stopped) break
     }
   } finally {
-    stopped = true
+    onAbort()
     signal?.removeEventListener('abort', onAbort)
-    for (const entry of running.values()) {
-      try {
-        entry.child?.kill('SIGTERM')
-      } catch {
-        /* gone */
-      }
+    try {
+      await Promise.all([...running.values()].map((entry) => entry.done))
+    } finally {
+      clearTimeout(reportTimer)
     }
-    await Promise.race([Promise.all([...running.values()].map((entry) => entry.done)), graceSleep(KILL_GRACE_MS + 1000)])
   }
 }
 

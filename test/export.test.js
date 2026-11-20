@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { exportStatic } from '../src/export.js'
 import { PNG } from 'pngjs'
-import { capturesDir, createComment } from '../src/store.js'
+import { capturesDir, createComment, saveVariant } from '../src/store.js'
 import { sampleConfig, tempDir } from './helpers.js'
 
 function fakeClient() {
@@ -50,6 +50,18 @@ test('a static export holds the client, board data, captures and comments', asyn
   fs.writeFileSync(path.join(other, 'precious.txt'), 'keep me')
   await assert.rejects(exportStatic(config, { out: other, clientDir: fakeClient() }), /not a previous Shapewall export/)
   assert.ok(fs.existsSync(path.join(other, 'precious.txt')))
+})
+
+test('a static export copies only files referenced by visible variants', async () => {
+  const config = sampleConfig('export-variant-files')
+  await saveVariant(config, 'sample', { id: 'kept', pageId: 'home' })
+  const variants = path.join(config.outputDir, 'sample', 'variants')
+  fs.mkdirSync(variants)
+  const kept = ['kept.desktop.png', 'kept.desktop.html', 'kept.desktop.elements.json', 'kept.desktop.thumb.png']
+  for (const name of [...kept, 'removed.desktop.elements.json', 'kept.retired.png']) fs.writeFileSync(path.join(variants, name), 'x')
+  const out = path.join(tempDir('export-variant-out'), 'site')
+  await exportStatic(config, { out, clientDir: fakeClient() })
+  assert.deepEqual(fs.readdirSync(path.join(out, 'data', 'boards', 'sample', 'variants')).sort(), kept.sort())
 })
 
 test('a static export precomputes compare data and can keep comments in the browser', async () => {

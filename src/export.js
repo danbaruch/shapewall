@@ -26,7 +26,7 @@ function copyMatching(fromDir, toDir, test) {
 
 // Options: includeComments (default true); browserComments lets visitors add,
 // resolve and reply to comments that stay in their own browser
-// (localStorage), for a public demo; noindex asks search engines to skip it.
+// (IndexedDB), for a public demo; noindex asks search engines to skip it.
 export async function exportStatic(
   config,
   { out, clientDir = CLIENT_DIR, includeComments = true, includeChecks = false, browserComments = false, noindex = false } = {},
@@ -83,7 +83,13 @@ export async function exportStatic(
     // Screenshots, live HTML and its element maps (the board places pins from them).
     const media = (name) => /\.(png|html|elements\.json)$/.test(name)
     files += copyMatching(path.join(source, 'captures'), path.join(dir, 'captures'), media)
-    files += copyMatching(path.join(source, 'variants'), path.join(dir, 'variants'), media)
+    const variantFiles = new Set()
+    for (const variant of view.variants) {
+      for (const viewport of Object.values(variant.files)) {
+        for (const name of Object.values(viewport)) if (name) variantFiles.add(name)
+      }
+    }
+    files += copyMatching(path.join(source, 'variants'), path.join(dir, 'variants'), (name) => variantFiles.has(name))
     // Previous screenshots, for before/after on resolved comments (not their live HTML).
     if (includeComments) files += copyMatching(path.join(source, 'versions'), path.join(dir, 'versions'), (name) => name.endsWith('.png'))
     // Images on the exported comments and their replies (not markup PNGs,

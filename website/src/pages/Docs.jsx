@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { ArrowLeft, ArrowRight, ChevronDown, Download, Pencil, Search } from 'lucide-react'
 import { Container, cx } from '../components/ui.jsx'
@@ -32,6 +32,7 @@ function searchIndex() {
 }
 
 function DocsSearch({ onPick }) {
+  const resultsId = useId()
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
   const counted = useRef(false)
@@ -69,8 +70,9 @@ function DocsSearch({ onPick }) {
           autoComplete="off"
           spellCheck="false"
           role="combobox"
-          aria-expanded={results.length > 0}
-          aria-controls="docs-search-results"
+          aria-expanded={Boolean(query.trim())}
+          aria-controls={query.trim() ? resultsId : undefined}
+          aria-activedescendant={results[active] ? `${resultsId}-${active}` : undefined}
           aria-autocomplete="list"
           onChange={(event) => {
             setQuery(event.target.value)
@@ -99,15 +101,16 @@ function DocsSearch({ onPick }) {
       </label>
       {query.trim() ? (
         <ul
-          id="docs-search-results"
+          id={resultsId}
           role="listbox"
           className="absolute inset-x-0 top-12 z-20 max-h-80 overflow-auto rounded-xl border border-line bg-card p-1.5 shadow-xl shadow-black/10"
         >
           {results.length ? (
             results.map((entry, position) => (
-              <li key={entry.doc.path + (entry.id || '')} role="option" aria-selected={position === active}>
+              <li key={entry.doc.path + (entry.id || '')} id={`${resultsId}-${position}`} role="option" aria-selected={position === active}>
                 <button
                   type="button"
+                  tabIndex={-1}
                   onMouseEnter={() => setActive(position)}
                   onClick={() => go(entry)}
                   className={cx('block w-full rounded-lg px-3 py-2 text-left', position === active && 'bg-wall-wash')}

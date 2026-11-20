@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { boardDir, entryVersion, readManifest, writeJsonAtomic } from '../store.js'
-import { ID_RE, authFor, boardViewports, getBoard, getEnvironment, joinUrl } from '../config.js'
+import { ID_RE, authFor, boardViewports, captureOptions, getBoard, getEnvironment, inSetupScope, joinUrl } from '../config.js'
 import { withFileLock } from '../lock.js'
 import { validateCheckEnvironments } from './environments.js'
 import { REPORT_ID_RE, REPORT_MAX_BYTES, REPORTS_MAX, fingerprint, summary, validateReport } from './schema.js'
@@ -22,9 +22,26 @@ export function authFingerprint(config, board = null) {
   )
 }
 export function targetFingerprint(config, board, page, environment, viewport, auth = authFingerprint(config, board)) {
+  const options = captureOptions(config, board)
+  const localStorage = { ...options.localStorage, ...page.localStorage }
+  const setup = inSetupScope(board.setup, page) ? board.setup : null
   return fingerprint({
     url: joinUrl(environment.baseUrl, page.path),
     viewport: boardViewports(config, board)[viewport],
+    ...(setup
+      ? {
+          setup: {
+            path: setup.path,
+            actions: setup.actions.filter((action) => !action.viewports || action.viewports.includes(viewport)),
+            timeout: setup.timeout || config.timeouts.page,
+            ...(options.localStorage ? { localStorage: options.localStorage } : {}),
+          },
+        }
+      : {}),
+    ...(Object.keys(localStorage).length ? { localStorage } : {}),
+    ...(options.block.length ? { block: options.block } : {}),
+    ...(options.reducedMotion !== 'reduce' ? { reducedMotion: options.reducedMotion } : {}),
+    ...(config.checks?.budgets && Object.keys(config.checks.budgets).length ? { budgets: config.checks.budgets } : {}),
     actions: page.actions,
     waitFor: page.waitFor,
     expected: page.expectStatus,

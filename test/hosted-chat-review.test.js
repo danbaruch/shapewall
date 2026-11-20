@@ -15,7 +15,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { createRemote, pushDefinition, pushFiles } from '../src/remote/remote.js'
-import { createProject, invite, reauth, signUp, startHostedServer, tokenCall, writeLocalCaptures } from './hosted-helpers.js'
+import { createBrowser, createProject, invite, reauth, signUp, startHostedServer, tokenCall, writeLocalCaptures } from './hosted-helpers.js'
 import { connectAgent, parseEvents, until } from './hosted-chat-helpers.js'
 import { sampleConfig, tempDir } from './helpers.js'
 
@@ -245,6 +245,67 @@ test("comments by people outside an agent's audience never reach it: not in the 
   assert.ok(!cydAgain.includes('ADA-FOR-SCOUT'))
   await b.close()
   await s.close()
+})
+
+test('only the claimed and approved imported human comment appears in its review job', async () => {
+  await fresh(ada)
+  const device = createBrowser(hosted.port, hosted.origin)
+  const started = await device.post('/api/v1/device/start', { name: 'Import fixture', purpose: 'import' })
+  const approved = await ada.browser.post('/api/device/approve', {
+    code: started.json.userCode,
+    workspaceId: ws,
+    projectId: project.id,
+    scopes: ['read', 'push', 'import'],
+  })
+  assert.equal(approved.status, 200, approved.text)
+  const credential = (await device.post('/api/v1/device/poll', { deviceCode: started.json.deviceCode })).json.token
+  const remote = createRemote({ origin: hosted.origin, token: credential })
+  const at = new Date().toISOString()
+  const fixture = (kind, n) => ({
+    authorKind: kind,
+    localId: n,
+    importKey: String(n).repeat(64),
+    pageId: 'home',
+    viewport: 'desktop',
+    x: 1,
+    y: 2,
+    author: 'Local',
+    body: `Imported ${kind} ${n}`,
+    createdAt: at,
+    updatedAt: at,
+    status: 'open',
+    replies: [],
+  })
+  const imported = await remote.importComments('sample', {
+    sessionId: '9'.repeat(64),
+    batchKey: '8'.repeat(64),
+    comments: [fixture('local', 1), fixture('local', 2), fixture('guest', 3), fixture('agent', 4)],
+  })
+  const id = imported.mappings[0].remoteId
+  const seen = (await ada.browser.get(boardUrl('/comments'))).json.comments.find((row) => row.id === id)
+  const sent = await ada.browser.post(boardUrl(`/comments/${id}/send-to-agent`), {
+    agentId: builder.agentId,
+    approve: true,
+    dispatchHash: seen.dispatchHash,
+  })
+  assert.equal(sent.status, 200, sent.text)
+  const box = await machine(builder)
+  try {
+    const agent = createRemote({ origin: hosted.origin, token: builder.token })
+    await agent.setAgentStatus('sample', id, 'queued', { onlyFrom: [null] })
+    const turn = await box.call('POST', '/turns', { board: 'sample', comment: id })
+    assert.equal(turn.status, 201, turn.text)
+    const read = async () => (await box.call('GET', `/turns/${turn.json.turn.id}`)).json.job
+    const job = await read()
+    assert.match(JSON.stringify(job.context.comment), /Imported local 1/)
+    assert.doesNotMatch(JSON.stringify(job), /Imported (?:local 2|guest 3|agent 4)/)
+    // Once the exact claim ends, the turn cannot continue reading this imported comment.
+    await agent.setAgentStatus('sample', id, 'done')
+    assert.equal((await read()).context.comment, null)
+    await box.call('POST', `/turns/${turn.json.turn.id}/finish`, { seq: 1, message: { text: 'ok' } })
+  } finally {
+    await box.close()
+  }
 })
 
 test('one process holds an agent link: a second is refused, --takeover replaces it, work goes to one stream, and a turn stays with the process that took it', async () => {

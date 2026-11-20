@@ -96,6 +96,27 @@ test('reports preserve states and provenance, recapture/config changes become st
   assert.equal(checksView(c, b.id).views[0].state, 'stale')
 })
 
+test('reports track only the setup used for their page and viewport', async () => {
+  const c = config()
+  const board = c.boards[0]
+  const initial = report(c)
+  await saveReport(c, initial)
+  const state = () => checksView(c, board.id).views[0].state
+  board.setup = { path: '/entry', actions: [{ type: 'wait', ms: 10 }], pages: ['other'] }
+  assert.equal(state(), 'complete')
+  board.setup.pages = ['home']
+  assert.equal(state(), 'stale')
+  await saveReport(c, { ...report(c), auditedAt: new Date(Date.now() + 1000).toISOString() })
+  assert.equal(state(), 'complete')
+  board.setup.actions.push({ type: 'wait', ms: 1, viewports: ['phone'] })
+  assert.equal(state(), 'complete')
+  board.setup.path = '/alternate'
+  assert.equal(state(), 'stale')
+  board.setup.path = '/entry'
+  board.pages[0].localStorage = { mode: 'reader' }
+  assert.equal(state(), 'stale')
+})
+
 test('different measurement conditions cannot silently compare as equivalent', () => {
   const a = report(config())
   assert.equal(compareProfiles(a, a).comparable, true)

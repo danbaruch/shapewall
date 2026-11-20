@@ -156,10 +156,12 @@ test('variants are saved, listed and removed with their files', async () => {
   fs.mkdirSync(dir, { recursive: true })
   fs.writeFileSync(path.join(dir, 'calm-hero.desktop.png'), 'png')
   assert.equal(readVariants(config, board.id)[0].title, 'Calmer hero')
+  for (const name of ['calm-hero.desktop.elements.json', 'calm-hero.old-phone.html', 'calm-heroine.desktop.png'])
+    fs.writeFileSync(path.join(dir, name), 'fixture')
   assert.ok(resolveFile(config, board.id, 'variants', 'calm-hero.desktop.png'))
   assert.equal(await removeVariant(config, board.id, 'calm-hero'), true)
   assert.equal(readVariants(config, board.id).length, 0)
-  assert.equal(fs.existsSync(path.join(dir, 'calm-hero.desktop.png')), false)
+  assert.deepEqual(fs.readdirSync(dir), ['calm-heroine.desktop.png'])
 })
 
 test('file sets list each capture and variant file from one directory read', async () => {

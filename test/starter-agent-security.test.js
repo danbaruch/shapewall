@@ -674,3 +674,15 @@ test('the push sends the branch only: no tags from push.followTags', async () =>
   const refs = gitIn(bare, 'for-each-ref', '--format=%(refname)').trim().split('\n')
   assert.deepEqual(refs, [`refs/heads/${tree.branch}`])
 })
+
+test('starter sweep leaves listed resources alone when owner inspection fails', async () => {
+  const name = 'shapewall-agent-20260101000000-aaaaaa'
+  const runtime = {
+    async exec(args) {
+      if (args[0] === 'ps' || args[1] === 'ls') return { code: 0, stdout: name }
+      assert.ok(args.includes('inspect'), 'unexpected removal: ' + args.join(' '))
+      return { code: 1, stdout: '' }
+    },
+  }
+  assert.deepEqual(await sweepLeftovers({ runtime }), { containers: [], networks: [], folders: [] })
+})

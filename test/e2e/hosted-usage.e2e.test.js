@@ -10,7 +10,7 @@
 // widget keeps its options; a view can carry a layout; an owner sets the
 // default; a phone gets one column; printing follows reading order.
 // Set SHAPEWALL_SHOTS=<dir> to keep screenshots.
-import { after, before, test } from 'node:test'
+import { after, afterEach, before, test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -26,7 +26,6 @@ const SHOTS = process.env.SHAPEWALL_SHOTS ? path.resolve(process.env.SHAPEWALL_S
 let hosted
 let s
 let browser
-const contexts = []
 const shot = async (page, name) =>
   SHOTS && page.screenshot({ path: path.join(SHOTS, `${name}.png`), fullPage: true, animations: 'disabled' })
 const api = (rest) => `/api/workspaces/${s.ws}${rest}`
@@ -44,7 +43,6 @@ async function open(user, { width = 1440, height = 900, phone = false } = {}) {
     acceptDownloads: true,
     ...(phone ? { isMobile: true, hasTouch: true } : {}),
   })
-  contexts.push(context)
   await context.addCookies([...user.browser.jar].map(([name, value]) => ({ name, value, url: hosted.origin })))
   const page = await context.newPage()
   const errors = []
@@ -72,8 +70,10 @@ before(async () => {
   browser = await chromium.launch()
   if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true })
 })
+afterEach(async () => {
+  for (const context of browser?.contexts() || []) await context.close()
+})
 after(async () => {
-  for (const context of contexts) await context.close().catch(() => {})
   await browser?.close()
   await hosted?.close()
 })
@@ -122,6 +122,23 @@ test('the overview: tiles agree with the API, charts draw, each has a table, swi
   assert.match(await page.locator('[data-sw-chart="time"] [data-sw-chart-legend]').textContent(), /Builder \(docs\)\s*Not reported/)
   await s.ada.browser.call('DELETE', api('/usage/layout'))
   assert.deepEqual(errors, [])
+})
+
+test('browser history restores the exact previous Usage filters on Back and Forward', async () => {
+  const { page } = await open(s.ada)
+  await page.goto(url('/usage?range=7d'))
+  await page.locator('[data-sw-option="turns"]').click()
+  await page.waitForURL((at) => at.searchParams.get('tab') === 'turns')
+  const turns = page.url()
+  await page.locator('[data-sw-period]').click()
+  await page.locator('[data-sw-period-preset="30d"]').click()
+  await page.waitForURL((at) => at.search !== new URL(turns).search)
+  const changed = page.url()
+  await page.goBack()
+  await page.waitForURL(turns)
+  await page.locator('[data-sw-option="turns"][aria-checked="true"], [data-sw-grid="table"]').first().waitFor()
+  await page.goForward()
+  await page.waitForURL(changed)
 })
 
 test('a filter round trip: pick, see it in the address and the numbers, reload, press a chart row, clear', async () => {
@@ -716,7 +733,6 @@ test('a local board: the owner’s Usage view shows the turns of this computer; 
   const server = await listen(app)
   const origin = `http://127.0.0.1:${server.address().port}`
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
-  contexts.push(context)
   try {
     const page = await context.newPage()
     const errors = []
@@ -742,7 +758,6 @@ test('a local board: the owner’s Usage view shows the turns of this computer; 
     assert.deepEqual(errors, [])
     // Without the owner's token: the page says whose it is.
     const stranger = await browser.newContext({ viewport: { width: 1280, height: 900 } })
-    contexts.push(stranger)
     const other = await stranger.newPage()
     await other.goto(`${origin}/console?section=usage`)
     await other.locator('[data-sw-local-usage="error"]').waitFor()
@@ -765,10 +780,8 @@ async function openDashboard(user, options = {}) {
   return { page, errors }
 }
 const resetLayout = (user) => user.browser.call('DELETE', api('/usage/layout'))
-// Each of these tests starts from nothing: no page of an earlier test left open (one could still save), nobody's own layout,
-// no workspace default.
+// Each layout test starts without anyone's own layout or a workspace default.
 async function freshLayouts() {
-  for (const context of contexts.splice(0)) await context.close().catch(() => {})
   for (const person of [s.ada, s.ben, s.cyd]) await resetLayout(person)
   await s.ada.browser.call('DELETE', api('/usage/layout/default'))
 }

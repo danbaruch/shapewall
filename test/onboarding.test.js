@@ -133,6 +133,19 @@ test('reloadConfig swaps title, pages and journeys into the same object; restart
   assert.equal(config.title, 'Renamed', 'a broken edit keeps the last good config')
 })
 
+test('reloadConfig applies and removes a checks-only edit', () => {
+  const { file } = sampleConfigFile('onboarding-reload-checks')
+  const config = loadConfig(file)
+  const raw = JSON.parse(fs.readFileSync(file, 'utf8'))
+  const policy = { seo: false, budgets: { loadMs: 1200 } }
+  fs.writeFileSync(file, JSON.stringify({ ...raw, checks: policy }))
+  assert.deepEqual(reloadConfig(config).applied, ['checks'])
+  assert.deepEqual(config.checks, policy)
+  fs.writeFileSync(file, JSON.stringify(raw))
+  assert.deepEqual(reloadConfig(config).applied, ['checks'])
+  assert.equal(config.checks, undefined)
+})
+
 test('watchConfig applies an edit (also a save by rename) and logs it; stop ends the watch', async () => {
   const { file } = sampleConfigFile('onboarding-watch')
   const config = loadConfig(file)

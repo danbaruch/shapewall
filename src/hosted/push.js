@@ -27,7 +27,7 @@ import { referencedVersions } from './retention.js'
 import { ID_PATTERNS, newId } from './crypto.js'
 import { transaction } from './db.js'
 import { commentFileBytes } from './comment-files.js'
-import { openPushIds, pushStatus, staleOpenPushes, tenant } from './tenancy.js'
+import { findApiToken, openPushIds, pushStatus, staleOpenPushes, tenant } from './tenancy.js'
 import { mergeCheckEnvironments, validateCheckEnvironments } from '../checks/environments.js'
 import { projectDir } from './projects.js'
 import { CHECKS_BUNDLE_MAX, validateChecksBundle } from '../checks/transport.js'
@@ -425,6 +425,10 @@ export function createPushStore(
       expire(push.id, now)
       throw new PushError(409, 'push_expired', 'This push is more than an hour old; start a new one.')
     }
+    // With a preexisting restore or lost staging directory, receiving another
+    // file must not recreate a partial upload that can replace the board.
+    if (!fs.existsSync(stagingDir(push.id)))
+      throw new PushError(409, 'push_incomplete', 'The files of this push are not on the server any more; start a new push.')
     return { ...push, definition: JSON.parse(push.definition) }
   }
 
@@ -488,14 +492,10 @@ export function createPushStore(
 
   // Writes the cleaned manifest and variants, swaps the staging folder in
   // and records the board definition.
-  function commit({ pushId, projectId, manifest, variants, checks, now = new Date() }) {
+  function commit({ pushId, projectId, manifest, variants, checks, now = new Date(), credential }) {
     const push = openPush(pushId, projectId, now)
     const { board, viewports } = push.definition
     const staging = stagingDir(push.id)
-    // start() made the folder: without it the uploads are gone (a crash, or a
-    // restored backup), and committing would replace the board with nothing.
-    if (!fs.existsSync(staging))
-      throw new PushError(409, 'push_incomplete', 'The files of this push are not on the server any more; start a new push.')
     let cleanChecks = { schemaVersion: 1, reports: [] }
     if (checks !== undefined) {
       try {
@@ -637,6 +637,13 @@ export function createPushStore(
     }
     function commitInLock() {
       const at = now.toISOString()
+      if (credential) {
+        const live = findApiToken(db, credential.hash, credential.now().toISOString())
+        if (!live || live.id !== credential.id || live.project_id !== projectId || live.workspace_id !== t.workspaceId)
+          throw new PushError(401, 'bad_token', 'This token is no longer valid for this project.')
+        if (!JSON.parse(live.scopes).includes('push'))
+          throw new PushError(403, 'missing_scope', 'This token does not have the "push" scope.')
+      }
       const existing = t.get('SELECT board_id FROM boards WHERE workspace_id = :ws AND project_id = :project AND board_id = :board', {
         project: projectId,
         board: board.id,

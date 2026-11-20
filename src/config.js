@@ -585,6 +585,12 @@ function validateSetup(raw, where, pages, viewportNames, pageTimeout, problems) 
   return { path: setupPath, actions, ...scope, ...(timeout ? { timeout } : {}) }
 }
 
+export const captureOptions = (config, board) => ({
+  block: board?.block || config.block || [],
+  reducedMotion: board?.reducedMotion || config.reducedMotion || 'reduce',
+  localStorage: board?.localStorage || null,
+})
+
 // Whether a page starts from the board's setup state: every page, unless the
 // setup lists groups and/or pages (then a page in either).
 export function inSetupScope(setup, page) {

@@ -13,6 +13,7 @@ import { pathToFileURL } from 'node:url'
 import {
   authFor,
   boardViewports,
+  captureOptions,
   frameSize,
   getBoard,
   getEnvironment,
@@ -354,12 +355,7 @@ export async function runSetup({ browser, setup, baseUrl, viewportName, size, st
   }
 }
 
-// A board's capture settings for shootPage and runSetup.
-export const captureOptions = (config, board) => ({
-  block: board?.block || config.block || [],
-  reducedMotion: board?.reducedMotion || config.reducedMotion || 'reduce',
-  localStorage: board?.localStorage || null,
-})
+export { captureOptions }
 
 // The state each shot starts from: the auth state (`base`), or for a page in
 // the setup's scope the setup's state for that viewport, run once on first
@@ -673,7 +669,9 @@ export async function runCapture({
     if (!partial) {
       if (status.failed === status.total) {
         const hint = failedHint()
-        throw new Error(`every shot failed; the previous captures were kept.${hint ? ` ${hint}` : ''}`)
+        const error = new Error(`every shot failed; the previous captures were kept.${hint ? ` ${hint}` : ''}`)
+        error.captureManifest = manifest
+        throw error
       }
       const old = `${finalDir}.prev`
       fs.rmSync(old, { recursive: true, force: true })

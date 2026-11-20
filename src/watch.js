@@ -25,15 +25,13 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { spawn } from 'node:child_process'
+import { runWatchCommand } from './watch-command.js'
 import { recaptureComment } from './agent/feedback-loop.js'
 import { getBoard } from './config.js'
 import { feedbackContext, feedbackItem } from './feedback.js'
 import { acquireLock, readLock, releaseLock } from './lock.js'
 import { addReply, boardDir, getComment, listComments, setAgentStatus } from './store.js'
 import { absoluteProgram } from './which.js'
-
-const KILL_GRACE_MS = 5000
 
 // Splits a command string into argv, like a shell would for plain words and
 // quotes, but without one: no variables, globs, pipes or redirects. Those
@@ -117,8 +115,6 @@ export function commentEnv(config, board, item, commentFile) {
   }
 }
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms).unref())
-
 // Runs until `signal` aborts (or, with `once`, until the comments open right
 // now are handed out and their commands have finished). Options:
 // - exec: command string; without it each comment is printed with `out`
@@ -148,6 +144,7 @@ export async function watchComments({
   log = (line) => process.stderr.write(`${line}\n`),
   env = process.env,
 }) {
+  if (signal?.aborted) return
   const board = getBoard(config, boardId)
   if (recapture && (!exec || !claim)) throw new Error('--recapture needs --exec and cannot be used with --no-claim')
   if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 4) throw new Error('--concurrency must be 1 to 4')
@@ -167,13 +164,14 @@ export async function watchComments({
     throw new Error(`Another "shapewall watch" is running for board "${board.id}"${holder?.pid ? ` (pid ${holder.pid})` : ''}.`)
   }
 
-  const running = new Map() // comment id -> { child, done }
+  const running = new Map() // comment id -> { done }
   // --no-claim: what this process handed out, as id:reopenCount (a reopen is new).
   const handed = new Set()
   const handedKey = (comment) => `${comment.id}:${comment.reopenCount || 0}`
   // Every status the watcher sets says it was the watcher.
   const setStatus = (id, value, options = {}) => setAgentStatus(config, board.id, id, value, { ...options, actor: 'shapewall' })
   const baseline = newOnly ? Math.max(0, ...listComments(config, board.id).map((comment) => comment.id)) : 0
+  const lifetime = new AbortController()
   let stopped = false
   let scanning = null
   let again = false
@@ -192,6 +190,7 @@ export async function watchComments({
   }
 
   const runCommand = async (item) => {
+    lifetime.signal.throwIfAborted()
     const commentFile = path.join(agentDir, `comment-${item.id}.json`)
     const logFile = path.join(agentDir, `comment-${item.id}.log`)
     const json = JSON.stringify({ board: board.id, comment: item }, null, 2)
@@ -203,39 +202,13 @@ export async function watchComments({
     try {
       if (claim) await setStatus(item.id, 'working')
       log(`#${item.id} working: ${path.basename(argv[0])} (log ${path.relative(process.cwd(), logFile) || logFile})`)
-      result = await new Promise((resolve) => {
-        let child
-        try {
-          child = spawn(argv[0], argv.slice(1), {
-            cwd: config.dir,
-            env: { ...env, ...commentEnv(config, board, item, commentFile) },
-            stdio: ['pipe', logFd, logFd],
-            shell: false,
-            windowsHide: true,
-          })
-        } catch (error) {
-          resolve({ code: null, error })
-          return
-        }
-        const entry = running.get(item.id)
-        if (entry) entry.child = child
-        let killTimer = null
-        const timer = setTimeout(() => {
-          child.kill('SIGTERM')
-          killTimer = setTimeout(() => child.kill('SIGKILL'), KILL_GRACE_MS)
-        }, timeoutMs)
-        child.stdin.on('error', () => {}) // a command that does not read stdin
-        child.stdin.end(json)
-        child.once('error', (error) => {
-          clearTimeout(timer)
-          clearTimeout(killTimer)
-          resolve({ code: null, error })
-        })
-        child.once('exit', (code, exitSignal) => {
-          clearTimeout(timer)
-          clearTimeout(killTimer)
-          resolve({ code, signal: exitSignal, timedOut: Date.now() - began >= timeoutMs })
-        })
+      result = await runWatchCommand(argv, {
+        cwd: config.dir,
+        env: { ...env, ...commentEnv(config, board, item, commentFile) },
+        logFd,
+        input: json,
+        timeoutMs,
+        signal: lifetime.signal,
       })
     } finally {
       fs.closeSync(logFd)
@@ -252,7 +225,7 @@ export async function watchComments({
     } catch {
       /* deleted while the agent ran */
     }
-    if (recapture && comment && result.code === 0 && !stopped && !['needs-human', null].includes(comment.agentStatus)) {
+    if (recapture && comment && !result.timedOut && result.code === 0 && !stopped && !['needs-human', null].includes(comment.agentStatus)) {
       try {
         await recaptureComment({ config, board, id: item.id, capture, log })
         if (comment.status === 'open') await setStatus(item.id, 'done')
@@ -273,21 +246,20 @@ export async function watchComments({
     // of its own, handled above). A silent exit 0 (a command that ignored the
     // comment, a wrong --exec) is for a person to look at, not a fix.
     const replied = (comment.replies || []).length > repliesBefore
-    if (result.code === 0 && replied) {
+    if (!stopped && !result.timedOut && result.code === 0 && replied) {
       await setStatus(item.id, 'done')
       log(`#${item.id} done (exit 0, ${seconds}s)`)
       return
     }
-    const why =
-      result.code === 0
-        ? 'the agent command exited 0 without a reply or a status change, so nothing says what it did'
-        : stopped
-          ? 'shapewall watch stopped while the agent command was running'
-          : result.error
-            ? `the agent command could not start (${result.error.code || result.error.message})`
-            : result.timedOut
-              ? `the agent command ran past the ${Math.round(timeoutMs / 60000)} minute timeout and was stopped`
-              : `the agent command exited with ${result.code === null ? `signal ${result.signal}` : `code ${result.code}`}`
+    const why = stopped
+      ? 'shapewall watch stopped while the agent command was running'
+      : result.timedOut
+        ? `the agent command ran past the ${Math.round(timeoutMs / 60000)} minute timeout and was stopped`
+        : result.error
+          ? `the agent command could not start (${result.error.code || result.error.message})`
+          : result.code === 0
+            ? 'the agent command exited 0 without a reply or a status change, so nothing says what it did'
+            : `the agent command exited with ${result.code === null ? `signal ${result.signal}` : `code ${result.code}`}`
     await addReply(config, board.id, item.id, { author: 'shapewall', body: `Needs a person: ${why}. Log: ${logFile}` })
     await setStatus(item.id, 'needs-human')
     log(`#${item.id} needs-human: ${why}`)
@@ -312,7 +284,7 @@ export async function watchComments({
         out(JSON.stringify({ board: board.id, comment: item }))
         continue
       }
-      const entry = { child: null, done: null }
+      const entry = { done: null }
       running.set(item.id, entry)
       entry.done = runCommand(item)
         .catch(async (error) => {
@@ -362,6 +334,7 @@ export async function watchComments({
   let poll = null
   const onAbort = () => {
     stopped = true
+    lifetime.abort()
     wake?.()
   }
   signal?.addEventListener('abort', onAbort, { once: true })
@@ -399,20 +372,13 @@ export async function watchComments({
     }
   } finally {
     stopped = true
+    lifetime.abort()
     clearTimeout(debounce)
     clearInterval(poll)
     watcher?.close()
     signal?.removeEventListener('abort', onAbort)
-    for (const entry of running.values()) {
-      try {
-        entry.child?.kill('SIGTERM')
-      } catch {
-        /* gone */
-      }
-    }
-    // Let the runners record what happened (needs-human) before unlocking.
-    await Promise.race([Promise.all([...running.values()].map((entry) => entry.done)), sleep(KILL_GRACE_MS + 1000)])
     if (scanning) await scanning
+    await Promise.all([...running.values()].map((entry) => entry.done))
     if (claim) releaseLock(lockFile)
   }
 }

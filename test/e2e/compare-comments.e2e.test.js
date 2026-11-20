@@ -314,6 +314,41 @@ test('phone: the compare bar is one row and the thread is the full sheet, with i
   }
 })
 
+test('phone: dragging from a compare image in Comment mode pans without opening a composer', async () => {
+  const { context, page } = await openBoard(PHONE, '?cmp=staging_production')
+  try {
+    await page.tap('[data-sw-comment-mode]')
+    await settle(page)
+    // Use a point that actually hits a capture inside the visible canvas.
+    const point = await page.evaluate(() => {
+      const area = document.querySelector('[data-sw-canvas]').getBoundingClientRect()
+      for (let y = area.top + 55; y < area.bottom - 80; y += 10) {
+        for (let x = area.left + 20; x < area.right - 20; x += 10) {
+          const frame = document.elementFromPoint(x, y)?.closest('[data-sw-frame]')
+          if (frame) return { x, y }
+        }
+      }
+    })
+    assert.ok(point, 'a compare capture is visible')
+    const cameraY = () => page.locator('.react-flow__viewport').evaluate((node) => new DOMMatrix(getComputedStyle(node).transform).m42)
+    const initial = await cameraY()
+    const cdp = await context.newCDPSession(page)
+    const touch = (type, offset) =>
+      cdp.send('Input.dispatchTouchEvent', {
+        type,
+        touchPoints: offset == null ? [] : [{ x: point.x, y: point.y + offset }],
+      })
+    await touch('touchStart', 0)
+    for (let dy = 10; dy <= 70; dy += 10) await touch('touchMove', dy)
+    await touch('touchEnd')
+    await settle(page)
+    assert.ok((await cameraY()) - initial > 35)
+    assert.equal(await page.locator('[data-sw-composer]').count(), 0)
+  } finally {
+    await context.close()
+  }
+})
+
 test('phone: a tap on the Production side places a comment there', async () => {
   const { context, page, errors } = await openBoard(PHONE, '?cmp=staging_production')
   try {

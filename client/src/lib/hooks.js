@@ -154,7 +154,13 @@ function pushEntry(entry) {
 
 if (typeof window !== 'undefined') {
   window.addEventListener('popstate', () => {
-    writeSearch(currentSearch)
+    // Only this hook's own overlay traversal keeps edits to board parameters.
+    // Ordinary history and the hosted console router own their landed URL.
+    if (listeners.size && (ignorePops > 0 || overlays.length)) writeSearch(currentSearch)
+    else {
+      currentSearch = window.location.search
+      notify()
+    }
     if (ignorePops > 0) {
       ignorePops -= 1
       if (ignorePops === 0) {

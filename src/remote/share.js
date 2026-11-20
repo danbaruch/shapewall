@@ -88,19 +88,22 @@ export function commentUploads(config, boardId, comment, portable) {
   const folder = boardDir(config, boardId)
   const uploads = []
   const refs = (images, slot) =>
-    readImages(images).flatMap((image, index) => {
+    readImages(images).map((image, index) => {
       const file = commentFilePath(folder, image.file)
-      let data = null
+      let data
       try {
-        const stat = file ? fs.lstatSync(file) : null
-        if (stat?.isFile() && stat.size <= COMMENT_IMAGE_READ_MAX) data = fs.readFileSync(file)
-      } catch {
-        data = null
+        if (!file) throw new Error('Missing image')
+        data = readCaptureFile(config, file, COMMENT_IMAGE_READ_MAX)
+        if (!data.length) throw new Error('Empty image')
+      } catch (cause) {
+        throw new Error(
+          `Board ${boardId}, comment #${comment.id} (${slot}): cannot read attachment "${image.name}". Restore it before moving comments.`,
+          { cause },
+        )
       }
-      if (!data) return []
       const ref = hash(`${portable.importKey}\0${slot}:${index}\0${hash(data.toString('base64'))}`)
       uploads.push({ ref, name: image.name, mediaType: image.mediaType, data })
-      return [{ ref, name: image.name }]
+      return { ref, name: image.name }
     })
   const own = refs(comment.images, 'comment')
   if (own.length) portable.images = own
@@ -115,6 +118,10 @@ export function commentUploads(config, boardId, comment, portable) {
 function portableComments(config, board, projectPath) {
   const uploads = new Map()
   const comments = listComments(config, board.id).map((item) => {
+    if (item.environment && item.environment !== board.environments[0].id)
+      throw new Error(
+        `Board ${board.id}, comment #${item.id} is pinned to environment "${item.environment}". Only the default environment's captures can move. Use --no-comments to keep comments here.`,
+      )
     const portable = portableComment(item, projectPath, board.id)
     const files = commentUploads(config, board.id, item, portable)
     if (files.length) uploads.set(portable.importKey, files)
@@ -274,13 +281,47 @@ async function runShare(
     }
   }
   const maps = readMap(config, origin)
-  const needsImport = plans.some(({ board, comments }) =>
-    comments.some(
-      (item) =>
-        maps.boards[board.id]?.projectId !== project?.project.id ||
-        maps.boards[board.id]?.comments?.[item.localId]?.localHash !== hash(item),
-    ),
-  )
+  // A lost close response can be replayed by its original credential after
+  // the one-time scope was consumed. Other interrupted moves need the grant.
+  const credentialId = () => hash(`share credential\0${settings.token}`)
+  const pending = maps.pending
+  let closeReplayed = false
+  if (remote && pending?.projectId === project.project.id && !project.token.scopes.includes('import')) {
+    // Old clients recorded neither the credential nor the board that closed
+    // the session. The receipt on the server binds both. Try the likely last
+    // board first, then other existing boards in this project when necessary.
+    const legacy = !pending.tokenId
+    const boardsToCheck = legacy
+      ? [...new Set([...plans.map(({ board }) => board.id).reverse(), ...project.boards.map((board) => board.id)])]
+      : pending.tokenId === credentialId() && pending.commitBoard
+        ? [pending.commitBoard]
+        : []
+    for (const board of boardsToCheck) {
+      try {
+        await remote.importComments(board, {
+          sessionId: pending.sessionId,
+          batchKey: hash(`commit:${pending.sessionId}`),
+          comments: [],
+          commit: true,
+        })
+        closeReplayed = true
+        break
+      } catch (error) {
+        if (error.code === 'missing_scope') break // The session has no commit receipt.
+        if (legacy && ['unknown_board', 'import_key_reused'].includes(error.code)) continue
+        throw error
+      }
+    }
+  }
+  const needsImport =
+    (!flags['no-comments'] && pending && pending.projectId === project?.project.id && !closeReplayed) ||
+    plans.some(({ board, comments }) =>
+      comments.some(
+        (item) =>
+          maps.boards[board.id]?.projectId !== project?.project.id ||
+          maps.boards[board.id]?.comments?.[item.localId]?.localHash !== hash(item),
+      ),
+    )
   if (!remote || (needsImport && !project.token.scopes.includes('import'))) {
     if (env.SHAPEWALL_TOKEN || flags['token-file'])
       throw new Error(
@@ -299,13 +340,16 @@ async function runShare(
   // Stable across a crash, distinct after commit. Keep pending session in the
   // private map before sending its first request, so retries stay idempotent.
   let sessionId
-  updateMap(config, origin, (data) => {
-    if (!data.pending || data.pending.projectId !== project.project.id)
-      data.pending = { projectId: project.project.id, sessionId: hash(`${Date.now()}:${Math.random()}`) }
-    sessionId = data.pending.sessionId
-  })
+  if (project.token.scopes.includes('import')) {
+    updateMap(config, origin, (data) => {
+      if (!data.pending || data.pending.projectId !== project.project.id || data.pending.tokenId !== credentialId())
+        data.pending = { projectId: project.project.id, tokenId: credentialId(), sessionId: hash(`${Date.now()}:${Math.random()}`) }
+      sessionId = data.pending.sessionId
+    })
+  }
   let committedBoard = null
-  for (const plan of plans) {
+  const frozenBoards = new Map()
+  async function moveBoard(plan) {
     if (signal?.aborted) throw new Error('Share cancelled.')
     const { board, files, checks } = plan
     if (!readManifest(config, board.id)) throw new Error(`Board ${board.id} has no captures. Capture it before sharing.`)
@@ -315,104 +359,112 @@ async function runShare(
         ? { ...existing, pending: false, readOnly: existing.previousReadOnly === true }
         : null
       : existing
-    let frozen = false
-    try {
-      if (!flags['no-comments']) {
-        await writeMigration(
-          config,
-          board.id,
-          { ...prior, pending: true, readOnly: true, previousReadOnly: prior?.readOnly === true },
-          { beforeWrite: () => beforeFreeze(board.id) },
-        )
-        frozen = true
-        // Read again after freezing under the comment lock: no edits made
-        // between planning and approval are lost from this move.
-        Object.assign(plan, portableComments(config, board, projectPath))
-      }
-      if (
-        !project.token.scopes.includes('import') &&
-        plan.comments.some((item) => maps.boards[board.id]?.comments?.[item.localId]?.localHash !== hash(item))
+    if (!flags['no-comments']) {
+      await writeMigration(
+        config,
+        board.id,
+        { ...prior, pending: true, readOnly: true, previousReadOnly: prior?.readOnly === true },
+        { beforeWrite: () => beforeFreeze(board.id) },
       )
-        throw new Error('Local comments changed during sign-in. Run shapewall share again to approve their import.')
-      const definition = portableDefinition(config, { ...board, journeys: listJourneys(config, board) })
-      out(`Pushing ${board.id}: ${files.length} capture/history files`)
-      const started = await remote.startPush(definition)
-      if (checks && !started.limits.checks) throw new Error('This server does not support explicitly included check reports.')
-      let pushed = 0
-      for (const [area, name, file] of files) {
-        if (signal?.aborted) throw new Error('Share cancelled.')
-        if (name.endsWith('.elements.json') && !started.limits.elements) continue
-        const cap = name.endsWith('.html')
-          ? started.limits.html
-          : name.endsWith('.elements.json')
-            ? started.limits.elements
-            : started.limits.png
-        const bytes = readCapture(config, file, cap)
-        if (bytes.length > cap) throw new Error(`Capture ${area}/${name} exceeds the server limit; nothing was silently skipped.`)
-        await remote.pushFile(started.id, area, name, bytes)
-        pushed += 1
-        if (pushed % 25 === 0) out(`Pushed ${pushed}/${files.length} files`)
-      }
-      const pushedBoard = await remote.commitPush(started.id, {
-        manifest: portableManifest(config, board, readManifest(config, board.id)),
-        variants: portableVariants(readVariants(config, board.id)),
-        checks,
-      })
-      if (checks && pushedBoard.checks !== checks.reports.length) throw new Error('The server did not confirm all included check reports.')
-      // A server-supplied URL is never trusted for navigation or credentials.
-      const url = `${origin}/w/${encodeURIComponent(project.workspace.id)}/p/${encodeURIComponent(project.project.id)}/?board=${encodeURIComponent(board.id)}`
-      if (!pushedBoard.board || pushedBoard.board !== board.id) throw new Error('The server committed a different board.')
-      urls.push(url)
-      if (project.token.scopes.includes('import')) committedBoard = board.id
-      if (!flags['no-comments'] && project.token.scopes.includes('import')) {
-        let importedCount = 0
-        for (const comments of importBatches(plan.comments)) {
-          // Their images first, one request each, cleaned and counted
-          // against the quota by the server like any upload.
-          for (const comment of comments) {
-            for (const upload of plan.uploads?.get(comment.importKey) || []) {
-              if (signal?.aborted) throw new Error('Share cancelled.')
-              await remote.importImage(board.id, {
-                sessionId,
-                ref: upload.ref,
-                image: { name: upload.name, mediaType: upload.mediaType, data: upload.data.toString('base64') },
-              })
-            }
+      frozenBoards.set(board.id, { prior, marker: null })
+      // Read again after freezing under the comment lock: no edits made
+      // between planning and approval are lost from this move.
+      Object.assign(plan, portableComments(config, board, projectPath))
+    }
+    if (
+      !project.token.scopes.includes('import') &&
+      plan.comments.some((item) => maps.boards[board.id]?.comments?.[item.localId]?.localHash !== hash(item))
+    )
+      throw new Error('Local comments changed during sign-in. Run shapewall share again to approve their import.')
+    const definition = portableDefinition(config, { ...board, journeys: listJourneys(config, board) })
+    out(`Pushing ${board.id}: ${files.length} capture/history files`)
+    const started = await remote.startPush(definition)
+    if (checks && !started.limits.checks) throw new Error('This server does not support explicitly included check reports.')
+    let pushed = 0
+    for (const [area, name, file] of files) {
+      if (signal?.aborted) throw new Error('Share cancelled.')
+      if (name.endsWith('.elements.json') && !started.limits.elements) continue
+      const cap = name.endsWith('.html')
+        ? started.limits.html
+        : name.endsWith('.elements.json')
+          ? started.limits.elements
+          : started.limits.png
+      const bytes = readCapture(config, file, cap)
+      if (bytes.length > cap) throw new Error(`Capture ${area}/${name} exceeds the server limit; nothing was silently skipped.`)
+      await remote.pushFile(started.id, area, name, bytes)
+      pushed += 1
+      if (pushed % 25 === 0) out(`Pushed ${pushed}/${files.length} files`)
+    }
+    const pushedBoard = await remote.commitPush(started.id, {
+      manifest: portableManifest(config, board, readManifest(config, board.id)),
+      variants: portableVariants(readVariants(config, board.id)),
+      checks,
+    })
+    if (checks && pushedBoard.checks !== checks.reports.length) throw new Error('The server did not confirm all included check reports.')
+    // A server-supplied URL is never trusted for navigation or credentials.
+    const url = `${origin}/w/${encodeURIComponent(project.workspace.id)}/p/${encodeURIComponent(project.project.id)}/?board=${encodeURIComponent(board.id)}`
+    if (!pushedBoard.board || pushedBoard.board !== board.id) throw new Error('The server committed a different board.')
+    urls.push(url)
+    if (project.token.scopes.includes('import')) committedBoard = board.id
+    if (!flags['no-comments'] && project.token.scopes.includes('import')) {
+      let importedCount = 0
+      for (const comments of importBatches(plan.comments)) {
+        // Their images first, one request each, cleaned and counted
+        // against the quota by the server like any upload.
+        for (const comment of comments) {
+          for (const upload of plan.uploads?.get(comment.importKey) || []) {
+            if (signal?.aborted) throw new Error('Share cancelled.')
+            await remote.importImage(board.id, {
+              sessionId,
+              ref: upload.ref,
+              image: { name: upload.name, mediaType: upload.mediaType, data: upload.data.toString('base64') },
+            })
           }
-          importedCount += comments.length
-          const result = await remote.importComments(board.id, { sessionId, batchKey: hash({ board: board.id, comments }), comments })
-          out(
-            `Importing ${board.id}: ${importedCount}/${plan.comments.length} comments (${result.imported} new, ${result.updated} updated, ${result.skipped} unchanged)`,
-          )
-          conflicts.push(...result.conflicts.map((id) => `${board.id}:${id}`))
-          updateMap(config, origin, (data) => {
-            const stored = (data.boards[board.id] ||= { projectId: project.project.id, comments: {} })
-            if (stored.projectId !== project.project.id) {
-              stored.projectId = project.project.id
-              stored.comments = {}
-            }
-            for (const item of result.mappings)
-              stored.comments[item.localId] = { ...item, localHash: hash(comments.find((local) => local.localId === item.localId)) }
-          })
         }
-        committedBoard = board.id
-      }
-      if (!flags['no-comments'] && !conflicts.some((id) => id.startsWith(`${board.id}:`))) {
-        await writeMigration(config, board.id, {
-          url,
-          remote: origin,
-          projectId: project.project.id,
-          migratedAt: new Date().toISOString(),
-          readOnly: true,
+        importedCount += comments.length
+        const result = await remote.importComments(board.id, { sessionId, batchKey: hash({ board: board.id, comments }), comments })
+        out(
+          `Importing ${board.id}: ${importedCount}/${plan.comments.length} comments (${result.imported} new, ${result.updated} updated, ${result.skipped} unchanged)`,
+        )
+        conflicts.push(...result.conflicts.map((id) => `${board.id}:${id}`))
+        updateMap(config, origin, (data) => {
+          const stored = (data.boards[board.id] ||= { projectId: project.project.id, comments: {} })
+          if (stored.projectId !== project.project.id) {
+            stored.projectId = project.project.id
+            stored.comments = {}
+          }
+          for (const item of result.mappings)
+            stored.comments[item.localId] = { ...item, localHash: hash(comments.find((local) => local.localId === item.localId)) }
         })
-        frozen = false
       }
-    } finally {
-      if (frozen) await writeMigration(config, board.id, prior)
+      committedBoard = board.id
+    }
+    if (!flags['no-comments'] && !conflicts.some((id) => id.startsWith(`${board.id}:`))) {
+      frozenBoards.get(board.id).marker = {
+        url,
+        remote: origin,
+        projectId: project.project.id,
+        migratedAt: new Date().toISOString(),
+        readOnly: true,
+      }
     }
   }
-  if (committedBoard) {
-    await remote.importComments(committedBoard, { sessionId, batchKey: hash(`commit:${sessionId}`), comments: [], commit: true })
+  try {
+    for (const plan of plans) await moveBoard(plan)
+    if (committedBoard) {
+      updateMap(config, origin, (data) => {
+        data.pending.commitBoard = committedBoard
+      })
+      await remote.importComments(committedBoard, { sessionId, batchKey: hash(`commit:${sessionId}`), comments: [], commit: true })
+    }
+    for (const [boardId, { marker }] of frozenBoards) {
+      if (marker) {
+        await writeMigration(config, boardId, marker)
+        frozenBoards.delete(boardId)
+      }
+    }
+  } finally {
+    for (const [boardId, { prior }] of frozenBoards) await writeMigration(config, boardId, prior)
   }
   updateMap(config, origin, (data) => {
     delete data.pending

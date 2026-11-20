@@ -41,7 +41,7 @@ import { INK_RGB, drawingBounds } from './comment-drawing.js'
 export const IMAGE_SIDE_MAX = 8192
 export const IMAGE_PIXELS_MAX = 16_000_000
 export const MEDIA_TYPES = Object.fromEntries(Object.entries(COMMENT_IMAGE_TYPES).map(([type, ext]) => [ext, type]))
-export const MARKUP_RE = /^markup-[1-9][0-9]{0,15}(?:-r[1-9][0-9]{0,5})?\.png$/
+export const MARKUP_RE = /^markup-[1-9][0-9]{0,15}(?:-r[1-9][0-9]{0,5}(?:-env)?)?\.png$/
 
 const bad = (message, code = 'bad_image', status = 400) => new CommentError(status, code, message)
 
@@ -504,9 +504,10 @@ export function renderMarkup(screenshot, drawing) {
 // The markup file of a comment (replyId null) or reply: rendered once from
 // `screenshot` (the capture it was drawn on), then read from disk. Returns
 // the path, or null when there is no drawing or no screenshot.
-export function markupFile(boardFolder, { commentId, replyId = null, drawing, screenshot }) {
+export function markupFile(boardFolder, { commentId, replyId = null, drawing, screenshot, kind }) {
   if (!drawing?.shapes?.length || !screenshot) return null
-  const name = markupName(commentId, replyId)
+  // A legacy reply cache may contain pixels from the default environment.
+  const name = replyId && kind?.startsWith('env:') ? `markup-${commentId}-r${replyId}-env.png` : markupName(commentId, replyId)
   const existing = commentFilePath(boardFolder, name)
   if (existing) return existing
   let rendered
