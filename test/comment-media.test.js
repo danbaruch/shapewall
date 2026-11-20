@@ -602,6 +602,21 @@ test('markup: rendered once to the board folder, from the capture it was drawn o
 
 // ---- What agents get ------------------------------------------------------------------
 
+test('a reply drawing uses the comment environment even with a legacy default capture version', async () => {
+  const { config, board, folder } = boardWithCapture('media-other-env')
+  board.environments.push({ id: 'preview', baseUrl: board.baseUrl })
+  const dir = path.join(folder, 'envs', 'preview', 'captures')
+  fs.mkdirSync(dir, { recursive: true })
+  const shot = path.join(dir, 'home.desktop.png')
+  fs.writeFileSync(shot, solidPng(40, 30))
+  const pin = await createComment(config, board, { ...valid, environment: 'preview' })
+  const { comment, reply } = await addReply(config, board.id, pin.id, { body: 'Here', drawing: { shapes: [box] } })
+  assert.equal(reply.drawing.captureVersion, null)
+  comment.replies[0].drawing.captureVersion = '20260101T000000000Z-aaaa'
+  const context = feedbackContext(config, board, { media: { markupPath: ({ screenshot }) => screenshot } })
+  assert.equal(feedbackItem(context, comment).replies[0].markup, shot)
+})
+
 test('agents: comments --json, the text list and the model context include the media', async () => {
   const { config, board, folder } = boardWithCapture('media-agents')
   const comment = await createComment(config, board, {

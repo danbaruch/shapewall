@@ -430,12 +430,13 @@ export async function removeVariant(config, boardId, variantId) {
     const list = readVariants(config, boardId)
     const kept = list.filter((item) => item.id !== variantId)
     if (kept.length === list.length) return false
-    writeJsonAtomic(file, { variants: kept })
     const dir = path.join(boardDir(config, boardId), 'variants')
-    const board = config.boards?.find((item) => item.id === boardId)
-    for (const viewport of new Set([...VIEWPORT_NAMES, ...Object.keys(boardViewports(config, board) || {})])) {
-      for (const suffix of ['png', 'thumb.png', 'html']) fs.rmSync(path.join(dir, `${variantId}.${viewport}.${suffix}`), { force: true })
+    if (fs.existsSync(dir)) {
+      for (const name of fs.readdirSync(dir)) {
+        if (name.startsWith(`${variantId}.`) && CAPTURE_FILE_RE.test(name)) fs.rmSync(path.join(dir, name), { force: true })
+      }
     }
+    writeJsonAtomic(file, { variants: kept })
     return true
   })
 }
@@ -897,9 +898,11 @@ export async function addReply(config, boardId, commentId, input, { now = new Da
         if (input?.agent === true) reply.agent = true
         if (images.length) reply.images = images
         if (media.drawing) {
-          const version = String(target.pageId).startsWith('variant:')
-            ? null
-            : currentVersion(config, boardId, target.pageId, target.viewport)
+          const board = config.boards?.find((item) => item.id === boardId)
+          const version =
+            String(target.pageId).startsWith('variant:') || commentOnOtherEnvironment(board, target)
+              ? null
+              : currentVersion(config, boardId, target.pageId, target.viewport)
           reply.drawing = { ...media.drawing, captureVersion: version }
         }
         target.replies = [...replies, reply]
