@@ -307,8 +307,16 @@ test('all boards import before grant consumption, rich threads use byte-sized ba
   )
   assert.equal(seen.at(-1).commit, true)
   for (const board of rich.boards) assert.equal(readMigration(rich, board.id), null, 'lost close restores editable boards')
-  const retry = await share({ remote: hosted.origin }, () => {}, { config: rich, env: { SHAPEWALL_TOKEN: token } })
-  assert.equal(retry.code, 0)
+  const checkpoint = readMap(rich, hosted.origin).pending
+  const retry = () => share({ remote: hosted.origin }, () => {}, { config: rich, env: { SHAPEWALL_TOKEN: token } })
+  assert.equal((await retry()).code, 0)
+  // Before credential and closing-board metadata existed, the original
+  // token could still prove the successful close with its server receipt.
+  updateMap(rich, hosted.origin, (data) => {
+    data.pending = { projectId: checkpoint.projectId, sessionId: checkpoint.sessionId }
+  })
+  rich.boards.reverse() // the old final board is no longer the first replay candidate
+  assert.equal((await retry()).code, 0)
   assert.equal(readMigration(rich, 'sample').pending, false)
   assert.equal(readMigration(rich, 'second').readOnly, true)
   const destination = login.approve.json.project.id

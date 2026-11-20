@@ -286,23 +286,31 @@ async function runShare(
   const credentialId = () => hash(`share credential\0${settings.token}`)
   const pending = maps.pending
   let closeReplayed = false
-  if (
-    remote &&
-    pending?.projectId === project.project.id &&
-    pending.tokenId === credentialId() &&
-    pending.commitBoard &&
-    !project.token.scopes.includes('import')
-  ) {
-    try {
-      await remote.importComments(pending.commitBoard, {
-        sessionId: pending.sessionId,
-        batchKey: hash(`commit:${pending.sessionId}`),
-        comments: [],
-        commit: true,
-      })
-      closeReplayed = true
-    } catch (error) {
-      if (error.code !== 'missing_scope') throw error
+  if (remote && pending?.projectId === project.project.id && !project.token.scopes.includes('import')) {
+    // Old clients recorded neither the credential nor the board that closed
+    // the session. The receipt on the server binds both. Try the likely last
+    // board first, then other existing boards in this project when necessary.
+    const legacy = !pending.tokenId
+    const boardsToCheck = legacy
+      ? [...new Set([...plans.map(({ board }) => board.id).reverse(), ...project.boards.map((board) => board.id)])]
+      : pending.tokenId === credentialId() && pending.commitBoard
+        ? [pending.commitBoard]
+        : []
+    for (const board of boardsToCheck) {
+      try {
+        await remote.importComments(board, {
+          sessionId: pending.sessionId,
+          batchKey: hash(`commit:${pending.sessionId}`),
+          comments: [],
+          commit: true,
+        })
+        closeReplayed = true
+        break
+      } catch (error) {
+        if (error.code === 'missing_scope') break // The session has no commit receipt.
+        if (legacy && ['unknown_board', 'import_key_reused'].includes(error.code)) continue
+        throw error
+      }
     }
   }
   const needsImport =
