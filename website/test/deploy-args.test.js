@@ -286,3 +286,26 @@ test('a release carries the manifest it was built with (for media-prune)', () =>
   assert.ok(copy > 0, 'deploy.sh copies the manifest into the release')
   assert.ok(copy < script.indexOf('tar -C dist -cf - .'), 'before the release is uploaded')
 })
+
+test('release pointer changes preserve rollback across an installation and a failed activation', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'deploy-switch-'))
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  const script = fileURLToPath(new URL('../deploy/switch-release.sh', import.meta.url))
+  const change = (name, env = process.env) => spawnSync('bash', [script, root, name], { encoding: 'utf8', env })
+  const pointers = () => ['current', 'previous'].map((name) => fs.readlinkSync(path.join(root, name)))
+  for (const name of ['a', 'b', 'c']) fs.mkdirSync(path.join(root, 'releases', name), { recursive: true })
+  assert.equal(change('a').status, 0)
+  assert.equal(change('b').status, 0)
+  assert.deepEqual(pointers(), ['releases/b', 'releases/a'])
+  assert.equal(change('rollback').status, 0)
+  assert.deepEqual(pointers(), ['releases/a', 'releases/b'])
+  const bin = path.join(root, 'bin')
+  fs.mkdirSync(bin)
+  for (const pointer of ['previous', 'current']) {
+    fs.writeFileSync(path.join(bin, 'mv'), `#!/bin/bash\n[[ "\${!#}" == "${pointer}" ]] && exit 1\nexec /usr/bin/mv "$@"\n`, {
+      mode: 0o700,
+    })
+    assert.notEqual(change('c', { ...process.env, PATH: `${bin}:${process.env.PATH}` }).status, 0)
+    assert.deepEqual(pointers(), ['releases/a', 'releases/b'])
+  }
+})

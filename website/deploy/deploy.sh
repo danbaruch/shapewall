@@ -187,7 +187,7 @@ export SHAPEWALL_SOURCEMAPS="${SHAPEWALL_SOURCEMAPS:-1}"
 # A release always checks its media: the build fails when a file src/media.json names is missing locally.
 export SHAPEWALL_MEDIA_CHECK=1
 if [ "$COMMAND" = rollback ]; then
-  ssh "$HOST" "cd $ROOT && prev=\$(readlink previous) && cur=\$(readlink current) && ln -sfn \"\$prev\" current && ln -sfn \"\$cur\" previous && echo now \$prev"
+  ssh "$HOST" "bash -s -- $ROOT rollback" < deploy/switch-release.sh
   exit 0
 fi
 if [ -n "$DRY_RUN" ]; then
@@ -217,7 +217,7 @@ STAMP="$(date -u +%Y%m%dT%H%M%SZ)-$(git rev-parse --short HEAD)"
 media_upload
 ssh "$HOST" "mkdir -p $ROOT/releases/$STAMP"
 tar -C dist -cf - . | ssh "$HOST" "tar -C $ROOT/releases/$STAMP -xf - && ln -sfn ../../media $ROOT/releases/$STAMP/media && chown -R root:root $ROOT/releases/$STAMP && chmod -R a+rX $ROOT/releases/$STAMP"
-ssh "$HOST" "cd $ROOT && { [ -L current ] && ln -sfn \"\$(readlink current)\" previous || true; } && ln -sfn releases/$STAMP current"
+ssh "$HOST" "bash -s -- $ROOT $STAMP" < deploy/switch-release.sh
 echo "released $STAMP"
 smoke
 prune
