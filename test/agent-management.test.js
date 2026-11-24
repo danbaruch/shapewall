@@ -377,8 +377,14 @@ test(
     })
     const first = await b.call('POST', settings + '/profiles/connect', { agentId: 'codex' })
     const pending = b.call('POST', settings + '/profiles/connect', { agentId: 'codex', confirm: first.json.confirmHash })
-    await until(() => fs.existsSync(marker))
-    const pid = Number(fs.readFileSync(marker, 'utf8'))
+    // The shell's redirection creates the marker before printf writes the
+    // pid: an empty read is Number('') === 0, and process.kill(0, 0) signals
+    // our own process group, so it never throws. Wait for the pid itself.
+    let pid = 0
+    await until(() => {
+      pid = Number(fs.existsSync(marker) && fs.readFileSync(marker, 'utf8'))
+      return Number.isInteger(pid) && pid > 1
+    })
     b.app.locals.close()
     const ended = await pending
     assert.equal(ended.json.connected, false)
