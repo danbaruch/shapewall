@@ -83,9 +83,13 @@ answer again before it counts.
 
 ## Do I need a passkey to sign in to a team server?
 
-Not on your tailnet. Start the server with `shapewall hosted --tailscale --tailnet-sign-in` and your tailnet login is the sign-in:
-no passkey and no password. An admin still invites each login with a role, so being on the tailnet alone gives nothing. On a
-server reached through your own domain, or a tailnet server without that flag, everyone signs in with a passkey. See
+Not on your tailnet. Start the server with `shapewall hosted --tailscale --tailnet-sign-in` and your Tailscale account signs you
+in on every tailnet device of yours: no passkey and no password. That flag needs the server to run on Linux; teammates sign in
+from any operating system. An admin still invites each login with a role, so being on the tailnet alone gives nothing. The
+tailnet is the trust boundary there: anything running as you on one of your tailnet devices can act as you. Whoever runs the
+server can also allow passkeys alongside it (`shapewall hosted admin passkeys on`).
+
+On a server reached through your own domain, or a tailnet server without that flag, everyone signs in with a passkey. See
 [Signing in](/docs/hosted#signing-in).
 
 ## How often does it ask for my passkey?
@@ -93,12 +97,6 @@ server reached through your own domain, or a tailnet server without that flag, e
 Rarely. Signed in with the right role is enough for the daily work: approving agents, tokens, share links, an agent's edits. A
 few things always ask (your passkeys and recovery codes, deleting an account or a workspace, changing owners), and a workspace's
 owner can switch on more in Settings.
-
-## Do I need a passkey on a tailnet server?
-
-No. A server started with `--tailnet-sign-in` signs you in by your Tailscale account, on every tailnet device of yours, and
-asks for no passkey. The tailnet is the trust boundary there: anything running as you on one of your tailnet devices can act
-as you. Whoever runs the server can also allow passkeys (`shapewall hosted admin passkeys on`).
 
 ## Can I reach a server over SSH instead of Tailscale?
 

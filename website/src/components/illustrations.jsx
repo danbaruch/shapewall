@@ -105,7 +105,7 @@ export function JourneyIllustration() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2.5">
           <span className="size-2.5 rounded-full bg-pin" aria-hidden="true" />
-          <p className="text-[14px] font-semibold text-white">Journey: visitor to first note</p>
+          <p className="text-[14px] font-semibold text-white">Journey: home to dashboard</p>
         </div>
         <div className="flex items-center gap-1.5">
           <IconButton

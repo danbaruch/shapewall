@@ -70,7 +70,7 @@ const SECTIONS = [
     clip: { id: 'clip-journeys', label: 'The Sign up journey stepping from Home to Pricing, Sign up and the Dashboard' },
     nav: 'Journeys',
     title: 'Journeys: the flows between screens',
-    text: 'During a capture Shapewall reads the links on each screen and keeps the ones that lead to other screens on the wall. They become arrows. Name the flows that matter, such as visitor to first note, highlight one, and step through it screen by screen.',
+    text: 'During a capture Shapewall reads the links on each screen and keeps the ones that lead to other screens on the wall. They become arrows. Name the flows that matter, such as sign up to dashboard, highlight one, and step through it screen by screen.',
     points: [
       'Arrows from real links, not guesses',
       'Named journeys in the config or made on the wall',
@@ -114,7 +114,7 @@ const SECTIONS = [
     group: 'Steer your agents',
     clip: { id: 'clip-agent', label: 'Fix with agent: the agent plans, asks before it acts, changes one file and resolves the comment' },
     nav: 'Agents',
-    title: 'An agent loop that runs on its own',
+    title: 'An agent loop that works with the tools you already use',
     text: 'shapewall comments --json hands any agent the page, viewport, selector, text, position and screenshot path for each open comment. shapewall watch runs your agent once per new comment, and the MCP server gives Claude Code, Codex and other agents tools to list, reply, recapture and resolve.',
     points: [
       'Vendor neutral: anything that runs a command or speaks MCP',
@@ -206,11 +206,11 @@ const SECTIONS = [
     id: 'variants',
     group: 'More ways to look',
     nav: 'Variants',
-    title: 'Variants for trying a direction',
-    text: 'When a comment asks for a direction ("try a calmer hero"), have the agent build it on a branch and put it beside the screen instead of replacing it. Comment on the variant like on any screen.',
+    title: 'Variants: try a direction beside the screen',
+    text: 'When a comment asks for a direction ("try a calmer hero"), have your agent build it on a branch and put it beside the original instead of replacing it. Comment on the variant like on any other screen.',
     points: [
       'shapewall variant add home --url ... --title "Calmer hero"',
-      'Joined to its page by a dashed edge',
+      'Joined to its screen by a dashed line on the wall',
       'Remove it when the decision is made',
     ],
     art: (
@@ -228,8 +228,8 @@ const SECTIONS = [
     id: 'github',
     group: 'Work together',
     nav: 'GitHub',
-    title: 'Comments, issues and pull requests, linked',
-    text: 'Name your repo in the config and give Shapewall a token in the environment. A comment becomes a GitHub issue with one click, carrying the text, the page, the element and a link to the screenshot. A pull request that says shapewall:12 is linked to comment 12, and when it merges the comment resolves with the PR as its fix.',
+    title: 'Comments, GitHub issues and pull requests, linked',
+    text: 'Name your repo in the config and give Shapewall a token in the environment. Any wall comment becomes a GitHub issue in one click, with the text, the screen, the element and a link to the screenshot. A pull request that mentions shapewall:12 is linked to comment 12, and when it merges the comment resolves with the PR as its fix.',
     points: [
       'From the board, shapewall github issue, the API or MCP',
       'PRs linked by hand, by shapewall github sync, or by a signed webhook',
@@ -262,11 +262,11 @@ const SECTIONS = [
     nav: 'Teams',
     badge: 'Beta',
     title: 'Workspaces, roles and share links',
-    text: 'Host the team server and people sign in with a passkey, or, on a server in your tailnet, with their Tailscale identity and nothing to type. Each workspace has owners, admins, members and viewers. Admins invite people, hand out expiring read-only share links, issue API tokens for agents and read an audit log of who changed what. A Usage page shows every agent turn with the tokens and cost each agent reported, as a dashboard each person arranges for themselves (drag, resize, hide and duplicate its charts), and Activity shows who signed in, who changed which setting and who approved what. The live demo has the roles, the links and both pages, with made-up numbers: switch who you are with View as.',
+    text: 'Host the team server and everyone steers from one shared wall. People sign in with a passkey, or, on your tailnet, with just their tailnet login. Each workspace has owners, admins, members and viewers. Admins invite people, hand out expiring share links, issue API tokens for agents and read an audit log of who changed what. A Usage page charts every agent turn with the tokens and cost each agent reported, and Activity shows who signed in, changed a setting or approved what. The live demo has the roles, the links and both pages, with made-up numbers: switch who you are with View as.',
     points: [
-      'Four roles, checked on every request',
-      'Invites and share links that expire',
-      'Agent usage as charts and a grid, never estimated',
+      'Four workspace roles (owner, admin, member, viewer), checked on every request',
+      'Expiring invites, and read-only or guest-comment share links with an optional passcode',
+      'Agent usage from the numbers each agent reported, never estimated',
       'People\u2019s activity and an access review',
     ],
     // The demo's console, with made-up numbers (client/src/demo/usage).
@@ -282,12 +282,12 @@ const SECTIONS = [
     clip: { id: 'clip-phone', label: 'The board on a phone: a tap on the headline, a comment in the sheet, Post' },
     nav: 'Phone',
     title: 'The wall in your pocket',
-    text: 'The board works on a phone: 44 px touch targets, a bottom sheet for comments, and Back closes the topmost panel instead of leaving the board. Add it to your home screen and it opens like an app.',
+    text: 'Steer from your phone: 44 px touch targets, a bottom sheet for comments, and Back closes the topmost panel instead of leaving the board. Served over HTTPS, it installs to your home screen and opens like an app.',
     points: [
-      'Installable board app',
-      'Pinch to zoom, tap to comment, dictate with the microphone',
+      'Installs as an app over HTTPS',
+      'Pinch to zoom, tap to pin an instruction, dictate with the microphone',
       'Staging beside production, on the phone too',
-      'Same comments, same pins',
+      'Same wall, same pins, same agent threads',
     ],
     art: (
       <div className="wall-dots flex items-center justify-center gap-4 rounded-2xl p-6">
