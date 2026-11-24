@@ -149,6 +149,36 @@ test('a vouch or run approval covers only the text its sender saw: an edit in be
   assert.ok(!JSON.stringify(await remote.comments('sample')).includes('dispatchHash'), 'tokens need no hash')
 })
 
+// The author edits a comment an agent took a moment ago (it went to the
+// agent as written): the edit takes it back, so the agent lets go of it
+// instead of holding a comment it may no longer read, and it can be sent again.
+test('an edit takes back a comment an agent had taken: the claim ends, the status clears, it can be sent again', async () => {
+  const openClaims = (id) =>
+    t.get(
+      "SELECT COUNT(*) AS n FROM agent_claims WHERE workspace_id = :ws AND project_id = :project AND board_id = 'sample' AND comment_number = :id AND ended_at IS NULL",
+      { project: project.id, id },
+    ).n
+  for (const taken of ['queued', 'working']) {
+    const id = await comment(owner, `Taken while ${taken}`)
+    assert.equal((await remote.setAgentStatus('sample', id, 'queued', { onlyFrom: [null] })).changed, true)
+    if (taken === 'working') await remote.setAgentStatus('sample', id, 'working')
+    assert.equal(openClaims(id), 1)
+    const edited = await owner.browser.call('PATCH', `${base}/comments/${id}`, { body: { body: `Edited while ${taken}` } })
+    assert.equal(edited.status, 200, edited.text)
+    assert.equal(edited.json.comment.dispatchable, false)
+    assert.equal(edited.json.comment.agentStatus, null, `${taken}: not left ${taken} under an agent that cannot see it`)
+    assert.equal(openClaims(id), 0, `${taken}: the claim ended`)
+    await assert.rejects(remote.setAgentStatus('sample', id, 'done'), (error) => error.status === 404)
+    // Sent again, as edited: an agent takes it afresh.
+    const sent = await send(owner, id)
+    assert.equal(sent.status, 200, sent.text)
+    assert.equal(sent.json.comment.dispatchable, true)
+    assert.equal((await remote.setAgentStatus('sample', id, 'queued', { onlyFrom: [null] })).changed, true)
+    assert.equal((await remote.comment('sample', id)).comment.body, `Edited while ${taken}`)
+    await remote.setAgentStatus('sample', id, 'done')
+  }
+})
+
 test('on the board only an admin sets an agent status; members may clear one', async () => {
   const id = await comment(owner, 'Status rules')
   const patch = (who, agentStatus) => who.browser.call('PATCH', `${base}/comments/${id}`, { body: { agentStatus } })
