@@ -146,8 +146,14 @@ export function CommentComposer({
               <AttachButton draft={images} touch={touch} disabled={busy} />
             ) : null}
             {canDraw && touch && media.page ? (
-              <Button size="touch" variant="ghost" className="min-w-0 px-2.5" onClick={() => setSheet(true)} data-sw-draw-open="true">
-                <Brush size={16} aria-hidden="true" />
+              <Button
+                size="touch"
+                variant="ghost"
+                className="min-w-0 shrink px-2.5"
+                onClick={() => setSheet(true)}
+                data-sw-draw-open="true"
+              >
+                <Brush size={16} className="shrink-0" aria-hidden="true" />
                 <span className="truncate">{shapes ? `Drawing (${shapes})` : 'Draw on the page'}</span>
               </Button>
             ) : null}

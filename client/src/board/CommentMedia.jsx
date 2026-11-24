@@ -152,7 +152,7 @@ function ToolButton({ touch, label, tooltip, narrow, className, ...props }) {
 const Divider = ({ touch }) => <span className={cn('h-4 w-px shrink-0 bg-line', touch ? 'mx-1' : 'mx-0.5')} aria-hidden="true" />
 
 // Box, Arrow, Pen, the inks, Undo and Clear for the drawing of `owner`, on
-// one line. `onTool` hears a tool being picked (the phone opens its sheet
+// one line where it fits. `onTool` hears a tool being picked (the phone opens its sheet
 // then); `leading` sits first in the row (the composer's attach button).
 // `compact` (a composer or reply box): only the tools until a tool is
 // picked or a shape is drawn. `showCount` false: the count shows elsewhere.
@@ -167,8 +167,9 @@ export function DrawTools({ owner, touch, onTool = null, leading = null, compact
     <div
       // Touch (the phone's drawing sheet): two lines on purpose, the tools
       // on the first, the inks with Undo and Clear on the second, so every
-      // button keeps its 44 px.
-      className={cn('flex min-w-0 items-center', touch ? 'flex-wrap gap-y-0.5' : 'flex-nowrap', className)}
+      // button keeps its 44 px. Desktop: one line while it fits; in a
+      // narrower box it wraps rather than run under the buttons beside it.
+      className={cn('flex min-w-0 flex-wrap items-center', touch ? 'gap-y-0.5' : 'gap-y-1', className)}
       role="group"
       aria-label="Draw on the page"
       data-sw-draw-tools={owner}
