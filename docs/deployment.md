@@ -269,7 +269,8 @@ owner is determined at server start; restart Shapewall after changing the
 node's owner.
 
 Where that cannot be proven, identity is off and every other device pairs; the
-board still starts and says why: not Linux, tailscaled in userspace-networking
+board still starts and says why: not Linux, macOS or Windows, the Mac App
+Store version of Tailscale, tailscaled in userspace-networking
 mode, Tailscale before 1.98, tailscaled running a SOCKS5 or outbound HTTP
 proxy or started with a loopback-forwarding debug switch, no tailscaled of
 root visible, the node unable to say which node it is, or Shapewall in a
