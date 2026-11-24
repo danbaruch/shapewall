@@ -335,10 +335,12 @@ test('the changelog page shows every release from CHANGELOG.md', () => {
   assert.doesNotMatch(html, />Unreleased</, 'work not yet released stays off the page')
   assert.doesNotMatch(html, /<environment>/, 'placeholders in angle brackets are text, not tags')
   assert.doesNotMatch(html, /href="https?:\/\/(127\.0\.0\.1|localhost)/, 'no links to the reader\u2019s own machine')
-  // Links to guides that are site pages stay on the site; checked on the newest entry as it renders once it is dated.
-  const newest = renderChangelog(source.replace(/^(## \S+ - )YYYY-MM-DD$/m, '$12000-01-01')).versions[0]
-  assert.equal(newest.version, headings[0].version)
-  assert.match(newest.html, /href="\/docs\/stability(#[^"]*)?"/, 'links to guides that are site pages stay on the site')
+  // Links to guides that are site pages stay on the site; checked on every entry as it renders once it is dated.
+  const rendered = renderChangelog(source.replace(/^(## \S+ - )YYYY-MM-DD$/m, '$12000-01-01')).versions
+  assert.equal(rendered[0].version, headings[0].version)
+  const all = rendered.map((entry) => entry.html).join('\n')
+  assert.match(all, /href="\/docs\/stability(#[^"]*)?"/, 'links to guides that are site pages stay on the site')
+  assert.doesNotMatch(all, /href="(\.\.\/)*docs\/[^"]*\.md/, 'no links to the docs as repository files')
   assert.match(read(fileFor('/docs')), /<a[^>]*href="\/changelog"[^>]*>Changelog<\/a>/, 'the docs navigation links it')
   assert.match(read(fileFor('/features')), /<a[^>]*href="\/changelog"[^>]*>Changelog<\/a>/, 'the footer links it')
   const sitemap = read(path.join(DIST, 'sitemap.xml'))
