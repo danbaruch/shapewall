@@ -184,7 +184,7 @@ export async function startHosted({
     const refuse = (problem) => new TailnetSignInError(`Tailnet sign-in stays off, and the server did not start: ${problem}`)
     const proofModule = tailnetSignIn ? await import('../tailnet-proof.js') : null
     if (tailnetSignIn) {
-      proof = tailnetProof || proofModule.procPeerProof()
+      proof = tailnetProof || proofModule.peerProof()
       const problem = proof.problem?.() || (await proofModule.proofSelfTest(server, proof))
       if (problem) throw refuse(problem)
       // Known to this process and to the serve entry it makes, new at each start. Never logged.

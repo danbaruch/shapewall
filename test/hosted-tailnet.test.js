@@ -462,7 +462,7 @@ test('a tailscaled whose connections cannot be believed: userspace networking, a
       tailscaledProblem(status, { ...plainFacts(), tailscaled: [...plainFacts().tailscaled, ...plainFacts().tailscaled] }),
       /more than one tailscaled/,
     ],
-    ['unreadable', tailscaledProblem(status, facts([], { unreadable: 1 })), /cannot be read in \/proc/],
+    ['unreadable', tailscaledProblem(status, facts([], { unreadable: 1 })), /command line cannot be read/],
     ['a container', tailscaledProblem(status, facts([], { container: 'it runs in a container' })), /cannot tell whose "root"/],
   ])
     assert.match(String(problem), pattern, label)

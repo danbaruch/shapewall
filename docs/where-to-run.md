@@ -83,7 +83,8 @@ With tailnet sign-in the server believes Tailscale's identity headers only on re
 entry it made (a secret path, a connection owned by tailscaled, tailscaled's own whois), never on direct loopback requests,
 raw forwards or Funnel traffic, never for a request from the server's own machine (use a passkey or another device there),
 and each tailnet login is its own account: being on the tailnet alone puts nobody in a
-workspace. It needs Linux, Tailscale 1.98 or newer in its normal (TUN) mode, and a server that is not in a container. A
+workspace. It needs Linux, macOS (Standalone Tailscale app) or Windows, Tailscale 1.98 or newer in its normal (TUN) mode, and a
+server that is not in a container. A
 tailnet identity is per device, not per person: anything running as you on a tailnet device of yours can act as you there.
 See [Tailnet sign-in](hosted.md#tailnet-sign-in).
 

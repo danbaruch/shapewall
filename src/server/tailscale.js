@@ -7,7 +7,7 @@ import {
   createTailnetGate,
   machineFacts,
   newServeSecret,
-  procPeerProof,
+  peerProof,
   proofSelfTest,
   selfFromStatus,
   serveProblem,
@@ -51,7 +51,7 @@ export async function tailscaleAccess({
   run = execute,
   command = absoluteProgram('tailscale', env),
   // The identity proof's parts (tests): the peer check and what the machine says about tailscaled.
-  proof = procPeerProof(),
+  proof = peerProof(),
   facts = machineFacts,
   log = () => {},
 } = {}) {
