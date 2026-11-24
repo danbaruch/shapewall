@@ -45,7 +45,7 @@ const fieldClass = (invalid) =>
 export default function Contact() {
   return (
     <>
-      <PageHeader eyebrow="Contact" title="Contact us">
+      <PageHeader eyebrow="Contact" title="Get in touch">
         What works and what does not, a feature you would like, or a question about Shapewall: send it here and it reaches the maintainer
         directly.
       </PageHeader>

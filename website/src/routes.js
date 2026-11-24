@@ -41,7 +41,7 @@ export const PAGES = [
   },
   {
     path: '/features',
-    title: 'Features: the whole-app wall, journeys, agents | Shapewall',
+    title: 'Features: whole-app wall, journeys and agents | Shapewall',
     description:
       'Every screen at every size, journeys between them, comments that are instructions to your coding agent, watch and MCP, before and after, and team workspaces.',
     og: 'features',
@@ -49,7 +49,7 @@ export const PAGES = [
   },
   {
     path: '/open-source',
-    title: 'Open source licenses and self-hosting | Shapewall',
+    title: 'Licenses and self-hosting: Apache 2.0 and FSL | Shapewall',
     description:
       'The Shapewall local tool is open source under Apache 2.0. The team server you host yourself is source-available under the Functional Source License.',
     og: 'open-source',
@@ -64,7 +64,7 @@ export const PAGES = [
   },
   {
     path: '/contact',
-    title: 'Contact: questions and feature requests | Shapewall',
+    title: 'Contact the Shapewall maintainer | Shapewall',
     description: LAUNCHED
       ? 'Ask a question about Shapewall, tell us what works and what does not, or request a feature. Bugs go to GitHub issues, security reports to the policy.'
       : 'Ask a question, report a bug or request a feature from the Shapewall maintainer. For a private security report, use the email address on this page.',
@@ -73,14 +73,14 @@ export const PAGES = [
   },
   {
     path: '/privacy',
-    title: 'Privacy policy | Shapewall',
+    title: 'Privacy policy: local tool and website | Shapewall',
     description:
       'What the Shapewall tool keeps on your machine, what agents, integrations and sharing send when you connect them, and how shapewall.com counts visits.',
     og: 'privacy',
   },
   {
     path: '/terms',
-    title: 'Terms of use | Shapewall',
+    title: 'Terms of use: website and public demo | Shapewall',
     description:
       'What these terms cover: this website and the public demo. The software is covered by its licenses, and a team server by its operator.',
     og: 'privacy',
