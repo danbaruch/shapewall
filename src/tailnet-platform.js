@@ -166,7 +166,7 @@ const LOCAL_SYSTEM = /^(LocalSystem|NT AUTHORITY\\SYSTEM|\.\\LocalSystem)$/i
 
 // proof for Windows: { ownerOf, trusted, problem, selfOwner }. ownerOf and
 // trusted are asynchronous (each spawns netstat).
-export function windowsPeerProof({ run = runProgram, env = process.env } = {}) {
+export function windowsPeerProof({ run = runProgram, env = process.env, now = () => Date.now() } = {}) {
   const dir = system32(env)
   const netstat = path.win32.join(dir, 'netstat.exe')
   const sc = path.win32.join(dir, 'sc.exe')
@@ -180,10 +180,16 @@ export function windowsPeerProof({ run = runProgram, env = process.env } = {}) {
     const result = await run(sc, ['queryex', WINDOWS_SERVICE])
     return result.code === 0 ? scQueryEx(result.stdout).pid : null
   }
-  // The service's process id when each connection was accepted (watch()).
+  // The service's process id when each connection was accepted (watch()). One read serves every
+  // connection accepted within a second of it: an id read before a connection existed cannot be that of
+  // a service that restarted after it, and connections do not each cost a program run.
   const atAccept = new WeakMap()
+  let recent = null
   const accepted = (socket) => {
-    if (socket && !atAccept.has(socket)) atAccept.set(socket, loopbackPair(socket) ? servicePid() : Promise.resolve(null))
+    if (!socket || atAccept.has(socket)) return
+    if (!loopbackPair(socket)) return atAccept.set(socket, Promise.resolve(null))
+    if (!recent || now() - recent.at > 1000) recent = { at: now(), pid: servicePid() }
+    atAccept.set(socket, recent.pid)
   }
   return {
     ownerOf,
@@ -255,7 +261,28 @@ export async function windowsFacts({ run = runProgram, env = process.env, read =
   }
   const switches = ['TS_DEBUG_NETSTACK_LOOPBACK_PORT', 'TS_DEBUG_NETSTACK_SUBNETS'].filter((name) => names.includes(name))
   facts.tailscaled.push({ pid, uid: LOCAL_SYSTEM.test(parsed.account) ? 0 : -1, argv, env: switches })
+  facts.advertised = await advertisedRoutes(run)
   return facts
+}
+
+// The routes this node advertises (exit node included), from its own prefs:
+// `tailscale debug prefs`. What tailscaled accepts for routing is what it
+// advertises, approved by an admin or not; `tailscale status` shows only the
+// approved ones. [] when none, null when the prefs cannot be read.
+export function prefsRoutes(text) {
+  try {
+    const prefs = JSON.parse(text)
+    if (!prefs || typeof prefs !== 'object') return null
+    if (prefs.AdvertiseRoutes === null || prefs.AdvertiseRoutes === undefined) return []
+    return Array.isArray(prefs.AdvertiseRoutes) ? prefs.AdvertiseRoutes.map(String) : null
+  } catch {
+    return null
+  }
+}
+
+export async function advertisedRoutes(run = runProgram) {
+  const result = await run('tailscale', ['debug', 'prefs'])
+  return result.code === 0 ? prefsRoutes(result.stdout) : null
 }
 
 // ---- macOS ---------------------------------------------------------------------
@@ -375,7 +402,9 @@ export function psRows(text) {
 
 const STANDALONE = /^\/Library\/SystemExtensions\/.+\/io\.tailscale\.ipn\.macsys\.network-extension$/
 const OPEN_SOURCE = /(^|\/)tailscaled$/
-const APP_STORE = /^\/Applications\/Tailscale\.app\/Contents\/PlugIns\/IPNExtension\.appex\/Contents\/MacOS\/IPNExtension$/
+// ps may show another user's process by its short name only: any program of a user that ends in
+// IPNExtension counts. A user can switch the feature off that way, never on.
+const APP_STORE = /(^|\/)IPNExtension$/
 
 // What macOS says about tailscaled, in hostFacts' shape, plus `appStore`:
 // the Mac App Store app's extension runs (as a user). While it runs the
@@ -409,5 +438,6 @@ export async function darwinFacts({ run = runProgram } = {}) {
       facts.tailscaled.push({ pid: row.pid, uid: 0, argv: text.split(/\s+/), env: null, variant: 'open-source' })
     }
   }
+  facts.advertised = await advertisedRoutes(run)
   return facts
 }

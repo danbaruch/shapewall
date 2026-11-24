@@ -416,7 +416,8 @@ administrator rights or native code.
   debug switches from its registry environment and `tailscaled-env.txt` when readable.
 - **Both refuse a subnet router or exit node.** There tailscaled handles routed connections in its own network stack and
   dials the destination itself, which could be this machine's loopback. Stop advertising routes and the exit node on the
-  server's machine, or run the server elsewhere.
+  server's machine, or run the server elsewhere. Advertised routes count whether or not an admin approved them; the server
+  reads them with `tailscale debug prefs`, so it must run as the user who runs Tailscale there (it refuses otherwise).
 
 Both are covered by tests and by a run of the real check on macOS and Windows in CI. They have not yet been run against a
 real tailnet on a Mac or a Windows server; the self test at start still refuses where the check cannot see the server's own

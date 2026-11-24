@@ -116,6 +116,7 @@ function windowsRun({
   binary = '"C:\\Program Files\\Tailscale\\tailscaled.exe"',
   account,
   reg = null,
+  prefs = '{"AdvertiseRoutes":null}',
 } = {}) {
   const calls = []
   let at = 0
@@ -129,6 +130,7 @@ function windowsRun({
     }
     if (/sc\.exe$/i.test(file) && args[0] === 'qc') return { code: 0, stdout: qc(binary, account) }
     if (/reg\.exe$/i.test(file)) return reg ? { code: 0, stdout: reg } : { code: 1, stdout: '' }
+    if (file === 'tailscale') return prefs === null ? { code: 1, stdout: '' } : { code: 0, stdout: prefs }
     return { code: null, stdout: '' }
   }
   return { run, calls }
@@ -175,6 +177,16 @@ test('Windows: only a connection from the running Tailscale service’s own proc
   const s2 = socket(50001)
   listeners[0][1](s2)
   assert.equal(await watched.trusted(s2), true)
+  // Connections accepted within a second share one read of the service; later ones read it again.
+  let clock = 0
+  const counted = windowsRun()
+  const shared = windowsPeerProof({ run: counted.run, env, now: () => clock })
+  const queries = () => counted.calls.filter(([file, verb]) => /sc\.exe$/.test(file) && verb === 'queryex').length
+  for (let index = 0; index < 50; index += 1) shared.accepted(socket(51000 + index))
+  assert.equal(queries(), 1)
+  clock = 1500
+  shared.accepted(socket(52000))
+  assert.equal(queries(), 2)
   assert.equal(await proof.ownerOf(socket(50002)), 8888)
   assert.equal(proof.selfOwner(), process.pid)
 })
@@ -314,8 +326,9 @@ const PS = (rows) => rows.map(([pid, ids, command]) => `  ${pid}   ${ids.join(' 
 const STANDALONE =
   '/Library/SystemExtensions/0A1B2C3D-0000-1111-2222-333344445555/io.tailscale.ipn.macsys.network-extension.systemextension/Contents/MacOS/io.tailscale.ipn.macsys.network-extension'
 
-function darwinRun(rows, args = {}) {
+function darwinRun(rows, args = {}, prefs = '{"AdvertiseRoutes":null}') {
   return async (file, argv) => {
+    if (file === 'tailscale') return prefs === null ? { code: 1, stdout: '' } : { code: 0, stdout: prefs }
     if (argv.includes('args=')) {
       const pid = argv[argv.length - 1]
       return pid in args ? { code: 0, stdout: `${args[pid]}\n` } : { code: 1, stdout: '' }
@@ -364,12 +377,12 @@ test('macOS: which process is tailscaled, and the App Store app refused with the
     { 300: '/opt/homebrew/bin/tailscaled' },
   )
   assert.match(tailscaledProblem(status, both), /Mac App Store version/)
-  // A user's own program by that name elsewhere does not switch the feature off.
-  const named = await facts([
-    [701, [501, 501, 501], '/Users/x/IPNExtension'],
+  // ps may show another user's App Store extension by its short name: that counts too (it can only switch the feature off).
+  const short = await facts([
+    [701, [502, 502, 502], 'IPNExtension'],
     [412, [0, 0, 0], STANDALONE],
   ])
-  assert.equal(tailscaledProblem(status, named), null)
+  assert.match(tailscaledProblem(status, short), /Mac App Store version/)
 
   assert.match(
     tailscaledProblem(
@@ -400,6 +413,22 @@ test('on Windows and macOS, not on a subnet router or exit node: tailscaled woul
       /subnet router/,
     )
   }
+  // Advertised but not approved: status does not show it, tailscaled's prefs do.
+  for (const facts of [
+    await windowsFacts({
+      run: windowsRun({ prefs: '{"AdvertiseRoutes":["0.0.0.0/0","::/0"]}' }).run,
+      env: {},
+      read: { readFileSync: () => '' },
+    }),
+    await darwinFacts({ run: darwinRun([[412, [0, 0, 0], STANDALONE]], {}, '{"AdvertiseRoutes":["10.0.0.0/8"]}') }),
+  ])
+    assert.match(tailscaledProblem(plain, facts), /subnet router or exit node/)
+  // Prefs that cannot be read: whether it routes cannot be told.
+  for (const facts of [
+    await windowsFacts({ run: windowsRun({ prefs: null }).run, env: {}, read: { readFileSync: () => '' } }),
+    await darwinFacts({ run: darwinRun([[412, [0, 0, 0], STANDALONE]], {}, 'not json') }),
+  ])
+    assert.match(tailscaledProblem(plain, facts), /settings cannot be read/)
   // Linux: tailscaled routes in the kernel unless the debug switches say otherwise (checked apart).
   assert.equal(tailscaledProblem({ ...status, Self: { ...self, ExitNodeOption: true } }, { ...win, platform: undefined }), null)
 })

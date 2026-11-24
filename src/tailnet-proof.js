@@ -493,7 +493,9 @@ export function tailscaledProblem(status, facts) {
     return 'tailscaled runs an outbound HTTP proxy (--outbound-http-proxy-listen), which opens connections for local programs'
   // On Windows and macOS tailscaled handles routed traffic in its own network stack by default, and
   // dials the destination itself: on a subnet router or exit node that could be this machine's loopback.
-  if (['win32', 'darwin'].includes(facts.platform) && routes(status))
+  if (['win32', 'darwin'].includes(facts.platform) && !Array.isArray(facts.advertised))
+    return 'this machine’s Tailscale settings cannot be read (tailscale debug prefs), so whether it routes for others cannot be checked. Run the server as the user who runs Tailscale here'
+  if (['win32', 'darwin'].includes(facts.platform) && (facts.advertised.length || routes(status)))
     return 'this machine is a subnet router or exit node, and on this system tailscaled then dials routed connections itself, which could reach this machine’s loopback. Stop advertising routes and the exit node here, or run the server on another machine'
   const version = /^(\d+)\.(\d+)/.exec(String(status?.Version || ''))
   if (!version) return 'tailscaled’s version cannot be read'
