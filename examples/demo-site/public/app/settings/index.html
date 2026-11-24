@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Settings -- Lumen Notes</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="wrap">
+        <a class="logo" href="/app/"><img src="/img/logo.svg" alt="" />Lumen</a>
+        <a class="app-search" href="/app/" role="search">Search notes <kbd>/</kbd></a>
+        <div class="app-actions">
+          <a class="btn btn-primary btn-small" href="/app/note/" data-testid="new-note">New note</a>
+          <a class="avatar" href="/app/settings/" aria-label="Account settings" data-testid="avatar">AR</a>
+        </div>
+      </div>
+    </header>
+    <main>
+      <div class="app">
+        <nav class="sidebar" aria-label="Workspace">
+          <a href="/app/">All notes</a>
+          <a href="/app/empty/">Daily notes</a>
+          <a href="/app/note/share/">Shared with me</a>
+          <a class="active" href="/app/settings/">Settings</a>
+          <p class="sidebar-label">Spaces</p>
+          <a href="/app/">Research</a>
+          <a href="/app/">Product</a>
+        </nav>
+        <div class="workspace">
+          <h1 class="form-title">Settings</h1>
+          <div class="settings">
+            <nav class="settings-nav" aria-label="Settings">
+              <a class="active" href="/app/settings/">Profile</a>
+              <a href="/app/settings/billing/">Billing</a>
+              <a href="/app/settings/">Notifications</a>
+              <a href="/app/settings/">Danger zone</a>
+            </nav>
+            <div class="settings-body">
+              <section class="panel">
+                <h2 class="panel-title">Profile</h2>
+                <label>Name <input value="Alex Reader" /></label>
+                <label>Email <input type="email" value="reader@example.com" /></label>
+                <label
+                  >Language
+                  <select>
+                    <option>English</option>
+                    <option>Deutsch</option>
+                  </select></label
+                >
+              </section>
+              <section class="panel">
+                <h2 class="panel-title">Notifications</h2>
+                <div class="field-row"><span>Weekly summary email</span><span class="switch on" data-testid="switch-weekly"></span></div>
+                <div class="field-row"><span>When someone mentions me</span><span class="switch on"></span></div>
+                <div class="field-row"><span>Product news</span><span class="switch"></span></div>
+              </section>
+              <section class="panel danger">
+                <h2 class="panel-title">Danger zone</h2>
+                <p class="meta">Deleting your account removes every note on every device. This cannot be undone.</p>
+                <button class="btn btn-danger" type="button" data-testid="delete-account">Delete account</button>
+              </section>
+              <div class="onboard-actions"><a class="btn btn-primary" href="/app/settings/billing/">Save changes</a></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </body>
+</html>

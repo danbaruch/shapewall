@@ -1,0 +1,26 @@
+{
+  "title": "Tiny Shop",
+  "id": "tiny-shop",
+  "baseUrl": "http://127.0.0.1:5810",
+  "outputDir": ".shapewall",
+  "viewports": {
+    "desktop": { "width": 1280, "height": 800 },
+    "phone": { "width": 390, "height": 844 }
+  },
+  "groups": ["Pages"],
+  "pages": [
+    { "id": "home", "path": "/", "title": "Home", "group": "Pages" },
+    { "id": "pricing", "path": "/pricing", "title": "Pricing", "group": "Pages" },
+    { "id": "about", "path": "/about", "title": "About", "group": "Pages" },
+    { "id": "changelog", "path": "/changelog", "title": "Changelog", "group": "Pages" }
+  ],
+  "ci": {
+    "threshold": 0.001,
+    "ignore": [".clock"],
+    "start": {
+      "serve": ["node", "server.js"],
+      "url": "http://127.0.0.1:5810",
+      "timeout": 30000
+    }
+  }
+}

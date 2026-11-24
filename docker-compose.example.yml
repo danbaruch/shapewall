@@ -1,0 +1,29 @@
+# Shapewall with Docker Compose. Build the image once from the Shapewall
+# folder (docker build -t shapewall .), copy this file next to your
+# shapewall.config.json as docker-compose.yml, then:
+#
+#   export UID GID=$(id -g)                      # so captures are owned by you
+#   docker compose up -d                         # the board on http://localhost:4600/
+#   docker compose run --rm shapewall capture    # capture (or use "Capture now" on the board)
+#   docker compose run --rm shapewall doctor
+#
+# The board has no login: keep the port on 127.0.0.1 and put an
+# authenticating proxy in front to share it (docs/deployment.md).
+
+services:
+  shapewall:
+    image: shapewall
+    init: true
+    user: '${UID:-1000}:${GID:-1000}'
+    ports:
+      - '127.0.0.1:4600:4600'
+    volumes:
+      - .:/work
+    environment:
+      # Host names the board is reached by; "*" only behind a proxy that checks them.
+      SHAPEWALL_ALLOWED_HOSTS: localhost,127.0.0.1
+    # A dev server on your machine is host.docker.internal inside the
+    # container: set "baseUrl": "http://host.docker.internal:3000" in the config.
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    restart: unless-stopped

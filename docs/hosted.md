@@ -1,0 +1,2871 @@
+# Hosted Shapewall (beta, push-first)
+
+A server for teams building apps with coding agents. The whole team sees the whole app on shared boards (every screen, on
+desktop and phone, and the journeys between them) and steers its agents from there: a comment on a screen is an instruction to an
+agent. People sign in with passkeys and belong to workspaces. Boards are captured on your machine or in CI and uploaded with
+`shapewall push`. Agents read and act on the comments with a project token through `shapewall comments --remote`,
+`shapewall watch --remote` or `shapewall mcp --remote`, or chat on the board as a [connected agent](#connected-agents).
+
+License: the server (`src/hosted`) is under the [Functional Source License 1.1, ALv2 future license](../src/hosted/LICENSE.md).
+You can run it for yourself or your company; you can't offer it as a competing hosted service. Each release becomes Apache 2.0
+two years later. The clients (`push` and the `--remote` commands, in `src/remote`) are Apache 2.0 like the rest of Shapewall.
+
+**Status: beta.** Start with one invite-only server that the team reaches over Tailscale. Each teammate signs in with their own Shapewall passkey and joins a workspace.
+Walk through the [checklist before you invite the team](#before-you-invite-the-team) on your own devices and network first.
+
+`shapewall serve` is the separate, single-owner local tool. Its Tailscale/pairing mode lets that owner use their other devices;
+`shapewall hosted` supplies team accounts, roles and collaboration. A public domain or a Shapewall-operated service is not needed
+for tailnet multiplayer.
+
+What v0 does not do: capture on the server. The server never opens a browser and never fetches a URL a user gives it, so there is no
+SSRF surface. You capture on your machine or in CI (it can reach `localhost` and staging, which a hosted crawler cannot) and push.
+
+## Run it
+
+```sh
+shapewall hosted --data /var/lib/shapewall-hosted --origin https://app.example.com --port 4700 --trust-proxy
+```
+
+| Flag                    | Env                                                | Default                         | What                                                                                                                                                                                                                                          |
+| ----------------------- | -------------------------------------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--data DIR`            | `SHAPEWALL_HOSTED_DATA`                            | `./shapewall-hosted-data`       | Database, secret, pushed files                                                                                                                                                                                                                |
+| `--origin URL`          | `SHAPEWALL_HOSTED_ORIGIN`                          | `http://HOST:PORT`              | The public origin. Passkeys are bound to its host name (the RP ID).                                                                                                                                                                           |
+| `--port`/`--host`       |                                                    | `4700` on `127.0.0.1`           | Keep it on loopback behind a reverse proxy                                                                                                                                                                                                    |
+| `--signup`              | `SHAPEWALL_HOSTED_SIGNUP`                          | `invite`                        | `invite`: only invite links (and the setup link). `open`: anyone                                                                                                                                                                              |
+| `--trust-proxy`         | `SHAPEWALL_HOSTED_TRUST_PROXY=1` or `=uniquelocal` | off; forced on by `--tailscale` | Client IPs from `X-Forwarded-For`. `1`: a proxy on this host. `uniquelocal`: a proxy on a private network, which is what the generated Compose file sets. `--tailscale` turns it on by itself ([what that means](#tailnet-deployment-mode-1)) |
+|                         | `SHAPEWALL_HOSTED_SECRET`                          | `<data>/secret.key`             | Key for signed live-HTML URLs (made on first start, mode 0600)                                                                                                                                                                                |
+|                         | `RESEND_API_KEY`                                   | unset                           | With `SHAPEWALL_EMAIL_FROM`: invite emails through Resend                                                                                                                                                                                     |
+|                         | `SHAPEWALL_EMAIL_FROM`                             | unset                           | Sender for invite emails, e.g. `Shapewall <invites@example.com>`                                                                                                                                                                              |
+| `--previous-origin URL` | `SHAPEWALL_HOSTED_PREVIOUS_ORIGIN`                 | unset                           | The old origin during a move ([Moving to a new origin](#moving-to-a-new-origin))                                                                                                                                                              |
+| `--report-email ADDR`   | `SHAPEWALL_HOSTED_REPORT_EMAIL`                    | unset                           | "Report this board" on public projects opens a mail to this address                                                                                                                                                                           |
+| `--tailnet-sign-in`     | `SHAPEWALL_HOSTED_TAILNET_SIGN_IN=1`               | off                             | With `--tailscale`: a tailnet user is signed in as the account linked to their tailnet login, no passkey ([Tailnet sign-in](#tailnet-sign-in)). Linux only                                                                                    |
+| `--tailnet-passkeys`    | `SHAPEWALL_HOSTED_TAILNET_PASSKEYS=1`              | off                             | With `--tailnet-sign-in`: also allow passkeys ([With passkeys also allowed](#with-passkeys-also-allowed)); `hosted admin passkeys on\|off` wins over it                                                                                       |
+| `--owners-see-sign-ins` | `SHAPEWALL_HOSTED_OWNERS_SEE_SIGN_INS=1`           | off                             | Workspace owners see their members' sign-ins, passkey events and devices in Activity. For a server with one team ([Activity](#the-activity-page))                                                                                             |
+| `--quotas FILE`         | `SHAPEWALL_HOSTED_QUOTAS`                          | `<data>/quotas.json`            | Storage and per-workspace limits ([Operator commands and quotas](#operator-commands-and-quotas)). The flag wins over the variable, and both over the file                                                                                     |
+|                         | `SHAPEWALL_TURNSTILE_SITE_KEY`                     | unset                           | With `SHAPEWALL_TURNSTILE_SECRET`: a Cloudflare Turnstile check on open sign-up and comment share links                                                                                                                                       |
+|                         | `SHAPEWALL_TURNSTILE_SECRET`                       | unset                           | Turnstile secret key. Both keys or neither (one alone is a warning and stays off)                                                                                                                                                             |
+
+**The switches above read only `1`.** `SHAPEWALL_HOSTED_TRUST_PROXY` (where `uniquelocal` is the one other accepted value),
+`SHAPEWALL_HOSTED_OWNERS_SEE_SIGN_INS`, `SHAPEWALL_HOSTED_TAILNET_SIGN_IN` and `SHAPEWALL_HOSTED_TAILNET_PASSKEYS` compare the
+value with the string `1` and nothing else. `=true`, `=on` and `=yes` leave the feature off, and nothing warns: a server meant to
+have `SHAPEWALL_HOSTED_TAILNET_SIGN_IN=true` starts as an ordinary passkey server. Read the start log: it names the sign-in
+("Sign-in: your Tailscale account ...") only when tailnet sign-in really came on.
+
+It needs Node 22.19 or newer, like the rest of Shapewall, and uses the built-in `node:sqlite`. Passkeys need a secure context: `https://`, or `http://localhost`
+for trying it on your own machine (`--origin http://localhost:4700`; not `127.0.0.1`, which is not a valid passkey RP ID).
+
+**The first account.** On an invite-only server with no accounts, the server makes a one-time setup link (valid 24 hours) and writes it
+to `<data>/setup-link` (mode 0600). The start log names only the file and the command, never the link, so journald never holds it.
+Print it on the server's machine with `shapewall hosted setup-link --data <dir>` (the same link until it expires or is used; `--new`
+makes a new one and voids the old one). Open it, pick a handle and your name, and create a passkey. You get a workspace you own and
+ten recovery codes, shown once: save them in a password manager. Using the link deletes the file. The link only ever creates the
+first account: once the server has any account (an open sign-up, say), an unused setup link stops working on every path (web,
+tailnet sign-up, `hosted claim`), and the next start deletes it and its file.
+
+**Bot check.** With both Turnstile keys set, open sign-up (`--signup open`) and opening a comment share link need a passing Turnstile
+check (`POST /auth/register/options` and `POST /api/shares/open` take `turnstileToken`). It fails closed: a missing, wrong or
+unverifiable token (Cloudflare unreachable, 5 second timeout) is refused with 403 `turnstile_failed`. Invite and setup sign-ups and
+view-only links skip it. The console loads the widget from `challenges.cloudflare.com` only then, and only a server with keys adds
+that origin to the console CSP. Off by default.
+
+Deployment examples: [examples/hosted/shapewall-hosted.service](../examples/hosted/shapewall-hosted.service)
+(systemd, hardened) and [examples/hosted/Caddyfile](../examples/hosted/Caddyfile).
+
+## Signing in
+
+Four ways to reach Shapewall, side by side. Pick by who has to reach the board.
+
+| How you reach it              | Command                                             | How people sign in                                                                                    | Who can reach it               |
+| ----------------------------- | --------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------ |
+| Local board, on your machine  | `shapewall serve`                                   | Nothing: it is your board                                                                             | This machine                   |
+| Over an SSH tunnel            | `ssh -L 4700:127.0.0.1:4700 server`                 | A local board: nothing, as if you sat at that machine. A hosted server: a passkey each                | Whoever can SSH to the machine |
+| Your tailnet, tailnet sign-in | `shapewall hosted --tailscale --tailnet-sign-in`    | Your Tailscale account, from every tailnet device of yours. No passkey, no password. An admin invites | People on your tailnet         |
+| Your own domain               | `shapewall hosted --origin https://app.example.com` | A passkey each                                                                                        | Anyone you invite              |
+
+A tailnet server can also run with passkeys instead of tailnet sign-in (`shapewall hosted --tailscale`: a passkey each), or
+with both (`--tailnet-sign-in --tailnet-passkeys`). Everything after the sign-in is the same on every hosted server: accounts,
+workspaces, roles, invites, the audit log.
+
+### Over SSH
+
+For people who do not use Tailscale: an SSH tunnel carries one port of the server's machine to your own.
+
+```sh
+# On the server (once): a hosted server for the address your browser will use. No TLS, no proxy, loopback only.
+shapewall hosted --data ./hosted-data --port 4700 --origin http://shapewall.localhost:4700
+
+# On your machine, each time:
+ssh -L 4700:127.0.0.1:4700 you@server
+# then open http://shapewall.localhost:4700
+```
+
+- **Give the tunnel a host name of its own: `shapewall.localhost`.** Browsers send every name that ends in `.localhost` to
+  your own machine and treat it as a secure context, so passkeys work without a certificate, and the name keeps the server's
+  cookies and passkeys to itself. Tested in Chromium (sign-up and sign-in with a passkey; the passkey belongs to
+  `shapewall.localhost`, the session cookie is sent to that name only).
+- **Plain `http://localhost:4700` works too** (`--origin http://localhost:4700`), for a browser or a tool that does not
+  resolve `.localhost` names. Know what it means: **cookies are not kept apart by port.** At plain `localhost` the session
+  cookie is also sent to any other web server on your machine's `localhost` (a dev server on another port), and that server
+  could use it against Shapewall while you have the tunnel open. With `shapewall.localhost` it is not. Not `127.0.0.1`: not a
+  valid passkey host.
+- **Accounts are passkey accounts** for that origin. The origin is part of the passkey: keep the same host name and the same
+  port on both ends. Everyone who tunnels in uses the same address and has their own account, role and passkey.
+- **Everyone arrives from 127.0.0.1.** The server sees the SSH daemon's end of the tunnel, so all tunnelled people share one
+  address: the rate limits that count per address (sign-in attempts, recovery codes, invite lookups) are shared between
+  them, and the audit log and the device list show `127.0.0.1` for everyone. Who did what is still each person's account.
+- **The first account** is made with the setup link, as on any server: `shapewall hosted setup-link --data ./hosted-data` on
+  the server prints `http://shapewall.localhost:4700/signup#setup=...`; open it through the tunnel.
+- **The server listens on 127.0.0.1 only.** Nothing is open to the network; SSH is the way in, and whoever has an SSH login on
+  the machine can reach the port. Sign-in still decides who is who.
+- **Share links** made there point at the tunnel's address too, so they work only for people with a tunnel. For links
+  anyone can open, use a tailnet with `--funnel` or your own domain.
+- **A local board over a tunnel** (`shapewall serve --port 4600` on the remote machine, `ssh -L 4600:127.0.0.1:4600 ...`):
+  the board sees a connection from its own machine, so you are treated as the person sitting at it. There is no sign-in and no
+  pairing; comments, chat with the agent and approvals work as they do locally, and settings still need the private owner
+  link the terminal printed. That is right for your own machine over your own SSH login. It also means that every OS user on
+  that machine, and anyone you forward the port to, is that same person: do not tunnel a local board for other people; run
+  the hosted server for them.
+
+Tested in the suite with the real command and a real browser at `http://shapewall.localhost:<port>` and at
+`http://localhost:<port>` (sign-up, sign-out, sign-in with a passkey, and which of the two sends its session cookie to
+another server on localhost; `test/e2e/hosted-ssh.e2e.test.js`). The tunnel itself is SSH's.
+
+### When Shapewall asks for the passkey again
+
+This section is about servers where passkeys are the sign-in. On a tailnet sign-in server without passkeys (the default
+there) the fixed core below asks for a typed name instead, and nothing else asks: [Tailnet sign-in](#tailnet-sign-in).
+
+Once you are signed in, your role decides what you may do, and that is all: approving an agent or a machine, agent settings,
+tokens, share links, exports, an agent's edit and push cards, members and roles, deleting a project. No second prompt.
+
+Two things ask for the passkey again ("Confirm it's you"):
+
+**1. A small fixed core, always, on every server** (a passkey check in the last 10 minutes). These guard the account itself or
+cannot be undone for everyone:
+
+- adding or removing a passkey (`POST /auth/passkeys/options`, `POST /auth/passkeys/verify`, `DELETE /auth/passkeys/:id`);
+- new recovery codes (`POST /auth/recovery-codes`);
+- linking or unlinking a tailnet login (`POST` and `DELETE /auth/tailnet/link`; ticking the box at sign-up is the one way to
+  link without it);
+- deleting your account (`DELETE /auth/me`);
+- deleting a workspace (`DELETE /api/workspaces/:ws`);
+- owners: making someone an owner, changing or removing an owner, inviting an owner (`PATCH` and `DELETE
+/api/workspaces/:ws/members/:user`, `POST /api/workspaces/:ws/invites` with role `owner`);
+- moving your sign-in to the server's new address (`POST /auth/rebind/start`);
+- making the setting below weaker (`PATCH /api/workspaces/:ws/step-up`).
+
+The list is one table in the code (`FIXED_CORE` in `src/hosted/step-up.js`), enforced in one place before any route runs.
+"Sign out other devices" is not in it, but it is not free either: it needs a session that passed a passkey check at some
+point (any passkey sign-in has), so a session someone merely holds cannot sign you out everywhere.
+
+**2. What a workspace's owner switches on.** Settings, "Ask for a passkey again". Everything is off by default. One switch per
+group:
+
+| Group                  | Asks before                                                                                                                             |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Agent edits and pushes | Allow on an agent's edit or command, Push this fix, approving an agent run or a shell command                                           |
+| Agents and machines    | approving a machine or an agent (`shapewall login`, `agent connect`), who may use an agent, its approval rule, the project agent policy |
+| Tokens and share links | new API tokens, new share links, turning share links or public projects on, making a project public                                     |
+| Members and roles      | inviting an admin, making someone an admin, changing or removing an admin                                                               |
+| Exports and deletes    | exporting the workspace, deleting a project or a board                                                                                  |
+
+With them: how long one check counts (5, 15, 30 or 60 minutes; 15 by default), and the admin idle rule (admin pages ask once more
+after 12 hours without opening one). Only an owner changes these. Switching something on needs nothing more; switching it off or
+choosing a longer time is part of the fixed core. Every change is in the audit log with the value before and after
+(`step_up_changed`), and Activity's "Worth a look" filter marks it.
+
+The server decides, route by route: it answers 403 `reauth_required` with a message that says which rule asked (and `stepUp` in the
+error: `always`, the group's id, `adminIdle` or `restricted`), and only then does the console show the prompt. The console never
+asks on its own.
+
+A session that started with a recovery code, or with a passkey that was added with one in the last 24 hours, keeps the strict
+rules whatever the workspace chose: everything in the groups above, and signing out other devices, needs a passkey check it cannot
+give yet ([Accounts](#accounts)).
+
+The audit log is unchanged: every action above is recorded as before, whether or not a passkey was asked for.
+
+The settings as an API, one setting per request (owners): `PATCH /api/workspaces/:ws/step-up` with `{ "group": "tokens", "on":
+true }`, `{ "windowMinutes": 30 }`, `{ "adminIdle": true }` or `{ "cliApproval": true }`. `GET /api/workspaces/:ws` carries them as
+`workspace.settings.stepUp`.
+
+### Tailnet sign-in
+
+**Experimental.** Tailnet sign-in and everything that goes with it (`--tailnet-sign-in`, `--tailnet-passkeys`, `--funnel` and
+`--funnel-port`, `hosted claim`, `shapewall join`, `shapewall admin`, and `--project` on `login` and `agent connect`) is outside
+the [stability promise](stability.md): it can change in a minor release, with a note in the changelog.
+
+```sh
+shapewall hosted --data ./hosted-data --tailscale --tailnet-sign-in     # or SHAPEWALL_HOSTED_TAILNET_SIGN_IN=1
+```
+
+On your tailnet, your Tailscale account is the sign-in: one identity, your different machines, and they all reach the server
+with no second credential. `tailscale serve` adds the identity of the person behind each request (`Tailscale-User-Login`,
+`Tailscale-User-Name`), and the server signs that person in as the account linked to their login.
+
+**No passkeys, by default.** On a server started with `--tailnet-sign-in` no passkey is asked for or offered: the sign-in page
+shows "Continue as ada@example.com" (or the invited and not-invited states) and nothing else, the Account page has no passkeys
+and no recovery codes, and every passkey route answers 403 `passkeys_off`. What that means, plainly:
+
+- **The tailnet is the trust boundary.** Anything running as you on one of your tailnet devices can act as you on this
+  server: a script, a coding agent, a browser extension. Tailscale says which device a request came from and whose device it
+  is, not that you are at the keyboard. Lock your devices, and keep the tailnet to people and machines you trust.
+- **The few things Shapewall always asks about ask you to type a name.** Deleting a workspace or your account, making,
+  changing or removing an owner (leaving as one too), inviting an owner: the console asks you to type the workspace's name
+  (your handle for the account), and the server refuses the request until it carries that name (403 `confirm_required`;
+  the header `X-Shapewall-Confirm`). On the command line the same things need `--yes`, and the command names what it
+  confirms. This is deliberateness, not proof: the identity is already proven, and a program acting as you can type too.
+  The header is no secret and no token: the request is refused from another site exactly as every other write is (the same
+  origin and JSON are required, and no other origin is allowed to send the header). When you are in more than one workspace
+  with the same name, the name would not say which, so the prompt asks for the workspace's id instead and shows it.
+- **Nothing else asks.** A workspace's "Ask for a passkey again" switches have nothing to ask for; Settings shows
+  "Confirming changes" in their place.
+- **Passkeys are an opt-in hardening.** Start the server with `--tailnet-passkeys` (or
+  `SHAPEWALL_HOSTED_TAILNET_PASSKEYS=1`), or switch them on a running server: `shapewall hosted admin passkeys on --data DIR`
+  (`off`, `status`; kept in the database, and it wins over the flag). Then anyone may add a passkey on the Account page, an
+  account that has one confirms the fixed core with it, and everything under
+  [With passkeys also allowed](#with-passkeys-also-allowed) applies. Switched off again, passkeys are kept and not used, and the switch does three things and says them: every session that a
+  passkey or a recovery code started is ended (deleted, so switching on later does not bring one back); a passkey that was
+  still on hold stays on hold, stays removable with "Not you? Remove it", and starts its 24 hours again when passkeys come
+  back; and each workspace that asks for a passkey somewhere ("Ask for a passkey again", the command line switch) gets an
+  audit entry and a line in Settings, "Switched on here, and not asked while this server has passkeys off": its settings are
+  kept and asked again when passkeys are. An account with no tailnet login cannot sign in until they are on again (the
+  command says how many). In this mode a tailnet session ends the account's other sessions with no further question.
+
+**Each tailnet login is its own account, and an admin still decides who is in a workspace.** Being on the tailnet alone gives
+nothing. Why:
+
+- **Who did what.** Comments, approvals, the audit log and usage name a person. One shared identity for "the tailnet" would make
+  all of that anonymous.
+- **Roles.** A viewer, a member, an admin and an owner are different things; agents have audiences. None of it works without
+  accounts.
+- **A tailnet is wider than a team.** It holds family devices, a contractor's laptop, a build machine, nodes shared in from
+  someone else's tailnet. They can reach the server; that should not put them in your workspace.
+
+How people get in:
+
+- **The first owner** claims the server with the setup link, as on any server. Opened through the tailnet, the page offers
+  "Continue as ada@example.com" and links that login. From the command line:
+  `shapewall hosted claim --data DIR --login LOGIN` on the server's machine ([From your coding agent](#from-your-coding-agent)).
+  Opened from the server's own machine, the tailnet address links nothing: [why](#on-the-servers-own-machine).
+- **Someone the server does not know** sees "Ask an admin of a workspace here to invite ada@example.com", and nothing else, on an
+  invite-only server, which is the default (`--signup invite`). The admins of every workspace see them under Members, "Arrived
+  through the tailnet", and can invite them with a role or take them off the list (kept 30 days, at most 200).
+- **With `--signup open` nobody waits for an invite.** A tailnet login the server does not know gets an account on arrival and a
+  new workspace of its own, which it owns, exactly as open sign-up does on any other server. Only the invite stage goes: the
+  account is still that one login's, and it is in no workspace of yours. Keep sign-up invite-only unless everyone your tailnet
+  reaches should be able to make a workspace here.
+- **An invite can be for one tailnet login** (Invite people, "Tailnet login"; `POST /invites` with `tailnetLogin`). Only that
+  login can use it, whoever has the link. They join the next time they open the server, with the role of the invite.
+- **One login, one account.** (With passkeys allowed, an account that has a passkey links or unlinks its login on the
+  Account page; without them there is nothing to link or unlink.)
+- **Tagged devices and nodes shared in without a user** carry no login. They are never signed in.
+
+Good to know:
+
+- **A tailnet session is bound to the identity.** It works only on requests that arrive as that login. Its cookie is worth
+  nothing off the tailnet, on another person's device, or through Funnel. It is held to Tailscale's own id of the user as well as
+  to the login, so a login handed to someone else later inherits neither the account nor its sessions: a request with the right
+  login behind another user id is nobody ([an account is held to the tailnet user](#on-the-servers-own-machine)). The cookie is
+  stored under the hash of `tailnet:<token>` rather than of the token alone, so a build without tailnet sign-in finds nothing for
+  it. It is marked "Signed in by tailnet" in the device list and in Account activity,
+  `via: tailnet` on its session and in the account's log, and `signedInBy: tailnet` on what it does in the workspace's audit log (Activity shows a
+  "tailnet" mark).
+- **Signing out** keeps that browser signed out until you press "Continue as ada@example.com" on the sign-in page. Arriving again
+  would otherwise sign you straight back in; the page says so.
+- **Share links, public boards and `--funnel`** work as on any server. The public listener never reads an identity.
+
+### With passkeys also allowed
+
+Only on a tailnet server where the operator switched passkeys on (`--tailnet-passkeys`, or `hosted admin passkeys on`). An
+account may then add a passkey; one that has a passkey confirms the fixed core with it (a passkey check in the last 10
+minutes) and no longer by typing a name, and a workspace's "Ask for a passkey again" switches work.
+
+- **The fixed core without a passkey.** An account that only its tailnet signs in has no passkey to confirm with. For the few
+  things that always need one it is told to add a passkey first (403 `passkey_required`). Adding the first passkey needs no
+  passkey check (there is nothing stronger to check it against). What it does need, and what follows:
+  - **A browser and a named device.** The request must come from the Account page in a browser (not from the command line's
+    tailnet session, not from another site), and you confirm a step that names the device: "Add a passkey from Chrome on
+    Linux?". A program on your device can imitate both; they keep the command line and other sites out, and they put the
+    device's name on the passkey.
+  - **The passkey is on hold for 24 hours.** It signs in at once, and it cannot confirm the fixed core until the day is over,
+    exactly like a passkey added after a recovery code. It cannot add a second passkey or make recovery codes either.
+  - **Every page says so, on every device.** While it is on hold, each page of your account shows "A passkey was added from
+    Chrome on Linux" with the time, and **"Not you? Remove it"**. Any tailnet session of your account removes it with that
+    button: no passkey check (the only passkey there is to check with is the one in question), and it goes though it is your
+    only passkey and you have no recovery codes. The sessions that passkey signed in end, every other passkey still on hold
+    starts its 24 hours again, and the account is as it was before. Adding it is in the account's log and "Worth a look" in
+    Activity ("First passkey added in a tailnet session"); so is the removal.
+  - **After the 24 hours** it is an ordinary passkey: removing it needs a passkey check. If you find a passkey that is not
+    yours then, or cannot reach the server from a tailnet device, the server's operator removes it:
+    `shapewall hosted admin passkeys list|remove` ([Operator commands](#operator-commands-and-quotas)).
+
+  A tailnet identity is per device, so whatever runs as you on one of your devices could add a passkey of its own; the hold,
+  the notice and the removal are what stand between that and your account. So add your passkey before you need it, and look
+  at the notice when you did not. We chose this over "ask the proxy again": a second request through the proxy proves nothing
+  the first did not.
+
+- **Ending your other sessions** ("Sign out other devices") needs a session that passed a passkey check at some point, or an
+  account with no passkey at all. A tailnet session of an account that has a passkey confirms with it once.
+- **Signing up with a passkey while you arrive through the tailnet does not link your login.** The sign-up page has a box,
+  "Also sign me in from this tailnet login", off by default. Ticked, the link is in the account's log (`tailnet_linked`).
+- **`shapewall login` and `agent connect`** are approved in the browser by a tailnet-signed-in admin with no passkey, or with no
+  browser at all ([From your coding agent](#from-your-coding-agent)), unless the workspace switched on "Approve command line
+  logins in the browser": then the server takes an approval only from a session with a passkey check in the last 10 minutes,
+  whatever the client is and whatever it sends. The same switch keeps a session that only a tailnet identity stands behind
+  from making an API token and from inviting or making an admin (an admin could do the first two); it covers those three
+  things and nothing else that session's role allows.
+- **People from another tailnet who accepted a share of this machine** do carry a login (Tailscale sets the headers for them).
+  They are visitors like anyone else: listed for the admins, in nothing until invited.
+
+### How the server knows a request came through tailscale serve
+
+The identity headers are only as good as the path they came by. `tailscale serve` removes any `Tailscale-User-*` header a client
+sent and sets its own, for traffic from tailnet users only: none for tagged devices, none for Funnel
+([Tailscale: identity headers](https://tailscale.com/kb/1312/serve#identity-headers)). But the server listens on `127.0.0.1`, and
+other things can open that port and write the same headers:
+
+- any program on the machine, directly;
+- any program on the machine, through tailscaled: it asks for the server's own tailnet address
+  (`https://board.example.ts.net/`), and serve answers its own machine like any other device, with the machine owner's login;
+- a tailnet device, when tailscaled runs in userspace-networking mode: its netstack forwards a raw TCP connection to the
+  machine's tailnet address, on a port serve does not handle, to `127.0.0.1:<same port>`, and tailscaled itself dials it;
+- a local user through tailscaled's own dialler (`tailscale nc`, before Tailscale 1.98), or through tailscaled's SOCKS5 or
+  outbound HTTP proxy.
+
+The last three arrive from a socket that tailscaled owns. So no single check is proof, and an identity is believed only when
+**all** of these hold:
+
+1. **The secret.** At each start the server makes a random secret and points its serve entry at
+   `http://127.0.0.1:<port>/_ts/<secret>`. Serve puts the path of its target in front of every request it proxies; a raw
+   forward, a dial or a proxy passes the client's own path. A request without the secret is never asked who it is. This stops a
+   tailnet device, and anything else that cannot read this machine's serve config. **It does not stop a local user:** any local
+   user can read the serve config (`tailscale serve status` works for a user who is not the Tailscale operator; checked), secret
+   included. The secret is in no log line, error or response; a wrong one gets a plain 404.
+2. **The peer.** The connection's other end must be a socket owned by root, the user tailscaled runs as. On Linux the kernel
+   lists every TCP socket with its owner in `/proc/net/tcp`, and the server looks the peer up for each connection. This stops
+   a local program that connects to the port itself, though it has the secret: its socket is its own. It does not stop a local
+   program that asks tailscaled for the serve address (check 4 does). There is no setting to name another user.
+3. **tailscaled vouches.** For each request the server asks tailscaled who owns the address in `X-Forwarded-For` (which serve
+   sets to the tailnet address the request came from): `tailscale whois`. It must be a user's device, not tagged, with a key
+   that has not expired, of the same login as the header, and the answer must name the user by Tailscale's id. Kept for a minute per connection and address. Not proof alone (the address is a header too), required
+   in addition.
+4. **Not this machine.** A request whose source is the server's own machine is never taken by its tailnet identity. Any
+   program there, under any user, can ask tailscaled for the serve address; serve then sets the machine owner's login, adds the
+   secret and dials the server from a root socket, and whois agrees. Nothing in such a request says which local user or
+   program made it. So the server refuses when the address in `X-Forwarded-For` is one of this node's own tailnet addresses
+   (IPv4 or IPv6, from `tailscale status --json`, read again every 30 seconds), or when whois says the address belongs to this
+   node (compared by the node's stable id, not by a name). The machine's network interfaces are read on every request as
+   well, so an address tailscaled was given a moment ago counts at once. If the server cannot tell which node it is, nobody
+   is believed.
+   What this means for the owner: [On the server's own machine](#on-the-servers-own-machine).
+5. **The headers are clean.** Exactly one `Tailscale-User-Login`, no `Tailscale-Funnel-Request`, a value that is plain ASCII or
+   RFC 2047 encoded UTF-8 (what Tailscale sends for non-ASCII names) and reads as `user@domain`. Twice, empty, another
+   character set, a broken escape: nobody.
+6. **The request is from this origin.** The proxy adds the identity to every request a device makes, also one that a page on
+   another site made the browser send. So the identity alone only answers `GET /auth/me` with `Sec-Fetch-Site: same-origin`
+   and the `POST /auth/tailnet/*` routes (same-origin and JSON, as for every write). Everything else needs the session cookie
+   as before. `GET /auth/me` never makes a session: for a linked login it answers `"tailnet":{"state":"linked"}`, and the
+   console and the command line then sign in with `POST /auth/tailnet/sign-in` (rate limited per login). An account keeps at
+   most 20 tailnet sessions per login; signing in again past that ends the oldest.
+
+**The feature refuses to turn on, and the server does not start,** when the peer check would not mean what it must. While the
+server runs the same is checked every 30 seconds, and nobody is signed in by tailnet identity until it is right again (tailnet
+sessions stop counting and their open live streams are cut; passkey sessions go on; the log says why):
+
+- not Linux (macOS and Windows have no such table), `/proc/net/tcp` unreadable, or a test connection from the server itself not
+  recognised;
+- tailscaled in **userspace-networking mode** (`tailscale status --json` says `TUN: false`, or it was started with
+  `--tun=userspace-networking`);
+- **Tailscale older than 1.98**;
+- tailscaled running a **SOCKS5 or outbound HTTP proxy** (`--socks5-server`, `--outbound-http-proxy-listen`, read from its
+  command line in `/proc`);
+- no tailscaled of root found, more than one, or its command line not readable. Which process is tailscaled: where systemd
+  runs it, the main process of `tailscaled.service` (`systemctl show -p MainPID`) and no other, whatever else on the machine
+  is called `tailscaled`; without systemd, a process named `tailscaled` (where `/proc/<pid>/exe` can be read, the program
+  file itself must be). In both cases only a process that is root in all four of its ids (the `Uid:` line of
+  `/proc/<pid>/status`): a setuid-root program that an ordinary user started under that name is ignored, cannot be mistaken
+  for the daemon, and cannot switch the feature off;
+- tailscaled started with `TS_DEBUG_NETSTACK_LOOPBACK_PORT` or `TS_DEBUG_NETSTACK_SUBNETS` in its environment (debugging
+  switches that make tailscaled forward tailnet connections to loopback), when the server can read that environment;
+- the server cannot tell which node it is (`tailscale status --json` without `Self.ID` or without its tailnet addresses);
+- the server in a **container or a user namespace**, where "root" may not be the machine's root (a `/.dockerenv` or
+  `/run/.containerenv` file, a container cgroup, `container` or `KUBERNETES_SERVICE_HOST` in the environment, or a uid map
+  that is not the machine's own);
+- the serve config not the one entry the server added: a raw TCP forward to its port (under any spelling of loopback), another
+  serve entry to it, Funnel on its port, or its own entry gone or changed.
+
+Run with passkeys in those cases (`--tailscale` without `--tailnet-sign-in`).
+
+**What is still trusted.** Root on the server's machine, and whoever may change tailscaled's serve config there (the Tailscale
+operator). Either can pretend to be anyone. Nothing else on the machine is trusted, and nothing on the tailnet. tailscaled's
+environment is part of that root configuration: `/proc/<pid>/environ` of a root process is readable only by root, so a server
+that runs as an ordinary user (as it should) cannot see the two debugging switches above and trusts root not to have set them.
+
+### On the server's own machine
+
+The server's own machine is never signed in by its tailnet identity, in the browser or from the command line: a request from
+there proves only that something on the machine made it. What to use there instead:
+
+- **Hosted server: two ways.**
+  1. **Another tailnet device of yours.** Your phone or laptop opens the server and is you. The sign-in page on the server's
+     machine says so ("This is the server's own machine").
+  2. **The operator's commands on the machine, with the data folder.** Being able to read and write the data folder is the
+     proof, as for `hosted claim`. They cover what an owner needs there:
+
+     ```sh
+     shapewall hosted claim --data ./hosted-data --login ada@example.com          # the first account
+     shapewall hosted admin members list --data ./hosted-data
+     shapewall hosted admin members add --login ben@example.com --role admin --data ./hosted-data
+     shapewall hosted admin members remove --handle ben --data ./hosted-data
+     shapewall hosted admin members relink --handle ben [--login ben@new.example] --data ./hosted-data
+     shapewall hosted admin members unlink --handle ben --data ./hosted-data
+     shapewall hosted admin invites list|create --login cyd@example.com|revoke ID --data ./hosted-data
+     shapewall hosted admin projects list --data ./hosted-data
+     shapewall hosted admin passkeys status|on|off --data ./hosted-data
+     shapewall hosted admin passkeys list|remove ID --login ada@example.com --data ./hosted-data
+     ```
+
+     `members add` puts an existing account in at once (or changes its role), while the workspace has a free seat (the
+     `members` quota; a role change needs none); a tailnet login with no account yet gets an invite that only that login can
+     take. Adding the same login again replaces its pending invite, as an invite from the console does: one login has one
+     pending invite per workspace. `members remove` also revokes the invites, share links and API tokens that person made. With
+     several workspaces add `--workspace ID`. Every one of these is in the operator log and in the workspace's audit log as
+     "Server operator".
+
+  `shapewall login` and `shapewall agent connect` on the server's machine fall back to the code (approve it in a browser on
+  another device); `shapewall join` and `shapewall admin` say to run them on another tailnet device. Where passkeys are
+  allowed, a passkey session works from the machine as from anywhere.
+
+- **Local board** (`shapewall serve --tailscale`). On the machine itself open `http://localhost:<port>`: the board's own
+  machine is the owner there by the settings token, as without Tailscale. The tailnet address opened from the machine itself
+  asks to pair, and the pairing page says why. On a local board a peer check that fails its self test at start keeps
+  identity off until the board is started again; the 30 second watch never switches it back on.
+
+One consequence to know: an owner who works only on the server's machine and has no second tailnet device cannot open the
+console of a tailnet sign-in server from there. The operator's commands above are for that; for the console itself, use a
+second device, or run the server with passkeys and reach it [over SSH](#over-ssh) instead.
+
+**An identity is per device, not per person.** Tailscale says which device a request came from and whose device it is. It
+cannot say that the person is at the keyboard. Anything running as you on a tailnet device of yours (a script, a coding agent,
+a browser extension, malware) can act as you here, as far as a tailnet session goes. That is why the fixed core asks for a
+passkey, why a first passkey is on hold for a day, and why a workspace can require a passkey for approving machines and for making
+tokens ("Approve command line logins in the browser": with it on, a session that only a tailnet identity stands behind can
+neither approve a command line login nor make an API token on a project's page; alone, the first would be no barrier, since
+a token is what a command line works with). If that is not acceptable for your team, use passkeys.
+
+**An account is held to the tailnet user, not to the login's spelling.** A login is a name (`ada@example.com`), and a name can
+be given to someone else later, or a node shared in from another tailnet can carry one that reads the same. So when a login is
+linked the server keeps Tailscale's own id of the user (from `tailscale whois`, `UserProfile.ID`), and every later request must
+carry the same id: a request with the right login and another id is nobody ("This tailnet login belongs to someone else here"),
+and so is a whois answer with no user id at all. If that happens to your own account (Tailscale gave you a new user id:
+the tailnet moved to another identity provider, or you were removed and added again), the page shows the command for
+whoever runs the server: `shapewall hosted admin members relink --login you@example.com --data DIR` forgets the stored id,
+so the next arrival as that login is taken as the account's person. `members relink --handle HANDLE --login NEW` links the
+account to another login, and `members unlink --handle HANDLE` takes the login off. The operator decides because nobody
+in the product can tell a new id for the same person from the same name given to someone else; each is in the operator log
+and in the account's own log. A link made by `hosted claim --login` knows only the name: it takes the id of
+the first proven request that arrives as that login, so open the server from your own device soon after claiming. A device
+whose key has expired is nobody.
+
+**"Root on this machine" is what the peer check proves, and no more.** It shows that the connection was opened by a process of
+this machine's root. That this process is tailscaled's serve proxy follows from the other checks (the secret, the refusal
+list below it, the serve config). And Tailscale's identity is the device's: **several OS users of one tailnet device all count
+as that device's owner**. A family computer signed in to Tailscale as Ada signs every one of its users in as Ada. Tailscale's
+serve documentation does not spell this out; it follows from how the identity headers are made (from the connection's source
+device).
+
+### What was and was not checked against real Tailscale
+
+Checked on a real machine (Tailscale 1.104.2, Linux), read-only:
+
+- `tailscaled` runs as root, and its command line is readable in `/proc` by an ordinary user;
+- `tailscale status --json` has `TUN` (true there) and `Version` ("1.104.2-...");
+- `tailscale serve status --json` has the shape the server reads for an HTTPS entry (`TCP`, `Web`, `Handlers`, `Proxy`), and
+  **a user who is not the operator can read it** (run as `nobody`): the secret is not secret from local users;
+- `tailscale whois --json <address>` answers `Node` and `UserProfile.LoginName` for this machine's own tailnet address, and
+  "peer not found" for an address that is nobody's;
+- `tailscale status --json` has `Self.ID` and `Self.TailscaleIPs` (IPv4 and IPv6), and whois on one of those addresses
+  answers `Node.StableID` equal to `Self.ID`;
+- one capture of real requests through an existing serve entry, made from the machine itself: the request arrived from a
+  root-owned socket, with the entry's path in front, the identity headers set to the machine owner's login, and exactly one
+  `X-Forwarded-For` holding one of the machine's own tailnet addresses. That is the request check 4 refuses;
+- the `/proc/net/tcp` lookup names the right owner for a real loopback connection (a test in the suite, on Linux).
+
+**Run against a real tailscaled** (Tailscale 1.102.5, Linux, kernel mode, other serve entries on the machine, and a second
+tailnet device), with an earlier build of this release:
+
+- the serve entry with the `/_ts/<secret>` target was accepted, and requests arrived with the secret path in front;
+- a visitor from the other device was recognised by login, over IPv4 and IPv6, with the real whois;
+- forged `Tailscale-User-Login`, `Tailscale_User_Login` and `X-Forwarded-For` headers sent by that visitor were ignored;
+- a guessed secret path got 404, and the server's local port was not reachable from the tailnet;
+- the server's own machine got "This is the server's own machine" by the server's name, by its own IPv4 and by its IPv6;
+- a direct loopback request with a forged header was nobody, without the secret and with the real one;
+- `hosted claim --login`, then from the other device `admin projects create` and `list`, `admin members list`, `admin agents
+list` and `login --project` with no code; `admin` from the server's own machine was refused with its message;
+- stopping the server removed its serve entry, and Tailscale 1.94 was refused at start with its message.
+
+That run was made before four things in this release existed, so they are covered by the suite's stand-in only: holding an
+account to Tailscale's id of the user (`UserProfile.ID` in whois), finding tailscaled by its systemd unit, reading the
+machine's network interfaces on every request, and the server without passkeys (typed confirmation, the operator's
+commands).
+
+Read in Tailscale's source (`ipn/ipnlocal/serve.go`, `wgengine/netstack`, `cmd/tailscaled`), not run: that the userspace
+netstack forwards raw TCP to loopback; the proxy flags; the debug switches.
+
+**Not checked against a live serve:**
+
+- **a tagged device** (how `tailscale whois --json` marks it on your version; the code reads `Node.Tags`), and a device
+  shared in from another tailnet;
+- **the suspension within 30 seconds** when the serve config changes under a running server (a raw TCP forward, Funnel, the
+  entry changed), and that sign-in comes back when it is put right;
+- **a sign-in in a real browser** through the tailnet (the browser tests send the headers themselves);
+- and, smaller: whether the server can read `/proc/<pid>/environ` of tailscaled anywhere it is meant to run (as an ordinary
+  user it cannot), and the time `tailscale whois` takes per new connection under load.
+
+[Checking it on your own tailnet](#checking-it-on-your-own-tailnet) below goes through all of it, these three included.
+
+### Checking it on your own tailnet
+
+The tests run without a tailnet, against a stand-in for `tailscale serve`. Before you rely on tailnet sign-in, check it on
+yours. You need the server's machine, a second tailnet device of your own, and if you can a tagged device and a device of
+another person. Nothing here changes any setting except starting the server.
+
+1. **Start it and read what it says.** `shapewall hosted --data ./hosted-data --tailscale --tailnet-sign-in`. It either prints
+   the private address or refuses and says why ([the list](#how-the-server-knows-a-request-came-through-tailscale-serve)).
+   A refusal is the feature working: run with passkeys there.
+2. **The serve entry.** `tailscale serve status --json` on the server's machine shows one HTTPS entry whose `Proxy` is
+   `http://127.0.0.1:<port>/_ts/<a long secret>`, no `TCP` forward to that port and no Funnel.
+3. **Claim, from the server's machine:** `shapewall hosted claim --data ./hosted-data --login <your tailnet login>`. It prints
+   the owner account and the login it linked.
+4. **From your second device, open the address.** You are signed in as that account with no passkey. Account, "Devices"
+   shows a session marked tailnet. This is the one check that needs a real request from another device; the suite cannot
+   make it.
+5. **From the server's own machine, open the same address.** You must not be signed in: the page says "This is the server's
+   own machine". `curl -s https://<name>.ts.net/auth/me -H 'Sec-Fetch-Site: same-origin'` there answers
+   `"tailnet":{"state":"self"}`. If it signs you in, stop and report it.
+6. **Forge it.** On the server's machine: `curl -s http://127.0.0.1:<port>/auth/me -H 'Tailscale-User-Login: <your login>'
+-H 'Sec-Fetch-Site: same-origin'` must answer `"user":null` and never `"state":"linked"` (a `GET` makes no session anywhere; `linked` would mean the forged login was believed), and so must the same request with the `/_ts/<secret>` path
+   from the serve config in front and `-H 'X-Forwarded-For: <your second device's tailnet address>'`. The server log has
+   "ignored identity headers" with the check that failed (the connection did not come from tailscaled).
+7. **A tagged device, and another person's device,** if you have them: the first sees "Your tailnet did not say who you
+   are", the second "Ask an admin of a workspace here to invite ..." and appears under Members, "Arrived through the
+   tailnet". Neither is in anything.
+8. **The first passkey, if you allowed passkeys** (`shapewall hosted admin passkeys on`; without it the Account page has no
+   passkeys and step 8 does not apply). On the second device add a passkey on the Account page: it asks you to confirm the device by name,
+   then every page shows "A passkey was added from ...". Press "Not you? Remove it" from a third device or the same one: it
+   is gone, with no passkey prompt. `shapewall hosted admin passkeys list --login <your login> --data ./hosted-data` on the
+   server shows the same.
+9. **Break it and watch it stop.** `tailscale serve --tcp=<port> tcp://127.0.0.1:<port>` on the server's machine (a raw
+   forward to the server's port); within 30 seconds the log says tailnet sign-in is suspended and the second device is
+   signed out. Remove the forward (`tailscale serve --tcp=<port> off`): sign-in comes back. Do this only on a machine whose
+   serve config is yours to change.
+10. **Which tailscaled.** `systemctl show -p MainPID --value tailscaled.service` is the process the server checks; its
+    `Uid:` line in `/proc/<pid>/status` is `0 0 0 0`. Without systemd the server goes by the process name.
+
+What to send us if a step fails: the Tailscale version, the step, and the "ignored identity headers" line. Not the serve
+config: it holds the secret.
+
+### From your coding agent
+
+On a server with tailnet sign-in, an agent or a terminal on a tailnet machine is already known to the server as that machine's
+tailnet user. Nothing below needs a browser unless it says so. Each command asks the server who it is (through `tailscale
+serve`, by the same rule as the browser), gets a session that works only with that identity, uses the console's own API with it
+(the same role checks, the same audit entries, marked as a tailnet session from "Shapewall CLI"), and signs out when it ends.
+No admin token is stored anywhere.
+
+**1. An owner sets up a server and a first project.** On the machine that runs the server:
+
+```sh
+shapewall hosted --data ./hosted-data --tailscale --tailnet-sign-in &        # needs Tailscale, MagicDNS and HTTPS certificates
+shapewall hosted claim --data ./hosted-data --login ada@example.com --workspace-name "Team"   # no browser
+```
+
+Then on another tailnet device of the owner's (the server's own machine is never signed in by its tailnet identity:
+[why](#on-the-servers-own-machine)):
+
+```sh
+shapewall admin projects create "My app" --remote https://board.example.ts.net
+shapewall login --remote https://board.example.ts.net                        # no code, no browser: a token for the project
+shapewall push --remote https://board.example.ts.net
+shapewall admin invites create --login ben@example.com --role admin --remote https://board.example.ts.net
+```
+
+`hosted claim` reads the one-time setup link from the data folder: being able to read that folder is the proof, as it is for
+`hosted setup-link`. It does not ask the tailnet who you are, because on the server's own machine the tailnet cannot say.
+`--login` names the owner's tailnet login and is required; it must read as a login (`ada@example.com`), it is taken on your
+word, and the command prints what it linked: the server's address, the owner account and its handle, the tailnet login, the
+workspace. A server is claimed once: with an account already there, or the setup link used or replaced, the command refuses.
+The audit log records the account and the link as made by "hosted claim on the server". From another tailnet device, with the
+setup link in hand, `shapewall hosted claim --setup-link URL` asks the server who is asking instead, and `--login` there only
+refuses anyone else. No passkey is made and none is needed: the Tailscale account is the sign-in. The few things Shapewall
+always asks about need `--yes` on the command line (`shapewall admin invites create --role owner --yes`), which names what
+it confirms. Where the operator allowed passkeys, an account that has one confirms those in the browser instead.
+
+**2. A member joins and connects their machine.** On their own tailnet machine, after an admin invited their login:
+
+```sh
+shapewall join --remote https://board.example.ts.net                         # takes the invite made for your login
+shapewall agent connect --remote https://board.example.ts.net --project my-app --name "Builder"
+```
+
+`join` reports the workspace, your role and its projects. With an invite link instead: `shapewall join --remote URL --invite
+LINK`. The role is always the invite's; there is no way to choose one, and no way into a workspace that did not invite you.
+`agent connect` (and `shapewall login`) is approved by your own tailnet identity when your role may make tokens (admin or owner),
+with the scopes the browser's approval page gives; the audit entry says "approved by tailnet identity" with the machine's name.
+A member or viewer gets the usual code, for an admin to approve in the browser. **Needs a browser:** nothing, for an admin.
+
+The rules of those commands:
+
+- **Which project.** `--project <slug>` (and `--workspace <name>` when you are in several). With one project it is picked.
+  Otherwise the command lists the projects with the exact flags to add and exits with an error. It never prompts.
+- **An agent's look and audience** come from flags: `--name`, `--icon`, `--tint`, `--used-by owner|trusted` (default `owner`:
+  only you). Named members are picked in the console.
+- **A workspace can require the browser and a passkey:** Settings, "Approve command line logins in the browser" (owners). The
+  server then refuses an approval from any session that only a tailnet identity stands behind (no passkey check in the last 10
+  minutes): `login` and `agent connect` show the code, and whoever approves it confirms with a passkey. Such a session can
+  then not make an API token or invite or make an admin either (`shapewall admin invites create --role admin` says so). This is decided by the
+  server from the session; nothing the command line or a browser sends changes it. A workspace that asks for a passkey for
+  "Agents and machines" gets the code too.
+- **When it does not apply** (the server has no tailnet sign-in, the request did not come through the tailnet, a tagged device, a
+  login with no account): `login` and `agent connect` use the code and the browser, unchanged. `join` says that an account
+  needs a passkey, which is made in the browser, and gives the link. `admin` says it would need an admin token, which does not
+  exist yet, and points at the console.
+- **The admin commands** are these and no more: `admin projects list|create NAME`, `admin invites create --login LOGIN | --link
+[--role ROLE] [--days N]`, `admin members list`, `admin agents list` (`--json` for scripts).
+
+## Accounts
+
+- **Passkeys only.** No email, no passwords. Sign-up and sign-in use discoverable credentials with user verification required, so
+  signing in is one button (no username). Where the browser supports it, the sign-in page also offers passkeys in the handle field's
+  autofill (WebAuthn conditional UI), renewed before the 5-minute ceremony expires. Add more passkeys (another device, a password
+  manager) on the Account page; the last one cannot be removed while you have no unused recovery codes.
+- **Passkey labels.** Each passkey says where it lives, from the authenticator's backup flags: "Synced" (backed up by a cloud keychain
+  or password manager), "This device only", or "Not synced yet" (can sync, has not), plus how it connects (built in, phone, security
+  key). With a single device-only passkey the page suggests adding one on another device. A sign-in from a browser and OS the account
+  has not used before is marked "Signed in on a new device" in Account activity.
+- **Recovery codes.** Ten one-time codes (about 128 bits each), stored as SHA-256 hashes, shown once. A code plus your handle signs you
+  in and ends every other session of the account (a stolen device loses its session). That session is never "fresh": in its first 30
+  minutes it can add a passkey, and nothing that ever asked for a passkey check. A passkey added that way signs in, but is on hold for 24 hours before it can
+  confirm sensitive actions, so someone with one stolen code cannot lock the owner out: the owner's own passkey still removes theirs
+  (which ends their sessions) and makes new codes. Making new codes voids the old ones. Lose every passkey and every code and the
+  account is gone, but its work is not: projects belong to workspaces, so an admin removes the old member and invites the new account.
+  Admins never reset someone else's credentials (that would be a takeover path).
+- **Sessions.** A random 32-byte cookie (`__Host-sw_session` on https), HttpOnly, SameSite=Lax, stored as a hash, 30 days sliding and
+  90 days at most. Signing in replaces the browser's previous session. The Account page lists your signed-in devices (browser and OS
+  from the user agent, IP, last used); sign one out, or "Sign out other devices" for all of them. Removing a passkey also ends the
+  other sessions. The list carries a session id, never the cookie or its hash.
+- **Asking for the passkey again.** By default a signed-in session with the right role is enough. A small fixed core always asks
+  (passkeys, recovery codes, deleting the account or a workspace, owners, moving the server), and a workspace's owner can switch
+  more on: [When Shapewall asks for the passkey again](#when-shapewall-asks-for-the-passkey-again). In a recovery-code session,
+  which has no passkey to confirm with, the prompt says "Add a passkey first" and links to adding one (or lets you use a passkey
+  you still have, which turns the session into a passkey session). Such a session, and one started by a passkey that is still on
+  hold, is asked for everything the workspace settings cover, whatever they are set to.
+- **Tailnet sign-in.** On a server run with `--tailscale --tailnet-sign-in`, an account can be linked to a tailnet login and is
+  then signed in without a passkey: [Tailnet sign-in](#tailnet-sign-in).
+- **Account activity.** The Account page lists your own security events, newest first: sign-ins (passkey or recovery code, with the
+  device and IP), passkeys added and removed, new recovery codes, devices signed out (`GET /auth/security-log?before=`). After a
+  recovery code was used on your account, the next passkey sign-in shows a banner until you dismiss it ("That was me",
+  `POST /auth/security-notice/seen`); `GET /auth/me` carries it as `securityNotice`.
+- **Deleting your account.** Account page, "Delete account": a fresh passkey check (always) and your handle typed back
+  (`DELETE /auth/me` with `{ confirm, revokeTokens }`; `POST /auth/delete-account/preview` shows the plan first). Workspaces where you
+  are the only member are deleted with it; in the others you leave (your pending invites and share links are revoked, and your API
+  tokens unless you untick that). It is refused while you are the only owner of a workspace that has other people in it: make one of
+  them an owner first. Comments keep the name they were signed with. The account's own security events are deleted; an
+  `account_deleted` entry without a user stays.
+
+## Workspaces, roles and invites
+
+Projects belong to a workspace, never to a person. Roles:
+
+| Who                        | Reaches                   | Can                                                                                                                                                                    |
+| -------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| viewer                     | every project             | See projects, boards and comments                                                                                                                                      |
+| member                     | every project             | + comment, reply, react, resolve, reopen; edit and delete their own comments                                                                                           |
+| admin                      | every project             | + projects, API tokens, share links, invite links (up to admin), change and remove members and viewers, delete any comment, the Access overview, the audit log, rename |
+| owner                      | every project             | + change or remove admins and owners, invite owners, delete the workspace. A workspace always keeps one owner                                                          |
+| API token                  | one project               | Its scopes (below): `read`, `reply`, `status`, `claim`, `resolve`, `push`, `import`, `agent`. Signed as the token, marked as an agent                                  |
+| share link guest (view)    | one project, no workspace | See that project's boards and comments. Nothing else: no members, no other projects, no workspace data                                                                 |
+| share link guest (comment) | one project, no workspace | + add comments and replies, signed `<name> (guest)`. Never resolve, reopen, edit or delete; agents skip their comments by default                                      |
+
+The console shows this table on **Access, Roles** and next to every role picker.
+
+A member also reads their own agent usage (and that of agents they connected), and everyone reads their own
+activity. Admins and owners read the workspace's usage, everyone's activity and the access review
+([Usage and activity](#usage-and-activity)).
+
+**Renaming a token.** An agent that watches a hosted board signs its comments and replies with its token's name (for a terminal
+login, "laptop (shapewall login)"). **Rename** on the token lists (the project page and **API tokens**) gives it a human name:
+`PATCH /api/workspaces/:ws/projects/:pid/tokens/:tid` with `{ "name": "..." }`, 1 to 60 characters, for the same people who may revoke
+it (admins and owners). The secret, the scopes and the expiry do not change; what the token already wrote keeps the old name; a
+revoked token is not renamed; the audit log records `token_renamed` with both names. A token that may take work is an agent with an
+icon, a state and rules of its own: see [Agents on a hosted board](#agents-on-a-hosted-board).
+
+**Invite links** hold a 32-byte token (stored hashed), a role, an expiry (the console offers 1, 3, 7, 14 or 30 days, 7 by
+default; the operator's `hosted admin invites create --days N` takes any whole number from 1 to 30), and work once. Opening
+one shows the workspace and role; a new person creates an account from it, an existing one joins with a click. The token sits in the
+URL fragment (`/invite#<token>`), and the setup link the same way (`/signup#setup=<code>`): browsers never send a fragment, so the token
+stays out of access logs and Referer headers. The console reads it, keeps it in session storage for the sign-in round trip, and previews
+the invite with `POST /api/invites/preview`. With `RESEND_API_KEY` and `SHAPEWALL_EMAIL_FROM` set, an admin can also have the link
+emailed: at most 20 an hour per workspace, 50 a day per person and 500 a day for the whole server, with a fixed subject ("You have an
+invite to a Shapewall workspace") and the workspace and inviter names quoted as names they chose, so the operator's sending domain is a
+poor tool for phishing. Invite emails are off on a server with `--signup open` (anyone could make an account and send them). The address
+is kept on the invite for its history. Without email the console only offers copying the link. At most 100 invites are pending per
+workspace; pending ones can be revoked, used and expired ones move to History with who made them and who joined.
+
+**What someone hands out goes with them.** Removing an admin or owner, or their leaving, revokes their pending invites, share links
+and API tokens in the same transaction; demoting one below admin does the same, and an owner made admin loses their pending owner
+invites. Deleting an account always revokes its tokens. On top of that, an invite works only while its creator can still invite to
+that role (admin, or owner for owner invites), a share link only while its creator is still an admin or owner, and an API token only
+while its creator is still a member with the admin or owner role, checked again at every use. There are no service tokens: every
+token has a creator. An admin removing someone may keep their tokens (`{ revokeTokens: false }`, for CI that cannot stop at once);
+kept tokens are `inactive` and refused until the creator is an admin here again, so revoke them and make new ones.
+
+**Share links** let an admin share one project's boards with someone who has no account. They are off for every workspace until an
+admin turns them on (Settings); turning them off stops every link at once, and turning them back on
+restores the ones that are not revoked or expired.
+
+- A link reaches exactly one project. It is **view-only** or **comment** (guests give a display name, 1 to 40 characters), expires
+  after 1, 7, 30 or 90 days, can have a passcode (4 to 64 characters, stored with scrypt), and is revoked with a click. At most 20
+  active links per project. Deleting the project ends its links.
+- The link is `/share#<token>`: 32 random bytes in the fragment, stored as SHA-256. The landing page previews it with
+  `POST /api/shares/preview`; when there is a passcode, the preview names neither the project nor the workspace until it is right.
+  `POST /api/shares/open` checks the passcode (5 wrong tries per 15 minutes per link and IP, 30 an hour per IP, 50 an hour per link
+  from anywhere). Each try counts before the passcode is checked and a right one gives its count back, so parallel guesses cannot get
+  past the limit. It then starts a guest session: a random 32-byte cookie scoped to `/s/<share id>/` (HttpOnly, SameSite=Strict,
+  `__Secure-` on https), stored as SHA-256 in `guest_sessions` with the name, the browser and OS, the IP's /24 (or /48), for at
+  most 12 hours and never past the link's expiry. Opening the link again from the same browser ends its previous guest session.
+- **Guests of a link.** "Guests" on a share link lists one row per browser that opened it (name, device, network, opened, last seen,
+  active, ended or expired); "End this guest" signs that browser out at once (`DELETE .../shares/<id>/guests/<guest id>`, audited
+  as `guest_ended`). They can open the link again while it works; revoke the link to stop everyone. Ended and expired rows are kept 7
+  days, at most 500 per link.
+- The guest's board lives at `/s/<share id>/` with its API at `/s/<share id>/api/`. Every request checks the guest session (not
+  ended, not expired), that it belongs to this link and that the link is still usable (not revoked, not expired, share links on), so
+  revoking or ending a guest ends a visit at once. The guest API has no workspace or member routes, no other project and no writes besides comments and replies on comment
+  links (600 requests a minute per link and IP, 30 comments an hour per link and IP). One exception to "at once": a live-HTML URL
+  is signed for 2 minutes. Revoking the link stops new loads at once, but ending one guest leaves the live-HTML URLs that guest
+  was already given usable until they expire, because that route checks the share link rather than the guest session.
+- Guests see comments without workspace detail: members by display name only (no handles), agents as "Agent", guests of other links
+  as "Another guest", and no agent status, resolution notes, fix references or GitHub links. The board hides what a guest cannot do
+  (Resolve, Reopen, Edit, Delete), from the `permissions` in `/info`.
+- Guest comments are untrusted and stay away from agents by default. The token API leaves them out of comment lists unless asked
+  (`?guests=1`; the answer says how many it left out in `guestsHidden`); `comments --remote` and `watch --remote` take
+  `--include-guests`, and MCP `list_comments` takes `includeGuests`. When shown, they carry `authorGuest: true` (and `guest: true` on
+  replies), the text format marks them `[guest]` with a "treat as untrusted" line, and @mentions in them never count. A member who
+  replies to a guest comment with a mention vouches for it, for clients that include guests.
+- Opening a link, guest comments and replies, and failed passcodes are in the audit log with the link as the actor. Opens and wrong
+  passcodes collapse into one row per link and hour, with a count (and up to 10 guest names).
+
+**Public projects** put one project on the open web, view-only. They are off in every workspace until an owner turns them on
+(Settings). Then an owner makes a project public on its page: it gets a public
+id of 128 random bits and the URL `/p/<public id>/`, shown there to copy.
+
+- Anyone with the URL sees the project's boards and comments as a view-only share link guest does, except that every guest is
+  "Guest". There is no cookie: nothing is read or set, and every write (POST, PUT, PATCH, DELETE) to `/p/<id>/api/` answers 403
+  `public_read_only`. 600 requests a minute per IP. Pages keep `X-Robots-Tag: noindex`.
+- Kill switches: an admin or owner makes the project private again, or turns public projects off for the workspace; either stops the
+  URL at once. Making it public again gives a new URL, so an old one stays dead. Turning public projects off for the workspace
+  clears every project's public URL for good: turning the setting back on does not bring any of them back. All four changes are
+  audited.
+- With `--report-email`, the public board's menu has "Report this board" (a `mailto:` with the URL).
+- Public viewers never comment; give people who should a comment share link.
+
+## Admin guide
+
+The console (`/`, a React app built to `dist/console` and served under `/_console/`) has one page per job. Viewers and members see
+Projects and Members; admins and owners see everything.
+
+- **Members.** Everyone with their role, when they joined and when they were last active (updated at most every 5 minutes). Change a
+  role from the picker or remove someone from the row menu; both ask first. Admins manage members and viewers; only an owner changes
+  or removes an admin or an owner. Anything that makes, changes or removes an owner always asks for the passkey; the same for
+  an admin when the workspace asks for it (Settings, "Members and roles"). The last owner
+  cannot be demoted, removed or leave. Removing, or demoting below admin, revokes the person's pending invites, share links and API
+  tokens (the confirm dialog says so). When the person made API tokens that still work, the remove dialog lists them with "Revoke"
+  checked; unchecking it keeps them, inactive (`DELETE /members/:user` with `{ revokeTokens: false }`); the audit entry says whose
+  invites, links and tokens went.
+- **Invites.** "Invite people": pick the role (up to your own: admins invite up to admin), the expiry, an optional note for whom it is
+  (up to 80 characters, shown in the pending list, the history and the audit log; admins only) and optionally an email address. The
+  link is shown once, with a copy button. Pending invites can be revoked; History shows used, revoked and expired ones. Someone who
+  opens an invite while signed in to an account that is already in the workspace is told so, with a link to it. The invite page keeps
+  the token in the tab's session storage until it is used, so a reload or a trip through sign-in does not lose it, and a link that
+  lost its code can be pasted back in.
+- **Access.** Who reaches what. "By project" is a matrix of people, API tokens and share links against projects (on a phone, pick a
+  project). "By person" shows one person's role and what it gives them in each project. "Roles" is the table above. Pending invites
+  are counted.
+- **API tokens.** Every token in the workspace with its project, scopes, creator, created, last used and expiry. A token whose creator
+  has left the workspace or is no longer an admin is `inactive` and flagged: it is refused at every request, so revoke it.
+- **Share links.** On each project page (Manage): create, copy, see opens and last use, list and end guests, revoke. They are also
+  listed in Access.
+- **Public.** On each project page, when the workspace allows it: make the project public (owners) or private (admins), and copy its
+  public URL.
+- **Audit log.** Filter by who (a person, a token or a share link), by action and by time (24 hours, 7, 30 or 90 days), and search
+  (`q`: names, handles, projects, tokens, links, details); 50 a page, newest first, "Load older events" for more. Each entry shows the
+  relative and the exact time. "Export CSV" downloads up to 10,000 entries with the same filters (`GET /audit/export`; cells that
+  start with `=`, `+`, `-` or `@` get a leading `'` so a spreadsheet does not run them).
+- **Usage.** Every agent turn with the numbers each agent reported: tiles against the period before, charts, a grid of every turn,
+  saved views and exports ([Usage and activity](#usage-and-activity)).
+- **Activity.** What people did, read from the audit log: sign-ins, settings with before and after, agents, approvals, tokens and
+  exports; a page per person and per agent; and the access review.
+- **Settings.** Rename (admins), share links on or off (admins), public projects on (owners) or off (admins), export (admins), leave, and delete the workspace (the owner, with a
+  passkey check and the workspace name typed back). Deleting removes every project, board, file, comment, token, invite, share link and
+  audit entry, and writes one `workspace_deleted` entry to the account log.
+- **Export.** "Download a copy" (admins; `POST /export`; one at a time per workspace, 409 while one runs,
+  and 5 an hour per person) streams a zip: `workspace.json` (the workspace,
+  members, projects, tokens without their secrets, share links without theirs), `audit.json`, and per board `board.json`,
+  `comments.json` and its files (captures, variants, versions, live HTML), and `chats.json` when the board has chat with a
+  [connected agent](#connected-agents): the threads every member reads (the board's and each comment's) with their messages. A
+  member's own chats are not in the copy; the file says how many there are. Over 3.5 GB it answers 413 (no zip64 yet). `audit.json` holds
+  up to 100,000 entries, newest first, read and written 1,000 at a time.
+- A member who opens an admin page (a link, a bookmark) sees "This page needs the admin role" instead of being sent back to Projects.
+- An empty project shows a four-step checklist (project, token, push, invite) that ticks itself off. The token dialog shows the
+  working command once, with the token in it: `SHAPEWALL_TOKEN=... shapewall push --remote <this server>`.
+
+Console API (cookie session; all under `/api/workspaces/:ws`): `GET /` (workspace, members, projects, `me`, features),
+`PATCH /` (rename), `PATCH /settings` (`{ shareLinks }`), `DELETE /` (`{ confirm: name }`), `GET /invites` (`{ pending, history }`),
+`POST /invites` (`{ role, expiresInDays, email }`), `DELETE /invites/:id`, `PATCH /members/:user` (`{ role }`),
+`DELETE /members/:user` (`{ revokeTokens }`), `GET /access`, `GET /tokens`, `GET /shares`, `GET|POST /projects/:pid/shares`,
+`DELETE /projects/:pid/shares/:sid`, `GET /audit?actor=user:<id>|token:<id>|share:<id>&action=&from=&to=&q=&before=&limit=`,
+`GET /audit/export` (CSV, same filters), `GET /audit/filters`, `POST /export` (zip). Account: `GET /auth/sessions`,
+`DELETE /auth/sessions/:id`, `POST /auth/sessions/revoke-others`, `GET /auth/security-log`, `POST /auth/security-notice/seen`,
+`POST /auth/delete-account/preview`, `DELETE /auth/me`. Logins from the CLI: `POST /api/device/lookup|approve|deny` (`{ code, ... }`).
+
+## Projects, tokens and push
+
+An admin creates a project and an **API token** for it (Workspace page, "API tokens"). Tokens look like `swp_` + 43 characters, are
+shown once, stored as SHA-256 with a 12-character display prefix, can expire, and are revoked with a click. Each token belongs to one
+project and has scopes:
+
+| Scope     | Allows                                                                                                                                  |
+| --------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `read`    | Pages, comments, screenshots and live HTML of the project                                                                               |
+| `reply`   | Replies                                                                                                                                 |
+| `status`  | An agent status on a comment                                                                                                            |
+| `claim`   | Take the comments sent to an agent. A token with it is an agent ([Agents on a hosted board](#agents-on-a-hosted-board))                 |
+| `resolve` | Resolve and reopen                                                                                                                      |
+| `push`    | Upload captures                                                                                                                         |
+| `import`  | The one-way move of a local project, granted only by a moving device login ([Move a local project](#move-a-local-project-to-your-team)) |
+| `agent`   | The link of a [connected agent](#connected-agents), granted only by approving `shapewall agent connect`                                 |
+
+The legacy scope `comment` (the same as `reply` and `status`) is not accepted: asking for it is refused with
+HTTP 400 `invalid_scopes`, naming `reply` and `status` instead. Tokens that already had it were rewritten to `reply` and `status`
+when the server upgraded ([Migration 21 and rollback](#migration-21-and-rollback)), so they work as before and still take no work
+(no `claim`, [Scoped hosted agents](#scoped-hosted-agents)).
+
+The CLI takes the token from `$SHAPEWALL_TOKEN` or `--token-file FILE`, never from a flag (other users can read a process's arguments),
+and sends it only over https (plain http only to this machine).
+
+```sh
+shapewall capture
+SHAPEWALL_TOKEN=swp_... shapewall push --remote https://app.example.com
+```
+
+**`shapewall login`** gets a token without copying one:
+
+```sh
+shapewall login --remote https://app.example.com
+shapewall push --remote https://app.example.com    # and comments, watch, mcp --remote
+```
+
+It prints a short code (like `BCDF-GHJK`) and opens `/device` in the browser (a URL the CLI builds from `--remote`, never one the
+server sends; on Windows through `rundll32 url.dll,FileProtocolHandler`, no shell). Someone with the admin role there types the code,
+checks that the page shows the same code, the address the login came from and how long ago it started, picks the workspace,
+project, scopes and expiry (30 or 90 days, or none), and approves (with a passkey check when the workspace asks for one
+before "Agents and machines"). On a server with tailnet sign-in the command needs no code at all:
+[From your coding agent](#from-your-coding-agent). The machine name is shown as reported by the
+terminal (unchecked), and the page warns when the login came from another address than the approver's. The CLI, polling `POST /api/v1/device/poll` every 3 seconds, receives the token once and saves it
+in `$XDG_CONFIG_HOME/shapewall/credentials.json` (or `~/.config/...`; `%APPDATA%\shapewall\` on Windows): the folder 0700, the file 0600, one entry per server origin.
+It never prints the token. The token is named `<machine> (shapewall login)` and listed with the others; revoke it there. A code
+expires after 10 minutes, works once, and can be denied. A login approved but never collected (the terminal stopped polling) has its
+token revoked when the login expires. `$SHAPEWALL_TOKEN` and `--token-file` still win over the saved login. The
+CLI side is `POST /api/v1/device/start` (`{ name }`, 10 a minute per IP, at most 5 pending per IP (429), at most 500 pending in all,
+the oldest dropped to make room) and `/poll` (`{ deviceCode }`: 202 while waiting, 200 with
+the token, 403 denied, 410 expired); lookups are limited to 10 a minute per account. Pending logins live in SQLite
+(`device_logins`), so a restart keeps them: the row holds the device code's SHA-256, never the code. An approved token is stored
+sealed to a key derived from the device code (X25519 and AES-256-GCM), so only the CLI that holds the code can open it, and the row is
+deleted when it is picked up. Approving is single-use: two approvals race for one row and one wins.
+
+A refused token (revoked, expired, its creator no longer an admin, or mistyped) gets one message from every `--remote` command:
+"This token was revoked, has expired or its maker is no longer an admin there (or it is wrong). Create a new one in the console:
+<url>". Names and messages from the server are printed without control characters, so a project name cannot rewrite the terminal.
+
+`push` uploads each board's latest capture, its variants and its kept versions, then commits; the board switches to the new files all at
+once. Comments stay. What a push sends about the board is only what the board shows (page ids, paths, titles, groups, notes, viewports,
+journeys): never `auth`, storage states, login scripts, `actions` (a `fill` can hold a password), `waitFor`, or local paths.
+
+The server treats every upload as untrusted, even from our CLI:
+
+- File names must be ones the local tool writes, for pages and viewports on the pushed board.
+- Live HTML runs through the same sanitizer as a local capture (`sanitizeDocument`, then the CSP meta tag) and the same 5 MB cap, with
+  at most 4 MB of CSS per file. The sanitizer's scans run in linear time on any input.
+- PNGs are decoded and re-encoded (which drops every chunk but the pixels), after a header check (at most 3840 x 8000, 16 megapixels,
+  10 MB). Local viewports can be larger than 16 megapixels; those do not push.
+- Cleaning runs in worker threads (2 at once, 32 waiting, 30 seconds and 512 MB each), never on the server's event loop; a token has at
+  most 4 uploads in flight.
+- The manifest and variants are rebuilt field by field; the board definition is validated by the same code as a local config.
+- **Which agents are online?** A comment sent to an agent is only picked up while some machine runs `shapewall watch --remote` (or
+  an MCP client) with a token of the project that has the `claim` scope. Each such token is an agent
+  ([Agents on a hosted board](#agents-on-a-hosted-board)). The server remembers, in memory, when each one last called the API or held
+  its event stream open; for 90 seconds after that the agent is online. Members who can send comments to an agent see every agent
+  by name with its state in the board's Agent panel (the Agent button in the top bar; on a phone, **Agents** in the More menu), in
+  the button's tooltip ("Builder online, Fixer offline") and on the thread. Only names, faces and times are told, never a token, and
+  never to share link guests or public viewers. After a restart every agent reads offline, with the last time it was seen, until
+  its next call.
+- **Removing a board.** A board pushed by mistake, or one you retired, comes off the server on the project page: "Remove board"
+  on its row in the Boards list, for the same people who may delete the project (admins and owners).
+  It deletes that board's captures, page history, variants, checks, comments, replies and comment images, and frees their storage;
+  the project, its other boards, its tokens and its share links stay. A later push of the same board id starts a new board: the
+  captures are back, the comments are not. The audit log records who removed which board, and people who have the board open are
+  told at once (`board.removed` on the event stream). API: `DELETE /api/workspaces/:ws/projects/:pid/boards/:bid`.
+- Limits: 5000 files and 1 GB per push and 500 pages per board, which are fixed; and, by default, 10 boards per project (checked
+  again at commit), 20 pushes per hour per token and 5 GiB per workspace (committed boards plus open pushes), which are quotas the
+  operator can raise or lower ([Operator commands and quotas](#operator-commands-and-quotas)). A push is open for an hour; after that it takes no more files and
+  a sweep (at start and every 10 minutes) removes its staging folder, staging folders without a push, and board folders a commit left
+  behind.
+
+## The board
+
+`/w/<workspace>/p/<project>/` serves the same board client as `shapewall serve`, on an API with the same shape, for members of the
+workspace. Comments are signed with the account's name and handle (the server sets them; the board shows the handle beside the name).
+A token's replies are signed with the token's name and marked as an agent, with its agent's icon beside them; the API ignores any `author` it sends. Captures from the board and editing journeys are off on a
+hosted board (push again instead). Compare between environments is not hosted yet.
+
+Live HTML is served from `/uc/...` through HMAC-signed URLs that expire after 2 minutes. The board API gives each new frame load a
+fresh redirect. Guest URLs are bound to their share link and checked again on every load: revoking the link stops new loads immediately
+(an already loaded frame keeps its document). Responses carry a CSP `sandbox` without `allow-same-origin`, no script source, and
+`Cache-Control: private, no-store`. Frames use `sandbox=""`. Pins and click targets come from the captured element map on the authenticated
+board API, which the server validates field by field on push, including its viewport dimensions (3 MB, at most 8000 elements).
+
+For a separate cookieless domain, run `shapewall hosted --origin https://app.example.com --usercontent-origin https://example-content.net`
+(or set `SHAPEWALL_HOSTED_USERCONTENT_ORIGIN`; the 0.x name `SHAPEWALL_USERCONTENT_ORIGIN` still works, with a warning). Point both
+host names at this server through your TLS proxy, preserving Host. The content origin
+serves only signed `/uc/` routes, ignores cookies and never sets one; the app origin refuses `/uc/`. Its CSP permits only the app origin
+to frame documents. Use a separate registrable domain for a separate site; a second port or subdomain alone is a different origin, and
+the opaque sandbox remains the main boundary. Separate usercontent must be https when the app is https.
+
+The capture's base URL (often `http://localhost:...` on the machine that captured) is never sent to a hosted board, to members or
+guests: page links and the link that opens the app use the board's `publicUrl` when the config has one, and are hidden otherwise. Variant sources
+on the capture host become paths; broken links in the app become `publicUrl` links or paths, and the capture host is taken out of
+broken-link and failed-shot error messages. (Links inside the pushed live HTML are cleaned at push time, not rewritten on serve.)
+
+The board header links back to the project's console page for members. A viewer sees a note where Comment would be. When access ends
+during a visit (a share link revoked or expired, the session ended, the account removed from the workspace), the board shows a banner
+at the first refused request instead of failing quietly; opening a board you cannot reach shows the console's "You don't have access to
+this board" page (still a 404), with "Sign in as someone else" and "Back to your workspaces". Guests' comments are text only: an
+`@agent` in one is not a mention.
+
+Comments and replies can carry up to 4 images (PNG, JPEG, WebP or GIF, 5 MB each) and a drawing (boxes, arrows and pen strokes), as
+on a local board. The server checks each image by its bytes and cleans it in the same worker pool as pushed files (PNGs re-encoded,
+metadata stripped from the others), then stores it in the database, not in the board folder, so a push never removes it. Images count
+against the workspace's storage quota (a comment over it is refused with `quota_exceeded`, and pushes count them too) and are deleted
+with their comment, project or workspace. They are served only to people who can see that comment, as images with `nosniff` and a
+sandbox CSP, never as a page. Share link guests can draw but cannot attach images. Agents get each image and the drawing rendered on
+its capture (`files.images`, `files.markup`) as token API URLs. The workspace export holds the images (`comment-files/`) and lists
+them in `comments.json`; `shapewall share` moves a local comment's images (one request each, cleaned and counted like uploads) and
+its drawing. Backups hold them, since they are in the database.
+
+## Agents
+
+```sh
+export SHAPEWALL_TOKEN=swp_...
+shapewall comments --remote https://app.example.com --json          # same JSON as local; files are URLs
+shapewall comments reply 4 --body "Fixed in #12" --remote https://app.example.com
+shapewall comments resolve 4 --note "Bigger button" --ref https://github.com/acme/app/pull/12 --remote https://app.example.com
+shapewall watch --remote https://app.example.com --mention agent --exec "my-agent"
+shapewall mcp --remote https://app.example.com
+```
+
+- `comments --remote` has every action the local one has (list, resolve, reopen, reply, status), and prints the same JSON shapes
+  (`{ trust, note, board, comment }` for a write, `reply` added for a reply). `files.screenshot` and `files.liveHtml` are download
+  URLs on the token API.
+- Guest comments (from share links) are opt-in everywhere an agent touches them: listing (`--include-guests`, `?guests=1`, the MCP
+  `includeGuests` argument) and acting on one (get, reply, status, resolve, reopen answer 403 `guest_comment` without it). The same
+  goes for a guest's reply under a member's comment: an agent never receives it unless it runs with `--include-guests`.
+- `watch --remote` runs until Ctrl+C (exit 0). A token that is refused, lacks a scope, or a board or project that is gone stops it with
+  an error and a non-zero exit; network errors and restarts are retried. It polls every 3 seconds and claims each comment with a compare-and-set on the server, so several watchers on different
+  machines never take the same comment. With `--exec`, the comment's screenshot and live HTML are downloaded next to its JSON under
+  `.shapewall/remote/<project>/<board>/agent/`, so `SHAPEWALL_SCREENSHOT` is a local path as it is locally. The done rule is the
+  local one: exit 0 plus a reply from the command is `done`, anything else `needs-human`. Without `--pass-token` the command has no
+  token to reply with, so its exit 0 ends `needs-human`, and the reply says so.
+- `mcp --remote` is the stdio MCP server with the same tools as local minus `recapture_pages` and `add_comment` (the token API has
+  no route that creates a comment). `list_selectors` reads the element map of the latest push. Tools that write appear only when the
+  token has the scope. In an MCP client config:
+
+```json
+{
+  "mcpServers": {
+    "shapewall": {
+      "command": "npx",
+      "args": ["shapewall", "mcp", "--remote", "https://app.example.com"],
+      "env": { "SHAPEWALL_TOKEN": "swp_..." }
+    }
+  }
+}
+```
+
+Token API (`Authorization: Bearer swp_...`; cookies are ignored there): `GET /api/v1/project`, `GET /api/v1/boards/:board/pages`,
+`GET /api/v1/boards/:board/comments?status=open|resolved|all&page=&mention=&guests=1`, `GET /api/v1/boards/:board/comments/:id`,
+`GET /api/v1/boards/:board/files/:kind/:file`, `POST .../comments/:id/replies`, `POST .../comments/:id/agent-status`
+(`{ agentStatus, onlyFrom }`), `POST .../comments/:id/resolve` (`{ note, fixRef, agentStatus }`), `POST .../comments/:id/reopen`,
+and for push `POST /api/v1/pushes`, `PUT /api/v1/pushes/:id/files/:area/:name`, `POST /api/v1/pushes/:id/commit`.
+
+Emoji reactions are for people: members and up toggle one with `POST /api/boards/:board/comments/:id/reactions`
+(`{ emoji, replyId? }`, one of a fixed set of six) from the board. Viewers and guests cannot react (guests see counts only, never who
+reacted), tokens have no reactions route and the token API leaves reactions out of what agents read. Reacting does not change a
+comment's `updatedAt` or notify anyone.
+
+### Agents on a hosted board
+
+Every project API token with the `claim` scope is an **agent**: a named thing the board lists, that people choose when they send a
+comment, with a state and rules about who may use it. Nothing changes on the machine that runs it: `shapewall watch --remote` and
+`shapewall mcp --remote` work as before, with the same token, and need no new flag. The server still never runs an agent.
+
+- **Name and face.** The agent's name is its token's name. In the console (**Agents**, then the project) **Edit** changes the name
+  (1 to 40 characters, one line), picks one of the built-in icons and a colour, and says what runs behind it (Claude Code, Codex,
+  goose, Gemini CLI, another program, or an unknown watcher). A known program shows its mark until you pick an icon; a watcher
+  whose command is unknown shows its initials. The agent's replies on a thread wear its face. A token made with `shapewall login`
+  keeps the machine's name as a label.
+- **State.** Online (heard from in the last 90 seconds; a [connected agent](#connected-agents): while its link is open), working
+  (online and holding a comment it took, or answering in a chat), offline (with the last time it was seen) or revoked (its token was
+  revoked or expired, or its maker is no longer an admin).
+- **Sending a comment to one agent.** **Send to agent** on a thread is a split button: the main part names the project's default
+  agent, the caret lists every agent with its state, and **Any agent** hands the comment to whichever takes it first. A comment sent to one agent can only be taken by that agent's token. The other tokens of the project do
+  not see it at all: not in lists, not by id, not through MCP.
+- **The default agent.** An admin or owner picks it on the project's Agents page (**Make default**). It is what the main part of
+  Send to agent names, and where a trusted member's new comment goes (such a comment is sent as it is written). Without a default,
+  and for people the default does not take work from, comments go to any agent. A project starts with no default.
+- **An agent that is offline.** The comment waits for it, and the thread and the Agent panel say so: "Waiting for Builder (offline,
+  last seen 2 hours ago)". Nothing is lost: when the agent is back it takes what was sent to it. **Let any agent take it** hands the
+  comment to whichever agent is free; **Choose another** sends it to a different one. Revoking an agent sends what waited for it to
+  any agent.
+- **Who may send it work (the audience).** Work sent to an agent runs on the machine of the person who connected it, so each agent
+  says whose work it takes:
+
+  | Audience                                    | Takes work from                                                               |
+  | ------------------------------------------- | ----------------------------------------------------------------------------- |
+  | Only the person who connected it            | That person. **The default for every new agent**                              |
+  | Named members                               | That person and the members you choose                                        |
+  | Everyone this project's agent policy trusts | The team case: whoever may send work to an agent here at all may use this one |
+
+  The audience only narrows: the project's **Agent policy** still decides who may send work to an agent at all. The server checks it
+  twice, when the comment is sent (and when an admin approves someone else's run) and again when the agent's token takes it, against
+  the person whose approval stands on the comment. The audience also decides whose replies the agent reads: a reply from someone it
+  does not take work from never reaches its token, however trusted they are by the agent policy. An audience governs new work: a
+  comment the agent already holds stays its own until it finishes, even if the audience is narrowed meanwhile, and sending a comment
+  again while an agent works on it changes nothing. On the board, an agent you may not use is listed, greyed, with the reason ("Only
+  Ada can send work to Builder. Ask them, or an admin, to share it.").
+  Tokens given the `claim` scope by an older version keep the audience they had: everyone the agent policy trusts. The console
+  marks them "kept from before 0.4.0" ([Upgrading from older versions](#upgrading-from-older-versions)).
+
+- **Approvals.** Each agent has an approval rule and two roles: who may answer its approvals, and who may change the rule (admins and
+  owners, or owners only; only an owner changes those two). The rule in effect is **Ask every time** unless the agent's own machine
+  says otherwise: what an agent asks to do waits for a person with that role (and their passkey again when the workspace asks for it). **Allow without asking** is
+  listed as not available until the agent's own machine names what may go without asking (`shapewall agent connect --approvals
+owner --auto edits`, on that machine). It is never the default and is never possible on the server's say alone. A
+  [connected agent](#connected-agents) reads and answers only until its machine switches edits on
+  ([Edits from the board](#edits-from-the-board-the-trust-decision)).
+- **Revoke.** Revoking an agent revokes its token (and revoking the token on the Tokens page revokes the agent). What it was working
+  on loses its "working" status and goes to any agent, with what waited for it; its usage records close as "revoked"; the project
+  loses it as default. The same happens when an agent stops working by another road (its token expired, its maker was removed or is
+  no longer an admin), the next time it would be seen. The audit log has one `agent_queue_released` entry per comment.
+- **The workspace overview.** **Agents** in the workspace menu (admins and owners) lists every agent of the workspace: the project
+  it serves, its state, when it was last seen, who may send it work and who connected it, with a link to manage each. An agent
+  belongs to one project; a machine that works on two projects has two tokens and so two agents.
+- **Audit.** `agent_created`, `agent_first_seen`, `agent_renamed`, `agent_identity_changed`, `agent_default_changed`,
+  `agent_audience_changed`, `agent_approval_rule_changed`, `agent_revoked` and `agent_queue_released` are in the workspace's audit log
+  with what it was before and after.
+- **Usage records.** For every comment an agent takes, the server writes one row: who asked, which agent, project, board and comment,
+  when it started, when it ended and how (done, needs a person, resolved, released). No comment text and no answers. The rows
+  are what the [Usage page](#usage-and-activity) shows, and they go with their project.
+
+There are two ways to connect one, on the machine that has the code. An agent members **chat with** (it reads the project and
+answers; when its machine says so, it also makes a fix on a branch, each edit allowed on the board;
+[Connected agents](#connected-agents)):
+
+```sh
+shapewall agent connect --remote https://wall.example.com   # approve in the console: name it, choose the project and who may use it
+```
+
+An agent that **fixes comments by itself** (a watcher: it runs your command once for each comment sent to it):
+
+```sh
+shapewall login --remote https://wall.example.com     # approve in the console, choose the project, tick "Take agent work"
+shapewall watch --remote https://wall.example.com --exec "<your agent command>"
+```
+
+Either appears on the project's Agents page as online. Give it a name and an icon there, and choose who may send it work.
+[Agent recipes](agent-recipes.md) has the commands for Claude Code, Codex and goose. One machine can run both, each with its own
+token.
+
+Console API (admins and owners): `GET /api/workspaces/:ws/agents`, `GET /api/workspaces/:ws/projects/:pid/agents`,
+`PATCH .../agents/:aid` (`{ name, icon, tint, kind }`), `PUT .../agents/:aid/audience` (`{ audience: "owner" | "members" | "trusted",
+users }`), `PUT .../agents/:aid/approval` (`{ rule, changeRole, answerRole }`), `PUT .../default-agent` (`{ agentId }`, `null` for
+none) and `DELETE .../agents/:aid`. Board API (members): `GET /api/boards/:board/agents`, `POST .../comments/:id/send-to-agent` takes
+`agentId` (an agent's id, `null` for any agent; left out, the default agent) and `POST .../comments/:id/release-agent` lets any agent
+take a comment that waits for one.
+
+## Connected agents
+
+A **connected agent** is a coding agent on a machine that has the project's code, joined to a hosted project so that members can
+chat with it on the board. In this release that agent is Claude Code ([which agents](#which-agents-can-be-connected)). One command
+connects it:
+
+```sh
+cd ~/projects/app                                    # the project's folder, on the machine that has the code
+shapewall agent connect --remote https://wall.example.com
+```
+
+1. **The first run asks for an approval.** The command prints a short code and the address of the server's `/device` page. An admin
+   or owner of the workspace opens it, types the code, and sees "Connect an agent": the machine's name, the address it asked from,
+   and which agent it says it runs. They give the agent a name and an icon, choose the project, and choose who may use it. **Only
+   me** is the default. (On a server with tailnet sign-in, run on a tailnet machine by an admin, there is no code and no
+   browser: [From your coding agent](#from-your-coding-agent).)
+2. **The machine gets the agent's own token.** It is saved on that machine and never printed. The next run of the same command needs
+   no approval.
+3. **The agent comes online.** It shows in the board's Agents panel and on the project's Agents page for as long as the command
+   runs: its state comes from its open link to the server, not from a timer. Ctrl+C disconnects it.
+4. **Members chat with it.** The Agent button on the board opens the Agents panel. **Chat** on a connected agent opens a chat with
+   it in the same panel a local board has: the answer streams in, with the agent's steps.
+
+**By default a connected agent reads and answers. It does not change files and it runs no commands.** The machine that runs it
+enforces this, whatever the server sends, in two ways. The agent's own controls are set so that it cannot act: its session starts
+without your settings files and with only its reading tools
+([read-only by the agent's own controls](#read-only-by-the-agents-own-controls)). And Shapewall offers it no way to write a file
+or open a terminal, and refuses every permission request it makes on the spot. The answer then shows what was refused ("Refused:
+read and answer only"), and nobody is asked. If the session cannot be made read-only, the agent is not started. When a change is
+needed, the agent says what to change and where.
+
+**Edits are switched on only on the machine that has the code.** Started with `--approvals owner` or
+`--approvals admins`, the agent can make a fix for a comment: on a new branch, in a folder of its own, never in the checkout, and
+each edit is a card with the full diff that a person allows or denies on the board
+([Edits from the board](#edits-from-the-board-the-trust-decision)). Chat stays read and answer only either way. A connected Claude
+Code runs no commands from the board in this release. `shapewall watch --remote --exec` is unchanged, and stays the way for an
+agent that fixes comments with nobody in between.
+
+The server still never runs an agent. It stores the conversation and passes messages between the browser and the agent's machine.
+
+### Which agents can be connected
+
+Only **Claude Code** is offered by `agent connect` in this release. An agent is offered when its own controls were shown, with its
+real adapter, to keep a read-only session from editing, running commands and reading outside the project. Refusing what an agent
+asks for is not enough when it does not ask.
+
+| Agent       | `agent connect`         | Why                                                                                                                                                                                                    |
+| ----------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Claude Code | Yes                     | Started with only its reading tools and none of your settings files, it created no file, ran no command, and asked before reading outside the project                                                  |
+| Codex       | Refused, with a message | Started in its read-only sandbox it changed no file in our check, but it still ran shell commands and read a file outside the project without asking. What it reads can leave the machine in an answer |
+| goose       | Refused, with a message | Its chat-only mode could not be verified on the test machine                                                                                                                                           |
+| Gemini CLI  | Refused, with a message | It was not installed to verify                                                                                                                                                                         |
+
+The same rule holds for an agent saved on the machine: it can be connected only when its command starts Claude Code. For Codex,
+goose and Gemini CLI, `shapewall watch --remote` stays the way to work on a hosted board. How the check was done is in
+[the agent hardening guide](agent-hardening.md#connected-agents).
+
+The same test decided what a fix session gets. A Claude Code session for a fix has its reading tools and its editing tools, and
+no shell tool: started with the shell tool, Claude Code ran commands it takes to be read-only (`ls`, `cat`) without asking anyone,
+and those can read outside the project. So commands from the board are not offered for Claude Code in this release
+([Commands](#commands-are-not-offered-for-claude-code)).
+
+### The connect command
+
+| Flag                              | Default                                           | Meaning                                                                                                                                                                                                                            |
+| --------------------------------- | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--agent NAME`                    | This project's agent, else Claude Code when found | `claude`, or the id of an agent saved on this machine that runs Claude Code. Never a command from the server                                                                                                                       |
+| `--name "Builder"`                | The agent's own name                              | The name to suggest on the approval page. The approver has the last word, and an admin can rename it later                                                                                                                         |
+| `--as NAME`                       | `default`                                         | A second connection from this machine, with a token of its own                                                                                                                                                                     |
+| `--audience owner\|server`        | `server`                                          | `owner`: the server is asked to keep it to the person who connected it even if its audience there is widened, and this machine refuses a job the server labels as someone else's. `server`: its audience on the server             |
+| `--approvals none\|owner\|admins` | `none`                                            | Edits from the board. `none`: never, the agent reads and answers only. `owner`: the person who connected it may allow each edit. `admins`: whoever the server lets answer (admins by default)                                      |
+| `--auto none\|edits`              | `none`                                            | What the server's "Allow without asking" rule may apply to. `none`: every request waits for a person. Needs `--approvals owner` or `admins`. (`commands` is also accepted and never applies to Claude Code)                        |
+| `--allow-path FILE`               | None                                              | A file that runs something, which the agent may ask to edit (a dotfile, `package.json`, a `Makefile`, a `Dockerfile`, CI config). Such an edit is refused on the machine otherwise. Adds one file per run; `none` empties the list |
+| `--base BRANCH`                   | `head`                                            | The branch a fix starts from. `head`: the commit the checkout is on, and then only while the checkout has no uncommitted changes to tracked files                                                                                  |
+| `--git-remote NAME`               | `origin`                                          | Where a finished fix is pushed. `none`: never pushed                                                                                                                                                                               |
+| `--takeover`                      |                                                   | Close the link another process holds for this agent, and take its place                                                                                                                                                            |
+| `--concurrency N`                 | 2                                                 | Answers at once, 1 to 4                                                                                                                                                                                                            |
+| `--token-file FILE`               |                                                   | For a service: the agent's own token from a file, no browser                                                                                                                                                                       |
+
+`--approvals`, `--auto`, `--allow-path`, `--base` and `--git-remote` are saved for the connection, so the next run without them
+keeps what was set. They are explained under [Switching edits on](#switching-edits-on). `--allow-command` is listed by
+`shapewall --help` and is refused for Claude Code ([Commands](#commands-are-not-offered-for-claude-code)).
+
+- **Which program runs** is the machine's choice: an agent saved for this project on that machine, or Claude Code found on its
+  `PATH` with its ACP adapter, the same detection a local board uses ([chat with an agent](agents.md)). Codex, goose, Gemini CLI, a saved
+  agent that runs one of them, a program Shapewall does not know and a model endpoint are all refused with a message. Nothing the
+  server sends names a command, an argument, a folder or an environment variable.
+- **`--audience owner` trusts the server's label.** The machine cannot check who really asked: it sees only what the server says
+  about a job. So this setting holds against a later change of the audience on the server, and does not protect against a
+  compromised server.
+- **One link per agent.** One `agent connect` process holds an agent's link. A second one on the same token is refused by the
+  server, and the command exits with an error that names the machine already connected and since when. `--takeover` closes the
+  other link first; the process that lost it prints that another connect took over, and exits 0.
+- **The folder it reads** is the one the command runs in (the folder of `shapewall.config.json` when there is one). The agent
+  process starts with a small environment and never gets `SHAPEWALL_TOKEN` or any other `SHAPEWALL_*` variable.
+- **The token** comes from `SHAPEWALL_TOKEN`, then `--token-file`, then the one saved by an earlier approval. It must be a connected
+  agent's token: the login saved by `shapewall login` is never used, and a plain project token is refused with a message.
+- **Files on the machine.** The token is kept in `credentials.json` in Shapewall's config folder (`$XDG_CONFIG_HOME/shapewall`, by
+  default `.config/shapewall` in your home folder), under `agents`, by server and `--as` name, apart from the login `push` and
+  `watch` use. What the machine allows (`--audience`, `--approvals` and the flags that go with it) is remembered in
+  `agent-policy.json` beside it, one entry per server and `--as` name. Both files are readable by you only (0600), are outside
+  every repository, and the server cannot change either.
+- **Ending.** Ctrl+C or SIGTERM stops the answers in progress, closes the agent and exits 0. A token the server refuses (revoked,
+  expired, or its maker is no longer an admin) ends the command with exit 1; a saved token is then removed, so the next run asks for
+  a new approval.
+
+One connection serves one project. A machine that works on two projects connects twice, each in its own folder (`--as docs` for the
+second on the same server). Connecting one agent to every project of a workspace in one step is not in this release; the workspace's
+**Agents** page lists every agent and the project it serves.
+
+### What a connected agent's token may do
+
+Approving a connection makes a project token with a fixed set of scopes: `read`, `reply`, `status`, `claim` and `agent`. It reads
+comments sent to it, replies as itself, sets agent statuses, takes work and holds the link. It never has `resolve` or `push`,
+whatever the approval asks for.
+
+The `agent` scope opens the link routes and nothing else. It cannot be ticked on an ordinary token in the console or at
+`shapewall login`; it comes from approving `shapewall agent connect`. A token with `claim` but without `agent` (a `watch --remote`
+watcher) is an agent as before, with no link and no chat.
+
+### Chat with a connected agent
+
+- **Threads.** The **board chat** and the chat of each comment are shared: every member of the workspace reads them. A chat you
+  start with **Chat** (or **New chat**) is yours alone: nobody else reads it, lists it, writes in it or stops it, an admin included.
+  Agent transcripts can quote source code, so viewers, share link guests and public visitors have no chat at all.
+- **Who may ask.** A member the project's agent policy trusts, who is in the audience of the thread's agent, while that agent is
+  online. Everyone else can read a shared thread, and sees why they cannot write in it ("Only Ada can use Scout").
+- **One answer at a time** in a thread. A second message while one is being answered is refused; the panel queues it for you.
+- **Stop** ends the answer. The person who asked, the person who connected the agent, and admins may stop it.
+- **A turn outlives the tab that started it.** Reload, or open the same shared thread as a second person: the running answer is
+  replayed from its start, in order, and then followed live. A viewer whose stream drops resumes from the last event it has and
+  misses nothing. Closing the tab does not stop the agent; Stop does.
+- **A thread stays with its agent.** The chip in the chat's header lists the project's connected agents with where each runs, or
+  why you cannot use it. You can point a thread only at an agent you may use yourself, and a thread never moves to another agent
+  by itself. Switching a thread that has messages adds a line to it: who switched it, from which agent to which. Only then does
+  the other agent get the thread: the messages of people it takes work from, and none of the first agent's answers.
+- **History** is kept on the server: the person's messages and the agent's answers with their steps. It counts against the
+  workspace's storage quota, is in backups, and goes when its board or project is deleted. Rename, archive and delete your own
+  chats from the chat history; a shared thread is cleared only by an admin. A thread keeps its newest 200 messages.
+- **"@" mentions and text files** work as on a local board: a page, a comment, an element, a journey or a person, and up to three
+  text files with a message. Images are not sent to a connected agent yet. Editing a sent message, asking again for an answer, answer
+  ratings and the model and effort menus are not on hosted boards yet either.
+- **A chat message never edits.** Whatever a message says, and whatever the agent's machine allows, a chat turn is read and answer
+  only. Only **Fix with** on a comment starts a turn that may edit ([Fix with an agent](#fix-with-an-agent)).
+
+### Who may use a connected agent
+
+The audience rules of [Agents on a hosted board](#agents-on-a-hosted-board) apply to chat exactly as they do to comments, and the
+project's agent policy still decides who may use any agent at all. On top of them:
+
+- **The machine can narrow it.** Started with `--audience owner`, the agent's machine asks the server to keep the agent to the
+  person who connected it, even if its audience there is widened later. The server refuses everyone else, the machine refuses a
+  job the server labels as someone else's, and the board says what is in effect: "Only Ada (set on the agent's own machine)". The
+  machine cannot check that label, so this does not protect against a compromised server.
+- **A shared thread is not a way around an audience.** What reaches an agent is only what people in its audience wrote, and its own
+  earlier answers. A message by someone outside its audience stays in the thread for people to read and is never sent to that
+  agent; nor are another agent's answers. The same goes for replies on a comment.
+- **Comments follow the audience too.** The board context an agent gets with a question holds a comment only when the person
+  asking wrote it, or the agent holds it, or its author is in the agent's audience and the comment was sent to an agent and not
+  to another one. That is what the token API would show that agent's token. The same rule decides the comment of a comment's
+  thread and what an "@" mention of a comment carries: a mention of a comment the agent may not read keeps only its number.
+- **A share link guest's text never reaches a connected agent**: not their comments, not their replies, and not through a
+  mention.
+
+### Comments sent to a connected agent
+
+A comment sent to a connected agent **by name** (Send to agent, or the project's default agent) is read and answered by it: it
+takes the comment, answers in the comment's chat thread where everyone can watch, posts the answer as a reply signed with its name,
+and sets the agent status to done. It never resolves a comment, and Send to agent never edits. When it cannot answer, it says so
+in a reply and marks the comment as needing a person. For a change to the code, press **Fix with** on the comment
+([Fix with an agent](#fix-with-an-agent)), when the agent's machine takes edits.
+
+A comment sent to **any agent** is left alone by connected agents: it stays with the `watch --remote --exec` watchers that fix
+comments by themselves. So do not make a connected agent the project's default agent while you rely on watchers to fix new
+comments: every trusted member's new comment would go to an agent that answers it and waits for someone to press Fix.
+
+### Edits from the board: the trust decision
+
+A fix runs on someone's machine, with their login, for a comment other people wrote. So the question is: **who may make someone
+else's machine change files?** By default, nobody. Even the person who connected the agent cannot allow an edit from the board
+until they said so on that machine.
+
+| Level                                                           | Where it is set                                                                   | Default                     | What the board can cause                                                                                                                                                 |
+| --------------------------------------------------------------- | --------------------------------------------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Audience "only the person who connected it", `--approvals none` | The audience at the approval; `--audience owner` pins it from the machine         | Yes                         | That person asks. The agent reads the project and answers                                                                                                                |
+| Audience: named members, or everyone the agent policy trusts    | On the server: the approval page, or the Agents page                              | Opt-in                      | Those members may ask too. Still read and answer only                                                                                                                    |
+| `--approvals owner`                                             | On the machine                                                                    | Opt-in                      | A fix on a new branch. Each edit waits for the person who connected the agent                                                                                            |
+| `--approvals admins`                                            | On the machine                                                                    | Opt-in                      | A fix on a new branch. Each edit waits for someone with the agent's answer role (admin by default), in its audience and trusted                                          |
+| "Allow without asking"                                          | On the machine (`--auto edits`), and then the agent's approval rule on the server | Opt-in, twice               | Edits to ordinary source files go into the fix without a person. The fix stays on the machine: it is pushed only after a person allows "Push this fix" on its whole diff |
+| Commands                                                        | On the machine (`--allow-command`)                                                | Not offered for Claude Code | Nothing: a fix session of Claude Code has no shell tool                                                                                                                  |
+
+The machine's choice is the ceiling. The server can only narrow it: an audience, an answer role, a rule that asks. It can never
+widen it.
+
+### Switching edits on
+
+On the machine that has the code, in the project's folder:
+
+```sh
+shapewall agent connect --remote https://wall.example.com --approvals owner     # the person who connected it allows each edit
+shapewall agent connect --remote https://wall.example.com --approvals admins    # whoever the server lets answer
+shapewall agent connect --remote https://wall.example.com --approvals none      # back to read and answer only
+```
+
+- **`--approvals owner`** takes an "allow" only from the person who connected the agent. The server enforces it, and the machine
+  checks it again on every answer.
+- **`--approvals admins`** takes it from whoever the server lets answer: the agent's answer role (admin by default; an owner can
+  make it owner), who is also in the agent's audience and trusted by the project's agent policy.
+- **The choice is saved** for this connection in `agent-policy.json` on the machine, beside the saved token. A service that runs
+  the plain command keeps it. `--approvals none` switches it off again.
+- **`--auto edits`** names what the server's "Allow without asking" rule may apply to. Without it every request waits for a
+  person ([Allow without asking](#allow-without-asking)).
+- **`--allow-path FILE`** lets the agent ask to edit one file that runs something. Without it, an edit to such a file is refused
+  on the machine and never becomes a question ([Files that run something](#files-that-run-something)). Each run adds one file;
+  `--allow-path none` empties the list. `.git` and Shapewall's own store can never be named. An allowed path always gets a card
+  a person answers, whatever the approval rule says, and a fix that changes it is not pushed from the machine.
+- **`--base BRANCH`** is where a fix starts. Without it a fix starts from the commit the checkout is on, and a checkout with
+  uncommitted changes to tracked files refuses the fix, because the fix would silently leave them out. `--base main` always starts
+  from that branch, whatever the checkout holds. `--base head` goes back to the default.
+- **`--git-remote NAME`** is where a finished fix is pushed (`origin` by default). `--git-remote none`: never pushed.
+
+`agent connect` prints what is in effect when it starts, and it says the same to the server with the code: the approval page
+shows what that machine asked for (read and answer only, or edits on a branch and who may allow them, "without asking" if it
+asked for `--auto edits`, the base branch, and that it never runs a command), marked "Reported by the terminal". The machine
+enforces its own rules; the server decides nothing by that report. Before it goes online, `agent connect` also opens a session
+with the agent (no prompt is sent) and prints which adapter version answered ([tested versions](agents.md#claude-code)).
+
+The console's Agents page and the board's Agents panel say which mode an
+agent is in: "Reads and answers", "Edits on a branch, each allowed by the person who connected it" (or "an admin", or "an
+owner"), or "Edits on a branch, allowed without asking".
+
+### Commands are not offered for Claude Code
+
+The link and the machine's policy file know a third thing an agent could ask: to run one exact command from the machine's own
+list, each run allowed on the board (`--allow-command`). **This is not available for Claude Code in this release, and Claude
+Code is the only agent `agent connect` offers.** So no connected agent runs a command from the board in this release.
+
+The reason was found with the real adapter. Started with its shell tool, Claude Code runs commands it takes to be read-only
+(`ls`, `cat`) without asking anyone, and those can read outside the project. A list of allowed commands does not help when the
+agent does not ask. So:
+
+- a fix session of Claude Code gets no shell tool at all;
+- `--allow-command` is refused for it, with that explanation;
+- commands written by hand into `agent-policy.json` are not in effect, and `agent connect` says so when it starts.
+
+### Fix with an agent
+
+On a hosted comment, **Fix with Builder** is offered when Builder's machine takes edits and you may use Builder. The agent must be
+online: a fix cannot be queued for an offline agent (Send to agent still queues). For an agent that reads and answers only the
+button is not offered, and one line says why: "Builder reads and answers only. Edits are switched on on its own machine".
+
+Pressing it takes the comment in the agent's name and opens a turn in the comment's chat thread, where everyone can watch. The
+rules are the ones for sending a comment to an agent, unchanged:
+
+- a trusted member vouches for the text they saw (a comment that changed since you opened it is refused: read it again);
+- a non-admin's run still needs an admin's **Approve agent run** where the agent policy says so. Fix makes that one flow: an
+  admin's Fix is also their approval (with their passkey) and starts at once; a member's Fix sends the comment for approval,
+  where admins see **Approve agent run** on it, and says to press Fix again once it is approved;
+- the agent's audience decides whose comment it takes;
+- the project's daily runs and its open-claims limit count a fix like any other claim;
+- one agent at a time: a comment that is already with an agent is refused.
+
+The agent reads the comment as quoted, untrusted data, as always. Stop ends the fix, and cancels any card that waits.
+
+### Where a fix is made
+
+**Never in the checked-out tree.** The checkout is only read (`git status`, `git rev-parse`).
+
+1. **A fresh copy of the base commit**, with no `.git` in it, in a folder outside the project: under your state folder,
+   `$XDG_STATE_HOME/shapewall/agent-fixes/` (by default `.local/state/shapewall/agent-fixes/` in your home folder). It is made by
+   the same code as a local board's [Work on a branch](agents.md#work-on-a-branch). That folder is never inside the project: when
+   it would be (the project is your home folder, say), `agent connect` and the fix refuse and say to set `XDG_STATE_HOME` to a
+   folder outside it. A relative `XDG_STATE_HOME` is ignored.
+2. **The agent edits that copy**, one allowed edit at a time ([Permission cards](#permission-cards)).
+3. **Shapewall itself commits the result** on a new branch, `shapewall/comment-<n>-<slug>`, with the repository's own author. No
+   hook, filter or attribute runs. The comment's text in the commit subject is made inert first: no "@name" pings anyone and no
+   "Fixes #12" closes anything.
+4. **The commit is kept only if it is exactly what was allowed.** Every changed file must have had an allowed edit and must hold
+   exactly the bytes that were shown, with the file mode it had (a new file is not executable). Every allowed file must be in the
+   commit. Nothing may be removed. A changed edit, an extra file, a mode change, a deletion, an allowed file Git left out: the
+   branch is taken back and the thread says "Nothing was committed", with the files.
+5. **The branch is pushed** to the machine's remote when three things hold: the machine has that remote, the change touches no
+   file that runs something ([Files that run something](#files-that-run-something)), and a person saw every edit. Otherwise it
+   stays on the machine and the thread says why: "Not pushed", or, for a fix with an edit that went without asking, a
+   **Push this fix** card ([Allow without asking](#allow-without-asking)).
+6. **A pull request is opened** when [GitHub connect](github.md) is set up on that machine. Otherwise the thread and the comment
+   say "Fix ready on branch" with the name to copy. The link is shown as a link only when it is a pull request URL on github.com;
+   on another GitHub host it is shown as text.
+7. **The folder is removed.** The branch stays.
+
+A fix is refused before it starts, with a clear sentence in the thread and on the comment, when the project folder is not a Git
+repository, has no commit yet, has a merge in progress, or has uncommitted changes and no `--base`. A fix whose edits were all
+denied leaves no branch and no folder, and the comment is marked as needing a person.
+
+**Stop stops all of it.** Stop is honoured between every step: after it nothing is committed, nothing is pushed, no pull request
+is opened, and the agent's reply on the comment says the fix was stopped, not "Fix ready". A fix that was waiting for
+"Push this fix" is taken back, branch and all. The one thing Stop cannot undo is a push that had already finished: then the
+thread says the branch exists on the remote, and no pull request follows.
+
+**Copies a dead process left behind are swept.** When `agent connect` starts, and around every fix, the copies whose process is
+gone are removed with their records, so their branch names are free again. Ctrl+C during a fix removes its copy on the way out.
+
+If files in the person's own checkout changed while the fix ran, the thread says so: "Files in the agent's own checkout changed
+during this fix. Check git status on its machine." Shapewall does not sandbox the agent's own tools
+([the agent hardening guide](agent-hardening.md#connected-agents)).
+
+### Files that run something
+
+Some files of a project run something once they change: on install, on build, in a test run, in CI, or the moment a branch is
+pushed. Shapewall keeps one list of them, used both when an edit is asked and before a push:
+
+- dotfiles and everything in a dot folder (`.env`, `.npmrc`, `.github/`, `.husky/`, editor and agent settings);
+- dependency manifests and lockfiles (`package.json`, `package-lock.json`, `pnpm-lock.yaml`, `requirements*.txt`, `go.mod`,
+  `Cargo.toml` and the like);
+- build, task and tool configuration (`Makefile`, `GNUmakefile`, `*.config.js` / `.ts` / `.mjs` / `.cjs`, `tsconfig*.json`, the
+  jest, vitest, vite, webpack, rollup, babel, eslint and prettier files, `shapewall.config.json`);
+- scripts a package runs (`scripts/`, `bin/`, `tools/`, install hooks, `*.sh`);
+- container files (`Dockerfile*`, compose files) and CI files;
+- test files (`*.test.*`, `*.spec.*`, `test/`, `tests/`, `__tests__/`, `e2e/`): CI runs them.
+
+For a connected agent's fix:
+
+- an edit to one of them is **refused on the machine** unless the machine named that file with `--allow-path`;
+- a named one is **always asked**: it gets a card a person answers, even when the rule is "Allow without asking";
+- a fix that changes one is **never pushed from the machine**. The branch stays there for a person to look at.
+
+Three more kinds are never part of a fix, named or not, because Shapewall's own commit leaves them out: files Git ignores,
+anything under `node_modules`, and `.gitattributes` / `.gitmodules`. An edit to one is refused when it is asked, with that reason.
+It is never allowed and then silently dropped.
+
+### Permission cards
+
+Each edit the agent asks for is checked on the machine first. It becomes a question only when all of this holds:
+
+- the file is inside the fix's folder, after resolving symlinks;
+- it is not in `.git` and not in Shapewall's store;
+- it is not a file that runs something, unless the machine named it with `--allow-path`, and not a file Git would leave out of
+  the commit ([Files that run something](#files-that-run-something));
+- the whole resulting file can be worked out, and the diff is small enough to show in full.
+
+What fails is refused there, with the reason in the answer ("Refused on the agent's machine: ..."), and nobody is asked. What
+passes is shown in the comment's chat thread as a card:
+
+- **The path and the full diff**, with **Allow** and **Deny**, in the machine's own words ("Edit src/app.css", "Create
+  src/new.css"). The agent's own title for the request is never shown.
+- **A hash ties the answer to the card.** The card carries a hash of the turn, the card, the path, the whole diff and how long it
+  waits. An answer must send that hash back. An answer for other content, another card or another turn is not this card's
+  answer.
+- **A card waits 2 minutes** ("Push this fix": 10). That is a length of time, not a moment: the machine and the server each count
+  it on their own clock, so the two clocks need not agree. No answer is a no. The machine's count is the one that decides: when
+  it did not take an answer (it came too late there), the card shows as expired, never as "Allowed by", and is counted as not
+  allowed.
+- **Who reads the diff.** The diff is a piece of the project's code. It is shown, live and in the stored thread, to the people
+  the agent works for: those in its audience whom the project trusts, whoever may answer its cards, and whoever asked for the
+  fix. Everyone else who can open the thread reads that the agent asked to edit a file, which file, and how that ended.
+- **A card is answered once.** Stop cancels the cards that wait.
+- **Everyone with the thread open sees the state change live**: waiting, allowed and by whom, denied, expired, cancelled. The strip
+  above the board lists the cards that wait for you, and opens the comment's chat, where the diff is.
+- **Allow asks for a passkey again only when the workspace says so** (Settings, "Agent edits and pushes"; off by default). The
+  browser asks when the server does. Deny never does: it only ever stops something.
+
+**Who may answer.** Someone with the agent's answer role (admin by default), who is also in the agent's audience and trusted by
+the project's agent policy. When the agent's machine says `--approvals owner`: only the person who connected it. Everyone else
+sees the card and who it waits for.
+
+**The machine checks every answer again.** It counts an "allow" only for a card it asked and still waits on, with the same hash,
+not expired, once, and from the connecting person when it said "owner". A failed "allow" is a deny. An answer for a card it never
+asked is ignored. In the other direction, the server never takes "approved" from the machine: only a person's answer on the board
+makes a card allowed.
+
+### Allow without asking
+
+Each agent has an approval rule, in the console's approvals dialog on the project's Agents page: **Ask every time** or **Allow
+without asking**.
+
+- **Only when the agent's own machine named a kind** with `--auto` (`--auto edits`). Otherwise the option is listed as not
+  available, with the command to run on that machine.
+- **Who may switch it on.** When the machine says `--approvals owner`: only the person who connected the agent, nobody else,
+  whatever their role. An admin cannot take that person out of the loop; the server refuses, and the machine itself only goes
+  without asking when the server says the rule is that person's own. When the machine says `--approvals admins`: the role in the
+  agent's "who may change the rule" setting (admin by default; an owner can make it owner).
+- **Only for the kinds the machine named, and only for ordinary source files.** A file that runs something
+  ([Files that run something](#files-that-run-something)) always waits for a person, named or not.
+- **It never widens what may be edited.** The machine's checks above run on every edit all the same. The fix is still made on a
+  branch, and the commit is still kept only when it is exactly what was allowed.
+- **Nothing reaches a remote without a person having seen the diff.** A fix with an edit that went without asking is committed
+  on its branch on the machine and held there. It is not pushed and no pull request is opened. The thread shows one
+  **Push this fix** card with the whole changed-files diff. Someone who may answer the agent's cards allows it,
+  under the same rules as any card (the hash, once, the machine's own recheck); it waits 10 minutes. Denied or not
+  answered, the fix stays on the machine and the result offers **Push this fix** again, as often as needed. A fix too large to
+  show in full cannot be pushed from the board at all. A held fix belongs to the connection that made it (the server's
+  address, the workspace, the project and the agent): one folder connected twice never offers one connection's fix to the
+  other, and **Push this fix** offers the very fix whose result it is on, not a newer one of the same comment. A fix held by
+  a version before this was recorded is not offered again: ask the agent for a fresh fix.
+- **If the machine connects again without it**, the stored rule is set back to "ask" at once, and that is in the audit log.
+
+An edit that went without asking is still a card in the thread, marked "Allowed automatically", and is counted and audited.
+
+### What the machine enforces whatever the server says
+
+- **The command is the machine's.** The server cannot name, change or add a command, an argument, a folder, an environment
+  variable or an MCP server.
+- **No edits unless this machine said so.** With `--approvals none`, nobody's answer is taken and no fix starts.
+- **A fix is never made in the checkout.** A fresh copy, a new branch, a folder that is removed afterwards.
+- **Every edit is checked here first**: inside the fix's folder, not `.git`, not Shapewall's store, not a file that runs something
+  unless named with `--allow-path`, not a file Git would leave out, the whole diff shown.
+- **A file that runs something is never allowed without asking**, and a fix that changes one is never pushed.
+- **The policy file fails narrow.** A value in `agent-policy.json` that this version does not know (a typo, `false`, `""`, a
+  wrong type) reads as the narrowest setting for that key, never as the default: no approvals, only the person who connected it,
+  never pushed, nothing without asking. `agent connect` names each such key when it starts. The file must be yours and not
+  writable by others, which is checked before it is read.
+- **Every answer is checked here again**: a card this machine asked, the same hash, in time, once, and from the connecting person
+  under `--approvals owner`.
+- **"Allow without asking" only for what `--auto` named**, and under `--approvals owner` only when the server says the
+  connecting person set that rule themself.
+- **The commit is exactly what was allowed**, byte for byte and mode for mode, or there is no commit.
+- **Nothing is pushed that runs something, or that no person has seen.**
+- **After Stop, nothing more happens**: no commit, no push, no pull request.
+- **No commands for Claude Code.** Its fix session has no shell tool.
+- **The agent never holds its token.** Its process gets a small environment with no `SHAPEWALL_*` variable.
+
+What the machine cannot do is in [the agent hardening guide](agent-hardening.md#connected-agents): it does not sandbox the agent's own
+tools, and with approvals on, a server that was broken into can forge an "allow" for an edit the agent really asked.
+
+### When a connected agent is offline
+
+- **Chat is refused.** The composer gives way to "Builder is offline. Chat needs it online; a comment sent to it waits until it is
+  back." A conversation that silently queues is worse than a clear no.
+- **A fix cannot be asked.** Fix with an agent needs the agent online, and is not queued.
+- **The thread does not move by itself.** A thread whose agent is offline, or was revoked, stays with it. When another agent you
+  may use is online, the panel offers **Ask Scout instead**. Choosing it switches the thread in the open, with the line described
+  under [Chat with a connected agent](#chat-with-a-connected-agent).
+- **Comments wait**, as for any agent: "Waiting for Builder (offline, last seen 2 hours ago)", with **Let any agent take it**. The
+  agent takes what was sent to it when it is back.
+
+### When the link drops
+
+- **The link reconnects by itself**, waiting 1 to 60 seconds between tries. After every reconnect the machine asks the server what
+  is open and picks up from there. A batch of an answer the server did not hear is sent again; a repeat is dropped.
+- **The machine goes away mid-answer.** After 45 seconds without a word and without a link, the turn ends as interrupted, with what
+  the agent had written so far: "The agent's machine went away before it finished. Ask again."
+- **The server restarts.** Answers in progress are over. Every turn a stop left queued or running is ended as interrupted when
+  the server starts, with its usage record, whether or not anyone opens its thread again. Stored messages are untouched.
+- **The agent is revoked** (on the Agents page, or its token on the Tokens page). Its link closes at once, what it was answering ends
+  with "Builder was revoked before it finished.", and the command on its machine exits.
+- **A second connect.** Refused while the first holds the link, or it takes over with `--takeover`
+  ([the connect command](#the-connect-command)). After a hard crash the server may still believe the old link is open for a short
+  while, and refuses a restart until it notices.
+- **A link that flaps** does not flood anything. Boards are told that an agent came or went at most once every 3 seconds per
+  agent, and the audit log gets at most one connected and one disconnected entry a minute per agent. A revoked or taken-over link
+  is always written.
+
+### Limits of chat
+
+| What                                | Limit                                                                                                        |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Messages one person sends           | 20 a minute                                                                                                  |
+| Chat turns in a project             | 200 a day (`dailyTurns` in the agent policy), answers to comments sent to an agent by name included          |
+| Answers one agent gives at once     | `--concurrency` (1 to 4), plus 5 waiting; after that it answers "busy"                                       |
+| A message                           | 8,000 characters, 8 mentions, 3 text files of 100 KB                                                         |
+| An answer                           | 100,000 characters                                                                                           |
+| What the machine sends at once      | 256 KB and 100 events in a batch                                                                             |
+| What the machine fetches for a turn | 2 MB                                                                                                         |
+| Links one agent token holds         | 1 (a second is refused, or takes over with `--takeover`)                                                     |
+| Link opens by one agent token       | 6 a minute                                                                                                   |
+| Chats of your own on one board      | 50 (the shared threads are apart)                                                                            |
+| A permission card                   | Waits 2 minutes ("Push this fix": 10); the whole diff must fit in the card; counts against the storage quota |
+| Cards one fix may ask               | 60, and 5 waiting at the same time                                                                           |
+
+The daily budget is counted from the usage records, so deleting a thread gives no turns back. `dailyTurns` is part of the
+project's agent policy. The console's form has no field for it yet (and keeps the value when you save
+the form): read the policy with `GET /api/workspaces/:ws/projects/:pid/agent`, set `dailyTurns` (0 to 100000; 0 stops chat turns and answers to comments sent by name)
+and `PUT` the whole policy back. The link has its own request budget on the token API, so a streamed answer does not use up the
+agent's budget for comments.
+
+### Running a connected agent as a service
+
+Run the command once by hand in the project's folder and approve it: the token is saved. A service then runs the same command and
+finds it. Shapewall installs nothing; this is a systemd user unit you write yourself (`systemctl --user enable --now
+shapewall-agent`):
+
+```ini
+# ~/.config/systemd/user/shapewall-agent.service
+[Unit]
+Description=Shapewall connected agent (Builder)
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/projects/app
+ExecStart=/usr/bin/env shapewall agent connect --remote https://wall.example.com --takeover
+Restart=on-failure
+RestartSec=10
+# A clean environment: only what the agent needs to find its programs and its own login.
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin
+
+[Install]
+WantedBy=default.target
+```
+
+- `--takeover` is there so a restart is not refused: after a hard crash the server may still count the old link as open for a short
+  while. It also means this service takes the link from any other process that holds it for this agent.
+- With the token in a file of its own (a secret store, another user), add `--token-file /path/to/token`. The file holds the agent's
+  token and nothing else.
+- SIGTERM is a clean stop (exit 0), so `systemctl --user stop` does not count as a failure. A revoked token exits 1; the unit then
+  restarts and fails again until you approve a new connection by hand.
+- Give the service its own agent profile ([what it can read](#what-a-connected-agent-can-reach)).
+
+### What a connected agent can reach
+
+- **The server cannot make the machine act.** Every request goes out from the machine, to the one server you named. A turn's job is
+  data: the conversation and the board around it. Nothing in it names a command, a tool, a file to write or a variable, and fields
+  the machine does not know are dropped.
+- **Board text is quoted on the machine.** Comments, replies, page titles, mentions and attached files reach the agent as
+  `<shapewall-data trust="untrusted">`, built on the machine itself, with the same rules the local chat gives an agent. Only the
+  person's own message is outside the quotes.
+- **It can read the project, and its answers leave the machine.** The agent reads with its own tools: every file in the project
+  folder that those tools can read, a `.env` file included. Its instructions say not to quote secrets, and the machine removes the
+  agent's own token from anything it sends; neither is a guarantee. Connect only a project whose code the agent's audience may
+  read, and keep secrets out of the folder or out of the agent's reach.
+- **It cannot act, by its own controls.** The session has only its reading tools and none of your settings files, and it is not
+  started when that cannot be set up ([read-only by the agent's own controls](#read-only-by-the-agents-own-controls)). A fix
+  session, on a machine that switched edits on, also has its editing tools, in a folder of its own.
+- **What leaves the machine when edits are on**, beyond the answers: the diffs on edit cards (bounded: a diff too large to show
+  in full is refused), the file paths and line counts of a fix, the branch name and the pull request link. Still not the agent's
+  token, which is never in the agent's environment, and not absolute paths.
+- **What the machine sends back** is cleaned by the server field by field before anything is shown or stored. A stolen agent token
+  can pose as the agent (read what was sent to it, post answers); it cannot reach the machine.
+
+### Read-only by the agent's own controls
+
+Refusing what an agent asks for is not enough: a tool it is set up to run without asking never asks. So a connected Claude Code
+session is started in a way that leaves it nothing to act with, and anything that cannot be set up that way stops the start
+(fail closed).
+
+- **No settings files.** Your `~/.claude/settings.json` and the project's `.claude/settings.json` and
+  `.claude/settings.local.json` are left out of the session. Their allow rules, hooks, default mode and plugins do not apply.
+  When one of them holds such rules, `agent connect` says so: "Left out of this session".
+- **No MCP servers** from `.mcp.json` or from settings.
+- **Only its reading tools:** Read, Grep and Glob. Bash, Edit, Write, MultiEdit, NotebookEdit, WebFetch, WebSearch, Task/Agent and
+  Skill are removed from the session, and bypassing permissions is switched off.
+- **A mode that asks.** The session's mode must be "default" or "plan". Any other is switched to "default", or the agent is not
+  started. An agent that reports no session mode at all is not started read-only. An agent that switches itself to another mode
+  mid-answer is stopped.
+- **Reading outside the project asks**, and the request is refused like every other.
+- **Managed settings cannot be left out.** When `/etc/claude-code/managed-settings.json` allows acting tools (Bash, Edit, Write,
+  MultiEdit, NotebookEdit, WebFetch, WebSearch, Task, `mcp__*`, or Read of absolute or home paths) or runs hooks, `agent connect`
+  refuses to start and says why. It no longer only warns.
+- **What this costs you.** Settings that live in those files, such as an `apiKeyHelper` or `env`, do not apply to the connected
+  session either. The login itself is not in those files.
+
+**A fix session** (a machine started with `--approvals owner` or `admins`) is set up the same way, with one difference: it keeps
+Edit, Write and MultiEdit beside Read, Grep and Glob. It has no settings files, no MCP servers, no Bash, no web tools and no
+bypass. Each edit it makes asks first, and the request goes through the machine's checks and a card
+([Permission cards](#permission-cards)). Chat turns on the same machine keep the read-only session.
+
+This was shown on one machine with one adapter version ([the agent hardening guide](agent-hardening.md#connected-agents) says how). It
+is still a good idea to give a connected agent a profile of its own: a separate config folder, logged in for this purpose.
+
+### Chat usage records and the audit log
+
+Every chat turn writes one usage record: who asked, which agent, the board and thread (or comment), when it started and ended, and
+how it ended (answered, stopped, failed, interrupted). The model, the effort and the token counts are kept only when the agent
+reports them, and a cost only when the agent itself reports one: nothing is estimated, and "not reported" is not zero. A record
+never holds a message or an answer. They are shown on the Usage page: see [Usage and activity](#usage-and-activity).
+
+A fix is one usage record of kind "fix": its steps, how it ended (fix ready, answered, stopped, failed, interrupted), and how many
+requests it asked and how many were allowed and denied.
+
+The audit log gains `agent_connected` (who approved which agent, on which machine, for whom), `agent_link_connected` and
+`agent_link_disconnected` (with the reason; at most one of each a minute per agent, except a revoked or taken-over link, which is
+always written), `chat_thread_created`, `chat_thread_deleted`, `chat_thread_agent_changed` (who switched a thread from which agent
+to which), `agent_turn_started` and `agent_turn_stopped` (who, which agent, which board and thread). No entry holds message text.
+
+For edits it gains:
+
+| Entry                                                  | What it records                                                                                                      |
+| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| `agent_edit_mode_changed`                              | What the agent's machine allows changed (approvals, how many commands, what may go without asking), before and after |
+| `agent_turn_started` with kind "fix"                   | Who pressed Fix, for which agent, board and comment thread                                                           |
+| `agent_permission_asked`                               | A card arrived: the agent, the thread, the path, the card's hash                                                     |
+| `agent_permission_approved`, `agent_permission_denied` | Who answered, the path, the card's hash                                                                              |
+| `agent_permission_expired`                             | Nobody answered in time                                                                                              |
+| `agent_permission_auto`                                | An edit went without asking, under the agent's rule                                                                  |
+| `agent_permission_not_taken`                           | The machine did not take a person's "allow" (it came too late there): who answered, and what the card became         |
+| `agent_fix_branch_ready`                               | The branch name and how many files, as the agent's machine reported them                                             |
+| `agent_branch_pushed`, `agent_pull_request_opened`     | The remote, or the pull request's link, as the agent's machine reported them                                         |
+| `agent_approval_rule_changed`                          | The rule or its roles changed, by a person, or reset to "ask" because the machine no longer allows "without asking"  |
+
+A command would be recorded only as a hash. No entry ever holds file content or a diff. The server sees no repository: what it
+writes about a branch, a push or a pull request is the machine's own account.
+
+### The link and chat APIs
+
+The link is on the token API, scope `agent`: `POST /api/v1/agent/hello`, `GET /api/v1/agent/link` (server-sent events: `work`,
+`cancel`, `change`, a keepalive every 15 seconds), `GET /api/v1/agent/work`, `GET /api/v1/agent/turns/:id`,
+`POST /api/v1/agent/turns/:id/events` (`{ seq, events }`), `POST /api/v1/agent/turns/:id/finish` (`{ seq, message }`) and
+`POST /api/v1/agent/turns` (`{ board, comment }`, for a comment the agent holds). Every route derives the project and the agent from
+the token; another agent's turn answers 404.
+
+Chat is on the board API for members and up (`/w/:ws/p/:pid/api`): `GET agent/status`, `GET agent/boards/:board/threads`,
+`GET|PATCH|DELETE agent/boards/:board/threads/:thread`, `POST .../threads/:thread/messages` (answers with server-sent events),
+`GET .../threads/:thread/events?after=<n>` (a running turn, for a second viewer), `POST .../threads/:thread/stop` and
+`POST .../threads/:thread/profile` (`{ profileId }`: the thread's agent). The board's agent list (`GET /api/boards/:board/agents`)
+says for each agent whether it is connected, whether it chats, and whether you may chat with it now. It also says which edit mode
+the agent is in, and whether you may press Fix and answer its cards, with the reason when not.
+
+Fix with an agent is `POST .../threads/comment-<n>/messages` with `{ fix: true }` (and `agentId` for an agent other than the
+thread's, `dispatchHash` for the text you saw). A card is answered with `POST .../threads/:thread/permissions/:id`
+(`{ optionId: "allow" | "deny", hash }`), and `GET agent/boards/:board/permissions` lists the cards that wait for you.
+
+## Usage and activity
+
+Two pages of the Workspace Console answer two different questions. **Usage** is about agents: every turn an
+agent ran, with the numbers it reported. **Activity** is about people: who signed in, who changed what, who answered which
+approval. Activity is read from the audit log, which stays the security record; the two pages link to each other and are never
+merged.
+
+To look before you install: the live demo has both pages, with about sixty days of made-up numbers
+([Usage](https://shapewall.com/demo/console.html#/w/ws_4c756d000000000000000001/usage),
+[Activity](https://shapewall.com/demo/console.html#/w/ws_4c756d000000000000000001/activity)). There the queries run in your browser over
+a fictional history; everything on this page describes a real server.
+
+### What a usage record holds
+
+One row per agent turn: a chat answer, a comment an agent answered, a fix, or the push of a fix. It is written when the turn
+starts and completed when it ends.
+
+| Recorded                              | Where it comes from                                                                               |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| When it started and ended, how long   | The server's own clock, from the question to the end of the turn                                  |
+| Who asked                             | The signed-in person (nobody, when an agent took a queued comment by itself)                      |
+| Which agent, on which machine         | The agent and the machine label it connected with; and who connected it                           |
+| Project, board, thread or comment     | Ids. A private chat's id is shown only to the person who started it                               |
+| Kind                                  | Chat, comment answer, fix or push                                                                 |
+| Outcome                               | Answered, fix ready, needs a person, stopped, failed, interrupted, and a few "let go" states      |
+| Model and effort                      | As the agent reported them                                                                        |
+| Input, output and cached tokens       | As the agent reported them                                                                        |
+| Context used, of how much             | As the agent reported it                                                                          |
+| Cost                                  | Only when the agent or its endpoint reported a cost                                               |
+| Steps, and tool calls counted by type | The number of steps and a count per tool type ("read: 12, edit: 3"). Never a label or an argument |
+| Approvals                             | How many it asked, how many were allowed, how many without asking, how many denied, and by whom   |
+| The agent's own time                  | How long the agent says it worked, when it says                                                   |
+
+**Never recorded:** the question, the answer, file contents, file names from a step, a diff or a command. Those are in the thread,
+which has its own access rule (members and up; a private chat only its starter). A usage row links to the comment or board for
+people who may read it there.
+
+**Nothing is estimated.** Shapewall has no table of model prices. Subscription CLIs often report tokens and no cost, and some
+agents report nothing. Wherever a number was not reported the pages say "Not reported" (a dash in a table, a hatched area in a
+chart), never zero, and each total says how many of its turns reported the number ("723 of 1,795 turns reported").
+
+### The Usage page
+
+`/w/<workspace>/usage`. Everything on it follows one filter, shown in one row above it:
+
+- **Period:** today, the last 7, 30 or 90 days, this week, this month, last month, or a custom range of up to 400 days. Days,
+  weeks and months are in your browser's time zone (the server stores UTC), across any number of clock changes, north or south.
+  Weeks start on Monday.
+- **Agent, project, person, kind, model, outcome:** several values each. "No model reported" and "nobody" are values too.
+- **Ranges** of tokens and of duration, and a **search over ids** (a turn, an agent, a project, a board, a comment number).
+
+The filters live in the page's address, so a link is a view and Back undoes a filter.
+
+**Overview** is a dashboard of widgets, which each person arranges for themselves ([Arranging the
+dashboard](#arranging-the-dashboard)). Unless you change it, it shows, for that filter:
+
+- **Tiles:** turns, tokens, agent time, reported cost, fixes that ended ready, and the share that failed or was stopped, each with
+  its change against the period to compare with, which the tile names: the same number of days just before (whole local days,
+  whatever the clocks did); this week or this month so far against last week or last month up to the same day; last month against
+  the month before.
+- **Usage over time:** stacked bars per day, week or month, split by agent, project, person, kind, model or outcome, measuring
+  turns, tokens (total, input, output, cached), time or reported cost. Drag the bar under the chart to zoom, then "Use ... for the
+  page" to keep that range.
+- **A breakdown:** ranked bars with each group's share.
+- **How turns ended** as a share per day, **approvals** (allowed by a person, allowed without asking, denied), and **turn
+  duration** (the median and the 95th percentile; the 90th and 99th are an option).
+- **Top lists:** the busiest agents, the threads that used the most tokens, the slowest turns, the agents with the most denied
+  approvals (five entries each; three or ten are an option).
+- **Budgets today** (admins and owners): each project's daily chat turns and fixes from its agent policy, with today's use, last
+  week's daily average, and a forecast for the end of the day once a third of the day has passed and there are at least five
+  turns to go by. The day is UTC, as the policy counts it. There are no per-agent budgets yet.
+
+Hovering (or tapping) a chart shows exact values. Pressing a bar, a row of the breakdown or a legend entry filters the whole page
+to it. Every chart has a table of the same numbers, "copy as CSV" and "copy as an image". The colours are one palette, checked for
+colour-blind readers in light and dark, and never the only sign: legends carry names, outcomes carry icons.
+
+**Turns** is every turn of the filter in a grid: sorted, filtered and paged by the server (a hundred rows at a time as you
+scroll, by a cursor, so the last page costs what the first does). Choose columns, drag a header to move its column and drag its right edge to resize it (each header's menu does both from the
+keyboard: move left or right, wider, narrower), pin columns to the left, sort by time, duration, tokens or cost, group by any
+dimension with subtotals, and switch to denser rows. With groups on, **Compare** adds two columns to the group rows: the group's
+turns in the period before, and the change. While you page through a sorted table it holds still: a turn that finishes meanwhile
+keeps the place it had when the first page was read, and turns that started later wait for the next look. Arrow keys move
+through the rows and Enter opens one. A turn opens in a drawer with everything in the table above, a link to its comment or board, and for
+admins a link to the activity around it. On a phone the grid is a list of cards and the drawer is a sheet.
+
+**Saved views** are yours alone: a name for the page's address (filters, columns, sort) and, for a view saved from the overview,
+the dashboard as you have it: its layout and every widget's options (measure, split, bucket and the rest). Untick **Include this
+layout** to save the filters alone. "Copy a link to this view" shares the address; whoever opens it sees what they themselves may
+see, so a link or a view never widens access. Opening a view that carries a layout only ever shows that layout; your own stays as
+it is. For one of your own views a small chip says which view you are looking at, with "Back to my layout". For a view somebody
+shared by link, a note says whose layout it is, with "Use this layout" (which makes it yours) and "Back to my layout". Links and
+views made before the dashboard could be arranged, which name a chart's measure, split or bucket in the address (`metric=`, `by=`,
+`bucket=`, `bd=`), still set the first chart over time and the first breakdown.
+
+**Print** prints the overview as a report (the period and filters at the top), the widgets one after another in reading order,
+each as tall as it needs, whatever sizes they have on screen. **Export** downloads the turns of the filter as CSV
+or JSON: streamed, newest first, at most 50,000 rows, with an audit entry (`usage_exported`: who, the format, how many rows, the
+period). There are no scheduled or emailed exports.
+
+### Arranging the dashboard
+
+**Edit layout** (in the page's header; **Done** or Escape leaves it) turns the overview into a grid you arrange. Every tile,
+chart and list is a widget on 12 columns:
+
+- **Move** a widget by dragging the bar it wears while you edit. What was in its way moves down; nothing overlaps and no gap is
+  left above a widget.
+- **Resize** it from its bottom right corner, inside what its kind allows: a tile is 2, 3 or 4 columns wide and always 2 rows
+  tall; the chart over time is 4 to 12 columns by 4 to 10 rows; a breakdown 3 to 12 by 3 to 10; the other charts 4 to 12 by 4
+  to 8; a top list 3 to 6 by 3 to 9; the budgets 4 to 12 by 3 to 10. A row is 56 px, so no chart can be made too small to read.
+- **Hide** a widget with its ×, and bring it back from **Add widget**, which lists everything that is hidden.
+- **Duplicate** a chart from its bar (up to four of one kind): two charts over time can sit side by side, one measuring turns by
+  agent and one cost by model. Each copy keeps its own options.
+- **Undo** takes back the last change (a run of arrow keys on one widget counts as one). **Reset to default** forgets your
+  layout: you see the workspace's default if it has one, else the built-in layout.
+
+Outside "Edit layout" nothing can be dragged, and until you change something the page is the layout it always was. While you
+edit, a widget's bar is its heading (its own title row steps aside), and at the default sizes nothing is cut off, editing or not.
+
+**Heights that follow the content.** A top list, a breakdown and the budgets are as tall as what they hold: a list set to ten
+rows grows and one set to three shrinks, and the budgets hold a row per project (from six projects on, the list scrolls inside
+its card). That stops for a widget once you size it by hand: its height is then the one you gave it.
+
+**With nothing to show yet.** A workspace where no agent has taken a turn in the period shows one plain "No agent turns" state.
+Someone who has arranged the dashboard, or whose workspace has a default layout, keeps the dashboard instead (a member who has
+not asked an agent anything yet, for one): each widget says there is nothing yet, and "Edit layout" works as ever.
+
+**From the keyboard:** while editing, every widget takes the focus (Tab). The arrow keys move it: a column left or right, and
+up or down past the widget above or below. Shift with an arrow key resizes it by a column or a row. Each change is spoken by a
+live region ("Turn duration moved to row 3, column 7; 6 wide, 2 tall"), and so is the reason when nothing can change. Tab goes
+on to the widget's own buttons (options, duplicate, hide). With "reduce motion" set, widgets do not glide to their places.
+
+**Each widget has options,** behind the "..." button on it (while editing, on its bar). They are saved with that widget, so two
+copies of a chart differ:
+
+| Widget          | Options                                                                                                              |
+| --------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Usage over time | measure, split, bucket (or automatic), stacked bars, grouped bars or lines, legend on or off, zoom brush on or off   |
+| Breakdown       | what to break down by, measure (its own, or the same as the first chart over time), 5, 8, 12 or 20 rows, show shares |
+| How turns ended | share of turns, or number of turns                                                                                   |
+| Approvals       | stacked, or side by side                                                                                             |
+| Turn duration   | which of the median, 90th, 95th and 99th percentile to draw; a logarithmic axis (off unless you turn it on)          |
+| Top lists       | 3, 5 or 10 rows                                                                                                      |
+| Tiles           | the trend line, and the line that compares with the period before                                                    |
+| Any chart       | chart or table, as what it opens with                                                                                |
+
+The switches in a chart's header (measure, split, bucket, chart or table) are the same options: pressing one saves it for that
+chart. A narrow chart keeps only its title and its options button. The outcomes, approvals and duration charts, and the tiles'
+trend lines, use the bucket of the first chart over time.
+
+**Narrower screens** show the same layout on fewer columns, worked out the same way every time: 6 columns below about 840 px
+of dashboard (tiles three to a row, charts one to a row, lists in pairs) and one column on a phone, in reading order, with the
+tiles in pairs as before. There you move a widget with the up and down buttons on its bar (or the arrow keys; on 6 columns a
+drag works too), and nothing is resized. One layout is stored, the 12-column one; a move made on a phone is a move in that
+layout. On a tablet held sideways the grid is the 12-column one, and a finger on a widget's bar drags it (a finger anywhere else
+scrolls the page).
+
+**Saving.** Every change is saved for you, in this workspace, a moment after you make it, with a note that offers Undo. If a
+save fails the change stays on the page and the page says so, with "Try again"; it is lost only if you leave before it is
+saved. Your layout is yours: nobody else sees or changes it, on any role.
+
+**A default for everyone.** An owner can press **Reset > Set as default for everyone**: people who have not arranged the
+dashboard, and everyone who joins later, start from that layout (their own changes are still their own). "Remove the workspace
+default" goes back to the built-in layout. Both leave an audit entry (`usage_layout_default_set` with the number of widgets,
+`usage_layout_default_removed`). The budgets are drawn for admins and owners only, whatever layout says so.
+
+**What is stored** is JSON, at most 16,000 characters and 40 widgets, checked on the way in and again on the way out
+(`src/shared/usage-layout.js`): a widget of a kind this build does not know, a size or a place out of range, a repeated id or a
+second copy of a tile is dropped, an option that is not one of the listed values falls back to its default, and something that
+is not a layout at all is refused (400; 413 when too large). Nothing a stored layout says is drawn as it is.
+
+### Who sees usage
+
+| Role                                                   | Sees                                                                                                         |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| Owner, admin                                           | Every turn in the workspace                                                                                  |
+| Member                                                 | The turns they asked for, and every turn of an agent they connected (it ran on their machine), whoever asked |
+| Viewer                                                 | Nothing (the page says so)                                                                                   |
+| Share link guests, project tokens, signed-out browsers | Nothing: the usage routes take a signed-in session only                                                      |
+
+The server decides this for every request, including exports, a turn opened by its id, and the lists the filter pickers offer. A
+member who filters by someone else gets an empty answer, not that person's rows. Another workspace's ids open nothing.
+
+### The Activity page
+
+`/w/<workspace>/activity`. What people did, newest first, from the audit log: sign-in and sign-out, passkeys and sessions, members
+and invites, settings (with the value before and after), projects and pushes, share links and guests, tokens, agents (connected,
+audience, approval rule, revoked), approval cards (who allowed or denied what), agent work, comments (resolved, reopened and deleted) and
+exports. Filter by person, kind of
+action, agent, project, where it came through (a person, a token, a share link guest, the server) and period; search; open an
+entry for the address and device it came from and exactly what was recorded. "Worth a look" keeps the security-relevant changes:
+roles, audiences, approval rules, the agent policy, share links switched on, a project made public, tokens made, passkeys
+removed, and exports.
+
+- **Owners and admins** read everyone's activity. **Anyone else** in the workspace reads their own, whatever they filter by.
+- **What someone did in this workspace** (with the address it came from) is the workspace's record, as before.
+- **Sign-ins, passkey and recovery-code events and the list of signed-in devices are account events.** They belong to the person
+  and cover every workspace that person is in, so by default nobody else sees them: each person sees their own, on their own
+  activity and their own page, and an owner or admin sees none of them for anyone else, in the list, on a person's page or in an
+  export.
+- **On a server with one team** the operator can switch that on: `shapewall hosted --owners-see-sign-ins` (or
+  `SHAPEWALL_HOSTED_OWNERS_SEE_SIGN_INS=1`). Then a workspace's **owners** (not admins) also see those events and devices for the
+  people who are members of their workspace now, from the day each joined, and the page says so. Do not switch it on where
+  separate teams share a server: a person's sign-in is not tied to one workspace, so an owner would see sign-ins a member made
+  for another team. An entry holds a device label ("Chrome on macOS") and the address the server saw; the device list holds a
+  label and when it was last seen, never an address.
+- **A person's page** (`/activity/<user id>`; admins, or the person themselves): role and when it changed, what they can reach,
+  the tokens and agents they made, how much they commented, their agent usage and their activity; and, for the person themselves
+  (or an owner where the operator said so), the devices they are signed in on.
+- **A page is at most 200 entries** however many are asked for; older ones load as you scroll. **A text search always has a
+  start:** without a period it looks at the last 90 days and says so. Searches and filters by agent or project are limited to 60
+  a minute per person.
+- **Saved views** work here for everyone who has the page, viewers too.
+- **An agent's page** (`/activity/<agent id>`; admins): what it is, who connected it, who may send it work, its approval rule,
+  its usage and the activity about it.
+- **Access review** (admins and owners): every person, agent, API token, share link, public project and open invite in one place,
+  with what it reaches, who made it and when it was last used. Anything unused for 90 days is marked. "Export CSV" downloads it
+  (audited as `access_exported`); each list links to the page where access is cut.
+- **Export CSV** on the log downloads up to 10,000 entries of the filter (audited as `audit_exported`). The older Audit log page
+  and its export are unchanged, and that export now leaves the same audit entry.
+
+Usage and activity add these audit entries: `signed_out`, `usage_exported`, `audit_exported`, `access_exported`, `usage_retention_changed`,
+`usage_layout_default_set`, `usage_layout_default_removed`, and
+`agent_policy_changed` now says which settings changed, from what to what.
+
+**What the log does and does not prove.** The application has no route that edits or deletes an audit entry; entries are ordered
+by one increasing id and leave only when the workspace is deleted. That is a record for people who trust the server. It is not
+tamper-evident: someone with the database file can change it, and there is no hash chain yet. Keep backups if you need to compare.
+
+### Retention, quota and export
+
+- **Retention.** Usage records are kept for 400 days by default, and a finished record older than that is removed by the
+  retention job (at start and every 6 hours). A turn still running is never removed. The operator sets it per workspace:
+  `shapewall hosted admin retention ws_ID --usage-days 90` (or `default`). Audit entries are not pruned.
+- **Quota.** Each usage record counts 400 bytes toward the workspace's storage quota.
+- **Workspace export.** "Download a copy" now includes `usage.json`: every usage record of the workspace, newest first, read a
+  page at a time (the 50,000 cap is for downloads from the Usage page only).
+- **A deleted account** takes its saved views with it, in every workspace.
+
+### The usage and activity API
+
+For the console (session cookie; every route answers 404 for a workspace you are not in). All of them are one function each in
+`src/hosted/usage.js` and `src/hosted/activity.js`, so a later admin tool calls the same code.
+
+`GET /api/workspaces/:ws/usage/summary`, `/usage/series?bucket=day|week|month&groupBy=<dimension>|none&metric=`,
+`/usage/breakdown?groupBy=`, `/usage/latency?bucket=`, `/usage/top`, `/usage/budgets`, `/usage/options`,
+`/usage/rows?sort=started|duration|tokens|input|output|cached|cost|steps&dir=asc|desc&cursor=&limit=`, `/usage/rows/:id`,
+`/usage/export?format=csv|json`. Each takes the filter: `from`, `to` (ISO instants), `tz` (an IANA zone), `agent`, `project`,
+`person`, `kind`, `outcome` (a comma list or the parameter repeated), `model` (the parameter repeated, once per name, never
+split: a model's name may hold commas, brackets and spaces), `~` for the empty value, `tokensMin`, `tokensMax`, `durationMin`,
+`durationMax` (milliseconds), `q`, and `prevFrom` with `prevTo` (the period to compare with; without them, the same span on the
+wall clock just before). `/usage/breakdown` takes `previous=1` for the same split over that period.
+
+`GET /api/workspaces/:ws/activity?person=&agent=&project=&group=&action=&source=&sensitive=1&from=&to=&q=&before=&limit=`,
+`/activity/filters`, `/activity/export`, `/people/:user`, `/agents/:agent/profile`, `/access-review`, `/access-review/export`.
+`GET|POST /views` and `DELETE /views/:id` keep a person's saved views (`POST` takes `layout` to keep a dashboard layout with a
+view of the Usage page). `GET /views/:id/layout` answers a view's name and layout to anyone in the workspace who has the Usage
+page and the view's link (404 for a view that carries none).
+
+The dashboard's layout: `GET /usage/layout` answers `{ layout, default, canSetDefault }` (the caller's own layout or null, the
+workspace's default or null), `PUT /usage/layout` with `{ layout }` saves the caller's own, `DELETE /usage/layout` resets it,
+and `PUT` or `DELETE /usage/layout/default` sets or removes the workspace's default (owners; audited). There is no address for
+another person's layout. `/usage/top` takes `limit` (1 to 10, default 5); `/usage/latency` answers `p50`, `p90`, `p95` and
+`p99`. Members and up, like the rest of Usage; in `src/hosted/usage.js` these are `createLayouts` (one function per operation)
+and `createViews`.
+
+## Moving to a new origin
+
+Passkeys belong to a host name (the RP ID), so changing the server's address would lock everyone out. To move:
+
+1. On the server's machine: `shapewall hosted move-origin --to https://new.example --data <dir> [--days N]` (1 to 30 days, default
+   30). It records the move from the current origin and prints the next steps; `--status` shows it.
+2. Point the new host name at the server and restart it with `--origin https://new.example --previous-origin https://old.example`.
+   Passkeys made before the move keep their old RP ID (stored per passkey since migration 5).
+3. On the old address, signed-in people see "This server is moving". "Move my sign-in" (after a passkey check) makes a one-time move
+   link for their own account and opens `https://new.example/rebind#<token>`, where they create a passkey for the new host name and
+   are signed in. The token is 32 random bytes in the URL fragment (never in a log), stored as SHA-256, works once, only for the
+   account that made it, for 24 hours (never past the move's end), and a newer one voids it. Made in a fresh passkey session, the
+   new passkey has no 24-hour hold. Admins never move anyone else's sign-in.
+4. Someone who missed it signs in on the new address with their handle and a recovery code (codes have no host name) and adds a
+   passkey; the normal 24-hour hold applies.
+5. Best effort: the old address serves `/.well-known/webauthn` listing the new origin (WebAuthn Related Origin Requests), and the new
+   sign-in page offers "Use a passkey from old.example". Browsers that support it let an old passkey sign in on the new address;
+   the move link is the guarantee.
+
+During the move the old address serves only sign-in, re-auth, the move page, the move link, the related-origins file, `/api/health`
+and the token API (so CI tokens keep working); other writes answer 409 `server_moved` and every other page redirects (308) to the
+same path on the new address. After the move ends it redirects reads; API and auth writes answer 409 `server_moved`.
+Update `--remote` to the new address before the window ends. The CLI never forwards bearer tokens across an origin redirect.
+Old-host passkeys show "For old.example" on the Account page.
+
+## Security model
+
+- **Tenancy.** Every tenant row (workspaces, memberships, invites, projects, boards, comments, tokens, share links, pushes, audit) has
+  `workspace_id`, and every query on those tables goes through `tenant(db, workspaceId)` in `src/hosted/tenancy.js`. The handle binds
+  `:ws` itself, refuses SQL whose WHERE does not start with `workspace_id = :ws` or that has `OR`, `UNION` or a second statement (or
+  an INSERT that does not write `:ws`), and refuses missing parameters (which SQLite would otherwise bind as NULL). The only lookups that start without a workspace (a token or invite by its hash, a user's
+  workspaces) live in that file; a test fails if any other hosted module queries tenant tables through the raw handle. A workspace or
+  project you cannot see answers 404, never 403. Tests cover two workspaces with the same board id across the console API, the board
+  API, signed URLs and tokens.
+- **CSRF.** Cookie-authenticated writes need JSON and an `Origin` (or `Sec-Fetch-Site: same-origin`) equal to the configured origin,
+  on top of SameSite=Lax. The token API ignores cookies.
+- **Tailnet identity** (only with `--tailnet-sign-in`). The `Tailscale-User-*` headers are believed only on a request that
+  carries the secret path of the serve entry this server made, on a connection whose other end is owned by root, for an address
+  tailscaled's own whois gives to that login, with exactly one clean login header and no Funnel mark, and never for a request
+  from the server's own machine (any program there can ask tailscaled for the serve address). On direct loopback requests, raw
+  TCP forwards, Funnel traffic and with the flag off they are ignored. The secret is taken off the request before the
+  application sees it and is in no response; a test crawls the hosted server and the local board for it. The server refuses to start with the flag
+  (and suspends it while running) under userspace networking, Tailscale before 1.98, tailscaled's own proxies, in a container,
+  or when the serve config is not its one entry. Root and the Tailscale operator on the machine are trusted; nothing else on
+  the machine or the tailnet is. An identity is per device, not per person
+  ([how](#how-the-server-knows-a-request-came-through-tailscale-serve)).
+- **Rate limits** (in memory, per process): passkey ceremonies 30 a minute per IP; wrong recovery codes 5 per 15 minutes per handle and
+  IP, and 30 an hour per IP (right codes do not count, and nobody can use up another address's attempts); invite lookups 30 a minute
+  per IP; bad tokens 20 a minute per IP; 1200 requests a minute per token; 20 pushes an hour per
+  token; share link previews and opens 30 a minute per IP, wrong passcodes as above for recovery codes, 600 guest requests a minute
+  per link, 30 guest comments an hour per link and IP; 600 public-project requests a minute per IP; 20 invite emails an hour per
+  workspace.
+- **Audit log.** Account events (sign-up, sign-in by passkey or recovery code, failures, passkeys, recovery codes, sessions, deleted
+  workspaces) and workspace events (members, roles, invites, projects, tokens, share links and their guests, settings, pushes,
+  resolved, reopened and deleted comments), with the user, token or share link and IP. Admins read the workspace log in the console.
+- **Headers.** `nosniff`, `no-referrer`, COOP same-origin, `X-Robots-Tag: noindex`, HSTS on https, a strict CSP on the console and the
+  board shell, `frame-ancestors 'none'` except for live HTML. The console has no inline script; its only inline styles are the ones
+  Radix adds for dialogs and menus, allowed by a per-response nonce (`style-src 'self' 'nonce-...'`). It renders every value as text
+  (React, no `dangerouslySetInnerHTML`).
+- **DOM clobbering.** Live HTML keeps no `name` attributes (except `<meta name>`) and no `id` that matches a document or form method or
+  a document property the board reads; the board calls `Document.prototype` methods on the frame's document through `.call`.
+- **Agents.** `watch --remote --exec` does not pass `SHAPEWALL_TOKEN` to the command (it reads untrusted comment text) unless you add
+  `--pass-token`, and checks project, board and comment ids before they become file names.
+- **Behind a proxy.** `shapewall hosted` warns when the origin is https, it listens on loopback and `--trust-proxy` is off (rate limits
+  would see every client as the proxy).
+
+## Data and backups
+
+```
+<data>/shapewall.db            SQLite (WAL): accounts, workspaces, comments, tokens, audit
+<data>/secret.key              HMAC key for signed URLs
+<data>/quotas.json             the operator's quotas, when there is one (or `--quotas FILE`)
+<data>/setup-link              the first account's setup link (0600), until it is used
+<data>/files/<ws>/<project>/<board>/   pushed captures, in the local layout
+<data>/staging/<push>/         pushes in progress (swept after an hour)
+<data>/swaps/<push>.json       a push commit's folder swap while it runs (settled by the sweep after a crash)
+```
+
+A push commit swaps the board's folder for the uploaded one inside the database transaction that records it. Before the first
+rename it writes `swaps/<push>.json`; if the server dies mid-swap, the sweep at the next start follows the database: a
+committed push keeps the new folder and removes `<board>.old-<push>`, anything else gets the previous folder back and the
+uploads return to `staging/` (the push can be committed again or expires). An old folder the database cannot account for is
+left in place and named in the log (`left ... in place; check it by hand`).
+
+Deploy by stopping the old server before starting the new one, never side by side. The sweep runs when a server starts: with
+two processes on one data folder, the new one's sweep can roll back a push the old one is committing at that moment. After a
+downgrade to 0.11.0 or earlier, that version's sweep is back: it removes every `<board>.old-<push>` folder whatever the
+database says, and ignores `swaps/`.
+
+Use the operator commands below for a consistent database and file copy. Copying the SQLite file alone, or copying files after an
+unlocked database snapshot, is not a complete backup of a board.
+
+**Migrations** run at start (`src/hosted/db.js`, `PRAGMA user_version` and the `schema_migrations` ledger); each is additive
+except 18, which rebuilds `sessions` ([Migration 18 and rollback](#migration-18-and-rollback)), and 19 adds a column and fills it
+for open claims ([Migration 19 and rollback](#migration-19-and-rollback)). 20 adds a column ([Migration 20 and
+rollback](#migration-20-and-rollback)). 21 rewrites the removed token scope `comment` ([Migration 21 and
+rollback](#migration-21-and-rollback)). Back up before upgrading.
+
+- **4** (hosted QA fixes): `invites.note TEXT` (the invite's note) and `users.security_seen_at TEXT` (when the account last dismissed
+  the recovery-code notice). Rollback: an older build ignores both columns, so the simplest rollback is to run the older build on the
+  same file and change nothing else. Setting `PRAGMA user_version` by hand does nothing here: what runs is decided by the
+  `schema_migrations` ledger, and the server writes `user_version` back from it at every start. To drop the columns as well
+  (SQLite 3.35+), with the server stopped: `ALTER TABLE invites DROP COLUMN note; ALTER TABLE users DROP COLUMN
+security_seen_at; DELETE FROM schema_migrations WHERE version = 4; PRAGMA user_version = 3;`. The `DELETE` is the part that
+  matters: without it the ledger still says migration 4 ran, so the next upgrade does not add the columns back and the newer
+  build runs against a database that no longer has them. Notes and the "seen" time are lost; nothing else depends on them.
+- **5** (hosted access): tables `device_logins` (pending `shapewall login` codes, hashed, results sealed), `guest_sessions` (one row
+  per share link guest), `rebind_tokens` (move links, hashed) and `server_state` (the origin and a recorded move); columns
+  `workspaces.public_projects`, `projects.public_id` (unique), `public_at`, `public_by`, `passkeys.rp_id` (filled with the current
+  host name on first start) and `sessions.admin_seen_at`. Rollback: back up first. An older build ignores the new tables and columns,
+  but its guest cookies are a different format (guests open their link again), pending device logins are lost, and public projects
+  stop answering (their routes do not exist there). Run the older build on the same file and leave the version alone:
+  `user_version` is not what decides what runs, the `schema_migrations` ledger is, and the server writes `user_version` back from
+  it at every start. To drop everything as well (SQLite 3.35+), with the server stopped: `DROP TABLE device_logins; DROP TABLE
+guest_sessions; DROP TABLE rebind_tokens; DROP TABLE server_state; DROP INDEX projects_public_id; ALTER TABLE projects DROP
+COLUMN public_id; ALTER TABLE projects DROP COLUMN public_at; ALTER TABLE projects DROP COLUMN public_by; ALTER TABLE workspaces
+DROP COLUMN public_projects; ALTER TABLE passkeys DROP COLUMN rp_id; ALTER TABLE sessions DROP COLUMN admin_seen_at; DELETE FROM
+schema_migrations WHERE version = 5; PRAGMA user_version = 4;`. Without that `DELETE` the ledger still says migration 5 ran, so
+  the next upgrade does not recreate any of it and the newer build runs against missing tables and columns. Do this only on a
+  database whose newest migration is 5: later migrations add to what this one made (8 adds `device_logins.purpose`), and
+  re-running 5 does not bring those additions back. Do not roll back during an origin move: the old build cannot serve the old
+  address.
+- **12** (agents, 0.4.0): tables `agents` and `agent_runs`, columns `projects.default_agent_id`, `comments.agent_id` and
+  `agent_claims.agent_id`, and a backfill that turns every token with the `claim` scope into an agent that behaves as before. What a
+  rollback loses is in [Migration 12 and rollback](#migration-12-and-rollback).
+
+**That is not every migration.** There are 20, numbered 1 to 20, and they all run at start. The ones with a rollback note are 4
+and 5 above; 7, in [Migration 7 and rollback](#migration-7-and-rollback); 8, one paragraph under
+[Move a local project to your team](#move-a-local-project-to-your-team); 12, and then one section each for 13, 14, 15, 16, 17,
+18 and 19 below. **Migrations 1, 2, 3, 6, 9, 10 and 11 have no rollback note anywhere:** 1 to 3 are the first schema and its early
+additions; 6 is scoped dispatch, project budgets and command approvals; 9 is profile images; 10 is `shares.include_checks`; 11 is
+comment and reply images and drawings, whose bytes live in `comment_files`. No recipe for them is written down, and this page does
+not invent one. What holds for all of them: an older build ignores additive tables and columns, the pre-upgrade backup in a fresh
+data folder is the rollback to prefer, and any hand rollback that drops a migration's schema must delete that migration's row
+from `schema_migrations` too, as the recipes below do.
+
+**Why SQLite through `node:sqlite`.** One host, one process, small metadata (captures are files), so SQLite fits. `node:sqlite` ships with
+Node, so the npm package stays free of native addons for the many people who only use the CLI; `better-sqlite3` would download or build a
+binary for every install. The cost: `node:sqlite` needs Node 22.13+ (Shapewall as a whole needs 22.19, so that is always met) and prints an
+ExperimentalWarning on Node 22, which `shapewall hosted` hides.
+
+## Before you invite the team
+
+Try these on the real server, at its real address, before the team depends on it:
+
+1. **Reach the same HTTPS server from two team devices.** Tailscale grants network access; Shapewall accounts and workspace roles
+   grant application access. Keep sign-up invite-only, and allow only the intended peers in the tailnet policy. Leave Funnel off
+   for a private team pilot.
+2. **Create the owner account privately.** Read the one-time setup link locally, create a passkey and save recovery codes. Invite a
+   second person as a member and another as a viewer; verify the member can comment and the viewer cannot. Neither can administer
+   members or tokens. Test sign-out and return sign-in on the real desktop and phone, including any installed home-screen app.
+3. **Move and work on a real project.** Capture locally, use `shapewall share` or `login` plus `push`, then see comments and cursor
+   updates between two independently signed-in browsers. Check live HTML pins, follow/unfollow, mobile background/resume, and
+   re-capture plus push. The local project picker is desktop-only navigation, not a phone hub or a team workspace.
+4. **Verify the agent boundary.** Use a project-scoped token on the developer machine or CI. Confirm trusted dispatch and shell
+   approval work, imported/guest comments stay inert, and revocation ends access. The hosted server does not run your agent or capture browser.
+   On the project's Agents page, check each agent's audience: a teammate outside it should see the agent greyed on the board with
+   the reason, and a comment sent to one agent should run only on that machine.
+5. **Check operation and recovery.** Give the server a lifecycle independent of an interactive shell or coding-agent session. The
+   foreground command stops when its process stops; example service/Compose files need deliberate operator setup. Probe `/api/health`
+   from a second device, choose monitoring and backup arrangements ([Monitoring your server](monitoring.md)), and restore a backup
+   to a separate folder before relying on it.
+   Do not start two hosted processes against one data directory, also not for a moment during a deploy: stop the old one, then
+   start the new one. Record the data and immutable release to use for rollback.
+6. **Try the passkeys your team uses.** Shapewall's tests use virtual authenticators, so check iCloud, Google or password-manager
+   sync, hardware keys and phone autofill yourself, whichever the team will rely on. Origin migration is optional
+   until the address changes, but preserve the old origin and recovery codes before attempting it.
+
+A private tailnet server needs no separate usercontent domain and no public sign-up. Live HTML still uses an opaque sandbox and
+signed, short-lived URLs. Decide retention and access before sharing sensitive work; the legal templates in `examples/hosted/legal`
+are drafts for you to adapt, not terms anyone has agreed to.
+
+## Before public hosting
+
+These are additional operator tasks when exposing the service beyond the private team:
+
+- Configure a separate, cookieless registrable domain with `--usercontent-origin` for live HTML.
+- Configure Turnstile when sign-up is open or comment links are widely distributed; keep invite-only sign-up until then.
+- Set quotas, test suspension, and provision storage for the expected workload. Agent claim budgets are set per project in the
+  agent policy, not in the quotas.
+- Adapt the draft legal text to your operator, contacts, regions and retention periods. Workspace export is capped at 3.5 GB.
+- Set up backups, monitoring ([Monitoring your server](monitoring.md)) and restore drills for the public deployment. The commands and timer examples are supplied disabled;
+  nothing enables them for you.
+- Have the deployment's security checked, and check passkeys on real devices over HTTPS at the chosen public origin and proxy.
+
+Files are kept on the server's own disk: size it for the workload. Signed live HTML URLs are bearer links for up to two minutes; revoking a share stops new loads,
+while ending one guest session may leave an already-issued URL valid for the remainder of that window. Rate limits are per process.
+
+## Tailnet deployment (mode 1)
+
+`--funnel` and `--funnel-port` are experimental, like [tailnet sign-in](#tailnet-sign-in).
+
+```sh
+shapewall hosted --data ./hosted-data --tailscale --tailscale-port 8443
+# Alternative invocation with optional public guest access (not a second server):
+shapewall hosted --data ./hosted-data --tailscale --tailscale-port 8443 --funnel --funnel-port 443
+```
+
+These commands change Tailscale Serve/Funnel configuration. Run them only when you intend to expose this server. Install Tailscale,
+connect the machine, enable MagicDNS and HTTPS certificates, and authorize your unprivileged user as a Tailscale operator first.
+That last step hands out real trust: the Tailscale operator can change the serve config, and with it pretend to be anyone on a
+tailnet sign-in server, so grant it only to a user you trust as you trust root there
+([what is still trusted](#how-the-server-knows-a-request-came-through-tailscale-serve)). Rewriting the serve config under a
+running server does not stay unnoticed: the server reads it again every 30 seconds and suspends tailnet sign-in until it is the
+one entry it made.
+Add `--tailnet-sign-in` to sign tailnet users in by their tailnet login instead of a passkey ([Tailnet sign-in](#tailnet-sign-in)).
+The console and passkey origin come from this machine's `*.ts.net` hostname. Do not also pass `--origin` or `--host` (it listens on 127.0.0.1 only).
+An occupied HTTPS port is refused, including an existing mapping to the same target. SIGINT/SIGTERM removes mappings this process
+added only while they still match; after a crash inspect `tailscale serve status` and remove the stale mapping explicitly.
+
+**`--tailscale` turns `--trust-proxy` on by itself,** because `tailscale serve` is the proxy in front of the server. Client IPs for
+rate limits, the audit log and the device list then come from `X-Forwarded-For`. With `--tailnet-sign-in` that header is believed
+only behind the checks of [Tailnet sign-in](#how-the-server-knows-a-request-came-through-tailscale-serve) (the secret path, a
+root-owned peer, tailscaled's own whois), so who someone is stays sound. With plain `--tailscale` and no `--tailnet-sign-in`
+there are no such checks: any program on this machine can open the loopback port and set `X-Forwarded-For` to what it likes, so
+the addresses in the audit log and the per-address rate limits are that program's to choose. Sign-in itself is not affected, being
+a passkey either way, but do not read an address in such a server's log as proof of where a request came from.
+
+Funnel uses a second loopback listener and a different HTTPS port. It serves guest share pages, guest APIs, signed live HTML,
+static assets, legal/report routes and health only. Console, sign-in, signup, device login, invitations, member APIs and token APIs
+answer 404. Member session/ceremony cookies and any `Tailscale-*` header are discarded at that listener. Share links still require the secret in the link and
+any passcode configured by the workspace. Funnel makes those guest paths public. Ports are not cookie boundaries, so never add
+member routes to this listener. Tailscale policy/ACL configuration remains the operator's responsibility.
+
+## Own domain deployment (mode 2)
+
+```sh
+shapewall hosted setup --domain app.example.com \
+  --usercontent-domain usercontent.example.net --dir ./deployment --source ./shapewall
+```
+
+This writes Compose, Caddy and a private `.env` file; it does not start containers or modify DNS. `--dry-run` previews the plan and
+checks DNS. Point the names at the server, install Docker Engine and Compose, then check `.env` and Caddyfile. `--start` explicitly
+builds and starts the Compose services and reads the first setup link privately from `/data/setup-link`. Never copy that link into
+logs or monitoring. Manual equivalent: `docker compose up -d --build --wait`, then `docker compose exec shapewall cat /data/setup-link`.
+When the link has expired, `docker compose exec shapewall node bin/shapewall.js hosted setup-link --new --data /data` makes a new one.
+
+**What is in that `.env`, besides the settings of this page.** Three variables there are read by Docker Compose itself, not by the
+server: `SHAPEWALL_SOURCE` (the build context, the checkout the image is built from), `SHAPEWALL_UID` and `SHAPEWALL_GID` (the
+user and group the container runs as, which must own the `data` and `backups` mounts; 1000 and 1000 when they are unset). The
+setup command writes all three. Changing them changes the stack, not a running server.
+
+**Two settings cannot be changed in that `.env`.** The generated Compose file puts `SHAPEWALL_HOSTED_DATA: /data` and
+`SHAPEWALL_HOSTED_TRUST_PROXY: uniquelocal` in its own `environment:` block, and a Compose `environment:` entry wins over
+`env_file`. Setting either in `.env` under the generated stack has no effect; edit the Compose file if you must change them.
+
+The image is built from a checkout using `Dockerfile.hosted`; no image is published, and the Dockerfile is an example outside the
+[stability promise](stability.md). It contains no installed capture browser: users push captures from
+local machines or CI. Data and backups are separate private mounts. Only Caddy publishes ports; the app trusts forwarded addresses
+from the private Compose network. Check network access and secrets before production. The setup command needs a checkout with the
+Dockerfile, client and lockfile; a packed npm installation must pass `--source` pointing to one.
+
+Use a separate registrable domain for live HTML, not another subdomain of the app's domain. The usercontent Caddy site forwards
+only `/uc/*`, discards incoming Cookie/Authorization and strips Set-Cookie. `--usercontent-origin` /
+`SHAPEWALL_HOSTED_USERCONTENT_ORIGIN` support is required to issue URLs for that site; the template alone does not isolate same-origin HTML.
+To keep a private copy (a staging server, say) behind a password, the Caddyfile has a commented-out `basic_auth` gate. It leaves
+share links, `/uc/`, `/report` and `/api/health` outside the gate on purpose, so guests and health checks still reach them.
+Pages always carry `X-Robots-Tag: noindex`.
+
+## Operator commands and quotas
+
+These are the server-wide commands. `admin members`, `admin invites` and `admin projects`, which do for the operator what an owner
+would do in the console, are under [On the server's own machine](#on-the-servers-own-machine). Run these on the machine that holds
+the data, as the data owner:
+
+```sh
+shapewall hosted admin list --data ./hosted-data
+shapewall hosted admin suspend ws_ID --reason "Investigating an abuse report" --data ./hosted-data
+shapewall hosted admin resume ws_ID --data ./hosted-data
+shapewall hosted admin export ws_ID --out ./workspace.zip --data ./hosted-data
+shapewall hosted admin reports --data ./hosted-data
+shapewall hosted admin reports close rp_ID --note "Handled" --data ./hosted-data
+shapewall hosted admin log --data ./hosted-data
+# An account's passkeys (by handle, or by the tailnet login it is linked to):
+shapewall hosted admin passkeys list --login ada@example.com --data ./hosted-data
+shapewall hosted admin passkeys remove PASSKEY_ID --handle ada --data ./hosted-data
+# Destructive, requires the workspace's exact name:
+shapewall hosted admin delete ws_ID --confirm "Workspace name" --data ./hosted-data
+```
+
+`passkeys remove` is for the case nobody in the product can solve: an account whose only passkey is not its owner's, or is
+lost with no recovery codes, most of all on a server with tailnet sign-in after a first passkey's 24 hours have passed. Being
+able to read and write the data folder is the proof, as for every operator command. It removes any passkey, also the last
+one, and ends the account's passkey sessions (tailnet sessions go on); an account with a tailnet login then signs in through
+the tailnet and can add a passkey again, and one without signs in with a recovery code if it has one. It is in the operator
+log and in the account's own security log ("removed by the server's operator").
+
+Suspension immediately refuses existing API tokens, new device approvals, invitations and guest links. Members can read and export
+but writes return `workspace_suspended`. Resume restores the previous grants. Operator actions, including listing workspaces/reports and reading the log, are recorded in the
+operator log; suspension/resume also enter the workspace audit log. The CLI is privileged filesystem access, not a web-admin role.
+Do not give an untrusted workspace owner shell access to it. Reports remain private to the server operator.
+
+`--quotas FILE`, `SHAPEWALL_HOSTED_QUOTAS` or `<data>/quotas.json` (the flag wins over the variable, and both over the file in the
+data folder) controls storage, projects, boards per project, members, active share links per project and
+pushes per token per hour. Defaults: 5 GiB, 20 projects, 10 boards/project, 100 members, 20 links/project and 20 pushes/hour/token.
+Valid edits reload within 5 seconds; invalid edits preserve the previous limits and log a validation error. Example:
+
+```json
+{
+  "default": { "projects": 20, "storageGB": 5 },
+  "workspaces": { "ws_000000000000000000000000": { "storageGB": 10, "members": 25 } }
+}
+```
+
+Lowering a quota blocks new growth; it does not delete existing data. `storageGB` is binary GiB (1024 cubed bytes). Agent claims/day
+limits belong to the agent policy, not this config. Rate limits are in-memory and reset on process restart: the console and board
+APIs 1200 requests a minute per account (6000 for captures and other files), guest requests 600 a minute per share link and IP,
+public-project requests 600 a minute per IP, device polling 60/minute, plus the limits listed above. Run one hosted process per data folder.
+
+## Retention, backup and restore
+
+Usage records (one small row per agent turn) are kept for 400 days unless a workspace has its own `--usage-days`; see
+[Retention, quota and export](#retention-quota-and-export). Current captures stay. By default retention keeps the newest two historical captures per page and viewport plus every historical
+capture a comment references, open or resolved, and every version a reply's drawing was made on, so that markup keeps rendering.
+A push that replaces a board keeps those referenced versions too: when the pushing machine no longer has one (a second checkout,
+CI), the commit copies it over from the board it replaces and counts its bytes in the board's storage once. Other history follows
+the pushing machine. Variants are left alone. It runs at start and every 6 hours in-process when the
+operator starts the hosted server. `--retention-hours 0` disables it; `--retention-keep N` changes the default. To preview or run it:
+
+```sh
+shapewall hosted admin retention --run --dry-run --data ./hosted-data
+shapewall hosted admin retention --run --data ./hosted-data
+shapewall hosted admin retention ws_ID --keep 4 --data ./hosted-data
+shapewall hosted admin retention ws_ID --keep default --data ./hosted-data
+shapewall hosted admin retention ws_ID --usage-days 90 --data ./hosted-data
+shapewall hosted backup --data ./hosted-data --to ./backups --keep-days 30
+shapewall hosted restore --from ./backups --check
+shapewall hosted restore --from ./backups --data ./restored-new-folder
+```
+
+Backup holds a SQLite write lock for a `VACUUM INTO` snapshot and for pinning the board files that go with it: each file is
+hard-linked into a `.backup-pin-<id>` folder inside the data folder (copied instead when the disk cannot link), so the files
+and the database in a backup are the same moment. The pin is copied to the backup after the lock is released, so reads and
+writes continue, and then removed; a pin left by a crashed backup is removed by the next backup after a day. When the data
+folder cannot take the pin, the files are copied under the lock instead, which holds the lock longer. A board row whose folder
+is missing is listed under `files.skipped.missing` in `backup.json`, the backup is marked `"complete": false` and the backup
+command prints a warning and exits with status 1 (a timer or script that runs it sees the failure). Backups made by
+earlier versions that recorded skipped boards under `files.skipped` now fail the restore drill: they never held every board's
+files, so that is the drill being right, not a regression. Anything written after the snapshot is not in the backup: it is a
+copy of a moment, not a continuous log. A `--to` inside the data folder is refused. The backup includes account data, passkey
+public keys, captures, comments, audit records, signing key and default-path quota config. If the HMAC key is supplied as a systemd
+credential or environment variable, give the backup command the same credential: with `SHAPEWALL_HOSTED_SECRET` in the
+environment the backup writes that value into `<backup>/secret.key` in plain text, and restore copies it into the restored data
+folder, so a backup is as secret as the key. When no key is found in the environment and the data folder has no `secret.key`
+either, `backup.json` simply records `"secret": false` and nothing warns: check that field, because a restore without the key
+makes a new one on first start and the live-HTML URLs signed with the old one stop working (they last two minutes, so that is a
+blip, not an outage). Back up an external quota config separately.
+Backup folders are mode 0700, files 0600, and checksums cover database/capture/key files. Treat them as sensitive as the live server,
+encrypt offsite copies and test that you can recover them. Staging uploads and one-time setup links are excluded.
+
+`--keep-days 30` deletes only recognizable older backup folders in the destination; it does not schedule anything. The example
+backup service/timer is disabled until the operator explicitly installs and enables it. Installation never starts a backup timer.
+A monthly manual restore drill should be logged by the operator. `restore --check` creates a scratch copy beside the backup, verifies
+checksums, row counts, board folders, that every capture a board's manifest lists is there, that the backup is complete (one
+that left files out, also one from an older version that listed them under `files.skipped`, fails), and health, then stops its temporary server and removes the scratch copy. Automated tests also
+sign in to a restored fixture with its software passkey; that does not verify real phones or hardware authenticators.
+
+Four things the commands above do not do for you, each enough to leave a dead instance:
+
+- **Nothing stops the server.** Neither `restore` nor the drill touches a running service, and two hosted processes against one
+  data folder is not supported. Stop the service yourself before you point it at restored data.
+- **Nothing sets the owner.** `restore` makes the folder 0700 and its files 0600, owned by whoever ran the command, and there is
+  no `chown` step anywhere. Restored under `sudo`, the data belongs to root, the service user cannot read it and the server does
+  not start. Run the restore as the user the service runs as, or change the owner afterwards yourself.
+- **The drill writes next to the backup, not inside it.** `restore --check` puts its scratch copy in the backup's **parent**
+  directory (`.restore-drill-<pid>-<timestamp>`), so a backup whose parent directory is read-only fails the drill. There is no
+  flag for that folder: copy the backup to a writable disk and drill the copy.
+- **`--from` pointed at a folder of backups picks the newest.** `restore --from ./backups` takes the newest
+  `shapewall-backup-*` it finds there without asking. Name the exact backup folder when you mean a particular one.
+
+Restore refuses a nonempty target. Keep the original origin (passkeys depend on it), inspect the restored copy, then change the
+runtime data pointer during an operator-approved maintenance window. Retain the previous release and data backup for rollback.
+Project/workspace deletion removes active files immediately after database deletion; backup copies age out only under the chosen
+backup policy. Operators must replay deletion requests after restoring an older backup.
+
+## Upgrading from older versions
+
+A newer server upgrades the database on its first start. Each migration below says what it adds and what happens if you go back
+to the release before it. Back up first (`shapewall hosted backup`), and keep that backup for rollback.
+
+- **Agent tokens from before 0.4.0.** A token that already had the `claim` scope keeps the audience it had (everyone the agent
+  policy trusts). The console marks it "kept from before 0.4.0". Agents made since then take work only from the person who
+  connected them, until you widen it.
+
+### Migration 7 and rollback
+
+Migration 7 adds workspace suspension and retention columns, the operator log and abuse reports. It is also where the
+`schema_migrations` ledger came in: it records every migration that actually ran, so migrations written in parallel can reach a
+database in either order. `PRAGMA user_version` is the highest number in the ledger, not a count, and the server writes it back
+from the ledger at every start. Every number from 1 up is a real migration; none is empty. A database from before the ledger
+has contiguous versions 1 to 4, and those are adopted into the ledger on its first start with a newer build.
+
+**A database with no ledger and `user_version` above 4 is refused at start:** "Database has untracked migrations newer than
+version 4; restore its pre-upgrade backup before continuing." That is what a hand-raised `user_version` looks like, and the
+server will not guess which migrations ran. Restore the pre-upgrade backup instead.
+
+Back up before any upgrade.
+
+For rollback, prefer the pre-upgrade backup in a fresh data folder and the previous immutable release. Merely running an older build
+on the new database ignores additive columns but also removes suspension enforcement: keep affected workspaces blocked externally
+until upgraded again. Do not drop the operator log or reset the ledger casually. Test rollback on a copy first.
+
+### Migration 12 and rollback
+
+Migration 12 (0.4.0) makes agents first-class ([Agents on a hosted board](#agents-on-a-hosted-board)). It is additive and runs once:
+
+- tables `agents` (one row per token with the `claim` scope: kind, icon, tint, machine label, audience, approval rule and its two
+  roles, who created it, when it was last seen) and `agent_runs` (the usage record of each comment an agent took);
+- columns `projects.default_agent_id`, `comments.agent_id` (the agent a comment was sent to; empty means any agent) and
+  `agent_claims.agent_id`;
+- a backfill: every token that already has the `claim` scope becomes an agent of kind "watcher" with the audience "everyone the
+  agent policy trusts", which is what it did before. Open claims are linked to their agent. No project gets a default agent and no
+  comment gets an address, so every comment stays open to any agent, as before.
+
+A token with the `claim` scope that has no agent row (made while an older build ran on the upgraded database) becomes an agent the
+first time it calls the server, with the same audience. Back up before upgrading.
+
+For rollback, prefer the pre-upgrade backup in a fresh data folder with the previous release. Running 0.3.4 on the upgraded database
+also works, since it ignores the new tables and columns, but it loses what they held:
+
+- **Routing.** A comment sent to one agent can be taken by any watcher, and an agent takes work from everyone the agent policy
+  trusts, whatever audience it was given. Tighten the project's Agent policy first if that matters.
+- **Agents made after the upgrade** (audience "only the person who connected it") behave like every other token there.
+- Default agents, icons, audiences, approval roles and usage records are not shown, and are still there when you upgrade again.
+
+To remove the schema as well (SQLite 3.35+), with the server stopped: `DROP TABLE agent_runs; DROP TABLE agents; ALTER TABLE projects
+DROP COLUMN default_agent_id; ALTER TABLE comments DROP COLUMN agent_id; ALTER TABLE agent_claims DROP COLUMN agent_id; DELETE FROM
+schema_migrations WHERE version = 12; PRAGMA user_version = 11;`. The next upgrade then backfills again from the tokens. Never reset
+the ledger any other way. Test a rollback on a copy first.
+
+### Migration 13 and rollback
+
+Migration 13 (0.5.0) adds chat with [connected agents](#connected-agents). It is additive and runs once:
+
+- tables `chat_threads` (a thread of a board, the agent it talks to, and for a private chat its owner), `chat_messages` (the
+  person's messages and the agent's answers) and `chat_turns` (one question on its way through an agent, and how it ended);
+- column `device_logins.meta` (what a machine that asks to connect says it runs, for the approval page).
+
+Nothing existing is rewritten: no token gains a scope, no agent changes its audience, and `watch --remote` and `mcp --remote` work
+with the same tokens. The usage records of chat turns go in `agent_runs`, the table migration 12 made. Back up before upgrading.
+
+For rollback, prefer the pre-upgrade backup in a fresh data folder with the previous release. Running 0.4.0 on the upgraded database
+also works, since it ignores the new tables, but:
+
+- **Chat is gone from the board**, and the threads are not shown. They are still there when you upgrade again.
+- **Connected agents show as ordinary agents** with no chat. Their tokens keep working on the token API, so a comment sent to one
+  can still be read and answered through it; 0.4.0 shows the `agent` scope on such a token and gives it no meaning.
+  Revoke the connected agents first if that is not what you want.
+- A machine still running `shapewall agent connect` gets 404 from the link routes and keeps retrying. Stop it.
+
+To remove the schema as well (SQLite 3.35+), with the server stopped: `DROP TABLE chat_turns; DROP TABLE chat_messages; DROP TABLE
+chat_threads; ALTER TABLE device_logins DROP COLUMN meta; DELETE FROM schema_migrations WHERE version = 13; PRAGMA user_version =
+12;`. Never reset the ledger any other way. Test a rollback on a copy first.
+
+### Migration 14 and rollback
+
+Migration 14 (0.6.0) adds approvals and edits from a hosted board
+([Edits from the board](#edits-from-the-board-the-trust-decision)). It is additive and runs once:
+
+- table `chat_permissions` (one row per permission card a connected agent asked during a fix: what it asked, as hashed, its
+  state, who answered and when);
+- columns `agent_runs.approvals_asked`, `agent_runs.approvals_allowed` and `agent_runs.approvals_denied` (how many requests a
+  fix asked and how they ended);
+- column `agents.approval_rule_by` (who last set the agent's approval rule, so an agent whose machine says `--approvals owner`
+  goes without asking only while that rule is the connecting person's own).
+
+Nothing existing is rewritten: no token gains a scope, no agent changes its audience or its approval rule, and a connected agent
+reads and answers only until its own machine says more. `watch --remote` and `mcp --remote` work with the same tokens. Back up
+before upgrading.
+
+For rollback, prefer the pre-upgrade backup in a fresh data folder with the previous release. Running 0.5.0 on the upgraded
+database also works, since it ignores the new table and columns, but:
+
+- **A fix cannot be started.** 0.5.0 has no Fix with an agent on hosted comments and relays no cards. Connected agents chat and
+  answer comments as they did in 0.5.0.
+- **Cards and their answers are not shown.** They are still there when you upgrade again, and the audit entries stay in the
+  audit log.
+- **A machine started with `--approvals`** keeps its own setting in its policy file. It takes no edits while the server is
+  0.5.0, because that server never asks for a fix.
+
+To remove the schema as well (SQLite 3.35+), with the server stopped: `DROP TABLE chat_permissions; ALTER TABLE agent_runs DROP
+COLUMN approvals_asked; ALTER TABLE agent_runs DROP COLUMN approvals_allowed; ALTER TABLE agent_runs DROP COLUMN
+approvals_denied; ALTER TABLE agents DROP COLUMN approval_rule_by; DELETE FROM schema_migrations WHERE version = 14; PRAGMA
+user_version = 13;`. Never reset the ledger any other
+way. Test a rollback on a copy first.
+
+### Migration 15 and rollback
+
+Migration 15 (0.7.0) adds what the Usage and Activity pages need ([Usage and activity](#usage-and-activity)). It is additive
+and runs once:
+
+- columns on `agent_runs`: `agent_owner` (who connected the agent; filled in for existing rows), `duration_ms` (filled in for
+  finished rows from their start and end), `agent_ms`, `tools`, `approvals_auto`, `approvals_by`, `window_used`, `window_size`;
+- indexes `agent_runs_owner` and `agent_runs_thread`;
+- table `saved_views` (a person's named filters on the Usage and Activity pages);
+- column `workspaces.retention_usage_days` (how long a workspace keeps usage records; empty means the default, 400 days);
+- indexes on the audit log for the Activity filters: `audit_workspace_at`, `audit_workspace_user`, `audit_account_user`.
+
+Nothing existing is rewritten beyond the two fill-ins above, and no role gains a permission it did not have, except that members
+may now read their own usage and everyone their own activity. Back up before upgrading. From 0.7.0 the retention job removes
+finished usage records older than 400 days; set `--usage-days` for a workspace first if you want to keep them longer.
+
+For rollback, prefer the pre-upgrade backup in a fresh data folder with the previous release. Running 0.6.0 on the upgraded
+database also works, since it ignores the new columns, table and indexes, but:
+
+- **There are no Usage and Activity pages,** and turns recorded by 0.6.0 lack the new fields (they show as "not reported" after
+  upgrading again, and their duration is not filled in).
+- **Usage records are not pruned** and do not count toward the quota while 0.6.0 runs.
+- **Saved views stay** in their table, unused.
+
+To remove the schema as well (SQLite 3.35+), with the server stopped: `DROP TABLE saved_views; DROP INDEX agent_runs_owner; DROP
+INDEX agent_runs_thread; DROP INDEX audit_workspace_at; DROP INDEX audit_workspace_user; DROP INDEX audit_account_user; ALTER
+TABLE agent_runs DROP COLUMN agent_owner; ALTER TABLE agent_runs DROP COLUMN duration_ms; ALTER TABLE agent_runs DROP COLUMN
+agent_ms; ALTER TABLE agent_runs DROP COLUMN tools; ALTER TABLE agent_runs DROP COLUMN approvals_auto; ALTER TABLE agent_runs
+DROP COLUMN approvals_by; ALTER TABLE agent_runs DROP COLUMN window_used; ALTER TABLE agent_runs DROP COLUMN window_size; ALTER
+TABLE workspaces DROP COLUMN retention_usage_days; DELETE FROM schema_migrations WHERE version = 15; PRAGMA user_version = 14;`.
+Never reset the ledger any other way. Test a rollback on a copy first.
+
+### Migration 16 and rollback
+
+Migration 16 (0.7.0) adds one table and changes nothing else:
+
+- table `usage_layouts`: the layouts of the Usage dashboard ([Arranging the dashboard](#arranging-the-dashboard)). One row per
+  layout: a person's own (`kind` `person`, `subject` their user id), the workspace's default (`default`, empty subject), and the
+  layout a saved view carries (`view`, the view's id). `layout` is the checked JSON; `updated_by` and `updated_at` say who saved
+  it and when. Rows go with their workspace, with a member who leaves or is removed, with a deleted account, and with a deleted
+  view.
+
+It is additive, and it does not touch `saved_views` or any other table of migration 15. Back up before upgrading.
+
+For rollback, prefer the pre-upgrade backup in a fresh data folder with the previous build. Running a build without migration 16
+on the upgraded database also works, since it ignores the table, but:
+
+- **Everyone sees the built-in dashboard,** fixed as it was. Layouts, the workspace's default and the layouts of saved views
+  stay in the table, unused, and are back when you upgrade again.
+- **Saved views keep working** as names for an address. A link that names a view (`view=`) opens the filters and ignores the
+  rest.
+- **A member removed or an account deleted meanwhile** leaves their rows behind. They are harmless (a layout holds no usage
+  data, only which widgets go where), and `DELETE FROM usage_layouts WHERE kind = 'person' AND subject NOT IN (SELECT user_id
+FROM memberships WHERE workspace_id = usage_layouts.workspace_id);` clears them.
+
+To remove the schema as well, with the server stopped: `DROP TABLE usage_layouts; DELETE FROM schema_migrations WHERE version =
+16;`, then set `PRAGMA user_version` to the highest version left in `schema_migrations` (17 where migration 17 is there, else
+15). Never reset the ledger any other way. Test a rollback on a copy first.
+
+### Migration 17 and rollback
+
+Migration 17 (0.7.0) adds what the passkey settings and tailnet sign-in need ([Signing in](#signing-in)). It is additive and
+runs once:
+
+- column `workspaces.step_up` (the "Ask for a passkey again" settings as JSON; `{}` is all off);
+- columns `users.tailnet_login`, `users.tailnet_linked_at` and `users.tailnet_user_id` (Tailscale's id of the linked user), with
+  the unique index `users_tailnet_login`;
+- column `passkeys.tailnet_added_from` (the device a first passkey was added from in a tailnet session);
+- table `server_settings` (what the operator switched for the whole server: passkeys on a tailnet sign-in server);
+- column `sessions.tailnet_login` (set on a session that came in by tailnet identity);
+- column `invites.tailnet_login` (an invite for one login);
+- table `tailnet_visitors` (logins that arrived and are in no workspace).
+
+**What changes on upgrade, with no setting touched:** the passkey prompts before workspace actions are gone. A signed-in session
+with the right role is enough. If you want them back, an owner switches the groups on in Settings, per workspace.
+
+For rollback, prefer the pre-upgrade backup in a fresh data folder with the previous release. Running the previous build on the
+upgraded database also works, but:
+
+- **The old passkey rules are back for everyone,** whatever the workspaces chose.
+- **Delete tailnet sessions** (`DELETE FROM sessions WHERE tailnet_login IS NOT NULL;`). An older build cannot use them in any
+  case: they are stored under the hash of `tailnet:<token>`, and an older build looks a cookie up by the hash of the token
+  alone, so it finds nothing. Deleting them is tidiness, and the documented step.
+- **Accounts made by tailnet sign-in have no passkey** and no recovery codes, so they cannot sign in to an older build.
+- **Invites made for a tailnet login** work for anyone who has their link on an older build. Revoke the pending ones first.
+
+To remove the schema as well (SQLite 3.35+), with the server stopped: `DROP TABLE tailnet_visitors; DROP INDEX
+users_tailnet_login; ALTER TABLE users DROP COLUMN tailnet_login; ALTER TABLE users DROP COLUMN tailnet_linked_at; ALTER TABLE
+users DROP COLUMN tailnet_user_id; ALTER TABLE passkeys DROP COLUMN tailnet_added_from; DROP TABLE server_settings; ALTER TABLE
+sessions DROP COLUMN tailnet_login; ALTER TABLE invites DROP COLUMN tailnet_login; ALTER TABLE workspaces DROP COLUMN step_up;
+DELETE FROM schema_migrations WHERE version = 17;`, then set `PRAGMA user_version` to the highest version left in
+`schema_migrations` (16 where the saved Usage layouts are there, else 15). Where migration 18 ran, roll it back first
+([Migration 18 and rollback](#migration-18-and-rollback)): its check names `sessions.tailnet_login`, so the column cannot be
+dropped before.
+
+**A database from a 0.7.0 pre-release build.** Some pre-release builds of 0.7.0 numbered the sign-in migration 16. A database
+such a build opened says "16 ran" in its ledger, which now means the Usage layouts. The
+server recognises it (the sign-in tables are there, `usage_layouts` is not, 17 is not marked), adds what that early build
+did not have yet, and corrects the ledger to "17 ran, 16 did not", so both end applied once. Nothing to do by hand.
+
+**Migrations 16 and 17.** Number 16 is the Usage layouts (table `usage_layouts`) and 17 is sign-in; they were made separately
+and do not depend on each other. The server keeps a ledger of what ran (`schema_migrations`), so they can reach a database in
+either order: a database that ran only 16 runs 17 on the next start, and one that ran only 17 runs 16. `PRAGMA user_version` is
+the highest number applied, not a count. Rolling one back does not touch the other; remove only its own row from
+`schema_migrations`.
+
+### Migration 18 and rollback
+
+Migration 18 (0.9.0) records a tailnet sign-in as one. It is the first migration that rewrites a table instead of adding to one:
+
+- `sessions.via` may now be `tailnet` as well as `passkey` and `recovery`, and a check keeps `tailnet` to rows that carry a
+  `tailnet_login`;
+- `sessions.tailnet_login` is never the empty string (another check): it is a login or `NULL`;
+- every existing session with a `tailnet_login` is marked `tailnet` (before, such a session was stored as `passkey` with its
+  login beside it). A row whose login is `''` (no build writes one; only a hand-made row can have it) is copied with `NULL`
+  instead and keeps its `via`: the server's code read `''` as "no login" while its SQL read it as a login, and now both
+  read it as none. Such a row is then an ordinary session, found by the hash of its token; one stored under a tailnet hash is
+  never found.
+
+Why a rebuild: SQLite cannot change a `CHECK` in place, so the server makes the new `sessions` table, copies every row into it,
+drops the old one, renames the new one and makes its two indexes again (`sessions_user`, `sessions_id`), as SQLite documents.
+All of it runs in the same transaction as the ledger entry, so a failure leaves the database as it was and the server does not
+start. Nothing Shapewall makes references `sessions` (no foreign key, trigger or view), so dropping the old table touches nothing
+else. Two cases only a hand-made schema has:
+
+- **A view on `sessions`** makes the migration fail with `error in view <name>: no such table: main.sessions`. The server does not
+  start and the file is left as it was (still at 17). Drop the view, start the server, then make the view again.
+- **A trigger on `sessions`** is dropped with the old table, and the migration succeeds without it. Note its `CREATE TRIGGER`
+  first (`SELECT sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'sessions';`) and make it again afterwards.
+
+A session
+whose account no longer exists is not copied (it can only exist if foreign keys were switched off at some point, and it could
+never be used: signing in with it finds no account). Signed-in browsers stay signed in: the token hashes are copied as they are.
+
+What it does not change: who may do what. The server never decided anything from the stored `via`. How a session came in is read
+from `tailnet_login` (the column the session's hash is bound to): a row with a login is a tailnet session whatever `via` says,
+and a row without one never is. The `verified_at` of a tailnet session stays `1970-01-01T00:00:00.000Z`, the mark for "no
+passkey was checked at sign-in", until a passkey of the account confirms it.
+
+For rollback, prefer the pre-upgrade backup in a fresh data folder with the previous release. Running the previous build on the
+upgraded database also works with no change to it: the previous build reads how a session came in from `tailnet_login` as this
+one does, and the new check allows what it writes (a tailnet session stored as `passkey` with its login). Sessions it makes are
+stored that way, and stay so after upgrading again; they still show as tailnet sessions everywhere.
+
+To put the table back as it was (with the server stopped; any SQLite 3.25+ `sqlite3` shell, or Node's `node:sqlite`). Roll this
+back before rolling back migration 17, whose rollback drops `sessions.tailnet_login`:
+
+```sql
+BEGIN IMMEDIATE;
+CREATE TABLE sessions_v17 (
+  token_hash TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  verified_at TEXT NOT NULL,
+  via TEXT NOT NULL DEFAULT 'passkey' CHECK (via IN ('passkey', 'recovery')),
+  id TEXT,
+  user_agent TEXT,
+  ip TEXT,
+  admin_seen_at TEXT,
+  tailnet_login TEXT
+);
+INSERT INTO sessions_v17
+  (token_hash, user_id, created_at, last_seen_at, expires_at, verified_at, via, id, user_agent, ip, admin_seen_at, tailnet_login)
+  SELECT token_hash, user_id, created_at, last_seen_at, expires_at, verified_at,
+    CASE WHEN via = 'tailnet' THEN 'passkey' ELSE via END,
+    id, user_agent, ip, admin_seen_at, tailnet_login
+  FROM sessions;
+DROP TABLE sessions;
+ALTER TABLE sessions_v17 RENAME TO sessions;
+CREATE INDEX sessions_user ON sessions(user_id);
+CREATE UNIQUE INDEX sessions_id ON sessions(id);
+DELETE FROM schema_migrations WHERE version = 18;
+PRAGMA user_version = 17;
+COMMIT;
+```
+
+Every session survives it, tailnet sessions as `passkey` with their login (as before 0.9.0). A login that was `''` before the upgrade stays `NULL`. `PRAGMA user_version` is the
+highest version left in `schema_migrations`: 17 unless a later migration is there too. The next upgrade runs 18 again. Never
+reset the ledger any other way. Test a rollback on a copy first: `PRAGMA integrity_check;` says `ok`, and `SELECT via,
+tailnet_login IS NOT NULL, COUNT(*) FROM sessions GROUP BY 1, 2;` shows the same sessions as before, with `tailnet` back to
+`passkey`.
+
+### Migration 19 and rollback
+
+Migration 19 (0.12.5) adds a heartbeat to agent claims and changes nothing else:
+
+- column `agent_claims.heartbeat_at`: when the agent holding the claim was last heard from (see "A claim has a heartbeat" under
+  [Scoped hosted agents](#scoped-hosted-agents)). New claims start with their own time. Open claims on the upgraded database are
+  filled with the time of the upgrade, so none ends before its agent had 10 minutes to call again; ended claims stay `NULL`.
+
+It is additive. Back up before upgrading ([Retention, backup and restore](#retention-backup-and-restore)); the migration rewrites
+no other column or table.
+
+For rollback, prefer the pre-upgrade backup in a fresh data folder with the previous release. Running the previous build on the
+upgraded database also works with no change to it: it ignores the column, and claims go back to ending only on a revoke, an
+expiry, a changed comment or a person clearing them.
+
+To remove the column as well (SQLite 3.35+), with the server stopped: `ALTER TABLE agent_claims DROP COLUMN heartbeat_at; DELETE
+FROM schema_migrations WHERE version = 19;`, then set `PRAGMA user_version` to the highest version left in `schema_migrations`
+(18). Roll this back before rolling back migration 18 or any earlier one. Test a rollback on a copy first.
+
+### Migration 20 and rollback
+
+Migration 20 (1.0) records who ended an agent claim and changes nothing else:
+
+- column `agent_claims.ended_by`: `sweep` when the claim ended because its agent went silent, `person` when a person cleared,
+  resolved, changed or deleted the comment on the board, `NULL` for every other end (the agent's own status, a revoke, any claim
+  from before the upgrade). The token whose claim a sweep or a person ended gets HTTP 409 `claim_ended` for a status write or a
+  resolve on that comment afterwards, instead of overwriting the hand-off with a late `done`; it may still reply, and it takes the
+  comment again once a person clears it or sends it to an agent again (or with a compare-and-set take, `onlyFrom`).
+
+It is additive. For rollback, prefer the pre-upgrade backup; the previous build also runs on the upgraded database unchanged (it
+ignores the column, and late writes after a sweep or a Clear are taken again). To remove the column as well (SQLite 3.35+), with the
+server stopped: `ALTER TABLE agent_claims DROP COLUMN ended_by; DELETE FROM schema_migrations WHERE version = 20;`, then set
+`PRAGMA user_version` to 19. Roll this back before rolling back migration 19 or any earlier one.
+
+### Migration 21 and rollback
+
+Migration 21 (1.0) removes the legacy token scope `comment` and changes nothing else:
+
+- every row of `api_tokens` whose `scopes` list holds `comment` gets `reply` and `status` in its place (each once, so a token that
+  already had `reply` keeps one). That is what every build since 0.4.0 already read `comment` as, so each such token can do exactly
+  what it could before. Only a JSON array is rewritten, and only its string `comment` entries;
+  any other entry stays as it was, in its place. Tokens without `comment` are not touched, and running it again changes nothing.
+
+There is nothing to undo for a rollback: the previous build reads `reply` and `status` as they are, and the tokens keep working
+on it. Prefer the pre-upgrade backup if you want the old rows back byte for byte. To let a newer build run the migration again
+(it finds nothing to change), with the server stopped: `DELETE FROM schema_migrations WHERE version = 21;`, then set
+`PRAGMA user_version` to 20. Roll this back before rolling back migration 20 or any earlier one.
+
+## Secrets, logs and legal text
+
+`SHAPEWALL_HOSTED_SECRET_FILE` and `RESEND_API_KEY_FILE` read private secret files. systemd `LoadCredential=shapewall-secret:...` and
+`LoadCredential=resend-api-key:...` are read from `$CREDENTIALS_DIRECTORY`. **The order is: the variable itself, then its `_FILE`,
+then the credentials directory.** A value already in `SHAPEWALL_HOSTED_SECRET` or `RESEND_API_KEY` means the file is not read at
+all, so a stale variable quietly beats the file you meant to use. The two are not treated alike when the file is missing: a
+`_FILE` you named and the server cannot read is a startup error, while a file missing from `$CREDENTIALS_DIRECTORY` is skipped in
+silence and the server carries on as if the secret were unset (it then makes its own `<data>/secret.key`, and invite emails stay
+off). Check the start log for the names it loaded; it never prints a value. Setup links
+are written to `<data>/setup-link` (0600) and not journaled. Caddy deletes Cookie, Authorization, Set-Cookie and signed `s` query
+values from access logs. Invite/setup/share fragments are never sent in HTTP requests. App errors omit request values; email logs
+contain status only. Do not enable debug request-body logging. Check any proxy/hosting logs outside these examples yourself.
+
+Fill `SHAPEWALL_HOSTED_TERMS_URL`, `_PRIVACY_URL`, `_AUP_URL`, `_SUBPROCESSORS_URL` and `_ABUSE_EMAIL` before inviting users.
+**Setting them is the only way the legal links appear:** the server shows no Terms, Privacy, Acceptable use or Subprocessors link
+for a variable that is unset -- that is the "legal links not set" state, and each variable governs its own link alone. Where they
+are set, they appear on sign-in and signup and on guest pages, plus `/report`.
+
+**A bad value stops the server.** The four URLs are checked at start: each must begin `http://` or `https://` and hold no
+whitespace, quote or angle bracket, or the server throws `SHAPEWALL_HOSTED_TERMS_URL: an http(s) URL` (naming the one at fault)
+and does not start; `_ABUSE_EMAIL` must look like an email address (`SHAPEWALL_HOSTED_ABUSE_EMAIL: an email address`). A bare host name, a
+`mailto:` in a URL slot or a trailing comment is a refusal, not a warning. Unset is fine; wrong is fatal.
+
+The legal templates deliberately require an operator, contact, actual hosting region, provider list and retention policy. Have
+them checked by whoever answers for your service (counsel, where you need it) before you publish them. Adding these files
+activates nothing: no legal text, Compose stack, Tailscale mapping or timer.
+
+## Scoped hosted agents
+
+The server never runs a model or an agent process. Capture and execution stay
+on the developer's machine or CI. In a project's console, **Agent policy**
+sets trusted workspace roles or handles, board overrides, `onlyMentions`,
+claims per UTC day (50 by default), and open claims (3 by default). Zero stops
+new claims. Removed members and changed
+trust policy invalidate vouches immediately.
+
+Use project tokens with `read, reply, status, claim` for runners. `reply` posts
+agent replies, `status` changes their status, and `claim` takes dispatched work.
+`resolve` separately allows resolving/reopening; `push` uploads captures;
+`import` is reserved for the local-to-shared bridge; `agent` is the link of a
+[connected agent](#connected-agents), granted only by approving
+`shapewall agent connect`. Old `comment` tokens map
+to `reply,status`, without acquiring `claim`. Give CI only `push` when it does
+not need to read the project.
+
+A trusted member's new comment is vouched for automatically. **Send to agent**
+vouches for the exact current text and anchor. Editing clears it, and both
+**Send to agent** and **Approve agent run** refuse a comment that was edited
+after you opened it: reload and read it again. Only admins set an agent status
+from the board. Approvals and denials of an agent's commands are in the audit
+log. Non-admin
+requests need **Approve agent run** by a trusted admin, by
+default. Guest and agent-written comments can never be dispatched, including
+with `--include-guests`. Imported comments start inert and need an explicit
+trusted vouch. Claim tokens see only dispatched comments, including direct-id
+reads; guest replies are removed from their responses. Read tokens without
+`claim` may inspect untrusted comments with the existing guest opt-in.
+
+A claim token is an agent ([Agents on a hosted board](#agents-on-a-hosted-board)), and two more rules apply to it on every route:
+it sees and takes only comments sent to it or to any agent, and only when the person whose approval stands on the comment is in its
+audience. A comment sent to another agent answers 404 `unknown_comment`, exactly like one that was never dispatched: lists, direct
+reads, replies, statuses, approvals, comment files and the MCP tools. The events stream still carries ids only. On a comment it
+may work on, it reads only the replies of people in its audience. The token that holds a comment keeps all of this for that comment
+until it finishes.
+
+**Tokens without `claim` are not agents and are not routed.** A token with `read` (and `reply` or `status`) but no `claim` sees every
+comment of the project, including the ones sent to one agent: it is for scripts, CI and reporting, cannot take
+work, and is not listed on the board. Give `claim` to what should behave as an agent, and leave it off anything that only needs to read.
+
+Claims use an atomic per-project budget and compare-and-set. Exceeding a budget
+returns HTTP 429 `agent_budget`; another token cannot take over a live claim.
+
+**A claim has a heartbeat.** Every call of the token that holds it, and every keepalive of its open stream (`watch --remote`,
+a connected agent's link), counts as hearing from it. A claim whose agent has not been heard from for 10 minutes ends: its comment
+goes to **Needs a person**, with a reply from `shapewall` that names the agent and when it was last heard from, and it counts
+against the open claims no longer. A machine that died while it held a comment no longer leaves it "Agent working" until its token
+is revoked or expires. The server looks once a minute, but not in the first 10 minutes after it starts, so an agent waiting for a
+restart has time to come back. A fix the server is running on that comment (a connected agent's turn) is left to that turn, which
+writes the status when it ends. On the board, a member or anyone above can also **Clear** an "Agent working" that no turn in their
+tab holds; the comment can then be sent again. Once a sweep or a person has ended a token's claim, that token's status writes and
+resolves on the comment are refused with HTTP 409 `claim_ended` (a late `done` would hide the hand-off); replies still go through,
+and the token may take the comment again once a person clears it or sends it to an agent again.
+
+**Keep a long job's claim alive: call at least every few minutes.** Anything that holds a claim with a token and then works quietly
+(a script, your own client, an agent between tool calls) must call the API (any call, for example `GET` of the comment) well inside
+the 10 minutes. `shapewall watch --remote` (every mode, `--once` included) reads the comment every 2 minutes while its `--exec`
+command runs, `shapewall mcp --remote` does the same for each comment it took while it stays open and queued or working, for at
+most 60 minutes per comment (an agent that took one and never finished then lets the sweep hand it to a person), and `shapewall
+agent sandbox run --remote` every minute. The heartbeat is per token, not per claim: one call keeps every claim of that token alive, so one token
+shared by a busy and a dead machine keeps the dead machine's claims too. Give each machine its own token.
+An operator suspension, token revocation, membership loss, changed trust or an
+edited comment prevents subsequent requests. Shell approvals bind one exact
+command and one claim generation, expire after two minutes and need a trusted
+admin (and their passkey again when the workspace asks for it). They cannot be reused on a later run of identical text.
+
+`shapewall watch --remote` uses bearer-authenticated SSE at `/api/v1/events`,
+with bounded polling fallback when a proxy does not support streams. Each
+event is `event: change` with `{ version: 1, type, board }`; `type` uses the
+local event log's names (`comment.created`, `comment.replied`,
+`comment.resolved`, `comment.reopened`, `comment.agent_status_changed`,
+`comment.vouched`, `push.committed`, `board.removed`), and `comment.updated`
+for any other change to comments. Events contain project/board identifiers,
+never comment text. Revoking a token through
+the server closes its streams immediately; out-of-process database changes are
+rechecked at the 15-second heartbeat. Streams are process-local and have no
+replay log, so clients always refetch authoritative state.
+
+MCP clients can use Streamable HTTP at `/mcp` with an `Authorization: Bearer`
+project token, supplied from a secret store or environment. Never put it in a
+URL. This stateless endpoint refuses Cookie headers and foreign Origin headers;
+there is no shared MCP session or account authority. The same scoped tool set
+as `shapewall mcp --remote` is available. A project selector cannot override the
+token's project. Rotate/revoke tokens from the project's console.
+
+## Move a local project to your team
+
+Run `shapewall share --remote https://board.example.com` from the local project, or use **Profile > Share with your team...** through the
+host's private settings link. Sign in on the destination's `/device` page, choose or create a project, and explicitly select **Import local
+comments once**. Only workspace admins and owners can approve this grant. It starts unchecked and is removed when the move commits.
+`shapewall share --remote URL --dry-run` reports counts without contacting the server. It cannot discover remote conflicts without a request.
+Use `--board ID` for one board or `--no-comments` to push only captures, variants, history and journeys.
+
+The move pushes the same stripped definition and capture allowlist as `push`, including board-created journeys. It imports comment and
+reply history with remapped ids, anchors, state, agent status, resolution notes and reaction counts. Local display names receive an
+`(imported)` label. They are plain text, never an attested account or handle; imported agent statuses and replies remain inert until a
+trusted teammate explicitly sends the comment to an agent. Comments whose page disappeared remain stored as orphans with the reason
+`page no longer on the board`. No agent settings, chat threads, keys, notification/GitHub configuration, paired devices, browser auth,
+login scripts or page actions move.
+
+Imports use batches of at most 200 comments and 1.8 MB below the endpoint's 2 MiB wire cap. Each batch and its idempotent retry result is
+committed atomically. A final commit consumes the grant after all selected boards; retrying a lost final response is safe. Already imported
+comments are skipped. A changed local comment updates an untouched remote copy. If the remote copy changed or was deleted, its version is
+kept and the CLI lists the local ids and exits 2. It never merges text or silently overwrites a teammate's edits. Imports from two folders
+remain distinct because only an opaque hash of the real project directory, board, local id and creation time identifies the source.
+
+Finish or stop local agent/watch runs before a CLI move. The hosted copy preserves old `working` statuses as history; they do not represent an active hosted run. The host UI refuses a move while a local owner fix is running. Do not start a new local agent run while a move is in progress.
+
+The local folder saves a private `remote/<origin-hash>/map.json` under its output directory (0600), containing ids and content hashes,
+never credentials. Corrupt, unowned, publicly readable or symlinked maps are refused. Comments freeze under their normal write lock during
+the move; failures restore the preceding local choice. A successful move displays the destination URL and defaults to read-only local
+comments. The host can choose **Keep commenting here** to maintain an independent local copy. Captures and journeys stay writable, and
+future captures continue through `shapewall push --remote URL`. This is a one-way move, not ongoing synchronization.
+
+Reconnect the agent explicitly with `shapewall watch --remote URL --exec '<your-agent-command>'` or `shapewall mcp --remote URL`. Local agent
+settings are never copied. Keep the remaining token scoped to the work that agent needs.
+
+Migration 8 adds `device_logins.purpose`, the `import_author_kind`, `imported_by`, `imported_at`, `import_orphan`, `imported_reactions` comment columns, and the
+`import_sessions`, `import_batches`, `comment_imports` tenant tables. Rollback requires restoring the pre-upgrade backup with the previous
+release; do not discard imported comments or run an older server against the upgraded database.
+
+## Live presence
+
+Hosted boards show who is viewing, cursors in canvas coordinates and an avatar button to follow another viewer's camera. Move your own
+canvas or press **Stop following** to leave follow mode. Phone controls keep 44-pixel targets. A share-link visitor is always shown as
+**Guest** in presence, regardless of the name on their comments. Public boards show a viewer count only: no names, cursors, camera
+positions or comment events. Counts represent open connections, including multiple tabs.
+
+Presence uses Yjs awareness over the same host's WebSocket, with no shared document or persisted cursor history. The server assigns
+awareness ids, names and colours. Clients can send only bounded cursor/camera coordinates, viewport mode and an open-comment id; they
+cannot send arbitrary awareness updates, choose an identity or join a different room. Rooms bind workspace, project and board. Member
+sockets require a live account-session cookie; share sockets require that share's live guest cookie. API tokens do not authenticate.
+The handshake requires the exact application Origin and Host. Usercontent and the previous-origin listener cannot join these sockets.
+
+The limits are 30 incoming messages/second, 1 KB/frame and 50 connections/board and 500 connections across the shared server hub, with a 60-second idle timeout and a bounded send buffer.
+Clients send coordinate updates at most 20 times/second. Each incoming frame rechecks the session, membership, project, board and
+share/public switches. All connections are rechecked every five seconds, and recipients of comment invalidations are checked again
+before delivery. Thus a revoked silent connection may receive cursor updates for at most five seconds; its next frame is refused
+immediately. Recipient authorization is cached between sweeps for cursor fan-out, avoiding a database lookup for every recipient of
+every pointer movement. Comment notifications carry only ids and make the client refetch through its normal authorized API.
+
+The primary server and a configured Funnel guest listener share one in-process room hub and event bus. The guest listener accepts
+only share-cookie sockets, and cannot upgrade a console/member/public route. Shutdown removes listeners, sockets and awareness timers.
+Caddy and Tailscale Serve must forward WebSocket upgrades. Actual proxies, physical phones and background-mobile behavior still need
+an operator smoke test. Cursor tracking pauses over an opaque live iframe while its text-selection interaction owns the pointer.

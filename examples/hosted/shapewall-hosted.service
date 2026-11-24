@@ -1,0 +1,59 @@
+# Example systemd unit for the hosted Shapewall server (docs/hosted.md).
+# An example only: nothing is deployed with it. Copy to
+# /etc/systemd/system/shapewall-hosted.service and adjust paths and origin.
+#
+#   sudo useradd --system --home /var/lib/shapewall-hosted --shell /usr/sbin/nologin shapewall
+#   sudo systemctl daemon-reload && sudo systemctl enable --now shapewall-hosted
+#   sudo -u shapewall cat /var/lib/shapewall-hosted/setup-link  # read privately
+
+[Unit]
+Description=Shapewall hosted (passkeys, workspaces, pushed boards)
+After=network.target
+
+[Service]
+Type=simple
+User=shapewall
+Group=shapewall
+WorkingDirectory=/opt/shapewall/current
+ExecStart=/usr/bin/node /opt/shapewall/current/bin/shapewall.js hosted --data /var/lib/shapewall-hosted --origin https://app.example.com --host 127.0.0.1 --port 4700 --trust-proxy
+Environment=NODE_ENV=production
+Restart=on-failure
+RestartSec=5
+
+# State lives only in StateDirectory (/var/lib/shapewall-hosted).
+StateDirectory=shapewall-hosted
+StateDirectoryMode=0700
+UMask=0077
+
+# Hardening: the server never runs a browser or fetches user URLs, so it
+# needs no outbound network beyond loopback by default. If invite email is
+# configured, remove IPAddressDeny/Allow below to permit Resend HTTPS.
+# Store optional secrets as systemd credentials, not in Environment= lines:
+# LoadCredential=shapewall-secret:/etc/shapewall/secret.key
+# LoadCredential=resend-api-key:/etc/shapewall/resend-api-key
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+IPAddressDeny=any
+IPAddressAllow=localhost
+MemoryMax=2G
+TasksMax=256
+
+[Install]
+WantedBy=multi-user.target

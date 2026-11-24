@@ -1,0 +1,320 @@
+// Tenancy: every row of a tenant table belongs to one workspace, and every
+// query on one goes through tenant(db, workspaceId). The handle binds :ws
+// itself and refuses SQL that does not constrain workspace_id = :ws (or, for
+// an INSERT, write :ws into workspace_id), so a route cannot forget the scope.
+//
+// The only queries on tenant tables that do not start from a known workspace
+// are the entry points below (an API token or invite looked up by its hash,
+// the workspaces of a signed-in user). They live here and nowhere else;
+// test/hosted-tenancy.test.js fails if other hosted modules touch tenant
+// tables through the raw database handle.
+
+import { prepareSql } from '../shared/sqlite.js'
+import { auditRow } from '../accounts/events.js'
+export { accountEvents, auditAccount, lastRecoverySignIn, seenDevice } from '../accounts/events.js'
+import { ID_PATTERNS } from './crypto.js'
+import { inviteCreatorOk, shareCreatorOk, tokenCreatorOk } from './permissions.js'
+
+export const TENANT_TABLES = [
+  'workspaces',
+  'memberships',
+  'invites',
+  'projects',
+  'boards',
+  'comments',
+  'api_tokens',
+  'pushes',
+  'audit_log',
+  'shares',
+  'guest_sessions',
+  'agent_claims',
+  'agent_approvals',
+  'import_sessions',
+  'import_batches',
+  'comment_imports',
+  'comment_files',
+  'agents',
+  'agent_runs',
+  'chat_threads',
+  'chat_messages',
+  'chat_turns',
+  'chat_permissions',
+  'saved_views',
+  'usage_layouts',
+]
+export { ROLES, roleAtLeast } from './permissions.js'
+
+export class TenancyError extends Error {}
+
+const prepare = (db, sql) => prepareSql(db, sql, TenancyError)
+
+// Queries on account tables (users, passkeys, sessions, ...), which belong to
+// no workspace. Same parameter checks; tenant tables are refused.
+export function accounts(db) {
+  const guard = (sql) => {
+    const tables = [...sql.matchAll(/\b(?:FROM|JOIN|INTO|UPDATE)\s+([a-z_]+)/gi)].map((match) => match[1].toLowerCase())
+    if (tables.some((name) => TENANT_TABLES.includes(name))) throw new TenancyError('tenant table outside tenant()')
+    return prepare(db, sql)
+  }
+  return {
+    get: (sql, params) => guard(sql).get(params),
+    all: (sql, params) => guard(sql).all(params),
+    run: (sql, params) => guard(sql).run(params),
+  }
+}
+
+function checkScoped(sql) {
+  const text = sql.replace(/\s+/g, ' ').trim()
+  if (/^INSERT /i.test(text)) {
+    if (!/^INSERT INTO [a-z_]+ \(workspace_id,/i.test(text) || !/VALUES \(:ws,/i.test(text)) {
+      throw new TenancyError('tenant INSERT must write :ws as the first column, workspace_id')
+    }
+    return
+  }
+  // The scope is the first condition of the WHERE clause, and nothing can
+  // widen it: no OR, no second statement, no UNION.
+  if (!/\bWHERE (?:[a-z]\.)?workspace_id = :ws(?: AND | ORDER | GROUP | LIMIT |$)/i.test(text)) {
+    throw new TenancyError('tenant query must start its WHERE with "workspace_id = :ws"')
+  }
+  if (/\bOR\b|\bUNION\b|;/i.test(text)) throw new TenancyError('tenant query with OR, UNION or a second statement')
+}
+
+// A handle scoped to one workspace. Params are named (:name); :ws is bound
+// here and cannot be overridden by the caller.
+export function tenant(db, workspaceId) {
+  if (!ID_PATTERNS.workspace.test(String(workspaceId || ''))) throw new TenancyError('invalid workspace id')
+  const bind = (params = {}) => {
+    if (Object.hasOwn(params, 'ws')) throw new TenancyError(':ws is bound by the tenant handle')
+    return { ...params, ws: workspaceId }
+  }
+  return {
+    workspaceId,
+    get(sql, params) {
+      checkScoped(sql)
+      return prepare(db, sql).get(bind(params))
+    },
+    all(sql, params) {
+      checkScoped(sql)
+      return prepare(db, sql).all(bind(params))
+    },
+    run(sql, params) {
+      checkScoped(sql)
+      return prepare(db, sql).run(bind(params))
+    },
+  }
+}
+
+// ---- Entry points (global lookups that yield a workspace) ----------------------
+
+// The workspaces that hold a chat turn the database still calls open. At
+// server start none is really running (live turns are memory): the caller
+// ends each one, through its own tenant handle (src/hosted/agent-link.js).
+export function workspacesWithOpenTurns(db) {
+  const has = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'chat_turns'").get()
+  if (!has) return []
+  return db
+    .prepare("SELECT DISTINCT workspace_id FROM chat_turns WHERE state IN ('queued', 'running')")
+    .all()
+    .map((row) => row.workspace_id)
+}
+
+// The workspaces that hold an agent claim whose heartbeat is older than
+// `before` (an ISO time). The caller ends each one through its own tenant
+// handle (src/hosted/claim-sweep.js).
+export function workspacesWithStaleClaims(db, before) {
+  return db
+    .prepare('SELECT DISTINCT workspace_id FROM agent_claims WHERE ended_at IS NULL AND COALESCE(heartbeat_at, created_at) < ?')
+    .all(before)
+    .map((row) => row.workspace_id)
+}
+
+// The token row for a SHA-256 hash, if it is live: not revoked, not
+// expired, and its maker is still a member who may hold tokens (an admin or
+// owner here; tokenCreatorOk). Callers then scope by its workspace_id.
+export function findApiToken(db, tokenHash, now) {
+  const row = prepare(
+    db,
+    `SELECT t.*, p.name AS project_name, p.slug AS project_slug, w.name AS workspace_name, w.suspended_at AS workspace_suspended_at,
+       m.role AS creator_role
+     FROM api_tokens t JOIN projects p ON p.id = t.project_id AND p.workspace_id = t.workspace_id
+     JOIN workspaces w ON w.id = t.workspace_id
+     LEFT JOIN memberships m ON m.workspace_id = t.workspace_id AND m.user_id = t.created_by
+     WHERE t.token_hash = :hash`,
+  ).get({ hash: tokenHash })
+  if (!row || row.revoked_at || (row.expires_at && row.expires_at <= now)) return null
+  if (!row.created_by || !tokenCreatorOk(row.creator_role)) return null
+  // A workspace the operator suspended refuses every token.
+  if (row.workspace_suspended_at) return null
+  return row
+}
+
+// A share link by the SHA-256 of its token, with what decides whether it
+// works: the workspace switch and the project. Callers check revoked and
+// expiry (shareUsable) and then scope by its workspace_id.
+export function findShareByHash(db, tokenHash) {
+  return (
+    prepare(
+      db,
+      `SELECT s.*, w.name AS workspace_name, (w.share_links AND w.suspended_at IS NULL) AS workspace_share_links, p.name AS project_name, m.role AS creator_role
+       FROM shares s JOIN workspaces w ON w.id = s.workspace_id
+       JOIN projects p ON p.id = s.project_id AND p.workspace_id = s.workspace_id
+       LEFT JOIN memberships m ON m.workspace_id = s.workspace_id AND m.user_id = s.created_by
+       WHERE s.token_hash = :hash`,
+    ).get({ hash: tokenHash }) || null
+  )
+}
+
+// The same, by id, for a guest session cookie (which names its share).
+export function findShareById(db, shareId) {
+  return (
+    prepare(
+      db,
+      `SELECT s.*, w.name AS workspace_name, (w.share_links AND w.suspended_at IS NULL) AS workspace_share_links, p.name AS project_name, m.role AS creator_role
+       FROM shares s JOIN workspaces w ON w.id = s.workspace_id
+       JOIN projects p ON p.id = s.project_id AND p.workspace_id = s.workspace_id
+       LEFT JOIN memberships m ON m.workspace_id = s.workspace_id AND m.user_id = s.created_by
+       WHERE s.id = :id`,
+    ).get({ id: shareId }) || null
+  )
+}
+
+// A public project by its public id (src/hosted/public.js), with the
+// workspace switch. Callers check the switch and then scope by workspace_id.
+export function findPublicProject(db, publicId) {
+  return (
+    prepare(
+      db,
+      `SELECT p.*, w.public_projects AS workspace_public_projects FROM projects p JOIN workspaces w ON w.id = p.workspace_id
+       WHERE p.public_id = :id AND w.suspended_at IS NULL`,
+    ).get({ id: publicId }) || null
+  )
+}
+
+// Whether a share row (from the two lookups above) lets a guest in now.
+// The admin who made the link must still be an admin or owner here: removing
+// or demoting them revokes their links, and this is the second check.
+export const shareUsable = (row, nowIso) =>
+  Boolean(row && !row.revoked_at && row.expires_at > nowIso && row.workspace_share_links && shareCreatorOk(row.creator_role))
+
+export function findInviteByHash(db, tokenHash) {
+  return (
+    prepare(
+      db,
+      `SELECT i.*, w.name AS workspace_name, m.role AS creator_role FROM invites i JOIN workspaces w ON w.id = i.workspace_id
+       LEFT JOIN memberships m ON m.workspace_id = i.workspace_id AND m.user_id = i.created_by
+       WHERE i.token_hash = :hash`,
+    ).get({ hash: tokenHash }) || null
+  )
+}
+
+// The invites made for one tailnet login (src/hosted/tailnet.js), in any
+// workspace, with what inviteUsable needs. The caller keeps the usable ones.
+export function findInvitesForTailnetLogin(db, login) {
+  return prepare(
+    db,
+    `SELECT i.*, w.name AS workspace_name, m.role AS creator_role FROM invites i JOIN workspaces w ON w.id = i.workspace_id
+     LEFT JOIN memberships m ON m.workspace_id = i.workspace_id AND m.user_id = i.created_by
+     WHERE i.tailnet_login = :login AND i.used_at IS NULL AND i.revoked_at IS NULL ORDER BY i.created_at`,
+  ).all({ login })
+}
+
+// Whether an invite row (from findInviteByHash) still works: unused, not
+// revoked, not expired, and its creator can still invite to that role (an
+// admin up to admin, an owner for owners). A removed or demoted admin's
+// invites are revoked too; this is the second check.
+export function inviteUsable(row, nowIso) {
+  if (!row || row.used_at || row.revoked_at || row.expires_at <= nowIso) return false
+  return inviteCreatorOk(row.creator_role, row.role)
+}
+
+// The workspaces a user belongs to, with their role.
+export function workspacesForUser(db, userId) {
+  return prepare(
+    db,
+    `SELECT w.id, w.name, w.created_at, m.role FROM memberships m JOIN workspaces w ON w.id = m.workspace_id
+     WHERE m.user_id = :user ORDER BY w.created_at, w.id`,
+  ).all({ user: userId })
+}
+
+// The role of a user in a workspace, or null.
+export function roleIn(db, userId, workspaceId) {
+  if (!ID_PATTERNS.workspace.test(String(workspaceId || ''))) return null
+  const row = tenant(db, workspaceId).get('SELECT role FROM memberships WHERE workspace_id = :ws AND user_id = :user', { user: userId })
+  return row?.role || null
+}
+
+// Every workspace, for the operator CLI and the retention job
+// (src/hosted/operator.js, retention.js). Each caller then works through
+// tenant(db, id) per workspace.
+export function allWorkspaces(db) {
+  return prepare(
+    db,
+    'SELECT id, name, created_at, created_by, share_links, suspended_at, suspended_reason, retention_versions, retention_usage_days FROM workspaces ORDER BY created_at, id',
+  ).all()
+}
+
+// ---- Audit log ----------------------------------------------------------------
+
+export function audit(t, entry) {
+  t.run(
+    'INSERT INTO audit_log (workspace_id, user_id, token_id, share_id, action, target, ip, detail, at) VALUES (:ws, :user, :token, :share, :action, :target, :ip, :detail, :at)',
+    auditRow(entry),
+  )
+}
+
+// The account events of a workspace's members (sign-ins, passkeys, sessions:
+// rows with no workspace), for the workspace's Activity page: only of people
+// who are members now, only since each joined, and only the actions listed
+// (src/hosted/usage-shape.js ACCOUNT_ACTIONS). Newest first, `before` an
+// entry id. `userId`: one member (a person reading their own activity).
+export function memberAccountEvents(
+  db,
+  workspaceId,
+  { userId = null, actions, from = null, to = null, q = null, before = Number.MAX_SAFE_INTEGER, limit = 50 },
+) {
+  if (!ID_PATTERNS.workspace.test(String(workspaceId || ''))) return []
+  return prepare(
+    db,
+    `SELECT a.id, a.action, a.target, a.ip, a.detail, a.at, a.user_id, u.handle, u.display_name
+     FROM memberships m JOIN audit_log a ON a.user_id = m.user_id AND a.workspace_id IS NULL JOIN users u ON u.id = a.user_id
+     WHERE m.workspace_id = :ws AND a.at >= m.created_at AND a.id < :before
+       AND a.action IN (SELECT value FROM json_each(:actions))
+       AND (:user IS NULL OR a.user_id = :user) AND (:from IS NULL OR a.at >= :from) AND (:to IS NULL OR a.at < :to)
+       AND (:q IS NULL OR instr(lower(replace(a.action, '_', ' ') || ' ' || coalesce(a.ip, '') || ' ' || coalesce(a.detail, '') || ' ' ||
+         u.display_name || ' ' || u.handle), :q) > 0)
+     ORDER BY a.id DESC LIMIT :limit`,
+  ).all({ ws: workspaceId, actions: JSON.stringify(actions), user: userId, from, to, q, before, limit })
+}
+
+// Account deletion: the person's saved views, in every workspace, go with them.
+export function deleteSavedViewsOf(db, userId) {
+  // With the layouts those views carry, and the person's own dashboard layouts.
+  prepare(db, "DELETE FROM usage_layouts WHERE kind = 'view' AND subject IN (SELECT id FROM saved_views WHERE user_id = :user)").run({
+    user: userId,
+  })
+  prepare(db, "DELETE FROM usage_layouts WHERE kind = 'person' AND subject = :user").run({ user: userId })
+  prepare(db, 'DELETE FROM saved_views WHERE user_id = :user').run({ user: userId })
+}
+
+// Account deletion: the person's own account-level log goes with them.
+export function deleteAccountEvents(db, userId) {
+  prepare(db, 'DELETE FROM audit_log WHERE workspace_id IS NULL AND user_id = :user').run({ user: userId })
+}
+
+// Open pushes older than `cutoff` in any workspace, and the ids of every open
+// push, for the staging sweep (src/hosted/push.js sweepStaging).
+export function staleOpenPushes(db, cutoff) {
+  return prepare(db, "SELECT workspace_id, id FROM pushes WHERE status = 'open' AND created_at < :cutoff").all({ cutoff })
+}
+export function openPushIds(db) {
+  return new Set(
+    prepare(db, "SELECT id FROM pushes WHERE status = 'open'")
+      .all()
+      .map((row) => row.id),
+  )
+}
+// One push's status by id, in any workspace, or null when there is no such
+// push: what settles a board-folder swap a crash interrupted (push.js recoverSwaps).
+export function pushStatus(db, id) {
+  return prepare(db, 'SELECT status FROM pushes WHERE id = :id').get({ id })?.status ?? null
+}

@@ -1,0 +1,633 @@
+{
+  "note": "Written by scripts/media-encode.mjs. Files live in website/media/ (git-ignored) and on the server in media/.",
+  "base": "/media/",
+  "videos": {
+    "launch-film": {
+      "kind": "film",
+      "width": 1920,
+      "height": 1080,
+      "duration": 92.34,
+      "audio": true,
+      "sources": [
+        {
+          "file": "launch-film-1080.84bc10ebd9.mp4",
+          "bytes": 15809136,
+          "type": "video/mp4; codecs=\"avc1.640028, mp4a.40.2\"",
+          "height": 1080
+        },
+        {
+          "file": "launch-film-720.38b250d6ff.webm",
+          "bytes": 8348698,
+          "type": "video/webm; codecs=\"vp9, opus\"",
+          "height": 720
+        },
+        {
+          "file": "launch-film-720.f4d02f5354.mp4",
+          "bytes": 8152410,
+          "type": "video/mp4; codecs=\"avc1.640028, mp4a.40.2\"",
+          "height": 720
+        }
+      ],
+      "poster": {
+        "webp": [
+          {
+            "file": "launch-film-poster-1920.829643a066.webp",
+            "bytes": 41292,
+            "width": 1920
+          },
+          {
+            "file": "launch-film-poster-960.3e93dacdc7.webp",
+            "bytes": 18834,
+            "width": 960
+          }
+        ],
+        "jpg": {
+          "file": "launch-film-poster.9fc13f5cce.jpg",
+          "bytes": 101235,
+          "width": 1920
+        }
+      }
+    },
+    "tour": {
+      "kind": "film",
+      "width": 1920,
+      "height": 1080,
+      "duration": 106.41,
+      "audio": true,
+      "sources": [
+        {
+          "file": "tour-1080.f534ade2da.mp4",
+          "bytes": 18603270,
+          "type": "video/mp4; codecs=\"avc1.640028, mp4a.40.2\"",
+          "height": 1080
+        },
+        {
+          "file": "tour-720.5336ca8e45.webm",
+          "bytes": 10197218,
+          "type": "video/webm; codecs=\"vp9, opus\"",
+          "height": 720
+        },
+        {
+          "file": "tour-720.60816cecdf.mp4",
+          "bytes": 9684202,
+          "type": "video/mp4; codecs=\"avc1.640028, mp4a.40.2\"",
+          "height": 720
+        }
+      ],
+      "poster": {
+        "webp": [
+          {
+            "file": "tour-poster-1920.94fea4a265.webp",
+            "bytes": 36934,
+            "width": 1920
+          },
+          {
+            "file": "tour-poster-960.cfd6190901.webp",
+            "bytes": 15688,
+            "width": 960
+          }
+        ],
+        "jpg": {
+          "file": "tour-poster.ae0ae8ccd7.jpg",
+          "bytes": 107390,
+          "width": 1920
+        }
+      },
+      "tracks": [
+        {
+          "file": "tour-captions-en.72e7706656.vtt",
+          "bytes": 2504,
+          "kind": "subtitles",
+          "srclang": "en",
+          "label": "English"
+        }
+      ]
+    },
+    "docs-quickstart": {
+      "kind": "film",
+      "width": 1920,
+      "height": 1080,
+      "duration": 87,
+      "audio": false,
+      "sources": [
+        {
+          "file": "docs-quickstart-1080.383adf6a74.mp4",
+          "bytes": 7233121,
+          "type": "video/mp4; codecs=\"avc1.640028\"",
+          "height": 1080
+        },
+        {
+          "file": "docs-quickstart-720.c22c65e84a.webm",
+          "bytes": 3626844,
+          "type": "video/webm; codecs=\"vp9\"",
+          "height": 720
+        },
+        {
+          "file": "docs-quickstart-720.32e723d434.mp4",
+          "bytes": 3878115,
+          "type": "video/mp4; codecs=\"avc1.640028\"",
+          "height": 720
+        }
+      ],
+      "poster": {
+        "webp": [
+          {
+            "file": "docs-quickstart-poster-1920.c7e87ef87c.webp",
+            "bytes": 48218,
+            "width": 1920
+          },
+          {
+            "file": "docs-quickstart-poster-960.bd6fddde10.webp",
+            "bytes": 21086,
+            "width": 960
+          }
+        ],
+        "jpg": {
+          "file": "docs-quickstart-poster.ef501f9871.jpg",
+          "bytes": 106542,
+          "width": 1920
+        }
+      }
+    },
+    "clip-wall": {
+      "kind": "clip",
+      "width": 1440,
+      "height": 900,
+      "duration": 13,
+      "audio": false,
+      "sources": [
+        {
+          "file": "clip-wall-loop.06f68c9412.webm",
+          "bytes": 2066590,
+          "type": "video/webm; codecs=\"vp9\"",
+          "height": 900
+        },
+        {
+          "file": "clip-wall-loop.319078ac57.mp4",
+          "bytes": 2305760,
+          "type": "video/mp4; codecs=\"avc1.640028\"",
+          "height": 900
+        }
+      ],
+      "poster": {
+        "webp": [
+          {
+            "file": "clip-wall-poster-1440.ce3ffac9e6.webp",
+            "bytes": 35020,
+            "width": 1440
+          },
+          {
+            "file": "clip-wall-poster-720.9afbf6fe19.webp",
+            "bytes": 14510,
+            "width": 720
+          }
+        ],
+        "jpg": {
+          "file": "clip-wall-poster.fa2cc4608c.jpg",
+          "bytes": 90485,
+          "width": 1440
+        }
+      }
+    },
+    "clip-pin": {
+      "kind": "clip",
+      "width": 1440,
+      "height": 900,
+      "duration": 11,
+      "audio": false,
+      "sources": [
+        {
+          "file": "clip-pin-loop.7bb25d559e.webm",
+          "bytes": 1776292,
+          "type": "video/webm; codecs=\"vp9\"",
+          "height": 900
+        },
+        {
+          "file": "clip-pin-loop.a1641a2c58.mp4",
+          "bytes": 1662502,
+          "type": "video/mp4; codecs=\"avc1.640028\"",
+          "height": 900
+        }
+      ],
+      "poster": {
+        "webp": [
+          {
+            "file": "clip-pin-poster-1440.aafc5b66f4.webp",
+            "bytes": 42542,
+            "width": 1440
+          },
+          {
+            "file": "clip-pin-poster-720.f407f476d1.webp",
+            "bytes": 17332,
+            "width": 720
+          }
+        ],
+        "jpg": {
+          "file": "clip-pin-poster.ac515fff0b.jpg",
+          "bytes": 107281,
+          "width": 1440
+        }
+      }
+    },
+    "clip-say": {
+      "kind": "clip",
+      "width": 1440,
+      "height": 900,
+      "duration": 10.8,
+      "audio": false,
+      "sources": [
+        {
+          "file": "clip-say-loop.2d88e79fb8.webm",
+          "bytes": 2360878,
+          "type": "video/webm; codecs=\"vp9\"",
+          "height": 900
+        },
+        {
+          "file": "clip-say-loop.908bf04728.mp4",
+          "bytes": 2222527,
+          "type": "video/mp4; codecs=\"avc1.640028\"",
+          "height": 900
+        }
+      ],
+      "poster": {
+        "webp": [
+          {
+            "file": "clip-say-poster-1440.90ac8e5d85.webp",
+            "bytes": 42410,
+            "width": 1440
+          },
+          {
+            "file": "clip-say-poster-720.30d628b483.webp",
+            "bytes": 17370,
+            "width": 720
+          }
+        ],
+        "jpg": {
+          "file": "clip-say-poster.90ff266ce3.jpg",
+          "bytes": 107362,
+          "width": 1440
+        }
+      }
+    },
+    "clip-agent": {
+      "kind": "clip",
+      "width": 1440,
+      "height": 900,
+      "duration": 11,
+      "audio": false,
+      "sources": [
+        {
+          "file": "clip-agent-loop.bcdc796551.webm",
+          "bytes": 2431707,
+          "type": "video/webm; codecs=\"vp9\"",
+          "height": 900
+        },
+        {
+          "file": "clip-agent-loop.d2fdac2c30.mp4",
+          "bytes": 2215307,
+          "type": "video/mp4; codecs=\"avc1.640028\"",
+          "height": 900
+        }
+      ],
+      "poster": {
+        "webp": [
+          {
+            "file": "clip-agent-poster-1440.0e7b3bc51e.webp",
+            "bytes": 48598,
+            "width": 1440
+          },
+          {
+            "file": "clip-agent-poster-720.d4cf1adfd8.webp",
+            "bytes": 19992,
+            "width": 720
+          }
+        ],
+        "jpg": {
+          "file": "clip-agent-poster.d8ac6d3b6e.jpg",
+          "bytes": 117815,
+          "width": 1440
+        }
+      }
+    },
+    "clip-compare": {
+      "kind": "clip",
+      "width": 1440,
+      "height": 900,
+      "duration": 12,
+      "audio": false,
+      "sources": [
+        {
+          "file": "clip-compare-loop.11c3b2485c.webm",
+          "bytes": 2234514,
+          "type": "video/webm; codecs=\"vp9\"",
+          "height": 900
+        },
+        {
+          "file": "clip-compare-loop.a13630b3f9.mp4",
+          "bytes": 2309117,
+          "type": "video/mp4; codecs=\"avc1.640028\"",
+          "height": 900
+        }
+      ],
+      "poster": {
+        "webp": [
+          {
+            "file": "clip-compare-poster-1440.05c1d38e45.webp",
+            "bytes": 41620,
+            "width": 1440
+          },
+          {
+            "file": "clip-compare-poster-720.14515cea17.webp",
+            "bytes": 17602,
+            "width": 720
+          }
+        ],
+        "jpg": {
+          "file": "clip-compare-poster.26f01266e2.jpg",
+          "bytes": 100141,
+          "width": 1440
+        }
+      }
+    },
+    "clip-journeys": {
+      "kind": "clip",
+      "width": 1440,
+      "height": 900,
+      "duration": 8.6,
+      "audio": false,
+      "sources": [
+        {
+          "file": "clip-journeys-loop.a7f53c89e8.webm",
+          "bytes": 1379819,
+          "type": "video/webm; codecs=\"vp9\"",
+          "height": 900
+        },
+        {
+          "file": "clip-journeys-loop.fe5ffe390d.mp4",
+          "bytes": 1447981,
+          "type": "video/mp4; codecs=\"avc1.640028\"",
+          "height": 900
+        }
+      ],
+      "poster": {
+        "webp": [
+          {
+            "file": "clip-journeys-poster-1440.7c3b2fa34d.webp",
+            "bytes": 39860,
+            "width": 1440
+          },
+          {
+            "file": "clip-journeys-poster-720.e5ade853e2.webp",
+            "bytes": 14582,
+            "width": 720
+          }
+        ],
+        "jpg": {
+          "file": "clip-journeys-poster.f8c523a439.jpg",
+          "bytes": 99474,
+          "width": 1440
+        }
+      }
+    },
+    "clip-checks": {
+      "kind": "clip",
+      "width": 1440,
+      "height": 900,
+      "duration": 7.6,
+      "audio": false,
+      "sources": [
+        {
+          "file": "clip-checks-loop.b25dd243f0.webm",
+          "bytes": 1388867,
+          "type": "video/webm; codecs=\"vp9\"",
+          "height": 900
+        },
+        {
+          "file": "clip-checks-loop.a8bf22ca61.mp4",
+          "bytes": 1449198,
+          "type": "video/mp4; codecs=\"avc1.640028\"",
+          "height": 900
+        }
+      ],
+      "poster": {
+        "webp": [
+          {
+            "file": "clip-checks-poster-1440.0fe4a57d5e.webp",
+            "bytes": 56312,
+            "width": 1440
+          },
+          {
+            "file": "clip-checks-poster-720.2856122179.webp",
+            "bytes": 22154,
+            "width": 720
+          }
+        ],
+        "jpg": {
+          "file": "clip-checks-poster.740885313d.jpg",
+          "bytes": 128977,
+          "width": 1440
+        }
+      }
+    },
+    "clip-team": {
+      "kind": "clip",
+      "width": 1440,
+      "height": 900,
+      "duration": 9.6,
+      "audio": false,
+      "sources": [
+        {
+          "file": "clip-team-loop.dec33857d6.webm",
+          "bytes": 835264,
+          "type": "video/webm; codecs=\"vp9\"",
+          "height": 900
+        },
+        {
+          "file": "clip-team-loop.a8aff24186.mp4",
+          "bytes": 861972,
+          "type": "video/mp4; codecs=\"avc1.640028\"",
+          "height": 900
+        }
+      ],
+      "poster": {
+        "webp": [
+          {
+            "file": "clip-team-poster-1440.f383f2ace7.webp",
+            "bytes": 29514,
+            "width": 1440
+          },
+          {
+            "file": "clip-team-poster-720.8d2a9a1598.webp",
+            "bytes": 11000,
+            "width": 720
+          }
+        ],
+        "jpg": {
+          "file": "clip-team-poster.035c8bc1c4.jpg",
+          "bytes": 74690,
+          "width": 1440
+        }
+      }
+    },
+    "clip-multi": {
+      "kind": "clip",
+      "width": 1440,
+      "height": 900,
+      "duration": 10,
+      "audio": false,
+      "sources": [
+        {
+          "file": "clip-multi-loop.f22751a904.webm",
+          "bytes": 742961,
+          "type": "video/webm; codecs=\"vp9\"",
+          "height": 900
+        },
+        {
+          "file": "clip-multi-loop.1bea562e21.mp4",
+          "bytes": 906993,
+          "type": "video/mp4; codecs=\"avc1.640028\"",
+          "height": 900
+        }
+      ],
+      "poster": {
+        "webp": [
+          {
+            "file": "clip-multi-poster-1440.4029e39acf.webp",
+            "bytes": 29112,
+            "width": 1440
+          },
+          {
+            "file": "clip-multi-poster-720.7cd029d4a3.webp",
+            "bytes": 10710,
+            "width": 720
+          }
+        ],
+        "jpg": {
+          "file": "clip-multi-poster.bf4a73080c.jpg",
+          "bytes": 77091,
+          "width": 1440
+        }
+      }
+    },
+    "clip-log": {
+      "kind": "clip",
+      "width": 1440,
+      "height": 900,
+      "duration": 12,
+      "audio": false,
+      "sources": [
+        {
+          "file": "clip-log-loop.2b79d2ff9f.webm",
+          "bytes": 2210807,
+          "type": "video/webm; codecs=\"vp9\"",
+          "height": 900
+        },
+        {
+          "file": "clip-log-loop.f5281777e1.mp4",
+          "bytes": 2309718,
+          "type": "video/mp4; codecs=\"avc1.640028\"",
+          "height": 900
+        }
+      ],
+      "poster": {
+        "webp": [
+          {
+            "file": "clip-log-poster-1440.ff4d11ec71.webp",
+            "bytes": 52590,
+            "width": 1440
+          },
+          {
+            "file": "clip-log-poster-720.22802bb484.webp",
+            "bytes": 20582,
+            "width": 720
+          }
+        ],
+        "jpg": {
+          "file": "clip-log-poster.89ba42cef9.jpg",
+          "bytes": 108909,
+          "width": 1440
+        }
+      }
+    },
+    "clip-phone": {
+      "kind": "clip",
+      "width": 1440,
+      "height": 900,
+      "duration": 8.4,
+      "audio": false,
+      "sources": [
+        {
+          "file": "clip-phone-loop.0aaaedad22.webm",
+          "bytes": 284744,
+          "type": "video/webm; codecs=\"vp9\"",
+          "height": 900
+        },
+        {
+          "file": "clip-phone-loop.2c9002583c.mp4",
+          "bytes": 477287,
+          "type": "video/mp4; codecs=\"avc1.640028\"",
+          "height": 900
+        }
+      ],
+      "poster": {
+        "webp": [
+          {
+            "file": "clip-phone-poster-1440.414165c56c.webp",
+            "bytes": 19608,
+            "width": 1440
+          },
+          {
+            "file": "clip-phone-poster-720.d5a501db29.webp",
+            "bytes": 6610,
+            "width": 720
+          }
+        ],
+        "jpg": {
+          "file": "clip-phone-poster.1d94be4f4d.jpg",
+          "bytes": 54131,
+          "width": 1440
+        }
+      }
+    },
+    "clip-share": {
+      "kind": "clip",
+      "width": 1440,
+      "height": 900,
+      "duration": 9.4,
+      "audio": false,
+      "sources": [
+        {
+          "file": "clip-share-loop.2b2f2e3c57.webm",
+          "bytes": 976720,
+          "type": "video/webm; codecs=\"vp9\"",
+          "height": 900
+        },
+        {
+          "file": "clip-share-loop.169f9875be.mp4",
+          "bytes": 1318582,
+          "type": "video/mp4; codecs=\"avc1.640028\"",
+          "height": 900
+        }
+      ],
+      "poster": {
+        "webp": [
+          {
+            "file": "clip-share-poster-1440.2482365c8e.webp",
+            "bytes": 41304,
+            "width": 1440
+          },
+          {
+            "file": "clip-share-poster-720.f21c847a3e.webp",
+            "bytes": 14626,
+            "width": 720
+          }
+        ],
+        "jpg": {
+          "file": "clip-share-poster.1153cb3b7a.jpg",
+          "bytes": 93930,
+          "width": 1440
+        }
+      }
+    }
+  }
+}

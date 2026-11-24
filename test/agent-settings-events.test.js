@@ -1,0 +1,308 @@
+// "Agents changed" (src/agent/settings-events.js and GET /api/agent/events):
+// one event for every open view when the agent settings change, from this
+// server's own settings routes or from an edit of the agents file made
+// outside this process. Against the ACP stub only: never a real agent.
+import { after, test } from 'node:test'
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import http from 'node:http'
+import os from 'node:os'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { createApp, stopChildren } from '../src/server/app.js'
+import { EVENT_STREAMS_MAX } from '../src/agent/routes.js'
+import { normalizeConfig } from '../src/config.js'
+import { createSettingsEvents } from '../src/agent/settings-events.js'
+import { acpHandshake } from '../src/agent/backends/acp.js'
+import { SAMPLE, request, tempDir } from './helpers.js'
+
+const TOKEN = 'settings-token-for-events-0123456789'
+const STUB_ACP = fileURLToPath(new URL('./fixtures/acp-stub.mjs', import.meta.url))
+const homes = []
+after(() => {
+  for (const dir of homes) fs.rmSync(dir, { recursive: true, force: true })
+})
+
+function settingsHome() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'shapewall-events-'))
+  homes.push(dir)
+  return { dir, file: path.join(dir, 'shapewall', 'agents.json') }
+}
+
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+// Resolves with the next event, or null when none comes within `ms`.
+function nextEvent(events, ms = 2000) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      stop()
+      resolve(null)
+    }, ms)
+    const stop = events.subscribe((event) => {
+      clearTimeout(timer)
+      stop()
+      resolve(event)
+    })
+  })
+}
+
+test('events: changes close together become one event', async () => {
+  const events = createSettingsEvents({ watch: false, debounceMs: 30 })
+  try {
+    const seen = []
+    events.subscribe((event) => seen.push(event))
+    events.changed('settings')
+    events.changed('file')
+    await wait(80)
+    assert.equal(seen.length, 1)
+    assert.deepEqual(seen[0].reasons.sort(), ['file', 'settings'])
+    const stop = events.subscribe(() => {})
+    assert.equal(events.listenerCount(), 2)
+    stop()
+    assert.equal(events.listenerCount(), 1)
+  } finally {
+    events.close()
+  }
+})
+
+test('events: an edit of the agents file from outside is announced, also when its folder appears later', async () => {
+  const home = settingsHome()
+  // The folder is not there yet: no settings were ever saved.
+  const events = createSettingsEvents({ file: home.file, debounceMs: 30 })
+  try {
+    let event = nextEvent(events)
+    fs.mkdirSync(path.dirname(home.file), { recursive: true })
+    assert.ok(await event, 'the folder appearing is a change')
+
+    // `shapewall settings` or a person writing the file (write, then rename).
+    await wait(60)
+    event = nextEvent(events)
+    fs.writeFileSync(`${home.file}.tmp-1`, '{"version":1,"projects":{}}\n')
+    fs.renameSync(`${home.file}.tmp-1`, home.file)
+    const got = await event
+    assert.ok(got)
+    assert.deepEqual(got.reasons, ['file'])
+
+    // Other files in the folder are not agent settings.
+    await wait(60)
+    event = nextEvent(events, 300)
+    fs.writeFileSync(path.join(path.dirname(home.file), 'other.json'), '{}')
+    assert.equal(await event, null)
+  } finally {
+    events.close()
+  }
+})
+
+function listen(app) {
+  return new Promise((resolve) => {
+    const instance = app.listen(0, '127.0.0.1', () => resolve(instance))
+  })
+}
+
+// Reads GET /api/agent/events and counts "agents" events.
+function eventStream(port, { token = TOKEN } = {}) {
+  return new Promise((resolve, reject) => {
+    const seen = []
+    const headers = token ? { 'X-Shapewall-Settings-Token': token } : {}
+    const req = http.get({ host: '127.0.0.1', port, path: '/api/agent/events', headers }, (res) => {
+      assert.equal(res.statusCode, 200)
+      assert.match(res.headers['content-type'], /text\/event-stream/)
+      let buffer = ''
+      res.setEncoding('utf8')
+      res.on('data', (chunk) => {
+        buffer += chunk
+        let end
+        while ((end = buffer.indexOf('\n\n')) >= 0) {
+          const block = buffer.slice(0, end)
+          buffer = buffer.slice(end + 2)
+          if (block.startsWith('event: agents')) seen.push(JSON.parse(block.split('\ndata: ')[1]))
+        }
+      })
+      resolve({
+        response: res,
+        seen,
+        // Waits until `count` events arrived (or fails after 3 s).
+        async until(count) {
+          for (let i = 0; i < 60 && seen.length < count; i++) await wait(50)
+          return seen.length
+        },
+        close: () => req.destroy(),
+      })
+    })
+    req.on('error', reject)
+  })
+}
+
+test('api: every settings route that changes something, and an outside edit of the file, tell GET /api/agent/events', async () => {
+  const home = settingsHome()
+  const dir = tempDir('events-board')
+  const config = normalizeConfig(structuredClone(SAMPLE), { dir, file: path.join(dir, 'shapewall.config.json') })
+  // A fake Codex adapter on PATH that runs the ACP stub.
+  const bin = path.join(home.dir, 'bin')
+  fs.mkdirSync(bin)
+  fs.writeFileSync(path.join(bin, 'codex-acp'), `#!/bin/sh\nexec "${process.execPath}" "${STUB_ACP}" "$@"\n`, { mode: 0o755 })
+  const env = { HOME: home.dir, XDG_CONFIG_HOME: home.dir, PATH: `${bin}${path.delimiter}${process.env.PATH}` }
+  const app = createApp({ config, clientDir: tempDir('events-client'), env, settingsToken: TOKEN })
+  const server = await listen(app)
+  const port = server.address().port
+  const headers = { 'X-Shapewall-Settings-Token': TOKEN, Origin: `http://127.0.0.1:${port}` }
+  const post = (pathname, body) => request(port, 'POST', pathname, { body, headers })
+  const stream = await eventStream(port)
+  // Each step starts with the stream quiet and checks that its change said so. A change may say so twice: on a busy
+  // machine the file watcher can notice a route's own write after the debounce (settings-events.js), which costs a
+  // view one extra refetch. So a step waits for its event, and a refused change is checked against a quiet stream.
+  const quiet = async () => {
+    let last = -1
+    for (let i = 0; i < 20 && last !== stream.seen.length; i++) {
+      last = stream.seen.length
+      await wait(300)
+    }
+    return stream.seen.length
+  }
+  const says = async (label, action) => {
+    const before = await quiet()
+    await action()
+    assert.ok((await stream.until(before + 1)) > before, label)
+  }
+  try {
+    await says('connect', async () => {
+      let connected = await post('/api/agent/settings/profiles/connect', { agentId: 'codex' })
+      if (connected.json?.confirm)
+        connected = await post('/api/agent/settings/profiles/connect', { agentId: 'codex', confirm: connected.json.confirmHash })
+      assert.equal(connected.status, 200, JSON.stringify(connected.json))
+      assert.equal(connected.json.connected, true, JSON.stringify(connected.json.result))
+    })
+    const id = 'codex'
+
+    await says('default', async () => {
+      assert.equal((await post(`/api/agent/settings/profiles/${id}/default`, {})).status, 200)
+    })
+    await says('save', async () => {
+      assert.equal((await post('/api/agent/settings', { settings: { label: 'Renamed' } })).status, 200)
+    })
+    await says('test (the agent state changed)', async () => {
+      assert.equal((await post('/api/agent/settings/test', { profileId: id })).status, 200)
+    })
+
+    // A refused change changes nothing and says nothing.
+    const before = await quiet()
+    assert.equal((await post('/api/agent/settings/profiles/nope/default', {})).status, 404)
+    await wait(500)
+    assert.equal(stream.seen.length, before, 'refused')
+
+    await says('remove', async () => {
+      const removed = await request(port, 'DELETE', `/api/agent/settings/profiles/${id}`, { headers })
+      assert.equal(removed.status, 200)
+    })
+
+    // Another process edits the file.
+    await says('outside edit', async () => {
+      const text = fs.readFileSync(home.file, 'utf8')
+      fs.writeFileSync(home.file, text.replace(/\n?$/, '\n'))
+    })
+    assert.match(stream.seen.at(-1).at, /^\d{4}-\d\d-\d\dT/)
+    // No settings ride along.
+    assert.deepEqual(Object.keys(stream.seen.at(-1)), ['at'])
+  } finally {
+    stream.close()
+    stopChildren(app)
+    await new Promise((resolve) => server.close(resolve))
+  }
+})
+
+test('api: a server with open events streams closes promptly', async () => {
+  const home = settingsHome()
+  const dir = tempDir('events-close')
+  const config = normalizeConfig(structuredClone(SAMPLE), { dir, file: path.join(dir, 'shapewall.config.json') })
+  const app = createApp({
+    config,
+    clientDir: tempDir('events-close-client'),
+    env: { PATH: process.env.PATH, XDG_CONFIG_HOME: home.dir },
+    settingsToken: TOKEN,
+  })
+  const server = await listen(app)
+  const port = server.address().port
+  const streams = [await eventStream(port), await eventStream(port)]
+  const ended = streams.map(
+    (stream) =>
+      new Promise((resolve) => {
+        stream.response.on('end', resolve)
+        stream.response.on('close', resolve)
+      }),
+  )
+  const started = Date.now()
+  stopChildren(app)
+  await Promise.race([
+    Promise.all([new Promise((resolve) => server.close(resolve)), ...ended]),
+    wait(2000).then(() => assert.fail('the server stayed open behind its events streams')),
+  ])
+  assert.ok(Date.now() - started < 2000)
+  // A stream asked for after close is refused, not held open.
+  const late = createApp({
+    config,
+    clientDir: tempDir('events-close-client-2'),
+    env: { PATH: process.env.PATH, XDG_CONFIG_HOME: home.dir },
+    settingsToken: TOKEN,
+  })
+  stopChildren(late)
+  const lateServer = await listen(late)
+  try {
+    const answer = await request(lateServer.address().port, 'GET', '/api/agent/events')
+    assert.equal(answer.status, 503)
+  } finally {
+    await new Promise((resolve) => lateServer.close(resolve))
+  }
+})
+
+test('api: GET /api/agent/events is for the owner only, and at most 32 streams stay open (the oldest ends)', async () => {
+  const home = settingsHome()
+  const dir = tempDir('events-owner')
+  const config = normalizeConfig(structuredClone(SAMPLE), { dir, file: path.join(dir, 'shapewall.config.json') })
+  const app = createApp({
+    config,
+    clientDir: tempDir('events-owner-client'),
+    env: { PATH: process.env.PATH, XDG_CONFIG_HOME: home.dir },
+    settingsToken: TOKEN,
+  })
+  const server = await listen(app)
+  const port = server.address().port
+  const streams = []
+  try {
+    for (const headers of [{}, { 'X-Shapewall-Settings-Token': 'wrong-token' }]) {
+      const answer = await request(port, 'GET', '/api/agent/events', { headers })
+      assert.equal(answer.status, 403)
+      assert.doesNotMatch(String(answer.headers?.['content-type'] || ''), /event-stream/)
+    }
+    for (let i = 0; i < EVENT_STREAMS_MAX; i++) streams.push(await eventStream(port))
+    const first = streams[0]
+    const firstEnded = new Promise((resolve) => {
+      first.response.on('end', resolve)
+      first.response.on('close', resolve)
+    })
+    streams.push(await eventStream(port))
+    await Promise.race([firstEnded, wait(2000).then(() => assert.fail('the oldest stream stayed open past the cap'))])
+    // The newest still hears changes.
+    await request(port, 'POST', '/api/agent/settings/branch-mode', {
+      body: { enabled: true },
+      headers: { 'X-Shapewall-Settings-Token': TOKEN, Origin: `http://127.0.0.1:${port}` },
+    })
+    assert.ok((await streams.at(-1).until(1)) >= 1, 'the newest stream got the nudge')
+  } finally {
+    for (const stream of streams) stream.close()
+    stopChildren(app)
+    await new Promise((resolve) => server.close(resolve))
+  }
+})
+
+test('events: the agent process pool says when an agent starts and when it is gone', async () => {
+  const calls = []
+  const processPool = { epoch: 0, agents: new Set(), max: 2, changed: () => calls.push([...processPool.agents].map((item) => item.state)) }
+  const result = await acpHandshake(
+    { label: 'Stub', acp: { argv: [process.execPath, STUB_ACP] } },
+    { root: tempDir('events-pool'), processPool },
+  )
+  assert.equal(result.ok, true, JSON.stringify(result))
+  assert.deepEqual(calls[0], ['starting'], 'told when it starts')
+  assert.deepEqual(calls.at(-1), [], 'and when it is gone')
+  assert.equal(processPool.agents.size, 0)
+})

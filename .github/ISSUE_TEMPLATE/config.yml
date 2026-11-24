@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions
+    url: https://github.com/danbaruch/shapewall/discussions/categories/q-a
+    about: Ask how to set something up or use a feature in GitHub Discussions (Q&A).
+  - name: Security vulnerability
+    url: https://github.com/danbaruch/shapewall/security/advisories/new
+    about: Report security issues privately with GitHub private vulnerability reporting or hello@shapewall.com, as described in SECURITY.md.

@@ -1,0 +1,137 @@
+name: Publish
+
+# Publishes the package to npm when a version tag (v1.2.3) is pushed, or when a
+# maintainer starts this workflow for an existing tag. It uses npm trusted
+# publishing: npm trusts this workflow in this repository directly (OpenID
+# Connect), so there is no npm token to store and nobody approves a release by
+# hand. Each release carries a provenance statement naming the commit it was
+# built from.
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The existing tag to publish, such as v1.2.3
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build and check the release archive
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+      digest: ${{ steps.pack.outputs.digest }}
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - name: Validate the release ref
+        id: tag
+        run: |
+          [[ "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          [[ "$GITHUB_REF" == "refs/tags/$TAG" || ("$GITHUB_EVENT_NAME" == workflow_dispatch && "$GITHUB_REF" == refs/heads/main) ]]
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: refs/tags/${{ env.TAG }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Verify tagged source and package identity
+        run: |
+          git merge-base --is-ancestor HEAD origin/main
+          test "v$(node -p "require('./package.json').version")" = "$TAG"
+          test "$(node -p "require('./package.json').name")" = shapewall
+      - run: node scripts/release-notes.js "${TAG#v}" > "$RUNNER_TEMP/release-notes.md"
+      - run: npm ci --ignore-scripts
+      - run: npm run lint
+      - run: npm run build && npm run prepack
+      - run: mkdir -p "$HOME/.cache" && npm run pretest && node --test --test-concurrency=4 --test-timeout=120000 test/*.test.js
+      - name: Pack and verify the exact archive
+        id: pack
+        run: |
+          # The publish job receives only the tarball, without a Git checkout.
+          npm pkg set "gitHead=$(git rev-parse HEAD)"
+          # npm 10 still invokes prepare during pack even with --ignore-scripts.
+          npm exec --yes --package=npm@11.6.2 -- npm pack --ignore-scripts --json --pack-destination "$RUNNER_TEMP" > "$RUNNER_TEMP/pack.json"
+          node --input-type=module <<'JS'
+          import fs from 'node:fs'
+          import { checkPackFiles } from './scripts/check-pack.js'
+          const [pack] = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + '/pack.json', 'utf8'))
+          const errors = checkPackFiles(pack.files.map(file => file.path), { size: pack.size })
+          if (errors.length) throw new Error(errors.join('\n'))
+          JS
+          mv "$RUNNER_TEMP/shapewall-${TAG#v}.tgz" "$RUNNER_TEMP/shapewall.tgz"
+          echo "digest=$(sha256sum "$RUNNER_TEMP/shapewall.tgz" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: npm-package
+          path: ${{ runner.temp }}/shapewall.tgz
+          if-no-files-found: error
+          retention-days: 3
+
+  npm:
+    name: Publish verified archive to npm
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+      DIGEST: ${{ needs.build.outputs.digest }}
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: npm-package
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.11.1
+          registry-url: https://registry.npmjs.org
+      - name: Publish once, with provenance
+        run: |
+          echo "$DIGEST  shapewall.tgz" | sha256sum -c -
+          if published=$(npm view "shapewall@$VERSION" dist.integrity 2>/dev/null); then
+            test "$published" = "sha512-$(openssl dgst -sha512 -binary shapewall.tgz | openssl base64 -A)"
+            echo "shapewall@$VERSION already published"
+          else
+            npm publish ./shapewall.tgz --ignore-scripts --provenance --access public
+          fi
+
+  release:
+    name: GitHub release
+    needs: npm
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: refs/tags/${{ env.TAG }}
+          persist-credentials: false
+      - name: Create the release from the changelog entry, if there is none yet
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists"
+            exit 0
+          fi
+          node scripts/release-notes.js "${TAG#v}" > notes.md
+          printf '\nInstall: `npm install --save-dev shapewall`. Live demo: https://shapewall.com/demo/ · Docs: https://shapewall.com/docs\n' >> notes.md
+          gh release create "$TAG" --title "Shapewall ${TAG#v}" --notes-file notes.md --verify-tag

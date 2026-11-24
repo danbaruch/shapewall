@@ -1,0 +1,39 @@
+// The help text printed on the website's CLI page is the real `shapewall --help`, so a flag
+// added to src/cli/help.js cannot be forgotten in the docs. To refresh both after a change:
+//   node bin/shapewall.js --help all    (paste everything from "Usage:" on into its ```text block)
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import { HELP, SECTIONS } from '../src/cli/help.js'
+import { COMMAND_FLAGS } from '../src/cli/args.js'
+
+const read = (name) => fs.readFileSync(new URL(`../${name}`, import.meta.url), 'utf8')
+// Without the first line: it carries the version, which changes every release.
+const body = HELP.trim().split('\n').slice(2).join('\n')
+
+test('the website CLI page carries the current --help text', () => {
+  for (const file of ['website/src/docs/cli.md']) {
+    assert.ok(read(file).includes(body), `${file}: the help block is out of date (see the top of this test)`)
+  }
+})
+
+test('every command and every option it takes is in its help section', () => {
+  for (const [command, flags] of Object.entries(COMMAND_FLAGS)) {
+    assert.ok(SECTIONS[command], `${command}: no help section`)
+    // Operator subcommand flags of `hosted admin` are listed by `shapewall hosted admin` itself.
+    if (command === 'hosted') continue
+    for (const flag of flags) {
+      assert.ok(HELP.includes(`--${flag}`), `${command} --${flag} is not in the help text`)
+    }
+  }
+})
+
+test('no Node version the help names is older than the one package.json requires', () => {
+  const minimum = JSON.parse(read('package.json'))
+    .engines.node.match(/(\d+)\.(\d+)/)
+    .slice(1)
+    .map(Number)
+  const named = [...HELP.matchAll(/Node (\d+)\.(\d+)/g)].map((match) => [Number(match[1]), Number(match[2])])
+  for (const [major, minor] of named)
+    assert.ok(major > minimum[0] || (major === minimum[0] && minor >= minimum[1]), 'help says Node ' + major + '.' + minor)
+})

@@ -1,0 +1,59 @@
+{
+  "title": "Lumen Notes (demo)",
+  "id": "demo",
+  "baseUrl": "http://127.0.0.1:4601",
+  "outputDir": ".shapewall",
+  "concurrency": 2,
+  "viewports": {
+    "desktop": { "width": 1440, "height": 2200 },
+    "phone": { "width": 390, "height": 1800 }
+  },
+  "groups": ["Marketing", "Content", "App"],
+  "pages": [
+    { "id": "home", "path": "/", "title": "Home", "group": "Marketing" },
+    { "id": "features", "path": "/features/", "title": "Features", "group": "Marketing" },
+    { "id": "pricing", "path": "/pricing/", "title": "Pricing", "group": "Marketing", "waitFor": ".pricing" },
+    { "id": "blog", "path": "/blog/", "title": "Blog", "group": "Content" },
+    { "id": "blog-post", "path": "/blog/sync-without-servers/", "title": "Blog post", "group": "Content" },
+    {
+      "id": "login",
+      "path": "/login/",
+      "title": "Sign in",
+      "group": "App",
+      "note": "Signed-out state; the password and CSRF token on this page are never captured",
+      "actions": [{ "fill": ["input[name=email]", "reader@example.com"] }]
+    },
+    {
+      "id": "dashboard",
+      "path": "/app/",
+      "title": "Dashboard",
+      "group": "App",
+      "note": "Sample data rendered by a script",
+      "waitFor": "table"
+    }
+  ],
+  "journeys": [
+    {
+      "id": "sign-up",
+      "name": "Sign up",
+      "description": "From the landing page to the first notes",
+      "steps": ["home", "pricing", "login", "dashboard"]
+    },
+    {
+      "id": "open-app",
+      "name": "Open the app",
+      "description": "From pricing to the dashboard: signed out through sign in, or signed in straight there",
+      "steps": [
+        "home",
+        "pricing",
+        {
+          "branches": [
+            { "id": "signed-out", "label": "Signed out", "steps": ["login"] },
+            { "id": "signed-in", "label": "Signed in", "steps": [] }
+          ]
+        },
+        "dashboard"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Admin -- Lumen Notes</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="wrap">
+        <a class="logo" href="/app/"><img src="/img/logo.svg" alt="" />Lumen</a>
+        <a class="app-search" href="/app/" role="search">Search notes <kbd>/</kbd></a>
+        <div class="app-actions">
+          <a class="btn btn-primary btn-small" href="/app/note/" data-testid="new-note">New note</a>
+          <a class="avatar" href="/app/settings/" aria-label="Account settings" data-testid="avatar">AR</a>
+        </div>
+      </div>
+    </header>
+    <main>
+      <div class="workspace admin">
+        <h1 class="form-title">Workspace admin</h1>
+        <p class="meta">Members, seats and audit log for the Papercrane team space.</p>
+        <div class="stats">
+          <div class="stat"><span class="meta">Seats used</span><b>18 / 20</b></div>
+          <div class="stat"><span class="meta">Pending invites</span><b>3</b></div>
+          <div class="stat"><span class="meta">Storage</span><b>4.2 GB</b></div>
+        </div>
+        <table class="dense" data-testid="members">
+          <thead>
+            <tr>
+              <th>Member</th>
+              <th>Role</th>
+              <th>Last active</th>
+              <th>Two-step</th>
+              <th>Spaces</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Alex Reader</td>
+              <td>Owner</td>
+              <td>Now</td>
+              <td><span class="pill">On</span></td>
+              <td>6</td>
+              <td><a href="/admin/">Manage</a></td>
+            </tr>
+            <tr>
+              <td>Kit Tan</td>
+              <td>Admin</td>
+              <td>2 hours ago</td>
+              <td><span class="pill">On</span></td>
+              <td>4</td>
+              <td><a href="/admin/">Manage</a></td>
+            </tr>
+            <tr>
+              <td>Noor Vale</td>
+              <td>Member</td>
+              <td>Yesterday</td>
+              <td><span class="pill draft">Off</span></td>
+              <td>2</td>
+              <td><a href="/admin/">Manage</a></td>
+            </tr>
+            <tr>
+              <td>Rae Ortiz</td>
+              <td>Member</td>
+              <td>3 days ago</td>
+              <td><span class="pill">On</span></td>
+              <td>3</td>
+              <td><a href="/admin/">Manage</a></td>
+            </tr>
+            <tr>
+              <td>Jules Park</td>
+              <td>Guest</td>
+              <td>Last week</td>
+              <td><span class="pill draft">Off</span></td>
+              <td>1</td>
+              <td><a href="/admin/">Manage</a></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </main>
+  </body>
+</html>

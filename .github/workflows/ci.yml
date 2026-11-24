@@ -1,0 +1,105 @@
+name: CI
+
+# The quick checks (lint, unit tests, build, package contents, website) run on
+# every pull request and on every push to main. The full browser suite (e2e)
+# runs on pull requests into main, on pushes to main and from the Actions tab
+# (not on pull requests into other branches), split into four shards.
+# No job uses a secret, so pull requests from forks run the same checks.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    # Every Node.js LTS line Shapewall supports (package.json engines: 22.19 on).
+    name: Lint, test, build (Node ${{ matrix.node }})
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - name: Unit tests with a per-file deadline
+        run: npm run pretest && node --test --test-concurrency=4 --test-timeout=120000 test/*.test.js
+      - run: npm run build
+      - name: Package contents (no tests, fixtures or captures in the tarball)
+        run: npm run check:pack
+
+  website:
+    name: Website (build and SEO checks)
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - run: npm ci
+      - run: npm test
+
+  e2e:
+    name: End to end (Playwright Chromium, shard ${{ matrix.shard }}/4)
+    # The full browser suite (about 48 minutes in one run) as four shards. node --test --test-shard splits the e2e files
+    # deterministically: the sorted file list, every fourth file to a shard.
+    if: >-
+      github.event_name == 'workflow_dispatch' || github.event_name == 'push' ||
+      (github.event_name == 'pull_request' && github.base_ref == 'main')
+    timeout-minutes: 40
+    runs-on: ubuntu-latest
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Verify sandboxed audit Chromium startup
+        run: bash scripts/ci-chrome-sandbox.sh
+      - run: npm run build
+      - run: npm run build:demo
+      - name: End to end tests (shard ${{ matrix.shard }} of 4)
+        run: node --test --test-concurrency=1 --test-shard="$SHARD/4" test/e2e/*.test.js
+        env:
+          SHARD: ${{ matrix.shard }}
+          SHAPEWALL_SHOTS: e2e-screenshots
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: e2e-screenshots-${{ matrix.shard }}
+          retention-days: 3
+          path: e2e-screenshots
+          if-no-files-found: ignore

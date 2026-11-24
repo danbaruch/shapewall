@@ -1,0 +1,64 @@
+// What a share link guest sees of a hosted comment. Only import-free
+// modules, so the public demo's in-browser backend (client/src/demo)
+// projects comments the same way the server does.
+
+import { countedReactions } from '../reactions.js'
+
+// Which share link wrote a guest comment or reply. Kept off the JSON (a
+// symbol key) so members and tokens never see it; guestView uses it.
+export const GUEST_SHARE = Symbol('guestShare')
+
+const media = (item) => ({
+  ...(Array.isArray(item.images) && item.images.length ? { images: item.images } : {}),
+  ...(item.drawing ? { drawing: item.drawing } : {}),
+})
+
+// What a share link guest sees of a comment: the text, place and state, and
+// no workspace detail. Members by display name only (no handles), agents as
+// "Agent", guests of other links as "Another guest"; no agent status,
+// resolution notes, fix references or GitHub links; reactions as counts, not names.
+export function guestView(comment, shareId) {
+  const from = comment[GUEST_SHARE] || { comment: null, replies: [] }
+  const name = (author, { guest, agent, share }) =>
+    guest ? (share && share === shareId ? author : 'Another guest') : agent ? 'Agent' : author
+  return {
+    id: comment.id,
+    pageId: comment.pageId,
+    viewport: comment.viewport,
+    x: comment.x,
+    y: comment.y,
+    body: comment.body,
+    author: name(comment.author, { guest: comment.authorGuest, agent: comment.authorAgent, share: from.comment }),
+    ...(comment.authorGuest ? { authorGuest: true } : {}),
+    ...(comment.authorAgent ? { authorAgent: true } : {}),
+    ...(comment.anchor ? { anchor: comment.anchor } : {}),
+    // The side of a compare card it was left on (client/src/board/commentSide.js).
+    ...(comment.environment ? { environment: comment.environment } : {}),
+    // Images and a drawing, when the comment has them (members attach
+    // images; guests may draw).
+    ...media(comment),
+    captureVersion: comment.captureVersion,
+    status: comment.status,
+    createdAt: comment.createdAt,
+    updatedAt: comment.updatedAt,
+    resolvedAt: comment.resolvedAt,
+    resolution: null,
+    replies: comment.replies.map((reply, index) => ({
+      id: reply.id,
+      author: name(reply.author, { guest: reply.guest, agent: reply.agent, share: from.replies[index] }),
+      ...(reply.guest ? { guest: true } : {}),
+      ...(reply.agent ? { agent: true } : {}),
+      body: reply.body,
+      createdAt: reply.createdAt,
+      ...media(reply),
+      reactions: countedReactions(reply.reactions),
+    })),
+    reactions: countedReactions(comment.reactions),
+    editedAt: comment.editedAt || null,
+    agentStatus: null,
+    agentStatusAt: null,
+    reopenCount: comment.reopenCount,
+    reopenedAt: comment.reopenedAt,
+    mentions: [],
+  }
+}

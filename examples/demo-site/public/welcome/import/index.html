@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Import your notes -- Lumen Notes</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="logo" href="/"><img src="/img/logo.svg" alt="" />Lumen Notes</a>
+        <div class="header-cta"><a class="btn btn-ghost" href="/app/">Skip setup</a></div>
+      </div>
+    </header>
+    <main>
+      <section class="onboard">
+        <div class="steps" aria-label="Step 2 of 3" data-testid="steps">
+          <span class="step done"></span><span class="step done"></span><span class="step"></span>
+        </div>
+        <h1 class="form-title">Bring your notes along</h1>
+        <p class="lead">Import now or later from Settings. Nothing leaves your device until you sync.</p>
+        <div class="import-list">
+          <label class="import-row"><input type="checkbox" checked /> Markdown folder <span class="meta">.md files and images</span></label>
+          <label class="import-row"><input type="checkbox" /> Plain text <span class="meta">.txt files</span></label>
+          <label class="import-row"><input type="checkbox" /> Another notes app <span class="meta">its export file</span></label>
+        </div>
+        <div class="dropzone" data-testid="dropzone">Drop files here, or <a href="/welcome/invite/">choose a folder</a></div>
+        <div class="onboard-actions">
+          <a class="btn btn-ghost" href="/welcome/">Back</a><a class="btn btn-primary" href="/welcome/invite/">Continue</a>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

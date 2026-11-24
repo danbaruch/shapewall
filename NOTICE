@@ -1,0 +1,19 @@
+Shapewall
+Copyright 2026 Dan Baruch and Shapewall contributors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE),
+except for the hosted server in src/hosted, which is licensed under the
+Functional Source License, Version 1.1, ALv2 Future License (see
+src/hosted/LICENSE.md). Each version of src/hosted becomes available under the
+Apache License, Version 2.0 two years after it is released.
+
+The built board includes third-party code and data for the natural read-aloud
+voices (ONNX Runtime Web, misaki's lexicons and others), each
+under its own license; see THIRD_PARTY.md.
+
+The board shows the product marks of coding agents as their default icons
+(the Claude mark of Anthropic, PBC, the OpenAI mark of OpenAI for
+Codex, the goose mark of LF Projects, LLC and the Gemini mark of Google LLC).
+These marks are trademarks of their respective owners. They are used only to
+identify the agent you connected; no endorsement by or affiliation with their
+owners is implied. Sources and terms: THIRD_PARTY.md.

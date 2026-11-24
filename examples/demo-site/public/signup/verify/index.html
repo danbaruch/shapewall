@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Email verified -- Lumen Notes</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="logo" href="/"><img src="/img/logo.svg" alt="" />Lumen Notes</a>
+        <nav class="nav" aria-label="Main">
+          <a href="/features/">Features</a>
+          <a href="/pricing/">Pricing</a>
+          <a href="/templates/">Templates</a>
+          <a href="/blog/">Blog</a>
+        </nav>
+        <div class="header-cta">
+          <a class="btn btn-ghost" href="/login/">Sign in</a>
+          <a class="btn btn-primary" href="/signup/">Start free</a>
+          <button class="btn btn-ghost menu-button" type="button" aria-label="Open menu">Menu</button>
+        </div>
+      </div>
+    </header>
+    <main>
+      <section class="auth">
+        <form action="/welcome/" aria-label="Email verified">
+          <h1 class="form-title">You're in</h1>
+          <div class="alert alert-info" data-testid="verified">Your email address is verified. Welcome to Lumen Notes.</div>
+          <p class="meta" style="margin: 0">Three short questions and your first notebook is ready.</p>
+          <a class="btn btn-primary" href="/welcome/" data-testid="verified-continue">Set up my notes</a>
+        </form>
+      </section>
+    </main>
+  </body>
+</html>

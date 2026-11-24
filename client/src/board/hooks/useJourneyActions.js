@@ -1,0 +1,173 @@
+import { useCallback, useEffect, useRef } from 'react'
+import { api } from '../../lib/api'
+import { clampStep } from '../flow'
+import { chooseBranch, journeyPages } from '../../../../src/journey-paths.js'
+import { useJourneyKeys } from './useShortcuts'
+import { motionDuration } from '../../lib/motion'
+import { contentExtent } from '../contentExtent'
+
+// Opening, stepping through and leaving a journey (each step flies to its
+// card), and building, saving or deleting one.
+export function useJourneyActions({
+  boardId,
+  view,
+  updateParams,
+  clearFocus,
+  setCommentMode,
+  journey,
+  route,
+  routePages,
+  step,
+  builder,
+  setBuilder,
+  busy,
+  setBusy,
+  setNotice,
+  flow,
+  targets,
+  nodesReady,
+  mode,
+  comparePair,
+  setSettledZoom,
+  // The capture image URLs of a page's frames, for fitting a step to its content.
+  shotUrlsFor = () => [],
+  // Going through a journey is going somewhere else: an open comment closes
+  // (Board.jsx leaveForNavigation).
+  onLeave = () => {},
+}) {
+  const openJourney = useCallback(
+    (id) => {
+      if (id) onLeave()
+      clearFocus()
+      updateParams({ j: id || null, step: id ? 1 : null, jc: null, jb: null })
+    },
+    [clearFocus, onLeave, updateParams],
+  )
+  const closeJourney = useCallback(() => updateParams({ j: null, step: null, jc: null, jb: null }), [updateParams])
+  const goStep = useCallback(
+    (value) => {
+      if (!routePages) return
+      onLeave()
+      updateParams({ step: clampStep(value, routePages.length) })
+    },
+    [onLeave, routePages, updateParams],
+  )
+  // Picking a branch at a fork keeps the choices before it; later forks
+  // start again from their first branch.
+  const chooseJourneyBranch = useCallback(
+    (ordinal, branchId) => {
+      if (!route) return
+      onLeave()
+      updateParams({ jb: chooseBranch(route, ordinal, branchId).join(',') })
+    },
+    [onLeave, route, updateParams],
+  )
+  // Each step change flies to its card (not on every poll of the board).
+  const zoomedStep = useRef(null)
+  useEffect(() => {
+    if (!journey || !nodesReady || builder) {
+      if (!journey) zoomedStep.current = null
+      return
+    }
+    const pageId = routePages[step - 1]
+    const key = `${journey.id}:${step}:${pageId}:${mode}:${comparePair}`
+    if (zoomedStep.current === key) return
+    const target = targets[pageId]
+    if (!target) return
+    zoomedStep.current = key
+    setSettledZoom(null)
+    // Room above the card for its step badges. Captures are fixed frames
+    // (1440x2200 on a desktop), so a short page is mostly a plain band
+    // below its content: the step fits the content, top-aligned, like "Go to
+    // page" (camera.js flyToPage), not the empty rest of the frame.
+    const frame = target.frames?.[0]
+    const fit = (share) =>
+      flow.fitBounds(
+        {
+          x: target.x,
+          y: target.y - 48,
+          width: target.w,
+          height: Math.min(target.h, frame ? frame.y + frame.h * share + 16 : target.h) + 48,
+        },
+        { padding: 0.18, duration: motionDuration(450) },
+      )
+    const urls = frame ? shotUrlsFor(pageId) : []
+    if (!urls.length) fit(1)
+    else
+      Promise.all(urls.map((url) => contentExtent(url)))
+        .then((shares) => zoomedStep.current === key && fit(Math.max(0.35, ...shares)))
+        .catch(() => fit(1))
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- shotUrlsFor is read when a step opens, not a reason to fly again
+  }, [builder, comparePair, flow, journey, targets, mode, nodesReady, routePages, setSettledZoom, step])
+  useJourneyKeys({ journey, builder, goStep, step, closeJourney })
+
+  const startBuilder = useCallback(
+    (from = null) => {
+      onLeave()
+      setCommentMode(false)
+      clearFocus()
+      setBuilder(
+        from
+          ? { id: from.id, name: from.name, steps: structuredClone(from.steps), into: null }
+          : { id: null, name: '', steps: [], into: null },
+      )
+    },
+    [clearFocus, onLeave, setBuilder, setCommentMode],
+  )
+  // A click adds the page as the next step: of the branch being filled
+  // (`into`: { fork, branch } indexes), else of the main line.
+  const addBuilderStep = useCallback(
+    (pageId) => {
+      setBuilder((current) => {
+        if (!current || journeyPages(current.steps).length >= 50) return current
+        const steps = structuredClone(current.steps)
+        const fork = current.into ? steps[current.into.fork] : null
+        const list = fork?.branches?.[current.into.branch]?.steps || steps
+        if (list[list.length - 1] === pageId) return current
+        list.push(pageId)
+        return { ...current, steps }
+      })
+    },
+    [setBuilder],
+  )
+  const journeysUrl = `/api/boards/${encodeURIComponent(boardId)}/journeys`
+  // One save or delete at a time, whatever else the board's busy flag is doing.
+  const working = useRef(false)
+  const saveBuilder = async () => {
+    if (!builder || busy || working.current) return
+    working.current = true
+    setBusy(true)
+    try {
+      const body = { name: builder.name, steps: builder.steps }
+      // (`into` is the builder's cursor, not part of the journey.)
+      const result = builder.id
+        ? await api.patch(`${journeysUrl}/${encodeURIComponent(builder.id)}`, body)
+        : await api.post(journeysUrl, body)
+      await view.refetch()
+      setBuilder(null)
+      zoomedStep.current = null
+      openJourney(result.journey.id)
+    } catch (error) {
+      setNotice({ tone: 'bad', text: error.message || 'The journey was not saved.' })
+    } finally {
+      working.current = false
+      setBusy(false)
+    }
+  }
+  const removeJourney = async () => {
+    if (!journey || busy || working.current) return
+    working.current = true
+    setBusy(true)
+    try {
+      await api.delete(`${journeysUrl}/${encodeURIComponent(journey.id)}`)
+      closeJourney()
+      view.refetch()
+    } catch (error) {
+      setNotice({ tone: 'bad', text: error.message || 'The journey was not deleted.' })
+    } finally {
+      working.current = false
+      setBusy(false)
+    }
+  }
+  return { openJourney, closeJourney, goStep, chooseJourneyBranch, startBuilder, addBuilderStep, saveBuilder, removeJourney }
+}

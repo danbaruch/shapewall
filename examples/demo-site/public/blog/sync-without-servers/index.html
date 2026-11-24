@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>How offline sync works -- Lumen Notes</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="logo" href="/"><img src="/img/logo.svg" alt="" />Lumen Notes</a>
+        <nav class="nav" aria-label="Main">
+          <a href="/features/">Features</a>
+          <a href="/pricing/">Pricing</a>
+          <a href="/templates/">Templates</a>
+          <a href="/blog/" aria-current="page">Blog</a>
+        </nav>
+        <div class="header-cta">
+          <a class="btn btn-ghost" href="/login/">Sign in</a>
+          <a class="btn btn-primary" href="/signup/">Start free</a>
+          <button class="btn btn-ghost menu-button" type="button" aria-label="Open menu">Menu</button>
+        </div>
+      </div>
+    </header>
+    <main>
+      <article class="article">
+        <p class="meta">March 4 · 6 min read</p>
+        <h1>How offline sync works without a central server</h1>
+        <p>
+          Every note in Lumen is a list of small changes. When two devices edit the same note while offline, both lists are kept and merged
+          in the same order on every device.
+        </p>
+        <img src="/img/cover-1.svg" alt="" width="720" height="425" />
+        <h2>Why not last write wins?</h2>
+        <p>Because the last write is often the smaller one. A quick fix on your phone should not erase an hour of work on your laptop.</p>
+        <p>The trade-off is a little more storage per note, which we compact every night.</p>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="wrap">
+        <span>Lumen Notes is a fictional product for the Shapewall demo.</span
+        ><span><a href="/pricing/">Pricing</a> · <a href="/changelog/">Changelog</a> · <a href="/blog/">Blog</a></span>
+      </div>
+    </footer>
+  </body>
+</html>

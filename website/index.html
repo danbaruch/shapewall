@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <!--seo-->
+    <title>Shapewall</title>
+    <!--/seo-->
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#fafaf9" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#17171b" />
+    <!-- Applies the saved theme before the first paint (src/theme.js owns it afterwards). The CSP allows it by hash. -->
+    <script>
+      ;(function () {
+        var choice = null
+        try {
+          choice = window.localStorage.getItem('shapewall.site.theme')
+        } catch (error) {
+          choice = null
+        }
+        var fixed = choice === 'light' || choice === 'dark'
+        var dark = choice === 'dark'
+        if (!fixed) {
+          try {
+            dark = window.matchMedia('(prefers-color-scheme: dark)').matches
+          } catch (error) {
+            dark = false
+          }
+        }
+        document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light')
+        if (fixed) {
+          var metas = document.querySelectorAll('meta[name="theme-color"]')
+          for (var i = 0; i < metas.length; i++) metas[i].setAttribute('content', dark ? '#17171b' : '#fafaf9')
+        }
+      })()
+    </script>
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <!--analytics-->
+  </head>
+  <body>
+    <div id="root"><!--app-html--></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

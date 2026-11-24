@@ -1,0 +1,458 @@
+// App-wide state: the signed-in account (/auth/me), toasts, and re-auth
+// (the passkey check the server asks for before sensitive actions).
+
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { AnimatePresence, LayoutMotion, m, rise, usePresenceProps } from '../lib/animate'
+import { KeyRound, ShieldCheck } from 'lucide-react'
+import { Button, Dialog, Input, Spinner } from '../components/ui'
+import { api, ApiError, retryConfirmed } from './lib/api'
+import { errorMessage, getPasskey } from './lib/webauthn'
+import { leaveTo, navigateSoon } from './lib/router'
+import { ADD_PASSKEY_EVENT } from './lib/events'
+import { formatDateTime } from './lib/format'
+import { afterAll, afterHead, afterPasskey } from './reauthQueue'
+
+// ---- Session ----
+
+const SessionContext = createContext(null)
+
+export function SessionProvider({ children }) {
+  // anon: the signed-out answer (sign-up mode, a bot check, a server move).
+  const [state, setState] = useState({ me: null, anon: null, loading: true, error: null })
+  const refresh = useCallback(async () => {
+    try {
+      let me = await api.get('/auth/me')
+      // A tailnet login linked to an account: GET /auth/me never signs in, so the console asks for the
+      // session with a POST, once. If that fails, the sign-in page shows "Continue as ...".
+      if (!me.user && me.tailnet?.state === 'linked') {
+        const signedIn = await api.post('/auth/tailnet/sign-in', {}).catch(() => null)
+        if (signedIn?.user) me = await api.get('/auth/me')
+      }
+      setState({ me: me.user ? me : null, anon: me.user ? null : me, loading: false, error: null })
+      return me.user ? me : null
+    } catch (error) {
+      setState((current) => ({ ...current, loading: false, error }))
+      return null
+    }
+  }, [])
+  useEffect(() => {
+    refresh()
+  }, [refresh])
+  const value = useMemo(() => ({ ...state, refresh }), [state, refresh])
+  return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>
+}
+
+export const useSession = () => useContext(SessionContext)
+
+// ---- Toasts ----
+
+const ToastContext = createContext(() => {})
+
+export function ToastProvider({ children }) {
+  const [toasts, setToasts] = useState([])
+  const counter = useRef(0)
+  const toast = useCallback((message, tone = 'ok') => {
+    const id = ++counter.current
+    setToasts((list) => [...list.slice(-2), { id, message, tone }])
+    window.setTimeout(() => setToasts((list) => list.filter((item) => item.id !== id)), 4500)
+  }, [])
+  return (
+    <ToastContext.Provider value={toast}>
+      {children}
+      <div
+        className="pointer-events-none fixed inset-x-0 bottom-4 z-[80] flex flex-col items-center gap-2 px-4"
+        role="status"
+        aria-live="polite"
+        data-sw-toasts
+      >
+        {/* In from below, out with a fade; the rest close the gap (layout). */}
+        <LayoutMotion>
+          <AnimatePresence initial={false}>
+            {toasts.map((item) => (
+              <ConsoleToast key={item.id} item={item} />
+            ))}
+          </AnimatePresence>
+        </LayoutMotion>
+      </div>
+    </ToastContext.Provider>
+  )
+}
+
+function ConsoleToast({ item }) {
+  const presence = usePresenceProps({ 'data-sw-toast': item.tone })
+  return (
+    <m.div
+      layout
+      {...rise}
+      className={
+        item.tone === 'bad'
+          ? 'pointer-events-auto max-w-md rounded-lg border border-bad/40 bg-surface px-4 py-2.5 text-sm text-bad shadow-pop'
+          : 'pointer-events-auto max-w-md rounded-lg border border-line bg-fg px-4 py-2.5 text-sm text-surface shadow-pop'
+      }
+      {...presence}
+    >
+      {item.message}
+    </m.div>
+  )
+}
+
+export const useToast = () => useContext(ToastContext)
+
+// ---- Re-auth ----
+// withReauth(action) runs the action; if the server answers reauth_required,
+// a dialog asks for the passkey (a click, so every browser allows the
+// prompt), then the action runs once more. The console never asks on its
+// own: by default a workspace asks for nothing, and the dialog says, in the
+// server's words, which rule asked (the fixed core, or a workspace setting).
+
+const ReauthContext = createContext(null)
+
+export function ReauthProvider({ children }) {
+  const { me, refresh } = useSession()
+  // A recovery-code session has no passkey to confirm with (often none at
+  // all): it is told to add one first.
+  const recovery = Boolean(me?.viaRecovery)
+  const [tryExisting, setTryExisting] = useState(false)
+  // The requests waiting for the dialog ({ resolve, reject, message, ... }),
+  // in order; the first is the one shown (console/reauthQueue.js).
+  const [queue, setQueue] = useState([])
+  const queueRef = useRef([])
+  const pending = queue[0] || null
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+  const [typedValue, setTypedValue] = useState('')
+  // A new request at the head starts the dialog over.
+  const replaceQueue = useCallback((next) => {
+    const head = queueRef.current[0]
+    queueRef.current = next
+    setQueue(next)
+    if (next[0] !== head) {
+      setError(null)
+      setTryExisting(false)
+      setTypedValue('')
+    }
+  }, [])
+  // Takes the answered requests off the queue and returns them.
+  const settle = useCallback(
+    (step) => {
+      const { done, rest } = step(queueRef.current)
+      replaceQueue(rest)
+      return done
+    },
+    [replaceQueue],
+  )
+
+  const ask = useCallback(
+    (message, { stepUp = null, addFirst = false, typed = null } = {}) =>
+      new Promise((resolve, reject) => {
+        replaceQueue([...queueRef.current, { resolve, reject, message, stepUp, addFirst, typed }])
+      }),
+    [replaceQueue],
+  )
+
+  const withReauth = useCallback(
+    async (action) => {
+      try {
+        return await action()
+      } catch (failure) {
+        // The server decides, route by route: it asks for the passkey (reauth_required) or, for an account that
+        // has none because its tailnet signs it in, says to add one first (passkey_required).
+        if (!(failure instanceof ApiError)) throw failure
+        // No passkeys on this server (Tailscale is the sign-in): the few things that always ask take a
+        // typed confirmation, which goes with the action's requests when it runs again.
+        if (failure.code === 'confirm_required' && failure.details?.confirm) {
+          const typed = await ask(failure.message, { stepUp: failure.stepUp, typed: failure.details })
+          return retryConfirmed(failure, typed, action)
+        }
+        if (!['reauth_required', 'passkey_required'].includes(failure.code)) throw failure
+        await ask(failure.message, { stepUp: failure.stepUp, addFirst: failure.code === 'passkey_required' })
+        return action()
+      }
+    },
+    [ask],
+  )
+
+  const confirm = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      const { options } = await api.post('/auth/reauth/options', {})
+      const response = await getPasskey(options)
+      await api.post('/auth/reauth/verify', { response })
+      // A recovery session confirmed by a passkey is a passkey session now.
+      if (recovery) await refresh()
+      // The session is confirmed: every request waiting for a passkey goes on.
+      for (const done of settle(afterPasskey)) done.resolve()
+    } catch (failure) {
+      setError(errorMessage(failure))
+    } finally {
+      setBusy(false)
+    }
+  }
+  const cancelled = () => Object.assign(new Error('Cancelled.'), { cancelled: true })
+  const cancel = () => {
+    if (busy) return
+    for (const done of settle(afterHead)) done.reject(cancelled())
+  }
+  const addPasskey = () => {
+    // Off to the account page: nothing waiting is answered here.
+    for (const done of settle(afterAll)) done.reject(cancelled())
+    // Closing the dialog goes Back first; the account page opens its
+    // add-passkey dialog from the #add-passkey it lands on.
+    navigateSoon('/account#add-passkey')
+    window.setTimeout(() => window.dispatchEvent(new Event(ADD_PASSKEY_EVENT)), 450)
+  }
+  const typed = pending?.typed || null
+  const typedRight = Boolean(typed) && typedValue.trim() === String(typed.confirm).trim()
+  const confirmTyped = (event) => {
+    event?.preventDefault()
+    if (!typedRight) return
+    const value = typedValue.trim()
+    for (const done of settle(afterHead)) done.resolve(value)
+  }
+  const noPasskey = Boolean(pending?.addFirst)
+  const askAdd = noPasskey || (recovery && !tryExisting)
+  const onHold =
+    me?.passkeys
+      ?.map((key) => key.onHoldUntil)
+      .filter(Boolean)
+      .sort()[0] || null
+  const held = Boolean(onHold) && !noPasskey
+
+  return (
+    <ReauthContext.Provider value={withReauth}>
+      {children}
+      <Dialog
+        open={Boolean(pending)}
+        onClose={cancel}
+        title={typed ? 'Type to confirm' : askAdd ? (held ? 'Your new passkey is on hold' : 'Add a passkey first') : "Confirm it's you"}
+        footer={
+          typed ? (
+            <>
+              <Button size="touch" variant="ghost" onClick={cancel} className="lg:h-10">
+                Cancel
+              </Button>
+              <Button
+                size="touch"
+                variant="default"
+                onClick={confirmTyped}
+                disabled={!typedRight}
+                data-sw-confirm-typed
+                className="lg:h-10"
+              >
+                <ShieldCheck size={16} aria-hidden="true" />
+                Confirm
+              </Button>
+            </>
+          ) : askAdd && held ? (
+            // A passkey added in this session is on hold: another one would be too.
+            <Button size="touch" variant="default" onClick={cancel} data-sw-reauth-close className="lg:h-10">
+              Close
+            </Button>
+          ) : askAdd ? (
+            <>
+              <Button size="touch" variant="ghost" onClick={cancel} className="lg:h-10">
+                Cancel
+              </Button>
+              <Button size="touch" variant="default" onClick={addPasskey} data-sw-reauth-add-passkey className="lg:h-10">
+                <KeyRound size={16} aria-hidden="true" />
+                Add a passkey
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button size="touch" variant="ghost" onClick={cancel} disabled={busy} className="lg:h-10">
+                Cancel
+              </Button>
+              <Button size="touch" variant="default" onClick={confirm} disabled={busy} data-sw-reauth className="lg:h-10">
+                {busy ? <Spinner /> : <ShieldCheck size={16} aria-hidden="true" />}
+                Use passkey
+              </Button>
+            </>
+          )
+        }
+      >
+        <div className="space-y-2 px-5 py-4 text-sm text-muted">
+          {typed ? (
+            <form onSubmit={confirmTyped} className="space-y-3" data-sw-confirm-required={typed.confirms || ''}>
+              <p>
+                Shapewall always asks before this.{' '}
+                {typed.confirms === 'workspace-id' ? 'You are in more than one workspace with this name, so type the id of this one' : null}
+                {typed.confirms === 'workspace' ? 'Type the workspace’s name' : null}
+                {typed.confirms === 'account' || !typed.confirms ? 'Type your handle' : null},{' '}
+                <span className="font-medium break-all text-fg">{typed.confirm}</span>, to confirm.
+              </p>
+              <Input
+                size="touch"
+                value={typedValue}
+                onChange={(event) => setTypedValue(event.target.value)}
+                aria-label={
+                  typed.confirms === 'workspace-id'
+                    ? 'The workspace’s id'
+                    : typed.confirms === 'workspace'
+                      ? 'The workspace’s name'
+                      : 'Your handle'
+                }
+                autoCapitalize="none"
+                autoComplete="off"
+                spellCheck={false}
+                autoFocus
+                data-sw-confirm-typed-input
+              />
+              <p className="text-xs">
+                Your Tailscale account is the sign-in on this server, so there is no passkey to check. Anything running as you on one of
+                your tailnet devices can do this too.
+              </p>
+            </form>
+          ) : noPasskey ? (
+            <p data-sw-reauth-no-passkey>{pending.message}</p>
+          ) : askAdd && held ? (
+            <>
+              <p data-sw-reauth-recovery data-sw-reauth-held>
+                You signed in with a recovery code. The passkey you added then can confirm changes like this one from{' '}
+                <span className="font-medium text-fg">{formatDateTime(onHold)}</span>: for your safety, not sooner.
+              </p>
+              <button
+                type="button"
+                className="text-[13px] font-medium text-accent underline-offset-2 hover:underline"
+                onClick={() => setTryExisting(true)}
+              >
+                I still have an older passkey: use it
+              </button>
+            </>
+          ) : askAdd ? (
+            <>
+              <p data-sw-reauth-recovery>
+                You signed in with a recovery code, so there is no passkey to confirm this change with. Add a passkey first: for your
+                safety, a passkey added this way can confirm changes like this one 24 hours after it is added.
+              </p>
+              <button
+                type="button"
+                className="text-[13px] font-medium text-accent underline-offset-2 hover:underline"
+                onClick={() => setTryExisting(true)}
+              >
+                I still have a passkey: use it
+              </button>
+            </>
+          ) : (
+            <p data-sw-reauth-why={pending?.stepUp || ''}>{pending?.message || 'Confirm with your passkey first.'}</p>
+          )}
+          {error ? (
+            <p className="text-bad" role="alert">
+              {error}
+            </p>
+          ) : null}
+        </div>
+      </Dialog>
+    </ReauthContext.Provider>
+  )
+}
+
+export const useReauth = () => useContext(ReauthContext)
+
+// Runs an action with re-auth, a busy flag and an error message; a cancelled
+// re-auth is not an error. A second run while one is busy is dropped (a
+// double click, Enter held down). Outside the signed-in console there is no
+// re-auth dialog: the action just runs.
+export function useAction() {
+  const withReauth = useReauth()
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+  const running = useRef(false)
+  const run = useCallback(
+    async (action) => {
+      if (running.current) return undefined
+      running.current = true
+      setBusy(true)
+      setError(null)
+      try {
+        return await (withReauth ? withReauth(action) : action())
+      } catch (failure) {
+        if (!failure?.cancelled) setError(errorMessage(failure))
+        return undefined
+      } finally {
+        running.current = false
+        setBusy(false)
+      }
+    },
+    [withReauth],
+  )
+  return { run, busy, error, setError }
+}
+
+// Signs out, then loads `to` afresh. If the server could not be told, the
+// session is still live: say so and stay, rather than look signed out.
+export function useSignOut(to = '/signin') {
+  const toast = useToast()
+  return useCallback(async () => {
+    try {
+      await api.post('/auth/logout', {})
+    } catch (failure) {
+      toast(`You are still signed in: ${errorMessage(failure)}`, 'bad')
+      return
+    }
+    leaveTo(to)
+  }, [toast, to])
+}
+
+// GET a URL into state, with refetch.
+export function useLoad(url) {
+  const [state, setState] = useState({ data: null, error: null, loading: Boolean(url) })
+  const ticket = useRef(0)
+  const load = useCallback(async () => {
+    if (!url) return null
+    const mine = ++ticket.current
+    try {
+      const data = await api.get(url)
+      if (mine === ticket.current) setState({ data, error: null, loading: false })
+      return data
+    } catch (error) {
+      if (mine === ticket.current) setState((current) => ({ data: current.data, error, loading: false }))
+      return null
+    }
+  }, [url])
+  useEffect(() => {
+    setState({ data: null, error: null, loading: Boolean(url) })
+    load()
+  }, [load, url])
+  return { ...state, reload: load, setData: (data) => setState((current) => ({ ...current, data })) }
+}
+
+// A newest-first list read a page at a time. `urlFor(before)` builds the URL
+// (no argument: the first page); a new `urlFor` (the filters changed) starts
+// over, and a page asked for under the old one is dropped when it lands.
+// `key` names the list in the answer; `next` is what to pass as `before`.
+export function usePagedLoad(urlFor, key) {
+  const [state, setState] = useState({ items: [], next: null, loading: true, more: false, error: null })
+  const generation = useRef(0)
+  const reload = useCallback(async () => {
+    const mine = ++generation.current
+    setState((current) => ({ ...current, loading: true, error: null }))
+    try {
+      const data = await api.get(urlFor())
+      if (mine === generation.current) setState({ items: data[key], next: data.next, loading: false, more: false, error: null })
+    } catch (error) {
+      if (mine === generation.current) setState({ items: [], next: null, loading: false, more: false, error })
+    }
+  }, [urlFor, key])
+  useEffect(() => {
+    reload()
+    return () => {
+      generation.current += 1
+    }
+  }, [reload])
+  const next = state.next
+  const loadMore = useCallback(async () => {
+    if (!next) return
+    const mine = generation.current
+    setState((current) => ({ ...current, more: true, error: null }))
+    try {
+      const data = await api.get(urlFor(next))
+      if (mine !== generation.current) return
+      setState((current) => ({ ...current, items: [...current.items, ...data[key]], next: data.next, more: false }))
+    } catch (error) {
+      if (mine === generation.current) setState((current) => ({ ...current, error, more: false }))
+    }
+  }, [urlFor, key, next])
+  return { ...state, reload, loadMore }
+}

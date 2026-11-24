@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Invite your team -- Lumen Notes</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="logo" href="/"><img src="/img/logo.svg" alt="" />Lumen Notes</a>
+        <div class="header-cta"><a class="btn btn-ghost" href="/app/">Skip setup</a></div>
+      </div>
+    </header>
+    <main>
+      <section class="onboard">
+        <div class="steps" aria-label="Step 3 of 3" data-testid="steps">
+          <span class="step done"></span><span class="step done"></span><span class="step done"></span>
+        </div>
+        <h1 class="form-title">Invite people to your space</h1>
+        <p class="lead">They can read and edit what you share with them. You can change that later.</p>
+        <label>Email addresses <textarea rows="3" placeholder="name@example.com, name@example.com"></textarea></label>
+        <label
+          >They can
+          <select>
+            <option>Edit</option>
+            <option>View</option>
+          </select></label
+        >
+        <div class="onboard-actions">
+          <a class="btn btn-ghost" href="/app/" data-testid="invite-skip">Skip for now</a
+          ><a class="btn btn-primary" href="/app/">Send invites</a>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

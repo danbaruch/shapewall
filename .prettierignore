@@ -1,0 +1,15 @@
+dist/
+node_modules/
+package-lock.json
+test/.output/
+**/.shapewall/
+shapewall-export/
+docs/images/
+CHANGELOG.md
+CODE_OF_CONDUCT.md
+website/dist/
+website/.ssr/
+website/node_modules/
+website/package-lock.json
+website/public/
+website/src/assets/

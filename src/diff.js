@@ -1,0 +1,106 @@
+import { regularOutputFile } from './output-path.js'
+// Pixel diffs between two environments' captures of the same page and
+// viewport (pixelmatch). Computed when the board asks for a comparison (and
+// after an environment capture), then cached under
+// <board>/diffs/<a>_<b>/: a transparent PNG with the changed pixels in red,
+// to lay over the screenshot, and index.json with the changed share. A cached
+// entry is reused while both source files are unchanged (size and mtime).
+
+import fs from 'node:fs'
+import path from 'node:path'
+import { PNG } from 'pngjs'
+import { withFileLock } from './lock.js'
+import { DIFF_THRESHOLD, diffPixels } from './pixeldiff.js'
+import { resolveFile, diffsDir, readJson, readManifest, writeFileAtomic, writeJsonAtomic } from './store.js'
+
+// 2: crossed sizes no longer count the corner neither image has.
+const CACHE_FORMAT = 2
+
+// Compares two PNG buffers (see diffPixels). Returns { width, height,
+// changed, total, percent, png } where png is the diff mask (red where
+// changed, transparent elsewhere).
+export function diffPngs(bufferA, bufferB, { threshold = DIFF_THRESHOLD } = {}) {
+  const { data, ...result } = diffPixels(PNG.sync.read(bufferA), PNG.sync.read(bufferB), { threshold })
+  const mask = new PNG({ width: result.width, height: result.height })
+  mask.data.set(data)
+  return { ...result, png: PNG.sync.write(mask) }
+}
+
+function stamp(file) {
+  try {
+    const stat = fs.statSync(file)
+    return `${stat.size}:${Math.round(stat.mtimeMs)}`
+  } catch {
+    return null
+  }
+}
+
+const yieldToLoop = () => new Promise((resolve) => setImmediate(resolve))
+
+// Compares environment `a` with `b` for every page and viewport of the board.
+// Returns { a, b, pages: { [pageId]: { [viewport]: { status, percent?, changed?, total?, diff? } } }, changedPages }
+// status: 'ok' (diff is the mask file name; changed is the exact pixel
+// count, percent only its rounded share), 'missing' (one side has no
+// capture), 'failed' (one side's latest capture of it failed: an older
+// screenshot left behind by a partial recapture is not current).
+export async function compareEnvironments(config, board, a, b, { onlyPages = null } = {}) {
+  const dir = diffsDir(config, board.id, a, b)
+  const indexFile = path.join(dir, 'index.json')
+  // Check the output directory chain before creating the comparison lock.
+  regularOutputFile(config.outputDir, indexFile, { rejectUnsafe: true })
+  const failedOn = [readManifest(config, board.id, a), readManifest(config, board.id, b)]
+  const failed = (pageId, viewport) => failedOn.some((manifest) => manifest?.pages?.[pageId]?.[viewport]?.status === 'failed')
+  return withFileLock(
+    indexFile,
+    async () => {
+      const cached = readJson(indexFile)
+      const entries = cached?.format === CACHE_FORMAT && cached.entries && typeof cached.entries === 'object' ? cached.entries : {}
+      const pages = {}
+      let dirty = false
+      for (const page of board.pages) {
+        if (onlyPages && !onlyPages.includes(page.id)) continue
+        pages[page.id] = {}
+        for (const viewport of page.viewports) {
+          const name = `${page.id}.${viewport}.png`
+          const fileA = resolveFile(config, board.id, `env:${a}`, name)
+          const fileB = resolveFile(config, board.id, `env:${b}`, name)
+          const key = `${page.id}.${viewport}`
+          if (failed(page.id, viewport)) {
+            pages[page.id][viewport] = { status: 'failed' }
+            continue
+          }
+          const sa = fileA && stamp(fileA)
+          const sb = fileB && stamp(fileB)
+          if (!sa || !sb) {
+            pages[page.id][viewport] = { status: 'missing' }
+            continue
+          }
+          const hit = entries[key]
+          if (hit && hit.a === sa && hit.b === sb && fs.existsSync(path.join(dir, name))) {
+            pages[page.id][viewport] = { status: 'ok', percent: hit.percent, changed: hit.changed, total: hit.total, diff: name }
+            continue
+          }
+          let result
+          try {
+            result = diffPngs(fs.readFileSync(fileA), fs.readFileSync(fileB))
+          } catch {
+            pages[page.id][viewport] = { status: 'missing' }
+            continue
+          }
+          writeFileAtomic(path.join(dir, name), result.png)
+          entries[key] = { a: sa, b: sb, percent: result.percent, changed: result.changed, total: result.total }
+          dirty = true
+          pages[page.id][viewport] = { status: 'ok', percent: result.percent, changed: result.changed, total: result.total, diff: name }
+          // Big boards: let the server answer other requests between pages.
+          await yieldToLoop()
+        }
+      }
+      if (dirty) writeJsonAtomic(indexFile, { format: CACHE_FORMAT, entries })
+      const changedPages = Object.values(pages).filter((viewports) =>
+        Object.values(viewports).some((item) => item.status === 'ok' && item.changed > 0),
+      ).length
+      return { a, b, pages, changedPages }
+    },
+    { timeoutMs: 120000, staleMs: 300000 },
+  )
+}

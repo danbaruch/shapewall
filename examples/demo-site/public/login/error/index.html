@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sign in -- Lumen Notes</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="logo" href="/"><img src="/img/logo.svg" alt="" />Lumen Notes</a>
+        <nav class="nav" aria-label="Main">
+          <a href="/features/">Features</a>
+          <a href="/pricing/">Pricing</a>
+          <a href="/templates/">Templates</a>
+          <a href="/blog/">Blog</a>
+        </nav>
+        <div class="header-cta">
+          <a class="btn btn-ghost" href="/login/">Sign in</a>
+          <a class="btn btn-primary" href="/signup/">Start free</a>
+          <button class="btn btn-ghost menu-button" type="button" aria-label="Open menu">Menu</button>
+        </div>
+      </div>
+    </header>
+    <main>
+      <section class="auth">
+        <form method="post" action="/session" aria-label="Sign in">
+          <h1 class="form-title">Welcome back</h1>
+          <div class="alert alert-error" role="alert" data-testid="login-error">
+            That email and password do not match. Try again or reset your password.
+          </div>
+          <label>Email <input type="email" name="email" class="invalid" value="reader@example.com" /></label>
+          <label>Password <input type="password" name="password" class="invalid" /></label>
+          <button class="btn btn-primary" type="submit">Sign in</button>
+          <p class="meta" style="margin: 0"><a href="/reset-password/" data-testid="reset-link">Forgot your password?</a></p>
+        </form>
+      </section>
+    </main>
+  </body>
+</html>

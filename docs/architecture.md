@@ -1,0 +1,308 @@
+# Architecture
+
+Shapewall is three parts that share one folder of plain files.
+
+```
+shapewall.config.json ──► capture (Playwright) ──► .shapewall/<board>/captures/*.png|*.thumb.png|*.html + manifest.json
+                                                        │
+                    shapewall serve (Express) ◄──────────┘  + comments.json, variants.json, journeys.json, versions/,
+                                │                               envs/<env>/captures/, diffs/, status.json, capture.lock
+                                │
+                     React Flow client (dist/client)
+```
+
+| Path                        | Role                                                                                            |
+| --------------------------- | ----------------------------------------------------------------------------------------------- |
+| `src/config.js`             | Loads and validates the config, collecting every problem with its JSON path.                    |
+| `src/capture/capture.js`    | Runs captures: browser contexts per viewport, waits, actions, screenshots, live HTML.           |
+| `src/capture/actions.js`    | Runs page and setup actions (captures and page checks); step-named failures.                    |
+| `src/capture/requests.js`   | The private-host guard, the `block` list and `localStorage` seeds of a capture context.         |
+| `src/capture/live.js`       | The in-page DOM snapshot and the Node-side build of one self-contained HTML document.           |
+| `src/capture/sanitize.js`   | The allowlist HTML and CSS sanitizer every snapshot goes through.                               |
+| `src/lock.js`               | The board-job lock (pid + process start time) and a short file lock for JSON writes.            |
+| `src/store.js`              | File layout, atomic JSON writes, comments, variants, capture versions, capture state.           |
+| `src/links.js`              | Matches the links read from a captured page to configured pages.                                |
+| `src/journeys.js`           | Journeys from the config and the board (journeys.json).                                         |
+| `src/journey-paths.js`      | Branching journeys: fork validation, the step graph, paths. Shared with the client.             |
+| `src/diff.js`               | Pixel diffs between environments (pixelmatch), cached per pair.                                 |
+| `src/server/app.js`         | The Express app: API, capture and live files with their headers, the built client.              |
+| `src/feedback.js`           | Comments as a work list (`shapewall comments`), for people and agents.                          |
+| `src/watch.js`              | `shapewall watch`: claims new comments and hands them to an agent command.                      |
+| `src/mcp.js`                | `shapewall mcp`: the stdio MCP server (comments, replies, status, recapture).                   |
+| `src/png.js`                | A minimal PNG decoder/encoder, to crop a capture around a pin for the MCP server.               |
+| `src/agent/`                | The board chat: config, `/api/agent/*` routes, threads, prompt and quoted data, backends.       |
+| `client/src/chat/`          | The chat panel: threads, streaming Markdown, attachments and crops, voice in, read aloud.       |
+| `src/accounts/`             | Local account storage, shared WebAuthn, recovery, sessions and account activity.                |
+| `src/shared/`               | Shared role and reporting helpers, SQLite utilities and account token primitives.               |
+| `src/hosted/`               | The hosted server (FSL): accounts, workspaces, tenancy, tokens, push, share links, audit.       |
+| `client/src/console/`       | Console (second Vite entry, `dist/console`): hosted accounts, or local Projects and Settings.   |
+| `src/doctor.js`             | `shapewall doctor`: environment checks and the matching browser download.                       |
+| `src/export.js`             | Static, read-only export.                                                                       |
+| `client/src/board/`         | Canvas, layout, nodes, arrows, journeys, compare, before/after, the comments panel.             |
+| `client/src/components/ui/` | The UI kit (Radix + Tailwind): buttons, selects, menus, dialogs, ... (`docs/design-system.md`). |
+| `client/sw.js`              | The board's service worker (app shell only), built into `dist/client/sw.js`.                    |
+
+## Capture
+
+For each page and viewport Shapewall opens a fresh browser context with the viewport size (device scale 1; mobile emulation, touch and a
+mobile user agent for `tablet` and `phone`, and for any viewport name that starts with one, such as `phone-landscape`), loads the page,
+waits for `load`, then for network idle (bounded by `timeouts.settle`), then for `waitFor`, then runs `actions`, then waits until every
+image intersecting the frame has decoded (lazy images in view are switched to eager). After a short pause for late renders it takes two
+screenshots of the same fixed frame through the DevTools protocol: full size and a scaled thumbnail (a quarter of the desktop width, half
+of the phone width). The frame starts at the page's current scroll position (the clip is in document coordinates), so an action or a
+hash link that scrolls the page is shot where it scrolled to. A viewport with `layoutHeight` lays the page out in a window of that height
+and shoots the frame's `height` past it.
+
+Board settings shape the context too: a board's `viewports` replace the top-level list for it; `block` patterns are aborted by one
+context route (with the private-host guard), and the requests it blocked are left out of the network warnings; `localStorage` seeds go
+in through an init script that only writes on the page's own origin; `reducedMotion` defaults to `reduce`; the color scheme is always
+light. Live HTML is frozen to those preferences (`src/capture/media-scheme.js` rewrites `prefers-color-scheme` and the forced
+`prefers-reduced-motion` queries to always or never match, and pins the root `color-scheme`), so a viewer whose browser prefers dark
+still sees what the screenshot shows. A board `setup` runs once
+per viewport, on first use, in its own context (`runSetup`), and its `storageState()` (cookies, localStorage, IndexedDB) is the state
+every page in its scope starts from, so a guest entry happens once per capture instead of once per shot. Actions run in
+`src/capture/actions.js`, shared with page checks: a failure names the step (`action 3 (click "...") timed out after 45 s`) from the
+config only, never from page text or Playwright's call log.
+
+Why fixed frames: comparable cards on one canvas, predictable memory, and headless Chrome's minimum window width does not affect device
+emulation through Playwright, so a 390 px phone capture is a real 390 px layout.
+
+Board jobs are serialized per board by `capture.lock` (`src/board-job.js`): a capture, a checks run (from the terminal or the board) and
+an agent Apply all hold it, and its body names the kind, so the board reports a capture only when one runs. The lock is created with its
+content in one step (written to a temp file, then hard-linked into place). A lock counts as held only while its process exists and,
+on Linux, started at the recorded time, so a recycled pid reads as stale and a crashed run never blocks the next one. A full run writes to
+`captures.next/` and swaps it in at the end (a run cut short between the two renames gets `captures.prev/` back at the next capture or
+`serve` start). `--only` stages each shot beside `captures/`, moves its files into place only once the whole shot succeeded and writes
+its manifest entry at once, so an interrupted run leaves every page either all old or all new.
+
+Links: after the screenshot, the page's `<a href>` and `<area href>` values (as resolved by the browser, at most 2000) are matched to the
+board's pages in Node (`links.js`) and only the matching page ids are written to the manifest entry (`links`). Unmatched or malformed
+hrefs are dropped there; nothing from them is stored.
+
+Versions: each successful shot gets a version id (its time plus a random suffix) in the manifest. On the default environment, the shot it
+replaces is copied to `versions/` first (a full run copies from the old `captures/` after the swap; `--only` copies before the shot and
+removes the copy again if the shot fails), then each page and viewport is pruned to the newest `keepVersions` (config).
+
+Environments: `--env ID` captures another environment into `envs/<id>/captures/` (same layout, same lock), then warms the pixel diffs
+against the default environment.
+
+## Live HTML
+
+In the page, after the screenshot:
+
+- The document element is cloned. Form values are frozen into attributes (text, checkboxes, selects); password and hidden values are not.
+- Stylesheets are walked in cascade order, including `@import`ed sheets and adopted sheets. Rules whose selectors match nothing on the page
+  are dropped (bundles are mostly other pages); `@media`, `@supports`, `@layer` and `@container` blocks keep their matching rules.
+- Images are redrawn onto a canvas from their decoded pixels at twice their displayed width and exported as WebP, which makes them small
+  and guaranteed complete. Canvas and video elements become still images.
+- Scripts, frames, objects, `link`, `base`, `template`, `meta http-equiv` and every `on*` attribute are removed before anything leaves the
+  page.
+
+In Node:
+
+- Cross-origin stylesheets and images the page could not read are taken from the browser's own response bodies, only when the response was
+  a complete 200 (format signature and end marker checked, `Content-Length` compared when the body was not compressed).
+- Every `url()` is resolved to a `data:` URI or replaced with `none`. An image budget (3 MB per page) drops the largest images first;
+  dropped images become same-size grey placeholders so the layout holds. Identical images are stored once, as a CSS rule.
+- The whole document goes through `sanitize.js` (allowlist, see the README), then gets its CSP `<meta>` tag. The file is capped at 5 MB.
+
+On the board, the live document is rendered at the capture's native width inside the frame and scaled down with a CSS transform, so the
+layout matches the screenshot. Capture also renders the sanitized document at that native size and writes an element map
+(`<page>.<viewport>.elements.json`): selectors, short text, boxes and hit order. The board hit-tests and resolves pins against this map,
+so the frame uses `sandbox=""` with an opaque origin. Controls stay inert while text is selected. Only older local captures without a
+map keep the DOM path and `allow-same-origin` until recaptured; hosted boards and static exports always use an opaque frame.
+
+### Limits
+
+- The snapshot is a frozen state: menus that only open with JavaScript stay closed, and `:hover` styles apply only while hovering.
+- Content inside cross-origin iframes (embedded maps, videos) is dropped.
+- Web fonts are inlined up to a budget (1.5 MB); above it the page falls back to system fonts in the live view (the screenshot is exact).
+- Shadow DOM content is not cloned.
+
+## Comment anchors
+
+When a comment is made on live HTML, the element under the click is turned into an anchor:
+
+- The element itself, or the nearest interactive ancestor (link, button, input, label, image, ...). A run of inline words (a
+  `<strong>`, a `<small>`) means the block it is in, never anything a few pixels big, mostly off the page or as big as the whole
+  page (`hitTest()` in `src/capture/element-map.js`, `elementAt()` in `client/src/board/anchors.js` on the DOM). Holding Alt
+  (Option on a Mac) while picking steps out to the container around it, and the click pins to that container.
+- A selector path from the closest stable hook: a unique `#id`, `[data-testid]` or `[aria-label]`, then `:nth-of-type()` steps. The server
+  accepts only this grammar, so a stored selector can never be an arbitrary CSS expression.
+- The element's text (first 80 characters) and the click offset inside it.
+- The element's size as a share of the page (`w`, `h`), so the pin sits on the element's corner (top right, outside it; top left near
+  the right edge, below it near the top) in screenshot mode too, instead of on top of what it is about.
+
+In comment mode the element a click would pin to is outlined while the mouse is over a live page (a large element, a fifth of the
+page or more, is dashed), with what a person would call it in a small tab outside its top left corner: a short kind and, when it
+helps, a short name ("Card · Free", "Heading · Simple pricing", "Link · Start free", "Navigation · Main", "Paragraph"). The names
+come from one pure function, `elementName()` in `src/capture/element-name.js`: the ARIA role, then the tag (and an input's type),
+then aria-label, alt, the field's label or placeholder; a container is named by its own heading (the first and only heading at
+the highest level inside it), never by the text of everything in it, and a wrapper with no name of its own is called what it
+wraps. Words are cut at a word boundary. The same names are used for the composer's "Commenting on", a thread's "Pinned to"
+(learnt from the live page's element map when it has been live, else from the stored selector and text: `anchorName()`) and the
+chat's element mentions. The stored anchor and its selector are unchanged. The tab sits above the element, below it at the top of
+the page, else inside its top edge held at the top of the screen; it never leaves the page or the visible canvas, and it and the
+outline keep one size on screen at any zoom (`--sw-inv`). The outline goes once a click picks the element (the picked element
+keeps a solid outline while the composer is open) and while the page's thread is open (a click then closes the thread); the open thread's element, and the element of a pin or comment row under the mouse, get a quiet outline. On a touch
+screen the element under the finger is outlined and named from touch-down; a drag pans and a second finger pinches, and only a
+tap pins, after which the picked element's name shows for a moment.
+
+To place the pin later: the selector is tried first and accepted only if the text still matches; otherwise the first element of the same
+tag with exactly that text wins. If neither is found the pin stays at its stored position with a dashed ring ("this moved"). In screenshot
+mode pins use the stored position.
+
+## Canvas controls
+
+In `client/src/board/navigation.js` (React Flow's own wheel, Space and zoom-key handling is off; it keeps left-drag and
+touch):
+
+| Input                                             | Does                                                                    |
+| ------------------------------------------------- | ----------------------------------------------------------------------- |
+| Wheel                                             | Pan up and down                                                         |
+| Shift+wheel                                       | Pan sideways                                                            |
+| Trackpad two-finger scroll                        | Pan in any direction                                                    |
+| Ctrl+wheel, Cmd+wheel, trackpad pinch             | Zoom about the cursor (0.02x to 4x; a mouse notch is about 1.3x)        |
+| Space+drag, middle-button drag, drag on the board | Pan (Space and middle drag work over pages and in comment mode as well) |
+| The Hand tool (H): drag anywhere                  | Pan, over pages and pins too; a click selects and opens nothing         |
+| Touch: one finger, two-finger pinch               | Pan, zoom                                                               |
+| + or =, -, with or without Ctrl/Cmd               | Zoom in, zoom out (about the middle of the canvas)                      |
+| Ctrl/Cmd+0, Shift+0                               | Zoom to 100%                                                            |
+| Shift+1                                           | Fit the whole board                                                     |
+
+Space pans while the mouse is over the canvas, except in text fields and on a control reached with the keyboard (Space presses it).
+A Space+click never selects a page or starts a comment. Wheel and drag steps move the camera without saving it; the URL camera and the
+settled zoom update once it rests (150 ms after the last wheel event, or on mouse up). Safari's trackpad pinch (gesture events) zooms
+the same way. Scrolling inside a `nowheel` element (the frame bar, a live page being selected) scrolls it instead.
+
+Over something floating on the canvas (the zoom controls, the tools, a note, an open thread or composer, which live in a portal
+but sit over the canvas), a list that overflows in the wheel's axis scrolls itself and anything else pans the board, so there are no
+dead spots; the minimap keeps its own wheel, and a pinch there zooms the board, never the browser page. Wheel events less than
+120 ms apart are one gesture and stay where it started: a trackpad pan that carries on (momentum) while a thread slides under the
+still cursor keeps panning instead of scrolling the thread. The side panels and dialogs are outside the canvas and scroll as usual.
+
+Live pages: the wheel over a live page is always the board's (the frame lets go of the mouse), so a live page never traps a pan.
+To scroll or select inside one, use **Select text** on the page's bar (it is not a board tool; Select stays the tool in use): the
+page gets a text cursor, and a click on it hands the mouse to the page until the pointer leaves it. Esc, a click away from the page,
+Comment or Draw, or **Done** (the same button, pressed) ends it. A capture that is not live has no text, so its bar offers **Open
+live** instead.
+
+The zoom keys take Ctrl/Cmd with +, - and 0 from the browser while the board has the keyboard; in a text field, a
+dialog, a menu or a list (and inside a live page that has focus) they stay the browser's page zoom. The middle button's press is
+taken where it lands on the board, so it never starts autoscroll (Windows) or pastes the primary selection (Linux).
+
+## Board rendering
+
+- Pages are grouped (config order), each group laid out in rows; groups wrap so the board is roughly screen-shaped. Variants sit to the
+  right of their page, joined by a dashed edge.
+- Images: thumbnails until a frame is drawn wider on screen than the thumbnail has pixels, then the full PNG. Decided from the zoom once
+  the camera has rested, never mid-animation.
+- Live HTML: a frame goes live when it is drawn at least 40% of its native width (or half the canvas, whichever is smaller), or when "Open
+  live" pinned it. At most two at once, nearest the center first.
+- Arrows are a custom React Flow edge that runs border to border between two cards, curving slightly so a -> b and b -> a stay apart.
+  Thickness and arrowheads are divided by the zoom, so they read the same at any zoom. Link arrows are opt-in (**Views**, then **Links between pages**), and only
+  the hovered or selected card's arrows are drawn once a board has more than 150 links. Links into pages that at least half the pages
+  link to (the nav and the footer, `globalTargets`) are hidden until "Show them" (`la=1`). Arrows are not tab stops, and their labels
+  use page titles.
+- Journeys fade the cards that are not in the journey, put numbered badges on the ones that are, and fly the camera to each step. A
+  branching journey is shown one path at a time (`resolvePath` with the branches picked); the other branches' arrows are dashed.
+- Compare mode lays two frames per viewport side by side (one per environment) and shows screenshots only, with the cached diff mask
+  over the second. A variant keeps its single frame there, beside its page's pair: it is one capture of one idea, with no second
+  environment to compare it against. Comments work while comparing: a comment placed on one side stores that side's environment
+  (`environment`, an environment id; none outside compare mode, which is the default environment), and each side draws the
+  comments left on it (`commentSide.js`), so a pin is on its own side in every later compare, swapped too. It sticks to that
+  side's elements: each environment's element map is served on its own route (`/api/boards/:id/env-elements/:env/:file`)
+  and a static export carries them under `envs/<id>/`. A comment on an
+  environment that is not one of the two compared is drawn on the first, and its thread says so. Outside compare mode the board
+  shows the default environment, so a comment left on another one keeps its pin there and its thread names the environment it was
+  left on. Only the default environment keeps capture versions, so a comment on another one stores no `captureVersion`, and an
+  agent's `files` point at that environment's capture. On a phone the compare bar is one row (the two environments, swap, the view
+  options behind one button, leave), so the board and the thread sheet keep the room they have outside compare mode.
+- Each frame's label (viewport, environment, live) sits in a strip between the card header and the frame, never on the captured page.
+- The selected card's action bar belongs to one view: switching viewport, compare or a journey, and Fit view, clear the selection, and
+  the bar hides while the frame is a thumbnail on screen (its longer side under 160 px). Tapping a thumbnail flies to it first, leaving
+  room above the card, so the bar sits above it and never over its title or badges. When the card fills the canvas the bar is one
+  button in the card's header. On local boards it has "Capture" (that page only, `POST .../capture { pages: [id] }`).
+- "Go to page" fits the page's content, not its whole fixed frame: the lowest row of the thumbnail that differs from the plain
+  background below it (`contentExtent.js`).
+- A variant made only for viewports the mode does not show (a tablet-only variant in Desktop mode) is a short card that says so, with a
+  button to show its viewport.
+- Phone-width screens (640 px and narrower) open on the phone viewport when the board has one and the URL names none, on the first
+  group at a readable zoom (two cards across), top-aligned. Pins never shrink below their 44 px touch target, and a tap in comment mode
+  on a page drawn small zooms to it first, so the next tap can pin to an element.
+- The desktop toolbar never truncates: when its two zones do not fit side by side, labels drop one step at a time (the side
+  panel toggles first, then Views, then the screen-size toggle), computed from fixed control widths and measured text, never from
+  the rendered toolbar (`FIT_STEPS` in `client/src/board/toolbarFit.js`). Links, Compare and the minimap are in the **Views**
+  menu. Notes about what the canvas shows (the tip, the
+  viewport switch, the links note) are pills in one stack at its top. The board tools (Select, Hand, Comment, Draw) float at
+  the bottom centre of the canvas, with the note for the tool in use (the comment hint, the drawing bar) just above them, so
+  turning comment mode on never moves the canvas; they stay clear of the zoom controls and the minimap at every width
+  (`client/src/board/toolDock.js`), and on a phone they are the bottom bar. The minimap
+  can be turned off and hides while a page is live. Resolve and delete show a toast with Undo (a delete is sent after a few seconds,
+  or when the page is left).
+- Keyboard: each card is one tab stop; the arrow keys move through its pins and buttons, Esc returns to the card, Enter opens its
+  action bar. "Skip to comments" is the first tab stop. After a pick from a toolbar list, focus returns to the canvas, and a closed
+  list ignores typed letters (Radix type-ahead), so shortcuts like C keep working. Esc closes a journey. The board tools are one
+  tab stop (a labelled toolbar): the arrow keys, Home and End move between them; V is Select, H is Hand, C is Comment (none
+  of them while typing) and Esc ends on Select.
+- URL state: board, viewport mode, comment filter, selected comment, camera, journey, branches and step, links, and compare pair live in the
+  query string.
+- Overlays (dialogs, the comment sheet, the selected card, comment mode) each own a history entry, so Back closes the topmost one.
+
+## Comments on the board
+
+Pins are avatar bubbles (the author's initials and colour, a pointed corner on the spot, a count badge
+for replies, a dot for news) drawn at screen size; pins closer than about 30 screen pixels on a frame merge into one bubble with a
+count, and clicking it zooms in until they part (`clusterPins` in `client/src/board/pins.jsx`). Hovering a pin previews the thread in
+a kit `HoverCard`. Resolved threads are hidden by the Open filter, which is the toggle for showing them.
+
+C (or the Comment tool, in the board tools at the bottom of the canvas, or Comment on the selected page's bar, which also names that page in the hint) turns comment mode on; a click drops a draft pin and an inline composer (`ComposerPopover`) opens beside
+it: Enter posts, Shift+Enter adds a line, Esc cancels and stays in comment mode, @ suggests people. The composer, the reply box and
+the edit box share one composer box (`client/src/board/ComposerBox.jsx`: the text on top, growing with it to a
+maximum and then scrolling, `client/src/lib/useAutoGrow.js`; tools, microphone and send in a row along its bottom). The
+microphone is there where the browser has speech recognition
+(`client/src/board/DictationButton.jsx`; listening and errors never move the layout, an error is a bubble at the microphone): the browser's
+`SpeechRecognition` writes at the caret, the rules for joining words to the text around them and the session states are pure
+(`client/src/board/dictation.js`, tested in `test/comment-dictation.test.js`), and `client/src/board/hooks/useCommentDictation.js` drives one
+recognizer at a time and releases it on posting, Esc, unmount and a hidden tab. Shapewall never receives the audio; the browser's
+speech service does the transcription. The open thread is a popover at
+its pin (`ThreadPopover`): resolve, previous and next (also the arrow keys), and a more menu (copy link, edit, ask agent, GitHub,
+history, delete), then the messages with reactions and an inline reply box. Both are Radix popovers anchored to a virtual element
+that reads the pin's position every frame, bounded by the canvas, so they follow pan and zoom, flip to stay on screen and hide when
+the pin leaves the canvas. On phones the thread and the composer are bottom sheets (`Dialog`) and Back closes them.
+
+The list beside the canvas mirrors the pins: picking a row flies to the pin and opens its thread, hovering a row lights up its pin
+and the other way round, and threads with activity since you last opened them carry a dot. "Seen" is per browser
+(`localStorage`, `client/src/lib/unread.js`), not stored on the server.
+
+## Storage
+
+All JSON is written to a temporary file, fsynced and renamed over the old one. Comment and variant changes run under
+`<file>.lock` (exclusive create, with stale-lock takeover), so concurrent writers never lose an update and never see a partial file.
+Comment ids are never reused. Journeys made on the board (`journeys.json`) and the diff cache index use the same writes and locks.
+
+Replies live inside their comment (`replies: [{ id, author, body, createdAt, reactions? }]`), next to `agentStatus` and `agentStatusAt`.
+A comment or reply may carry `reactions: [{ emoji, by: [{ name, handle?, user? }] }]` (six emoji in `src/reactions.js`; the API
+returns `{ emoji, count, by }`), and `editedAt` once its text is edited. Both are optional, so older files read unchanged; reacting
+does not touch `updatedAt`, and the agent views (`shapewall comments`, MCP, the token API) leave reactions out. The hosted store
+keeps them in the `reactions` and `edited_at` columns (migration 3). The agent
+status is the hand-off between `shapewall watch`, MCP clients and people: a watcher claims a comment by changing `agentStatus` from null to
+`queued` inside the same file lock, so the claim is atomic and survives restarts. `<board>/watch.lock` (the capture lock's pid + start
+time scheme) keeps one watcher per board; `<board>/agent/` holds the JSON and log of each command it ran.
+
+## The board as an app
+
+The client ships a web app manifest and a service worker, so the board installs on a phone or desktop and opens in its own window. The
+worker is generated at build time with the list of files of that build (the page, its hashed assets, icons, manifest) and caches only
+those: network first for the page, cache first for the hashed files, and a new cache per build. It never handles `api/` (board data,
+images, live HTML) or a static export's `data/`, so captures and comments are always fresh. It registers only in production builds on
+secure origins (https or localhost); the board works the same without it.
+
+## Local Console
+
+`shapewall serve` serves `/console` and its `/_console/` assets behind the same Host and remote-access gates as the board.
+The shell carries a fixed `shapewall-local-console` marker and a fresh style nonce under a strict CSP. The console entry selects
+`LocalConsole` (`client/src/console/LocalConsole.jsx`), which reads the existing `/api/info` and `/api/boards` APIs; it never starts a hosted sign-in or creates a hosted session.
+Board links preserve the selected board id. General preferences reuse the board settings content, and the existing Agent and update
+capabilities still decide whether protected controls can mount or mutate anything. Local API requests are absolute so trailing slashes
+and direct Console links work.

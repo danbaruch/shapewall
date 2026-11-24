@@ -1,0 +1,354 @@
+/* Usage and Activity (loaded with their lazy chunk). */
+
+/* Recharts draws focus rings of its own on the plot; the cards have theirs. */
+[data-sw-chart] .recharts-wrapper:focus,
+[data-sw-chart] .recharts-surface:focus {
+  outline: none;
+}
+[data-sw-chart] .recharts-wrapper:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* The brush under the time chart: quiet until it is used. */
+[data-sw-chart] .recharts-brush-slide {
+  fill: var(--accent);
+  fill-opacity: 0.14;
+}
+[data-sw-chart] .recharts-brush-traveller rect {
+  fill: var(--line-strong);
+}
+[data-sw-chart] .recharts-brush text {
+  fill: var(--muted);
+  font-size: 10px;
+}
+
+/* The grid scrolls inside itself; keep its scrollbars slim. */
+[data-sw-grid-scroll] {
+  scrollbar-width: thin;
+  overscroll-behavior: contain;
+}
+
+/* Printing the Usage page: the report alone, on white, charts kept whole. */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  [data-sw-usage-report],
+  [data-sw-usage-report] * {
+    visibility: visible;
+  }
+  [data-sw-usage-report] {
+    position: absolute;
+    inset: 0 auto auto 0;
+    width: 100%;
+    padding: 0 8px;
+  }
+  [data-sw-usage-report] .print\:hidden {
+    display: none !important;
+  }
+  [data-sw-chart],
+  [data-sw-tile],
+  [data-sw-top] {
+    break-inside: avoid;
+    box-shadow: none !important;
+  }
+  [data-sw-grid-scroll] {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+}
+
+/* ---- The dashboard grid (Dashboard.jsx; react-grid-layout places the widgets) ---- */
+
+.sw-layout .react-grid-layout {
+  position: relative;
+  transition: opacity 180ms ease;
+}
+/* The first visit: held back until the widgets as tall as their content have been measured (or a moment has
+   passed), then shown at once in their places, so nothing shrinks in front of the reader. */
+.sw-layout[data-sw-layout-ready='false'] .react-grid-layout {
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sw-layout .react-grid-layout {
+    transition: none;
+  }
+}
+.sw-layout .react-grid-item {
+  /* Never a box of its own: the card inside is the widget. */
+  min-width: 0;
+  border-radius: 0.75rem;
+}
+.sw-layout .sw-widget-body > * {
+  height: 100%;
+}
+
+/* While the layout is edited the widgets glide to their places. */
+.sw-layout-editing .react-grid-layout {
+  transition: height 200ms ease;
+}
+.sw-layout-editing .react-grid-item {
+  transition:
+    transform 200ms cubic-bezier(0.2, 0.8, 0.3, 1),
+    width 200ms cubic-bezier(0.2, 0.8, 0.3, 1),
+    height 200ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+.sw-layout-editing .react-grid-item.resizing,
+.sw-layout-editing .react-grid-item.react-draggable-dragging {
+  transition: none;
+  /* Above the sticky edit bar while it is held. */
+  z-index: 40;
+}
+
+/* A widget being edited is the same card as ever: a ring when it is pointed at or has the focus, and it is held anywhere. */
+.sw-layout-editing .sw-widget-body > * {
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+.sw-layout-editing .sw-widget-drag {
+  cursor: grab;
+  /* A finger on a widget drags it while the layout is edited (the page scrolls from the gaps and the bar). */
+  touch-action: none;
+  user-select: none;
+}
+.sw-layout-editing .sw-widget:hover .sw-widget-body > *,
+.sw-layout-editing .sw-widget.resizing .sw-widget-body > * {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+}
+.sw-layout-editing .sw-widget:focus {
+  outline: none;
+}
+.sw-layout-editing .sw-widget:focus-visible .sw-widget-body > * {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.sw-layout-editing .react-draggable-dragging {
+  cursor: grabbing;
+}
+.sw-layout-editing .react-draggable-dragging .sw-widget-body > * {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  box-shadow:
+    0 18px 40px -12px rgb(0 0 0 / 0.28),
+    0 4px 12px -4px rgb(0 0 0 / 0.12);
+}
+/* Its own switches step aside (its options are in its tools), and its heading leaves room for the tools. */
+.sw-layout-editing [data-sw-chart-controls] {
+  display: none !important;
+}
+.sw-layout-editing :is([data-sw-chart-header], [data-sw-top-head], [data-sw-tile-head], [data-sw-budgets-head]) {
+  padding-right: var(--sw-tools, 7rem);
+}
+
+/* Where the widget will land: a quiet tinted place. */
+.sw-layout .react-grid-item.react-grid-placeholder {
+  z-index: 1;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  transition:
+    transform 160ms ease,
+    width 160ms ease,
+    height 160ms ease;
+  user-select: none;
+}
+
+/* The tools in a widget's top right corner while it is edited. */
+.sw-widget-tools {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 2px;
+  /* Quiet until the widget is pointed at: then the tools sit on a small chip of their own. */
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  background: var(--surface);
+  cursor: default;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+.sw-widget-tools > :not(.sw-widget-grip) {
+  opacity: 0.6;
+  transition: opacity 120ms ease;
+}
+.sw-widget:is(:hover, :focus-within, .resizing) .sw-widget-tools {
+  border-color: var(--line);
+  box-shadow: var(--shadow-card, 0 1px 2px rgb(0 0 0 / 0.06));
+}
+.sw-widget:is(:hover, :focus-within) .sw-widget-tools > * {
+  opacity: 1;
+}
+@media (hover: none) {
+  .sw-widget-tools > :not(.sw-widget-grip) {
+    opacity: 1;
+  }
+}
+.sw-widget-grip {
+  display: inline-flex;
+  width: 20px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  color: var(--faint);
+  cursor: grab;
+  touch-action: none;
+}
+@media (pointer: coarse) {
+  /* A finger holds the grip, so it is a finger's size. */
+  .sw-widget-grip {
+    width: 32px;
+    height: 32px;
+    color: var(--muted);
+  }
+}
+.sw-widget:hover .sw-widget-grip {
+  color: var(--fg);
+}
+
+/* Resizing: the right edge, the bottom edge and the corner. Each shows a small grip when the widget is pointed at. */
+.sw-layout .sw-resize {
+  position: absolute;
+  z-index: 4;
+  touch-action: none;
+}
+.sw-layout .sw-resize::after {
+  content: '';
+  position: absolute;
+  opacity: 0;
+  transition:
+    opacity 120ms ease,
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+.sw-layout .sw-resize-e {
+  top: 14px;
+  right: -7px;
+  bottom: 14px;
+  width: 14px;
+  cursor: ew-resize;
+}
+.sw-layout .sw-resize-e::after {
+  top: 50%;
+  left: 5px;
+  width: 4px;
+  height: 32px;
+  max-height: 60%;
+  border-radius: 4px;
+  background: var(--line-strong);
+  transform: translateY(-50%);
+}
+.sw-layout .sw-resize-s {
+  right: 14px;
+  bottom: -7px;
+  left: 14px;
+  height: 14px;
+  cursor: ns-resize;
+}
+.sw-layout .sw-resize-s::after {
+  top: 5px;
+  left: 50%;
+  width: 32px;
+  height: 4px;
+  border-radius: 4px;
+  background: var(--line-strong);
+  transform: translateX(-50%);
+}
+.sw-layout .sw-resize-se {
+  right: -5px;
+  bottom: -5px;
+  width: 22px;
+  height: 22px;
+  cursor: nwse-resize;
+}
+.sw-layout .sw-resize-se::after {
+  right: 8px;
+  bottom: 8px;
+  width: 9px;
+  height: 9px;
+  border-right: 2px solid var(--line-strong);
+  border-bottom: 2px solid var(--line-strong);
+  border-bottom-right-radius: 3px;
+}
+.sw-layout-editing .sw-widget:hover .sw-resize::after,
+.sw-layout-editing .sw-widget:focus-visible .sw-resize::after,
+.sw-layout-editing .sw-widget.resizing .sw-resize::after {
+  opacity: 1;
+}
+.sw-layout .sw-resize:hover::after,
+.sw-layout .react-resizable-handle:active::after {
+  background-color: var(--accent);
+  border-color: var(--accent);
+  opacity: 1;
+}
+.sw-layout .sw-resize-se:hover::after {
+  background-color: transparent;
+}
+.sw-layout .react-resizable-hide > :is(.react-resizable-handle, .sw-resize) {
+  display: none;
+}
+/* (A pointer that cannot hover, a finger: the grips show all the time.) */
+@media (hover: none) {
+  .sw-layout-editing .sw-resize::after {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sw-layout-editing .react-grid-layout,
+  .sw-layout-editing .react-grid-item,
+  .sw-layout .react-grid-item.react-grid-placeholder,
+  .sw-layout-editing .sw-widget-body > *,
+  .sw-widget-tools,
+  .sw-widget-tools > *,
+  .sw-layout .sw-resize::after {
+    transition: none;
+  }
+}
+
+/* On paper the widgets follow one another in reading order, each as tall as it needs. */
+@media print {
+  .sw-layout .react-grid-layout {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: 12px;
+    height: auto !important;
+  }
+  .sw-layout .react-grid-item {
+    position: static !important;
+    transform: none !important;
+    width: auto !important;
+    height: auto !important;
+    grid-column: span 12;
+    break-inside: avoid;
+  }
+  .sw-layout .react-grid-item[data-sw-widget-type^='tile_'] {
+    grid-column: span 4;
+  }
+  .sw-layout .react-grid-item[data-sw-widget-type^='top_'] {
+    grid-column: span 6;
+  }
+  .sw-layout [data-sw-chart],
+  .sw-layout [data-sw-tile],
+  .sw-layout [data-sw-top],
+  .sw-layout [data-sw-usage-budgets] {
+    height: auto !important;
+    overflow: visible !important;
+  }
+  .sw-layout .recharts-brush {
+    display: none;
+  }
+  .sw-layout [data-sw-chart-legend],
+  .sw-layout [data-sw-top] ol,
+  .sw-layout [data-sw-usage-budgets] ul,
+  .sw-layout [data-sw-breakdown] {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+}
