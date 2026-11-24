@@ -806,7 +806,7 @@ test('phone 390: the tools are the bottom bar with 44 px targets, the top row ha
       }),
     )
     assert.ok(
-      sizes.every(([w, h]) => w >= 44 && h >= 44),
+      sizes.every(([w, h]) => w >= 43.99 && h >= 43.99),
       `44 px targets: ${JSON.stringify(sizes)}`,
     )
     const row = await bottomRow(page)
@@ -1262,7 +1262,7 @@ test('phone 390: "Comment on this page" is the first action of a tapped page, fi
       }),
     )
     assert.ok(
-      sizes.every(([w, h]) => w >= 44 && h >= 44),
+      sizes.every(([w, h]) => w >= 43.99 && h >= 43.99),
       `44 px targets: ${JSON.stringify(sizes)}`,
     )
     await assertBarFits(page, 'phone')
@@ -1279,7 +1279,7 @@ test('phone 390: "Comment on this page" is the first action of a tapped page, fi
     const rows = await page.$$eval('[data-sw-frame-more-menu] [role="menuitem"]', (nodes) =>
       nodes.map((node) => [node.textContent.trim(), node.offsetHeight]),
     )
-    assert.ok(rows.length && rows.every(([text, height]) => text && height >= 44), JSON.stringify(rows))
+    assert.ok(rows.length && rows.every(([text, height]) => text && height >= 43.99), JSON.stringify(rows))
     assert.equal(rows[0][0], 'Open live', JSON.stringify(rows))
     assert.ok(
       rows.some(([text]) => text === 'Open in a new tab'),

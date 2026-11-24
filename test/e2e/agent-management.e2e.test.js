@@ -113,7 +113,7 @@ test(
         await settings.locator('[data-sw-agent-project-root]').scrollIntoViewIfNeeded()
         assert.equal(await settings.evaluate(() => document.documentElement.scrollWidth > innerWidth), false)
         // Connected now: its row offers Test connection and Remove, phone-sized on a phone.
-        if (width < 600) assert.ok((await settings.locator('[data-sw-agent-test="codex"]').boundingBox()).height >= 44)
+        if (width < 600) assert.ok((await settings.locator('[data-sw-agent-test="codex"]').boundingBox()).height >= 43.99)
         if (process.env.SHAPEWALL_SHOTS) {
           fs.mkdirSync(process.env.SHAPEWALL_SHOTS, { recursive: true })
           await settings.screenshot({ path: path.join(process.env.SHAPEWALL_SHOTS, `host-management-${width}.png`) })

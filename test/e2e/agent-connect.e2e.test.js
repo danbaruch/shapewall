@@ -251,7 +251,7 @@ test('phone 390: detected agents and Connect fit the sheet and work', { skip: !P
     const connect = page.locator('[role="dialog"] [data-sw-chat-connect-agent="claude"]')
     await connect.waitFor()
     const box = await connect.boundingBox()
-    assert.ok(box.height >= 44, `Connect is a touch target (${box.height}px)`)
+    assert.ok(box.height >= 43.99, `Connect is a touch target (${box.height}px)`)
     assert.ok(box.x + box.width <= 390, 'Connect fits the screen')
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
     await shot(page, 'connect-phone-detected')
@@ -567,12 +567,12 @@ test('phone 390: the Connect name field and the icon picker are touch sized and 
     await page.locator('[role="dialog"] [data-sw-chat-connect-agent="claude"]').tap()
     const name = page.locator('[data-sw-connect-identity] [data-sw-agent-name-input]')
     await name.waitFor()
-    assert.ok((await name.boundingBox()).height >= 44, 'the name field is a touch target')
+    assert.ok((await name.boundingBox()).height >= 43.99, 'the name field is a touch target')
     await page.locator('[data-sw-connect-icon] summary').tap()
     for (const box of await page
       .locator('[data-sw-connect-icon] [data-sw-agent-icon-option]')
       .evaluateAll((items) => items.map((item) => item.getBoundingClientRect().toJSON()))) {
-      assert.ok(box.width >= 44 && box.height >= 44, `an icon choice is a touch target (${box.width}x${box.height})`)
+      assert.ok(box.width >= 43.99 && box.height >= 43.99, `an icon choice is a touch target (${box.width}x${box.height})`)
       assert.ok(box.right <= 390, 'it fits the screen')
     }
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)

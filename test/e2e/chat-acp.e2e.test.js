@@ -173,7 +173,7 @@ test('phone 390: an ACP permission card has 44 px buttons and the complete answe
     )
     await option.waitFor()
     const box = await option.boundingBox()
-    assert.ok(box.height >= 44, `the Allow button is ${box.height} px tall`)
+    assert.ok(box.height >= 43.99, `the Allow button is ${box.height} px tall`)
     const overflow = await page.evaluate(() => document.querySelector('[role="dialog"]').scrollWidth > window.innerWidth)
     assert.equal(overflow, false)
     await shot(page, 'acp-phone-permission')

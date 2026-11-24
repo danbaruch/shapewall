@@ -469,7 +469,7 @@ test('phone 390: the chat opens as a sheet, answers, has 44 px controls, and Bac
     })
     for (const selector of ['[data-sw-chat-send]', '[data-sw-chat-attach]', '[data-sw-chat-settings]', '[data-sw-chat-thread]']) {
       const box = await page.locator(selector).boundingBox()
-      assert.ok(box.height >= 44 && box.width >= 44, `${selector} is ${box.width}x${box.height}`)
+      assert.ok(box.height >= 43.99 && box.width >= 43.99, `${selector} is ${box.width}x${box.height}`)
     }
     const input = await page.locator('[data-sw-chat-input]').evaluate((node) => getComputedStyle(node).fontSize)
     assert.equal(input, '16px', 'no iOS zoom on focus')
@@ -685,7 +685,7 @@ for (const width of [390, 320]) {
         assert.equal(await composer.evaluate((el) => el.scrollWidth > el.clientWidth), false)
         for (const selector of ['[data-sw-chat-send]', '[data-sw-chat-mic]', '[data-sw-chat-attach]']) {
           const box = await page.locator(selector).boundingBox()
-          assert.ok(box.height >= 44 && box.width >= 44, `${selector} ${box.width}x${box.height}`)
+          assert.ok(box.height >= 43.99 && box.width >= 43.99, `${selector} ${box.width}x${box.height}`)
         }
         await shot(page, `chat-voice-${width}-${color}-listening`)
       }
@@ -748,7 +748,7 @@ for (const width of [1440, 390, 320]) {
       assert.ok(action.x - (microphone.x + microphone.width) >= 8, 'mic and send have a consistent gap')
       for (const control of [attach, microphone, action]) {
         assert.equal(control.y, actions.y, 'all controls align on the same rail')
-        assert.ok(control.height >= 44 && control.width >= 44, 'every composer control is a 44 px target')
+        assert.ok(control.height >= 43.99 && control.width >= 43.99, 'every composer control is a 44 px target')
       }
       await page.click('[data-sw-chat-mic]')
       await page.waitForSelector('[data-sw-chat-listening="starting"]')

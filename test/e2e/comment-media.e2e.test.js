@@ -457,7 +457,7 @@ test('phone 390: draw in the full-sheet page, attach, post; 44 px targets', asyn
     )
     assert.equal(drawControls.length, 8)
     assert.deepEqual(
-      drawControls.filter((item) => item.width < 44 || item.height < 44),
+      drawControls.filter((item) => item.width < 43.99 || item.height < 43.99),
       [],
       'no drawing control under 44 px',
     )

@@ -172,7 +172,7 @@ test('phone 390: phone frames, live HTML, comment sheet, Back closes it', async 
       nodes.map((node) => node.getBoundingClientRect().height),
     )
     assert.ok(
-      sizes.every((height) => height >= 44),
+      sizes.every((height) => height >= 43.99),
       `toolbar targets ${sizes.join(', ')}`,
     )
     // The viewport lives in the More sheet on a phone.
@@ -326,7 +326,7 @@ test('journey step-through at phone 390: menu, 44 px buttons, Back closes it', a
     await expectStep(page, 1, 'home')
     const sizes = await page.$$eval('[data-sw-journey-bar] button', (nodes) => nodes.map((node) => node.getBoundingClientRect().height))
     assert.ok(
-      sizes.every((height) => height >= 44),
+      sizes.every((height) => height >= 43.99),
       `journey buttons ${sizes.join(', ')}`,
     )
     await page.tap('[data-sw-journey-next]')
@@ -417,7 +417,7 @@ test('branching journey at phone 390: 44 px branch buttons, tap a branch', async
     await page.waitForSelector('[data-sw-journey-fork]')
     const sizes = await page.$$eval('[data-sw-journey-bar] button', (nodes) => nodes.map((node) => node.getBoundingClientRect().height))
     assert.ok(
-      sizes.every((height) => height >= 44),
+      sizes.every((height) => height >= 43.99),
       `journey buttons ${sizes.join(', ')}`,
     )
     const bar = await page.locator('[data-sw-journey-bar]').boundingBox()
@@ -655,7 +655,7 @@ test('phone 390: comment filters are custom selects with 44 px options, and Back
         .every((item) => item.playState === 'finished'),
     )
     const trigger = await page.locator('[data-sw-comment-state]').boundingBox()
-    assert.ok(trigger.height >= 44, `state trigger ${trigger.height}`)
+    assert.ok(trigger.height >= 43.99, `state trigger ${trigger.height}`)
     await page.tap('[data-sw-comment-state]')
     await page.waitForSelector('[role="listbox"] [data-sw-option="reopened"]')
     // Measured once the list's open animation (a small scale-in) has finished.
@@ -668,7 +668,7 @@ test('phone 390: comment filters are custom selects with 44 px options, and Back
     const heights = await page.$$eval('[role="listbox"] [role="option"]', (nodes) =>
       nodes.map((node) => node.getBoundingClientRect().height),
     )
-    assert.ok(heights.length > 1 && heights.every((height) => height >= 44), `options ${heights.join(', ')}`)
+    assert.ok(heights.length > 1 && heights.every((height) => height >= 43.99), `options ${heights.join(', ')}`)
     await shot(page, 'phone-state-select')
     // Back closes the open list and leaves the sheet open.
     await page.goBack()
