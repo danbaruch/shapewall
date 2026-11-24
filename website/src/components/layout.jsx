@@ -179,7 +179,7 @@ function Footer() {
         <div className="col-span-2 max-w-xs lg:col-span-1">
           <Logo />
           <p className="mt-4 text-[14.5px] leading-6 text-slate">
-            See your whole app and steer your coding agents from it. Local-first under Apache 2.0, with a source-available team server you
+            See your whole app and steer your coding agents from it. Open source under Apache 2.0, with a source-available team server you
             host yourself.
           </p>
         </div>

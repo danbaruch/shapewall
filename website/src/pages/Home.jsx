@@ -304,7 +304,7 @@ function FeatureGrid() {
 
 function AgentLoop() {
   const loop = [
-    { title: 'You point', text: 'at the exact element on the wall and say what to build, in plain English.' },
+    { title: 'You point', text: 'at the exact element on the wall and say what to build, in plain words.' },
     {
       title: 'Your agent gets the full context:',
       text: 'screen, viewport, CSS selector, element text, screenshot and any drawings or attached images.',
