@@ -84,8 +84,8 @@ answer again before it counts.
 ## Do I need a passkey to sign in to a team server?
 
 Not on your tailnet. Start the server with `shapewall hosted --tailscale --tailnet-sign-in` and your Tailscale account signs you
-in on every tailnet device of yours: no passkey and no password. That flag needs the server to run on Linux; teammates sign in
-from any operating system. An admin still invites each login with a role, so being on the tailnet alone gives nothing. The
+in on every tailnet device of yours: no passkey and no password. The server can run on Linux, macOS (with the Standalone
+Tailscale app) or Windows; teammates sign in from any operating system. An admin still invites each login with a role, so being on the tailnet alone gives nothing. The
 tailnet is the trust boundary there: anything running as you on one of your tailnet devices can act as you. Whoever runs the
 server can also allow passkeys alongside it (`shapewall hosted admin passkeys on`).
 

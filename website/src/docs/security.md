@@ -79,8 +79,8 @@ serve` is signed in as the account linked to their tailnet login, with no passke
   still invites each one with a role: being on the tailnet alone gives nothing, because a tailnet also holds family devices,
   contractors and shared nodes, and because roles and the audit log need to know who did what.
 - **The identity headers are believed only where they can be.** Every one of these must hold: the request carries a secret path
-  that only the serve entry the server made adds; the connection's other end is a socket owned by root (read from the kernel's
-  socket table, on Linux); tailscaled's own whois gives the request's tailnet address to that login, on a user's untagged
+  that only the serve entry the server made adds; the connection's other end is a socket owned by tailscaled (read from the
+  kernel's socket table); tailscaled's own whois gives the request's tailnet address to that login, on a user's untagged
   device; the request does not come from the server's own machine; exactly one clean login header. Never on direct loopback
   requests, raw TCP forwards, Funnel traffic, or with the flag
   off. The server refuses to start with the flag, and suspends it while running, when tailscaled is in userspace-networking

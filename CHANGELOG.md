@@ -3,6 +3,15 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## 1.1.0 - 2026-11-24
+
+### Added
+
+- Tailnet sign-in (`shapewall hosted --tailscale --tailnet-sign-in`) and the local board's owner check under
+  `serve --tailscale` now work with the server on macOS (Standalone Tailscale app or open-source `tailscaled`) and Windows,
+  not only Linux. Each system's own socket table proves that a request came from tailscaled; the Mac App Store version of
+  Tailscale is refused with the Standalone app as the fix. See [On macOS and Windows](docs/hosted.md#on-macos-and-windows).
+
 ## 1.0.1 - 2026-11-23
 
 ### Fixed

@@ -34,18 +34,24 @@
 //      anything else that cannot read this machine's serve config. It does
 //      NOT stop a local user: any local user can read the serve config
 //      through the LocalAPI (`tailscale serve status`), secret included.
-//   2. THE PEER. The connection's other end is a socket owned by root (the
-//      user tailscaled runs as), read from the kernel's socket table,
-//      /proc/net/tcp. This stops a local user who connects to the port
+//   2. THE PEER. The connection's other end is a socket owned by tailscaled,
+//      read from the kernel's socket table: on Linux one owned by root (the
+//      user tailscaled runs as), from /proc/net/tcp; on macOS the same, from
+//      the net.inet.tcp.pcblist_n sysctl; on Windows one owned by the
+//      process of the LocalSystem `Tailscale` service, from netstat and the
+//      Service Control Manager (src/tailnet-platform.js). This stops a
+//      local user who connects to the port
 //      directly with the secret: that socket is their own. (It does not stop
 //      one who goes through tailscaled's own serve listener: see 5.) It is
 //      only meaningful while tailscaled gives
 //      nobody a way to make it dial loopback for them, so the feature is off
 //      (the server refuses to start, and trust is suspended while it runs)
 //      when tailscaled is in userspace-networking mode, is older than 1.98,
-//      runs a SOCKS5 or outbound HTTP proxy, cannot be found or read in
-//      /proc, does not run as root, or when this process is in a container
-//      or a user namespace where "root" is not the machine's root.
+//      runs a SOCKS5 or outbound HTTP proxy, cannot be found or read, does
+//      not run as root (LocalSystem on Windows), is the Mac App Store app
+//      (its extension runs as the logged-in user), or when this process is
+//      in a container or a user namespace where "root" is not the machine's
+//      root.
 //   3. TAILSCALED VOUCHES. For each request, tailscaled is asked who owns
 //      the address in X-Forwarded-For (LocalAPI whois, through the CLI): it
 //      must be a user's device, not tagged, of the same login as the header.
@@ -65,7 +71,8 @@
 //      at the server's own machine uses what does not rest on the tailnet:
 //      the settings token on localhost (a local board), a passkey (hosted).
 //
-// What is still trusted: root on the machine, and whoever may change
+// What is still trusted: root on the machine (an Administrator on
+// Windows), and whoever may change
 // tailscaled's serve config there (the Tailscale operator). Nothing else on
 // the machine, and nothing on the tailnet.
 //
@@ -78,6 +85,7 @@ import { execFile } from 'node:child_process'
 import os from 'node:os'
 import net from 'node:net'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
+import { darwinFacts, darwinPeerProof, windowsFacts, windowsPeerProof } from './tailnet-platform.js'
 
 const LOGIN_HEADER = 'tailscale-user-login'
 const NAME_HEADER = 'tailscale-user-name'
@@ -236,9 +244,10 @@ export function procPeerProof({ read = () => fs.readFileSync('/proc/net/tcp', 'u
   return {
     ownerOf,
     trusted: (socket) => ownerOf(socket) === 0,
+    selfOwner: () => (typeof process.getuid === 'function' ? process.getuid() : null),
     problem() {
       if (platform !== 'linux')
-        return `this needs Linux: the server proves that a request came from tailscaled by the owner of the connection's other end, which it reads from /proc/net/tcp. On ${platform} it cannot tell tailscaled from any other program on this machine, and that program could sign in as anyone.`
+        return `this needs Linux, macOS or Windows: the server proves that a request came from tailscaled by the owner of the connection's other end. On ${platform} it cannot tell tailscaled from any other program on this machine, and that program could sign in as anyone.`
       try {
         if (!/\buid\b/.test(read().split('\n')[0] || '')) return '/proc/net/tcp does not list socket owners here.'
       } catch (error) {
@@ -249,22 +258,40 @@ export function procPeerProof({ read = () => fs.readFileSync('/proc/net/tcp', 'u
   }
 }
 
+// The peer check for the system this runs on: Linux, macOS or Windows
+// (src/tailnet-platform.js); elsewhere one whose problem() says why not.
+export function peerProof({ platform = process.platform, ...options } = {}) {
+  if (platform === 'win32') return windowsPeerProof(options)
+  if (platform === 'darwin') return darwinPeerProof(options)
+  return procPeerProof({ ...options, platform })
+}
+
 // The proof must see this process's own connection to its listener as this
 // process's: where it cannot (a container that hides /proc, another network
 // namespace), it could not tell tailscaled from anyone else either. Returns
 // the problem, or null. `server`: a listening net/http server on 127.0.0.1.
+// A proof without ownerOf (a test's stand-in) is not tested. One that cannot
+// say who this process is fails: a check that cannot be tested is not used.
 export async function proofSelfTest(server, proof) {
-  if (!proof.ownerOf || typeof process.getuid !== 'function') return null
+  if (!proof.ownerOf) return null
+  const expected = proof.selfOwner ? proof.selfOwner() : typeof process.getuid === 'function' ? process.getuid() : null
+  if (expected === null || expected === undefined)
+    return 'the check that tells tailscaled from other programs cannot say who this process is, so it cannot be tested here.'
   const accepted = new Promise((resolve) => server.once('connection', resolve))
   const client = net.connect(server.address().port, '127.0.0.1')
   client.on('error', () => {})
   try {
     const socket = await accepted
-    const owner = proof.ownerOf(socket)
+    let recognised = false
+    try {
+      recognised = proof.recognisesSelf ? await proof.recognisesSelf(socket) : (await proof.ownerOf(socket)) === expected
+    } catch {
+      recognised = false
+    }
     socket.destroy()
-    return owner === process.getuid()
+    return recognised
       ? null
-      : 'the check that tells tailscaled from other programs did not recognise a test connection from this process (is /proc/net/tcp hidden or from another network namespace?).'
+      : 'the check that tells tailscaled from other programs did not recognise a test connection from this process (is the socket table hidden, or from another network namespace?).'
   } finally {
     client.destroy()
   }
@@ -298,7 +325,10 @@ export function systemdMainPid(unit = 'tailscaled.service', run = execFile) {
 // hostFacts for a real machine: asks systemd which process tailscaled is
 // (without blocking), then reads /proc. What the servers call at start and
 // in their watch; never on the path of a request.
-export async function machineFacts(options = {}) {
+// On macOS and Windows, what those systems say instead (src/tailnet-platform.js).
+export async function machineFacts({ platform = process.platform, ...options } = {}) {
+  if (platform === 'win32') return windowsFacts(options)
+  if (platform === 'darwin') return darwinFacts(options)
   return hostFacts({ ...options, mainPid: await systemdMainPid() })
 }
 
@@ -427,13 +457,15 @@ const flagValue = (argv, name) => {
 // proxy's, or null. `status`: the parsed `tailscale status --json`.
 export function tailscaledProblem(status, facts) {
   if (facts.container) return `this process cannot tell whose "root" a connection comes from: ${facts.container}`
-  if (facts.unreadable) return 'tailscaled’s command line cannot be read in /proc, so how it runs cannot be checked'
+  if (facts.unreadable) return 'tailscaled’s command line cannot be read, so how it runs cannot be checked'
+  if (!facts.tailscaled.length && facts.appStore)
+    return 'the Mac App Store version of Tailscale runs as your user, so its connections cannot be told apart from any other program’s. Install the Standalone Tailscale app from tailscale.com instead'
   if (facts.tailscaled.length !== 1)
     return facts.tailscaled.length
       ? 'more than one tailscaled runs on this machine'
       : 'no tailscaled process of root is visible to this server (userspace tailscaled, another machine, container or process namespace?)'
   const daemon = facts.tailscaled[0]
-  if (daemon.uid !== 0) return 'tailscaled does not run as root here'
+  if (daemon.uid !== 0) return 'tailscaled does not run as root (LocalSystem on Windows) here'
   if (daemon.env?.length)
     return `tailscaled runs with ${daemon.env.join(' and ')} set, which makes it forward connections to this machine’s loopback itself`
   const tun = flagValue(daemon.argv, 'tun')
@@ -720,8 +752,16 @@ export function createTailnetGate({
       if (suspendedFor) refused(suspendedFor)
       else if (secretState !== 'yes') refused('the request did not come through this server’s serve entry')
       else {
-        if (socket && !proven.has(socket)) proven.set(socket, Boolean(proof.trusted(socket)))
-        if (!socket || !proven.get(socket)) refused('the connection did not come from tailscaled')
+        // Once per connection (on macOS and Windows the answer costs a program run), shared by
+        // requests that arrive on it together.
+        if (socket && !proven.has(socket))
+          proven.set(
+            socket,
+            Promise.resolve()
+              .then(() => proof.trusted(socket))
+              .then(Boolean, () => false),
+          )
+        if (!socket || !(await proven.get(socket))) refused('the connection did not come from tailscaled')
         else {
           const parsed = parseIdentity(req)
           const address = forwardedTailnetAddress(req)

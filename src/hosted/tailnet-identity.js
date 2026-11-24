@@ -17,6 +17,7 @@ export {
   parseIdentity,
   peerOwner,
   procAddress,
+  peerProof,
   procPeerProof,
   serveTarget,
   tailscaledProblem,

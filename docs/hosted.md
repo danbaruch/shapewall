@@ -38,7 +38,7 @@ shapewall hosted --data /var/lib/shapewall-hosted --origin https://app.example.c
 |                         | `SHAPEWALL_EMAIL_FROM`                             | unset                           | Sender for invite emails, e.g. `Shapewall <invites@example.com>`                                                                                                                                                                              |
 | `--previous-origin URL` | `SHAPEWALL_HOSTED_PREVIOUS_ORIGIN`                 | unset                           | The old origin during a move ([Moving to a new origin](#moving-to-a-new-origin))                                                                                                                                                              |
 | `--report-email ADDR`   | `SHAPEWALL_HOSTED_REPORT_EMAIL`                    | unset                           | "Report this board" on public projects opens a mail to this address                                                                                                                                                                           |
-| `--tailnet-sign-in`     | `SHAPEWALL_HOSTED_TAILNET_SIGN_IN=1`               | off                             | With `--tailscale`: a tailnet user is signed in as the account linked to their tailnet login, no passkey ([Tailnet sign-in](#tailnet-sign-in)). Linux only                                                                                    |
+| `--tailnet-sign-in`     | `SHAPEWALL_HOSTED_TAILNET_SIGN_IN=1`               | off                             | With `--tailscale`: a tailnet user is signed in as the account linked to their tailnet login, no passkey ([Tailnet sign-in](#tailnet-sign-in)). Linux, macOS or Windows                                                                       |
 | `--tailnet-passkeys`    | `SHAPEWALL_HOSTED_TAILNET_PASSKEYS=1`              | off                             | With `--tailnet-sign-in`: also allow passkeys ([With passkeys also allowed](#with-passkeys-also-allowed)); `hosted admin passkeys on\|off` wins over it                                                                                       |
 | `--owners-see-sign-ins` | `SHAPEWALL_HOSTED_OWNERS_SEE_SIGN_INS=1`           | off                             | Workspace owners see their members' sign-ins, passkey events and devices in Activity. For a server with one team ([Activity](#the-activity-page))                                                                                             |
 | `--quotas FILE`         | `SHAPEWALL_HOSTED_QUOTAS`                          | `<data>/quotas.json`            | Storage and per-workspace limits ([Operator commands and quotas](#operator-commands-and-quotas)). The flag wins over the variable, and both over the file                                                                                     |
@@ -341,8 +341,9 @@ The last three arrive from a socket that tailscaled owns. So no single check is 
    tailnet device, and anything else that cannot read this machine's serve config. **It does not stop a local user:** any local
    user can read the serve config (`tailscale serve status` works for a user who is not the Tailscale operator; checked), secret
    included. The secret is in no log line, error or response; a wrong one gets a plain 404.
-2. **The peer.** The connection's other end must be a socket owned by root, the user tailscaled runs as. On Linux the kernel
-   lists every TCP socket with its owner in `/proc/net/tcp`, and the server looks the peer up for each connection. This stops
+2. **The peer.** The connection's other end must be a socket owned by tailscaled. On Linux the kernel lists every TCP socket
+   with its owner in `/proc/net/tcp`, and the owner must be root, the user tailscaled runs as. macOS and Windows read their own
+   socket table instead ([On macOS and Windows](#on-macos-and-windows)). The server looks the peer up once per connection. This stops
    a local program that connects to the port itself, though it has the secret: its socket is its own. It does not stop a local
    program that asks tailscaled for the serve address (check 4 does). There is no setting to name another user.
 3. **tailscaled vouches.** For each request the server asks tailscaled who owns the address in `X-Forwarded-For` (which serve
@@ -372,8 +373,9 @@ The last three arrive from a socket that tailscaled owns. So no single check is 
 server runs the same is checked every 30 seconds, and nobody is signed in by tailnet identity until it is right again (tailnet
 sessions stop counting and their open live streams are cut; passkey sessions go on; the log says why):
 
-- not Linux (macOS and Windows have no such table), `/proc/net/tcp` unreadable, or a test connection from the server itself not
-  recognised;
+- not Linux, macOS or Windows; the socket table unreadable, or a test connection from the server itself not recognised;
+- on macOS, the **Mac App Store** version of Tailscale (its network extension runs as your user, like every other program of
+  yours, so nothing tells it apart). Install the Standalone app from tailscale.com instead;
 - tailscaled in **userspace-networking mode** (`tailscale status --json` says `TUN: false`, or it was started with
   `--tun=userspace-networking`);
 - **Tailscale older than 1.98**;
@@ -396,7 +398,26 @@ sessions stop counting and their open live streams are cut; passkey sessions go 
 
 Run with passkeys in those cases (`--tailscale` without `--tailnet-sign-in`).
 
-**What is still trusted.** Root on the server's machine, and whoever may change tailscaled's serve config there (the Tailscale
+### On macOS and Windows
+
+New in 1.1.0. The checks are the same; only the peer check and how tailscaled is found differ, and neither needs
+administrator rights or native code.
+
+- **macOS**, with the Standalone Tailscale app or the open-source `tailscaled`: the kernel lists every TCP socket with the user
+  that made it in the `net.inet.tcp.pcblist_n` sysctl, which any user may read. As on Linux, the peer must be root.
+  tailscaled is the Standalone app's network extension (under `/Library/SystemExtensions`) or a process named `tailscaled`,
+  root in its user, real and saved ids. The `tailscale` command must be on the server's `PATH` (in the app: Settings, CLI
+  integration). The Mac App Store app is refused (above).
+- **Windows**: tailscaled is the `Tailscale` service, which must run as LocalSystem. `netstat -ano` gives the process that
+  owns the peer socket, and `sc.exe queryex Tailscale` the service's process, read before and after the lookup so that a
+  process id reused in between cannot pass. The proxy flags are read from the service's command line (`sc.exe qc`), the
+  debug switches from its registry environment and `tailscaled-env.txt` when readable.
+
+Both are covered by tests and by a run of the real check on macOS and Windows in CI. They have not yet been run against a
+real tailnet on a Mac or a Windows server; the self test at start still refuses where the check cannot see the server's own
+connection.
+
+**What is still trusted.** Root on the server's machine (an Administrator on Windows), and whoever may change tailscaled's serve config there (the Tailscale
 operator). Either can pretend to be anyone. Nothing else on the machine is trusted, and nothing on the tailnet. tailscaled's
 environment is part of that root configuration: `/proc/<pid>/environ` of a root process is readable only by root, so a server
 that runs as an ordinary user (as it should) cannot see the two debugging switches above and trusts root not to have set them.

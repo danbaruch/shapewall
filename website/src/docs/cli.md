@@ -820,7 +820,7 @@ Hosted Shapewall (https://shapewall.com/docs/hosted)
                             (share pages only, never the console), on --funnel-port 8443|443|10000
       --tailnet-sign-in     with --tailscale: sign tailnet users in by their tailnet login (experimental)
                             a tailnet user is signed in as the account linked to their tailnet login, no passkey (or $SHAPEWALL_HOSTED_TAILNET_SIGN_IN=1). An admin still decides
-                            who is in a workspace. Needs Linux and Tailscale 1.98+ in its normal (TUN) mode, not
+                            who is in a workspace. Needs Linux, macOS or Windows and Tailscale 1.98+ in TUN mode, not
                             in a container; refuses to start where it cannot prove that a request came through
                             tailscale serve. An identity is per device: what runs as you there can act as you.
                             Tailscale is then the only sign-in: no passkeys, and the few things that always ask
