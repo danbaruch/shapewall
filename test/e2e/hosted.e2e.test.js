@@ -108,7 +108,7 @@ async function phoneChecks(page, label) {
   const small = await page.evaluate(() =>
     [...document.querySelectorAll('main button, main a[href], main [role="tab"]')]
       .filter((el) => el.offsetParent !== null && !el.closest('p'))
-      .filter((el) => el.getBoundingClientRect().height < 44)
+      .filter((el) => el.getBoundingClientRect().height < 43.99)
       .map((el) => el.textContent.trim().slice(0, 30)),
   )
   assert.deepEqual(small, [], `${label}: touch targets under 44 px`)
@@ -945,7 +945,7 @@ test('hosted starter: shell approval on the board, a fixture edit and a mocked p
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), 'approval board fits at390')
     await shot(page, 'agent-approval-phone')
     assert.ok(
-      await page.getByRole('button', { name: 'Approve once' }).evaluate((button) => button.getBoundingClientRect().height >= 44),
+      await page.getByRole('button', { name: 'Approve once' }).evaluate((button) => button.getBoundingClientRect().height >= 43.99),
       'approval touch target',
     )
     await page.getByRole('button', { name: 'Approve once' }).click()

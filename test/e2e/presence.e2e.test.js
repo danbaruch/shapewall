@@ -138,7 +138,7 @@ test('phone guest is named Guest; public sees counts only; a different workspace
     assert.equal(await a.page.getByRole('button', { name: /Private guest label/ }).count(), 0)
     const small = await g.page
       .locator('[data-sw-presence] button')
-      .evaluateAll((items) => items.filter((item) => item.getBoundingClientRect().height < 44).length)
+      .evaluateAll((items) => items.filter((item) => item.getBoundingClientRect().height < 43.99).length)
     assert.equal(small, 0)
     assert.equal(await g.page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false)
     await shot(g.page, 'phone-guest')

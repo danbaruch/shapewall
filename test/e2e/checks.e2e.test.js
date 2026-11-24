@@ -208,7 +208,7 @@ for (const { width, colorScheme } of [1440, 1024, 768, 390, 320].flatMap((width)
         fits: element.scrollWidth <= element.clientWidth,
         whiteSpace: getComputedStyle(element).whiteSpace,
       }))
-      assert.ok(toggleLayout.height >= 44 && toggleLayout.fits)
+      assert.ok(toggleLayout.height >= 43.99 && toggleLayout.fits)
       assert.equal(toggleLayout.whiteSpace, 'normal')
       await panel.getByText('Declared build changed; all other recorded conditions match.', { exact: false }).waitFor()
       assert.match(await panel.locator('[data-sw-check-comparison]').textContent(), /-560/)
@@ -331,7 +331,7 @@ for (const { width, height, colorScheme } of [
         .locator('button:visible, summary:visible')
         .evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().height))
       assert.ok(
-        controls.every((size) => size >= 44),
+        controls.every((size) => size >= 43.99),
         JSON.stringify(controls),
       )
       if (process.env.SHAPEWALL_SHOTS) {

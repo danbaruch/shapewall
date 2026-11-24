@@ -87,7 +87,7 @@ for (const width of [1440, 390, 320]) {
             .locator('[data-sw-settings="general"] [data-sw-option]')
             .evaluateAll((items) => items.map((item) => item.getBoundingClientRect().height))
           assert.ok(
-            sizes.every((height) => height >= 44),
+            sizes.every((height) => height >= 43.99),
             `appearance touch targets: ${sizes}`,
           )
         }

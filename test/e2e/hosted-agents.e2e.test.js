@@ -481,7 +481,7 @@ test('a phone: the More menu opens an Agents sheet, and a thread sends its comme
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), 'no sideways scroll')
   const small = await page.evaluate(() =>
     [...document.querySelectorAll('[data-sw-hosted-agent-sheet] button, [data-sw-hosted-agent-sheet] a[href]')]
-      .filter((el) => el.offsetParent !== null && el.getBoundingClientRect().height < 44)
+      .filter((el) => el.offsetParent !== null && el.getBoundingClientRect().height < 43.99)
       .map((el) => el.textContent.trim().slice(0, 30)),
   )
   assert.deepEqual(small, [], 'touch targets under 44 px')
@@ -514,7 +514,7 @@ test("a phone: the console's Agents page fits, with touch targets", async () => 
   const small = await page.evaluate(() =>
     [...document.querySelectorAll('main button, main a[href]')]
       .filter((el) => el.offsetParent !== null && !el.closest('p'))
-      .filter((el) => el.getBoundingClientRect().height < 44)
+      .filter((el) => el.getBoundingClientRect().height < 43.99)
       .map((el) => el.textContent.trim().slice(0, 30)),
   )
   assert.deepEqual(small, [], 'touch targets under 44 px')

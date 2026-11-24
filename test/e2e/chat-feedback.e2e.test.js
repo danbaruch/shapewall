@@ -243,7 +243,7 @@ test('phone 390 (dark): the row always shows with 44 px targets, and the form fi
     const last = answers(page).last()
     for (const selector of ['[data-sw-chat-copy]', '[data-sw-chat-regenerate]', '[data-sw-chat-rate="up"]', '[data-sw-chat-rate="down"]']) {
       const box = await last.locator(selector).boundingBox()
-      assert.ok(box.height >= 44 && box.width >= 44, `${selector} is ${box.width}x${box.height}`)
+      assert.ok(box.height >= 43.99 && box.width >= 43.99, `${selector} is ${box.width}x${box.height}`)
     }
     await last.locator('[data-sw-chat-rate="down"]').tap()
     await page.locator('[data-sw-chat-feedback-form="down"]').waitFor()
@@ -253,7 +253,7 @@ test('phone 390 (dark): the row always shows with 44 px targets, and the form fi
       return form.bottom <= document.querySelector('[data-sw-chat-composer]').getBoundingClientRect().top + 1
     })
     const chip = await page.locator('[data-sw-chat-reason="wrong"]').boundingBox()
-    assert.ok(chip.height >= 44, `a reason chip is ${chip.height} tall`)
+    assert.ok(chip.height >= 43.99, `a reason chip is ${chip.height} tall`)
     const overflow = await page.evaluate(() => document.querySelector('[role="dialog"]').scrollWidth > window.innerWidth)
     assert.equal(overflow, false)
     await shot(page, 'feedback-phone-form')

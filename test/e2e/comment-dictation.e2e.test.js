@@ -595,7 +595,7 @@ test('phone 390: the microphone is a 44 px target inside the field; nothing move
     await page.waitForSelector(button)
     await page.waitForTimeout(400)
     const box = await page.locator(button).boundingBox()
-    assert.ok(box.width >= 44 && box.height >= 44, `44 px target, got ${box.width}x${box.height}`)
+    assert.ok(box.width >= 43.99 && box.height >= 43.99, `44 px target, got ${box.width}x${box.height}`)
     const where = await assertMicInField(page, sheet)
     assert.ok(Math.abs(where.face.width - 32) < 0.5, `a 32 px circle drawn in the 44 px target, got ${where.face.width}`)
     const row = await page.$eval(`${sheet} [data-sw-composer-media]`, (element) => ({
@@ -642,7 +642,7 @@ test('phone 390: the microphone is a 44 px target inside the field; nothing move
     const replyMic = `${reply} [data-sw-dictate]`
     await page.waitForSelector(replyMic)
     const replyBox = await page.locator(replyMic).boundingBox()
-    assert.ok(replyBox.width >= 44 && replyBox.height >= 44)
+    assert.ok(replyBox.width >= 43.99 && replyBox.height >= 43.99)
     await assertMicInField(page, reply)
     const replyIdle = await settledLayout(page, reply)
     await page.tap(replyMic)

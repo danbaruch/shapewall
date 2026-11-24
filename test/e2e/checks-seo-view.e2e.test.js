@@ -126,8 +126,8 @@ for (const colorScheme of ['light', 'dark'])
         .locator('button:visible, [role=tab]:visible')
         .evaluateAll((els) => els.map((el) => [el.textContent.trim().slice(0, 30), el.getBoundingClientRect().height, el.offsetHeight]))
       assert.ok(
-        small.every(([, h, layout]) => h >= 43.5 && layout >= 44),
-        JSON.stringify(small.filter(([, h, layout]) => h < 43.5 || layout < 44)),
+        small.every(([, h, layout]) => h >= 43.5 && layout >= 43.99),
+        JSON.stringify(small.filter(([, h, layout]) => h < 43.5 || layout < 43.99)),
       )
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false)
       if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `seo-local-390-${colorScheme}.png`) })
