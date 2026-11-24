@@ -59,6 +59,8 @@ for (const width of [1440, 390, 320]) {
         assert.equal(await page.locator('html').getAttribute('data-theme'), 'ocean')
         await page.keyboard.press('Escape')
         await page.locator('[data-sw-profile-content]').waitFor({ state: 'detached' })
+        // The project grid renders only once /api/boards has answered.
+        await page.locator('[data-sw-local-projects]').waitFor()
         assert.equal(await page.locator('[data-sw-local-project]').count(), install.setup.config.boards.length)
         for (const board of install.setup.config.boards) {
           const card = page.locator(`[data-sw-local-project="${board.id}"]`)
