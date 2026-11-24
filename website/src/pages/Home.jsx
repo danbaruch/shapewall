@@ -80,8 +80,8 @@ function Hero() {
         </div>
         <div className="order-3 mx-auto max-w-3xl text-center sm:order-2">
           <p className="mx-auto mt-8 max-w-2xl text-[17px] leading-7 text-pretty text-slate sm:mt-6 sm:text-[19px] sm:leading-8">
-            Shapewall captures every screen of your app on desktop and phone, maps the flows between them, and lets you point at anything
-            and tell your agent what to build. 10 screens or 500.
+            Coding agents read your code, not your screens. Shapewall captures every screen of your app on desktop and phone, maps the flows
+            between them, and lets you point at anything and tell your agent what to build. 10 screens or 500.
           </p>
           <p className="mx-auto mt-4 max-w-2xl text-[15px] leading-6 text-pretty text-ink">
             {LAUNCHED ? 'Free and open source. ' : ''}Runs on your machine, or host the team server yourself for one shared wall.
@@ -216,8 +216,9 @@ function HowItWorks() {
   return (
     <section className="py-16 sm:py-28" aria-labelledby="how">
       <Container>
-        <SectionHead eyebrow="How it works" title={<span id="how">From a running app to a wall you steer from, in three steps</span>}>
-          Your agents write the code. You see the whole app at once, point at what should change, and check the result on every screen.
+        <SectionHead eyebrow="How it works" title={<span id="how">From a running app to one wall in three steps</span>}>
+          Stop describing UI changes in prose or clicking through thirty routes to see what broke. Put every screen in front of you and work
+          straight from the app you ship.
         </SectionHead>
         <ol className="mt-14 grid gap-10 md:grid-cols-3 md:gap-6 lg:gap-8">
           {STEPS.map((step, index) => (
@@ -304,17 +305,20 @@ function FeatureGrid() {
 function AgentLoop() {
   const loop = [
     { title: 'You point', text: 'at the exact element on the wall and say what to build, in plain words.' },
-    { title: 'The agent builds it', text: 'with the screen, viewport, selector, element text and screenshot in hand.' },
-    { title: 'It recaptures', text: 'only the screens it touched, and replies on the comment.' },
-    { title: 'You check', text: 'before and after, in place. Resolve it, or reopen it with the next instruction.' },
+    {
+      title: 'Your agent gets the full context:',
+      text: 'screen, viewport, CSS selector, element text, screenshot and any drawings or attached images.',
+    },
+    { title: 'It builds and recaptures', text: 'only the screens it touched, then replies on the thread with what changed.' },
+    { title: 'You verify in place', text: 'with before and after. Resolve it, or reopen it with the next instruction.' },
   ]
   return (
     <section className="wall-dots-dark py-16 text-white sm:py-28" aria-labelledby="loop">
       <Container className="grid items-center gap-12 lg:grid-cols-[1fr_1.15fr] lg:gap-16">
         <div>
-          <SectionHead dark eyebrow="Steer your agents" title={<span id="loop">Your agents build. You steer from the wall.</span>}>
-            Shapewall works with the coding agent you already use. <code>shapewall watch</code> hands it each new comment, and{' '}
-            <code>shapewall mcp</code> gives it the same tools over MCP.
+          <SectionHead dark eyebrow="Steer your agents" title={<span id="loop">Your agents write the code. You steer from the wall.</span>}>
+            Bring the coding agent you already use. <code>shapewall watch</code> hands it each new instruction, and{' '}
+            <code>shapewall mcp</code> gives it the same workflow over MCP.
           </SectionHead>
           <ol className="mt-10 space-y-5">
             {loop.map((item, index) => (
@@ -377,10 +381,10 @@ function BeforeAfterSection() {
           </SectionHead>
           <ul className="mt-8 space-y-3 text-[15.5px] text-slate">
             {[
-              'Before and after on each resolved comment',
-              'Staging next to production, page by page',
-              'Variants: try a direction without replacing the page',
-              'On every pull request: one comment with the screens that changed',
+              'Before and after on every resolved wall comment',
+              'Staging beside production, screen by screen, with changed pixels in red',
+              'Branch variants: try a direction beside the screen instead of replacing it',
+              'One GitHub PR summary per pull request, with every screen that changed',
             ].map((item) => (
               <li key={item} className="flex gap-3">
                 <span className="mt-2 size-1.5 shrink-0 rounded-full bg-pin" aria-hidden="true" />
@@ -401,9 +405,13 @@ const TEAM_POINTS = [
   {
     icon: KeyRound,
     title: 'Passkey accounts and roles',
-    text: 'Everyone signs in with their own passkey. Owners, admins, members and viewers.',
+    text: 'Each person signs in with their own passkey, or, on your tailnet, just their tailnet login. Four roles: owner, admin, member and viewer.',
   },
-  { icon: Link2, title: 'Share links', text: 'Share one project read-only, or with guest comments, with an expiry and a passcode.' },
+  {
+    icon: Link2,
+    title: 'Expiring share links',
+    text: 'Share one project read-only, or with guest comments, with an expiry date and an optional passcode.',
+  },
   { icon: Radio, title: 'Live presence', text: 'See who is on the wall, follow their cursor, comment together.' },
   {
     icon: Bot,
@@ -421,15 +429,15 @@ function Teams() {
             eyebrow="Teams"
             title={
               <>
-                <span id="teams">One wall for the whole team, on your own server</span>{' '}
+                <span id="teams">One shared wall for your team, on your server</span>{' '}
                 <span className="align-middle">
                   <Badge tone="amber">Beta</Badge>
                 </span>
               </>
             }
           >
-            Run <code>shapewall hosted</code> on a machine you control and your team steers from one wall. Captures upload from your
-            computers to your server.
+            Run <code>shapewall hosted</code> on a machine you control and everyone steers from the same wall. Captures run on your machines
+            and upload straight to your server.
           </SectionHead>
           <div className="mt-8 flex flex-wrap gap-3">
             <Button to="/features#teams" variant="secondary">
