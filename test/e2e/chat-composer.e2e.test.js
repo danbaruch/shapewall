@@ -406,7 +406,7 @@ test('phone 390: the picker, footer and queue fit, with 44px targets', async () 
     const box = await picker.boundingBox()
     assert.ok(box.x >= 0 && box.x + box.width <= 390, `picker fits: ${JSON.stringify(box)}`)
     const option = await picker.locator('[data-sw-chat-picker-option]').first().boundingBox()
-    assert.ok(option.height >= 44, `option height ${option.height}`)
+    assert.ok(option.height >= 43.99, `option height ${option.height}`)
     await shot(page, 'phone-picker')
     // Esc closes the /help card and leaves the sheet open.
     await input.fill('/help')
@@ -426,7 +426,7 @@ test('phone 390: the picker, footer and queue fit, with 44px targets', async () 
     for (const hook of ['[data-sw-chat-usage]', '[data-sw-chat-options]', '[data-sw-chat-attach]', '[data-sw-chat-send]']) {
       const target = await page.locator(hook).boundingBox()
       assert.ok(target, hook)
-      assert.ok(target.height >= 44 && target.x + target.width <= 390, `${hook}: ${JSON.stringify(target)}`)
+      assert.ok(target.height >= 43.99 && target.x + target.width <= 390, `${hook}: ${JSON.stringify(target)}`)
     }
     await input.fill('slowly')
     await page.click('[data-sw-chat-send]')

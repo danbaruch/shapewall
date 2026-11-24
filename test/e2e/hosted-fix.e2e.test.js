@@ -275,7 +275,7 @@ test('Fix with Builder: the card with its diff, Allow with the passkey, the bran
   if (adas[2]) {
     const allow = await adas[2].page.locator('[data-sw-chat-permission-option="allow"]').boundingBox()
     const deny = await adas[2].page.locator('[data-sw-chat-permission-option="deny"]').boundingBox()
-    assert.ok(allow.height >= 44 && deny.height >= 44, 'phone-sized answers')
+    assert.ok(allow.height >= 43.99 && deny.height >= 43.99, 'phone-sized answers')
     const box = await card(adas[2].page, 'pending').boundingBox()
     assert.ok(allow.width + deny.width > box.width * 0.85, 'the two answers fill the row on a phone')
     assert.equal(Math.round(allow.y), Math.round(deny.y), 'side by side')

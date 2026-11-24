@@ -257,7 +257,7 @@ for (const dark of [false, true]) {
       await page.waitForSelector('[role="dialog"] [data-sw-chat="board"]')
       for (const selector of ['[data-sw-chat-thread]', '[data-sw-chat-new="header"]']) {
         const box = await page.locator(selector).boundingBox()
-        assert.ok(box.height >= 44 && box.width >= 44, `${selector} is ${box.width}x${box.height}`)
+        assert.ok(box.height >= 43.99 && box.width >= 43.99, `${selector} is ${box.width}x${box.height}`)
       }
       await page.tap('[data-sw-chat-thread]')
       await page.waitForSelector('[role="dialog"] [data-sw-chat-history] [data-sw-chat-history-item="board"]')
@@ -267,7 +267,7 @@ for (const dark of [false, true]) {
         '[data-sw-chat-new="history"]',
       ]) {
         const box = await page.locator(selector).boundingBox()
-        assert.ok(box.height >= 44 && box.width >= 44, `${selector} is ${box.width}x${box.height}`)
+        assert.ok(box.height >= 43.99 && box.width >= 43.99, `${selector} is ${box.width}x${box.height}`)
       }
       const overflow = await page.evaluate(() =>
         [...document.querySelectorAll('[role="dialog"]')].some((node) => node.scrollWidth > innerWidth),

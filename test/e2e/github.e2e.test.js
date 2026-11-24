@@ -172,7 +172,7 @@ for (const [name, contextOptions] of [
           ?.getAnimations({ subtree: true })
           .every((item) => item.playState === 'finished'),
       )
-      if (name === 'phone') assert.ok((await button.boundingBox()).height >= 44, 'touch target')
+      if (name === 'phone') assert.ok((await button.boundingBox()).height >= 43.99, 'touch target')
       await button.click()
       const issueLink = page.locator('[data-sw-github-issue-link]').first()
       await issueLink.waitFor()

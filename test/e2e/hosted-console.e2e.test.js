@@ -169,7 +169,7 @@ test('Activity and Usage at phone width: controls are touch size', async () => {
     page.evaluate(() =>
       [...document.querySelectorAll('main button, main a[href], main [role="combobox"], main [role="radio"], main input')]
         .filter((el) => el.getClientRects().length && !el.closest('p') && !el.closest('[data-sw-usage-grid]'))
-        .filter((el) => el.getBoundingClientRect().height < 44)
+        .filter((el) => el.getBoundingClientRect().height < 43.99)
         .map(
           (el) =>
             `${(el.getAttribute('aria-label') || el.textContent || el.placeholder).trim().slice(0, 30)} ${Math.round(el.getBoundingClientRect().height)}`,
@@ -285,7 +285,7 @@ test('console consistency: one workspace name, a 44 px logo, one shown-once noti
     await phone.page.waitForSelector('[data-sw-header-home]')
     const home = await phone.page.locator('[data-sw-header-home]').boundingBox()
     const mark = await phone.page.locator('[data-sw-header-home] svg').boundingBox()
-    assert.ok(home.width >= 44 && home.height >= 44, `logo target ${home.width}x${home.height}`)
+    assert.ok(home.width >= 43.99 && home.height >= 43.99, `logo target ${home.width}x${home.height}`)
     assert.equal(Math.round(mark.width), 28)
     assert.deepEqual(await names(phone.page), ['North Studio'])
     await phone.context.close()

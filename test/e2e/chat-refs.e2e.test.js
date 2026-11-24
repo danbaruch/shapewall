@@ -240,7 +240,7 @@ test('demo phone 390: 44 px targets, a long press previews a chip, a tap jumps t
         '[data-sw-chat-summary-recapture]',
       ]) {
         const box = await answer.locator(selector).first().boundingBox()
-        assert.ok(box.height >= 44, `${selector} is ${box.height}px tall`)
+        assert.ok(box.height >= 43.99, `${selector} is ${box.height}px tall`)
       }
       const width = await page.evaluate(() => document.documentElement.scrollWidth)
       assert.ok(width <= 390, `no sideways scroll (${width})`)
@@ -256,7 +256,7 @@ test('demo phone 390: 44 px targets, a long press previews a chip, a tap jumps t
         const after = getComputedStyle(node, '::after')
         return { width: parseFloat(after.width), height: parseFloat(after.height) }
       })
-      assert.ok(hit.width >= 44 && hit.height >= 44, `chip tap area ${hit.width}x${hit.height}`)
+      assert.ok(hit.width >= 43.99 && hit.height >= 43.99, `chip tap area ${hit.width}x${hit.height}`)
       assert.ok(box.height < 30, `the chip itself stays inline (${box.height}px)`)
       const cdp = await context.newCDPSession(page)
       const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 }

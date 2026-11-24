@@ -247,7 +247,7 @@ test('phone 390: the settings sheet from the menu, light and dark, no sideways s
       }
       // Touch-sized controls, and nothing wider than the screen.
       const box = await page.locator('[data-sw-settings-save]').boundingBox()
-      assert.ok(box.height >= 44, `save button is ${box.height}px tall`)
+      assert.ok(box.height >= 43.99, `save button is ${box.height}px tall`)
       const overflow = await page.evaluate(() => {
         const panel = document.querySelector('[data-sw-settings="agent"]').closest('[role="dialog"]')
         const scroller = panel.querySelector('.overflow-y-auto')

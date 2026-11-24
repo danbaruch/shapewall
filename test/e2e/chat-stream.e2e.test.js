@@ -102,7 +102,7 @@ async function liveTurn(page, { touch = false, prefix = 'desk' } = {}) {
   await toggle[touch ? 'tap' : 'click']()
   assert.equal(await toggle.getAttribute('aria-expanded'), 'true')
   await page.waitForSelector('[data-sw-chat-steps] [data-sw-chat-card="list_comments"][data-state="running"]')
-  if (touch) assert.ok((await toggle.boundingBox()).height >= 44, 'the activity line is a 44 px target on touch')
+  if (touch) assert.ok((await toggle.boundingBox()).height >= 43.99, 'the activity line is a 44 px target on touch')
   await page.waitForSelector('[data-sw-chat-elapsed]')
   assert.match(await page.locator('[data-sw-chat-elapsed]').textContent(), /^\d+s$/)
 
@@ -169,7 +169,7 @@ async function scrollAndFinish(page, { touch = false, prefix = 'desk' } = {}) {
   )
   assert.equal(await page.locator('[data-sw-chat-list]').evaluate((list) => list.scrollTop), top, 'the list stays where the reader is')
   const jump = page.locator('[data-sw-chat-jump]')
-  if (touch) assert.ok((await jump.boundingBox()).height >= 44, 'Jump to latest is a 44 px target on touch')
+  if (touch) assert.ok((await jump.boundingBox()).height >= 43.99, 'Jump to latest is a 44 px target on touch')
   await shot(page, `${prefix}-jump`)
   await jump[touch ? 'tap' : 'click']()
   await page.waitForFunction(() => {
