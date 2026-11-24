@@ -413,7 +413,11 @@ test('activity: the log with filters and an entry, a person, an agent, and the a
     // Sign-ins, then one person through the picker.
     await page.goto(consoleUrl('/activity?group=signin'))
     await page.locator('[data-sw-activity-log] [data-sw-grid-row]').first().waitFor()
-    assert.match(await page.locator('[data-sw-grid-row]').first().textContent(), /signed in on/i)
+    // The newest row can be a sign-out (the demo signs some people out hours later), so look for a sign-in among them.
+    assert.ok(
+      (await page.locator('[data-sw-grid-row]').allTextContents()).some((text) => /signed in on/i.test(text)),
+      'a sign-in in the sign-in log',
+    )
     await page.goto(consoleUrl('/activity'))
     await page.locator('[data-sw-activity-filter="person"]').click()
     await page.getByRole('option', { name: 'Mei Lin' }).click()
