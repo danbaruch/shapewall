@@ -5,7 +5,8 @@
 // thread is open, a recapture after which it shows on "before" only, and
 // the agent's JSON with the files, and a reply that is a drawing with no
 // text, kept unsent across closing its thread. On a phone: the full-sheet
-// page to draw on and 44 px targets. On a hosted board: a share link guest sees no
+// page to draw on and 44 px targets. On a desktop the composer's row
+// never overlaps or cuts off a control, at any card width, theme or font. On a hosted board: a share link guest sees no
 // attach button (and is refused by the server) but can draw.
 // Set SHAPEWALL_SHOTS=<dir> to keep screenshots.
 import { after, before, test } from 'node:test'
@@ -396,6 +397,139 @@ test('a reply can be a drawing alone, and an unsent reply survives closing the t
     assert.deepEqual(errors, [])
   } finally {
     await context.close()
+  }
+})
+
+// Every control in a composer's bottom row, measured: none overlaps another
+// or Post, and none is cut off by the row or the card (1 px tolerance).
+async function composerRowProblems(page, composer) {
+  return page.$eval(composer, (form) => {
+    const row = form.querySelector('[data-sw-composer-actions]')
+    const card = form.closest('[data-sw-composer-popover]') || form
+    const edge = (a, b) => a.left < b.left - 1 || a.right > b.right + 1 || a.top < b.top - 1 || a.bottom > b.bottom + 1
+    const rowBox = row.getBoundingClientRect()
+    const cardBox = card.getBoundingClientRect()
+    const items = [...row.querySelectorAll('button, [data-sw-draw-count], [data-sw-draw-label]')]
+      .filter((node) => node.getClientRects().length && getComputedStyle(node).visibility !== 'hidden')
+      .map((node) => ({
+        name: node.getAttribute('aria-label') || node.textContent.trim() || node.tagName,
+        box: node.getBoundingClientRect(),
+        cut: node.scrollWidth > node.clientWidth + 1,
+      }))
+    const problems = []
+    if (row.scrollWidth > row.clientWidth + 1) problems.push(`the row scrolls (${row.scrollWidth} > ${row.clientWidth})`)
+    items.forEach((item, i) => {
+      if (edge(item.box, rowBox)) problems.push(`${item.name} is outside the row`)
+      if (edge(item.box, cardBox)) problems.push(`${item.name} is outside the card`)
+      if (item.cut) problems.push(`${item.name} is cut off`)
+      for (const other of items.slice(i + 1)) {
+        const x = Math.min(item.box.right, other.box.right) - Math.max(item.box.left, other.box.left)
+        const y = Math.min(item.box.bottom, other.box.bottom) - Math.max(item.box.top, other.box.top)
+        if (x > 1 && y > 1) problems.push(`${item.name} overlaps ${other.name}`)
+      }
+    })
+    return { problems, count: items.length, post: items.some((item) => item.name === 'Post') }
+  })
+}
+
+test('desktop: the composer row never overlaps or cuts off a control, at any card width, theme or font', async () => {
+  const { context, page, errors } = await openBoard({ viewport: { width: 1024, height: 800 } })
+  try {
+    const frame = '[data-sw-frame="pricing:desktop"]'
+    await page.click(frame)
+    const box = await settle(page, frame)
+    await page.mouse.move(box.x + 10, box.y + 10)
+    await page.keyboard.press('c')
+    await page.waitForSelector('[data-sw-comment-mode][aria-pressed="true"]')
+    await page.mouse.click(box.x + box.width * 0.5, box.y + box.height * 0.3)
+    const composer = '[data-sw-composer-popover] [data-sw-composer]'
+    await page.waitForSelector(`${composer} [data-sw-comment-input]`)
+    await page.fill(`${composer} [data-sw-comment-input]`, 'Assign before 9:00')
+    // Draw one box so the whole row shows: tools, inks, Undo, Clear, the count.
+    await page.click(`${composer} [data-sw-draw-tool="box"]`)
+    const bar = '[data-sw-draw-bar="composer"]'
+    await page.waitForSelector(bar)
+    const fitted = await settle(page, frame)
+    // On the part of the frame in view, clear of the bar.
+    const barBox = await page.locator(bar).boundingBox()
+    const canvas = await page.locator('[data-sw-canvas]').boundingBox()
+    const top = Math.max(fitted.y, canvas.y, barBox.y + barBox.height < canvas.y + canvas.height / 2 ? barBox.y + barBox.height + 8 : 0)
+    const bottom = Math.min(
+      fitted.y + fitted.height,
+      canvas.y + canvas.height - 70,
+      barBox.y > canvas.y + canvas.height / 2 ? barBox.y - 8 : Infinity,
+    )
+    const at = (fx, fy) => [fitted.x + fitted.width * fx, top + (bottom - top) * fy]
+    await drag(page, at(0.1, 0.2), at(0.4, 0.6))
+    await page.waitForSelector(`${bar} [data-sw-draw-count="1"]`)
+    await page.click(`${bar} [data-sw-draw-bar-done]`)
+    await page.waitForSelector('[data-sw-composer-popover]:not([data-sw-stowed])')
+    await page.waitForSelector(`${composer} [data-sw-draw-count="1"]`)
+    await page.waitForSelector(`${composer} [data-sw-draw-ink]`)
+
+    // Runner-like fonts: a CI box has none of the system fonts, only a wide
+    // fallback; this stands in for it with wider letters and a larger size.
+    const fonts = {
+      normal: '',
+      wide: 'html { font-size: 18px !important } * { font-family: "DejaVu Sans", Verdana, sans-serif !important; letter-spacing: 0.04em !important }',
+    }
+    await page.evaluate(() => document.head.append(Object.assign(document.createElement('style'), { id: 'sw-test-fonts' })))
+    const checked = []
+    for (const mode of ['light', 'dark']) {
+      await page.evaluate((value) => document.documentElement.setAttribute('data-mode', value), mode)
+      for (const [font, css] of Object.entries(fonts)) {
+        await page.evaluate((value) => (document.getElementById('sw-test-fonts').textContent = value), css)
+        for (const width of [260, 300, 340, 400, 480]) {
+          await page.$eval('[data-sw-composer-popover]', (node, value) => (node.style.width = `${value}px`), width)
+          await page.waitForTimeout(60)
+          const result = await composerRowProblems(page, composer)
+          assert.ok(result.post && result.count >= 10, `${mode} ${font} ${width}: the whole row is measured (${result.count})`)
+          assert.deepEqual(result.problems, [], `${mode} ${font} ${width}px`)
+          checked.push(`${mode}/${font}/${width}`)
+          if (width === 300 || width === 340) await shot(page, `row-${mode}-${font}-${width}`)
+        }
+      }
+    }
+    assert.equal(checked.length, 20)
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+})
+
+test('phone 390 and 320: the composer row never overlaps or cuts off a control; 44 px targets', async () => {
+  for (const width of [390, 320]) {
+    const { context, page, errors } = await openBoard({ ...PHONE, viewport: { width, height: 760 } })
+    try {
+      await page.tap('[data-sw-comment-mode]')
+      const composer = '[role="dialog"] [data-sw-composer]'
+      for (let tries = 0; tries < 3 && !(await page.locator(`${composer} [data-sw-comment-input]`).count()); tries += 1) {
+        const frame = await settle(page, '[data-sw-frame]')
+        const top = Math.max(frame.y, 120)
+        const bottom = Math.min(frame.y + frame.height, 620)
+        await page.touchscreen.tap(frame.x + frame.width / 2, (top + bottom) / 2)
+        await page.waitForSelector(`${composer} [data-sw-comment-input]`, { timeout: 2500 }).catch(() => {})
+      }
+      await page.waitForSelector(`${composer} [data-sw-comment-input]`, { timeout: 5000 })
+      await page.fill(`${composer} [data-sw-comment-input]`, 'Assign before 9:00')
+      await page.waitForSelector(`${composer} [data-sw-draw-open]`)
+      const result = await composerRowProblems(page, composer)
+      assert.ok(result.post && result.count >= 3, `phone ${width}: the whole row is measured (${result.count})`)
+      assert.deepEqual(result.problems, [], `phone ${width}`)
+      const small = await page.$$eval(
+        `${composer} [data-sw-composer-actions] button`,
+        (nodes) =>
+          nodes
+            .filter((node) => node.getClientRects().length)
+            .map((node) => node.getBoundingClientRect())
+            .filter((box) => box.width < 43.5 || box.height < 43.5).length,
+      )
+      assert.equal(small, 0, `phone ${width}: 44 px targets`)
+      await shot(page, `row-phone-${width}`)
+      assert.deepEqual(errors, [])
+    } finally {
+      await context.close()
+    }
   }
 })
 
