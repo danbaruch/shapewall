@@ -114,11 +114,14 @@ async function comment(user, body, x = 20) {
   assert.equal(made.status, 201, made.text)
   return made.json.comment
 }
-// A comment nobody sent yet: editing one clears its vouch.
+// A comment nobody sent yet: editing one clears its vouch. Written, it goes
+// to the default agent, and Builder's watcher may take it before the edit
+// lands: the edit takes it back from Builder too (no status, no claim).
 async function unsent(user, body, x) {
   const made = await comment(user, `${body} (draft)`, x)
   const edited = await api(user, 'PATCH', boardApi(`/comments/${made.id}`), { body })
   assert.equal(edited.status, 200, edited.text)
+  assert.equal(edited.json.comment.agentStatus, null, 'not left with an agent that took the draft')
   assert.equal(edited.json.comment.dispatchable, false)
   return edited.json.comment
 }

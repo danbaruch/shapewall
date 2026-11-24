@@ -3,6 +3,15 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## 1.0.1 - 2026-11-23
+
+### Fixed
+
+- The comment composer's tools no longer run under Post in a narrow comment card: the row wraps, and Post moves to its own line
+  when the tools need the room. On phones the "Draw on the page" label shortens instead of running under the microphone.
+- Hosted: editing a comment that an agent has already taken (queued or working) takes it back from that agent, so it can be sent
+  again as edited. Before, the edit left it stuck as queued until the stale-claim sweep.
+
 ## 1.0.0 - 2026-11-23
 
 Shapewall shows your whole app on one wall: every screen on desktop and phone, the flows between them, and comments your coding

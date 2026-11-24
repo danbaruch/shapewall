@@ -149,7 +149,18 @@ test('comment PATCH and the review claim transition together', async () => {
       assert.equal((await box.take(number)).status, 200)
       const route = boardUrl(`/comments/${number}`)
       const patch = (body) => ada.browser.call('PATCH', route, { body })
-      assert.equal((await patch({ body: 'Review the new title' })).status, 200)
+      // A new text takes it back from the agent (it may not read it any
+      // more): the claim ends and the status clears. Sent again, it is taken again.
+      const edited = await patch({ body: 'Review the new title' })
+      assert.equal(edited.status, 200)
+      assert.equal(openClaims(number), 0)
+      assert.equal(commentRow(number).agent_status, null)
+      const resent = await ada.browser.post(boardUrl(`/comments/${number}/send-to-agent`), {
+        agentId: builder.agentId,
+        dispatchHash: edited.json.comment.dispatchHash,
+      })
+      assert.equal(resent.status, 200, resent.text)
+      assert.equal((await box.take(number)).status, 200)
       // The same rule and answer as a local board (comment-fields.js checkAgentTransition).
       const invalid = await patch({ status: 'resolved', agentStatus: 'working' })
       assert.equal(invalid.status, 409)
@@ -159,9 +170,11 @@ test('comment PATCH and the review claim transition together', async () => {
       const result = await patch(resolve ? { status: 'resolved' } : { agentStatus: null })
       assert.equal(result.status, 200)
       assert.equal(openClaims(number), 0)
-      const run = hosted.db
-        .prepare('SELECT ended_at, outcome FROM agent_runs WHERE workspace_id = ? AND project_id = ? AND comment_number = ?')
-        .get(ws, project.id, number)
+      const [first, run] = hosted.db
+        .prepare('SELECT ended_at, outcome FROM agent_runs WHERE workspace_id = ? AND project_id = ? AND comment_number = ? ORDER BY rowid')
+        .all(ws, project.id, number)
+      assert.ok(first.ended_at, 'the run the edit took back ended')
+      assert.equal(first.outcome, 'released')
       assert.ok(run.ended_at)
       assert.equal(run.outcome, resolve ? 'resolved' : 'released')
     }

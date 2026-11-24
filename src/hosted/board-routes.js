@@ -348,8 +348,21 @@ export function mountBoardRoutes(
     const lifecycle =
       changes.status === 'resolved' || (changes.status !== undefined && changes.status !== row.status) || changes.agentStatus !== undefined
     if (lifecycle) requireNoRunningFix(hub, req.t.workspaceId, req.project.id, ctx.board.id, row.number)
-    const updated = ctx.comments.update(row.number, changes, now())
-    if (lifecycle && !['queued', 'working'].includes(updated.agentStatus))
+    let updated = ctx.comments.update(row.number, changes, now())
+    // A new text takes the comment back from where it was sent (comments.js
+    // drops the vouch with it). An agent that had taken it may no longer
+    // read it or report on it, so it lets go now: the status clears and the
+    // claim ends, and the comment can be sent again as edited. Not while a
+    // connected agent's fix runs on it: that turn works from the text it
+    // claimed and writes the status when it ends.
+    const takenBack =
+      !lifecycle &&
+      row.dispatch_hash &&
+      ['queued', 'working'].includes(updated.agentStatus) &&
+      !ctx.comments.get(row.number).dispatch_hash &&
+      hub?.ofThread(req.t.workspaceId, req.project.id, ctx.board.id, `comment-${row.number}`)?.kind !== 'fix'
+    if (takenBack) updated = ctx.comments.update(row.number, { agentStatus: null }, now())
+    if ((lifecycle || takenBack) && !['queued', 'working'].includes(updated.agentStatus))
       agentsFor(req.t).closeCommentClaims(req.project.id, ctx.board.id, row.number, 'person')
     return updated
   }
