@@ -138,19 +138,43 @@ test('Windows: only a connection from the running Tailscale service’s own proc
   const env = { SystemRoot: 'C:\\Windows' }
   const fake = windowsRun()
   const proof = windowsPeerProof({ run: fake.run, env })
-  assert.equal(await proof.trusted(socket(50001)), true)
+  // Every connection is seen as it is accepted; one that was not is never tailscaled's.
+  const seen = (proof, ...sockets) => {
+    for (const item of sockets) proof.accepted(item)
+    return sockets[0]
+  }
+  assert.equal(await proof.trusted(socket(50001)), false, 'not seen when it was accepted')
+  const s1 = seen(proof, socket(50001))
+  assert.equal(await proof.trusted(s1), true)
   assert.ok(
     fake.calls.every(([file]) => file.startsWith('C:\\Windows\\System32\\')),
     'programs by their full path, never looked up in the current folder',
   )
-  assert.equal(await proof.trusted(socket(50002)), false, 'another process')
-  assert.equal(await proof.trusted(socket(50003)), false, 'no such connection')
-  assert.equal(await proof.trusted(socket(50001, 4700, { remoteAddress: '100.64.0.7' })), false, 'not loopback')
+  assert.equal(await proof.trusted(seen(proof, socket(50002))), false, 'another process')
+  assert.equal(await proof.trusted(seen(proof, socket(50003))), false, 'no such connection')
+  assert.equal(await proof.trusted(seen(proof, socket(50001, 4700, { remoteAddress: '100.64.0.7' }))), false, 'not loopback')
   assert.equal(await proof.trusted(null), false)
-  // The service's process id changed while the connection was looked up: it may have been reused.
-  assert.equal(await windowsPeerProof({ run: windowsRun({ pids: [3120, 4000] }).run, env }).trusted(socket(50001)), false)
-  assert.equal(await windowsPeerProof({ run: windowsRun({ pids: [4000, 3120] }).run, env }).trusted(socket(50001)), false)
-  assert.equal(await windowsPeerProof({ run: windowsRun({ pids: [0] }).run, env }).trusted(socket(50001)), false, 'not running')
+  // pids: the service's process id at accept, before and after the netstat lookup.
+  const check = async (pids) => {
+    const other = windowsPeerProof({ run: windowsRun({ pids }).run, env })
+    return other.trusted(seen(other, socket(50001)))
+  }
+  assert.equal(await check([3120, 3120, 3120]), true)
+  assert.equal(await check([3120, 3120, 4000]), false, 'changed during the lookup: it may have been reused')
+  assert.equal(await check([3120, 4000, 3120]), false)
+  // The service restarted since the connection was accepted, and its new process got the id netstat still shows
+  // for a socket whose maker exited long ago.
+  assert.equal(await check([4000, 3120, 3120]), false, 'restarted since the connection was accepted')
+  assert.equal(await check([0, 3120, 3120]), false, 'not running when the connection was accepted')
+  assert.equal(await check([0]), false, 'not running')
+  // watch(server): the connection event is what records it.
+  const listeners = []
+  const watched = windowsPeerProof({ run: windowsRun().run, env })
+  watched.watch({ on: (event, listener) => listeners.push([event, listener]) })
+  assert.equal(listeners[0][0], 'connection')
+  const s2 = socket(50001)
+  listeners[0][1](s2)
+  assert.equal(await watched.trusted(s2), true)
   assert.equal(await proof.ownerOf(socket(50002)), 8888)
   assert.equal(proof.selfOwner(), process.pid)
 })
@@ -214,6 +238,8 @@ function pcblist(sockets, { inpcbLength = 104, socketLength = 104 } = {}) {
     })
     record(socketLength, 0x1, (buffer) => {
       if (buffer.length < 72) return
+      // The kernel's handle of the socket; a user-space flow has none.
+      if (!item.userland) buffer.writeBigUInt64LE(0xffffff8012345678n, 8)
       buffer.writeUInt32LE(item.uid, 64)
       buffer.writeInt32LE(item.lastPid, 68)
     })
@@ -245,6 +271,10 @@ const TABLE = [
 test('macOS: every socket and its owner, from the kernel’s pcblist_n', () => {
   const sockets = parsePcblistN(pcblist(TABLE))
   assert.equal(sockets.length, 5, 'IPv6 sockets are left out')
+  // A user-space flow's record (no socket handle, every other field zero) names nobody, not root.
+  const userland = parsePcblistN(pcblist([...TABLE, mac(50009, 4700, 0, 0, { userland: true })]))
+  assert.equal(userland.length, 5)
+  assert.equal(pcblistPeer(userland, socket(50009)), null)
   assert.deepEqual(pcblistPeer(sockets, socket(50001)), {
     remotePort: 4700,
     localPort: 50001,
@@ -322,10 +352,24 @@ test('macOS: which process is tailscaled, and the App Store app refused with the
   ])
   assert.match(tailscaledProblem(status, fake), /no tailscaled process of root/)
 
-  const appStore = await facts([
-    [700, [501, 501, 501], '/Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension'],
-  ])
+  const APP = '/Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension'
+  const appStore = await facts([[700, [501, 501, 501], APP]])
   assert.match(tailscaledProblem(status, appStore), /Mac App Store version of Tailscale runs as your user.*Standalone/)
+  // Beside a root tailscaled too: the tailscale command would talk to the one, the facts describe the other.
+  const both = await facts(
+    [
+      [700, [501, 501, 501], APP],
+      [300, [0, 0, 0], '/opt/homebrew/bin/tailscaled'],
+    ],
+    { 300: '/opt/homebrew/bin/tailscaled' },
+  )
+  assert.match(tailscaledProblem(status, both), /Mac App Store version/)
+  // A user's own program by that name elsewhere does not switch the feature off.
+  const named = await facts([
+    [701, [501, 501, 501], '/Users/x/IPNExtension'],
+    [412, [0, 0, 0], STANDALONE],
+  ])
+  assert.equal(tailscaledProblem(status, named), null)
 
   assert.match(
     tailscaledProblem(
@@ -340,6 +384,30 @@ test('macOS: which process is tailscaled, and the App Store app refused with the
     ),
     /more than one tailscaled/,
   )
+})
+
+test('on Windows and macOS, not on a subnet router or exit node: tailscaled would dial routed connections itself', async () => {
+  const self = { TailscaleIPs: ['100.64.0.1', 'fd7a:115c:a1e0::1'], AllowedIPs: ['100.64.0.1/32', 'fd7a:115c:a1e0::1/128'] }
+  const plain = { ...status, Self: self }
+  const win = await windowsFacts({ run: windowsRun().run, env: {}, read: { readFileSync: () => '' } })
+  const mac = await darwinFacts({ run: darwinRun([[412, [0, 0, 0], STANDALONE]]) })
+  for (const facts of [win, mac]) {
+    assert.equal(tailscaledProblem(plain, facts), null)
+    assert.match(tailscaledProblem({ ...status, Self: { ...self, ExitNodeOption: true } }, facts), /subnet router or exit node/)
+    assert.match(tailscaledProblem({ ...status, Self: { ...self, PrimaryRoutes: ['192.168.1.0/24'] } }, facts), /subnet router/)
+    assert.match(
+      tailscaledProblem({ ...status, Self: { ...self, AllowedIPs: [...self.AllowedIPs, '127.0.0.0/8'] } }, facts),
+      /subnet router/,
+    )
+  }
+  // Linux: tailscaled routes in the kernel unless the debug switches say otherwise (checked apart).
+  assert.equal(tailscaledProblem({ ...status, Self: { ...self, ExitNodeOption: true } }, { ...win, platform: undefined }), null)
+})
+
+test('macOS: the server must not run as root, where the self test could not catch a misread table', () => {
+  const proof = darwinPeerProof({ run: async () => ({ code: 1, stdout: Buffer.alloc(0) }) })
+  const root = process.getuid?.() === 0
+  assert.equal(proof.problem() === null, !root)
 })
 
 // ---- Shared --------------------------------------------------------------------
@@ -402,6 +470,34 @@ test('Windows: the self test passes when netstat names this process for its own 
   } finally {
     await new Promise((resolve) => server.close(resolve))
   }
+})
+
+test('a suspension while a check is in flight is not undone by the check finishing', async () => {
+  let release
+  const proof = { trusted: () => new Promise((resolve) => (release = resolve)) }
+  const here = { stableId: 'nSELF', addresses: ['100.64.0.1'] }
+  const whois = async () => ({ login: 'a@b.c', userId: 'u1', tagged: false, expired: false, stableId: 'nPEER', addresses: ['100.64.0.9'] })
+  const gate = createTailnetGate({ secret: 's'.repeat(43), proof, whois, self: () => here, interfaces: () => ({}) })
+  const req = {
+    url: `/_ts/${'s'.repeat(43)}/`,
+    headers: { 'tailscale-user-login': 'a@b.c', 'x-forwarded-for': '100.64.0.9' },
+    rawHeaders: ['Tailscale-User-Login', 'a@b.c', 'X-Forwarded-For', '100.64.0.9'],
+    socket: { remotePort: 1 },
+  }
+  const admitted = gate.admit(req)
+  await new Promise((resolve) => setImmediate(resolve))
+  gate.suspend('test')
+  release(true)
+  await admitted
+  gate.resume()
+  assert.equal(gate.identityOf(req), null, 'not believed after resume either')
+  // The same, without a suspension: believed.
+  const again = { ...req, url: `/_ts/${'s'.repeat(43)}/`, socket: { remotePort: 2 } }
+  const second = gate.admit(again)
+  await new Promise((resolve) => setImmediate(resolve))
+  release(true)
+  await second
+  assert.equal(gate.identityOf(again)?.login, 'a@b.c')
 })
 
 test('the gate waits for an asynchronous check, and asks it once per connection', async () => {

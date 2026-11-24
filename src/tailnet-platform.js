@@ -9,8 +9,10 @@
 // connection (no elevation needed for the id, only for the program's path),
 // and `sc.exe queryex Tailscale` says which process id the running service
 // has. A connection is tailscaled's when its other end is owned by that
-// process id, read before and after the netstat lookup so that a process id
-// freed and reused in between cannot pass. No other user can start, replace
+// process id. That id is read when the connection is accepted and again
+// before and after the netstat lookup, and all must agree: netstat names the
+// process that made a socket even after it exited, so an id freed long ago
+// and taken by a restarted service must not make an older connection pass. No other user can start, replace
 // or reconfigure a LocalSystem service or open a socket in its process; an
 // Administrator can, as root can on Linux.
 //
@@ -178,12 +180,23 @@ export function windowsPeerProof({ run = runProgram, env = process.env } = {}) {
     const result = await run(sc, ['queryex', WINDOWS_SERVICE])
     return result.code === 0 ? scQueryEx(result.stdout).pid : null
   }
+  // The service's process id when each connection was accepted (watch()).
+  const atAccept = new WeakMap()
+  const accepted = (socket) => {
+    if (socket && !atAccept.has(socket)) atAccept.set(socket, loopbackPair(socket) ? servicePid() : Promise.resolve(null))
+  }
   return {
     ownerOf,
+    // Called with the listening server before anything is put on the tailnet (proofSelfTest).
+    watch(server) {
+      server.on('connection', accepted)
+    },
+    accepted,
     async trusted(socket) {
-      if (!loopbackPair(socket)) return false
+      if (!loopbackPair(socket) || !atAccept.has(socket)) return false
+      const then = await atAccept.get(socket)
       const before = await servicePid()
-      if (!before) return false
+      if (!then || then !== before) return false
       const owner = await ownerOf(socket)
       const after = await servicePid()
       return owner === before && after === before
@@ -198,7 +211,7 @@ export function windowsPeerProof({ run = runProgram, env = process.env } = {}) {
 // { tailscaled: [{ pid, uid, argv, env }], unreadable, container }. uid 0
 // stands for LocalSystem (the account that is root's equal here).
 export async function windowsFacts({ run = runProgram, env = process.env, read = fs } = {}) {
-  const facts = { tailscaled: [], unreadable: 0, container: null }
+  const facts = { tailscaled: [], unreadable: 0, container: null, platform: 'win32' }
   const dir = system32(env)
   const sc = path.win32.join(dir, 'sc.exe')
   const query = await run(sc, ['queryex', WINDOWS_SERVICE])
@@ -293,7 +306,11 @@ export function parsePcblistN(buffer) {
           : null
     } else if (kind === XSO_SOCKET) {
       if (length < XSOCKET_N_MIN) return null
-      if (current && current.uid === null) {
+      // A record the kernel did not fill from a socket (a user-space flow,
+      // a pcb without a socket) has no handle and a uid of 0 that means
+      // nothing: that socket's owner is unknown.
+      const handle = buffer.readBigUInt64LE(offset + 8)
+      if (current && current.uid === null && handle !== 0n) {
         current.uid = buffer.readUInt32LE(offset + 64)
         current.lastPid = buffer.readInt32LE(offset + 68)
         sockets.push(current)
@@ -338,7 +355,11 @@ export function darwinPeerProof({ run = runProgram } = {}) {
       const found = await peer(socket)
       return Boolean(found && found.uid === process.getuid() && found.lastPid === process.pid)
     },
-    problem: () => null,
+    // As root the self test would expect the very uid that is trusted, and could not catch a misread table.
+    problem: () =>
+      typeof process.getuid === 'function' && process.getuid() === 0
+        ? 'on macOS the server must not run as root: run it as an ordinary user.'
+        : null,
   }
 }
 
@@ -354,15 +375,17 @@ export function psRows(text) {
 
 const STANDALONE = /^\/Library\/SystemExtensions\/.+\/io\.tailscale\.ipn\.macsys\.network-extension$/
 const OPEN_SOURCE = /(^|\/)tailscaled$/
-const APP_STORE = /\/Tailscale\.app\/.*IPNExtension$|(^|\/)IPNExtension$/
+const APP_STORE = /^\/Applications\/Tailscale\.app\/Contents\/PlugIns\/IPNExtension\.appex\/Contents\/MacOS\/IPNExtension$/
 
 // What macOS says about tailscaled, in hostFacts' shape, plus `appStore`:
-// the Mac App Store app's extension runs (as a user). Which process is
+// the Mac App Store app's extension runs (as a user). While it runs the
+// feature is refused, also beside a root tailscaled: the `tailscale`
+// command would then talk to one daemon and the facts describe another. Which process is
 // tailscaled: the Standalone app's network extension (installed under
 // /Library/SystemExtensions) or a process named tailscaled, and in both cases
 // only one that is root in its user, real and saved ids.
 export async function darwinFacts({ run = runProgram } = {}) {
-  const facts = { tailscaled: [], unreadable: 0, container: null, appStore: false }
+  const facts = { tailscaled: [], unreadable: 0, container: null, appStore: false, platform: 'darwin' }
   const list = await run('/bin/ps', ['-axww', '-o', 'pid=,uid=,ruid=,svuid=,comm='])
   if (list.code !== 0) {
     facts.unreadable += 1

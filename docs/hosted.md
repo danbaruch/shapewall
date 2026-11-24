@@ -407,11 +407,16 @@ administrator rights or native code.
   that made it in the `net.inet.tcp.pcblist_n` sysctl, which any user may read. As on Linux, the peer must be root.
   tailscaled is the Standalone app's network extension (under `/Library/SystemExtensions`) or a process named `tailscaled`,
   root in its user, real and saved ids. The `tailscale` command must be on the server's `PATH` (in the app: Settings, CLI
-  integration). The Mac App Store app is refused (above).
+  integration). The server must run as an ordinary user, not root. The Mac App Store app is refused (above), also when a
+  root `tailscaled` runs beside it.
 - **Windows**: tailscaled is the `Tailscale` service, which must run as LocalSystem. `netstat -ano` gives the process that
-  owns the peer socket, and `sc.exe queryex Tailscale` the service's process, read before and after the lookup so that a
-  process id reused in between cannot pass. The proxy flags are read from the service's command line (`sc.exe qc`), the
+  owns the peer socket, and `sc.exe queryex Tailscale` the service's process. That process is read when the connection is accepted
+  and before and after the lookup, and all three must agree, so a process id freed and reused (also by a restarted service)
+  cannot pass. The proxy flags are read from the service's command line (`sc.exe qc`), the
   debug switches from its registry environment and `tailscaled-env.txt` when readable.
+- **Both refuse a subnet router or exit node.** There tailscaled handles routed connections in its own network stack and
+  dials the destination itself, which could be this machine's loopback. Stop advertising routes and the exit node on the
+  server's machine, or run the server elsewhere.
 
 Both are covered by tests and by a run of the real check on macOS and Windows in CI. They have not yet been run against a
 real tailnet on a Mac or a Windows server; the self test at start still refuses where the check cannot see the server's own

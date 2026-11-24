@@ -277,6 +277,8 @@ export async function proofSelfTest(server, proof) {
   const expected = proof.selfOwner ? proof.selfOwner() : typeof process.getuid === 'function' ? process.getuid() : null
   if (expected === null || expected === undefined)
     return 'the check that tells tailscaled from other programs cannot say who this process is, so it cannot be tested here.'
+  // From now on, every connection the server accepts is seen as it arrives (Windows).
+  proof.watch?.(server)
   const accepted = new Promise((resolve) => server.once('connection', resolve))
   const client = net.connect(server.address().port, '127.0.0.1')
   client.on('error', () => {})
@@ -453,12 +455,26 @@ const flagValue = (argv, name) => {
   return null
 }
 
+// Whether `tailscale status --json` says this node routes for others: an
+// exit node, approved subnet routes, or allowed addresses beyond its own.
+function routes(status) {
+  const self = status?.Self || {}
+  if (self.ExitNodeOption === true) return true
+  if (Array.isArray(self.PrimaryRoutes) && self.PrimaryRoutes.length) return true
+  const own = new Set((Array.isArray(self.TailscaleIPs) ? self.TailscaleIPs : []).map(canonicalAddress))
+  return (Array.isArray(self.AllowedIPs) ? self.AllowedIPs : []).some((prefix) => {
+    const [address, bits] = String(prefix).split('/')
+    const host = canonicalAddress(address)
+    return !(host && own.has(host) && (bits === undefined || bits === (host.includes(':') ? '128' : '32')))
+  })
+}
+
 // Why tailscaled's connections to loopback cannot be taken as the serve
 // proxy's, or null. `status`: the parsed `tailscale status --json`.
 export function tailscaledProblem(status, facts) {
   if (facts.container) return `this process cannot tell whose "root" a connection comes from: ${facts.container}`
   if (facts.unreadable) return 'tailscaled’s command line cannot be read, so how it runs cannot be checked'
-  if (!facts.tailscaled.length && facts.appStore)
+  if (facts.appStore)
     return 'the Mac App Store version of Tailscale runs as your user, so its connections cannot be told apart from any other program’s. Install the Standalone Tailscale app from tailscale.com instead'
   if (facts.tailscaled.length !== 1)
     return facts.tailscaled.length
@@ -475,6 +491,10 @@ export function tailscaledProblem(status, facts) {
     return 'tailscaled runs a SOCKS5 proxy (--socks5-server), which opens connections for local programs'
   if (flagValue(daemon.argv, 'outbound-http-proxy-listen'))
     return 'tailscaled runs an outbound HTTP proxy (--outbound-http-proxy-listen), which opens connections for local programs'
+  // On Windows and macOS tailscaled handles routed traffic in its own network stack by default, and
+  // dials the destination itself: on a subnet router or exit node that could be this machine's loopback.
+  if (['win32', 'darwin'].includes(facts.platform) && routes(status))
+    return 'this machine is a subnet router or exit node, and on this system tailscaled then dials routed connections itself, which could reach this machine’s loopback. Stop advertising routes and the exit node here, or run the server on another machine'
   const version = /^(\d+)\.(\d+)/.exec(String(status?.Version || ''))
   if (!version) return 'tailscaled’s version cannot be read'
   const [major, minor] = [Number(version[1]), Number(version[2])]
@@ -762,6 +782,7 @@ export function createTailnetGate({
               .then(Boolean, () => false),
           )
         if (!socket || !(await proven.get(socket))) refused('the connection did not come from tailscaled')
+        else if (suspendedFor) refused(suspendedFor)
         else {
           const parsed = parseIdentity(req)
           const address = forwardedTailnetAddress(req)
@@ -777,7 +798,8 @@ export function createTailnetGate({
               refused('the request came from this machine itself')
             } else {
               const vouched = await vouch(socket, address, parsed.login)
-              if (vouched.is === 'yes') {
+              if (suspendedFor) refused(suspendedFor)
+              else if (vouched.is === 'yes') {
                 answer = { ...parsed, userId: vouched.userId }
                 admittedNodes.set(req, { address, login: parsed.login, userId: vouched.userId, nodeId: vouched.nodeId })
               } else if (vouched.is === 'self') {
