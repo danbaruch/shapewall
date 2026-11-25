@@ -114,7 +114,13 @@ export function cropPng(buffer, rect) {
   return cropImage(decodePng(buffer), rect)
 }
 
-function cropImage(image, { x, y, width, height }) {
+function cropImage(image, rect) {
+  const cut = cutImage(image, rect)
+  return { png: encodePng(cut), rect: cut.rect }
+}
+
+// The rectangle (clamped to the image, at least one pixel) as an image, with its rect.
+function cutImage(image, { x, y, width, height }) {
   const left = Math.max(0, Math.min(image.width - 1, Math.round(x)))
   const top = Math.max(0, Math.min(image.height - 1, Math.round(y)))
   const w = Math.max(1, Math.min(image.width - left, Math.round(width)))
@@ -125,7 +131,53 @@ function cropImage(image, { x, y, width, height }) {
     const start = (top + row) * stride + left * image.channels
     image.pixels.copy(out, row * w * image.channels, start, start + w * image.channels)
   }
-  return { png: encodePng({ ...image, width: w, height: h, pixels: out }), rect: { x: left, y: top, width: w, height: h } }
+  return { ...image, width: w, height: h, pixels: out, rect: { x: left, y: top, width: w, height: h } }
+}
+
+// A capture as an MCP image: cut to `crop` ({ x, y, width, height } in the
+// capture's pixels, clamped to it) when given, then scaled down (never up) to
+// fit maxWidth x maxHeight, each output pixel the average of the block it
+// covers. Returns { png, size (the whole capture), rect (the part shown),
+// width, height (of png), scale }.
+export function fitPng(buffer, { crop = null, maxWidth = 1600, maxHeight = 8000 } = {}) {
+  const whole = decodePng(buffer)
+  const size = { width: whole.width, height: whole.height }
+  const image = crop ? cutImage(whole, crop) : { ...whole, rect: { x: 0, y: 0, ...size } }
+  const { rect, channels } = image
+  const scale = Math.min(1, maxWidth / image.width, maxHeight / image.height)
+  if (scale >= 1) return { png: encodePng(image), size, rect, width: image.width, height: image.height, scale: 1 }
+  const width = Math.max(1, Math.round(image.width * scale))
+  const height = Math.max(1, Math.round(image.height * scale))
+  const stride = image.width * channels
+  const out = Buffer.alloc(width * height * channels)
+  const lefts = Array.from({ length: width + 1 }, (_, x) => Math.floor((x * image.width) / width))
+  const sums = new Float64Array(channels)
+  for (let y = 0; y < height; y += 1) {
+    const top = Math.floor((y * image.height) / height)
+    const bottom = Math.max(top + 1, Math.floor(((y + 1) * image.height) / height))
+    for (let x = 0; x < width; x += 1) {
+      const left = lefts[x]
+      const right = Math.max(left + 1, lefts[x + 1])
+      sums.fill(0)
+      for (let sy = top; sy < bottom; sy += 1) {
+        const row = sy * stride
+        for (let sx = left; sx < right; sx += 1) {
+          const at = row + sx * channels
+          for (let c = 0; c < channels; c += 1) sums[c] += image.pixels[at + c]
+        }
+      }
+      const count = (bottom - top) * (right - left)
+      for (let c = 0; c < channels; c += 1) out[(y * width + x) * channels + c] = Math.round(sums[c] / count)
+    }
+  }
+  return {
+    png: encodePng({ ...image, width, height, pixels: out }),
+    size,
+    rect,
+    width,
+    height,
+    scale: Math.round(scale * 1000) / 1000,
+  }
 }
 
 // The part of a capture around a point: up to `width` x `height`, the point

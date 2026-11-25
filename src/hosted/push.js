@@ -22,7 +22,7 @@ import { ID_RE, frameSize, normalizeConfig } from '../config.js'
 import { FILE_MAX as HTML_MAX, withCspMeta } from '../capture/live.js'
 import { CssTooLargeError, sanitizeDocument } from '../capture/sanitize.js'
 import { ELEMENT_MAP_LIMITS, ElementMapError, parseElementMap } from '../capture/element-map.js'
-import { CAPTURE_FILE_RE, VERSION_FILE_RE, VERSION_RE, entryVersion } from '../store.js'
+import { CAPTURE_FILE_RE, VERSION_FILE_RE, VERSION_RE, entryVersion, versionTime } from '../store.js'
 import { referencedVersions } from './retention.js'
 import { ID_PATTERNS, newId } from './crypto.js'
 import { transaction } from './db.js'
@@ -768,9 +768,7 @@ export function createPushStore(
       // The version is the capture's time: one from the future would hold
       // this page against every later push (the stale guard), so a client
       // clock more than ten minutes ahead of the server's is refused.
-      const taken = Date.parse(
-        `${entry.version.slice(0, 4)}-${entry.version.slice(4, 6)}-${entry.version.slice(6, 8)}T${entry.version.slice(9, 11)}:${entry.version.slice(11, 13)}:${entry.version.slice(13, 15)}.${entry.version.slice(15, 18)}Z`,
-      )
+      const taken = Date.parse(versionTime(entry.version) || '')
       if (!Number.isFinite(taken) || taken > now.getTime() + FUTURE_SKEW_MS)
         throw new PushError(
           400,

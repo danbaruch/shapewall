@@ -288,6 +288,15 @@ export function entryVersion(entry, manifest) {
   return Number.isFinite(time) ? versionId(new Date(time), '') : null
 }
 
+// When a capture version was taken, as an ISO time (its first 18 digits are
+// the UTC time to the millisecond), or null for anything else.
+export function versionTime(version) {
+  if (typeof version !== 'string' || !VERSION_RE.test(version)) return null
+  const v = version
+  const time = Date.parse(`${v.slice(0, 4)}-${v.slice(4, 6)}-${v.slice(6, 8)}T${v.slice(9, 11)}:${v.slice(11, 13)}:${v.slice(13, 15)}.${v.slice(15, 18)}Z`)
+  return Number.isFinite(time) ? new Date(time).toISOString() : null
+}
+
 // The version currently shown for a page and viewport (default environment).
 export function currentVersion(config, boardId, pageId, viewport) {
   const manifest = readManifest(config, boardId)
