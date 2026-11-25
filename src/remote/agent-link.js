@@ -831,6 +831,7 @@ export async function runAgentLink({
 
   // What this machine says about itself when the link opens (and again when
   // its instruction files change): display, and its own ceiling.
+  let helloSeq = 0
   function helloBody({ takeover: take = false } = {}) {
     return {
       ...hello,
@@ -844,6 +845,8 @@ export async function runAgentLink({
       policy: { audience: policy.audience, approvals: policy.approvals, commands: policy.commands, auto: policy.auto },
       // The instruction files a chat session reads: names, sizes and short hashes, never content.
       instructions: instructions?.current() || [],
+      // Counts up with every hello of this process: the server keeps the newest list.
+      seq: (helloSeq += 1),
       ...(take ? { takeover: true } : {}),
     }
   }

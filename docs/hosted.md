@@ -1504,8 +1504,9 @@ pushed. Shapewall keeps one list of them, used both when an edit is asked and be
 - scripts a package runs (`scripts/`, `bin/`, `tools/`, install hooks, `*.sh`);
 - container files (`Dockerfile*`, compose files) and CI files;
 - test files (`*.test.*`, `*.spec.*`, `test/`, `tests/`, `__tests__/`, `e2e/`): CI runs them;
-- agent instruction files (`CLAUDE.md`, `AGENTS.md`, `CLAUDE.local.md`, `GEMINI.md`, anywhere in the project): they steer what
-  the next agent session does, so a fix cannot quietly rewrite its own rules or the next agent's.
+- agent instruction files (`CLAUDE.md`, `AGENTS.md`, `CLAUDE.local.md`, `GEMINI.md`, anywhere in the project, and every file the
+  project's instruction files import with `@path`): they steer what the next agent session does, so a fix cannot quietly rewrite
+  its own rules or the next agent's.
 
 For a connected agent's fix:
 
@@ -1705,14 +1706,16 @@ to the session as an appended system prompt, with Shapewall's own data rules aft
   `agent-config/<--as name>/` in Shapewall's config folder (beside `agent-policy.json`) when that folder exists. Shapewall never
   creates it; make it when you want an owner note. It must be outside the project, and it is never Claude Code's own folder.
 - **Never read:** `~/.claude/CLAUDE.md`, `CLAUDE.local.md`, `CLAUDE.md` files in folders above the project, `.claude/rules/`.
-- **Imports** (`@path` in a file) are followed only inside the folder the file came from, at most 4 deep, regular files only (a
-  symbolic link is refused), 64 KB a file and 128 KB in all. A refused import stays as text and is listed with its reason; one that
+- **Imports** (`@path` in a file) are followed only inside the folder the file came from, never to `CLAUDE.local.md`, a dotfile
+  or a dot folder, at most 4 deep, regular files only (a symbolic link only when its real target is inside the same folder, so
+  `CLAUDE.md` linked to `AGENTS.md` works and is read once), 64 KB a file and 128 KB in all. A fix treats every imported file like
+  `CLAUDE.md` itself: a file that runs something. A refused import stays as text and is listed with its reason; one that
   does not exist (an `@name` mention) is skipped.
 - **When:** each session reads them as it starts, so an edited `CLAUDE.md` reaches new chats, not a running one. A fix reads them
   from its own copy of the project (the base commit), and its status line says which it got.
 - **What you see:** `agent connect` prints one line per file (path, size, sha256) and each refused import. The board's Agents
-  panel shows "Instructions: CLAUDE.md (project), CLAUDE.md (agent config)" to people who may use the agent; the console's Agents
-  page shows the same with sizes and short hashes. Only names, sizes and hashes leave your machine, never the text. The server
+  panel shows "Instructions: CLAUDE.md (project), CLAUDE.md (agent config)" (names only) to people who may use the agent; the
+  console's Agents page shows the same with sizes and short hashes. Only names, sizes and hashes leave your machine, never the text. The server
   keeps them in memory for the open link, so they show again after its next connect.
 - **Turning them off:** `--instructions project` leaves the agent config folder out, `--instructions none` everything.
 - **They add no powers.** The tools, the mode and every refusal are the same with or without them. A file that tells the agent to

@@ -71,9 +71,11 @@ and the project uses [Semantic Versioning](https://semver.org/).
   the machine. It is now off twice over: `autoMemoryEnabled: false` in the session's flag settings and
   `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` in its environment, checked with claude-agent-acp 0.93.0 and 0.106.0
   (docs/agent-hardening.md).
-- `CLAUDE.md`, `AGENTS.md`, `CLAUDE.local.md` and `GEMINI.md` are now files that run something: a connected agent's fix cannot
-  edit them unless the machine names the file with `--allow-path`, the edit is always asked on the board, and such a fix is
-  never pushed.
+- `CLAUDE.md`, `AGENTS.md`, `CLAUDE.local.md` and `GEMINI.md` are now files that run something, and so is every file the
+  project's instruction files import: a connected agent's fix cannot edit them unless the machine names the file with
+  `--allow-path`, the edit is always asked on the board, and such a fix is never pushed.
+- Instruction file imports never reach `CLAUDE.local.md`, a dotfile or a dot folder (`.env`, `.git`), and the board is told
+  instruction file names only (sizes and hashes stay in the console).
 
 ## 1.2.0 - 2026-11-24
 

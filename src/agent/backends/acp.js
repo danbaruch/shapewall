@@ -32,7 +32,7 @@ import { PROTOCOL_VERSION, RequestError, client, ndJsonStream } from '@agentclie
 import { TERMINAL_ENV_ALLOWED, acpAgentKind, agentEnv, formatCommand, loginHint, terminalEnvRefused } from '../acp/command.js'
 import { createSandbox, SandboxError } from '../acp/sandbox.js'
 import { ACP_PREAMBLE, NEXT_STEPS_PROMPT, NO_IMAGES_NOTE, REMOTE_DATA_RULES, quoteData } from '../context.js'
-import { instructionsPrompt, loadInstructions } from '../instructions.js'
+import { instructionPaths, instructionsPrompt, isInstructionPath, loadInstructions } from '../instructions.js'
 import { AgentError } from '../errors.js'
 import { showable } from '../showable.js'
 import { neverCommitted, runsSomething } from '../exec-paths.js'
@@ -675,6 +675,8 @@ class AcpProcess {
     this.instructions = readOnly || remoteEdit ? instructions : null
     // The files' text for the first prompt, when the agent takes no system prompt.
     this.instructionsBlock = ''
+    // Edits from a hosted board: the project's rule files, read when the session starts.
+    this.instructionGuard = null
     // `extraEnv`: set by Shapewall itself, never by the agent (branch mode's
     // GIT_CEILING_DIRECTORIES), for the agent and the terminals it runs.
     // Read only: the variables that put the agent's own sandbox in force win over the person's.
@@ -786,6 +788,8 @@ class AcpProcess {
       this.agentInfo = init?.agentInfo || null
       this.image = Boolean(init?.agentCapabilities?.promptCapabilities?.image)
       this.authMethods = Array.isArray(init?.authMethods) ? init.authMethods : []
+      // Edits from a hosted board: the project's rule files (and what they import), kept for remoteDecide.
+      if (this.remoteEdit) this.instructionGuard = instructionPaths(this.root)
       const appended = this.instructionText()
       // The ACP system prompt (append), where the agent says it takes one; else the first prompt carries it.
       const takesSystemPrompt = Boolean(init?.agentCapabilities?.sessionCapabilities?.systemPrompt)
@@ -1311,7 +1315,8 @@ class AcpProcess {
       if (never) return refuse(`Edit ${rel}`, 'edit', rel, REMOTE_REFUSALS.never)
       // Files that run something (exec-paths.js): only when this machine named the file,
       // and then never without a person's answer.
-      guarded = this.sandbox.sensitive(result.file) || runsSomething(rel)
+      // And the session's own rules: CLAUDE.md, AGENTS.md and every file they import.
+      guarded = this.sandbox.sensitive(result.file) || runsSomething(rel) || isInstructionPath(this.instructionGuard, rel)
       if (guarded && !this.remoteEdit.allowPaths.includes(rel)) return refuse(`Edit ${rel}`, 'edit', rel, REMOTE_REFUSALS.sensitive)
       const diff = diffForFiles([{ path: rel, oldText: result.current, newText: result.next, outside: false }])
       if (!diff || diff.truncated || Buffer.byteLength(JSON.stringify(diff)) > REMOTE_DIFF_MAX)

@@ -208,17 +208,18 @@ choice, made on that machine ([Edits from a hosted board](#edits-from-a-hosted-b
   the connection's own agent config folder's `CLAUDE.md` (`--agent-config DIR`, or `agent-config/<name>/` beside
   `agent-policy.json` when that folder exists; it is never created for you). Shapewall's data rules come after them and win.
   Never read: `~/.claude/CLAUDE.md`, `CLAUDE.local.md`, folders above the project, `.claude/rules/`. `@path` imports are
-  followed only inside the folder the file came from, at most 4 deep, regular files only (no symbolic links), 64 KB a file and
-  128 KB in all; a refused one is listed with its reason. A fix reads the files from its own copy of the project (the base commit),
+  followed only inside the folder the file came from, never to `CLAUDE.local.md`, a dotfile or a dot folder, at most 4 deep,
+  regular files only (a symbolic link only when its real target is inside the same folder, read once), 64 KB a file and 128 KB in
+  all; a refused one is listed with its reason. A fix reads the files from its own copy of the project (the base commit),
   and says which in its status. `--instructions project` leaves the agent config folder out; `--instructions none`, everything.
 - **They add no powers.** The files are text in the system prompt. The tools, the mode, the left-out settings files and every
   refusal above are the same with them or without them. A `CLAUDE.md` that says "run `touch x`" creates nothing: the session has
   no shell.
 - **Only names and hashes leave your machine.** `agent connect` prints one line per file (path, size, sha256); the server is told
-  the same (relative path, size, short sha256), never the text; the board's Agents panel shows the names to people who may use the
-  agent, and the console shows the hashes. A new chat session that reads a different set tells the server again.
-- **A fix cannot rewrite its rules.** `CLAUDE.md`, `AGENTS.md`, `CLAUDE.local.md` and `GEMINI.md` (anywhere in the project) are
-  [files that run something](hosted.md#files-that-run-something): an edit to one is refused unless the machine names it with
+  the same (relative path, size, short sha256), never the text; the board's Agents panel shows the names only, to people who may
+  use the agent, and the console shows the sizes and hashes. A new chat session that reads a different set tells the server again.
+- **A fix cannot rewrite its rules.** `CLAUDE.md`, `AGENTS.md`, `CLAUDE.local.md` and `GEMINI.md` (anywhere in the project), and
+  every file the project's instruction files import, are [files that run something](hosted.md#files-that-run-something): an edit to one is refused unless the machine names it with
   `--allow-path`, is always asked on the board, and a fix that changes one is never pushed. The agent config folder must be outside
   the project (and is never Claude Code's own folder), so no fix copy holds it.
 - **Fail closed.** The session's mode must be "default" or "plan"; any other is switched to "default", or the agent is not

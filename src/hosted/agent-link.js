@@ -397,6 +397,8 @@ export function cleanHello(body) {
     },
     // Kept in memory beside the agent's presence (agent-presence.js), never in the database.
     instructions: cleanInstructions(input.instructions),
+    // Which hello of this link it is: an older one arriving late does not replace a newer list.
+    seq: Number.isSafeInteger(input.seq) && input.seq >= 0 ? input.seq : null,
   }
 }
 
@@ -411,6 +413,8 @@ export function cleanInstructionPath(value) {
   if (typeof value !== 'string' || !value || value.length > 200) return null
   // eslint-disable-next-line no-control-regex
   if (/[\u0000-\u001f\u007f\\]/.test(value)) return null
+  // Other control and format characters too: bidi overrides, zero-width marks.
+  if (/[\p{Cc}\p{Cf}]/u.test(value)) return null
   if (value.startsWith('/') || value.startsWith('~') || /^[A-Za-z]:/.test(value)) return null
   const parts = value.split('/')
   if (parts.some((part) => !part || part === '.' || part === '..')) return null
@@ -531,7 +535,7 @@ export function mountAgentLink(
       // is audited, and a stored "always allow" it no longer backs is reset.
       const row = transaction(db, () => agents.helloPolicy(req.agent, agents.hello(req.agent, hello), said(req)))
       // Which instruction files its sessions read (names and hashes): in memory, per link.
-      agentPresence?.setInstructions(req.t.workspaceId, req.agent.id, hello.instructions)
+      agentPresence?.setInstructions(req.t.workspaceId, req.agent.id, hello.instructions, { link: linkId, seq: hello.seq })
       res.json({
         agent: {
           id: row.id,
