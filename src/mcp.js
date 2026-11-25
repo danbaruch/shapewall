@@ -24,11 +24,15 @@ import {
   STORED_AGENT_STATUSES,
   addReply,
   captureFiles,
+  entryVersion,
   getComment,
   readManifest,
+  resolveFile,
   setAgentStatus,
   updateComment,
+  versionTime,
 } from './store.js'
+import { cropArg, pageCaptureDescription, pageCaptureResult } from './page-capture.js'
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version
 
@@ -240,6 +244,42 @@ export function createMcpServer({
     tool(({ board, page, viewport, text }) =>
       json(selectorsReport(config, boardFor(board), { page, viewport: viewport || null, text: text || '' })),
     ),
+  )
+
+  registerTool(
+    'get_page_capture',
+    {
+      title: 'Get a page capture',
+      description: pageCaptureDescription,
+      inputSchema: {
+        board: boardArg,
+        page: z.string().max(64).describe('Page id'),
+        viewport: z.string().max(40).optional().describe("Default: the page's first viewport"),
+        crop: cropArg,
+      },
+      annotations: { readOnlyHint: true },
+    },
+    tool(({ board, page: pageId, viewport, crop }) => {
+      const target = boardFor(board)
+      // Ids only: the page and viewport must be the board's, and the file
+      // name is built from them (resolveFile allows only capture names).
+      const page = target.pages.find((item) => item.id === pageId)
+      if (!page) throw new Error(`No page "${pageId}" on board "${target.id}".`)
+      const wanted = viewport || page.viewports[0]
+      if (!page.viewports.includes(wanted))
+        throw new Error(`Page "${page.id}" has no viewport "${wanted}" (it has: ${page.viewports.join(', ')}).`)
+      const file = resolveFile(config, target.id, 'captures', `${page.id}.${wanted}.png`)
+      if (!file) throw new Error(`No capture of "${page.id}" (${wanted}) yet. Capture it first (recapture_pages, or shapewall capture).`)
+      const manifest = readManifest(config, target.id)
+      return pageCaptureResult({
+        png: readScreenshot(file),
+        board: target.id,
+        page: page.id,
+        viewport: wanted,
+        capturedAt: versionTime(entryVersion(manifest?.pages?.[page.id]?.[wanted], manifest)),
+        crop: crop || null,
+      })
+    }),
   )
 
   registerTool(

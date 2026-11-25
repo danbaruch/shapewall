@@ -11,9 +11,9 @@ import path from 'node:path'
 import express from 'express'
 import { boardRef, feedbackContext, feedbackItem, fileKind, replyOf } from '../feedback.js'
 import { listJourneys } from '../journeys.js'
-import { joinUrl } from '../config.js'
+import { boardViewports, joinUrl } from '../config.js'
 import { MENTION_HANDLE_RE } from '../mentions.js'
-import { captureFiles, listVersions, readManifest, resolveFile, variantsWithFiles } from '../store.js'
+import { captureFiles, entryVersion, listVersions, readManifest, resolveFile, variantsWithFiles, versionTime } from '../store.js'
 import { agentPolicy, trustedMember } from './agent-policy.js'
 import { COMMENT_ROUTING } from './agents.js'
 import { mountHostedApprovals } from './agent-approvals.js'
@@ -470,6 +470,14 @@ export function mountTokenApi({
           url: joinUrl(ctx.board.publicUrl || ctx.board.baseUrl, page.path),
           viewports: page.viewports,
           captured: Object.keys(files[page.id] || {}),
+          // When each viewport's current capture was taken (page pushes
+          // update pages one by one, so the board's capturedAt is only the newest).
+          capturedAt: Object.fromEntries(
+            Object.keys(files[page.id] || {}).map((viewport) => [
+              viewport,
+              versionTime(entryVersion(manifest?.pages?.[page.id]?.[viewport], manifest)),
+            ]),
+          ),
         })),
         journeys: listJourneys(ctx.config, ctx.board),
         variants: variantsWithFiles(ctx.config, ctx.board).map(({ files: _files, ...variant }) => variant),
@@ -580,6 +588,47 @@ export function mountTokenApi({
       // The reply in the item shape (authorAgent, files), as the comment lists it.
       const item = v1Item(req, ctx, comment)
       res.status(201).json({ board: boardRef(ctx.board), comment: item, reply: replyOf(item, reply.id) })
+    }),
+  )
+  // A new comment from a token (the add_comment MCP tool): the same scope as
+  // a reply, since both put the token's text on the board, signed with the
+  // token's name and marked as an agent. Only text and a pin: no images, no
+  // drawing, no author name. It is never vouched for or sent to an agent
+  // (agent-policy.js refuses any comment a token wrote), so an agent cannot
+  // hand work to another agent this way; only a trusted person can.
+  v1.post(
+    '/boards/:bid/comments',
+    scope('reply'),
+    v1Json,
+    v1Board((req, res, ctx) => {
+      const input = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {}
+      const pageId = typeof input.page === 'string' ? input.page.trim() : ''
+      const page = ctx.board.pages.find((item) => item.id === pageId)
+      const comment = transaction(db, () =>
+        ctx.comments.create(
+          ctx.config,
+          ctx.board,
+          {
+            pageId,
+            // Default: the page's first viewport, and the pin near the
+            // top-left corner (where `comments add` puts it).
+            viewport:
+              input.viewport !== undefined
+                ? input.viewport
+                : page
+                  ? page.viewports[0]
+                  : Object.keys(boardViewports(ctx.config, ctx.board))[0],
+            x: input.x === undefined ? 2 : input.x,
+            y: input.y === undefined ? 2 : input.y,
+            body: input.body,
+            anchor: input.anchor ?? null,
+          },
+          { ...tokenAuthor(req), tokenId: req.token.id },
+          now(),
+        ),
+      )
+      auditOf(req, 'token_commented', `${ctx.board.id}#${comment.id}`, { project: req.project.id })
+      res.status(201).json({ board: boardRef(ctx.board), comment: v1Item(req, ctx, comment) })
     }),
   )
   function requireClaimOwner(req, boardId, number) {

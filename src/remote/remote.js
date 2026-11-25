@@ -162,6 +162,9 @@ export function createRemote({ origin, token, source = null, fetchImpl = fetch, 
     // Replies are signed with the token's name on the server (no author here).
     reply: (boardId, id, { body, guests = false, signal }) =>
       call('POST', one(boardId, id, '/replies', guests), { json: { body }, signal }),
+    // A new comment ({ page, body, viewport?, x?, y?, anchor? }), signed with the token's name on the server.
+    addComment: (boardId, { page, body, viewport, x, y, anchor }) =>
+      call('POST', `${board(boardId)}/comments`, { json: { page, body, viewport, x, y, anchor } }),
     setAgentStatus: (boardId, id, agentStatus, { onlyFrom = null, guests = false, signal } = {}) =>
       call('POST', one(boardId, id, '/agent-status', guests), { json: { agentStatus, onlyFrom }, signal }),
     resolve: (boardId, id, { note, fixRef, agentStatus, guests = false } = {}) =>
