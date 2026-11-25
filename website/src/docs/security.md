@@ -192,7 +192,7 @@ What these protections do not cover:
   `--registry` may resolve to private addresses. The image base is pinned by tag, not digest.
 - **`shapewall mcp` trusts the agent that calls it.** A local MCP agent can sign replies with any author name, and @mentions in its
   replies wake other agents. In `mcp --remote`, the agent, not the operator, chooses whether to include guest comments.
-  `list_comments` returns every matching comment with no paging, and a full-size image is the whole capture. The `files` paths in
+  `list_comments` returns up to 200 comments per call (50 by default), and a full-size image is the whole capture. The `files` paths in
   results are absolute local paths the agent reads with its own file access.
 - **GitHub issues copy the comment.** With GitHub connect on, creating an issue copies the comment text and the screenshot link into
   that repository, which may be public.

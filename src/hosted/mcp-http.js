@@ -47,7 +47,7 @@ export function mountMcpHttp(app, { tokenAuth, origin }) {
     let server
     let transport
     try {
-      server = await createRemoteMcpServer({ remote })
+      server = await createRemoteMcpServer({ remote, hostedEndpoint: true })
       transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true })
       await server.connect(transport)
       res.once('close', () => {

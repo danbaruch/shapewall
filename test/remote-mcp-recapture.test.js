@@ -84,7 +84,7 @@ test('recapture_pages is offered only with a config, capture allowed, not read-o
   const config = sampleConfig('rmcp-offer')
   const on = await toolNames({ server: { config } })
   assert.ok(on.names.includes('recapture_pages'))
-  assert.match(on.instructions, /change the code, call recapture_pages for the pages you changed/)
+  assert.match(on.instructions, /call recapture_pages once for the pages you changed: it captures them on this machine/)
   assert.doesNotMatch(on.instructions, /shapewall push/)
 
   for (const [why, options] of [
