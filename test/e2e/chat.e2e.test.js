@@ -1074,6 +1074,14 @@ test('triggers: a board chat set to mentions only keeps a plain message, answers
     createApp({ config: agentConfig, settingsToken: token, env: { SHAPEWALL_AGENT_API_KEY: 'sk-e2e-not-a-real-key-000000' } }),
   )
   const { context, page, errors } = await openBoard(`http://127.0.0.1:${owned.address().port}/#settings-token=${token}`)
+  // The board thread carries the answers of the tests before this one, and a long
+  // history is drawn in part only: wait for the answer right after this message.
+  const answeredAfter = (text) =>
+    page.waitForFunction((asked) => {
+      const items = [...document.querySelectorAll('[data-sw-chat="board"] [data-sw-chat-message]')]
+      const at = items.findLastIndex((item) => item.getAttribute('data-sw-chat-message') === 'user' && item.innerText.includes(asked))
+      return at >= 0 && items.slice(at + 1).some((item) => item.getAttribute('data-sw-chat-message') === 'assistant' && item.getAttribute('data-status') === 'done')
+    }, text)
   try {
     await page.click('[data-sw-chat-toggle]')
     await page.waitForSelector('[data-sw-chat="board"] [data-sw-chat-input]')
@@ -1085,28 +1093,25 @@ test('triggers: a board chat set to mentions only keeps a plain message, answers
     await page.keyboard.press('Escape')
     await page.waitForSelector('[data-sw-chat-ask]')
     const calls = stub.calls.length
-    const answers = await assistantMessages(page).count()
     await page.fill('[data-sw-chat-input]', 'a note for later, not for the agent')
     await page.click('[data-sw-chat-send]')
     await page.waitForSelector('[data-sw-chat-message="user"]:has-text("a note for later")')
     await page.waitForTimeout(1000)
     assert.equal(stub.calls.length, calls, 'a plain message never reaches the model')
-    assert.equal(await assistantMessages(page).count(), answers)
+    assert.equal(
+      await page.evaluate(() => [...document.querySelectorAll('[data-sw-chat="board"] [data-sw-chat-message]')].at(-1)?.getAttribute('data-sw-chat-message')),
+      'user',
+      'no answer after the plain message',
+    )
     await page.fill('[data-sw-chat-input]', '@agent hello')
     await page.click('[data-sw-chat-send]')
-    await page.waitForFunction(
-      (count) => document.querySelectorAll('[data-sw-chat-message="assistant"][data-status="done"]').length > count,
-      answers,
-    )
+    await answeredAfter('@agent hello')
     await page.waitForSelector('[data-sw-chat-send]')
     // The note is part of what the model read, as context.
     assert.match(JSON.stringify(stub.calls.at(-1)), /a note for later/)
     await page.fill('[data-sw-chat-input]', 'and once more')
     await page.click('[data-sw-chat-ask]')
-    await page.waitForFunction(
-      (count) => document.querySelectorAll('[data-sw-chat-message="assistant"][data-status="done"]').length > count,
-      answers + 1,
-    )
+    await answeredAfter('and once more')
     await page.waitForSelector('[data-sw-chat-send]')
     // Back to every message, as it was.
     await page.click('[data-sw-chat="board"] [data-sw-chat-settings]')
