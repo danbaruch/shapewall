@@ -31,6 +31,15 @@ and the project uses [Semantic Versioning](https://semver.org/).
   `follow=<agent id|any>` link, or `shapewall open --follow [ID]`. Moving the canvas or opening another comment stops it. It reads
   only what the viewer already sees: local boards for any tab, hosted boards for members (never share-link guests or public
   viewers). See "Follow an agent" in the agent workflow docs.
+- Agents find the board with no plugin: `shapewall init` writes a short Shapewall section into `AGENTS.md` (and a one-line
+  `CLAUDE.md` that imports it, when there is none), between `<!-- shapewall:start v1 -->` and `<!-- shapewall:end -->`. The first
+  `serve` or `capture` in a project adds it once; a section you removed is never added back. `init --no-agent-docs` and config
+  `"agentDocs": false` turn it off; `shapewall agent docs --write | --remove | --print` does it by hand.
+- `shapewall agent setup` registers the `shapewall` MCP server with Claude Code (`--scope local` by default, or `user`, `project`)
+  and Codex (`~/.codex/config.toml`, with `tool_timeout_sec = 600`). It shows the change and asks first (`--yes`, `--dry-run`),
+  backs up each file, touches only the `shapewall` entry, replaces a different one only with `--force`, and `--remove` takes it out.
+  It registers the project's own install, else `shapewall` on PATH at this version or newer, else `npx -y shapewall@<version>`.
+  `--remote URL` registers `shapewall mcp --remote URL` after `shapewall login`; no token is written.
 
 ### Changed
 

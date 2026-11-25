@@ -955,6 +955,8 @@ export function normalizeConfig(raw, { dir = process.cwd(), file = null, env = p
   }
   const notifications = normalizeNotifications(raw.notifications, { boardIds: [...ids], env }, problems)
   const github = validateGithub(raw.github, problems)
+  // The Shapewall section in AGENTS.md (src/agent-docs.js): false and serve and capture never add it.
+  if (raw.agentDocs !== undefined && typeof raw.agentDocs !== 'boolean') problems.push('agentDocs: true or false')
   if (github?.board && !ids.has(github.board)) problems.push(`github.board: no board "${github.board}"`)
   const agent = validateAgent(raw.agent, problems)
   const starterAgent = validateStarterAgent(raw.starterAgent, problems, { boardIds: [...ids] })
@@ -983,6 +985,7 @@ export function normalizeConfig(raw, { dir = process.cwd(), file = null, env = p
     reducedMotion,
     browser,
     liveHtml: raw.liveHtml !== false,
+    agentDocs: raw.agentDocs !== false,
     versions,
     github,
     agent,

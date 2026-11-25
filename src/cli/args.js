@@ -69,6 +69,11 @@ const BOOLEAN_FLAGS = new Set([
   'ci',
   'fail-on-change',
   'allow-start',
+  'claude',
+  'codex',
+  'remove',
+  'write',
+  'no-agent-docs',
 ])
 // Old flag spellings each command still takes, hidden from its help: the
 // value moves to the new name and a one-line warning says to switch. null:
@@ -120,7 +125,7 @@ export const COMMAND_FLAGS = {
   'buzz-bridge': ['bridge-config'],
   settings: ['port', 'open'],
   auth: AUTH_FLAGS,
-  init: ['base-url', 'sitemap', 'no-discover', 'force', 'limit', 'group', 'exclude', 'ci'],
+  init: ['base-url', 'sitemap', 'no-discover', 'force', 'limit', 'group', 'exclude', 'ci', 'no-agent-docs'],
   sitemap: ['limit', 'group', 'exclude', 'board', 'dry-run', 'json'],
   capture: ['board', 'only', 'env', 'json', 'check-external'],
   // Every flag any `checks` action takes; SUBCOMMAND_FLAGS narrows it per action.
@@ -214,6 +219,16 @@ export const COMMAND_FLAGS = {
     'allow-path',
     'auto',
     'base',
+    // agent setup, agent docs
+    'claude',
+    'codex',
+    'scope',
+    'force',
+    'dry-run',
+    'remove',
+    'yes',
+    'write',
+    'print',
     ...REMOTE_FLAGS,
   ],
   github: ['board', 'json'],

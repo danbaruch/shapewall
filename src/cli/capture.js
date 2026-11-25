@@ -7,6 +7,7 @@ import { cliCommand } from '../invocation.js'
 import { formatBroken } from '../broken-links.js'
 import { pageLinks } from '../links.js'
 import { keyWarningLines } from '../config-keys.js'
+import { addAgentDocsOnce } from '../agent-docs.js'
 
 // `capture`: one line per shot and a summary; with --json the summary is one
 // JSON document on stdout and the progress lines go to stderr. Capture never
@@ -16,6 +17,9 @@ export async function capture(flags, out, err) {
   const json = Boolean(flags.json)
   // Keys the config has but Shapewall does not use (a typo, most often).
   for (const line of keyWarningLines(config.warnings)) (json ? err : out)(line)
+  // The first capture in a project adds the Shapewall section to AGENTS.md, once (src/agent-docs.js).
+  const agentDocsLine = addAgentDocsOnce(config)
+  if (agentDocsLine) (json ? err : out)(agentDocsLine)
   const result = await runCapture({
     config,
     boardId: flags.board,

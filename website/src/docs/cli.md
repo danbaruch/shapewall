@@ -14,7 +14,7 @@ Messages that suggest a command (`doctor`, `init`, a missing browser) write it t
 
 ```text
 shapewall init [--base-url URL] [--sitemap [URL|FILE] [--limit N] [--group NAME] [--exclude /PREFIX ...]] [--no-discover]
-               [--force] [--ci]
+               [--force] [--ci] [--no-agent-docs]
 ```
 
 Writes a starter `shapewall.config.json` in the current folder and adds `.shapewall/`, `shapewall-export/` and `*.auth.json` to
@@ -27,7 +27,8 @@ something answers but not with a page (a 404, a redirect away), the address look
 a sitemap instead and records it in the config (it accepts the `shapewall sitemap` options too). `--no-discover` (with `--base-url`)
 skips the lookup and writes the home page only. `--ci` also writes `.github/workflows/shapewall.yml` beside
 the config, so pull requests are captured ([pull requests](/docs/pull-requests)); an existing config is kept, and `--force` with
-`--ci` replaces only the workflow.
+`--ci` replaces only the workflow. init also adds a short Shapewall section to `AGENTS.md` (and a `CLAUDE.md` that imports it), so a
+coding agent opened in the project finds the board; `--no-agent-docs` leaves it out (see `shapewall agent docs` below).
 
 ## shapewall sitemap
 
@@ -218,6 +219,9 @@ for local `serve --tailscale` or `serve --lan`, separate from hosted workspace a
 ## shapewall agent
 
 ```text
+shapewall agent setup [--claude] [--codex] [--scope local|user|project] [--remote URL] [--force] [--dry-run] [--yes]
+                      [--remove] [--json]
+shapewall agent docs [--write | --remove | --print]
 shapewall agent connect --remote URL [--agent claude|ID] [--name NAME] [--as NAME]
                         [--audience owner|server] [--approvals none|owner|admins] [--auto none|edits|commands|edits,commands]
                         [--allow-path FILE] [--base BRANCH] [--git-remote NAME]
@@ -228,6 +232,24 @@ shapewall agent sandbox doctor [--no-egress]
 shapewall agent sandbox run --comment ID
 shapewall agent sandbox watch [--once]
 ```
+
+`agent setup` registers the `shapewall` MCP server with Claude Code and Codex (each one found on PATH, or the one named with
+`--claude` or `--codex`), so an agent opened in the project has the board's tools. It shows what it would change and asks first
+(`--yes` skips the question, `--dry-run` only shows); it backs up each file before changing it
+(`<file>.shapewall-backup-<time>`) and touches only the `shapewall` entry. Running it again changes nothing. A `shapewall` entry that
+is different is shown and replaced only with `--force`. Claude Code's `--scope`: `local` (default) is this project, only you, in
+`~/.claude.json`; `user` is every project of yours; `project` writes `.mcp.json` for everyone, and Claude Code asks each person to
+approve it the first time. Codex has no scope: the entry goes in `~/.codex/config.toml` (`$CODEX_HOME`) for every Codex project, with
+`tool_timeout_sec = 600`. The command it registers is the project's own `node_modules/.bin/shapewall` (local scope), else
+`shapewall` on PATH when it is this version or newer, else `npx -y shapewall@<this version>`. `--remote URL` registers
+`shapewall mcp --remote URL` for a hosted board, after `shapewall login`; no token is written. `--remove` takes the entries out
+again.
+
+`agent docs` says where the Shapewall section for coding agents is. The section sits between `<!-- shapewall:start v1 -->` and
+`<!-- shapewall:end -->` in `AGENTS.md` (or `CLAUDE.md` when only that exists); Shapewall never changes text outside the markers and
+never writes through a symbolic link. `--write` puts it in or refreshes it, `--remove` takes it out (and deletes an `AGENTS.md` or
+`CLAUDE.md` Shapewall made that has nothing else in it), `--print` prints it. `init` writes it, and the first `serve` or `capture` in
+a project adds it once; a section you removed is never added back, and config `"agentDocs": false` turns the first-run step off.
 
 `agent connect` makes Claude Code on this machine an agent of a project on a
 [team server](/docs/hosted#connected-agents). Run it in the project's folder. The first run prints a code that an admin approves in
@@ -587,6 +609,7 @@ Commands
       --force               overwrite an existing config
       --ci                  write .github/workflows/shapewall.yml (capture on every pull request) beside
                             the config; an existing config is kept, --force replaces only the workflow
+      --no-agent-docs       do not add the Shapewall section to AGENTS.md (see agent docs)
                             exit code: 0 config written (a warning when the app did not answer: home page only),
                             2 the address answered but not with a page (check --base-url), 1 error
   sitemap [URL|FILE]        add the pages of a sitemap.xml (or sitemap index) to the config
@@ -694,6 +717,21 @@ Commands
       --no-claim            hand out every open comment once without claiming it (no agent status, beside other watchers)
                             a command that exits 0 must reply or set a status itself, else the
                             comment becomes needs-human (https://shapewall.com/docs/agent-workflow)
+  agent setup               register the shapewall MCP server with Claude Code and Codex (each one on PATH),
+                            so an agent opened in this project has the board's tools. Shows what changes and
+                            asks first; backs up each file it changes; touches only the shapewall entry
+      --claude | --codex    only this app
+      --scope local|user|project  Claude Code: local (default) this project, only you; user every project
+                            of yours; project .mcp.json, committed (Claude Code asks each person to approve it).
+                            Codex has no scope: ~/.codex/config.toml, every project, tool_timeout_sec 600
+      --remote URL          a hosted board: registers "shapewall mcp --remote URL" (needs shapewall login first;
+                            no token is written)
+      --force               replace a shapewall entry that is different
+      --dry-run             show the changes, write nothing      --yes   write without asking
+      --remove              take the shapewall entries out       --json  machine-readable
+  agent docs                where the Shapewall section for coding agents is (AGENTS.md, CLAUDE.md)
+      --write | --remove | --print   put it in (or refresh it), take it out, print it. init and the
+                            first serve or capture add it once; config "agentDocs": false turns that off
   agent connect             make this machine's coding agent an agent of a hosted project: members chat with it
                             on the board, and it reads this folder and answers. Read and answer only unless this
                             machine says more (--approvals). The first run is approved in the browser by an admin.

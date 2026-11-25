@@ -86,6 +86,11 @@ export async function agentCommand(positional, flags, out, err, { env = process.
   } else if (SANDBOX_ACTIONS.includes(action)) {
     deprecated(`agent ${action}`, `use agent sandbox ${action}`)
   }
+  if (action === 'setup' || action === 'docs') {
+    // How a coding agent opened in the project finds the board (src/agent-setup.js, src/agent-docs.js).
+    const { agentDocsCommand, agentSetupCommand } = await import('../../cli/agent-setup-command.js')
+    return action === 'setup' ? agentSetupCommand(flags, out, err, { env }) : agentDocsCommand(flags, out)
+  }
   if (action === 'connect') {
     // A connected agent of a hosted board: this machine's coding agent, read and answer only.
     const { agentConnect } = await import('../../remote/agent-connect.js')
