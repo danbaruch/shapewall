@@ -1247,23 +1247,25 @@ and those can read outside the project. So commands from the board are not offer
 
 ### The connect command
 
-| Flag                              | Default                                           | Meaning                                                                                                                                                                                                                            |
-| --------------------------------- | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--agent NAME`                    | This project's agent, else Claude Code when found | `claude`, or the id of an agent saved on this machine that runs Claude Code. Never a command from the server                                                                                                                       |
-| `--name "Builder"`                | The agent's own name                              | The name to suggest on the approval page. The approver has the last word, and an admin can rename it later                                                                                                                         |
-| `--as NAME`                       | `default`                                         | A second connection from this machine, with a token of its own                                                                                                                                                                     |
-| `--audience owner\|server`        | `server`                                          | `owner`: the server is asked to keep it to the person who connected it even if its audience there is widened, and this machine refuses a job the server labels as someone else's. `server`: its audience on the server             |
-| `--approvals none\|owner\|admins` | `none`                                            | Edits from the board. `none`: never, the agent reads and answers only. `owner`: the person who connected it may allow each edit. `admins`: whoever the server lets answer (admins by default)                                      |
-| `--auto none\|edits`              | `none`                                            | What the server's "Allow without asking" rule may apply to. `none`: every request waits for a person. Needs `--approvals owner` or `admins`. (`commands` is also accepted and never applies to Claude Code)                        |
-| `--allow-path FILE`               | None                                              | A file that runs something, which the agent may ask to edit (a dotfile, `package.json`, a `Makefile`, a `Dockerfile`, CI config). Such an edit is refused on the machine otherwise. Adds one file per run; `none` empties the list |
-| `--base BRANCH`                   | `head`                                            | The branch a fix starts from. `head`: the commit the checkout is on, and then only while the checkout has no uncommitted changes to tracked files                                                                                  |
-| `--git-remote NAME`               | `origin`                                          | Where a finished fix is pushed. `none`: never pushed                                                                                                                                                                               |
-| `--takeover`                      |                                                   | Close the link another process holds for this agent, and take its place                                                                                                                                                            |
-| `--concurrency N`                 | 2                                                 | Answers at once, 1 to 4                                                                                                                                                                                                            |
-| `--token-file FILE`               |                                                   | For a service: the agent's own token from a file, no browser                                                                                                                                                                       |
+| Flag                                | Default                                                                | Meaning                                                                                                                                                                                                                                        |
+| ----------------------------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--agent NAME`                      | This project's agent, else Claude Code when found                      | `claude`, or the id of an agent saved on this machine that runs Claude Code. Never a command from the server                                                                                                                                   |
+| `--name "Builder"`                  | The agent's own name                                                   | The name to suggest on the approval page. The approver has the last word, and an admin can rename it later                                                                                                                                     |
+| `--as NAME`                         | `default`                                                              | A second connection from this machine, with a token of its own                                                                                                                                                                                 |
+| `--audience owner\|server`          | `server`                                                               | `owner`: the server is asked to keep it to the person who connected it even if its audience there is widened, and this machine refuses a job the server labels as someone else's. `server`: its audience on the server                         |
+| `--approvals none\|owner\|admins`   | `none`                                                                 | Edits from the board. `none`: never, the agent reads and answers only. `owner`: the person who connected it may allow each edit. `admins`: whoever the server lets answer (admins by default)                                                  |
+| `--auto none\|edits`                | `none`                                                                 | What the server's "Allow without asking" rule may apply to. `none`: every request waits for a person. Needs `--approvals owner` or `admins`. (`commands` is also accepted and never applies to Claude Code)                                    |
+| `--allow-path FILE`                 | None                                                                   | A file that runs something, which the agent may ask to edit (a dotfile, `package.json`, a `Makefile`, a `Dockerfile`, CI config). Such an edit is refused on the machine otherwise. Adds one file per run; `none` empties the list             |
+| `--base BRANCH`                     | `head`                                                                 | The branch a fix starts from. `head`: the commit the checkout is on, and then only while the checkout has no uncommitted changes to tracked files                                                                                              |
+| `--git-remote NAME`                 | `origin`                                                               | Where a finished fix is pushed. `none`: never pushed                                                                                                                                                                                           |
+| `--instructions all\|project\|none` | `all`                                                                  | Which instruction files each session gets as an appended system prompt: `all`, the project's `CLAUDE.md` (or `AGENTS.md`) and the agent config folder's; `project`, the project's only; `none`, none ([Instruction files](#instruction-files)) |
+| `--agent-config DIR\|none`          | `agent-config/<--as name>/` beside `agent-policy.json`, when it exists | This connection's own folder for its `CLAUDE.md`. Outside the project, never Claude Code's own folder, never created by Shapewall                                                                                                              |
+| `--takeover`                        |                                                                        | Close the link another process holds for this agent, and take its place                                                                                                                                                                        |
+| `--concurrency N`                   | 2                                                                      | Answers at once, 1 to 4                                                                                                                                                                                                                        |
+| `--token-file FILE`                 |                                                                        | For a service: the agent's own token from a file, no browser                                                                                                                                                                                   |
 
-`--approvals`, `--auto`, `--allow-path`, `--base` and `--git-remote` are saved for the connection, so the next run without them
-keeps what was set. They are explained under [Switching edits on](#switching-edits-on). `--allow-command` is listed by
+`--approvals`, `--auto`, `--allow-path`, `--base`, `--git-remote`, `--instructions` and `--agent-config` are saved for the
+connection, so the next run without them keeps what was set. They are explained under [Switching edits on](#switching-edits-on). `--allow-command` is listed by
 `shapewall --help` and is refused for Claude Code ([Commands](#commands-are-not-offered-for-claude-code)).
 
 - **Which program runs** is the machine's choice: an agent saved for this project on that machine, or Claude Code found on its
@@ -1501,7 +1503,9 @@ pushed. Shapewall keeps one list of them, used both when an edit is asked and be
   jest, vitest, vite, webpack, rollup, babel, eslint and prettier files, `shapewall.config.json`);
 - scripts a package runs (`scripts/`, `bin/`, `tools/`, install hooks, `*.sh`);
 - container files (`Dockerfile*`, compose files) and CI files;
-- test files (`*.test.*`, `*.spec.*`, `test/`, `tests/`, `__tests__/`, `e2e/`): CI runs them.
+- test files (`*.test.*`, `*.spec.*`, `test/`, `tests/`, `__tests__/`, `e2e/`): CI runs them;
+- agent instruction files (`CLAUDE.md`, `AGENTS.md`, `CLAUDE.local.md`, `GEMINI.md`, anywhere in the project): they steer what
+  the next agent session does, so a fix cannot quietly rewrite its own rules or the next agent's.
 
 For a connected agent's fix:
 
@@ -1690,6 +1694,33 @@ WantedBy=default.target
   restarts and fails again until you approve a new connection by hand.
 - Give the service its own agent profile ([what it can read](#what-a-connected-agent-can-reach)).
 
+### Instruction files
+
+A connected agent follows the project's own house rules and a note its owner wrote for it. Because a connected session leaves
+every settings file out, Claude Code itself loads no `CLAUDE.md`; Shapewall reads the files on the agent's machine and hands them
+to the session as an appended system prompt, with Shapewall's own data rules after them (those win). Nothing comes from the server.
+
+- **What is read:** the project's `CLAUDE.md` and `.claude/CLAUDE.md`, or its `AGENTS.md` when neither exists; then the
+  connection's agent config folder's `CLAUDE.md` (else its `AGENTS.md`). The agent config folder is `--agent-config DIR`, or
+  `agent-config/<--as name>/` in Shapewall's config folder (beside `agent-policy.json`) when that folder exists. Shapewall never
+  creates it; make it when you want an owner note. It must be outside the project, and it is never Claude Code's own folder.
+- **Never read:** `~/.claude/CLAUDE.md`, `CLAUDE.local.md`, `CLAUDE.md` files in folders above the project, `.claude/rules/`.
+- **Imports** (`@path` in a file) are followed only inside the folder the file came from, at most 4 deep, regular files only (a
+  symbolic link is refused), 64 KB a file and 128 KB in all. A refused import stays as text and is listed with its reason; one that
+  does not exist (an `@name` mention) is skipped.
+- **When:** each session reads them as it starts, so an edited `CLAUDE.md` reaches new chats, not a running one. A fix reads them
+  from its own copy of the project (the base commit), and its status line says which it got.
+- **What you see:** `agent connect` prints one line per file (path, size, sha256) and each refused import. The board's Agents
+  panel shows "Instructions: CLAUDE.md (project), CLAUDE.md (agent config)" to people who may use the agent; the console's Agents
+  page shows the same with sizes and short hashes. Only names, sizes and hashes leave your machine, never the text. The server
+  keeps them in memory for the open link, so they show again after its next connect.
+- **Turning them off:** `--instructions project` leaves the agent config folder out, `--instructions none` everything.
+- **They add no powers.** The tools, the mode and every refusal are the same with or without them. A file that tells the agent to
+  run a command changes nothing: a connected session has no shell. A file could still tell it to quote secrets from the project; the
+  data rules come last and say not to, which is an instruction, not a control. Instruction files are
+  [files that run something](#files-that-run-something), so a fix cannot change them without a named `--allow-path` and a person's
+  answer, and such a fix is never pushed.
+
 ### What a connected agent can reach
 
 - **The server cannot make the machine act.** Every request goes out from the machine, to the one server you named. A turn's job is
@@ -1723,6 +1754,11 @@ session is started in a way that leaves it nothing to act with, and anything tha
 - **No MCP servers** from `.mcp.json` or from settings.
 - **Only its reading tools:** Read, Grep and Glob. Bash, Edit, Write, MultiEdit, NotebookEdit, WebFetch, WebSearch, Task/Agent and
   Skill are removed from the session, and bypassing permissions is switched off.
+- **No auto memory.** Claude Code's auto memory (the notes it keeps per project and loads into every session) is off: the session's
+  flag settings say `autoMemoryEnabled: false` and its environment sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`. Nothing it noted for
+  you shapes an answer that leaves your machine, and it writes no new notes. In 1.2.0 and earlier a connected session still loaded it.
+- **Instruction files come from Shapewall,** read on your machine and appended to the system prompt
+  ([Instruction files](#instruction-files)); they change nothing above.
 - **A mode that asks.** The session's mode must be "default" or "plan". Any other is switched to "default", or the agent is not
   started. An agent that reports no session mode at all is not started read-only. An agent that switches itself to another mode
   mid-answer is stopped.

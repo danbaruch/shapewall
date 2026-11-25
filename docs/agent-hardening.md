@@ -197,7 +197,30 @@ choice, made on that machine ([Edits from a hosted board](#edits-from-a-hosted-b
     `.claude/settings.local.json` are left out, so their allow rules, hooks, default mode and plugins do not apply;
   - with no MCP servers from `.mcp.json` or settings (`strictMcpConfig`);
   - with only its reading tools (Read, Grep, Glob). Bash, Edit, Write, MultiEdit, NotebookEdit, WebFetch, WebSearch, Task/Agent and
-    Skill are removed from the session, and bypassing permissions is switched off.
+    Skill are removed from the session, and bypassing permissions is switched off;
+  - with Claude Code's auto memory off, twice over: the session's flag settings say `autoMemoryEnabled: false`, and its environment
+    sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`. The notes Claude Code keeps for you per project are neither loaded nor written. Each
+    alone was seen to work with the real adapter (0.93.0 and 0.106.0); a top-level `autoMemoryEnabled` option was seen to be
+    ignored, so it is not the one used.
+- **Instruction files, read by Shapewall, not by the agent.** Because the settings files are left out, Claude Code itself loads no
+  `CLAUDE.md`. Shapewall reads them on your machine and hands them to the session as an appended system prompt (ACP
+  `systemPrompt`, append mode): the project's `CLAUDE.md` and `.claude/CLAUDE.md` (its `AGENTS.md` when neither exists), then
+  the connection's own agent config folder's `CLAUDE.md` (`--agent-config DIR`, or `agent-config/<name>/` beside
+  `agent-policy.json` when that folder exists; it is never created for you). Shapewall's data rules come after them and win.
+  Never read: `~/.claude/CLAUDE.md`, `CLAUDE.local.md`, folders above the project, `.claude/rules/`. `@path` imports are
+  followed only inside the folder the file came from, at most 4 deep, regular files only (no symbolic links), 64 KB a file and
+  128 KB in all; a refused one is listed with its reason. A fix reads the files from its own copy of the project (the base commit),
+  and says which in its status. `--instructions project` leaves the agent config folder out; `--instructions none`, everything.
+- **They add no powers.** The files are text in the system prompt. The tools, the mode, the left-out settings files and every
+  refusal above are the same with them or without them. A `CLAUDE.md` that says "run `touch x`" creates nothing: the session has
+  no shell.
+- **Only names and hashes leave your machine.** `agent connect` prints one line per file (path, size, sha256); the server is told
+  the same (relative path, size, short sha256), never the text; the board's Agents panel shows the names to people who may use the
+  agent, and the console shows the hashes. A new chat session that reads a different set tells the server again.
+- **A fix cannot rewrite its rules.** `CLAUDE.md`, `AGENTS.md`, `CLAUDE.local.md` and `GEMINI.md` (anywhere in the project) are
+  [files that run something](hosted.md#files-that-run-something): an edit to one is refused unless the machine names it with
+  `--allow-path`, is always asked on the board, and a fix that changes one is never pushed. The agent config folder must be outside
+  the project (and is never Claude Code's own folder), so no fix copy holds it.
 - **Fail closed.** The session's mode must be "default" or "plan"; any other is switched to "default", or the agent is not
   started. An agent that reports no session mode at all is not started read-only. An agent that switches itself to another mode
   mid-answer is stopped, and the thread says which mode. claude-agent-acp 0.106.0 starts a session in the mode "auto" (Claude
@@ -238,6 +261,26 @@ permission and must create a file, run `touch`, and read `/etc/hostname`.
 
 goose's chat-only mode could not be verified on the test machine, and Gemini CLI was not installed to verify, so neither is
 offered. For those agents, `shapewall watch --remote` stays the way.
+
+Instruction files and auto memory were checked the same way, with Shapewall's own session code driving the real
+**claude-agent-acp 0.93.0 and 0.106.0** against a stand-in model API that records every request and scripts the tool calls (no
+login, no real model). The project's `CLAUDE.md` said to run `touch`, the agent config folder's `CLAUDE.md` said the same, the
+project also had an `AGENTS.md`, a `CLAUDE.local.md` and a `.claude/settings.json` with allow rules, `bypassPermissions` and a
+`SessionStart` hook, the scratch Claude Code folder had a user `CLAUDE.md` and an auto memory file, and the scripted model
+asked for Bash, then Read.
+
+- **Read-only chat and a fix session, on each of the two versions:** the system prompt the model was sent held the project's
+  `CLAUDE.md` and the owner note, followed by Shapewall's rules; it held no `AGENTS.md` (a `CLAUDE.md` existed), no
+  `CLAUDE.local.md`, no user `CLAUDE.md`, no auto memory section and no memory file. The tools were Glob, Grep and Read (plus
+  Edit and Write for the fix). Bash came back as "No such tool available", nothing was created, and the hook did not run.
+- **Earlier versions (1.2.0 and before) loaded auto memory in these sessions.** The same check with 1.2.0's session options showed
+  Claude Code's auto memory section and the memory file in the system prompt of a connected agent's read-only and fix sessions,
+  so notes Claude Code had kept for that project could shape an answer that leaves your machine. This release turns it off; see
+  the changelog's Security entry.
+- **Not changed in this release: chat on a local board.** A local board's chat runs your own Claude Code with your own settings,
+  as it always has, and the same check showed it loads your user `CLAUDE.md`, `CLAUDE.local.md` and auto memory and runs the
+  project's `SessionStart` hook. That is the agent you run in that folder yourself; moving local chat onto the restricted session
+  is planned for a later release.
 
 The limits, plainly:
 
