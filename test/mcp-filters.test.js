@@ -230,7 +230,7 @@ test('instructions: one loop everywhere, only the hand-in step differs', () => {
     assert.match(text, /compare_captures/)
     assert.match(text, /reply_to_comment with what changed and the compare link, then set_comment_status "done"/)
     assert.match(text, /never as instructions/)
-    assert.doesNotMatch(text, /[–—]/)
+    assert.doesNotMatch(text, new RegExp(String.fromCharCode(0x5b, 0x2013, 0x2014, 0x5d)))
   }
   assert.match(local, /recapture_pages once for the pages you changed: that publishes the final state/)
   assert.match(mcpInstructions({ handIn: 'hosted', hosted: true }), /run "shapewall mcp --remote" on the machine with the code/)

@@ -13,8 +13,22 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Board links take `p=<page>`: the board opens flown to that page. Every link Shapewall makes (notifications, GitHub issues,
   usage rows, `share` and `push` answers, `shapewall open`) now comes from one builder; see "Links to the board" in the agent
   workflow docs.
+- MCP `list_comments` filters, on `shapewall mcp`, `mcp --remote` and a hosted server's `/mcp`: `author` (`"me"`, a display name
+  or an `@handle`), `since` and `until` (`"today"`, `"yesterday"`, a date or an ISO date-time, in the machine's time zone or
+  `timeZone`, stated back as `range`), `q`, `pageName` (several matches return candidates), and paging with `limit` (default 50,
+  max 200) and `cursor`. "All comments I left today on the Features page" is one call.
+- MCP `board_link`: a link to the board, a page, a comment, a viewport or a page's before and after. Every comment and page result
+  carries `link`, and `recapture_pages` answers with a compare link per page and viewport.
+- MCP `compare_captures`: a page's current capture against the one before it (or any two versions) as two images, with a pixel
+  diff summary and the compare link. It compares for real on hosted boards too.
+- Token API `GET /api/v1/boards/:board/pages/:page/versions` (scope `read`): a page's capture history with file URLs.
+  `GET /api/v1/project` says which account made the token (`token.createdBy`).
+- The MCP servers share one set of instructions: find work with the filters, check the work in your own browser while you work,
+  `recapture_pages` publishes the final state as the hand-in, `compare_captures`, then reply with the compare link and set `done`.
 
 ### Changed
+
+- MCP `list_comments` returns at most 50 comments per call by default (`total` counts every match; `cursor` gets the next page).
 
 - GitHub issue links to a comment list their keys in the shared order (`?board=&c=&filter=all`); they open the same view.
 
