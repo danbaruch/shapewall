@@ -210,9 +210,16 @@ test('open: prints and opens the link to a running board; --print and --json ope
       comment: null,
       viewport: null,
       compare: null,
+      follow: null,
       running: true,
     })
     assert.deepEqual(result.opened, [])
+    // --follow: alone any agent, or one agent's id.
+    result = await run({ ...flags, follow: true, print: true })
+    assert.deepEqual(result.lines, ['http://127.0.0.1:4711/?board=sample&follow=any'])
+    result = await run({ ...flags, comment: undefined, follow: 'ag_7', json: true })
+    assert.equal(JSON.parse(result.lines[0]).follow, 'ag_7')
+    await assert.rejects(run({ ...flags, follow: 'a b' }), /--follow takes an agent id/)
   } finally {
     clearServeState(config)
     if (saved !== undefined) process.env.SHAPEWALL_BOARD_URL = saved
@@ -290,6 +297,18 @@ test('open is a command with its flags; --compare works alone and with a pair', 
   assert.equal(parseArgs(['open', '--compare', '--page', 'home'], { strict: true }).flags.compare, true)
   assert.equal(parseArgs(['open', '--compare', 'a_b'], { strict: true }).flags.compare, 'a_b')
   assert.equal(parseArgs(['open', '--page', 'home', '--compare'], { strict: true }).flags.compare, true)
+})
+
+test('open --follow takes an optional agent id; events --follow stays a switch', () => {
+  assert.ok(COMMAND_FLAGS.open.includes('follow'))
+  assert.equal(parseArgs(['open', '--follow'], { strict: true }).flags.follow, true)
+  assert.equal(parseArgs(['open', '--follow', '--print'], { strict: true }).flags.follow, true)
+  assert.equal(parseArgs(['open', '--follow', 'ag_1', '--print'], { strict: true }).flags.follow, 'ag_1')
+  assert.equal(parseArgs(['open', '--follow=ag_2'], { strict: true }).flags.follow, 'ag_2')
+  const events = parseArgs(['events', '--follow', '--board', 'demo'], { strict: true })
+  assert.equal(events.flags.follow, true)
+  assert.equal(events.flags.board, 'demo')
+  assert.throws(() => parseArgs(['events', '--follow=x'], { strict: true }), /accepts only true or false/)
 })
 
 // ---- shapewall open --remote, against a loopback hosted server --------------------
