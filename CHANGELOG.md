@@ -13,10 +13,27 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Board links take `p=<page>`: the board opens flown to that page. Every link Shapewall makes (notifications, GitHub issues,
   usage rows, `share` and `push` answers, `shapewall open`) now comes from one builder; see "Links to the board" in the agent
   workflow docs.
+- Connected agents follow instruction files: `shapewall agent connect` reads the project's `CLAUDE.md` and `.claude/CLAUDE.md`
+  (its `AGENTS.md` when neither exists) and the connection's own agent config folder's `CLAUDE.md`, and hands them to each
+  session as an appended system prompt, with Shapewall's data rules last. New flags `--instructions all|project|none` and
+  `--agent-config DIR|none` (saved per connection; the folder is never created for you). The terminal, the board's Agents panel
+  and the console's Agents page list the files by name (the console with short sha256 hashes); their text never leaves the
+  machine. A fix reads them from its own copy of the project. They add no powers.
 
 ### Changed
 
 - GitHub issue links to a comment list their keys in the shared order (`?board=&c=&filter=all`); they open the same view.
+
+### Security
+
+- Connected agents (`shapewall agent connect`, chat and fix sessions) no longer load or write Claude Code's auto memory. In 1.2.0
+  and earlier these hardened sessions still loaded it, so notes Claude Code kept for the project could shape answers that leave
+  the machine. It is now off twice over: `autoMemoryEnabled: false` in the session's flag settings and
+  `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` in its environment, checked with claude-agent-acp 0.93.0 and 0.106.0
+  (docs/agent-hardening.md).
+- `CLAUDE.md`, `AGENTS.md`, `CLAUDE.local.md` and `GEMINI.md` are now files that run something: a connected agent's fix cannot
+  edit them unless the machine names the file with `--allow-path`, the edit is always asked on the board, and such a fix is
+  never pushed.
 
 ## 1.2.0 - 2026-11-24
 
