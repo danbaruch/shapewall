@@ -7,14 +7,16 @@
 // the history), never by path or URL, and hand the bytes here.
 
 import * as z from 'zod'
-import { PNG } from 'pngjs'
 import { diffPixels } from './pixeldiff.js'
-import { fitPng } from './png.js'
+import { clampRect, encodePng, FAST_PNG, fitImage, fitScale, pngHeader, toRgba } from './png.js'
 import { CAPTURE_MAX_HEIGHT, CAPTURE_MAX_WIDTH } from './page-capture.js'
 import { VERSION_RE, versionTime } from './store.js'
 
-// Above this many pixels per image the diff is skipped (the images still come).
-export const DIFF_MAX_PIXELS = 40_000_000
+// The most pixels a capture may have to be compared at all, checked from its
+// PNG header before anything is decoded. The hosted /mcp endpoint passes a
+// lower cap (the most a push may carry, src/hosted/push.js).
+export const COMPARE_MAX_PIXELS = 40_000_000
+export const HOSTED_COMPARE_MAX_PIXELS = 16_000_000
 
 export const compareDescription =
   'Two captures of one page at one viewport, before and after, as images (scaled like get_page_capture), with ' +
@@ -65,6 +67,18 @@ export function pickPair(history, { before = 'previous', after = 'current' } = {
   return { before: history[beforeIndex], after: history[afterIndex] }
 }
 
+// The bytes of a pair, read with read(entry). The current capture lives
+// under a name the next capture replaces: if the current version changed
+// while reading (currentNow() is not `current` any more), the bytes may not
+// be the version they would be labeled with, so it refuses instead.
+export function readPair({ pair, read, current, currentNow, what = 'this page' }) {
+  const beforePng = read(pair.before)
+  const afterPng = read(pair.after)
+  if ((pair.before.current || pair.after.current) && currentNow() !== current)
+    throw new Error(`The current capture of ${what} changed while comparing (a new capture landed). Call compare_captures again.`)
+  return { beforePng, afterPng }
+}
+
 // Where the changed pixels are: the box around every pixel of the mask.
 function changedBox(diff) {
   let minX = Infinity
@@ -84,39 +98,131 @@ function changedBox(diff) {
   return maxX < 0 ? null : { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 }
 }
 
-function pixelDiff(beforePng, afterPng) {
-  let a
-  let b
-  try {
-    a = PNG.sync.read(beforePng)
-    b = PNG.sync.read(afterPng)
-  } catch (error) {
-    throw new Error(`A capture could not be read as a PNG (${error.message}).`, { cause: error })
+// A box on the shown images, in capture pixels (clamped to the larger capture).
+function captureBox(box, after, before) {
+  if (!box) return null
+  const factor = Math.min(1, after.width / after.rect.width, after.height / after.rect.height)
+  const maxWidth = Math.max(after.size.width, before.size.width)
+  const maxHeight = Math.max(after.size.height, before.size.height)
+  const x = Math.min(maxWidth - 1, after.rect.x + Math.floor(box.x / factor))
+  const y = Math.min(maxHeight - 1, after.rect.y + Math.floor(box.y / factor))
+  const right = Math.min(maxWidth, after.rect.x + Math.ceil((box.x + box.width) / factor))
+  const bottom = Math.min(maxHeight, after.rect.y + Math.ceil((box.y + box.height) / factor))
+  return { x, y, width: Math.max(1, right - x), height: Math.max(1, bottom - y) }
+}
+
+// The work of a compare, without the answer around it. Each capture is
+// decoded once (a row at a time), cut to `crop` and scaled down like
+// get_page_capture, both by the same factor so their pixels line up; the
+// diff is counted on those shown images, never on the full-size captures.
+// A capture over `maxPixels` is refused from its PNG header, before anything
+// is decoded. Returns { before, after, diff }: before/after are { png, size,
+// rect, width, height, scale }, diff.box is in capture pixels.
+// `fit(png, options)` decodes and scales one capture (fitImage); the hosted
+// server passes one that runs in its worker threads, both at once
+// (src/hosted/mcp-http.js), and then this returns a promise (that rejects
+// on every error, the header checks included).
+export function compareImages({ beforePng, afterPng, crop = null, maxPixels = COMPARE_MAX_PIXELS, fit = null }) {
+  const failed = (side) => (error) => {
+    throw new Error(`The ${side} capture could not be read as a PNG (${error.message}).`, { cause: error })
   }
-  if (a.width * a.height > DIFF_MAX_PIXELS || b.width * b.height > DIFF_MAX_PIXELS)
-    return { skipped: 'The captures are too large to diff here; look at the images.' }
-  const diff = diffPixels(a, b)
+  if (fit)
+    return Promise.resolve().then(() => {
+      const options = compareOptions({ beforePng, afterPng, crop, maxPixels })
+      const one = (png, side) =>
+        Promise.resolve()
+          .then(() => fit(png, options))
+          .catch(failed(side))
+      return Promise.all([one(beforePng, 'before'), one(afterPng, 'after')]).then(([a, b]) => compareFitted(a, b))
+    })
+  const options = compareOptions({ beforePng, afterPng, crop, maxPixels })
+  const one = (png, side) => {
+    try {
+      return fitImage(png, options)
+    } catch (error) {
+      return failed(side)(error)
+    }
+  }
+  return compareFitted(one(beforePng, 'before'), one(afterPng, 'after'))
+}
+
+// The fitImage options of both captures: the crop, one scale for both, the
+// pixel cap. Reads the PNG headers only.
+function compareOptions({ beforePng, afterPng, crop, maxPixels }) {
+  const header = (png, side) => {
+    let found
+    try {
+      found = pngHeader(png)
+    } catch (error) {
+      throw new Error(`The ${side} capture could not be read as a PNG (${error.message}).`, { cause: error })
+    }
+    if (found.width * found.height > maxPixels)
+      throw new Error(
+        `The ${side} capture is ${found.width}x${found.height} pixels, more than the ${maxPixels / 1e6} megapixels compare_captures ` +
+          'reads. Open the compare link on the board to see it.',
+      )
+    return found
+  }
+  const sizes = { before: header(beforePng, 'before'), after: header(afterPng, 'after') }
+  const rectOf = (size) => (crop ? clampRect(size, crop) : { x: 0, y: 0, width: size.width, height: size.height })
+  const limits = { maxWidth: CAPTURE_MAX_WIDTH, maxHeight: CAPTURE_MAX_HEIGHT }
+  const scale = Math.min(fitScale(rectOf(sizes.before), limits), fitScale(rectOf(sizes.after), limits))
+  return { crop, scale, maxPixels }
+}
+
+// The diff and the shown PNGs of two fitted images (fitImage's answers).
+function compareFitted(a, b) {
+  const diff = diffPixels({ width: a.width, height: a.height, data: toRgba(a) }, { width: b.width, height: b.height, data: toRgba(b) })
+  const shown = (image) => ({
+    // Encoded already when it was fitted in a worker.
+    png: image.png || encodePng(image, FAST_PNG),
+    size: image.size,
+    rect: image.rect,
+    width: image.width,
+    height: image.height,
+    scale: image.scale,
+  })
   return {
-    changed: diff.changed,
-    total: diff.total,
-    percent: diff.percent,
-    box: changedBox(diff),
-    sizes: { before: { width: a.width, height: a.height }, after: { width: b.width, height: b.height } },
+    before: shown(a),
+    after: shown(b),
+    diff: {
+      changed: diff.changed,
+      total: diff.total,
+      percent: diff.percent,
+      box: captureBox(changedBox(diff), b, a),
+      // Counted on the images as shown: below scale 1 a pixel stands for a
+      // block of the capture.
+      scale: b.scale,
+      sizes: { before: a.size, after: b.size },
+    },
   }
 }
 
 // The tool's answer: the JSON, a note, then before and after as images.
-export function compareResult({ beforePng, afterPng, board, page, viewport, pair, crop = null, link = null, versions = [] }) {
-  const fit = (png, side) => {
+// `compared` is compareImages' answer when it was worked out elsewhere (the
+// hosted server's worker); otherwise it is worked out here from the PNGs.
+export function compareResult({
+  beforePng = null,
+  afterPng = null,
+  compared = null,
+  maxPixels = COMPARE_MAX_PIXELS,
+  board,
+  page,
+  viewport,
+  pair,
+  crop = null,
+  link = null,
+  versions = [],
+}) {
+  let result = compared
+  if (!result) {
     try {
-      return fitPng(png, { crop, maxWidth: CAPTURE_MAX_WIDTH, maxHeight: CAPTURE_MAX_HEIGHT })
+      result = compareImages({ beforePng, afterPng, crop, maxPixels })
     } catch (error) {
-      throw new Error(`The ${side} capture of "${page}" (${viewport}) could not be read as a PNG (${error.message}).`, { cause: error })
+      throw new Error(`"${page}" (${viewport}): ${error.message}`, { cause: error })
     }
   }
-  const shownBefore = fit(beforePng, 'before')
-  const shownAfter = fit(afterPng, 'after')
-  const diff = pixelDiff(beforePng, afterPng)
+  const { before: shownBefore, after: shownAfter, diff } = result
   const side = (entry, shown) => ({
     version: entry.version,
     current: entry.current,
@@ -135,12 +241,11 @@ export function compareResult({ beforePng, afterPng, board, page, viewport, pair
     link,
     versions: versions.slice(0, 20).map(({ version, current, capturedAt }) => ({ version, current, capturedAt })),
   }
+  const counted = diff.scale < 1 ? `, counted on the images as shown (scale ${diff.scale})` : ''
   const summary =
-    diff.changed === undefined
-      ? diff.skipped
-      : diff.changed === 0
-        ? 'No pixel changed between them.'
-        : `${diff.changed} pixels changed (${diff.percent}%)${diff.box ? `, inside x ${diff.box.x}-${diff.box.x + diff.box.width}, y ${diff.box.y}-${diff.box.y + diff.box.height}` : ''}.`
+    diff.changed === 0
+      ? `No pixel changed between them${counted}.`
+      : `${diff.changed} pixels changed (${diff.percent}%${counted})${diff.box ? `, inside x ${diff.box.x}-${diff.box.x + diff.box.width}, y ${diff.box.y}-${diff.box.y + diff.box.height} of the capture` : ''}.`
   return {
     content: [
       { type: 'text', text: JSON.stringify(info, null, 2) },

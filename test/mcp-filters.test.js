@@ -244,7 +244,13 @@ before(async () => {
   local = project('mcp-filters-local')
   const board = local.boards[0]
   for (const [author, pageId, at, body] of SEED)
-    await createComment(local, board, { pageId, viewport: 'desktop', x: 10, y: 10, body, author }, { now: new Date(chicago(at)) })
+    await createComment(
+      local,
+      board,
+      { pageId, viewport: 'desktop', x: 10, y: 10, body, author },
+      // Dan's are the owner's (made from this machine's browser); Robin's came from elsewhere.
+      { now: new Date(chicago(at)), owner: author === 'Dan' },
+    )
   localClient = await connect(
     createMcpServer({
       config: local,
@@ -273,7 +279,7 @@ test('local: the sentence is one list_comments call, with the range stated back 
     field: 'createdAt',
     sinceAsked: 'today',
   })
-  assert.deepEqual(listed.author, { asked: 'me', names: ['Dan'] })
+  assert.deepEqual(listed.author, { asked: 'me', names: ['Dan'], meMatch: 'owner' })
   assert.deepEqual(listed.pageName, { asked: 'Features', page: 'features' })
   assert.deepEqual([listed.total, listed.count, listed.nextCursor], [2, 2, null])
   assert.deepEqual(parseBoardLink(listed.comments[0].link), { board: 'lumen', comment: 1, viewport: 'desktop' })
@@ -543,4 +549,75 @@ test('hosted /mcp endpoint: the same sentence and compare, and instructions that
   } finally {
     await client.close()
   }
+})
+
+// ---- Review fixes on the hosted side -------------------------------------------------
+
+test('hosted: the current capture URL names its version; a stale version is a 409 the compare tool explains', async () => {
+  const route = '/api/v1/boards/lumen/pages/home/versions?viewport=desktop'
+  const listed = await tokenCall(hosted, token, 'GET', route)
+  const currentUrl = listed.json.versions.find((row) => row.current).files.png
+  assert.ok(currentUrl.endsWith(`/files/captures/home.desktop.png?version=${SECOND}`), currentUrl)
+  const local = (url) => url.replace(hosted.origin, '')
+  assert.equal((await tokenCall(hosted, token, 'GET', local(currentUrl))).status, 200)
+  const stale = await tokenCall(
+    hosted,
+    token,
+    'GET',
+    '/api/v1/boards/lumen/files/captures/home.desktop.png?version=20261125T160000000Z-cccc',
+  )
+  assert.equal(stale.status, 409)
+  assert.equal(stale.json.error.code, 'capture_moved')
+  // A version on a file that is not a current capture never matches.
+  assert.equal(
+    (await tokenCall(hosted, token, 'GET', `/api/v1/boards/lumen/files/versions/home.desktop.${FIRST}.png?version=${FIRST}`)).status,
+    409,
+  )
+  // The race, as the tool sees it: the history says one current version, the
+  // server has moved on by the time the bytes are fetched.
+  const remote = createRemote({ origin: hosted.origin, token })
+  const moved = {
+    ...remote,
+    pageVersions: async (...args) => {
+      const answer = await remote.pageVersions(...args)
+      const later = '20261125T160000000Z-cccc'
+      answer.versions = answer.versions.map((row) =>
+        row.current ? { ...row, version: later, files: { ...row.files, png: row.files.png.replace(SECOND, later) } } : row,
+      )
+      return answer
+    },
+  }
+  const client = await connect(await createRemoteMcpServer({ remote: moved, now: () => NOW }))
+  try {
+    const refused = await client.callTool({ name: 'compare_captures', arguments: { page: 'home' } })
+    assert.equal(refused.isError, true)
+    assert.match(refused.content[0].text, /changed while comparing/)
+  } finally {
+    await client.close()
+  }
+})
+
+test('hosted: a claim token lists only current captures and the versions its comments were made on', async () => {
+  const claim = await createToken(owner, owner.workspaceId, projectRow.id, ['read', 'reply', 'status', 'claim'])
+  const route = '/api/v1/boards/lumen/pages/home/versions?viewport=desktop'
+  const asClaim = await tokenCall(hosted, claim, 'GET', route)
+  assert.equal(asClaim.status, 200, asClaim.text)
+  assert.deepEqual(
+    asClaim.json.versions.map((row) => [row.version, row.current]),
+    [[SECOND, true]],
+  )
+  const old = `/api/v1/boards/lumen/files/versions/home.desktop.${FIRST}.png`
+  assert.equal((await tokenCall(hosted, claim, 'GET', old)).status, 404)
+  // A plain read token still sees the whole history (docs/hosted.md says so).
+  assert.equal((await tokenCall(hosted, token, 'GET', old)).status, 200)
+})
+
+test('hosted: GET /project names the token maker only to a token with the read scope', async () => {
+  const reader = await tokenCall(hosted, token, 'GET', '/api/v1/project')
+  assert.deepEqual(reader.json.token.createdBy, { handle: 'dan', name: 'Dan' })
+  const pushOnly = await createToken(owner, owner.workspaceId, projectRow.id, ['push'])
+  const pusher = await tokenCall(hosted, pushOnly, 'GET', '/api/v1/project')
+  assert.equal(pusher.status, 200, pusher.text)
+  assert.equal('createdBy' in pusher.json.token, false)
+  assert.deepEqual(pusher.json.token.scopes, ['push'])
 })

@@ -26,7 +26,15 @@ import { cropAround } from '../png.js'
 import { AGENT_STATUSES, STORED_AGENT_STATUSES, readManifest } from '../store.js'
 import { boardLink, hostedBoardBase } from '../board-links.js'
 import { ambiguousPage, authorFilter, filterArgs, narrowComments, pageByName, statedFilters, timeRange } from '../comment-filters.js'
-import { captureHistory, compareDescription, compareResult, pickPair, versionArg } from '../compare-captures.js'
+import {
+  captureHistory,
+  COMPARE_MAX_PIXELS,
+  compareDescription,
+  compareImages,
+  compareResult,
+  pickPair,
+  versionArg,
+} from '../compare-captures.js'
 import { mcpInstructions } from '../mcp-instructions.js'
 import { pushPages } from './cli.js'
 import { REMOTE_HEARTBEAT_MS } from './remote-watch.js'
@@ -88,6 +96,10 @@ export async function createRemoteMcpServer({
   // The hosted server's own /mcp endpoint (src/hosted/mcp-http.js): it never
   // captures, so its instructions point at `mcp --remote` for the hand-in.
   hostedEndpoint = false,
+  // How compare_captures decodes: { maxPixels, fit, run } from the hosted
+  // endpoint (src/hosted/mcp-http.js: worker threads, one compare per
+  // token); null decodes here, as `mcp --remote` on a person's machine does.
+  compare = null,
   // The clock "today" is read from (tests set it).
   now = () => Date.now(),
 }) {
@@ -525,43 +537,71 @@ export async function createRemoteMcpServer({
     },
     tool(async ({ board, page: pageId, viewport, before = 'previous', after = 'current', crop }) => {
       const target = boardFor(board)
-      let answer
-      try {
-        answer = await remote.pageVersions(target, pageId, { viewport: viewport || null })
-      } catch (error) {
-        if (error?.code === 'unknown_page') throw new Error(`No page "${pageId}" on board "${target}".`, { cause: error })
-        if (error?.code === 'unknown_viewport') throw new Error(`Page "${pageId}" has no viewport "${viewport}".`, { cause: error })
-        if (error?.status === 404)
-          throw new Error('This hosted server has no capture history yet (it needs Shapewall 1.3.0 or later).', { cause: error })
-        throw error
+      const work = async () => {
+        let answer
+        try {
+          answer = await remote.pageVersions(target, pageId, { viewport: viewport || null })
+        } catch (error) {
+          if (error?.code === 'unknown_page') throw new Error(`No page "${pageId}" on board "${target}".`, { cause: error })
+          if (error?.code === 'unknown_viewport') throw new Error(`Page "${pageId}" has no viewport "${viewport}".`, { cause: error })
+          if (error?.status === 404)
+            throw new Error('This hosted server has no capture history yet (it needs Shapewall 1.3.0 or later).', { cause: error })
+          throw error
+        }
+        const wanted = viewport || answer.viewports?.[0]
+        // Ids only: the files are the ones the server lists for this page and
+        // viewport, fetched from this server's token API. The current one's
+        // URL names its version (?version=): a push that lands between the
+        // list and the download is a 409, never an image under the wrong label.
+        const rows = (answer.versions || []).filter((row) => row.viewport === wanted)
+        const current = rows.find((row) => row.current)?.version || null
+        const history = captureHistory(
+          current,
+          rows.filter((row) => !row.current).map((row) => row.version),
+        )
+        const pair = pickPair(history, { before, after }, `"${pageId}" (${wanted})`)
+        const fetchPng = async (entry) => {
+          const row = rows.find((item) => item.version === entry.version && item.current === entry.current)
+          let bytes = null
+          try {
+            bytes = row?.files?.png ? await remote.download(row.files.png) : null
+          } catch (error) {
+            if (error?.status === 409)
+              throw new Error(
+                `The current capture of "${pageId}" (${wanted}) changed while comparing (a push landed). Call compare_captures again.`,
+                { cause: error },
+              )
+            throw error
+          }
+          if (!Buffer.isBuffer(bytes)) throw new Error(`The capture ${entry.version} of "${pageId}" (${wanted}) is not an image.`)
+          return bytes
+        }
+        const beforePng = await fetchPng(pair.before)
+        const afterPng = await fetchPng(pair.after)
+        let compared
+        try {
+          compared = await compareImages({
+            beforePng,
+            afterPng,
+            crop: crop || null,
+            maxPixels: compare?.maxPixels ?? COMPARE_MAX_PIXELS,
+            fit: compare?.fit || null,
+          })
+        } catch (error) {
+          throw new Error(`"${pageId}" (${wanted}): ${error.message}`, { cause: error })
+        }
+        return compareResult({
+          compared,
+          board: target,
+          page: pageId,
+          viewport: wanted,
+          pair,
+          crop: crop || null,
+          link: links.compare(target, pageId, wanted),
+          versions: history,
+        })
       }
-      const wanted = viewport || answer.viewports?.[0]
-      // Ids only: the files are the ones the server lists for this page and
-      // viewport, fetched from this server's token API.
-      const rows = (answer.versions || []).filter((row) => row.viewport === wanted)
-      const current = rows.find((row) => row.current)?.version || null
-      const history = captureHistory(
-        current,
-        rows.filter((row) => !row.current).map((row) => row.version),
-      )
-      const pair = pickPair(history, { before, after }, `"${pageId}" (${wanted})`)
-      const fetchPng = async (entry) => {
-        const row = rows.find((item) => item.version === entry.version && item.current === entry.current)
-        const bytes = row?.files?.png ? await remote.download(row.files.png) : null
-        if (!Buffer.isBuffer(bytes)) throw new Error(`The capture ${entry.version} of "${pageId}" (${wanted}) is not an image.`)
-        return bytes
-      }
-      return compareResult({
-        beforePng: await fetchPng(pair.before),
-        afterPng: await fetchPng(pair.after),
-        board: target,
-        page: pageId,
-        viewport: wanted,
-        pair,
-        crop: crop || null,
-        link: links.compare(target, pageId, wanted),
-        versions: history,
-      })
+      return compare ? compare.run(work) : work()
     }),
   )
 

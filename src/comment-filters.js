@@ -163,10 +163,40 @@ export function authorFilter(author, { me = null } = {}) {
   const text = String(author ?? '').trim()
   if (!text || text.length > 80) throw new Error('author takes "me", a display name or an @handle.')
   if (text.toLowerCase() === 'me') {
-    if (!me || (!me.names?.length && !me.handles?.length))
+    if (!me || (!me.ownerStamp && !me.names?.length && !me.handles?.length))
       throw new Error(me?.why || 'This server cannot tell who "me" is here. Pass the display name or @handle the comments are signed with.')
-    const names = new Set(me.names.map(clean).filter(Boolean))
+    const names = new Set((me.names || []).map(clean).filter(Boolean))
     const handles = new Set((me.handles || []).map(clean).filter(Boolean))
+    if (me.ownerStamp) {
+      // A local board: the server stamps the comments its owner makes
+      // (byOwner), and "me" goes by that stamp, never by a name anyone who
+      // can comment could sign with. Comments from before the stamp
+      // (byOwner absent) fall back to the name, and the answer says which.
+      const byName = []
+      return {
+        get stated() {
+          return {
+            asked: 'me',
+            ...(me.names?.length ? { names: me.names } : {}),
+            ...(handles.size ? { handles: [...handles] } : {}),
+            meMatch: byName.length ? 'owner+name' : 'owner',
+            ...(byName.length
+              ? {
+                  matchedByName: byName.slice(0, 50),
+                  note: 'These older comments carry no owner stamp and matched by display name, which anyone who can comment can use.',
+                }
+              : {}),
+          }
+        },
+        match: (item) => {
+          if (item.authorAgent || item.authorGuest) return false
+          if (typeof item.byOwner === 'boolean') return item.byOwner
+          if (!names.has(clean(item.author))) return false
+          byName.push(item.id)
+          return true
+        },
+      }
+    }
     return {
       stated: { asked: 'me', ...(me.names.length ? { names: me.names } : {}), ...(handles.size ? { handles: [...handles] } : {}) },
       match: (item) =>

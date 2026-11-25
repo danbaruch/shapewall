@@ -38,7 +38,7 @@ import {
 import { cropArg, pageCaptureDescription, pageCaptureResult } from './page-capture.js'
 import { boardLink, localBoardBase } from './board-links.js'
 import { ambiguousPage, authorFilter, filterArgs, narrowComments, pageByName, statedFilters, timeRange } from './comment-filters.js'
-import { captureHistory, compareDescription, compareResult, pickPair, versionArg } from './compare-captures.js'
+import { captureHistory, compareDescription, compareResult, pickPair, readPair, versionArg } from './compare-captures.js'
 import { mcpInstructions } from './mcp-instructions.js'
 import { localUserName } from './server/local-user.js'
 
@@ -123,11 +123,13 @@ export function listPages(config, board) {
   }
 }
 
-// Who "me" is on a local board: the name the board signs this machine's
-// comments with (SHAPEWALL_USER_NAME, git user.name, the OS user), and,
-// when the board has accounts (`serve --accounts`), the owner account's
-// display name and handle. Read-only; a missing or unreadable accounts
-// file just leaves the account out.
+// Who "me" is on a local board: the comments the server stamped as the
+// owner's (byOwner, store.js createComment). For older comments without the
+// stamp, the name the board signs this machine's comments with
+// (SHAPEWALL_USER_NAME, git user.name, the OS user), and, when the board has
+// accounts (`serve --accounts`), the owner account's display name and
+// handle. Read-only; a missing or unreadable accounts file just leaves the
+// account out.
 export function localMe(config, env = process.env) {
   const names = []
   const handles = []
@@ -152,6 +154,8 @@ export function localMe(config, env = process.env) {
   return {
     names,
     handles,
+    // Comments carry the server's owner stamp (byOwner): "me" goes by it.
+    ownerStamp: true,
     why: 'Shapewall does not know your name on this machine. Set SHAPEWALL_USER_NAME or git user.name, or pass the name your comments are signed with.',
   }
 }
@@ -522,9 +526,19 @@ export function createMcpServer({
         if (!file) throw new Error(`The capture ${entry.version} of "${page.id}" (${wanted}) is gone.`)
         return readScreenshot(file)
       }
+      const { beforePng, afterPng } = readPair({
+        pair,
+        read,
+        current,
+        currentNow: () => {
+          const now = readManifest(config, target.id)
+          return entryVersion(now?.pages?.[page.id]?.[wanted], now)
+        },
+        what: `"${page.id}" (${wanted})`,
+      })
       return compareResult({
-        beforePng: read(pair.before),
-        afterPng: read(pair.after),
+        beforePng,
+        afterPng,
         board: target.id,
         page: page.id,
         viewport: wanted,

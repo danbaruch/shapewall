@@ -136,12 +136,17 @@ export function createRemote({ origin, token, source = null, fetchImpl = fetch, 
   const one = (boardId, id, rest, guests) => `${board(boardId)}/comments/${enc(id)}${rest}${guests ? '?guests=1' : ''}`
 
   // A file URL from a comment (files.screenshot, a comment image) as bytes.
-  // Only this origin's API; of the query only the guests opt-in is kept (a
-  // share link guest's image is served with it).
+  // Only this origin's API; of the query only the guests opt-in (a share
+  // link guest's image is served with it) and a capture version (the
+  // current capture as the history listed it, else a 409) are kept.
   async function download(url, { signal } = {}) {
     const target = new URL(url)
     if (target.origin !== origin || !target.pathname.startsWith('/api/v1/boards/')) throw new Error('not a file of this Shapewall')
-    return call('GET', `${target.pathname}${target.searchParams.get('guests') === '1' ? '?guests=1' : ''}`, { signal })
+    const query = new URLSearchParams()
+    if (target.searchParams.get('guests') === '1') query.set('guests', '1')
+    const version = target.searchParams.get('version')
+    if (version && /^[\w.-]{1,40}$/.test(version)) query.set('version', version)
+    return call('GET', `${target.pathname}${query.size ? `?${query}` : ''}`, { signal })
   }
 
   return {
