@@ -130,6 +130,13 @@ test("a page push takes only its own pages' capture files, within the size caps"
   })
   assert.equal(noVersion.status, 400)
   assert.equal(noVersion.json.error.code, 'invalid_manifest')
+  // A capture dated a day ahead of the server (a clock gone wrong, or a crafted version that would hold the page forever).
+  const ahead = new Date(Date.now() + 86_400_000).toISOString().replace(/[-:.]/g, '')
+  const future = await call('POST', `/api/v1/pushes/${start.json.id}/commit`, {
+    body: { manifest: { pages: { home: { desktop: { status: 'ok', version: `${ahead}-ffff` } } } } },
+  })
+  assert.equal(future.status, 400)
+  assert.match(future.json.error.message, /dated in the future/)
   assert.equal(await hostedWidth('captures/home.desktop.png'), 8, 'the board is unchanged')
 })
 
@@ -205,7 +212,7 @@ test('a page push replaces only its pages, keeps what another machine pushed, an
 
 test('shapewall push --page pushes only those pages', async () => {
   const c = machine('page-push-cli')
-  recapture(c, 'app', '20261125T100000000Z-cccc', 40)
+  recapture(c, 'app', '20261124T110000000Z-cccc', 40)
   const lines = []
   const saved = process.env.SHAPEWALL_TOKEN
   process.env.SHAPEWALL_TOKEN = token
@@ -228,24 +235,52 @@ test('shapewall push --page pushes only those pages', async () => {
 })
 
 test('a page push that fails at commit (over the quota) leaves the board as it was', async () => {
-  // The store itself, with a quota just above what the workspace holds now.
+  // The store itself: uploads with room, then a commit with a quota just above what the workspace holds now
+  // (as when comment images filled it meanwhile).
   const t = tenant(hosted.db, owner.workspaceId)
   const held = hosted.db.prepare('SELECT COALESCE(SUM(bytes), 0) AS n FROM boards WHERE workspace_id = ?').get(owner.workspaceId).n
+  const roomy = createPushStore(t, { db: hosted.db, dataDir: hosted.dataDir })
   const tight = createPushStore(t, { db: hosted.db, dataDir: hosted.dataDir, workspaceQuota: held + 50 })
   const before = await hostedWidth('captures/pricing.desktop.png')
-  const started = tight.start({ projectId: project.id, raw: { mode: 'pages', board: 'sample', pages: { pricing: ['desktop'] } } })
+  const started = roomy.start({ projectId: project.id, raw: { mode: 'pages', board: 'sample', pages: { pricing: ['desktop'] } } })
   // Noise does not compress: the new capture is bigger than the one it replaces by more than the room left.
   const pixels = Buffer.from(Array.from({ length: 24 * 24 * 3 }, (_, i) => (i * 7919) % 251))
   const png = encodePng({ width: 24, height: 24, channels: 3, colorType: 2, pixels })
-  await tight.receive({ pushId: started.id, projectId: project.id, area: 'captures', name: 'pricing.desktop.png', body: png })
-  const manifest = { pages: { pricing: { desktop: { status: 'ok', version: '20261128T100000000Z-dddd' } } } }
+  await roomy.receive({ pushId: started.id, projectId: project.id, area: 'captures', name: 'pricing.desktop.png', body: png })
+  const manifest = { pages: { pricing: { desktop: { status: 'ok', version: '20261124T120000000Z-dddd' } } } }
   assert.throws(() => tight.commit({ pushId: started.id, projectId: project.id, manifest }), { code: 'quota_exceeded' })
   assert.equal(await hostedWidth('captures/pricing.desktop.png'), before, 'the board is as it was')
   assert.equal(await hostedWidth('captures/home.desktop.png'), 30)
+  // No copy of the board is left behind: only the push's own upload.
+  const staging = path.join(hosted.dataDir, 'staging', started.id)
+  assert.deepEqual(fs.readdirSync(staging), ['captures'])
+  assert.deepEqual(fs.readdirSync(path.join(staging, 'captures')), ['pricing.desktop.png'])
   // The same push, committed again with room: the retry starts from its uploads.
-  const roomy = createPushStore(t, { db: hosted.db, dataDir: hosted.dataDir })
   roomy.commit({ pushId: started.id, projectId: project.id, manifest })
   assert.equal(await hostedWidth('captures/pricing.desktop.png'), 24)
   assert.equal(await hostedWidth('captures/home.desktop.png'), 30)
   assert.equal(await hostedWidth('captures/app.desktop.png'), 40)
+})
+
+test('pages a page push leaves keep their version, also entries from before versions existed', async () => {
+  const e = machine('page-push-legacy')
+  // An older client: no version on app's entry, so its version comes from the run's time.
+  const manifest = readManifest(e, 'sample')
+  delete manifest.pages.app.desktop.version
+  manifest.capturedAt = '2026-11-02T10:00:00.000Z'
+  fs.writeFileSync(path.join(boardDir(e, 'sample'), 'captures', 'manifest.json'), JSON.stringify(manifest))
+  recapture(e, 'pricing', '20261124T130000000Z-eeee', 50)
+  recapture(e, 'home', '20261124T130000000Z-eeee', 50)
+  const saved = readManifest(e, 'sample')
+  saved.capturedAt = '2026-11-02T10:00:00.000Z'
+  fs.writeFileSync(path.join(boardDir(e, 'sample'), 'captures', 'manifest.json'), JSON.stringify(saved))
+  await pushBoard({ config: e, board: e.boards[0], remote })
+  const folder = path.join(hosted.dataDir, 'files', owner.workspaceId, project.id, 'sample', 'captures', 'manifest.json')
+  assert.equal(JSON.parse(fs.readFileSync(folder, 'utf8')).pages.app.desktop.version, undefined)
+  recapture(e, 'home', '20261124T140000000Z-eeee', 60)
+  await pushPages({ config: e, board: e.boards[0], remote, pages: ['home'] })
+  const after = JSON.parse(fs.readFileSync(folder, 'utf8'))
+  assert.ok(after.capturedAt > '2026-11-02T10:00:00.000Z', 'the board capturedAt moved on')
+  assert.equal(after.pages.app.desktop.version, '20261102T100000000Z', "app keeps the version it had (from the old run's time)")
+  assert.equal(after.pages.home.desktop.version, '20261124T140000000Z-eeee')
 })

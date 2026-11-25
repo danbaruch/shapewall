@@ -53,6 +53,8 @@ export const PUSH_LIMITS = {
   // Everything a workspace stores (committed boards plus open pushes).
   workspaceBytes: 5 * 1024 * 1024 * 1024,
 }
+// How far ahead of the server's clock a page push's capture time may be.
+const FUTURE_SKEW_MS = 10 * 60_000
 const PNG_MAX_WIDTH = 3840
 const PNG_MAX_HEIGHT = 8000
 
@@ -386,8 +388,30 @@ function regularFile(file) {
   }
 }
 
-// Copies the regular files and folders of `from` into `to` (relative paths
-// that `keep` accepts), never following a link. Files already in `to` stay.
+// A board file into a page push's staging folder: a hard link (no bytes
+// copied, so the commit holds the write lock only for the walk, and the data
+// is already on disk), else a copy that is synced before the commit. Board
+// files are never written in place (a push swaps whole folders in, retention
+// unlinks), so sharing an inode with the board being replaced is safe.
+function linkOrCopy(from, to) {
+  try {
+    fs.linkSync(from, to)
+    return
+  } catch (error) {
+    if (!['EXDEV', 'EPERM', 'ENOTSUP', 'EMLINK', 'EACCES'].includes(error.code)) throw error
+  }
+  fs.copyFileSync(from, to, fs.constants.COPYFILE_FICLONE)
+  const fd = fs.openSync(to, 'r')
+  try {
+    fs.fsyncSync(fd)
+  } finally {
+    fs.closeSync(fd)
+  }
+}
+
+// Links (or copies) the regular files and folders of `from` into `to`
+// (relative paths that `keep` accepts), never following a link. Files
+// already in `to` stay.
 function copyBoard(from, to, keep, relative = '') {
   for (const entry of fs.readdirSync(path.join(from, relative), { withFileTypes: true })) {
     const name = path.join(relative, entry.name)
@@ -396,7 +420,7 @@ function copyBoard(from, to, keep, relative = '') {
       const dest = path.join(to, name)
       if (fs.existsSync(dest)) continue
       fs.mkdirSync(path.dirname(dest), { recursive: true })
-      fs.copyFileSync(path.join(from, name), dest, fs.constants.COPYFILE_FICLONE)
+      linkOrCopy(path.join(from, name), dest)
     }
   }
 }
@@ -550,7 +574,18 @@ export function createPushStore(
       throw new PushError(413, 'too_many_files', `A push holds at most ${PUSH_LIMITS.files} files.`)
     const grow = clean.length - (previous ?? 0)
     if (push.bytes + grow > PUSH_LIMITS.bytes) throw new PushError(413, 'too_large', 'This push is over the size cap.')
-    if (workspaceBytesBesides(projectId, board.id) + grow > workspaceQuota) {
+    // A page push keeps the board it adds to, so its bytes count here too.
+    const kept =
+      push.definition.mode === 'pages'
+        ? t.get(
+            'SELECT COALESCE(SUM(bytes), 0) AS n FROM boards WHERE workspace_id = :ws AND project_id = :project AND board_id = :board',
+            {
+              project: projectId,
+              board: board.id,
+            },
+          ).n
+        : 0
+    if (workspaceBytesBesides(projectId, board.id) + kept + grow > workspaceQuota) {
       throw new PushError(413, 'quota_exceeded', 'This workspace is over its storage quota.')
     }
     fs.mkdirSync(dir, { recursive: true })
@@ -730,94 +765,130 @@ export function createPushStore(
       const entry = manifest?.pages?.[page]?.[viewport]
       if (!isObject(entry) || entry.status !== 'ok' || typeof entry.version !== 'string' || !VERSION_RE.test(entry.version))
         throw new PushError(400, 'invalid_manifest', `The manifest needs an ok capture with a version for ${page} (${viewport}).`)
+      // The version is the capture's time: one from the future would hold
+      // this page against every later push (the stale guard), so a client
+      // clock more than ten minutes ahead of the server's is refused.
+      const taken = Date.parse(
+        `${entry.version.slice(0, 4)}-${entry.version.slice(4, 6)}-${entry.version.slice(6, 8)}T${entry.version.slice(9, 11)}:${entry.version.slice(11, 13)}:${entry.version.slice(13, 15)}.${entry.version.slice(15, 18)}Z`,
+      )
+      if (!Number.isFinite(taken) || taken > now.getTime() + FUTURE_SKEW_MS)
+        throw new PushError(
+          400,
+          'invalid_manifest',
+          `The capture of ${page} (${viewport}) is dated in the future; check this machine's clock.`,
+        )
       sent[`${page}.${viewport}`] = entry
     }
+    // The staging folder down to this push's own uploads: before each commit
+    // attempt (a retry starts again from them) and after a failed one, so a
+    // refused commit leaves no copy of the board behind.
+    const keepUploads = () => {
+      for (const entry of safeList(staging)) {
+        if (entry !== 'captures') fs.rmSync(path.join(staging, entry), { recursive: true, force: true })
+      }
+      for (const name of safeList(path.join(staging, 'captures'))) {
+        if (!replaced.has(name.split('.').slice(0, 2).join('.')) || !CAPTURE_FILE_RE.test(name))
+          fs.rmSync(path.join(staging, 'captures', name), { force: true })
+      }
+    }
     let pages = 0
-    installBoard({
-      push,
-      projectId,
-      boardId: board.id,
-      credential,
-      carried: [],
-      now,
-      prepare: (at) => {
-        // The board as it is now, read in the write transaction.
-        const row = t.get('SELECT definition FROM boards WHERE workspace_id = :ws AND project_id = :project AND board_id = :board', {
-          project: projectId,
-          board: board.id,
-        })
-        if (!row || !fs.existsSync(target))
-          throw new PushError(409, 'board_gone', 'The board was removed meanwhile; nothing was committed.')
-        const current = JSON.parse(row.definition)
-        for (const [page, viewport] of pairs)
-          if (!current.board.pages.some((item) => item.id === page && item.viewports.includes(viewport)))
-            throw new PushError(409, 'board_changed', `The board no longer has ${page} (${viewport}); push the whole board.`)
-        let currentManifest = null
-        try {
-          currentManifest = JSON.parse(fs.readFileSync(path.join(target, 'captures', 'manifest.json'), 'utf8'))
-        } catch {
-          currentManifest = null
-        }
-        const stale = []
-        for (const [page, viewport] of pairs) {
-          const held = entryVersion(currentManifest?.pages?.[page]?.[viewport], currentManifest)
-          if (held && held.slice(0, 19) > sent[`${page}.${viewport}`].version.slice(0, 19)) stale.push(`${page} (${viewport})`)
-        }
-        if (stale.length)
-          throw new PushError(
-            409,
-            'stale_capture',
-            `The board has a newer capture of ${stale.join(', ')} than this push; nothing was committed. Capture again, then push.`,
-          )
-        // A retry starts again from the uploads alone: everything else in
-        // the staging folder came from the board at an earlier attempt.
-        for (const entry of fs.readdirSync(staging)) {
-          if (entry !== 'captures') fs.rmSync(path.join(staging, entry), { recursive: true, force: true })
-        }
-        for (const name of fs.readdirSync(path.join(staging, 'captures'))) {
-          if (!replaced.has(name.split('.').slice(0, 2).join('.')) || !CAPTURE_FILE_RE.test(name))
-            fs.rmSync(path.join(staging, 'captures', name), { force: true })
-        }
-        // Everything else from the board as it is: other pages, variants,
-        // versions, checks. Never through a link.
-        copyBoard(target, staging, (relative) => {
-          if (relative === path.join('captures', 'manifest.json')) return false
-          if (path.dirname(relative) === 'captures') return !replaced.has(path.basename(relative).split('.').slice(0, 2).join('.'))
-          return true
-        })
-        // The capture each of these replaces becomes a version, as on a
-        // local recapture, unless the board already keeps it.
-        for (const [page, viewport] of pairs) {
-          const version = entryVersion(currentManifest?.pages?.[page]?.[viewport], currentManifest)
-          if (!version || version === sent[`${page}.${viewport}`].version) continue
-          for (const suffix of ['.png', '.thumb.png', '.html']) {
-            const from = path.join(target, 'captures', `${page}.${viewport}${suffix}`)
-            const to = path.join(staging, 'versions', `${page}.${viewport}.${version}${suffix}`)
-            if (!regularFile(from) || fs.existsSync(to)) continue
-            fs.mkdirSync(path.dirname(to), { recursive: true })
-            fs.copyFileSync(from, to, fs.constants.COPYFILE_FICLONE)
+    try {
+      installBoard({
+        push,
+        projectId,
+        boardId: board.id,
+        credential,
+        carried: [],
+        now,
+        prepare: (at) => {
+          // The board as it is now, read in the write transaction.
+          const row = t.get('SELECT definition FROM boards WHERE workspace_id = :ws AND project_id = :project AND board_id = :board', {
+            project: projectId,
+            board: board.id,
+          })
+          if (!row || !fs.existsSync(target))
+            throw new PushError(409, 'board_gone', 'The board was removed meanwhile; nothing was committed.')
+          const current = JSON.parse(row.definition)
+          for (const [page, viewport] of pairs)
+            if (!current.board.pages.some((item) => item.id === page && item.viewports.includes(viewport)))
+              throw new PushError(409, 'board_changed', `The board no longer has ${page} (${viewport}); push the whole board.`)
+          let currentManifest = null
+          try {
+            currentManifest = JSON.parse(fs.readFileSync(path.join(target, 'captures', 'manifest.json'), 'utf8'))
+          } catch {
+            currentManifest = null
           }
-        }
-        const files = new Set()
-        for (const area of ['captures', 'variants', 'versions'])
-          for (const name of safeList(path.join(staging, area))) files.add(`${area}/${name}`)
-        const merged = { ...(currentManifest || {}), pages: { ...(currentManifest?.pages || {}) } }
-        for (const [page, viewport] of pairs)
-          merged.pages[page] = { ...(merged.pages[page] || {}), [viewport]: sent[`${page}.${viewport}`] }
-        const times = [currentManifest?.capturedAt, manifest?.capturedAt].filter((value) => Number.isFinite(Date.parse(value || '')))
-        merged.capturedAt = times.sort((a, b) => Date.parse(b) - Date.parse(a))[0] || null
-        const nextManifest = cleanManifest(merged, current.board, current.viewports || viewports, files)
-        fs.mkdirSync(path.join(staging, 'captures'), { recursive: true })
-        fs.writeFileSync(path.join(staging, 'captures', 'manifest.json'), JSON.stringify(nextManifest))
-        const bytes = folderBytes(staging)
-        checkQuota(projectId, board.id, bytes)
-        t.run(
-          'UPDATE boards SET pushed_at = :at, push_count = push_count + 1, bytes = :bytes WHERE workspace_id = :ws AND project_id = :project AND board_id = :board',
-          { at, bytes, project: projectId, board: board.id },
-        )
-        pages = new Set(pairs.map(([page]) => page)).size
-      },
-    })
+          const stale = []
+          for (const [page, viewport] of pairs) {
+            const held = entryVersion(currentManifest?.pages?.[page]?.[viewport], currentManifest)
+            if (held && held.slice(0, 19) > sent[`${page}.${viewport}`].version.slice(0, 19)) stale.push(`${page} (${viewport})`)
+          }
+          if (stale.length)
+            throw new PushError(
+              409,
+              'stale_capture',
+              `The board has a newer capture of ${stale.join(', ')} than this push; nothing was committed. Capture again, then push.`,
+            )
+          keepUploads()
+          // Everything else from the board as it is: other pages, variants,
+          // versions, checks (hard links where the file system allows).
+          // Never through a symlink.
+          copyBoard(target, staging, (relative) => {
+            if (relative === path.join('captures', 'manifest.json')) return false
+            if (path.dirname(relative) === 'captures') return !replaced.has(path.basename(relative).split('.').slice(0, 2).join('.'))
+            return true
+          })
+          // The capture each of these replaces becomes a version, as on a
+          // local recapture, unless the board already keeps it.
+          for (const [page, viewport] of pairs) {
+            const version = entryVersion(currentManifest?.pages?.[page]?.[viewport], currentManifest)
+            if (!version || version === sent[`${page}.${viewport}`].version) continue
+            for (const suffix of ['.png', '.thumb.png', '.html']) {
+              const from = path.join(target, 'captures', `${page}.${viewport}${suffix}`)
+              const to = path.join(staging, 'versions', `${page}.${viewport}.${version}${suffix}`)
+              if (!regularFile(from) || fs.existsSync(to)) continue
+              fs.mkdirSync(path.dirname(to), { recursive: true })
+              linkOrCopy(from, to)
+            }
+          }
+          const files = new Set()
+          for (const area of ['captures', 'variants', 'versions'])
+            for (const name of safeList(path.join(staging, area))) files.add(`${area}/${name}`)
+          const merged = { ...(currentManifest || {}), pages: {} }
+          // Pages this push leaves keep their version as it is now: an entry
+          // from before versions existed takes its version from the run's time,
+          // which would otherwise move with the merged capturedAt.
+          for (const [page, entries] of Object.entries(currentManifest?.pages || {})) {
+            merged.pages[page] = {}
+            for (const [viewport, entry] of Object.entries(isObject(entries) ? entries : {})) {
+              const version = isObject(entry) && !entry.version ? entryVersion(entry, currentManifest) : null
+              merged.pages[page][viewport] = version ? { ...entry, version } : entry
+            }
+          }
+          for (const [page, viewport] of pairs)
+            merged.pages[page] = { ...(merged.pages[page] || {}), [viewport]: sent[`${page}.${viewport}`] }
+          const times = [currentManifest?.capturedAt, manifest?.capturedAt].filter((value) => Number.isFinite(Date.parse(value || '')))
+          merged.capturedAt = times.sort((a, b) => Date.parse(b) - Date.parse(a))[0] || null
+          const nextManifest = cleanManifest(merged, current.board, current.viewports || viewports, files)
+          fs.mkdirSync(path.join(staging, 'captures'), { recursive: true })
+          fs.writeFileSync(path.join(staging, 'captures', 'manifest.json'), JSON.stringify(nextManifest))
+          const bytes = folderBytes(staging)
+          checkQuota(projectId, board.id, bytes)
+          t.run(
+            'UPDATE boards SET pushed_at = :at, push_count = push_count + 1, bytes = :bytes WHERE workspace_id = :ws AND project_id = :project AND board_id = :board',
+            { at, bytes, project: projectId, board: board.id },
+          )
+          pages = new Set(pairs.map(([page]) => page)).size
+        },
+      })
+    } catch (error) {
+      try {
+        if (fs.existsSync(staging)) keepUploads()
+      } catch {
+        /* the push expires within the hour, and its staging folder with it */
+      }
+      throw error
+    }
     return { board: board.id, mode: 'pages', files: push.files, pages, viewports: pairs.length, checks: 0 }
   }
 
