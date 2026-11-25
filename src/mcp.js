@@ -37,15 +37,7 @@ import {
 } from './store.js'
 import { cropArg, pageCaptureDescription, pageCaptureResult } from './page-capture.js'
 import { boardLink, localBoardBase } from './board-links.js'
-import {
-  ambiguousPage,
-  authorFilter,
-  filterArgs,
-  narrowComments,
-  pageByName,
-  statedFilters,
-  timeRange,
-} from './comment-filters.js'
+import { ambiguousPage, authorFilter, filterArgs, narrowComments, pageByName, statedFilters, timeRange } from './comment-filters.js'
 import { captureHistory, compareDescription, compareResult, pickPair, versionArg } from './compare-captures.js'
 import { mcpInstructions } from './mcp-instructions.js'
 import { localUserName } from './server/local-user.js'
@@ -450,7 +442,7 @@ export function createMcpServer({
       title: 'Board link',
       description:
         'A link into the board: the board, a page (flown to), a comment (opened), a viewport, or a page compare (before and after of its ' +
-        'latest recapture). Open it in your app\'s browser pane if it has one; otherwise give it to the person.',
+        "latest recapture). Open it in your app's browser pane if it has one; otherwise give it to the person.",
       inputSchema: {
         board: boardArg,
         page: z.string().max(64).optional().describe('Page id'),
@@ -489,7 +481,9 @@ export function createMcpServer({
         running: base.running,
         note:
           "Open this in your app's browser pane if it has one; otherwise give it to the person." +
-          (base.running === false ? ' No board is running for this project yet: start it with "shapewall serve", then the link opens.' : ''),
+          (base.running === false
+            ? ' No board is running for this project yet: start it with "shapewall serve", then the link opens.'
+            : ''),
       })
     }),
   )

@@ -44,7 +44,7 @@ export function mcpInstructions({ handIn = 'local', hosted = false, github = tru
     '5. compare_captures for each page you changed, to confirm the change is what was asked.',
     '6. reply_to_comment with what changed and the compare link, then set_comment_status "done" (a person checks and resolves). ' +
       'resolve_comment only when you were asked to resolve. When the request is unclear, set "needs-human" with a reply that asks.',
-    '7. board_link gives a link to the board, a page, a comment or a compare: open it in your app\'s browser pane if it has one, ' +
+    "7. board_link gives a link to the board, a page, a comment or a compare: open it in your app's browser pane if it has one, " +
       'otherwise give it to the person.',
   ]
   if (github)

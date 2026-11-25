@@ -66,6 +66,8 @@ test('tools are listed; read-only drops every write', async () => {
   const names = (await client.listTools()).tools.map((item) => item.name).sort()
   assert.deepEqual(names, [
     'add_comment',
+    'board_link',
+    'compare_captures',
     'get_comment',
     'get_page_capture',
     'list_comments',
@@ -78,7 +80,16 @@ test('tools are listed; read-only drops every write', async () => {
     'set_comment_status',
   ])
   const readOnly = (await readOnlyClient.listTools()).tools.map((item) => item.name).sort()
-  assert.deepEqual(readOnly, ['get_comment', 'get_page_capture', 'list_comments', 'list_journeys', 'list_pages', 'list_selectors'])
+  assert.deepEqual(readOnly, [
+    'board_link',
+    'compare_captures',
+    'get_comment',
+    'get_page_capture',
+    'list_comments',
+    'list_journeys',
+    'list_pages',
+    'list_selectors',
+  ])
 })
 
 test('list_pages and list_comments with filters', async () => {

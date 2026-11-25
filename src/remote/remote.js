@@ -148,6 +148,9 @@ export function createRemote({ origin, token, source = null, fetchImpl = fetch, 
     origin,
     project: () => call('GET', '/api/v1/project'),
     pages: (boardId) => call('GET', `${board(boardId)}/pages`),
+    // A page's capture history, newest first (current and kept versions).
+    pageVersions: (boardId, pageId, { viewport = null, signal } = {}) =>
+      call('GET', `${board(boardId)}/pages/${enc(pageId)}/versions${viewport ? `?viewport=${enc(viewport)}` : ''}`, { signal }),
     // Guest comments (share links) only with `guests: true`.
     comments: (boardId, { status = 'open', page = null, mention = null, guests = false, signal } = {}) => {
       const query = new URLSearchParams({ status })

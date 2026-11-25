@@ -102,7 +102,7 @@ export function mountTokenApi({
       res.setHeader('Retry-After', String(hits.retryAfter))
       return fail(res, 429, 'rate_limited', 'Too many requests for this token.')
     }
-    req.token = { id: row.id, name: row.name, scopes }
+    req.token = { id: row.id, name: row.name, scopes, createdBy: row.created_by }
     req.tokenHash = sha256(token)
     req.authTokenHash = row.token_hash
     req.t = tenant(db, row.workspace_id)
@@ -369,11 +369,18 @@ export function mountTokenApi({
           slug: req.project.slug,
           url: hostedBoardBase(publicOrigin, req.t.workspaceId, req.project.id),
         },
-        token: { name: req.token.name, scopes: req.token.scopes },
+        // The account that made the token: the person its agent works for
+        // ("me" in the MCP list_comments filter). Handle and name only.
+        token: { name: req.token.name, scopes: req.token.scopes, createdBy: tokenMaker(req) },
         boards: boards.map((row) => ({ id: row.board_id, pushedAt: row.pushed_at })),
       })
     }),
   )
+
+  const tokenMaker = (req) => {
+    const user = req.token.createdBy ? q.get('SELECT handle, display_name FROM users WHERE id = :id', { id: req.token.createdBy }) : null
+    return user ? { handle: user.handle, name: user.display_name } : null
+  }
 
   const pushJson = express.json({ limit: '4mb' })
   // Files a token is uploading right now: the CLI sends one at a time, so a
@@ -486,6 +493,61 @@ export function mountTokenApi({
         journeys: listJourneys(ctx.config, ctx.board),
         variants: variantsWithFiles(ctx.config, ctx.board).map(({ files: _files, ...variant }) => variant),
         versions: Object.keys(listVersions(ctx.config, ctx.board.id)).length,
+      })
+    }),
+  )
+  // A page's capture history, newest first: the current capture of each
+  // viewport and the earlier versions the board keeps, with token API URLs
+  // of their files (GET /files/captures|versions/<name>, same guards). At
+  // most VERSIONS_MAX; ?viewport= narrows it to one viewport.
+  const VERSIONS_MAX = 50
+  v1.get(
+    '/boards/:bid/pages/:pid/versions',
+    scope('read'),
+    v1Board((req, res, ctx) => {
+      const page = ctx.board.pages.find((item) => item.id === req.params.pid)
+      if (!page) return fail(res, 404, 'unknown_page', 'That page is not on this board.')
+      const asked = typeof req.query.viewport === 'string' ? req.query.viewport : null
+      if (asked && !page.viewports.includes(asked)) return fail(res, 404, 'unknown_viewport', 'That page has no such viewport.')
+      const files = captureFiles(ctx.config, ctx.board)[page.id] || {}
+      const manifest = readManifest(ctx.config, ctx.board.id)
+      const kept = listVersions(ctx.config, ctx.board.id)[page.id] || {}
+      const fileUrl = (kind, name) =>
+        `${publicOrigin}/api/v1/boards/${encodeURIComponent(ctx.board.id)}/files/${kind}/${encodeURIComponent(name)}`
+      const rows = []
+      for (const viewport of asked ? [asked] : page.viewports) {
+        const current = files[viewport] ? entryVersion(manifest?.pages?.[page.id]?.[viewport], manifest) : null
+        if (current) {
+          const html = resolveFile(ctx.config, ctx.board.id, 'captures', `${page.id}.${viewport}.html`)
+          rows.push({
+            version: current,
+            viewport,
+            current: true,
+            capturedAt: versionTime(current),
+            files: {
+              png: fileUrl('captures', `${page.id}.${viewport}.png`),
+              html: html ? fileUrl('captures', `${page.id}.${viewport}.html`) : null,
+            },
+          })
+        }
+        for (const item of kept[viewport] || []) {
+          if (item.version === current) continue
+          rows.push({
+            version: item.version,
+            viewport,
+            current: false,
+            capturedAt: versionTime(item.version),
+            files: { png: fileUrl('versions', item.file), html: item.live ? fileUrl('versions', item.live) : null },
+          })
+        }
+      }
+      rows.sort((a, b) => (a.version < b.version ? 1 : a.version > b.version ? -1 : a.current ? -1 : b.current ? 1 : 0))
+      res.json({
+        board: boardRef(ctx.board),
+        page: page.id,
+        viewports: asked ? [asked] : page.viewports,
+        versions: rows.slice(0, VERSIONS_MAX),
+        more: Math.max(0, rows.length - VERSIONS_MAX),
       })
     }),
   )

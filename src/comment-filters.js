@@ -164,9 +164,7 @@ export function authorFilter(author, { me = null } = {}) {
   if (!text || text.length > 80) throw new Error('author takes "me", a display name or an @handle.')
   if (text.toLowerCase() === 'me') {
     if (!me || (!me.names?.length && !me.handles?.length))
-      throw new Error(
-        me?.why || 'This server cannot tell who "me" is here. Pass the display name or @handle the comments are signed with.',
-      )
+      throw new Error(me?.why || 'This server cannot tell who "me" is here. Pass the display name or @handle the comments are signed with.')
     const names = new Set(me.names.map(clean).filter(Boolean))
     const handles = new Set((me.handles || []).map(clean).filter(Boolean))
     return {
@@ -174,7 +172,9 @@ export function authorFilter(author, { me = null } = {}) {
       match: (item) =>
         !item.authorAgent &&
         !item.authorGuest &&
-        (item.authorHandle ? handles.has(clean(item.authorHandle)) || (!handles.size && names.has(clean(item.author))) : names.has(clean(item.author))),
+        (item.authorHandle
+          ? handles.has(clean(item.authorHandle)) || (!handles.size && names.has(clean(item.author)))
+          : names.has(clean(item.author))),
     }
   }
   if (text.startsWith('@')) {

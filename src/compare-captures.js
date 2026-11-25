@@ -22,12 +22,7 @@ export const compareDescription =
   'to see what your change did. before/after also take a version from versions (newest first). diff counts changed pixels ' +
   '(diff.box is where they are, in capture pixels, to crop to); link opens the same compare on the board.'
 
-export const versionArg = (fallback) =>
-  z
-    .string()
-    .max(40)
-    .optional()
-    .describe(`"${fallback}" (default) or a capture version from versions`)
+export const versionArg = (fallback) => z.string().max(40).optional().describe(`"${fallback}" (default) or a capture version from versions`)
 
 // The capture history of one page and viewport, newest first:
 // [{ version, current, capturedAt }]. `current` is the version shown now
@@ -155,7 +150,10 @@ export function compareResult({ beforePng, afterPng, board, page, viewport, pair
       },
       { type: 'text', text: `Before: ${pair.before.version} (${pair.before.capturedAt || 'time unknown'}).` },
       { type: 'image', data: shownBefore.png.toString('base64'), mimeType: 'image/png' },
-      { type: 'text', text: `After: ${pair.after.version}${pair.after.current ? ', the current capture' : ''} (${pair.after.capturedAt || 'time unknown'}).` },
+      {
+        type: 'text',
+        text: `After: ${pair.after.version}${pair.after.current ? ', the current capture' : ''} (${pair.after.capturedAt || 'time unknown'}).`,
+      },
       { type: 'image', data: shownAfter.png.toString('base64'), mimeType: 'image/png' },
     ],
   }
