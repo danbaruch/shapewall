@@ -2,8 +2,10 @@ name: CI
 
 # The quick checks (lint, unit tests, build, package contents, website) run on
 # every pull request and on every push to main. The full browser suite (e2e)
-# runs on pull requests into main, on pushes to main and from the Actions tab
-# (not on pull requests into other branches), split into four shards.
+# runs on pull requests into main or staging (staging is where work merges),
+# on pushes to main and from the Actions tab (not on pull requests into other
+# branches), split into four shards. A new push to a pull request cancels the
+# run still going for it (concurrency below).
 # No job uses a secret, so pull requests from forks run the same checks.
 on:
   pull_request:
@@ -89,7 +91,7 @@ jobs:
     # deterministically: the sorted file list, every fourth file to a shard.
     if: >-
       github.event_name == 'workflow_dispatch' || github.event_name == 'push' ||
-      (github.event_name == 'pull_request' && github.base_ref == 'main')
+      (github.event_name == 'pull_request' && (github.base_ref == 'main' || github.base_ref == 'staging'))
     timeout-minutes: 40
     runs-on: ubuntu-latest
     needs: check
