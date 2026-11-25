@@ -179,7 +179,17 @@ test('which files run something: one list for the card and for the push', () => 
 })
 
 test('the policy file: a value it does not know reads as the narrowest setting, by name; never as the default', () => {
-  const NONE = { audience: 'server', approvals: 'none', commands: [], auto: [], allowPaths: [], base: null, remote: 'origin' }
+  const NONE = {
+    audience: 'server',
+    approvals: 'none',
+    commands: [],
+    auto: [],
+    allowPaths: [],
+    base: null,
+    remote: 'origin',
+    instructions: 'all',
+    agentConfig: null,
+  }
   const read = (entry) => {
     const warnings = []
     return [cleanMachinePolicy(entry, (text) => warnings.push(text)), warnings]
@@ -225,7 +235,7 @@ test('the policy file: a value it does not know reads as the narrowest setting, 
     /"pushWithoutAsking" is not a setting this version knows/,
   )
   // An entry that is not an object at all: the narrowest of everything.
-  assert.deepEqual(read('admins')[0], { ...NONE, audience: 'owner', remote: null })
+  assert.deepEqual(read('admins')[0], { ...NONE, audience: 'owner', remote: null, instructions: 'none', agentConfig: 'none' })
 
   // The file itself: yours, and only yours to write, checked before a byte of it is read.
   const env = { XDG_CONFIG_HOME: tempDir('fix-policy-file') }

@@ -129,6 +129,16 @@ export const anyOnline = (list) => (list ? (list.agents || []).some((agent) => a
 // for chat and fixes (it takes comments with `shapewall watch --remote`).
 export const editsLine = (agent) => (agent?.link?.connected && agent.edits?.text ? agent.edits.text : '')
 
+// The instruction files a connected agent's sessions read (its machine said
+// so at hello: names and short hashes, never their text), as one line:
+// "CLAUDE.md (project), CLAUDE.md (agent config)". '' when none or unknown.
+const SCOPE_WORDS = { project: 'project', 'agent-config': 'agent config' }
+export const instructionsOf = (agent) => (agent?.link?.connected && Array.isArray(agent.link.instructions) ? agent.link.instructions : [])
+export const instructionsLine = (agent) =>
+  instructionsOf(agent)
+    .map((file) => `${file.path} (${SCOPE_WORDS[file.scope] || file.scope})`)
+    .join(', ')
+
 // What "Fix with ..." on a comment offers this person:
 // { agent, options, reason }. `agent`: the one the main button uses (the
 // agent the comment is addressed to, else the project's default, else the

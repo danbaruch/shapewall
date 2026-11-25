@@ -40,6 +40,12 @@ and the project uses [Semantic Versioning](https://semver.org/).
   backs up each file, touches only the `shapewall` entry, replaces a different one only with `--force`, and `--remove` takes it out.
   It registers the project's own install, else `shapewall` on PATH at this version or newer, else `npx -y shapewall@<version>`.
   `--remote URL` registers `shapewall mcp --remote URL` after `shapewall login`; no token is written.
+- Connected agents follow instruction files: `shapewall agent connect` reads the project's `CLAUDE.md` and `.claude/CLAUDE.md`
+  (its `AGENTS.md` when neither exists) and the connection's own agent config folder's `CLAUDE.md`, and hands them to each
+  session as an appended system prompt, with Shapewall's data rules last. New flags `--instructions all|project|none` and
+  `--agent-config DIR|none` (saved per connection; the folder is never created for you). The terminal, the board's Agents panel
+  and the console's Agents page list the files by name (the console with short sha256 hashes); their text never leaves the
+  machine. A fix reads them from its own copy of the project. They add no powers.
 - A Claude Code and Codex plugin (experimental), from the repository's own marketplaces (`.claude-plugin/marketplace.json`,
   `.agents/plugins/marketplace.json`): the `shapewall` MCP server plus the skills `shapewall`, `shapewall-next`, `shapewall-open`
   and `shapewall-status`, whose text comes from the MCP server's instructions. Its launcher starts the project's own install, else
@@ -73,6 +79,16 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Token API: `GET /api/v1/project` names the token maker (`token.createdBy`) only to tokens with the `read` scope. A claim token
   lists and fetches only the current captures and the versions its dispatched comments were made on; any other read token can
   read every kept version, as `docs/hosted.md` now says.
+- Connected agents (`shapewall agent connect`, chat and fix sessions) no longer load or write Claude Code's auto memory. In 1.2.0
+  and earlier these hardened sessions still loaded it, so notes Claude Code kept for the project could shape answers that leave
+  the machine. It is now off twice over: `autoMemoryEnabled: false` in the session's flag settings and
+  `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` in its environment, checked with claude-agent-acp 0.93.0 and 0.106.0
+  (docs/agent-hardening.md).
+- `CLAUDE.md`, `AGENTS.md`, `CLAUDE.local.md` and `GEMINI.md` are now files that run something, and so is every file the
+  project's instruction files import: a connected agent's fix cannot edit them unless the machine names the file with
+  `--allow-path`, the edit is always asked on the board, and such a fix is never pushed.
+- Instruction file imports never reach `CLAUDE.local.md`, a dotfile or a dot folder (`.env`, `.git`), and the board is told
+  instruction file names only (sizes and hashes stay in the console).
 
 ## 1.2.0 - 2026-11-24
 

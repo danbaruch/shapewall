@@ -30,6 +30,13 @@
 //              changes.
 //   remote     the git remote a finished fix is pushed to ("origin"), or
 //              null: never pushed.
+//   instructions  which instruction files the agent's sessions get
+//              (src/agent/instructions.js): "all" (the default: the
+//              project's CLAUDE.md or AGENTS.md and the agent config
+//              folder's), "project", or "none".
+//   agentConfig  the agent config folder: null (the default:
+//              $XDG_CONFIG_HOME/shapewall/agent-config/<name>/, read only if
+//              it exists, never created), an absolute path, or "none".
 //
 // One entry per server and connection name.
 
@@ -51,7 +58,10 @@ export const DEFAULT_MACHINE_POLICY = {
   allowPaths: [],
   base: null,
   remote: 'origin',
+  instructions: 'all',
+  agentConfig: null,
 }
+export const POLICY_INSTRUCTIONS = ['all', 'project', 'none']
 
 export const policyFile = (env = process.env) => path.join(path.dirname(credentialsFile(env)), 'agent-policy.json')
 
@@ -117,6 +127,13 @@ export const cleanBase = (value) =>
     ? value
     : null
 const REMOTE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,59}$/
+// The agent config folder: an absolute path on this machine, or "none".
+export function cleanAgentConfig(value) {
+  if (value === 'none') return 'none'
+  // eslint-disable-next-line no-control-regex
+  if (typeof value !== 'string' || !value || value.length > 1024 || /[\u0000-\u001f\u007f]/.test(value)) return null
+  return path.isAbsolute(value) ? path.normalize(value) : null
+}
 export const cleanRemote = (value) => (typeof value === 'string' && REMOTE_RE.test(value) ? value : null)
 
 // One entry of the file, as the policy in effect. A key that is missing
@@ -125,14 +142,14 @@ export const cleanRemote = (value) => (typeof value === 'string' && REMOTE_RE.te
 // for that key, never as the default: no approvals, only the person who
 // connected it, no commands, nothing automatic, no settings files, never
 // pushed. `warn(text)` hears about each such key by name.
-const KNOWN_KEYS = ['audience', 'approvals', 'commands', 'auto', 'allowPaths', 'base', 'remote']
+const KNOWN_KEYS = ['audience', 'approvals', 'commands', 'auto', 'allowPaths', 'base', 'remote', 'instructions', 'agentConfig']
 const unique = (list) => [...new Set(list)]
 function clean(entry, warn = () => {}) {
   const has = (key) =>
     entry !== null && typeof entry === 'object' && !Array.isArray(entry) && Object.hasOwn(entry, key) && entry[key] !== undefined
   if (entry !== undefined && entry !== null && (typeof entry !== 'object' || Array.isArray(entry))) {
     warn('this connection\'s entry is not an object: read as "read and answer only, for the person who connected it"')
-    return { ...DEFAULT_MACHINE_POLICY, audience: 'owner', remote: null }
+    return { ...DEFAULT_MACHINE_POLICY, audience: 'owner', remote: null, instructions: 'none', agentConfig: 'none' }
   }
   for (const key of Object.keys(entry || {})) if (!KNOWN_KEYS.includes(key)) warn(`"${key}" is not a setting this version knows: ignored`)
   const bad = (key, narrow) => {
@@ -175,6 +192,22 @@ function clean(entry, warn = () => {}) {
     remote = entry.remote === null ? null : cleanRemote(entry.remote)
     if (entry.remote !== null && !remote) bad('remote', 'none (a fix is never pushed)')
   }
+  let instructions = DEFAULT_MACHINE_POLICY.instructions
+  if (has('instructions')) {
+    if (POLICY_INSTRUCTIONS.includes(entry.instructions)) instructions = entry.instructions
+    else {
+      instructions = 'none'
+      bad('instructions', '"none" (no instruction files)')
+    }
+  }
+  let agentConfig = null
+  if (has('agentConfig') && entry.agentConfig !== null) {
+    agentConfig = cleanAgentConfig(entry.agentConfig)
+    if (!agentConfig) {
+      agentConfig = 'none'
+      bad('agentConfig', '"none" (no agent config folder)')
+    }
+  }
   return {
     audience,
     approvals,
@@ -183,6 +216,8 @@ function clean(entry, warn = () => {}) {
     allowPaths: on ? allowPaths : [],
     base,
     remote,
+    instructions,
+    agentConfig,
   }
 }
 export { clean as cleanMachinePolicy }

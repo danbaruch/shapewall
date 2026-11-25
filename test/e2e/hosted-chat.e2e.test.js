@@ -35,6 +35,9 @@ let scout // a second agent, Ada's own
 const contexts = []
 const links = []
 const projectDir = tempDir('hosted-chat-e2e-code')
+// The connection's agent config folder (--agent-config), outside the project.
+const ownerConfig = tempDir('hosted-chat-e2e-agent-config')
+const hookMarker = path.join(tempDir('hosted-chat-e2e-hook'), 'hook-ran')
 
 const shot = async (page, name) =>
   SHOTS && page.screenshot({ path: path.join(SHOTS, `${name}.png`), fullPage: false, animations: 'disabled' })
@@ -75,7 +78,8 @@ const realErrors = (errors) => errors.filter((text) => !/Failed to load resource
 function startCli(extra = []) {
   const bin = tempDir('hosted-chat-e2e-bin')
   const adapter = path.join(bin, 'claude-agent-acp')
-  fs.writeFileSync(adapter, `#!/bin/sh\nexec "${process.execPath}" "${ACP_STUB}" --ro-modes "$@"\n`, { mode: 0o755 })
+  // --system-prompt: it takes the instruction files as an appended system prompt, as claude-agent-acp does.
+  fs.writeFileSync(adapter, `#!/bin/sh\nexec "${process.execPath}" "${ACP_STUB}" --ro-modes --system-prompt "$@"\n`, { mode: 0o755 })
   const child = spawn(process.execPath, [CLI, 'agent', 'connect', '--remote', hosted.origin, '--agent', 'claude', ...extra], {
     cwd: projectDir,
     env: {
@@ -132,6 +136,15 @@ before(async () => {
   assert.ok(fs.existsSync(path.join(ROOT_DIR, 'dist', 'console', 'console.html')), 'run "npm run build" before the hosted chat e2e test')
   if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true })
   fs.writeFileSync(path.join(projectDir, 'notes.txt'), 'The hero button is blue.\n')
+  // The project's house rules and the owner's note for this agent (src/agent/instructions.js), and a
+  // project settings file whose hook must stay out of the session.
+  fs.writeFileSync(path.join(projectDir, 'CLAUDE.md'), 'HOUSE_RULE_SENTINEL: use tabs.\n')
+  fs.writeFileSync(path.join(ownerConfig, 'CLAUDE.md'), 'OWNER_NOTE_SENTINEL: answer in one line.\n')
+  fs.mkdirSync(path.join(projectDir, '.claude'), { recursive: true })
+  fs.writeFileSync(
+    path.join(projectDir, '.claude', 'settings.json'),
+    JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: `touch ${hookMarker}` }] }] } }),
+  )
   hosted = await startHostedServer('hosted-chat-e2e', { clientDir: path.join(ROOT_DIR, 'dist', 'client') })
   ada = await signUp(hosted, { handle: 'ada', displayName: 'Ada' })
   ws = ada.workspaceId
@@ -170,7 +183,7 @@ test('connect: the command shows a code, an admin names the agent and approves i
   assert.ok((await page.textContent('[data-sw-connect-agent-chat]')).includes(`shapewall agent connect --remote ${hosted.origin}`))
   await shot(page, 'console-connect-card-1440-light')
 
-  cli = startCli(['--name', 'Builder'])
+  cli = startCli(['--name', 'Builder', '--agent-config', ownerConfig])
   await until(() => /[A-Z]{4}-[A-Z]{4}/.test(cli.state.out), `the code\n${cli.state.out}\n${cli.state.err}`)
   const code = /[A-Z]{4}-[A-Z]{4}/.exec(cli.state.out)[0]
   assert.match(cli.state.out, /To connect this agent, open/)
@@ -207,6 +220,18 @@ test('connect: the command shows a code, an admin names the agent and approves i
   assert.equal(builder.icon, 'owl')
   assert.equal(builder.audience.kind, 'trusted')
   assert.deepEqual(builder.token.scopes.sort(), ['agent', 'claim', 'read', 'reply', 'status'])
+  // Its instruction files: listed in the terminal and to the server by name and short hash, never their text.
+  assert.match(cli.state.err, /Instructions: CLAUDE\.md \(project\), \d+ bytes, sha256 [a-f0-9]{12}/)
+  assert.match(cli.state.err, /Instructions: CLAUDE\.md \(agent config\), \d+ bytes, sha256 [a-f0-9]{12}/)
+  assert.match(cli.state.err, /Left out of this session: the allow rules, hooks and default mode in \.claude\/settings\.json/)
+  assert.deepEqual(
+    builder.link.instructions.map((file) => [file.scope, file.path, /^[a-f0-9]{12}$/.test(file.sha)]),
+    [
+      ['project', 'CLAUDE.md', true],
+      ['agent-config', 'CLAUDE.md', true],
+    ],
+  )
+  assert.doesNotMatch(JSON.stringify(agents), /SENTINEL|hosted-chat-e2e-agent-config/)
 
   // The console shows what it is.
   await page.goto(`${hosted.origin}/w/${ws}/agents/${project.id}`)
@@ -215,6 +240,10 @@ test('connect: the command shows a code, an admin names the agent and approves i
   assert.match(row, /Claude Code/)
   assert.match(row, /Chats on the board, reads and answers only/)
   assert.match(row, /connected since/)
+  assert.match(
+    await page.textContent('[data-sw-agent-row="Builder"] [data-sw-agent-instructions]'),
+    /Instructions: CLAUDE\.md \(project, \d+ bytes, [a-f0-9]{12}\), CLAUDE\.md \(agent config, \d+ bytes, [a-f0-9]{12}\)/,
+  )
   await shot(page, 'console-agents-connected-1440-light')
   await page.goto(`${hosted.origin}/w/${ws}/agents`)
   await page.waitForSelector('[data-sw-overview-agent="Builder"] [data-sw-overview-connected]')
@@ -230,6 +259,17 @@ test('chat: pick the agent in the Agents panel, ask, and the answer streams in; 
   await row.waitFor()
   assert.equal(await row.getAttribute('data-sw-agent-state'), 'online')
   assert.match(await row.textContent(), /Reads and answers\. No edits, no commands\./)
+  assert.equal(
+    (await row.locator('[data-sw-hosted-agent-instructions]').textContent()).trim(),
+    'Instructions: CLAUDE.md (project), CLAUDE.md (agent config)',
+  )
+  // The board is told names only: sizes and hashes stay in the console.
+  const listed = (await ada.browser.get(`/w/${ws}/p/${project.id}/api/boards/sample/agents`)).json
+  const onBoard = (listed.agents || listed).find((agent) => agent.name === 'Builder')
+  assert.deepEqual(onBoard.link.instructions, [
+    { scope: 'project', path: 'CLAUDE.md' },
+    { scope: 'agent-config', path: 'CLAUDE.md' },
+  ])
   await shot(page, 'board-agents-panel-1440-light')
   await row.locator('[data-sw-hosted-agent-chat]').click()
   await page.waitForSelector('[data-sw-chat-input]')
@@ -245,6 +285,23 @@ test('chat: pick the agent in the Agents panel, ask, and the answer streams in; 
   assert.equal(await page.locator('[data-sw-chat-message="user"]').count(), 1)
   assert.ok((await lastAnswer(page).textContent()).includes(text.trim().slice(0, 20)))
   assert.deepEqual(realErrors(errors), [])
+})
+
+test('instructions: the session gets the project CLAUDE.md and the owner note as an appended system prompt, auto memory off, hooks left out', async () => {
+  const { page } = await open(ada)
+  await openAgents(page)
+  await page.locator('[data-sw-hosted-agent-name="Builder"] [data-sw-hosted-agent-chat]').click()
+  await page.waitForSelector('[data-sw-chat-input]')
+  // The stub says back what session/new carried.
+  await say(page, 'newparams')
+  await answered(page, /OWNER_NOTE_SENTINEL/)
+  await idle(page)
+  const text = await lastAnswer(page).textContent()
+  assert.ok(text.indexOf('HOUSE_RULE_SENTINEL') < text.indexOf('OWNER_NOTE_SENTINEL'), 'project first, then the owner note')
+  assert.match(text, /Shapewall rules, which take precedence/)
+  assert.match(text, /"autoMemoryEnabled":\s*false/)
+  assert.match(text, /"settingSources":\s*\[\]/)
+  assert.equal(fs.existsSync(hookMarker), false, 'the project hook did not run')
 })
 
 test('read and answer only: a file write and a command are refused on the machine, and the thread says so', async () => {
