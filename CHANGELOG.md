@@ -34,6 +34,13 @@ and the project uses [Semantic Versioning](https://semver.org/).
   backs up each file, touches only the `shapewall` entry, replaces a different one only with `--force`, and `--remove` takes it out.
   It registers the project's own install, else `shapewall` on PATH at this version or newer, else `npx -y shapewall@<version>`.
   `--remote URL` registers `shapewall mcp --remote URL` after `shapewall login`; no token is written.
+- A Claude Code and Codex plugin (experimental), from the repository's own marketplaces (`.claude-plugin/marketplace.json`,
+  `.agents/plugins/marketplace.json`): the `shapewall` MCP server plus the skills `shapewall`, `shapewall-next`, `shapewall-open`
+  and `shapewall-status`, whose text comes from the MCP server's instructions. Its launcher starts the project's own install, else
+  `shapewall` on PATH at the plugin's version or newer (not a folder npm put on PATH for one project or `npx` run), else
+  `npx -y shapewall@<version>`, in the nearest folder with a `shapewall.config.json`; a hosted board through the Claude Code
+  `remote_url` option or `SHAPEWALL_REMOTE`. Not in the npm package. See docs/plugins.md.
+- "Shapewall tools for Buzz agents" in docs/buzz.md: the MCP server for Claude Code, Codex and goose agents in Buzz.
 
 ### Changed
 

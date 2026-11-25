@@ -14,6 +14,7 @@
 // `--print` prints what it would run as JSON and exits.
 
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -150,7 +151,12 @@ export function pathInstall(env = process.env, { platform = process.platform, pr
 
 // The same answer as resolveShapewallCommand() in src/shapewall-command.js
 // with reach "local": { command, args, how, note }.
-export function resolveShapewallCommand({ projectDir = process.cwd(), version = PINNED, env = process.env, platform = process.platform } = {}) {
+export function resolveShapewallCommand({
+  projectDir = process.cwd(),
+  version = PINNED,
+  env = process.env,
+  platform = process.platform,
+} = {}) {
   if (!parseVersion(version)) throw new Error(`not a version: ${version}`)
   const npx = platform === 'win32' ? 'npx.cmd' : 'npx'
   const own = projectInstall(projectDir, { platform })
@@ -160,7 +166,8 @@ export function resolveShapewallCommand({ projectDir = process.cwd(), version = 
   }
   const found = pathInstall(env, { platform, projectDir })
   const order = found?.version ? compareVersions(found.version, version) : null
-  if (found && order !== null && order >= 0) return { command: found.bin, args: [], how: 'path', note: `shapewall ${found.version} on PATH` }
+  if (found && order !== null && order >= 0)
+    return { command: found.bin, args: [], how: 'path', note: `shapewall ${found.version} on PATH` }
   const why = found
     ? found.version
       ? `shapewall ${found.version} on PATH is older`
@@ -190,13 +197,25 @@ export function remoteUrl(env = process.env) {
 // the app works (CLAUDE_PROJECT_DIR, set by Claude Code, else the folder this
 // was started in) that has a shapewall.config.json, so an app opened in a
 // subfolder still finds the board; that folder itself when none has one.
-// Only the file's presence is checked; nothing in it is read here.
-export function projectDirOf(env = process.env, cwd = process.cwd()) {
+// The search stops at the repository root (a folder with .git) and never
+// reaches the home folder or above. Only the file's presence is checked;
+// nothing in it is read here.
+export function projectDirOf(env = process.env, cwd = process.cwd(), home = os.homedir()) {
   const named = env.CLAUDE_PROJECT_DIR
   const start = named && path.isAbsolute(named) && isDir(named) ? named : cwd
-  let dir = path.resolve(start)
+  const first = path.resolve(start)
+  const stop = home ? path.resolve(home) : null
+  // dir is the home folder or one of its parents
+  const atOrAboveHome = (dir) => {
+    if (!stop) return false
+    const relative = path.relative(dir, stop)
+    return !relative.startsWith('..') && !path.isAbsolute(relative)
+  }
+  let dir = first
   for (;;) {
+    if (dir !== first && atOrAboveHome(dir)) return start
     if (isFile(path.join(dir, 'shapewall.config.json'))) return dir
+    if (fs.existsSync(path.join(dir, '.git'))) return start
     const parent = path.dirname(dir)
     if (parent === dir) return start
     dir = parent
