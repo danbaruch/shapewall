@@ -400,7 +400,7 @@ function writeAtomic(file, text) {
     } catch {
       /* missing */
     }
-    if (link) throw new Error(`${file} is a symbolic link to a file that does not exist; Shapewall does not change it`)
+    if (link) throw new Error(`${file} is a symbolic link to a file that does not exist; Shapewall does not change it`, { cause: error })
   }
   let mode = 0o600
   try {

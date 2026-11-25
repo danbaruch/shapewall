@@ -6,7 +6,16 @@ import path from 'node:path'
 import { findConfigFile, loadConfig } from '../config.js'
 import { cliCommand } from '../invocation.js'
 import { applySetup, formatPlan, planJson, planSetup, shownPath, willWrite } from '../agent-setup.js'
-import { describeWritten, findBlock, planAgentDocs, readState, removeAgentDocs, writeAgentDocs, agentDocsBlock } from '../agent-docs.js'
+import {
+  agentDocsBlock,
+  describeWritten,
+  findBlock,
+  planAgentDocs,
+  readState,
+  removeAgentDocs,
+  writeAgentDocs,
+  writeAgentDocsSetting,
+} from '../agent-docs.js'
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version
 
@@ -132,8 +141,12 @@ export function agentDocsCommand(flags, out) {
         out(
           `Deleted ${result.deleted.join(' and ')} (Shapewall made ${result.deleted.length === 1 ? 'it' : 'them'}; nothing else was in ${result.deleted.length === 1 ? 'it' : 'them'}).`,
         )
-      out('serve and capture will not add it back.')
     }
+    // In the committed config, so no clone and no teammate's serve adds it back.
+    const changed = writeAgentDocsSetting(config.file, false)
+    out(
+      `${changed ? `Set "agentDocs": false in ${path.basename(config.file)}` : `${path.basename(config.file)} already has "agentDocs": false`}, so serve and capture never add it (commit it with the change).`,
+    )
     return 0
   }
   if (flags.write) {
@@ -161,6 +174,7 @@ export function agentDocsCommand(flags, out) {
   if (pending.length) out(`"agent docs --write" would: ${pending.join(', ')}.`)
   for (const note of plan.notes) out(note)
   if (config.agentDocs === false) out('The config says "agentDocs": false, so serve and capture never add it.')
+  else if (config.agentDocs === true) out('The config says "agentDocs": true: serve and capture leave it to "agent docs --write".')
   else if (state?.removed) out('It was removed with agent docs --remove, so serve and capture do not add it back.')
   return 0
 }
