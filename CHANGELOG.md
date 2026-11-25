@@ -33,13 +33,20 @@ and the project uses [Semantic Versioning](https://semver.org/).
   viewers). See "Follow an agent" in the agent workflow docs.
 - Agents find the board with no plugin: `shapewall init` writes a short Shapewall section into `AGENTS.md` (and a one-line
   `CLAUDE.md` that imports it, when there is none), between `<!-- shapewall:start v1 -->` and `<!-- shapewall:end -->`. The first
-  `serve` or `capture` in a project adds it once; a section you removed is never added back. `init --no-agent-docs` and config
-  `"agentDocs": false` turn it off; `shapewall agent docs --write | --remove | --print` does it by hand.
+  `serve` or `capture` creates the files only in a project with neither `AGENTS.md` nor `CLAUDE.md` and no `"agentDocs"` in its
+  config; an existing file is never edited unasked (serve prints a one-line hint instead). `init --no-agent-docs` and
+  `shapewall agent docs --remove` write `"agentDocs": false` into the config, so the choice holds in every clone;
+  `shapewall agent docs --write | --remove | --print` does it by hand. Markers in fenced code blocks do not count, a doubled start
+  marker is refused, and a newer Shapewall's section is left as it is.
 - `shapewall agent setup` registers the `shapewall` MCP server with Claude Code (`--scope local` by default, or `user`, `project`)
   and Codex (`~/.codex/config.toml`, with `tool_timeout_sec = 600`). It shows the change and asks first (`--yes`, `--dry-run`),
-  backs up each file, touches only the `shapewall` entry, replaces a different one only with `--force`, and `--remove` takes it out.
-  It registers the project's own install, else `shapewall` on PATH at this version or newer, else `npx -y shapewall@<version>`.
-  `--remote URL` registers `shapewall mcp --remote URL` after `shapewall login`; no token is written.
+  backs up each file (a project's `.mcp.json` outside the project; the newest 3 for `~/.claude.json`), writes through a symbolic
+  link to the real file, touches only the `shapewall` entry, updates an older Shapewall's entry, replaces a different one only with
+  `--force`, puts the old Claude Code entry back when an update fails, and `--remove` takes it out. It registers the project's own
+  install, else `shapewall` on PATH at this version or newer (for every-project entries, never one in a `node_modules` folder, npx's
+  cache or the project), else `npx -y shapewall@<version>`; on Windows, `cmd /c` for `.cmd` programs except in a committed
+  `.mcp.json`. The Codex edit reads its result back and refuses to write if any other line would change. `--remote URL` registers
+  `shapewall mcp --remote URL` after `shapewall login`; no token is written.
 - Connected agents follow instruction files: `shapewall agent connect` reads the project's `CLAUDE.md` and `.claude/CLAUDE.md`
   (its `AGENTS.md` when neither exists) and the connection's own agent config folder's `CLAUDE.md`, and hands them to each
   session as an appended system prompt, with Shapewall's data rules last. New flags `--instructions all|project|none` and

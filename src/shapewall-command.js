@@ -15,6 +15,14 @@
 //   'project'  one project, committed for everyone (.mcp.json): no absolute path; the project's own
 //              install becomes "npx shapewall" (npx finds it without a download), else the pinned npx
 //   'global'   every project (Claude Code user scope, Codex): never one project's install
+//
+// PATH entries that never count (pathInstall's `skip`, from skipPathDir):
+//   every reach   a folder in npm's npx cache (a path segment "_npx"): `npx -y` puts
+//                 ~/.npm/_npx/<hash>/node_modules/.bin first on PATH, and the cache is pruned
+//   'global'      also any folder with a "node_modules" path segment (npm exec, npx and
+//                 npm run put <project>/node_modules/.bin and every ancestor's on PATH),
+//                 and any folder inside the project
+// Each is checked on the folder's real path (symbolic links resolved) as well as as written.
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -92,15 +100,42 @@ export function projectInstall(projectDir, { platform = process.platform } = {})
   return null
 }
 
+const segmentsOf = (dir) => dir.split(/[\\/]+/).filter(Boolean)
+const realOrSame = (dir) => {
+  try {
+    return fs.realpathSync(dir)
+  } catch {
+    return dir
+  }
+}
+const within = (dir, parent, sep) => dir === parent || dir.startsWith(parent.endsWith(sep) ? parent : `${parent}${sep}`)
+
+// Whether a PATH folder may name the shapewall a registration starts (see the top).
+export function skipPathDir(dir, { reach = 'local', projectDir = null, platform = process.platform } = {}) {
+  const sep = platform === 'win32' ? '\\' : '/'
+  const fold = (value) => (platform === 'win32' ? value.toLowerCase() : value)
+  const forms = [...new Set([dir, realOrSame(dir)])].map(fold)
+  if (forms.some((form) => segmentsOf(form).includes('_npx'))) return true
+  if (reach !== 'global') return false
+  if (forms.some((form) => segmentsOf(form).includes('node_modules'))) return true
+  if (projectDir) {
+    const projects = [...new Set([projectDir, realOrSame(projectDir)])].map(fold)
+    if (forms.some((form) => projects.some((project) => within(form, project, sep)))) return true
+  }
+  return false
+}
+
 // `shapewall` on PATH: { bin, version } or null. Only absolute PATH entries
-// count (a relative one would let the current folder decide what runs).
-export function pathInstall(env = process.env, { platform = process.platform } = {}) {
+// count (a relative one would let the current folder decide what runs), and
+// none that `skip(dir)` turns down.
+export function pathInstall(env = process.env, { platform = process.platform, skip = null } = {}) {
   const windows = platform === 'win32'
   const pathOf = windows ? env.Path || env.PATH : env.PATH
   const isAbsolute = windows ? path.win32.isAbsolute : path.posix.isAbsolute
   const names = windows ? [`${PACKAGE}.cmd`, `${PACKAGE}.exe`] : [PACKAGE]
   for (const dir of String(pathOf || '').split(windows ? ';' : ':')) {
     if (!dir || !isAbsolute(dir)) continue
+    if (skip && skip(dir)) continue
     for (const name of names) {
       const bin = path.join(dir, name)
       if (!isFile(bin)) continue
@@ -127,7 +162,8 @@ export function resolveShapewallCommand({
   platform = process.platform,
 } = {}) {
   if (!parseVersion(version)) throw new Error(`not a version: ${version}`)
-  const npx = platform === 'win32' ? 'npx.cmd' : 'npx'
+  // A committed .mcp.json is shared by every system: plain npx there, always.
+  const npx = platform === 'win32' && reach !== 'project' ? 'npx.cmd' : 'npx'
   const pinned = { command: npx, args: ['-y', `${PACKAGE}@${version}`], how: 'npx' }
   if (reach !== 'global') {
     const own = projectInstall(projectDir, { platform })
@@ -138,7 +174,7 @@ export function resolveShapewallCommand({
     }
   }
   if (reach !== 'project') {
-    const found = pathInstall(env, { platform })
+    const found = pathInstall(env, { platform, skip: (dir) => skipPathDir(dir, { reach, projectDir, platform }) })
     const order = found?.version ? compareVersions(found.version, version) : null
     if (found && order !== null && order >= 0)
       return { command: found.bin, args: [], how: 'path', note: `shapewall ${found.version} on PATH` }

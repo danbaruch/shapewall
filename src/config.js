@@ -955,7 +955,8 @@ export function normalizeConfig(raw, { dir = process.cwd(), file = null, env = p
   }
   const notifications = normalizeNotifications(raw.notifications, { boardIds: [...ids], env }, problems)
   const github = validateGithub(raw.github, problems)
-  // The Shapewall section in AGENTS.md (src/agent-docs.js): false and serve and capture never add it.
+  // The Shapewall section in AGENTS.md (src/agent-docs.js). Kept as given (true, false, or null when
+  // unset): serve and capture only ever add it when the key is not set at all.
   if (raw.agentDocs !== undefined && typeof raw.agentDocs !== 'boolean') problems.push('agentDocs: true or false')
   if (github?.board && !ids.has(github.board)) problems.push(`github.board: no board "${github.board}"`)
   const agent = validateAgent(raw.agent, problems)
@@ -985,7 +986,7 @@ export function normalizeConfig(raw, { dir = process.cwd(), file = null, env = p
     reducedMotion,
     browser,
     liveHtml: raw.liveHtml !== false,
-    agentDocs: raw.agentDocs !== false,
+    agentDocs: typeof raw.agentDocs === 'boolean' ? raw.agentDocs : null,
     versions,
     github,
     agent,
