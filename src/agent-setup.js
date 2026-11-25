@@ -17,10 +17,15 @@
 // the entry is for every Codex project, the CLI and the desktop app alike.
 //
 // Rules for every write: it shows what changes and asks first (--yes skips the question, --dry-run
-// only shows); a file is backed up (<file>.shapewall-backup-<time>) before it is changed; an
-// identical entry is left alone; a different `shapewall` entry is shown and replaced only with
-// --force; nothing but the `shapewall` entry is touched. No token is ever written: with --remote
-// the MCP server reads the saved login (credentials.json) itself.
+// only shows); a file is backed up (<file>.shapewall-backup-<time>, the newest 3 for ~/.claude.json;
+// a project's .mcp.json under $XDG_STATE_HOME/shapewall/backups, never inside the project) before it
+// is changed; a symbolic link is written through to the real file; an identical entry is left alone;
+// an older Shapewall's entry is updated; a different `shapewall` entry is shown and replaced only
+// with --force; an entry that changed since the plan is not written over; a failed Claude Code
+// update puts the old entry back; nothing but the `shapewall` entry is touched. No token is ever
+// written: with --remote the MCP server reads the saved login (credentials.json) itself. An
+// existing entry's env does go on the `claude mcp add-json` command line during an update (the CLI
+// has no other way in), and the plan says so.
 
 import fs from 'node:fs'
 import os from 'node:os'
