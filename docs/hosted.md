@@ -2921,7 +2921,11 @@ release; do not discard imported comments or run an older server against the upg
 ## Live presence
 
 Hosted boards show who is viewing, cursors in canvas coordinates and an avatar button to follow another viewer's camera. Move your own
-canvas or press **Stop following** to leave follow mode. Phone controls keep 44-pixel targets. A share-link visitor is always shown as
+canvas or press **Stop following** to leave follow mode. Members can also follow one of the project's agents (**Follow &lt;name&gt;**
+at the top left of the canvas, or a `follow=<agent id>` link from `shapewall open --remote URL --follow ID`): the board flies to each
+comment the agent takes and opens the before and after of that comment's screen when the agent pushes a recapture. It is built from
+the comment invalidations and the agents list a member already gets, so it shows only comments in that member's audience; share-link
+guests and public viewers never get it. See [Follow an agent](agent-workflow.md#follow-an-agent). Phone controls keep 44-pixel targets. A share-link visitor is always shown as
 **Guest** in presence, regardless of the name on their comments. Public boards show a viewer count only: no names, cursors, camera
 positions or comment events. Counts represent open connections, including multiple tabs.
 

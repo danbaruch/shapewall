@@ -128,14 +128,17 @@ an error instead, with the status and the pages they are on, and exits with `2` 
 ## shapewall open
 
 ```text
-shapewall open [--board ID] [--page ID|TITLE] [--comment N] [--viewport NAME] [--compare [A_B]] [--print] [--json] [--remote URL]
+shapewall open [--board ID] [--page ID|TITLE] [--comment N] [--viewport NAME] [--compare [A_B]] [--follow [AGENT]] [--print] [--json]
+               [--remote URL]
 ```
 
 Prints a deep link to the board and opens it in your browser: the board flown to a page (`--page`), opened on a comment at its
 screen size (`--comment`, which wins over `--page`), at one screen size (`--viewport`), with the page's before and after
 (`--compare` alone, which opens its history: the latest capture beside the one before it), or two environments side by side
-(`--compare staging_prod`). `--print` only prints the link; `--json` prints `{ url, board, page, comment, viewport, compare, running }`
-and opens nothing, for agents. A local board uses the running `shapewall serve` (or `SHAPEWALL_BOARD_URL`); when nothing is
+(`--compare staging_prod`). `--follow` opens it following an agent: the board flies to each comment the agent takes and shows the
+before and after of that comment's screen when the agent recaptures it (`--follow` alone: any agent; on a hosted board `--follow ID`
+follows one agent; see [Follow an agent](/docs/agent-workflow#follow-an-agent)). `--print` only prints the link; `--json` prints
+`{ url, board, page, comment, viewport, compare, follow, running }` and opens nothing, for agents. A local board uses the running `shapewall serve` (or `SHAPEWALL_BOARD_URL`); when nothing is
 serving it, the link is printed with a reminder to run `shapewall serve`. With `--remote URL` it links to the hosted project the
 token belongs to. Links carry ids only, never a token. The link format is described in
 [the agent workflow](/docs/agent-workflow#links-to-the-board).
@@ -784,8 +787,10 @@ Commands
       --viewport NAME       desktop, phone, any viewport of the board, or all
       --compare [A_B]       alone: the page's before and after (needs --page or --comment);
                             A_B: two environments side by side
+      --follow [AGENT]      follow an agent: fly to each comment it takes, before and after when it
+                            recaptures that screen (alone: any agent; hosted: an agent id)
       --print               print the link only, do not open a browser
-      --json                { url, board, page, comment, viewport, compare, running }; opens nothing
+      --json                { url, board, page, comment, viewport, compare, follow, running }; opens nothing
       --remote URL          a hosted project instead of the local board (with --token-file, --include-guests)
                             a local board that is not running: prints the link and says to run shapewall serve
   mcp                       MCP server on stdio for coding agents

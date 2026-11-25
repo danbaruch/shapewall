@@ -268,6 +268,10 @@ is checked again on each turn, and trusted and untrusted ACP sessions are separa
 For an external coding session, open **Chat settings** in the chat panel: **Use with Claude Code / Codex** shows copyable MCP setup
 commands (before an agent is connected, the same commands are folded under the connect options). See [The agent workflow](agent-workflow.md#mcp-server-shapewall-mcp).
 
+To watch an agent work from the board, press **Follow agent** on the canvas while it works, or open `shapewall open --follow`: the
+board flies to each comment it takes and shows the before and after of that screen when it recaptures. See
+[Follow an agent](agent-workflow.md#follow-an-agent).
+
 ## Undo an agent's change
 
 The summary card under an owner's answer has **Undo** when Shapewall can undo that turn safely. It asks first, then:

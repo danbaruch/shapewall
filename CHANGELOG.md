@@ -13,6 +13,12 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Board links take `p=<page>`: the board opens flown to that page. Every link Shapewall makes (notifications, GitHub issues,
   usage rows, `share` and `push` answers, `shapewall open`) now comes from one builder; see "Links to the board" in the agent
   workflow docs.
+- Follow an agent: with the board open beside an agent, it flies to each comment the agent takes, and after the agent recaptures
+  that comment's page it opens the before and after of that screen only; other screens the recapture changed wait in a quiet
+  "N more screens changed" menu. Start it with **Follow agent** on the canvas (hosted: **Follow &lt;name&gt;**), a
+  `follow=<agent id|any>` link, or `shapewall open --follow [ID]`. Moving the canvas or opening another comment stops it. It reads
+  only what the viewer already sees: local boards for any tab, hosted boards for members (never share-link guests or public
+  viewers). See "Follow an agent" in the agent workflow docs.
 
 ### Changed
 
