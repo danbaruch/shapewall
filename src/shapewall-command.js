@@ -182,9 +182,7 @@ export function resolveShapewallCommand({
       ? found.version
         ? `shapewall ${found.version} on PATH is older`
         : 'the shapewall on PATH has no version Shapewall can read'
-      : reach === 'global'
-        ? 'there is no shapewall on PATH outside node_modules folders, the npx cache and the project'
-        : 'there is no shapewall on PATH outside the npx cache'
+      : 'there is no shapewall on PATH'
     return { ...pinned, note: `npx -y shapewall@${version}, since ${why}` }
   }
   return { ...pinned, note: `npx -y shapewall@${version}, since the project does not install shapewall` }

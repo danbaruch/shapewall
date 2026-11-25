@@ -25,6 +25,12 @@ and the project uses [Semantic Versioning](https://semver.org/).
   `GET /api/v1/project` says which account made the token (`token.createdBy`).
 - The MCP servers share one set of instructions: find work with the filters, check the work in your own browser while you work,
   `recapture_pages` publishes the final state as the hand-in, `compare_captures`, then reply with the compare link and set `done`.
+- Follow an agent: with the board open beside an agent, it flies to each comment the agent takes, and after the agent recaptures
+  that comment's page it opens the before and after of that screen only; other screens the recapture changed wait in a quiet
+  "N more screens changed" menu. Start it with **Follow agent** on the canvas (hosted: **Follow &lt;name&gt;**), a
+  `follow=<agent id|any>` link, or `shapewall open --follow [ID]`. Moving the canvas or opening another comment stops it. It reads
+  only what the viewer already sees: local boards for any tab, hosted boards for members (never share-link guests or public
+  viewers). See "Follow an agent" in the agent workflow docs.
 - Agents find the board with no plugin: `shapewall init` writes a short Shapewall section into `AGENTS.md` (and a one-line
   `CLAUDE.md` that imports it, when there is none), between `<!-- shapewall:start v1 -->` and `<!-- shapewall:end -->`. The first
   `serve` or `capture` creates the files only in a project with neither `AGENTS.md` nor `CLAUDE.md` and no `"agentDocs"` in its
@@ -41,6 +47,13 @@ and the project uses [Semantic Versioning](https://semver.org/).
   cache or the project), else `npx -y shapewall@<version>`; on Windows, `cmd /c` for `.cmd` programs except in a committed
   `.mcp.json`. The Codex edit reads its result back and refuses to write if any other line would change. `--remote URL` registers
   `shapewall mcp --remote URL` after `shapewall login`; no token is written.
+- A Claude Code and Codex plugin (experimental), from the repository's own marketplaces (`.claude-plugin/marketplace.json`,
+  `.agents/plugins/marketplace.json`): the `shapewall` MCP server plus the skills `shapewall`, `shapewall-next`, `shapewall-open`
+  and `shapewall-status`, whose text comes from the MCP server's instructions. Its launcher starts the project's own install, else
+  `shapewall` on PATH at the plugin's version or newer (not a folder npm put on PATH for one project or `npx` run), else
+  `npx -y shapewall@<version>`, in the nearest folder with a `shapewall.config.json`; a hosted board through the Claude Code
+  `remote_url` option or `SHAPEWALL_REMOTE`. Not in the npm package. See docs/plugins.md.
+- "Shapewall tools for Buzz agents" in docs/buzz.md: the MCP server for Claude Code, Codex and goose agents in Buzz.
 
 ### Changed
 

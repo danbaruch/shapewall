@@ -1,0 +1,25 @@
+{
+  "name": "shapewall",
+  "version": "1.2.0",
+  "description": "Steer and build your app with your coding agent from a Shapewall board: the board's MCP tools plus skills that take a comment from request to recaptured, compared and answered.",
+  "author": { "name": "Dan Baruch", "url": "https://github.com/danbaruch" },
+  "homepage": "https://shapewall.com/docs/plugins",
+  "repository": "https://github.com/danbaruch/shapewall",
+  "license": "Apache-2.0",
+  "keywords": ["shapewall", "mcp", "coding-agent", "agent-steering", "screenshots", "user-flows"],
+  "userConfig": {
+    "remote_url": {
+      "type": "string",
+      "title": "Hosted board URL (optional)",
+      "description": "Leave empty for the local board of the project you open. For a hosted board, its URL (sign in first with: shapewall login --remote URL).",
+      "default": ""
+    }
+  },
+  "mcpServers": {
+    "shapewall": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/bin/shapewall-mcp.mjs"],
+      "env": { "SHAPEWALL_REMOTE": "${user_config.remote_url}" }
+    }
+  }
+}

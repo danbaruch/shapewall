@@ -88,6 +88,10 @@ const REPEATABLE = new Set(['only', 'allowed-host', 'exclude', 'allow-host', 'tr
 // Flags that take a value but also work alone ("init --sitemap": the base
 // URL's sitemap.xml). Alone, the flag is true.
 const OPTIONAL_VALUE = new Set(['sitemap', 'compare'])
+// A flag that is a plain switch elsewhere but takes an optional value for
+// one command: "events --follow" keeps printing, "open --follow [AGENT]"
+// opens the board following an agent (alone: any agent).
+const COMMAND_OPTIONAL_VALUE = { open: new Set(['follow']) }
 
 // The flags each command reads. Anything else is a typo worth stopping for:
 // "capture --onyl home" would otherwise capture every page.
@@ -249,7 +253,7 @@ export const COMMAND_FLAGS = {
     'json',
   ],
   mcp: ['read-only', 'no-capture', 'board', ...REMOTE_FLAGS],
-  open: ['board', 'page', 'comment', 'viewport', 'compare', 'print', 'json', ...REMOTE_FLAGS],
+  open: ['board', 'page', 'comment', 'viewport', 'compare', 'follow', 'print', 'json', ...REMOTE_FLAGS],
   notify: ['json', 'to', 'board'],
   doctor: ['install-browser', 'port', 'agent-acp', 'json', 'no-launch'],
   variant: ['url', 'path', 'title', 'note', 'source', 'id', 'viewport', 'board', 'json'],
@@ -400,17 +404,19 @@ export function parseArgs(argv, { strict = false } = {}) {
       throw unknownFlag(key, scope.name, scope.flags)
     }
     seen.push(key)
+    const ownValue = Boolean(command && COMMAND_OPTIONAL_VALUE[command]?.has(key))
+    const boolean = BOOLEAN_FLAGS.has(key) && !ownValue
     if (eq >= 0) {
-      if (BOOLEAN_FLAGS.has(key)) {
+      if (boolean) {
         if (value === 'true' || value === 'false') value = value === 'true'
         else if (!['tailscale', 'lan'].includes(key)) throw new Error(`--${key} accepts only true or false.`)
       }
-    } else if (BOOLEAN_FLAGS.has(key)) {
+    } else if (boolean) {
       value = true
     } else {
       value = argv[index + 1]
       if (value === undefined || value.startsWith('--')) {
-        if (!OPTIONAL_VALUE.has(key)) throw new Error(`--${key} needs a value`)
+        if (!OPTIONAL_VALUE.has(key) && !ownValue) throw new Error(`--${key} needs a value`)
         value = true
       } else index += 1
     }

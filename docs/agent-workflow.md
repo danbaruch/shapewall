@@ -87,6 +87,9 @@ For a hosted board, `shapewall login --remote URL` first, then `shapewall agent 
 `shapewall mcp --remote URL`, which signs in with the saved login. No token goes into any agent config. `--remove` takes the
 entries out again.
 
+**Or the plugin.** The [Claude Code and Codex plugin](plugins.md) gives the same MCP server in one install, plus skills that know the
+loop (`/shapewall:shapewall-next` and others). Use the plugin or `agent setup`, not both: both add a server called `shapewall`.
+
 ## The loop
 
 1. **Point.** You zoom into a screen on the wall and pin a comment that says what to build or change. Comments made on live HTML are
@@ -540,7 +543,7 @@ Every link Shapewall makes (in `shapewall open`, notifications, GitHub issues, p
 agent can hand the person a link that opens exactly what it worked on:
 
 ```text
-<board address>?board=<board>[&p=<page>][&c=<comment>][&filter=all][&vp=<viewport>][&hist=<page>&hv=<viewport>][&cmp=<a>_<b>]
+<board address>?board=<board>[&p=<page>][&c=<comment>][&filter=all][&vp=<viewport>][&hist=<page>&hv=<viewport>][&cmp=<a>_<b>][&follow=<agent>]
 ```
 
 | Key          | Opens                                                                                      |
@@ -552,12 +555,32 @@ agent can hand the person a link that opens exactly what it worked on:
 | `vp`         | one screen size (`desktop`, `phone`, any viewport of the board) or `all`                   |
 | `hist`, `hv` | the page's before and after: its latest capture beside the one before it, at that viewport |
 | `cmp`        | two environments side by side (`staging_prod`)                                             |
+| `follow`     | follow an agent: `any`, or a hosted agent's id ([Follow an agent](#follow-an-agent))       |
 
 The board address is the running `shapewall serve` (`http://127.0.0.1:4600/` by default) or, on a hosted server,
 `https://<server>/w/<workspace>/p/<project>/`. Ids the board does not have are ignored, and a link carries ids only, never a
 token. `shapewall open --print` (or `--json`) prints the link for a page, a comment, a viewport or a before and after; without
 `--print` it also opens it in the browser. An agent in an app with a browser pane can open the link there; otherwise it gives the
 link to the person.
+
+### Follow an agent
+
+With the board open beside the agent (a browser pane, a second window), follow mode lets the person watch the work: the board flies
+to each comment the agent takes and opens its thread, and after the agent recaptures that comment's page, it opens the before and
+after of that screen (the page at the comment's screen size, the latest capture beside the one before it). Other screens the same
+recapture changed do not open by themselves: a quiet **N more screens changed** in the follow bar lists them, each one a click away.
+Moving the canvas, opening another comment or pressing **Stop following** ends it; closing the before and after does not.
+
+- `shapewall open --follow` prints and opens the board following any agent (`follow=any`); `--follow ID` follows one hosted agent
+  (its id from the board's agent list). An agent can open this link in its own browser pane before it starts.
+- On the board: **Follow agent** shows at the top left of the canvas while an agent works on a local board; a hosted board has
+  **Follow &lt;name&gt;** for each of the project's agents that is online.
+
+Follow mode reads only what the viewer already sees: the comments' agent status (`working`, from `set_comment_status` or a claim),
+the capture history, and on a hosted board the agents list. Nothing new is sent to the board. On a local board any tab works, the
+owner's or a plain one without the owner link (a browser pane's second tab, a reload). On a hosted board, members follow; a share
+link's guest and a public board's viewers do not get it. An agent that goes offline or leaves the board stops it, with a note saying
+so.
 
 ## A prompt that works
 
