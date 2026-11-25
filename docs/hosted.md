@@ -1119,7 +1119,8 @@ comment, with a state and rules about who may use it. Nothing changes on the mac
   again while an agent works on it changes nothing. On the board, an agent you may not use is listed, greyed, with the reason ("Only
   Ada can send work to Builder. Ask them, or an admin, to share it.").
   Tokens given the `claim` scope by an older version keep the audience they had: everyone the agent policy trusts. The console
-  marks them "kept from before 0.4.0" ([Upgrading from older versions](#upgrading-from-older-versions)).
+  says so on the agent's card, as a setting kept from an older version
+  ([Upgrading from older versions](#upgrading-from-older-versions)).
 
 - **Approvals.** Each agent has an approval rule and two roles: who may answer its approvals, and who may change the rule (admins and
   owners, or owners only; only an owner changes those two). The rule in effect is **Ask every time** unless the agent's own machine
@@ -2424,7 +2425,7 @@ A newer server upgrades the database on its first start. Each migration below sa
 to the release before it. Back up first (`shapewall hosted backup`), and keep that backup for rollback.
 
 - **Agent tokens from before 0.4.0.** A token that already had the `claim` scope keeps the audience it had (everyone the agent
-  policy trusts). The console marks it "kept from before 0.4.0". Agents made since then take work only from the person who
+  policy trusts). The console says on the agent's card that the setting was kept from an older version. Agents made since then take work only from the person who
   connected them, until you widen it.
 
 ### Migration 7 and rollback

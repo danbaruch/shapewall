@@ -1,3 +1,5 @@
+import { monogram } from '../lib/initials.js'
+
 // The agent picker (AgentPicker.jsx), from a thread's `profiles`
 // (src/agent/routes.js): every connected agent once, by name. The default
 // connection is listed only when it is not one of the profiles (`sameAs`
@@ -92,19 +94,8 @@ export function stateLine(option) {
   return text
 }
 
-// Two letters for an agent without an icon: the initials of a two-word
-// name ("Claude Code" CC, "Gemini CLI" GC), else its first two letters
-// ("Codex" Co, "goose" Go).
-export function monogram(label) {
-  const words = String(label || '?')
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean)
-  if (!words.length) return '?'
-  if (words.length > 1) return (words[0][0] + words[1][0]).toUpperCase()
-  const word = words[0]
-  return word[0].toUpperCase() + (word[1] || '').toLowerCase()
-}
+// Two letters for an agent without an icon (lib/initials.js).
+export { monogram }
 
 // The quiet note after a switch, said once.
 export function switchedNote(label) {

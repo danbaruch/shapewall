@@ -176,7 +176,6 @@ function AgentRow({ agent, nameOf, onOpen, onChat }) {
           : chats
             ? String(agent.reason || '').replace('can send work to', 'can use')
             : agent.reason}
-        {agent.canSend && agent.audience.inherited ? ' (As before 0.4.0.)' : ''}
       </p>
     </li>
   )
