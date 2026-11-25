@@ -903,7 +903,8 @@ shapewall push --remote https://app.example.com --page pricing
 - **An older capture never replaces a newer one.** A capture's version starts with the time it was taken. If the board holds a
   later capture of any page and viewport in the push, the whole push is refused (409 `stale_capture`) and nothing changes: capture
   again, then push. The server compares the versions it already has, so the pushing machine needs no extra round trip, and a retry
-  of the same capture is accepted. This relies on the capturing machines' clocks being roughly right.
+  of the same capture is accepted. This relies on the capturing machines' clocks being roughly right: a capture dated more than ten
+  minutes ahead of the server's clock is refused (400), so a wrong clock cannot hold a page against every later push.
 - The capture a page push replaces is kept as a version, so before and after keeps working, and comments made on it still show the
   screenshot they were made on. Retention trims old versions as usual.
 - It takes the `push` scope, the same upload caps, the same file cleaning (PNGs re-encoded, live HTML sanitized, element maps
