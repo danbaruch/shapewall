@@ -86,9 +86,11 @@ export async function mcp(flags, err) {
     const readOnly = Boolean(flags['read-only'])
     const allowCapture = !readOnly && !flags['no-capture']
     const remote = createRemote(remoteSettings(flags))
-    await runRemoteMcp({ remote, readOnly, allowCapture, config: allowCapture ? remoteMcpConfig(flags, err) : null })
+    const board = typeof flags.board === 'string' ? flags.board : null
+    await runRemoteMcp({ remote, readOnly, board, allowCapture, config: allowCapture ? remoteMcpConfig(flags, err) : null })
     return 0
   }
+  if (flags.board !== undefined) throw new Error('mcp --board picks a hosted board: use it with --remote URL.')
   const config = loadConfig(flags.config)
   const { runMcp } = await import('../mcp.js')
   const readOnly = Boolean(flags['read-only'])

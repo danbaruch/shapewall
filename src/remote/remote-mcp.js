@@ -79,9 +79,12 @@ const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp
 // config: the local project (loadConfig), for recapture_pages; allowCapture:
 // false drops that tool (--no-capture). capture and push are the capture run
 // and the board upload (tests stub them); log gets their progress lines.
+// board (--board): the board a tool works on when it names none (default:
+// the first pushed one).
 export async function createRemoteMcpServer({
   remote,
   readOnly = false,
+  board: defaultBoard = null,
   heartbeatMs = REMOTE_HEARTBEAT_MS,
   maxHoldMs = MAX_HOLD_MS,
   config = null,
@@ -94,6 +97,9 @@ export async function createRemoteMcpServer({
   const scopes = new Set(project.token.scopes.flatMap((scope) => (scope === 'comment' ? ['reply', 'status'] : [scope])))
   if (!scopes.has('read')) throw new Error('The token needs the "read" scope for MCP.')
   const boardIds = project.boards.map((item) => item.id)
+  if (defaultBoard && !boardIds.includes(defaultBoard))
+    throw new Error(`No board "${defaultBoard}" on ${project.project?.name || 'this project'} (have: ${boardIds.join(', ') || 'none'}).`)
+  const firstBoard = defaultBoard || boardIds[0]
   const canRecapture = Boolean(config) && allowCapture && !readOnly && scopes.has('push')
   const server = new McpServer(
     { name: 'shapewall', version: VERSION },
@@ -155,14 +161,14 @@ export async function createRemoteMcpServer({
     .string()
     .max(64)
     .optional()
-    .describe(`Board id (default: ${boardIds[0] || 'the first pushed board'})`)
+    .describe(`Board id (default: ${firstBoard || 'the first pushed board'})`)
   const commentId = z.number().int().positive().describe('Comment id')
   const guestsArg = z
     .boolean()
     .optional()
     .describe('Needed to act on a comment from a share link guest (untrusted, marked authorGuest); the server refuses it otherwise')
   const boardFor = (id) => {
-    const wanted = id || boardIds[0]
+    const wanted = id || firstBoard
     if (!wanted) throw new Error('Nothing is pushed to this project yet.')
     if (!boardIds.includes(wanted)) throw new Error(`No board "${wanted}" (have: ${boardIds.join(', ')}).`)
     return wanted
@@ -522,10 +528,11 @@ export async function createRemoteMcpServer({
   return server
 }
 
-export async function runRemoteMcp({ remote, readOnly = false, config = null, allowCapture = true }) {
+export async function runRemoteMcp({ remote, readOnly = false, board = null, config = null, allowCapture = true }) {
   const server = await createRemoteMcpServer({
     remote,
     readOnly,
+    board,
     config,
     allowCapture,
     // stdout is the protocol; progress goes to stderr, cleaned (push lines hold the server's URL).

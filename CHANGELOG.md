@@ -3,6 +3,16 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Added
+
+- `shapewall mcp --remote` now offers `recapture_pages` when it starts in a project folder (or with `--config FILE`) and the token
+  has the `push` scope: it captures the pages on your machine, then pushes the board to the hosted project, so an agent on a hosted
+  board can make the change, recapture and resolve without leaving MCP. It refuses a hosted board whose id is not in the config.
+  `--read-only` and `--no-capture` leave it out. `mcp --remote` also takes `--board ID` for the board a tool works on by default.
+  See [the hosted guide](docs/hosted.md).
+
 ## 1.1.0 - 2026-11-24
 
 ### Added

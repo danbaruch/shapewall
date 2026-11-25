@@ -1012,9 +1012,17 @@ shapewall mcp --remote https://app.example.com
   `.shapewall/remote/<project>/<board>/agent/`, so `SHAPEWALL_SCREENSHOT` is a local path as it is locally. The done rule is the
   local one: exit 0 plus a reply from the command is `done`, anything else `needs-human`. Without `--pass-token` the command has no
   token to reply with, so its exit 0 ends `needs-human`, and the reply says so.
-- `mcp --remote` is the stdio MCP server with the same tools as local minus `recapture_pages` and `add_comment` (the token API has
-  no route that creates a comment). `list_selectors` reads the element map of the latest push. Tools that write appear only when the
-  token has the scope. In an MCP client config:
+- `mcp --remote` is the stdio MCP server with the same tools as local minus `add_comment` (the token API has no route that creates
+  a comment). `list_selectors` reads the element map of the latest push. Tools that write appear only when the token has the scope.
+  `--board ID` picks the board a tool works on when it names none (default: the first pushed board).
+- `recapture_pages` is there only when `mcp --remote` starts in a project folder (it finds `shapewall.config.json` like the other
+  commands, or takes `--config FILE`), without `--read-only` or `--no-capture`, and the token has the `push` scope. The hosted server
+  never captures anything: the tool captures the pages on your machine, the same way the local tool does (page ids from the config,
+  the same capture lock), then pushes the board as `shapewall push --board ID` would. The hosted server replaces a board whole on
+  each push, so the whole board goes up, with the new captures of those pages. It works only on a hosted board whose id is a board in
+  the config, and refuses any other board before capturing, so captures never land on the wrong board. The result is the local one
+  (per page and viewport `ok` or the error) plus `pushed` (`ok`, then the files and board URL, or the error); when no shot landed,
+  nothing is pushed. The agent loop is then: make the change, call `recapture_pages`, then resolve. In an MCP client config:
 
 ```json
 {

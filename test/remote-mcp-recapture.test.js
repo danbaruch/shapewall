@@ -147,6 +147,29 @@ test('recapture_pages refuses a hosted board that is not a board of the config, 
   assert.equal(calls.length, 0)
   assert.equal(pushes.length, 0)
   await client.close()
+
+  // --board picks the default board; one the project does not have stops the server from starting.
+  const scoped = await connect(
+    await createRemoteMcpServer({
+      remote: stubRemote({ boards: ['marketing', 'sample'] }),
+      board: 'sample',
+      config,
+      capture: fakeCapture(calls),
+      push: async () => ({ files: 1, url: 'u' }),
+    }),
+  )
+  assert.equal(parse(await scoped.callTool({ name: 'recapture_pages', arguments: { pageIds: ['home'] } })).pushed.ok, true)
+  assert.deepEqual(calls, [{ boardId: 'sample', only: ['home'] }])
+  await scoped.close()
+  await assert.rejects(createRemoteMcpServer({ remote: stubRemote(), board: 'nope', config }), /No board "nope"/)
+})
+
+test('mcp --board is for --remote only', async () => {
+  const { mcp } = await import('../src/cli/commands.js')
+  await assert.rejects(
+    mcp({ board: 'sample', config: '/nonexistent/shapewall.config.json' }, () => {}),
+    /use it with --remote URL/,
+  )
 })
 
 test('recapture_pages captures the pages here, pushes the board and reports each page and viewport', async () => {
