@@ -18,8 +18,8 @@
   "mcpServers": {
     "shapewall": {
       "command": "node",
-      "args": ["/bin/shapewall-mcp.mjs"],
-      "env": { "SHAPEWALL_REMOTE": "" }
+      "args": ["${CLAUDE_PLUGIN_ROOT}/bin/shapewall-mcp.mjs"],
+      "env": { "SHAPEWALL_REMOTE": "${user_config.remote_url}" }
     }
   }
 }

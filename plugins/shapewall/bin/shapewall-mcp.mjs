@@ -186,12 +186,21 @@ export function remoteUrl(env = process.env) {
   return value
 }
 
-// The folder `shapewall mcp` runs in: the project the app says it is in
-// (CLAUDE_PROJECT_DIR, set by Claude Code), else the folder this was started in.
+// The folder `shapewall mcp` runs in: the nearest folder at or above where
+// the app works (CLAUDE_PROJECT_DIR, set by Claude Code, else the folder this
+// was started in) that has a shapewall.config.json, so an app opened in a
+// subfolder still finds the board; that folder itself when none has one.
+// Only the file's presence is checked; nothing in it is read here.
 export function projectDirOf(env = process.env, cwd = process.cwd()) {
   const named = env.CLAUDE_PROJECT_DIR
-  if (named && path.isAbsolute(named) && isDir(named)) return named
-  return cwd
+  const start = named && path.isAbsolute(named) && isDir(named) ? named : cwd
+  let dir = path.resolve(start)
+  for (;;) {
+    if (isFile(path.join(dir, 'shapewall.config.json'))) return dir
+    const parent = path.dirname(dir)
+    if (parent === dir) return start
+    dir = parent
+  }
 }
 
 // Everything the launcher decides, without running anything.
