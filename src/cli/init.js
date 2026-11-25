@@ -8,6 +8,7 @@ import { addPagesToRaw, defaultSitemapUrl, formatImport, importSitemap, sitemapP
 import { DISCOVER_DEFAULTS, cutTitle, describeFetchError, discoverPages, pageTitle, siteNameFrom } from '../discover.js'
 import { cliCommand } from '../invocation.js'
 import { WORKFLOW_FILE, workflowYaml } from '../ci/workflow.js'
+import { describeWritten, writeAgentDocs } from '../agent-docs.js'
 
 const isHttp = (value) => /^https?:\/\//i.test(String(value))
 // describeFetchError's words for "nothing answered at that address".
@@ -133,6 +134,20 @@ export function baseUrlHint(value) {
   return `${local ? 'http' : 'https'}://${text}`
 }
 
+// The Shapewall section in AGENTS.md (src/agent-docs.js), so a coding
+// agent opened in the project finds the board. Returns the line to print.
+function initAgentDocs(dir, config) {
+  const outputDir = path.resolve(dir, typeof config.outputDir === 'string' && config.outputDir.trim() ? config.outputDir : '.shapewall')
+  try {
+    const result = writeAgentDocs(dir, outputDir)
+    const notes = result.notes.length ? ` (${result.notes.join(' ')})` : ''
+    if (!result.changed) return `The Shapewall section in ${result.files.join(' and ')} is up to date${notes}.`
+    return `Added a Shapewall section to ${describeWritten(result)} so coding agents find the board${notes}. Remove it with "${cliCommand('agent docs --remove')}"; register the MCP server with "${cliCommand('agent setup')}".`
+  } catch (error) {
+    return `Could not add the Shapewall section to AGENTS.md: ${error.message}`
+  }
+}
+
 // Returns the exit code: 0 when the config was written (with a warning when
 // the app did not answer, so it has the home page only: start the app and
 // run init again), or 2 when something answered at the base URL but not
@@ -187,6 +202,7 @@ export async function init(flags, out, { fetch }) {
     fs.writeFileSync(gitignore, `${current}${current && !current.endsWith('\n') ? '\n' : ''}# Shapewall\n${missing.join('\n')}\n`)
     out(`Added ${missing.join(', ')} to .gitignore`)
   }
+  if (!flags['no-agent-docs']) out(initAgentDocs(path.dirname(file), config))
   if (found === 'none') out(`Warning: ${baseUrl} did not answer, so the config has the home page only.`)
   out(initNextHint({ baseUrl, givenBaseUrl, fromSitemap, found, file: path.basename(file) }))
   return found === 'wrong' ? 2 : 0
