@@ -13,6 +13,16 @@ and the project uses [Semantic Versioning](https://semver.org/).
   `--read-only` and `--no-capture` leave it out. `mcp --remote` also takes `--board ID` for the board a tool works on by default.
   See [the hosted guide](docs/hosted.md).
 
+### Fixed
+
+- Avatar initials use only letters and digits: an agent named "Harry (ibuypower)" shows "HI", not "H(", and a word that is only
+  an emoji or punctuation is skipped.
+- Hosted: agent cards on the board no longer end with "(As before 0.4.0.)". The console's agent card says in plain words that the
+  agent keeps a setting from an older version.
+- Hosted: a connected agent asked in the board chat to change something no longer says nobody can approve it. It says the chat
+  reads and answers, and that a change is made with "Fix with" and its name on a comment, each edit allowed on the board. On a
+  machine that takes no edits from the board, it says so and how to turn them on (`shapewall agent connect --approvals owner`).
+
 ## 1.1.0 - 2026-11-24
 
 ### Added

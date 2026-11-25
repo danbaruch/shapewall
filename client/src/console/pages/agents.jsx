@@ -507,7 +507,7 @@ export function ProjectAgentsPage({ projectId }) {
                         <dd className="mt-1 text-muted">
                           <span className="text-fg">{agent.audience.text}.</span>{' '}
                           {agent.audience.inherited
-                            ? 'Kept from before 0.4.0, when the agent policy alone decided, so nothing changed on upgrade. New agents start with only the person who connected them.'
+                            ? 'This agent was connected on an older version of Shapewall, when the agent policy alone decided who could use it. It keeps that setting so nothing changed when you updated. New agents start with only the person who connected them.'
                             : agent.audience.kind === 'trusted'
                               ? ''
                               : "They must also be trusted by this project's agent policy (on the project page)."}

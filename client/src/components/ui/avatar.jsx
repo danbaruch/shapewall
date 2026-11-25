@@ -3,15 +3,9 @@ import { useState } from 'react'
 import { cn } from '../../lib/utils'
 import { useAgentIdentity } from '../../lib/agentIdentity'
 import { AgentFace } from '../../chat/agentIcons'
+import { initials } from '../../lib/initials'
 
-export function initials(name) {
-  const parts = String(name || '?')
-    .replace(/\(guest\)/i, '')
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean)
-  return ((parts[0]?.[0] || '?') + (parts.length > 1 ? parts.at(-1)[0] : '')).toUpperCase()
-}
+export { initials }
 
 // Person colours for comment avatars and pins: white text on each keeps AA
 // contrast (4.5:1, test/theme.test.js) in every theme, light and dark.

@@ -21,7 +21,7 @@ import { acpAgentKind } from '../agent/acp/command.js'
 import { ACP_DEFAULTS, acpHandshake, adapterName, adapterWarning } from '../agent/backends/acp.js'
 import { createBackend } from '../agent/backends/index.js'
 import { agentSettings } from '../agent/config.js'
-import { REMOTE_FIX_PREAMBLE, REMOTE_PREAMBLE } from '../agent/context.js'
+import { REMOTE_FIX_PREAMBLE, remotePreamble } from '../agent/context.js'
 import { DEFAULT_OUTPUT_DIR, authFiles, findConfigFile, loadConfig } from '../config.js'
 import { AGENT_SLUG_RE, forgetAgentCredential, readAgentCredential, saveAgentCredential } from './credentials.js'
 import { fixRoot, sweepFixes } from './agent-fix.js'
@@ -379,7 +379,7 @@ export async function agentConnect(
   const backend = createBackend(
     // Read and answer only (src/agent/backends/acp.js readOnly), with the
     // connected agent's own first words. Images are not sent to it yet.
-    { ...settings, readOnly: true, preamble: REMOTE_PREAMBLE, vision: false },
+    { ...settings, readOnly: true, preamble: remotePreamble(askedOf(policy, kind)), vision: false },
     {
       env,
       root: config.dir,
