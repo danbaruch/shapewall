@@ -66,6 +66,9 @@ For a hosted board, `shapewall login --remote URL` first, then `shapewall agent 
 `shapewall mcp --remote URL`, which signs in with the saved login. No token goes into any agent config. `--remove` takes the
 entries out again.
 
+**Or the plugin.** The [Claude Code and Codex plugin](plugins.md) gives the same MCP server in one install, plus skills that know the
+loop (`/shapewall:shapewall-next` and others). Use the plugin or `agent setup`, not both: both add a server called `shapewall`.
+
 ## The loop
 
 1. **Point.** You zoom into a screen on the wall and pin a comment that says what to build or change. Comments made on live HTML are

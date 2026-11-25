@@ -58,6 +58,9 @@ all`), an experimental command or option ends its first line with `(experimental
   the report JSON ([page checks](page-checks.md), [Lighthouse audits](performance.md)).
 - **The Buzz bridge:** `shapewall buzz-bridge`, `serve --buzz-bridge`, the board's "Existing Buzz conversation" dialog,
   and `SHAPEWALL_BUZZ_SIGNER_CODEX`/`SHAPEWALL_BUZZ_SIGNER_CLAUDE` ([the Buzz bridge](buzz.md)).
+- **The Claude Code and Codex plugin:** everything in `plugins/shapewall/` (manifests, skills, the launcher) and the marketplace
+  files `.claude-plugin/marketplace.json` and `.agents/plugins/marketplace.json` ([plugins](plugins.md)). The `shapewall mcp`
+  server it starts is covered as usual.
 - **Self-update:** `SHAPEWALL_UPDATE_*` and the board's update routes ([updates](updates.md)).
 - **Smaller pieces:** the `settings` command (use `serve --open`), `export --browser-comments`, the hosted `quotas.json`, and the
   output of `hosted admin`.

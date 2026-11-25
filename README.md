@@ -62,6 +62,9 @@ agent** on a comment.
 npx shapewall agent setup    # registers the MCP server with Claude Code and Codex
 ```
 
+Or install the [Claude Code and Codex plugin](docs/plugins.md) (the same MCP server plus skills; from the `staging` branch until the
+next release).
+
 Comments are untrusted input to an agent: read [keeping an agent safe](docs/agent-hardening.md) before you let others comment.
 
 ## What else is on the wall

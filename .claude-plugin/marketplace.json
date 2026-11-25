@@ -1,0 +1,14 @@
+{
+  "name": "shapewall",
+  "owner": { "name": "Dan Baruch", "url": "https://github.com/danbaruch" },
+  "metadata": { "description": "Shapewall's plugin for Claude Code: steer and build your app with your coding agent from its board." },
+  "plugins": [
+    {
+      "name": "shapewall",
+      "source": "./plugins/shapewall",
+      "description": "The Shapewall board's MCP tools plus skills that take a comment from request to recaptured, compared and answered.",
+      "category": "development",
+      "homepage": "https://shapewall.com/docs/plugins"
+    }
+  ]
+}
