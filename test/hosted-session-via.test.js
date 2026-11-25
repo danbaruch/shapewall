@@ -62,7 +62,7 @@ test('a new database has the tailnet sign-in method in its sessions table, with 
   try {
     assert.deepEqual(
       versions(db),
-      Array.from({ length: 21 }, (_, index) => index + 1),
+      Array.from({ length: 22 }, (_, index) => index + 1),
     )
     assert.equal(db.prepare('PRAGMA user_version').get().user_version, 22)
     assert.match(sessionsSql(db), /CHECK \(via IN \('passkey', 'recovery', 'tailnet'\)\)/)

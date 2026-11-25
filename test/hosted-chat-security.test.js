@@ -92,7 +92,7 @@ async function jobFor(agent, user, thread, text) {
   hosted.rateLimiter.reset()
   held.add(agent.token)
   try {
-    const sending = user.browser.post(chatUrl(thread, '/messages'), { text })
+    const sending = user.browser.post(chatUrl(thread, '/messages'), { text, ask: true })
     const live = await until(() => liveTurn(thread), 'the turn')
     const headers = linkHeaders(hosted, ws, agent.agentId)
     const job = (await tokenCall(hosted, agent.token, 'GET', `/api/v1/agent/turns/${live.id}`, { headers })).json.job

@@ -155,6 +155,7 @@ test('the agent’s token and this machine’s policy are files of their own, pr
     remote: 'origin',
     instructions: 'all',
     agentConfig: null,
+    respond: 'thread',
   }
   assert.deepEqual(readMachinePolicy(ORIGIN, 'default', env), NONE)
   // What it does not understand reads as the narrowest: a 0.5.0 file ("never"), a made-up level, a list of nonsense.
@@ -195,6 +196,7 @@ test('the agent’s token and this machine’s policy are files of their own, pr
       remote: 'upstream',
       instructions: 'all',
       agentConfig: null,
+      respond: 'thread',
     },
   )
   // A list with an entry it cannot read is not trusted for the rest, and a remote it cannot read
@@ -310,7 +312,7 @@ test('a job is checked on the machine, and every piece of board text is quoted a
     () => cleanJob(job({ turn: { id: TURN, board: 'sample', thread: 'comment-2', kind: 'fix', comment: 3 } })),
     /another thread/,
   )
-  assert.deepEqual(Object.keys(cleaned.turn).sort(), ['board', 'comment', 'id', 'kind', 'thread'])
+  assert.deepEqual(Object.keys(cleaned.turn).sort(), ['board', 'comment', 'id', 'kind', 'thread', 'trigger'])
   assert.deepEqual(Object.keys(cleaned.messages[0]).sort(), ['author', 'files', 'mentions', 'role', 'text'])
   // A "system" message from the server is dropped; a huge text is cut.
   const padded = cleanJob(
