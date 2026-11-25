@@ -13,6 +13,8 @@ import { LOOP_SUMMARY, UNTRUSTED_TEXT } from '../src/mcp-instructions.js'
 const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'))
 const json = (file) => JSON.parse(fs.readFileSync(file, 'utf8'))
 const KEBAB = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
+// The en and em dash, spelled by code point so this file holds neither.
+const DASHES = [String.fromCharCode(0x2013), String.fromCharCode(0x2014)]
 
 function filesUnder(dir) {
   return fs.readdirSync(dir, { withFileTypes: true, recursive: true }).flatMap((entry) => {
@@ -111,7 +113,7 @@ test('skills: frontmatter parses, names are kebab-case and match their folder, m
 test('plugin copy: no absolute paths, no em or en dashes, never a feedback or review tool', () => {
   for (const file of TEXT_FILES) {
     const text = fs.readFileSync(file, 'utf8')
-    assert.doesNotMatch(text, /[–—]/, `${file}: em or en dash`)
+    assert.ok(!text.includes(DASHES[0]) && !text.includes(DASHES[1]), `${file}: em or en dash`)
     assert.doesNotMatch(text, /(feedback|review)[ -]tool/i, `${file}: positioning`)
     if (file.startsWith(PLUGIN) || file.endsWith('marketplace.json'))
       assert.doesNotMatch(text, /\/home\/|\/Users\/|[A-Z]:\\\\/, `${file}: absolute path`)
