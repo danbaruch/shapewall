@@ -190,6 +190,8 @@ export async function init(flags, out, { fetch }) {
     config = result.raw
     out(pageLines(result.pages))
   }
+  // --no-agent-docs is kept in the config, so serve and capture never add the section either.
+  if (flags['no-agent-docs']) config = { ...config, agentDocs: false }
   fs.writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`)
   out(`Wrote ${path.relative(process.cwd(), file) || file}`)
   // Captures, comments and auth files stay out of git.

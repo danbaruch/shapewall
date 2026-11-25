@@ -17,17 +17,22 @@
 // the entry is for every Codex project, the CLI and the desktop app alike.
 //
 // Rules for every write: it shows what changes and asks first (--yes skips the question, --dry-run
-// only shows); a file is backed up (<file>.shapewall-backup-<time>) before it is changed; an
-// identical entry is left alone; a different `shapewall` entry is shown and replaced only with
-// --force; nothing but the `shapewall` entry is touched. No token is ever written: with --remote
-// the MCP server reads the saved login (credentials.json) itself.
+// only shows); a file is backed up (<file>.shapewall-backup-<time>, the newest 3 for ~/.claude.json;
+// a project's .mcp.json under $XDG_STATE_HOME/shapewall/backups, never inside the project) before it
+// is changed; a symbolic link is written through to the real file; an identical entry is left alone;
+// an older Shapewall's entry is updated; a different `shapewall` entry is shown and replaced only
+// with --force; an entry that changed since the plan is not written over; a failed Claude Code
+// update puts the old entry back; nothing but the `shapewall` entry is touched. No token is ever
+// written: with --remote the MCP server reads the saved login (credentials.json) itself. An
+// existing entry's env does go on the `claude mcp add-json` command line during an update (the CLI
+// has no other way in), and the plan says so.
 
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
-import { randomBytes } from 'node:crypto'
-import { resolveShapewallCommand } from './shapewall-command.js'
+import { createHash, randomBytes } from 'node:crypto'
+import { compareVersions, packageVersionOf, parseVersion, resolveShapewallCommand } from './shapewall-command.js'
 import { readServer, removeServer, serverText, setServer } from './codex-toml.js'
 import { lookupProgram } from './which.js'
 
@@ -100,9 +105,61 @@ export function serverArgs({ prefix, remote, config }) {
   return [...prefix, 'mcp', ...(remote ? ['--remote', remote] : []), ...(config ? ['--config', config] : [])]
 }
 
+const baseName = (file) =>
+  String(file || '')
+    .split(/[\\/]/)
+    .pop()
+    .toLowerCase()
+
+// An entry's program and arguments, without a Windows "cmd /c" wrapper.
+function unwrapped(entry) {
+  const parts = [entry?.command, ...(Array.isArray(entry?.args) ? entry.args : [])]
+  if (['cmd', 'cmd.exe'].includes(baseName(parts[0])) && /^\/c$/i.test(parts[1] || '')) return parts.slice(2)
+  return parts
+}
+
+// Whether an existing entry is an earlier Shapewall registration that this
+// one may replace without --force: it starts Shapewall (`npx [-y] shapewall`,
+// `npx -y shapewall@<version>`, or a shapewall program by path), runs the
+// same "mcp ..." arguments, and is not a newer Shapewall than this one.
+export function isOlderShapewall(entry, { tail, version }) {
+  if (!entry || (entry.type && entry.type !== 'stdio')) return false
+  const parts = unwrapped(entry)
+  if (parts.some((part) => typeof part !== 'string')) return false
+  const program = baseName(parts[0])
+  let rest
+  let theirs = null
+  if (program === 'npx' || program === 'npx.cmd') {
+    let index = 1
+    if (parts[index] === '-y' || parts[index] === '--yes') index += 1
+    const match = /^shapewall(?:@(.+))?$/.exec(parts[index] || '')
+    if (!match) return false
+    if (match[1] !== undefined) {
+      // A tag such as "latest" is someone's choice: not an older version.
+      if (!parseVersion(match[1])) return false
+      theirs = match[1]
+    }
+    rest = parts.slice(index + 1)
+  } else if (['shapewall', 'shapewall.cmd', 'shapewall.exe'].includes(program)) {
+    theirs = path.isAbsolute(parts[0]) || path.win32.isAbsolute(parts[0]) ? packageVersionOf(parts[0]) : null
+    rest = parts.slice(1)
+  } else return false
+  if (!sameList(rest, tail)) return false
+  return theirs === null || compareVersions(theirs, version) <= 0
+}
+
+// Claude Code on native Windows starts a .cmd program (npx.cmd, an npm
+// shim) only through "cmd /c" (its MCP docs). A committed .mcp.json keeps
+// plain npx for everyone.
+export function claudeCommand(resolved, { scope, platform = process.platform }) {
+  if (platform === 'win32' && scope !== 'project' && /\.(cmd|bat)$/i.test(resolved.command))
+    return { command: 'cmd', args: ['/c', resolved.command, ...resolved.args] }
+  return { command: resolved.command, args: resolved.args }
+}
+
 // One app's plan: { app, file, shownFile, action: 'add'|'update'|'same'|'differs'|'remove'|'absent'|'skip',
 // before, after, notes, ... }. Nothing is written.
-function planClaude({ dir, scope, remote, config, version, env, force, remove, cli }) {
+function planClaude({ dir, scope, remote, config, version, env, force, remove, cli, platform }) {
   const notes = []
   const file = scope === 'project' ? path.join(dir, '.mcp.json') : claudeConfigFile(env)
   const entries = claudeEntries(dir, env)
@@ -119,12 +176,14 @@ function planClaude({ dir, scope, remote, config, version, env, force, remove, c
     return { ...base, action: existing ? 'remove' : 'absent', after: null, notes }
   }
   const reach = scope === 'user' ? 'global' : scope
-  const resolved = resolveShapewallCommand({ projectDir: dir, version, reach, env })
+  const resolved = resolveShapewallCommand({ projectDir: dir, version, reach, env, platform })
+  const program = claudeCommand(resolved, { scope, platform })
   const configArg = config ? (scope === 'project' ? path.relative(dir, config) || config : config) : null
+  const tail = serverArgs({ prefix: [], remote, config: configArg })
   const after = {
     type: 'stdio',
-    command: resolved.command,
-    args: serverArgs({ prefix: resolved.args, remote, config: configArg }),
+    command: program.command,
+    args: [...program.args, ...tail],
     env: existing?.env || {},
   }
   notes.push(`Uses ${resolved.note}.`)
@@ -144,10 +203,16 @@ function planClaude({ dir, scope, remote, config, version, env, force, remove, c
   }
   if (!existing) return { ...base, action: 'add', after, notes }
   if (sameServer(existing, after)) return { ...base, action: 'same', after, notes }
-  return { ...base, action: force ? 'update' : 'differs', after, notes }
+  const action = force || isOlderShapewall(existing, { tail, version }) ? 'update' : 'differs'
+  // The CLI has no "change": the entry is removed and added again, env included.
+  if (existing.env && typeof existing.env === 'object' && Object.keys(existing.env).length)
+    notes.push(
+      'The entry keeps its env values; they are passed to "claude mcp add-json" on its command line, where other programs on this machine can see them while it runs.',
+    )
+  return { ...base, action, after, notes }
 }
 
-function planCodex({ dir, remote, config, version, env, force, remove, cli }) {
+function planCodex({ dir, remote, config, version, env, force, remove, cli, platform }) {
   const file = codexConfigFile(env)
   let source = ''
   try {
@@ -168,8 +233,9 @@ function planCodex({ dir, remote, config, version, env, force, remove, cli }) {
     const text = existing ? removeServer(source) : source
     return { ...base, action: existing ? 'remove' : 'absent', before: existing, beforeText, afterText: '', source, text, notes }
   }
-  const resolved = resolveShapewallCommand({ projectDir: dir, version, reach: 'global', env })
-  const args = serverArgs({ prefix: resolved.args, remote, config })
+  const resolved = resolveShapewallCommand({ projectDir: dir, version, reach: 'global', env, platform })
+  const tail = serverArgs({ prefix: [], remote, config })
+  const args = [...resolved.args, ...tail]
   const set = { command: resolved.command, args }
   // Timeouts are added when missing; a value the person set stays.
   if (existing?.tool_timeout_sec === undefined) set.tool_timeout_sec = CODEX_TOOL_TIMEOUT
@@ -183,14 +249,14 @@ function planCodex({ dir, remote, config, version, env, force, remove, cli }) {
   if (existing) {
     const sameCore = existing.command === set.command && sameList(existing.args, args)
     if (text === source) action = 'same'
-    else if (sameCore) action = 'update'
-    else action = force ? 'update' : 'differs'
+    else if (sameCore || force || isOlderShapewall(existing, { tail, version })) action = 'update'
+    else action = 'differs'
   }
   return { ...base, action, before: existing, after, beforeText, afterText, source, text, notes }
 }
 
 // The whole plan. Throws on flags that do not fit together.
-export function planSetup({ dir, flags = {}, version, env = process.env, configFile = null }) {
+export function planSetup({ dir, flags = {}, version, env = process.env, configFile = null, platform = process.platform }) {
   const scope = flags.scope === undefined ? 'local' : String(flags.scope)
   if (!SCOPES.includes(scope)) throw new Error(`--scope: local, user or project (got ${JSON.stringify(scope)})`)
   const claudeCli = lookupProgram('claude', env)
@@ -200,7 +266,7 @@ export function planSetup({ dir, flags = {}, version, env = process.env, configF
     ? [flags.claude && 'claude', flags.codex && 'codex'].filter(Boolean)
     : [claudeCli && 'claude', (codexCli || fs.existsSync(path.dirname(codexConfigFile(env)))) && 'codex'].filter(Boolean)
   const remote = typeof flags.remote === 'string' ? flags.remote : null
-  const common = { dir, remote, config: configFile, version, env, force: Boolean(flags.force), remove: Boolean(flags.remove) }
+  const common = { dir, remote, config: configFile, version, env, force: Boolean(flags.force), remove: Boolean(flags.remove), platform }
   const plans = []
   for (const app of apps) {
     if (app === 'claude') plans.push(planClaude({ ...common, scope, cli: claudeCli?.runnable ? claudeCli.path : null }))
@@ -280,28 +346,77 @@ export function formatPlan({ plans }) {
   return lines
 }
 
-// <file>.shapewall-backup-<time>, private, before any change.
-export function backupFile(file, { now = new Date() } = {}) {
+// Where backups of a project's .mcp.json go: outside the project, so they are
+// never committed. $XDG_STATE_HOME/shapewall/backups (default ~/.local/state/...).
+export function backupDir(env = process.env) {
+  const state = env.XDG_STATE_HOME && path.isAbsolute(env.XDG_STATE_HOME) ? env.XDG_STATE_HOME : path.join(homeOf(env), '.local', 'state')
+  return path.join(state, 'shapewall', 'backups')
+}
+
+// "<folder name>-<hash of its path>.mcp.json": one project's backups, told apart from another's.
+function projectBackupName(dir) {
+  return `${path.basename(projectKey(dir)) || 'project'}-${createHash('sha256').update(projectKey(dir)).digest('hex').slice(0, 8)}.mcp.json`
+}
+
+const BACKUP_MARK = '.shapewall-backup-'
+
+// <file>.shapewall-backup-<time> (or <into>/<name>.shapewall-backup-<time>),
+// private, before any change. With `keep`, only the newest `keep` backups of
+// that file are kept.
+export function backupFile(file, { now = new Date(), into = null, name = null, keep = null } = {}) {
   if (!fs.existsSync(file)) return null
   const stamp = now.toISOString().replace(/[:.]/g, '-')
-  let backup = `${file}.shapewall-backup-${stamp}`
+  const folder = into || path.dirname(file)
+  const base = name || path.basename(file)
+  if (into) fs.mkdirSync(into, { recursive: true, mode: 0o700 })
+  let backup = path.join(folder, `${base}${BACKUP_MARK}${stamp}`)
   if (fs.existsSync(backup)) backup = `${backup}-${randomBytes(3).toString('hex')}`
   fs.copyFileSync(file, backup, fs.constants.COPYFILE_EXCL)
   fs.chmodSync(backup, 0o600)
+  if (keep) pruneBackups(folder, base, keep)
   return backup
 }
 
+// Deletes all but the newest `keep` of Shapewall's own backups of one file
+// (the names sort by time).
+export function pruneBackups(folder, base, keep) {
+  const prefix = `${base}${BACKUP_MARK}`
+  let names
+  try {
+    names = fs.readdirSync(folder).filter((item) => item.startsWith(prefix) && /^\d{4}-\d\d-\d\dT/.test(item.slice(prefix.length)))
+  } catch {
+    return
+  }
+  names.sort()
+  for (const item of names.slice(0, Math.max(0, names.length - keep))) fs.rmSync(path.join(folder, item), { force: true })
+}
+
+// Writes through a symbolic link (a dotfiles repo's config.toml stays a
+// link): the new file is made beside the real file and renamed over it.
 function writeAtomic(file, text) {
+  let target = file
+  try {
+    target = fs.realpathSync(file)
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error
+    let link = false
+    try {
+      link = fs.lstatSync(file).isSymbolicLink()
+    } catch {
+      /* missing */
+    }
+    if (link) throw new Error(`${file} is a symbolic link to a file that does not exist; Shapewall does not change it`, { cause: error })
+  }
   let mode = 0o600
   try {
-    mode = fs.statSync(file).mode & 0o777
+    mode = fs.statSync(target).mode & 0o777
   } catch {
-    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 })
+    fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 })
   }
-  const temp = `${file}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`
+  const temp = `${target}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`
   try {
     fs.writeFileSync(temp, text, { mode, flag: 'wx' })
-    fs.renameSync(temp, file)
+    fs.renameSync(temp, target)
   } catch (error) {
     fs.rmSync(temp, { force: true })
     throw error
@@ -316,32 +431,51 @@ export function runProgram(file, args, { cwd, env, timeoutMs = 60000 } = {}) {
   })
 }
 
+// An error that carries the backup made before it, so it is always shown.
+const withBackup = (message, backup) => Object.assign(new Error(message), { backup })
+const sameJson = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null)
+const cliOutput = (result) => (result.stderr || result.stdout).trim().slice(0, 300)
+
 async function applyClaude(plan, { dir, env, run }) {
+  // The entry may have changed since the plan was shown: only change what was shown.
+  if (!sameJson(claudeEntries(dir, env)[plan.scope], plan.before))
+    throw new Error(`The shapewall entry in ${plan.shownFile} changed while Shapewall was asking; run agent setup again`)
+  // Backups of ~/.claude.json beside it (the newest 3); of a project's .mcp.json outside the project.
+  const backup =
+    plan.scope === 'project'
+      ? backupFile(plan.file, { into: backupDir(env), name: projectBackupName(dir), keep: 3 })
+      : backupFile(plan.file, { keep: 3 })
   if (plan.scope === 'project' && !plan.cli) {
     // No claude CLI: .mcp.json directly, every other server kept.
     const data = readJsonFile(plan.file) || {}
-    if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error(`${plan.file} is not a JSON object`)
+    if (!data || typeof data !== 'object' || Array.isArray(data)) throw withBackup(`${plan.file} is not a JSON object`, backup)
     data.mcpServers = data.mcpServers && typeof data.mcpServers === 'object' ? data.mcpServers : {}
     if (plan.action === 'remove') delete data.mcpServers[SERVER_NAME]
     else data.mcpServers[SERVER_NAME] = plan.after
-    const backup = backupFile(plan.file)
     writeAtomic(plan.file, `${JSON.stringify(data, null, 2)}\n`)
     return { backup }
   }
-  const backup = backupFile(plan.file)
   const claude = (args) => run(plan.cli, ['mcp', ...args], { cwd: dir, env })
   if (plan.action === 'remove' || plan.action === 'update') {
     const result = await claude(['remove', '-s', plan.scope, SERVER_NAME])
-    if (result.code !== 0) throw new Error(`claude mcp remove failed: ${(result.stderr || result.stdout).trim().slice(0, 300)}`)
+    if (result.code !== 0) throw withBackup(`claude mcp remove failed: ${cliOutput(result)}`, backup)
   }
   if (plan.action === 'add' || plan.action === 'update') {
     const result = await claude(['add-json', '-s', plan.scope, SERVER_NAME, JSON.stringify(plan.after)])
-    if (result.code !== 0) throw new Error(`claude mcp add-json failed: ${(result.stderr || result.stdout).trim().slice(0, 300)}`)
+    if (result.code !== 0) {
+      let restored = ''
+      if (plan.action === 'update' && plan.before) {
+        // Put the old entry back, so a failed update does not leave no server at all.
+        const back = await claude(['add-json', '-s', plan.scope, SERVER_NAME, JSON.stringify(plan.before)])
+        restored = back.code === 0 ? ' The old entry was put back.' : ` Putting the old entry back failed too: ${cliOutput(back)}.`
+      }
+      throw withBackup(`claude mcp add-json failed: ${cliOutput(result)}.${restored}`, backup)
+    }
   }
   // Read back from the file (not `claude mcp get`, which starts the server).
   const now = claudeEntries(dir, env)[plan.scope]
   const ok = plan.action === 'remove' ? !now : sameServer(now, plan.after)
-  if (!ok) throw new Error(`Claude Code's ${plan.scope} scope does not show the change in ${plan.shownFile}`)
+  if (!ok) throw withBackup(`Claude Code's ${plan.scope} scope does not show the change in ${plan.shownFile}`, backup)
   return { backup }
 }
 
@@ -355,7 +489,11 @@ async function applyCodex(plan, { env, run }) {
   }
   if (current !== plan.source) throw new Error(`${plan.shownFile} changed while Shapewall was asking; run agent setup again`)
   const backup = backupFile(plan.file)
-  writeAtomic(plan.file, plan.text)
+  try {
+    writeAtomic(plan.file, plan.text)
+  } catch (error) {
+    throw withBackup(error.message, backup)
+  }
   let checked = null
   if (plan.cli && plan.action !== 'remove') {
     // `codex mcp get --json` reads the entry without starting the server.
@@ -379,7 +517,7 @@ export async function applySetup({ plans }, { dir, env = process.env, run = runP
       const done = plan.app === 'claude' ? await applyClaude(plan, { dir, env, run }) : await applyCodex(plan, { env, run })
       results.push({ app: plan.app, ok: true, action: plan.action, ...done })
     } catch (error) {
-      results.push({ app: plan.app, ok: false, action: plan.action, error: error.message })
+      results.push({ app: plan.app, ok: false, action: plan.action, error: error.message, backup: error.backup || null })
     }
   }
   return results

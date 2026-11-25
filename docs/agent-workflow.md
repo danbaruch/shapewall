@@ -37,15 +37,26 @@ steps, and that comment text is untrusted. It holds no ports, paths, names or to
 | `CLAUDE.md`     | `CLAUDE.md`                                                                                                        |
 | both            | `AGENTS.md`; `CLAUDE.md` also gets the section when it does not import `AGENTS.md` already                         |
 
-Shapewall changes only the text between the markers, keeps the file's line endings and never writes through a symbolic link (a
-`CLAUDE.md` that links to `AGENTS.md` already reads it). `init` writes it; the first `serve` or `capture` in a project with a config
-adds it once and says so, and records that in `.shapewall/agent-docs.json`, so a section you deleted is never added back. A CI run
-(`CI` set) never adds it. Turn it off with `init --no-agent-docs` or config `"agentDocs": false`; `shapewall agent docs --write`,
-`--remove` and `--print` do it by hand.
+Shapewall changes only the text between the markers, keeps every other line's line ending and never writes through a symbolic link
+(a `CLAUDE.md` that links to `AGENTS.md` already reads it). Markers inside fenced code blocks do not count, and a section from a
+newer Shapewall (a higher `v` in its start marker) is left as it is.
+
+Who writes it, and when:
+
+- `init` writes it. `init --no-agent-docs` writes `"agentDocs": false` into the config instead.
+- The first `serve` or `capture` creates `AGENTS.md` and `CLAUDE.md` only in a project that has neither file and no `"agentDocs"`
+  key in its config. An `AGENTS.md` or `CLAUDE.md` that is already there is never edited unasked: serve and capture print one line
+  naming `shapewall agent docs --write` instead (once per checkout). A CI run (`CI` set) does neither.
+- `shapewall agent docs --write` puts it in or refreshes it; `--print` prints it.
+- `shapewall agent docs --remove` takes it out and sets `"agentDocs": false` in the config. Commit the config with the change: it is
+  what keeps the section out of fresh clones and your teammates' checkouts (`.shapewall/` is not committed).
 
 **`shapewall agent setup`** registers the MCP server with each app it finds on PATH (`--claude` or `--codex` for one). It prints what
 it would change and asks first; `--yes` skips the question and `--dry-run` only prints. Each file is backed up before it changes
-(`<file>.shapewall-backup-<time>`), only the `shapewall` entry is touched, and running it again changes nothing.
+(`<file>.shapewall-backup-<time>`; for `~/.claude.json`, the newest 3 are kept; a project's `.mcp.json` is backed up outside the
+project, in `~/.local/state/shapewall/backups`, so a backup is never committed). Only the `shapewall` entry is touched, a symbolic
+link to a config file stays a link (the file it points to is changed), and running it again changes nothing. If Claude Code refuses
+the new entry during an update, the old one is put back; a failed write always names the backup.
 
 | App         | Where                                                                                                                                             |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -55,12 +66,22 @@ it would change and asks first; `--yes` skips the question and `--dry-run` only 
 
 The command it registers, first match: the project's own `node_modules/.bin/shapewall` (Claude Code local scope only), `shapewall` on
 PATH when it is this version or newer, else `npx -y shapewall@<this version>` (with `startup_timeout_sec = 60` for Codex, for the
-first download). A user-scope or Codex entry never names one project's install, and it runs `shapewall mcp`, which finds
-`shapewall.config.json` in the folder the agent runs in. A `shapewall` entry that is already there and different (another command,
-a hand-made `--config` path) is shown and replaced only with `--force`; a `tool_timeout_sec` or `env` you set stays. Codex's own
-`codex mcp add` replaces the whole entry and drops `tool_timeout_sec`, so Shapewall edits that one table of `config.toml` itself and
-leaves every other line as it was; an entry written as an inline table is refused, to edit by hand. Claude Code shows the same
-registrations in its desktop app's Code tab, and the Codex desktop app reads the same `config.toml`.
+first download). A user-scope or Codex entry never names one project's install: a `shapewall` on PATH in a `node_modules` folder,
+in npx's cache (`_npx`) or inside the project does not count, which matters because `npx shapewall agent setup` and `npm run` put
+those folders first on PATH. It runs `shapewall mcp`, which finds `shapewall.config.json` in the folder the agent runs in. On
+Windows, a local or user scope entry runs `npx.cmd` (or an npm `.cmd` shim) through `cmd /c`, as Claude Code requires; a
+`.mcp.json` always says plain `npx`, for everyone's system.
+
+An entry an older Shapewall registered (`npx -y shapewall@<older version>`, `npx shapewall`, or a `shapewall` program by path, with
+the same `mcp` arguments) is updated without asking for `--force`. A `shapewall` entry that is different (another command, a newer
+pinned version, a tag such as `@latest`, a hand-made `--config` path) is shown and replaced only with `--force`; a
+`tool_timeout_sec` or `env` you set stays. Claude Code's CLI cannot change an entry in place, so an update removes it and adds it
+again, and an `env` it has goes on the `claude mcp add-json` command line for that moment, where other programs on the machine can
+see it; Shapewall says so before it writes. Codex's own `codex mcp add` replaces the whole entry and drops `tool_timeout_sec`, so
+Shapewall edits that one table of `config.toml` itself and leaves every other line as it was: it reads the result back and refuses
+to write when any line outside the entry would change. An entry written as an inline table is refused, to edit by hand. Comment
+lines right above the next table stay with that table when the entry is removed. Claude Code shows the same registrations in its
+desktop app's Code tab, and the Codex desktop app reads the same `config.toml`.
 
 For a hosted board, `shapewall login --remote URL` first, then `shapewall agent setup --remote URL`: it registers
 `shapewall mcp --remote URL`, which signs in with the saved login. No token goes into any agent config. `--remove` takes the

@@ -7,9 +7,19 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { compareVersions, pathInstall, projectInstall, resolveShapewallCommand } from '../src/shapewall-command.js'
-import { keyParts, parseValue, readServer, removeServer, scanToml, setServer } from '../src/codex-toml.js'
-import { claudeEntries, lineDiff, planSetup } from '../src/agent-setup.js'
+import { execFileSync } from 'node:child_process'
+import { compareVersions, pathInstall, projectInstall, resolveShapewallCommand, skipPathDir } from '../src/shapewall-command.js'
+import { checkEdit, keyParts, parseValue, readServer, removeServer, scanToml, setServer } from '../src/codex-toml.js'
+import {
+  applySetup,
+  backupDir,
+  claudeCommand,
+  claudeEntries,
+  isOlderShapewall,
+  lineDiff,
+  planSetup,
+  pruneBackups,
+} from '../src/agent-setup.js'
 import { agentSetupCommand } from '../src/cli/agent-setup-command.js'
 import { saveCredential } from '../src/remote/credentials.js'
 import { tempDir } from './helpers.js'
@@ -410,4 +420,301 @@ test('agent setup: no app found, no config, --json', async () => {
 test('planSetup picks the apps found: codex counts when its config folder exists without the CLI', () => {
   const box = machine('setup-pick', { claude: false, codex: false })
   assert.deepEqual(planSetup({ dir: box.dir, version: VERSION, env: box.env }).apps, ['codex'])
+})
+
+// ---- review fixes (PR 23)
+
+// A shapewall package claiming `version`, installed the way npm does into <root>/node_modules
+// (bin linked from node_modules/.bin). Returns the .bin folder.
+function npmInstall(root, version) {
+  const pkg = path.join(root, 'node_modules', 'shapewall')
+  fs.mkdirSync(path.join(pkg, 'bin'), { recursive: true })
+  fs.writeFileSync(path.join(pkg, 'package.json'), JSON.stringify({ name: 'shapewall', version }))
+  fs.writeFileSync(path.join(pkg, 'bin', 'shapewall.js'), '#!/bin/sh\necho not this one\n', { mode: 0o755 })
+  const bin = path.join(root, 'node_modules', '.bin')
+  fs.mkdirSync(bin, { recursive: true })
+  fs.symlinkSync('../shapewall/bin/shapewall.js', path.join(bin, 'shapewall'))
+  return bin
+}
+
+test('global reach never names a project install or the npx cache, with PATH built the way npm exec and npx -y build it', () => {
+  const box = machine('resolve-npm-exec', { claude: false, shapewall: '99.0.0' })
+  // A monorepo: the project inside a workspace root, each with its own install (newer than this version).
+  const workspace = path.join(box.root, 'workspace')
+  const dir = path.join(workspace, 'packages', 'app')
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(path.join(dir, 'shapewall.config.json'), '{}')
+  const ownBin = npmInstall(dir, '99.0.0')
+  const rootBin = npmInstall(workspace, '99.0.0')
+  // npx -y: ~/.npm/_npx/<hash>/node_modules/.bin goes first.
+  const npxBin = npmInstall(path.join(box.home, '.npm', '_npx', '0123456789abcdef'), '99.0.0')
+  // A folder of scripts inside the project.
+  const scripts = path.join(dir, 'bin')
+  fs.mkdirSync(scripts)
+  fs.symlinkSync(path.join(ownBin, 'shapewall'), path.join(scripts, 'shapewall'))
+  // npm exec / npm run: <project>/node_modules/.bin, then every ancestor's, then npm's node-gyp-bin, then PATH.
+  const ancestors = []
+  for (let at = path.join(dir, 'packages'); ; at = path.dirname(at)) {
+    ancestors.push(path.join(at, 'node_modules', '.bin'))
+    if (path.dirname(at) === at) break
+  }
+  const npmExec = [npxBin, ownBin, path.join(dir, 'packages', 'node_modules', '.bin'), ...ancestors, scripts]
+  assert.ok(npmExec.includes(rootBin))
+  const gyp = path.join(box.root, 'npm', 'node_modules', '@npmcli', 'run-script', 'lib', 'node-gyp-bin')
+  const pick = (reach, PATH) => resolveShapewallCommand({ projectDir: dir, version: VERSION, reach, env: { ...box.env, PATH } }).command
+  const npx = 'npx'
+  assert.equal(pick('global', [...npmExec, gyp].join(':')), npx)
+  // The real global install after them is the one named.
+  assert.equal(pick('global', [...npmExec, gyp, box.bin].join(':')), path.join(box.bin, 'shapewall'))
+  // Local reach: the project's own install first, as before; the npx cache never.
+  assert.equal(pick('local', [npxBin, box.bin].join(':')), path.join(ownBin, 'shapewall'))
+  fs.rmSync(path.join(dir, 'node_modules'), { recursive: true })
+  assert.equal(pick('local', [npxBin].join(':')), npx)
+  // Through a symbolic link to the cache too.
+  const linked = path.join(box.root, 'cache-link')
+  fs.symlinkSync(npxBin, linked)
+  assert.equal(pick('local', linked), npx)
+  // And what agent setup writes for Codex from inside `npx shapewall agent setup`.
+  const plan = planSetup({ dir, flags: { codex: true }, version: VERSION, env: { ...box.env, PATH: [npxBin, rootBin, gyp].join(':') } })
+  assert.deepEqual(plan.plans[0].after.args, ['-y', `shapewall@${VERSION}`, 'mcp'])
+  // Windows paths: the cache and node_modules are spotted there too.
+  assert.equal(skipPathDir('C:\\Users\\me\\AppData\\Local\\npm-cache\\_npx\\ab12\\node_modules\\.bin', { platform: 'win32' }), true)
+  assert.equal(skipPathDir('C:\\work\\app\\node_modules\\.bin', { reach: 'global', platform: 'win32' }), true)
+  assert.equal(skipPathDir('C:\\work\\app\\node_modules\\.bin', { reach: 'local', platform: 'win32' }), false)
+  assert.equal(skipPathDir('C:\\Work\\App\\tools', { reach: 'global', projectDir: 'c:\\work\\app', platform: 'win32' }), true)
+  assert.equal(skipPathDir('C:\\Program Files\\nodejs', { reach: 'global', projectDir: 'c:\\work\\app', platform: 'win32' }), false)
+})
+
+test('Windows: project scope commits plain npx; local and user scope run .cmd programs through cmd /c', () => {
+  const box = machine('setup-windows', { codex: false })
+  const win = (scope) => planSetup({ dir: box.dir, flags: { claude: true, scope }, version: VERSION, env: box.env, platform: 'win32' })
+  const pinned = ['-y', `shapewall@${VERSION}`, 'mcp']
+  assert.deepEqual(
+    { command: win('project').plans[0].after.command, args: win('project').plans[0].after.args },
+    { command: 'npx', args: pinned },
+  )
+  for (const scope of ['local', 'user']) {
+    const { after } = win(scope).plans[0]
+    assert.deepEqual({ command: after.command, args: after.args }, { command: 'cmd', args: ['/c', 'npx.cmd', ...pinned] })
+  }
+  assert.equal(
+    resolveShapewallCommand({ projectDir: box.dir, version: VERSION, reach: 'project', platform: 'win32', env: {} }).command,
+    'npx',
+  )
+  assert.equal(
+    resolveShapewallCommand({ projectDir: box.dir, version: VERSION, reach: 'global', platform: 'win32', env: {} }).command,
+    'npx.cmd',
+  )
+  // An npm shim found by path: wrapped too; an .exe is not.
+  assert.deepEqual(claudeCommand({ command: 'C:\\npm\\shapewall.cmd', args: [] }, { scope: 'local', platform: 'win32' }), {
+    command: 'cmd',
+    args: ['/c', 'C:\\npm\\shapewall.cmd'],
+  })
+  assert.deepEqual(claudeCommand({ command: 'C:\\bin\\shapewall.exe', args: [] }, { scope: 'user', platform: 'win32' }), {
+    command: 'C:\\bin\\shapewall.exe',
+    args: [],
+  })
+  assert.deepEqual(claudeCommand({ command: 'npx', args: ['x'] }, { scope: 'local', platform: 'linux' }), { command: 'npx', args: ['x'] })
+  // A wrapped older registration is an upgrade, not a different server.
+  assert.equal(
+    isOlderShapewall({ command: 'cmd', args: ['/c', 'npx', '-y', 'shapewall@0.1.0', 'mcp'] }, { tail: ['mcp'], version: VERSION }),
+    true,
+  )
+})
+
+test('an older Shapewall entry is updated without --force; a newer, tagged or different one is not', async () => {
+  const older = (entry, tail = ['mcp']) => isOlderShapewall(entry, { tail, version: VERSION })
+  assert.equal(older({ command: 'npx', args: ['-y', 'shapewall@0.9.0', 'mcp'] }), true)
+  assert.equal(older({ command: 'npx', args: ['shapewall', 'mcp'] }), true)
+  assert.equal(older({ command: 'npx', args: ['-y', `shapewall@${VERSION}`, 'mcp'] }), true)
+  assert.equal(older({ command: 'npx', args: ['-y', 'shapewall@99.0.0', 'mcp'] }), false)
+  assert.equal(older({ command: 'npx', args: ['-y', 'shapewall@latest', 'mcp'] }), false)
+  assert.equal(older({ command: 'npx', args: ['-y', 'shapewall@0.9.0', 'mcp', '--remote', 'https://x.example'] }), false)
+  assert.equal(older({ command: 'npx', args: ['-y', 'other@0.9.0', 'mcp'] }), false)
+  assert.equal(older({ command: '/gone/bin/shapewall', args: ['mcp'] }), true)
+  assert.equal(older({ command: 'node', args: ['/x/shapewall.js', 'mcp'] }), false)
+  assert.equal(older({ type: 'http', command: 'npx', args: ['shapewall', 'mcp'] }), false)
+
+  const box = machine('setup-upgrade', { shapewall: '99.0.0' })
+  const shapewall = path.join(box.bin, 'shapewall')
+  fs.writeFileSync(
+    box.codexFile,
+    '[mcp_servers.shapewall]\ncommand = "npx"\nargs = ["-y", "shapewall@0.1.0", "mcp"]\ntool_timeout_sec = 600\n',
+  )
+  fs.writeFileSync(
+    box.claudeFile,
+    JSON.stringify({
+      projects: {
+        [fs.realpathSync(box.dir)]: { mcpServers: { shapewall: { type: 'stdio', command: '/old/shapewall', args: ['mcp'], env: {} } } },
+      },
+    }),
+  )
+  const result = await setup(box, { yes: true })
+  assert.equal(result.code, 0, result.out + result.err)
+  assert.doesNotMatch(result.out, /--force/)
+  assert.equal(claudeEntries(box.dir, box.env).local.command, shapewall)
+  assert.equal(readServer(fs.readFileSync(box.codexFile, 'utf8')).command, shapewall)
+})
+
+test('a symbolic link to config.toml or .mcp.json stays a link; the file it points to is changed', async () => {
+  const box = machine('setup-symlink', { claude: false, shapewall: '99.0.0' })
+  const dotfiles = path.join(box.root, 'dotfiles')
+  fs.mkdirSync(dotfiles)
+  fs.writeFileSync(path.join(dotfiles, 'config.toml'), 'model = "o3"\n', { mode: 0o640 })
+  fs.symlinkSync(path.join(dotfiles, 'config.toml'), box.codexFile)
+  const result = await setup(box, { codex: true, yes: true })
+  assert.equal(result.code, 0, result.err)
+  assert.equal(fs.lstatSync(box.codexFile).isSymbolicLink(), true)
+  assert.equal(readServer(fs.readFileSync(path.join(dotfiles, 'config.toml'), 'utf8')).command, path.join(box.bin, 'shapewall'))
+  assert.equal(fs.statSync(path.join(dotfiles, 'config.toml')).mode & 0o777, 0o640)
+  assert.deepEqual(
+    fs.readdirSync(dotfiles).filter((name) => name.endsWith('.tmp')),
+    [],
+  )
+
+  const bare = machine('setup-symlink-mcp', { claude: false, codex: false })
+  const shared = path.join(bare.root, 'shared.mcp.json')
+  fs.writeFileSync(shared, JSON.stringify({ mcpServers: { other: { command: 'x' } } }))
+  fs.symlinkSync(shared, path.join(bare.dir, '.mcp.json'))
+  const project = await setup(bare, { claude: true, scope: 'project', yes: true })
+  assert.equal(project.code, 0, project.err)
+  assert.equal(fs.lstatSync(path.join(bare.dir, '.mcp.json')).isSymbolicLink(), true)
+  assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(shared, 'utf8')).mcpServers), ['other', 'shapewall'])
+})
+
+test('a failed Claude Code update puts the old entry back and names the backup; a changed entry is not overwritten', async () => {
+  const box = machine('setup-rollback', { codex: false, shapewall: '99.0.0' })
+  const old = { type: 'stdio', command: '/mine/server', args: ['--x'], env: {} }
+  fs.writeFileSync(box.claudeFile, JSON.stringify({ projects: { [fs.realpathSync(box.dir)]: { mcpServers: { shapewall: old } } } }))
+  box.env.FAKE_CLAUDE_FAIL_COMMAND = path.join(box.bin, 'shapewall')
+  const result = await setup(box, { yes: true, force: true })
+  assert.equal(result.code, 1)
+  assert.match(result.err, /claude mcp add-json failed: add-json failed on purpose\. The old entry was put back\./)
+  assert.match(result.err, /Backup of the file before the change: ~\/\.claude\/\.claude\.json\.shapewall-backup-/)
+  assert.deepEqual(claudeEntries(box.dir, box.env).local, old)
+  delete box.env.FAKE_CLAUDE_FAIL_COMMAND
+
+  // The entry changes between the plan and the write: nothing is run.
+  const plan = planSetup({ dir: box.dir, flags: { claude: true, force: true }, version: VERSION, env: box.env })
+  const data = JSON.parse(fs.readFileSync(box.claudeFile, 'utf8'))
+  data.projects[fs.realpathSync(box.dir)].mcpServers.shapewall.args = ['--y']
+  fs.writeFileSync(box.claudeFile, JSON.stringify(data))
+  const calls = box.calls().length
+  const [applied] = await applySetup(plan, { dir: box.dir, env: box.env })
+  assert.equal(applied.ok, false)
+  assert.match(applied.error, /changed while Shapewall was asking/)
+  assert.equal(box.calls().length, calls)
+})
+
+test('backups: ~/.claude.json keeps the newest 3; a project .mcp.json is backed up outside the project', async () => {
+  const box = machine('setup-backups', { codex: false })
+  fs.writeFileSync(box.claudeFile, JSON.stringify({ numStartups: 1 }))
+  for (const [index, scope] of ['local', 'user', 'local', 'user', 'local'].entries()) {
+    const flags = { claude: true, scope, yes: true }
+    if (index > 1) flags.remove = true
+    await setup(box, flags)
+  }
+  const names = fs.readdirSync(box.env.CLAUDE_CONFIG_DIR).filter((name) => name.includes('.shapewall-backup-'))
+  assert.equal(names.length, 3)
+  // A backup someone named themselves is not Shapewall's to prune.
+  fs.writeFileSync(path.join(box.env.CLAUDE_CONFIG_DIR, '.claude.json.shapewall-backup-mine'), '{}')
+  pruneBackups(box.env.CLAUDE_CONFIG_DIR, '.claude.json', 1)
+  assert.deepEqual(
+    fs
+      .readdirSync(box.env.CLAUDE_CONFIG_DIR)
+      .filter((name) => name.includes('.shapewall-backup-'))
+      .sort(),
+    [names.sort().at(-1), '.claude.json.shapewall-backup-mine'].sort(),
+  )
+
+  fs.writeFileSync(path.join(box.dir, '.mcp.json'), JSON.stringify({ mcpServers: { other: { command: 'x' } } }))
+  const project = await setup(box, { claude: true, scope: 'project', yes: true })
+  assert.equal(project.code, 0, project.err)
+  assert.deepEqual(
+    fs.readdirSync(box.dir).filter((name) => name.includes('backup')),
+    [],
+  )
+  const kept = fs.readdirSync(backupDir(box.env))
+  assert.equal(kept.length, 1)
+  assert.match(kept[0], /^project-[0-9a-f]{8}\.mcp\.json\.shapewall-backup-/)
+  assert.ok(backupDir(box.env).startsWith(path.join(box.home, '.local', 'state', 'shapewall')))
+})
+
+test('a --force update says that the entry env values go on the claude command line', async () => {
+  const box = machine('setup-env-note', { codex: false, shapewall: '99.0.0' })
+  fs.writeFileSync(
+    box.claudeFile,
+    JSON.stringify({
+      projects: { [fs.realpathSync(box.dir)]: { mcpServers: { shapewall: { command: 'x', args: [], env: { A: '1' } } } } },
+    }),
+  )
+  const dry = await setup(box, { 'dry-run': true, force: true })
+  assert.match(dry.out, /keeps its env values; they are passed to "claude mcp add-json" on its command line/)
+})
+
+// The reviewer's two repro files: an escaped """ inside a multi-line basic string.
+const ESCAPED_A = '[a]\nx = """a \\""" b"""\n[mcp_servers.shapewall]\ncommand = "old"\n[b]\nw = """c \\""" d"""\n'
+const ESCAPED_B = '[notes]\nnote = """see \\""" here\n[mcp_servers.shapewall]\ncommand = "evil"\n# """\n[keep]\nk = 1\n'
+
+// Python's tomllib (3.11+) as the reference reader, when there is one; undefined otherwise.
+const HAS_TOMLLIB = (() => {
+  try {
+    execFileSync('python3', ['-I', '-c', 'import tomllib'], { stdio: 'ignore' })
+    return true
+  } catch {
+    return false
+  }
+})()
+function tomllib(text) {
+  if (!HAS_TOMLLIB) return undefined
+  const script = 'import sys,tomllib,json;print(json.dumps(tomllib.loads(sys.stdin.read())))'
+  return JSON.parse(execFileSync('python3', ['-I', '-c', script], { input: text, stdio: ['pipe', 'pipe', 'pipe'] }).toString())
+}
+
+test('codex TOML: \\""" inside """ does not end the string (the two review repros)', () => {
+  const set = { command: '/usr/bin/shapewall', args: ['mcp'], tool_timeout_sec: 600 }
+  // (a) the real entry sits between two such strings: found, updated and removed, the strings untouched.
+  assert.deepEqual(readServer(ESCAPED_A), { command: 'old' })
+  const setA = setServer(ESCAPED_A, set)
+  assert.equal(
+    setA,
+    '[a]\nx = """a \\""" b"""\n[mcp_servers.shapewall]\ncommand = "/usr/bin/shapewall"\nargs = ["mcp"]\ntool_timeout_sec = 600\n[b]\nw = """c \\""" d"""\n',
+  )
+  assert.equal(removeServer(ESCAPED_A), '[a]\nx = """a \\""" b"""\n[b]\nw = """c \\""" d"""\n')
+  // (b) a header inside a string is not our entry: --remove leaves the file alone, setting appends a real one.
+  assert.equal(readServer(ESCAPED_B), null)
+  assert.equal(removeServer(ESCAPED_B), ESCAPED_B)
+  const setB = setServer(ESCAPED_B, set)
+  assert.ok(setB.startsWith(ESCAPED_B))
+  const parsed = tomllib(setB)
+  if (parsed !== undefined) {
+    assert.deepEqual(parsed.mcp_servers.shapewall, set)
+    assert.match(parsed.notes.note, /command = "evil"/)
+    assert.deepEqual(tomllib(setA).b, { w: 'c """ d' })
+  }
+})
+
+test('codex TOML: every edit is read back; one that would change other lines is refused', () => {
+  assert.doesNotThrow(() => checkEdit('[x]\na = 1\n', '[x]\na = 1\n\n[mcp_servers.shapewall]\ncommand = "s"\n', { command: 's' }))
+  assert.throws(
+    () => checkEdit('[x]\na = 1\n', '[x]\na = 2\n\n[mcp_servers.shapewall]\ncommand = "s"\n', { command: 's' }),
+    /could not change \[mcp_servers\.shapewall\] safely \(it would change the line "a = 1"\)/,
+  )
+  assert.throws(() => checkEdit('[x]\na = 1\n', '[x]\na = 1\n', { command: 's' }), /the entry is missing/)
+  assert.throws(() => checkEdit('[x]\r\na = 1\r\n', '[x]\na = 1\n', { command: 's' }), /would change the line/)
+  assert.throws(() => checkEdit('a = 1\n', 'a = """\n', null), /does not read back/)
+})
+
+test('codex TOML: removing the entry keeps the comment above the next table; mixed line endings stay', () => {
+  const source = '[mcp_servers.shapewall]\ncommand = "a"\n\n# GitHub server: do not remove\n[mcp_servers.github]\ncommand = "gh"\n'
+  assert.equal(removeServer(source), '# GitHub server: do not remove\n[mcp_servers.github]\ncommand = "gh"\n')
+  // A comment above our own subtable is ours.
+  assert.equal(
+    removeServer('[mcp_servers.shapewall]\ncommand = "a"\n# env\n[mcp_servers.shapewall.env]\nA = "1"\n[k]\nx = 1\n'),
+    '[k]\nx = 1\n',
+  )
+  const mixed = '# top\r\nmodel = "x"\n\n[mcp_servers.shapewall]\r\ncommand = "a"\r\n\r\n[keep]\nk = 1\r\n'
+  const set = setServer(mixed, { command: 'b', tool_timeout_sec: 600 })
+  assert.equal(set, '# top\r\nmodel = "x"\n\n[mcp_servers.shapewall]\r\ncommand = "b"\r\ntool_timeout_sec = 600\r\n\r\n[keep]\nk = 1\r\n')
+  assert.equal(removeServer(mixed), '# top\r\nmodel = "x"\n\n[keep]\nk = 1\r\n')
 })

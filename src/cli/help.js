@@ -31,7 +31,8 @@ export const SECTIONS = {
       --force               overwrite an existing config
       --ci                  write .github/workflows/shapewall.yml (capture on every pull request) beside
                             the config; an existing config is kept, --force replaces only the workflow
-      --no-agent-docs       do not add the Shapewall section to AGENTS.md (see agent docs)
+      --no-agent-docs       do not add the Shapewall section to AGENTS.md, and write "agentDocs": false
+                            into the config so serve and capture do not either (see agent docs)
                             exit code: 0 config written (a warning when the app did not answer: home page only),
                             2 the address answered but not with a page (check --base-url), 1 error`,
   sitemap: `  sitemap [URL|FILE]        add the pages of a sitemap.xml (or sitemap index) to the config
@@ -148,12 +149,15 @@ export const SECTIONS = {
                             Codex has no scope: ~/.codex/config.toml, every project, tool_timeout_sec 600
       --remote URL          a hosted board: registers "shapewall mcp --remote URL" (needs shapewall login first;
                             no token is written)
-      --force               replace a shapewall entry that is different
+      --force               replace a shapewall entry that is different (an older Shapewall's entry
+                            is updated without it)
       --dry-run             show the changes, write nothing      --yes   write without asking
       --remove              take the shapewall entries out       --json  machine-readable
   agent docs                where the Shapewall section for coding agents is (AGENTS.md, CLAUDE.md)
-      --write | --remove | --print   put it in (or refresh it), take it out, print it. init and the
-                            first serve or capture add it once; config "agentDocs": false turns that off
+      --write | --remove | --print   put it in (or refresh it), take it out (and set "agentDocs": false
+                            in the config, so it stays out in every clone), print it. The first serve or
+                            capture creates both files only in a project with neither and no "agentDocs"
+                            in the config; an existing AGENTS.md or CLAUDE.md is never edited unasked
   agent connect             make this machine's coding agent an agent of a hosted project: members chat with it
                             on the board, and it reads this folder and answers. Read and answer only unless this
                             machine says more (--approvals). The first run is approved in the browser by an admin.

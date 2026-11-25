@@ -31,6 +31,11 @@ if (name === 'claude') {
     servers = data.projects[fs.realpathSync(process.cwd())].mcpServers ||= {}
   } else servers = data.mcpServers ||= {}
   if (action === 'add-json') {
+    // A failure on demand: add-json of an entry with this command fails.
+    if (process.env.FAKE_CLAUDE_FAIL_COMMAND && JSON.parse(json).command === process.env.FAKE_CLAUDE_FAIL_COMMAND) {
+      process.stderr.write('add-json failed on purpose\n')
+      process.exit(1)
+    }
     if (servers[server]) {
       process.stderr.write(`MCP server ${server} already exists in ${scope} config\n`)
       process.exit(1)
