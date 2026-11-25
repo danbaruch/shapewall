@@ -80,7 +80,9 @@ export function attachmentPath(config, boardId, name) {
   return fs.existsSync(file) ? file : null
 }
 
-const META_FIELDS = ['profileId', 'owner', 'title', 'titleSource', 'createdAt']
+// `respond`: when a shared thread's agent answers ("mention" or "always",
+// src/agent/triggers.js); left out, the board's default applies.
+const META_FIELDS = ['profileId', 'owner', 'title', 'titleSource', 'createdAt', 'respond']
 
 // The whole stored thread. Fields a file does not have are left out, so an
 // old file reads exactly as before (plus `branches: []`).
@@ -434,6 +436,13 @@ export function attachmentData(config, boardId, attachment) {
 export async function markThreadOwnerControls(config, boardId, threadId) {
   return updateThread(config, boardId, threadId, (messages, thread) => {
     thread.ownerControls = true
+  })
+}
+
+// When a shared thread's agent answers: "mention" or "always".
+export async function setThreadRespond(config, boardId, threadId, mode) {
+  return updateThread(config, boardId, threadId, (messages, thread) => {
+    thread.respond = mode === 'always' ? 'always' : 'mention'
   })
 }
 

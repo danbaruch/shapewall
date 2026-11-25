@@ -393,7 +393,14 @@ export function cleanHello(body) {
       images: false,
       version: input.version || null,
       maxTurns,
-      policy: { audience: policy.audience === 'owner' ? 'owner' : 'server', approvals, commands, auto },
+      policy: {
+        audience: policy.audience === 'owner' ? 'owner' : 'server',
+        approvals,
+        commands,
+        auto,
+        // Whether a thread set to answer every message is honored there ("thread"), or mentions only.
+        respond: policy.respond === 'thread' ? 'thread' : 'mention',
+      },
     },
     // Kept in memory beside the agent's presence (agent-presence.js), never in the database.
     instructions: cleanInstructions(input.instructions),
@@ -711,11 +718,13 @@ export function mountAgentLink(
             },
           )
         : null
+      const thread = store.thread(req.project.id, row.board_id, row.thread_id)
       const job = buildJob({
         ctx,
         turn: row,
         agent: req.agent,
         rows,
+        respond: thread?.respond_mode,
         // The same rule as sending it a comment: in its audience, and
         // trusted by the project's agent policy.
         inAudience: (userId) =>

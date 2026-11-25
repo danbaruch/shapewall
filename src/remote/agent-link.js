@@ -32,6 +32,7 @@ import { tokensToText } from '../agent/plain-text.js'
 import { runTurn } from '../agent/run.js'
 import { git } from '../agent/starter/worktree.js'
 import { instructionsStatus, loadInstructions } from '../agent/instructions.js'
+import { agentHandles, shouldRespond } from '../agent/triggers.js'
 import { FixRefusal, dropFixFolder, dropHeld, finishFix, heldDiff, heldSummary, prepareFix, pushFix, readHeld } from './agent-fix.js'
 import { JobError, TURN_ID_RE, cleanJob, jobConversation } from './agent-job.js'
 import { RemoteError, badTokenMessage, readBounded } from './remote.js'
@@ -168,7 +169,19 @@ export async function runAgentLink({
 }) {
   const limit = { ...LINK_DEFAULTS, ...limits }
   // Whatever is missing reads as the narrowest: no approvals, nothing automatic.
-  const policy = { audience: 'server', approvals: 'none', commands: [], auto: [], allowPaths: [], base: null, remote: null, ...givenPolicy }
+  const policy = {
+    audience: 'server',
+    approvals: 'none',
+    commands: [],
+    auto: [],
+    allowPaths: [],
+    base: null,
+    remote: null,
+    respond: 'thread',
+    ...givenPolicy,
+  }
+  // Anything but "thread" reads as mentions only (src/agent/triggers.js).
+  policy.respond = policy.respond === 'thread' ? 'thread' : 'mention'
   if (!editBackend || !fix) policy.approvals = 'none'
   const api = createLinkClient({ origin, token, source, fetchImpl })
   const maxTurns = Math.min(Math.max(Number(hello.maxTurns) || 2, 1), 4)
@@ -423,6 +436,33 @@ export async function runAgentLink({
         )
         if (job.turn.kind !== 'chat') await answerComment(job, null)
         return
+      }
+      // This machine's own trigger rule (src/agent/triggers.js): a chat turn in
+      // a shared thread needs an @mention of this agent, Send to agent, or a
+      // thread set to answer every message where this machine honors that
+      // (--respond thread). A message an agent wrote never starts a turn here.
+      // The server applies the same rule first; this is the ceiling.
+      if (job.turn.kind === 'chat') {
+        const decision = shouldRespond({
+          threadId: job.turn.thread,
+          message: job.messages.at(-1),
+          handles: agentHandles({ name: job.agent.name }),
+          respond: job.turn.trigger.respond,
+          explicit: job.turn.trigger.ask,
+          machine: policy.respond,
+        })
+        if (!decision.ok) {
+          log(`turn ${id}: refused (${decision.reason}: not for this agent by this machine's trigger rule)`)
+          await finish(
+            refused(
+              decision.reason === 'machine_mention_only'
+                ? 'This agent answers in shared threads only when someone @mentions it or presses Send to agent (set on its own machine).'
+                : 'This message was not for this agent: in a shared thread it answers an @mention or Send to agent.',
+              'not_addressed',
+            ),
+          )
+          return
+        }
       }
       const fixing = job.turn.kind === 'fix'
       // "Push this fix", asked again for a fix this machine holds back.
@@ -768,7 +808,8 @@ export async function runAgentLink({
           if (!Number.isSafeInteger(id) || id < 1) continue
           // Only a comment sent to this agent by name: "any agent" work
           // stays with the watchers that can fix it.
-          if (!item.dispatchable || item.authorGuest || item.agentId !== agent.id) continue
+          // Never a comment an agent wrote (src/agent/triggers.js), whatever the server says.
+          if (!item.dispatchable || item.authorGuest || item.authorAgent || item.agentId !== agent.id) continue
           // Taken already, its turn not opened (the answer was lost, or this
           // process restarted in between): opened now. The server opens at
           // most one turn for it, and only for the agent that holds it.
@@ -842,7 +883,7 @@ export async function runAgentLink({
         commands: policy.approvals !== 'none' && policy.commands.length > 0,
       },
       // What this machine allows, for the board to show. The server can only narrow it.
-      policy: { audience: policy.audience, approvals: policy.approvals, commands: policy.commands, auto: policy.auto },
+      policy: { audience: policy.audience, approvals: policy.approvals, commands: policy.commands, auto: policy.auto, respond: policy.respond },
       // The instruction files a chat session reads: names, sizes and short hashes, never content.
       instructions: instructions?.current() || [],
       // Counts up with every hello of this process: the server keeps the newest list.

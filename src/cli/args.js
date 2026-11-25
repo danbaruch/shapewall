@@ -231,6 +231,7 @@ export const COMMAND_FLAGS = {
     'print',
     'instructions',
     'agent-config',
+    'respond',
     ...REMOTE_FLAGS,
   ],
   github: ['board', 'json'],

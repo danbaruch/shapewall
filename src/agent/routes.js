@@ -80,6 +80,7 @@ import { uploadHashes } from './identity.js'
 import { readIcon } from './icon-store.js'
 import { finishFix, projectChanged, projectSnapshot, stopReason } from './feedback-loop.js'
 import { ownerMcpServers } from './owner-mcp.js'
+import { agentHandles, respondLine, shouldRespond } from './triggers.js'
 import { RUN_MS_MAX, commentIdOf, runTurn } from './run.js'
 import { beginTurnChanges, finishTurnChanges, ignoredPaths, starterSummary, undoFiles, undoStarterBranch } from './turn-changes.js'
 import { latestChange, withUndoAvailability } from './undo-state.js'
@@ -104,6 +105,7 @@ import {
   replaceAnswer,
   restoreVersion,
   setThreadProfile,
+  setThreadRespond,
   threadKind,
   titleOf,
   validateUserMessage,
@@ -303,6 +305,36 @@ export function agentRouter({
   const ownerGate = Boolean(settingsToken) && !shared
   const chatNeedsOwner = (req, current = settings()) => ownerGate && current.backend === 'acp' && current.configured && !agentOwner(req)
   router.chatNeedsOwner = chatNeedsOwner
+  // When a thread's agent answers (src/agent/triggers.js). A private chat:
+  // every message. A board only its owner chats on: its board chat and
+  // comment threads are the owner and the agent alone, so they answer every
+  // message too, unless the owner sets one to mentions only. A board shared
+  // with --chat: the board chat and comment threads are shared with
+  // everyone who reaches it, and answer an @mention or Send to agent only.
+  const respondOf = (thread) =>
+    threadKind(thread.id) === 'chat' ? 'always' : shared ? 'mention' : thread.respond === 'mention' ? 'mention' : 'always'
+  const respondView = (req, thread, current) => {
+    const isShared = threadKind(thread.id) !== 'chat'
+    const mode = respondOf(thread)
+    const owner = !shared && ownerWritesFor(req)
+    const name = current?.configured ? current.label : null
+    return {
+      mode,
+      shared: isShared,
+      stored: isShared ? mode : null,
+      machine: 'thread',
+      handles: agentHandles({ name }),
+      line: respondLine({ threadId: thread.id, respond: mode, name: name || 'The agent' }),
+      note: !isShared
+        ? null
+        : shared
+          ? 'This board is shared with --chat: its shared threads answer an @mention or Send to agent only.'
+          : owner
+            ? null
+            : 'Only the owner sets this (the private owner link, or a paired device).',
+      canSet: { always: isShared && owner, mention: isShared && owner },
+    }
+  }
   // The same state fields /status reports, for /api/info.
   router.agentStatus = () => agentStatus(settings())
   const ownerNeeded = (res) =>
@@ -840,6 +872,39 @@ export function agentRouter({
       const editOf = req.body?.editOf ?? null
       if (editOf !== null && (typeof editOf !== 'string' || editOf.length > 64 || fix || previous))
         return fail(res, 400, 'bad_edit', 'editOf is the id of one of your messages in this thread.')
+      // People talking in a shared thread (src/agent/triggers.js): a message
+      // that does not @mention the agent and is not Send to agent is kept and
+      // shown, and no turn starts. Fix and Regenerate are explicit actions.
+      if (!fix && !previous) {
+        const thread = readThread(config, board.id, threadId)
+        const decision = shouldRespond({
+          threadId,
+          message: input,
+          handles: agentHandles({ name: current.configured ? current.label : null }),
+          respond: respondOf(thread),
+          explicit: req.body?.ask === true,
+        })
+        if (!decision.ok) {
+          if (editOf !== null && !controlsAllowed(req, board, threadId)) return controlDenied(res)
+          const userMessage = await appendUserMessage(config, board.id, threadId, input, {
+            quotaBytes: limit.chatBytesMax,
+            viewer: res.locals.viewer,
+            editOf,
+            ownerControls: ownerWrites,
+          })
+          if (editOf !== null) resetSessions(`${board.id}/${threadId}`)
+          res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' })
+          res.write(`event: user\ndata: ${JSON.stringify({ message: userMessage })}\n\n`)
+          res.write(
+            `event: posted\ndata: ${JSON.stringify({
+              reason: decision.reason,
+              line: respondLine({ threadId, respond: respondOf(thread), name: current.configured ? current.label : 'The agent' }),
+            })}\n\n`,
+          )
+          res.end()
+          return
+        }
+      }
       // An edit or a new answer rewrites the thread (and moves an owner
       // turn's answer, with its Undo, into an earlier version): like
       // bringing back a version, an owner session's thread needs the owner.
@@ -1478,6 +1543,8 @@ export function agentRouter({
           ownerWrites: ownerWritesFor(req),
           fixWithAgent: allowCapture && ownerWritesFor(req) && current.backend === 'acp',
         },
+        // When its agent answers: every message, or an @mention or Send to agent.
+        respond: respondView(req, thread, current),
         running: runs.has(`${board.id}/${threadId}`),
         ratings: myRatings(config, board.id, threadId, raterOf(req.shapewallAccess, res.locals.viewer)),
       })
@@ -1813,7 +1880,27 @@ export function agentRouter({
     findThread,
     handle(async (req, res, board, threadId) => {
       if (!controlsAllowed(req, board, threadId)) return controlDenied(res)
-      const { title, archived } = req.body || {}
+      const { title, archived, respond } = req.body || {}
+      if (respond !== undefined) {
+        // The owner sets when a shared thread's agent answers; a board shared
+        // with --chat answers mentions only, and a private chat every message.
+        if (!['mention', 'always'].includes(respond) || title !== undefined || archived !== undefined)
+          return fail(res, 400, 'bad_thread_info', 'Send { respond: "mention" | "always" } on its own.')
+        if (threadKind(threadId) === 'chat')
+          return fail(res, 400, 'private_chat', 'A private chat answers every message already. This is for shared threads.')
+        if (shared || !ownerWritesFor(req) || !sameOriginWrite(req))
+          return fail(
+            res,
+            403,
+            'respond_owner',
+            shared
+              ? 'On a board shared with --chat, shared threads answer an @mention or Send to agent only.'
+              : 'Only the owner sets when the agent answers here (the private owner link, or a paired device).',
+          )
+        await setThreadRespond(config, board.id, threadId, respond)
+        const thread = readThread(config, board.id, threadId)
+        return res.json({ id: threadId, respond: respondView(req, thread, settings(thread.profileId)) })
+      }
       if ((title !== undefined && typeof title !== 'string') || (archived !== undefined && typeof archived !== 'boolean'))
         return fail(res, 400, 'bad_thread_info', 'Send { title: string } or { archived: true | false }.')
       res.json(await changeThreadInfo(config, board.id, threadId, { title, archived }))

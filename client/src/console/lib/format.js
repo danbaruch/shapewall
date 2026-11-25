@@ -257,6 +257,8 @@ export function describeAudit(entry) {
       return 'deleted a chat'
     case 'chat_thread_agent_changed':
       return 'changed the agent of a chat'
+    case 'chat_thread_respond':
+      return d.respond === 'always' ? 'set a shared chat to answer every message' : 'set a shared chat to answer mentions only'
     // Settings and exports.
     case 'agent_policy_changed':
       return `changed the agent policy of ${d.name || target}${Array.isArray(d.changed) && d.changed.length ? ` (${d.changed.join(', ')})` : ''}`

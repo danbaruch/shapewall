@@ -28,6 +28,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { runWatchCommand } from './watch-command.js'
 import { recaptureComment } from './agent/feedback-loop.js'
+import { isAgentAuthored } from './agent/triggers.js'
 import { getBoard } from './config.js'
 import { commentJson, feedbackContext, feedbackItem } from './feedback.js'
 import { acquireLock, readLock, releaseLock } from './lock.js'
@@ -123,7 +124,10 @@ export function commentEnv(config, board, item, commentFile) {
 // - newOnly: skip comments that already exist when the watcher starts
 // - claim: false hands out without claiming (no status, no lock; see above)
 // - mention: only comments that mention this handle ("agent"), so people can
-//   talk among themselves and tag the agent when a comment is ready for it
+//   talk among themselves and tag the agent when a comment is ready for it.
+//   Only what people wrote counts: an agent's reply that says "@agent" does
+//   not hand the comment out again. A comment an agent wrote is never handed
+//   out, with or without --mention.
 // - pollMs, debounceMs, timeoutMs (per command)
 // - out(line): JSON lines; log(line): progress
 export async function watchComments({
@@ -312,6 +316,9 @@ export async function watchComments({
   const scan = async () => {
     const context = feedbackContext(config, board)
     const candidates = listComments(config, board.id, { status: 'open', mention })
+      // An agent's own comment is never work for an agent (src/agent/triggers.js):
+      // an agent that pins "@agent check this" does not start another one.
+      .filter((comment) => !isAgentAuthored(comment))
       .filter((comment) => (claim ? comment.agentStatus === null : !handed.has(handedKey(comment))))
       .filter((comment) => comment.id > baseline && !running.has(comment.id))
       .sort((a, b) => a.id - b.id)

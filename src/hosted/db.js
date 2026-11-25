@@ -821,6 +821,17 @@ const MIGRATIONS = [
   WHERE json_valid(scopes) AND json_type(scopes) = 'array'
     AND EXISTS (SELECT 1 FROM json_each(api_tokens.scopes) AS j WHERE j.type = 'text' AND j.value = 'comment');
   `,
+  // 22. When a shared thread's agent answers (1.3.0). chat_threads.respond_mode
+  // is 'mention' (the default: only an @mention of the agent or Send to
+  // agent starts a turn) or 'always' (every message, set by the person who
+  // connected the thread's agent; src/agent/triggers.js). Private chats
+  // ignore it: they answer every message of their owner. Every thread
+  // starts as 'mention', so shared threads stop answering every message on
+  // upgrade. Additive; an older build ignores the column and answers every
+  // message again (docs/hosted.md, "Migration 22 and rollback").
+  `
+  ALTER TABLE chat_threads ADD COLUMN respond_mode TEXT NOT NULL DEFAULT 'mention';
+  `,
 ]
 
 export const openDatabase = (file) => openSqlite(file, migrate)

@@ -330,7 +330,8 @@ export function selectorPin({ selector: raw, map, mapFile = null, html, pageId, 
 }
 
 // `comments add --page ID --body TEXT [--viewport NAME] [--selector CSS] [--author NAME]`
-export async function addComment(config, board, flags, out, err = () => {}) {
+// `agent`: the MCP add_comment tool is calling (the comment is an agent's).
+export async function addComment(config, board, flags, out, err = () => {}, { agent = false } = {}) {
   const pageId = typeof flags.page === 'string' ? flags.page.trim() : ''
   const body = typeof flags.body === 'string' ? flags.body : ''
   if (!pageId || !body.trim())
@@ -363,7 +364,7 @@ export async function addComment(config, board, flags, out, err = () => {}) {
       board,
       { pageId, viewport, ...pin, body, author: authorFlag(flags, { dir: config.dir }), anchor },
       // The person at this machine, unless an agent's run is calling.
-      { owner: !runByAgent(process.env) },
+      { owner: !agent && !runByAgent(process.env), agent: agent === true || runByAgent(process.env) },
     )
   } catch (error) {
     if (error instanceof CommentError && error.code === 'invalid_anchor') {

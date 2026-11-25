@@ -122,7 +122,14 @@ function mentionData(ctx, comments, mention) {
 // read it (replies filtered to its audience), or null.
 // `commentVisible(comment)`: whether this agent may read that comment.
 // `approvals`: the approval rule in effect per kind of request, for a fix.
-export function buildJob({ ctx, turn, agent, rows, inAudience, asker, commentItem, commentVisible, approvals = null }) {
+// `respond`: the thread's stored setting ("mention" or "always"), for the
+// machine's own check of why this turn started (src/agent/triggers.js).
+export function buildJob({ ctx, turn, agent, rows: allRows, inAudience, asker, commentItem, commentVisible, approvals = null, respond = 'mention' }) {
+  // The conversation up to the message that started this turn, never past
+  // it: a message written while the turn waited for the machine is not the
+  // question (it may be people talking, or the next question, for later).
+  const at = allRows.findIndex((row) => row.id === turn.user_message_id)
+  const rows = at >= 0 ? allRows.slice(0, at + 1) : allRows
   const board = ctx.board
   const all = ctx.comments.list({})
   const comments = all.filter((comment) => !comment.authorGuest && commentVisible(comment))
@@ -170,6 +177,8 @@ export function buildJob({ ctx, turn, agent, rows, inAudience, asker, commentIte
     }
   })
   const commentNumber = /^comment-(\d+)$/.exec(turn.thread_id)?.[1]
+  // Why the turn started, as the server stored it with the message.
+  const asked = parse(rows.find((row) => row.id === turn.user_message_id) || {})
   // "Push this fix" names the fix it was asked on (chat-routes.js startPush).
   const pushed = turn.kind === 'push' ? parse(rows.find((row) => row.id === turn.user_message_id) || {}) : null
   const commit = typeof pushed?.commit === 'string' && COMMIT_RE.test(pushed.commit) ? pushed.commit : null
@@ -183,6 +192,11 @@ export function buildJob({ ctx, turn, agent, rows, inAudience, asker, commentIte
       thread: turn.thread_id,
       comment: commentNumber ? Number(commentNumber) : null,
       ...(commit ? { commit } : {}),
+      // What the machine checks before it answers a chat turn (agent-link.js).
+      trigger: {
+        ask: asked.ask === true || asked.fix === true || asked.push === true,
+        respond: respond === 'always' ? 'always' : 'mention',
+      },
     },
     agent: { id: agent.id, name: agent.name },
     // Who asked. `owner`: the person who connected this agent.

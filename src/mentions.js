@@ -23,10 +23,19 @@ export function extractMentions(text) {
   return found
 }
 
-// Everyone mentioned in a comment's body and its replies.
-export function commentMentions(comment) {
-  const found = extractMentions(comment?.body)
+// Whether an agent wrote this comment or reply (the marks every path sets;
+// src/agent/triggers.js isAgentAuthored is the full rule, this is its copy
+// for the places that must not import it).
+const byAgent = (item) =>
+  Boolean(item && (item.authorAgent === true || item.agent === true || item.starter === true || item.authorKind === 'agent'))
+
+// Everyone mentioned in a comment's body and its replies. `people: true`
+// counts only what people wrote: an agent's comment or reply never wakes an
+// agent (watch --mention, comment pickup), whoever it mentions.
+export function commentMentions(comment, { people = false } = {}) {
+  const found = people && byAgent(comment) ? [] : extractMentions(comment?.body)
   for (const reply of Array.isArray(comment?.replies) ? comment.replies : []) {
+    if (people && byAgent(reply)) continue
     for (const handle of extractMentions(reply?.body)) if (!found.includes(handle)) found.push(handle)
   }
   return found

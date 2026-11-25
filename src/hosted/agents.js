@@ -332,7 +332,16 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
       approvals !== 'none' && Array.isArray(policy.auto)
         ? policy.auto.filter((kind) => kind === 'edits' || (kind === 'commands' && commands.length > 0))
         : []
-    return { audience: policy.audience === 'owner' ? 'owner' : 'server', approvals, commands, auto }
+    // When it answers in a shared thread: "thread" honors a thread set to
+    // answer every message; "mention" (also an older machine that did not
+    // say) answers an @mention or Send to agent only (src/agent/triggers.js).
+    return {
+      audience: policy.audience === 'owner' ? 'owner' : 'server',
+      approvals,
+      commands,
+      auto,
+      respond: policy.respond === 'thread' ? 'thread' : 'mention',
+    }
   }
   // On a machine that takes approvals from the person who connected it
   // alone, "allow without asking" counts only when that same person set it:

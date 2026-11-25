@@ -114,13 +114,29 @@ export function createChatStore(t, { now = () => new Date() } = {}) {
     )
     return { row: thread(projectId, boardId, threadId), created: true }
   }
+  // A thread that changes agents answers mentions only again: "every
+  // message" is the choice of the person who connected the agent it was
+  // set for, never carried over to another agent (src/agent/triggers.js).
   function setAgent(projectId, boardId, threadId, agentId) {
-    t.run(`UPDATE chat_threads SET agent_id = :agent WHERE ${KEY}`, {
+    t.run(
+      `UPDATE chat_threads SET respond_mode = CASE WHEN agent_id IS :agent THEN respond_mode ELSE 'mention' END, agent_id = :agent WHERE ${KEY}`,
+      {
+        project: projectId,
+        board: boardId,
+        thread: threadId,
+        agent: agentId,
+      },
+    )
+  }
+  // When a shared thread's agent answers: "mention" or "always".
+  function setRespond(projectId, boardId, threadId, mode) {
+    t.run(`UPDATE chat_threads SET respond_mode = :mode WHERE ${KEY}`, {
       project: projectId,
       board: boardId,
       thread: threadId,
-      agent: agentId,
+      mode: mode === 'always' ? 'always' : 'mention',
     })
+    return thread(projectId, boardId, threadId)
   }
   function change(projectId, boardId, threadId, { title, archived }) {
     const row = thread(projectId, boardId, threadId)
@@ -454,6 +470,7 @@ export function createChatStore(t, { now = () => new Date() } = {}) {
     visible,
     ensure,
     setAgent,
+    setRespond,
     change,
     remove,
     messages,

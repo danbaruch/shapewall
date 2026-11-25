@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Lock } from 'lucide-react'
 import { api, fileUrl } from '../lib/api'
+import { RespondSetting } from './RespondSetting'
 import { cn } from '../lib/utils'
 import { useResource } from '../lib/hooks'
 import { useAgentsChanged } from '../lib/agentEvents'
@@ -453,7 +454,8 @@ export default function ChatPanel({
 
   // The composer's send: while a turn runs (or a message is still going
   // out), the message waits in the queue instead.
-  const send = (textValue = draft, fix = false) => {
+  // `ask`: Send to agent (a shared thread's agent answers that, or an @mention).
+  const send = (textValue = draft, fix = false, ask = false) => {
     // "/word" on its own is a command: a known one runs, an unknown one says
     // so instead of going to the agent; "//" sends text that starts with "/".
     const slash = fix ? null : slashInput(textValue, commands)
@@ -471,7 +473,7 @@ export default function ChatPanel({
       return
     }
     if (slash?.text) textValue = slash.text
-    const item = { text: String(textValue ?? '').trim(), fix, attachments, mentions, files }
+    const item = { text: String(textValue ?? '').trim(), fix, ask: ask === true, attachments, mentions, files }
     const empty = !fix && !item.text && !item.attachments.length && !item.mentions.length && !item.files.length
     if (empty || dictation.listening) return
     // A turn another tab started in this thread: the server takes one at a time.
@@ -486,7 +488,7 @@ export default function ChatPanel({
       setHelp(false)
       return
     }
-    submit(item.text, fix)
+    submit(item.text, fix, { ask: item.ask })
   }
   // Edit: the queued message back in the box (whatever is there stays, after it).
   const editQueued = (item) => {
@@ -873,6 +875,14 @@ export default function ChatPanel({
           settingsExtra={
             <>
               <AutoAllowSettings rules={allowRules[threadId]} onRevoke={revokeRule} touch={touch} />
+              <RespondSetting
+                boardId={boardId}
+                threadId={threadId}
+                respond={selectedThread?.respond || null}
+                onChanged={() => thread.refetch()}
+                touch={touch}
+                disabled={running}
+              />
               {agent?.ownerWrites ? <BranchModeToggle touch={touch} disabled={running} /> : null}
             </>
           }
@@ -1075,6 +1085,9 @@ export default function ChatPanel({
               optionsLoading={agentOptions.loading}
               onChooseOption={agentOptions.choose}
               onSubmit={send}
+              // A shared thread that answers mentions only: Send to agent, and the line that says so.
+              respond={selectedThread?.respond || null}
+              onAsk={() => send(draft, false, true)}
               onStop={stop}
               onMic={() => {
                 if (dictation.listening) dictation.stop()

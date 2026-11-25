@@ -600,6 +600,7 @@ export function createMcpServer({
           { page, body, author: signed(author).author, ...(viewport ? { viewport } : {}), ...(selector !== undefined ? { selector } : {}) },
           () => {},
           (line) => notes.push(line),
+          { agent: true },
         )
         return json(commentJson(target, { ...item, link: links.comment(target.id, item) }, notes.length ? { notes } : {}))
       }),

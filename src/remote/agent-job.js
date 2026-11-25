@@ -101,6 +101,9 @@ export function cleanJob(raw) {
       comment,
       // "Push this fix": the commit of the fix that was shown (null: the newest held one).
       ...(kind === 'push' ? { commit: COMMIT_RE.test(String(turn.commit || '')) ? turn.commit : null } : {}),
+      // Why the server says it started (src/agent/triggers.js): Send to agent
+      // pressed, and the thread's setting. Anything unclear reads narrow.
+      trigger: { ask: turn.trigger?.ask === true, respond: turn.trigger?.respond === 'always' ? 'always' : 'mention' },
     },
     agent: { name: text(raw.agent?.name, 60) || null },
     asker: { name: text(raw.asker?.name, 80) || null, handle: text(raw.asker?.handle, 40) || null, owner: raw.asker?.owner === true },

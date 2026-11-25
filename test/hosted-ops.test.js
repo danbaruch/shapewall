@@ -701,7 +701,7 @@ test('migration 17 (sign-in) and 16 (usage layouts) reach a database in either o
   const file = path.join(tempDir('migration-17'), 'shapewall.db')
   let db = await openDatabase(file)
   assert.deepEqual(versions(db).slice(-7), [15, 16, 17, 18, 19, 20, 21])
-  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 21)
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 22)
   // 17 first, 16 later: a database made by this branch before 16 was merged (16 absent, 17 ran).
   db.exec('DROP TABLE usage_layouts; DELETE FROM schema_migrations WHERE version = 16;')
   assert.deepEqual(versions(db).slice(-6), [15, 17, 18, 19, 20, 21])
@@ -732,7 +732,7 @@ test('migration 17 (sign-in) and 16 (usage layouts) reach a database in either o
   db = await openDatabase(file)
   assert.equal(layoutsTable(db), 1)
   assert.deepEqual(versions(db).slice(-7), [15, 16, 17, 18, 19, 20, 21])
-  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 21)
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 22)
   assert.ok(columns(db, 'users').includes('tailnet_user_id'))
   assert.ok(columns(db, 'workspaces').includes('step_up'))
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'server_settings'").get().n, 1)
@@ -778,7 +778,7 @@ test('a database from an early build of this release, where the sign-in migratio
   // This build opens it: no "duplicate column", 17 marked, and the real 16 (the layouts) runs once.
   db = await openDatabase(file)
   assert.deepEqual(versions(db).slice(-7), [15, 16, 17, 18, 19, 20, 21])
-  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 21)
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 22)
   assert.equal(layoutsTable(db), 1, 'the layouts table is made')
   assert.ok(columns(db, 'usage_layouts').includes('layout'))
   assert.ok(columns(db, 'users').includes('tailnet_user_id'))

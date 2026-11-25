@@ -49,7 +49,7 @@ test('migration 21 rewrites "comment" to reply and status, keeps every other tok
   db.close()
 
   db = await openDatabase(file)
-  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 21)
+  assert.ok(db.prepare('PRAGMA user_version').get().user_version >= 21)
   const after = scopesOf(db)
   assert.deepEqual(after.tk_legacy, ['read', 'reply', 'status'])
   assert.deepEqual(after.tk_both, ['read', 'reply', 'status', 'claim'], 'reply once, in the place comment had')

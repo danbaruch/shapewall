@@ -33,6 +33,7 @@ import {
   POLICY_AUDIENCES,
   POLICY_AUTO_KINDS,
   POLICY_INSTRUCTIONS,
+  POLICY_RESPOND,
   cleanAgentConfig,
   cleanAllowPath,
   cleanBase,
@@ -287,6 +288,13 @@ export function policyChanges(flags, saved, kind = null, { cwd = process.cwd() }
     if (dir !== 'none' && !isDir(dir))
       throw new Error(`--agent-config: ${dir} is not a folder. Make it first: Shapewall does not create it.`)
     changes.agentConfig = dir
+  }
+  if (flags.respond !== undefined) {
+    if (!POLICY_RESPOND.includes(flags.respond))
+      throw new Error(
+        '--respond: "thread" (in a shared thread, an @mention or Send to agent, or every message where the person who connected it set that; the default) or "mention" (an @mention or Send to agent only)',
+      )
+    changes.respond = flags.respond
   }
   if (flags['git-remote'] !== undefined) {
     if (flags['git-remote'] !== 'none' && !cleanRemote(flags['git-remote']))

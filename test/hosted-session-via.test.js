@@ -64,7 +64,7 @@ test('a new database has the tailnet sign-in method in its sessions table, with 
       versions(db),
       Array.from({ length: 21 }, (_, index) => index + 1),
     )
-    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 21)
+    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 22)
     assert.match(sessionsSql(db), /CHECK \(via IN \('passkey', 'recovery', 'tailnet'\)\)/)
     assert.match(sessionsSql(db), /CHECK \(tailnet_login IS NULL OR tailnet_login <> ''\)/)
     assert.match(sessionsSql(db), /CHECK \(via <> 'tailnet' OR \(tailnet_login IS NOT NULL AND tailnet_login <> ''\)\)/)
@@ -200,7 +200,7 @@ test('migration 18 on a database from before it: every row kept, tailnet session
   // The upgrade.
   db = await openDatabase(file)
   assert.deepEqual(versions(db).slice(-6), [16, 17, 18, 19, 20, 21])
-  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 21)
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 22)
   assert.equal(db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok')
   assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), [])
   assert.deepEqual(columns(db), before.columns, 'the same columns, in the same order')
