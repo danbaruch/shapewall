@@ -1,8 +1,9 @@
 // The commands whose handling used to sit inline in main(): buzz-bridge,
 // settings, journeys, events, mcp and export.
 
+import fs from 'node:fs'
 import path from 'node:path'
-import { getBoard, loadConfig } from '../config.js'
+import { findConfigFile, getBoard, loadConfig } from '../config.js'
 import { formatJourneys, listJourneys } from '../journeys.js'
 import { openBrowser } from './open.js'
 import { withNotifications } from './notify.js'
@@ -82,15 +83,37 @@ export async function mcp(flags, err) {
   if (flags.remote !== undefined) {
     const { createRemote, remoteSettings } = await import('../remote/remote.js')
     const { runRemoteMcp } = await import('../remote/remote-mcp.js')
-    await runRemoteMcp({ remote: createRemote(remoteSettings(flags)), readOnly: Boolean(flags['read-only']) })
+    const readOnly = Boolean(flags['read-only'])
+    const allowCapture = !readOnly && !flags['no-capture']
+    const remote = createRemote(remoteSettings(flags))
+    const board = typeof flags.board === 'string' ? flags.board : null
+    await runRemoteMcp({ remote, readOnly, board, allowCapture, config: allowCapture ? remoteMcpConfig(flags, err) : null })
     return 0
   }
+  if (flags.board !== undefined) throw new Error('mcp --board picks a hosted board: use it with --remote URL.')
   const config = loadConfig(flags.config)
   const { runMcp } = await import('../mcp.js')
   const readOnly = Boolean(flags['read-only'])
   // stdout is the MCP protocol, so notification log lines go to stderr.
   await withNotifications(config, err, () => runMcp({ config, readOnly, allowCapture: !readOnly && !flags['no-capture'] }))
   return 0
+}
+
+// The project config `mcp --remote` captures with (recapture_pages): found
+// as every command finds it (--config FILE, $SHAPEWALL_CONFIG, else
+// ./shapewall.config.json). Without one the server runs as before, with no
+// recapture_pages; a config that was named but cannot load is an error, and
+// one found but broken turns recapture off with a line on stderr.
+export function remoteMcpConfig(flags, err = () => {}, { env = process.env, cwd = process.cwd() } = {}) {
+  const named = typeof flags.config === 'string' || Boolean(env.SHAPEWALL_CONFIG)
+  if (!named && !fs.existsSync(findConfigFile(null, cwd))) return null
+  try {
+    return loadConfig(flags.config, { cwd })
+  } catch (error) {
+    if (named) throw error
+    err(`recapture_pages is off: ${error.message}`)
+    return null
+  }
 }
 
 export async function exportCommand(flags, out) {

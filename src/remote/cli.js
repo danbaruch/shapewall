@@ -16,48 +16,56 @@ export async function push(flags, print) {
   const remote = createRemote(remoteSettings(flags))
   const boards = flags.board ? [getBoard(config, flags.board)] : config.boards
   const project = await remote.project()
-  for (const board of boards) {
-    const manifest = readManifest(config, board.id)
-    if (!manifest) throw new Error(`Board "${board.id}" has no captures yet. Run "shapewall capture --board ${board.id}" first.`)
-    const checks = portableChecks(config, board, { includeChecks: !!flags['include-checks'] })
-    const files = pushFiles(config, board)
-    const started = await remote.startPush(pushDefinition(config, board))
-    if (checks && !started.limits.checks)
-      throw new Error('This server does not support checks. Update it before explicitly including diagnostics.')
-    out(`Pushing board "${board.id}" (${files.length} files) to ${project.workspace.name} / ${project.project.name}`)
-    let bytes = 0
-    let done = 0
-    for (const [area, name, file] of files) {
-      // A server from before element maps does not take them (its boards keep x/y pins).
-      if (name.endsWith('.elements.json') && !started.limits.elements) continue
-      // Never through a symlink (see readCaptureFile).
-      const cap = name.endsWith('.html')
-        ? started.limits.html
-        : name.endsWith('.elements.json')
-          ? started.limits.elements
-          : started.limits.png
-      if (!Number.isSafeInteger(cap) || cap < 0) throw new Error('The server returned an invalid upload limit.')
-      let data
-      try {
-        data = readCaptureFile(config, file, Math.min(cap, 11 * 1024 * 1024))
-      } catch (error) {
-        if (error.code !== 'file_too_large') throw error
-        out(`  skipped ${area}/${name}: ${(error.size / 1048576).toFixed(1)} MB is over the upload limit`)
-        continue
-      }
-      await remote.pushFile(started.id, area, name, data)
-      bytes += data.length
-      done += 1
-      if (done % 25 === 0) out(`  ${done}/${files.length} files`)
+  for (const board of boards) await pushBoard({ config, board, remote, project, includeChecks: !!flags['include-checks'], out })
+}
+
+// Uploads one board's latest captures and returns the commit's answer
+// ({ files, url, ... }). The hosted server swaps a board in whole on commit
+// (src/hosted/push.js), so this always sends the whole board, never a few
+// pages. `shapewall push` and recapture_pages of `mcp --remote` use it.
+export async function pushBoard({ config, board, remote, project = null, includeChecks = false, out = () => {} }) {
+  const manifest = readManifest(config, board.id)
+  if (!manifest) throw new Error(`Board "${board.id}" has no captures yet. Run "shapewall capture --board ${board.id}" first.`)
+  const checks = portableChecks(config, board, { includeChecks })
+  const files = pushFiles(config, board)
+  const started = await remote.startPush(pushDefinition(config, board))
+  if (checks && !started.limits.checks)
+    throw new Error('This server does not support checks. Update it before explicitly including diagnostics.')
+  const where = project ? ` to ${project.workspace.name} / ${project.project.name}` : ''
+  out(`Pushing board "${board.id}" (${files.length} files)${where}`)
+  let bytes = 0
+  let done = 0
+  for (const [area, name, file] of files) {
+    // A server from before element maps does not take them (its boards keep x/y pins).
+    if (name.endsWith('.elements.json') && !started.limits.elements) continue
+    // Never through a symlink (see readCaptureFile).
+    const cap = name.endsWith('.html')
+      ? started.limits.html
+      : name.endsWith('.elements.json')
+        ? started.limits.elements
+        : started.limits.png
+    if (!Number.isSafeInteger(cap) || cap < 0) throw new Error('The server returned an invalid upload limit.')
+    let data
+    try {
+      data = readCaptureFile(config, file, Math.min(cap, 11 * 1024 * 1024))
+    } catch (error) {
+      if (error.code !== 'file_too_large') throw error
+      out(`  skipped ${area}/${name}: ${(error.size / 1048576).toFixed(1)} MB is over the upload limit`)
+      continue
     }
-    const result = await remote.commitPush(started.id, {
-      manifest: portableManifest(config, board, manifest),
-      variants: portableVariants(readVariants(config, board.id)),
-      checks,
-    })
-    if (checks && result.checks !== checks.reports.length) throw new Error('The server did not confirm all included check reports.')
-    out(`Pushed ${result.files} files (${(bytes / 1048576).toFixed(1)} MB). Board: ${result.url}`)
+    await remote.pushFile(started.id, area, name, data)
+    bytes += data.length
+    done += 1
+    if (done % 25 === 0) out(`  ${done}/${files.length} files`)
   }
+  const result = await remote.commitPush(started.id, {
+    manifest: portableManifest(config, board, manifest),
+    variants: portableVariants(readVariants(config, board.id)),
+    checks,
+  })
+  if (checks && result.checks !== checks.reports.length) throw new Error('The server did not confirm all included check reports.')
+  out(`Pushed ${result.files} files (${(bytes / 1048576).toFixed(1)} MB). Board: ${result.url}`)
+  return result
 }
 
 function mentionOf(value) {

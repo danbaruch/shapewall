@@ -233,7 +233,7 @@ export const COMMAND_FLAGS = {
     'board',
     'json',
   ],
-  mcp: ['read-only', 'no-capture', ...REMOTE_FLAGS],
+  mcp: ['read-only', 'no-capture', 'board', ...REMOTE_FLAGS],
   notify: ['json', 'to', 'board'],
   doctor: ['install-browser', 'port', 'agent-acp', 'json', 'no-launch'],
   variant: ['url', 'path', 'title', 'note', 'source', 'id', 'viewport', 'board', 'json'],
