@@ -442,9 +442,13 @@ Dates are when the comment was made (`createdAt`). The answer states back what i
 times, `until` exclusive, and `timeZone`), `author` (who "me" was) and `pageName` (the page id it found). Anything else is refused
 with a message: free text such as "last week" never reaches a date parser.
 
-Who "me" is: on a local board, the name this machine signs comments with (`SHAPEWALL_USER_NAME`, else `git config user.name`, else
-the OS user name) and, on a board with accounts (`serve --accounts`), the owner account's name and handle. On a hosted board, the
-account that made the token (`GET /api/v1/project` says who, in `token.createdBy`). Filters only narrow: they never show a guest's
+Who "me" is: on a local board, the comments the server saw the board's owner make: from this machine's own browser on a board not
+shared beyond it, the owner account under `serve --accounts`, or `shapewall comments add` outside an agent's run. The server stamps
+them (`byOwner` on the comment); the request cannot set it, so a paired device or a LAN visitor signing with the owner's name is not
+"me". Comments from before 1.3.0 have no stamp and match by the name this machine signs comments with (`SHAPEWALL_USER_NAME`, else
+`git config user.name`, else the OS user name) or the owner account's name and handle; the answer then says
+`author.meMatch: "owner+name"` and lists them in `author.matchedByName` (`"owner"` when the stamp decided every match). On a hosted
+board, the account that made the token (`GET /api/v1/project` says who, in `token.createdBy`). Filters only narrow: they never show a guest's
 comment without `includeGuests`, or a comment a claim token does not read.
 
 ### Links and before and after
@@ -457,8 +461,11 @@ not running yet says so in `note`.
 
 `compare_captures` shows what a change did: by default the page's current capture against the one before it (so call it after
 `recapture_pages`), or any two versions from `versions` (newest first). Both captures come as images, scaled like
-`get_page_capture` (`crop` cuts the same part out of both), with `diff`: `changed` and `total` pixels, `percent`, and `box`, where
-the changed pixels are, in capture pixels, to crop to. `link` opens the same compare on the board, for the reply. On a hosted board
+`get_page_capture` (`crop` cuts the same part out of both, and both are scaled by the same factor), with `diff`: `changed` and
+`total` pixels, `percent`, and `box`, where the changed pixels are, in capture pixels, to crop to. The diff is counted on the images
+as shown: below `diff.scale` 1 a pixel stands for a block of the capture, so crop to `box` to see a small change at full size. A
+capture over 40 megapixels (16 on a hosted server's own `/mcp`) is refused from its header. If a new capture lands while the
+current one is read, the call is refused (call it again) rather than labeling the wrong image `current`. `link` opens the same compare on the board, for the reply. On a hosted board
 it reads the page's capture history from `GET /api/v1/boards/:board/pages/:page/versions` ([hosted](hosted.md#agents)).
 `recapture_pages` answers with a `compare` link for every page and viewport it captured.
 

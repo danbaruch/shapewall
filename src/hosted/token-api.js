@@ -13,7 +13,16 @@ import { boardRef, feedbackContext, feedbackItem, fileKind, replyOf } from '../f
 import { listJourneys } from '../journeys.js'
 import { boardViewports, joinUrl } from '../config.js'
 import { MENTION_HANDLE_RE } from '../mentions.js'
-import { captureFiles, entryVersion, listVersions, readManifest, resolveFile, variantsWithFiles, versionTime } from '../store.js'
+import {
+  captureFiles,
+  entryVersion,
+  listVersions,
+  readManifest,
+  resolveFile,
+  VERSION_FILE_RE,
+  variantsWithFiles,
+  versionTime,
+} from '../store.js'
 import { agentPolicy, trustedMember } from './agent-policy.js'
 import { COMMENT_ROUTING } from './agents.js'
 import { mountHostedApprovals } from './agent-approvals.js'
@@ -370,8 +379,13 @@ export function mountTokenApi({
           url: hostedBoardBase(publicOrigin, req.t.workspaceId, req.project.id),
         },
         // The account that made the token: the person its agent works for
-        // ("me" in the MCP list_comments filter). Handle and name only.
-        token: { name: req.token.name, scopes: req.token.scopes, createdBy: tokenMaker(req) },
+        // ("me" in the MCP list_comments filter). Handle and name only, and
+        // only to a token that may read the board (where comments show them).
+        token: {
+          name: req.token.name,
+          scopes: req.token.scopes,
+          ...(req.token.scopes.includes('read') ? { createdBy: tokenMaker(req) } : {}),
+        },
         boards: boards.map((row) => ({ id: row.board_id, pushedAt: row.pushed_at })),
       })
     }),
@@ -496,10 +510,37 @@ export function mountTokenApi({
       })
     }),
   )
+  // The earlier capture versions of a page a claim token may read: the ones
+  // the comments dispatched to it were made (or drawn) on. Its agent has no
+  // business in the rest of the history. null: any other token, no limit.
+  const claimVersions = (req, ctx, pageId) => {
+    if (!req.token.scopes.includes('claim')) return null
+    const out = new Set()
+    for (const row of ctx.comments.list({ status: null })) {
+      if (row.pageId !== pageId) continue
+      const comment = dispatchView(req.t, req.project.id, ctx.board.id, row)
+      if (!comment.dispatchable || !mine(req, comment[COMMENT_ROUTING])) continue
+      if (comment.captureVersion) out.add(comment.captureVersion)
+      if (comment.drawing?.captureVersion) out.add(comment.drawing.captureVersion)
+    }
+    return out
+  }
+  // The page and viewport of a current capture's file name, if it is one.
+  const captureOf = (board, name) => {
+    for (const page of board.pages)
+      for (const viewport of page.viewports)
+        if (name === `${page.id}.${viewport}.png` || name === `${page.id}.${viewport}.html`) return { page: page.id, viewport }
+    return null
+  }
+
   // A page's capture history, newest first: the current capture of each
   // viewport and the earlier versions the board keeps, with token API URLs
-  // of their files (GET /files/captures|versions/<name>, same guards). At
-  // most VERSIONS_MAX; ?viewport= narrows it to one viewport.
+  // of their files (GET /files/captures|versions/<name>, same guards). The
+  // current capture's URLs carry ?version=<its version>: fetched after a
+  // push replaced it, they answer 409 instead of another capture. At most
+  // VERSIONS_MAX; ?viewport= narrows it to one viewport. Any read token sees
+  // the whole history, except a claim token (one agent's dispatched work):
+  // it sees the current captures and the versions its comments were made on.
   const VERSIONS_MAX = 50
   v1.get(
     '/boards/:bid/pages/:pid/versions',
@@ -512,8 +553,9 @@ export function mountTokenApi({
       const files = captureFiles(ctx.config, ctx.board)[page.id] || {}
       const manifest = readManifest(ctx.config, ctx.board.id)
       const kept = listVersions(ctx.config, ctx.board.id)[page.id] || {}
-      const fileUrl = (kind, name) =>
-        `${publicOrigin}/api/v1/boards/${encodeURIComponent(ctx.board.id)}/files/${kind}/${encodeURIComponent(name)}`
+      const fileUrl = (kind, name, version = null) =>
+        `${publicOrigin}/api/v1/boards/${encodeURIComponent(ctx.board.id)}/files/${kind}/${encodeURIComponent(name)}${version ? `?version=${encodeURIComponent(version)}` : ''}`
+      const allowed = claimVersions(req, ctx, page.id)
       const rows = []
       for (const viewport of asked ? [asked] : page.viewports) {
         const current = files[viewport] ? entryVersion(manifest?.pages?.[page.id]?.[viewport], manifest) : null
@@ -525,13 +567,13 @@ export function mountTokenApi({
             current: true,
             capturedAt: versionTime(current),
             files: {
-              png: fileUrl('captures', `${page.id}.${viewport}.png`),
-              html: html ? fileUrl('captures', `${page.id}.${viewport}.html`) : null,
+              png: fileUrl('captures', `${page.id}.${viewport}.png`, current),
+              html: html ? fileUrl('captures', `${page.id}.${viewport}.html`, current) : null,
             },
           })
         }
         for (const item of kept[viewport] || []) {
-          if (item.version === current) continue
+          if (item.version === current || (allowed && !allowed.has(item.version))) continue
           rows.push({
             version: item.version,
             viewport,
@@ -583,6 +625,19 @@ export function mountTokenApi({
     v1Board((req, res, ctx) => {
       const { kind, file: name } = req.params
       if (!['captures', 'variants', 'versions'].includes(kind)) return fail(res, 404, 'not_found', 'No such file.')
+      // A claim token reads only the earlier versions its comments were made on.
+      if (kind === 'versions' && req.token.scopes.includes('claim')) {
+        const match = VERSION_FILE_RE.exec(name)
+        if (!match || !claimVersions(req, ctx, match[1]).has(match[3])) return fail(res, 404, 'not_found', 'No such file.')
+      }
+      // ?version=: the current capture only while it is still that version
+      // (the history route's URLs), so a push in between is never mislabeled.
+      if (typeof req.query.version === 'string') {
+        const at = kind === 'captures' ? captureOf(ctx.board, name) : null
+        const manifest = at ? readManifest(ctx.config, ctx.board.id) : null
+        if (!at || entryVersion(manifest?.pages?.[at.page]?.[at.viewport], manifest) !== req.query.version)
+          return fail(res, 409, 'capture_moved', 'That capture is no longer the current one. List the versions again.')
+      }
       const file = resolveFile(ctx.config, ctx.board.id, kind, name)
       if (!file) return fail(res, 404, 'not_found', 'No such file.')
       if (name.endsWith('.png')) return sendPng(res, file, false)

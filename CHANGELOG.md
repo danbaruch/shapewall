@@ -41,6 +41,26 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 - GitHub issue links to a comment list their keys in the shared order (`?board=&c=&filter=all`); they open the same view.
 
+### Fixed
+
+- `compare_captures` decodes each capture once, a row at a time, and counts the diff on the images as shown (`diff.scale`), not
+  on the full-size captures: two 3840x4166 captures took 1.25 s, now about 0.33 s, and a fraction of the memory.
+- `compare_captures` no longer labels the wrong image `current` when a capture or push lands while it reads: it asks to be called
+  again (local boards re-check the version; hosted current capture URLs carry `?version=` and answer 409 once it moved).
+
+### Security
+
+- A hosted server's own `/mcp` runs `compare_captures` in its worker threads, one compare at a time per token (another call is
+  refused with a "busy, retry" error), with a 16 megapixel cap read from the PNG header before decoding. It used to decode both
+  captures at full size on the server's event loop, about 2 s and 550 MB per call, for any read token.
+- `compare_captures` refuses a capture over its pixel cap from the PNG header, before decoding it.
+- `author: "me"` on a local board goes by a server-side owner stamp (`byOwner`) on the comments the owner makes, which the request
+  cannot set: a paired device or LAN visitor signing with the owner's name no longer counts as "me". Older comments without the
+  stamp still match by name, and the answer says so (`author.meMatch: "owner+name"`).
+- Token API: `GET /api/v1/project` names the token maker (`token.createdBy`) only to tokens with the `read` scope. A claim token
+  lists and fetches only the current captures and the versions its dispatched comments were made on; any other read token can
+  read every kept version, as `docs/hosted.md` now says.
+
 ## 1.2.0 - 2026-11-24
 
 ### Added

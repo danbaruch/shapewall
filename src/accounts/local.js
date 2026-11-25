@@ -473,5 +473,11 @@ export function createLocalAccounts({
     if (shellAsset) return next()
     return fail(res, 401, 'signed_out', 'Sign in with your passkey first.')
   }
-  return { router, gate, read, publicUser, auth, db, origin }
+  // Whether the signed-in account is the installation's owner (the first one).
+  const isOwner = (req) => {
+    const current = read(req)
+    if (!current?.user?.id) return false
+    return q.get('SELECT id FROM users ORDER BY created_at, rowid LIMIT 1', {})?.id === current.user.id
+  }
+  return { router, gate, read, isOwner, publicUser, auth, db, origin }
 }

@@ -358,7 +358,13 @@ export async function addComment(config, board, flags, out, err = () => {}) {
   }
   let comment
   try {
-    comment = await createComment(config, board, { pageId, viewport, ...pin, body, author: authorFlag(flags, { dir: config.dir }), anchor })
+    comment = await createComment(
+      config,
+      board,
+      { pageId, viewport, ...pin, body, author: authorFlag(flags, { dir: config.dir }), anchor },
+      // The person at this machine, unless an agent's run is calling.
+      { owner: !runByAgent(process.env) },
+    )
   } catch (error) {
     if (error instanceof CommentError && error.code === 'invalid_anchor') {
       throw new Error(`${error.message} ${selectorHelp(pageId)}`, { cause: error })

@@ -704,7 +704,11 @@ async function logEvents(config, events) {
   return events
 }
 
-export async function createComment(config, board, input, { now = new Date() } = {}) {
+// `owner`: the server knows the board's owner made it (a request from this
+// machine's own browser, the owner account under `serve --accounts`, the
+// CLI outside an agent's run). Stored as byOwner, never read from `input`:
+// the "me" of the MCP list_comments filter goes by it, not by the name.
+export async function createComment(config, board, input, { now = new Date(), owner = false } = {}) {
   const clean = validateCommentInput(config, board, input)
   const media = validateCommentMedia(input)
   const file = commentsFile(config, board.id)
@@ -736,6 +740,7 @@ export async function createComment(config, board, input, { now = new Date() } =
       replies: [],
       agentStatus: null,
       agentStatusAt: null,
+      byOwner: owner === true,
     }
     if (!comment.anchor) delete comment.anchor
     if (images.length) comment.images = images

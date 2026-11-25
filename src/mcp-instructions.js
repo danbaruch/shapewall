@@ -55,6 +55,12 @@ export function mcpInstructions({ handIn = 'local', hosted = false, github = tru
     '1. Find work with list_comments and its filters. "Comments I left today on the Features page" is one call: author "me", ' +
       'since "today", pageName "Features". Days are in this machine\'s time zone unless you pass timeZone; the answer states the ' +
       'range it used. More than one page of results: pass cursor.',
+    ...(hosted
+      ? []
+      : [
+          '   On this board "me" is the comments the server saw the owner make; older ones without that stamp match by display ' +
+            'name, and the answer says so (author.meMatch "owner+name").',
+        ]),
     '2. For each comment: get_comment, then set_comment_status "working".',
     '3. Change the code. Check your work in your own browser while you work (the page URLs from list_pages, on the dev server), ' +
       'not by recapturing.',

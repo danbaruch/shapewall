@@ -659,6 +659,16 @@ export function createApp({
     }),
   )
 
+  // Whether the board's owner sends this request, as the server can tell
+  // (never from the body): the owner account signed in under `serve
+  // --accounts`, else this machine's own browser on a board not shared
+  // beyond it. A paired device, a LAN or tailnet visitor or a share link
+  // guest is not, whatever name it signs with.
+  const ownerRequest = (req) => {
+    if (account) return account.isOwner(req)
+    return !shared && localRequest(req)
+  }
+
   // Who changed a comment, for its events: the name the board sends (the
   // commenter's saved name), like the author of a reply. Display text only.
   const actorOf = (author) => (typeof author === 'string' ? author : null)
@@ -674,7 +684,7 @@ export function createApp({
   app.post(
     '/api/boards/:id/comments',
     withBoard(async (req, res, board) => {
-      const comment = await createComment(config, board, req.body)
+      const comment = await createComment(config, board, req.body, { owner: ownerRequest(req) })
       res.status(201).json({ comment })
     }),
   )

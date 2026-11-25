@@ -1071,10 +1071,14 @@ shapewall mcp --remote https://app.example.com
 ```
 
 Token API (`Authorization: Bearer swp_...`; cookies are ignored there): `GET /api/v1/project` (the project, its boards, and the
-token's name, scopes and `createdBy: { handle, name }`, the account that made it), `GET /api/v1/boards/:board/pages`,
-`GET /api/v1/boards/:board/pages/:page/versions?viewport=` (scope `read`: the page's capture history, newest first, at most 50:
-`{ version, viewport, current, capturedAt, files: { png, html } }`, the current capture of each viewport and the earlier versions the
-board keeps; `files` are `/files/captures/...` and `/files/versions/...` URLs of this API, `more` counts the rest),
+token's name, scopes and, for a token with the `read` scope, `createdBy: { handle, name }`, the account that made it),
+`GET /api/v1/boards/:board/pages`, `GET /api/v1/boards/:board/pages/:page/versions?viewport=` (scope `read`: the page's capture
+history, newest first, at most 50: `{ version, viewport, current, capturedAt, files: { png, html } }`, the current capture of each
+viewport and the earlier versions the board keeps; `files` are `/files/captures/...?version=` and `/files/versions/...` URLs of this
+API, `more` counts the rest; a current capture's URL answers `409 capture_moved` once a push has replaced that version). Any token
+with `read` can list and fetch every kept version of every page: old captures are as readable as the current ones, so give a
+read token only to someone who may see the board's history. A claim token (a connected agent's) is the exception: it lists and
+fetches only the current captures and the versions the comments dispatched to it were made on,
 `GET /api/v1/boards/:board/comments?status=open|resolved|all&page=&mention=&guests=1`, `GET /api/v1/boards/:board/comments/:id`,
 `GET /api/v1/boards/:board/files/:kind/:file`, `POST /api/v1/boards/:board/comments` (scope `reply`: `{ page, body, viewport?, x?, y?,
 anchor? }`, the pin in percent of the page, near the top-left corner by default; no images, drawing or author name; audited as
