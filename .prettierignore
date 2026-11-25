@@ -13,3 +13,5 @@ website/node_modules/
 website/package-lock.json
 website/public/
 website/src/assets/
+plugins/shapewall/skills/
+plugins/shapewall/.mcp.json
