@@ -98,7 +98,9 @@ export async function createRemoteMcpServer({
   if (!scopes.has('read')) throw new Error('The token needs the "read" scope for MCP.')
   const boardIds = project.boards.map((item) => item.id)
   if (defaultBoard && !boardIds.includes(defaultBoard))
-    throw new Error(`No board "${defaultBoard}" on ${project.project?.name || 'this project'} (have: ${boardIds.join(', ') || 'none'}).`)
+    throw new Error(
+      `No board "${defaultBoard}" on ${terminalSafe(project.project?.name || 'this project')} (have: ${boardIds.join(', ') || 'none'}).`,
+    )
   const firstBoard = defaultBoard || boardIds[0]
   const canRecapture = Boolean(config) && allowCapture && !readOnly && scopes.has('push')
   const server = new McpServer(
