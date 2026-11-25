@@ -253,8 +253,10 @@ export const SECTIONS = {
       --viewport NAME       desktop, phone, any viewport of the board, or all
       --compare [A_B]       alone: the page's before and after (needs --page or --comment);
                             A_B: two environments side by side
+      --follow [AGENT]      follow an agent: fly to each comment it takes, before and after when it
+                            recaptures that screen (alone: any agent; hosted: an agent id)
       --print               print the link only, do not open a browser
-      --json                { url, board, page, comment, viewport, compare, running }; opens nothing
+      --json                { url, board, page, comment, viewport, compare, follow, running }; opens nothing
       --remote URL          a hosted project instead of the local board (with --token-file, --include-guests)
                             a local board that is not running: prints the link and says to run shapewall serve`,
   mcp: `  mcp                       MCP server on stdio for coding agents

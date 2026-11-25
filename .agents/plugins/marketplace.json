@@ -1,0 +1,12 @@
+{
+  "name": "shapewall",
+  "interface": { "displayName": "Shapewall" },
+  "plugins": [
+    {
+      "name": "shapewall",
+      "source": { "source": "local", "path": "./plugins/shapewall" },
+      "policy": { "installation": "AVAILABLE" },
+      "category": "Coding"
+    }
+  ]
+}

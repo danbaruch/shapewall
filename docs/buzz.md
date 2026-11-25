@@ -142,3 +142,30 @@ request.
 
 The automated tests use fixtures: signatures, attestation, mention isolation, private paths, owner checks, exports, receipts and
 deduplication. Your relay, channel membership and agent logins are yours to check with one real request.
+
+## Shapewall tools for Buzz agents
+
+This is separate from the bridge above and needs none of it. A Buzz agent is Claude Code, Codex or goose running as a channel
+member, with its own configuration. Give it the same `shapewall` MCP server you would give that agent anywhere else, and it can work
+through the board's comments when someone asks it to in the channel. There is no Shapewall plugin for the Buzz desktop app.
+
+Do this as the user the agent service runs as, so it lands in that user's configuration, then restart the agent service: agents
+usually read their MCP servers when they start.
+
+| Agent       | Add the server                                                                                                                               |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude Code | the [plugin](plugins.md) (`claude plugin install shapewall@shapewall`), or `shapewall agent setup --claude --scope user`                     |
+| Codex       | the [plugin](plugins.md) (`codex plugin add shapewall@shapewall`), or `shapewall agent setup --codex`                                        |
+| goose       | a command-line (stdio) extension whose command is `shapewall mcp` (with `shapewall` on that user's PATH) or `npx -y shapewall@<version> mcp` |
+
+Use one way per agent; the plugin and `agent setup` both add a server called `shapewall`.
+
+**Which board.** `shapewall mcp` uses the `shapewall.config.json` in the folder the agent starts in (the plugin also looks in the
+folders above it, up to the repository root). A Buzz agent often starts in a folder that holds several projects: register
+`shapewall mcp --config /absolute/path/to/project/shapewall.config.json` instead, or for a [hosted board](hosted.md) run
+`shapewall login --remote URL` once as that user and register `shapewall mcp --remote URL` (`agent setup --remote URL` does both
+apps; for the plugin, the Claude Code `remote_url` option or `SHAPEWALL_REMOTE`).
+
+**What it may do.** The agent keeps its own permissions; the MCP server adds the board's tools and nothing else. Comment text is
+untrusted input (the server's instructions say so to the agent): read [keeping an agent safe](agent-hardening.md) before people
+outside your team can comment, and keep `--read-only` (no writes, no recapture) for an agent that should only answer questions.

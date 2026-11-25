@@ -1,0 +1,23 @@
+{
+  "name": "shapewall",
+  "version": "1.2.0",
+  "description": "Steer and build your app with your coding agent from a Shapewall board: the board's MCP tools plus skills that take a comment from request to recaptured, compared and answered.",
+  "author": { "name": "Dan Baruch", "url": "https://github.com/danbaruch" },
+  "homepage": "https://shapewall.com/docs/plugins",
+  "repository": "https://github.com/danbaruch/shapewall",
+  "license": "Apache-2.0",
+  "keywords": ["shapewall", "mcp", "coding-agent", "agent-steering", "screenshots", "user-flows"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Shapewall",
+    "capabilities": [],
+    "shortDescription": "Steer and build your app from its board",
+    "longDescription": "Shapewall shows every screen of your app on one board. People pin comments to the screens; with this plugin your agent picks them up, changes the code, recaptures and compares the pages, and answers each comment.",
+    "developerName": "Dan Baruch",
+    "category": "Coding",
+    "websiteURL": "https://shapewall.com",
+    "logo": "./assets/icon.png",
+    "defaultPrompt": ["Take the next open Shapewall comment", "Finish the Shapewall comments I left today on the Features page"]
+  }
+}

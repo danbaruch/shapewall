@@ -13,7 +13,7 @@
 //   cmp     environment compare, "a_b" (useCompare.js)
 //   hist    page history: before and after of the page's captures (History.jsx)
 //   hv      the viewport page history shows
-//   follow  an agent id to follow (reserved; the follow behaviour lands later)
+//   follow  an agent to follow: an agent id, or "any" (the board's follow mode)
 //
 // Links carry ids only: never a token, a share secret or anything else that
 // grants access. Values are URL-encoded; ids that do not exist on the board
