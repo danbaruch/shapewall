@@ -20,6 +20,7 @@ import { KNOWN_AGENTS, detectAgents } from '../agent/acp/detect.js'
 import { acpAgentKind } from '../agent/acp/command.js'
 import { ACP_DEFAULTS, acpHandshake, adapterName, adapterWarning } from '../agent/backends/acp.js'
 import { createBackend } from '../agent/backends/index.js'
+import { inside } from '../agent/acp/sandbox.js'
 import { agentSettings } from '../agent/config.js'
 import { agentConfigDir, createInstructionsNote, instructionsLines, instructionsSummary, loadInstructions } from '../agent/instructions.js'
 import { REMOTE_FIX_PREAMBLE, remotePreamble } from '../agent/context.js'
@@ -201,10 +202,7 @@ export function agentConfigFor(policy, slug, { env = process.env, projectDir }) 
       return path.resolve(file)
     }
   }
-  const within = (outer, inner) => {
-    const rel = path.relative(real(outer), real(inner))
-    return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
-  }
+  const within = (outer, inner) => inside(real(outer), real(inner))
   const home = env.HOME || os.homedir()
   const claudeDirs = [path.join(home, '.claude'), env.CLAUDE_CONFIG_DIR].filter(Boolean)
   if (claudeDirs.some((claude) => within(claude, dir) || within(dir, claude)))
@@ -331,6 +329,9 @@ export async function agentConnect(
     warn: (text) => log(`Not understood, so read as the narrowest setting: ${text}`),
   })
   const changes = policyChanges(flags, policyNow, kind, { cwd })
+  // The agent config folder is checked before the policy file is written: a refused folder is never saved.
+  if (changes.agentConfig !== undefined || changes.instructions !== undefined)
+    agentConfigFor({ ...policyNow, ...changes }, slug, { env, projectDir: config.dir })
 
   // ---- The agent's token: its own, never the saved login's ----
   let token = env.SHAPEWALL_TOKEN || ''

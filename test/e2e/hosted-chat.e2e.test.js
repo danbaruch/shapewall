@@ -263,6 +263,13 @@ test('chat: pick the agent in the Agents panel, ask, and the answer streams in; 
     (await row.locator('[data-sw-hosted-agent-instructions]').textContent()).trim(),
     'Instructions: CLAUDE.md (project), CLAUDE.md (agent config)',
   )
+  // The board is told names only: sizes and hashes stay in the console.
+  const listed = (await ada.browser.get(`/w/${ws}/p/${project.id}/api/boards/sample/agents`)).json
+  const onBoard = (listed.agents || listed).find((agent) => agent.name === 'Builder')
+  assert.deepEqual(onBoard.link.instructions, [
+    { scope: 'project', path: 'CLAUDE.md' },
+    { scope: 'agent-config', path: 'CLAUDE.md' },
+  ])
   await shot(page, 'board-agents-panel-1440-light')
   await row.locator('[data-sw-hosted-agent-chat]').click()
   await page.waitForSelector('[data-sw-chat-input]')

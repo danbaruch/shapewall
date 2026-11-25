@@ -18,8 +18,9 @@
 //
 // `@path` imports are followed the way Claude Code follows them, with tighter
 // limits: only inside the folder the file came from (after symlinks), no "~",
-// no absolute path, no ".." out of it, at most 4 deep, regular files only
-// (a symbolic link is refused), 64 KB a file and 128 KB in all. A refused
+// no absolute path, no ".." out of it, no CLAUDE.local.md, no dotfile or dot
+// folder, at most 4 deep, regular files only (a symbolic link only when its
+// real target is inside the same folder; read once), 64 KB a file and 128 KB in all. A refused
 // import stays as literal text and is listed with its reason. An import that
 // does not exist (an @mention of a person, say) is skipped without a word.
 //
@@ -63,21 +64,27 @@ function readInside(root, file, budget) {
     if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return null
     throw new Refused('could not be read')
   }
-  if (stat.isSymbolicLink()) throw new Refused('a symbolic link')
-  if (!stat.isFile()) throw new Refused('not a regular file')
-  let realDir
+  // A symbolic link (CLAUDE.md -> AGENTS.md, say) is followed when its real
+  // target is a regular file inside the same folder; the target is what is read.
+  let real
   try {
-    realDir = fs.realpathSync(path.dirname(file))
-  } catch {
-    throw new Refused('could not be read')
+    real = fs.realpathSync(file)
+  } catch (error) {
+    if (stat.isSymbolicLink() && (error.code === 'ENOENT' || error.code === 'ENOTDIR')) return null
+    throw new Refused(error.code === 'ELOOP' ? 'a symbolic link loop' : 'could not be read')
   }
-  if (!inside(root, realDir)) throw new Refused('outside its folder')
+  if (!inside(root, real)) throw new Refused('outside its folder')
+  if (stat.isSymbolicLink()) {
+    try {
+      stat = fs.lstatSync(real)
+    } catch {
+      throw new Refused('could not be read')
+    }
+  }
+  if (!stat.isFile()) throw new Refused('not a regular file')
   let fd
   try {
-    fd = fs.openSync(
-      path.join(realDir, path.basename(file)),
-      fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0),
-    )
+    fd = fs.openSync(real, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0))
   } catch (error) {
     if (error.code === 'ENOENT') return null
     throw new Refused(error.code === 'ELOOP' ? 'a symbolic link' : 'could not be read')
@@ -90,7 +97,7 @@ function readInside(root, file, budget) {
     const buffer = fs.readFileSync(fd)
     if (buffer.length > INSTRUCTION_FILE_MAX) throw new Refused(`over ${INSTRUCTION_FILE_MAX / 1024} KB`)
     if (buffer.length > budget) throw new Refused(`over the ${INSTRUCTIONS_TOTAL_MAX / 1024} KB limit for all instruction files`)
-    return { buffer }
+    return { buffer, real }
   } finally {
     fs.closeSync(fd)
   }
@@ -123,6 +130,10 @@ function importProblem(value) {
   if (value.includes('\0')) return 'not a file path'
   if (value.startsWith('~')) return 'a home folder path'
   if (path.isAbsolute(value) || /^[A-Za-z]:[\\/]/.test(value) || value.startsWith('\\')) return 'an absolute path'
+  const parts = value.split(/[\\/]/)
+  if (parts.at(-1).toLowerCase() === 'claude.local.md') return 'personal notes (CLAUDE.local.md)'
+  // Dotfiles and dot folders (.env, .claude, .git): settings and secrets, never rules.
+  if (parts.some((part) => part.startsWith('.') && part !== '.' && part !== '..')) return 'a dotfile or dot folder'
   return null
 }
 
@@ -147,6 +158,7 @@ export function loadInstructions({ root, mode = 'all', configDir = null } = {}) 
     }
     let count = 0
     const seen = new Set()
+    const seenReal = new Set()
     const one = (rel, depth, from) => {
       const shown = slash(rel)
       if (seen.has(shown)) return
@@ -163,6 +175,12 @@ export function loadInstructions({ root, mode = 'all', configDir = null } = {}) 
         return
       }
       if (!got) return
+      // One file reached twice (a link and its target): read once.
+      if (seenReal.has(got.real)) {
+        if (depth === 0) count += 1
+        return
+      }
+      seenReal.add(got.real)
       budget -= got.buffer.length
       const text = got.buffer.toString('utf8')
       out.files.push({
@@ -206,6 +224,19 @@ export function loadInstructions({ root, mode = 'all', configDir = null } = {}) 
   if (wanted === 'all' && configDir) read('agent-config', configDir, CONFIG_FILES, { firstOnly: true })
   return out
 }
+
+// The project files that are a session's rules (the top files and every file
+// they import), read as a session would: a fix may not edit them without a
+// card, nor push them, the same as a file that runs something. Lowercase.
+export function instructionPaths(root) {
+  try {
+    const files = loadInstructions({ root, mode: 'project' }).files
+    return new Set(files.filter((file) => file.scope === 'project').map((file) => file.path.toLowerCase()))
+  } catch {
+    return new Set()
+  }
+}
+export const isInstructionPath = (paths, rel) => Boolean(paths?.has(String(rel || '').toLowerCase()))
 
 // What may leave the machine: names, sizes and short hashes, no content.
 export function instructionsSummary(loaded) {

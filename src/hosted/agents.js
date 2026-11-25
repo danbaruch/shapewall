@@ -890,9 +890,12 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
       // A connected agent: whether it chats, and whether this person may
       // chat with it right now (with the reason when not).
       link: (() => {
-        // Its instruction files only for someone who may use it.
+        // Its instruction files only for someone who may use it, and then
+        // names only: sizes and hashes stay in the console.
         const link = linkView(row)
-        if (!link.connected || check.ok || chatCheck(row, { ...viewer, boardId }).ok) return link
+        if (!link.connected) return link
+        if (check.ok || chatCheck(row, { ...viewer, boardId }).ok)
+          return { ...link, instructions: (link.instructions || []).map((file) => ({ scope: file.scope, path: file.path })) }
         const rest = { ...link }
         delete rest.instructions
         return rest

@@ -69,16 +69,21 @@ export function createAgentPresence({ now = () => new Date(), ttlMs = AGENT_PRES
       if (entry) entry.gone = true
     },
     // What its hello said about its instruction files (already cleaned).
-    setInstructions(workspaceId, agentId, list) {
+    // `link` and `seq`: which process said it, and which of its hellos: one
+    // older than the last from the same link (out of order) changes nothing.
+    setInstructions(workspaceId, agentId, list, { link = null, seq = null } = {}) {
       if (!workspaceId || !agentId) return
       const id = agentKey(workspaceId, agentId)
+      const before = instructions.get(id)
+      if (before && link && before.link === link && Number.isSafeInteger(seq) && Number.isSafeInteger(before.seq) && seq < before.seq)
+        return
       instructions.delete(id)
-      instructions.set(id, Array.isArray(list) ? list : [])
+      instructions.set(id, { list: Array.isArray(list) ? list : [], link, seq })
       if (instructions.size > AGENTS_MAX) instructions.delete(instructions.keys().next().value)
     },
     // [] when its machine said nothing since the server started.
     instructionsOf(workspaceId, agentId) {
-      return instructions.get(agentKey(workspaceId, agentId)) || []
+      return instructions.get(agentKey(workspaceId, agentId))?.list || []
     },
     // A revoked agent is not listening any more.
     forgetAgent(workspaceId, agentId) {
