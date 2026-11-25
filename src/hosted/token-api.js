@@ -541,7 +541,7 @@ export function mountTokenApi({
           })
         }
       }
-      rows.sort((a, b) => (a.version < b.version ? 1 : a.version > b.version ? -1 : a.current ? -1 : b.current ? 1 : 0))
+      rows.sort((a, b) => (a.version < b.version ? 1 : a.version > b.version ? -1 : a.current === b.current ? 0 : a.current ? -1 : 1))
       res.json({
         board: boardRef(ctx.board),
         page: page.id,
