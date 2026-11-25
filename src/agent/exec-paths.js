@@ -14,7 +14,9 @@
 // tool and build configuration (*.config.js and friends, tsconfig, the jest /
 // vitest / vite / webpack / rollup / babel / eslint / prettier files),
 // scripts a package runs (scripts/, bin/, tools/, hooks), container files,
-// makefiles, and test files (CI runs them). Everything else is ordinary source.
+// makefiles, test files (CI runs them), and agent instruction files
+// (CLAUDE.md, AGENTS.md, CLAUDE.local.md, GEMINI.md, anywhere in the tree):
+// they steer what the next agent runs. Everything else is ordinary source.
 //
 // Two more kinds are never editable from a hosted board, named or not,
 // because Shapewall's own commit leaves them out: what the base commit's
@@ -61,6 +63,12 @@ const EXEC_NAMES = new Set([
   'bootstrap.sh',
   'postinstall.js',
   'preinstall.js',
+  // Instruction files: what the next agent session is told to do (src/agent/instructions.js).
+  // A fix may not quietly rewrite its own rules or the next agent's.
+  'claude.md',
+  'claude.local.md',
+  'agents.md',
+  'gemini.md',
 ])
 const EXEC_PATTERNS = [
   // Tool and build configuration: vite.config.ts, jest.config.cjs, tailwind.config.js, ...

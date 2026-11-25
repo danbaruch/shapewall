@@ -210,6 +210,8 @@ export const COMMAND_FLAGS = {
     'allow-path',
     'auto',
     'base',
+    'instructions',
+    'agent-config',
     ...REMOTE_FLAGS,
   ],
   github: ['board', 'json'],

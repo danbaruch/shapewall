@@ -31,7 +31,8 @@ import { Readable, Writable } from 'node:stream'
 import { PROTOCOL_VERSION, RequestError, client, ndJsonStream } from '@agentclientprotocol/sdk'
 import { TERMINAL_ENV_ALLOWED, acpAgentKind, agentEnv, formatCommand, loginHint, terminalEnvRefused } from '../acp/command.js'
 import { createSandbox, SandboxError } from '../acp/sandbox.js'
-import { ACP_PREAMBLE, NEXT_STEPS_PROMPT, NO_IMAGES_NOTE, quoteData } from '../context.js'
+import { ACP_PREAMBLE, NEXT_STEPS_PROMPT, NO_IMAGES_NOTE, REMOTE_DATA_RULES, quoteData } from '../context.js'
+import { instructionsPrompt, loadInstructions } from '../instructions.js'
 import { AgentError } from '../errors.js'
 import { showable } from '../showable.js'
 import { neverCommitted, runsSomething } from '../exec-paths.js'
@@ -151,10 +152,24 @@ export function readOnlySession(kind) {
           tools: CLAUDE_READ_TOOLS,
           disallowedTools: CLAUDE_ACTING_TOOLS,
           allowDangerouslySkipPermissions: false,
+          // Claude Code's auto memory off (see connectedEnv).
+          settings: NO_AUTO_MEMORY,
         },
       },
     },
   }
+}
+// Claude Code's auto memory: notes it keeps per project under its own config
+// folder and loads into every session it starts there. A connected session
+// neither loads nor writes them: they are the person's, and the answers
+// leave this machine. Turned off twice, as the real adapters were seen to
+// honour each alone (0.93.0 and 0.106.0): the SDK's flag settings
+// (`settings`, below; a top-level `autoMemoryEnabled` option is ignored by
+// the adapter) and the environment variable (connectedEnv).
+const NO_AUTO_MEMORY = Object.freeze({ autoMemoryEnabled: false })
+export function connectedEnv(kind) {
+  if (kind === 'claude') return { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' }
+  return {}
 }
 // What goes in the agent's environment.
 export function readOnlyEnv(kind) {
@@ -200,6 +215,7 @@ export function remoteEditSession(kind) {
           tools,
           disallowedTools: CLAUDE_ACTING_TOOLS.filter((tool) => !tools.includes(tool)),
           allowDangerouslySkipPermissions: false,
+          settings: NO_AUTO_MEMORY,
         },
       },
     },
@@ -571,11 +587,16 @@ export function authError(label, argv) {
 
 // What the person's turn looks like to the agent: on a new session, the
 // preamble and the thread so far (as quoted data); then the new message.
-export function promptBlocks({ messages, fresh, image, thread, preamble = null }) {
+// `instructions`: the instruction files (src/agent/instructions.js) when the
+// agent could not take them as a system prompt: the owner's and the project's
+// text, after the preamble, not quoted as board data.
+export function promptBlocks({ messages, fresh, image, thread, preamble = null, instructions = '' }) {
   const blocks = []
   const last = messages.at(-1)
   if (fresh) {
     blocks.push({ type: 'text', text: preamble || ACP_PREAMBLE })
+    if (instructions)
+      blocks.push({ type: 'text', text: `<shapewall-instructions source="instructions">\n${instructions}\n</shapewall-instructions>` })
     const earlier = messages
       .slice(0, -1)
       .map((message) => ({
@@ -647,12 +668,23 @@ class AcpProcess {
     readOnly = false,
     remoteEdit = null,
     preamble = null,
+    instructions = null,
   }) {
     Object.assign(this, { argv, label, sandbox, limits, log, thread, onGone, mcpServers, readOnly, remoteEdit, preamble })
+    // A connected agent's instruction files: { mode, configDir, onLoad } (src/agent/instructions.js).
+    this.instructions = readOnly || remoteEdit ? instructions : null
+    // The files' text for the first prompt, when the agent takes no system prompt.
+    this.instructionsBlock = ''
     // `extraEnv`: set by Shapewall itself, never by the agent (branch mode's
     // GIT_CEILING_DIRECTORIES), for the agent and the terminals it runs.
     // Read only: the variables that put the agent's own sandbox in force win over the person's.
-    this.env = { ...agentEnv(env), ...extraEnv, ...(readOnly ? readOnlyEnv(acpAgentKind(argv)) : {}) }
+    // A connected agent (read only, or taking edits from a hosted board): its auto memory off (connectedEnv).
+    this.env = {
+      ...agentEnv(env),
+      ...extraEnv,
+      ...(readOnly ? readOnlyEnv(acpAgentKind(argv)) : {}),
+      ...(readOnly || remoteEdit ? connectedEnv(acpAgentKind(argv)) : {}),
+    }
     this.root = sandbox.root
     this.state = 'starting'
     this.stderr = ''
@@ -754,9 +786,14 @@ class AcpProcess {
       this.agentInfo = init?.agentInfo || null
       this.image = Boolean(init?.agentCapabilities?.promptCapabilities?.image)
       this.authMethods = Array.isArray(init?.authMethods) ? init.authMethods : []
+      const appended = this.instructionText()
+      // The ACP system prompt (append), where the agent says it takes one; else the first prompt carries it.
+      const takesSystemPrompt = Boolean(init?.agentCapabilities?.sessionCapabilities?.systemPrompt)
+      if (appended && !takesSystemPrompt) this.instructionsBlock = appended
       const session = await this.connection.agent.request('session/new', {
         cwd: this.root,
         mcpServers: this.mcpServers,
+        ...(appended && takesSystemPrompt ? { systemPrompt: { mode: 'append', content: [{ type: 'text', text: appended }] } } : {}),
         // Read only: the agent's own controls are set so that it cannot act (readOnlySession).
         ...(this.readOnly ? readOnlySession(acpAgentKind(this.argv)) : this.remoteEdit ? remoteEditSession(acpAgentKind(this.argv)) : {}),
       })
@@ -783,6 +820,26 @@ class AcpProcess {
       signal?.removeEventListener('abort', onAbort)
     }
     return this
+  }
+
+  // The instruction files of this session's folder, read now (each session
+  // reads them afresh), as the text appended to its system prompt. Told to
+  // `onLoad` (what the board shows). '' when there are none.
+  instructionText() {
+    if (!this.instructions) return ''
+    let loaded
+    try {
+      loaded = loadInstructions({ root: this.root, mode: this.instructions.mode, configDir: this.instructions.configDir })
+    } catch (error) {
+      this.log(`Instruction files were not read: ${error.code || error.message}`)
+      loaded = { files: [], refused: [] }
+    }
+    try {
+      this.instructions.onLoad?.(loaded, { root: this.root })
+    } catch {
+      // What the board is told is not this session's concern.
+    }
+    return instructionsPrompt(loaded, REMOTE_DATA_RULES)
   }
 
   // Waits, for a bounded moment, until all of a stopped agent's stderr has
@@ -1943,6 +2000,8 @@ export function createAcpBackend(
       readOnly: settings.readOnly === true,
       // Edits from a hosted board (settings.remoteEdit: { commands, allowPaths }).
       remoteEdit: settings.readOnly !== true && settings.remoteEdit ? settings.remoteEdit : null,
+      // A connected agent's instruction files (agent connect): read when the session starts.
+      instructions: settings.instructions || null,
       mcpServers: mcpServersFor?.(thread) || [],
       onGone: (item) => {
         if (item.stopped || !item.pid) processPool?.agents.delete(item)
@@ -2057,7 +2116,14 @@ export function createAcpBackend(
         const used = usedOptions(agent.options())
         const image = agent.image && settings.vision !== false
         const turn = agent.prompt(
-          promptBlocks({ messages, fresh: agent.fresh, image, thread, preamble: preamble || settings.preamble || null }),
+          promptBlocks({
+            messages,
+            fresh: agent.fresh,
+            image,
+            thread,
+            preamble: preamble || settings.preamble || null,
+            instructions: agent.instructionsBlock,
+          }),
           signal,
           gate,
         )
@@ -2155,6 +2221,8 @@ export async function acpHandshake(settings, { env = process.env, root, timeoutM
     thread: 'doctor',
     readOnly: settings.readOnly === true,
     remoteEdit: settings.readOnly !== true && settings.remoteEdit ? settings.remoteEdit : null,
+    // The session opened as it will be: an adapter that refuses the appended prompt says so now.
+    instructions: settings.instructions ? { ...settings.instructions, onLoad: null } : null,
     onGone: (item) => {
       if (item.stopped || !item.pid) processPool?.agents.delete(item)
       poolChanged(processPool)

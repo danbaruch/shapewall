@@ -7,13 +7,13 @@
 // who may send it work. Below: what waits for a person. Only for people who
 // can send comments to an agent (never a share link guest or a public
 // viewer).
-import { Bot, Eye, GitBranch, MessageSquare, Settings2, ShieldCheck } from 'lucide-react'
+import { Bot, Eye, FileText, GitBranch, MessageSquare, Settings2, ShieldCheck } from 'lucide-react'
 import { Button } from '../components/ui'
 import { PanelHeader } from '../components/panel-header'
 import { AgentMark } from '../chat/AgentPicker'
 import { useState } from 'react'
 import { cn, formatRelative } from '../lib/utils'
-import { STATE_MARK, editsLine, stateWords } from './hostedAgents'
+import { STATE_MARK, editsLine, instructionsLine, stateWords } from './hostedAgents'
 
 const DOCS_URL = 'https://shapewall.com/docs/where-to-run#where-the-work-happens'
 const WHY = { approval: 'needs your OK', 'needs-human': 'needs a person', 'branch-ready': 'fix ready on a branch' }
@@ -78,6 +78,8 @@ function AgentRow({ agent, nameOf, onOpen, onChat }) {
   // How its edits are allowed, as its own machine set it (hostedAgents.js).
   const mode = agent.edits?.mode || 'none'
   const modeLine = editsLine(agent)
+  // Its instruction files, as its machine said (names only here; hashes in the console).
+  const rules = instructionsLine(agent)
   const elsewhere = (agent.elsewhere?.working || 0) + (agent.elsewhere?.queued || 0)
   return (
     <li
@@ -115,6 +117,12 @@ function AgentRow({ agent, nameOf, onOpen, onChat }) {
             <p className="flex min-w-0 items-start gap-1 text-xs text-muted" data-sw-hosted-agent-mode={mode}>
               <ModeIcon mode={mode} />
               <span className="min-w-0">{mode === 'none' ? `${modeLine}. No edits, no commands.` : modeLine}</span>
+            </p>
+          ) : null}
+          {rules ? (
+            <p className="flex min-w-0 items-start gap-1 text-xs text-muted" data-sw-hosted-agent-instructions>
+              <FileText size={12} className="mt-0.5 shrink-0" aria-hidden="true" />
+              <span className="min-w-0 break-words">Instructions: {rules}</span>
             </p>
           ) : null}
         </div>

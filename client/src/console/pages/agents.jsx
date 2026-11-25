@@ -190,7 +190,30 @@ function LinkLine({ agent }) {
       )}
       {link.version ? ` · Shapewall ${link.version}` : ''}
       {link.policy?.audience === 'owner' ? ' · its machine takes questions from its connector only' : ''}
+      <InstructionsLine list={link.instructions} />
     </p>
+  )
+}
+
+const SCOPE_WORDS = { project: 'project', 'agent-config': 'agent config' }
+// The instruction files its sessions read, as its machine said at hello:
+// names, sizes and short sha256 hashes. Their text never reaches the server.
+function InstructionsLine({ list }) {
+  if (!Array.isArray(list) || !list.length) return null
+  return (
+    <span className="mt-0.5 block" data-sw-agent-instructions>
+      Instructions:{' '}
+      {list.map((file, index) => (
+        <span key={`${file.scope}:${file.path}`}>
+          {index ? ', ' : ''}
+          <span className="text-fg">{file.path}</span> ({SCOPE_WORDS[file.scope] || file.scope}, {file.bytes} bytes,{' '}
+          <code className="font-mono" title="sha256, first 12 characters">
+            {file.sha}
+          </code>
+          )
+        </span>
+      ))}
+    </span>
   )
 }
 
