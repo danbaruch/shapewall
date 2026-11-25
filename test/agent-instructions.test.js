@@ -300,8 +300,11 @@ test('a rejected --agent-config is not saved', async () => {
   const project = tempDir('instr-reject')
   const inside = path.join(project, 'cfg')
   fs.mkdirSync(inside)
+  // An adapter on PATH (never run: the folder is refused before anything starts).
+  const bin = tempDir('instr-reject-bin')
+  fs.writeFileSync(path.join(bin, 'claude-agent-acp'), '#!/bin/sh\nexit 1\n', { mode: 0o755 })
   const env = {
-    PATH: process.env.PATH,
+    PATH: bin + path.delimiter + '/usr/bin' + path.delimiter + '/bin',
     HOME: tempDir('instr-reject-home'),
     XDG_CONFIG_HOME: tempDir('instr-reject-xdg'),
     XDG_STATE_HOME: tempDir('instr-reject-state'),
