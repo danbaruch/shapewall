@@ -125,6 +125,26 @@ an error instead, with the status and the pages they are on, and exits with `2` 
   fail https://elsewhere.example/x  (from home): getaddrinfo ENOTFOUND
 ```
 
+## shapewall open
+
+```text
+shapewall open [--board ID] [--page ID|TITLE] [--comment N] [--viewport NAME] [--compare [A_B]] [--print] [--json] [--remote URL]
+```
+
+Prints a deep link to the board and opens it in your browser: the board flown to a page (`--page`), opened on a comment at its
+screen size (`--comment`, which wins over `--page`), at one screen size (`--viewport`), with the page's before and after
+(`--compare` alone, which opens its history: the latest capture beside the one before it), or two environments side by side
+(`--compare staging_prod`). `--print` only prints the link; `--json` prints `{ url, board, page, comment, viewport, compare, running }`
+and opens nothing, for agents. A local board uses the running `shapewall serve` (or `SHAPEWALL_BOARD_URL`); when nothing is
+serving it, the link is printed with a reminder to run `shapewall serve`. With `--remote URL` it links to the hosted project the
+token belongs to. Links carry ids only, never a token. The link format is described in
+[the agent workflow](/docs/agent-workflow#links-to-the-board).
+
+```text
+$ shapewall open --comment 12 --print
+http://127.0.0.1:4600/?board=site&c=12&filter=all&vp=phone
+```
+
 ## shapewall serve
 
 ```text
@@ -757,6 +777,17 @@ Commands
   ci wait --url URL         wait until a deploy preview answers   [--timeout DURATION (default 600s, at most 1h;
                             a number alone is seconds)]
       --board ID | --json   (https://shapewall.com/docs/pull-requests)
+  open                      print and open a deep link: a board, a page, a comment, a screen size, a before and after
+      --board ID            the board (default: the first)
+      --page ID|TITLE       fly to this page
+      --comment N           open on this comment, at its screen size (wins over --page)
+      --viewport NAME       desktop, phone, any viewport of the board, or all
+      --compare [A_B]       alone: the page's before and after (needs --page or --comment);
+                            A_B: two environments side by side
+      --print               print the link only, do not open a browser
+      --json                { url, board, page, comment, viewport, compare, running }; opens nothing
+      --remote URL          a hosted project instead of the local board (with --token-file, --include-guests)
+                            a local board that is not running: prints the link and says to run shapewall serve
   mcp                       MCP server on stdio for coding agents
       --read-only | --no-capture
   notify list               notification channels, their events and what each still needs   [--json]

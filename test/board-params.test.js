@@ -36,6 +36,8 @@ test('a board switch clears every board-scoped param and keeps the view preferen
     'diff',
     'ha',
     'page',
+    'p',
+    'follow',
   ]) {
     assert.ok(key in changes, `${key} is cleared`)
     assert.equal(changes[key], null)

@@ -224,6 +224,17 @@ export const SECTIONS = {
   ci wait --url URL         wait until a deploy preview answers   [--timeout DURATION (default 600s, at most 1h;
                             a number alone is seconds)]
       --board ID | --json   (https://shapewall.com/docs/pull-requests)`,
+  open: `  open                      print and open a deep link: a board, a page, a comment, a screen size, a before and after
+      --board ID            the board (default: the first)
+      --page ID|TITLE       fly to this page
+      --comment N           open on this comment, at its screen size (wins over --page)
+      --viewport NAME       desktop, phone, any viewport of the board, or all
+      --compare [A_B]       alone: the page's before and after (needs --page or --comment);
+                            A_B: two environments side by side
+      --print               print the link only, do not open a browser
+      --json                { url, board, page, comment, viewport, compare, running }; opens nothing
+      --remote URL          a hosted project instead of the local board (with --token-file, --include-guests)
+                            a local board that is not running: prints the link and says to run shapewall serve`,
   mcp: `  mcp                       MCP server on stdio for coding agents
       --read-only | --no-capture`,
   notify: `  notify list               notification channels, their events and what each still needs   [--json]
@@ -365,7 +376,7 @@ ${GLOBAL_HELP}
 // newcomer runs, in the order they run them, then the rest by name only.
 const CORE = ['doctor', 'init', 'capture', 'serve', 'comments', 'watch', 'mcp']
 // The rest, roughly by how soon someone needs them; any command not named here goes last.
-const ADVANCED_ORDER = ['sitemap', 'variant', 'journeys', 'links', 'checks', 'export', 'notify', 'github', 'ci', 'events']
+const ADVANCED_ORDER = ['sitemap', 'variant', 'journeys', 'links', 'open', 'checks', 'export', 'notify', 'github', 'ci', 'events']
 const ADVANCED = [
   ...ADVANCED_ORDER,
   ...Object.keys(SECTIONS).filter((name) => !CORE.includes(name) && !ADVANCED_ORDER.includes(name) && !HIDDEN.includes(name)),

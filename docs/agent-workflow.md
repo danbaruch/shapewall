@@ -396,6 +396,31 @@ tool_timeout_sec = 600
 
 From a clone instead of the npm package, use `"command": "node", "args": ["/path/to/shapewall/bin/shapewall.js", "mcp", ...]`.
 
+## Links to the board
+
+Every link Shapewall makes (in `shapewall open`, notifications, GitHub issues, push and share answers) has one format, so an
+agent can hand the person a link that opens exactly what it worked on:
+
+```text
+<board address>?board=<board>[&p=<page>][&c=<comment>][&filter=all][&vp=<viewport>][&hist=<page>&hv=<viewport>][&cmp=<a>_<b>]
+```
+
+| Key          | Opens                                                                                      |
+| ------------ | ------------------------------------------------------------------------------------------ |
+| `board`      | the board                                                                                  |
+| `p`          | the board flown to that page, its card selected                                            |
+| `c`          | the board on that comment, its thread open (wins over `p`)                                 |
+| `filter`     | the comment list filter; `all` so a resolved comment shows                                 |
+| `vp`         | one screen size (`desktop`, `phone`, any viewport of the board) or `all`                   |
+| `hist`, `hv` | the page's before and after: its latest capture beside the one before it, at that viewport |
+| `cmp`        | two environments side by side (`staging_prod`)                                             |
+
+The board address is the running `shapewall serve` (`http://127.0.0.1:4600/` by default) or, on a hosted server,
+`https://<server>/w/<workspace>/p/<project>/`. Ids the board does not have are ignored, and a link carries ids only, never a
+token. `shapewall open --print` (or `--json`) prints the link for a page, a comment, a viewport or a before and after; without
+`--print` it also opens it in the browser. An agent in an app with a browser pane can open the link there; otherwise it gives the
+link to the person.
+
 ## A prompt that works
 
 > Run `shapewall comments --open --json`. For each comment, find the code that renders the element (search for `element.text` and the

@@ -18,6 +18,7 @@ import { GITHUB_REPO_RE, ID_RE } from './config.js'
 import { feedbackContext, feedbackItem, fileKind } from './feedback.js'
 import { aroundRect } from './png.js'
 import { DEFAULT_BOARD_URL, runningBoardUrl } from './serve-state.js'
+import { boardLink as deepLink } from './board-links.js'
 import { commentText } from './comment-fields.js'
 import { CommentError, getComment, listComments, readJson, recordGithubPull, setGithubIssue, writeJsonAtomic } from './store.js'
 import { absoluteProgram } from './which.js'
@@ -197,11 +198,7 @@ function code(value) {
 
 // A link to the comment on the board: it opens with the comment selected.
 export function boardLink(settings, boardId, commentId) {
-  const url = new URL(settings.boardUrl)
-  url.searchParams.set('board', boardId)
-  url.searchParams.set('filter', 'all')
-  url.searchParams.set('c', String(commentId))
-  return url.toString()
+  return deepLink({ base: settings.boardUrl, board: boardId, comment: commentId, filter: 'all' })
 }
 
 function screenshotLink(settings, boardId, item) {

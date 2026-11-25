@@ -50,6 +50,7 @@ import {
   startViewport,
 } from './camera'
 import { useSettledZoom } from './hooks/useSettledZoom'
+import { linkedFollow, linkedPage } from '../lib/deepLink'
 import { minimapDefault, minimapSaved, rememberMinimap, rememberPageCommentSeen, rememberTipDismissed, tipDismissed } from './prefs'
 import { CommandPalette } from './PageFinder'
 import { useSidebarExpanded } from '../components/app-rail'
@@ -202,6 +203,14 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   } = useAgentParams({ boardId, info, params, updateParams })
   const updates = useRef(null)
   const initialCamera = useRef(parseCamera(params.get('v')))
+  // A deep link's page (`p`, lib/deepLink.js): the board opens flown to it,
+  // unless the link also names a comment or a camera, which win.
+  const startPage = useRef(linkedPage(params))
+  // The page images flying to a page measures (shotUrlsFor below), for the first view.
+  const shotUrlsForRef = useRef(() => [])
+  // A deep link's `follow=<agentId>`: read and kept on the board element for
+  // the follow mode, which does not act on it yet.
+  const followRequest = linkedFollow(params)
   const canvasRef = useRef(null)
 
   const [commentMode, setCommentMode] = useState(false)
@@ -394,7 +403,8 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     !data?.board || (comparePair && changedOnly && !compareData)
       ? null
       : `${comparePair?.join('_') || ''}|${changedOnly && compareData ? layoutPages.length : 'all'}`
-  useRefitOnChange({ mode, pendingFocus, shapeKey, clearFocus, fitBoard, initialCamera })
+  // A link's page counts as the board's first view, like a link's camera.
+  useRefitOnChange({ mode, pendingFocus, shapeKey, clearFocus, fitBoard, initialCamera: initialCamera.current ? initialCamera : startPage })
 
   // Search, state and mention narrow the list (and the pins); the
   // Open/Resolved counts are of what is left.
@@ -659,7 +669,18 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     onHidden: onFocusHidden,
     onLanded: onFocusLanded,
   })
-  usePhoneStartView({ wide, nodesReady, initialCamera, selectedCommentId, canvasRef, nodes: layout.nodes, flow, setSettledZoom })
+  const startTarget = startPage.current ? layout.targets[startPage.current] || null : null
+  usePhoneStartView({
+    wide,
+    nodesReady,
+    initialCamera,
+    selectedCommentId,
+    linkedTarget: Boolean(startTarget),
+    canvasRef,
+    nodes: layout.nodes,
+    flow,
+    setSettledZoom,
+  })
   // The first view on a desktop: a board that fits at a readable zoom is
   // fitted whole, a big one opens on its first group (camera.js). Hidden
   // until placed, so it never flashes at 100%.
@@ -670,7 +691,25 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   useEffect(() => {
     // Not before the Comments panel is settled (open or not): it changes the canvas size.
     if (!startPending.current || !nodesReady || !layout.nodes.length || panelStart === null) return
+    // A link to a page waits for the board's shape (a compare link's pairs) before it flies.
+    if (startPage.current && shapeKey === null) return
     startPending.current = false
+    // A link to a page (`p`): straight to it, no animation, its card selected.
+    // A page this board does not have (or one the view hides) falls back to the usual first view.
+    if (startPage.current && layout.targets[startPage.current]) {
+      const pageId = startPage.current
+      const target = layout.targets[pageId]
+      setSettledZoom(null)
+      Promise.resolve(
+        flyToPage(flow, target, canvasRef.current?.getBoundingClientRect(), {
+          phoneCompare: Boolean(comparePair) && !wide,
+          shotUrls: shotUrlsForRef.current(pageId, target),
+          instant: true,
+        }),
+      ).finally(() => setStartShown(true))
+      if (target.frames[0]) setFocusedKey(`${pageId}|${target.frames[0].viewport}`)
+      return
+    }
     if (!wide) {
       setStartShown(true)
       return
@@ -688,7 +727,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
     // placed, or the frame in between paints it at 100%.
     const placed = view ? flow.setViewport(view) : flow.fitView(fitOptionsWithRoom(room, box?.height))
     Promise.resolve(placed).finally(() => setStartShown(true))
-  }, [flow, layout.nodes, nodesReady, panelStart, setSettledZoom, tipOpen, tryOpen, wide])
+  }, [comparePair, flow, layout.nodes, layout.targets, nodesReady, panelStart, setSettledZoom, shapeKey, tipOpen, tryOpen, wide])
 
   // After a pick from a toolbar list, focus goes back to the canvas (not the
   // trigger), so the next shortcut (C, the arrows) reaches the board.
@@ -741,6 +780,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
       .map((item) => data?.captures?.[pageId]?.[item.viewport])
       .filter((image) => image?.thumb || image?.file)
       .map((image) => fileUrl(boardId, 'captures', image.thumb || image.file, imageVersion))
+  shotUrlsForRef.current = shotUrlsFor
   const { openJourney, closeJourney, goStep, chooseJourneyBranch, startBuilder, addBuilderStep, saveBuilder, removeJourney } =
     useJourneyActions({
       onLeave: leaveForNavigation,
@@ -1833,7 +1873,12 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   }
   return (
     <BoardProviders board={boardContext} view={boardView} people={people}>
-      <div className="flex h-full flex-col" data-sw-board={boardId} style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
+      <div
+        className="flex h-full flex-col"
+        data-sw-board={boardId}
+        data-sw-follow-request={followRequest || undefined}
+        style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}
+      >
         <DemoBanner />
         <AccessLostBanner />
         {info?.hosted && data?.agentApprove ? (

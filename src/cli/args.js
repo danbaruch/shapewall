@@ -82,7 +82,7 @@ export const FLAG_ALIASES = {
 const REPEATABLE = new Set(['only', 'allowed-host', 'exclude', 'allow-host', 'trusted'])
 // Flags that take a value but also work alone ("init --sitemap": the base
 // URL's sitemap.xml). Alone, the flag is true.
-const OPTIONAL_VALUE = new Set(['sitemap'])
+const OPTIONAL_VALUE = new Set(['sitemap', 'compare'])
 
 // The flags each command reads. Anything else is a typo worth stopping for:
 // "capture --onyl home" would otherwise capture every page.
@@ -234,6 +234,7 @@ export const COMMAND_FLAGS = {
     'json',
   ],
   mcp: ['read-only', 'no-capture', 'board', ...REMOTE_FLAGS],
+  open: ['board', 'page', 'comment', 'viewport', 'compare', 'print', 'json', ...REMOTE_FLAGS],
   notify: ['json', 'to', 'board'],
   doctor: ['install-browser', 'port', 'agent-acp', 'json', 'no-launch'],
   variant: ['url', 'path', 'title', 'note', 'source', 'id', 'viewport', 'board', 'json'],

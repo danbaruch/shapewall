@@ -31,6 +31,9 @@ export const BOARD_SCOPED_PARAMS = Object.freeze([
   'diff',
   // a page a check asked to show
   'page',
+  // a deep link's page and the agent it follows (lib/deepLink.js)
+  'p',
+  'follow',
 ])
 
 // The URL changes that open board `id`: every board-scoped parameter goes.
