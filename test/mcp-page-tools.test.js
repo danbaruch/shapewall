@@ -15,6 +15,7 @@ import { decodePng, encodePng, fitPng } from '../src/png.js'
 import { pushBoard } from '../src/remote/cli.js'
 import { createRemoteMcpServer } from '../src/remote/remote-mcp.js'
 import { createRemote } from '../src/remote/remote.js'
+import { LIMITS } from '../src/hosted/ratelimit.js'
 import { boardDir, readManifest, versionTime } from '../src/store.js'
 import { createProject, createToken, signUp, startHostedServer, tokenCall, writeLocalCaptures } from './hosted-helpers.js'
 import { SAMPLE, tempDir } from './helpers.js'
@@ -282,4 +283,18 @@ test('the token comment route needs the reply scope and takes only text and a pi
   // Too large a request body is refused before anything is read.
   const huge = await call({ page: 'home', body: 'x'.repeat(70 * 1024) })
   assert.equal(huge.status, 413)
+  // New comments have a budget per token of their own.
+  const saved = LIMITS.tokenComment
+  LIMITS.tokenComment = { limit: 2, windowMs: 60 * 60_000 }
+  try {
+    const looping = await createToken(owner, owner.workspaceId, project.id, ['read', 'reply'])
+    const post = () => tokenCall(hosted, looping, 'POST', '/api/v1/boards/sample/comments', { body: { page: 'home', body: 'again' } })
+    assert.equal((await post()).status, 201)
+    assert.equal((await post()).status, 201)
+    const limited = await post()
+    assert.equal(limited.status, 429)
+    assert.equal(limited.json.error.code, 'rate_limited')
+  } finally {
+    LIMITS.tokenComment = saved
+  }
 })

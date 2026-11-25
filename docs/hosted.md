@@ -1046,7 +1046,8 @@ shapewall mcp --remote https://app.example.com
   `get_page_capture` the latest pushed capture of a page (scaled down to at most 1600 px wide, with when that page was captured).
   Tools that write appear only when the token has the scope. `add_comment` needs `reply`, like a reply: the comment is signed with
   the token's name (it takes no `author`), marked as an agent's, and can never be sent to an agent, so an agent cannot hand work to
-  another agent; only a trusted person can. `--board ID` picks the board a tool works on when it names none (default: the first
+  another agent; only a trusted person can. A token makes at most 120 new comments an hour. A token with `claim` sees only comments sent to
+  agents, so it cannot read back a comment it added. `--board ID` picks the board a tool works on when it names none (default: the first
   pushed board).
 - `recapture_pages` is there only when `mcp --remote` starts in a project folder (it finds `shapewall.config.json` like the other
   commands, or takes `--config FILE`), without `--read-only` or `--no-capture`, and the token has the `push` scope. The hosted server

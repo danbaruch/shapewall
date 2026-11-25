@@ -23,7 +23,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - `shapewall mcp --remote` now has `add_comment`, with a token that has the `reply` scope: it pins a new comment on a page of the
   hosted board, on an element from `list_selectors` or near the top-left corner. It is signed with the token's name, marked as an
   agent's and never sent to an agent. Behind it is a new token API route, `POST /api/v1/boards/:board/comments`, audited as
-  `token_commented`. The token pages route also says when each page's viewports were captured (`capturedAt`).
+  `token_commented`, at most 120 new comments an hour per token. The token pages route also says when each page's viewports were captured (`capturedAt`).
 
 ## 1.1.0 - 2026-11-24
 

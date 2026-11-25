@@ -599,6 +599,12 @@ export function mountTokenApi({
   v1.post(
     '/boards/:bid/comments',
     scope('reply'),
+    (req, res, next) => {
+      const result = rateLimiter.hit('tokenComment', req.token.id, LIMITS.tokenComment)
+      if (result.ok) return next()
+      res.setHeader('Retry-After', String(result.retryAfter))
+      fail(res, 429, 'rate_limited', 'That is a lot of new comments from this token. Wait a while and try again.')
+    },
     v1Json,
     v1Board((req, res, ctx) => {
       const input = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {}

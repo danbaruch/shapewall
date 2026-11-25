@@ -40,6 +40,9 @@ export const LIMITS = {
   shareFailLink: { limit: 50, windowMs: 60 * 60_000 },
   guestApi: { limit: 600, windowMs: 60_000 },
   guestComment: { limit: 30, windowMs: 60 * 60_000 },
+  // New comments per API token (the add_comment MCP tool): a looping agent
+  // stops long before it fills a board (replies stay on the token budget).
+  tokenComment: { limit: 120, windowMs: 60 * 60_000 },
   // A public project's board API, per client address.
   publicApi: { limit: 600, windowMs: 60_000 },
   // `shapewall login`: starting a login and polling it per IP, and looking up
