@@ -75,9 +75,8 @@ import { useJourneyActions } from './hooks/useJourneyActions'
 import { useCommentActions } from './hooks/useCommentActions'
 import { useBoardData } from './hooks/useBoardData'
 import { useBoardEvents } from './hooks/useBoardEvents'
-import { useFollowAgent } from './hooks/useFollowAgent'
-import { FollowBar } from './FollowBar'
-import { ANY_AGENT } from './followAgent'
+// Only once there is someone to follow: its own chunk.
+const FollowAgent = lazy(() => import('./FollowAgent'))
 import { useJourneyState } from './hooks/useJourneyState'
 import { LANDED_MS, useFlyToPending, usePhoneStartView, useRefitOnChange } from './hooks/useCameraMoves'
 import { useCommentLink } from './hooks/useCommentLink'
@@ -982,30 +981,11 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
   const agentsQuery = useResource(hostedMember ? `/api/boards/${encodeURIComponent(boardId)}/agents` : null, { pollMs: 15000 })
   const agentList = hostedMember ? agentsQuery.data || null : null
   useEffect(() => rememberHostedAgents(agentList?.agents || []), [agentList])
-  // Follow an agent (followAgent.js): fly to the pin it takes, before and
-  // after of that screen when it recaptures. Local boards (any viewer of
+  // Follow an agent (followAgent.js, FollowAgent.jsx): fly to the pin it
+  // takes, before and after of that screen when it recaptures. Local boards (any viewer of
   // the board, owner or not) and hosted members; never a share link's guest
   // or a public board's viewer, who get no agent list.
   const followEnabled = Boolean(data) && !STATIC && !DEMO && (!info?.hosted || hostedMember)
-  const following = useFollowAgent({
-    enabled: followEnabled,
-    hosted: Boolean(info?.hosted),
-    boardId,
-    request: followRequest,
-    comments,
-    manifest: data?.manifest,
-    agents: agentList?.agents ?? null,
-    focus: focusEntry,
-    selectedCommentId,
-    historyPageId,
-    canvasRef,
-    focusComment,
-    openHistory,
-    closeHistory,
-    updateParams,
-    setToast,
-    titleOf: titleOfPage,
-  })
   const {
     commentsUrl,
     applyComment,
@@ -1294,6 +1274,13 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
       }),
     [agentList, approvalRows, comments, data?.agentDispatch, data?.agentListening, focusEntry, info?.hosted, titleOfPage],
   )
+  // Who the follow bar offers to follow: a hosted board's agents that are
+  // online, or on a local board "the agent" while one works.
+  const followCandidates = info?.hosted
+    ? (agentList?.agents || []).filter((agent) => agent.state !== 'offline')
+    : activity.state === 'working'
+      ? [{ id: 'any', name: 'agent' }]
+      : []
   // The hosted Agent panel, beside the canvas or as a phone's sheet.
   const hostedAgentProps = hostedAgent
     ? {
@@ -2243,20 +2230,31 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                     }}
                   />
                 ) : null}
-                {followEnabled ? (
-                  <FollowBar
-                    following={following}
-                    touch={!wide}
-                    belowPresence={Boolean(info?.hosted) && !wide}
-                    titleOf={titleOfPage}
-                    candidates={
-                      info?.hosted
-                        ? (agentList?.agents || []).filter((agent) => agent.state !== 'offline')
-                        : activity.state === 'working'
-                          ? [{ id: ANY_AGENT, name: 'agent' }]
-                          : []
-                    }
-                  />
+                {followEnabled && (followRequest || followCandidates.length) ? (
+                  <Suspense fallback={null}>
+                    <FollowAgent
+                      candidates={followCandidates}
+                      touch={!wide}
+                      belowPresence={Boolean(info?.hosted) && !wide}
+                      titleOf={titleOfPage}
+                      enabled={followEnabled}
+                      hosted={Boolean(info?.hosted)}
+                      boardId={boardId}
+                      request={followRequest}
+                      comments={comments}
+                      manifest={data?.manifest}
+                      agents={agentList?.agents ?? null}
+                      focus={focusEntry}
+                      selectedCommentId={selectedCommentId}
+                      historyPageId={historyPageId}
+                      canvasRef={canvasRef}
+                      focusComment={focusComment}
+                      openHistory={openHistory}
+                      closeHistory={closeHistory}
+                      updateParams={updateParams}
+                      setToast={setToast}
+                    />
+                  </Suspense>
                 ) : null}
                 {tryOpen && data && !journey && !builder && !drawingOn && !(commentMode && !wide) && !noteSqueezed ? (
                   <TryThis
