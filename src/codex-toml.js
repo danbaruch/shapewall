@@ -323,5 +323,12 @@ export function serverText(source) {
   const found = findServer(source)
   if (!found.ranges.length) return ''
   const lines = found.lines.map((line) => line.text)
-  return found.ranges.map(([from, to]) => lines.slice(from, to + 1).join('\n').replace(/\n+$/, '')).join('\n')
+  return found.ranges
+    .map(([from, to]) =>
+      lines
+        .slice(from, to + 1)
+        .join('\n')
+        .replace(/\n+$/, ''),
+    )
+    .join('\n')
 }

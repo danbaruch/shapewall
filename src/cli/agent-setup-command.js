@@ -69,7 +69,8 @@ export async function agentSetupCommand(
   }
   const writes = setup.plans.filter(willWrite)
   const blocked = setup.plans.some((plan) => plan.action === 'differs' || plan.action === 'skip')
-  const report = (extra) => out(JSON.stringify({ ok: !blocked, dryRun: Boolean(flags['dry-run']), plans: setup.plans.map(planJson), ...extra }, null, 2))
+  const report = (extra) =>
+    out(JSON.stringify({ ok: !blocked, dryRun: Boolean(flags['dry-run']), plans: setup.plans.map(planJson), ...extra }, null, 2))
   if (!json) for (const line of formatPlan(setup)) out(line)
   if (!writes.length || flags['dry-run']) {
     if (json) report({ applied: [] })
@@ -127,7 +128,10 @@ export function agentDocsCommand(flags, out) {
     if (!result.removed.length) out('No Shapewall section to remove.')
     else {
       out(`Removed the Shapewall section from ${result.removed.join(' and ')}.`)
-      if (result.deleted.length) out(`Deleted ${result.deleted.join(' and ')} (Shapewall made ${result.deleted.length === 1 ? 'it' : 'them'}; nothing else was in ${result.deleted.length === 1 ? 'it' : 'them'}).`)
+      if (result.deleted.length)
+        out(
+          `Deleted ${result.deleted.join(' and ')} (Shapewall made ${result.deleted.length === 1 ? 'it' : 'them'}; nothing else was in ${result.deleted.length === 1 ? 'it' : 'them'}).`,
+        )
       out('serve and capture will not add it back.')
     }
     return 0
@@ -135,7 +139,11 @@ export function agentDocsCommand(flags, out) {
   if (flags.write) {
     const result = writeAgentDocs(config.dir, config.outputDir)
     for (const note of result.notes) out(note)
-    out(result.changed ? `Wrote the Shapewall section to ${describeWritten(result)}.` : `The Shapewall section in ${result.files.join(' and ')} is up to date.`)
+    out(
+      result.changed
+        ? `Wrote the Shapewall section to ${describeWritten(result)}.`
+        : `The Shapewall section in ${result.files.join(' and ')} is up to date.`,
+    )
     return 0
   }
   const plan = planAgentDocs(config.dir)

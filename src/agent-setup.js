@@ -110,17 +110,32 @@ function planClaude({ dir, scope, remote, config, version, env, force, remove, c
   const base = { app: 'claude', scope, file, shownFile: shownPath(file, env), before: existing, cli }
   if (remove) {
     if (existing && !cli && scope !== 'project')
-      return { ...base, action: 'skip', after: null, notes: [`The claude command is not on PATH, so ${scope} scope cannot be changed from here.`] }
+      return {
+        ...base,
+        action: 'skip',
+        after: null,
+        notes: [`The claude command is not on PATH, so ${scope} scope cannot be changed from here.`],
+      }
     return { ...base, action: existing ? 'remove' : 'absent', after: null, notes }
   }
   const reach = scope === 'user' ? 'global' : scope
   const resolved = resolveShapewallCommand({ projectDir: dir, version, reach, env })
   const configArg = config ? (scope === 'project' ? path.relative(dir, config) || config : config) : null
-  const after = { type: 'stdio', command: resolved.command, args: serverArgs({ prefix: resolved.args, remote, config: configArg }), env: existing?.env || {} }
+  const after = {
+    type: 'stdio',
+    command: resolved.command,
+    args: serverArgs({ prefix: resolved.args, remote, config: configArg }),
+    env: existing?.env || {},
+  }
   notes.push(`Uses ${resolved.note}.`)
   if (scope === 'project') notes.push('Claude Code asks each person to approve the shapewall server in .mcp.json the first time.')
   if (!cli && scope !== 'project')
-    return { ...base, action: 'skip', after, notes: [...notes, `The claude command is not on PATH, so ${scope} scope cannot be set from here.`] }
+    return {
+      ...base,
+      action: 'skip',
+      after,
+      notes: [...notes, `The claude command is not on PATH, so ${scope} scope cannot be set from here.`],
+    }
   for (const other of SCOPES.filter((item) => item !== scope && entries[item])) {
     const winner = SCOPES.indexOf(other) < SCOPES.indexOf(scope) ? other : scope
     notes.push(
@@ -142,7 +157,12 @@ function planCodex({ dir, remote, config, version, env, force, remove, cli }) {
   }
   const base = { app: 'codex', scope: 'global', file, shownFile: shownPath(file, env), cli }
   const notes = []
-  const existing = readServer(source)
+  let existing
+  try {
+    existing = readServer(source)
+  } catch (error) {
+    throw new Error(`${base.shownFile}: ${error.message}. Shapewall did not change it.`, { cause: error })
+  }
   const beforeText = serverText(source)
   if (remove) {
     const text = existing ? removeServer(source) : source
@@ -225,7 +245,11 @@ export function lineDiff(before, after) {
 }
 
 const APP_NAMES = { claude: 'Claude Code', codex: 'Codex' }
-const SCOPE_WORDS = { local: 'local scope: this project, only you', user: 'user scope: every project of yours', project: 'project scope: .mcp.json, for everyone' }
+const SCOPE_WORDS = {
+  local: 'local scope: this project, only you',
+  user: 'user scope: every project of yours',
+  project: 'project scope: .mcp.json, for everyone',
+}
 
 // The plan as lines a person reads before saying yes.
 export function formatPlan({ plans }) {

@@ -45,7 +45,6 @@ export const LOOP_SUMMARY = [
   '`reply_to_comment` with what changed and the compare link, then `set_comment_status "done"` (a person checks and resolves).',
 ]
 
-
 // mcpInstructions({ handIn, hosted, github }): the text. `hosted` says the
 // board is a hosted one; `github` adds the pull request line (local only).
 export function mcpInstructions({ handIn = 'local', hosted = false, github = true } = {}) {

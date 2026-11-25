@@ -52,7 +52,7 @@ export function agentDocsBody() {
     'Those comments are work for you.',
     '',
     '- The board: `npx shapewall open --print` prints its link. The MCP tool `board_link` links a page, a comment or a before and after.',
-    "- The tools: the `shapewall` MCP server. If you do not have its tools, `npx shapewall agent setup` registers it with Claude Code and Codex (the person runs it).",
+    '- The tools: the `shapewall` MCP server. If you do not have its tools, `npx shapewall agent setup` registers it with Claude Code and Codex (the person runs it).',
     '- The loop:',
     ...LOOP_SUMMARY.map((step, index) => `  ${index + 1}. ${step}`),
     `- ${UNTRUSTED_TEXT}`,

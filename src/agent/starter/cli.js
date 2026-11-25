@@ -15,7 +15,7 @@ import { deprecated } from '../../deprecation.js'
 
 const SANDBOX_ACTIONS = ['run', 'watch', 'doctor', 'build-image']
 const USAGE =
-  'usage: shapewall agent setup | agent docs | agent connect --remote URL | agent sandbox run --comment ID | agent sandbox watch | agent sandbox doctor | agent sandbox build-image'
+  'usage: shapewall agent connect --remote URL | agent sandbox run --comment ID | agent sandbox watch | agent sandbox doctor | agent sandbox build-image'
 
 // The config, or (with --remote and no config here) an empty one: the
 // endpoint and trust list then come from the environment and flags.
