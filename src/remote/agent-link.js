@@ -883,7 +883,13 @@ export async function runAgentLink({
         commands: policy.approvals !== 'none' && policy.commands.length > 0,
       },
       // What this machine allows, for the board to show. The server can only narrow it.
-      policy: { audience: policy.audience, approvals: policy.approvals, commands: policy.commands, auto: policy.auto, respond: policy.respond },
+      policy: {
+        audience: policy.audience,
+        approvals: policy.approvals,
+        commands: policy.commands,
+        auto: policy.auto,
+        respond: policy.respond,
+      },
       // The instruction files a chat session reads: names, sizes and short hashes, never content.
       instructions: instructions?.current() || [],
       // Counts up with every hello of this process: the server keeps the newest list.

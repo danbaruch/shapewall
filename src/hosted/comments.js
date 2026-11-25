@@ -148,19 +148,21 @@ export function createCommentStore(t, projectId, boardId) {
 
   function list({ status = null, mention = null } = {}) {
     const wanted = mention ? String(mention).replace(/^@/, '').toLowerCase() : null
-    return t
-      .all(`SELECT * FROM comments WHERE ${SCOPE} ORDER BY created_at DESC, number DESC`, key)
-      .map(rowToComment)
-      .filter((comment) => !status || comment.status === status)
-      // As people wrote them: an agent's comment or reply never counts (watch --mention wakes agents).
-      .filter(
-        (comment) =>
-          !wanted ||
-          commentMentions(
-            { ...comment, body: comment.authorGuest ? '' : comment.body, replies: comment.replies.filter((reply) => !reply.guest) },
-            { people: true },
-          ).includes(wanted),
-      )
+    return (
+      t
+        .all(`SELECT * FROM comments WHERE ${SCOPE} ORDER BY created_at DESC, number DESC`, key)
+        .map(rowToComment)
+        .filter((comment) => !status || comment.status === status)
+        // As people wrote them: an agent's comment or reply never counts (watch --mention wakes agents).
+        .filter(
+          (comment) =>
+            !wanted ||
+            commentMentions(
+              { ...comment, body: comment.authorGuest ? '' : comment.body, replies: comment.replies.filter((reply) => !reply.guest) },
+              { people: true },
+            ).includes(wanted),
+        )
+    )
   }
 
   function counts() {

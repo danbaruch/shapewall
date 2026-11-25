@@ -445,18 +445,24 @@ export function createMcpServer({
     {
       title: 'Board link',
       description:
-        'A link into the board: the board, a page (flown to), a comment (opened), a viewport, or a page compare (before and after of its ' +
-        "latest recapture). Open it in your app's browser pane if it has one; otherwise give it to the person.",
+        'A link into the board: the board, a page (flown to), a comment (opened), a viewport, a page compare (before and after of its ' +
+        "latest recapture), or follow mode (follow: the board follows an agent as it works). Open it in your app's browser pane if it has one; otherwise give it to the person.",
       inputSchema: {
         board: boardArg,
         page: z.string().max(64).optional().describe('Page id'),
         comment: z.number().int().positive().optional().describe('Comment id'),
         viewport: z.string().max(40).optional().describe('Viewport name, or "all"'),
         compare: z.boolean().optional().describe("Open the page's before and after (needs page, or a comment on a page)"),
+        follow: z
+          .string()
+          .max(128)
+          .regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]*$/)
+          .optional()
+          .describe('Follow an agent on the board: "any" (whichever agent works), or one agent\'s id'),
       },
       annotations: { readOnlyHint: true },
     },
-    tool(({ board, page, comment, viewport, compare = false }) => {
+    tool(({ board, page, comment, viewport, compare = false, follow }) => {
       const target = boardFor(board)
       if (page && !target.pages.some((item) => item.id === page)) throw new Error(`No page "${page}" on board "${target.id}".`)
       const viewports = target.pages.flatMap((item) => item.viewports)
@@ -473,6 +479,7 @@ export function createMcpServer({
         ...(item ? { comment: item.id } : {}),
         ...(viewport ? { viewport } : {}),
         ...(compare ? { compare: true } : {}),
+        ...(follow ? { follow } : {}),
         ...(item?.status === 'resolved' ? { filter: 'all' } : {}),
       })
       return json({
@@ -482,6 +489,7 @@ export function createMcpServer({
         comment: item ? item.id : null,
         viewport: viewport || null,
         compare,
+        follow: follow || null,
         running: base.running,
         note:
           "Open this in your app's browser pane if it has one; otherwise give it to the person." +

@@ -52,14 +52,14 @@ export function isAgentAuthored(entry) {
   if (!entry || typeof entry !== 'object') return false
   return Boolean(
     entry.authorAgent === true ||
-      entry.agent === true ||
-      entry.role === 'assistant' ||
-      entry.starter === true ||
-      entry.byAgent === true ||
-      entry.authorKind === 'agent' ||
-      entry.import_author_kind === 'agent' ||
-      entry.author_token_id ||
-      entry.authorTokenId,
+    entry.agent === true ||
+    entry.role === 'assistant' ||
+    entry.starter === true ||
+    entry.byAgent === true ||
+    entry.authorKind === 'agent' ||
+    entry.import_author_kind === 'agent' ||
+    entry.author_token_id ||
+    entry.authorTokenId,
   )
 }
 

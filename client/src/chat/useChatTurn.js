@@ -84,7 +84,11 @@ export function useChatTurn({
   // `push`: a hosted board's "Push this fix", asked again (no text of its own).
   // `ask`: Send to agent, the explicit action that wakes a shared thread's
   // agent without an @mention (src/agent/triggers.js).
-  const submit = async (textValue = draft, fix = false, { queued = null, editOf = null, regenerate = null, push = false, ask = false } = {}) => {
+  const submit = async (
+    textValue = draft,
+    fix = false,
+    { queued = null, editOf = null, regenerate = null, push = false, ask = false } = {},
+  ) => {
     const fromComposer = !editOf && !regenerate && !push
     const item = queued || {
       text: regenerate ? regenerate.request.text || '' : String(textValue ?? '').trim(),

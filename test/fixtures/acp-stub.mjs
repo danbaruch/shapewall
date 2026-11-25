@@ -438,6 +438,13 @@ async function prompt({ sessionId, prompt: blocks }) {
     say(sessionId, `pid ${process.pid}`)
     return 'end_turn'
   }
+  // "@agent reply TEXT": answers TEXT as it is (an @mention in it too), for
+  // the chat trigger tests: an agent's own mention never starts a turn.
+  const bare = last.replace(/^(@\S+\s+)+/, '')
+  if (bare.startsWith('reply ')) {
+    say(sessionId, bare.slice('reply '.length))
+    return 'end_turn'
+  }
   if (last === 'echo') {
     say(sessionId, JSON.stringify(blocks))
     return 'end_turn'

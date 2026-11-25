@@ -394,7 +394,7 @@ test('what a machine, or a stolen agent token, may claim: never "approved", neve
   // A chat turn is never a fix: a card in it is refused, whatever the agent's machine allows.
   const thread = `chat-${Math.random().toString(36).slice(2).padEnd(16, '0').slice(0, 16)}`
   hosted.rateLimiter.reset()
-  const chatting = ada.browser.post(agentUrl(`/threads/${thread}/messages`), { text: 'slowly' })
+  const chatting = ada.browser.post(agentUrl(`/threads/${thread}/messages`), { text: 'slowly', ask: true })
   const chatTurn = await until(() => hosted.app.locals.chat.hub.all().find((item) => item.threadId === thread), 'the chat turn')
   const inChat = askFrame(chatTurn.id)
   await inject(builder, chatTurn.id, [{ name: 'permission', data: inChat }], () =>

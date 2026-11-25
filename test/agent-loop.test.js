@@ -83,7 +83,7 @@ test('ACP: no injected MCP tools on shared boards; tokenless and proxied request
       }
       const result = await request(port, 'POST', '/api/agent/boards/sample/threads/board/messages', {
         headers,
-        body: { text: 'Inspect tools' },
+        body: { text: 'Inspect tools', ask: true },
       })
       assert.doesNotMatch(result.text, /owner-mcp/)
       if (options.shared) {

@@ -149,7 +149,7 @@ test('a viewer, a guest, a public visitor, a signed-out person and another works
     ['GET', `${base()}/agent/boards/sample/threads`],
     ['GET', chatUrl('board')],
     ['GET', chatUrl('board', '/events')],
-    ['POST', chatUrl('board', '/messages'), { text: 'hello' }],
+    ['POST', chatUrl('board', '/messages'), { ask: true, text: 'hello' }],
     ['POST', chatUrl('board', '/stop'), {}],
     ['POST', chatUrl('board', '/profile'), { profileId: builder.agentId }],
     ['PATCH', chatUrl('board'), { title: 'x' }],
@@ -168,7 +168,7 @@ test('a viewer, a guest, a public visitor, a signed-out person and another works
   // Signed out, and a cross-site request with a real session.
   const stranger = createBrowser(hosted.port, hosted.origin)
   assert.equal((await stranger.get(chatUrl('board'))).status, 401)
-  assert.equal((await stranger.post(chatUrl('board', '/messages'), { text: 'hello' })).status, 401)
+  assert.equal((await stranger.post(chatUrl('board', '/messages'), { ask: true, text: 'hello' })).status, 401)
   const forged = await ada.browser.call('POST', chatUrl('board', '/messages'), {
     body: { text: 'hello' },
     headers: { Origin: 'https://evil.example' },
@@ -181,7 +181,7 @@ test('a viewer, a guest, a public visitor, a signed-out person and another works
   assert.notEqual(zed.workspaceId, ws)
   for (const url of [chatUrl('board'), chatUrl(thread), `${base()}/agent/status`])
     assert.equal((await zed.browser.get(url)).status, 404, url)
-  assert.equal((await zed.browser.post(chatUrl('board', '/messages'), { text: 'hello' })).status, 404)
+  assert.equal((await zed.browser.post(chatUrl('board', '/messages'), { ask: true, text: 'hello' })).status, 404)
 
   // A share link's guest and a public project's visitor: no such routes.
   await fresh(ada)
@@ -208,7 +208,7 @@ test('a viewer, a guest, a public visitor, a signed-out person and another works
       '/agent/boards/sample/threads/board/events',
     ])
       assert.equal((await who.get(`${root}${rest}`)).status, 404, `${root}${rest}`)
-    const posted = await who.post(`${root}/agent/boards/sample/threads/board/messages`, { text: 'hello' })
+    const posted = await who.post(`${root}/agent/boards/sample/threads/board/messages`, { ask: true, text: 'hello' })
     assert.ok([403, 404].includes(posted.status), `${root}: ${posted.status}`)
     assert.ok(!/Hello from the stream/.test(posted.text))
   }
@@ -242,7 +242,7 @@ test("one member's chat is theirs: another member cannot read it, write in it, w
     for (const [method, url, body] of [
       ['GET', chatUrl(thread)],
       ['GET', chatUrl(thread, '/events')],
-      ['POST', chatUrl(thread, '/messages'), { text: 'me too' }],
+      ['POST', chatUrl(thread, '/messages'), { ask: true, text: 'me too' }],
       ['POST', chatUrl(thread, '/stop'), {}],
       ['POST', chatUrl(thread, '/profile'), { profileId: builder.agentId }],
       ['PATCH', chatUrl(thread), { title: 'mine now' }],
@@ -257,7 +257,7 @@ test("one member's chat is theirs: another member cannot read it, write in it, w
   }
   // While it runs, too: the live events are as private as the stored ones.
   hosted.rateLimiter.reset()
-  const sending = cyd.browser.post(chatUrl(thread, '/messages'), { text: 'slowly' })
+  const sending = cyd.browser.post(chatUrl(thread, '/messages'), { text: 'slowly', ask: true })
   await until(() => liveTurn(thread)?.events.some((event) => event.name === 'text'), 'the agent to write')
   assert.equal((await dee.browser.get(chatUrl(thread, '/events'))).status, 404)
   assert.equal((await dee.browser.post(chatUrl(thread, '/stop'), {})).status, 404)
@@ -339,7 +339,7 @@ test('the agent policy still decides who may use an agent at all; roles decide w
   // Stop: the asker, the agent's connector and admins. Not another member.
   const running = (user) => {
     hosted.rateLimiter.reset()
-    return user.browser.post(chatUrl('board', '/messages'), { text: 'slowly' })
+    return user.browser.post(chatUrl('board', '/messages'), { text: 'slowly', ask: true })
   }
   assert.equal((await api(cyd, 'POST', chatUrl('board', '/profile'), { profileId: builder.agentId })).status, 200)
   let sending = running(cyd)
@@ -414,7 +414,7 @@ test('limits: one person, one project and one agent can only ask so much', async
     const mine = newChat()
     hosted.rateLimiter.reset()
     assert.equal((await api(ada, 'POST', chatUrl(mine, '/profile'), { profileId: busy.agentId })).status, 200)
-    const request = ada.browser.post(chatUrl(mine, '/messages'), { text: 'hello' })
+    const request = ada.browser.post(chatUrl(mine, '/messages'), { ask: true, text: 'hello' })
     const settled = await Promise.race([request, new Promise((resolve) => setTimeout(() => resolve(null), 150))])
     if (settled) status = settled.status
     else pending.push(request)
@@ -516,7 +516,7 @@ test('the link routes: only an agent token, only its own turns, only its own pro
   // Another agent's turn does not exist for this agent; nor does another project's.
   hosted.rateLimiter.reset()
   assert.equal((await api(ada, 'POST', chatUrl('board', '/profile'), { profileId: builder.agentId })).status, 200)
-  const sending = ada.browser.post(chatUrl('board', '/messages'), { text: 'slowly' })
+  const sending = ada.browser.post(chatUrl('board', '/messages'), { text: 'slowly', ask: true })
   await until(() => liveTurn('board')?.events.some((event) => event.name === 'text'), 'the agent to write')
   const turnId = liveTurn('board').id
   const elsewhere = await connectAgent(hosted, ada, { workspaceId: ws, projectId: other.id, name: 'Elsewhere' })

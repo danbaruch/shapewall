@@ -828,6 +828,21 @@ What the bridge protects against, and what it does not:
   `git status` run a program): approve commands only in repos you trust.
   Shapewall does not inspect the agent's network traffic.
 
+## When an agent answers
+
+The same rules hold on a local board, a hosted board, in chat and for `watch` (`src/agent/triggers.js`):
+
+- **A private chat** (New chat) answers every message.
+- **A shared thread** (the board chat, a comment's chat on a hosted board or a board shared with `--chat`) answers only a message
+  that @mentions the agent (`@agent`, or its own handle such as `@builder`), **Send to agent** (the button beside Send, or
+  Ctrl/Cmd+Enter) or **Fix with**. Other messages stay in the thread for the people there; the agent reads them, as quoted data,
+  with the next message that is for it. On a hosted board the person who connected the thread's agent can turn on **Answer every
+  message** in Chat settings, and the agent's own machine can refuse that (`agent connect --respond mention`).
+- **A local board only you chat on** treats the board chat and comment threads like a private chat: every message gets an answer.
+  Chat settings > **Answer every message** turns that off for one thread, so it answers mentions and Send to agent only.
+- **Text an agent wrote never starts a turn**: not its replies, not a comment it made with `add_comment` or `comments add`, not an
+  @mention inside them. This is always on and has no setting, so agents cannot set each other off in a loop.
+
 ## What the panel does
 
 - **Threads.** The board thread, one per comment (**Ask agent** on a comment), and as many **New chat** conversations as you start

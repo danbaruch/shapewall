@@ -98,11 +98,7 @@ test('the loop breaker: agent text never starts a turn, mention, action or "alwa
 test('mentions counted for agents: only what people wrote', () => {
   const comment = {
     body: 'Header is off',
-    replies: [
-      { body: 'Over to @agent', agent: true },
-      { body: '@robin can you look?', authorAgent: true },
-      { body: '@sam thoughts?' },
-    ],
+    replies: [{ body: 'Over to @agent', agent: true }, { body: '@robin can you look?', authorAgent: true }, { body: '@sam thoughts?' }],
   }
   assert.deepEqual(commentMentions(comment), ['agent', 'robin', 'sam'], 'shown as before')
   assert.deepEqual(commentMentions(comment, { people: true }), ['sam'])
@@ -165,7 +161,13 @@ function jobFor({ rows, turn, respond }) {
 }
 
 test('a hosted job ends at the message that started the turn and carries why', async () => {
-  const row = (id, role, body) => ({ id, role, body: JSON.stringify(body), author_user_id: role === 'user' ? 'u1' : null, agent_id: 'ag_1' })
+  const row = (id, role, body) => ({
+    id,
+    role,
+    body: JSON.stringify(body),
+    author_user_id: role === 'user' ? 'u1' : null,
+    agent_id: 'ag_1',
+  })
   const rows = [
     row('m1', 'user', { text: 'People talking' }),
     row('m2', 'user', { text: '@builder what is open?', trigger: 'mention' }),

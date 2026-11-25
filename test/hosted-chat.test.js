@@ -77,7 +77,7 @@ const open = (token, options) => {
 // A turn left running: sends "slowly" and returns once the agent writes.
 async function startSlow(user, thread) {
   hosted.rateLimiter.reset()
-  const sending = user.browser.post(chatUrl(thread, '/messages'), { text: 'slowly' })
+  const sending = user.browser.post(chatUrl(thread, '/messages'), { text: 'slowly', ask: true })
   await until(async () => (await ada.browser.get(chatUrl(thread))).json?.running, 'the turn to run')
   // (An object: returning the promise itself would wait for the whole turn.)
   return { sending }
@@ -137,7 +137,7 @@ test('approving a connection makes an agent with its own token: fixed scopes, th
   assert.ok(agent.link.connectedAt)
   assert.equal(agent.link.version, '0.5.0')
   assert.deepEqual(agent.link.capabilities, { chat: true, edits: false, commands: false, images: false })
-  assert.deepEqual(agent.link.policy, { audience: 'server', approvals: 'none', commands: [], auto: [] })
+  assert.deepEqual(agent.link.policy, { audience: 'server', approvals: 'none', commands: [], auto: [], respond: 'thread' })
   assert.equal(agent.approval.autoAvailable, false, 'a read-only agent never opts in to approvals')
   assert.equal(agent.approval.mode, 'none')
   const log = audit()
@@ -239,7 +239,7 @@ test('the agent reads the project it runs in, and gets the board as quoted data 
   assert.equal(blocks.at(-1), 'echo', "the person's own words, last and unquoted")
   assert.equal(echoed.events.find((event) => event.name === 'user').data.message.mentions.length, 2)
   // A mention of something that is not on the board is refused, not dropped.
-  const bad = await chat(ada, chatUrl(second, '/messages'), { text: 'x', mentions: [{ kind: 'page', id: 'nope' }] })
+  const bad = await chat(ada, chatUrl(second, '/messages'), { ask: true, text: 'x', mentions: [{ kind: 'page', id: 'nope' }] })
   assert.equal(bad.status, 400)
   assert.equal(bad.json.error.code, 'bad_mention')
   await ada.browser.call('DELETE', boardUrl(`/comments/${made.json.comment.id}`))
@@ -280,7 +280,7 @@ test('read and answer only: the machine refuses writes, commands and permission 
   assert.ok(!names.some((name) => /^SHAPEWALL_/.test(name)))
   // A fix from a chat is refused with words, not attempted: a fix starts from a comment
   // (and from an agent whose machine takes edits: test/hosted-fix.test.js).
-  const fix = await chat(ada, chatUrl(thread, '/messages'), { text: 'x', fix: true })
+  const fix = await chat(ada, chatUrl(thread, '/messages'), { ask: true, text: 'x', fix: true })
   assert.equal(fix.status, 400)
   assert.equal(fix.json.error.code, 'fix_needs_comment')
   const image = await chat(ada, chatUrl(thread, '/messages'), {
@@ -294,7 +294,7 @@ test('read and answer only: the machine refuses writes, commands and permission 
 test('one turn at a time in a thread; Stop ends it; a second viewer replays it from the start and follows on', async () => {
   const { sending } = await startSlow(ada, 'board')
   await wrote('board')
-  const second = await ada.browser.post(chatUrl('board', '/messages'), { text: 'slowly' })
+  const second = await ada.browser.post(chatUrl('board', '/messages'), { text: 'slowly', ask: true })
   assert.equal(second.status, 409, second.text)
   assert.equal(second.json.error.code, 'agent_running')
   assert.equal((await stateOf(builder.agentId)).state, 'busy')
@@ -371,6 +371,81 @@ test('usage records: one per turn, who asked which agent where and how it ended,
   // The audit trail names the thread kind, not a private chat's id.
   assert.ok(audit().some((row) => row.action === 'chat_thread_created'))
   assert.ok(!JSON.stringify(audit()).includes(thread))
+})
+
+test("shared threads answer an @mention or Send to agent; Answer every message is the connector's, and its machine can refuse it", async () => {
+  await fresh(ada)
+  await fresh(cyd)
+  const thread = 'board'
+  const turns = () => runs().length
+  const count = turns()
+  // A plain message from a member: kept, shown, no turn.
+  const plain = await chat(cyd, chatUrl(thread, '/messages'), { text: 'just a note for the team' })
+  assert.equal(plain.status, 200, plain.text)
+  assert.deepEqual(
+    plain.events.map((event) => event.name),
+    ['user', 'posted'],
+  )
+  assert.equal(plain.events[1].data.reason, 'not_addressed')
+  assert.match(plain.events[1].data.line, /Builder answers when you @mention it or press Send to agent/)
+  assert.equal(turns(), count, 'no turn for a plain message')
+  let view = (await cyd.browser.get(chatUrl(thread))).json
+  assert.equal(view.running, false)
+  assert.equal(view.messages.at(-1).text, 'just a note for the team')
+  assert.equal(view.respond.mode, 'mention')
+  assert.equal(view.respond.shared, true)
+  assert.deepEqual(view.respond.canSet, { always: false, mention: false }, 'a member sets nothing')
+  // An @mention of `agent` or of its own handle, and Send to agent, start a turn.
+  for (const body of [{ text: '@agent stream' }, { text: '@builder stream' }, { text: 'stream', ask: true }]) {
+    const asked = await chat(cyd, chatUrl(thread, '/messages'), body)
+    assert.equal(asked.status, 200, asked.text)
+    assert.equal(asked.events.at(-1).name, 'done', JSON.stringify(body))
+    assert.equal(asked.final.role, 'assistant')
+  }
+  assert.equal(turns(), count + 3)
+  // Who may change it: the person who connected it (Ada) for "always".
+  view = (await ada.browser.get(chatUrl(thread))).json
+  assert.deepEqual(view.respond.canSet, { always: true, mention: true })
+  const bad = await ada.browser.call('PATCH', chatUrl(thread), { body: { respond: 'everything' } })
+  assert.equal(bad.status, 400, bad.text)
+  const mixed = await ada.browser.call('PATCH', chatUrl(thread), { body: { respond: 'always', title: 'x' } })
+  assert.equal(mixed.status, 400, mixed.text)
+  const own = newChat()
+  await chat(ada, chatUrl(own, '/messages'), 'stream')
+  const privateChat = await ada.browser.call('PATCH', chatUrl(own), { body: { respond: 'mention' } })
+  assert.equal(privateChat.json.error.code, 'private_chat')
+  const member = await cyd.browser.call('PATCH', chatUrl(thread), { body: { respond: 'always' } })
+  assert.equal(member.status, 403, member.text)
+  assert.equal(member.json.error.code, 'respond_owner')
+  const on = await ada.browser.call('PATCH', chatUrl(thread), { body: { respond: 'always' } })
+  assert.equal(on.status, 200, on.text)
+  assert.equal(on.json.thread.respond.mode, 'always')
+  assert.match(on.json.thread.respond.line, /answers every message in this thread/)
+  const record = audit().findLast((row) => row.action === 'chat_thread_respond')
+  assert.deepEqual([record.user_id, record.detail.respond, record.detail.agent], [ada.user.id, 'always', builder.agentId])
+  // Now a plain message gets an answer.
+  const every = await chat(cyd, chatUrl(thread, '/messages'), { text: 'stream' })
+  assert.equal(every.events.at(-1).name, 'done', every.text)
+  // The machine says mentions only: the thread reads as mentions only, and "always" cannot be set.
+  const row = hosted.db.prepare('SELECT capabilities FROM agents WHERE id = ?').get(builder.agentId)
+  const caps = JSON.parse(row.capabilities)
+  hosted.db
+    .prepare('UPDATE agents SET capabilities = ? WHERE id = ?')
+    .run(JSON.stringify({ ...caps, policy: { ...caps.policy, respond: 'mention' } }), builder.agentId)
+  try {
+    view = (await ada.browser.get(chatUrl(thread))).json
+    assert.equal(view.respond.mode, 'mention')
+    assert.equal(view.respond.stored, 'always')
+    assert.equal(view.respond.canSet.always, false)
+    const refused = await chat(cyd, chatUrl(thread, '/messages'), { text: 'stream' })
+    assert.equal(refused.events.at(-1).name, 'posted', refused.text)
+    assert.equal(refused.events.at(-1).data.reason, 'machine_mention_only')
+  } finally {
+    hosted.db.prepare('UPDATE agents SET capabilities = ? WHERE id = ?').run(row.capabilities, builder.agentId)
+  }
+  // Back to mentions only, by Ada.
+  const off = await ada.browser.call('PATCH', chatUrl(thread), { body: { respond: 'mention' } })
+  assert.equal(off.json.thread.respond.mode, 'mention')
 })
 
 test('chat history: rename, archive, search and delete follow who owns the thread', async () => {
@@ -464,7 +539,7 @@ test('the link: batches are numbered, a repeat is dropped, a gap is refused; a f
 
   const thread = newChat()
   await ada.browser.post(chatUrl(thread, '/profile'), { profileId: made.agentId })
-  const sending = ada.browser.post(chatUrl(thread, '/messages'), { text: 'hello there' })
+  const sending = ada.browser.post(chatUrl(thread, '/messages'), { ask: true, text: 'hello there' })
   await until(() => /event: work/.test(streamed), 'the work event')
   const turnId = /event: work\ndata: (.*)/.exec(streamed)[1] && JSON.parse(/event: work\ndata: (.*)/.exec(streamed)[1]).turn
   const work = await call('GET', '/work')
@@ -585,7 +660,7 @@ test('the link: batches are numbered, a repeat is dropped, a gap is refused; a f
   assert.equal((await tokenCall(hosted, made.token, 'GET', '/api/v1/agent/link')).status, 400)
 
   // Revoked: the stream closes at once, the token stops working, a waiting turn ends.
-  const waiting = ada.browser.post(chatUrl(thread, '/messages'), { text: 'still there?' })
+  const waiting = ada.browser.post(chatUrl(thread, '/messages'), { ask: true, text: 'still there?' })
   await until(() => (streamed.match(/event: work/g) || []).length >= 2, 'the second work event')
   await fresh(ada)
   const revoked = await ada.browser.call('DELETE', consoleUrl(`/agents/${made.agentId}`))

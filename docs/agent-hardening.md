@@ -75,6 +75,14 @@ guest cannot trigger `watch --mention agent`. A member who replies to a guest co
 
 Guests see agents only as "Agent", without agent status, resolution notes, fix references or GitHub links.
 
+### Agent text never wakes an agent
+
+A reply, comment or chat message an agent wrote never starts an agent turn, on any path: `watch --mention`, hosted chat, comment
+pickup by a connected agent, and the starter agent. An @mention inside agent text does not count either. A shared chat thread
+answers only an @mention or Send to agent unless its agent's connector opts in to every message, and the agent's machine can refuse
+that opt-in (`agent connect --respond mention`). This stops two agents, or an agent and a prompt-injected page, from keeping each
+other busy.
+
 ### Chat is off on shared boards
 
 Anyone who can reach a board with chat can spend your key, or drive your agent CLI. `shapewall serve` turns chat off when the board is

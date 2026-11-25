@@ -53,8 +53,31 @@ and the project uses [Semantic Versioning](https://semver.org/).
   `npx -y shapewall@<version>`, in the nearest folder with a `shapewall.config.json`; a hosted board through the Claude Code
   `remote_url` option or `SHAPEWALL_REMOTE`. Not in the npm package. See docs/plugins.md.
 - "Shapewall tools for Buzz agents" in docs/buzz.md: the MCP server for Claude Code, Codex and goose agents in Buzz.
+- **Send to agent** in the chat composer of a shared thread (the button beside Send, or Ctrl/Cmd+Enter), and **Answer every
+  message** in Chat settings for the person who connected the thread's agent (hosted) or the owner (local). One set of trigger
+  rules for every path, `src/agent/triggers.js`; see "When an agent answers" in docs/agents.md.
+- `shapewall agent connect --respond thread|mention`: whether this machine honors a shared thread set to answer every message
+  ("thread", the default) or answers an @mention and Send to agent only ("mention"), whatever the server says. Saved in
+  `agent-policy.json` as `respond`.
+- MCP `board_link` takes `follow` (`"any"` or an agent id) for a follow mode link, on `shapewall mcp` and `mcp --remote`.
+- Hosted migration 22: `chat_threads.respond_mode` (docs/hosted.md, "Migration 22 and rollback").
 
 ### Changed
+
+- **Shared threads answer only when asked, like a chat app.** On a hosted board, the board chat and a comment's chat no longer
+  send every message to the agent: a message starts a turn only when it @mentions the agent (`@agent` or its own handle, such as
+  `@builder`), when someone presses Send to agent or Fix with, or when the person who connected the agent set that thread to
+  answer every message. Every other message is kept and shown to the people in the thread, needs no online agent, and is read by
+  the agent with the next message that is for it (only when its author is in the agent's audience, as before). A private chat
+  (New chat) still answers every message. The agent's own machine checks the same rule again, and a thread that changes agents
+  goes back to mentions only. On a local board only you chat on, nothing changes; on a board shared with `--chat`, the board
+  chat and comment threads answer mentions and Send to agent only.
+- Text an agent wrote never starts an agent turn, on any path, even when it @mentions an agent or the thread answers every
+  message: `watch --mention` (local and `--remote`) and `GET /api/v1/.../comments?mention=` count only mentions people wrote, a
+  comment an agent wrote is never handed out by `watch`, a connected agent's comment pickup skips agent comments, and the starter
+  agent uses the same rule. Comments made with the MCP `add_comment` tool, or with `comments add` inside an agent's run, are now
+  marked `authorAgent` on local boards too.
+- An agent session that goes on in a thread now also gets, as quoted data, what people wrote there since its last answer.
 
 - MCP `list_comments` returns at most 50 comments per call by default (`total` counts every match; `cursor` gets the next page).
 

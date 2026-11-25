@@ -124,7 +124,18 @@ function mentionData(ctx, comments, mention) {
 // `approvals`: the approval rule in effect per kind of request, for a fix.
 // `respond`: the thread's stored setting ("mention" or "always"), for the
 // machine's own check of why this turn started (src/agent/triggers.js).
-export function buildJob({ ctx, turn, agent, rows: allRows, inAudience, asker, commentItem, commentVisible, approvals = null, respond = 'mention' }) {
+export function buildJob({
+  ctx,
+  turn,
+  agent,
+  rows: allRows,
+  inAudience,
+  asker,
+  commentItem,
+  commentVisible,
+  approvals = null,
+  respond = 'mention',
+}) {
   // The conversation up to the message that started this turn, never past
   // it: a message written while the turn waited for the machine is not the
   // question (it may be people talking, or the next question, for later).
