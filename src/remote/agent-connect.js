@@ -21,6 +21,7 @@ import { acpAgentKind } from '../agent/acp/command.js'
 import { ACP_DEFAULTS, acpHandshake, adapterName, adapterWarning } from '../agent/backends/acp.js'
 import { createBackend } from '../agent/backends/index.js'
 import { agentSettings } from '../agent/config.js'
+import { agentConfigDir, createInstructionsNote, instructionsLines, instructionsSummary, loadInstructions } from '../agent/instructions.js'
 import { REMOTE_FIX_PREAMBLE, remotePreamble } from '../agent/context.js'
 import { DEFAULT_OUTPUT_DIR, authFiles, findConfigFile, loadConfig } from '../config.js'
 import { AGENT_SLUG_RE, forgetAgentCredential, readAgentCredential, saveAgentCredential } from './credentials.js'
@@ -30,6 +31,8 @@ import {
   POLICY_APPROVALS,
   POLICY_AUDIENCES,
   POLICY_AUTO_KINDS,
+  POLICY_INSTRUCTIONS,
+  cleanAgentConfig,
   cleanAllowPath,
   cleanBase,
   cleanCommand,
@@ -174,7 +177,48 @@ export const COMMANDS_PROVEN = []
 const NO_COMMANDS =
   'Commands cannot be allowed for Claude Code in this release: started with its shell tool it runs commands it takes to be read-only (ls, cat) without asking, and those can read outside the project. Edits work without it.'
 
-export function policyChanges(flags, saved, kind = null) {
+const isDir = (dir) => {
+  try {
+    return fs.statSync(dir).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+// The agent config folder in effect for a connection, checked: { dir, note }.
+// The saved setting (null: the default folder, read only when it exists;
+// "none"; or a path). Never the person's own Claude Code folder, never
+// inside the project (a fix copy would carry it), never created here.
+export function agentConfigFor(policy, slug, { env = process.env, projectDir }) {
+  const fallback = path.join(path.dirname(policyFile(env)), 'agent-config', slug)
+  const dir = agentConfigDir(policy.instructions === 'all' ? policy.agentConfig : 'none', fallback)
+  if (!dir) return { dir: null }
+  if (!isDir(dir)) throw new Error(`The agent config folder ${dir} is not there. Make it, or run again with --agent-config none.`)
+  const real = (file) => {
+    try {
+      return fs.realpathSync(file)
+    } catch {
+      return path.resolve(file)
+    }
+  }
+  const within = (outer, inner) => {
+    const rel = path.relative(real(outer), real(inner))
+    return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
+  }
+  const home = env.HOME || os.homedir()
+  const claudeDirs = [path.join(home, '.claude'), env.CLAUDE_CONFIG_DIR].filter(Boolean)
+  if (claudeDirs.some((claude) => within(claude, dir) || within(dir, claude)))
+    throw new Error(
+      `The agent config folder ${dir} is (or holds) Claude Code's own settings folder. A connected agent never reads that: pick a folder of its own (--agent-config DIR).`,
+    )
+  if (within(projectDir, dir) || within(dir, projectDir))
+    throw new Error(
+      `The agent config folder ${dir} is inside the project (or holds it): a fix's copy of the project could change it. Pick a folder outside the project (--agent-config DIR).`,
+    )
+  return { dir: real(dir) }
+}
+
+export function policyChanges(flags, saved, kind = null, { cwd = process.cwd() } = {}) {
   const changes = {}
   const commandsOk = kind === null || COMMANDS_PROVEN.includes(kind)
   if (flags.audience !== undefined) {
@@ -231,6 +275,21 @@ export function policyChanges(flags, saved, kind = null) {
       throw new Error('--base: a branch name, such as main ("head": the commit the checkout is on)')
     changes.base = flags.base === 'head' ? null : flags.base
   }
+  if (flags.instructions !== undefined) {
+    if (!POLICY_INSTRUCTIONS.includes(flags.instructions))
+      throw new Error(
+        '--instructions: "all" (the project\'s CLAUDE.md or AGENTS.md and the agent config folder\'s, the default), "project" or "none"',
+      )
+    changes.instructions = flags.instructions
+  }
+  if (flags['agent-config'] !== undefined) {
+    const given = flags['agent-config']
+    const dir = cleanAgentConfig(given === 'none' ? 'none' : typeof given === 'string' && given ? path.resolve(cwd, given) : null)
+    if (!dir) throw new Error('--agent-config: a folder on this machine for this agent\'s own CLAUDE.md ("none": no such folder)')
+    if (dir !== 'none' && !isDir(dir))
+      throw new Error(`--agent-config: ${dir} is not a folder. Make it first: Shapewall does not create it.`)
+    changes.agentConfig = dir
+  }
   if (flags['git-remote'] !== undefined) {
     if (flags['git-remote'] !== 'none' && !cleanRemote(flags['git-remote']))
       throw new Error('--git-remote: a remote name, such as origin ("none": never push)')
@@ -271,7 +330,7 @@ export async function agentConnect(
   const policyNow = readMachinePolicy(origin, slug, env, {
     warn: (text) => log(`Not understood, so read as the narrowest setting: ${text}`),
   })
-  const changes = policyChanges(flags, policyNow, kind)
+  const changes = policyChanges(flags, policyNow, kind, { cwd })
 
   // ---- The agent's token: its own, never the saved login's ----
   let token = env.SHAPEWALL_TOKEN || ''
@@ -354,6 +413,21 @@ export async function agentConnect(
     )
   for (const line of profile.notes) log(line)
 
+  // ---- Instruction files (src/agent/instructions.js) ----
+  // Read here for the list the board is shown; each session reads them again
+  // when it starts (a fix from its own copy of the project).
+  const configDir = agentConfigFor(policy, slug, { env, projectDir: config.dir }).dir
+  const instructions = { mode: policy.instructions, configDir }
+  const loaded = loadInstructions({ root: config.dir, ...instructions })
+  for (const line of instructionsLines(loaded)) log(terminalSafe(line))
+  if (!loaded.files.length)
+    log(
+      policy.instructions === 'none'
+        ? 'Instructions: off on this machine (--instructions none).'
+        : 'Instructions: none found (CLAUDE.md or AGENTS.md in the project, or in the agent config folder).',
+    )
+  const instructionsNote = createInstructionsNote(instructionsSummary(loaded))
+
   // ---- Can a session be opened at all? ----
   // Asked of the agent now, the way a question from the board would start it
   // (no prompt is sent, so nothing is spent): an adapter that cannot open the
@@ -368,9 +442,13 @@ export async function agentConnect(
       `${label} could not open ${what} on this machine, so it is not connected${said && !result.message.includes(said) ? ` (adapter: ${terminalSafe(said)})` : ''}. ${terminalSafe(result.message)}`,
     )
   }
-  const opened = await opens('a read-only session', { readOnly: true })
+  const opened = await opens('a read-only session', { readOnly: true, instructions })
   if (edits)
-    await opens('a session for edits', { readOnly: false, remoteEdit: { commands: policy.commands, allowPaths: policy.allowPaths } })
+    await opens('a session for edits', {
+      readOnly: false,
+      remoteEdit: { commands: policy.commands, allowPaths: policy.allowPaths },
+      instructions,
+    })
   const adapter = terminalSafe(adapterName(opened.agentInfo) || 'an adapter that does not say its version')
   const untested = adapterWarning(kind, opened.agentInfo, label)
   if (untested) log(`Warning: ${terminalSafe(untested)}`)
@@ -379,7 +457,14 @@ export async function agentConnect(
   const backend = createBackend(
     // Read and answer only (src/agent/backends/acp.js readOnly), with the
     // connected agent's own first words. Images are not sent to it yet.
-    { ...settings, readOnly: true, preamble: remotePreamble(askedOf(policy, kind)), vision: false },
+    {
+      ...settings,
+      readOnly: true,
+      preamble: remotePreamble(askedOf(policy, kind)),
+      vision: false,
+      // Each chat session reads the files afresh; a different set is told to the board (hello).
+      instructions: { ...instructions, onLoad: (read) => instructionsNote.update(instructionsSummary(read)) },
+    },
     {
       env,
       root: config.dir,
@@ -401,6 +486,8 @@ export async function agentConnect(
           remoteEdit: { commands: policy.commands, allowPaths: policy.allowPaths },
           preamble: REMOTE_FIX_PREAMBLE,
           vision: false,
+          // Read from the fix's own copy (the base commit) when its session starts.
+          instructions,
         },
         {
           env,
@@ -428,7 +515,8 @@ export async function agentConnect(
       source,
       backend,
       editBackend,
-      fix: edits ? { config, env, fetchImpl } : null,
+      fix: edits ? { config, env, fetchImpl, instructions } : null,
+      instructions: instructionsNote,
       hello: { kind, machine: os.hostname().split('.')[0] || 'this computer', version: VERSION, maxTurns: concurrency },
       policy,
       remote,

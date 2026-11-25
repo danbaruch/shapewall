@@ -553,6 +553,8 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
       },
       policy: machinePolicy(row),
       maxTurns: Number.isInteger(caps.maxTurns) ? caps.maxTurns : null,
+      // The instruction files its sessions read, as its last hello said (names and hashes, no content).
+      instructions: presence?.instructionsOf(t.workspaceId, row.id) || [],
     }
   }
   // Edits from the board, as the board says it about this agent: whether
@@ -887,7 +889,14 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
       reason: check.reason,
       // A connected agent: whether it chats, and whether this person may
       // chat with it right now (with the reason when not).
-      link: linkView(row),
+      link: (() => {
+        // Its instruction files only for someone who may use it.
+        const link = linkView(row)
+        if (!link.connected || check.ok || chatCheck(row, { ...viewer, boardId }).ok) return link
+        const rest = { ...link }
+        delete rest.instructions
+        return rest
+      })(),
       edits: editsView(row, viewer, { boardId }),
       chat: (() => {
         const chat = chatCheck(row, { ...viewer, boardId })

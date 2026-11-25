@@ -10,6 +10,10 @@
 // "offline since"; src/hosted/agents.js writes it, at most once a minute,
 // when seen() says it is due.) It holds an agent's id and display name and a
 // time, nothing else: no token id, no hash, no address.
+//
+// A connected agent's instruction files (names, sizes, short hashes, as its
+// hello said: src/hosted/agent-link.js cleanInstructions) live here too, per
+// agent, until its next hello or a restart. Never their content.
 
 export const AGENT_PRESENCE_TTL_MS = 90_000
 // How often an agent's last-seen time is worth writing to the database.
@@ -23,6 +27,8 @@ export function createAgentPresence({ now = () => new Date(), ttlMs = AGENT_PRES
   const latest = new Map()
   const projectKey = (workspaceId, projectId) => `${workspaceId}:${projectId}`
   const agentKey = (workspaceId, agentId) => `${workspaceId}:${agentId}`
+  // agent key -> [{ scope, path, bytes, sha }], oldest first.
+  const instructions = new Map()
   const fresh = (entry) => Boolean(entry) && !entry.gone && now().getTime() - entry.at <= ttlMs
   return {
     // A claim-scoped token of this project was just heard from. Returns
@@ -62,9 +68,22 @@ export function createAgentPresence({ now = () => new Date(), ttlMs = AGENT_PRES
       const entry = seenAt.get(agentKey(workspaceId, agentId))
       if (entry) entry.gone = true
     },
+    // What its hello said about its instruction files (already cleaned).
+    setInstructions(workspaceId, agentId, list) {
+      if (!workspaceId || !agentId) return
+      const id = agentKey(workspaceId, agentId)
+      instructions.delete(id)
+      instructions.set(id, Array.isArray(list) ? list : [])
+      if (instructions.size > AGENTS_MAX) instructions.delete(instructions.keys().next().value)
+    },
+    // [] when its machine said nothing since the server started.
+    instructionsOf(workspaceId, agentId) {
+      return instructions.get(agentKey(workspaceId, agentId)) || []
+    },
     // A revoked agent is not listening any more.
     forgetAgent(workspaceId, agentId) {
       const id = agentKey(workspaceId, agentId)
+      instructions.delete(id)
       const entry = seenAt.get(id)
       seenAt.delete(id)
       if (!entry || latest.get(projectKey(entry.workspaceId, entry.projectId)) !== id) return
@@ -74,7 +93,11 @@ export function createAgentPresence({ now = () => new Date(), ttlMs = AGENT_PRES
       for (const [key, other] of seenAt) if (projectKey(other.workspaceId, other.projectId) === project) latest.set(project, key)
     },
     forget(workspaceId, projectId) {
-      for (const [id, entry] of [...seenAt]) if (entry.workspaceId === workspaceId && entry.projectId === projectId) seenAt.delete(id)
+      for (const [id, entry] of [...seenAt])
+        if (entry.workspaceId === workspaceId && entry.projectId === projectId) {
+          seenAt.delete(id)
+          instructions.delete(id)
+        }
       latest.delete(projectKey(workspaceId, projectId))
     },
   }

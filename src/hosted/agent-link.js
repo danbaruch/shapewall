@@ -395,7 +395,39 @@ export function cleanHello(body) {
       maxTurns,
       policy: { audience: policy.audience === 'owner' ? 'owner' : 'server', approvals, commands, auto },
     },
+    // Kept in memory beside the agent's presence (agent-presence.js), never in the database.
+    instructions: cleanInstructions(input.instructions),
   }
+}
+
+// The instruction files a machine says its sessions read: at most 12, each
+// { scope, path, bytes, sha }. A relative path only (never an absolute or a
+// home path, never "..", no control characters), a short hex hash, a size.
+// No content is ever taken. An entry that is not all of that is dropped.
+export const INSTRUCTIONS_MAX = 12
+const INSTRUCTION_SCOPES = ['project', 'agent-config']
+const SHA_RE = /^[a-f0-9]{8,64}$/
+export function cleanInstructionPath(value) {
+  if (typeof value !== 'string' || !value || value.length > 200) return null
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f\\]/.test(value)) return null
+  if (value.startsWith('/') || value.startsWith('~') || /^[A-Za-z]:/.test(value)) return null
+  const parts = value.split('/')
+  if (parts.some((part) => !part || part === '.' || part === '..')) return null
+  return value
+}
+export function cleanInstructions(list) {
+  if (!Array.isArray(list)) return []
+  const out = []
+  for (const item of list.slice(0, INSTRUCTIONS_MAX)) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue
+    const file = cleanInstructionPath(item.path)
+    if (!file || !INSTRUCTION_SCOPES.includes(item.scope)) continue
+    if (!Number.isSafeInteger(item.bytes) || item.bytes < 0 || item.bytes > 1024 * 1024) continue
+    if (typeof item.sha !== 'string' || !SHA_RE.test(item.sha)) continue
+    out.push({ scope: item.scope, path: file, bytes: item.bytes, sha: item.sha })
+  }
+  return out
 }
 
 export function mountAgentLink(
@@ -498,6 +530,8 @@ export function mountAgentLink(
       // What the machine allows now, against what it allowed before: a change
       // is audited, and a stored "always allow" it no longer backs is reset.
       const row = transaction(db, () => agents.helloPolicy(req.agent, agents.hello(req.agent, hello), said(req)))
+      // Which instruction files its sessions read (names and hashes): in memory, per link.
+      agentPresence?.setInstructions(req.t.workspaceId, req.agent.id, hello.instructions)
       res.json({
         agent: {
           id: row.id,
