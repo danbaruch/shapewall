@@ -357,7 +357,7 @@ shapewall mcp [--read-only] [--no-capture]
 A Model Context Protocol server on stdio, for agents that prefer tools over shell commands. `--read-only` offers only the reading
 tools; `--no-capture` drops `recapture_pages`. With `--remote URL` (and `--board ID` to pick the default board) it works on a
 hosted board. Started in a project folder (or with `--config FILE`) and with a token that has the `push` scope, `mcp --remote`
-also offers `recapture_pages`: it captures the pages on your machine, then pushes the board to the hosted project. See
+also offers `recapture_pages`: it captures the pages on your machine, then pushes only those pages to the hosted board. See
 [the agent workflow](/docs/agent-workflow#mcp-server-shapewall-mcp).
 
 ## shapewall variant

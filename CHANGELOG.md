@@ -8,10 +8,15 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ### Added
 
 - `shapewall mcp --remote` now offers `recapture_pages` when it starts in a project folder (or with `--config FILE`) and the token
-  has the `push` scope: it captures the pages on your machine, then pushes the board to the hosted project, so an agent on a hosted
+  has the `push` scope: it captures the pages on your machine, then pushes those pages to the hosted board, so an agent on a hosted
   board can make the change, recapture and resolve without leaving MCP. It refuses a hosted board whose id is not in the config.
   `--read-only` and `--no-capture` leave it out. `mcp --remote` also takes `--board ID` for the board a tool works on by default.
   See [the hosted guide](docs/hosted.md).
+- `shapewall push --page ID[,ID]` and a page mode of the hosted push API upload only some pages' captures to a board already
+  pushed. Every other page on the hosted board stays as it is there, so two machines pushing one board no longer put back each
+  other's newer captures, and the server refuses a push that would replace a newer capture with an older one (`stale_capture`).
+  The capture a page push replaces is kept as a version, so comments made on it still show it. `recapture_pages` of
+  `mcp --remote` pushes this way. See [Pushing a few pages](docs/hosted.md#pushing-a-few-pages).
 
 ## 1.1.0 - 2026-11-24
 
