@@ -47,6 +47,8 @@
 //   "selfswitch ID"   -> the agent moves itself to mode ID and says so with
 //                        current_mode_update alone, then goes on talking
 // --agent-info=NAME@VERSION: what initialize says the adapter is.
+// --system-prompt: initialize advertises sessionCapabilities.systemPrompt (as
+// claude-agent-acp does); "newparams" then shows the appended prompt.
 // --new-fails=TEXT: session/new writes "stub stderr: TEXT" to stderr and
 // fails with TEXT. --new-exits: it writes to stderr and exits with code 7.
 
@@ -57,6 +59,7 @@ const MODE = process.env.STUB_ACP_MODE || ''
 const OPTIONS = process.argv.includes('--options')
 const RO_MODES = process.argv.includes('--ro-modes')
 const V106 = process.argv.includes('--v106')
+const SYSTEM_PROMPT = process.argv.includes('--system-prompt')
 const MODES = process.argv.includes('--modes') || RO_MODES || V106
 const SLOW_NEW = process.argv.includes('--slow-new')
 const argOf = (name) => process.argv.find((arg) => arg.startsWith(`--${name}=`))?.slice(name.length + 3)
@@ -213,7 +216,11 @@ function handle(message) {
     const answer = () =>
       reply({
         protocolVersion: 1,
-        agentCapabilities: { loadSession: false, promptCapabilities: { image: MODE !== 'noimage', embeddedContext: true } },
+        agentCapabilities: {
+          loadSession: false,
+          promptCapabilities: { image: MODE !== 'noimage', embeddedContext: true },
+          ...(SYSTEM_PROMPT ? { sessionCapabilities: { systemPrompt: { mode: { override: {} } } } } : {}),
+        },
         agentInfo: AGENT_INFO
           ? {
               name: AGENT_INFO.slice(0, AGENT_INFO.lastIndexOf('@')),

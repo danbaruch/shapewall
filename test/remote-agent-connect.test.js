@@ -145,7 +145,17 @@ test('the agent’s token and this machine’s policy are files of their own, pr
   assert.equal(readCredential(ORIGIN, env).token, TOKEN)
 
   // The policy: the server's audience unless this machine says owner, and nothing but reading until it says more.
-  const NONE = { audience: 'server', approvals: 'none', commands: [], auto: [], allowPaths: [], base: null, remote: 'origin' }
+  const NONE = {
+    audience: 'server',
+    approvals: 'none',
+    commands: [],
+    auto: [],
+    allowPaths: [],
+    base: null,
+    remote: 'origin',
+    instructions: 'all',
+    agentConfig: null,
+  }
   assert.deepEqual(readMachinePolicy(ORIGIN, 'default', env), NONE)
   // What it does not understand reads as the narrowest: a 0.5.0 file ("never"), a made-up level, a list of nonsense.
   assert.deepEqual(
@@ -183,6 +193,8 @@ test('the agent’s token and this machine’s policy are files of their own, pr
       allowPaths: ['package.json', '.github/workflows/ci.yml'],
       base: 'main',
       remote: 'upstream',
+      instructions: 'all',
+      agentConfig: null,
     },
   )
   // A list with an entry it cannot read is not trusted for the rest, and a remote it cannot read

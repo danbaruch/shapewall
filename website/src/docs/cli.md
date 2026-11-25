@@ -726,6 +726,12 @@ Commands
                             then only while it has no uncommitted changes)
       --git-remote NAME     where a finished fix is pushed (default origin; "none": never pushed). A pull request
                             is opened when GitHub connect is set up here (https://shapewall.com/docs/github)
+      --instructions all|project|none  instruction files each session gets as an appended system prompt: the
+                            project's CLAUDE.md and .claude/CLAUDE.md (AGENTS.md when neither exists) and, with "all"
+                            (default), the agent config folder's CLAUDE.md. Never ~/.claude or CLAUDE.local.md. Names
+                            and hashes show on the board, never the text. They add no powers. Saved for this connection
+      --agent-config DIR|none  this agent's own folder for its CLAUDE.md (default: agent-config/<--as name> beside
+                            agent-policy.json, read only when it exists; never created). Outside the project
       --takeover            close the link another machine holds for this agent, and take its place
       --concurrency N       answers at once, 1 to 4 (default 2)
       --token-file FILE     for a service: the agent's own token, no browser (https://shapewall.com/docs/hosted)
