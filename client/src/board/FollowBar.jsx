@@ -1,5 +1,6 @@
 import { Crosshair, Layers, X } from 'lucide-react'
 import { Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '../components/ui'
+import { cn } from '../lib/utils'
 import { ANY_AGENT } from './followAgent'
 import { viewportLabel } from './viewports'
 
@@ -9,13 +10,15 @@ import { viewportLabel } from './viewports'
 // On: who is followed, what it is doing, the quiet "2 more screens changed"
 // (a menu of those screens' before and after) and Stop following.
 // Presses here never count as moving the canvas (data-sw-follow-bar).
-export function FollowBar({ following, candidates, touch, titleOf }) {
+export function FollowBar({ following, candidates, touch, titleOf, belowPresence = false }) {
+  // On a narrow hosted board the presence bar has the top row: this goes under it.
+  const top = belowPresence ? 'top-28' : 'top-14'
   const { state } = following
   const size = touch ? 'touch' : 'xs'
   if (state.mode === 'off') {
     if (!candidates.length) return null
     return (
-      <div className="absolute top-14 left-2 z-30 flex max-w-[calc(100%-1rem)] flex-wrap gap-1" data-sw-follow-bar="off">
+      <div className={cn('absolute left-2 z-30 flex max-w-[calc(100%-1rem)] flex-wrap gap-1', top)} data-sw-follow-bar="off">
         {candidates.slice(0, 3).map((agent) => (
           <Button
             key={agent.id}
@@ -35,7 +38,10 @@ export function FollowBar({ following, candidates, touch, titleOf }) {
   const others = state.others || []
   return (
     <div
-      className="absolute top-14 left-2 z-30 flex max-w-[calc(100%-1rem)] flex-wrap items-center gap-1 rounded-xl border border-line bg-surface/95 p-1 shadow-pop"
+      className={cn(
+        'absolute left-2 z-30 flex max-w-[calc(100%-1rem)] flex-wrap items-center gap-1 rounded-xl border border-line bg-surface/95 p-1 shadow-pop',
+        top,
+      )}
       role="status"
       aria-live="polite"
       data-sw-follow-bar={state.mode}

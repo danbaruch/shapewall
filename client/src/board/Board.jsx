@@ -2247,6 +2247,7 @@ export default function Board({ boardId, boards, info, onPickBoard, onInfoChange
                   <FollowBar
                     following={following}
                     touch={!wide}
+                    belowPresence={Boolean(info?.hosted) && !wide}
                     titleOf={titleOfPage}
                     candidates={
                       info?.hosted
