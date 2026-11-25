@@ -35,6 +35,7 @@ export const TOP_LEVEL_KEYS = [
   'sitemap',
   'ci',
   'checks',
+  'agentDocs',
 ]
 export const BOARD_KEYS = [
   'id',

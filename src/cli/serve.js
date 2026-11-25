@@ -3,6 +3,7 @@
 import fs from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { isLoopback } from '../net.js'
+import { addAgentDocsOnce } from '../agent-docs.js'
 import http from 'node:http'
 import https from 'node:https'
 import { lanAccess, tailscaleAccess } from '../server/tailscale.js'
@@ -112,6 +113,9 @@ export async function serve(flags, out) {
   const config = loadConfig(flags.config)
   // Keys the config has but Shapewall does not use (a typo, most often).
   for (const line of keyWarningLines(config.warnings)) out(line)
+  // The first serve in a project adds the Shapewall section to AGENTS.md, once (src/agent-docs.js).
+  const agentDocsLine = addAgentDocsOnce(config)
+  if (agentDocsLine) out(agentDocsLine)
   const acp = acpFlag(flags)
   const { createApp, shutdownApp, stopChildren } = await import('../server/app.js')
   if (flags.lan && flags.tailscale) throw new Error('Choose --lan or --tailscale, not both.')

@@ -59,7 +59,7 @@ agent** on a comment.
 **Works with** Claude Code, Codex, goose, Gemini CLI and any agent that can run a shell command and read JSON, or speak MCP:
 
 ```sh
-claude mcp add shapewall -- npx shapewall mcp
+npx shapewall agent setup    # registers the MCP server with Claude Code and Codex
 ```
 
 Comments are untrusted input to an agent: read [keeping an agent safe](docs/agent-hardening.md) before you let others comment.

@@ -45,6 +45,9 @@ See [Connected agents](hosted.md#connected-agents).
 
 ### MCP in your session
 
+`npx shapewall agent setup --claude` registers the server for you, in this project and only for you
+([details](agent-workflow.md#your-agent-finds-the-board)). For the whole team, committed in `.mcp.json`:
+
 ```sh
 claude mcp add --scope project shapewall -- npx shapewall mcp
 ```
@@ -111,6 +114,9 @@ npx shapewall watch --exec "codex exec --sandbox workspace-write -c sandbox_work
 Without the `-c` setting the change and the reply still happen, but the capture fails inside the sandbox; recapture yourself afterwards.
 
 ### MCP
+
+`npx shapewall agent setup --codex` writes the entry with `tool_timeout_sec = 600` and keeps the rest of `~/.codex/config.toml`
+([details](agent-workflow.md#your-agent-finds-the-board)). By hand:
 
 ```sh
 codex mcp add shapewall -- npx shapewall mcp --config "$PWD/shapewall.config.json"

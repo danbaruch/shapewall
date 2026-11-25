@@ -180,6 +180,18 @@ The transcription is done by your browser's own speech service, not by Shapewall
 Apple. Shapewall never receives or stores the audio, only the text you post. It only starts from a press, and the microphone's
 tooltip says who does the transcribing. On a phone, the keyboard's own microphone works as well.
 
+## Let your agent find the board
+
+`shapewall init` writes a short Shapewall section into `AGENTS.md` (and a `CLAUDE.md` that imports it), so a coding agent opened in
+the project knows the board is there. To give Claude Code and Codex the board's tools too:
+
+```sh
+npx shapewall agent setup
+```
+
+It shows what it would register and asks first. Then open Claude Code or Codex in the project and ask: "take the open Shapewall
+comments". Details: [your agent finds the board](/docs/agent-workflow#your-agent-finds-the-board).
+
 ## Fix a comment with your agent
 
 Put `shapewall.config.json` in the checkout the agent should edit and run `shapewall serve` there: the agent works in the folder the
