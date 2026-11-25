@@ -3,6 +3,21 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Added
+
+- `shapewall open`: prints and opens a deep link to a board, a page (`--page`), a comment (`--comment`), a screen size
+  (`--viewport`), a page's before and after (`--compare`) or two environments (`--compare A_B`), on a local board or a hosted
+  project (`--remote URL`). `--print` and `--json` print without opening.
+- Board links take `p=<page>`: the board opens flown to that page. Every link Shapewall makes (notifications, GitHub issues,
+  usage rows, `share` and `push` answers, `shapewall open`) now comes from one builder; see "Links to the board" in the agent
+  workflow docs.
+
+### Changed
+
+- GitHub issue links to a comment list their keys in the shared order (`?board=&c=&filter=all`); they open the same view.
+
 ## 1.2.0 - 2026-11-24
 
 ### Added

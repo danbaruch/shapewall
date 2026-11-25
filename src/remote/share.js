@@ -25,6 +25,7 @@ import { login } from './login.js'
 import { portableChecks } from '../checks/transport.js'
 import { safeOut } from './terminal.js'
 import { hash, mapFile, readMap, updateMap } from './share-state.js'
+import { boardLink, hostedBoardBase } from '../board-links.js'
 
 const fields = [
   'id',
@@ -345,7 +346,7 @@ async function runShare(
     })
     if (checks && pushedBoard.checks !== checks.reports.length) throw new Error('The server did not confirm all included check reports.')
     // A server-supplied URL is never trusted for navigation or credentials.
-    const url = `${origin}/w/${encodeURIComponent(project.workspace.id)}/p/${encodeURIComponent(project.project.id)}/?board=${encodeURIComponent(board.id)}`
+    const url = boardLink({ base: hostedBoardBase(origin, project.workspace.id, project.project.id), board: board.id })
     if (!pushedBoard.board || pushedBoard.board !== board.id) throw new Error('The server committed a different board.')
     urls.push(url)
     if (project.token.scopes.includes('import')) committedBoard = board.id

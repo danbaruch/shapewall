@@ -31,6 +31,7 @@ import { createPushStore } from './push.js'
 import { LIMITS } from './ratelimit.js'
 import { findApiToken, tenant } from './tenancy.js'
 import { mountTokenEvents } from './token-events.js'
+import { boardLink, hostedBoardBase } from '../board-links.js'
 
 export function mountTokenApi({
   agentsFor,
@@ -317,7 +318,7 @@ export function mountTokenApi({
         title: ctx.board.title,
         baseUrl: ctx.board.baseUrl,
         project: req.project.id,
-        url: `${publicOrigin}/w/${req.t.workspaceId}/p/${req.project.id}/`,
+        url: hostedBoardBase(publicOrigin, req.t.workspaceId, req.project.id),
       },
       status,
       guestsHidden,
@@ -366,7 +367,7 @@ export function mountTokenApi({
           id: req.project.id,
           name: req.project.name,
           slug: req.project.slug,
-          url: `${publicOrigin}/w/${req.t.workspaceId}/p/${req.project.id}/`,
+          url: hostedBoardBase(publicOrigin, req.t.workspaceId, req.project.id),
         },
         token: { name: req.token.name, scopes: req.token.scopes },
         boards: boards.map((row) => ({ id: row.board_id, pushedAt: row.pushed_at })),
@@ -447,7 +448,10 @@ export function mountTokenApi({
           ? { files: result.files, mode: 'pages', pages: result.pages, viewports: result.viewports }
           : { files: result.files }
       auditOf(req, 'push_committed', `${req.project.id}/${result.board}`, detail)
-      res.json({ ...result, url: `${publicOrigin}/w/${req.t.workspaceId}/p/${req.project.id}/?board=${result.board}` })
+      res.json({
+        ...result,
+        url: boardLink({ base: hostedBoardBase(publicOrigin, req.t.workspaceId, req.project.id), board: result.board }),
+      })
     }),
   )
 

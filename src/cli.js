@@ -92,6 +92,10 @@ const COMMANDS = {
     return ciCommand(positional, flags, out, { fetch })
   },
   mcp: ({ flags, err }) => mcp(flags, err),
+  open: async ({ flags, out }) => {
+    const { openCommand } = await import('./cli/open-command.js')
+    return openCommand(flags, out)
+  },
   doctor: ({ flags, out }) => doctor(flags, out),
   export: ({ flags, out }) => exportCommand(flags, out),
   login: async ({ flags, out }) => {

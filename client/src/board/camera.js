@@ -29,13 +29,15 @@ export function parseCamera(value) {
 // frame, measured from its screenshots), with room above for the frame bar.
 // Compare on a phone: the pair is wide and short, so it fills the screen
 // width, its frames just below the room the frame bar needs.
-export function flyToPage(flow, target, box, { phoneCompare, shotUrls }) {
+// `instant`: no animation (the board's first view, from a link's `p`).
+// Settles once the camera is placed.
+export function flyToPage(flow, target, box, { phoneCompare, shotUrls, instant = false }) {
   const frame = target.frames[0]
+  const duration = instant ? 0 : motionDuration(450)
   if (phoneCompare && frame && box?.width) {
     const zoom = Math.min(4, (box.width - 16) / target.w)
     const top = 54 + 16
-    flow.setViewport({ x: 8 - target.x * zoom, y: top - (target.y + frame.y) * zoom, zoom }, { duration: motionDuration(450) })
-    return
+    return Promise.resolve(flow.setViewport({ x: 8 - target.x * zoom, y: top - (target.y + frame.y) * zoom, zoom }, { duration }))
   }
   const fit = (share) =>
     flow.fitBounds(
@@ -44,13 +46,12 @@ export function flyToPage(flow, target, box, { phoneCompare, shotUrls }) {
         box,
         0.12,
       ),
-      { padding: 0.12, duration: motionDuration(450) },
+      { padding: 0.12, duration },
     )
-  if (!frame || !shotUrls.length) fit(1)
-  else
-    Promise.all(shotUrls.map((url) => contentExtent(url)))
-      .then((shares) => fit(Math.max(0.2, ...shares)))
-      .catch(() => fit(1))
+  if (!frame || !shotUrls.length) return Promise.resolve(fit(1))
+  return Promise.all(shotUrls.map((url) => contentExtent(url)))
+    .then((shares) => fit(Math.max(0.2, ...shares)))
+    .catch(() => fit(1))
 }
 
 // The box around a cluster of pins on one frame, with `pad` around them.

@@ -4,7 +4,7 @@
 // (no @channel, @here or @everyone from a comment).
 
 import { splitMentions } from '../mentions.js'
-import { DEFAULT_BOARD_URL, runningBoardUrl } from '../serve-state.js'
+import { boardLink, localBoardBase } from '../board-links.js'
 import { boardViewports } from '../config.js'
 import { commentText } from '../comment-fields.js'
 import { EVENT_VERSION } from '../events.js'
@@ -15,25 +15,17 @@ const QUOTE_MAX = 500
 // (notifications.boardUrl first, deprecated), this server's own address, a
 // `shapewall serve` running for this config, and only then the default port.
 export function boardUrlFor(config, { boardUrl = null, env = process.env } = {}) {
-  return (
-    env.SHAPEWALL_BOARD_URL || config.notifications?.boardUrl || config.boardUrl || boardUrl || runningBoardUrl(config) || DEFAULT_BOARD_URL
-  )
+  return localBoardBase(config, { boardUrl, env }).url
 }
 
 // The board, scrolled to the comment and with its thread open: ?board=&c=,
 // every state shown (so a resolved one is visible) and the comment's viewport.
 export function commentLink(config, boardUrl, boardId, comment) {
-  const url = new URL(boardUrl)
-  url.searchParams.set('board', boardId)
-  if (comment?.id) {
-    url.searchParams.set('c', String(comment.id))
-    url.searchParams.set('filter', 'all')
-    const board = config.boards?.find((item) => item.id === boardId)
-    const first = Object.keys(boardViewports(config, board))[0]
-    if (comment.viewport && comment.viewport !== first) url.searchParams.set('vp', comment.viewport)
-  }
-  url.hash = ''
-  return url.toString()
+  if (!comment?.id) return boardLink({ base: boardUrl, board: boardId })
+  const board = config.boards?.find((item) => item.id === boardId)
+  const first = Object.keys(boardViewports(config, board))[0]
+  const viewport = comment.viewport && comment.viewport !== first ? comment.viewport : undefined
+  return boardLink({ base: boardUrl, board: boardId, comment: comment.id, filter: 'all', viewport })
 }
 
 const clip = (value, max = QUOTE_MAX) => {
