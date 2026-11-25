@@ -1070,7 +1070,11 @@ shapewall mcp --remote https://app.example.com
 }
 ```
 
-Token API (`Authorization: Bearer swp_...`; cookies are ignored there): `GET /api/v1/project`, `GET /api/v1/boards/:board/pages`,
+Token API (`Authorization: Bearer swp_...`; cookies are ignored there): `GET /api/v1/project` (the project, its boards, and the
+token's name, scopes and `createdBy: { handle, name }`, the account that made it), `GET /api/v1/boards/:board/pages`,
+`GET /api/v1/boards/:board/pages/:page/versions?viewport=` (scope `read`: the page's capture history, newest first, at most 50:
+`{ version, viewport, current, capturedAt, files: { png, html } }`, the current capture of each viewport and the earlier versions the
+board keeps; `files` are `/files/captures/...` and `/files/versions/...` URLs of this API, `more` counts the rest),
 `GET /api/v1/boards/:board/comments?status=open|resolved|all&page=&mention=&guests=1`, `GET /api/v1/boards/:board/comments/:id`,
 `GET /api/v1/boards/:board/files/:kind/:file`, `POST /api/v1/boards/:board/comments` (scope `reply`: `{ page, body, viewport?, x?, y?,
 anchor? }`, the pin in percent of the page, near the top-left corner by default; no images, drawing or author name; audited as

@@ -61,6 +61,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       'list_journeys',
       'list_comments',
       'get_comment',
+      'board_link',
+      'compare_captures',
       'reply_to_comment',
       'set_comment_status',
       'resolve_comment',
