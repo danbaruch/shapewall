@@ -99,7 +99,7 @@ export async function agentSetupCommand(
   for (const item of applied) {
     const name = item.app === 'claude' ? 'Claude Code' : 'Codex'
     if (!item.ok) {
-      err(`${name}: ${item.error}`)
+      err(`${name}: ${item.error}${item.backup ? ` Backup of the file before the change: ${shownPath(item.backup, env)}` : ''}`)
       continue
     }
     const what = item.action === 'remove' ? 'removed the shapewall server' : 'registered the shapewall server'
