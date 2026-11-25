@@ -864,7 +864,7 @@ project and has scopes:
 | Scope     | Allows                                                                                                                                  |
 | --------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | `read`    | Pages, comments, screenshots and live HTML of the project                                                                               |
-| `reply`   | Replies                                                                                                                                 |
+| `reply`   | Replies, and new comments (an agent's, never sent to an agent)                                                                          |
 | `status`  | An agent status on a comment                                                                                                            |
 | `claim`   | Take the comments sent to an agent. A token with it is an agent ([Agents on a hosted board](#agents-on-a-hosted-board))                 |
 | `resolve` | Resolve and reopen                                                                                                                      |
@@ -1042,9 +1042,13 @@ shapewall mcp --remote https://app.example.com
   `.shapewall/remote/<project>/<board>/agent/`, so `SHAPEWALL_SCREENSHOT` is a local path as it is locally. The done rule is the
   local one: exit 0 plus a reply from the command is `done`, anything else `needs-human`. Without `--pass-token` the command has no
   token to reply with, so its exit 0 ends `needs-human`, and the reply says so.
-- `mcp --remote` is the stdio MCP server with the same tools as local minus `add_comment` (the token API has no route that creates
-  a comment). `list_selectors` reads the element map of the latest push. Tools that write appear only when the token has the scope.
-  `--board ID` picks the board a tool works on when it names none (default: the first pushed board).
+- `mcp --remote` is the stdio MCP server with the same tools as local. `list_selectors` reads the element map of the latest push, and
+  `get_page_capture` the latest pushed capture of a page (scaled down to at most 1600 px wide, with when that page was captured).
+  Tools that write appear only when the token has the scope. `add_comment` needs `reply`, like a reply: the comment is signed with
+  the token's name (it takes no `author`), marked as an agent's, and can never be sent to an agent, so an agent cannot hand work to
+  another agent; only a trusted person can. A token makes at most 120 new comments an hour. A token with `claim` sees only comments sent to
+  agents, so it cannot read back a comment it added. `--board ID` picks the board a tool works on when it names none (default: the first
+  pushed board).
 - `recapture_pages` is there only when `mcp --remote` starts in a project folder (it finds `shapewall.config.json` like the other
   commands, or takes `--config FILE`), without `--read-only` or `--no-capture`, and the token has the `push` scope. The hosted server
   never captures anything: the tool captures the pages on your machine, the same way the local tool does (page ids from the config,
@@ -1068,7 +1072,9 @@ shapewall mcp --remote https://app.example.com
 
 Token API (`Authorization: Bearer swp_...`; cookies are ignored there): `GET /api/v1/project`, `GET /api/v1/boards/:board/pages`,
 `GET /api/v1/boards/:board/comments?status=open|resolved|all&page=&mention=&guests=1`, `GET /api/v1/boards/:board/comments/:id`,
-`GET /api/v1/boards/:board/files/:kind/:file`, `POST .../comments/:id/replies`, `POST .../comments/:id/agent-status`
+`GET /api/v1/boards/:board/files/:kind/:file`, `POST /api/v1/boards/:board/comments` (scope `reply`: `{ page, body, viewport?, x?, y?,
+anchor? }`, the pin in percent of the page, near the top-left corner by default; no images, drawing or author name; audited as
+`token_commented`), `POST .../comments/:id/replies`, `POST .../comments/:id/agent-status`
 (`{ agentStatus, onlyFrom }`), `POST .../comments/:id/resolve` (`{ note, fixRef, agentStatus }`), `POST .../comments/:id/reopen`,
 and for push `POST /api/v1/pushes` (a whole board, or `{ mode: "pages", board, pages }` for
 [a few pages](#pushing-a-few-pages)), `PUT /api/v1/pushes/:id/files/:area/:name`, `POST /api/v1/pushes/:id/commit`.

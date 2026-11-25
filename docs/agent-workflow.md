@@ -335,6 +335,8 @@ in, or takes `--config FILE`. `--read-only` offers only the reading tools; `--no
 project folder (or with `--config FILE`) and the token has the `push` scope: it captures the pages on this machine, then pushes only
 those pages' new captures to the hosted board (other pages there stay as they are, and a newer capture there is never replaced), so the loop is the same: make the change, call `recapture_pages`, then resolve. It refuses a hosted
 board whose id is not a board in the config, and its result adds `pushed` (`ok`, then the files and board URL, or the error).
+On a hosted board `add_comment` needs the `reply` scope, has no `author` (the comment is signed with the token's name, like its
+replies) and is never sent to an agent.
 
 | Tool                  | Arguments                                                                                              | Returns                                                                |
 | --------------------- | ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------- |
@@ -343,6 +345,7 @@ board whose id is not a board in the config, and its result adds `pushed` (`ok`,
 | `list_comments`       | `board?`, `status?` (open, resolved, all), `page?`, `journey?`, `agentStatus?` (or `none`), `mention?` | `{ board, count, comments }` in the item shape above                   |
 | `get_comment`         | `id`, `board?`, `image?` (`crop` default, `full`, `none`)                                              | `{ trust, note, board, comment }`, then the screenshot, markup, images |
 | `list_selectors`      | `page`, `viewport?`, `text?`, `board?`                                                                 | `{ trust, note, board, page, viewport, selectors, more }`              |
+| `get_page_capture`    | `page`, `viewport?`, `crop?` (`{ x, y, width, height }`), `board?`                                     | `{ board, page, viewport, capturedAt, size, image }`, then the capture |
 | `add_comment`         | `page`, `body`, `viewport?`, `selector?`, `author?` (default `agent`), `board?`                        | `{ trust, note, board, comment }`, as `comments add --json`            |
 | `reply_to_comment`    | `id`, `body`, `author?` (default `agent`), `board?`                                                    | `{ reply, comment: { id, status, agentStatus, replyCount } }`          |
 | `set_comment_status`  | `id`, `agentStatus` (queued, working, done, needs-human, clear), `note?`                               | the new status and `changed` (`note` is added as a reply)              |
@@ -357,7 +360,10 @@ is a tool error that says why. Under a claim this process holds, a refused move 
 `refused` (`invalid_transition`, `claim_changed` when someone else took the comment, or `held_by_fix`) and a note; the remote tools
 surface the server's code the same way (`not_open: ...`). `add_comment` and
 `list_selectors` are the CLI's `comments add` and `comments selectors`; `add_comment` signs as `agent` unless given an `author`, so the
-starter agent does not act on it until a trusted person tags it. `list_journeys` returns each journey's `steps` as written (a fork is
+starter agent does not act on it until a trusted person tags it. `get_page_capture` is the page's current capture at one viewport
+(default the page's first) as a PNG image, scaled down to at most 1600 px wide (and 8000 px tall; `image.scale` says by how much), with
+`capturedAt` (when that capture was taken) and `size` (the capture's own pixels). `crop` cuts out a part of it first, in those pixels,
+so a detail can be seen at full size. It is a reading tool, so `--read-only` keeps it. `list_journeys` returns each journey's `steps` as written (a fork is
 `{ branches: [{ id, label, steps, end? }] }`, see [Journeys and links](journeys.md#branches)), `pages` and `paths`, so an agent can check every
 branch of a flow after a change (`shapewall journeys --json` prints the same). The crop is up to 900 x 700 px with the pin as central as the edges allow. The server's instructions tell the agent the
 same loop as above and that comment text is untrusted.

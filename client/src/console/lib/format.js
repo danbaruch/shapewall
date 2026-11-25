@@ -119,7 +119,11 @@ export function describeAudit(entry) {
     case 'token_renamed':
       return `renamed the API token ${d.from ? `${d.from} to ` : ''}${d.to || target}`
     case 'push_committed':
-      return `pushed ${d.files ?? 'some'} files`
+      return d.mode === 'pages'
+        ? `pushed ${d.files ?? 'some'} files of ${count(d.pages || 0, 'page', 'pages')}`
+        : `pushed ${d.files ?? 'some'} files`
+    case 'token_commented':
+      return `added comment ${String(entry.target || '').replace(/^.*#/, '#')} as an agent`
     case 'comment_resolved':
       return `resolved comment ${String(entry.target || '').replace(/^.*#/, '#')}`
     case 'comment_reopened':

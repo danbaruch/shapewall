@@ -1,7 +1,7 @@
 // `shapewall mcp --remote`: the MCP server (stdio) for a hosted board. Same
-// tools as the local one (src/mcp.js) minus add_comment (the token API takes
-// no new comments), going through the token API. Tools that write are listed
-// only when the token has the scope for them.
+// tools as the local one (src/mcp.js), going through the token API. Tools
+// that write are listed only when the token has the scope for them
+// (add_comment and reply_to_comment: "reply").
 //
 // recapture_pages is offered only when the server is started in a project
 // folder (a shapewall.config.json, or --config FILE), without --read-only or
@@ -18,9 +18,10 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import * as z from 'zod'
 import { parseElementMap } from '../capture/element-map.js'
-import { SELECTORS_MAX, selectorsOnMap } from '../comments-cli.js'
+import { SELECTORS_MAX, selectorPin, selectorsOnMap } from '../comments-cli.js'
 import { remoteBoardRef, untrustedJson } from '../feedback.js'
 import { sniffImage } from '../image-sniff.js'
+import { cropArg, pageCaptureDescription, pageCaptureResult } from '../page-capture.js'
 import { cropAround } from '../png.js'
 import { AGENT_STATUSES, STORED_AGENT_STATUSES, readManifest } from '../store.js'
 import { pushPages } from './cli.js'
@@ -177,6 +178,9 @@ export async function createRemoteMcpServer({
     if (!boardIds.includes(wanted)) throw new Error(`No board "${wanted}" (have: ${boardIds.join(', ')}).`)
     return wanted
   }
+  // A file of a board's latest push on the token API, by its capture name.
+  const captureUrl = (boardId, name) =>
+    `${remote.origin}/api/v1/boards/${encodeURIComponent(boardId)}/files/captures/${encodeURIComponent(name)}`
 
   server.registerTool(
     'list_pages',
@@ -341,9 +345,7 @@ export async function createRemoteMcpServer({
       const name = `${page.id}.${wanted}.elements.json`
       let map
       try {
-        const bytes = await remote.download(
-          `${remote.origin}/api/v1/boards/${encodeURIComponent(target)}/files/captures/${encodeURIComponent(name)}`,
-        )
+        const bytes = await remote.download(captureUrl(target, name))
         map = parseElementMap(Buffer.isBuffer(bytes) ? bytes.toString('utf8') : JSON.stringify(bytes))
       } catch {
         throw new Error(`No element map for "${page.id}" (${wanted}) on the hosted board. Capture and push it again: shapewall push`)
@@ -353,7 +355,104 @@ export async function createRemoteMcpServer({
     }),
   )
 
+  server.registerTool(
+    'get_page_capture',
+    {
+      title: 'Get a page capture',
+      description: pageCaptureDescription.replace('current capture', 'current capture on the hosted board'),
+      inputSchema: {
+        board: boardArg,
+        page: z.string().max(64).describe('Page id'),
+        viewport: z.string().max(40).optional().describe("Default: the page's first viewport"),
+        crop: cropArg,
+      },
+      annotations: { readOnlyHint: true },
+    },
+    tool(async ({ board, page: pageId, viewport, crop }) => {
+      const target = boardFor(board)
+      const answer = await remote.pages(target)
+      // Ids only: the page and viewport must be the hosted board's, and the
+      // file is fetched by its capture name from this server's token API.
+      const page = (answer.pages || []).find((item) => item.id === pageId)
+      if (!page) throw new Error(`No page "${pageId}" on board "${target}".`)
+      const wanted = viewport || page.viewports?.[0]
+      if (!wanted || !(page.viewports || []).includes(wanted))
+        throw new Error(`Page "${page.id}" has no viewport "${wanted}" (it has: ${(page.viewports || []).join(', ')}).`)
+      if (!(page.captured || []).includes(wanted))
+        throw new Error(`No capture of "${page.id}" (${wanted}) on the hosted board yet. Push one first.`)
+      const png = await remote.download(captureUrl(target, `${page.id}.${wanted}.png`))
+      if (!Buffer.isBuffer(png)) throw new Error(`The capture of "${page.id}" (${wanted}) is not an image.`)
+      return pageCaptureResult({
+        png,
+        board: target,
+        page: page.id,
+        viewport: wanted,
+        // Per page from a server that says it, else the board's newest capture.
+        capturedAt: page.capturedAt?.[wanted] || answer.capturedAt || null,
+        crop: crop || null,
+      })
+    }),
+  )
+
   if (!readOnly && scopes.has('reply')) {
+    server.registerTool(
+      'add_comment',
+      {
+        title: 'Add a comment',
+        description:
+          'Pins a new comment to a page on the hosted board: on the element a selector from list_selectors finds (the pin sits in ' +
+          'its middle), or near the top-left corner without one. Signed with the token name and marked as an agent; a comment an ' +
+          'agent writes is never sent to an agent.',
+        inputSchema: {
+          board: boardArg,
+          page: z.string().max(80).describe('Page id, or variant:<id>'),
+          body: z.string().min(1).max(5000),
+          viewport: z.string().max(40).optional().describe("Default: the page's first viewport"),
+          selector: z.string().max(600).optional().describe('An element selector from list_selectors'),
+        },
+      },
+      tool(async ({ board, page: pageId, body, viewport, selector }) => {
+        const target = boardFor(board)
+        const notes = []
+        let placed = {}
+        if (selector !== undefined) {
+          const answer = await remote.pages(target)
+          const page = (answer.pages || []).find((item) => item.id === pageId)
+          const wanted = viewport || page?.viewports?.[0]
+          // The element map and live HTML of the page's latest push, when it
+          // has them (a variant has neither: the selector is kept as given).
+          const captured = Boolean(page && (page.captured || []).includes(wanted))
+          const fetchText = async (name) => {
+            if (!captured) return null
+            try {
+              const bytes = await remote.download(captureUrl(target, name))
+              return Buffer.isBuffer(bytes) ? bytes.toString('utf8') : JSON.stringify(bytes)
+            } catch {
+              return null
+            }
+          }
+          let map = null
+          try {
+            const text = await fetchText(`${pageId}.${wanted}.elements.json`)
+            map = text ? parseElementMap(text) : null
+          } catch {
+            map = null
+          }
+          const html = captured ? await fetchText(`${pageId}.${wanted}.html`) : null
+          const { anchor, pin } = selectorPin({
+            selector,
+            map,
+            html: () => html,
+            pageId,
+            viewport: wanted,
+            err: (line) => notes.push(line),
+          })
+          placed = { anchor, x: pin.x, y: pin.y }
+        }
+        const answer = await remote.addComment(target, { page: pageId, body, viewport, ...placed })
+        return json(untrustedJson({ board: answer.board, comment: answer.comment, ...(notes.length ? { notes } : {}) }))
+      }),
+    )
     server.registerTool(
       'reply_to_comment',
       {
