@@ -357,7 +357,9 @@ shapewall mcp [--read-only] [--no-capture]
 A Model Context Protocol server on stdio, for agents that prefer tools over shell commands. `--read-only` offers only the reading
 tools; `--no-capture` drops `recapture_pages`. With `--remote URL` (and `--board ID` to pick the default board) it works on a
 hosted board. Started in a project folder (or with `--config FILE`) and with a token that has the `push` scope, `mcp --remote`
-also offers `recapture_pages`: it captures the pages on your machine, then pushes only those pages to the hosted board. See
+also offers `recapture_pages`: it captures the pages on your machine, then pushes only those pages to the hosted board.
+`get_page_capture` hands the agent a page's current capture as an image (scaled down to at most 1600 px wide; `crop` for a detail),
+locally and on a hosted board, and `--read-only` keeps it. On a hosted board `add_comment` needs a token with the `reply` scope. See
 [the agent workflow](/docs/agent-workflow#mcp-server-shapewall-mcp).
 
 ## shapewall variant
@@ -446,7 +448,8 @@ shapewall hosted [--data DIR] [--origin URL] [--port 4700] [--signup invite|open
                             watch --exec commands get no token unless --pass-token
                             watch and mcp show on the board as an agent, by the token's name
                             mcp --remote in a project folder, with the "push" scope, also has
-                            recapture_pages: it captures here, then pushes those pages
+                            recapture_pages: it captures here, then pushes those pages;
+                            add_comment needs the "reply" scope
       --include-guests      comments and watch: also share link guests' comments (untrusted)
   hosted                    run the hosted server (accounts, workspaces, pushed boards)
       --data DIR            default ./shapewall-hosted-data (or $SHAPEWALL_HOSTED_DATA)
@@ -811,7 +814,8 @@ Hosted Shapewall (https://shapewall.com/docs/hosted)
                             watch --exec commands get no token unless --pass-token
                             watch and mcp show on the board as an agent, by the token's name
                             mcp --remote in a project folder, with the "push" scope, also has
-                            recapture_pages: it captures here, then pushes those pages
+                            recapture_pages: it captures here, then pushes those pages;
+                            add_comment needs the "reply" scope
       --include-guests      comments and watch: also share link guests' comments (untrusted)
   hosted                    run the hosted server (accounts, workspaces, pushed boards)
       --data DIR            default ./shapewall-hosted-data (or $SHAPEWALL_HOSTED_DATA)
