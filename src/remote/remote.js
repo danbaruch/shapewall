@@ -168,6 +168,8 @@ export function createRemote({ origin, token, source = null, fetchImpl = fetch, 
       call('POST', one(boardId, id, '/resolve', guests), { json: { note, fixRef, agentStatus } }),
     reopen: (boardId, id, { guests = false } = {}) => call('POST', one(boardId, id, '/reopen', guests), { json: {} }),
     startPush: (definition) => call('POST', '/api/v1/pushes', { json: definition }),
+    // A push of only these pages and viewports ({ <page>: [<viewport>] }) to a board already pushed.
+    startPagePush: (boardId, pages) => call('POST', '/api/v1/pushes', { json: { mode: 'pages', board: boardId, pages } }),
     pushFile: (pushId, area, name, bytes) =>
       call('PUT', `/api/v1/pushes/${enc(pushId)}/files/${enc(area)}/${enc(name)}`, {
         body: bytes,

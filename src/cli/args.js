@@ -238,7 +238,7 @@ export const COMMAND_FLAGS = {
   doctor: ['install-browser', 'port', 'agent-acp', 'json', 'no-launch'],
   variant: ['url', 'path', 'title', 'note', 'source', 'id', 'viewport', 'board', 'json'],
   export: ['out', 'no-comments', 'browser-comments', 'no-index', 'include-checks'],
-  push: ['remote', 'token-file', 'board', 'include-checks'],
+  push: ['remote', 'token-file', 'board', 'include-checks', 'page'],
   share: ['remote', 'token-file', 'board', 'dry-run', 'no-comments', 'include-checks'],
   login: ['remote', 'project', 'workspace'],
   join: ['remote', 'invite'],
