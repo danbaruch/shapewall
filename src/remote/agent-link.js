@@ -31,6 +31,7 @@ import { cardHash } from '../agent/card-hash.js'
 import { tokensToText } from '../agent/plain-text.js'
 import { runTurn } from '../agent/run.js'
 import { git } from '../agent/starter/worktree.js'
+import { instructionsStatus, loadInstructions } from '../agent/instructions.js'
 import { FixRefusal, dropFixFolder, dropHeld, finishFix, heldDiff, heldSummary, prepareFix, pushFix, readHeld } from './agent-fix.js'
 import { JobError, TURN_ID_RE, cleanJob, jobConversation } from './agent-job.js'
 import { RemoteError, badTokenMessage, readBounded } from './remote.js'
@@ -161,6 +162,9 @@ export async function runAgentLink({
   log = () => {},
   limits = {},
   onReady = () => {},
+  // The instruction files the chat sessions read (src/agent/instructions.js
+  // createInstructionsNote): what hello lists, said again when it changes.
+  instructions = null,
 }) {
   const limit = { ...LINK_DEFAULTS, ...limits }
   // Whatever is missing reads as the narrowest: no approvals, nothing automatic.
@@ -492,6 +496,16 @@ export async function runAgentLink({
           await answerComment(job, null, { why: error.message })
           return
         }
+        // The fix's copy is the base commit: its instruction files may differ from the checkout's.
+        if (fix.instructions) {
+          let loaded = { files: [], refused: [] }
+          try {
+            loaded = loadInstructions({ root: prepared.workdir.root, ...fix.instructions })
+          } catch (error) {
+            log(`turn ${id}: instruction files were not read: ${error.code || error.message}`)
+          }
+          push('status', { text: instructionsStatus(loaded) })
+        }
         const kindOf = (kind) => (kind === 'edit' ? 'edits' : 'commands')
         fixTurn = {
           workdir: prepared.workdir,
@@ -815,6 +829,28 @@ export async function runAgentLink({
 
   // ---- The stream ----
 
+  // What this machine says about itself when the link opens (and again when
+  // its instruction files change): display, and its own ceiling.
+  let helloSeq = 0
+  function helloBody({ takeover: take = false } = {}) {
+    return {
+      ...hello,
+      maxTurns,
+      capabilities: {
+        chat: true,
+        edits: policy.approvals !== 'none',
+        commands: policy.approvals !== 'none' && policy.commands.length > 0,
+      },
+      // What this machine allows, for the board to show. The server can only narrow it.
+      policy: { audience: policy.audience, approvals: policy.approvals, commands: policy.commands, auto: policy.auto },
+      // The instruction files a chat session reads: names, sizes and short hashes, never content.
+      instructions: instructions?.current() || [],
+      // Counts up with every hello of this process: the server keeps the newest list.
+      seq: (helloSeq += 1),
+      ...(take ? { takeover: true } : {}),
+    }
+  }
+
   async function connectOnce() {
     const controller = new AbortController()
     let reader = null
@@ -827,26 +863,13 @@ export async function runAgentLink({
     const onAbort = () => hangUp()
     signal?.addEventListener('abort', onAbort, { once: true })
     let idle = null
+    let unwatch = null
     const touch = () => {
       clearTimeout(idle)
       idle = setTimeout(hangUp, limit.idleMs)
     }
     try {
-      const said = await api.hello(
-        {
-          ...hello,
-          maxTurns,
-          capabilities: {
-            chat: true,
-            edits: policy.approvals !== 'none',
-            commands: policy.approvals !== 'none' && policy.commands.length > 0,
-          },
-          // What this machine allows, for the board to show. The server can only narrow it.
-          policy: { audience: policy.audience, approvals: policy.approvals, commands: policy.commands, auto: policy.auto },
-          ...(taking ? { takeover: true } : {}),
-        },
-        controller.signal,
-      )
+      const said = await api.hello(helloBody({ takeover: taking }), controller.signal)
       agent = said?.agent && typeof said.agent.id === 'string' ? said.agent : null
       if (!agent) throw new Error('The server did not say which agent this is.')
       touch()
@@ -868,6 +891,12 @@ export async function runAgentLink({
       reader = response.body.getReader()
       taking = false
       onReady(said)
+      // A new chat session read a different set of instruction files: the board is told again.
+      unwatch = instructions?.onChange(() => {
+        api.hello(helloBody(), controller.signal).catch((error) => {
+          if (!controller.signal.aborted) log(`instructions: the board was not told the new list (${error.message})`)
+        })
+      })
       await reconcile(controller.signal)
       scanComments()
       const decoder = new TextDecoder()
@@ -904,6 +933,7 @@ export async function runAgentLink({
         if (fatal) throw fatal
       }
     } finally {
+      unwatch?.()
       clearTimeout(idle)
       signal?.removeEventListener('abort', onAbort)
       controller.abort()
