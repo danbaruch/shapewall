@@ -25,6 +25,12 @@ and the project uses [Semantic Versioning](https://semver.org/).
   `GET /api/v1/project` says which account made the token (`token.createdBy`).
 - The MCP servers share one set of instructions: find work with the filters, check the work in your own browser while you work,
   `recapture_pages` publishes the final state as the hand-in, `compare_captures`, then reply with the compare link and set `done`.
+- Follow an agent: with the board open beside an agent, it flies to each comment the agent takes, and after the agent recaptures
+  that comment's page it opens the before and after of that screen only; other screens the recapture changed wait in a quiet
+  "N more screens changed" menu. Start it with **Follow agent** on the canvas (hosted: **Follow &lt;name&gt;**), a
+  `follow=<agent id|any>` link, or `shapewall open --follow [ID]`. Moving the canvas or opening another comment stops it. It reads
+  only what the viewer already sees: local boards for any tab, hosted boards for members (never share-link guests or public
+  viewers). See "Follow an agent" in the agent workflow docs.
 - Agents find the board with no plugin: `shapewall init` writes a short Shapewall section into `AGENTS.md` (and a one-line
   `CLAUDE.md` that imports it, when there is none), between `<!-- shapewall:start v1 -->` and `<!-- shapewall:end -->`. The first
   `serve` or `capture` in a project adds it once; a section you removed is never added back. `init --no-agent-docs` and config

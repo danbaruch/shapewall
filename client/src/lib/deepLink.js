@@ -14,8 +14,8 @@ export function linkedPage(params) {
   return page && PAGE_RE.test(page) ? page : null
 }
 
-// The agent a link asks to follow, or null. Read and kept for the follow
-// mode; nothing acts on it yet.
+// The agent a link asks to follow ("any" for whichever), or null
+// (board/hooks/useFollowAgent.js).
 export function linkedFollow(params) {
   const id = params.get('follow')
   return id && AGENT_RE.test(id) ? id : null

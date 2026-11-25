@@ -50,6 +50,15 @@ function compareFlag(value, environments) {
   return pair
 }
 
+// --follow alone: any agent; --follow ID: that agent (a hosted board's agent id).
+const FOLLOW_RE = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/
+function followFlag(value) {
+  if (value === undefined || value === false) return null
+  if (value === true) return 'any'
+  if (!FOLLOW_RE.test(String(value))) fail('--follow takes an agent id (letters, digits, . _ : -), or nothing for any agent')
+  return String(value)
+}
+
 function viewportFlag(value, names) {
   if (value === undefined) return null
   const name = String(value)
@@ -82,6 +91,7 @@ async function target(flags, { board, pages, viewports, environments, lookupComm
     compare,
     // A link to a comment shows every state, so a resolved one is visible.
     filter: comment ? 'all' : null,
+    follow: followFlag(flags.follow),
   }
 }
 
@@ -94,6 +104,7 @@ const linkOf = (base, item) =>
     viewport: item.viewport ?? undefined,
     compare: item.compare ?? undefined,
     filter: item.filter ?? undefined,
+    follow: item.follow ?? undefined,
   })
 
 async function localTarget(flags) {
@@ -166,6 +177,7 @@ export async function openCommand(flags, out, { open = openBrowser } = {}) {
         comment: item.comment,
         viewport: item.viewport,
         compare: Array.isArray(item.compare) ? item.compare.join('_') : item.compare || null,
+        follow: item.follow,
         running: running !== false,
       }),
     )
