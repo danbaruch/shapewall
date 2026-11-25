@@ -279,8 +279,8 @@ asked for Bash, then Read.
   the changelog's Security entry.
 - **Not changed in this release: chat on a local board.** A local board's chat runs your own Claude Code with your own settings,
   as it always has, and the same check showed it loads your user `CLAUDE.md`, `CLAUDE.local.md` and auto memory and runs the
-  project's `SessionStart` hook. That is the agent you run in that folder yourself; moving local chat onto the restricted session
-  is planned for a later release.
+  project's `SessionStart` hook. That is the agent you run in that folder yourself, not the
+  restricted session a connected agent gets.
 
 The limits, plainly:
 

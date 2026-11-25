@@ -182,7 +182,7 @@ for (const [name, contextOptions] of [
       const sent = issues.at(-1)
       assert.match(sent.title, /^Pricing: Make the Plus button stand out/)
       assert.match(sent.body, new RegExp(`api/boards/demo/captures/pricing\\.desktop\\.png`))
-      assert.match(sent.body, new RegExp(`\\?board=demo&filter=all&c=${comment.id}`))
+      assert.match(sent.body, new RegExp(`\\?board=demo&c=${comment.id}&filter=all\\b`))
       if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `github-issue-${name}.png`) })
 
       const result = await mergedWebhook(comment.id, 7 + comment.id)
