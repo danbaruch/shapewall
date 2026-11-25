@@ -441,7 +441,12 @@ export function mountTokenApi({
         now: now(),
         credential: { id: req.token.id, hash: req.authTokenHash, now },
       })
-      auditOf(req, 'push_committed', `${req.project.id}/${result.board}`, { files: result.files })
+      // A page push says so, with how many pages and viewports it replaced.
+      const detail =
+        result.mode === 'pages'
+          ? { files: result.files, mode: 'pages', pages: result.pages, viewports: result.viewports }
+          : { files: result.files }
+      auditOf(req, 'push_committed', `${req.project.id}/${result.board}`, detail)
       res.json({ ...result, url: `${publicOrigin}/w/${req.t.workspaceId}/p/${req.project.id}/?board=${result.board}` })
     }),
   )

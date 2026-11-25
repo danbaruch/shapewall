@@ -357,7 +357,7 @@ shapewall mcp [--read-only] [--no-capture]
 A Model Context Protocol server on stdio, for agents that prefer tools over shell commands. `--read-only` offers only the reading
 tools; `--no-capture` drops `recapture_pages`. With `--remote URL` (and `--board ID` to pick the default board) it works on a
 hosted board. Started in a project folder (or with `--config FILE`) and with a token that has the `push` scope, `mcp --remote`
-also offers `recapture_pages`: it captures the pages on your machine, then pushes the board to the hosted project. See
+also offers `recapture_pages`: it captures the pages on your machine, then pushes only those pages to the hosted board. See
 [the agent workflow](/docs/agent-workflow#mcp-server-shapewall-mcp).
 
 ## shapewall variant
@@ -428,7 +428,7 @@ Private diagnostic reports are excluded unless `--include-checks` is explicitly 
 ## shapewall push, --remote and hosted
 
 ```text
-shapewall push --remote URL [--board ID] [--include-checks]
+shapewall push --remote URL [--board ID] [--page ID[,ID]] [--include-checks]
 shapewall comments|watch|mcp --remote URL [--board ID] [--token-file FILE]
 shapewall hosted [--data DIR] [--origin URL] [--port 4700] [--signup invite|open] [--trust-proxy]
 ```
@@ -438,13 +438,15 @@ shapewall hosted [--data DIR] [--origin URL] [--port 4700] [--signup invite|open
       --include-checks      explicitly include private diagnostic reports
       --remote URL          the hosted Shapewall (or $SHAPEWALL_REMOTE)
       --board ID            only this board (default: every board)
+      --page ID[,ID]        only these pages' captures, to a board already pushed; other pages
+                            there stay as they are, and a newer capture there is never replaced
   comments | watch | mcp --remote URL
                             the same commands against a hosted board (--board ID picks one)
                             token: $SHAPEWALL_TOKEN or --token-file FILE (a project token, swp_...)
                             watch --exec commands get no token unless --pass-token
                             watch and mcp show on the board as an agent, by the token's name
                             mcp --remote in a project folder, with the "push" scope, also has
-                            recapture_pages: it captures here, then pushes the board
+                            recapture_pages: it captures here, then pushes those pages
       --include-guests      comments and watch: also share link guests' comments (untrusted)
   hosted                    run the hosted server (accounts, workspaces, pushed boards)
       --data DIR            default ./shapewall-hosted-data (or $SHAPEWALL_HOSTED_DATA)
@@ -801,13 +803,15 @@ Hosted Shapewall (https://shapewall.com/docs/hosted)
       --include-checks      explicitly include private diagnostic reports
       --remote URL          the hosted Shapewall (or $SHAPEWALL_REMOTE)
       --board ID            only this board (default: every board)
+      --page ID[,ID]        only these pages' captures, to a board already pushed; other pages
+                            there stay as they are, and a newer capture there is never replaced
   comments | watch | mcp --remote URL
                             the same commands against a hosted board (--board ID picks one)
                             token: $SHAPEWALL_TOKEN or --token-file FILE (a project token, swp_...)
                             watch --exec commands get no token unless --pass-token
                             watch and mcp show on the board as an agent, by the token's name
                             mcp --remote in a project folder, with the "push" scope, also has
-                            recapture_pages: it captures here, then pushes the board
+                            recapture_pages: it captures here, then pushes those pages
       --include-guests      comments and watch: also share link guests' comments (untrusted)
   hosted                    run the hosted server (accounts, workspaces, pushed boards)
       --data DIR            default ./shapewall-hosted-data (or $SHAPEWALL_HOSTED_DATA)

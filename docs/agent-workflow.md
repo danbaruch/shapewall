@@ -332,8 +332,8 @@ shapewall watch | while read -r line; do printf '%s' "$line" | my-agent; done
 A [Model Context Protocol](https://modelcontextprotocol.io) server on stdio. It finds `shapewall.config.json` in the folder it is started
 in, or takes `--config FILE`. `--read-only` offers only the reading tools; `--no-capture` drops `recapture_pages`. With
 `--remote URL` it works on a [hosted board](hosted.md) instead. There, `recapture_pages` is offered when the server starts in the
-project folder (or with `--config FILE`) and the token has the `push` scope: it captures the pages on this machine, then pushes the
-board to the hosted project, so the loop is the same: make the change, call `recapture_pages`, then resolve. It refuses a hosted
+project folder (or with `--config FILE`) and the token has the `push` scope: it captures the pages on this machine, then pushes only
+those pages' new captures to the hosted board (other pages there stay as they are, and a newer capture there is never replaced), so the loop is the same: make the change, call `recapture_pages`, then resolve. It refuses a hosted
 board whose id is not a board in the config, and its result adds `pushed` (`ok`, then the files and board URL, or the error).
 
 | Tool                  | Arguments                                                                                              | Returns                                                                |

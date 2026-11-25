@@ -7,8 +7,10 @@
 // folder (a shapewall.config.json, or --config FILE), without --read-only or
 // --no-capture, and the token has the "push" scope. The hosted server never
 // captures: the tool captures the pages on this machine, the same way the
-// local tool does, then pushes the board to the hosted project. Only a board
-// whose id is in the config is pushed. The server built for a hosted board's
+// local tool does, then pushes only those pages' new captures to the hosted
+// board (a page push, src/hosted/push.js), so pages another machine pushed
+// meanwhile are never put back. Only a board whose id is in the config is
+// pushed. The server built for a hosted board's
 // own MCP endpoint (src/hosted/mcp-http.js) has no config, so never offers it.
 
 import fs from 'node:fs'
@@ -21,7 +23,7 @@ import { remoteBoardRef, untrustedJson } from '../feedback.js'
 import { sniffImage } from '../image-sniff.js'
 import { cropAround } from '../png.js'
 import { AGENT_STATUSES, STORED_AGENT_STATUSES, readManifest } from '../store.js'
-import { pushBoard } from './cli.js'
+import { pushPages } from './cli.js'
 import { REMOTE_HEARTBEAT_MS } from './remote-watch.js'
 import { terminalSafe } from './terminal.js'
 
@@ -462,7 +464,8 @@ export async function createRemoteMcpServer({
         title: 'Recapture pages',
         description:
           'Captures these pages again on this machine (every viewport, screenshot and live HTML) from the board baseUrl in the local ' +
-          'shapewall.config.json, then pushes the board to the hosted project, so it shows the new version. Returns when both are done.',
+          'shapewall.config.json, then pushes only those new captures to the hosted board, so it shows the new version. Every other page there ' +
+          'is left as it is. Returns when both are done.',
         inputSchema: { board: boardArg, pageIds: z.array(z.string().max(64)).min(1).max(100) },
       },
       tool(async ({ board, pageIds }) => {
@@ -506,13 +509,19 @@ export async function createRemoteMcpServer({
           if (!landed) pushed = { ok: false, error: 'No page was captured, so nothing was pushed.' }
           else {
             try {
-              // The hosted server takes a board whole (src/hosted/push.js swaps
-              // it in on commit), so the whole board goes up: these pages' new
-              // captures and every other page's current one.
-              const answer = await (push || pushBoard)({ config, board: local, remote, out: note })
-              pushed = { ok: true, files: answer.files, url: answer.url }
+              // Only the viewports captured now go up (a page push): every
+              // other page on the hosted board stays as it is there, and the
+              // server refuses (stale_capture) if it has a newer capture.
+              const fresh = Object.fromEntries(
+                Object.entries(pages)
+                  .map(([id, viewports]) => [id, Object.keys(viewports).filter((viewport) => viewports[viewport] === 'ok')])
+                  .filter(([, viewports]) => viewports.length),
+              )
+              const answer = await (push || pushPages)({ config, board: local, remote, pages: fresh, out: note })
+              pushed = { ok: true, files: answer.files, pages: answer.sent || fresh, url: answer.url }
             } catch (error) {
-              pushed = { ok: false, error: error.message || String(error) }
+              const code = typeof error?.code === 'string' && error.status >= 400 && error.status < 500 ? `${error.code}: ` : ''
+              pushed = { ok: false, error: `${code}${error.message || String(error)}` }
             }
           }
           return json({

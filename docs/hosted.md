@@ -885,6 +885,36 @@ shapewall capture
 SHAPEWALL_TOKEN=swp_... shapewall push --remote https://app.example.com
 ```
 
+### Pushing a few pages
+
+`shapewall push` uploads a whole board, and the server swaps it in whole. When several machines push the same board, that can put
+back an older capture of a page another machine pushed since. `shapewall push --page ID[,ID]` (with `--board ID` when the config
+has more than one board) uploads only those pages' latest captures, for each viewport that captured ok, to a board already pushed:
+
+```sh
+shapewall capture --only pricing
+shapewall push --remote https://app.example.com --page pricing
+```
+
+- Every other page, the variants, the older versions, the checks and the board's pages and journeys stay as the server has them
+  when the push commits, also when another machine pushed meanwhile. Changing the board's pages or journeys still needs a whole push.
+- The commit is one step, like a whole push: the server builds the board from what it holds at that moment plus these captures and
+  swaps it in inside the same write transaction, so the board never shows half a push and a crash is put right the same way.
+- **An older capture never replaces a newer one.** A capture's version starts with the time it was taken. If the board holds a
+  later capture of any page and viewport in the push, the whole push is refused (409 `stale_capture`) and nothing changes: capture
+  again, then push. The server compares the versions it already has, so the pushing machine needs no extra round trip, and a retry
+  of the same capture is accepted. This relies on the capturing machines' clocks being roughly right: a capture dated more than ten
+  minutes ahead of the server's clock is refused (400), so a wrong clock cannot hold a page against every later push.
+- The capture a page push replaces is kept as a version, so before and after keeps working, and comments made on it still show the
+  screenshot they were made on. Retention trims old versions as usual.
+- It takes the `push` scope, the same upload caps, the same file cleaning (PNGs re-encoded, live HTML sanitized, element maps
+  rebuilt) and the same rate limit and storage quota as a whole push, and is in the audit log as `push_committed` with
+  `mode: "pages"`. Only `captures/` files of the pages and viewports it named are taken.
+- On the wire: `POST /api/v1/pushes` with `{ "mode": "pages", "board": "<id>", "pages": { "<page>": ["<viewport>", ...] } }`, then
+  the files and the commit as for a whole push; the commit's `manifest` needs an ok entry with a `version` for each page and
+  viewport named. A server from before page pushes answers 400 `invalid_board`, and the CLI says to update it or push the whole
+  board.
+
 **`shapewall login`** gets a token without copying one:
 
 ```sh
@@ -1018,11 +1048,11 @@ shapewall mcp --remote https://app.example.com
 - `recapture_pages` is there only when `mcp --remote` starts in a project folder (it finds `shapewall.config.json` like the other
   commands, or takes `--config FILE`), without `--read-only` or `--no-capture`, and the token has the `push` scope. The hosted server
   never captures anything: the tool captures the pages on your machine, the same way the local tool does (page ids from the config,
-  the same capture lock), then pushes the board as `shapewall push --board ID` would. The hosted server replaces a board whole on
-  each push, so the whole board goes up, with the new captures of those pages. It works only on a hosted board whose id is a board in
-  the config, and refuses any other board before capturing, so captures never land on the wrong board. The result is the local one
-  (per page and viewport `ok` or the error) plus `pushed` (`ok`, then the files and board URL, or the error); when no shot landed,
-  nothing is pushed. The agent loop is then: make the change, call `recapture_pages`, then resolve. In an MCP client config:
+  the same capture lock), then pushes only the new captures of those pages, as `shapewall push --page` does (see
+  [Pushing a few pages](#pushing-a-few-pages)): every other page on the hosted board stays as it is there. It works only on a hosted
+  board whose id is a board in the config, and refuses any other board before capturing, so captures never land on the wrong board.
+  The result is the local one (per page and viewport `ok` or the error) plus `pushed` (`ok`, then the files, the pages and viewports
+  sent and the board URL, or the error, such as `stale_capture`); when no shot landed, nothing is pushed. The agent loop is then: make the change, call `recapture_pages`, then resolve. In an MCP client config:
 
 ```json
 {
@@ -1040,7 +1070,8 @@ Token API (`Authorization: Bearer swp_...`; cookies are ignored there): `GET /ap
 `GET /api/v1/boards/:board/comments?status=open|resolved|all&page=&mention=&guests=1`, `GET /api/v1/boards/:board/comments/:id`,
 `GET /api/v1/boards/:board/files/:kind/:file`, `POST .../comments/:id/replies`, `POST .../comments/:id/agent-status`
 (`{ agentStatus, onlyFrom }`), `POST .../comments/:id/resolve` (`{ note, fixRef, agentStatus }`), `POST .../comments/:id/reopen`,
-and for push `POST /api/v1/pushes`, `PUT /api/v1/pushes/:id/files/:area/:name`, `POST /api/v1/pushes/:id/commit`.
+and for push `POST /api/v1/pushes` (a whole board, or `{ mode: "pages", board, pages }` for
+[a few pages](#pushing-a-few-pages)), `PUT /api/v1/pushes/:id/files/:area/:name`, `POST /api/v1/pushes/:id/commit`.
 
 Emoji reactions are for people: members and up toggle one with `POST /api/boards/:board/comments/:id/reactions`
 (`{ emoji, replyId? }`, one of a fixed set of six) from the board. Viewers and guests cannot react (guests see counts only, never who

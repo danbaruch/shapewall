@@ -196,6 +196,8 @@ test('recapture_pages captures the pages here, pushes the board and reports each
   assert.equal(pushes[0].board.id, 'sample')
   assert.equal(pushes[0].remote, remote)
   assert.equal(pushes[0].config, config)
+  // Only what was captured now goes up: not the failed shot, not other pages.
+  assert.deepEqual(pushes[0].pages, { home: ['desktop', 'phone'] })
   assert.deepEqual(result.pages, {
     home: { desktop: 'ok', phone: 'ok' },
     app: { desktop: 'net::ERR_CONNECTION_REFUSED' },
@@ -203,7 +205,12 @@ test('recapture_pages captures the pages here, pushes the board and reports each
   assert.equal(result.ok, false, 'a failed shot is not ok, though the rest was pushed')
   assert.equal(result.shots, 3)
   assert.equal(result.failed, 1)
-  assert.deepEqual(result.pushed, { ok: true, files: 20, url: 'https://hosted.example/w/1/p/2/?board=sample' })
+  assert.deepEqual(result.pushed, {
+    ok: true,
+    files: 20,
+    pages: { home: ['desktop', 'phone'] },
+    url: 'https://hosted.example/w/1/p/2/?board=sample',
+  })
   assert.ok(result.log.some((line) => line.startsWith('Pushed 20 files')))
   await client.close()
 })
