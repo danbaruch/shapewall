@@ -60,6 +60,7 @@ import { requireCleanBuzzEnvironment } from '../buzz/environment.js'
 import { cspWithErrors, errorMeta, errorSettingsFrom, reportServerError } from '../error-tracking.js'
 import { cliCommand } from '../invocation.js'
 import { formatCommand } from '../agent/acp/command.js'
+import { AGENT_HEADER } from '../agent/triggers.js'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 export const CLIENT_DIR = path.join(ROOT, 'dist', 'client')
@@ -664,6 +665,7 @@ export function createApp({
   // --accounts`, else this machine's own browser on a board not shared
   // beyond it. A paired device, a LAN or tailnet visitor or a share link
   // guest is not, whatever name it signs with.
+  const fromAgent = (req) => req.get(AGENT_HEADER) === '1'
   const ownerRequest = (req) => {
     if (account) return account.isOwner(req)
     return !shared && localRequest(req)
@@ -684,7 +686,10 @@ export function createApp({
   app.post(
     '/api/boards/:id/comments',
     withBoard(async (req, res, board) => {
-      const comment = await createComment(config, board, req.body, { owner: ownerRequest(req) })
+      // Sent by an agent's command (SHAPEWALL_AGENT_HEADER, watch --exec):
+      // marked as an agent's. It only ever narrows: agent text wakes no agent.
+      const agent = fromAgent(req)
+      const comment = await createComment(config, board, req.body, { owner: !agent && ownerRequest(req), agent })
       res.status(201).json({ comment })
     }),
   )
@@ -706,7 +711,13 @@ export function createApp({
     '/api/boards/:id/comments/:cid/replies',
     withBoard(async (req, res, board) => {
       const { body, author, images, drawing } = req.body || {}
-      const { comment, reply } = await addReply(config, board.id, req.params.cid, { body, author, images, drawing })
+      const { comment, reply } = await addReply(config, board.id, req.params.cid, {
+        body,
+        author,
+        images,
+        drawing,
+        ...(fromAgent(req) ? { agent: true } : {}),
+      })
       res.status(201).json({ comment, reply })
     }),
   )

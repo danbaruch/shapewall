@@ -313,7 +313,7 @@ test('a job is checked on the machine, and every piece of board text is quoted a
     /another thread/,
   )
   assert.deepEqual(Object.keys(cleaned.turn).sort(), ['board', 'comment', 'id', 'kind', 'thread', 'trigger'])
-  assert.deepEqual(Object.keys(cleaned.messages[0]).sort(), ['author', 'files', 'mentions', 'role', 'text'])
+  assert.deepEqual(Object.keys(cleaned.messages[0]).sort(), ['asked', 'author', 'files', 'id', 'mentions', 'role', 'text'])
   // A "system" message from the server is dropped; a huge text is cut.
   const padded = cleanJob(
     job({

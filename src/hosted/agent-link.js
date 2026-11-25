@@ -39,8 +39,8 @@ import { CARD_HASH_RE, CARD_ID_RE, cardContent, cardHash, cardSubjectHash, cardT
 import { checkStorageQuota } from './comment-files.js'
 import { FRAME_LIMITS, cleanEvent, cleanReply, usageOf } from './chat-frames.js'
 import { createPermissionStore, permissionView } from './chat-permissions.js'
-import { buildJob } from './chat-job.js'
-import { INTERRUPTED_MESSAGE } from './chat-store.js'
+import { JobError, buildJob } from './chat-job.js'
+import { INTERRUPTED_MESSAGE, threadRespond } from './chat-store.js'
 import { agentPolicy } from './agent-policy.js'
 import { LINK_KINDS, LINK_TURNS_MAX } from './agents.js'
 import { rowToComment } from './comments.js'
@@ -719,88 +719,100 @@ export function mountAgentLink(
           )
         : null
       const thread = store.thread(req.project.id, row.board_id, row.thread_id)
-      const job = buildJob({
-        ctx,
-        turn: row,
-        agent: req.agent,
-        rows,
-        respond: thread?.respond_mode,
-        // The same rule as sending it a comment: in its audience, and
-        // trusted by the project's agent policy.
-        inAudience: (userId) =>
-          Boolean(userId) && agents.inAudience(req.agent, userId) && agents.trusted(req.project.id, row.board_id, userId),
-        asker: {
-          name: person?.display_name || null,
-          handle: person?.handle || null,
-          owner: Boolean(row.started_by) && row.started_by === req.agent.created_by,
-        },
-        // The approval rule in effect, per kind ("auto" only where this
-        // agent's machine said so itself; the machine checks again).
-        approvals: agents.approvalRules(req.agent),
-        // A comment reaches this agent only when the person asking wrote it,
-        // or the agent holds it, or its author is in the agent's audience
-        // and the token API would show it to this agent's token (sent to an
-        // agent, and not to another one). An imported human comment must be
-        // the exact vouched content this agent claimed for this turn.
-        commentVisible: (comment) => {
-          let stored
-          try {
-            stored = ctx.comments.get(comment.id)
-          } catch {
-            return false
-          }
-          if (stored.author_share_id || stored.author_token_id) return false
-          if (stored.imported || stored.imported_by) {
-            if (
-              !['comment', 'fix'].includes(row.kind) ||
-              stored.number !== row.comment_number ||
-              !['queued', 'working'].includes(stored.agent_status) ||
-              !policyFor(req.t).state(req.project.id, ctx.board.id, stored).dispatchable
-            )
+      let job
+      try {
+        job = buildJob({
+          ctx,
+          turn: row,
+          agent: req.agent,
+          rows,
+          respond: threadRespond(thread),
+          // The same rule as sending it a comment: in its audience, and
+          // trusted by the project's agent policy.
+          inAudience: (userId) =>
+            Boolean(userId) && agents.inAudience(req.agent, userId) && agents.trusted(req.project.id, row.board_id, userId),
+          asker: {
+            name: person?.display_name || null,
+            handle: person?.handle || null,
+            owner: Boolean(row.started_by) && row.started_by === req.agent.created_by,
+          },
+          // The approval rule in effect, per kind ("auto" only where this
+          // agent's machine said so itself; the machine checks again).
+          approvals: agents.approvalRules(req.agent),
+          // A comment reaches this agent only when the person asking wrote it,
+          // or the agent holds it, or its author is in the agent's audience
+          // and the token API would show it to this agent's token (sent to an
+          // agent, and not to another one). An imported human comment must be
+          // the exact vouched content this agent claimed for this turn.
+          commentVisible: (comment) => {
+            let stored
+            try {
+              stored = ctx.comments.get(comment.id)
+            } catch {
               return false
-            return Boolean(
-              req.t.get(
-                `SELECT 1 FROM agent_claims c JOIN agent_runs r ON r.workspace_id = c.workspace_id AND r.claim_id = c.id
+            }
+            if (stored.author_share_id || stored.author_token_id) return false
+            if (stored.imported || stored.imported_by) {
+              if (
+                !['comment', 'fix'].includes(row.kind) ||
+                stored.number !== row.comment_number ||
+                !['queued', 'working'].includes(stored.agent_status) ||
+                !policyFor(req.t).state(req.project.id, ctx.board.id, stored).dispatchable
+              )
+                return false
+              return Boolean(
+                req.t.get(
+                  `SELECT 1 FROM agent_claims c JOIN agent_runs r ON r.workspace_id = c.workspace_id AND r.claim_id = c.id
                  WHERE c.workspace_id = :ws AND c.project_id = :project AND c.board_id = :board
                    AND c.comment_number = :number AND c.token_id = :token AND c.hash = :hash AND c.ended_at IS NULL AND r.id = :run`,
-                {
-                  project: req.project.id,
-                  board: ctx.board.id,
-                  number: stored.number,
-                  token: req.token.id,
-                  hash: stored.dispatch_hash,
-                  run: row.run_id,
-                },
-              ),
+                  {
+                    project: req.project.id,
+                    board: ctx.board.id,
+                    number: stored.number,
+                    token: req.token.id,
+                    hash: stored.dispatch_hash,
+                    run: row.run_id,
+                  },
+                ),
+              )
+            }
+            if (!stored.author_user_id) return false
+            if (row.started_by && stored.author_user_id === row.started_by) return true
+            if (agents.holds(req.agent, req.project.id, stored)) return true
+            if (
+              !agents.inAudience(req.agent, stored.author_user_id) ||
+              !agents.trusted(req.project.id, row.board_id, stored.author_user_id)
             )
-          }
-          if (!stored.author_user_id) return false
-          if (row.started_by && stored.author_user_id === row.started_by) return true
-          if (agents.holds(req.agent, req.project.id, stored)) return true
-          if (!agents.inAudience(req.agent, stored.author_user_id) || !agents.trusted(req.project.id, row.board_id, stored.author_user_id))
-            return false
-          return (
-            policyFor(req.t).state(req.project.id, ctx.board.id, { ...stored, status: 'open' }).dispatchable &&
-            agents.workCheck(req.agent, req.project.id, stored).ok
-          )
-        },
-        // The thread's comment as this token reads it: never a guest's, its
-        // replies only from people in the agent's audience, and no file URLs.
-        commentItem: (number) => {
-          let comment
-          try {
-            comment = rowToComment(ctx.comments.get(number))
-          } catch {
-            return null
-          }
-          if (comment.authorGuest) return null
-          const item = remoteItem(req, ctx, contextFor(ctx), dispatchView(req.t, req.project.id, ctx.board.id, comment))
-          // No file URLs: nothing is downloaded for a chat turn.
-          delete item.files
-          for (const reply of item.replies || []) delete reply.files
-          return item
-        },
-      })
+              return false
+            return (
+              policyFor(req.t).state(req.project.id, ctx.board.id, { ...stored, status: 'open' }).dispatchable &&
+              agents.workCheck(req.agent, req.project.id, stored).ok
+            )
+          },
+          // The thread's comment as this token reads it: never a guest's, its
+          // replies only from people in the agent's audience, and no file URLs.
+          commentItem: (number) => {
+            let comment
+            try {
+              comment = rowToComment(ctx.comments.get(number))
+            } catch {
+              return null
+            }
+            if (comment.authorGuest) return null
+            const item = remoteItem(req, ctx, contextFor(ctx), dispatchView(req.t, req.project.id, ctx.board.id, comment))
+            // No file URLs: nothing is downloaded for a chat turn.
+            delete item.files
+            for (const reply of item.replies || []) delete reply.files
+            return item
+          },
+        })
+      } catch (error) {
+        // Its question is gone, or is not one this agent may read: the turn
+        // ends here, said in the thread, instead of answering another message.
+        if (!(error instanceof JobError)) throw error
+        chat.interrupt(req.t, row, { message: error.message, agentName: req.agent.name })
+        throw new HttpError(409, error.code, error.message)
+      }
       if (Buffer.byteLength(JSON.stringify(job)) > FRAME_LIMITS.jobBytes)
         throw new HttpError(413, 'job_too_large', 'This conversation is too large to send to the agent. Start a new chat.')
       // The process that fetches the job is the one that answers it.

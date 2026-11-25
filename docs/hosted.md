@@ -1321,7 +1321,11 @@ watcher) is an agent as before, with no link and no chat.
   off, and pointing the thread at another agent turns it off. The agent's machine has the last word: `agent connect --respond
 mention` keeps it to mentions and Send to agent everywhere, and the machine checks every chat job against the same rule before it
   starts. **Text an agent wrote never starts a turn**, even with an @mention or Answer every message on, so two agents cannot keep
-  each other going.
+  each other going. A message that would wake the agent by its words (an @mention, or a thread that answers every message) while
+  the agent is offline, or already answering in that thread, is kept in the thread with a note saying so; @mention it again
+  later. Send to agent is refused instead, so the panel can queue it or say why. A mention inside a code span (`` `@agent` ``) or
+  a quoted line (`> @agent ...`) does not count. An agent cannot be named after a member's handle or "Agent": a mention of that
+  person would wake it.
 - **One answer at a time** in a thread. A second message while one is being answered is refused; the panel queues it for you.
   A message that does not ask the agent is simply posted, even while an answer runs.
 - **Stop** ends the answer. The person who asked, the person who connected the agent, and admins may stop it.
@@ -2828,14 +2832,18 @@ on it. Prefer the pre-upgrade backup if you want the old rows back byte for byte
 
 ### Migration 22 and rollback
 
-Migration 22 (chat triggers) adds one column, `chat_threads.respond_mode` (`mention` or `always`, default `mention`): whether a
-shared thread's agent answers every message. Existing threads read as `mention`, so after the upgrade a shared thread answers only
-an @mention, Send to agent or Fix with. Nothing else changes and no rows are rewritten.
+Migration 22 (chat triggers) adds two columns to `chat_threads`: `respond_mode` (`mention` or `always`, default `mention`),
+whether a shared thread's agent answers every message, and `respond_agent_id`, the agent `always` was set for. `always` holds only
+while the thread still talks to that agent, so a thread that moved to another agent (on this build, or on an older one after a
+rollback) answers mentions only again. Existing threads read as `mention`, so after the upgrade a shared thread answers only an
+@mention, Send to agent or Fix with. Nothing else changes and no rows are rewritten.
 
-For a rollback, the older build ignores the column (and then answers every message in a shared thread, as it did). To let a newer
-build run the migration again, with the server stopped: `ALTER TABLE chat_threads DROP COLUMN respond_mode;`,
-`DELETE FROM schema_migrations WHERE version = 22;`, then set `PRAGMA user_version` to 21. Without the drop, the migration fails
-on the existing column. Roll this back before rolling back migration 21 or any earlier one.
+For a rollback, the older build ignores the columns (and then answers every message in a shared thread, as it did). To let a newer
+build run the migration again, with the server stopped: `ALTER TABLE chat_threads DROP COLUMN respond_agent_id;`,
+`ALTER TABLE chat_threads DROP COLUMN respond_mode;`, `DELETE FROM schema_migrations WHERE version = 22;`, then set
+`PRAGMA user_version` to 21. Without the drops, the migration fails on the existing columns. If you keep the columns instead and
+upgrade again later, nothing carries over wrongly: `always` counts only for the agent it was set for. Roll this back before rolling
+back migration 21 or any earlier one.
 
 ## Secrets, logs and legal text
 

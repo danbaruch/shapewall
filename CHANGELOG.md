@@ -78,6 +78,11 @@ and the project uses [Semantic Versioning](https://semver.org/).
   agent uses the same rule. Comments made with the MCP `add_comment` tool, or with `comments add` inside an agent's run, are now
   marked `authorAgent` on local boards too.
 - An agent session that goes on in a thread now also gets, as quoted data, what people wrote there since its last answer.
+- In a shared thread, a message that would wake the agent by its words while it is offline or already answering there is kept,
+  with a note saying so, instead of refused; people can post while an answer runs (local boards too). A mention inside a code
+  span or block, or on a quoted line, does not count. A hosted agent can no longer be named after a member's handle or "Agent".
+- On a local board, comments and replies posted through the HTTP API with the `X-Shapewall-Agent: 1` header (given to every
+  `watch --exec` command as `SHAPEWALL_AGENT_HEADER`) are marked as an agent's, and so are `watch`'s own "Needs a person" notes.
 
 - MCP `list_comments` returns at most 50 comments per call by default (`total` counts every match; `cursor` gets the next page).
 

@@ -448,6 +448,51 @@ test("shared threads answer an @mention or Send to agent; Answer every message i
   assert.equal(off.json.thread.respond.mode, 'mention')
 })
 
+test("the agent's machine refuses a turn its own rule does not allow, whatever the server says", async () => {
+  await fresh(ada)
+  await fresh(cyd)
+  const strict = await connectAgent(hosted, ada, {
+    workspaceId: ws,
+    projectId: project.id,
+    name: 'Strict',
+    kind: 'claude',
+    audience: 'trusted',
+  })
+  assert.equal(strict.status, 200, JSON.stringify(strict.error))
+  const entry = open(strict.token, { cwd: projectDir, policy: { audience: 'server', respond: 'mention' } })
+  assert.ok(await entry.ready, entry.failure()?.message)
+  try {
+    // The machine said mentions only: the server keeps to it.
+    assert.equal((await stateOf(strict.agentId)).link.policy.respond, 'mention')
+    const thread = 'board'
+    assert.equal((await ada.browser.post(chatUrl(thread, '/profile'), { profileId: strict.agentId })).status, 200)
+    assert.equal((await ada.browser.call('PATCH', chatUrl(thread), { body: { respond: 'always' } })).status, 403)
+    // A server that says otherwise (here: its record changed by hand) starts a turn for a plain message.
+    const row = hosted.db.prepare('SELECT capabilities FROM agents WHERE id = ?').get(strict.agentId)
+    const caps = JSON.parse(row.capabilities)
+    hosted.db
+      .prepare('UPDATE agents SET capabilities = ? WHERE id = ?')
+      .run(JSON.stringify({ ...caps, policy: { ...caps.policy, respond: 'thread' } }), strict.agentId)
+    assert.equal((await ada.browser.call('PATCH', chatUrl(thread), { body: { respond: 'always' } })).status, 200)
+    const turn = await chat(cyd, chatUrl(thread, '/messages'), { text: 'just people talking' })
+    assert.equal(turn.status, 200, turn.text)
+    assert.equal(turn.events.at(-1).name, 'done', turn.text)
+    // ...and the machine, which still answers mentions only, refuses it on its own.
+    assert.equal(turn.final.error.code, 'not_addressed')
+    assert.match(turn.final.error.message, /set on its own machine/)
+    assert.ok(
+      entry.logs.some((line) => /refused \(machine_mention_only/.test(line)),
+      entry.logs.join('\n'),
+    )
+    hosted.db.prepare('UPDATE agents SET capabilities = ? WHERE id = ?').run(row.capabilities, strict.agentId)
+    assert.equal((await ada.browser.call('PATCH', chatUrl(thread), { body: { respond: 'mention' } })).status, 200)
+  } finally {
+    await entry.stop()
+    await fresh(ada)
+    assert.equal((await ada.browser.post(chatUrl('board', '/profile'), { profileId: builder.agentId })).status, 200)
+  }
+})
+
 test('chat history: rename, archive, search and delete follow who owns the thread', async () => {
   const thread = newChat()
   await chat(ada, chatUrl(thread, '/messages'), 'stream')

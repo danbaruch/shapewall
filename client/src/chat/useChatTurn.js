@@ -327,6 +327,10 @@ export function useChatTurn({
       setSending(boardId, false)
       live()?.threads.refetch()
       storeRun(boardId, null)
+      // Kept but not answered for a reason the person should know (the agent
+      // is offline, or busy here): say so in the composer.
+      if (pending.posted && !pending.final && pending.posted.reason && pending.posted.reason !== 'not_addressed' && pending.posted.line)
+        stash(boardId, startedThread, (composer) => composer.setNotice({ tone: 'info', text: pending.posted.line }))
       if (pending.posted && !pending.final) publishFocus('stopped')
       else publishFocus(pending.final && !['stopped', 'error'].includes(pending.final.status) && !pending.final.error ? 'done' : 'stopped')
       if (fix) (live()?.onFixDone || onFixDone)?.()

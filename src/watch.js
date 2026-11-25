@@ -28,7 +28,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { runWatchCommand } from './watch-command.js'
 import { recaptureComment } from './agent/feedback-loop.js'
-import { isAgentAuthored } from './agent/triggers.js'
+import { AGENT_HEADER, isAgentAuthored } from './agent/triggers.js'
 import { getBoard } from './config.js'
 import { commentJson, feedbackContext, feedbackItem } from './feedback.js'
 import { acquireLock, readLock, releaseLock } from './lock.js'
@@ -99,6 +99,10 @@ export function findProgram(name, env = process.env) {
 export function commentEnv(config, board, item, commentFile) {
   return {
     SHAPEWALL_COMMENT_ID: String(item.id),
+    // For an agent that posts to the board's HTTP API itself (curl): send
+    // this header, and what it writes is marked as an agent's, so it never
+    // wakes an agent (src/agent/triggers.js). `comments add` marks it anyway.
+    SHAPEWALL_AGENT_HEADER: AGENT_HEADER + ': 1',
     SHAPEWALL_BOARD: board.id,
     SHAPEWALL_PAGE_ID: item.page?.id || item.variant?.pageId || '',
     SHAPEWALL_VARIANT_ID: item.variant?.id || '',
@@ -278,7 +282,7 @@ export async function watchComments({
       } catch (error) {
         // The recapture took a while: only a comment still ours gets the note.
         if (lost(item.id) || getComment(config, board.id, item.id).status !== 'open') return
-        await addReply(config, board.id, item.id, { author: 'shapewall', body: `Recapture needs a person: ${error.message}` })
+        await addReply(config, board.id, item.id, { author: 'shapewall', agent: true, body: `Recapture needs a person: ${error.message}` })
         await setStatus(item.id, 'needs-human')
       }
       return
@@ -308,7 +312,7 @@ export async function watchComments({
             ? 'the agent command exited 0 without a reply or a status change, so nothing says what it did'
             : `the agent command exited with ${result.code === null ? `signal ${result.signal}` : `code ${result.code}`}`
     if (lost(item.id)) return
-    await addReply(config, board.id, item.id, { author: 'shapewall', body: `Needs a person: ${why}. Log: ${logFile}` })
+    await addReply(config, board.id, item.id, { author: 'shapewall', agent: true, body: `Needs a person: ${why}. Log: ${logFile}` })
     await setStatus(item.id, 'needs-human')
     log(`#${item.id} needs-human: ${why}`)
   }

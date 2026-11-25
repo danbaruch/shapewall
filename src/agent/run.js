@@ -75,7 +75,8 @@ export function modelMessages({ config, board, threadId, messages, comments = fa
     }
     if (!message.text && !(message.attachments || []).length && !message.mentions?.length && !message.files?.length)
       content.push({ type: 'text', text: '(empty message)' })
-    return { role: 'user', content }
+    // `asked`: false for a message posted for the people (acp.js promptBlocks).
+    return { role: 'user', asked: message.posted !== true, content }
   })
 }
 

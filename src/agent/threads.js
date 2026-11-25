@@ -255,13 +255,16 @@ export async function appendUserMessage(
   boardId,
   threadId,
   { text, attachments, mentions = [], files = [] },
-  { now = new Date(), quotaBytes = Infinity, viewer = null, editOf = null, ownerControls = null } = {},
+  { now = new Date(), quotaBytes = Infinity, viewer = null, editOf = null, ownerControls = null, posted = false } = {},
 ) {
   const message = {
     id: newId('msg'),
     role: 'user',
     text,
     attachments: [],
+    // Posted for the people in a shared thread: it did not ask the agent
+    // (src/agent/triggers.js). The agent reads it later, as context.
+    ...(posted ? { posted: true } : {}),
     // Composer extras (src/agent/composer.js): board mentions and text files.
     ...(mentions.length ? { mentions } : {}),
     ...(files.length ? { files } : {}),

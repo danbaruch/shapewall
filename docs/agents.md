@@ -842,6 +842,11 @@ The same rules hold on a local board, a hosted board, in chat and for `watch` (`
   Chat settings > **Answer every message** turns that off for one thread, so it answers mentions and Send to agent only.
 - **Text an agent wrote never starts a turn**: not its replies, not a comment it made with `add_comment` or `comments add`, not an
   @mention inside them. This is always on and has no setting, so agents cannot set each other off in a loop.
+- **What counts as a mention**: `@agent`, or the handle the agent's name makes (lowercase, accents dropped, other characters as
+  `-`, at most 40 characters: "Builder Bot" is `@builder-bot`). A name with no letters to make one from (only emoji, say) answers
+  `@agent` only. A mention inside a code span or block, or on a quoted line (`> ...`), does not count.
+- **People can talk while it answers**: a message that does not ask the agent is posted at once, even while an answer is being
+  written; the agent gets it with the next message that is for it.
 
 ## What the panel does
 

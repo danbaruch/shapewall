@@ -741,6 +741,78 @@ export function agentRouter({
       }
     })
 
+  // ---- People talking: a message that does not ask the agent --------------
+
+  // Stores a message posted for the people in a shared thread and says so
+  // (`posted`): no turn, no run slot (src/agent/triggers.js).
+  const writePosted = async (req, res, { board, threadId, thread, current, input, editOf, decision, ownerWrites }) => {
+    const userMessage = await appendUserMessage(config, board.id, threadId, input, {
+      quotaBytes: limit.chatBytesMax,
+      viewer: res.locals.viewer,
+      editOf,
+      ownerControls: ownerWrites,
+      posted: true,
+    })
+    if (editOf !== null) resetSessions(`${board.id}/${threadId}`)
+    res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' })
+    res.write(`event: user\ndata: ${JSON.stringify({ message: userMessage })}\n\n`)
+    res.write(
+      `event: posted\ndata: ${JSON.stringify({
+        reason: decision.reason,
+        line: respondLine({ threadId, respond: respondOf(thread), name: current.configured ? current.label : 'The agent' }),
+      })}\n\n`,
+    )
+    res.end()
+  }
+
+  // Before the turn admission below (run slot, rate bucket, "an answer is
+  // running"): in a thread that answers mentions only, a message that does
+  // not ask the agent is posted here, so people can talk while it answers.
+  const peekPost = (req, res, next) => {
+    const { board, threadId } = res.locals
+    if (threadKind(threadId) === 'chat' || req[batchOwner]) return next()
+    const thread = readThread(config, board.id, threadId)
+    if (respondOf(thread) !== 'mention') return next()
+    express.json({ limit: BODY_LIMIT })(req, res, async (error) => {
+      if (error) return next(error)
+      const body = req.body || {}
+      if (body.fix === true || body.regenerate !== undefined || body.ask === true) return next()
+      const current = settings(thread.profileId || 'default')
+      const decision = shouldRespond({
+        threadId,
+        message: { text: typeof body.text === 'string' ? body.text : '', mentions: body.mentions },
+        handles: agentHandles({ name: current.configured ? current.label : null }),
+        respond: 'mention',
+      })
+      if (decision.ok) return next()
+      try {
+        const ownerWrites = ownerWritesFor(req) && sameOriginWrite(req)
+        if ((thread.profileId || 'default') !== 'default' && !ownerWrites) return controlDenied(res)
+        if (chatNeedsOwner(req, current) || (ownerGate && current.backend === 'acp' && current.configured && !sameOriginWrite(req)))
+          return ownerNeeded(res)
+        const editOf = body.editOf ?? null
+        if (editOf !== null && (typeof editOf !== 'string' || editOf.length > 64))
+          return fail(res, 400, 'bad_edit', 'editOf is the id of one of your messages in this thread.')
+        // An edit rewrites the thread: not under a running answer.
+        if (editOf !== null && runs.has(`${board.id}/${threadId}`))
+          return fail(res, 409, 'agent_running', 'Wait for the answer in this thread before editing a message.')
+        if (editOf !== null && !controlsAllowed(req, board, threadId)) return controlDenied(res)
+        // People talking has its own allowance, apart from the agent's turns.
+        const bucket = bucketFor(`${board.id}#posts`)
+        if (!bucket.take()) {
+          res.setHeader('Retry-After', String(bucket.retryAfter()))
+          return fail(res, 429, 'rate_limited', 'Too many messages on this board. Wait a moment and send again.')
+        }
+        const mentions = validateMentions(config, board, body.mentions)
+        const files = validateFiles(body.files)
+        const input = { ...validateUserMessage(board, body, { extras: mentions.length + files.length }), mentions, files }
+        await writePosted(req, res, { board, threadId, thread, current, input, editOf, decision, ownerWrites })
+      } catch (failure) {
+        handleError(res, failure)
+      }
+    })
+  }
+
   // ---- Sending: checked and reserved before the big body is read ----------
 
   const admitMessage = async (req, res, next) => {
@@ -886,23 +958,7 @@ export function agentRouter({
         })
         if (!decision.ok) {
           if (editOf !== null && !controlsAllowed(req, board, threadId)) return controlDenied(res)
-          const userMessage = await appendUserMessage(config, board.id, threadId, input, {
-            quotaBytes: limit.chatBytesMax,
-            viewer: res.locals.viewer,
-            editOf,
-            ownerControls: ownerWrites,
-          })
-          if (editOf !== null) resetSessions(`${board.id}/${threadId}`)
-          res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' })
-          res.write(`event: user\ndata: ${JSON.stringify({ message: userMessage })}\n\n`)
-          res.write(
-            `event: posted\ndata: ${JSON.stringify({
-              reason: decision.reason,
-              line: respondLine({ threadId, respond: respondOf(thread), name: current.configured ? current.label : 'The agent' }),
-            })}\n\n`,
-          )
-          res.end()
-          return
+          return writePosted(req, res, { board, threadId, thread, current, input, editOf, decision, ownerWrites })
         }
       }
       // An edit or a new answer rewrites the thread (and moves an owner
@@ -1157,7 +1213,7 @@ export function agentRouter({
       }
     }
   })
-  router.post('/boards/:id/threads/:thread/messages', findThread, admitMessage, express.json({ limit: BODY_LIMIT }), sendMessage)
+  router.post('/boards/:id/threads/:thread/messages', findThread, peekPost, admitMessage, express.json({ limit: BODY_LIMIT }), sendMessage)
 
   // ---- Batch fixes (batch-fixes.js) -------------------------------------------
   //

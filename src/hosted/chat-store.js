@@ -43,6 +43,10 @@ export const CHAT_LIMITS = {
   text: 8000,
 }
 export const TURN_ENDED = ['done', 'stopped', 'error', 'interrupted']
+// A thread's respond setting as it applies: "always" only while the thread
+// talks to the agent it was set for (migration 22, respond_agent_id).
+export const threadRespond = (row) =>
+  row?.respond_mode === 'always' && row.respond_agent_id && row.respond_agent_id === row.agent_id ? 'always' : 'mention'
 export const INTERRUPTED_MESSAGE = "The agent's machine went away before it finished. Ask again."
 
 const parse = (text) => {
@@ -128,9 +132,10 @@ export function createChatStore(t, { now = () => new Date() } = {}) {
       },
     )
   }
-  // When a shared thread's agent answers: "mention" or "always".
+  // When a shared thread's agent answers: "mention" or "always", for the
+  // agent the thread talks to now (threadRespond).
   function setRespond(projectId, boardId, threadId, mode) {
-    t.run(`UPDATE chat_threads SET respond_mode = :mode WHERE ${KEY}`, {
+    t.run(`UPDATE chat_threads SET respond_mode = :mode, respond_agent_id = agent_id WHERE ${KEY}`, {
       project: projectId,
       board: boardId,
       thread: threadId,

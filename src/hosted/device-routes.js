@@ -124,6 +124,8 @@ export function mountDeviceApprovals(consoleApi, deps) {
         // may use it. The scopes are fixed, whatever the request says: what
         // an agent works with, plus the link.
         const look = agentLogin ? agentLook(req.body?.agent, found.entry) : null
+        const clash = look ? agentsFor(req.t).nameProblem(look.name) : null
+        if (clash) throw new HttpError(400, 'agent_name_taken', `Agent ${clash}.`)
         if (!agentLogin && Array.isArray(req.body?.scopes) && req.body.scopes.includes('agent'))
           throw new HttpError(403, 'agent_login_required', 'The agent scope comes from "shapewall agent connect".')
         const token = createApiToken(

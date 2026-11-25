@@ -26,6 +26,14 @@ import { listJourneys } from '../journeys.js'
 import { commentText } from '../comment-fields.js'
 import { commentMentions } from '../mentions.js'
 
+// A job that cannot be built as asked (its question is gone): the turn ends.
+export class JobError extends Error {
+  constructor(code, message) {
+    super(message)
+    this.code = code
+  }
+}
+
 export const JOB_LIMITS = { history: 40, comments: 60, text: 8000, person: 10 }
 
 // A Git commit id (SHA-1 or SHA-256).
@@ -140,6 +148,10 @@ export function buildJob({
   // it: a message written while the turn waited for the machine is not the
   // question (it may be people talking, or the next question, for later).
   const at = allRows.findIndex((row) => row.id === turn.user_message_id)
+  // A chat turn answers its own message, or nothing: when that message is
+  // gone (pruned, removed) the newest message left is not the question.
+  if (turn.kind === 'chat' && at < 0)
+    throw new JobError('trigger_gone', 'The message that asked for this answer is no longer in the thread.')
   const rows = at >= 0 ? allRows.slice(0, at + 1) : allRows
   const board = ctx.board
   const all = ctx.comments.list({})
@@ -155,6 +167,9 @@ export function buildJob({
   const kept = rows
     .filter((row) => (row.role === 'user' ? inAudience(row.author_user_id) : row.agent_id === agent.id))
     .slice(-JOB_LIMITS.history)
+  // ...and the question is the last message the agent gets, or no turn.
+  if (turn.kind === 'chat' && kept.at(-1)?.id !== turn.user_message_id)
+    throw new JobError('trigger_gone', 'The message that asked for this answer is not one this agent may read.')
   // The newest few person messages carry their mentions and files in full;
   // older ones a line each, as on a local board.
   const full = new Set(
@@ -165,9 +180,14 @@ export function buildJob({
   )
   const messages = kept.map((row) => {
     const body = parse(row)
-    if (row.role === 'assistant') return { role: 'assistant', text: String(body.text || '').slice(0, 100_000) }
+    if (row.role === 'assistant') return { id: row.id, role: 'assistant', text: String(body.text || '').slice(0, 100_000) }
     return {
+      id: row.id,
       role: 'user',
+      // Whether this message asked the agent (started a turn): false for one
+      // posted for the people in the thread (chat-routes.js postOnly). The
+      // machine uses it to hand a session what it missed (acp.js promptBlocks).
+      asked: !body.posted,
       text: String(body.text || '').slice(0, JOB_LIMITS.text),
       author: body.author?.name || null,
       mentions: (Array.isArray(body.mentions) ? body.mentions : []).slice(0, 8).map((mention) => ({
@@ -207,6 +227,8 @@ export function buildJob({
       trigger: {
         ask: asked.ask === true || asked.fix === true || asked.push === true,
         respond: respond === 'always' ? 'always' : 'mention',
+        // The message that started it: the machine checks it is the last one.
+        messageId: turn.user_message_id || null,
       },
     },
     agent: { id: agent.id, name: agent.name },

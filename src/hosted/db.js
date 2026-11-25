@@ -829,8 +829,12 @@ const MIGRATIONS = [
   // starts as 'mention', so shared threads stop answering every message on
   // upgrade. Additive; an older build ignores the column and answers every
   // message again (docs/hosted.md, "Migration 22 and rollback").
+  // respond_agent_id is the agent 'always' was set for: it holds only while
+  // the thread still talks to that agent, so a thread that went to another
+  // agent (on this build or an older one) answers mentions only.
   `
   ALTER TABLE chat_threads ADD COLUMN respond_mode TEXT NOT NULL DEFAULT 'mention';
+  ALTER TABLE chat_threads ADD COLUMN respond_agent_id TEXT;
   `,
 ]
 

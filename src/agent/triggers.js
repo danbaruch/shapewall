@@ -25,6 +25,11 @@
 
 import { extractMentions, handleFor } from '../mentions.js'
 
+// The header a request from an agent's command carries to the local board
+// API (watch --exec gives it as SHAPEWALL_AGENT_HEADER): what it posts is
+// marked as an agent's.
+export const AGENT_HEADER = 'X-Shapewall-Agent'
+
 export const RESPOND_MODES = ['mention', 'always']
 // What a machine allows (src/remote/agent-policy-file.js `respond`):
 // "thread" honors a thread an owner set to "always"; "mention" never does.
@@ -47,7 +52,12 @@ export const isSharedThread = (threadId) => !isPrivateThread(threadId)
 //   - local replies: agent (store.js addReply)
 //   - chat messages: role "assistant"; starter agent replies: starter
 //   - imported comments: authorKind / import_author_kind "agent"
-//   - watch --exec and token replies go through the API, which sets agent
+//   - local comments and replies made by an agent: authorAgent / agent, set
+//     by `comments add` and MCP add_comment inside an agent's run, by watch's
+//     own notes, and by the local HTTP API for a request that carries the
+//     X-Shapewall-Agent header (watch --exec gives its command
+//     SHAPEWALL_AGENT_HEADER to send). A plain HTTP post from an agent
+//     without that header cannot be told apart from a person's.
 export function isAgentAuthored(entry) {
   if (!entry || typeof entry !== 'object') return false
   return Boolean(
@@ -76,15 +86,36 @@ export function agentHandles(agent) {
   return out
 }
 
-// Whether a message mentions one of `handles`: typed in its text, or picked
-// as a person in the composer's @ menu ({ kind: "person", id }).
+// The text a trigger reads: without code (```blocks``` and `spans`) and
+// without quoted lines ("> ..."), so quoting or showing a handle does not
+// wake the agent.
+export function addressableText(text) {
+  return String(text || '')
+    .replace(/```[\s\S]*?(```|$)/g, ' ')
+    .replace(/`[^`\n]*`/g, ' ')
+    .split('\n')
+    .filter((line) => !/^\s*>/.test(line))
+    .join('\n')
+}
+
+// One handle as both sides compare it: lowercase, the way a name makes its
+// handle (src/mentions.js handleFor), so "@Builder" and a long name's handle match.
+const sameHandle = (value) => {
+  const plain = String(value || '')
+    .replace(/^@/, '')
+    .toLowerCase()
+  return [plain, handleFor(plain)].filter(Boolean)
+}
+
+// Whether a message mentions one of `handles`: typed in its text (outside
+// code and quotes), or picked as a person in the composer's @ menu
+// ({ kind: "person", id }).
 export function mentionsAgent(message, handles) {
-  const wanted = new Set((handles || []).map((handle) => String(handle).toLowerCase()))
+  const wanted = new Set((handles || []).flatMap(sameHandle))
   if (!wanted.size) return false
-  if (extractMentions(message?.text ?? message?.body ?? '').some((handle) => wanted.has(handle))) return true
-  return (Array.isArray(message?.mentions) ? message.mentions : []).some(
-    (mention) => mention?.kind === 'person' && wanted.has(String(mention.id || '').toLowerCase()),
-  )
+  const hit = (value) => sameHandle(value).some((handle) => wanted.has(handle))
+  if (extractMentions(addressableText(message?.text ?? message?.body ?? '')).some(hit)) return true
+  return (Array.isArray(message?.mentions) ? message.mentions : []).some((mention) => mention?.kind === 'person' && hit(mention.id))
 }
 
 // The rule. `message`: the new message ({ text, mentions, role, agent, ... }).

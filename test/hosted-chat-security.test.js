@@ -761,3 +761,99 @@ test('an open chat stream stops delivering when access changes: role, membership
     await api(ada, 'PUT', consoleUrl('/agent'), { trustedRoles: ['member', 'admin', 'owner'], approveNonAdmin: false })
   }
 })
+
+test('when an agent answers: an admin narrows it, a switch of agent resets it, another project cannot set it, and words that cannot start a turn are kept', async () => {
+  await fresh(ada)
+  await fresh(bo)
+  await fresh(cyd)
+  hosted.rateLimiter.reset()
+  const made = await ada.browser.post(boardUrl('/comments'), { pageId: 'home', viewport: 'desktop', x: 20, y: 20, body: 'Trigger rules' })
+  assert.equal(made.status, 201, made.text)
+  const thread = `comment-${made.json.comment.id}`
+  const view = async (user = ada) => (await user.browser.get(chatUrl(thread))).json.respond
+  const patch = (user, respond, projectId = project.id) => api(user, 'PATCH', chatUrl(thread, '', projectId), { respond })
+  const row = () => hosted.db.prepare('SELECT agent_id, respond_mode, respond_agent_id FROM chat_threads WHERE thread_id = ?').get(thread)
+  assert.equal((await api(ada, 'POST', chatUrl(thread, '/profile'), { profileId: builder.agentId })).status, 200)
+  // Ada connected Builder: she turns on every message. Bo (an admin) cannot, but can turn it off.
+  assert.equal((await patch(ada, 'always')).status, 200)
+  assert.deepEqual((await view(bo)).canSet, { always: false, mention: true })
+  const boAlways = await patch(bo, 'always')
+  assert.equal(boAlways.status, 403, boAlways.text)
+  assert.equal(boAlways.json.error.code, 'respond_owner')
+  const boOff = await patch(bo, 'mention')
+  assert.equal(boOff.status, 200, boOff.text)
+  assert.equal(boOff.json.thread.respond.mode, 'mention')
+  // A thread id of this project, through another project's route: that project's own thread, no agent there.
+  assert.equal((await patch(ada, 'always')).status, 200)
+  const elsewhere = await patch(ada, 'always', other.id)
+  assert.notEqual(elsewhere.status, 200, elsewhere.text)
+  assert.equal(row().respond_mode, 'always', 'untouched by the other project')
+  // Pointing the thread at another agent turns it off, and back again does not bring it back.
+  assert.equal((await api(ada, 'POST', chatUrl(thread, '/profile'), { profileId: scout.agentId })).status, 200)
+  assert.equal((await view()).mode, 'mention')
+  assert.equal((await api(ada, 'POST', chatUrl(thread, '/profile'), { profileId: builder.agentId })).status, 200)
+  assert.equal((await view()).mode, 'mention')
+  // An older build after a rollback moves the thread without the reset: "always" holds for Builder only.
+  assert.equal((await patch(ada, 'always')).status, 200)
+  assert.equal(row().respond_agent_id, builder.agentId)
+  hosted.db.prepare('UPDATE chat_threads SET agent_id = ? WHERE thread_id = ?').run(scout.agentId, thread)
+  assert.equal((await view()).mode, 'mention', 'set for Builder, not for Scout')
+  hosted.db.prepare('UPDATE chat_threads SET agent_id = ? WHERE thread_id = ?').run(builder.agentId, thread)
+  assert.equal((await view()).mode, 'always')
+  assert.equal((await patch(ada, 'mention')).status, 200)
+
+  // Words that would wake Builder while it answers here: kept, with why. Send to agent: refused, as before.
+  hosted.rateLimiter.reset()
+  const slow = ada.browser.post(chatUrl(thread, '/messages'), { text: 'slowly', ask: true })
+  await until(() => liveTurn(thread), 'the slow turn')
+  const busy = await chat(cyd, chatUrl(thread, '/messages'), { text: '@builder the footer too' })
+  assert.equal(busy.status, 200, busy.text)
+  assert.equal(busy.events.at(-1).name, 'posted')
+  assert.equal(busy.events.at(-1).data.reason, 'agent_running')
+  assert.match(busy.events.at(-1).data.line, /Builder is answering another message here/)
+  const asked = await chat(cyd, chatUrl(thread, '/messages'), { text: 'and this', ask: true })
+  assert.equal(asked.status, 409, asked.text)
+  assert.equal((await api(ada, 'POST', chatUrl(thread, '/stop'), {})).status, 200)
+  await slow
+  // The kept message reaches Builder with the next one that asks it, as data.
+  const job = await jobFor(builder, ada, thread, 'what did Cyd say?')
+  assert.ok(JSON.stringify(job.messages).includes('the footer too'))
+  assert.equal(job.messages.find((message) => message.text === '@builder the footer too').asked, false)
+
+  // Scout is Ada's own. Set to every message, Cyd's plain words are people talking; Cyd's @mention is refused.
+  assert.equal((await api(ada, 'POST', chatUrl(thread, '/profile'), { profileId: scout.agentId })).status, 200)
+  assert.equal((await patch(ada, 'always')).status, 200)
+  const talk = await chat(cyd, chatUrl(thread, '/messages'), { text: 'just saying' })
+  assert.equal(talk.events.at(-1).name, 'posted', talk.text)
+  assert.equal(talk.events.at(-1).data.reason, 'agent_audience')
+  assert.equal((await chat(cyd, chatUrl(thread, '/messages'), { text: '@scout do it' })).status, 403)
+  assert.equal((await patch(ada, 'mention')).status, 200)
+
+  // Builder goes offline: an @mention is kept and says so; Send to agent is refused.
+  assert.equal((await api(ada, 'POST', chatUrl(thread, '/profile'), { profileId: builder.agentId })).status, 200)
+  await links[0].stop()
+  await until(
+    async () => (await ada.browser.get(boardUrl('/agents'))).json.agents.find((item) => item.id === builder.agentId)?.state === 'offline',
+    'Builder offline',
+  )
+  const away = await chat(cyd, chatUrl(thread, '/messages'), { text: '@builder when you are back' })
+  assert.equal(away.events.at(-1).name, 'posted', away.text)
+  assert.equal(away.events.at(-1).data.reason, 'agent_offline')
+  assert.match(away.events.at(-1).data.line, /Builder is offline\. Your message is kept here/)
+  const refused = await chat(cyd, chatUrl(thread, '/messages'), { text: 'now', ask: true })
+  assert.equal(refused.status, 409)
+  assert.equal(refused.json.error.code, 'agent_offline')
+  const stored = (await cyd.browser.get(chatUrl(thread))).json.messages.map((message) => message.text)
+  assert.ok(stored.includes('@builder when you are back'))
+})
+
+test('an agent is never named after a member or "Agent"', async () => {
+  await fresh(ada)
+  for (const name of ['Cyd', 'cyd', 'Agent', 'Bo Admin']) {
+    const renamed = await api(ada, 'PATCH', consoleUrl(`/agents/${builder.agentId}`), { name })
+    assert.equal(renamed.status, 400, `${name}: ${renamed.text}`)
+    assert.equal(renamed.json.error.code, 'agent_name_taken')
+  }
+  const fine = await api(ada, 'PATCH', consoleUrl(`/agents/${builder.agentId}`), { name: 'Builder' })
+  assert.equal(fine.status, 200, fine.text)
+})
