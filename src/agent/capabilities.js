@@ -43,6 +43,17 @@ export const minTier = (...tiers) => TIERS[Math.min(...tiers.map(tierRank))]
 // Every path an agent reaches a board by (plan section 3.3).
 export const PATHS = ['local-chat', 'local-endpoint', 'hosted-chat', 'hosted-fix', 'pickup', 'watch-exec', 'starter']
 const LOCAL_PATHS = ['local-chat', 'local-endpoint']
+// The paths whose agent is an ACP session Shapewall starts with its own
+// options, so it can be given skills and MCP servers (and have them taken
+// away on the next turn): not an endpoint, `watch --exec` or the starter.
+export const EXTENSION_PATHS = ['local-chat', 'hosted-chat', 'hosted-fix', 'pickup']
+const EXT_NAME_RE = /^[A-Za-z0-9_-]{1,64}$/
+// The names an agent config folder holds, as the resolver reads them.
+export function cleanExtensionNames(raw) {
+  const names = (list) =>
+    Array.isArray(list) ? [...new Set(list.filter((item) => typeof item === 'string' && EXT_NAME_RE.test(item)))].slice(0, 40) : []
+  return raw && typeof raw === 'object' && !Array.isArray(raw) ? { skills: names(raw.skills), servers: names(raw.servers) } : { skills: [], servers: [] }
+}
 const HOSTED_PATHS = ['hosted-chat', 'hosted-fix', 'pickup']
 
 // The capability keys of a machine policy (agent-policy.json version 2, and
@@ -433,7 +444,26 @@ export function cleanTrust(raw) {
   }
   // Taint: absent is none; a value it does not know is the narrowest.
   const taint = raw.taint === undefined || raw.taint === null ? null : TIERS.includes(raw.taint) ? raw.taint : 'open'
-  return { authors, guests: raw.guests !== false, taint }
+  return { authors, guests: raw.guests !== false, taint, thread: cleanThreadTrust(raw.thread) }
+}
+
+// The thread's own trust state as the trust block carries it
+// (src/agent/thread-trust.js): { tainted, authors: [{ handle, owner, member }] },
+// every person whose text the thread ever carried. Only extensions read it.
+// Missing (an older server or path) or not that shape: tainted, so a
+// thread whose history the machine cannot read never gets extensions.
+export function cleanThreadTrust(raw) {
+  const tainted = { tainted: true, authors: [] }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return tainted
+  if (raw.tainted !== false) return tainted
+  const list = raw.authors === undefined ? [] : raw.authors
+  if (!Array.isArray(list) || list.length > 200) return tainted
+  const authors = []
+  for (const author of list) {
+    if (!author || typeof author !== 'object' || Array.isArray(author)) return tainted
+    authors.push({ handle: cleanHandle(author.handle), owner: author.owner === true, member: author.member === true })
+  }
+  return { tainted: false, authors }
 }
 
 // The tier of one turn: { tier, why } where `why` is the code that held it
@@ -733,7 +763,7 @@ function platformView(platform) {
 
 // What one tier may do on one path. The tier is the one tierOf() decided
 // (or, for the ceiling the board shows, the one asked for).
-function resolveForTier(tier, { path: where, machine, server, config, platform, trust, tierWhy = null }) {
+function resolveForTier(tier, { path: where, machine, server, config, platform, trust, extensions: found = null, tierWhy = null }) {
   const m = machineView(machine)
   const narrowing = cleanNarrowing(server)
   const box = platformView(platform)
@@ -879,26 +909,40 @@ function resolveForTier(tier, { path: where, machine, server, config, platform, 
   }
   off('chrome', 'never_real_chrome')
 
-  // Extensions (skills and MCP from the agent config folder).
+  // Extensions (skills and MCP from the agent config folder, plan 3.7):
+  // only on an ACP agent's path, only above the open tier, only from a
+  // folder the machine names itself (never the default folder, never
+  // ~/.claude or anything in the project: agent-config-folder.js), only when
+  // the folder holds something, and only in a thread whose whole history
+  // (thread-trust.js) is by people in the extension set (--extensions-for):
+  // a thread that ever carried text nobody can vouch for never gets them.
   const block = cleanTrust(trust)
-  let extensions = { on: false, tools: [] }
-  const configured = m.agentConfig !== 'none'
-  if (!known || starter || where === 'watch-exec') off('extensions', known ? 'path_no_extensions' : 'unknown_path')
+  let extensions = { on: false, tools: [], skills: [], servers: [] }
+  const named = typeof m.agentConfig === 'string' && m.agentConfig !== 'none' && path.isAbsolute(m.agentConfig)
+  const held = cleanExtensionNames(found)
+  const inSet = (author) =>
+    author.owner ? m.extensionsFor.includes('owner') : author.handle !== null && m.extensionsFor.includes(author.handle)
+  if (!known) off('extensions', 'unknown_path')
+  else if (!EXTENSION_PATHS.includes(where)) off('extensions', 'path_no_extensions')
   else if (tier === 'open') off('extensions', 'open_tier_extensions')
-  else if (!configured) off('extensions', 'no_agent_config')
+  else if (!named) off('extensions', 'no_agent_config')
+  else if (!held.skills.length && !held.servers.length) off('extensions', 'no_extensions_found')
+  else if (!block) off('extensions', 'thread_tainted')
+  else if (block.thread.tainted) off('extensions', 'thread_tainted')
   else if (tier === 'solo' && !m.extensionsFor.includes('owner')) off('extensions', 'extensions_not_for_owner')
-  else if (
-    tier === 'team' &&
-    !(block?.authors || []).every((author) =>
-      author.owner ? m.extensionsFor.includes('owner') : author.handle !== null && m.extensionsFor.includes(author.handle),
-    )
-  )
-    off('extensions', 'extensions_not_for_team')
-  else if (tier === 'team' && !block) off('extensions', 'extensions_not_for_team')
-  else extensions = { on: true, tools: [...m.allowTool] }
+  else if (!block.authors.every(inSet)) off('extensions', tier === 'solo' ? 'extensions_not_for_owner' : 'extensions_not_for_team')
+  else if (!block.thread.authors.every(inSet)) off('extensions', 'extensions_not_for_thread')
+  else
+    extensions = {
+      on: true,
+      // Only tools of a server the folder holds, by exact name.
+      tools: m.allowTool.filter((tool) => held.servers.some((server) => tool.startsWith(`mcp__${server}__`))),
+      skills: held.skills,
+      servers: held.servers,
+    }
 
   // Memory: automatic memory is always off; a memory tool only by exact name, solo only.
-  const memory = { auto: false, write: tier === 'solo' && extensions.on ? m.allowTool.filter((name) => /memory/i.test(name)) : [] }
+  const memory = { auto: false, write: tier === 'solo' && extensions.on ? extensions.tools.filter((name) => /memory/i.test(name)) : [] }
   if (!memory.write.length) off('memory', 'memory_off')
 
   // Push and pull requests: always a card.
@@ -949,15 +993,37 @@ function resolveForTier(tier, { path: where, machine, server, config, platform, 
 //   server    the server's narrowing (cleanNarrowing), or null
 //   config    the loaded shapewall.config.json
 //   platform  { os, sandbox }: whether an OS sandbox is available here
-export function resolveCapabilities({ path: where, trust, audience, machine, server = null, config = null, platform = null } = {}) {
+//   extensions what the machine's agent config folder holds, names only
+//             ({ skills, servers }, agent-config-folder.js extensionNames), or null
+export function resolveCapabilities({
+  path: where,
+  trust,
+  audience,
+  machine,
+  server = null,
+  config = null,
+  platform = null,
+  extensions = null,
+} = {}) {
   const view = machineView(machine)
   const { tier, why } = PATHS.includes(where) ? tierOf({ trust, audience, machine: view, server }) : { tier: 'open', why: null }
-  return resolveForTier(tier, { path: where, machine, server, config, platform, trust, tierWhy: why })
+  return resolveForTier(tier, { path: where, machine, server, config, platform, trust, extensions, tierWhy: why })
 }
 
 // What one tier may do on one path, whoever wrote the turn: the ceiling the
 // board shows per tier (capability-render.js capabilitySummary). Never for
 // deciding a turn: that is resolveCapabilities().
-export function resolveCeiling(tier, { path: where, machine, config = null, platform = null, trust = null } = {}) {
-  return resolveForTier(TIERS.includes(tier) ? tier : 'open', { path: where, machine, server: null, config, platform, trust })
+// The ceiling is for a clean thread: a trust block without the thread's
+// state is read as one with nothing in its history yet.
+export function resolveCeiling(tier, { path: where, machine, config = null, platform = null, trust = null, extensions = null } = {}) {
+  const given = trust && typeof trust === 'object' && trust.thread === undefined ? { ...trust, thread: { tainted: false, authors: [] } } : trust
+  return resolveForTier(TIERS.includes(tier) ? tier : 'open', {
+    path: where,
+    machine,
+    server: null,
+    config,
+    platform,
+    trust: given,
+    extensions,
+  })
 }

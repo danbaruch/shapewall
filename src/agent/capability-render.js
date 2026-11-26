@@ -104,6 +104,14 @@ const REASONS = {
   no_agent_config: { text: 'no agent config folder', set: ['agent-config', 'DIR'] },
   extensions_not_for_owner: { text: 'extensions are not switched on for the owner', set: ['extensions-for', 'owner'] },
   extensions_not_for_team: { text: 'not everyone who wrote this turn is in the extensions list', set: ['extensions-for', 'owner,HANDLE'] },
+  no_extensions_found: { text: 'its agent config folder holds no skills or MCP servers Shapewall loads' },
+  thread_tainted: {
+    text: 'this thread once carried text nobody on the extensions list wrote (or its history is not known), so it never gets them',
+  },
+  extensions_not_for_thread: {
+    text: 'someone not on the extensions list wrote earlier in this thread',
+    set: ['extensions-for', 'owner,HANDLE'],
+  },
   memory_off: { text: 'automatic memory is off; a memory tool needs its exact name', set: ['allow-tool', 'mcp__SERVER__TOOL'] },
   machine_remote_none: { text: 'this machine pushes nowhere', set: ['remote', 'origin'] },
 }
@@ -113,6 +121,23 @@ const setOf = (reason, caps) => (typeof reason.set === 'function' ? reason.set(c
 
 const list = (items) => items.join(', ')
 const reasonOf = (caps, line) => caps.why.filter((item) => item.line === line).map((item) => REASONS[item.code] || { text: item.code })
+
+// The Extensions line when it is on: what the folder holds, by name, and
+// which of its tools run (every other tool of its servers is refused).
+export function extensionsText(ext) {
+  const skills = ext.skills || []
+  const servers = ext.servers || []
+  const parts = []
+  if (skills.length) parts.push(`skills ${list(skills)}`)
+  if (servers.length) parts.push(`MCP servers ${list(servers)}`)
+  const held = parts.length ? parts.join('; ') : 'nothing'
+  const tools = ext.tools.length
+    ? `Tools it may call: ${list(ext.tools)}; every other tool of those servers is refused.`
+    : servers.length
+      ? 'None of their tools is allowed yet (--allow-tool).'
+      : ''
+  return `From its agent config folder: ${held}.${tools ? ` ${tools}` : ''}`
+}
 
 function lineFor(caps, id) {
   const reasons = reasonOf(caps, id)
@@ -181,9 +206,7 @@ function lineFor(caps, id) {
       break
     case 'extensions':
       state = caps.extensions.on ? 'on' : 'off'
-      text = caps.extensions.on
-        ? `Skills and MCP servers from its agent config folder${caps.extensions.tools.length ? `, plus ${list(caps.extensions.tools)}` : ''}.`
-        : 'No extensions.'
+      text = caps.extensions.on ? extensionsText(caps.extensions) : 'No extensions.'
       break
     case 'memory':
       state = caps.memory.write.length ? 'on' : 'off'
