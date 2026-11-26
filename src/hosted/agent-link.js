@@ -714,10 +714,9 @@ export function mountAgentLink(
   // A member's handle, or null.
   const handleOf = (req, userId) =>
     userId
-      ? req.t.get(
-          'SELECT u.handle FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.workspace_id = :ws AND m.user_id = :user',
-          { user: userId },
-        )?.handle || null
+      ? req.t.get('SELECT u.handle FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.workspace_id = :ws AND m.user_id = :user', {
+          user: userId,
+        })?.handle || null
       : null
   // The trust block of a fix or comment turn (src/agent/capabilities.js
   // cleanTrust): every author whose text can reach the turn, each as { handle,

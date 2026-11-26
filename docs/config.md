@@ -511,8 +511,15 @@ digits and dashes. A string is short for `{ "run": "..." }`. Each takes:
 | `args`     | boolean  | `false`                                    | `true`: the agent may add arguments to it.                                                                                          |
 | `ready`    | URL      | none                                       | For a dev server: the loopback URL that answers once it is up. `$PORT` is the free port Shapewall picks.                            |
 
+`$PORT` goes bare, as its own word or part of one (`--port $PORT`, `--port=$PORT`): quoted or escaped it is refused, as it would
+read as text to a person and as the port to Shapewall, and it is never the program itself. `"args": true` lets the agent add any
+arguments: for `npx`, `jest` and similar runners that is any script or package, and the card for it says so. On Windows a line
+runs without a shell too: `node`, `npm` and `npx` run as Node plus their own script, and a `.cmd` or `.bat` program is refused.
+
 Whether a command runs at once or waits for a card on the board depends on who wrote the turn and what the machine running the agent
-allows, not on this file: see [what each turn may do](agent-hardening.md#what-each-turn-may-do). `starterAgent.testCommand` still
+allows, not on this file: see [what each turn may do](agent-hardening.md#what-each-turn-may-do) and
+[commands through Shapewall](agent-hardening.md#commands-through-shapewall). The lines are always read from your checkout, never
+from the copy an agent edits. `starterAgent.testCommand` still
 works; `commands.test` wins when both are set. A change needs a restart of `serve`.
 
 ## Auth

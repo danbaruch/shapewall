@@ -456,9 +456,9 @@ What to do:
 
 From 1.4.0 one function on the machine that runs the agent decides what it may do on each turn (`src/agent/capabilities.js`):
 which tools, whether commands run at once or wait for a card, whether it gets a shell and a browser. The console's "What it can do"
-card, `shapewall agent status` and the block the agent gets after its instruction files are three views of that one answer. This
-release builds the decision and its three renderings; the tools that use it (named commands, the sandboxed shell, the throwaway
-browser) arrive with the rest of 1.4.0.
+card, `shapewall agent status` and the block the agent gets after its instruction files are three views of that one answer. The
+tools that act on it are Shapewall's own (see [Commands through Shapewall](#commands-through-shapewall) below); in this release a
+hosted Fix with uses them, and the other paths follow.
 
 It is decided by **who wrote the turn**, not by whether the board is local or hosted:
 
@@ -534,16 +534,77 @@ no commands, handles, folders or origins. The server keeps it for display only, 
 is "unknown"; your own Chrome is always off), writes an `agent_capabilities_changed` audit row naming each line that changed, and
 an older hello of the same process arriving late does not replace a newer one.
 
+### Commands through Shapewall
+
+An agent never runs a command with its own shell on a board. On a turn that may run commands, Shapewall starts its own tool server
+for the agent (`exec-mcp`, internal) beside the agent's file tools, and the agent's Bash stays off. Its tools:
+
+- `run_named_command { name, args? }`: one of the project's named commands (config [`commands`](config.md#commands)), as its line
+  says, without a shell. `args` only where the config says `"args": true`.
+- `run_command { command, reason }`: on solo turns (and team turns with `trustTeamShell`), a shell command line inside the OS
+  sandbox; otherwise only one of the machine's exact commands, character for character, each after a card.
+- `start_dev_server { name }`, `stop_dev_server`: the named `dev` command on a free port (`$PORT`), checked with its `ready` URL,
+  stopped when the turn ends. Its port is the one local address the session's commands may reach.
+- `shapewall_capabilities`: what this turn may do, the same answer the console shows.
+
+Every check is in Shapewall's process, not in the tool server the agent's adapter starts (that one only relays calls, over a socket
+only it and Shapewall know, with a one-time token in a file only you can read). Before each run the capabilities are worked out
+again, and a card's "allow" counts only if the command, its config line and its inputs are still what was asked.
+
+**The OS sandbox.** On Linux, bubblewrap; on macOS, Seatbelt; both through the open-source sandbox runtime
+(`@anthropic-ai/sandbox-runtime`, pinned to one version). A command in it:
+
+- writes only in the fix copy and a tmp folder of its own (a read-only session: only the tmp folder); a write anywhere else fails,
+  or lands in a throwaway layer that is gone when it exits, never on the host;
+- cannot read the home folder (the fix copy and the folders Node runs from are let back in), so not `~/.ssh`, `~/.config`, your
+  agent's settings or tokens, nor the checkout the fix copy was made from;
+- gets a clean environment: `PATH`, the locale, a home folder of its own in its tmp folder, `CI=1`; never `SHAPEWALL_*` tokens or
+  anything else of the shell that started Shapewall;
+- reaches the package registries only (`shellNetwork`: `"registries"`; `"none"` for no network, `"open"` for any public host),
+  through the runtime's proxy, plus the session's dev server;
+- stops after 10 minutes (30 for a dev server), with its output capped at 64 KB, and its whole process group with it.
+
+The sandbox starts only in the fix copy Shapewall made for the turn, inside the folder it keeps fix copies in: never in your
+checkout, never in a folder that holds the home folder. The fix copy is a Git worktree of your repository; commands in it can run
+the project's tools, not Git against your repository's own folder.
+
+On Linux it needs `bubblewrap`, `socat` and `ripgrep` (`sudo apt install bubblewrap socat ripgrep`, or your system's packages), and
+a kernel that lets bubblewrap start user namespaces (some distributions restrict this with AppArmor). Without them there is no OS
+sandbox: no full shell, and every named command waits for a card. Windows has no sandbox here: the shell stays off, and named
+commands run without a shell (`node` and `npm` as Node plus their script; a `.cmd` or `.bat` program is never run, as `cmd.exe`
+would read its arguments), each after a card.
+
+**The honest limit.** The sandbox limits what a command touches. The code it runs is code the agent may have written: `npm test`
+runs the project's tests, and the agent edits those. Read the result as the agent's, and review the fix before it leaves your
+machine.
+
+**Asking again.** An "allow" is recorded on the machine (`$XDG_STATE_HOME/shapewall/approvals/<connection>/`, one file per record,
+kept 7 days) for that command name, that exact line and the content of its inputs: the files its `inputs` name, or by default the
+manifests, lockfiles and test configs, plus any script the line names and a relative program (`./run-tests`). When the agent
+changes one of them, or the line changes in the config, the next run asks again. On solo and team turns a command whose inputs are
+still as committed runs without asking. The command line always comes from your checkout's config, read again before each run,
+never from the fix copy the agent writes in. A card for a command with `"args": true` says that for `npx`, `jest` and similar
+runners an argument can be any script or package: allowing it is allowing arbitrary code.
+
+**Files a command changed** (a formatter, a snapshot update) join the fix as nobody looked at them, so it is held on the machine
+until someone sees its whole diff (Push this fix). A command that deletes a tracked file leaves nothing to commit.
+
+**Who "the owner" is.** A turn is solo only when every author is the person who connected the agent. The server says who wrote
+the turn; the machine counts an author as the owner only under the handle of the account that approved the connection, saved with
+its token (or, for a token saved before this release, the first handle the server names). A server that later names another
+account gets no solo turns from that process.
+
 ### What Shapewall cannot do
 
-- **The agent's own tools.** An ACP agent is still a program running as you. Claude Code's Bash and Edit, Codex's sandbox, goose's
-  extensions work as they do in your terminal, under the agent's own permission settings. Shapewall does not change those and cannot
-  sandbox them. Same for whatever `watch --exec` runs.
+- **The agent's own tools.** An ACP agent is still a program running as you. Outside a board's restricted sessions, Claude Code's
+  Bash and Edit, Codex's sandbox, goose's extensions work as they do in your terminal, under the agent's own permission settings.
+  Shapewall's OS sandbox holds the commands it runs for the agent, not the agent program itself. Same for whatever `watch --exec`
+  runs.
 - **Your environment in `watch --exec`.** Local `shapewall watch --exec` gives the command the environment `watch` itself was started
   with (plus the `SHAPEWALL_*` comment variables). Remote watch removes only `SHAPEWALL_TOKEN`. Start watchers from a clean environment.
 - **Commands you approve.** An approved command runs as you in the project, and the project's own config still applies to it (a repo's
   `.git/config` can make `git status` run a program).
-- **Network traffic.** Shapewall does not inspect or limit where the agent connects.
+- **Network traffic.** Shapewall limits where the commands it runs connect (above), not where the agent program itself connects.
 - **What the model provider sees.** Everything in the chat goes to the endpoint or the agent's provider.
 
 ## Least privilege

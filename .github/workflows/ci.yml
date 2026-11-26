@@ -72,6 +72,38 @@ jobs:
           node-version: 22
       - run: node --test test/tailnet-platform.test.js
 
+  sandbox:
+    # The OS sandbox agent commands run in (src/agent/sandbox-exec.js): bubblewrap on Linux, Seatbelt on
+    # macOS, through @anthropic-ai/sandbox-runtime. The escape tests, the exec tools and a hosted fix that
+    # runs npm test in it. SHAPEWALL_SANDBOX_TEST=1 makes a sandbox that does not start a failure.
+    name: Agent command sandbox (${{ matrix.os }})
+    timeout-minutes: 15
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Install bubblewrap, socat and ripgrep, and check bubblewrap starts
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q bubblewrap socat ripgrep
+          bash scripts/ci-bwrap-sandbox.sh
+      - name: Seatbelt is the sandbox on macOS
+        if: runner.os == 'macOS'
+        run: echo 'SHAPEWALL_SANDBOX_TEST=1' >> "$GITHUB_ENV"
+      - name: Sandbox, exec tools and hosted fix commands
+        run: node --test --test-concurrency=1 --test-timeout=300000 test/sandbox-exec.test.js test/exec-mcp.test.js test/hosted-exec.test.js
+
   website:
     name: Website (build and SEO checks)
     timeout-minutes: 10

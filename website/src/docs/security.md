@@ -172,12 +172,15 @@ What these protections do not cover:
   can only narrow it. A fix is then made on a new branch in a folder of its own, never in the checkout. Each edit is checked on
   the machine, shown on the board as a card with the full diff, and allowed by a person who may answer that agent (a workspace can ask for
   their passkey again first). The machine
-  checks every answer again, and keeps the commit only if it is exactly what was allowed. Commands are not offered for Claude
-  Code in this release: its fix session has no shell tool. The limit: Shapewall does not sandbox the agent's own tools, and with
-  approvals on, a compromised server can forge an "allow" for an edit the agent really asked. The worst case is then edits to
-  project files, on a branch, in a throwaway folder, pushed as a pull request. Not commands, and not the checkout. Give the agent a
-  restricted profile, prefer `--approvals owner`, check the pull request like any other, and do not add `--allow-path` for CI
-  files. See [agent hardening](/docs/agent-hardening#edits-from-a-hosted-board).
+  checks every answer again, and keeps the commit only if it is exactly what was allowed. The agent's own shell stays off:
+  commands run through Shapewall's own tools, the project's named commands (and, on its owner's own turns, a shell), inside an OS
+  sandbox on Linux and macOS that writes only in the fix copy, cannot read the home folder and reaches the package registries only.
+  The limit: Shapewall does not sandbox the agent program itself, and with approvals on, a compromised server can forge an "allow"
+  for something the agent really asked. The worst case is then edits to project files on a branch, and the project's named
+  commands run with the agent's changes: in the sandbox where there is one, as you where there is not (Windows, or Linux without
+  bubblewrap). Not the checkout. Give the agent a restricted profile, prefer `--approvals owner`, install bubblewrap on Linux,
+  check the pull request like any other, and do not add `--allow-path` for CI files. See
+  [agent hardening](/docs/agent-hardening#commands-through-shapewall).
 - **Dictation is the browser's.** The microphone in a comment field uses the browser's speech recognition, which in Chrome sends the
   audio to Google's speech service. Shapewall never sees the audio. Only the board page itself may use the microphone
   (`Permissions-Policy: microphone=(self)`); every other response, live HTML snapshots included, sends `microphone=()`, and

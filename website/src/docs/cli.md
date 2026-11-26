@@ -305,8 +305,9 @@ Connected Claude Code sessions never load or write Claude Code's auto memory.
 
 `--allow-command` is in the help text and is not available for Claude Code in this release. Started with its shell tool, Claude
 Code runs commands it takes to be read-only (`ls`, `cat`) without asking anyone, and those can read outside the project. So a fix
-session of Claude Code gets no shell tool, the flag is refused with that explanation, and no connected agent runs a command from
-the board in this release. The whole of it, with the trust table: [the hosted guide](/docs/hosted#edits-from-the-board-the-trust-decision).
+session of Claude Code gets no shell tool, and the flag is refused with that explanation. A fix runs the project's named commands
+(config `commands`) through Shapewall's own tools instead, in an OS sandbox where the machine has one
+([commands through Shapewall](/docs/agent-hardening#commands-through-shapewall)). The whole of it, with the trust table: [the hosted guide](/docs/hosted#edits-from-the-board-the-trust-decision).
 
 The sandboxed starter agent (`agent sandbox`) is **experimental** ([stability](/docs/stability)) and separate from native ACP board
 chat. Its [guide](/docs/starter-agent) explains the container, model and trusted-author prerequisites, budgets and approval limits.

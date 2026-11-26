@@ -25,8 +25,22 @@ and the project uses [Semantic Versioning](https://semver.org/).
   console's agent list carries it, a line it cannot read shows as unknown, and a change is an `agent_capabilities_changed` audit
   row naming each line.
 
+- Commands through Shapewall on a hosted Fix with: the agent gets Shapewall's own tools (`run_named_command`, `run_command`,
+  `start_dev_server`, `stop_dev_server`, `shapewall_capabilities`) and never its own shell. On Linux (bubblewrap, socat and ripgrep)
+  and macOS (Seatbelt) every command runs in an OS sandbox through `@anthropic-ai/sandbox-runtime`: it writes only in the fix copy,
+  cannot read the home folder, gets a clean environment and reaches the package registries only. Solo turns run named commands
+  without a card and get a sandboxed shell; open turns ask with a card (`command`), and an allow is checked again against the
+  machine's rules before the command runs. Approvals are recorded on the machine per command line and inputs, and asked again when
+  the agent changes `package.json`, a lockfile, a test config or a script the line names. Files a command changed hold the fix for a
+  look. See "Commands through Shapewall" in the agent hardening guide.
+
 ### Changed
 
+- Who "the owner" is on a connected agent's turns is pinned on its machine: the handle of the account that approved it (saved
+  with the token), not the server's word alone.
+- Named commands on Windows run without a shell: `node`, `npm` and `npx` as Node plus their script; a `.cmd` or `.bat` program is
+  refused. Without an OS sandbox (Windows, no bubblewrap) there is no full shell, and every named command waits for a card.
+- `$PORT` in a command line must be bare: quoted (`'$PORT'`, `"$PORT"`), escaped (`\$PORT`) or as the program it is refused.
 - A version 1 `agent-policy.json` is read as exactly what it allowed (no shell, no browser, no extensions, a card for every
   command), and the next save writes it back as version 2. A connection with no saved entry, or one 1.3.0 saved without flags,
   still reads and answers only: each wider capability is a key its owner sets. A version 1 entry with `approvals` "owner" (or

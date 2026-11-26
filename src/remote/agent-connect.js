@@ -25,6 +25,7 @@ import { agentSettings } from '../agent/config.js'
 import { agentConfigDir, createInstructionsNote, instructionsLines, instructionsSummary, loadInstructions } from '../agent/instructions.js'
 import { REMOTE_FIX_PREAMBLE, remotePreamble } from '../agent/context.js'
 import { DEFAULT_OUTPUT_DIR, authFiles, findConfigFile, loadConfig } from '../config.js'
+import { closeSandbox } from '../agent/sandbox-exec.js'
 import { AGENT_SLUG_RE, forgetAgentCredential, readAgentCredential, saveAgentCredential } from './credentials.js'
 import { fixRoot, sweepFixes } from './agent-fix.js'
 import { fatalLinkError, runAgentLink } from './agent-link.js'
@@ -575,6 +576,8 @@ export async function agentConnect(
     signal?.removeEventListener('abort', stop)
     backend.close?.()
     editBackend?.close?.()
+    // The sandbox runtime's proxies, if a fix started them.
+    await closeSandbox()
   }
   log(ended?.takenOver ? 'Another "shapewall agent connect" took over this agent (--takeover). This one stopped.' : 'Disconnected.')
   return 0
