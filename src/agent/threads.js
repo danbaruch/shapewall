@@ -16,6 +16,11 @@
 // and list as before. `branches` keeps the earlier versions an edited message
 // replaced: { id, at, messages, branches, createdAt }, `at` the index of the
 // edited message (absolute, so a version keeps its own later versions).
+// `trust`: the thread's trust state (thread-trust.js) { tainted, authors },
+// written only through nextThreadTrust. A local board has no person ids:
+// the owner's text is "owner", anyone else's taints the thread. A file from
+// before 1.4.0 with messages and no `trust` reads as tainted (its history
+// was never looked at); an empty one starts clean.
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -24,6 +29,7 @@ import { isLockLive, withFileLock } from '../lock.js'
 import { boardDir, readJson, writeFileAtomic, writeJsonAtomic } from '../store.js'
 import { AgentError } from './errors.js'
 import { sniffImage } from '../image-sniff.js'
+import { applyThreadTrust, readThreadTrust } from './thread-trust.js'
 import {
   CHAT_RE,
   THREAD_RE,
@@ -93,6 +99,8 @@ export function readThread(config, boardId, threadId) {
   if (typeof data?.ownerControls === 'boolean') thread.ownerControls = data.ownerControls
   if (data?.archived === true) thread.archived = true
   thread.branches = cleanBranches(data?.branches)
+  thread.trust =
+    data?.trust !== undefined ? readThreadTrust(data.trust) : thread.messages.length ? { tainted: true, authors: [] } : readThreadTrust(null)
   return thread
 }
 
@@ -103,6 +111,7 @@ function serialize(thread) {
   if (typeof thread.ownerControls === 'boolean') out.ownerControls = thread.ownerControls
   if (thread.archived === true) out.archived = true
   if (thread.branches?.length) out.branches = thread.branches
+  out.trust = readThreadTrust(thread.trust)
   return out
 }
 
@@ -255,7 +264,17 @@ export async function appendUserMessage(
   boardId,
   threadId,
   { text, attachments, mentions = [], files = [] },
-  { now = new Date(), quotaBytes = Infinity, viewer = null, editOf = null, ownerControls = null, posted = false } = {},
+  {
+    now = new Date(),
+    quotaBytes = Infinity,
+    viewer = null,
+    editOf = null,
+    ownerControls = null,
+    posted = false,
+    // What this message brings into the thread (thread-trust.js events),
+    // applied in the same write: by default the viewer's own text.
+    trustEvents = null,
+  } = {},
 ) {
   const message = {
     id: newId('msg'),
@@ -306,6 +325,7 @@ export async function appendUserMessage(
         message.editedFrom = tail[0].id
       } else message.attachments = saved
       messages.push(message)
+      thread.trust = applyThreadTrust(thread.trust, trustEvents || [localTextEvent(viewer)])
       // The first question names the thread (an edit of it renames it too).
       if (messages.findIndex((item) => item.role === 'user') === messages.length - 1) refreshAutoTitle(thread)
     })
@@ -314,6 +334,18 @@ export async function appendUserMessage(
     throw error
   }
   return message
+}
+
+// The thread-trust.js event of a local message by `viewer`: the owner's
+// text, or anyone else's (which taints the thread).
+export const localTextEvent = (viewer) => (viewer === 'owner' ? { kind: 'person', id: 'owner' } : { kind: 'outside' })
+
+// A turn read other people's text (a board tool's result): the thread is
+// tainted for good (thread-trust.js), so it never gets extensions again.
+export async function markThreadTainted(config, boardId, threadId, kind = 'tool') {
+  return updateThread(config, boardId, threadId, (messages, thread) => {
+    thread.trust = applyThreadTrust(thread.trust, [{ kind }])
+  })
 }
 
 function countChats(config, boardId) {
@@ -453,6 +485,9 @@ export async function setThreadRespond(config, boardId, threadId, mode) {
 export async function setThreadProfile(config, boardId, threadId, profileId, { ownerControls = false } = {}) {
   return updateThread(config, boardId, threadId, (messages, thread) => {
     if (ownerControls) thread.ownerControls = true
+    // Another agent's answers are in the history from here on: tainted.
+    if (messages.length && (thread.profileId || 'default') !== (profileId || 'default'))
+      thread.trust = applyThreadTrust(thread.trust, [{ kind: 'moved' }])
     if (profileId === 'default') delete thread.profileId
     else thread.profileId = profileId
   })

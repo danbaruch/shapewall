@@ -98,6 +98,8 @@ import {
   appendAssistantMessage,
   appendUserMessage,
   markThreadOwnerControls,
+  markThreadTainted,
+  localTextEvent,
   attachmentPath,
   changeMessage,
   changeThreadInfo,
@@ -116,6 +118,7 @@ import {
   visibleTo,
 } from './threads.js'
 import { commentText } from '../comment-fields.js'
+import { ownersComment } from './watch-capabilities.js'
 
 // Four 5 MB images in base64, and the text. Only POST .../messages reads a
 // body this big, and only once the message is allowed to run.
@@ -734,15 +737,21 @@ export function agentRouter({
     let tools = null
     try {
       const kind = threadKind(threadId)
+      const stored = readThread(config, board.id, threadId)
+      const comment = kind === 'comment' && commentId ? getComment(config, board.id, commentId) : null
       tools = await startLocalTools({
         config,
         env,
         acp: backend.id === 'acp',
+        // Extensions only while the thread holds nothing but the owner's text
+        // (thread-trust.js); a comment's thread also reads the comment and its replies.
+        thread: kind === 'comment' && !ownersComment(comment) ? { tainted: true, authors: [] } : stored.trust,
+        key,
         owner: localOwnerOnly({
           ownerWrites,
           kind,
-          thread: readThread(config, board.id, threadId),
-          comment: kind === 'comment' && commentId ? getComment(config, board.id, commentId) : null,
+          thread: stored,
+          comment,
           ownerGate,
           accounts: Boolean(accountUser),
           acp: backend.id === 'acp',
@@ -781,7 +790,7 @@ export function agentRouter({
         relay = null
       }
     }
-    return { tools, relay, mcpServers }
+    return { tools, relay, mcpServers, extensions: tools?.extensions || null }
   }
   const endTurnTools = async (key, { tools, relay }) => {
     if (relay && relays.get(key) === relay) await relay.setHost(null).catch(() => {})
@@ -840,6 +849,25 @@ export function agentRouter({
 
   // ---- People talking: a message that does not ask the agent --------------
 
+  // What a local message brings into its thread (thread-trust.js): the
+  // viewer's own text, and the text of each comment it mentions (a comment
+  // that is not the owner's own, or has a reply by anyone but its agent, is
+  // someone else's and taints the thread).
+  const trustEventsOf = (board, input, viewer) => {
+    const events = [localTextEvent(viewer)]
+    for (const mention of Array.isArray(input?.mentions) ? input.mentions : []) {
+      if (!['comment', 'element'].includes(mention?.kind)) continue
+      let comment = null
+      try {
+        comment = getComment(config, board.id, Number(mention.id))
+      } catch {
+        comment = null
+      }
+      if (!comment || !ownersComment(comment)) events.push({ kind: 'outside' })
+    }
+    return events
+  }
+
   // Stores a message posted for the people in a shared thread and says so
   // (`posted`): no turn, no run slot (src/agent/triggers.js).
   const writePosted = async (req, res, { board, threadId, thread, current, input, editOf, decision, ownerWrites }) => {
@@ -849,6 +877,7 @@ export function agentRouter({
       editOf,
       ownerControls: ownerWrites,
       posted: true,
+      trustEvents: trustEventsOf(board, input, res.locals.viewer),
     })
     if (editOf !== null) resetSessions(`${board.id}/${threadId}`)
     res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' })
@@ -1119,6 +1148,7 @@ export function agentRouter({
               viewer: res.locals.viewer,
               editOf,
               ownerControls: ownerWrites,
+              trustEvents: trustEventsOf(board, input, res.locals.viewer),
             })
       } catch (error) {
         if (fix)
@@ -1202,7 +1232,7 @@ export function agentRouter({
         const key = [board.id, threadId].join('/')
         const cards = {}
         res.locals.run.cards = cards
-        const { tools, relay, mcpServers } = await turnTools({
+        const { tools, relay, mcpServers, extensions } = await turnTools({
           req,
           board,
           threadId,
@@ -1242,6 +1272,11 @@ export function agentRouter({
             mcpServers,
             execHost: backend.id === 'acp' ? null : tools?.exec?.host || null,
             cards,
+            // Skills and MCP servers from the agent config folder, on a clean owner's turn only.
+            extensions: backend.id === 'acp' ? extensions : null,
+            // A board tool brought other people's text in: the thread is tainted for good.
+            onTaint: (why) =>
+              markThreadTainted(config, board.id, threadId, why).catch((error) => log(`chat: taint not saved: ${error.message}`)),
           })
         } finally {
           await endTurnTools(key, { tools, relay })
@@ -1893,7 +1928,12 @@ export function agentRouter({
           : await turnTools({ req, board, threadId, backend, ownerWrites: true, root: config.dir, inPlace: true, ask: null })
         let options
         try {
-          options = await backend.prepare(key, { choices, signal: admission.signal, mcpServers: prepared.mcpServers })
+          options = await backend.prepare(key, {
+            choices,
+            signal: admission.signal,
+            mcpServers: prepared.mcpServers,
+            extensions: prepared.extensions || null,
+          })
         } finally {
           await endTurnTools(key, prepared)
         }

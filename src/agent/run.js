@@ -10,6 +10,7 @@ import { splitNextSteps } from './next-steps.js'
 import { replyText, settleCardPositions } from './reply-text.js'
 import { AgentError } from './errors.js'
 import { cleanCardDiff } from './text-diff.js'
+import { taintingToolName } from './thread-trust.js'
 import { attachmentData, newId } from './threads.js'
 import { recentDownNotes } from './ratings.js'
 import { commentForModel, commentMediaParts, runTool, toolSpecs } from './tools.js'
@@ -160,8 +161,24 @@ export async function runTurn({
   // the tool host to call, and puts each waiting card in `cards.pending`
   // (id -> settle(state, answeredBy)) for the board's answer route.
   cards = null,
+  // This turn's extensions for its ACP session (agent-config-folder.js
+  // extensionSession), only when capabilities.js turned them on.
+  extensions = null,
+  // Called once when the turn read other people's text through a board tool
+  // (thread-trust.js): the caller marks the thread tainted.
+  onTaint = null,
 }) {
   const thread = `${board.id}/${threadId}`
+  let taintSaid = false
+  const taint = (why) => {
+    if (taintSaid) return
+    taintSaid = true
+    try {
+      onTaint?.(why)
+    } catch {
+      // The caller's store is not this turn's concern.
+    }
+  }
   const runMs = backend.runMsMax || RUN_MS_MAX
   const startedAt = Date.now()
   // The last round's stop reason, and whether the stored text was cut.
@@ -301,11 +318,13 @@ export async function runTurn({
         ...(preamble ? { preamble } : {}),
         ...(capabilities && backend.tools !== 'shapewall' ? { capabilities } : {}),
         ...(mcpServers ? { mcpServers } : {}),
+        ...(extensions ? { extensions } : {}),
         signal,
         thread,
       })) {
         if (signal.aborted) break
-        if (event.type === 'text') {
+        if (event.type === 'taint') taint('tool')
+        else if (event.type === 'text') {
           roundText += event.text
           const piece = flow.piece(event.text)
           if (reply.text.length < TEXT_STORED_MAX) reply.text += piece
@@ -390,6 +409,8 @@ export async function runTurn({
       for (const call of calls) {
         const id = call.id || newId('call')
         card({ id, kind: 'tool', name: call.name, label: call.name, state: 'running', detail: null })
+        // A board tool that returns comments: other people's text from here on.
+        if (taintingToolName(call.name)) taint('tool')
         const result = execNames.has(call.name)
           ? await runExecTool(execHost, call, signal)
           : await runTool({ config, board, ownerWrites, allowCapture, capture, requestedPages, agentName }, call)
