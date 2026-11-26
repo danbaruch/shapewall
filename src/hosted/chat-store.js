@@ -31,6 +31,7 @@ import {
   threadSummary,
 } from '../agent/thread-history.js'
 import { newId } from './crypto.js'
+import { applyThreadTrust, readThreadTrust } from '../agent/thread-trust.js'
 import { HttpError } from './http.js'
 
 export const CHAT_LIMITS = {
@@ -48,6 +49,23 @@ export const TURN_ENDED = ['done', 'stopped', 'error', 'interrupted']
 export const threadRespond = (row) =>
   row?.respond_mode === 'always' && row.respond_agent_id && row.respond_agent_id === row.agent_id ? 'always' : 'mention'
 export const INTERRUPTED_MESSAGE = "The agent's machine went away before it finished. Ask again."
+
+// A thread row's trust state (migration 23, src/agent/thread-trust.js). No
+// row: a thread nobody wrote in, clean. A stored value it cannot read:
+// tainted.
+export function threadTrustOf(row) {
+  if (!row) return { tainted: false, authors: [] }
+  let authors = []
+  if (row.taint_authors !== null && row.taint_authors !== undefined) {
+    try {
+      authors = JSON.parse(row.taint_authors)
+    } catch {
+      return { tainted: true, authors: [] }
+    }
+  }
+  if (row.tainted !== 0 && row.tainted !== 1) return { tainted: true, authors: [] }
+  return readThreadTrust({ tainted: row.tainted === 1, authors })
+}
 
 const parse = (text) => {
   try {
@@ -122,6 +140,11 @@ export function createChatStore(t, { now = () => new Date() } = {}) {
   // message" is the choice of the person who connected the agent it was
   // set for, never carried over to another agent (src/agent/triggers.js).
   function setAgent(projectId, boardId, threadId, agentId) {
+    // A thread that goes to another agent carries what the first one was
+    // told and answered: tainted (thread-trust.js `moved`).
+    const before = thread(projectId, boardId, threadId)
+    if (before && (before.agent_id ?? null) !== (agentId ?? null) && hasMessages(projectId, boardId, threadId))
+      trust(projectId, boardId, threadId, [{ kind: 'moved' }])
     t.run(
       `UPDATE chat_threads SET respond_mode = CASE WHEN agent_id IS :agent THEN respond_mode ELSE 'mention' END, agent_id = :agent WHERE ${KEY}`,
       {
@@ -175,6 +198,28 @@ export function createChatStore(t, { now = () => new Date() } = {}) {
     t.run(`DELETE FROM chat_threads WHERE ${KEY}`, key)
   }
 
+  // ---- Thread trust (migration 23, src/agent/thread-trust.js) ----
+
+  const hasMessages = (projectId, boardId, threadId) =>
+    Boolean(t.get(`SELECT 1 FROM chat_messages WHERE ${KEY} LIMIT 1`, { project: projectId, board: boardId, thread: threadId }))
+  // The thread's state after `events`, through the one guard (applyThreadTrust),
+  // stored. Returns the new state; a thread with no row reads as clean.
+  function trust(projectId, boardId, threadId, events = []) {
+    const row = thread(projectId, boardId, threadId)
+    const before = threadTrustOf(row)
+    if (!row || !events.length) return before
+    const after = applyThreadTrust(before, events)
+    if (after.tainted !== before.tainted || after.authors.length !== before.authors.length)
+      t.run(`UPDATE chat_threads SET tainted = :tainted, taint_authors = :authors WHERE ${KEY}`, {
+        project: projectId,
+        board: boardId,
+        thread: threadId,
+        tainted: after.tainted ? 1 : 0,
+        authors: JSON.stringify(after.authors),
+      })
+    return after
+  }
+
   // ---- Messages ----
 
   const view = (row) => ({ ...parse(row.body), id: row.id, role: row.role, createdAt: row.created_at })
@@ -185,6 +230,17 @@ export function createChatStore(t, { now = () => new Date() } = {}) {
     const id = newId('msg')
     const text = JSON.stringify(body)
     const at = iso()
+    // Who the text is by, kept before it is stored (thread-trust.js): a
+    // person's user id, or nobody's (tainted); an answer by an agent other
+    // than the thread's own taints too.
+    const own = thread(projectId, boardId, threadId)
+    trust(projectId, boardId, threadId, [
+      role === 'user'
+        ? userId
+          ? { kind: 'person', id: userId }
+          : { kind: 'outside' }
+        : { kind: 'agent', own: Boolean(agentId) && agentId === own?.agent_id },
+    ])
     t.run(
       `INSERT INTO chat_messages (workspace_id, project_id, board_id, thread_id, id, role, author_user_id, agent_id, turn_id, body, bytes, created_at)
        VALUES (:ws, :project, :board, :thread, :id, :role, :user, :agent, :turn, :body, :bytes, :at)`,
@@ -476,6 +532,7 @@ export function createChatStore(t, { now = () => new Date() } = {}) {
     ensure,
     setAgent,
     setRespond,
+    trust,
     change,
     remove,
     messages,

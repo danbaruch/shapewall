@@ -766,6 +766,65 @@ export function mountAgentLink(
     return authors.length ? { authors, guests: false } : null
   }
 
+  // Whose comment text a built job carries (thread trust, src/agent/thread-trust.js):
+  // the thread's own comment and its replies, the open comments listed, and
+  // every comment a mention stands for. A comment by a member is a `person`
+  // event with their user id; one by a token, an import or nobody known is
+  // `outside`. Share link guests' text never enters a job.
+  function jobTrustEvents(req, ctx, row, job) {
+    const events = []
+    const ids = new Set()
+    const context = job?.context || {}
+    if (context.comment?.id) ids.add(Number(context.comment.id))
+    for (const item of Array.isArray(context.comments) ? context.comments : []) ids.add(Number(item.id))
+    for (const message of Array.isArray(job?.messages) ? job.messages : []) {
+      for (const mention of Array.isArray(message.mentions) ? message.mentions : []) {
+        const data = mention.data || {}
+        if (data.comment?.id) ids.add(Number(data.comment.id))
+        for (const item of Array.isArray(data.openComments) ? data.openComments : []) ids.add(Number(item.id))
+      }
+    }
+    for (const id of ids) {
+      if (!Number.isSafeInteger(id) || id < 1) continue
+      let stored = null
+      try {
+        stored = ctx.comments.get(id)
+      } catch {
+        stored = null
+      }
+      if (!stored) continue
+      if (stored.author_share_id) continue
+      // An imported comment is someone else's text, whoever brought it in.
+      const person = stored.author_user_id && !stored.author_token_id && !stored.imported && !stored.imported_by
+      events.push(person ? { kind: 'person', id: stored.author_user_id } : { kind: 'outside' })
+      // The thread's own comment reaches the turn with its replies.
+      if (id !== Number(context.comment?.id)) continue
+      let replies = []
+      try {
+        replies = JSON.parse(stored.replies || '[]')
+      } catch {
+        replies = [null]
+      }
+      for (const reply of Array.isArray(replies) ? replies : [null]) {
+        if (reply?.share) continue
+        if (reply?.user) events.push({ kind: 'person', id: reply.user })
+        else if (reply?.token !== req.token.id) events.push({ kind: 'outside' })
+      }
+    }
+    return events
+  }
+  // The thread's trust state as the machine reads it (capabilities.js
+  // cleanThreadTrust): tainted, and each author as { handle, owner, member }.
+  function threadTrustBlock(req, state) {
+    return {
+      tainted: state.tainted === true,
+      authors: state.authors.map((user) => {
+        const member = Boolean(req.t.get('SELECT 1 FROM memberships WHERE workspace_id = :ws AND user_id = :user', { user }))
+        return { handle: member ? handleOf(req, user) : null, owner: member && user === req.agent.created_by, member }
+      }),
+    }
+  }
+
   // The project's and the board's ceiling for a running turn, as it is now:
   // the machine asks again before each command, so a setting tightened
   // mid-turn applies to the next command, not only the next turn.
@@ -900,6 +959,13 @@ export function mountAgentLink(
         if (!(error instanceof JobError)) throw error
         chat.interrupt(req.t, row, { message: error.message, agentName: req.agent.name })
         throw new HttpError(409, error.code, error.message)
+      }
+      // The thread's trust, with the comment text this job carries counted in
+      // (kept: a thread that ever carried it stays so). No trust block: the
+      // machine reads the thread as tainted.
+      if (job.trust) {
+        const state = store.trust(req.project.id, row.board_id, row.thread_id, jobTrustEvents(req, ctx, row, job))
+        job.trust = { ...job.trust, thread: threadTrustBlock(req, state) }
       }
       if (Buffer.byteLength(JSON.stringify(job)) > FRAME_LIMITS.jobBytes)
         throw new HttpError(413, 'job_too_large', 'This conversation is too large to send to the agent. Start a new chat.')

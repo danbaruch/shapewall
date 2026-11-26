@@ -2856,6 +2856,31 @@ build run the migration again, with the server stopped: `ALTER TABLE chat_thread
 upgrade again later, nothing carries over wrongly: `always` counts only for the agent it was set for. Roll this back before rolling
 back migration 21 or any earlier one.
 
+### Migration 23 and rollback
+
+Migration 23 (thread trust, 1.4.0) adds two columns to `chat_threads`: `tainted` (0 or 1) and `taint_authors` (a JSON array of
+user ids). They record whether a thread may still get its agent's extensions, the skills and MCP servers a connected machine loads
+from the folder it names with `--agent-config`. A thread is tainted once it carried text nobody can vouch for (another agent's
+answer, a move to another agent, a comment by a token or an import, a reply by another agent) and it never goes back; the authors
+are the members whose text it carried. Only the chat store writes them, through the one transition table in
+`src/agent/thread-trust.js`. **Every thread that exists at upgrade is marked tainted**, because who wrote its history was never
+kept: those threads never get extensions, and new threads start clean. Nothing else changes.
+
+For a rollback, the older build ignores the columns (it gives no extensions). To let a newer build run the migration again, with
+the server stopped:
+
+```sql
+ALTER TABLE chat_threads DROP COLUMN taint_authors;
+ALTER TABLE chat_threads DROP COLUMN tainted;
+DELETE FROM schema_migrations WHERE version = 23;
+PRAGMA user_version = 22;
+```
+
+Running it again marks every thread tainted once more, including threads started after the first upgrade, which is the safe
+direction. If you keep the columns instead and upgrade again later, a thread an older build wrote in may read as clean while it
+carries text the older build did not count; drop the columns (or run `UPDATE chat_threads SET tainted = 1;`) before upgrading
+again. Roll this back before rolling back migration 22 or any earlier one.
+
 ## Secrets, logs and legal text
 
 `SHAPEWALL_HOSTED_SECRET_FILE` and `RESEND_API_KEY_FILE` read private secret files. systemd `LoadCredential=shapewall-secret:...` and

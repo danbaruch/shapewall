@@ -762,6 +762,44 @@ test('an open chat stream stops delivering when access changes: role, membership
   }
 })
 
+test("a job carries its thread's trust: an owner's own chat is clean, another member's words name them, a move taints it for good", async () => {
+  await fresh(ada)
+  await fresh(cyd)
+  // Ada's own chat with Scout (Ada's agent, Ada's audience only): her words and nobody else's.
+  const mine = newChat()
+  assert.equal((await api(ada, 'POST', chatUrl(mine, '/profile'), { profileId: scout.agentId })).status, 200)
+  const clean = await jobFor(scout, ada, mine, 'what is open?')
+  assert.equal(clean.trust.thread.tainted, false)
+  assert.ok(clean.trust.thread.authors.length >= 1)
+  assert.ok(
+    clean.trust.thread.authors.every((author) => author.handle === 'ada' && author.owner === true && author.member === true),
+    JSON.stringify(clean.trust.thread),
+  )
+  // The same chat moved to Builder and back: tainted, never clean again.
+  assert.equal((await api(ada, 'POST', chatUrl(mine, '/profile'), { profileId: builder.agentId })).status, 200)
+  assert.equal((await api(ada, 'POST', chatUrl(mine, '/profile'), { profileId: scout.agentId })).status, 200)
+  const moved = await jobFor(scout, ada, mine, 'and now?')
+  assert.equal(moved.trust.thread.tainted, true)
+  const row = hosted.db.prepare('SELECT tainted FROM chat_threads WHERE thread_id = ?').get(mine)
+  assert.equal(row.tainted, 1)
+
+  // A comment thread where Cyd (a member in Builder's audience) wrote too: shared, Cyd named, not the owner.
+  const made = await ada.browser.post(boardUrl('/comments'), { pageId: 'home', viewport: 'desktop', x: 31, y: 31, body: 'Trust me' })
+  assert.equal(made.status, 201, made.text)
+  const thread = `comment-${made.json.comment.id}`
+  assert.equal((await api(ada, 'POST', chatUrl(thread, '/profile'), { profileId: builder.agentId })).status, 200)
+  assert.equal((await chat(cyd, chatUrl(thread, '/messages'), { text: 'my two cents' })).status, 200)
+  const shared = await jobFor(builder, ada, thread, 'what do we think?')
+  assert.equal(shared.trust.thread.tainted, false, JSON.stringify(shared.trust.thread))
+  const handles = shared.trust.thread.authors.map((author) => author.handle)
+  assert.ok(handles.includes('ada') && handles.includes('cyd'), handles.join(','))
+  assert.equal(shared.trust.thread.authors.find((author) => author.handle === 'cyd').owner, false)
+  // The shared board thread carried another agent's answers in an earlier test: tainted.
+  assert.equal((await api(ada, 'POST', chatUrl('board', '/profile'), { profileId: builder.agentId })).status, 200)
+  const board = await jobFor(builder, ada, 'board', 'still there?')
+  assert.equal(board.trust.thread.tainted, true)
+})
+
 test('when an agent answers: an admin narrows it, a switch of agent resets it, another project cannot set it, and words that cannot start a turn are kept', async () => {
   await fresh(ada)
   await fresh(bo)
