@@ -74,6 +74,10 @@ export const SANDBOX_LIMITS = {
   fileBytes: 2 * 1024 * 1024 * 1024,
   // The session temp (caches, HOME): emptied after a command that leaves more.
   tmpBytes: 2 * 1024 * 1024 * 1024,
+  // A fix copy that grows past this stops taking commands (Q7 B6).
+  copyBytes: 8 * 1024 * 1024 * 1024,
+  // Where systemd runs (Linux): the share of CPU a command's scope gets against others (100 is the default).
+  cpuWeight: 50,
 }
 
 export class SandboxRefusal extends Error {
@@ -265,6 +269,104 @@ export function commandEnv({ env = process.env, tmp, extra = {} }) {
     ...extra,
   })
   return out
+}
+
+// ---- Caps for the whole command (Linux, systemd) ----
+
+// Each sandboxed command in a systemd scope of its own, where this
+// machine's user manager makes one: its memory, its number of processes
+// and its CPU weight capped for the command and everything it starts
+// together (ulimit caps each process alone). The scope goes in the slice
+// this process runs in, so a cap set around Shapewall still holds. Where
+// there is no systemd user manager (a container, CI, macOS) commands run
+// with the ulimit caps only. -> { available, slice }
+let scopeProbe = null
+export function probeScope({ platform = process.platform, env = process.env, run = spawnSync, cgroup = null, fresh = false } = {}) {
+  if (scopeProbe && !fresh) return scopeProbe
+  let result = { available: false, slice: null, program: null }
+  if (platform === 'linux') {
+    const program = onPath('systemd-run', env)
+    if (program) {
+      const slice = sliceOf(cgroup ?? readCgroup())
+      const tried = run(
+        program,
+        // --expand-environment=no (systemd 254 and later): systemd-run would
+        // otherwise read every $NAME in the command as its own variable.
+        // Where it is not known, no scope.
+        [
+          '--user',
+          '--scope',
+          '--quiet',
+          '--collect',
+          '--expand-environment=no',
+          ...(slice ? [`--slice=${slice}`] : []),
+          '-p',
+          'MemoryMax=64M',
+          '-p',
+          'TasksMax=16',
+          'true',
+        ],
+        { stdio: 'ignore', timeout: 10_000, env: scopeEnv(env) },
+      )
+      if (tried.status === 0) result = { available: true, slice, program }
+    }
+  }
+  if (!fresh) scopeProbe = result
+  return result
+}
+function readCgroup() {
+  try {
+    return fs.readFileSync('/proc/self/cgroup', 'utf8')
+  } catch {
+    return ''
+  }
+}
+// The user manager's slice this process is in ("agent-work.slice"), or null.
+export function sliceOf(cgroup) {
+  const line = String(cgroup || '')
+    .split('\n')
+    .find((entry) => entry.startsWith('0::'))
+  if (!line) return null
+  const parts = line.slice(3).split('/')
+  const manager = parts.findIndex((part) => /^user@\d+\.service$/.test(part))
+  if (manager < 0) return null
+  const slices = parts.slice(manager + 1).filter((part) => /^[A-Za-z0-9:_.\\-]+\.slice$/.test(part))
+  return slices.at(-1) || null
+}
+// What systemd-run needs to reach the user manager, and nothing else.
+function scopeEnv(env) {
+  const out = { PATH: env.PATH || '/usr/bin:/bin' }
+  for (const name of ['XDG_RUNTIME_DIR', 'DBUS_SESSION_BUS_ADDRESS']) if (typeof env[name] === 'string') out[name] = env[name]
+  return out
+}
+// argv inside a scope of its own with the session's caps (probeScope said yes).
+export function scopeArgv(argv, { scope, limits = SANDBOX_LIMITS, unit }) {
+  return [
+    scope.program,
+    '--user',
+    '--scope',
+    '--quiet',
+    '--collect',
+    '--expand-environment=no',
+    `--unit=${unit}`,
+    ...(scope.slice ? [`--slice=${scope.slice}`] : []),
+    '-p',
+    `MemoryMax=${limits.memoryBytes}`,
+    '-p',
+    'MemorySwapMax=0',
+    '-p',
+    `TasksMax=${limits.processes}`,
+    '-p',
+    `CPUWeight=${limits.cpuWeight ?? 50}`,
+    '--',
+    // The user manager's address is systemd-run's, never the command's.
+    'env',
+    '-u',
+    'XDG_RUNTIME_DIR',
+    '-u',
+    'DBUS_SESSION_BUS_ADDRESS',
+    ...argv,
+  ]
 }
 
 // ---- Running one command ----
@@ -742,6 +844,10 @@ export async function createCommandSession({
     denyWrite: (typeof denyWrite === 'function' ? denyWrite() : denyWrite).filter((dir) => typeof dir === 'string' && path.isAbsolute(dir)),
   })
   const list = () => networkList(network)
+  // The caps for a whole command (systemd scope), where this machine has them.
+  const scope = boxed && process.platform === 'linux' && limits.scope !== false ? probeScope({ env }) : { available: false }
+  // A fix copy that grew past its cap takes no more commands.
+  let overgrown = false
   let closed = false
   // Run at close, before the temp goes: the session's dev servers (dev-server.js).
   const closers = []
@@ -750,6 +856,14 @@ export async function createCommandSession({
   const live = new Set()
   // A command that left the session temp over its cap: emptied (a fresh HOME).
   function capTmp(result) {
+    // A fix copy (not the person's own checkout, not read only) is measured after each run.
+    if (within && !readOnly && sizeOf(real, limits.copyBytes) > limits.copyBytes) {
+      overgrown = true
+      result = {
+        ...result,
+        output: `${result.output}\n[Shapewall: the fix copy went over ${Math.round(limits.copyBytes / 1024 / 1024 / 1024)} GB; it takes no more commands]`,
+      }
+    }
     if (sizeOf(tmp, limits.tmpBytes) <= limits.tmpBytes) return result
     for (const name of fs.readdirSync(tmp)) fs.rmSync(path.join(tmp, name), { recursive: true, force: true })
     return {
@@ -761,6 +875,11 @@ export async function createCommandSession({
   // argv (no shell) or { shell: "..." } (the solo full shell). -> runProcess's result.
   async function run(command, options = {}) {
     if (closed) throw new SandboxRefusal('closed', 'This session has ended.')
+    if (overgrown)
+      throw new SandboxRefusal(
+        'copy_too_big',
+        `Not run: the fix copy is over ${Math.round(limits.copyBytes / 1024 / 1024 / 1024)} GB, so it takes no more commands.`,
+      )
     let kill = null
     const started = (handle) => {
       kill = handle.kill
@@ -802,8 +921,15 @@ export async function createCommandSession({
     box.registerCommandNetworkLists(commandId, { allowedDomains: list() })
     try {
       // srt puts its proxy settings in the wrapped command; the host side gets only PATH.
+      const argv = scope.available ? scopeArgv(wrapped.argv, { scope, limits, unit: `shapewall-cmd-${randomBytes(8).toString('hex')}` }) : wrapped.argv
       return capTmp(
-        await runProcess(wrapped.argv, { cwd: real, env: { PATH: env.PATH || '/usr/bin:/bin' }, timeoutMs: time, signal, onStart }),
+        await runProcess(argv, {
+          cwd: real,
+          env: scope.available ? scopeEnv(env) : { PATH: env.PATH || '/usr/bin:/bin' },
+          timeoutMs: time,
+          signal,
+          onStart,
+        }),
       )
     } finally {
       box.unregisterCommandNetworkLists(commandId)
@@ -835,5 +961,5 @@ export async function createCommandSession({
   }
   log(`sandbox: ${boxed ? 'OS sandbox' : 'no OS sandbox (a card each)'} in ${real}`)
   const onClose = (fn) => (closed ? fn() : closers.push(fn))
-  return { root: real, tmp, mode, network, readOnly, denied, run, close, onClose }
+  return { root: real, tmp, mode, network, readOnly, denied, scoped: Boolean(scope.available), run, close, onClose }
 }

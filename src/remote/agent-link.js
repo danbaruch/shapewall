@@ -737,7 +737,8 @@ export async function runAgentLink({
           expect: prepared.work.tree.projectDir,
           within: prepared.work.root,
           checkout: fix.config.dir,
-          network: caps.shell.mode !== 'off' ? caps.shell.network : view.shellNetwork,
+          // Named commands get the machine's network on the owner's own turn only (Q7 B4).
+          network: caps.shell.mode !== 'off' ? caps.shell.network : caps.tier === 'solo' ? view.shellNetwork : 'none',
           approvals: createApprovalStore(approvalsDir(agent?.id, fix.env)),
           scope: JSON.stringify([origin, agent?.workspace?.id, agent?.project?.id, agent?.id, fix.config.dir]),
           ask: policy.approvals === 'none' ? null : (card) => askBoard(card, limit.commandCardMs),

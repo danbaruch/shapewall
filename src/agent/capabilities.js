@@ -851,6 +851,11 @@ function resolveForTier(
     } else if (needsCard && tier !== 'open' && !contained) off('commands', 'no_sandbox')
   }
 
+  // The network a command gets: the machine's (the package registries by
+  // default) on the owner's own turn only. Registries let a command upload
+  // as well as download (npm publish, a package page), so on a team or open
+  // turn commands get none (Q7 B4); installs are the owner's.
+  const commandNetwork = tier === 'solo' ? m.shellNetwork : 'none'
   let shell = { mode: 'off', network: 'none', exact: [] }
   if (!known) off('shell', 'unknown_path')
   else if (!commandsOn) off('shell', commandsWhy)
@@ -859,14 +864,14 @@ function resolveForTier(
   else if (starter) shell = { mode: 'container', network: 'egress', exact: [] }
   else {
     const wantsFull = m.shell === 'sandboxed' && (tier === 'solo' || (tier === 'team' && m.trustTeamShell))
-    if (wantsFull && box.sandbox) shell = { mode: 'sandboxed', network: m.shellNetwork, exact: [] }
-    else if (wantsFull && unsandboxed) shell = { mode: 'unsandboxed', network: m.shellNetwork, exact: [] }
+    if (wantsFull && box.sandbox) shell = { mode: 'sandboxed', network: commandNetwork, exact: [] }
+    else if (wantsFull && unsandboxed) shell = { mode: 'unsandboxed', network: commandNetwork, exact: [] }
     else {
       if (wantsFull) off('shell', 'no_sandbox')
       else if (m.shell === 'commands') off('shell', 'machine_shell_commands')
       else if (tier === 'team') off('shell', 'team_shell_off')
       else if (tier === 'open') off('shell', 'open_tier_shell')
-      if (m.commands.length) shell = { mode: 'exact', network: box.sandbox ? m.shellNetwork : 'none', exact: m.commands }
+      if (m.commands.length) shell = { mode: 'exact', network: box.sandbox ? commandNetwork : 'none', exact: m.commands }
       else if (!wantsFull) off('shell', 'no_exact_commands')
     }
   }
