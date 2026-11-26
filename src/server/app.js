@@ -42,6 +42,8 @@ import { pageLinks } from '../links.js'
 import { MENTION_HANDLE_RE } from '../mentions.js'
 import { WEBHOOK_SECRET_VAR, createIssue, githubSettings, handleWebhook, linkPull, verifySignature } from '../github.js'
 import { publicAgentInfo } from '../agent/config.js'
+import { localCard } from '../agent/capability-views.js'
+import { localMachinePolicy, userAgentEntry } from '../agent/user-settings.js'
 import { agentRouter } from '../agent/routes.js'
 import { checksRouter } from '../checks/routes.js'
 import { checksRunRouter, createChecksRuns } from '../checks/run-control.js'
@@ -475,6 +477,16 @@ export function createApp({
       )
     }
   })
+  // The local board's card (src/agent/capability-views.js): the same
+  // resolver and renderer as every turn and `shapewall agent status`.
+  const localCapabilities = () => {
+    try {
+      const { entry } = userAgentEntry(config.dir, env)
+      return localCard({ machine: localMachinePolicy(entry), config })
+    } catch {
+      return null
+    }
+  }
   app.get('/api/info', (req, res) => {
     // Whether the board may offer "Create GitHub issue"; never the token.
     const github = githubSettings(config, env)
@@ -485,6 +497,8 @@ export function createApp({
           ...publicAgentInfo(app.locals.agentRouter.settings()),
           ...app.locals.agentRouter.agentStatus(),
           ownerWrites: app.locals.agentRouter.ownerWritesFor(req),
+          // What an agent can do on this board, per tier (the console's What it can do card), for its owner only.
+          ...(app.locals.agentRouter.ownerWritesFor(req) ? { capabilities: localCapabilities() } : {}),
           // An agent that runs commands answers only its owner (403 control_needs_owner otherwise).
           chatNeedsOwner: app.locals.agentRouter.chatNeedsOwner(req),
           fixWithAgent: allowCapture && app.locals.agentRouter.ownerWritesFor(req) && app.locals.agentRouter.settings().backend === 'acp',

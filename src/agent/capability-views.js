@@ -39,7 +39,11 @@ const SUMMARY_TEXT = {
     ask: 'Asks on the board before each named command.',
     off: 'No named commands.',
   },
-  shell: { on: 'A full shell in the fix copy, inside an OS sandbox.', ask: 'Only exact commands, each asked on the board.', off: 'No shell.' },
+  shell: {
+    on: 'A full shell in the fix copy, inside an OS sandbox.',
+    ask: 'Only exact commands, each asked on the board.',
+    off: 'No shell.',
+  },
   browser: { on: "A throwaway headless browser, limited to the app's own addresses.", off: 'No browser.' },
   extensions: { on: 'Skills and MCP servers from its agent config folder.', off: 'No extensions.' },
   memory: { on: 'Memory tools given by exact name. Automatic memory stays off.', off: 'No memory.' },
@@ -111,7 +115,12 @@ export function summaryCard(summary, { narrowing = null, remote = null } = {}) {
         const states = summary[key]?.[tier]
         if (narrow && tierRank(tier) > tierRank(narrow.maxTier))
           return { tier, label: TIER_LABELS[tier], limitedTo: narrow.maxTier, lines: null }
-        return { tier, label: TIER_LABELS[tier], limitedTo: null, lines: states ? summaryLines(states, tier, { narrowing: narrow, remote }) : null }
+        return {
+          tier,
+          label: TIER_LABELS[tier],
+          limitedTo: null,
+          lines: states ? summaryLines(states, tier, { narrowing: narrow, remote }) : null,
+        }
       }),
     })),
   }
@@ -123,9 +132,16 @@ export function summaryCard(summary, { narrowing = null, remote = null } = {}) {
 // team is "members"; a named team's handles never reach the board, so a
 // viewer is not counted in one).
 export function viewerTier(summary, { audience, machineAudience, owner, narrowing = null }) {
-  const machine = { audience: machineAudience === 'owner' ? 'owner' : 'server', trustTeam: summary?.team === 'members' ? 'members' : 'none' }
-  return tierOf({ trust: { authors: [{ owner: Boolean(owner), member: true, handle: null }], guests: false }, audience, machine, server: narrowing })
-    .tier
+  const machine = {
+    audience: machineAudience === 'owner' ? 'owner' : 'server',
+    trustTeam: summary?.team === 'members' ? 'members' : 'none',
+  }
+  return tierOf({
+    trust: { authors: [{ owner: Boolean(owner), member: true, handle: null }], guests: false },
+    audience,
+    machine,
+    server: narrowing,
+  }).tier
 }
 
 // The compact view for the board's agent panel: one tier of one path.
@@ -156,8 +172,9 @@ export function localCard({ machine, config = null, platform = hostPlatform() })
           tier,
           label: TIER_LABELS[tier],
           limitedTo: null,
-          lines: toPanel(resolveCeiling(tier, { path: 'local-chat', machine, config, platform, trust: { authors: [{ owner: true }], guests: false } }))
-            .lines,
+          lines: toPanel(
+            resolveCeiling(tier, { path: 'local-chat', machine, config, platform, trust: { authors: [{ owner: true }], guests: false } }),
+          ).lines,
         })),
       },
     ],

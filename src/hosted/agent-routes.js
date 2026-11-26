@@ -125,6 +125,20 @@ export function mountAgentRoutes(consoleApi, { db, publicOrigin, handle, inWorks
     }),
   )
 
+  // The same for every project of the workspace (the Tokens page).
+  consoleApi.get(
+    '/workspaces/:ws/claim-tokens',
+    inWorkspace(NEEDS.tokens),
+    handle((req, res) => {
+      const agents = agentsFor(req.t)
+      const projects = req.t.all('SELECT id, name FROM projects WHERE workspace_id = :ws ORDER BY name')
+      res.json({
+        tokens: projects.flatMap((project) =>
+          agents.claimTokens(project.id).map((token) => ({ ...token, projectId: project.id, projectName: project.name })),
+        ),
+      })
+    }),
+  )
   // Tokens with the claim scope that are not listed as agents: ones from an
   // older build nobody used, and hidden ones (src/hosted/agents.js dormant).
   consoleApi.get(

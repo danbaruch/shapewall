@@ -77,7 +77,9 @@ async function collect(flags, { env = process.env, cwd = process.cwd(), fetchImp
       const remote = createRemote({ origin, token: saved.token, fetchImpl })
       const info = await Promise.race([
         remote.project(),
-        new Promise((resolve, reject) => setTimeout(() => reject(new Error('the server did not answer in 5 seconds')), LIVE_TIMEOUT_MS).unref?.()),
+        new Promise((resolve, reject) =>
+          setTimeout(() => reject(new Error('the server did not answer in 5 seconds')), LIVE_TIMEOUT_MS).unref?.(),
+        ),
       ])
       link = {
         state: info.agent ? info.agent.state : 'unknown',

@@ -14,6 +14,7 @@ import { AgentMark } from '../chat/AgentPicker'
 import { useState } from 'react'
 import { cn, formatRelative } from '../lib/utils'
 import { STATE_MARK, editsLine, instructionsLine, stateWords } from './hostedAgents'
+import { StateChip } from '../console/components/CapabilityCard.jsx'
 
 const DOCS_URL = 'https://shapewall.com/docs/where-to-run#where-the-work-happens'
 const WHY = { approval: 'needs your OK', 'needs-human': 'needs a person', 'branch-ready': 'fix ready on a branch' }
@@ -66,6 +67,34 @@ function Chips({ label, ids, nameOf, onOpen, hook, tone }) {
           <span className="truncate">{nameOf(id)}</span>
         </button>
       ))}
+    </div>
+  )
+}
+
+// What it can do on a fix this person asks for, as its machine said
+// (the server works it out: src/agent/capability-views.js compactCard).
+// The console's agent page has every line, per tier.
+const COMPACT_LINES = ['edits', 'commands', 'shell', 'browser', 'extensions', 'push']
+function CanDo({ can }) {
+  if (!can) return null
+  const lines = can.lines.filter((line) => COMPACT_LINES.includes(line.id))
+  return (
+    <div className="space-y-1" data-sw-hosted-agent-can={can.tier}>
+      <p className="text-[11px] text-muted">On a fix you ask for ({can.tierLabel.toLowerCase()} turn):</p>
+      <ul className="flex flex-wrap gap-1">
+        {lines.map((line) => (
+          <li
+            key={line.id}
+            className="flex items-center gap-1 rounded-md border border-line px-1.5 py-0.5 text-[11px] text-fg"
+            data-sw-hosted-agent-can-line={line.id}
+            data-state={line.state}
+            title={line.narrowed ? "Limited by this project's setting" : undefined}
+          >
+            {line.label}
+            <StateChip state={line.state} className="px-1.5 py-0 text-[10px]" />
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }
@@ -147,6 +176,7 @@ function AgentRow({ agent, nameOf, onOpen, onChat }) {
           </Button>
         ) : null}
       </div>
+      <CanDo can={agent.can} />
       {/* Not theirs to use: the line about who it takes work from says so, once. */}
       {chats && (agent.chat?.ok ? mode !== 'none' : agent.canSend) ? (
         <p className="text-[11px] text-muted" data-sw-hosted-agent-chat-note={agent.chat?.ok ? 'ok' : agent.chat?.code || 'no'}>

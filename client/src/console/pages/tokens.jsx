@@ -2,7 +2,7 @@
 // such a token is inactive), when it was last used. Tokens are shown once, when made.
 
 import { useMemo, useState } from 'react'
-import { AlertTriangle, KeyRound, Pencil, Plus, Terminal } from 'lucide-react'
+import { AlertTriangle, Bot, KeyRound, Pencil, Plus, Terminal } from 'lucide-react'
 import {
   Badge,
   Button,
@@ -20,6 +20,7 @@ import {
 } from '../../components/ui'
 import {
   Card,
+  CardHeader,
   ConfirmDialog,
   CopyField,
   Field,
@@ -123,8 +124,81 @@ export function TokensSection() {
           )
         ) : null}
       </Card>
+      <ClaimTokens onChanged={tokens.reload} />
       <CreateToken open={creating} onClose={() => setCreating(false)} projects={data.projects} onCreated={tokens.reload} />
     </>
+  )
+}
+
+// Tokens that may take comments (the claim scope) but are not listed as
+// agents: made by an older Shapewall and not used since, or hidden after
+// 90 days without activity (src/hosted/agents.js). Nothing was deleted:
+// make one an agent again, or take its claim access away.
+function ClaimTokens({ onChanged }) {
+  const { workspaceId } = useWorkspace()
+  const load = useLoad(wsUrl(workspaceId, '/claim-tokens'))
+  const action = useAction()
+  const toast = useToast()
+  const list = load.data?.tokens || []
+  if (!list.length) return null
+  const base = (token) => wsUrl(workspaceId, `/projects/${token.projectId}/claim-tokens/${token.id}`)
+  const run = (token, kind) =>
+    action.run(async () => {
+      if (kind === 'agent') await api.post(`${base(token)}/agent`, {})
+      else await api.delete(`${base(token)}/claim`)
+      toast(kind === 'agent' ? `${token.name} is an agent again` : `${token.name} no longer takes comments`)
+      await load.reload()
+      await onChanged?.()
+    })
+  return (
+    <Card className="mt-5" data-sw-claim-tokens>
+      <CardHeader
+        icon={Bot}
+        title="Has agent access (claim)"
+        description="These tokens may take comments, but are not listed as agents: an older Shapewall made them, and nothing was heard from them in 90 days. Nothing was deleted."
+      />
+      <ul className="divide-y divide-line">
+        {list.map((token) => (
+          <li
+            key={token.id}
+            className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 text-sm sm:px-5"
+            data-sw-claim-token={token.name}
+          >
+            <div className="min-w-0 flex-[1_1_14rem]">
+              <p className="truncate font-medium text-fg">{token.name}</p>
+              <p className="truncate text-xs text-muted">
+                {token.projectName} · <code className="font-mono">{token.prefix}</code> ·{' '}
+                {token.lastUsedAt ? <Time value={token.lastUsedAt} prefix="last used " /> : 'never used'}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              <Button
+                size="touch"
+                className="lg:h-8"
+                disabled={action.busy}
+                onClick={() => run(token, 'agent')}
+                data-sw-claim-make={token.name}
+              >
+                Make this an agent
+              </Button>
+              <Button
+                size="touch"
+                variant="secondary"
+                className="lg:h-8"
+                disabled={action.busy}
+                onClick={() => run(token, 'remove')}
+                data-sw-claim-remove={token.name}
+              >
+                Remove claim access
+              </Button>
+            </div>
+          </li>
+        ))}
+      </ul>
+      <div className="px-4 pb-3 sm:px-5">
+        <FormError error={action.error} />
+      </div>
+    </Card>
   )
 }
 

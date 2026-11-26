@@ -130,10 +130,7 @@ export const DORMANT_DAYS = 90
 const DORMANT_MS = DORMANT_DAYS * 24 * 60 * 60 * 1000
 
 // `origin`: this server's address, for the commands the console shows.
-export function createAgentStore(
-  t,
-  { now = () => new Date(), presence = null, handleFor = () => null, links = null, origin = null } = {},
-) {
+export function createAgentStore(t, { now = () => new Date(), presence = null, handleFor = () => null, links = null, origin = null } = {}) {
   const iso = () => now().toISOString()
   // Reads repeat within one request (a list of comments asks per comment);
   // every write starts over.
@@ -370,7 +367,9 @@ export function createAgentStore(
   function noteHidden(projectId, audit) {
     if (!audit) return
     for (const row of rows(projectId).filter(dormant)) {
-      const said = t.get("SELECT 1 AS n FROM audit_log WHERE workspace_id = :ws AND action = 'agent_hidden' AND target = :id", { id: row.id })
+      const said = t.get("SELECT 1 AS n FROM audit_log WHERE workspace_id = :ws AND action = 'agent_hidden' AND target = :id", {
+        id: row.id,
+      })
       if (said) continue
       audit('agent_hidden', row.id, {
         project: row.project_id,
@@ -388,7 +387,11 @@ export function createAgentStore(
   // listed as agents: never made one (from an older build, not used since),
   // or hidden. The Tokens page lists them as "Has agent access (claim)".
   function claimTokens(projectId) {
-    const hidden = new Map(rows(projectId).filter(dormant).map((row) => [row.token_id, row]))
+    const hidden = new Map(
+      rows(projectId)
+        .filter(dormant)
+        .map((row) => [row.token_id, row]),
+    )
     return t
       .all(
         `SELECT k.id, k.name, k.prefix, k.scopes, k.created_at, k.last_used_at FROM api_tokens k WHERE k.workspace_id = :ws
@@ -427,7 +430,13 @@ export function createAgentStore(
     }
     forget()
     const row = get(projectId, id)
-    actor.audit('agent_made', id, { project: projectId, token: token.id, name: token.name, audience: row?.audience || 'owner', was: token.hidden ? 'hidden' : 'token' })
+    actor.audit('agent_made', id, {
+      project: projectId,
+      token: token.id,
+      name: token.name,
+      audience: row?.audience || 'owner',
+      was: token.hidden ? 'hidden' : 'token',
+    })
     return consoleView(row)
   }
   // "Remove claim access": the token keeps its other scopes and stops
