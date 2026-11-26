@@ -16,6 +16,7 @@
 // untrusted comment text) unless `passToken` (--pass-token) says so. Ids from
 // the server are checked before they become file names.
 
+import { isAgentAuthored } from '../agent/triggers.js'
 import fs from 'node:fs'
 import path from 'node:path'
 import { runWatchCommand } from '../watch-command.js'
@@ -83,7 +84,8 @@ export async function watchRemote({
   const list = async () => {
     const report = await remote.comments(boardId, { status: 'open', mention, guests: includeGuests, signal })
     board = remoteBoardRef(boardId, report)
-    return report.comments.filter((item) => includeGuests || !item.authorGuest)
+    // Never an agent's own comment (src/agent/triggers.js), --guests or not.
+    return report.comments.filter((item) => (includeGuests || !item.authorGuest) && !isAgentAuthored(item))
   }
   const handOut = (item) => untrustedJson({ board, comment: item })
   let baseline = 0

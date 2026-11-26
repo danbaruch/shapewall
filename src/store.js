@@ -604,14 +604,16 @@ export function validateCommentMedia(input) {
   return { images, drawing }
 }
 
-// `mention` keeps comments whose text or replies mention that handle.
+// `mention` keeps comments whose text or replies mention that handle, as
+// people wrote them: an agent's comment or reply never counts (it is a
+// filter that wakes agents, watch --mention; src/agent/triggers.js).
 export function listComments(config, boardId, { status = null, mention = null } = {}) {
   const { comments } = readCommentStore(config, boardId)
   const wanted = mention ? String(mention).replace(/^@/, '').toLowerCase() : null
   return comments
     .map(withAgentFields)
     .filter((comment) => !status || comment.status === status)
-    .filter((comment) => !wanted || comment.mentions.includes(wanted))
+    .filter((comment) => !wanted || commentMentions(comment, { people: true }).includes(wanted))
     .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : b.id - a.id))
 }
 
@@ -708,7 +710,10 @@ async function logEvents(config, events) {
 // machine's own browser, the owner account under `serve --accounts`, the
 // CLI outside an agent's run). Stored as byOwner, never read from `input`:
 // the "me" of the MCP list_comments filter goes by it, not by the name.
-export async function createComment(config, board, input, { now = new Date(), owner = false } = {}) {
+// `agent`: an agent wrote it (the MCP add_comment tool, `comments add` inside
+// an agent's run). Stored as authorAgent, never read from `input`: an
+// agent's comment never wakes an agent (src/agent/triggers.js).
+export async function createComment(config, board, input, { now = new Date(), owner = false, agent = false } = {}) {
   const clean = validateCommentInput(config, board, input)
   const media = validateCommentMedia(input)
   const file = commentsFile(config, board.id)
@@ -740,8 +745,9 @@ export async function createComment(config, board, input, { now = new Date(), ow
       replies: [],
       agentStatus: null,
       agentStatusAt: null,
-      byOwner: owner === true,
+      byOwner: owner === true && agent !== true,
     }
+    if (agent === true) comment.authorAgent = true
     if (!comment.anchor) delete comment.anchor
     if (images.length) comment.images = images
     // The drawing belongs to the capture it was drawn on.

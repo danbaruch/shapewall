@@ -16,6 +16,8 @@ import { THREAD_RE } from '../agent/thread-history.js'
 import { ID_RE } from '../config.js'
 
 export const TURN_ID_RE = /^turn_[a-f0-9]{24}$/
+const MESSAGE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/
+const messageId = (value) => (MESSAGE_ID_RE.test(String(value || '')) ? String(value) : null)
 const COMMIT_RE = /^[0-9a-f]{40}([0-9a-f]{24})?$/
 export const JOB_BYTES_MAX = 2 * 1024 * 1024
 const HISTORY_MAX = 40
@@ -68,9 +70,13 @@ export function cleanJob(raw) {
     .filter((message) => message && (message.role === 'user' || message.role === 'assistant'))
     .map((message) =>
       message.role === 'assistant'
-        ? { role: 'assistant', text: text(message.text, 100000) }
+        ? { id: messageId(message.id), role: 'assistant', text: text(message.text, 100000) }
         : {
+            id: messageId(message.id),
             role: 'user',
+            // false only when the server says so: a message posted for the
+            // people in the thread, which did not ask the agent.
+            asked: message.asked !== false,
             text: text(message.text, 8000),
             author: text(message.author, 80) || null,
             mentions: (Array.isArray(message.mentions) ? message.mentions : [])
@@ -90,6 +96,11 @@ export function cleanJob(raw) {
           },
     )
   if (!messages.length || messages.at(-1).role !== 'user') throw new JobError('The server sent a turn with no question.')
+  // The question is the message that started the turn, when the server names it.
+  const triggerId = messageId(turn.trigger?.messageId)
+  if (kind === 'chat' && turn.trigger?.messageId !== undefined && (!triggerId || messages.at(-1).id !== triggerId))
+    throw new JobError('The server sent a turn whose last message is not the one that asked.')
+  if (messages.at(-1).asked === false) throw new JobError('The server sent a turn for a message that did not ask the agent.')
   const context = raw.context && typeof raw.context === 'object' ? raw.context : {}
   const board = context.board && typeof context.board === 'object' ? context.board : {}
   return {
@@ -101,6 +112,13 @@ export function cleanJob(raw) {
       comment,
       // "Push this fix": the commit of the fix that was shown (null: the newest held one).
       ...(kind === 'push' ? { commit: COMMIT_RE.test(String(turn.commit || '')) ? turn.commit : null } : {}),
+      // Why the server says it started (src/agent/triggers.js): Send to agent
+      // pressed, and the thread's setting. Anything unclear reads narrow.
+      trigger: {
+        ask: turn.trigger?.ask === true,
+        respond: turn.trigger?.respond === 'always' ? 'always' : 'mention',
+        messageId: triggerId,
+      },
     },
     agent: { name: text(raw.agent?.name, 60) || null },
     asker: { name: text(raw.asker?.name, 80) || null, handle: text(raw.asker?.handle, 40) || null, owner: raw.asker?.owner === true },
@@ -220,6 +238,8 @@ export function jobConversation(job) {
     else if (last && job.turn.kind === 'comment') content.push({ type: 'text', text: COMMENT_PROMPT })
     else if (message.text) content.push({ type: 'text', text: message.text })
     else if (!message.mentions.length && !message.files.length) content.push({ type: 'text', text: '(empty message)' })
-    return { role: 'user', content }
+    // `asked`: whether it started a turn (acp.js promptBlocks hands a going
+    // session the messages since the last one that did).
+    return { role: 'user', asked: message.asked !== false, content }
   })
 }

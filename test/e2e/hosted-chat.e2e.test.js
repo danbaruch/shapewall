@@ -107,9 +107,12 @@ function startCli(extra = []) {
   }
 }
 
+// Asks the agent: Send to agent in a shared thread (Send alone only posts
+// there), Send in a private chat.
 const say = async (page, text) => {
   await page.fill('[data-sw-chat-input]', text)
-  await page.click('[data-sw-chat-send]')
+  const ask = page.locator('[data-sw-chat-ask]')
+  await page.click((await ask.count()) ? '[data-sw-chat-ask]' : '[data-sw-chat-send]')
 }
 const lastAnswer = (page) => page.locator('[data-sw-chat-message="assistant"]').last()
 const answered = (page, pattern, ms = 30_000) =>
@@ -577,6 +580,56 @@ test('access ends with the chat open: demoted or signed out, the panel says so o
   }
 })
 
+test("triggers: a shared thread keeps a plain message and answers an @mention or Send to agent; the agent's own @mention never wakes it; a private chat answers every message", async () => {
+  const { page, errors } = await open(ada)
+  const boardThread = `/w/${ws}/p/${project.id}/api/agent/boards/sample/threads/board`
+  await page.goto(boardPage('&chat=board&ha=1'))
+  await page.waitForSelector('[data-sw-chat-input]')
+  await idle(page)
+  const answers = () => page.locator('[data-sw-chat-message="assistant"]').count()
+  const users = () => page.locator('[data-sw-chat-message="user"]').count()
+  const start = [await users(), await answers()]
+  assert.match(await page.textContent('[data-sw-chat-respond-line]'), /answers when you @mention it or press Send to agent/)
+  assert.equal(await page.getAttribute('[data-sw-chat-send]', 'aria-label'), 'Send to the thread')
+  // A plain message is posted for the people here: no turn, no answer.
+  await page.fill('[data-sw-chat-input]', 'hello team, nothing for the agent yet')
+  await page.click('[data-sw-chat-send]')
+  await until(async () => (await users()) === start[0] + 1, 'the plain message in the thread')
+  await page.waitForTimeout(1500)
+  assert.equal(await answers(), start[1], 'no answer to a plain message')
+  assert.equal((await ada.browser.get(boardThread)).json.running, false)
+  await shot(page, 'board-chat-posted-1440-light')
+  // An @mention wakes it. Its answer @mentions an agent too, and that never starts another turn.
+  await page.fill('[data-sw-chat-input]', '@agent reply @agent ping')
+  await page.click('[data-sw-chat-send]')
+  await answered(page, /@agent ping/)
+  await idle(page)
+  assert.equal(await answers(), start[1] + 1)
+  await page.waitForTimeout(2000)
+  assert.equal(await answers(), start[1] + 1, "the agent's own @mention starts no turn")
+  assert.equal((await ada.browser.get(boardThread)).json.running, false)
+  // Send to agent (Ctrl+Enter) asks without a mention.
+  await page.fill('[data-sw-chat-input]', 'stream')
+  await page.keyboard.press('Control+Enter')
+  await answered(page, /Hello from the stream/)
+  await idle(page)
+  assert.equal(await answers(), start[1] + 2)
+  // The server keeps to it too: a plain message is stored with no turn.
+  const posted = await ada.browser.post(`${boardThread}/messages`, { text: 'stream' })
+  assert.equal(posted.status, 200, posted.text)
+  assert.match(posted.text, /event: posted/)
+  assert.doesNotMatch(posted.text, /event: done/)
+  // A private chat answers every message, with Send alone.
+  await page.click('[data-sw-chat-new="header"]')
+  await page.waitForSelector('[data-sw-chat-input]')
+  assert.equal(await page.locator('[data-sw-chat-ask]').count(), 0)
+  await page.fill('[data-sw-chat-input]', 'stream')
+  await page.click('[data-sw-chat-send]')
+  await answered(page, /Hello from the stream/)
+  await idle(page)
+  assert.deepEqual(realErrors(errors), [])
+})
+
 test('offline: stopping the command takes the agent offline at once, and chat says so instead of sending', async () => {
   const { page } = await open(ada)
   await openAgents(page)
@@ -590,7 +643,10 @@ test('offline: stopping the command takes the agent offline at once, and chat sa
   assert.match(await page.textContent('[data-sw-chat-blocked]'), /Builder is offline/)
   assert.equal(await page.locator('[data-sw-chat-input]').count(), 0)
   await shot(page, 'board-chat-offline-1440-light')
-  const sent = await ada.browser.post(`/w/${ws}/p/${project.id}/api/agent/boards/sample/threads/board/messages`, { text: 'hello' })
+  const sent = await ada.browser.post(`/w/${ws}/p/${project.id}/api/agent/boards/sample/threads/board/messages`, {
+    text: 'hello',
+    ask: true,
+  })
   assert.equal(sent.status, 409, sent.text)
   assert.equal(sent.json.error.code, 'agent_offline')
   // Never handed to another agent silently: Scout (online, Ada's own) is offered, and choosing it is said in the thread.

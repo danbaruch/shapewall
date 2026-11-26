@@ -34,6 +34,12 @@
 //              (src/agent/instructions.js): "all" (the default: the
 //              project's CLAUDE.md or AGENTS.md and the agent config
 //              folder's), "project", or "none".
+//   respond    when it answers in a shared thread (src/agent/triggers.js):
+//              "thread" (the default) honors a thread the person who
+//              connected it set to answer every message; "mention" answers
+//              only an @mention or Send to agent, whatever the thread says.
+//              A private chat answers every message either way, and a
+//              message an agent wrote never starts a turn.
 //   agentConfig  the agent config folder: null (the default:
 //              $XDG_CONFIG_HOME/shapewall/agent-config/<name>/, read only if
 //              it exists, never created), an absolute path, or "none".
@@ -60,7 +66,9 @@ export const DEFAULT_MACHINE_POLICY = {
   remote: 'origin',
   instructions: 'all',
   agentConfig: null,
+  respond: 'thread',
 }
+export const POLICY_RESPOND = ['thread', 'mention']
 export const POLICY_INSTRUCTIONS = ['all', 'project', 'none']
 
 export const policyFile = (env = process.env) => path.join(path.dirname(credentialsFile(env)), 'agent-policy.json')
@@ -142,14 +150,14 @@ export const cleanRemote = (value) => (typeof value === 'string' && REMOTE_RE.te
 // for that key, never as the default: no approvals, only the person who
 // connected it, no commands, nothing automatic, no settings files, never
 // pushed. `warn(text)` hears about each such key by name.
-const KNOWN_KEYS = ['audience', 'approvals', 'commands', 'auto', 'allowPaths', 'base', 'remote', 'instructions', 'agentConfig']
+const KNOWN_KEYS = ['audience', 'approvals', 'commands', 'auto', 'allowPaths', 'base', 'remote', 'instructions', 'agentConfig', 'respond']
 const unique = (list) => [...new Set(list)]
 function clean(entry, warn = () => {}) {
   const has = (key) =>
     entry !== null && typeof entry === 'object' && !Array.isArray(entry) && Object.hasOwn(entry, key) && entry[key] !== undefined
   if (entry !== undefined && entry !== null && (typeof entry !== 'object' || Array.isArray(entry))) {
     warn('this connection\'s entry is not an object: read as "read and answer only, for the person who connected it"')
-    return { ...DEFAULT_MACHINE_POLICY, audience: 'owner', remote: null, instructions: 'none', agentConfig: 'none' }
+    return { ...DEFAULT_MACHINE_POLICY, audience: 'owner', remote: null, instructions: 'none', agentConfig: 'none', respond: 'mention' }
   }
   for (const key of Object.keys(entry || {})) if (!KNOWN_KEYS.includes(key)) warn(`"${key}" is not a setting this version knows: ignored`)
   const bad = (key, narrow) => {
@@ -208,6 +216,14 @@ function clean(entry, warn = () => {}) {
       bad('agentConfig', '"none" (no agent config folder)')
     }
   }
+  let respond = DEFAULT_MACHINE_POLICY.respond
+  if (has('respond')) {
+    if (POLICY_RESPOND.includes(entry.respond)) respond = entry.respond
+    else {
+      respond = 'mention'
+      bad('respond', '"mention" (answers an @mention or Send to agent only)')
+    }
+  }
   return {
     audience,
     approvals,
@@ -218,6 +234,7 @@ function clean(entry, warn = () => {}) {
     remote,
     instructions,
     agentConfig,
+    respond,
   }
 }
 export { clean as cleanMachinePolicy }
@@ -241,8 +258,11 @@ export function saveMachinePolicy(origin, slug, changes, env = process.env) {
 }
 
 // The policy in one line each, for the terminal when the agent connects.
+const MENTION_ONLY_LINE =
+  'In shared threads: answers an @mention or Send to agent only, also where a thread is set to answer every message.'
 export function describeMachinePolicy(policy) {
-  if (policy.approvals === 'none') return ['Reads and answers. No edits, no commands (this machine refuses both).']
+  const respond = policy.respond === 'mention' ? [MENTION_ONLY_LINE] : []
+  if (policy.approvals === 'none') return ['Reads and answers. No edits, no commands (this machine refuses both).', ...respond]
   const who = policy.approvals === 'owner' ? 'the person who connected it' : 'the people the server lets answer (admins by default)'
   const lines = [
     `Edits: asked on the board, allowed by ${who}. Each fix is made on a new branch in a folder of its own, never in this checkout.`,
@@ -263,5 +283,5 @@ export function describeMachinePolicy(policy) {
   lines.push(
     policy.remote ? `A finished fix is pushed to the remote "${policy.remote}" when this machine may push there.` : 'Fixes are not pushed.',
   )
-  return lines
+  return [...lines, ...respond]
 }

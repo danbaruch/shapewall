@@ -199,6 +199,7 @@ export const ACTION_GROUPS = {
     'chat_thread_created',
     'chat_thread_deleted',
     'chat_thread_agent_changed',
+    'chat_thread_respond',
   ],
   comments: ['comment_resolved', 'comment_reopened', 'comment_deleted', 'token_commented'],
   exports: ['workspace_exported', 'audit_exported', 'usage_exported', 'access_exported'],

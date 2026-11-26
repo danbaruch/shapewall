@@ -34,6 +34,12 @@ export function applyTurnEvent(pending, name, data) {
     accepted = true
     next = { ...next, final: data.message }
   }
+  // A message for the people in a shared thread: stored, and no agent turn
+  // started (src/agent/triggers.js). `data`: { reason, line }.
+  if (name === 'posted') {
+    accepted = true
+    next = { ...next, posted: data || {}, status: null }
+  }
   return { pending: next, stream: false, accepted }
 }
 

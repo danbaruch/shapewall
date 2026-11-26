@@ -136,7 +136,7 @@ after(async () => {
 test('a machine that opted in says so: the console and the board show the mode, who may answer, and the change is audited', async () => {
   const agent = await consoleAgent(builder.agentId)
   assert.deepEqual(agent.link.capabilities, { chat: true, edits: true, commands: false, images: false })
-  assert.deepEqual(agent.link.policy, { audience: 'server', approvals: 'admins', commands: [], auto: [] })
+  assert.deepEqual(agent.link.policy, { audience: 'server', approvals: 'admins', commands: [], auto: [], respond: 'thread' })
   assert.equal(agent.approval.mode, 'ask')
   assert.equal(agent.approval.autoAvailable, false, 'this machine named nothing to allow without asking')
   assert.deepEqual(agent.approval.rules, { edits: 'ask', commands: 'ask' })
@@ -393,7 +393,13 @@ test('"always allow": only where the machine says so, set by the role that may; 
 
   const auto = await agentWith('Auto', { approvals: 'owner', auto: ['edits'], commands: ['node --version'] })
   let agent = await consoleAgent(auto.agentId)
-  assert.deepEqual(agent.link.policy, { audience: 'server', approvals: 'owner', commands: ['node --version'], auto: ['edits'] })
+  assert.deepEqual(agent.link.policy, {
+    audience: 'server',
+    approvals: 'owner',
+    commands: ['node --version'],
+    auto: ['edits'],
+    respond: 'thread',
+  })
   assert.equal(agent.approval.autoAvailable, true)
   assert.equal(agent.approval.mode, 'ask', 'available is not on')
   // The rule is the owner's to change here: an admin is refused.

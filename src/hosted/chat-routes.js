@@ -48,6 +48,7 @@
 import express from 'express'
 import { listJourneys } from '../journeys.js'
 import { MENTION_HANDLE_RE } from '../mentions.js'
+import { RESPOND_MODES, agentHandles, effectiveRespond, isPrivateThread, respondLine, shouldRespond } from '../agent/triggers.js'
 import { FIXABLE_FROM, commentText } from '../comment-fields.js'
 import { validateFiles } from '../agent/composer.js'
 import { QUERY_MAX, THREAD_RE, CHAT_RE, threadKind } from '../agent/thread-history.js'
@@ -56,7 +57,7 @@ import { LINK_LIMITS } from './agent-link.js'
 import { LINK_TURNS_MAX } from './agents.js'
 import { CARD_HASH_RE, CARD_ID_RE, cardSubjectHash } from '../agent/card-hash.js'
 import { permissionView } from './chat-permissions.js'
-import { CHAT_LIMITS } from './chat-store.js'
+import { CHAT_LIMITS, threadRespond } from './chat-store.js'
 import { checkStorageQuota } from './comment-files.js'
 import { transaction } from './db.js'
 import { HttpError, fail } from './http.js'
@@ -246,6 +247,37 @@ export function mountChatRoutes(
     }),
   )
 
+  // When a thread's agent answers, as the panel shows it. `always`: only the
+  // person who connected the thread's agent may switch it on, and only while
+  // that agent's machine honors it (agent connect --respond thread). Back to
+  // mentions only: that person or an admin (a narrowing anyone in charge may make).
+  function respondView(req, threadId, row, agent) {
+    const shared = threadKind(threadId) !== 'chat'
+    const stored = agent ? agentsFor(req.t).get(req.project.id, agent.id) : null
+    const machine = stored ? agentsFor(req.t).machinePolicy(stored).respond : 'mention'
+    const mode = shared ? effectiveRespond(threadRespond(row), machine) : 'always'
+    const owner = Boolean(stored?.created_by) && stored.created_by === req.user.id
+    return {
+      mode,
+      shared,
+      stored: shared ? threadRespond(row) : null,
+      machine,
+      handles: agent ? agentHandles(agent) : ['agent'],
+      line: respondLine({ threadId, respond: threadRespond(row), machine, name: agent?.name || 'The agent' }),
+      note: !shared
+        ? null
+        : machine !== 'thread'
+          ? `${agent?.name ? `${agent.name}'s` : "The agent's"} machine answers mentions only (agent connect --respond mention), whatever this thread says.`
+          : owner
+            ? null
+            : 'Only the person who connected this agent can make it answer every message here.',
+      canSet: {
+        always: shared && owner && machine === 'thread',
+        mention: shared && (owner || roleAtLeast(req.role, 'admin')),
+      },
+    }
+  }
+
   router.get(
     '/boards/:bid/threads/:thread',
     handle((req, res) => {
@@ -275,6 +307,11 @@ export function mountChatRoutes(
         profiles: profilesOf(found),
         // A thread whose agent is gone says so; it does not show another agent's name.
         agent: gone ? { ...agentInfo(null), configured: true, label: 'Agent', composer: GONE } : agentInfo(agent),
+        // When its agent answers (src/agent/triggers.js): a private chat every
+        // message; a shared thread an @mention or Send to agent, or every
+        // message when the person who connected the agent set it so and the
+        // agent's machine allows it. `canSet`: who may change it here.
+        respond: respondView(req, threadId, row, agent),
         running: Boolean(live),
         // A turn to join (GET .../events): its id and who may stop it.
         turn: live
@@ -706,6 +743,47 @@ export function mountChatRoutes(
     return store.append(req.project.id, ctx.board.id, threadId, { role: 'user', userId: req.user.id, body })
   }
 
+  // A message in a shared thread that is not for its agent (no @mention, no
+  // Send to agent, the thread not set to answer every message): stored and
+  // shown to everyone in the thread, and nothing else. No turn, no agent
+  // budget, and the agent does not have to be online: people can talk.
+  // Answers like a turn that ended at once: `user`, then `posted` with why.
+  function postOnly(req, res, { ctx, threadId, store, row }, { text, mentions, files, author }, decision, agent) {
+    const sends = rateLimiter.hit('chatSend', req.user.id, LIMITS.chatSend)
+    if (!sends.ok) {
+      res.setHeader('Retry-After', String(sends.retryAfter))
+      throw new HttpError(429, 'rate_limited', 'That is a lot of messages. Wait a moment and try again.')
+    }
+    // `posted`: why it started no turn. The agent's machine reads it as a
+    // message that did not ask (acp.js promptBlocks).
+    const body = {
+      text,
+      ...(mentions.length ? { mentions } : {}),
+      ...(files.length ? { files } : {}),
+      author,
+      posted: decision.reason,
+    }
+    const message = transaction(db, () => {
+      checkStorageQuota(req.t, Buffer.byteLength(JSON.stringify(body)), quotaOf(req))
+      const { created } = store.ensure(req.project.id, ctx.board.id, threadId, {
+        userId: req.user.id,
+        agentId: row?.agent_id || agent?.id || null,
+      })
+      if (created) said(req)('chat_thread_created', `${ctx.board.id}/${threadId}`, { project: req.project.id })
+      return store.append(req.project.id, ctx.board.id, threadId, { role: 'user', userId: req.user.id, body })
+    })
+    chat.notify(req.t.workspaceId, req.project.id, ctx.board.id, threadId)
+    res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' })
+    res.write(`event: user\ndata: ${JSON.stringify({ message })}\n\n`)
+    res.write(
+      `event: posted\ndata: ${JSON.stringify({
+        reason: decision.reason,
+        line: decision.line || respondLine({ threadId, respond: threadRespond(row), name: agent?.name || 'The agent' }),
+      })}\n\n`,
+    )
+    res.end()
+  }
+
   router.post('/boards/:bid/threads/:thread/messages', express.json({ limit: '512kb' }), (req, res) => {
     let live
     try {
@@ -739,18 +817,62 @@ export function mountChatRoutes(
       }
       if (!text && !mentions.length && !files.length) throw new HttpError(400, 'empty_message', 'Write a message first.')
 
-      // Which agent, and whether this person may use it now.
+      // Which agent, and whether this message is for it at all.
       const agents = agentsFor(req.t)
       const found = chatAgents(req, ctx.board.id)
       const { agent, gone } = agentOfThread(found, at.row)
-      if (gone) throw new HttpError(409, GONE.code, GONE.reason)
-      if (!agent) throw new HttpError(409, 'no_agent', 'No agent that chats is connected to this project.')
-      if (!agent.chat.ok)
+      const author = { name: req.user.display_name, handle: req.user.handle }
+      const explicit = body.ask === true
+      const named = agent || (at.row?.agent_id ? agents.get(req.project.id, at.row.agent_id) : null)
+      const decision = shouldRespond({
+        threadId,
+        message: { text, mentions },
+        handles: agentHandles(named),
+        respond: threadRespond(at.row),
+        explicit,
+        machine: named ? agents.machinePolicy(agents.get(req.project.id, named.id) || named).respond : 'mention',
+      })
+      // People talking in a shared thread: the message is kept and shown,
+      // and no agent turn starts (src/agent/triggers.js). The agent reads it
+      // with the next message that is for it, when its author is in its audience.
+      if (!decision.ok) return postOnly(req, res, at, { text, mentions, files, author }, decision, named)
+      // A message in a shared thread that would wake the agent by its words
+      // alone (an @mention, or a thread that answers every message) but
+      // cannot start a turn now is still kept for the people there, with the
+      // reason; nothing is lost. Send to agent and private chats are refused
+      // as before, so the panel can say why or queue it.
+      const implicit = !isPrivateThread(threadId) && ['mention', 'always'].includes(decision.reason)
+      const keep = (reason, line) => postOnly(req, res, at, { text, mentions, files, author }, { ok: false, reason, line }, named)
+      const label = named?.name || 'The agent'
+      if (gone) {
+        if (implicit) return keep(GONE.code, `${GONE.reason} Your message is kept here.`)
+        throw new HttpError(409, GONE.code, GONE.reason)
+      }
+      if (!agent) {
+        if (implicit) return keep('no_agent', 'No agent that chats is connected to this project. Your message is kept here.')
+        throw new HttpError(409, 'no_agent', 'No agent that chats is connected to this project.')
+      }
+      if (!agent.chat.ok) {
+        // Someone outside the agent's audience talking in a thread that
+        // answers every message: people talking. An @mention by them is
+        // still refused, so they learn they cannot use this agent.
+        if (implicit && (agent.chat.code !== 'agent_audience' || decision.reason === 'always'))
+          return keep(
+            agent.chat.code || 'agent_unavailable',
+            agent.chat.code === 'agent_offline'
+              ? `${label} is offline. Your message is kept here; @mention it again when it is back.`
+              : `${agent.chat.reason} Your message is kept here.`,
+          )
         throw new HttpError(agent.chat.code === 'agent_audience' ? 403 : 409, agent.chat.code || 'agent_unavailable', agent.chat.reason)
+      }
       const row = agents.get(req.project.id, agent.id)
 
       // One answer at a time in a thread; an agent takes only so many.
-      if (runningOf(req, at)) throw new HttpError(409, 'agent_running', 'Wait for the answer in this chat, or stop it.')
+      if (runningOf(req, at)) {
+        if (implicit)
+          return keep('agent_running', `${label} is answering another message here. Yours is kept; @mention it again when it is done.`)
+        throw new HttpError(409, 'agent_running', 'Wait for the answer in this chat, or stop it.')
+      }
       const maxTurns = agent.link.maxTurns || LINK_TURNS_MAX
       if (hub.ofAgent(req.t.workspaceId, agent.id).length >= maxTurns + LINK_LIMITS.queued)
         throw new HttpError(429, 'agent_busy', `${agent.name} is busy with other chats. Try again in a moment.`)
@@ -759,8 +881,16 @@ export function mountChatRoutes(
         res.setHeader('Retry-After', String(sends.retryAfter))
         throw new HttpError(429, 'rate_limited', 'That is a lot of messages. Wait a moment and try again.')
       }
-      const author = { name: req.user.display_name, handle: req.user.handle }
-      const stored = { text, ...(mentions.length ? { mentions } : {}), ...(files.length ? { files } : {}), author }
+      // What started the turn ("private", "mention", "action", "always"):
+      // the agent's machine checks the same rule again (agent-link.js).
+      const stored = {
+        text,
+        ...(mentions.length ? { mentions } : {}),
+        ...(files.length ? { files } : {}),
+        author,
+        ...(explicit ? { ask: true } : {}),
+        trigger: decision.reason,
+      }
       const made = transaction(db, () => {
         const message = appendTurnRequest(req, at, agent, stored)
         const turn = store.createTurn({
@@ -933,8 +1063,39 @@ export function mountChatRoutes(
     '/boards/:bid/threads/:thread',
     handle((req, res) => {
       const { ctx, threadId, store, row } = open(req)
+      const { title, archived, respond } = req.body || {}
+      if (respond !== undefined) {
+        if (title !== undefined || archived !== undefined)
+          throw new HttpError(400, 'invalid_change', 'Change when the agent answers on its own, apart from the title.')
+        // When the agent answers (respondView above): checked against who
+        // asks now, the thread's agent now, and what its machine allows now.
+        if (!RESPOND_MODES.includes(respond)) throw new HttpError(400, 'invalid_respond', 'respond: "mention" or "always".')
+        if (threadKind(threadId) === 'chat')
+          throw new HttpError(400, 'private_chat', 'A private chat answers every message already. This is for shared threads.')
+        const found = chatAgents(req, ctx.board.id)
+        const { agent } = agentOfThread(found, row)
+        const allowed = respondView(req, threadId, row, agent).canSet
+        if (respond === 'always' && !allowed.always)
+          throw new HttpError(
+            403,
+            'respond_owner',
+            agent && agentsFor(req.t).machinePolicy(agentsFor(req.t).get(req.project.id, agent.id)).respond !== 'thread'
+              ? `${agent.name}'s machine answers mentions only (shapewall agent connect --respond mention). Change it there first.`
+              : 'Only the person who connected this agent can make it answer every message here.',
+          )
+        if (respond === 'mention' && !allowed.mention)
+          throw new HttpError(403, 'respond_owner', 'The person who connected this agent, or an admin, sets when it answers here.')
+        const next = transaction(db, () => {
+          store.ensure(req.project.id, ctx.board.id, threadId, { userId: req.user.id, agentId: agent?.id || null })
+          if (agent && row && row.agent_id !== agent.id) store.setAgent(req.project.id, ctx.board.id, threadId, agent.id)
+          const changed = store.setRespond(req.project.id, ctx.board.id, threadId, respond)
+          said(req)('chat_thread_respond', `${ctx.board.id}/${threadId}`, { project: req.project.id, respond, agent: agent?.id || null })
+          return changed
+        })
+        chat.notify(req.t.workspaceId, req.project.id, ctx.board.id, threadId)
+        return res.json({ thread: { id: threadId, respond: respondView(req, threadId, next, agent) } })
+      }
       if (!row) throw new HttpError(404, 'unknown_thread', 'No such chat.')
-      const { title, archived } = req.body || {}
       if (title !== undefined && typeof title !== 'string') throw new HttpError(400, 'invalid_title', 'title: text.')
       if (archived !== undefined && typeof archived !== 'boolean') throw new HttpError(400, 'invalid_archived', 'archived: true or false.')
       const next = transaction(db, () => store.change(req.project.id, ctx.board.id, threadId, { title, archived }))

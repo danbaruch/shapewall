@@ -344,7 +344,12 @@ test('local: links on pages and comments, board_link, and compare links after re
   const linked = parse(await localClient.callTool({ name: 'board_link', arguments: { comment: 1, compare: true, viewport: 'desktop' } }))
   assert.deepEqual(parseBoardLink(linked.url), { board: 'lumen', page: 'features', comment: 1, viewport: 'desktop', compare: true })
   assert.match(linked.note, /browser pane/)
+  // Follow mode: the board follows an agent as it works.
+  const following = parse(await localClient.callTool({ name: 'board_link', arguments: { follow: 'any' } }))
+  assert.deepEqual(parseBoardLink(following.url), { board: 'lumen', follow: 'any' })
+  assert.equal(following.follow, 'any')
   for (const [args, message] of [
+    [{ follow: '../x' }, /follow|Invalid|pattern|match/i],
     [{ page: 'nope' }, /No page "nope"/],
     [{ comment: 99 }, /does not exist/],
     [{ viewport: 'watch' }, /No viewport "watch"/],
@@ -513,6 +518,9 @@ test('hosted mcp --remote: the sentence, "me" is the token maker, links on the h
   assert.deepEqual(parseBoardLink(pages.pages[0].link), { board: 'lumen', page: 'home' })
   const linked = parse(await remoteClient.callTool({ name: 'board_link', arguments: { page: 'home', compare: true, viewport: 'desktop' } }))
   assert.deepEqual(parseBoardLink(linked.url), { board: 'lumen', page: 'home', viewport: 'desktop', compare: true })
+  const following = parse(await remoteClient.callTool({ name: 'board_link', arguments: { follow: 'ag_builder' } }))
+  assert.equal(parseBoardLink(following.url).follow, 'ag_builder')
+  assert.equal(following.follow, 'ag_builder')
 })
 
 test('hosted compare_captures compares for real: two images from the history route and a diff', async () => {

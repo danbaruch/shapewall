@@ -225,9 +225,11 @@ export function parseEvents(text) {
 }
 
 // Sends a chat message as `user` and reads the turn to its end:
-// { status, json, events, final } (`final`: the stored answer).
+// { status, json, events, final } (`final`: the stored answer). A string is
+// sent as Send to agent (`ask: true`), so it starts a turn in a shared thread
+// too; pass an object to send exactly that body.
 export async function chat(user, url, body) {
-  const response = await user.browser.post(url, typeof body === 'string' ? { text: body } : body)
+  const response = await user.browser.post(url, typeof body === 'string' ? { text: body, ask: true } : body)
   const events = response.status === 200 ? parseEvents(response.text) : []
   return {
     status: response.status,

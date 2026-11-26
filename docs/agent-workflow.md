@@ -161,7 +161,9 @@ The fields from version 0.1 are unchanged; `agentStatus`, `agentStatusAt`, `repl
 comments read as `null`, `null`, `[]`, `null` and `null`), then `mentions` (handles mentioned in the text or a reply, `["robin",
 "agent"]`), `reopenCount` and `reopenedAt`, then `github` (`{ issue, pulls }`: the issue made from the comment and the linked pull
 requests with their state; `{ issue: null, pulls: [] }` without [GitHub connect](github.md)). `--mention NAME` keeps comments that mention `@NAME`; `shapewall watch --mention agent` hands
-out only comments that tag the agent. Plain text output (`shapewall comments`) has the same information for pasting into a chat, with replies as `> author: text`
+out only comments that tag the agent. Only mentions people wrote count: a reply or comment an agent wrote never makes a comment
+match, and `watch` never hands out a comment an agent wrote (comments made with MCP `add_comment`, or `comments add` inside an
+agent's run, are marked `authorAgent`). Plain text output (`shapewall comments`) has the same information for pasting into a chat, with replies as `> author: text`
 lines and the author on each comment's first line. `--page ID` limits either output to one page and its variants; `--since ID|TIME`
 to comments after that id, or created or changed after that ISO time (`--since 12`, `--since 2026-11-05T18:00:00Z`).
 

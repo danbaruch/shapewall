@@ -114,7 +114,7 @@ async function machine(
 // the turn is then finished by hand.
 async function jobFor(box, user, thread, body) {
   hosted.rateLimiter.reset()
-  const sending = user.browser.post(chatUrl(thread, '/messages'), typeof body === 'string' ? { text: body } : body)
+  const sending = user.browser.post(chatUrl(thread, '/messages'), typeof body === 'string' ? { text: body, ask: true } : body)
   const live = await until(() => liveTurn(thread), 'the turn')
   const job = (await box.call('GET', `/turns/${live.id}`)).json.job
   await box.call('POST', `/turns/${live.id}/finish`, { seq: 1, message: { text: 'ok' } })
@@ -326,7 +326,7 @@ test('one process holds an agent link: a second is refused, --takeover replaces 
   const thread = newChat()
   assert.equal((await ada.browser.post(chatUrl(thread, '/profile'), { profileId: builder.agentId })).status, 200)
   hosted.rateLimiter.reset()
-  const sending = ada.browser.post(chatUrl(thread, '/messages'), { text: 'first' })
+  const sending = ada.browser.post(chatUrl(thread, '/messages'), { ask: true, text: 'first' })
   const live = await until(() => liveTurn(thread), 'the turn')
   await until(() => again.text().includes(live.id), 'the work event')
   assert.equal((await again.call('GET', `/turns/${live.id}`)).status, 200)
@@ -356,7 +356,7 @@ test('one process holds an agent link: a second is refused, --takeover replaces 
   const other = newChat()
   assert.equal((await ada.browser.post(chatUrl(other, '/profile'), { profileId: builder.agentId })).status, 200)
   hosted.rateLimiter.reset()
-  const next = ada.browser.post(chatUrl(other, '/messages'), { text: 'second' })
+  const next = ada.browser.post(chatUrl(other, '/messages'), { ask: true, text: 'second' })
   const nextLive = await until(() => liveTurn(other), 'the second turn')
   await until(() => taker.text().includes(nextLive.id), 'work on the new stream')
   assert.equal(taker.text().split(nextLive.id).length - 1, 1, 'delivered once')
@@ -380,7 +380,7 @@ test('a late viewer gets a long answer whole (far more than one socket buffer), 
   const box = await machine(builder)
   assert.equal(box.status, 200)
   assert.equal((await ada.browser.post(chatUrl('board', '/profile'), { profileId: builder.agentId })).status, 200)
-  const sending = ada.browser.post(chatUrl('board', '/messages'), { text: 'a long one' })
+  const sending = ada.browser.post(chatUrl('board', '/messages'), { ask: true, text: 'a long one' })
   const live = await until(() => liveTurn('board'), 'the turn')
   await box.call('GET', `/turns/${live.id}`)
   // 45 pieces of 18 KB: about 800 KB of events before anyone else looks.
@@ -409,7 +409,7 @@ test('a late viewer gets a long answer whole (far more than one socket buffer), 
 
   // Resume: a viewer that has events up to 30 asks for what comes after, and gets only that.
   hosted.rateLimiter.reset()
-  const again = ada.browser.post(chatUrl('board', '/messages'), { text: 'another' })
+  const again = ada.browser.post(chatUrl('board', '/messages'), { ask: true, text: 'another' })
   const next = await until(() => liveTurn('board'), 'the next turn')
   await box.call('GET', `/turns/${next.id}`)
   for (let batch = 0; batch < 8; batch += 1)
@@ -449,13 +449,13 @@ test('the daily turn budget is counted from the usage records: deleting a thread
   await jobFor(box, ada, thread, 'one')
   await jobFor(box, ada, thread, 'two')
   hosted.rateLimiter.reset()
-  assert.equal((await ada.browser.post(chatUrl(thread, '/messages'), { text: 'three' })).json.error.code, 'turn_budget')
+  assert.equal((await ada.browser.post(chatUrl(thread, '/messages'), { ask: true, text: 'three' })).json.error.code, 'turn_budget')
   // Delete the thread (its turns go with it) and try again, here and in a new chat.
   assert.equal((await api(ada, 'DELETE', chatUrl(thread))).status, 200)
   assert.equal(hosted.db.prepare('SELECT COUNT(*) AS n FROM chat_turns WHERE thread_id = ?').get(thread).n, 0)
   for (const target of [thread, newChat()]) {
     hosted.rateLimiter.reset()
-    const again = await ada.browser.post(chatUrl(target, '/messages'), { text: 'after deleting' })
+    const again = await ada.browser.post(chatUrl(target, '/messages'), { ask: true, text: 'after deleting' })
     assert.equal(again.status, 429, again.text)
     assert.equal(again.json.error.code, 'turn_budget')
   }
@@ -515,7 +515,7 @@ test("a thread whose agent is offline stays that agent's: the send is refused, a
   const thread = newChat()
   assert.equal((await ada.browser.post(chatUrl(thread, '/profile'), { profileId: scout.agentId })).status, 200)
   hosted.rateLimiter.reset()
-  const sending = ada.browser.post(chatUrl(thread, '/messages'), { text: 'SCOUT-ONLY-QUESTION about the secret plan' })
+  const sending = ada.browser.post(chatUrl(thread, '/messages'), { ask: true, text: 'SCOUT-ONLY-QUESTION about the secret plan' })
   const live = await until(() => liveTurn(thread), 'the turn')
   await s.call('GET', `/turns/${live.id}`)
   await s.call('POST', `/turns/${live.id}/finish`, { seq: 1, message: { text: 'SCOUT-ANSWER' } })
@@ -531,7 +531,7 @@ test("a thread whose agent is offline stays that agent's: the send is refused, a
   assert.equal(view.profileId, scout.agentId)
   assert.equal(view.agent.composer.code, 'agent_offline')
   hosted.rateLimiter.reset()
-  const refused = await ada.browser.post(chatUrl(thread, '/messages'), { text: 'are you there?' })
+  const refused = await ada.browser.post(chatUrl(thread, '/messages'), { ask: true, text: 'are you there?' })
   assert.equal(refused.status, 409)
   assert.equal(refused.json.error.code, 'agent_offline')
   assert.match(refused.json.error.message, /Scout is offline/)
@@ -592,8 +592,8 @@ test('a stop leaves no turn open: at the next start every queued or running turn
   for (const thread of [running, queued])
     assert.equal((await ada.browser.post(chatUrl(thread, '/profile'), { profileId: builder.agentId })).status, 200)
   hosted.rateLimiter.reset()
-  const one = ada.browser.post(chatUrl(running, '/messages'), { text: 'cut off mid-answer' }).catch(() => null)
-  const two = ada.browser.post(chatUrl(queued, '/messages'), { text: 'never picked up' }).catch(() => null)
+  const one = ada.browser.post(chatUrl(running, '/messages'), { ask: true, text: 'cut off mid-answer' }).catch(() => null)
+  const two = ada.browser.post(chatUrl(queued, '/messages'), { ask: true, text: 'never picked up' }).catch(() => null)
   const live = await until(() => liveTurn(running), 'the turn')
   await until(() => liveTurn(queued), 'the other turn')
   await box.call('GET', `/turns/${live.id}`)

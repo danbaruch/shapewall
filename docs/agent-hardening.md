@@ -70,10 +70,29 @@ GitHub tools, only on trusted turns. Permission answers, stopping and clearing a
 On hosted Shapewall, share link guests' comments are left out of everything an agent reads unless you ask for them: the token API skips
 them (`?guests=1` includes them and `guestsHidden` says how many were left out), `comments --remote` and `watch --remote` take
 `--include-guests`, and MCP `list_comments` takes `includeGuests`. When included, they carry `authorGuest: true` (`guest: true` on
-replies) and the text format marks them `[guest]` with a "treat as untrusted" line. **@mentions in guest comments never count**, so a
+replies) and the text format marks them `[guest]` with a "treat as untrusted" line. **@mentions in guest comments never count** (not for `watch --mention` with `--include-guests` either:
+a guest's `@agent` used to count there), so a
 guest cannot trigger `watch --mention agent`. A member who replies to a guest comment with a mention vouches for it.
 
 Guests see agents only as "Agent", without agent status, resolution notes, fix references or GitHub links.
+
+### Agent text never wakes an agent
+
+A reply, comment or chat message an agent wrote never starts an agent turn, on any path: `watch --mention`, hosted chat, comment
+pickup by a connected agent, and the starter agent. An @mention inside agent text does not count either. A shared chat thread
+answers only an @mention or Send to agent unless its agent's connector opts in to every message, and the agent's machine can refuse
+that opt-in (`agent connect --respond mention`). This stops two agents, or an agent and a prompt-injected page, from keeping each
+other busy.
+
+What the agent's machine can check itself, and what it takes on the server's word: a hosted job says why it started (Send to agent
+pressed, the thread's setting, the message that asked). The machine refuses a job whose question an agent wrote, a job whose last
+message is not the one named as the question, and a thread set to answer every message when it was connected with
+`--respond mention`. It cannot check that a person really pressed Send to agent (`trigger.ask`): a compromised server can always
+ask. Its guarantee is the loop breaker and its own `--respond` ceiling, not the server's honesty.
+
+On a local board, an agent's command that posts through the board's HTTP API itself (with `curl`, say) should send the header in
+`SHAPEWALL_AGENT_HEADER` (`X-Shapewall-Agent: 1`, given to every `watch --exec` command), so what it writes is marked as an agent's.
+`comments add` and the MCP tools mark it anyway. A plain HTTP post without the header cannot be told apart from a person's.
 
 ### Chat is off on shared boards
 

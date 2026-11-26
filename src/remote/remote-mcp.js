@@ -475,19 +475,25 @@ export async function createRemoteMcpServer({
     {
       title: 'Board link',
       description:
-        'A link into the hosted board: the board, a page (flown to), a comment (opened), a viewport, or a page compare (before and after ' +
-        "of its latest recapture). Open it in your app's browser pane if it has one; otherwise give it to the person.",
+        'A link into the hosted board: the board, a page (flown to), a comment (opened), a viewport, a page compare (before and after ' +
+        "of its latest recapture), or follow mode (follow: the board follows an agent as it works). Open it in your app's browser pane if it has one; otherwise give it to the person.",
       inputSchema: {
         board: boardArg,
         page: z.string().max(64).optional().describe('Page id'),
         comment: z.number().int().positive().optional().describe('Comment id'),
         viewport: z.string().max(40).optional().describe('Viewport name, or "all"'),
         compare: z.boolean().optional().describe("Open the page's before and after (needs page, or a comment on a page)"),
+        follow: z
+          .string()
+          .max(128)
+          .regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]*$/)
+          .optional()
+          .describe('Follow an agent on the board: "any" (whichever agent works), or one agent\'s id'),
         includeGuests: guestsArg,
       },
       annotations: { readOnlyHint: true },
     },
-    tool(async ({ board, page, comment, viewport, compare = false, includeGuests = false }) => {
+    tool(async ({ board, page, comment, viewport, compare = false, follow, includeGuests = false }) => {
       const target = boardFor(board)
       const answer = await remote.pages(target)
       const pages = answer.pages || []
@@ -506,6 +512,7 @@ export async function createRemoteMcpServer({
         ...(item ? { comment: item.id } : {}),
         ...(viewport ? { viewport } : {}),
         ...(compare ? { compare: true } : {}),
+        ...(follow ? { follow } : {}),
         ...(item?.status === 'resolved' ? { filter: 'all' } : {}),
       })
       return json({
@@ -515,6 +522,7 @@ export async function createRemoteMcpServer({
         comment: item ? item.id : null,
         viewport: viewport || null,
         compare,
+        follow: follow || null,
         note: "Open this in your app's browser pane if it has one; otherwise give it to the person (they sign in to the hosted board).",
       })
     }),

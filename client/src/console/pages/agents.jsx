@@ -190,6 +190,11 @@ function LinkLine({ agent }) {
       )}
       {link.version ? ` · Shapewall ${link.version}` : ''}
       {link.policy?.audience === 'owner' ? ' · its machine takes questions from its connector only' : ''}
+      {link.policy
+        ? link.policy.respond === 'thread'
+          ? ' · in shared threads it answers an @mention or Send to agent (or every message, where its connector set that)'
+          : ' · in shared threads it answers an @mention or Send to agent only'
+        : ''}
       <InstructionsLine list={link.instructions} />
     </p>
   )

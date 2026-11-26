@@ -37,6 +37,7 @@
 
 import { logoForAgent } from '../agent/agent-logos.js'
 import { cleanAgentName, isAgentTint, isBuiltInIcon } from '../agent/identity.js'
+import { handleFor as mentionHandle } from '../mentions.js'
 import { agentPolicy, trustedMember } from './agent-policy.js'
 import { newId } from './crypto.js'
 import { RUN_DURATION } from './usage-shape.js'
@@ -332,7 +333,16 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
       approvals !== 'none' && Array.isArray(policy.auto)
         ? policy.auto.filter((kind) => kind === 'edits' || (kind === 'commands' && commands.length > 0))
         : []
-    return { audience: policy.audience === 'owner' ? 'owner' : 'server', approvals, commands, auto }
+    // When it answers in a shared thread: "thread" honors a thread set to
+    // answer every message; "mention" (also an older machine that did not
+    // say) answers an @mention or Send to agent only (src/agent/triggers.js).
+    return {
+      audience: policy.audience === 'owner' ? 'owner' : 'server',
+      approvals,
+      commands,
+      auto,
+      respond: policy.respond === 'thread' ? 'thread' : 'mention',
+    }
   }
   // On a machine that takes approvals from the person who connected it
   // alone, "allow without asking" counts only when that same person set it:
@@ -440,6 +450,20 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
         before: new Date(at.getTime() - CLAIM_HEARTBEAT.touchEveryMs).toISOString(),
       },
     )
+  }
+
+  // An agent's name makes the handle people @mention it by
+  // (src/agent/triggers.js agentHandles): never "agent", which every agent
+  // answers to, nor a member's handle, which would wake it when they meant
+  // the person. A problem to show, or null.
+  function nameProblem(name) {
+    const handle = mentionHandle(name)
+    if (!handle) return null
+    if (handle === 'agent') return 'name: every agent answers to @agent already. Give it a name of its own'
+    for (const person of people().values())
+      if (String(person.handle || '').toLowerCase() === handle)
+        return `name: @${handle} is a member of this workspace, so a mention of them would wake the agent. Pick another name`
+    return null
   }
 
   // ---- Audience ----
@@ -1011,6 +1035,8 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
     if (changes.name !== undefined) {
       const { name, problem } = cleanAgentName(changes.name)
       if (problem || !name) throw new HttpError(400, 'invalid_name', problem ? `Agent ${problem}.` : 'Agent name: 1 to 40 characters.')
+      const clash = nameProblem(name)
+      if (clash) throw new HttpError(400, 'agent_name_taken', `Agent ${clash}.`)
       next.name = name
     }
     if (changes.icon !== undefined) {
@@ -1222,6 +1248,7 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
     consoleView,
     consoleList,
     setIdentity,
+    nameProblem,
     setDefault,
     setAudience,
     setApprovalRule,

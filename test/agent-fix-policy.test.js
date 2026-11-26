@@ -189,6 +189,7 @@ test('the policy file: a value it does not know reads as the narrowest setting, 
     remote: 'origin',
     instructions: 'all',
     agentConfig: null,
+    respond: 'thread',
   }
   const read = (entry) => {
     const warnings = []
@@ -235,7 +236,20 @@ test('the policy file: a value it does not know reads as the narrowest setting, 
     /"pushWithoutAsking" is not a setting this version knows/,
   )
   // An entry that is not an object at all: the narrowest of everything.
-  assert.deepEqual(read('admins')[0], { ...NONE, audience: 'owner', remote: null, instructions: 'none', agentConfig: 'none' })
+  assert.deepEqual(read('admins')[0], {
+    ...NONE,
+    audience: 'owner',
+    remote: null,
+    instructions: 'none',
+    agentConfig: 'none',
+    respond: 'mention',
+  })
+  // A respond value it does not know: mentions only.
+  for (const respond of ['always', 'Thread', '', 1]) {
+    const [policy, warnings] = read({ respond })
+    assert.equal(policy.respond, 'mention', JSON.stringify(respond))
+    assert.match(warnings.join('\n'), /"respond"/)
+  }
 
   // The file itself: yours, and only yours to write, checked before a byte of it is read.
   const env = { XDG_CONFIG_HOME: tempDir('fix-policy-file') }
@@ -313,7 +327,7 @@ test('agent connect: the flags that change this machine’s policy, and what the
 
 test('hello: what a machine says it allows is recorded as said, and anything unclear as nothing', () => {
   const hello = (policy, extra = {}) => cleanHello({ kind: 'claude', policy, ...extra }).capabilities
-  assert.deepEqual(hello(undefined).policy, { audience: 'server', approvals: 'none', commands: [], auto: [] })
+  assert.deepEqual(hello(undefined).policy, { audience: 'server', approvals: 'none', commands: [], auto: [], respond: 'mention' })
   assert.deepEqual([hello(undefined).edits, hello(undefined).commands], [false, false])
   // A 0.5.0 machine, a made-up level, and claims without approvals.
   for (const policy of [
@@ -321,7 +335,7 @@ test('hello: what a machine says it allows is recorded as said, and anything unc
     { approvals: 'remote', commands: ['npm test'], auto: ['edits'] },
     { commands: ['npm test'], auto: ['edits', 'commands'] },
   ])
-    assert.deepEqual(hello(policy).policy, { audience: 'server', approvals: 'none', commands: [], auto: [] })
+    assert.deepEqual(hello(policy).policy, { audience: 'server', approvals: 'none', commands: [], auto: [], respond: 'mention' })
   // The machine cannot claim capabilities apart from its policy.
   assert.equal(cleanHello({ kind: 'claude', capabilities: { chat: true, edits: true, commands: true } }).capabilities.edits, false)
   const on = hello({
@@ -329,7 +343,13 @@ test('hello: what a machine says it allows is recorded as said, and anything unc
     commands: ['npm test', 'npm test', 'a\nb', 7, 'x'.repeat(201)],
     auto: ['commands', 'edits', 'all'],
   })
-  assert.deepEqual(on.policy, { audience: 'server', approvals: 'owner', commands: ['npm test'], auto: ['edits', 'commands'] })
+  assert.deepEqual(on.policy, {
+    audience: 'server',
+    approvals: 'owner',
+    commands: ['npm test'],
+    auto: ['edits', 'commands'],
+    respond: 'mention',
+  })
   assert.deepEqual([on.edits, on.commands], [true, true])
   assert.deepEqual(hello({ approvals: 'admins', auto: ['commands'] }).policy.auto, [], '"commands" with no command is nothing')
   // The approval rule follows: "auto" only for a kind the machine named, and only with approvals.

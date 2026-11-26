@@ -199,6 +199,10 @@ export const SECTIONS = {
                             and hashes show on the board, never the text. They add no powers. Saved for this connection
       --agent-config DIR|none  this agent's own folder for its CLAUDE.md (default: agent-config/<--as name> beside
                             agent-policy.json, read only when it exists; never created). Outside the project
+      --respond thread|mention  in a shared thread (the board chat, a comment's) it answers an @mention of it or
+                            Send to agent; "thread" (default) also every message of a thread the person who
+                            connected it set to answer everything, "mention" never. A private chat answers every
+                            message; a message an agent wrote never starts a turn. Saved for this connection
       --takeover            close the link another machine holds for this agent, and take its place
       --concurrency N       answers at once, 1 to 4 (default 2)
       --token-file FILE     for a service: the agent's own token, no browser (https://shapewall.com/docs/hosted)
