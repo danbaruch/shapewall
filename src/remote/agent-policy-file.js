@@ -370,7 +370,10 @@ export function describeMachinePolicy(policy) {
   const browser =
     caps.browser === 'on'
       ? [
-          `Browser: a throwaway headless one, limited to the app's own addresses${caps.browserAllow.length ? ` and ${caps.browserAllow.join(', ')}` : ''}. Never your own Chrome.`,
+          `Browser: a throwaway headless one, limited to the app's own addresses${caps.browserAllow.length ? ` and ${caps.browserAllow.join(', ')}` : ''}. Never your own Chrome.` +
+            (caps.browserNoSandbox
+              ? " Where Chromium's own sandbox cannot start, it starts without it on solo and team turns (you chose --browser-no-sandbox)."
+              : ''),
         ]
       : ['Browser: none.']
   if (policy.approvals === 'none')
