@@ -21,6 +21,7 @@ import {
   scopeArgv,
   sliceOf,
 } from '../src/agent/sandbox-exec.js'
+import { commandReadDenied } from '../src/agent/local-tools.js'
 import { tempDir } from './helpers.js'
 
 after(() => closeSandbox())
@@ -356,4 +357,12 @@ test('Q7 C2: a narrower Browser line mid-turn ends the browser and the next call
   await host.call('browser_text', {})
   assert.notEqual(host.agentBrowser, first, 'a fresh browser')
   assert.equal(first.disposed, true, 'the wider one is closed')
+})
+
+test('Q7 C4: recorded logins are unreadable to commands, with no auth setting in the config', (t) => {
+  const root = scratch(t, 'q7-c4')
+  fs.mkdirSync(path.join(root, '.shapewall-auth'))
+  fs.writeFileSync(path.join(root, '.shapewall-auth', 'main.auth.json'), '{}')
+  const denied = commandReadDenied({ dir: root }, root)
+  assert.ok(denied.includes(path.join(root, '.shapewall-auth')), JSON.stringify(denied))
 })
