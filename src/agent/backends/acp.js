@@ -41,6 +41,7 @@ import { diffForCard, diffForFiles } from '../text-diff.js'
 import { KILL_GRACE_MS, POSIX, stopTree, track } from '../../process-group.js'
 import { findProgram } from '../../watch.js'
 import { redact } from './openai.js'
+import { EXEC_MCP_NAME, EXEC_TOOL_PREFIX } from '../exec-mcp.js'
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../../../package.json', import.meta.url), 'utf8')).version
 
@@ -204,7 +205,10 @@ export function readOnlyEnv(kind) {
 // commands reach an agent only through Shapewall's own terminal
 // (onTerminalCreate) or a permission request, both checked here.
 const CLAUDE_EDIT_TOOLS = ['Edit', 'Write', 'MultiEdit']
-export function remoteEditSession(kind) {
+// `exec`: the turn has Shapewall's own tool server (exec-mcp.js): its tools
+// need no permission request of their own (each one checks, and asks on the
+// board where it must, inside Shapewall). The agent's own Bash stays off.
+export function remoteEditSession(kind, { exec = false } = {}) {
   if (kind !== 'claude') return {}
   const tools = [...CLAUDE_READ_TOOLS, ...CLAUDE_EDIT_TOOLS]
   return {
@@ -214,6 +218,7 @@ export function remoteEditSession(kind) {
           settingSources: [],
           strictMcpConfig: true,
           tools,
+          ...(exec ? { allowedTools: ['mcp__' + EXEC_MCP_NAME] } : {}),
           disallowedTools: CLAUDE_ACTING_TOOLS.filter((tool) => !tools.includes(tool)),
           allowDangerouslySkipPermissions: false,
           settings: NO_AUTO_MEMORY,
@@ -836,7 +841,11 @@ class AcpProcess {
         mcpServers: this.mcpServers,
         ...(appended && takesSystemPrompt ? { systemPrompt: { mode: 'append', content: [{ type: 'text', text: appended }] } } : {}),
         // Read only: the agent's own controls are set so that it cannot act (readOnlySession).
-        ...(this.readOnly ? readOnlySession(acpAgentKind(this.argv)) : this.remoteEdit ? remoteEditSession(acpAgentKind(this.argv)) : {}),
+        ...(this.readOnly
+          ? readOnlySession(acpAgentKind(this.argv))
+          : this.remoteEdit
+            ? remoteEditSession(acpAgentKind(this.argv), { exec: this.mcpServers.some((server) => server?.name === EXEC_MCP_NAME) })
+            : {}),
       })
       this.sessionId = session.sessionId
       this.choices = sessionChoices(session)
@@ -2044,7 +2053,8 @@ export function createAcpBackend(
       remoteEdit: settings.readOnly !== true && settings.remoteEdit ? settings.remoteEdit : null,
       // A connected agent's instruction files (agent connect): read when the session starts.
       instructions: settings.instructions || null,
-      mcpServers: mcpServersFor?.(thread) || [],
+      // A turn's own tools (exec-mcp, for a fix) come with its working folder.
+      mcpServers: workdir?.mcpServers || mcpServersFor?.(thread) || [],
       onGone: (item) => {
         if (item.stopped || !item.pid) processPool?.agents.delete(item)
         if (processes.get(item.thread) === item) processes.delete(item.thread)

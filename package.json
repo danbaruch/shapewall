@@ -96,6 +96,7 @@
   ],
   "dependencies": {
     "@agentclientprotocol/sdk": "2.4.0",
+    "@anthropic-ai/sandbox-runtime": "0.0.83",
     "@modelcontextprotocol/sdk": "1.32.2",
     "@noble/curves": "2.4.0",
     "@scure/base": "2.4.0",

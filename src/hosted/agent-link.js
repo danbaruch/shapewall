@@ -560,6 +560,9 @@ export function mountAgentLink(
           // Who may use it, as in effect now (the server's setting, narrowed
           // by what this machine just said).
           audience: agents.audienceOf(row).text,
+          // The account that connected it, by handle: the machine pins it and
+          // counts a turn's author as "the owner" only under that handle.
+          owner: { handle: handleOf(req, req.agent.created_by) },
         },
         // This project's ceiling under the machine's (agent-policy.js narrowingOf).
         // Each turn's job carries it again, per board: a change applies from the next turn.
@@ -708,6 +711,58 @@ export function mountAgentLink(
     }),
   )
 
+  // A member's handle, or null.
+  const handleOf = (req, userId) =>
+    userId
+      ? req.t.get(
+          'SELECT u.handle FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.workspace_id = :ws AND m.user_id = :user',
+          { user: userId },
+        )?.handle || null
+      : null
+  // The trust block of a fix or comment turn (src/agent/capabilities.js
+  // cleanTrust): every author whose text can reach the turn, each as { handle,
+  // owner, member }. A superset, never fewer: the comment's author and the
+  // author of every reply (the job keeps only the agent's audience, but a
+  // reply left out still counts here), and the person messages of the
+  // thread. A reply by another token (another agent) is an author without a
+  // handle, so such a turn is never above "open". Guest text never enters a
+  // job, so `guests` is false: said explicitly, as the machine reads a
+  // missing flag as guests. The machine decides the tier, and pins who "the
+  // owner" is to the handle it heard at hello.
+  function turnTrust(req, ctx, row, rows, inAudience) {
+    const number = Number(/^comment-(\d+)$/.exec(row.thread_id)?.[1] || 0)
+    const users = new Set()
+    let unknown = false
+    let stored = null
+    try {
+      stored = number ? ctx.comments.get(number) : null
+    } catch {
+      stored = null
+    }
+    if (stored) {
+      if (stored.author_user_id) users.add(stored.author_user_id)
+      else if (!stored.author_share_id) unknown = true
+      let replies = []
+      try {
+        replies = JSON.parse(stored.replies || '[]')
+      } catch {
+        replies = []
+      }
+      for (const reply of Array.isArray(replies) ? replies : []) {
+        if (reply?.share) continue
+        if (reply?.user) users.add(reply.user)
+        else if (reply?.token !== req.token.id) unknown = true
+      }
+    }
+    for (const message of rows) if (message.role === 'user' && inAudience(message.author_user_id)) users.add(message.author_user_id)
+    const authors = [...users].map((user) => {
+      const member = Boolean(req.t.get('SELECT 1 FROM memberships WHERE workspace_id = :ws AND user_id = :user', { user }))
+      return { handle: member ? handleOf(req, user) : null, owner: member && user === req.agent.created_by, member }
+    })
+    if (unknown) authors.push({ handle: null, owner: false, member: false })
+    return authors.length ? { authors, guests: false } : null
+  }
+
   router.get(
     '/turns/:id',
     handle((req, res) => {
@@ -730,6 +785,8 @@ export function mountAgentLink(
           )
         : null
       const thread = store.thread(req.project.id, row.board_id, row.thread_id)
+      const inAudience = (userId) =>
+        Boolean(userId) && agents.inAudience(req.agent, userId) && agents.trusted(req.project.id, row.board_id, userId)
       let job
       try {
         job = buildJob({
@@ -738,12 +795,13 @@ export function mountAgentLink(
           agent: req.agent,
           rows,
           respond: threadRespond(thread),
+          // Who wrote the text of a fix or a comment turn (the machine works out its tier from it).
+          trust: ['fix', 'comment'].includes(row.kind) ? turnTrust(req, ctx, row, rows, inAudience) : null,
           // The project's and this board's ceiling under the machine's (agent-policy.js narrowingOf).
           narrowing: narrowingOf(req.t, req.project.id, row.board_id),
           // The same rule as sending it a comment: in its audience, and
           // trusted by the project's agent policy.
-          inAudience: (userId) =>
-            Boolean(userId) && agents.inAudience(req.agent, userId) && agents.trusted(req.project.id, row.board_id, userId),
+          inAudience,
           asker: {
             name: person?.display_name || null,
             handle: person?.handle || null,
@@ -1009,6 +1067,11 @@ export function mountAgentLink(
     // Edits (and commands) in a fix; "Push this fix" in a fix or when it is asked again. Nothing in a chat.
     if (!(row.kind === 'fix' || (row.kind === 'push' && content.name === 'push'))) return refuse()
     if (content.name === 'execute' && !agents.machinePolicy(req.agent).commands.includes(content.detail)) return refuse()
+    // A command Shapewall runs for the agent (exec-mcp): only in a fix, and
+    // never where this project (or board) took commands away. The machine
+    // decided it may ask (its resolved capabilities) and checks the answer again.
+    if (content.name === 'command' && (row.kind !== 'fix' || narrowingOf(req.t, req.project.id, row.board_id)?.shell === false))
+      return refuse()
     if (cardHash(row.id, content) !== data.hash) return refuse()
     // How long it waits is a length of time, counted here from now on this
     // server's clock (the machine counts the same length on its own), and
@@ -1049,7 +1112,8 @@ export function mountAgentLink(
     // this agent's rule here is "always allow" for that kind too.
     if (data?.state !== 'approved' || row.kind !== 'fix') return false
     const content = cardContent({ ...data, ttlMs: 1000 })
-    if (content?.name === 'push') return false
+    // Never "allowed automatically" on the machine's word: a push, or a command Shapewall runs.
+    if (content?.name === 'push' || content?.name === 'command') return false
     const agents = agentsFor(req.t)
     if (!content || agents.approvalRules(req.agent)[content.name === 'edit' ? 'edits' : 'commands'] !== 'auto') return false
     if (content.name === 'execute' && !agents.machinePolicy(req.agent).commands.includes(content.detail)) return false
