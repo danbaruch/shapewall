@@ -34,7 +34,8 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { splitCommand } from '../watch.js'
 import { agentRunEnvEntries } from '../agent-run.js'
-import { inputsDigest } from './command-approvals.js'
+import { UNBOUNDED, inputsCommitted, inputsDigest } from './command-approvals.js'
+import { git as runGit } from './starter/worktree.js'
 import { SANDBOX_LIMITS, SandboxRefusal, createCommandSession } from './sandbox-exec.js'
 import { toPrompt } from './capability-render.js'
 import { showCommand } from './starter/approvals.js'
@@ -57,6 +58,10 @@ export const EXEC_LIMITS = {
 const PORT_TOKEN = '$PORT'
 // How often a running dev server's guarded files are checked (command-guard.js).
 const GUARD_SWEEP_MS = 2000
+// What a card holds (card-hash.js CARD_LIMITS.detail), and the longest
+// command line one shows: a longer one is refused, never cut.
+const CARD_DETAIL_MAX = 4000
+const CARD_LINE_MAX = 3000
 const SKIP_DIRS = new Set(['.git', 'node_modules', '.shapewall', 'shapewall-export'])
 const sha256 = (data) => createHash('sha256').update(data).digest('hex')
 
@@ -95,22 +100,46 @@ function browserFamily(host) {
     if (!fresh || fresh.tier !== host.capabilities.tier || fresh.browser?.on !== true) return null
     return fresh.browser
   }
-  let agentBrowser
-  try {
-    agentBrowser = createAgentBrowser({
+  const make = (line) =>
+    createAgentBrowser({
       ...host.browserOptions,
-      browser,
+      browser: line,
       recheck: browserNow,
       checkout: host.checkout,
       denyPorts: host.denyPorts,
-      warn: (line) => host.log(`agent browser: ${line}`),
+      warn: (text) => host.log(`agent browser: ${text}`),
     })
+  // The browser the tools drive and the Browser line it was made from. A
+  // line that changed mid-turn (a narrower allowlist, a login or profile
+  // taken away, allowNoSandbox off: Q7 C2) ends it, and the next call gets a
+  // fresh one made from the line as it is now.
+  let built = browser
+  let agentBrowser
+  try {
+    agentBrowser = make(browser)
   } catch (error) {
     host.log(`agent browser: off for this turn: ${error.message}`)
     return []
   }
+  let handlers = new Map(browserTools(agentBrowser).map((tool) => [tool.name, tool.handler]))
   host.agentBrowser = agentBrowser
   host.onClose(() => agentBrowser.dispose())
+  const current = async (line) => {
+    if (browserLine(line) === browserLine(built)) return null
+    await agentBrowser.dispose().catch(() => {})
+    try {
+      agentBrowser = make(line)
+    } catch (error) {
+      host.log(`agent browser: off for this turn: ${error.message}`)
+      return 'Not done: the browser is no longer allowed on this turn.'
+    }
+    built = line
+    handlers = new Map(browserTools(agentBrowser).map((tool) => [tool.name, tool.handler]))
+    host.agentBrowser = agentBrowser
+    // The dev servers of this session are offered again (their ports were the old browser's).
+    await host.reofferDevServers?.()
+    return null
+  }
   return browserTools(agentBrowser).map((tool) => {
     const schema = z.object(tool.inputSchema).strict()
     return {
@@ -122,14 +151,29 @@ function browserFamily(host) {
         if (!parsed.success) return failure(`${tool.name}: ${parsed.error.issues.map((issue) => issue.message).join('; ')}`)
         // Checked again now (refresh ran first): a browser turned off
         // mid-turn is closed for good, never used once more.
-        if (!browserNow()) {
+        const line = browserNow()
+        if (!line) {
           await agentBrowser.dispose().catch(() => {})
           return failure('Not done: the browser is no longer allowed on this turn.')
         }
-        return tool.handler(parsed.data)
+        const refused = await current(line)
+        if (refused) return failure(refused)
+        return handlers.get(tool.name)(parsed.data)
       },
     }
   })
+}
+// What a Browser line lets the browser do, as one comparable string.
+function browserLine(line) {
+  const sorted = (list) => (Array.isArray(list) ? [...list].map(String).sort() : (list ?? null))
+  return JSON.stringify([
+    sorted(line?.allow),
+    line?.auth ?? null,
+    line?.profile ?? null,
+    line?.allowNoSandbox === true,
+    line?.allowHostLaunch === true,
+    sorted(line?.machineOrigins),
+  ])
 }
 registerTools(browserFamily)
 
@@ -237,6 +281,11 @@ export function createToolHost({
   // { before(), after(state) => note }: a local board's guard of the files
   // that run code on their own (command-guard.js), or null.
   guard = null,
+  // true: the session's root is the person's own checkout (a local board in
+  // place): the base is the committed state, not what is there now.
+  committedBase = false,
+  // Tests only: the git the committed base is read with.
+  committedGit = runGit,
   // The person's checkout (the browser reads its recorded logins there, never from the fix copy).
   checkout = null,
   // Loopback ports the agent browser never opens: Shapewall's own server port.
@@ -252,7 +301,20 @@ export function createToolHost({
   const caps = capabilities
   const closers = []
   // A card's text within what a card may hold (card-hash.js CARD_LIMITS.detail).
-  const askCard = (card) => ask({ ...card, detail: card.detail.length > 4000 ? card.detail.slice(0, 3990) + '\n[...]' : card.detail })
+  // The command line is the part a person approves: it is shown whole, or
+  // the card is not asked at all (Q7 B7); only the words after it are cut.
+  const askCard = async ({ command, ...card }) => {
+    const line = String(command ?? '')
+    if (line.length > CARD_LINE_MAX) return 'unshowable'
+    if (card.detail.length <= CARD_DETAIL_MAX) return ask(card)
+    const rest = card.detail.startsWith(line) ? card.detail.slice(line.length) : card.detail
+    const head = card.detail.startsWith(line) ? line : ''
+    return ask({ ...card, detail: head + rest.slice(0, CARD_DETAIL_MAX - 10 - head.length) + '\n[...]' })
+  }
+  const notRun = (state) =>
+    state === 'unshowable'
+      ? `Not run: the command line is over ${CARD_LINE_MAX} characters as a card shows it, too long for a person to check on the board.`
+      : null
   const devServers = new Map()
   // What the guard did, for the next tool result.
   const guardNotes = []
@@ -266,16 +328,28 @@ export function createToolHost({
   // The inputs as the fix copy started (the base commit, the person's own):
   // on solo and team turns a command whose inputs are still those runs
   // without a card. Worked out once, before the agent can change anything.
+  // With `committedBase` (a local board in place: the checkout keeps the
+  // agent's edits of earlier turns), only inputs exactly as committed in
+  // HEAD count as the person's own (Q7 B7); anything else asks.
   const base = new Map()
   if (session)
     for (const command of commands)
       if (caps.commands.some((item) => item.name === command.name)) {
         try {
-          base.set(command.name, inputsDigest(session.root, command))
+          const digest = inputsDigest(session.root, command)
+          if (digest !== UNBOUNDED) base.set(command.name, digest)
         } catch {
           /* no base: it asks */
         }
       }
+  const baseReady = committedBase && session ? checkCommitted() : Promise.resolve()
+  async function checkCommitted() {
+    for (const command of commands)
+      if (base.has(command.name)) {
+        const ok = await inputsCommitted(session.root, command, { git: committedGit }).catch(() => false)
+        if (!ok) base.delete(command.name)
+      }
+  }
 
   const allowedNow = (name) => {
     const fresh = recheck()
@@ -317,7 +391,10 @@ export function createToolHost({
     // The checkout's config line must still be the one this turn loaded: an
     // edit there takes effect before anything runs, remembered or not.
     if (!sameLine(command)) return 'Not run: its line in shapewall.config.json changed since this turn started.'
+    await baseReady
     const digest = inputsDigest(session.root, { ...command, argv })
+    // Inputs Shapewall could not read whole: never from the base, never remembered.
+    const bounded = digest !== UNBOUNDED
     const entry = {
       scope,
       name: command.name,
@@ -332,9 +409,9 @@ export function createToolHost({
     // command, so it always asks, whatever the resolver said (plan 3.5). An answer
     // there, or on an open turn (someone outside the trusted people wrote in the
     // thread), is for that one run: never read from or written to the store.
-    const remembers = Boolean(approvals) && session.mode !== 'host' && caps.tier !== 'open'
+    const remembers = bounded && Boolean(approvals) && session.mode !== 'host' && caps.tier !== 'open'
     const fromBase =
-      session.mode !== 'host' && !resolved.needsCard && base.get(command.name) === digest && argv.length === command.argv.length
+      bounded && session.mode !== 'host' && !resolved.needsCard && base.get(command.name) === digest && argv.length === command.argv.length
     if (fromBase || (remembers && approvals.has(entry))) return null
     if (!ask) return `"${command.name}" needs someone to allow it on the board, and this agent's machine takes no answers from the board.`
     const changedInputs = base.has(command.name) && base.get(command.name) !== digest
@@ -349,9 +426,14 @@ export function createToolHost({
         ? ['', 'Asked because someone outside the people this machine trusts wrote in this thread.']
         : []),
       ...(argsWarning(command) ? ['', argsWarning(command)] : []),
+      ...(bounded
+        ? []
+        : ['', 'Asked every time: this command depends on more files than Shapewall checks, so a change to them cannot be told apart.']),
     ]
     const recheckCard = () => allowedNow(command.name) && sameLine(command) && inputsDigest(session.root, { ...command, argv }) === digest
-    const state = await askCard({ name: 'command', label, detail: lines.join('\n'), recheck: recheckCard })
+    const line = showCommandLine(argv)
+    const state = await askCard({ name: 'command', label, command: line, detail: lines.join('\n'), recheck: recheckCard })
+    if (notRun(state)) return notRun(state)
     if (state !== 'approved')
       return `Not run: ${state === 'denied' ? 'it was denied on the board' : state === 'expired' ? 'nobody answered in time' : 'stopped'}.`
     // Once more, now: the answer was for this line with these inputs, still allowed.
@@ -509,9 +591,11 @@ export function createToolHost({
           const state = await askCard({
             name: 'command',
             label: 'Run a command',
+            command: showCommandLine(argv),
             detail: `${showCommandLine(argv)}\n\nWhy: ${why || '(no reason given)'}\n\n${whereText(session)}`,
             recheck: exactStill,
           })
+          if (notRun(state)) return failure(notRun(state))
           if (state !== 'approved') return failure(`Not run: ${state === 'denied' ? 'it was denied on the board' : 'nobody allowed it'}.`)
           // Once more, now: the answer was for this line, still allowed.
           if (closed || !exactStill()) return failure('Not run: it is no longer allowed, since it was asked.')
@@ -529,9 +613,11 @@ export function createToolHost({
           const state = await askCard({
             name: 'command',
             label: 'Run a shell command',
+            command: line,
             detail: `${line}\n\nWhy: ${why || '(no reason given)'}\n\n${whereText(session)}`,
             recheck: shellStill,
           })
+          if (notRun(state)) return failure(notRun(state))
           if (state !== 'approved') return failure('Not run: nobody allowed it.')
           if (closed || !shellStill()) return failure('Not run: the shell is no longer allowed on this turn, since it was asked.')
         }
@@ -649,6 +735,13 @@ export function createToolHost({
     devPorts: () => [...devServers.values()].map((server) => server.port),
     log,
   }
+  // A browser made again mid-turn (browserFamily) gets this session's dev servers again.
+  host.reofferDevServers = async () => {
+    for (const server of devServers.values()) {
+      server.token = null
+      await offerToBrowser(server)
+    }
+  }
   const all = [...builtin, ...FACTORIES.flatMap((factory) => factory(host) || [])]
   const listed = all.filter((tool) => (tool.available ? tool.available() : true))
   const byName = new Map(listed.map((tool) => [tool.name, tool]))
@@ -761,6 +854,7 @@ export async function startExecSession({
   shellCard = false,
   onChanged,
   guard = null,
+  committedBase = false,
   // Loopback ports the agent browser never opens (Shapewall's own server port).
   denyPorts = [],
   // false: the host only, no relay (an endpoint backend calls it in process; createThreadRelay serves it).
@@ -811,6 +905,7 @@ export async function startExecSession({
     shellCard,
     onChanged,
     guard,
+    committedBase,
     checkout: browserCheckout,
     denyPorts,
     log,

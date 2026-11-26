@@ -285,6 +285,8 @@ export async function startLocalTools({
     // Local edits are the agent's own: the run summary and Undo see the checkout as it is.
     onChanged: () => {},
     guard,
+    // In place, the checkout holds the agent's earlier edits: the base is what is committed (Q7 B7).
+    committedBase: Boolean(inPlace && real),
     browserCheckout: real,
     denyPorts,
     serve,

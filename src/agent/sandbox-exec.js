@@ -459,8 +459,51 @@ export function commandLimits(platform = process.platform, limits = SANDBOX_LIMI
 // the account's own entry say it), the person's absolute XDG folders, every
 // shared temp folder (other sessions' temps, other programs' sockets and
 // files), /run/user/<uid>, removable and mounted disks, and the folder of
-// fix copies (the other fixes). The session's own folders are allowed back
-// inside these (srt allowRead within denyRead). -> real paths that exist.
+// fix copies (the other fixes), and the folder that holds every account's
+// home (/home, /Users: other people's homes are not listed either, Q7 B7).
+// The session's own folders are allowed back inside these (srt allowRead
+// within denyRead), and so are programs on PATH installed in another
+// account's home (homebrew on Linux: homesToolchain). -> real paths that exist.
+const HOMES = new Set(['/home', '/Users', '/var/home'])
+// The folder of every account's home, when this account's home is in one.
+export function homesRoot(home = os.homedir()) {
+  let real
+  try {
+    real = realpath(home)
+  } catch {
+    return null
+  }
+  const parent = path.dirname(real)
+  return HOMES.has(parent) ? parent : null
+}
+// PATH folders inside another account's home (/home/linuxbrew/.linuxbrew/bin):
+// their install prefix stays readable, so the programs there still run.
+export function homesToolchain({ env = process.env, home = os.homedir() } = {}) {
+  const homes = homesRoot(home)
+  if (!homes) return []
+  let own = null
+  try {
+    own = realpath(home)
+  } catch {
+    /* none */
+  }
+  const out = []
+  for (const dir of String(env.PATH || '').split(path.delimiter)) {
+    if (!dir || !path.isAbsolute(dir)) continue
+    let real
+    try {
+      real = realpath(dir)
+    } catch {
+      continue
+    }
+    if (!isInside(homes, real) || (own && isInside(own, real))) continue
+    const prefix = path.basename(real) === 'bin' ? path.dirname(real) : real
+    // At least two levels below the homes folder: never a whole home.
+    if (path.relative(homes, prefix).split(path.sep).length < 2) continue
+    if (!out.includes(prefix)) out.push(prefix)
+  }
+  return out
+}
 const SYSTEM_DIRS = [
   '/usr',
   '/etc',
@@ -499,6 +542,7 @@ export function deniedRoots({ env = process.env, within = null, platform = proce
     wanted.push('/private/tmp', '/private/var/tmp')
   }
   if (within) wanted.push(within)
+  wanted.push(homesRoot())
   const out = []
   for (const item of wanted) {
     if (typeof item !== 'string' || !path.isAbsolute(item)) continue
@@ -649,6 +693,11 @@ export async function createCommandSession({
       throw new SandboxRefusal('bad_root', "The sandbox never writes in the person's own checkout.")
   }
   if (!['sandboxed', 'host', 'host-shell'].includes(mode)) throw new SandboxRefusal('bad_mode', 'Unknown sandbox mode.')
+  // Read only and the folders no command may read are the OS sandbox's to
+  // keep: without one a command could write and read anything the person
+  // can, so a session that promises read only does not start (Q7 B7).
+  if (readOnly && mode !== 'sandboxed')
+    throw new SandboxRefusal('no_sandbox_read_only', 'Read-only commands need the OS sandbox, and there is none here.')
   if (!['registries', 'none'].includes(network))
     throw new SandboxRefusal('bad_network', 'Commands get the package registries or no network.')
   // Real paths: Seatbelt matches them, and /var is a link to /private/var on macOS.
@@ -682,6 +731,7 @@ export async function createCommandSession({
       real,
       tmp,
       ...(toolchain.dir ? [toolchain.dir] : []),
+      ...homesToolchain({ env }),
       ...(vendor ? [vendor] : []),
       // srt's proxy bridge sockets live in the system temp, which is denied.
       ...bridgeSockets(box),

@@ -926,6 +926,14 @@ function resolveForTier(
       profile: loggedIn ? m.browserProfile : null,
       allowNoSandbox: noSandbox,
       realChrome: false,
+      // Origins that may open a port on this machine, checked again on the
+      // address each one resolves to (agent-browser.js, Q7 C1): any on the
+      // owner's own turn and the starter agent's (null), else the machine's list.
+      machineOrigins: ownersOwn || starter ? null : [...m.browserAllow],
+      // On an open turn Chromium's own sandbox is never off, not even inside
+      // the OS sandbox (where it cannot run): the browser starts on this
+      // machine with it, behind the same egress proxy, or not at all (Q7 C3).
+      chromiumSandbox: tier === 'open' ? 'required' : 'os-sandbox-instead',
     }
   }
   off('chrome', 'never_real_chrome')

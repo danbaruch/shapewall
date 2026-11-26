@@ -133,8 +133,11 @@ export function hostPort(value) {
 }
 
 // Looks up and checks the host of one allowed origin. Returns { address }
-// or { refused: reason }.
-export async function pinHost(host, { lookup = dns.promises.lookup } = {}) {
+// or { refused: reason }. A public name that resolves to one of this
+// machine's own addresses (its global IPv6 or public IPv4 too) is refused
+// like one that resolves to loopback (Q7 C1), unless `allowOwn` (the machine
+// lists that origin itself). `own`: this machine's addresses (ownAddresses).
+export async function pinHost(host, { lookup = dns.promises.lookup, own = null, allowOwn = false } = {}) {
   const name = bare(host).toLowerCase()
   if (net.isIP(name)) {
     const kind = addressKind(name)
@@ -159,6 +162,10 @@ export async function pinHost(host, { lookup = dns.promises.lookup } = {}) {
     if ((kind === 'loopback' || kind === 'private') && !localName(name))
       return {
         refused: `${name} resolves to a ${kind === 'loopback' ? 'loopback' : 'private network'} address (${address}); a public name pointing there is refused (allow the address itself instead)`,
+      }
+    if (!allowOwn && !localName(name) && isOwnAddress(address, own || ownAddresses()))
+      return {
+        refused: `${name} resolves to an address of this machine (${address}); a public name pointing here is refused (the machine owner lists the origin to open it)`,
       }
   }
   return { address: list[0] }

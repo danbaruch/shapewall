@@ -416,6 +416,10 @@ export function createTools({
     }).then((code) => {
       server.exited = true
       server.code = code ?? null
+      // Its port leaves the browser's allowlist the moment it exits, not only
+      // on stop(): the port is anyone's after (Q7 C6).
+      if (server.token) browser?.revokeSpawned(server.token)
+      server.token = null
     })
     server.stop = async () => {
       if (server.token) browser?.revokeSpawned(server.token)
@@ -467,6 +471,12 @@ export function createTools({
         } catch (error) {
           server.token = null
           browserText = ` Your browser tools do not get it: ${error.message}`
+        }
+        // Exited while its port was being offered: taken off again.
+        if (server.exited && server.token) {
+          browser.revokeSpawned(server.token)
+          server.token = null
+          browserText = ' Your browser tools do not get it: it exited meanwhile.'
         }
       }
     }
