@@ -802,7 +802,12 @@ class AcpProcess {
     preamble = null,
     instructions = null,
     extensions = null,
+    // The board server this session was given reads the owner's comments
+    // only (owner-mcp.js ownersOnly, a turn above "open"): its reads bring no
+    // one else's text in, so they do not taint the thread (Q7 N1).
+    boardReadsOwnersOnly = false,
   }) {
+    this.boardReadsOwnersOnly = boardReadsOwnersOnly === true
     Object.assign(this, { argv, label, sandbox, limits, log, thread, onGone, mcpServers, readOnly, remoteEdit, preamble, extraServers })
     // A local board's restricted session (localRestrictedSession): Claude Code only.
     this.restricted = Boolean(restricted) && !readOnly && !remoteEdit && acpAgentKind(argv) === 'claude'
@@ -1623,7 +1628,7 @@ class AcpProcess {
     else if (kind === 'tool_call' || kind === 'tool_call_update') {
       // A board tool whose result is other people's text (thread-trust.js):
       // the thread is tainted from here on, said once to the turn's runner.
-      if (!this.tainted && taintingToolName(toolNameOf(update))) {
+      if (!this.tainted && !this.boardReadsOwnersOnly && taintingToolName(toolNameOf(update))) {
         this.tainted = true
         turn.queue.push({ type: 'taint', why: 'tool' })
       }
@@ -2196,8 +2201,10 @@ export function createAcpBackend(
     idle[0].kill('evicted')
   }
 
-  const start = async (thread, signal, { evict = true, workdir = null, mcpServers = null, extensions = null } = {}) => {
+  const start = async (thread, signal, { evict = true, workdir = null, mcpServers = null, extensions = null, sessionKey = null } = {}) => {
     evictFor(evict)
+    // The board's own server for this session, made for its key (the turn's tier).
+    const owned = workdir?.mcpServers ? null : mcpServersFor?.(thread, { sessionKey }) || null
     const agent = new AcpProcess({
       argv: settings.acp.argv,
       label: settings.label,
@@ -2217,7 +2224,8 @@ export function createAcpBackend(
       instructions: settings.instructions || null,
       // A turn's own tools (exec-mcp, for a fix) come with its working folder;
       // a thread's exec relay (exec-mcp.js createThreadRelay) with the turn.
-      mcpServers: [...(workdir?.mcpServers || mcpServersFor?.(thread) || []), ...(mcpServers || [])],
+      mcpServers: [...(workdir?.mcpServers || owned || []), ...(mcpServers || [])],
+      boardReadsOwnersOnly: owned?.ownersOnly === true,
       extraServers: serverKey(mcpServers),
       // This turn's extensions (withExtensions), when it may have them.
       extensions,
@@ -2303,7 +2311,7 @@ export function createAcpBackend(
       agent = null
     }
     if (agent?.state === 'ready') return agent
-    agent = await start(thread, signal, { evict, workdir, mcpServers, extensions })
+    agent = await start(thread, signal, { evict, workdir, mcpServers, extensions, sessionKey })
     agent.sessionKey = sessionKey ?? null
     agent.idle()
     return agent

@@ -2909,6 +2909,14 @@ kept: those threads never get extensions, and new threads start clean. Nothing e
 its later turns (after their message is pruned, too), and a tainted thread's turns are open. Deleting a thread removes its row,
 so the next one under that id starts clean, and the agent's machine starts a new session for it (the job's `turn.generation`).
 
+**After the upgrade, owners lose solo in every thread that already existed**: those threads are tainted, so every turn in them is
+open (commands ask on a card, no full shell, no extensions). This is on purpose, because nobody can say who wrote their history.
+To get solo back, start a new chat thread; the old ones keep working as open threads.
+
+A thread is also tainted when an open turn in it was given other people's text the server did not count as the turn's authors:
+the board's other open comments, which only an open turn is given. The agent's machine says so when it finishes the turn
+(`outsideText` on the finish call), so an answer that repeats such a comment never reaches a later solo turn in that thread.
+
 For a rollback, the older build ignores the columns (it gives no extensions). To let a newer build run the migration again, with
 the server stopped:
 

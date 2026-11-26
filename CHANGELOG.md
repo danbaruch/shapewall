@@ -95,6 +95,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **Upgrading: owners lose solo in threads that existed before 1.4.0.** Those threads are tainted (hosted migration 23; on a
+  local board, a thread with messages and no trust record), so every turn in them is open: commands ask on a card, no full
+  shell, no extensions. Start a new chat thread to get solo back; the old threads keep working as open ones.
 - A local board's Claude Code session is restricted: read and edit tools plus Shapewall's tools, no shell of its own, no settings
   files (`~/.claude` allow rules, hooks, plugins, `.mcp.json`), no auto memory. `agent.localSession: "own"` keeps the 1.2.0
   session, with a deprecation warning, until 2.0. Other ACP adapters keep their own session.
@@ -168,6 +171,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - The narrowing re-check before a command or browser step asks the server again after a failed answer, instead of skipping 5
   seconds, and steps that run at once wait for the same answer.
 - An agent hidden for inactivity that came back and went quiet again is written to the audit log as hidden again.
+- A running `agent connect` without edits no longer logs on every turn that its policy file "would widen" approvals: a reload is
+  compared with what the file said, not with the link's own "no approvals".
 - The unconnected chat's Connect note says which session Claude Code gets on this board: the restricted one, or its own when
   `agent.localSession` is `"own"`.
 
@@ -185,6 +190,14 @@ and the project uses [Semantic Versioning](https://semver.org/).
   under the same id (`turn.generation` in the job), so an open turn's text cannot carry into a solo or team turn.
 - With `audience: owner` on the machine, a turn is refused unless its asker is the account this machine pinned as its owner; the
   server's `owner` label alone no longer passes.
+- On a local board, a solo turn's board tools (`list_comments`, `get_comment`, for an endpoint and through the owner MCP server
+  for an ACP agent) give the owner's own comments only and count the rest, so other people's text never reaches a solo turn
+  that way. A thread is tainted only when someone else's text actually came back, a tainted local thread is open from then on,
+  and if other people's text still comes into a turn above open, its commands and browser are off for the rest of that turn.
+- A connected agent's open turn that was given the board's other open comments tells the server when it finishes, and the
+  server taints the thread: an answer that repeats those comments never reaches a later solo turn there (after `agent set
+  audience owner`, a raised ceiling or a team that reconnects).
+- The trust block's thread state caps the tier too: a turn in a tainted thread is never above open, whatever its authors say.
 
 ## 1.3.0 - 2026-11-25
 

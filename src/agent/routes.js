@@ -392,10 +392,14 @@ export function agentRouter({
         // Files capture runs or logs in with: a write needs an approval card.
         sensitivePaths: () => authFiles(config),
         mcpServersFor: ownerWrites
-          ? (thread) =>
+          ? (thread, { sessionKey = null } = {}) =>
               ownerMcpServers(config, thread.split('/')[0], {
                 allowCapture,
                 env,
+                // A session for turns above "open" (its key is the turn's
+                // tier, turnTools): the board reads give the owner's own
+                // comments only (Q7 N1).
+                ownersOnly: sessionKey !== 'open',
                 // Whose replies these are, so they are signed with its name.
                 agent: {
                   which: live.profileId || (['flag', 'env'].includes(live.sources?.acpCommand) ? 'fixed' : 'default'),
@@ -768,8 +772,11 @@ export function agentRouter({
         thread: trust,
         key,
         agent: localAgentOf(config, current),
+        // A thread that ever carried someone else's text (a board read, a
+        // mention, a reply) stays open for good, as on a hosted board (Q7 N1).
         owner:
           !quoted &&
+          !readThreadTrust(trust).tainted &&
           localOwnerOnly({
             ownerWrites,
             kind,
@@ -1304,9 +1311,13 @@ export function agentRouter({
             cards,
             // Skills and MCP servers from the agent config folder, on a clean owner's turn only.
             extensions: backend.id === 'acp' ? extensions : null,
-            // A board tool brought other people's text in: the thread is tainted for good.
-            onTaint: (why) =>
-              markThreadTainted(config, board.id, threadId, why).catch((error) => log(`chat: taint not saved: ${error.message}`)),
+            // A board tool brought other people's text in: the thread is tainted for good,
+            // and on a turn above "open" an ACP agent's commands and browser (the
+            // thread's relay) are off for the rest of the turn (Q7 N1).
+            onTaint: (why) => {
+              if (tools && tools.caps.tier !== 'open') relay?.setHost(null).catch(() => {})
+              return markThreadTainted(config, board.id, threadId, why).catch((error) => log(`chat: taint not saved: ${error.message}`))
+            },
           })
         } finally {
           await endTurnTools(key, { tools, relay })

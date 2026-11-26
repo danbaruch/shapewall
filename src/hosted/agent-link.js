@@ -1059,6 +1059,12 @@ export function mountAgentLink(
         // A finished fix leaves its comment where it stands at once, should the
         // machine go away before it says so itself (it posts its reply next).
         chat.releaseFix(req.t, row, reply.summary ? 'branch-ready' : 'needs-human')
+        // The machine was given other people's text this server did not count
+        // as the turn's authors (an open turn's board comments), and its answer
+        // may repeat it: the thread carries it from now on (Q7 N2). A machine
+        // can only make its own thread stricter this way.
+        if (req.body?.outsideText === true && ['fix', 'comment', 'chat'].includes(row.kind))
+          store.trust(row.project_id, row.board_id, row.thread_id, [{ kind: 'outside' }])
         if (reply.summary) {
           const detail = {
             project: row.project_id,

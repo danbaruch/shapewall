@@ -375,14 +375,14 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
         id: row.id,
       })?.at
       // A token without the claim scope stays hidden whatever it does: said once.
-      const inactive = parseList(row.token_scopes).includes('claim')
+      const canClaim = parseList(row.token_scopes).includes('claim')
       const last = latestOf(row.last_seen_at, row.token_last_used_at, lastClaims(row.project_id).get(row.token_id))
-      if (said && (!inactive || !last || Date.parse(said) >= Date.parse(last))) continue
+      if (said && (!canClaim || !last || Date.parse(said) >= Date.parse(last))) continue
       audit('agent_hidden', row.id, {
         project: row.project_id,
         token: row.token_id,
         name: row.name,
-        reason: parseList(row.token_scopes).includes('claim') ? 'inactive' : 'no_claim',
+        reason: canClaim ? 'inactive' : 'no_claim',
         days: DORMANT_DAYS,
         by: 'server',
       })

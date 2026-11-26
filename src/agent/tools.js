@@ -7,8 +7,12 @@ import { feedbackContext, feedbackItem } from '../feedback.js'
 import { addReply, captureFiles, commentCounts, getComment, listComments, setAgentStatus, updateComment } from '../store.js'
 import { quoteData } from './context.js'
 import { commentText } from '../comment-fields.js'
+import { ownersComment } from './watch-capabilities.js'
 
 const LIST_MAX = 100
+// The mark a tool's result carries when it holds someone else's text (never
+// sent to the model: a symbol key is not serialized).
+const OUTSIDE = Symbol('outside')
 
 // A comment's images, as the model sees them: no local file paths.
 const imagesForModel = (images) =>
@@ -94,13 +98,16 @@ export const BOARD_TOOLS = [
       },
       additionalProperties: false,
     },
-    run({ config, board }, args) {
+    run({ config, board, quoteOthers = true }, args) {
       const status = ['open', 'resolved'].includes(args?.status) ? args.status : args?.status === 'all' ? null : 'open'
-      const comments = listComments(config, board.id, { status })
-        .filter((comment) => !args?.pageId || comment.pageId === args.pageId)
-        .sort((a, b) => a.id - b.id)
-        .slice(-LIST_MAX)
+      const matching = listComments(config, board.id, { status }).filter((comment) => !args?.pageId || comment.pageId === args.pageId)
+      // Above "open": the owner's own comments only, the rest counted (Q7 N1).
+      const withheld = quoteOthers ? 0 : matching.filter((comment) => !ownersComment(comment)).length
+      const comments = (quoteOthers ? matching : matching.filter(ownersComment)).sort((a, b) => a.id - b.id).slice(-LIST_MAX)
       return {
+        // Whether this result carries someone else's text (run.js: it taints the thread).
+        [OUTSIDE]: comments.some((comment) => !ownersComment(comment)),
+        ...(withheld ? { notShown: `${withheld} comment${withheld === 1 ? '' : 's'} by other people, not shown on this turn` } : {}),
         counts: commentCounts(config, board.id),
         comments: comments.map((comment) => ({
           id: comment.id,
@@ -126,8 +133,12 @@ export const BOARD_TOOLS = [
       required: ['id'],
       additionalProperties: false,
     },
-    run({ config, board }, args) {
-      return commentForModel(config, board, getComment(config, board.id, args?.id))
+    run({ config, board, quoteOthers = true }, args) {
+      const comment = getComment(config, board.id, args?.id)
+      if (ownersComment(comment)) return commentForModel(config, board, comment)
+      // Above "open": someone else's comment (or one with their reply) is not shown (Q7 N1).
+      if (!quoteOthers) return { id: comment.id, withheld: 'by someone other than the owner, not shown on this turn' }
+      return { [OUTSIDE]: true, ...commentForModel(config, board, comment) }
     },
   },
 ]
@@ -239,7 +250,14 @@ export async function runTool(context, call) {
           : result.id
             ? `Comment #${result.id}`
             : null
-    return { ok: true, label: tool.label, text: quoteData(`tool:${tool.name}`, { board: context.board.id }, result), detail }
+    return {
+      ok: true,
+      label: tool.label,
+      text: quoteData(`tool:${tool.name}`, { board: context.board.id }, result),
+      detail,
+      // Someone else's text came back (Q7 N1): the caller taints the thread.
+      outside: result?.[OUTSIDE] === true,
+    }
   } catch (error) {
     const message = error.statusCode ? error.message : 'The tool failed.'
     return { ok: false, label: tool.label, text: message, detail: message }

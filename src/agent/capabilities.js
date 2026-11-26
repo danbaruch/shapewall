@@ -494,6 +494,14 @@ export function tierOf({ trust, audience, machine = {}, server = null } = {}) {
       tier = block.taint
       why = 'thread_taint'
     }
+    // A thread state that says the thread carried text nobody vouches for
+    // caps the turn at "open", whatever its authors say (Q7 N3, defense in
+    // depth: the server folds that state into the authors as well). A trust
+    // block without a thread state is not read as tainted here.
+    if (trust.thread !== undefined && block.thread.tainted && tier !== 'open') {
+      tier = 'open'
+      why = 'thread_taint'
+    }
   }
   if (narrowing && tierRank(narrowing.maxTier) < tierRank(tier)) {
     tier = narrowing.maxTier
@@ -948,7 +956,9 @@ function resolveForTier(
     author.owner ? m.extensionsFor.includes('owner') : author.handle !== null && m.extensionsFor.includes(author.handle)
   if (!known) off('extensions', 'unknown_path')
   else if (!EXTENSION_PATHS.includes(where)) off('extensions', 'path_no_extensions')
-  else if (tier === 'open') off('extensions', 'open_tier_extensions')
+  // A tainted thread is open for that reason (tierOf, Q7 N3): said as such.
+  else if (tier === 'open')
+    off('extensions', block && trust?.thread !== undefined && block.thread.tainted ? 'thread_tainted' : 'open_tier_extensions')
   // Only Claude Code's hardened sessions take them (acp.js withExtensions):
   // said here, so the card, `agent status` and the prompt read one answer.
   else if (agent && agent.kind !== 'claude') off('extensions', 'agent_not_claude')

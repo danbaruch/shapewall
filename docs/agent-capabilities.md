@@ -45,7 +45,8 @@ machine then refuses any turn whose asker is not that pinned account, whatever t
 A local board has no team tier. A turn there is solo only while every word in it is the owner's (the owner is whoever holds
 the settings link, a paired device or the tailnet owner): a private chat, or a comment the owner wrote on a board only the owner
 can reach. A message that mentions a comment someone else wrote (or one that got someone else's reply since) makes the turn
-open. Anything else is open, including other signed-in local accounts and share visitors. A display name never counts.
+open. On a solo turn the agent's board tools list and read only the owner's own comments and count the rest. A thread that ever
+carried someone else's text is open from then on, and so is a thread from before 1.4.0: start a new chat to get solo back. Anything else is open, including other signed-in local accounts and share visitors. A display name never counts.
 
 ## What each tier gets
 

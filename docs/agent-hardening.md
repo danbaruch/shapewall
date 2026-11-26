@@ -482,6 +482,14 @@ ever carried still counts after their message is pruned, and a thread that carri
 server folds the thread's stored state, [migration 23](hosted.md#migration-23-and-rollback), into each turn's authors). On a local
 board the same check that decides whether the prompt quotes someone else's comment makes the turn open.
 
+A local board holds its own turns to the same answer. On a solo turn the board tools (`list_comments` and `get_comment`, for an
+endpoint and through the owner MCP server for an ACP agent) give the owner's own comments only and count the rest, as the prompt
+does. A thread is tainted only when someone else's text actually came back, and a tainted thread is open from then on. Should
+other people's text still come into a turn above open, its commands and browser are off for the rest of that turn. On a hosted
+board, an open turn is the only one given the board's other open comments; its machine tells the server when it finishes, and the
+server taints the thread, so an answer that repeats them never reaches a later solo turn there. The thread state caps the tier on
+the machine too: a turn in a tainted thread is never above open.
+
 The machine does not take the list on trust either. On a turn above open it holds back every mentioned comment whose author is not
 one of the turn's authors (a token's or an import's included), keeping its number only, and counts an `@person` mention's open
 comments by others instead of quoting them. An agent session is reused only by a turn of the same tier in the same life of the

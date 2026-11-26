@@ -10,7 +10,6 @@ import { splitNextSteps } from './next-steps.js'
 import { replyText, settleCardPositions } from './reply-text.js'
 import { AgentError } from './errors.js'
 import { cleanCardDiff } from './text-diff.js'
-import { taintingToolName } from './thread-trust.js'
 import { attachmentData, newId } from './threads.js'
 import { recentDownNotes } from './ratings.js'
 import { commentForModel, commentMediaParts, runTool, toolSpecs } from './tools.js'
@@ -28,6 +27,13 @@ const REASONING_STORED_MAX = 20000
 const LENGTH_STOPS = new Set(['length', 'max_tokens'])
 // A permission card shows all it asks about: backends deny what is longer (acp.js DETAIL_MAX).
 const PERMISSION_DETAIL_MAX = 5000
+// A command or browser call after other people's text came into a turn above "open" (Q7 N1).
+const EXEC_OFF_RESULT = {
+  ok: false,
+  label: 'Not on this turn',
+  text: "Other people's text came into this turn, so commands and the browser are off until the next one.",
+  detail: "Off after other people's text came in",
+}
 const REFS_MAX = 20
 
 export function commentIdOf(threadId) {
@@ -200,7 +206,12 @@ export async function runTurn({
 }) {
   const thread = `${board.id}/${threadId}`
   let taintSaid = false
+  // Other people's text came in mid-turn on a turn above "open" (Q7 N1): its
+  // tier was worked out without that text, so the commands and the browser
+  // (the exec host's tools) are not offered for the rest of the turn.
+  let execOff = false
   const taint = (why) => {
+    if (!quoteOthers) execOff = true
     if (taintSaid) return
     taintSaid = true
     try {
@@ -333,11 +344,11 @@ export async function runTurn({
     // A model that does not take images (Settings > Agent): the images are
     // dropped here, and the chat says so, instead of the endpoint's 400.
     if (backend.vision === false && withoutImages(conversation)) noteOnce(NO_IMAGES_NOTE)
-    const tools =
+    const toolsNow = () =>
       backend.tools === 'shapewall'
         ? [
             ...toolSpecs({ ownerWrites, allowCapture }),
-            ...execTools.map(({ name, description, inputSchema }) => ({ name, description, parameters: inputSchema })),
+            ...(execOff ? [] : execTools).map(({ name, description, inputSchema }) => ({ name, description, parameters: inputSchema })),
           ]
         : []
     emit('status', { text: 'Waiting for the model' })
@@ -347,7 +358,7 @@ export async function runTurn({
       for await (const event of backend.stream({
         system: `${SYSTEM_PROMPT}\n\n${NEXT_STEPS_PROMPT}${capabilities && backend.tools === 'shapewall' ? `\n\n${capabilities}` : ''}`,
         messages: conversation,
-        tools: round < TOOL_ROUNDS_MAX ? tools : [],
+        tools: round < TOOL_ROUNDS_MAX ? toolsNow() : [],
         ...(modelOverride ? { model: modelOverride } : {}),
         ...(choices ? { choices } : {}),
         ...(workdir ? { workdir } : {}),
@@ -447,11 +458,14 @@ export async function runTurn({
       for (const call of calls) {
         const id = call.id || newId('call')
         card({ id, kind: 'tool', name: call.name, label: call.name, state: 'running', detail: null })
-        // A board tool that returns comments: other people's text from here on.
-        if (taintingToolName(call.name)) taint('tool')
         const result = execNames.has(call.name)
-          ? await runExecTool(execHost, call, signal)
-          : await runTool({ config, board, ownerWrites, allowCapture, capture, requestedPages, agentName }, call)
+          ? execOff
+            ? EXEC_OFF_RESULT
+            : await runExecTool(execHost, call, signal)
+          : await runTool({ config, board, ownerWrites, allowCapture, capture, requestedPages, agentName, quoteOthers }, call)
+        // A board tool that returned someone else's text: other people's text
+        // from here on (a read above "open" gives the owner's own only).
+        if (result.outside) taint('tool')
         card({ id, label: result.label, state: result.ok ? 'done' : 'error', detail: result.detail })
         if (result.ok) noteRefs(call.args)
         conversation.push({ role: 'tool', toolCallId: id, content: [{ type: 'text', text: result.text }] })

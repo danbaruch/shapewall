@@ -263,6 +263,10 @@ export async function runAgentLink({
     ...CAPABILITY_NARROWEST,
     ...givenPolicy,
   }
+  // The policy as the file gave it, before this link's own rules below: a
+  // reload is compared with this, so a value the link itself narrowed (no
+  // fix backend: no approvals) never reads as the file widening it (Q7 N5).
+  let fromFile = { ...policy }
   // Anything but "thread" reads as mentions only (src/agent/triggers.js).
   policy.respond = policy.respond === 'thread' ? 'thread' : 'mention'
   if (!editBackend || !fix) policy.approvals = 'none'
@@ -281,8 +285,9 @@ export async function runAgentLink({
       return
     }
     if (!fresh || typeof fresh !== 'object') return
-    const { policy: next, narrowed, wider } = narrowPolicy(policy, fresh)
+    const { policy: next, narrowed, wider } = narrowPolicy(fromFile, fresh)
     if (narrowed.length) {
+      fromFile = next
       Object.assign(policy, next)
       policy.respond = policy.respond === 'thread' ? 'thread' : 'mention'
       if (!editBackend || !fix) policy.approvals = 'none'
@@ -452,13 +457,17 @@ export async function runAgentLink({
       sending = sending.then(flush)
       await sending
     }
+    // This turn was given other people's text the server did not count as
+    // its authors (an open turn's board comments): the answer tells the
+    // server, which taints the thread for good (Q7 N2).
+    let outsideText = false
     const finish = async (message) => {
       await drain()
       if (gone) return
       const began = Date.now()
       for (let wait = 500; ; wait = Math.min(wait * 2, 5000)) {
         try {
-          await api.finish(id, { seq: seq + 1, message })
+          await api.finish(id, { seq: seq + 1, message, ...(outsideText ? { outsideText: true } : {}) })
           return
         } catch (error) {
           if (error instanceof RemoteError && error.status < 500 && error.status !== 429) return
@@ -589,6 +598,20 @@ export async function runAgentLink({
       const handles = (boundTrust(job.trust)?.authors || []).map((author) => author.handle)
       const held = withholdOutside(job, handles)
       if (held) log(`turn ${id}: ${held} mentioned comment${held === 1 ? '' : 's'} by other people held back (${caps.tier} turn)`)
+    }
+    // The board's other open comments are other people's text, not in the
+    // trust block: above "open" they are counted, never quoted. An open turn
+    // is given them, and its answer may repeat them, so the thread carries
+    // them from then on: the server is told (finish, Q7 N2).
+    const boardComments = (caps) => {
+      if (caps.tier !== 'open') {
+        job.context.commentsLeft += job.context.comments.length
+        job.context.comments = []
+        holdOutside(caps)
+        return
+      }
+      const handles = new Set((boundTrust(job.trust)?.authors || []).map((author) => author.handle).filter(Boolean))
+      if (job.context.comments.some((item) => typeof item?.authorHandle !== 'string' || !handles.has(item.authorHandle))) outsideText = true
     }
     // The agent session a turn may reuse: one of the same tier, in the same
     // life of the thread (Q7 F2). A session that read an open turn's text
@@ -761,13 +784,7 @@ export async function runAgentLink({
             agent: agentShape,
           })
         const caps = resolveNow()
-        // The other open comments on the board are other people's text, not in
-        // the trust block: above "open" they are counted, never quoted.
-        if (caps.tier !== 'open') {
-          job.context.commentsLeft += job.context.comments.length
-          job.context.comments = []
-          holdOutside(caps)
-        }
+        boardComments(caps)
         // `commands` always come from the person's checkout, read again for every check.
         const checkoutConfig = () => {
           if (!fix.config.file) return fix.config
@@ -862,11 +879,7 @@ export async function runAgentLink({
             }),
           )
         const caps = resolveNow()
-        if (caps.tier !== 'open') {
-          job.context.commentsLeft += job.context.comments.length
-          job.context.comments = []
-          holdOutside(caps)
-        }
+        boardComments(caps)
         fixTurn = { capabilities: toPrompt(caps), sessionKey: sessionKeyOf(caps), extensions: extensionsOf(caps, job, answerEnv) }
         if (answerConfig?.dir) {
           const checkoutConfig = () => {

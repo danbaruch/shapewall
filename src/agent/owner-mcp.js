@@ -25,10 +25,15 @@ export function parseServerHolder(value) {
 // session started. Its replies are signed with the name it has when it
 // replies (user-settings.js savedAgentName), so a rename shows on the next
 // reply without restarting the agent; the starting name is the fallback.
-export function ownerMcpServers(config, boardId, { allowCapture = true, agent = null, env = process.env } = {}) {
+//
+// `ownersOnly`: a session for turns above "open" (routes.js, by the turn's
+// tier): its board reads give the owner's own comments only (mcp.js, Q7 N1).
+// The list says so (`ownersOnly`), so the ACP backend knows those reads bring
+// no one else's text in (acp.js, no taint for them).
+export function ownerMcpServers(config, boardId, { allowCapture = true, agent = null, env = process.env, ownersOnly = false } = {}) {
   if (!config.file) return []
   const settingsFile = env[SETTINGS_FILE_VAR]
-  return [
+  const servers = [
     {
       name: 'shapewall',
       command: process.execPath,
@@ -37,6 +42,7 @@ export function ownerMcpServers(config, boardId, { allowCapture = true, agent = 
         config.file,
         boardId,
         allowCapture ? 'capture' : 'no-capture',
+        ownersOnly ? 'owners' : 'all',
         ...(agent?.name ? [agent.which || 'default', agent.name] : []),
       ],
       // The agent's small environment may not name the settings file.
@@ -47,17 +53,21 @@ export function ownerMcpServers(config, boardId, { allowCapture = true, agent = 
       ],
     },
   ]
+  servers.ownersOnly = ownersOnly === true
+  return servers
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const config = loadConfig(process.argv[2])
-  const [which, startName] = process.argv.slice(5)
+  const [which, startName] = process.argv.slice(6)
   const server = createMcpServer({
     config,
     agentAuthor: startName ? () => savedAgentName(config.dir, which) || startName : null,
     boardId: process.argv[3],
     fixServer: parseServerHolder(process.env[SERVER_HOLDER_VAR]),
     allowCapture: process.argv[4] === 'capture',
+    // Anything but "all" reads as the owner's own comments only.
+    ownersOnly: process.argv[5] !== 'all',
     toolNames: [
       'list_pages',
       'list_journeys',
