@@ -131,6 +131,18 @@ export async function runTurn({
   // conversation comes from the hosted server: src/remote/agent-job.js).
   // Without it they are built from this board's own store (modelMessages).
   conversation: given = null,
+  // What this turn may do (capability-render.js toPrompt): after the
+  // instruction files in the prompt of every turn (plan 3.7).
+  capabilities = '',
+  // Shapewall's tool servers for this turn's ACP session (a thread's exec relay).
+  mcpServers = null,
+  // An endpoint backend's exec tools (exec-mcp.js createToolHost, served in
+  // process): offered beside the board tools, each checked by the host.
+  execHost = null,
+  // Cards of Shapewall's own (exec-mcp asks): runTurn sets `cards.ask` for
+  // the tool host to call, and puts each waiting card in `cards.pending`
+  // (id -> settle(state, answeredBy)) for the board's answer route.
+  cards = null,
 }) {
   const thread = `${board.id}/${threadId}`
   const runMs = backend.runMsMax || RUN_MS_MAX
@@ -184,6 +196,48 @@ export async function runTurn({
       if (typeof page === 'string' && pageIds.has(page) && refs.pages.size < REFS_MAX) refs.pages.add(page)
     }
   }
+  // A card of Shapewall's own in this answer: allow or deny on the board,
+  // 'expired' after `ms`, 'cancelled' when the turn stops.
+  if (cards) {
+    cards.pending ||= new Map()
+    cards.ask = ({ label, detail }, ms = 2 * 60 * 1000) =>
+      new Promise((resolve) => {
+        if (signal.aborted) return resolve('cancelled')
+        const id = newId('perm')
+        const base = {
+          id,
+          kind: 'permission',
+          name: 'command',
+          label: String(label || 'Run a command').slice(0, 120),
+          detail: String(detail || '').slice(0, PERMISSION_DETAIL_MAX),
+          diff: null,
+          options: [
+            { optionId: 'allow', name: 'Allow', kind: 'allow_once' },
+            { optionId: 'deny', name: 'Deny', kind: 'reject_once' },
+          ],
+          chosen: null,
+          answeredBy: null,
+          expiresAt: new Date(Date.now() + ms).toISOString(),
+        }
+        const settle = (state, answeredBy = null) => {
+          if (!cards.pending.has(id)) return false
+          cards.pending.delete(id)
+          clearTimeout(timer)
+          signal.removeEventListener('abort', onAbort)
+          card({ ...base, state, chosen: state === 'approved' ? 'Allow' : state === 'denied' ? 'Deny' : null, answeredBy })
+          resolve(state)
+          return true
+        }
+        const timer = setTimeout(() => settle('expired'), ms)
+        timer.unref?.()
+        const onAbort = () => settle('cancelled')
+        signal.addEventListener('abort', onAbort, { once: true })
+        cards.pending.set(id, settle)
+        card({ ...base, state: 'pending' })
+      })
+  }
+  const execTools = execHost ? execHost.tools() : []
+  const execNames = new Set(execTools.map((tool) => tool.name))
   const noted = new Set()
   const noteOnce = (text) => {
     if (noted.has(text)) return
@@ -195,13 +249,19 @@ export async function runTurn({
     // A model that does not take images (Settings > Agent): the images are
     // dropped here, and the chat says so, instead of the endpoint's 400.
     if (backend.vision === false && withoutImages(conversation)) noteOnce(NO_IMAGES_NOTE)
-    const tools = backend.tools === 'shapewall' ? toolSpecs({ ownerWrites, allowCapture }) : []
+    const tools =
+      backend.tools === 'shapewall'
+        ? [
+            ...toolSpecs({ ownerWrites, allowCapture }),
+            ...execTools.map(({ name, description, inputSchema }) => ({ name, description, parameters: inputSchema })),
+          ]
+        : []
     emit('status', { text: 'Waiting for the model' })
     for (let round = 0; round <= TOOL_ROUNDS_MAX; round += 1) {
       const calls = []
       let roundText = ''
       for await (const event of backend.stream({
-        system: `${SYSTEM_PROMPT}\n\n${NEXT_STEPS_PROMPT}`,
+        system: `${SYSTEM_PROMPT}\n\n${NEXT_STEPS_PROMPT}${capabilities && backend.tools === 'shapewall' ? `\n\n${capabilities}` : ''}`,
         messages: conversation,
         tools: round < TOOL_ROUNDS_MAX ? tools : [],
         ...(modelOverride ? { model: modelOverride } : {}),
@@ -209,6 +269,8 @@ export async function runTurn({
         ...(workdir ? { workdir } : {}),
         ...(gate ? { gate } : {}),
         ...(preamble ? { preamble } : {}),
+        ...(capabilities && backend.tools !== 'shapewall' ? { capabilities } : {}),
+        ...(mcpServers ? { mcpServers } : {}),
         signal,
         thread,
       })) {
@@ -298,7 +360,9 @@ export async function runTurn({
       for (const call of calls) {
         const id = call.id || newId('call')
         card({ id, kind: 'tool', name: call.name, label: call.name, state: 'running', detail: null })
-        const result = await runTool({ config, board, ownerWrites, allowCapture, capture, requestedPages, agentName }, call)
+        const result = execNames.has(call.name)
+          ? await runExecTool(execHost, call, signal)
+          : await runTool({ config, board, ownerWrites, allowCapture, capture, requestedPages, agentName }, call)
         card({ id, label: result.label, state: result.ok ? 'done' : 'error', detail: result.detail })
         if (result.ok) noteRefs(call.args)
         conversation.push({ role: 'tool', toolCallId: id, content: [{ type: 'text', text: result.text }] })
@@ -347,6 +411,19 @@ export async function runTurn({
     if (item.state === 'pending') item.state = 'cancelled'
   }
   return reply
+}
+
+// One exec-mcp tool call for an endpoint backend: the host's text, as the
+// tool result (an image it returns is named, not sent).
+async function runExecTool(host, call, signal) {
+  const result = await host.call(call.name, call.args || {}, { signal })
+  const parts = Array.isArray(result?.content) ? result.content : []
+  const text = parts
+    .map((part) => (part?.type === 'text' ? String(part.text) : part?.type === 'image' ? '[An image: this model reads text only.]' : ''))
+    .filter(Boolean)
+    .join('\n')
+  const ok = !result?.isError
+  return { ok, label: call.name, text: text || (ok ? 'Done.' : 'Failed.'), detail: ok ? null : text.split('\n')[0].slice(0, 200) }
 }
 
 const count = (value) => (Number.isFinite(Number(value)) && Number(value) >= 0 ? Math.round(Number(value)) : null)

@@ -598,6 +598,9 @@ export async function createCommandSession({
   tmpParent = null,
   env = process.env,
   denyRead = [],
+  // Folders inside the root no command may write (a local board's own
+  // checkout: its .git and .shapewall stay read only).
+  denyWrite = [],
   limits = SANDBOX_LIMITS,
   log = () => {},
 }) {
@@ -671,7 +674,7 @@ export async function createCommandSession({
       ...readPaths.filter((dir) => path.isAbsolute(dir)),
     ],
     allowWrite: readOnly ? [tmp] : [real, tmp],
-    denyWrite: [],
+    denyWrite: denyWrite.filter((dir) => path.isAbsolute(dir)),
   })
   const list = () => networkList(network)
   let closed = false

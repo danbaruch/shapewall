@@ -217,6 +217,10 @@ export function createToolHost({
   denyPorts = [],
   // Tests only: more options for createAgentBrowser (a stand-in chromium, a temp root).
   browserOptions = {},
+  // async () => void, run before every call so that `recheck` reads what is
+  // true now (agent-link.js: the server's narrowing, fetched again). One that
+  // throws refuses the call (fail closed).
+  refresh = null,
   log = () => {},
 }) {
   const caps = capabilities
@@ -586,6 +590,14 @@ export function createToolHost({
       if (closed) return failure('This session has ended.')
       const tool = byName.get(String(name))
       if (!tool) return failure(`No tool "${name}" here.`)
+      if (refresh) {
+        try {
+          await refresh()
+        } catch (error) {
+          log(`exec-mcp: ${name}: refused, what this turn may do could not be checked again: ${error.message}`)
+          return failure('Not run: what this turn may do could not be checked again just now. Try again in a moment.')
+        }
+      }
       try {
         return await tool.call(args && typeof args === 'object' && !Array.isArray(args) ? args : {}, { signal })
       } catch (error) {
@@ -648,14 +660,22 @@ export async function startExecSession({
   capabilities,
   platform,
   recheck,
+  refresh = null,
   commands = [],
   readCommands,
+  // The folder commands run in (the fix copy, a throwaway copy, or a local
+  // board's own working folder). null: no commands at all, only the browser.
   root,
   expect = root,
   within = null,
   checkout = null,
+  // The checkout the agent browser reads recorded logins from (a local board
+  // works in place: no session checkout, but the browser still knows it).
+  browserCheckout = checkout,
   readOnly = false,
   readPaths = [],
+  // Folders inside `root` no command may write (a local checkout's .git and .shapewall).
+  denyWrite = [],
   network = 'none',
   approvals = null,
   scope = '',
@@ -664,56 +684,128 @@ export async function startExecSession({
   onChanged,
   // Loopback ports the agent browser never opens (Shapewall's own server port).
   denyPorts = [],
+  // false: the host only, no relay (an endpoint backend calls it in process; createThreadRelay serves it).
+  serve = true,
   env = process.env,
   log = () => {},
 }) {
   const caps = capabilities
   if (!caps || (!caps.commands.length && caps.shell.mode === 'off' && caps.browser?.on !== true)) return null
+  const wantsCommands = caps.commands.length > 0 || caps.shell.mode !== 'off'
   const mode = platform?.sandbox ? 'sandboxed' : caps.shell.mode === 'unsandboxed' ? 'host-shell' : 'host'
   // The resolver counted on the sandbox for the full shell: no sandbox, no shell.
   if (caps.shell.mode === 'sandboxed' && mode !== 'sandboxed') return null
-  let session
-  try {
-    session = await createCommandSession({ root, expect, within, checkout, network, readOnly, mode, readPaths, env, log })
-  } catch (error) {
-    log(`exec-mcp: no command session: ${error.message}`)
-    return null
+  let session = null
+  if (wantsCommands && root) {
+    try {
+      session = await createCommandSession({ root, expect, within, checkout, network, readOnly, mode, readPaths, denyWrite, env, log })
+    } catch (error) {
+      log('exec-mcp: no command session: ' + error.message)
+      // Commands were the point: without a session nothing here may run them.
+      if (caps.browser?.on !== true) return null
+    }
   }
+  const offered = session ? caps : withoutCommands(caps)
   const host = createToolHost({
-    capabilities: caps,
-    recheck,
-    commands,
-    readCommands,
+    capabilities: offered,
+    recheck: session ? recheck : () => (recheck ? withoutCommands(recheck()) : offered),
+    refresh,
+    commands: session ? commands : [],
+    readCommands: session ? readCommands : () => [],
     session,
     approvals,
     scope,
     ask,
     shellCard,
     onChanged,
-    checkout,
+    checkout: browserCheckout,
     denyPorts,
     log,
   })
-  let served
-  try {
-    served = await serveToolHost(host, { env, log })
-  } catch (error) {
-    log(`exec-mcp: the tool host did not start: ${error.message}`)
+  if (!host.tools().length) {
     await host.close()
-    session.close()
+    session?.close()
     return null
+  }
+  let served = null
+  if (serve) {
+    try {
+      served = await serveToolHost(host, { env, log })
+    } catch (error) {
+      log('exec-mcp: the tool host did not start: ' + error.message)
+      await host.close()
+      session?.close()
+      return null
+    }
   }
   let closed = false
   return {
     host,
     session,
-    servers: served.servers,
+    servers: served ? served.servers : [],
     async close() {
       if (closed) return
       closed = true
       await host.close()
-      await served.close().catch(() => {})
-      session.close()
+      await served?.close().catch(() => {})
+      session?.close()
+    },
+  }
+}
+
+// The same capabilities with every command and the shell off: what a turn
+// gets when its command session did not start, or it has no folder to run in.
+export function withoutCommands(caps) {
+  if (!caps) return caps
+  return Object.freeze({ ...caps, commands: [], shell: Object.freeze({ mode: 'off', network: 'none', exact: [] }) })
+}
+
+// One stable exec server for a chat thread whose agent session outlives a
+// turn (a local board's chat, a connected agent's chat): the agent's adapter
+// starts the relay once, with the session, and each turn puts its own tool
+// host behind it (setHost) and takes it away at the end (setHost(null)).
+// Between turns, and for a tool the current turn does not offer, a call is
+// refused. The relay lists the tools of the host it first met (an adapter
+// reads the list when the session starts).
+export async function createThreadRelay({ env = process.env, log = () => {} } = {}) {
+  let current = null
+  let first = null
+  const relayHost = {
+    tools: () => (current || first)?.tools() || [],
+    call: (name, args, options) =>
+      current ? current.call(name, args, options) : Promise.resolve(failure('No turn of yours is running on the board just now.')),
+  }
+  let served = null
+  return {
+    get servers() {
+      return served ? served.servers : []
+    },
+    // The host of this turn (null: none). The first host decides what is listed.
+    async setHost(host) {
+      current = host || null
+      if (host && !served) {
+        first = host
+        served = await serveToolHost(relayHost, { env, log })
+      }
+    },
+    current: () => current,
+    // Whether `host` offers the tools this relay listed: when not, the
+    // caller starts a new relay (and so a new agent session) for the turn.
+    matches(host) {
+      if (!first || !host) return true
+      const names = (h) =>
+        JSON.stringify(
+          h
+            .tools()
+            .map((tool) => tool.name)
+            .sort(),
+        )
+      return names(first) === names(host)
+    },
+    async close() {
+      current = null
+      await served?.close().catch(() => {})
+      served = null
     },
   }
 }

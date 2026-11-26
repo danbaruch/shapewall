@@ -154,6 +154,7 @@ export function validateAgent(raw, problems) {
 // default) or "checkout" (a local board's owner only: solo turns edit this
 // checkout in place).
 export const FIX_IN = ['copy', 'checkout']
+export const LOCAL_SESSIONS = ['restricted', 'own']
 function validateCapabilityConfig(raw, problems) {
   const out = {}
   if (raw.browser !== undefined) {
@@ -175,6 +176,16 @@ function validateCapabilityConfig(raw, problems) {
   if (raw.fixIn !== undefined) {
     if (!FIX_IN.includes(raw.fixIn)) problems.push('agent.fixIn: "copy" (a fix copy of its own) or "checkout" (this checkout, solo only)')
     else out.fixIn = raw.fixIn
+  }
+  // `agent.localSession`: "restricted" (the default since 1.4.0: a local
+  // board's Claude Code session gets read and edit tools and Shapewall's
+  // own tools, never its own shell or ~/.claude settings) or "own" (the
+  // 1.2.0 session with the agent's own full tool set; deprecated, kept for
+  // one minor).
+  if (raw.localSession !== undefined) {
+    if (!LOCAL_SESSIONS.includes(raw.localSession))
+      problems.push('agent.localSession: "restricted" (the default) or "own" (the 1.2.0 session, deprecated)')
+    else out.localSession = raw.localSession
   }
   return out
 }

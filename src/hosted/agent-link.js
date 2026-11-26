@@ -753,7 +753,11 @@ export function mountAgentLink(
         else if (reply?.token !== req.token.id) unknown = true
       }
     }
-    for (const message of rows) if (message.role === 'user' && inAudience(message.author_user_id)) users.add(message.author_user_id)
+    for (const message of rows) {
+      if (message.role === 'user' && inAudience(message.author_user_id)) users.add(message.author_user_id)
+      // Another agent's answer in the thread reaches this turn as its history: an author without a handle.
+      else if (message.role === 'assistant' && message.agent_id && message.agent_id !== req.agent.id) unknown = true
+    }
     const authors = [...users].map((user) => {
       const member = Boolean(req.t.get('SELECT 1 FROM memberships WHERE workspace_id = :ws AND user_id = :user', { user }))
       return { handle: member ? handleOf(req, user) : null, owner: member && user === req.agent.created_by, member }
@@ -761,6 +765,19 @@ export function mountAgentLink(
     if (unknown) authors.push({ handle: null, owner: false, member: false })
     return authors.length ? { authors, guests: false } : null
   }
+
+  // The project's and the board's ceiling for a running turn, as it is now:
+  // the machine asks again before each command, so a setting tightened
+  // mid-turn applies to the next command, not only the next turn.
+  router.get(
+    '/turns/:id/narrowing',
+    handle((req, res) => {
+      const row = ownTurn(req)
+      const live = liveTurn(req, row)
+      notAnothers(req, live)
+      res.json({ narrowing: narrowingOf(req.t, req.project.id, row.board_id) })
+    }),
+  )
 
   router.get(
     '/turns/:id',
@@ -794,8 +811,9 @@ export function mountAgentLink(
           agent: req.agent,
           rows,
           respond: threadRespond(thread),
-          // Who wrote the text of a fix or a comment turn (the machine works out its tier from it).
-          trust: ['fix', 'comment'].includes(row.kind) ? turnTrust(req, ctx, row, rows, inAudience) : null,
+          // Who wrote the text of the turn (the machine works out its tier from it).
+          // Chat turns too (1.4.0): a solo chat turn may run read-style commands and the browser.
+          trust: ['fix', 'comment', 'chat'].includes(row.kind) ? turnTrust(req, ctx, row, rows, inAudience) : null,
           // The project's and this board's ceiling under the machine's (agent-policy.js narrowingOf).
           narrowing: narrowingOf(req.t, req.project.id, row.board_id),
           // The same rule as sending it a comment: in its audience, and
