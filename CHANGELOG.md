@@ -88,8 +88,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
   chat) still answers every message. The agent's own machine checks the same rule again, and a thread that changes agents goes
   back to mentions only. On a local board only you chat on, nothing changes; on a board shared with `--chat`, the board chat and
   comment threads answer mentions and Send to agent only.
-- Text an agent wrote never starts an agent turn, on any path, even when it @mentions an agent or the thread answers every
-  message: `watch --mention` (local and `--remote`) and `GET /api/v1/.../comments?mention=` count only mentions people wrote, a
+- Text marked as an agent's never starts an agent turn, even when it @mentions an agent or the thread answers every
+  message (docs/agent-hardening.md lists what is marked; a header-less HTTP post from a process Shapewall did not start is not, and
+  reads as a person's): `watch --mention` (local and `--remote`) and `GET /api/v1/.../comments?mention=` count only mentions people wrote, a
   comment an agent wrote is never handed out by `watch`, a connected agent's comment pickup skips agent comments, and the starter
   agent uses the same rule. Comments made with the MCP `add_comment` tool, or with `comments add` inside an agent's run, are now
   marked `authorAgent` on local boards too.

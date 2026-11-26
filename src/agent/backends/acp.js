@@ -27,6 +27,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { createHash, randomBytes } from 'node:crypto'
 import { spawn } from 'node:child_process'
+import { agentRunEnv } from '../../agent-run.js'
 import { Readable, Writable } from 'node:stream'
 import { PROTOCOL_VERSION, RequestError, client, ndJsonStream } from '@agentclientprotocol/sdk'
 import { TERMINAL_ENV_ALLOWED, acpAgentKind, agentEnv, formatCommand, loginHint, terminalEnvRefused } from '../acp/command.js'
@@ -720,6 +721,8 @@ class AcpProcess {
       ...extraEnv,
       ...(readOnly ? readOnlyEnv(acpAgentKind(argv)) : {}),
       ...(readOnly || remoteEdit ? connectedEnv(acpAgentKind(argv)) : {}),
+      // The agent and every command it runs are an agent's (src/agent-run.js).
+      ...agentRunEnv(),
     }
     this.root = sandbox.root
     this.state = 'starting'

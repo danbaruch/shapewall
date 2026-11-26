@@ -6,6 +6,7 @@ import { createMcpServer } from '../mcp.js'
 import { SETTINGS_FILE_VAR, savedAgentName } from './user-settings.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { processStartTime } from '../lock.js'
+import { agentRunEnvEntries } from '../agent-run.js'
 
 // The Shapewall server that runs this agent (pid:start). While that server
 // runs a fix on a comment it holds the comment's claim, and the turn's end
@@ -42,6 +43,7 @@ export function ownerMcpServers(config, boardId, { allowCapture = true, agent = 
       env: [
         ...(settingsFile ? [{ name: SETTINGS_FILE_VAR, value: settingsFile }] : []),
         { name: SERVER_HOLDER_VAR, value: process.pid + ':' + (processStartTime(process.pid) ?? '') },
+        ...agentRunEnvEntries(),
       ],
     },
   ]

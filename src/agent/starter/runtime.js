@@ -20,6 +20,7 @@
 
 import { spawn } from 'node:child_process'
 import { findProgram } from '../../watch.js'
+import { agentRunEnv } from '../../agent-run.js'
 import { PROXY_PORT, formatAllowEntry } from './egress-proxy.js'
 
 export const RUNTIMES = ['podman', 'docker']
@@ -163,6 +164,8 @@ export function agentEnv(runId) {
     npm_config_update_notifier: 'false',
     PLAYWRIGHT_BROWSERS_PATH: '/ms-playwright',
     SHAPEWALL_SANDBOX: '1',
+    // What the agent writes is an agent's (src/agent-run.js).
+    ...agentRunEnv(),
   }
 }
 

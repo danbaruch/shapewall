@@ -95,9 +95,8 @@ export function localUserName(dir, env = process.env, { userInfo = os.userInfo }
   return clean(env[USER_NAME_VAR]) || gitUserName(dir, env) || osUserName({ userInfo })
 }
 
-// A process an agent runs in: the command `shapewall watch --exec` starts
-// (SHAPEWALL_COMMENT_ID) or the board's own agent (SHAPEWALL_SERVER_HOLDER).
-// What it writes from the command line is signed "agent", not as the person
-// at the machine, so the starter agent never takes an agent's text for a
-// person's (docs/starter-agent.md).
-export const runByAgent = (env = process.env) => Boolean(env.SHAPEWALL_COMMENT_ID || env.SHAPEWALL_SERVER_HOLDER)
+// A process an agent runs in (src/agent-run.js): what it writes from the
+// command line is signed "agent", not as the person at the machine, so the
+// starter agent never takes an agent's text for a person's
+// (docs/starter-agent.md).
+export { runByAgent } from '../agent-run.js'

@@ -151,6 +151,8 @@ export async function watchRemote({
         env: {
           ...childEnv,
           SHAPEWALL_COMMENT_ID: String(item.id),
+          // An agent's process (src/agent-run.js).
+          SHAPEWALL_AGENT_RUN: '1',
           SHAPEWALL_BOARD: boardId,
           SHAPEWALL_PAGE_ID: item.page?.id || item.variant?.pageId || '',
           SHAPEWALL_VARIANT_ID: item.variant?.id || '',

@@ -7,6 +7,7 @@ import { findConfigFile, getBoard, loadConfig } from '../config.js'
 import { formatJourneys, listJourneys } from '../journeys.js'
 import { openBrowser } from './open.js'
 import { withNotifications } from './notify.js'
+import { agentRunEnv } from '../agent-run.js'
 
 export async function buzzBridge(flags, out) {
   if (typeof flags['bridge-config'] !== 'string') throw new Error('Use --bridge-config FILE for the private operator map.')
@@ -80,6 +81,9 @@ export async function events(flags, out, err) {
 }
 
 export async function mcp(flags, err) {
+  // An MCP server runs for an agent: it and what it starts are an agent's
+  // process (src/agent-run.js), whichever app started it.
+  Object.assign(process.env, agentRunEnv())
   if (flags.remote !== undefined) {
     const { createRemote, remoteSettings } = await import('../remote/remote.js')
     const { runRemoteMcp } = await import('../remote/remote-mcp.js')

@@ -103,6 +103,8 @@ export function commentEnv(config, board, item, commentFile) {
     // this header, and what it writes is marked as an agent's, so it never
     // wakes an agent (src/agent/triggers.js). `comments add` marks it anyway.
     SHAPEWALL_AGENT_HEADER: AGENT_HEADER + ': 1',
+    // The agent mark `comments add` reads (src/agent-run.js).
+    SHAPEWALL_AGENT_RUN: '1',
     SHAPEWALL_BOARD: board.id,
     SHAPEWALL_PAGE_ID: item.page?.id || item.variant?.pageId || '',
     SHAPEWALL_VARIANT_ID: item.variant?.id || '',

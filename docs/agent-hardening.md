@@ -78,8 +78,11 @@ Guests see agents only as "Agent", without agent status, resolution notes, fix r
 
 ### Agent text never wakes an agent
 
-A reply, comment or chat message an agent wrote never starts an agent turn, on any path: `watch --mention`, hosted chat, comment
-pickup by a connected agent, and the starter agent. An @mention inside agent text does not count either. A shared chat thread
+A reply, comment or chat message marked as an agent's never starts an agent turn: `watch --mention`, hosted chat, comment pickup
+by a connected agent, and the starter agent all skip it, and an @mention inside it does not count either. What is marked: on a
+hosted board, everything written with a token or by a connected agent; on a local board, what the MCP tools write, `watch`'s own
+notes, a post with the `X-Shapewall-Agent: 1` header, and `shapewall comments add` run inside a process Shapewall started for an
+agent (below). Text that carries no mark reads as a person's. A shared chat thread
 answers only an @mention or Send to agent unless its agent's connector opts in to every message, and the agent's machine can refuse
 that opt-in (`agent connect --respond mention`). This stops two agents, or an agent and a prompt-injected page, from keeping each
 other busy.
@@ -90,9 +93,20 @@ message is not the one named as the question, and a thread set to answer every m
 `--respond mention`. It cannot check that a person really pressed Send to agent (`trigger.ask`): a compromised server can always
 ask. Its guarantee is the loop breaker and its own `--respond` ceiling, not the server's honesty.
 
-On a local board, an agent's command that posts through the board's HTTP API itself (with `curl`, say) should send the header in
-`SHAPEWALL_AGENT_HEADER` (`X-Shapewall-Agent: 1`, given to every `watch --exec` command), so what it writes is marked as an agent's.
-`comments add` and the MCP tools mark it anyway. A plain HTTP post without the header cannot be told apart from a person's.
+Every agent process Shapewall starts gets `SHAPEWALL_AGENT_RUN=1` and `SHAPEWALL_AGENT_HEADER` (`X-Shapewall-Agent: 1`) in its
+environment, and so does every command it runs: ACP sessions (chat and fixes), the starter agent, `watch --exec` commands, and
+`shapewall mcp` (so also the plugin's launcher and the entries `shapewall agent setup` writes). Inside such a process,
+`shapewall comments add` signs "agent" and stores the comment as an agent's, never with the owner's stamp (`byOwner`), and an agent
+that posts through the local board's HTTP API itself (with `curl`, say) is told to send the header, which the server reads the same
+way. The MCP tools mark what they write anyway.
+
+What this does not cover: a process Shapewall did not start (an agent app you opened yourself whose shell has no mark, a script),
+and an agent that drops the mark from its own command. A header-less HTTP post from such a process cannot be told apart from yours,
+and its `comments add` gets your stamp. The mark keeps an honest agent's text from passing as yours; it is not a boundary against
+an agent that hides it.
+
+The owner's stamp comes from the comment store on this machine (`.shapewall/` in the project). A store committed to the repository
+you cloned carries whatever stamps its author put there, so on a board you did not make, "me" is only as good as that store.
 
 ### Chat is off on shared boards
 
