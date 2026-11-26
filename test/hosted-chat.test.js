@@ -277,7 +277,7 @@ test('read and answer only: the machine refuses writes, commands and permission 
   assert.deepEqual(caps, { fs: { readTextFile: true, writeTextFile: false }, terminal: false })
   // Its environment has no Shapewall token or setting.
   const names = JSON.parse((await chat(ada, chatUrl(thread, '/messages'), 'env')).final.text)
-  assert.ok(!names.some((name) => /^SHAPEWALL_/.test(name)))
+  assert.deepEqual(names.filter((name) => /^SHAPEWALL_/.test(name)).sort(), ['SHAPEWALL_AGENT_HEADER', 'SHAPEWALL_AGENT_RUN'])
   // A fix from a chat is refused with words, not attempted: a fix starts from a comment
   // (and from an agent whose machine takes edits: test/hosted-fix.test.js).
   const fix = await chat(ada, chatUrl(thread, '/messages'), { ask: true, text: 'x', fix: true })

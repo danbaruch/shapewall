@@ -509,7 +509,8 @@ test('env: the agent gets PATH and HOME, not Shapewall or other tools secrets', 
   const names = JSON.parse((await send(plain, 'board', 'env')).done.text)
   assert.ok(names.includes('PATH') && names.includes('HOME'))
   for (const secret of Object.keys(SECRETS)) assert.ok(!names.includes(secret), secret)
-  assert.ok(!names.some((name) => name.startsWith('SHAPEWALL_')))
+  // Only the agent mark (src/agent-run.js): no Shapewall token or setting.
+  assert.deepEqual(names.filter((name) => name.startsWith('SHAPEWALL_')).sort(), ['SHAPEWALL_AGENT_HEADER', 'SHAPEWALL_AGENT_RUN'])
 
   const named = await board('acp-env-named', { env: { SHAPEWALL_AGENT_ACP_ENV: 'OPENAI_API_KEY,GITHUB_TOKEN' } })
   const passed = JSON.parse((await send(named, 'board', 'env')).done.text)
