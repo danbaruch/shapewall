@@ -577,7 +577,7 @@ export function createHostedApp({
     chat,
   })
   // The token API first: it never falls through to the cookie-based console API.
-  mountMcpHttp(app, { tokenAuth, origin: publicOrigin, dataDir, db, cleaner })
+  mountMcpHttp(app, { tokenAuth, origin: publicOrigin, dataDir, db, cleaner, now: () => now().getTime() })
   app.use('/api/v1', v1)
   app.use('/api', consoleApi)
 

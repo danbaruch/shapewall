@@ -95,7 +95,7 @@ export function hostedCompare(cleaner = null, { globalMax = 1, workspaceMax = 1 
   }
 }
 
-export function mountMcpHttp(app, { tokenAuth, origin, cleaner = null }) {
+export function mountMcpHttp(app, { tokenAuth, origin, cleaner = null, now = () => Date.now() }) {
   const compareFor = hostedCompare(cleaner)
   const router = express.Router()
   router.use((req, res, next) => {
@@ -140,6 +140,8 @@ export function mountMcpHttp(app, { tokenAuth, origin, cleaner = null }) {
       server = await createRemoteMcpServer({
         remote,
         hostedEndpoint: true,
+        // "today" on this server's clock.
+        now,
         compare: compareFor({ tokenId: req.token.id, workspaceId: req.t?.workspaceId ?? null }),
       })
       transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true })
