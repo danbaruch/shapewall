@@ -440,6 +440,8 @@ test('IC2: a branch-mode command runs in its worktree and writes only there', po
   const result = await tools.exec.host.call('run_named_command', { name: 'write' })
   const text = JSON.stringify(result)
   assert.equal(fs.readFileSync(path.join(tree, 'made.txt'), 'utf8'), fs.realpathSync(tree), text)
+  // Without the OS sandbox a named command is the owner's own command on the host: only the cwd is checked.
+  if (!probeSandbox().available) return
   // Outside the worktree a write lands nowhere on this machine (the sandbox's view of the home folder is its own).
   assert.equal(fs.existsSync(path.join(other, 'made.txt')), false)
   assert.equal(fs.readFileSync(path.join(worktrees, '20261126000001-fedcba.json'), 'utf8'), '{"id":"x"}\n')
