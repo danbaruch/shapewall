@@ -151,7 +151,7 @@ export function cleanJob(raw) {
 // What the agent is asked for a comment that was sent to it. This text is
 // this machine's own: the server's stand-in message is never used.
 export const COMMENT_PROMPT =
-  'A person on the board sent you the comment quoted in the board context above. Read it, and the code it is about, then answer in a few short paragraphs: what the comment asks for, where in the project the change belongs (file and line when you can tell), and exactly what to change. You cannot change files or run commands from here, so do not try; end with one line saying the change still has to be made by a person or by an agent that can edit. Your answer is posted as a reply on the comment.'
+  'A person on the board sent you the comment quoted in the board context above. Read it, and the code it is about, then answer in a few short paragraphs: what the comment asks for, where in the project the change belongs (file and line when you can tell), and exactly what to change. You cannot change files from here, so do not try (any command or browser this turn may use is in the capabilities block); end with one line saying the change still has to be made by a person or by an agent that can edit. Your answer is posted as a reply on the comment.'
 
 // What the agent is asked for "Fix with <agent>". Again this machine's own words.
 export const FIX_PROMPT =

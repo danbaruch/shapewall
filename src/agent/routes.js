@@ -723,6 +723,70 @@ export function agentRouter({
     for (const entry of backends.values()) entry.backend?.resetThread?.(key)
     closeRelay(key)
   }
+  // What a local turn may do (capabilities.js) and the tool host that holds
+  // it to that (local-tools.js), behind the thread's relay for an ACP agent.
+  // The composer's prepare starts the session the same way, so that the
+  // first turn finds it with the same tools and keeps it.
+  // -> { tools, relay, mcpServers } (tools null: none)
+  const turnTools = async ({ req, board, threadId, backend, ownerWrites, root, inPlace, ask }) => {
+    const key = [board.id, threadId].join('/')
+    const commentId = commentIdOf(threadId)
+    let tools = null
+    try {
+      const kind = threadKind(threadId)
+      tools = await startLocalTools({
+        config,
+        env,
+        acp: backend.id === 'acp',
+        owner: localOwnerOnly({
+          ownerWrites,
+          kind,
+          thread: readThread(config, board.id, threadId),
+          comment: kind === 'comment' && commentId ? getComment(config, board.id, commentId) : null,
+          ownerGate,
+          accounts: Boolean(accountUser),
+          acp: backend.id === 'acp',
+        }),
+        shared,
+        comment: kind !== 'chat',
+        root,
+        inPlace,
+        ask,
+        denyPorts: [ownPort(req)].filter(Boolean),
+        serve: false,
+        log,
+      })
+    } catch (error) {
+      log(`agent tools: ${error.message}`)
+      tools = null
+    }
+    let relay = null
+    let mcpServers = null
+    if (tools?.exec && backend.id === 'acp') {
+      relay = relays.get(key)
+      if (relay && !relay.matches(tools.exec.host)) {
+        await closeRelay(key)
+        relay = null
+      }
+      if (!relay) {
+        relay = await createThreadRelay({ env, log })
+        relays.set(key, relay)
+      }
+      try {
+        await relay.setHost(tools.exec.host)
+        mcpServers = relay.servers
+      } catch (error) {
+        log(`agent tools: ${error.message}`)
+        await closeRelay(key)
+        relay = null
+      }
+    }
+    return { tools, relay, mcpServers }
+  }
+  const endTurnTools = async (key, { tools, relay }) => {
+    if (relay && relays.get(key) === relay) await relay.setHost(null).catch(() => {})
+    await tools?.exec?.close().catch((error) => log(`agent tools: ${error.message}`))
+  }
   // This server's own port: the agent browser never opens it.
   const ownPort = (req) => {
     const port =
@@ -1138,56 +1202,16 @@ export function agentRouter({
         const key = [board.id, threadId].join('/')
         const cards = {}
         res.locals.run.cards = cards
-        let tools = null
-        try {
-          const kind = threadKind(threadId)
-          tools = await startLocalTools({
-            config,
-            env,
-            acp: backend.id === 'acp',
-            owner: localOwnerOnly({
-              ownerWrites,
-              kind,
-              thread: readThread(config, board.id, threadId),
-              comment: kind === 'comment' && commentId ? getComment(config, board.id, commentId) : null,
-              ownerGate,
-              accounts: Boolean(accountUser),
-              acp: backend.id === 'acp',
-            }),
-            shared,
-            comment: kind !== 'chat',
-            root: work ? work.root : config.dir,
-            inPlace: !work,
-            ask: (card) => (cards.ask ? cards.ask(card) : Promise.resolve('cancelled')),
-            denyPorts: [ownPort(req)].filter(Boolean),
-            serve: false,
-            log,
-          })
-        } catch (error) {
-          log(`agent tools: ${error.message}`)
-          tools = null
-        }
-        let relay = null
-        let mcpServers = null
-        if (tools?.exec && backend.id === 'acp') {
-          relay = relays.get(key)
-          if (relay && !relay.matches(tools.exec.host)) {
-            await closeRelay(key)
-            relay = null
-          }
-          if (!relay) {
-            relay = await createThreadRelay({ env, log })
-            relays.set(key, relay)
-          }
-          try {
-            await relay.setHost(tools.exec.host)
-            mcpServers = relay.servers
-          } catch (error) {
-            log(`agent tools: ${error.message}`)
-            await closeRelay(key)
-            relay = null
-          }
-        }
+        const { tools, relay, mcpServers } = await turnTools({
+          req,
+          board,
+          threadId,
+          backend,
+          ownerWrites,
+          root: work ? work.root : config.dir,
+          inPlace: !work,
+          ask: (card) => (cards.ask ? cards.ask(card) : Promise.resolve('cancelled')),
+        })
         let reply
         try {
           reply = await runTurn({
@@ -1214,13 +1238,13 @@ export function agentRouter({
             workdir: work ? worktreeWorkdir(work) : null,
             agentName: current.label || null,
             capabilities: tools?.prompt || '',
+            quoteOthers: !tools || tools.caps.tier === 'open',
             mcpServers,
             execHost: backend.id === 'acp' ? null : tools?.exec?.host || null,
             cards,
           })
         } finally {
-          if (relay && relays.get(key) === relay) await relay.setHost(null).catch(() => {})
-          await tools?.exec?.close().catch((error) => log(`agent tools: ${error.message}`))
+          await endTurnTools(key, { tools, relay })
         }
         health.record(current, reply)
         // What the profile offers, as this turn's session saw it; a turn that
@@ -1862,7 +1886,17 @@ export function agentRouter({
       if (!release) return res.json({ options: null })
       try {
         if (runs.has(key) || selecting.has(key)) return res.json({ options: backend.sessionOptions(key) })
-        const options = await backend.prepare(key, { choices, signal: admission.signal })
+        // The session the first turn would start: with the tools it would have.
+        const branchOn = branchModeSettings(config, env).enabled
+        const prepared = branchOn
+          ? { tools: null, relay: null, mcpServers: null }
+          : await turnTools({ req, board, threadId, backend, ownerWrites: true, root: config.dir, inPlace: true, ask: null })
+        let options
+        try {
+          options = await backend.prepare(key, { choices, signal: admission.signal, mcpServers: prepared.mcpServers })
+        } finally {
+          await endTurnTools(key, prepared)
+        }
         ownerThreads.add(key)
         if (readThread(config, board.id, threadId).messages.length) await markThreadOwnerControls(config, board.id, threadId)
         rememberSession(current, backend, key)

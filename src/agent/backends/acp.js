@@ -2300,10 +2300,10 @@ export function createAcpBackend(
     // or the one already running. Never evicts another thread's session; an
     // unused one stops after `idleMs` like any idle session. `choices` are
     // applied to it as they would be before a turn.
-    async prepare(thread, { choices = null, signal = null } = {}) {
+    async prepare(thread, { choices = null, signal = null, mcpServers = null } = {}) {
       if (closed) throw new AgentError('agent_start', 'The server is stopping.')
       return onThread(thread, async () => {
-        const agent = await sessionFor(thread, signal, { evict: false })
+        const agent = await sessionFor(thread, signal, { evict: false, mcpServers })
         if (!agent.turn) await agent.applyChoices(choices)
         return agent.options()
       })

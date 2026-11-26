@@ -52,6 +52,7 @@ import { FixRefusal, dropFixFolder, dropHeld, finishFix, heldDiff, heldSummary, 
 import { JobError, TURN_ID_RE, cleanJob, jobConversation } from './agent-job.js'
 import { RemoteError, badTokenMessage, readBounded } from './remote.js'
 import { ID_RE } from '../config.js'
+import { COMMENT_BODY_MAX } from '../store.js'
 
 export const LINK_DEFAULTS = {
   // The server sends a keepalive every 15 seconds: quiet for this long
@@ -1018,7 +1019,9 @@ export async function runAgentLink({
     } else if (!ok)
       lines.push('I could not answer this comment from here. It needs a person, or an agent that can edit (shapewall watch --exec).')
     try {
-      await remote.reply(board, comment, { body: lines.join('\n\n').slice(0, 9000) })
+      // A reply is a comment body: the server takes COMMENT_BODY_MAX characters, no more.
+      const body = lines.join('\n\n')
+      await remote.reply(board, comment, { body: body.length > COMMENT_BODY_MAX ? body.slice(0, COMMENT_BODY_MAX - 3) + '...' : body })
       // Where a fixed comment stands is the server's to write, with the turn (a late
       // write from here could land on the next fix). A comment this agent answered:
       // only while it still holds it.
