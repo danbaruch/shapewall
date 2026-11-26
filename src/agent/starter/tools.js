@@ -456,8 +456,11 @@ export function createTools({
       else {
         try {
           server.token = browser.registerSpawned(port)
-          await browser.allowSessionOrigin(server.token)
-          browserText = ` Your browser tools can open http://127.0.0.1:${port}.`
+          if (await browser.allowSessionOrigin(server.token)) browserText = ` Your browser tools can open http://127.0.0.1:${port}.`
+          else {
+            server.token = null
+            browserText = ' Your browser tools do not get it: its port was refused or let go meanwhile.'
+          }
         } catch (error) {
           server.token = null
           browserText = ` Your browser tools do not get it: ${error.message}`

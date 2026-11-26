@@ -33,7 +33,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { splitCommand } from '../watch.js'
 import { probeSandbox } from './sandbox-exec.js'
-import { addressKind, localName } from './browser-egress.js'
+import { addressKind, isOwnAddress, localName, ownAddresses } from './browser-egress.js'
 
 // Narrowest first.
 export const TIERS = ['open', 'team', 'solo']
@@ -627,10 +627,13 @@ export function namedCommands(config) {
 // An origin on this machine: a loopback or unspecified address in any
 // spelling the URL parser keeps (127.0.0.0/8, [::1], 0.0.0.0, [::],
 // IPv4-mapped ::ffff:127.x, NAT64 and compatible forms: addressKind in
-// src/agent/browser-egress.js), localhost and *.localhost, or a local name
+// src/agent/browser-egress.js), one of this machine's own interface
+// addresses (its LAN and tailnet ones, in any of those spellings too: a
+// server here answers on them), localhost and *.localhost, or a local name
 // (.test, .local, .internal, .lan, .home.arpa) that /etc/hosts or the local
 // network may point at this machine (pinHost lets such names resolve inside).
-export function localOrigin(origin) {
+// `own`: this machine's addresses (tests pass their own).
+export function localOrigin(origin, own = ownAddresses()) {
   let host
   try {
     host = new URL(origin).hostname.toLowerCase()
@@ -638,8 +641,21 @@ export function localOrigin(origin) {
     return false
   }
   host = host.replace(/^\[|\]$/g, '').replace(/\.$/, '')
-  if (net.isIP(host)) return ['loopback', 'unspecified'].includes(addressKind(host))
+  if (net.isIP(host)) return ['loopback', 'unspecified'].includes(addressKind(host)) || isOwnAddress(host, own)
   return localName(host)
+}
+
+// An origin at a private address (RFC 1918, CGNAT 100.64/10 such as a
+// tailnet, IPv6 ULA): another machine on this one's own networks.
+export function privateOrigin(origin) {
+  let host
+  try {
+    host = new URL(origin).hostname.toLowerCase()
+  } catch {
+    return false
+  }
+  host = host.replace(/^\[|\]$/g, '')
+  return Boolean(net.isIP(host)) && addressKind(host) === 'private'
 }
 
 // The app's own addresses in the config: every baseUrl and publicUrl at the
@@ -835,9 +851,15 @@ function resolveForTier(tier, { path: where, machine, server, config, platform, 
     // owner's own (solo, no login) it counts only where the machine lists
     // that exact origin too (PR #37 review). Not for the starter agent: its
     // loopback is its container's.
-    const withheld =
-      ownersOwn || starter ? [] : uniq([...configOrigins(config), ...given]).filter((origin) => localOrigin(origin) && !listed(origin))
-    if (withheld.length) off('browser', 'loopback_not_listed')
+    // On an open turn the same goes for a private address (another machine
+    // on this one's LAN or tailnet): someone outside the trusted list steers
+    // what the browser opens there.
+    const named = ownersOwn || starter ? [] : uniq([...configOrigins(config), ...given]).filter((origin) => !listed(origin))
+    const local = named.filter((origin) => localOrigin(origin))
+    const lan = tier === 'open' ? named.filter((origin) => !local.includes(origin) && privateOrigin(origin)) : []
+    const withheld = [...local, ...lan]
+    if (local.length) off('browser', 'loopback_not_listed')
+    if (lan.length) off('browser', 'private_not_listed')
     // Chromium's own sandbox may be skipped where it cannot start only when
     // the machine says so (browserNoSandbox), and only while the browser is
     // on for a solo or team turn: on an open turn someone outside the

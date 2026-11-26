@@ -27,7 +27,7 @@ import { createApprovalStore } from './command-approvals.js'
 import { toPrompt } from './capability-render.js'
 import { startExecSession } from './exec-mcp.js'
 import { localMachinePolicy, userAgentEntry } from './user-settings.js'
-import { loadConfig } from '../config.js'
+import { authFiles, loadConfig } from '../config.js'
 
 let platformOnce = null
 // One sandbox probe per process: every turn and the capability card read the same answer.
@@ -43,6 +43,48 @@ export function localTrust({ owner, shared = false, comment = false }) {
 
 // The folder a local approval record lives in: the board's project, never the server.
 export const localApprovalsDir = (config) => path.join(config.outputDir, 'agent', 'approvals')
+
+// The paths in `root` no command may read: Shapewall's own folder and every
+// login file the config records (auth.storageState, auth.loginScript, at the
+// top and per board), wherever in the folder they are (PR #39 review). A
+// login file of the checkout is found in `root` too when root is a copy or
+// worktree of it (the same path relative to config.dir). Only paths that
+// exist and are inside root (the sandbox denies the rest of the home folder
+// anyway).
+export function commandReadDenied(config, root) {
+  if (!root || !config) return []
+  let real
+  try {
+    real = fs.realpathSync(root)
+  } catch {
+    return []
+  }
+  const inside = (file) => {
+    const rel = path.relative(real, file)
+    return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
+  }
+  const out = new Set()
+  const add = (file) => {
+    if (!file) return
+    let resolved
+    try {
+      resolved = fs.realpathSync(file)
+    } catch {
+      return
+    }
+    if (inside(resolved) && resolved !== real) out.add(resolved)
+  }
+  if (config.outputDir) add(path.resolve(config.outputDir))
+  for (const file of authFiles(config)) {
+    const absolute = path.resolve(config.dir || real, file)
+    add(absolute)
+    if (config.dir) {
+      const rel = path.relative(path.resolve(config.dir), absolute)
+      if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) add(path.join(real, rel))
+    }
+  }
+  return [...out]
+}
 
 // resolveCapabilities for one local turn. `inPlace`: edits land in the
 // checkout (not branch mode), which is what the agent's Edit tools do.
@@ -114,8 +156,9 @@ export async function startLocalTools({
     checkout: null,
     readOnly: !caps.edit.on,
     denyWrite,
-    // Shapewall's own folder holds the logins captures record: no command reads it.
-    denyRead: real && fs.existsSync(config.outputDir) ? [path.resolve(config.outputDir)] : [],
+    // Shapewall's own folder and the login files the config names hold the
+    // logins captures record: no command reads them.
+    denyRead: commandReadDenied(config, real),
     network: caps.shell.mode !== 'off' ? caps.shell.network : 'none',
     approvals: createApprovalStore(localApprovalsDir(config)),
     scope: JSON.stringify(['local', config.dir]),

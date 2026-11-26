@@ -87,7 +87,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
   counted in the board context, not quoted.
 - A comment picked up by a connected agent without a narrowing from the server is open with no commands, and a running turn asks
   the server for its narrowing again before each command (at most every 5 seconds): a project or board tightened mid-turn applies
-  to the next command, and a turn never widens.
+  to the commands after it, up to 5 seconds late, and a turn never widens.
 - Command cards are allowed in a connected agent's chat and comment turns too (read-style commands only), still never where the
   project or board took commands away.
 
@@ -125,6 +125,18 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - A connected agent's reply on a long comment answer is cut to the comment limit instead of failing to post.
+- A command started through a chat thread's tool relay stops when its turn ends; before, it could keep running (and writing)
+  after the turn.
+- The agent browser checks again before every step and every start: a browser turned off mid-turn is closed, and a tier or
+  `browserNoSandbox` change takes effect at the next start.
+- This machine's own LAN and tailnet addresses count as "on this machine" for the browser's held-back config origins and for its
+  denied ports; on open turns, private and tailnet addresses the config names open only where the machine lists them.
+- Two `start_dev_server` calls at once can no longer both start a server past the limit (and leave one running after the turn).
+- A dev server's port let go while the browser started is never let in again.
+- Commands cannot read the login files the config records (`auth.storageState`, `auth.loginScript`) anywhere in the folder they
+  run in, not only in `.shapewall`.
+- An exact command or a shell command allowed on a card is checked again after the answer, and a local card's answer counts only
+  while what it asked is still allowed.
 
 ## 1.3.0 - 2026-11-25
 

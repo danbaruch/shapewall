@@ -46,6 +46,7 @@ import {
 } from '../agent/capabilities.js'
 import { approvalsDir, createApprovalStore } from '../agent/command-approvals.js'
 import { createThreadRelay, startExecSession } from '../agent/exec-mcp.js'
+import { commandReadDenied } from '../agent/local-tools.js'
 import { loadConfig } from '../config.js'
 import { capabilitySummary, toPrompt } from '../agent/capability-render.js'
 import { FixRefusal, dropFixFolder, dropHeld, finishFix, heldDiff, heldSummary, prepareFix, pushFix, readHeld } from './agent-fix.js'
@@ -811,7 +812,7 @@ export async function runAgentLink({
               checkout: null,
               browserCheckout: answerConfig.dir,
               readOnly: true,
-              denyRead: answerConfig.outputDir && fs.existsSync(answerConfig.outputDir) ? [path.resolve(answerConfig.outputDir)] : [],
+              denyRead: commandReadDenied(answerConfig, answerConfig.dir),
               network: 'none',
               approvals: createApprovalStore(approvalsDir(agent?.id, answerEnv)),
               scope: JSON.stringify([origin, agent?.workspace?.id, agent?.project?.id, agent?.id, answerConfig.dir]),

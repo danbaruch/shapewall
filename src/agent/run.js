@@ -217,7 +217,9 @@ export async function runTurn({
   // 'expired' after `ms`, 'cancelled' when the turn stops.
   if (cards) {
     cards.pending ||= new Map()
-    cards.ask = ({ label, detail }, ms = 2 * 60 * 1000) =>
+    // `recheck`: () => whether what the card asks is still allowed now; an
+    // "Allow" given when it no longer is counts as no answer (cancelled).
+    cards.ask = ({ label, detail, recheck = null }, ms = 2 * 60 * 1000) =>
       new Promise((resolve) => {
         if (signal.aborted) return resolve('cancelled')
         const id = newId('perm')
@@ -236,8 +238,18 @@ export async function runTurn({
           answeredBy: null,
           expiresAt: new Date(Date.now() + ms).toISOString(),
         }
-        const settle = (state, answeredBy = null) => {
+        const settle = (answer, answeredBy = null) => {
           if (!cards.pending.has(id)) return false
+          let state = answer
+          if (state === 'approved' && typeof recheck === 'function') {
+            let still = false
+            try {
+              still = recheck() === true
+            } catch {
+              still = false
+            }
+            if (!still) state = 'cancelled'
+          }
           cards.pending.delete(id)
           clearTimeout(timer)
           signal.removeEventListener('abort', onAbort)

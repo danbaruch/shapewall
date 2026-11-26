@@ -91,6 +91,12 @@ const REASONS = {
       'add it to the origins this machine already allows',
     set: (caps) => ['browser-allow', caps.browser.withheld?.length ? caps.browser.withheld.join(',') : 'ORIGIN'],
   },
+  private_not_listed: {
+    text:
+      "on open turns an address on this machine's networks that the committed config names (a LAN or tailnet address) opens only where this machine lists that exact origin too; " +
+      'add it to the origins this machine already allows',
+    set: (caps) => ['browser-allow', caps.browser.withheld?.length ? caps.browser.withheld.join(',') : 'ORIGIN'],
+  },
   open_tier_browser_sandbox: { text: "on open turns the browser never starts without Chromium's own sandbox" },
   never_real_chrome: { text: 'never: an agent only gets a throwaway browser of its own' },
   path_no_extensions: { text: 'not on this path' },
@@ -166,7 +172,7 @@ function lineFor(caps, id) {
       text = caps.browser.on
         ? `A throwaway headless browser limited to ${caps.browser.allow.length ? list(caps.browser.allow) : "the app's own addresses"}${caps.browser.auth ? `, logged in as "${caps.browser.auth}"` : ''}${caps.browser.profile ? ', with its own saved profile' : ''}.` +
           (caps.browser.withheld?.length
-            ? ` Not ${list(caps.browser.withheld)}: an address on this machine from the config, which this machine does not list for this tier.`
+            ? ` Not ${list(caps.browser.withheld)}: an address on this machine from the config${caps.tier === 'open' ? ' (or on its networks)' : ''}, which this machine does not list for this tier.`
             : '') +
           (caps.browser.allowNoSandbox
             ? " Where Chromium's own sandbox cannot start on this machine, it starts without it (the owner chose browser-no-sandbox); pages then run with less isolation."

@@ -495,7 +495,8 @@ shell, no push. The console card, `agent status` and what `agent connect` prints
 **The machine sets the ceiling, the server can only lower it.** A project's agent policy on the server (Workspace Console, Agent
 policy) can set `maxTier` (`"solo"`, `"team"` or `"open"`), `shell: false` and `browser: false`, for the project and per board; a
 board's own setting can only narrow the project's. The server sends this at hello and again with every turn, and the machine applies
-the narrower of the two. Nothing the server sends can add a capability: a test feeds the resolver random server input and checks
+the narrower of the two. A turn that is already running asks again before each command or browser step, at most every 5 seconds,
+so a narrowing made mid-turn can reach it up to 5 seconds late. Nothing the server sends can add a capability: a test feeds the resolver random server input and checks
 that every line stays at or below what it was without it.
 
 **The machine's keys** (`agent-policy.json` version 2, beside the version 1 keys above; the same keys go in a project's `capabilities`

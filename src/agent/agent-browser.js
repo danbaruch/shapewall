@@ -73,7 +73,16 @@ import { cleanBrowserProfile, cleanOrigin } from './capabilities.js'
 import { processStartTime } from '../lock.js'
 import { fitPng } from '../png.js'
 import { quoteData } from './context.js'
-import { addressKind, bridgeIntoNamespace, hostPort, pinHost, startEgressProxy, upstreamDialer } from './browser-egress.js'
+import {
+  addressKind,
+  bridgeIntoNamespace,
+  hostPort,
+  isOwnAddress,
+  ownAddresses,
+  pinHost,
+  startEgressProxy,
+  upstreamDialer,
+} from './browser-egress.js'
 import {
   acquireSandbox,
   bridgeSockets,
@@ -410,6 +419,9 @@ export function browserSandboxPlan({
 // dispose() ends it for good, at the end of the task.
 export function createAgentBrowser({
   browser,
+  // () => the turn's Browser line as it is now, or null when the browser is
+  // off now: asked before every (re)launch (exec-mcp.js browserFamily).
+  recheck = null,
   checkout = null,
   tmpRoot = null,
   chromium = null,
@@ -422,6 +434,8 @@ export function createAgentBrowser({
   env = process.env,
   osSandbox = 'auto',
   sandboxPlan = browserSandboxPlan,
+  // Tests only: this machine's own addresses (browser-egress.js ownAddresses).
+  interfaces = undefined,
 } = {}) {
   if (!browser || browser.on !== true) throw new Error('The browser is off for this turn.')
   if (browser.realChrome) throw new Error('An agent never gets your own Chrome.')
@@ -469,7 +483,10 @@ export function createAgentBrowser({
     if (list.length > LOG_MAX) list.splice(0, list.length - LOG_MAX)
   }
   const block = (url, by) => record(blocked, { url: clip(url, 300), by, at: new Date().toISOString() })
-  const deniedPort = (address, port) => addressKind(address) === 'loopback' && denied.has(port)
+  // A denied port on this machine: on loopback, and on its own LAN and
+  // tailnet addresses too (a server there answers on all of them).
+  const own = ownAddresses(interfaces)
+  const deniedPort = (address, port) => (addressKind(address) === 'loopback' || isOwnAddress(address, own)) && denied.has(port)
 
   async function allowOrigin(origin) {
     const { host, port, protocol } = hostPort(origin)
@@ -663,7 +680,22 @@ export function createAgentBrowser({
     }
   }
 
+  // The Browser line as it is now, before a launch: off now, no launch.
+  function launchAllowed() {
+    if (!recheck) return browser
+    let now = null
+    try {
+      now = recheck()
+    } catch {
+      now = null
+    }
+    if (!now || now.on !== true) throw new Error('The browser is no longer allowed on this turn.')
+    return now
+  }
   async function launch() {
+    const now = launchAllowed()
+    // allowNoSandbox counts only while the turn still has it.
+    const noSandboxNow = allowNoSandbox && now.allowNoSandbox === true
     ensureBrowserRoot(root)
     sweepAgentBrowserDirs({ root, warn })
     const dir = path.join(root, `${process.pid}-${processStartTime(process.pid) ?? 'x'}-${randomBytes(4).toString('hex')}`)
@@ -745,7 +777,7 @@ export function createAgentBrowser({
           context = await engine.launchPersistentContext(userDataDir, hostOptions(chromiumSandbox))
         } catch (error) {
           if (!chromiumSandbox || !SANDBOX_ERROR_RE.test(String(error?.message))) throw error
-          if (!allowNoSandbox)
+          if (!noSandboxNow)
             throw new Error(
               "Chromium's own sandbox could not start on this machine, so the agent browser stays off. " +
                 'The machine owner can allow a browser without it (allowNoSandbox); pages then run with less isolation.',
@@ -951,6 +983,12 @@ export function createAgentBrowser({
       if (!given.includes(origin)) given.push(origin)
       // A start in progress has read `given` already, or will.
       if (opening) await opening.catch(() => {})
+      // Revoked (or the browser ended) while that start went on: never let in again.
+      if (disposed || spawned.get(token) !== origin) {
+        if (!configured.has(origin) && ![...spawned.values()].includes(origin) && given.includes(origin))
+          given.splice(given.indexOf(origin), 1)
+        return false
+      }
       if (state) return allowOrigin(origin)
       return true
     },

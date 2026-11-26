@@ -327,6 +327,8 @@ export function runProcess(
     }
     signal?.addEventListener('abort', onAbort, { once: true })
     onStart({ child, kill })
+    // Stopped before it started: it never runs on.
+    if (signal?.aborted) onAbort()
     const done = (code, sig, error = null) => {
       clearTimeout(timer)
       signal?.removeEventListener('abort', onAbort)
@@ -680,6 +682,9 @@ export async function createCommandSession({
   let closed = false
   // Run at close, before the temp goes: the session's dev servers (dev-server.js).
   const closers = []
+  // The kill of every run still going: close() stops them all, whatever
+  // signal their caller holds (a command never outlives its session).
+  const live = new Set()
   // A command that left the session temp over its cap: emptied (a fresh HOME).
   function capTmp(result) {
     if (sizeOf(tmp, limits.tmpBytes) <= limits.tmpBytes) return result
@@ -691,8 +696,22 @@ export async function createCommandSession({
   }
 
   // argv (no shell) or { shell: "..." } (the solo full shell). -> runProcess's result.
-  async function run(command, { timeoutMs = SANDBOX_LIMITS.timeoutMs, extraEnv = {}, signal = null, onStart } = {}) {
+  async function run(command, options = {}) {
     if (closed) throw new SandboxRefusal('closed', 'This session has ended.')
+    let kill = null
+    const started = (handle) => {
+      kill = handle.kill
+      if (closed) handle.kill()
+      else live.add(kill)
+      options.onStart?.(handle)
+    }
+    try {
+      return await runInSession(command, { ...options, onStart: started })
+    } finally {
+      if (kill) live.delete(kill)
+    }
+  }
+  async function runInSession(command, { timeoutMs = SANDBOX_LIMITS.timeoutMs, extraEnv = {}, signal = null, onStart } = {}) {
     const time = Math.min(Math.max(1000, timeoutMs), SANDBOX_LIMITS.timeoutMaxMs)
     const vars = commandEnv({ env, tmp, extra: extraEnv })
     if (!boxed) {
@@ -732,6 +751,13 @@ export async function createCommandSession({
   function close() {
     if (closed) return
     closed = true
+    for (const kill of [...live])
+      try {
+        kill()
+      } catch {
+        /* gone */
+      }
+    live.clear()
     for (const fn of closers.splice(0))
       try {
         fn()

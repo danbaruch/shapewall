@@ -20,6 +20,7 @@
 import fs from 'node:fs'
 import http from 'node:http'
 import net from 'node:net'
+import os from 'node:os'
 import dns from 'node:dns'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
@@ -90,6 +91,38 @@ export function addressKind(address) {
   if (bytes[0] === 0xfe && (bytes[1] & 0xc0) === 0x80) return 'link-local'
   if ((bytes[0] & 0xfe) === 0xfc) return 'private'
   return null
+}
+
+// The IPv4 address an IPv6 spelling carries (mapped ::ffff:a.b.c.d, NAT64,
+// compatible), else the address itself, lowercased, without brackets or zone.
+function plainAddress(address) {
+  const ip = bare(address).toLowerCase().replace(/%.*$/, '')
+  if (net.isIP(ip) !== 6) return ip
+  const bytes = ipv6Bytes(ip)
+  if (!bytes) return ip
+  const zero = (from, to) => bytes.slice(from, to).every((byte) => byte === 0)
+  const mapped = zero(0, 10) && bytes[10] === 0xff && bytes[11] === 0xff
+  const nat64 = bytes[0] === 0 && bytes[1] === 0x64 && bytes[2] === 0xff && bytes[3] === 0x9b && zero(4, 12)
+  const compatible = zero(0, 12) && !zero(12, 16)
+  if (mapped || nat64 || compatible) return bytes.slice(12).join('.')
+  // One spelling for every IPv6 address.
+  return bytes.reduce((out, byte, index) => (index % 2 ? out : [...out, ((byte << 8) | bytes[index + 1]).toString(16)]), []).join(':')
+}
+
+// The addresses of this machine's own interfaces (its LAN and tailnet
+// addresses too): a server on this machine answers on each of them, so an
+// origin there is "on this machine" like a loopback one (PR #39 review).
+// `interfaces` is for tests.
+export function ownAddresses(interfaces = os.networkInterfaces()) {
+  const out = new Set()
+  for (const list of Object.values(interfaces || {}))
+    for (const entry of list || []) if (entry?.address) out.add(plainAddress(entry.address))
+  return out
+}
+// Whether `address` (any spelling, IPv4 in IPv6 included) is one of this machine's own.
+export function isOwnAddress(address, own = ownAddresses()) {
+  if (!net.isIP(bare(address).replace(/%.*$/, ''))) return false
+  return own.has(plainAddress(address))
 }
 
 const defaultPort = (protocol) => (protocol === 'https:' ? 443 : 80)
