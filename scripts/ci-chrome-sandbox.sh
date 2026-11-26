@@ -25,4 +25,15 @@ printf 'abi <abi/4.0>,\ninclude <tunables/global>\nprofile shapewall-audit-chrom
   | sudo tee /etc/apparmor.d/shapewall-audit-chrome >/dev/null
 sudo apparmor_parser -r /etc/apparmor.d/shapewall-audit-chrome
 probe
+# The agent browser runs Playwright's headless shell: give that exact binary the same policy.
+for shell_path in "${HOME:?}"/.cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell; do
+  [ -x "$shell_path" ] || continue
+  case "$shell_path" in
+    *\"*|*$'\n'*) exit 1 ;;
+  esac
+  printf 'abi <abi/4.0>,\ninclude <tunables/global>\nprofile shapewall-agent-chrome-shell "%s" flags=(unconfined) {\n  userns,\n}\n' "$shell_path" \
+    | sudo tee /etc/apparmor.d/shapewall-agent-chrome-shell >/dev/null
+  sudo apparmor_parser -r /etc/apparmor.d/shapewall-agent-chrome-shell
+  echo 'Agent browser headless shell has the same exact-binary namespace policy.'
+done
 echo 'Audit Chromium starts with its sandbox enabled and an exact-binary namespace policy.'
