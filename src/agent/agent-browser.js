@@ -526,12 +526,10 @@ export function createAgentBrowser({
       // Chromium's last processes can still be writing (ENOTEMPTY): try
       // again for a few seconds. The folder stays on the exit list until it
       // is gone, and the next start's sweep is the last resort.
-      fs.promises
-        .rm(current.dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 })
-        .then(
-          () => liveDirs.delete(current.dir),
-          (error) => warn(`could not remove the agent browser folder ${current.dir} (${error.code || error.message})`),
-        )
+      fs.promises.rm(current.dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 }).then(
+        () => liveDirs.delete(current.dir),
+        (error) => warn(`could not remove the agent browser folder ${current.dir} (${error.code || error.message})`),
+      )
     }
   }
 
