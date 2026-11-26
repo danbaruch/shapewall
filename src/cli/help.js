@@ -136,7 +136,8 @@ export const SECTIONS = {
       --new-only            skip comments that exist when the watch starts
       --once                hand out what is open now, wait for the commands, exit
       --timeout DURATION    stop a command after this long, e.g. 90s, 30m or 2h (default 60m; a number alone is minutes)
-      --mention NAME        only comments that mention @NAME, e.g. --mention agent
+      --mention NAME        only comments that mention @NAME, e.g. --mention agent (mentions people wrote;
+                            text an agent wrote never counts)
       --no-claim            hand out every open comment once without claiming it (no agent status, beside other watchers)
                             a command that exits 0 must reply or set a status itself, else the
                             comment becomes needs-human (https://shapewall.com/docs/agent-workflow)`,
@@ -266,9 +267,10 @@ export const SECTIONS = {
       --print               print the link only, do not open a browser
       --json                { url, board, page, comment, viewport, compare, follow, running }; opens nothing
       --remote URL          a hosted project instead of the local board (with --token-file, --include-guests)
-                            a local board that is not running: prints the link and says to run shapewall serve`,
-  mcp: `  mcp                       MCP server on stdio for coding agents
-      --read-only | --no-capture`,
+                            When the local board is not running, it prints the link and says to run shapewall serve`,
+  mcp: `  mcp                       MCP server on stdio for coding agents: find comments, reply, recapture, compare
+                            before and after, and links to the board. shapewall agent setup registers it
+      --read-only | --no-capture   only the reading tools | everything but recapture_pages`,
   notify: `  notify list               notification channels, their events and what each still needs   [--json]
   notify test CHANNEL       send a test message to one channel   [--to EMAIL for email channels]`,
   doctor: `  doctor                    check Node, the browser, the config, the port, the output folder, notifications and chat
