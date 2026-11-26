@@ -15,7 +15,7 @@ import { deprecated } from '../../deprecation.js'
 
 const SANDBOX_ACTIONS = ['run', 'watch', 'doctor', 'build-image']
 const USAGE =
-  'usage: shapewall agent connect --remote URL | agent sandbox run --comment ID | agent sandbox watch | agent sandbox doctor | agent sandbox build-image'
+  'usage: shapewall agent connect --remote URL | agent status | agent set KEY VALUE | agent sandbox run --comment ID | agent sandbox watch | agent sandbox doctor | agent sandbox build-image'
 
 // The config, or (with --remote and no config here) an empty one: the
 // endpoint and trust list then come from the environment and flags.
@@ -90,6 +90,11 @@ export async function agentCommand(positional, flags, out, err, { env = process.
     // How a coding agent opened in the project finds the board (src/agent-setup.js, src/agent-docs.js).
     const { agentDocsCommand, agentSetupCommand } = await import('../../cli/agent-setup-command.js')
     return action === 'setup' ? agentSetupCommand(flags, out, err, { env }) : agentDocsCommand(flags, out)
+  }
+  if (action === 'status' || action === 'set') {
+    // What the agent can do here, per tier, and changing one line of it (src/cli/agent-status.js).
+    const { agentSet, agentStatus } = await import('../../cli/agent-status.js')
+    return action === 'status' ? agentStatus(flags, out, err, { env }) : agentSet(positional, flags, out, err, { env })
   }
   if (action === 'connect') {
     // A connected agent of a hosted board: this machine's coding agent, read and answer only.

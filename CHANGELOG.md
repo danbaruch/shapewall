@@ -24,6 +24,14 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - A connected agent's hello says what each tier may do on its machine, as on, ask or off per line (no commands, names or paths); the
   console's agent list carries it, a line it cannot read shows as unknown, and a change is an `agent_capabilities_changed` audit
   row naming each line.
+- "What it can do": each agent on a project's Agents page (and a local board's Agents page, for its owner) has a card with every
+  capability line per place and tier, an on, asks first, off or unknown chip, one sentence, and the command that changes it on the
+  agent's machine. A line the project's setting holds says so. The board's agent panel shows the main lines for a fix you ask for.
+- `shapewall agent status [--remote URL] [--as NAME] [--json]`: the same lines from this machine's own policy, with whether a
+  connected agent's link is open. `shapewall agent set KEY VALUE` changes one line without reconnecting.
+- API tokens: **Has agent access (claim)** lists tokens that may take comments but are not listed as agents, with **Make this an
+  agent** and **Remove claim access** (`agent_made` and `token_claim_removed` audit rows).
+- The token API's `/project` says which agent the token is and its state (online while its link is open).
 
 - Commands through Shapewall on a hosted Fix with: the agent gets Shapewall's own tools (`run_named_command`, `run_command`,
   `start_dev_server`, `stop_dev_server`, `shapewall_capabilities`) and never its own shell. On Linux (bubblewrap, socat and ripgrep)
@@ -41,6 +49,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Named commands on Windows run without a shell: `node`, `npm` and `npx` as Node plus their script; a `.cmd` or `.bat` program is
   refused. Without an OS sandbox (Windows, no bubblewrap) there is no full shell, and every named command waits for a card.
 - `$PORT` in a command line must be bare: quoted (`'$PORT'`, `"$PORT"`), escaped (`\$PORT`) or as the program it is refused.
+- Older claim tokens are no longer made agents just by opening the board or the console: a token becomes one when it calls the
+  server. An older watcher nothing was heard from in 90 days is hidden, not deleted (`agent_hidden` audit row), and lists again as
+  soon as its token is used.
 - A version 1 `agent-policy.json` is read as exactly what it allowed (no shell, no browser, no extensions, a card for every
   command), and the next save writes it back as version 2. A connection with no saved entry, or one 1.3.0 saved without flags,
   still reads and answers only: each wider capability is a key its owner sets. A version 1 entry with `approvals` "owner" (or

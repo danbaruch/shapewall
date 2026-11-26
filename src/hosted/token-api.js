@@ -387,6 +387,9 @@ export function mountTokenApi({
           ...(req.token.scopes.includes('read') ? { createdBy: tokenMaker(req) } : {}),
         },
         boards: boards.map((row) => ({ id: row.board_id, pushedAt: row.pushed_at })),
+        // The agent this token is, if it is one: its name and state (online
+        // while its link is open), for `shapewall agent status`.
+        ...(req.agent ? { agent: { id: req.agent.id, name: req.agent.name, state: agentsFor(req.t).stateOf(req.agent).state } } : {}),
       })
     }),
   )

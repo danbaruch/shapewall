@@ -539,7 +539,7 @@ export function mountConsoleRoutes(consoleApi, deps) {
       // A token that was an agent: what waited for it goes to any agent, and
       // the project loses it as its default (src/hosted/agents.js).
       const agents = agentsFor(req.t)
-      const agent = agents.forToken(req.project.id, String(req.params.tid))
+      const agent = agents.forToken(req.project.id, String(req.params.tid), { create: false })
       if (agent)
         agents.afterRevoke(
           { userId: req.user.id, role: req.role, audit: (action, target, detail) => auditOf(req, action, target, detail) },

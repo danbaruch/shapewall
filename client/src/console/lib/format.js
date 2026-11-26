@@ -157,6 +157,14 @@ export function describeAudit(entry) {
       return `connected the agent ${d.name || target}${d.machine ? ` (${d.machine})` : ''}, for themselves only`
     case 'agent_first_seen':
       return `was first seen as the agent ${d.name || target}`
+    case 'agent_hidden':
+      return d.reason === 'no_claim'
+        ? `stopped listing ${d.name || target} as an agent: its token has no claim access (hidden, not deleted)`
+        : `stopped listing the older agent ${d.name || target}: nothing heard from it in ${d.days || 90} days (hidden, not deleted)`
+    case 'agent_made':
+      return `made the token ${d.name || target} an agent${d.was === 'hidden' ? ' again' : ''}`
+    case 'token_claim_removed':
+      return `removed claim access from the token ${d.name || target}`
     case 'agent_renamed':
       return `renamed the agent ${d.from ? `${d.from} to ` : ''}${d.to || target}`
     case 'agent_identity_changed':

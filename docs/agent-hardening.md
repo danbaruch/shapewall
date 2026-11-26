@@ -534,6 +534,22 @@ no commands, handles, folders or origins. The server keeps it for display only, 
 is "unknown"; your own Chrome is always off), writes an `agent_capabilities_changed` audit row naming each line that changed, and
 an older hello of the same process arriving late does not replace a newer one.
 
+**Seeing and changing it.** Three places list the same lines, from the same renderer:
+
+- **The console.** Each agent on a project's Agents page has a **What it can do** card: per place (in chat, in Fix with) and per
+  tier, each line with an on, asks first, off or unknown chip, one sentence, and the command that changes it on the agent's machine
+  (copy it, run it there). A line the project's agent policy holds says "Limited by this project's setting", with no command: only
+  an admin changes it, on the project page. A local board shows the same card to its owner under **Agents**. The board's agent panel
+  shows a short version: the main lines for a fix the person looking asks for.
+- **`shapewall agent status`** on the agent's machine: every line per tier, why each off line is off and the command under it.
+  `--remote URL` (and `--as NAME`) for a connected agent, with whether its link is open; without it, the local board in this
+  project. `--json` prints the console card's data.
+- **The agent itself**, from the block after its instruction files: ask it "what can you do here?".
+
+`shapewall agent set KEY VALUE` changes one line without reconnecting (`agent set browser off`, `agent set trust-team ada,bo`,
+`agent set shell commands --remote URL`). It checks a value the way `agent connect` does, and refuses one it does not know rather
+than saving it. A connected agent reads the change when it connects again; a local board reads it on the next turn.
+
 ### Commands through Shapewall
 
 An agent never runs a command with its own shell on a board. On a turn that may run commands, Shapewall starts its own tool server

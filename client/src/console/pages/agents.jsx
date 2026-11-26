@@ -48,6 +48,7 @@ import { Link } from '../lib/router'
 import { canChangeApprovalRoles, canChangeApprovalRule } from '../../../../src/shared/permissions.js'
 import { useAction, useLoad, useToast } from '../state'
 import { CreateToken } from './tokens'
+import { CapabilityCard } from '../components/CapabilityCard.jsx'
 import { useWorkspace } from './workspace'
 
 const DOCS_URL = 'https://shapewall.com/docs/hosted#agents-on-a-hosted-board'
@@ -223,6 +224,12 @@ function InstructionsLine({ list }) {
 }
 
 const personName = (person) => person?.displayName || (person?.handle ? `@${person.handle}` : 'someone who left')
+
+// An agent that takes comments with a program of its own (shapewall watch --remote).
+const WATCHER_NOTE =
+  'It takes comments with a program of its own (shapewall watch --remote), so that program is its own boundary and Shapewall cannot say what it can do. An agent connected with shapewall agent connect shows its lines here.'
+const AS_NOTE =
+  'Connected it with --as NAME? Add --as NAME to these commands. Run shapewall agent status on its machine to see the same lines.'
 
 export function StateBadge({ agent }) {
   return (
@@ -593,6 +600,21 @@ export function ProjectAgentsPage({ projectId }) {
                         </dd>
                       </div>
                     </dl>
+                    <CapabilityCard
+                      card={agent.link?.connected ? agent.link.card || null : null}
+                      empty={agent.link?.connected ? null : WATCHER_NOTE}
+                      note={agent.link?.connected && agent.link.card ? AS_NOTE : null}
+                      settingsLink={
+                        <Link
+                          to={`/w/${workspaceId}/projects/${projectId}`}
+                          className="font-medium text-accent underline-offset-2 hover:underline"
+                          data-sw-cap-settings
+                        >
+                          Change it on the project page
+                        </Link>
+                      }
+                      testId={agent.name}
+                    />
                   </li>
                 ))}
               </ul>
@@ -601,6 +623,18 @@ export function ProjectAgentsPage({ projectId }) {
                 Comments sent to an agent wait here until one is. Connect one below.
               </EmptyState>
             )
+          ) : null}
+          {load.data?.claimTokens ? (
+            <div className="px-4 pb-3 sm:px-5">
+              <Notice tone="info" title="Older tokens with agent access" data-sw-agents-claim-tokens={load.data.claimTokens}>
+                {load.data.claimTokens === 1 ? 'One token' : `${load.data.claimTokens} tokens`} of this project may take comments but{' '}
+                {load.data.claimTokens === 1 ? 'is' : 'are'} not listed here: nothing was heard from{' '}
+                {load.data.claimTokens === 1 ? 'it' : 'them'} in 90 days. Nothing was deleted.{' '}
+                <Link to={`/w/${workspaceId}/tokens`} className="font-medium text-accent underline-offset-2 hover:underline">
+                  See API tokens
+                </Link>
+              </Notice>
+            </div>
           ) : null}
           <div className="px-4 pb-3 sm:px-5">
             <FormError error={makeDefault.error} />
