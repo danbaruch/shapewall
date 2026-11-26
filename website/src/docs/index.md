@@ -30,8 +30,14 @@ docs cover installing it, configuring your screens, steering your agents and run
 - [The agent workflow](/docs/agent-workflow): hand comments to Claude Code, Codex or any agent, with the
   [images and drawings on a comment](/docs/agent-workflow#images-and-drawings-on-comments) (how to add them:
   [Getting started](/docs/getting-started#images-and-drawings)).
+- [Your agent finds the board](/docs/agent-workflow#your-agent-finds-the-board): the `AGENTS.md` section `shapewall init` writes,
+  and `shapewall agent setup` for Claude Code and Codex. Or the [Claude Code and Codex plugin](/docs/plugins) (experimental): the
+  MCP server plus skills in one install.
+- [Links to the board](/docs/agent-workflow#links-to-the-board): `shapewall open` and the links agents hand you, to a page, a comment
+  or a before and after, and [follow an agent](/docs/agent-workflow#follow-an-agent) while it works.
 - [Chat with an agent](/docs/chat): connect a model or an agent CLI, let it [work on a branch](/docs/chat#work-on-a-branch) and
-  [fix several comments at once](/docs/chat#fix-several-comments-at-once).
+  [fix several comments at once](/docs/chat#fix-several-comments-at-once). In a shared thread it answers
+  [when someone asks it](/docs/chat#when-an-agent-answers).
 - [Capture on pull requests](/docs/pull-requests): one comment on each pull request with what changed, before and after.
 - [Agent recipes](/docs/agent-recipes): copy-paste commands for Claude Code, Codex, goose, Ollama and chat bots.
 - [GitHub connect](/docs/github) and [notifications](/docs/notifications): issues and pull requests from comments, and messages to a

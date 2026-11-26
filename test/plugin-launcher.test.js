@@ -1,6 +1,7 @@
 // The plugin's MCP launcher (plugins/shapewall/bin/shapewall-mcp.mjs): its
 // copy of the command resolver gives the same answers as
-// src/shapewall-command.js (reach "local") on the same table, it skips the
+// src/shapewall-command.js on the same table (reach "local" with a project
+// install, "global" without), skipPathDir is the same rule, it skips the
 // PATH folders npm puts first for one project or one npx run, it finds the
 // project folder, and it starts `shapewall mcp` (or `mcp --remote URL`).
 import { test } from 'node:test'
@@ -55,39 +56,98 @@ test('the launcher pins the package version', () => {
   assert.equal(launcher.PINNED, VERSION)
 })
 
+// The launcher's answer is src/shapewall-command.js's: reach "local" when the
+// project installs shapewall (step 1), reach "global" when it does not (the
+// plugin is installed once for every project, so its PATH step skips what a
+// global registration skips).
+const sourceAnswer = (projectDir, env, platform = 'linux') => {
+  const reach = source.projectInstall(projectDir, { platform }) ? 'local' : launcher.PATH_REACH
+  return source.resolveShapewallCommand({ projectDir, version: VERSION, reach, env, platform })
+}
+
 test('the launcher resolver answers the shared table like src/shapewall-command.js', () => {
   const { root, dir } = box('launcher-table')
   const newer = globalInstall(root, 'new', '99.0.0')
   const older = globalInstall(root, 'old', '0.9.0')
   const empty = path.join(root, 'nothing')
+  // A newer shapewall in another project's node_modules/.bin, and one in a folder inside this project.
+  const otherProject = path.join(root, 'other', 'node_modules', '.bin')
+  fs.mkdirSync(otherProject, { recursive: true })
+  fs.symlinkSync(path.join(newer, 'shapewall'), path.join(otherProject, 'shapewall'))
+  const inside = path.join(dir, 'tools')
+  fs.mkdirSync(inside)
+  fs.symlinkSync(path.join(newer, 'shapewall'), path.join(inside, 'shapewall'))
   const rows = [
     { name: 'PATH at or above this version', env: { PATH: newer } },
     { name: 'PATH older', env: { PATH: older } },
     { name: 'older first, newer after', env: { PATH: `${older}:${newer}` } },
     { name: 'no shapewall anywhere', env: { PATH: empty } },
     { name: 'relative PATH entries', env: { PATH: `.:bin:${newer}` } },
+    { name: "another project's install only", env: { PATH: otherProject } },
+    { name: 'a folder inside the project only', env: { PATH: inside } },
   ]
   const answers = (projectDir) =>
     rows.map((row) => {
       const ours = launcher.resolveShapewallCommand({ projectDir, version: VERSION, env: row.env, platform: 'linux' })
-      const theirs = source.resolveShapewallCommand({ projectDir, version: VERSION, reach: 'local', env: row.env, platform: 'linux' })
-      assert.deepEqual(ours, theirs, row.name)
+      assert.deepEqual(ours, sourceAnswer(projectDir, row.env), row.name)
       return pick(ours)
     })
   // Without a project install: PATH when new enough, else the pinned npx.
   const npx = { command: 'npx', args: ['-y', `shapewall@${VERSION}`], how: 'npx' }
-  assert.deepEqual(answers(dir), [
-    { command: path.join(newer, 'shapewall'), args: [], how: 'path' },
-    npx,
-    npx,
-    npx,
-    { command: path.join(newer, 'shapewall'), args: [], how: 'path' },
-  ])
+  const onPath = { command: path.join(newer, 'shapewall'), args: [], how: 'path' }
+  assert.deepEqual(answers(dir), [onPath, npx, npx, npx, onPath, npx, npx])
   // The project's own install wins over everything.
   const own = projectInstall(dir, '1.0.0')
   for (const answer of answers(dir)) assert.deepEqual(answer, { command: own, args: [], how: 'project' })
-  // Windows names npx.cmd.
-  assert.equal(launcher.resolveShapewallCommand({ projectDir: root, env: { Path: '' }, platform: 'win32' }).command, 'npx.cmd')
+  // Windows names npx.cmd, as reach "local" and "global" do.
+  const win = launcher.resolveShapewallCommand({ projectDir: root, version: VERSION, env: { Path: '' }, platform: 'win32' })
+  assert.equal(win.command, 'npx.cmd')
+  assert.deepEqual(win, sourceAnswer(root, { Path: '' }, 'win32'))
+})
+
+test('skipPathDir is the same rule in the launcher and src/shapewall-command.js, for every reach', () => {
+  const { root, dir } = box('launcher-skip')
+  // A symbolic link that looks harmless but points into an npx cache and into the project.
+  const npxReal = path.join(root, 'home', '.npm', '_npx', 'abc', 'node_modules', '.bin')
+  fs.mkdirSync(npxReal, { recursive: true })
+  const npxLink = path.join(root, 'tools-a')
+  fs.symlinkSync(npxReal, npxLink)
+  fs.mkdirSync(path.join(dir, 'bin'))
+  const projectLink = path.join(root, 'tools-b')
+  fs.symlinkSync(path.join(dir, 'bin'), projectLink)
+  const posix = [
+    { dir: path.join(root, 'prefix', 'bin'), skip: { local: false, global: false } },
+    { dir: npxReal, skip: { local: true, global: true } },
+    { dir: npxLink, skip: { local: true, global: true } },
+    { dir: path.join(dir, 'node_modules', '.bin'), skip: { local: false, global: true } },
+    { dir: path.join(root, 'node_modules', '.bin'), skip: { local: false, global: true } },
+    { dir: path.join(root, 'other', 'node_modules', 'shapewall', 'bin'), skip: { local: false, global: true } },
+    { dir: path.join(dir, 'bin'), skip: { local: false, global: true } },
+    { dir: projectLink, skip: { local: false, global: true } },
+    { dir, skip: { local: false, global: true } },
+    { dir: `${dir}-sibling`, skip: { local: false, global: false } },
+  ]
+  const windows = [
+    { dir: 'C:\\Users\\me\\AppData\\Roaming\\npm', skip: { local: false, global: false } },
+    { dir: 'C:\\Users\\me\\AppData\\Local\\npm-cache\\_npx\\abc\\node_modules\\.bin', skip: { local: true, global: true } },
+    { dir: 'C:\\Work\\App\\NODE_MODULES\\.bin', skip: { local: false, global: true } },
+    { dir: 'c:\\work\\app\\tools', skip: { local: false, global: true } },
+    { dir: 'C:\\Work\\App-2\\tools', skip: { local: false, global: false } },
+  ]
+  const check = (rows, platform, projectDir) => {
+    for (const row of rows) {
+      for (const reach of ['local', 'project', 'global']) {
+        const options = { reach, projectDir, platform }
+        const ours = launcher.skipPathDir(row.dir, options)
+        assert.equal(ours, source.skipPathDir(row.dir, options), `${platform} ${reach} ${row.dir}`)
+        const want = reach === 'global' ? row.skip.global : row.skip.local
+        assert.equal(ours, want, `${platform} ${reach} ${row.dir}`)
+      }
+    }
+  }
+  check(posix, 'linux', dir)
+  check(windows, 'win32', 'C:\\Work\\App')
+  assert.equal(launcher.PATH_REACH, 'global')
 })
 
 test('PATH as npm exec builds it: node_modules/.bin, _npx caches and the project folder are not "on PATH"', () => {
@@ -109,10 +169,11 @@ test('PATH as npm exec builds it: node_modules/.bin, _npx caches and the project
   const env = { PATH: [path.join(dir, 'node_modules', '.bin'), ancestorBin, npxBin, inside, real].join(':') }
   const chosen = launcher.resolveShapewallCommand({ projectDir: dir, version: VERSION, env, platform: 'linux' })
   assert.deepEqual(pick(chosen), { command: path.join(real, 'shapewall'), args: [], how: 'path' })
-  assert.equal(launcher.npmPlacedDir(ancestorBin), true)
-  assert.equal(launcher.npmPlacedDir(npxBin), true)
-  assert.equal(launcher.npmPlacedDir(inside, dir), true)
-  assert.equal(launcher.npmPlacedDir(real, dir), false)
+  const skip = (folder) => launcher.skipPathDir(folder, { reach: launcher.PATH_REACH, projectDir: dir, platform: 'linux' })
+  assert.equal(skip(ancestorBin), true)
+  assert.equal(skip(npxBin), true)
+  assert.equal(skip(inside), true)
+  assert.equal(skip(real), false)
   // With only npm-placed folders, the pinned npx.
   const only = { PATH: [ancestorBin, npxBin, inside].join(':') }
   assert.equal(launcher.resolveShapewallCommand({ projectDir: dir, version: VERSION, env: only, platform: 'linux' }).how, 'npx')

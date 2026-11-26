@@ -31,6 +31,7 @@ const SAME_NAME = [
   'notifications',
   'page-checks',
   'performance',
+  'plugins',
   'pull-requests',
   'stability',
   'starter-agent',

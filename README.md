@@ -53,17 +53,24 @@ system libraries: see [Linux system libraries](docs/deployment.md#linux-system-l
    the screen before and after, next to the pin; you resolve it or send it back.
 
 To close the loop without typing commands, `shapewall watch --exec "<agent command>"` hands each new comment to your agent once, and
-`shapewall mcp` is an MCP server with the same tools. The board also has a chat panel: connect an agent CLI and press **Fix with
-agent** on a comment.
+`shapewall mcp` is an MCP server with the same tools, plus links to the board and a before and after the agent can check itself. The
+board also has a chat panel: connect an agent CLI and press **Fix with agent** on a comment. In a shared thread the agent answers
+when someone @mentions it or presses **Send to agent** ([when an agent answers](docs/agents.md#when-an-agent-answers)).
 
-**Works with** Claude Code, Codex, goose, Gemini CLI and any agent that can run a shell command and read JSON, or speak MCP:
+**Works with** Claude Code, Codex, goose, Gemini CLI and any agent that can run a shell command and read JSON, or speak MCP.
+`shapewall init` adds a short Shapewall section to the project's `AGENTS.md`, so an agent opened there finds the board on its own
+([how](docs/agent-workflow.md#your-agent-finds-the-board)). To give Claude Code and Codex the board's tools:
 
 ```sh
-npx shapewall agent setup    # registers the MCP server with Claude Code and Codex
+npx shapewall agent setup    # registers the MCP server with Claude Code and Codex; shows the change and asks first
 ```
 
-Or install the [Claude Code and Codex plugin](docs/plugins.md) (the same MCP server plus skills; from the `staging` branch until the
-next release).
+Or install the [Claude Code and Codex plugin](docs/plugins.md) (experimental: the same MCP server plus skills; from the `staging`
+branch until the next release).
+
+**See what it did.** `npx shapewall open --comment 12` opens the board on a comment, a page or a before and after, and your agent
+hands you the same links. **Follow agent** on the board flies to each comment the agent takes and opens the screen it changed,
+before and after ([links and follow](docs/agent-workflow.md#links-to-the-board)).
 
 Comments are untrusted input to an agent: read [keeping an agent safe](docs/agent-hardening.md) before you let others comment.
 
