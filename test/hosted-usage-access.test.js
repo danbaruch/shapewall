@@ -17,6 +17,7 @@ let s
 let other
 let otherRun
 let otherAgent
+let otherProject
 const run = {}
 const api = (rest, ws = s.ws) => `/api/workspaces/${ws}${rest}`
 const WIDE = 'from=2026-01-01T00:00:00.000Z&to=2026-12-31T00:00:00.000Z'
@@ -24,6 +25,28 @@ const idsOf = async (browser, query = '') => {
   const result = await browser.get(api(`/usage/rows?${WIDE}${query}`))
   assert.equal(result.status, 200, result.text)
   return result.json.rows.map((row) => row.id).sort()
+}
+// A token's prefix (swp_ and 8 random base64url characters) is the only
+// random mixed-case text these pages show, and it can spell a name ("swp_xMalq...").
+// Before a page's JSON is searched for another workspace's names, every prefix
+// must be one of this workspace's own tokens; then it is blanked out.
+const prefixesOf = (ws) =>
+  new Set(
+    hosted.db
+      .prepare('SELECT prefix FROM api_tokens WHERE workspace_id = ?')
+      .all(ws)
+      .map((row) => row.prefix),
+  )
+function withoutOwnPrefixes(value, own) {
+  if (Array.isArray(value)) return value.map((item) => withoutOwnPrefixes(item, own))
+  if (!value || typeof value !== 'object') return value
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => {
+      if (key !== 'prefix' || typeof item !== 'string') return [key, withoutOwnPrefixes(item, own)]
+      assert.ok(own.has(item), `a token prefix of another workspace: ${item}`)
+      return [key, '[own token prefix]']
+    }),
+  )
 }
 const names = (ids) =>
   Object.entries(run)
@@ -83,6 +106,7 @@ before(async () => {
   // Another workspace on the same server, with its own agent and turn.
   other = await signUp(hosted, { handle: 'mal', displayName: 'Mal' })
   const project = await helpers.createProject(other, other.workspaceId, 'Elsewhere')
+  otherProject = project.id
   await reauth(other)
   const made = await other.browser.post(api(`/projects/${project.id}/tokens`, other.workspaceId), {
     name: 'Scout',
@@ -162,21 +186,30 @@ test('another workspace’s owner: 404 for the workspace, and its ids open nothi
     all.json.rows.map((row) => row.id),
     [otherRun],
   )
-  const text = JSON.stringify([
-    (await other.browser.get(mine(`/usage/options`))).json,
-    (await other.browser.get(mine(`/usage/breakdown?${WIDE}&groupBy=person`))).json,
-    (await other.browser.get(mine(`/activity?agent=${s.agents[0].id}`))).json,
-    (await other.browser.get(mine(`/activity?person=${s.ada.user.id}`))).json,
-    (await other.browser.get(mine(`/activity`))).json,
-    (await other.browser.get(mine(`/access-review`))).json,
-  ])
+  const text = JSON.stringify(
+    withoutOwnPrefixes(
+      [
+        (await other.browser.get(mine(`/usage/options`))).json,
+        (await other.browser.get(mine(`/usage/breakdown?${WIDE}&groupBy=person`))).json,
+        (await other.browser.get(mine(`/activity?agent=${s.agents[0].id}`))).json,
+        (await other.browser.get(mine(`/activity?person=${s.ada.user.id}`))).json,
+        (await other.browser.get(mine(`/activity`))).json,
+        (await other.browser.get(mine(`/access-review`))).json,
+      ],
+      prefixesOf(other.workspaceId),
+    ),
+  )
   assert.doesNotMatch(text, /Ada|Ben|Cyd|Builder|Marketing site|Example Studio/, 'nothing of the first workspace')
+  for (const id of [s.ws, s.ada.user.id, s.agents[0].id, s.projects[0].id, run.adaOnAda]) assert.ok(!text.includes(id), id)
   // And the first workspace's owner learns nothing of theirs.
-  const back = JSON.stringify([
-    (await s.ada.browser.get(api('/activity?limit=200'))).json,
-    (await s.ada.browser.get(api('/access-review'))).json,
-  ])
+  const back = JSON.stringify(
+    withoutOwnPrefixes(
+      [(await s.ada.browser.get(api('/activity?limit=200'))).json, (await s.ada.browser.get(api('/access-review'))).json],
+      prefixesOf(s.ws),
+    ),
+  )
   assert.doesNotMatch(back, /Mal|Elsewhere/)
+  for (const id of [other.workspaceId, other.user.id, otherProject, otherAgent, otherRun]) assert.ok(!back.includes(id), id)
   assert.equal((await s.ada.browser.get(api(`/usage/rows/${otherRun}`))).status, 404)
   assert.equal((await s.ada.browser.get(api(`/people/${other.user.id}`))).status, 404)
 })
