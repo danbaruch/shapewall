@@ -7,8 +7,8 @@
 //   3. `npx -y shapewall@PINNED`.
 //
 // It has no dependencies: the resolver below is a copy of
-// src/shapewall-command.js (reach "local"), and test/plugin-launcher.test.js
-// runs both against the same table. It never takes a command from a project
+// src/shapewall-command.js (step 1 as reach "local", the PATH step as reach
+// "global"), and test/plugin-launcher.test.js runs both against the same table. It never takes a command from a project
 // file and never runs a program to find a version (it reads package.json).
 //
 // `--print` prints what it would run as JSON and exits.
@@ -97,42 +97,53 @@ export function projectInstall(projectDir, { platform = process.platform } = {})
   return null
 }
 
-// A PATH folder npm put there for one project or one npx run is not "the
-// shapewall on PATH": `npm exec`, `npx` and `npm run` put the project's
-// node_modules/.bin (and its ancestors') or ~/.npm/_npx/<hash>/node_modules/.bin
-// first on PATH. Such a folder, or one inside the project, is skipped.
-export function npmPlacedDir(dir, projectDir = null) {
-  let real = dir
+// PATH entries that never count. This is skipPathDir from
+// src/shapewall-command.js, copied as it is (test/plugin-launcher.test.js
+// checks both on the same table). The plugin is installed once for every
+// project, so its PATH step uses reach "global":
+//   - a folder in npm's npx cache (a path segment "_npx");
+//   - any folder with a "node_modules" path segment (npm exec, npx and npm
+//     run put <project>/node_modules/.bin and every ancestor's on PATH, and
+//     another project's install lives there too);
+//   - any folder inside the project.
+// The project's own install is step 1, read from the project folder, never
+// from PATH. Each rule is checked on the folder's real path (symbolic links
+// resolved) as well as as written.
+const segmentsOf = (dir) => dir.split(/[\\/]+/).filter(Boolean)
+const realOrSame = (dir) => {
   try {
-    real = fs.realpathSync(dir)
+    return fs.realpathSync(dir)
   } catch {
-    // a folder that is not there has no shapewall either
+    return dir
   }
-  const parts = real.split(/[\\/]+/).filter(Boolean)
-  const last = parts.length - 1
-  if (last >= 1 && parts[last] === '.bin' && parts[last - 1] === 'node_modules') return true
-  if (parts.includes('_npx')) return true
+}
+const within = (dir, parent, sep) => dir === parent || dir.startsWith(parent.endsWith(sep) ? parent : `${parent}${sep}`)
+
+export function skipPathDir(dir, { reach = 'local', projectDir = null, platform = process.platform } = {}) {
+  const sep = platform === 'win32' ? '\\' : '/'
+  const fold = (value) => (platform === 'win32' ? value.toLowerCase() : value)
+  const forms = [...new Set([dir, realOrSame(dir)])].map(fold)
+  if (forms.some((form) => segmentsOf(form).includes('_npx'))) return true
+  if (reach !== 'global') return false
+  if (forms.some((form) => segmentsOf(form).includes('node_modules'))) return true
   if (projectDir) {
-    let project = projectDir
-    try {
-      project = fs.realpathSync(projectDir)
-    } catch {
-      // keep it as given
-    }
-    const relative = path.relative(project, real)
-    if (relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))) return true
+    const projects = [...new Set([projectDir, realOrSame(projectDir)])].map(fold)
+    if (forms.some((form) => projects.some((project) => within(form, project, sep)))) return true
   }
   return false
 }
 
-export function pathInstall(env = process.env, { platform = process.platform, projectDir = null } = {}) {
+// The reach the launcher's PATH step uses (see above).
+export const PATH_REACH = 'global'
+
+export function pathInstall(env = process.env, { platform = process.platform, skip = null } = {}) {
   const windows = platform === 'win32'
   const pathOf = windows ? env.Path || env.PATH : env.PATH
   const isAbsolute = windows ? path.win32.isAbsolute : path.posix.isAbsolute
   const names = windows ? [`${PACKAGE}.cmd`, `${PACKAGE}.exe`] : [PACKAGE]
   for (const dir of String(pathOf || '').split(windows ? ';' : ':')) {
     if (!dir || !isAbsolute(dir)) continue
-    if (npmPlacedDir(dir, projectDir)) continue
+    if (skip && skip(dir)) continue
     for (const name of names) {
       const bin = path.join(dir, name)
       if (!isFile(bin)) continue
@@ -149,8 +160,9 @@ export function pathInstall(env = process.env, { platform = process.platform, pr
   return null
 }
 
-// The same answer as resolveShapewallCommand() in src/shapewall-command.js
-// with reach "local": { command, args, how, note }.
+// { command, args, how, note }: the same answer as resolveShapewallCommand()
+// in src/shapewall-command.js with reach "local" when the project installs
+// shapewall, and with reach "global" when it does not.
 export function resolveShapewallCommand({
   projectDir = process.cwd(),
   version = PINNED,
@@ -158,13 +170,17 @@ export function resolveShapewallCommand({
   platform = process.platform,
 } = {}) {
   if (!parseVersion(version)) throw new Error(`not a version: ${version}`)
+  // reach is never "project" here (no committed .mcp.json), so Windows names npx.cmd.
   const npx = platform === 'win32' ? 'npx.cmd' : 'npx'
   const own = projectInstall(projectDir, { platform })
   if (own) {
     const note = `the project's own install${own.version ? ` (${own.version})` : ''}`
     return { command: own.bin, args: [], how: 'project', note }
   }
-  const found = pathInstall(env, { platform, projectDir })
+  const found = pathInstall(env, {
+    platform,
+    skip: (dir) => skipPathDir(dir, { reach: PATH_REACH, projectDir, platform }),
+  })
   const order = found?.version ? compareVersions(found.version, version) : null
   if (found && order !== null && order >= 0)
     return { command: found.bin, args: [], how: 'path', note: `shapewall ${found.version} on PATH` }
