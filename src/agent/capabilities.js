@@ -28,9 +28,12 @@
 // turn each code into a sentence and the command that changes it.
 
 import fs from 'node:fs'
+import net from 'node:net'
+import os from 'node:os'
 import path from 'node:path'
 import { splitCommand } from '../watch.js'
 import { probeSandbox } from './sandbox-exec.js'
+import { addressKind, localName } from './browser-egress.js'
 
 // Narrowest first.
 export const TIERS = ['open', 'team', 'solo']
@@ -66,6 +69,7 @@ export const CAPABILITY_KEYS = [
   'browserAuth',
   'browserProfile',
   'browserProfileTeam',
+  'browserNoSandbox',
   'extensionsFor',
   'allowTool',
   'handoffHops',
@@ -83,6 +87,7 @@ export const CAPABILITY_DEFAULTS = Object.freeze({
   browserAuth: null,
   browserProfile: null,
   browserProfileTeam: false,
+  browserNoSandbox: false,
   extensionsFor: Object.freeze(['owner']),
   allowTool: Object.freeze([]),
   handoffHops: 0,
@@ -100,6 +105,7 @@ export const CAPABILITY_NARROWEST = Object.freeze({
   browserAuth: null,
   browserProfile: null,
   browserProfileTeam: false,
+  browserNoSandbox: false,
   extensionsFor: Object.freeze([]),
   allowTool: Object.freeze([]),
   handoffHops: 0,
@@ -154,12 +160,24 @@ function originOf(value) {
 }
 
 // A persistent agent browser profile folder. An allowlist, not a denylist:
-// only a folder Shapewall made for an agent (markBrowserProfile), holding
-// the marker file, read after resolving symbolic links. A real browser's
-// own user data folder, a copy of one, a link to one: refused, because none
-// of them holds the marker. The name check is only a first pass, before the
-// disk is read (it also catches Windows short names such as MICROS~1). Q3
-// checks the folder again when it starts the browser.
+//   - It sits directly in one base folder Shapewall owns,
+//     $XDG_STATE_HOME/shapewall/agent-browser-profiles (~/.local/state/...
+//     without XDG_STATE_HOME): a real folder (never a symbolic link), this
+//     user's, 0700. The agent's own commands never see it: the OS sandbox
+//     hides the home folder and every XDG folder from them
+//     (src/agent/sandbox-exec.js deniedRoots), so nothing an agent runs can
+//     swap a profile for a link between a check and the browser's start.
+//   - It is a folder Shapewall made for an agent (markBrowserProfile),
+//     holding the marker file, this user's and 0700, read after resolving
+//     symbolic links: the resolved folder must still be directly in the base.
+//   - It is named by a NAME ("staging-login": <base>/staging-login), or by
+//     an absolute path that resolves into the base.
+// A real browser's own user data folder, a copy of one, a link to one, a
+// folder anywhere else: refused, because none of them is a marked folder in
+// the base. The browser-name check is only a first pass, before the disk is
+// read (it also catches Windows short names such as MICROS~1).
+// src/agent/agent-browser.js checks the folder again right before it starts
+// the browser, and once more after (the same folder, by device and inode).
 export const BROWSER_PROFILE_MARKER = '.shapewall-agent-profile'
 const BROWSER_PROFILE_MARK = 'shapewall agent browser profile v1\n'
 const SEP = '[/\\\\]'
@@ -205,36 +223,104 @@ function marked(fsImpl, dir) {
     return false
   }
 }
-export function cleanBrowserProfile(value, { fsImpl = fs } = {}) {
+export const BROWSER_PROFILE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/
+
+// The base folder every agent browser profile lives in (not checked here).
+export function browserProfileBase(env = process.env) {
+  const xdg = env.XDG_STATE_HOME
+  const state = typeof xdg === 'string' && path.isAbsolute(xdg) ? xdg : path.join(env.HOME || os.homedir(), '.local', 'state')
+  return path.join(state, 'shapewall', 'agent-browser-profiles')
+}
+
+// Throws unless `dir` itself (never followed) is a folder of this user's
+// that nobody else may enter. Returns its lstat.
+function privateDir(fsImpl, dir, what, platform = process.platform) {
+  const stat = fsImpl.lstatSync(dir)
+  if (stat.isSymbolicLink()) throw new Error(`${what} ${dir} is a symbolic link. It has to be a real folder of its own.`)
+  if (!stat.isDirectory()) throw new Error(`${what} ${dir} is not a folder.`)
+  if (platform !== 'win32') {
+    if (typeof process.getuid === 'function' && stat.uid !== process.getuid())
+      throw new Error(`${what} ${dir} belongs to another user of this machine.`)
+    if (stat.mode & 0o077) throw new Error(`${what} ${dir} is open to other users of this machine. Run: chmod 700 "${dir}"`)
+  }
+  return stat
+}
+
+// The base, checked (and with `create`, made 0700 first): its resolved path, or throws.
+export function checkedBrowserProfileBase({ fsImpl = fs, env = process.env, create = false } = {}) {
+  const base = browserProfileBase(env)
+  if (create) {
+    fsImpl.mkdirSync(path.dirname(base), { recursive: true, mode: 0o700 })
+    try {
+      fsImpl.mkdirSync(base, { mode: 0o700 })
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error
+    }
+  }
+  privateDir(fsImpl, base, 'The agent browser profile folder')
+  return realpath(fsImpl, base)
+}
+
+export function cleanBrowserProfile(value, { fsImpl = fs, env = process.env } = {}) {
   // eslint-disable-next-line no-control-regex
   if (typeof value !== 'string' || !value || value.length > 1024 || /[\u0000-\u001f\u007f]/.test(value)) return null
-  if (!path.isAbsolute(value)) return null
-  const normal = path.normalize(value)
-  if (BROWSER_DATA_RE.test(normal)) return null
-  let real
+  const byName = BROWSER_PROFILE_NAME_RE.test(value)
+  if (!byName && !path.isAbsolute(value)) return null
+  // A path that names a real browser's folder is refused before the disk is read.
+  if (!byName && BROWSER_DATA_RE.test(path.normalize(value))) return null
+  let base
   try {
-    real = realpath(fsImpl, normal)
-    if (!fsImpl.statSync(real).isDirectory()) return null
+    base = checkedBrowserProfileBase({ fsImpl, env })
   } catch {
     return null
   }
-  if (BROWSER_DATA_RE.test(real)) return null
+  let real
+  try {
+    real = realpath(fsImpl, byName ? path.join(base, value) : path.normalize(value))
+    // Directly in the base, after every link is resolved.
+    if (path.dirname(real) !== base || BROWSER_DATA_RE.test(path.basename(real))) return null
+    privateDir(fsImpl, real, 'The browser profile')
+  } catch {
+    return null
+  }
   return marked(fsImpl, real) ? real : null
 }
-// Makes an agent browser profile folder: a new or empty folder only, never
-// one a browser already wrote to. Returns the folder (links resolved), or throws.
-export function markBrowserProfile(dir, { fsImpl = fs } = {}) {
-  if (typeof dir !== 'string' || !path.isAbsolute(dir)) throw new Error('A browser profile folder is an absolute path.')
-  if (BROWSER_DATA_RE.test(path.normalize(dir))) throw new Error(`${dir} looks like a browser's own profile folder.`)
-  fsImpl.mkdirSync(dir, { recursive: true, mode: 0o700 })
-  const real = realpath(fsImpl, dir)
-  if (BROWSER_DATA_RE.test(real)) throw new Error(`${real} looks like a browser's own profile folder.`)
-  if (marked(fsImpl, real)) return real
-  if (BROWSER_OWN_FILES.some((name) => fsImpl.existsSync(path.join(real, name))))
-    throw new Error(`${real} holds a browser's own files. An agent never gets a real browser's profile, or a copy of one.`)
-  if (fsImpl.readdirSync(real).length) throw new Error(`${real} is not empty. An agent browser profile starts in a new, empty folder.`)
-  fsImpl.writeFileSync(path.join(real, BROWSER_PROFILE_MARKER), BROWSER_PROFILE_MARK, { mode: 0o600, flag: 'wx' })
-  return real
+
+// Makes an agent browser profile folder in the base: a new or empty folder
+// only, never one a browser already wrote to. `name`: a NAME such as
+// "staging-login", or an absolute path directly inside the base. Returns the
+// folder, or throws.
+export function markBrowserProfile(name, { fsImpl = fs, env = process.env } = {}) {
+  const base = checkedBrowserProfileBase({ fsImpl, env, create: true })
+  let leaf = null
+  if (typeof name === 'string' && BROWSER_PROFILE_NAME_RE.test(name)) leaf = name
+  else if (typeof name === 'string' && path.isAbsolute(name)) {
+    let parent = null
+    try {
+      parent = realpath(fsImpl, path.dirname(path.normalize(name)))
+    } catch {
+      parent = null
+    }
+    if (parent === base && BROWSER_PROFILE_NAME_RE.test(path.basename(name))) leaf = path.basename(name)
+    else
+      throw new Error(
+        `An agent browser profile lives in ${base}: give it a name such as staging-login (or a folder directly inside that one).`,
+      )
+  } else throw new Error('An agent browser profile is a name such as staging-login: letters, digits, dashes and underscores.')
+  if (BROWSER_DATA_RE.test(leaf)) throw new Error(`${leaf} looks like a browser's own profile folder. Pick another name.`)
+  const dir = path.join(base, leaf)
+  try {
+    fsImpl.mkdirSync(dir, { mode: 0o700 })
+  } catch (error) {
+    if (error.code !== 'EEXIST') throw error
+  }
+  privateDir(fsImpl, dir, 'The browser profile')
+  if (marked(fsImpl, dir)) return dir
+  if (BROWSER_OWN_FILES.some((file) => fsImpl.existsSync(path.join(dir, file))))
+    throw new Error(`${dir} holds a browser's own files. An agent never gets a real browser's profile, or a copy of one.`)
+  if (fsImpl.readdirSync(dir).length) throw new Error(`${dir} is not empty. An agent browser profile starts in a new, empty folder.`)
+  fsImpl.writeFileSync(path.join(dir, BROWSER_PROFILE_MARKER), BROWSER_PROFILE_MARK, { mode: 0o600, flag: 'wx' })
+  return dir
 }
 
 const uniq = (list) => [...new Set(list)]
@@ -243,7 +329,7 @@ const uniq = (list) => [...new Set(list)]
 // `defaults`; a key that is there with a value this version does not know
 // reads as CAPABILITY_NARROWEST for that key, and `warn(key, narrow)` hears
 // about it. A list with one bad entry is not trusted for the rest.
-export function cleanCapabilityKeys(entry, { defaults = CAPABILITY_DEFAULTS, warn = () => {} } = {}) {
+export function cleanCapabilityKeys(entry, { defaults = CAPABILITY_DEFAULTS, warn = () => {}, env = process.env } = {}) {
   const object = entry !== null && typeof entry === 'object' && !Array.isArray(entry) ? entry : {}
   const has = (key) => Object.hasOwn(object, key) && object[key] !== undefined
   const out = {}
@@ -290,11 +376,16 @@ export function cleanCapabilityKeys(entry, { defaults = CAPABILITY_DEFAULTS, war
   else narrow('browserAuth', 'none (a browser without a login)')
   if (!has('browserProfile') || object.browserProfile === null) out.browserProfile = defaults.browserProfile
   else {
-    const profile = cleanBrowserProfile(object.browserProfile)
+    const profile = cleanBrowserProfile(object.browserProfile, { env })
     if (profile) out.browserProfile = profile
-    else narrow('browserProfile', "none (a throwaway browser; never a real browser's own profile)")
+    else
+      narrow(
+        'browserProfile',
+        "none (a throwaway browser; a profile is only a folder Shapewall made for an agent, never a real browser's own)",
+      )
   }
   bool('browserProfileTeam', 'off')
+  bool('browserNoSandbox', "off (the browser never starts without Chromium's own sandbox)")
   list('extensionsFor', (item) => (item === 'owner' ? 'owner' : cleanHandle(item)), TRUST_TEAM_MAX, 'empty (no extensions)')
   list('allowTool', (item) => (typeof item === 'string' && TOOL_RE.test(item) ? item : null), ALLOW_TOOL_MAX, 'empty')
   if (!has('handoffHops')) out.handoffHops = defaults.handoffHops
@@ -533,6 +624,24 @@ export function namedCommands(config) {
   return out
 }
 
+// An origin on this machine: a loopback or unspecified address in any
+// spelling the URL parser keeps (127.0.0.0/8, [::1], 0.0.0.0, [::],
+// IPv4-mapped ::ffff:127.x, NAT64 and compatible forms: addressKind in
+// src/agent/browser-egress.js), localhost and *.localhost, or a local name
+// (.test, .local, .internal, .lan, .home.arpa) that /etc/hosts or the local
+// network may point at this machine (pinHost lets such names resolve inside).
+export function localOrigin(origin) {
+  let host
+  try {
+    host = new URL(origin).hostname.toLowerCase()
+  } catch {
+    return false
+  }
+  host = host.replace(/^\[|\]$/g, '').replace(/\.$/, '')
+  if (net.isIP(host)) return ['loopback', 'unspecified'].includes(addressKind(host))
+  return localName(host)
+}
+
 // The app's own addresses in the config: every baseUrl and publicUrl at the
 // top level, of each board and of each environment.
 export function configOrigins(config) {
@@ -702,7 +811,7 @@ function resolveForTier(tier, { path: where, machine, server, config, platform, 
 
   // The throwaway browser.
   const serverBrowser = !narrowing || narrowing.browser
-  let browser = { on: false, allow: [], auth: null, profile: null, realChrome: false }
+  let browser = { on: false, allow: [], withheld: [], auth: null, profile: null, allowNoSandbox: false, realChrome: false }
   if (!known) off('browser', 'unknown_path')
   else if (m.browser !== 'on') off('browser', 'machine_browser_off')
   else if (!serverBrowser) off('browser', 'server_browser_off')
@@ -718,12 +827,31 @@ function resolveForTier(tier, { path: where, machine, server, config, platform, 
     // longer list. The config is the checkout's (Q3 reads it from the
     // checkout, never from the fix copy an agent can write to).
     const given = (Array.isArray(config?.agent?.browser?.allow) ? config.agent.browser.allow : []).map(cleanOrigin).filter(Boolean)
-    const extra = tier === 'solo' && !login ? given : given.filter((origin) => m.browserAllow.includes(origin))
+    const ownersOwn = tier === 'solo' && !login
+    const listed = (origin) => m.browserAllow.includes(origin)
+    const extra = ownersOwn ? given : given.filter(listed)
+    // An address on this machine (or a local name that may point at it)
+    // named by a committed config opens a port here: on any turn but the
+    // owner's own (solo, no login) it counts only where the machine lists
+    // that exact origin too (PR #37 review). Not for the starter agent: its
+    // loopback is its container's.
+    const withheld =
+      ownersOwn || starter ? [] : uniq([...configOrigins(config), ...given]).filter((origin) => localOrigin(origin) && !listed(origin))
+    if (withheld.length) off('browser', 'loopback_not_listed')
+    // Chromium's own sandbox may be skipped where it cannot start only when
+    // the machine says so (browserNoSandbox), and only while the browser is
+    // on for a solo or team turn: on an open turn someone outside the
+    // trusted list steers what the pages show, so there the browser refuses
+    // to start without that sandbox.
+    const noSandbox = m.browserNoSandbox === true && tier !== 'open'
+    if (m.browserNoSandbox === true && !noSandbox) off('browser', 'open_tier_browser_sandbox')
     browser = {
       on: true,
-      allow: uniq([...configOrigins(config), ...extra, ...m.browserAllow]),
+      allow: uniq([...configOrigins(config), ...extra, ...m.browserAllow]).filter((origin) => !withheld.includes(origin)),
+      withheld,
       auth: loggedIn ? m.browserAuth : null,
       profile: loggedIn ? m.browserProfile : null,
+      allowNoSandbox: noSandbox,
       realChrome: false,
     }
   }

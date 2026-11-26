@@ -82,6 +82,16 @@ const REASONS = {
   machine_browser_off: { text: 'this machine allows no browser', set: ['browser', 'on'] },
   server_browser_off: { text: "limited by this project's setting", server: true },
   login_not_this_tier: { text: 'the logged-in browser is not for this tier, so the browser starts without a login' },
+  // `set` as a function: the command names the very origins held back.
+  // browser-allow replaces the machine's list, so the sentence says to keep
+  // the ones it already has.
+  loopback_not_listed: {
+    text:
+      'an address on this machine that the committed config names (a loopback address, localhost or a local name) opens only where this machine lists that exact origin too; ' +
+      'add it to the origins this machine already allows',
+    set: (caps) => ['browser-allow', caps.browser.withheld?.length ? caps.browser.withheld.join(',') : 'ORIGIN'],
+  },
+  open_tier_browser_sandbox: { text: "on open turns the browser never starts without Chromium's own sandbox" },
   never_real_chrome: { text: 'never: an agent only gets a throwaway browser of its own' },
   path_no_extensions: { text: 'not on this path' },
   open_tier_extensions: { text: 'never on open turns' },
@@ -93,6 +103,7 @@ const REASONS = {
 }
 
 const command = (set, as) => `shapewall agent set ${set[0]} ${set[1]}${as ? ` --as ${as}` : ''}`
+const setOf = (reason, caps) => (typeof reason.set === 'function' ? reason.set(caps) : reason.set)
 
 const list = (items) => items.join(', ')
 const reasonOf = (caps, line) => caps.why.filter((item) => item.line === line).map((item) => REASONS[item.code] || { text: item.code })
@@ -153,7 +164,13 @@ function lineFor(caps, id) {
     case 'browser':
       state = caps.browser.on ? 'on' : 'off'
       text = caps.browser.on
-        ? `A throwaway headless browser limited to ${caps.browser.allow.length ? list(caps.browser.allow) : "the app's own addresses"}${caps.browser.auth ? `, logged in as "${caps.browser.auth}"` : ''}${caps.browser.profile ? ', with its own saved profile' : ''}.`
+        ? `A throwaway headless browser limited to ${caps.browser.allow.length ? list(caps.browser.allow) : "the app's own addresses"}${caps.browser.auth ? `, logged in as "${caps.browser.auth}"` : ''}${caps.browser.profile ? ', with its own saved profile' : ''}.` +
+          (caps.browser.withheld?.length
+            ? ` Not ${list(caps.browser.withheld)}: an address on this machine from the config, which this machine does not list for this tier.`
+            : '') +
+          (caps.browser.allowNoSandbox
+            ? " Where Chromium's own sandbox cannot start on this machine, it starts without it (the owner chose browser-no-sandbox); pages then run with less isolation."
+            : '')
         : 'No browser.'
       break
     case 'extensions':
@@ -201,7 +218,7 @@ export function lines(caps, { as = null } = {}) {
       text,
       why: reasons.map((reason) => reason.text),
       // Lines the project's setting holds: only an admin there changes them.
-      fix: narrowed || !fixable ? null : command(fixable.set, as),
+      fix: narrowed || !fixable ? null : command(setOf(fixable, caps), as),
       narrowed,
     }
   })
@@ -248,7 +265,9 @@ export const SUMMARY_PATHS = { chat: 'hosted-chat', fix: 'hosted-fix' }
 export function capabilitySummary({ machine, config = null, platform = null }) {
   const m = machineView(machine)
   const team = m.trustTeam === 'members' ? 'members' : Array.isArray(m.trustTeam) ? 'named' : 'none'
-  const out = { v: 1, team }
+  // browserNoSandbox: the browser on solo and team turns may start without
+  // Chromium's own sandbox where it cannot start (an older server drops it).
+  const out = { v: 1, team, browserNoSandbox: m.browser === 'on' && m.browserNoSandbox === true }
   for (const [key, where] of Object.entries(SUMMARY_PATHS)) {
     out[key] = {}
     for (const tier of [...TIERS].reverse()) {
@@ -270,7 +289,7 @@ export function capabilitySummary({ machine, config = null, platform = null }) {
 // cannot tell, rather than guessing either way. null: none given.
 export function cleanCapabilitySummary(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw) || raw.v !== 1) return null
-  const out = { v: 1, team: ['members', 'named'].includes(raw.team) ? raw.team : 'none' }
+  const out = { v: 1, team: ['members', 'named'].includes(raw.team) ? raw.team : 'none', browserNoSandbox: raw.browserNoSandbox === true }
   for (const key of Object.keys(SUMMARY_PATHS)) {
     out[key] = {}
     const given = raw[key] && typeof raw[key] === 'object' && !Array.isArray(raw[key]) ? raw[key] : {}

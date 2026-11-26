@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import {
   BROWSER_PROFILE_MARKER,
@@ -8,8 +9,10 @@ import {
   CAPABILITY_KEYS,
   CAPABILITY_NARROWEST,
   hostPlatform,
+  localOrigin,
   PATHS,
   TIERS,
+  browserProfileBase,
   cleanBrowserProfile,
   cleanCapabilityKeys,
   cleanNarrowing,
@@ -49,16 +52,20 @@ import {
 import { localMachinePolicy, validateUserEntry } from '../src/agent/user-settings.js'
 import { cleanPolicy } from '../src/hosted/agent-policy.js'
 import { summaryChanges } from '../src/hosted/agents.js'
+import { summaryCard } from '../src/agent/capability-views.js'
 import { cleanHello } from '../src/hosted/agent-link.js'
 import { cleanJob } from '../src/remote/agent-job.js'
 import { loadConfig } from '../src/config.js'
+import { deniedRoots } from '../src/agent/sandbox-exec.js'
 import { tempDir } from './helpers.js'
 
 // ---- Fixtures ----
 
+// Agent browser profiles live in <XDG_STATE_HOME>/shapewall/agent-browser-profiles:
+// this test process gets a state folder of its own.
+process.env.XDG_STATE_HOME = tempDir('capabilities-state')
 // An agent browser profile folder Shapewall made (marked).
-const PROFILE_DIR = path.join(tempDir('capabilities-profile'), 'agent-profile')
-markBrowserProfile(PROFILE_DIR)
+const PROFILE_DIR = markBrowserProfile('agent-profile')
 
 const COMMANDS_CONFIG = {
   test: { run: 'npm test', argv: ['npm', 'test'], inputs: null, mutating: true, args: false, ready: null },
@@ -484,6 +491,7 @@ test('capability keys: a value it does not know reads as the narrowest, by name'
       browserAuth: '../../etc/passwd',
       browserProfile: '/home/x/.config/google-chrome/Default',
       browserProfileTeam: 'on',
+      browserNoSandbox: 'yes',
       extensionsFor: 'owner',
       allowTool: ['Bash'],
       handoffHops: 3,
@@ -1089,48 +1097,94 @@ test('browser allowlist: the machine caps the config; config origins widen it on
     assert.equal(machineView({ audience }).audience, 'server', String(audience))
 })
 
-test('browser profile: only a folder Shapewall marked, read after resolving links; never a browser’s own or a copy', () => {
-  const root = tempDir('capabilities-profiles')
-  const marked = markBrowserProfile(path.join(root, 'agent'))
-  assert.equal(cleanBrowserProfile(marked), marked)
+test('browser profile: only a folder Shapewall marked in its own base, read after resolving links; never a browser’s own or a copy', () => {
+  const env = { XDG_STATE_HOME: tempDir('capabilities-profiles-state') }
+  const base = browserProfileBase(env)
+  assert.equal(base, path.join(env.XDG_STATE_HOME, 'shapewall', 'agent-browser-profiles'))
+  // Without XDG_STATE_HOME: ~/.local/state/... (a relative XDG_STATE_HOME is ignored).
+  assert.equal(
+    browserProfileBase({ HOME: '/home/d', XDG_STATE_HOME: 'rel' }),
+    path.join('/home/d', '.local', 'state', 'shapewall', 'agent-browser-profiles'),
+  )
+  const opts = { env }
+  // No base yet: nothing is a profile.
+  assert.equal(cleanBrowserProfile('agent', opts), null)
+  // A NAME makes <base>/NAME, 0700, the base 0700 too.
+  const marked = markBrowserProfile('agent', opts)
+  assert.equal(marked, path.join(fs.realpathSync(base), 'agent'))
+  assert.equal(fs.statSync(base).mode & 0o777, 0o700)
+  assert.equal(fs.statSync(marked).mode & 0o777, 0o700)
+  assert.equal(cleanBrowserProfile('agent', opts), marked)
+  assert.equal(cleanBrowserProfile(marked, opts), marked)
   assert.equal(fs.statSync(path.join(marked, BROWSER_PROFILE_MARKER)).mode & 0o777, 0o600)
+  // An absolute path directly in the base is the same as its name.
+  assert.equal(markBrowserProfile(path.join(base, 'second'), opts), path.join(fs.realpathSync(base), 'second'))
   // Marking again is fine once it is ours, even after the browser wrote to it.
   fs.writeFileSync(path.join(marked, 'Local State'), '{}')
-  assert.equal(markBrowserProfile(marked), marked)
-  assert.equal(cleanBrowserProfile(marked), marked)
-  // A link to it reads as the folder it points to.
-  fs.symlinkSync(marked, path.join(root, 'link'))
-  assert.equal(cleanBrowserProfile(path.join(root, 'link')), marked)
+  assert.equal(markBrowserProfile('agent', opts), marked)
+  assert.equal(cleanBrowserProfile(marked, opts), marked)
+  // A link to it (from anywhere) reads as the folder it points to, still in the base.
+  const outside = tempDir('capabilities-profiles-outside')
+  fs.symlinkSync(marked, path.join(outside, 'link'))
+  assert.equal(cleanBrowserProfile(path.join(outside, 'link'), opts), marked)
+  // A marked folder outside the base: refused, and never made there.
+  const elsewhere = path.join(outside, 'elsewhere')
+  fs.mkdirSync(elsewhere)
+  fs.copyFileSync(path.join(marked, BROWSER_PROFILE_MARKER), path.join(elsewhere, BROWSER_PROFILE_MARKER))
+  assert.equal(cleanBrowserProfile(elsewhere, opts), null)
+  assert.throws(() => markBrowserProfile(path.join(outside, 'new'), opts), /lives in/)
+  assert.throws(() => markBrowserProfile(path.join(base, 'deep', 'er'), opts), /lives in/)
+  assert.throws(() => markBrowserProfile('../escape', opts), /a name such as/)
+  assert.throws(() => markBrowserProfile('relative/dir', opts), /a name such as/)
+  // A link in the base to a marked folder outside it: refused after resolving it.
+  fs.symlinkSync(elsewhere, path.join(base, 'sneaky'))
+  assert.equal(cleanBrowserProfile('sneaky', opts), null)
+  assert.throws(() => markBrowserProfile('sneaky', opts), /symbolic link/)
   // An unmarked folder, a missing one, a file: refused.
-  fs.mkdirSync(path.join(root, 'plain'))
-  assert.equal(cleanBrowserProfile(path.join(root, 'plain')), null)
-  assert.equal(cleanBrowserProfile(path.join(root, 'missing')), null)
-  assert.equal(cleanBrowserProfile(path.join(marked, BROWSER_PROFILE_MARKER)), null)
+  fs.mkdirSync(path.join(base, 'plain'), { mode: 0o700 })
+  assert.equal(cleanBrowserProfile('plain', opts), null)
+  assert.equal(cleanBrowserProfile('missing', opts), null)
+  assert.equal(cleanBrowserProfile(path.join(marked, BROWSER_PROFILE_MARKER), opts), null)
   // A copy of a real profile: its own files, no marker. Refused, and never marked.
-  const copy = path.join(root, 'copy')
-  fs.mkdirSync(path.join(copy, 'Default'), { recursive: true })
+  const copy = path.join(base, 'copy')
+  fs.mkdirSync(path.join(copy, 'Default'), { recursive: true, mode: 0o700 })
   fs.writeFileSync(path.join(copy, 'Local State'), '{}')
   fs.writeFileSync(path.join(copy, 'Default', 'Cookies'), 'x')
-  assert.equal(cleanBrowserProfile(copy), null)
-  assert.throws(() => markBrowserProfile(copy), /a browser's own files/)
+  assert.equal(cleanBrowserProfile('copy', opts), null)
+  assert.throws(() => markBrowserProfile('copy', opts), /a browser's own files/)
   // A marker that is a link, or says something else: not ours.
-  const fake = path.join(root, 'fake')
-  fs.mkdirSync(fake)
+  const fake = path.join(base, 'fake')
+  fs.mkdirSync(fake, { mode: 0o700 })
   fs.symlinkSync(path.join(marked, BROWSER_PROFILE_MARKER), path.join(fake, BROWSER_PROFILE_MARKER))
-  assert.equal(cleanBrowserProfile(fake), null)
-  const other = path.join(root, 'other')
-  fs.mkdirSync(other)
+  assert.equal(cleanBrowserProfile('fake', opts), null)
+  const other = path.join(base, 'other')
+  fs.mkdirSync(other, { mode: 0o700 })
   fs.writeFileSync(path.join(other, BROWSER_PROFILE_MARKER), 'trust me\n')
-  assert.equal(cleanBrowserProfile(other), null)
+  assert.equal(cleanBrowserProfile('other', opts), null)
   // A non-empty folder is never marked.
-  fs.writeFileSync(path.join(root, 'plain', 'notes.txt'), 'x')
-  assert.throws(() => markBrowserProfile(path.join(root, 'plain')), /not empty/)
-  // A link whose target is a real browser's folder: refused after resolving it, marker or not.
-  const chrome = path.join(root, '.config', 'google-chrome')
-  fs.mkdirSync(chrome, { recursive: true })
-  fs.writeFileSync(path.join(chrome, BROWSER_PROFILE_MARKER), fs.readFileSync(path.join(marked, BROWSER_PROFILE_MARKER)))
-  fs.symlinkSync(chrome, path.join(root, 'innocent'))
-  assert.equal(cleanBrowserProfile(path.join(root, 'innocent')), null)
+  fs.writeFileSync(path.join(base, 'plain', 'notes.txt'), 'x')
+  assert.throws(() => markBrowserProfile('plain', opts), /not empty/)
+  // A profile folder others may enter: refused until it is 0700 again.
+  fs.chmodSync(marked, 0o755)
+  assert.equal(cleanBrowserProfile('agent', opts), null)
+  assert.throws(() => markBrowserProfile('agent', opts), /open to other users/)
+  fs.chmodSync(marked, 0o700)
+  assert.equal(cleanBrowserProfile('agent', opts), marked)
+  // A base with the wrong mode: nothing in it counts.
+  fs.chmodSync(base, 0o755)
+  assert.equal(cleanBrowserProfile('agent', opts), null)
+  assert.throws(() => markBrowserProfile('agent', opts), /open to other users/)
+  fs.chmodSync(base, 0o700)
+  assert.equal(cleanBrowserProfile('agent', opts), marked)
+  // A base that is a symbolic link (to a folder of the same shape): refused.
+  const linkEnv = { XDG_STATE_HOME: tempDir('capabilities-profiles-linked') }
+  fs.mkdirSync(path.join(linkEnv.XDG_STATE_HOME, 'shapewall'))
+  fs.symlinkSync(fs.realpathSync(base), browserProfileBase(linkEnv))
+  assert.equal(cleanBrowserProfile('agent', { env: linkEnv }), null)
+  assert.equal(cleanBrowserProfile(marked, { env: linkEnv }), null)
+  assert.throws(() => markBrowserProfile('new-one', { env: linkEnv }), /symbolic link/)
+  // A name that looks like a browser's own folder is never made.
+  assert.throws(() => markBrowserProfile('chromium-x', opts), /looks like a browser's own/)
   // The name check catches the folders the review listed before the disk is read.
   for (const dir of [
     '/home/d/.config/google-chrome',
@@ -1156,7 +1210,40 @@ test('browser profile: only a folder Shapewall marked, read after resolving link
     '/home/d/.mozilla/firefox/abc.default',
     '/tmp/x/../../home/d/.config/google-chrome',
   ])
-    assert.equal(cleanBrowserProfile(dir), null, dir)
+    assert.equal(cleanBrowserProfile(dir, opts), null, dir)
+})
+
+test('browser profile base: inside a folder the command sandbox hides', () => {
+  // deniedRoots (src/agent/sandbox-exec.js) hides the home folder and the
+  // XDG folders from every command, so the agent cannot write the base.
+  const env = { XDG_STATE_HOME: tempDir('capabilities-profiles-denied') }
+  const base = fs.realpathSync(path.dirname(path.dirname(markBrowserProfile('denied', { env }))))
+  const within = (outer, inner) => inner === outer || inner.startsWith(outer + path.sep)
+  assert.ok(
+    deniedRoots({ env }).some((root) => within(root, base)),
+    'the base is inside a denied root',
+  )
+  // The fallback (no XDG_STATE_HOME) is under the home folder, also hidden.
+  const home = fs.realpathSync(os.homedir())
+  const fallback = browserProfileBase({ HOME: os.homedir() })
+  assert.ok(within(home, fallback))
+  assert.ok(deniedRoots({ env: { HOME: os.homedir() } }).some((root) => within(root, home)))
+})
+
+// An old policy that names a profile folder outside the base reads as no
+// profile, with a warning, like any value this version does not take.
+test('browser profile: an old absolute path outside the base reads as none, with a warning', () => {
+  const old = tempDir('capabilities-old-profile')
+  fs.writeFileSync(path.join(old, BROWSER_PROFILE_MARKER), fs.readFileSync(path.join(PROFILE_DIR, BROWSER_PROFILE_MARKER)))
+  fs.chmodSync(old, 0o700)
+  const warned = []
+  const cleaned = cleanCapabilityKeys({ browserProfile: old }, { warn: (key) => warned.push(key) })
+  assert.equal(cleaned.browserProfile, null)
+  assert.deepEqual(warned, ['browserProfile'])
+  const policyWarnings = []
+  const policy = cleanMachinePolicy({ ...CAPABILITY_DEFAULTS, browserProfile: old }, (text) => policyWarnings.push(text))
+  assert.equal(policy.browserProfile, null)
+  assert.ok(policyWarnings.some((text) => /browserProfile/.test(text)))
 })
 
 test('capability summary: what changed between two hellos, line by line', () => {
@@ -1194,4 +1281,227 @@ test('hostPlatform reads the sandbox probe; Windows and a failing probe read as 
     { os: 'linux', sandbox: false },
   )
   assert.deepEqual(hostPlatform({ platform: 'win32', probe: () => ({ available: true }) }), { os: 'win32', sandbox: false })
+})
+
+// ---- Review fixes (PR #37) ----
+
+test('loopback origins from a committed config count below the owner’s own turn only where the machine lists them', () => {
+  const spellings = [
+    'http://127.0.0.1:5173',
+    'http://127.0.0.2:8080',
+    'http://127.1:3000',
+    'http://0x7f000001:4000',
+    'http://localhost:5173',
+    'http://LOCALHOST:5174',
+    'http://localhost.:5175',
+    'http://app.localhost:5176',
+    'http://[::1]:5177',
+    'http://[::ffff:127.0.0.1]:5178',
+    'http://[0:0:0:0:0:ffff:7f00:1]:5179',
+    'http://0.0.0.0:5180',
+    'http://[::]:5181',
+    'http://myapp.test:5182',
+  ]
+  for (const origin of spellings) assert.equal(localOrigin(origin), true, origin)
+  for (const origin of ['https://staging.example.com', 'http://10.0.0.5:3000', 'http://192.168.1.2', 'http://8.8.8.8'])
+    assert.equal(localOrigin(origin), false, origin)
+  const machines = {
+    plain: optIn({ approvals: 'owner', trustTeam: ['robin'] }),
+    login: optIn({ approvals: 'owner', trustTeam: ['robin'], browserAuth: 'staging', browserProfileTeam: true }),
+  }
+  // Each tier and machine: does a loopback origin from the config reach the allowlist?
+  const cases = [
+    ['solo', 'plain', true],
+    ['solo', 'login', false],
+    ['team', 'plain', false],
+    ['team', 'login', false],
+    ['open', 'plain', false],
+    ['open', 'login', false],
+  ]
+  for (const origin of spellings) {
+    for (const source of ['baseUrl', 'publicUrl', 'environment', 'board', 'agent.browser.allow']) {
+      const config = {
+        baseUrl: source === 'baseUrl' ? `${origin}/app` : undefined,
+        publicUrl: source === 'publicUrl' ? origin : undefined,
+        environments: source === 'environment' ? [{ id: 'local', baseUrl: `${origin}/` }] : [],
+        boards: source === 'board' ? [{ baseUrl: `${origin}/x` }] : [],
+        agent: source === 'agent.browser.allow' ? { browser: { allow: [new URL(origin).origin] } } : undefined,
+      }
+      const own = new URL(origin).origin
+      for (const [tier, kind, reaches] of cases) {
+        const label = `${origin} ${source} ${tier} ${kind}`
+        const at = (machine) =>
+          resolveCapabilities({
+            path: 'hosted-fix',
+            trust: TRUST[tier],
+            audience: 'owner',
+            machine,
+            config,
+            platform: PLATFORMS['linux sandbox'],
+          })
+        const caps = at(machines[kind])
+        assert.equal(caps.browser.on, true, label)
+        assert.equal(caps.browser.allow.includes(own), reaches, label)
+        const held = caps.why.some((item) => item.line === 'browser' && item.code === 'loopback_not_listed')
+        assert.equal(held, !reaches, label)
+        assert.deepEqual([...caps.browser.withheld], reaches ? [] : [own], label)
+        // Listed by the machine, that exact origin: it counts on every tier.
+        const listed = at(optIn({ ...machines[kind], browserAllow: [own] }))
+        assert.ok(listed.browser.allow.includes(own), `${label} listed`)
+        assert.ok(!listed.why.some((item) => item.code === 'loopback_not_listed'), `${label} listed`)
+      }
+    }
+  }
+  // Another spelling of the same address on the machine's list is not that origin.
+  const other = resolveCapabilities({
+    path: 'hosted-fix',
+    trust: TRUST.team,
+    audience: 'owner',
+    machine: optIn({ approvals: 'owner', trustTeam: ['robin'], browserAllow: ['http://127.0.0.1:5173'] }),
+    config: { baseUrl: 'http://localhost:5173' },
+    platform: PLATFORMS['linux sandbox'],
+  })
+  assert.deepEqual([...other.browser.allow], ['http://127.0.0.1:5173'])
+  assert.deepEqual([...other.browser.withheld], ['http://localhost:5173'])
+  // Non-loopback config origins are unchanged on every tier.
+  for (const tier of TIERS) {
+    const caps = resolveCapabilities({
+      path: 'hosted-fix',
+      trust: TRUST[tier],
+      audience: 'owner',
+      machine: optIn({ approvals: 'owner', trustTeam: ['robin'] }),
+      config: { baseUrl: 'https://staging.example.com/app', publicUrl: 'http://10.0.0.5:3000' },
+      platform: PLATFORMS['linux sandbox'],
+    })
+    assert.deepEqual([...caps.browser.allow].sort(), ['http://10.0.0.5:3000', 'https://staging.example.com'], tier)
+    assert.ok(!caps.why.some((item) => item.code === 'loopback_not_listed'), tier)
+  }
+  // The local board's open turns too; its owner's own (solo) keeps them.
+  const local = (tier) =>
+    resolveCapabilities({
+      path: 'local-chat',
+      trust: TRUST[tier],
+      audience: 'owner',
+      machine: localMachinePolicy({ capabilities: {} }),
+      config: CONFIG,
+      platform: PLATFORMS['linux sandbox'],
+    })
+  assert.ok(local('solo').browser.allow.includes('http://127.0.0.1:5173'))
+  assert.ok(!local('open').browser.allow.includes('http://127.0.0.1:5173'))
+  assert.ok(local('open').browser.allow.includes('https://staging.example.com'))
+  // The starter agent's loopback is its container's: unchanged.
+  const starter = resolveCapabilities({
+    path: 'starter',
+    trust: TRUST.open,
+    audience: 'owner',
+    machine: MACHINE,
+    config: CONFIG,
+    platform: PLATFORMS['linux sandbox'],
+  })
+  assert.ok(starter.browser.allow.includes('http://127.0.0.1:5173'))
+})
+
+test('loopback_not_listed: every view says which origin and the command that lists it; the browser stays on', () => {
+  const caps = resolveCapabilities({
+    path: 'hosted-fix',
+    trust: TRUST.team,
+    audience: 'owner',
+    machine: optIn({ approvals: 'owner', trustTeam: ['robin'] }),
+    config: CONFIG,
+    platform: PLATFORMS['linux sandbox'],
+  })
+  const line = lines(caps, { as: 'staging' }).find((item) => item.id === 'browser')
+  assert.equal(line.state, 'on')
+  assert.match(line.text, /Not http:\/\/127\.0\.0\.1:5173: an address on this machine from the config/)
+  assert.ok(line.why.some((text) => /lists that exact origin too/.test(text)))
+  assert.equal(line.fix, 'shapewall agent set browser-allow http://127.0.0.1:5173 --as staging')
+  const panel = toPanel(caps, { as: 'staging' }).lines.find((item) => item.id === 'browser')
+  assert.deepEqual(panel, line)
+  assert.ok(toCli(caps, { as: 'staging' }).some((text) => text.includes('change: shapewall agent set browser-allow http://127.0.0.1:5173')))
+  assert.match(toPrompt(caps), /Not http:\/\/127\.0\.0\.1:5173/)
+  // The command it prints is one `agent set` takes.
+  assert.deepEqual(cleanCapabilityKeys({ browserAllow: ['http://127.0.0.1:5173'] }).browserAllow, ['http://127.0.0.1:5173'])
+  // The board's copy of the summary: line states only, the code never reaches it.
+  const summary = capabilitySummary({ machine: optIn({ approvals: 'owner', trustTeam: ['robin'] }), config: CONFIG })
+  const cleaned = cleanCapabilitySummary(JSON.parse(JSON.stringify(summary)))
+  assert.equal(cleaned.fix.team.browser, 'on')
+  assert.ok(!JSON.stringify(cleaned).includes('loopback_not_listed'))
+  // A summary carrying a reason code or text it does not know is cleaned to states only.
+  const odd = cleanCapabilitySummary({ ...summary, fix: { ...summary.fix, team: { ...summary.fix.team, browser: 'loopback_not_listed' } } })
+  assert.equal(odd.fix.team.browser, 'unknown')
+})
+
+test('browserNoSandbox: off by default and narrowest, on only while the browser is on for solo and team', () => {
+  assert.equal(CAPABILITY_DEFAULTS.browserNoSandbox, false)
+  assert.equal(CAPABILITY_NARROWEST.browserNoSandbox, false)
+  assert.equal(DEFAULT_MACHINE_POLICY.browserNoSandbox, false)
+  assert.equal(machineView({}).browserNoSandbox, false)
+  assert.equal(localMachinePolicy({}).browserNoSandbox, false)
+  for (const bad of ['yes', 1, 'on', null]) {
+    const warned = []
+    assert.equal(cleanCapabilityKeys({ browserNoSandbox: bad }, { warn: (key) => warned.push(key) }).browserNoSandbox, false, String(bad))
+    assert.deepEqual(warned, ['browserNoSandbox'], String(bad))
+  }
+  const at = (tier, entry = {}, extra = {}) =>
+    resolveCapabilities({
+      path: 'hosted-fix',
+      trust: TRUST[tier],
+      audience: 'owner',
+      machine: optIn({ approvals: 'owner', trustTeam: ['robin'], ...entry }),
+      config: CONFIG,
+      platform: PLATFORMS['linux sandbox'],
+      ...extra,
+    })
+  for (const tier of TIERS) {
+    assert.equal(at(tier).browser.allowNoSandbox, false, tier)
+    assert.equal(at(tier, { browserNoSandbox: true }).browser.allowNoSandbox, tier !== 'open', tier)
+    assert.equal(
+      at(tier, { browserNoSandbox: true }).why.some((item) => item.code === 'open_tier_browser_sandbox'),
+      tier === 'open',
+      tier,
+    )
+    // The browser off: nothing to start, so nothing to skip.
+    assert.equal(at(tier, { browserNoSandbox: true, browser: 'off' }).browser.allowNoSandbox, false, tier)
+    assert.equal(at(tier, { browserNoSandbox: true }, { server: { browser: false } }).browser.allowNoSandbox, false, tier)
+  }
+  // The card, agent status and the prompt say so on the Browser line.
+  const caps = at('solo', { browserNoSandbox: true })
+  const line = lines(caps).find((item) => item.id === 'browser')
+  assert.match(line.text, /starts without it \(the owner chose browser-no-sandbox\)/)
+  assert.ok(toCli(caps).some((text) => /browser-no-sandbox/.test(text)))
+  assert.match(toPrompt(caps), /browser-no-sandbox/)
+  assert.doesNotMatch(lines(at('solo')).find((item) => item.id === 'browser').text, /no-sandbox/)
+  assert.doesNotMatch(lines(at('open', { browserNoSandbox: true })).find((item) => item.id === 'browser').text, /no-sandbox/)
+  // The hello summary carries it; the board's card says it on solo and team only.
+  const summary = cleanCapabilitySummary(
+    JSON.parse(JSON.stringify(capabilitySummary({ machine: optIn({ approvals: 'owner', trustTeam: ['robin'], browserNoSandbox: true }) }))),
+  )
+  assert.equal(summary.browserNoSandbox, true)
+  assert.equal(cleanCapabilitySummary({ ...summary, browserNoSandbox: 'yes' }).browserNoSandbox, false)
+  assert.equal(capabilitySummary({ machine: optIn({ approvals: 'owner' }) }).browserNoSandbox, false)
+  assert.equal(
+    capabilitySummary({ machine: optIn({ approvals: 'owner', browserNoSandbox: true, browser: 'off' }) }).browserNoSandbox,
+    false,
+  )
+  const card = summaryCard(summary)
+  const browserLine = (tier) =>
+    card.paths
+      .find((item) => item.id === 'fix')
+      .tiers.find((item) => item.tier === tier)
+      .lines.find((item) => item.id === 'browser').text
+  assert.match(browserLine('solo'), /browser-no-sandbox/)
+  assert.match(browserLine('team'), /browser-no-sandbox/)
+  assert.doesNotMatch(browserLine('open'), /browser-no-sandbox/)
+  assert.deepEqual(summaryChanges(summary, { ...summary, browserNoSandbox: false }), ['browserNoSandbox'])
+  // The policy file: written and read back, local board entry too.
+  const env = { XDG_CONFIG_HOME: tempDir('capabilities-no-sandbox') }
+  saveMachinePolicy('https://board.example', 'default', { browserNoSandbox: true }, env)
+  assert.equal(readMachinePolicy('https://board.example', 'default', env).browserNoSandbox, true)
+  assert.equal(JSON.parse(fs.readFileSync(policyFile(env), 'utf8')).connections['https://board.example#default'].browserNoSandbox, true)
+  saveMachinePolicy('https://board.example', 'default', { browserNoSandbox: false }, env)
+  assert.equal(readMachinePolicy('https://board.example', 'default', env).browserNoSandbox, false)
+  const local = validateUserEntry({ capabilities: { browserNoSandbox: true } })
+  assert.deepEqual(local.problems, [])
+  assert.equal(localMachinePolicy(local.entry).browserNoSandbox, true)
+  assert.equal(localMachinePolicy(validateUserEntry({ capabilities: { browserNoSandbox: 'yes' } }).entry).browserNoSandbox, false)
 })

@@ -51,6 +51,10 @@ const SUMMARY_TEXT = {
   handoff: { on: 'Hands work to another connected agent.', off: 'No handoff.' },
   chrome: { off: 'Never your own Chrome or its profile.' },
 }
+// The machine allows the browser without Chromium's own sandbox (solo and
+// team turns only, as capabilities.js resolves it).
+const NO_SANDBOX_TEXT =
+  " Where Chromium's own sandbox cannot start on its machine, it starts without it (the owner chose browser-no-sandbox)."
 const UNKNOWN_TEXT = 'Its machine did not say (an older Shapewall there). Update it and connect again.'
 
 // The setting on the agent's machine that turns a line on, for a summary
@@ -77,7 +81,7 @@ const summaryText = (id, state, tier) => {
 // The lines of one tier of a summary, with the project's narrowing laid
 // over them the way the machine applies it (capabilities.js: no shell
 // means no commands and no shell; no browser means no browser).
-function summaryLines(states, tier, { narrowing, remote }) {
+function summaryLines(states, tier, { narrowing, remote, noSandbox = false }) {
   return LINE_IDS.map((id) => {
     let state = states[id] || 'unknown'
     let narrowed = false
@@ -90,7 +94,7 @@ function summaryLines(states, tier, { narrowing, remote }) {
       id,
       label: LINE_LABELS[id],
       state,
-      text: summaryText(id, state, tier),
+      text: summaryText(id, state, tier) + (id === 'browser' && state === 'on' && noSandbox && tier !== 'open' ? NO_SANDBOX_TEXT : ''),
       why: narrowed ? [LIMITED] : [],
       fix: fixable ? setCommand(SUMMARY_FIX[id], remote) : null,
       narrowed,
@@ -119,7 +123,7 @@ export function summaryCard(summary, { narrowing = null, remote = null } = {}) {
           tier,
           label: TIER_LABELS[tier],
           limitedTo: null,
-          lines: states ? summaryLines(states, tier, { narrowing: narrow, remote }) : null,
+          lines: states ? summaryLines(states, tier, { narrowing: narrow, remote, noSandbox: summary.browserNoSandbox === true }) : null,
         }
       }),
     })),
