@@ -72,6 +72,11 @@ repository marketplace).
 hands you the same links. **Follow agent** on the board flies to each comment the agent takes and opens the screen it changed,
 before and after ([links and follow](docs/agent-workflow.md#links-to-the-board)).
 
+**What the agent may do** follows who wrote the turn. On a local board, on your own turns, it runs the project's named commands (`test`, `build`,
+`dev`, `lint`) and a shell inside an OS sandbox, and checks its work in a throwaway headless browser limited to your app; when
+someone else wrote the turn, each command waits for a card on the board. The console, `npx shapewall agent status` and the agent
+itself list the same lines ([what an agent can do](docs/agent-capabilities.md)).
+
 Comments are untrusted input to an agent: read [keeping an agent safe](docs/agent-hardening.md) before you let others comment.
 
 ## What else is on the wall

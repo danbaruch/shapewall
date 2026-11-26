@@ -4,6 +4,7 @@ import { ArrowRight, Check, Download } from 'lucide-react'
 import { Badge, Container, Eyebrow, GetStarted, LiveDemo, Shot } from '../components/ui.jsx'
 import {
   BeforeAfter,
+  CapabilitiesIllustration,
   CaptureIllustration,
   FollowIllustration,
   GithubIllustration,
@@ -129,6 +130,23 @@ const SECTIONS = [
     links: [{ to: '/docs/agent-hardening', label: 'Read the hardening guide' }],
     art: <AgentTerminal />,
     dark: true,
+  },
+  {
+    id: 'capabilities',
+    group: 'Steer your agents',
+    nav: 'What it can do',
+    title: 'Your agent tests its own work, inside limits you set',
+    text: 'What an agent may do on a board follows who wrote the turn. On your own turns it runs your project\u2019s named commands and a shell inside an OS sandbox, and checks its work in a headless browser that opens only your app. When someone else wrote the turn, each command waits for a card on the board.',
+    points: [
+      'Named commands from shapewall.config.json: test, build, dev and lint, each run without a shell',
+      'Commands in a bubblewrap or Seatbelt sandbox: the fix copy only, no home folder, package registries only',
+      'Approvals are asked again when the agent changes a manifest, a lockfile or a test the command reads',
+      'The machine that runs the agent sets the ceiling; a project\u2019s setting can only lower it',
+      'A connected agent on a team server starts read and answer only; each line is switched on on its own machine',
+      'The console, shapewall agent status and the agent itself list the same lines',
+    ],
+    links: [{ to: '/docs/agent-capabilities', label: 'What an agent can do' }],
+    art: <CapabilitiesIllustration />,
   },
   {
     id: 'setup',

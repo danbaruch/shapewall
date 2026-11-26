@@ -1217,9 +1217,10 @@ needed, the agent says what to change and where.
 **Edits are switched on only on the machine that has the code.** Started with `--approvals owner` or
 `--approvals admins`, the agent can make a fix for a comment: on a new branch, in a folder of its own, never in the checkout, and
 each edit is a card with the full diff that a person allows or denies on the board
-([Edits from the board](#edits-from-the-board-the-trust-decision)). Chat stays read and answer only either way. A connected Claude
-Code runs no commands from the board in this release. `shapewall watch --remote --exec` is unchanged, and stays the way for an
-agent that fixes comments with nobody in between.
+([Edits from the board](#edits-from-the-board-the-trust-decision)). Chat stays read and answer only either way. Commands, a
+sandboxed shell and a throwaway browser are further lines the same machine switches on, one setting at a time: they run
+through Shapewall's own tools, never the agent's shell ([what an agent can do](agent-capabilities.md)).
+`shapewall watch --remote --exec` is unchanged, and stays the way for an agent that fixes comments with nobody in between.
 
 The server still never runs an agent. It stores the conversation and passes messages between the browser and the agent's machine.
 
@@ -1241,9 +1242,9 @@ goose and Gemini CLI, `shapewall watch --remote` stays the way to work on a host
 [the agent hardening guide](agent-hardening.md#connected-agents).
 
 The same test decided what a fix session gets. A Claude Code session for a fix has its reading tools and its editing tools, and
-no shell tool: started with the shell tool, Claude Code ran commands it takes to be read-only (`ls`, `cat`) without asking anyone,
-and those can read outside the project. So commands from the board are not offered for Claude Code in this release
-([Commands](#commands-are-not-offered-for-claude-code)).
+no shell tool of its own: started with the shell tool, Claude Code ran commands it takes to be read-only (`ls`, `cat`) without
+asking anyone, and those can read outside the project. So the project's commands reach it through Shapewall's tools instead, and
+exact commands (`--allow-command`) are not offered for it ([Commands](#commands-through-shapewall-not-the-agents-shell)).
 
 ### The connect command
 
@@ -1261,13 +1262,18 @@ and those can read outside the project. So commands from the board are not offer
 | `--git-remote NAME`                 | `origin`                                                               | Where a finished fix is pushed. `none`: never pushed                                                                                                                                                                                                              |
 | `--instructions all\|project\|none` | `all`                                                                  | Which instruction files each session gets as an appended system prompt: `all`, the project's `CLAUDE.md` (or `AGENTS.md`) and the agent config folder's; `project`, the project's only; `none`, none ([Instruction files](#instruction-files))                    |
 | `--agent-config DIR\|none`          | `agent-config/<--as name>/` beside `agent-policy.json`, when it exists | This connection's own folder for its `CLAUDE.md`. Outside the project, never Claude Code's own folder, never created by Shapewall                                                                                                                                 |
+| `--browser-profile NAME\|none`      | None                                                                   | A saved profile of the agent browser's own (test or staging logins), made in `$XDG_STATE_HOME/shapewall/agent-browser-profiles/NAME`; never a real browser's profile                                                                                              |
+| `--browser-no-sandbox`              | Off                                                                    | Let the agent browser start without Chromium's own sandbox where it cannot start, on solo and team turns only                                                                                                                                                     |
 | `--takeover`                        |                                                                        | Close the link another process holds for this agent, and take its place                                                                                                                                                                                           |
 | `--concurrency N`                   | 2                                                                      | Answers at once, 1 to 4                                                                                                                                                                                                                                           |
 | `--token-file FILE`                 |                                                                        | For a service: the agent's own token from a file, no browser                                                                                                                                                                                                      |
 
-`--approvals`, `--auto`, `--allow-path`, `--base`, `--git-remote`, `--instructions` and `--agent-config` are saved for the
-connection, so the next run without them keeps what was set. They are explained under [Switching edits on](#switching-edits-on). `--allow-command` is listed by
-`shapewall --help` and is refused for Claude Code ([Commands](#commands-are-not-offered-for-claude-code)).
+`--approvals`, `--auto`, `--allow-path`, `--base`, `--git-remote`, `--instructions`, `--agent-config`, `--browser-profile` and
+`--browser-no-sandbox` are saved for the connection, so the next run without them keeps what was set. They are explained under
+[Switching edits on](#switching-edits-on). `--allow-command` is listed by `shapewall --help` and is refused for Claude Code
+([Commands](#commands-through-shapewall-not-the-agents-shell)). The other lines of what the agent may do (the shell, commands
+without a card, the browser, a team) are set with `shapewall agent set KEY VALUE --remote URL` and read at the next connect
+([what an agent can do](agent-capabilities.md#change-a-line)); `shapewall agent status --remote URL` lists them all.
 
 - **Which program runs** is the machine's choice: an agent saved for this project on that machine, or Claude Code found on its
   `PATH` with its ACP adapter, the same detection a local board uses ([chat with an agent](agents.md)). Codex, goose, Gemini CLI, a saved
@@ -1390,14 +1396,14 @@ A fix runs on someone's machine, with their login, for a comment other people wr
 else's machine change files?** By default, nobody. Even the person who connected the agent cannot allow an edit from the board
 until they said so on that machine.
 
-| Level                                                           | Where it is set                                                                   | Default                     | What the board can cause                                                                                                                                                 |
-| --------------------------------------------------------------- | --------------------------------------------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Audience "only the person who connected it", `--approvals none` | The audience at the approval; `--audience owner` pins it from the machine         | Yes                         | That person asks. The agent reads the project and answers                                                                                                                |
-| Audience: named members, or everyone the agent policy trusts    | On the server: the approval page, or the Agents page                              | Opt-in                      | Those members may ask too. Still read and answer only                                                                                                                    |
-| `--approvals owner`                                             | On the machine                                                                    | Opt-in                      | A fix on a new branch. Each edit waits for the person who connected the agent                                                                                            |
-| `--approvals admins`                                            | On the machine                                                                    | Opt-in                      | A fix on a new branch. Each edit waits for someone with the agent's answer role (admin by default), in its audience and trusted                                          |
-| "Allow without asking"                                          | On the machine (`--auto edits`), and then the agent's approval rule on the server | Opt-in, twice               | Edits to ordinary source files go into the fix without a person. The fix stays on the machine: it is pushed only after a person allows "Push this fix" on its whole diff |
-| Commands                                                        | On the machine (`--allow-command`)                                                | Not offered for Claude Code | Nothing: a fix session of Claude Code has no shell tool                                                                                                                  |
+| Level                                                           | Where it is set                                                                   | Default       | What the board can cause                                                                                                                                                 |
+| --------------------------------------------------------------- | --------------------------------------------------------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Audience "only the person who connected it", `--approvals none` | The audience at the approval; `--audience owner` pins it from the machine         | Yes           | That person asks. The agent reads the project and answers                                                                                                                |
+| Audience: named members, or everyone the agent policy trusts    | On the server: the approval page, or the Agents page                              | Opt-in        | Those members may ask too. Still read and answer only                                                                                                                    |
+| `--approvals owner`                                             | On the machine                                                                    | Opt-in        | A fix on a new branch. Each edit waits for the person who connected the agent                                                                                            |
+| `--approvals admins`                                            | On the machine                                                                    | Opt-in        | A fix on a new branch. Each edit waits for someone with the agent's answer role (admin by default), in its audience and trusted                                          |
+| "Allow without asking"                                          | On the machine (`--auto edits`), and then the agent's approval rule on the server | Opt-in, twice | Edits to ordinary source files go into the fix without a person. The fix stays on the machine: it is pushed only after a person allows "Push this fix" on its whole diff |
+| Named commands, the shell, the browser                          | On the machine (`agent set shell`, `command-approval`, `browser`)                 | Off           | Fix with runs the project's named commands through Shapewall, in the OS sandbox; a card each unless the turn is solo (or team) and the machine says `tier`               |
 
 The machine's choice is the ceiling. The server can only narrow it: an audience, an answer role, a rule that asks. It can never
 widen it.
@@ -1439,13 +1445,26 @@ The console's Agents page and the board's Agents panel say which mode an
 agent is in: "Reads and answers", "Edits on a branch, each allowed by the person who connected it" (or "an admin", or "an
 owner"), or "Edits on a branch, allowed without asking".
 
-### Commands are not offered for Claude Code
+### Commands: through Shapewall, not the agent's shell
 
-The link and the machine's policy file know a third thing an agent could ask: to run one exact command from the machine's own
-list, each run allowed on the board (`--allow-command`), through the agent's own shell tool. **That is not available for Claude
-Code, and Claude Code is the only agent `agent connect` offers.** Commands reach a fix another way: through Shapewall's own tools,
-the project's named commands and (on its owner's own turns) a sandboxed shell, each checked and run on the machine by Shapewall,
-never by the agent's shell. See [commands through Shapewall](agent-hardening.md#commands-through-shapewall).
+A fix runs the project's named commands (config [`commands`](config.md#commands)) and, on its owner's own turns, a sandboxed
+shell, through Shapewall's own tools: each checked and run on the machine by Shapewall, never by the agent's shell. They are off
+until the machine switches them on:
+
+```sh
+shapewall agent set shell sandboxed --remote https://wall.example.com          # named commands, and the full shell on solo turns
+shapewall agent set command-approval tier --remote https://wall.example.com    # solo and team runs without a card while inputs are unchanged
+shapewall agent set browser on --remote https://wall.example.com               # the throwaway browser
+```
+
+Solo needs an agent only its connector may use (**Only me**, or `--audience owner`), and edits on (`--approvals`). A turn
+someone else wrote stays open: each command waits for a card on the board. A project's agent policy can take commands and the
+browser away (`shell: false`, `browser: false`), never add them. See [what an agent can do](agent-capabilities.md) and
+[commands through Shapewall](agent-hardening.md#commands-through-shapewall).
+
+The link and the machine's policy file also know exact commands from the machine's own list, each run allowed on the board
+(`--allow-command`), through the agent's own shell tool. **That is not available for Claude Code, and Claude Code is the only
+agent `agent connect` offers.**
 
 The reason was found with the real adapter. Started with its shell tool, Claude Code runs commands it takes to be read-only
 (`ls`, `cat`) without asking anyone, and those can read outside the project. A list of allowed commands does not help when the
@@ -1631,7 +1650,8 @@ An edit that went without asking is still a card in the thread, marked "Allowed 
 - **The commit is exactly what was allowed**, byte for byte and mode for mode, or there is no commit.
 - **Nothing is pushed that runs something, or that no person has seen.**
 - **After Stop, nothing more happens**: no commit, no push, no pull request.
-- **No commands for Claude Code.** Its fix session has no shell tool.
+- **No shell of the agent's own.** Its fix session has no shell tool; commands run through Shapewall's tools, as the machine
+  allows, in the OS sandbox where there is one.
 - **The agent never holds its token.** Its process gets a small environment with no `SHAPEWALL_*` variable.
 
 What the machine cannot do is in [the agent hardening guide](agent-hardening.md#connected-agents): it does not sandbox the agent's own
@@ -1744,10 +1764,23 @@ to the session as an appended system prompt, with Shapewall's own data rules aft
   keeps them in memory for the open link, so they show again after its next connect.
 - **Turning them off:** `--instructions project` leaves the agent config folder out, `--instructions none` everything.
 - **They add no powers.** The tools, the mode and every refusal are the same with or without them. A file that tells the agent to
-  run a command changes nothing: a connected session has no shell. A file could still tell it to quote secrets from the project; the
+  run a command changes nothing: a connected session has no shell of its own, and Shapewall's commands follow the machine's
+  rules, not the file. After the files comes a block that says what this turn may do, from the same renderer as the console's
+  **What it can do** card ([what an agent can do](agent-capabilities.md#see-what-it-can-do)). A file could still tell it to quote secrets from the project; the
   data rules come last and say not to, which is an instruction, not a control. Instruction files are
   [files that run something](#files-that-run-something), so a fix cannot change them without a named `--allow-path` and a person's
   answer, and such a fix is never pushed.
+
+### Extensions from the agent config folder
+
+<!-- Q5: verify -->
+
+The agent config folder can also give a connected agent skills and MCP servers of your own, never from `~/.claude`. Shapewall
+reads them on the machine and passes on only skills and MCP servers; hooks, commands, agents and `bin/` are skipped and listed
+when `agent connect` starts. They are used only on turns where every author is in the machine's extension set (`agent set
+extensions-for owner,HANDLE --remote URL`, the connector alone by default) and never on open turns, and a tool call runs only when
+its exact name is on the machine's `allow-tool` list. A thread that once carried someone else's text stays without them. See
+[extensions](agent-capabilities.md#extensions).
 
 ### What a connected agent can reach
 
@@ -1763,7 +1796,8 @@ to the session as an appended system prompt, with Shapewall's own data rules aft
   read, and keep secrets out of the folder or out of the agent's reach.
 - **It cannot act, by its own controls.** The session has only its reading tools and none of your settings files, and it is not
   started when that cannot be set up ([read-only by the agent's own controls](#read-only-by-the-agents-own-controls)). A fix
-  session, on a machine that switched edits on, also has its editing tools, in a folder of its own.
+  session, on a machine that switched edits on, also has its editing tools, in a folder of its own. Commands and the browser,
+  where the machine allows them, are Shapewall's own tools, run and checked by Shapewall on the machine.
 - **What leaves the machine when edits are on**, beyond the answers: the diffs on edit cards (bounded: a diff too large to show
   in full is refused), the file paths and line counts of a fix, the branch name and the pull request link. Still not the agent's
   token, which is never in the agent's environment, and not absolute paths.
@@ -1798,8 +1832,8 @@ session is started in a way that leaves it nothing to act with, and anything tha
   session either. The login itself is not in those files.
 
 **A fix session** (a machine started with `--approvals owner` or `admins`) is set up the same way, with one difference: it keeps
-Edit, Write and MultiEdit beside Read, Grep and Glob. It has no settings files, no MCP servers, no Bash, no web tools and no
-bypass. Each edit it makes asks first, and the request goes through the machine's checks and a card
+Edit, Write and MultiEdit beside Read, Grep and Glob. It has no settings files, no MCP servers but Shapewall's own tool server
+(where the machine allows commands or the browser), no Bash, no web tools and no bypass. Each edit it makes asks first, and the request goes through the machine's checks and a card
 ([Permission cards](#permission-cards)). Chat turns on the same machine keep the read-only session.
 
 This was shown on one machine with one adapter version ([the agent hardening guide](agent-hardening.md#connected-agents) says how). It
@@ -2219,7 +2253,8 @@ unlocked database snapshot, is not a complete backup of a board.
 except 18, which rebuilds `sessions` ([Migration 18 and rollback](#migration-18-and-rollback)), and 19 adds a column and fills it
 for open claims ([Migration 19 and rollback](#migration-19-and-rollback)). 20 adds a column ([Migration 20 and
 rollback](#migration-20-and-rollback)). 21 rewrites the removed token scope `comment` ([Migration 21 and
-rollback](#migration-21-and-rollback)). Back up before upgrading.
+rollback](#migration-21-and-rollback)). 22 adds two columns ([Migration 22 and rollback](#migration-22-and-rollback)). Back up
+before upgrading.
 
 - **4** (hosted QA fixes): `invites.note TEXT` (the invite's note) and `users.security_seen_at TEXT` (when the account last dismissed
   the recovery-code notice). Rollback: an older build ignores both columns, so the simplest rollback is to run the older build on the
@@ -2249,10 +2284,11 @@ schema_migrations WHERE version = 5; PRAGMA user_version = 4;`. Without that `DE
   `agent_claims.agent_id`, and a backfill that turns every token with the `claim` scope into an agent that behaves as before. What a
   rollback loses is in [Migration 12 and rollback](#migration-12-and-rollback).
 
-**That is not every migration.** There are 20, numbered 1 to 20, and they all run at start. The ones with a rollback note are 4
+**That is not every migration.** There are 22, numbered 1 to 22, and they all run at start. The ones with a rollback note are 4
 and 5 above; 7, in [Migration 7 and rollback](#migration-7-and-rollback); 8, one paragraph under
-[Move a local project to your team](#move-a-local-project-to-your-team); 12, and then one section each for 13, 14, 15, 16, 17,
-18 and 19 below. **Migrations 1, 2, 3, 6, 9, 10 and 11 have no rollback note anywhere:** 1 to 3 are the first schema and its early
+[Move a local project to your team](#move-a-local-project-to-your-team); 12, and then one section each for 13 to 22 below.
+1.4.0 adds no migration: the capability model's server settings (`maxTier`, `shell`, `browser`) live in the project's existing
+`agent_policy` JSON, and the summary a machine sends at hello in the existing `agents.capabilities` column. <!-- Q5: verify (migration 23, chat_threads.tainted) --> **Migrations 1, 2, 3, 6, 9, 10 and 11 have no rollback note anywhere:** 1 to 3 are the first schema and its early
 additions; 6 is scoped dispatch, project budgets and command approvals; 9 is profile images; 10 is `shares.include_checks`; 11 is
 comment and reply images and drawings, whose bytes live in `comment_files`. No recipe for them is written down, and this page does
 not invent one. What holds for all of them: an older build ignores additive tables and columns, the pre-upgrade backup in a fresh
@@ -2855,6 +2891,8 @@ build run the migration again, with the server stopped: `ALTER TABLE chat_thread
 `PRAGMA user_version` to 21. Without the drops, the migration fails on the existing columns. If you keep the columns instead and
 upgrade again later, nothing carries over wrongly: `always` counts only for the agent it was set for. Roll this back before rolling
 back migration 21 or any earlier one.
+
+<!-- Q5: verify -- "Migration 23 and rollback" (chat_threads.tainted, sticky thread taint) goes here once Q5 merges -->
 
 ## Secrets, logs and legal text
 
