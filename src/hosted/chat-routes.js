@@ -1187,7 +1187,8 @@ export function mountChatRoutes(
         card: id,
         decision: allow ? 'allow' : 'deny',
         hash: outcome.card.card_hash,
-        by: { owner: outcome.owner === true },
+        // Who answered: a machine set to "owner" takes an allow only from the handle it pinned.
+        by: { owner: outcome.owner === true, handle: typeof req.user.handle === 'string' ? req.user.handle : null },
       })
       if (row) chat.notify(req.t.workspaceId, req.project.id, at.ctx.board.id, at.threadId)
       res.json({ ok: true, state: allow ? 'approved' : 'denied' })
