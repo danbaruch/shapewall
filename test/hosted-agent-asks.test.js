@@ -46,7 +46,8 @@ test('the approval page says what was asked: read only, edits and who answers, a
   )
   assert.match(text, /on a new branch, never in that machine's checkout/)
   assert.match(text, /A fix starts from the commit that machine's checkout is on\./)
-  assert.match(text, /Never runs a command for the board/)
+  assert.match(text, /Runs a command only where that machine's own settings allow it/)
+  assert.doesNotMatch(text, /Never runs a command/)
   assert.doesNotMatch(text, /does not change files/i)
   assert.doesNotMatch(text, /without asking/)
 
@@ -55,7 +56,7 @@ test('the approval page says what was asked: read only, edits and who answers, a
   assert.match(admins, /Asked to allow edits without asking: that stays off until an admin switches it on/)
   assert.match(admins, /not pushed until a person has looked at its whole diff/)
   assert.match(admins, /A fix starts from the branch main\./)
-  assert.match(admins, /Never runs a command for the board/)
+  assert.match(admins, /Runs a command only where that machine's own settings allow it/)
   assert.match(agentAsks({ approvals: 'owner', auto: true, base: null }).lines.join('\n'), /until you switch it on/)
 
   // An older shapewall says nothing: the page does not promise "no edits" for it.
@@ -67,7 +68,7 @@ test('the approval page says what was asked: read only, edits and who answers, a
   assert.match(agentAsksDone({ approvals: 'none' }), /does not change files or run commands/)
   assert.match(
     agentAsksDone({ approvals: 'owner' }),
-    /makes fixes asked on the board on a branch of their own, each edit allowed by you first; it runs no commands/,
+    /makes fixes asked on the board on a branch of their own, each edit allowed by you first; it runs only the commands that machine allows/,
   )
   assert.match(agentAsksDone({ approvals: 'admins' }), /allowed by whoever this server lets answer first/)
   assert.match(agentAsksDone(undefined), /its terminal says whether it also takes edits/)

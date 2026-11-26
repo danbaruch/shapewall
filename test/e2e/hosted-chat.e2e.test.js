@@ -498,7 +498,7 @@ test('dark, and the phone: the Agents sheet, then the chat in its sheet', async 
     assert.match(asked, /on a new branch, never in that machine's checkout/)
     assert.match(asked, /Asked to allow edits without asking: that stays off until you switch it on/)
     assert.match(asked, /A fix starts from the branch main\./)
-    assert.match(asked, /Never runs a command for the board/)
+    assert.match(asked, /Runs a command only where that machine's own settings allow it/)
     assert.doesNotMatch(asked, /does not change files/i, 'never the read-only promise for a machine that asked for edits')
     await box.scrollIntoViewIfNeeded()
     await shot(view, name)

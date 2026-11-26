@@ -7,9 +7,17 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { browserProfileBase, resolveCapabilities, resolveCeiling } from '../src/agent/capabilities.js'
 import { loadConfig } from '../src/config.js'
-import { LINE_IDS, LINE_LABELS, capabilitySummary, cleanCapabilitySummary, lineStates, toPrompt } from '../src/agent/capability-render.js'
+import {
+  LINE_IDS,
+  LINE_LABELS,
+  REASONS,
+  capabilitySummary,
+  cleanCapabilitySummary,
+  lineStates,
+  toPrompt,
+} from '../src/agent/capability-render.js'
 import { compactCard, localCard, summaryCard, viewerTier } from '../src/agent/capability-views.js'
-import { agentSet, agentStatus, agentStatusData } from '../src/cli/agent-status.js'
+import { SET_KEYS, agentSet, agentStatus, agentStatusData } from '../src/cli/agent-status.js'
 import { saveMachinePolicy, readMachinePolicy } from '../src/remote/agent-policy-file.js'
 import { policyChanges } from '../src/remote/agent-connect.js'
 import { parseArgs } from '../src/cli/args.js'
@@ -280,6 +288,38 @@ test('agent set on a connection: capability keys and connect keys, each checked 
   assert.equal(readMachinePolicy(ORIGIN, 'default', e).approvals, 'none', 'another connection is untouched')
   await assert.rejects(set('handoff-hops', '9'), /not a value/)
   await assert.rejects(set('approvals', 'everyone'), /--approvals/)
+})
+
+test('agent set allow-command: refused with the reason agent connect gives, nothing saved; "none" still clears', async () => {
+  const { dir, env: e } = env()
+  const set = (...args) =>
+    agentSet(
+      ['set', ...args],
+      { remote: ORIGIN, as: 'builder' },
+      () => {},
+      () => {},
+      { env: e, cwd: dir },
+    )
+  await set('approvals', 'owner')
+  await assert.rejects(
+    set('allow-command', 'npm test'),
+    /^Error: allow-command: Commands cannot be allowed for Claude Code in this release/,
+  )
+  await assert.rejects(set('auto', 'edits,commands'), /^Error: auto: Commands cannot be allowed/)
+  assert.deepEqual(readMachinePolicy(ORIGIN, 'builder', e).commands, [], 'nothing saved that connect would drop')
+  await set('allow-command', 'none')
+  await set('auto', 'edits')
+  assert.deepEqual(readMachinePolicy(ORIGIN, 'builder', e).auto, ['edits'])
+})
+
+test('every suggested fix names a real agent set key, and none that turns nothing on', () => {
+  for (const [code, reason] of Object.entries(REASONS)) {
+    if (!reason.set) continue
+    const [key] = typeof reason.set === 'function' ? reason.set({ browser: { withheld: [] } }) : reason.set
+    assert.ok(SET_KEYS.includes(key), `${code}: agent set ${key} is not a setting`)
+    assert.ok(!['allow-command', 'handoff-hops'].includes(key), `${code}: agent set ${key} turns nothing on in this release`)
+  }
+  for (const reason of Object.values(REASONS)) assert.doesNotMatch(reason.text, /--shell-unsandboxed|--allow-tool/)
 })
 
 test('agent set and agent connect: browser-no-sandbox and browser-profile NAME', async () => {

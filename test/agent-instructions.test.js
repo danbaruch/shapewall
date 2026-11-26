@@ -338,7 +338,7 @@ test('server: hello keeps names, sizes and hashes only; presence holds them in m
     kind: 'claude',
     instructions: [
       { ...entry, text: 'secret content', extra: 1 },
-      { ...entry, path: '/home/dan/CLAUDE.md' },
+      { ...entry, path: '/home/ada/CLAUDE.md' },
       { ...entry, path: '~/CLAUDE.md' },
       { ...entry, path: '../CLAUDE.md' },
       { ...entry, path: 'a/../../CLAUDE.md' },

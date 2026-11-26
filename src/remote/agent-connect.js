@@ -179,7 +179,7 @@ export function profileProblems(kind, root, env = process.env, { managedFile = '
 // the only commands they run. None yet: Claude Code, started with its shell
 // tool, runs commands it takes to be read-only without asking (acp.js).
 export const COMMANDS_PROVEN = []
-const NO_COMMANDS =
+export const NO_COMMANDS =
   'Commands cannot be allowed for Claude Code in this release: started with its shell tool it runs commands it takes to be read-only (ls, cat) without asking, and those can read outside the project. Edits work without it.'
 
 const isDir = (dir) => {
