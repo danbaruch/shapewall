@@ -763,7 +763,9 @@ Commands
   agent set KEY VALUE       change one line without reconnecting, for example: agent set browser off,
                             agent set shell commands, agent set trust-team ada,bo. With --remote URL (and --as NAME)
                             a connected agent's setting, read when it connects again; without it, this project's
-                            local board, read by the next turn. "agent status" lists the keys under each line
+                            local board, read by the next turn. "agent status" lists the keys under each line.
+                            Extensions: agent set agent-config DIR (a local board's skills and MCP servers),
+                            agent set extensions-for owner,HANDLE, agent set allow-tool mcp__SERVER__TOOL
   agent docs                where the Shapewall section for coding agents is (AGENTS.md, CLAUDE.md)
       --write | --remove | --print   put it in (or refresh it), take it out (and set "agentDocs": false
                             in the config, so it stays out in every clone), print it. The first serve or
@@ -809,7 +811,9 @@ Commands
                             (default), the agent config folder's CLAUDE.md. Never ~/.claude or CLAUDE.local.md. Names
                             and hashes show on the board, never the text. They add no powers. Saved for this connection
       --agent-config DIR|none  this agent's own folder for its CLAUDE.md (default: agent-config/<--as name> beside
-                            agent-policy.json, read only when it exists; never created). Outside the project
+                            agent-policy.json, read only when it exists; never created). Outside the project.
+                            A folder named here also gives skills (skills/NAME/SKILL.md) and stdio MCP servers
+                            (.claude.json mcpServers) to trusted turns on clean threads (extensions-for, allow-tool)
       --respond thread|mention  in a shared thread (the board chat, a comment's) it answers an @mention of it or
                             Send to agent; "thread" (default) also every message of a thread the person who
                             connected it set to answer everything, "mention" never. A private chat answers every

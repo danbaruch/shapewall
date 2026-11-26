@@ -36,7 +36,7 @@ import { localRestrictedSession, readOnlySession, toolNameOf, withExtensions } f
 import { localTrust } from '../src/agent/local-tools.js'
 import { appendUserMessage, localTextEvent, markThreadTainted, readThread, setThreadProfile } from '../src/agent/threads.js'
 import { validateUserEntry } from '../src/agent/user-settings.js'
-import { sampleConfig, tempDir } from './helpers.js'
+import { SAMPLE, sampleConfig, tempDir } from './helpers.js'
 
 // A folder of this user's that nobody else may change (tempDir is in the repo, not /tmp).
 function privateDir(name) {
@@ -432,4 +432,45 @@ test('the local agent config folder is a setting of the machine only: an absolut
   assert.deepEqual(validateUserEntry({ agentConfig: 'none' }).problems, [])
   for (const bad of ['relative', '/a\nb', 7, '/' + 'a'.repeat(1001)])
     assert.match(validateUserEntry({ agentConfig: bad }).problems.join(' '), /agentConfig/, String(bad))
+})
+
+test('agent set agent-config checks the folder first; agent status and agent connect then name what it holds', async () => {
+  const { agentSet, agentStatusData } = await import('../src/cli/agent-status.js')
+  const { extensionLines } = await import('../src/remote/agent-connect.js')
+  const config = sampleConfig('ext-set')
+  fs.writeFileSync(path.join(config.dir, 'shapewall.config.json'), JSON.stringify(SAMPLE))
+  const home = privateDir('ext-set-home')
+  const env = { HOME: home, XDG_CONFIG_HOME: path.join(home, 'config'), XDG_STATE_HOME: path.join(home, 'state') }
+  const said = []
+  const out = (line) => said.push(line)
+  await assert.rejects(
+    agentSet(['set', 'agent-config', path.join(config.dir, 'inside')], {}, out, out, { env, cwd: config.dir }),
+    /is not there|in the project/,
+  )
+  fs.mkdirSync(path.join(config.dir, 'agent'), { mode: 0o700 })
+  await assert.rejects(
+    agentSet(['set', 'agent-config', path.join(config.dir, 'agent')], {}, out, out, { env, cwd: config.dir }),
+    /in the project/,
+  )
+  const folder = agentFolder('ext-set-folder')
+  assert.equal(await agentSet(['set', 'agent-config', folder], {}, out, out, { env, cwd: config.dir }), 0)
+  const status = await agentStatusData({}, { env, cwd: config.dir })
+  const line = status.tiers.solo.lines.find((item) => item.id === 'extensions')
+  assert.equal(line.state, 'on')
+  assert.match(line.text, /skills notes, release; MCP servers brain, brain_extra/)
+  assert.equal(status.tiers.open.lines.find((item) => item.id === 'extensions').state, 'off')
+  assert.equal(await agentSet(['set', 'agent-config', 'none'], {}, out, out, { env, cwd: config.dir }), 0)
+  assert.equal((await agentStatusData({}, { env, cwd: config.dir })).tiers.solo.lines.find((item) => item.id === 'extensions').state, 'off')
+  // What agent connect prints.
+  const read = policyExtensions(folder, { env })
+  const lines = extensionLines(read, { extensionsFor: ['owner'], allowTool: ['mcp__brain__search'] })
+  assert.match(lines[0], /skills notes, release; MCP servers brain, brain_extra/)
+  assert.ok(lines.includes('Tools it may call: mcp__brain__search. Every other tool of those servers is refused.'))
+  assert.ok(lines.some((text) => /^Not loaded: settings\.json/.test(text)))
+  assert.ok(extensionLines(read, {}).some((text) => /allow-tool/.test(text)))
+  assert.match(
+    extensionLines({ found: null, names: null, error: 'The agent config folder /x is not there.' }, {})[0],
+    /^Extensions: none\. /,
+  )
+  assert.deepEqual(extensionLines({ found: null, names: null, error: null }, {}), [])
 })

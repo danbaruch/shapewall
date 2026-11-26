@@ -477,7 +477,7 @@ owner has opted in (on a local board these are the defaults; a hosted connection
 | Shell                                                           | a full shell in the fix copy, inside an OS sandbox       | exact commands only (`trustTeamShell` for more) | exact commands, each a card |
 | Browser                                                         | a throwaway headless one, limited to the app's addresses | the same                                        | the same                    |
 | Logged-in browser (`browserAuth`, `browserProfile`)             | opt-in                                                   | opt-in (`browserProfileTeam`)                   | never                       |
-| Extensions from the agent config folder                         | on if there is one                                       | only if every author is in `extensionsFor`      | never                       |
+| Extensions from the agent config folder (see below)             | on if there is one and the thread is clean               | only if every author is in `extensionsFor`      | never                       |
 | Automatic memory, editing its own instructions, your own Chrome | never                                                    | never                                           | never                       |
 
 Hosted chat answers only: no edits, and on solo turns only the commands marked `"mutating": false` and the browser. No OS sandbox on
@@ -562,6 +562,27 @@ an older hello of the same process arriving late does not replace a newer one.
 `shapewall agent set KEY VALUE` changes one line without reconnecting (`agent set browser off`, `agent set trust-team ada,bo`,
 `agent set shell commands --remote URL`). It checks a value the way `agent connect` does, and refuses one it does not know rather
 than saving it. A connected agent reads the change when it connects again; a local board reads it on the next turn.
+
+### Extensions on trusted turns
+
+Claude Code over ACP can get skills and MCP servers of its own, from an agent config folder the machine names itself:
+`shapewall agent connect --agent-config DIR` for a connected agent, `shapewall agent set agent-config DIR` for a local board. Only
+`DIR/skills/NAME/SKILL.md` (and the files beside it, copied into a plugin Shapewall makes in its own state folder) and the stdio
+servers in the user-scope `mcpServers` of `DIR/.claude.json` are read; settings, hooks, commands, agents, output styles and
+installed plugins in it are skipped, and `agent connect` lists what it skipped. Never the default folder, `~/.claude`,
+`$CLAUDE_CONFIG_DIR`, anything in the project (a committed config or a fix copy cannot add one), a temporary folder or a folder
+other users can write to.
+
+A turn gets them only when all of these hold: it is above the open tier, everyone who wrote it is in `extensionsFor` (`owner` and
+handles), and its thread is clean: everyone who ever wrote in it is in `extensionsFor` too, and it never carried text nobody can
+vouch for. A server's tools are refused unless allowed by exact name (`shapewall agent set allow-tool mcp__SERVER__TOOL`), and every
+call is checked on the machine, never allowed ahead.
+
+A thread is tainted for good by a share link guest's or a non-member's text, another agent's answer, a move to another agent, a
+comment by a token or an import, and a board tool whose result is other people's comments (`list_comments`, `get_comment`). That
+last one can happen mid-turn: every extension tool is refused from that moment and the session ends with the turn. Threads from
+before 1.4.0 count as tainted. The rules are one transition table, `src/agent/thread-trust.js`. Captured page text stays quoted
+data and does not taint (residual risk: a page can still carry text written to steer an agent).
 
 ### Commands through Shapewall
 
