@@ -42,7 +42,10 @@
 //     sweep, which removes folders whose process is gone.
 //   - A logged-in persistent profile (`browser.profile`) only when
 //     cleanBrowserProfile() still accepts it right before launch (made by
-//     markBrowserProfile(), holds the marker, not a real browser's folder).
+//     markBrowserProfile() in Shapewall's own 0700 profile folder, holds the
+//     marker, not a real browser's folder), and again right after: the same
+//     resolved folder with the same device and inode, or the browser is
+//     closed and the tool refuses.
 import fs from 'node:fs'
 import os from 'node:os'
 import net from 'node:net'
@@ -266,6 +269,14 @@ export function readAuthState(checkout, name, origins) {
   }
 }
 
+const lstatOrNull = (target) => {
+  try {
+    return fs.lstatSync(target)
+  } catch {
+    return null
+  }
+}
+
 // ---- The browser ----
 
 // One agent browser for one task. Nothing starts until the first tool call
@@ -275,7 +286,10 @@ export function readAuthState(checkout, name, origins) {
 //   - `browser.allowNoSandbox`: only when true may the browser start without
 //     Chromium's own sandbox where it cannot start (the machine policy key
 //     arrives with Q4); the tool output then says so. Otherwise it refuses.
-//   - `chromium`, `lookup`, `warn` are for tests.
+//   - `browser.profile`: checked right before launch (cleanBrowserProfile:
+//     marked, in Shapewall's own profile folder) and again after it, the
+//     same folder by device and inode; a change closes the browser.
+//   - `chromium`, `lookup`, `warn`, `env` (where the profile folder is) are for tests.
 // close() ends the current browser (the next tool call starts a fresh one);
 // dispose() ends it for good, at the end of the task.
 export function createAgentBrowser({
@@ -289,11 +303,17 @@ export function createAgentBrowser({
   screenshotMaxBytes = SCREENSHOT_MAX_BYTES,
   denyPorts = [],
   warn = defaultWarn,
+  env = process.env,
 } = {}) {
   if (!browser || browser.on !== true) throw new Error('The browser is off for this turn.')
   if (browser.realChrome) throw new Error('An agent never gets your own Chrome.')
   const allowNoSandbox = browser.allowNoSandbox === true
   const root = browserRoot(tmpRoot)
+  const profileStillOurs = (checked) => {
+    const again = cleanBrowserProfile(checked.real, { env })
+    const stat = again === checked.real ? lstatOrNull(again) : null
+    return Boolean(stat && stat.isDirectory() && stat.dev === checked.dev && stat.ino === checked.ino)
+  }
   const denied = new Set([...DENIED_LOOPBACK_PORTS, ...(Array.isArray(denyPorts) ? denyPorts : []).filter(Number.isInteger)])
   // origin -> { host, port, protocol }
   const allowed = new Map()
@@ -383,14 +403,19 @@ export function createAgentBrowser({
       // The logged-in profile, checked again right before launch: it may
       // have changed since the policy was read.
       let userDataDir = path.join(dir, 'profile')
+      // The persistent profile as it was checked: its folder and identity,
+      // compared again once Chromium has it (profileStillOurs below).
+      let checked = null
       if (browser.profile !== null && browser.profile !== undefined) {
-        const real = cleanBrowserProfile(browser.profile)
-        if (!real)
+        const real = cleanBrowserProfile(browser.profile, { env })
+        const stat = real ? lstatOrNull(real) : null
+        if (!real || !stat)
           throw new Error(
             `Refused the browser profile ${String(browser.profile).slice(0, 200)}: only a folder Shapewall made for an agent ` +
-              "(shapewall agent connect --browser-profile) is used, never a browser's own profile or a copy of one.",
+              "in its own profile folder (shapewall agent connect --browser-profile NAME) is used, never a browser's own profile or a copy of one.",
           )
         userDataDir = real
+        checked = { real, dev: stat.dev, ino: stat.ino }
       }
       proxy = await startEgressProxy({ target, onBlock: ({ url }) => block(url, 'proxy') })
       const engine = chromium || (await import('playwright')).chromium
@@ -437,6 +462,16 @@ export function createAgentBrowser({
           )
         notes.push("Chromium's own sandbox could not start on this machine; this browser runs without it (allowNoSandbox).")
         context = await engine.launchPersistentContext(userDataDir, options(false))
+      }
+      // The persistent profile once more, now that Chromium holds it: the
+      // same folder (device and inode) at the same resolved path, still
+      // marked and still in Shapewall's own profile folder. Anything else
+      // (a link swapped in between the check and the start) closes it.
+      if (checked && !profileStillOurs(checked)) {
+        throw new Error(
+          `Refused the browser profile ${checked.real.slice(0, 200)}: it changed while the browser started, so the browser was closed. ` +
+            'Make a new one with shapewall agent connect --browser-profile NAME.',
+        )
       }
       hookExit()
       // No service workers: a worker's own requests would skip the route.

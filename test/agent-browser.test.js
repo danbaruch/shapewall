@@ -19,6 +19,7 @@ import {
   toolError,
 } from '../src/agent/agent-browser.js'
 import { addressKind, localName, pinHost, startEgressProxy } from '../src/agent/browser-egress.js'
+import { BROWSER_PROFILE_MARKER, markBrowserProfile } from '../src/agent/capabilities.js'
 import { tempDir } from './helpers.js'
 
 const on = (extra = {}) => ({ on: true, allow: ['http://127.0.0.1:5173'], auth: null, profile: null, realChrome: false, ...extra })
@@ -249,7 +250,7 @@ test('profile refusal happens before Chromium starts', async () => {
     }
     for (const profile of [chrome, path.join(tmp, 'unmarked'), 'relative/dir']) {
       if (path.isAbsolute(profile)) fs.mkdirSync(profile, { recursive: true })
-      const agent = createAgentBrowser({ browser: on({ profile }), tmpRoot: tmp, chromium })
+      const agent = createAgentBrowser({ browser: on({ profile }), tmpRoot: tmp, chromium, env: { XDG_STATE_HOME: tmp } })
       await assert.rejects(agent.navigate('http://127.0.0.1:5173/'), /Refused the browser profile/)
     }
     assert.equal(started, false)
@@ -461,6 +462,143 @@ test('a symlinked .shapewall-auth folder is refused', () => {
     fs.symlinkSync(real, path.join(checkout, '.shapewall-auth'))
     assert.throws(() => readAuthState(checkout, 'x', []), /not a plain folder/)
     assert.deepEqual(readAuthState(path.join(tmp, 'real'), 'x', []), { cookies: [], origins: [] })
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true })
+  }
+})
+
+// ---- The persistent profile, checked before and after the start (PR #37 review) ----
+
+// A Chromium stand-in: `during(userDataDir)` runs while it "starts"; the
+// context it returns stops the launch right after the profile re-check
+// (addInitScript is the next thing launch() calls) and records close().
+function fakeChromium(during = () => {}) {
+  const seen = { started: 0, closed: 0, dir: null }
+  return {
+    seen,
+    chromium: {
+      async launchPersistentContext(dir) {
+        seen.started += 1
+        seen.dir = dir
+        await during(dir)
+        return {
+          async close() {
+            seen.closed += 1
+          },
+          async addInitScript() {
+            throw new Error('past the profile check')
+          },
+          on() {},
+          pages: () => [],
+        }
+      },
+    },
+  }
+}
+
+test('profile: an unchanged profile in the base passes both checks', async () => {
+  const tmp = tempDir('agent-browser-profile-ok')
+  const env = { XDG_STATE_HOME: path.join(tmp, 'state') }
+  try {
+    const profile = markBrowserProfile('staging-login', { env })
+    const { seen, chromium } = fakeChromium()
+    const agent = createAgentBrowser({ browser: on({ profile }), tmpRoot: tmp, chromium, env })
+    await assert.rejects(agent.navigate('http://127.0.0.1:5173/'), /past the profile check/)
+    assert.equal(seen.dir, profile)
+    // By name too.
+    const byName = fakeChromium()
+    await assert.rejects(
+      createAgentBrowser({ browser: on({ profile: 'staging-login' }), tmpRoot: tmp, chromium: byName.chromium, env }).navigate(
+        'http://127.0.0.1:5173/',
+      ),
+      /past the profile check/,
+    )
+    assert.equal(byName.seen.dir, profile)
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true })
+  }
+})
+
+test('profile: swapped between the check and the start, the browser is closed and refused', async () => {
+  const tmp = tempDir('agent-browser-profile-swap')
+  const env = { XDG_STATE_HOME: path.join(tmp, 'state') }
+  try {
+    const profile = markBrowserProfile('swap', { env })
+    const other = markBrowserProfile('other', { env })
+    const marker = fs.readFileSync(path.join(profile, BROWSER_PROFILE_MARKER))
+    const swaps = {
+      // A symbolic link to another marked folder in its place.
+      link: (dir) => {
+        fs.renameSync(dir, `${dir}.was`)
+        fs.symlinkSync(other, dir)
+      },
+      // A link out of the base, to a marked folder elsewhere.
+      outside: (dir) => {
+        const away = path.join(tmp, 'away')
+        fs.mkdirSync(away, { mode: 0o700 })
+        fs.writeFileSync(path.join(away, BROWSER_PROFILE_MARKER), marker)
+        fs.renameSync(dir, `${dir}.was`)
+        fs.symlinkSync(away, dir)
+      },
+      // The same name, marked, 0700, but a different folder (another inode).
+      replaced: (dir) => {
+        fs.renameSync(dir, `${dir}.was`)
+        fs.mkdirSync(dir, { mode: 0o700 })
+        fs.writeFileSync(path.join(dir, BROWSER_PROFILE_MARKER), marker)
+      },
+      // The marker removed.
+      unmarked: (dir) => fs.rmSync(path.join(dir, BROWSER_PROFILE_MARKER)),
+      // The folder opened to other users.
+      mode: (dir) => fs.chmodSync(dir, 0o755),
+    }
+    for (const [name, swap] of Object.entries(swaps)) {
+      // Each case starts from a fresh, marked profile at the same path.
+      fs.rmSync(profile, { recursive: true, force: true })
+      fs.rmSync(`${profile}.was`, { recursive: true, force: true })
+      fs.rmSync(path.join(tmp, 'away'), { recursive: true, force: true })
+      markBrowserProfile('swap', { env })
+      const { seen, chromium } = fakeChromium(swap)
+      const agent = createAgentBrowser({ browser: on({ profile }), tmpRoot: tmp, chromium, env })
+      await assert.rejects(agent.navigate('http://127.0.0.1:5173/'), /it changed while the browser started/, name)
+      assert.equal(seen.started, 1, name)
+      assert.equal(seen.closed, 1, `${name}: the context is closed`)
+    }
+    // A failed start leaves no session folder behind.
+    assert.deepEqual(fs.readdirSync(browserRoot(tmp)), [])
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true })
+  }
+})
+
+test('profile: a folder outside the base, or a base that is open or a link, is refused before Chromium starts', async () => {
+  const tmp = tempDir('agent-browser-profile-base')
+  const env = { XDG_STATE_HOME: path.join(tmp, 'state') }
+  try {
+    const profile = markBrowserProfile('agent', { env })
+    const marker = fs.readFileSync(path.join(profile, BROWSER_PROFILE_MARKER))
+    const refused = async (browserProfile, useEnv, label) => {
+      const { seen, chromium } = fakeChromium()
+      const agent = createAgentBrowser({ browser: on({ profile: browserProfile }), tmpRoot: tmp, chromium, env: useEnv })
+      await assert.rejects(agent.navigate('http://127.0.0.1:5173/'), /Refused the browser profile/, label)
+      assert.equal(seen.started, 0, label)
+    }
+    // Marked, but not in the base (an old policy's absolute path).
+    const outside = path.join(tmp, 'old-profile')
+    fs.mkdirSync(outside, { mode: 0o700 })
+    fs.writeFileSync(path.join(outside, BROWSER_PROFILE_MARKER), marker)
+    await refused(outside, env, 'outside the base')
+    // The base open to other users.
+    const base = path.dirname(profile)
+    fs.chmodSync(base, 0o755)
+    await refused(profile, env, 'base 0755')
+    await refused('agent', env, 'base 0755, by name')
+    fs.chmodSync(base, 0o700)
+    // The base a symbolic link to a folder of the right shape.
+    const linkEnv = { XDG_STATE_HOME: path.join(tmp, 'linked') }
+    fs.mkdirSync(path.join(linkEnv.XDG_STATE_HOME, 'shapewall'), { recursive: true })
+    fs.symlinkSync(base, path.join(linkEnv.XDG_STATE_HOME, 'shapewall', 'agent-browser-profiles'))
+    await refused('agent', linkEnv, 'linked base')
+    await refused(path.join(linkEnv.XDG_STATE_HOME, 'shapewall', 'agent-browser-profiles', 'agent'), linkEnv, 'linked base path')
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true })
   }
