@@ -13,13 +13,18 @@ import { randomBytes } from 'node:crypto'
 import {
   REGISTRY_HOSTS,
   SandboxRefusal,
+  SANDBOX_LIMITS,
   closeSandbox,
   commandEnv,
+  commandLimits,
   createCommandSession,
+  deniedRoots,
   networkList,
   probeSandbox,
   resolveArgv,
   runProcess,
+  shellQuote,
+  toolchainDir,
 } from '../src/agent/sandbox-exec.js'
 
 const probe = probeSandbox()
@@ -234,9 +239,11 @@ test('the platforms without a sandbox say so', () => {
 
 test('network lists and the command environment', () => {
   assert.deepEqual(networkList('none'), [])
-  assert.deepEqual(networkList('open'), ['*'])
+  // No "open" (srt throws on "*"), and never a local port.
+  assert.deepEqual(networkList('open'), [])
   assert.ok(networkList('registries').includes(`${REGISTRY_HOSTS[0]}:443`))
-  assert.deepEqual(networkList('none', [5173, 0, 70000]), ['127.0.0.1:5173', 'localhost:5173'])
+  assert.deepEqual(networkList('none', [5173]), [])
+  assert.ok(!networkList('registries', [5173]).some((entry) => /^(127\.0\.0\.1|localhost)/.test(entry)))
   const env = commandEnv({ env: { PATH: '/bin', SHAPEWALL_TOKEN: 'x', HOME: '/home/someone', LANG: 'C.UTF-8' }, tmp: '/tmp/s' })
   assert.equal(env.SHAPEWALL_TOKEN, undefined)
   assert.equal(env.PATH, '/bin')
@@ -258,4 +265,135 @@ test('runProcess caps output and time, and stops the whole group', async () => {
     timeoutMs: 1000,
   })
   assert.equal(slow.timedOut, true)
+})
+
+test('a session for "open" network is refused: there is no such choice', async (t) => {
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-open-'))
+  t.after(() => fs.rmSync(parent, { recursive: true, force: true }))
+  const root = project(parent)
+  await assert.rejects(
+    createCommandSession({ root, expect: root, within: parent, mode: 'host', network: 'open' }),
+    (error) => error instanceof SandboxRefusal && error.code === 'bad_network',
+  )
+})
+
+test('the session temp is inside the folder of fix copies', async (t) => {
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-tmpin-'))
+  t.after(() => fs.rmSync(parent, { recursive: true, force: true }))
+  const root = project(parent)
+  const s = await createCommandSession({ root, expect: root, within: parent, mode: 'host' })
+  t.after(() => s.close())
+  assert.equal(path.dirname(s.tmp), fs.realpathSync(parent))
+})
+
+test('denied roots: every home spelling, absolute XDG folders, shared temps, /run/user, the fix copies', () => {
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-deny-'))
+  try {
+    const xdg = path.join(parent, 'xdg-config')
+    fs.mkdirSync(xdg)
+    const roots = deniedRoots({ env: { XDG_CONFIG_HOME: xdg, XDG_DATA_HOME: 'relative/no', XDG_CACHE_HOME: '/usr/share' }, within: parent })
+    const real = (dir) => fs.realpathSync(dir)
+    assert.ok(roots.includes(real(os.homedir())))
+    assert.ok(roots.includes(real(os.userInfo().homedir)))
+    assert.ok(roots.includes(real(xdg)))
+    assert.ok(roots.includes(real(os.tmpdir())))
+    assert.ok(roots.includes(real(parent)))
+    for (const dir of ['/var/tmp', '/dev/shm', '/mnt', '/media', `/run/user/${process.getuid?.()}`])
+      if (fs.existsSync(dir)) assert.ok(roots.includes(real(dir)), dir)
+    // Never a system folder, never the root.
+    assert.ok(!roots.some((dir) => dir === '/' || dir.startsWith('/usr')))
+  } finally {
+    fs.rmSync(parent, { recursive: true, force: true })
+  }
+})
+
+test("the toolchain allow is Node's own install folder only, never a shared prefix", (t) => {
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sw-home-')))
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }))
+  const node = (rel) => {
+    const file = path.join(home, rel, 'bin', 'node')
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, '')
+    return file
+  }
+  const nvm = node('.nvm/versions/node/v22.0.0')
+  assert.deepEqual(toolchainDir({ execPath: nvm, denied: [home] }), { dir: path.join(home, '.nvm/versions/node/v22.0.0'), refused: null })
+  // ~/.local/bin/node: ~/.local holds everything else installed there.
+  assert.equal(toolchainDir({ execPath: node('.local'), denied: [home] }).dir, null)
+  assert.equal(toolchainDir({ execPath: node('.local'), denied: [home] }).refused, path.join(home, '.local'))
+  // ~/bin/node: the home folder itself.
+  fs.mkdirSync(path.join(home, 'bin'), { recursive: true })
+  fs.writeFileSync(path.join(home, 'bin', 'node'), '')
+  assert.equal(toolchainDir({ execPath: path.join(home, 'bin', 'node'), denied: [home] }).dir, null)
+  // A link is followed: ~/.local/bin/node -> the nvm install opens the nvm folder only.
+  const link = path.join(home, '.local', 'bin', 'node-link')
+  fs.symlinkSync(nvm, link)
+  assert.equal(toolchainDir({ execPath: link, denied: [home] }).dir, path.join(home, '.nvm/versions/node/v22.0.0'))
+  // Outside every denied folder: nothing to allow.
+  assert.deepEqual(toolchainDir({ execPath: nvm, denied: ['/srv/none'] }), { dir: null, refused: null })
+})
+
+test('the ulimit lines: processes and memory on Linux, file size everywhere', () => {
+  const linux = commandLimits('linux')
+  assert.match(linux, new RegExp(`ulimit -u ${SANDBOX_LIMITS.processes} \\|\\| ulimit -p ${SANDBOX_LIMITS.processes}`))
+  assert.match(linux, /ulimit -v \d+/)
+  assert.match(linux, /ulimit -f \d+/)
+  const mac = commandLimits('darwin')
+  assert.doesNotMatch(mac, /ulimit -[uvp]/)
+  assert.match(mac, /ulimit -f \d+/)
+})
+
+// Review repros c1.sh and c2.sh: the host /tmp (other sessions' temps, the
+// relay's policy folder), /var/tmp, /dev/shm and /run/user were readable.
+test('shared temp folders and other sessions are hidden; the session temp is its own', box, async (t) => {
+  const parent = fixParent(t)
+  const root = project(parent)
+  const other = await session(t, { root, expect: root, within: parent })
+  fs.writeFileSync(path.join(other.tmp, 'other-secret'), 'OTHER-SESSION-SECRET')
+  const canaries = []
+  for (const dir of [os.tmpdir(), '/var/tmp', '/dev/shm']) {
+    if (!fs.existsSync(dir)) continue
+    const file = path.join(dir, `sw-canary-${randomBytes(6).toString('hex')}`)
+    try {
+      fs.writeFileSync(file, 'HOST-TEMP-SECRET')
+    } catch {
+      continue
+    }
+    canaries.push(file)
+    t.after(() => fs.rmSync(file, { force: true }))
+  }
+  const xdg = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-xdg-'))
+  t.after(() => fs.rmSync(xdg, { recursive: true, force: true }))
+  fs.writeFileSync(path.join(xdg, 'settings'), 'XDG-SECRET')
+  const s = await session(t, { root, expect: root, within: parent, env: { ...process.env, XDG_CONFIG_HOME: xdg } })
+  const lines = [
+    `cat ${shellQuote(path.join(other.tmp, 'other-secret'))}`,
+    ...canaries.map((file) => `cat ${shellQuote(file)}`),
+    `cat ${shellQuote(path.join(xdg, 'settings'))}`,
+    `ls -a /run/user/${process.getuid?.() ?? 0} 2>&1 | head -20`,
+    `cat ${shellQuote(path.join(os.userInfo().homedir, '.bashrc'))}`,
+    'echo mine > "$TMPDIR/own" && cat "$TMPDIR/own"',
+  ]
+  const run = await s.run({ shell: lines.map((line) => `${line} 2>&1`).join('; ') })
+  assert.doesNotMatch(run.output, /OTHER-SESSION-SECRET|HOST-TEMP-SECRET|XDG-SECRET/)
+  assert.doesNotMatch(run.output, /\bbus\b|pulse|keyring|gnupg/)
+  assert.match(run.output, /mine/)
+  assert.equal(path.dirname(s.tmp), fs.realpathSync(parent))
+})
+
+test('the limits apply inside: processes, file size, and the session temp cap', box, async (t) => {
+  const parent = fixParent(t)
+  const root = project(parent)
+  const limits = { ...SANDBOX_LIMITS, fileBytes: 64 * 1024, tmpBytes: 256 * 1024 }
+  const s = await session(t, { root, expect: root, within: parent, limits })
+  const big = await s.run({ shell: 'head -c 200000 /dev/zero > big.bin; echo code=$?; wc -c < big.bin' })
+  assert.ok(fs.statSync(path.join(root, 'big.bin')).size <= 2 * limits.fileBytes, big.output)
+  if (process.platform === 'linux') {
+    const shown = await s.run({ shell: 'ulimit -u 2>/dev/null || ulimit -p; ulimit -v' })
+    assert.match(shown.output, new RegExp(`^${SANDBOX_LIMITS.processes}\\n${Math.floor(SANDBOX_LIMITS.memoryBytes / 1024)}`))
+  }
+  // Three files under the file cap, together over the temp cap: the temp is emptied.
+  const fill = await s.run({ shell: 'for i in 1 2 3 4 5 6; do head -c 60000 /dev/zero > "$TMPDIR/f$i"; done; echo filled' })
+  assert.match(fill.output, /session temp went over/)
+  assert.deepEqual(fs.readdirSync(s.tmp), [])
 })

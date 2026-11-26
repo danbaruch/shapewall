@@ -15,10 +15,16 @@
 //              ~/.config, ~/.claude, credentials, the real checkout.
 //   network    nothing but what the session allows, through srt's proxies:
 //              the package registries by default (`shellNetwork`
-//              "registries"), any public host ("open"), or none ("none");
-//              plus the session's own dev server, as 127.0.0.1:<port>
-//              exactly, never 127.0.0.1 without a port (that would open the
-//              Shapewall server and every other local port)
+//              "registries"), or none ("none"). Never a local port: on
+//              Linux each command has its own network namespace, so a dev
+//              server one command starts cannot be reached by the next, and
+//              a host port it did not bind is the person's
+//   hidden     the home folder (every spelling of it), the absolute XDG
+//              folders, the shared temp folders (/tmp, $TMPDIR, /var/tmp,
+//              /dev/shm), /run/user/<uid>, /mnt, /media and the other fix
+//              copies (deniedRoots)
+//   limits     per command: processes (Linux), address space (Linux) and
+//              file size by ulimit; the session temp is emptied past its cap
 //   unix sockets  none (srt's seccomp filter on Linux)
 //
 // Honest limit: the sandbox limits what a command touches, not what it
@@ -60,6 +66,12 @@ export const SANDBOX_LIMITS = {
   outputBytes: 64 * 1024,
   timeoutMs: 10 * 60 * 1000,
   timeoutMaxMs: 30 * 60 * 1000,
+  // Set with ulimit inside the sandbox, per command (commandLimits).
+  processes: 1024,
+  memoryBytes: 8 * 1024 * 1024 * 1024,
+  fileBytes: 2 * 1024 * 1024 * 1024,
+  // The session temp (caches, HOME): emptied after a command that leaves more.
+  tmpBytes: 2 * 1024 * 1024 * 1024,
 }
 
 export class SandboxRefusal extends Error {
@@ -380,20 +392,136 @@ function releaseSandbox() {
   stopping = closeSandbox().finally(() => (stopping = null))
 }
 
-// What a session's commands may reach, as srt host patterns.
-export function networkList(network, ports = []) {
-  const list = network === 'open' ? ['*'] : network === 'registries' ? REGISTRY_HOSTS.map((host) => `${host}:443`) : []
-  for (const port of ports) if (Number.isInteger(port) && port > 0 && port < 65536) list.push(`127.0.0.1:${port}`, `localhost:${port}`)
-  return list
+// What a session's commands may reach, as srt host patterns: the package
+// registries, or nothing. Never a local port: each command has its own
+// network namespace on Linux, so a port another command bound is not there,
+// and a host port it did not bind is the person's (the Shapewall server,
+// a browser's debugging port).
+export function networkList(network) {
+  return network === 'registries' ? REGISTRY_HOSTS.map((host) => `${host}:443`) : []
 }
 
-// The folders Node and its tools run from, when they are in the home
-// folder (nvm, volta, fnm): readable, never writable.
-function toolchainDirs(home) {
+// The ulimit lines in front of every sandboxed command. Each is tried on
+// its own, so a shell or platform without one still runs the command:
+// processes only on Linux (inside srt's user namespace the count is the
+// sandbox's own; on macOS it would be every process of the person's),
+// address space where the kernel enforces it (Linux), file size everywhere.
+// dash spells the process limit -p, bash -u.
+export function commandLimits(platform = process.platform, limits = SANDBOX_LIMITS) {
+  const kb = (bytes) => Math.floor(bytes / 1024)
+  const lines = []
+  if (platform === 'linux') {
+    lines.push(`{ ulimit -u ${limits.processes} || ulimit -p ${limits.processes}; } 2>/dev/null`)
+    lines.push(`ulimit -v ${kb(limits.memoryBytes)} 2>/dev/null`)
+  }
+  // 512-byte blocks in dash and POSIX mode, 1024 in bash: at most twice the cap.
+  lines.push(`ulimit -f ${Math.floor(limits.fileBytes / 512)} 2>/dev/null`)
+  return lines.join('; ')
+}
+
+// What no command may read: the home folder (as $HOME, os.homedir() and
+// the account's own entry say it), the person's absolute XDG folders, every
+// shared temp folder (other sessions' temps, other programs' sockets and
+// files), /run/user/<uid>, removable and mounted disks, and the folder of
+// fix copies (the other fixes). The session's own folders are allowed back
+// inside these (srt allowRead within denyRead). -> real paths that exist.
+const SYSTEM_DIRS = ['/usr', '/etc', '/bin', '/sbin', '/lib', '/lib32', '/lib64', '/opt', '/System', '/Library', '/nix', '/proc', '/sys', '/dev']
+export function deniedRoots({ env = process.env, within = null, platform = process.platform } = {}) {
+  const wanted = [os.homedir(), env.HOME]
+  try {
+    wanted.push(os.userInfo().homedir)
+  } catch {
+    /* no passwd entry */
+  }
+  for (const name of ['XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME', 'XDG_CACHE_HOME', 'XDG_RUNTIME_DIR'])
+    for (const source of [env, process.env]) wanted.push(source[name])
+  const tmp = os.tmpdir()
+  wanted.push(tmp, '/tmp', '/var/tmp', '/dev/shm', '/mnt', '/media')
+  if (typeof process.getuid === 'function') wanted.push(`/run/user/${process.getuid()}`)
+  if (platform === 'darwin') {
+    // The per-user $TMPDIR (/var/folders/xx/yyyy/T) and its siblings (C: caches).
+    try {
+      wanted.push(path.dirname(realpath(tmp)))
+    } catch {
+      /* none */
+    }
+    wanted.push('/private/tmp', '/private/var/tmp')
+  }
+  if (within) wanted.push(within)
   const out = []
-  const node = path.dirname(path.dirname(process.execPath))
-  if (isInside(home, node) && node !== home) out.push(node)
+  for (const item of wanted) {
+    if (typeof item !== 'string' || !path.isAbsolute(item)) continue
+    let real
+    try {
+      real = realpath(item)
+    } catch {
+      continue
+    }
+    if (real === path.parse(real).root) continue
+    // A system folder only by a person's odd XDG setting: never hidden (/dev/shm is named above on purpose).
+    if (real !== '/dev/shm' && SYSTEM_DIRS.some((dir) => real === dir || isInside(dir, real))) continue
+    if (!out.includes(real)) out.push(real)
+  }
   return out
+}
+
+// The folder Node runs from, when it is inside a denied folder (nvm, volta,
+// fnm, asdf in the home folder): readable, never writable. Only Node's own
+// install folder, after following links, and only when it is at least three
+// levels down (~/.nvm/versions/node/v22): a shared prefix such as ~/.local
+// (~/.local/bin/node) or the home folder itself would open everything else
+// installed there, so it is refused and commands run without it.
+export function toolchainDir({ execPath = process.execPath, denied = [] } = {}) {
+  let prefix
+  try {
+    prefix = path.dirname(path.dirname(realpath(execPath)))
+  } catch {
+    return { dir: null, refused: null }
+  }
+  const under = denied.filter((root) => isInside(root, prefix))
+  if (!under.length) return { dir: null, refused: null }
+  const shallow = under.some((root) => {
+    const rel = path.relative(root, prefix)
+    return !rel || rel.split(path.sep).length < 3
+  })
+  return shallow ? { dir: null, refused: prefix } : { dir: prefix, refused: null }
+}
+
+// srt's own Unix sockets to its proxies (Linux), which it binds into every
+// sandbox inside the system temp.
+function bridgeSockets(box) {
+  const out = []
+  for (const get of ['getLinuxHttpSocketPath', 'getLinuxSocksSocketPath']) {
+    const file = typeof box?.[get] === 'function' ? box[get]() : null
+    if (typeof file === 'string' && path.isAbsolute(file) && !out.includes(file)) out.push(file)
+  }
+  return out
+}
+
+// The size of a folder (no links followed), stopping past `limit`.
+function sizeOf(dir, limit) {
+  let total = 0
+  const stack = [dir]
+  while (stack.length && total <= limit) {
+    const current = stack.pop()
+    let entries = []
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const entry of entries) {
+      const file = path.join(current, entry.name)
+      if (entry.isDirectory()) stack.push(file)
+      else
+        try {
+          total += fs.lstatSync(file).size
+        } catch {
+          /* gone */
+        }
+    }
+  }
+  return total
 }
 
 // One session of sandboxed commands for one fix copy.
@@ -401,7 +529,7 @@ function toolchainDirs(home) {
 //             when it is not `expect` (the fix copy the caller made), is
 //             the home folder or holds it, is inside `checkout` (the
 //             person's real project), or is the system root.
-//   network   "registries" | "open" | "none"
+//   network   "registries" | "none"
 //   readOnly  the copy is mounted read only too (hosted chat's QA commands
 //             that do not change files)
 //   mode      "sandboxed" (srt), "host" (no OS sandbox: only after a card
@@ -417,9 +545,12 @@ export async function createCommandSession({
   readOnly = false,
   mode = 'sandboxed',
   readPaths = [],
-  tmpParent = os.tmpdir(),
+  // Where the session temp goes: inside the folder of fix copies (denied to
+  // every other session), else the system temp.
+  tmpParent = null,
   env = process.env,
   denyRead = [],
+  limits = SANDBOX_LIMITS,
   log = () => {},
 }) {
   if (!root || !expect || !path.isAbsolute(root)) throw new SandboxRefusal('bad_root', 'The sandbox needs the fix copy as its folder.')
@@ -460,12 +591,14 @@ export async function createCommandSession({
       throw new SandboxRefusal('bad_root', "The sandbox never writes in the person's own checkout.")
   }
   if (!['sandboxed', 'host', 'host-shell'].includes(mode)) throw new SandboxRefusal('bad_mode', 'Unknown sandbox mode.')
-  const tmp = fs.mkdtempSync(path.join(tmpParent, 'shapewall-cmd-'))
+  if (!['registries', 'none'].includes(network)) throw new SandboxRefusal('bad_network', 'Commands get the package registries or no network.')
+  const tmp = fs.mkdtempSync(path.join(tmpParent || within || os.tmpdir(), '.shapewall-cmd-'))
   fs.chmodSync(tmp, 0o700)
-  const ports = new Set()
-  // commandId -> network list, for the commands that run now.
-  const live = new Map()
   const vendor = runtimeVendorDir()
+  const denied = [...new Set([home, ...deniedRoots({ env, within }), ...denyRead.filter((dir) => path.isAbsolute(dir))])]
+  const toolchain = toolchainDir({ denied })
+  if (toolchain.refused)
+    log(`sandbox: Node runs from ${toolchain.refused}, a shared folder; it stays unreadable, so commands need a Node installed elsewhere`)
   const boxed = mode === 'sandboxed'
   if (boxed) sessions += 1
   let box = null
@@ -477,13 +610,30 @@ export async function createCommandSession({
     throw error
   }
   const filesystem = () => ({
-    denyRead: [home, ...denyRead],
-    allowRead: [real, tmp, ...toolchainDirs(home), ...(vendor ? [vendor] : []), ...readPaths.filter((dir) => path.isAbsolute(dir))],
+    denyRead: denied,
+    allowRead: [
+      real,
+      tmp,
+      ...(toolchain.dir ? [toolchain.dir] : []),
+      ...(vendor ? [vendor] : []),
+      // srt's proxy bridge sockets live in the system temp, which is denied.
+      ...bridgeSockets(box),
+      ...readPaths.filter((dir) => path.isAbsolute(dir)),
+    ],
     allowWrite: readOnly ? [tmp] : [real, tmp],
     denyWrite: [],
   })
-  const list = () => networkList(network, [...ports])
+  const list = () => networkList(network)
   let closed = false
+  // A command that left the session temp over its cap: emptied (a fresh HOME).
+  function capTmp(result) {
+    if (sizeOf(tmp, limits.tmpBytes) <= limits.tmpBytes) return result
+    for (const name of fs.readdirSync(tmp)) fs.rmSync(path.join(tmp, name), { recursive: true, force: true })
+    return {
+      ...result,
+      output: `${result.output}\n[Shapewall: the session temp went over ${Math.round(limits.tmpBytes / 1024 / 1024)} MB and was emptied]`,
+    }
+  }
 
   // argv (no shell) or { shell: "..." } (the solo full shell). -> runProcess's result.
   async function run(command, { timeoutMs = SANDBOX_LIMITS.timeoutMs, extraEnv = {}, signal = null, onStart } = {}) {
@@ -493,10 +643,10 @@ export async function createCommandSession({
     if (!boxed) {
       // --shell-unsandboxed (solo, the owner's own choice): the shell on this machine itself.
       if (command.shell !== undefined && mode === 'host-shell' && process.platform !== 'win32')
-        return runProcess(['/bin/sh', '-c', String(command.shell)], { cwd: real, env: vars, timeoutMs: time, signal, onStart })
+        return capTmp(await runProcess(['/bin/sh', '-c', String(command.shell)], { cwd: real, env: vars, timeoutMs: time, signal, onStart }))
       if (command.shell !== undefined) throw new SandboxRefusal('no_shell', 'No shell runs outside the OS sandbox.')
       const argv = resolveArgv(command, { env })
-      return runProcess(argv, { cwd: real, env: vars, timeoutMs: time, signal, onStart })
+      return capTmp(await runProcess(argv, { cwd: real, env: vars, timeoutMs: time, signal, onStart }))
     }
     const line = command.shell !== undefined ? String(command.shell) : command.map(shellQuote).join(' ')
     const commandId = randomBytes(16).toString('base64url')
@@ -505,15 +655,15 @@ export async function createCommandSession({
       .filter(([name]) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(name))
       .map(([name, value]) => `${name}=${shellQuote(value)}`)
       .join(' ')
-    const inner = `cd ${shellQuote(real)} && exec env ${assignments} /bin/sh -c ${shellQuote(line)}`
+    const inner = `cd ${shellQuote(real)} && ${commandLimits(process.platform, limits)}; exec env ${assignments} /bin/sh -c ${shellQuote(line)}`
     const wrapped = await box.wrapWithSandboxArgv(inner, '/bin/sh', { filesystem: filesystem() }, signal || undefined, real, { commandId })
     box.registerCommandNetworkLists(commandId, { allowedDomains: list() })
-    live.set(commandId, true)
     try {
       // srt puts its proxy settings in the wrapped command; the host side gets only PATH.
-      return await runProcess(wrapped.argv, { cwd: real, env: { PATH: env.PATH || '/usr/bin:/bin' }, timeoutMs: time, signal, onStart })
+      return capTmp(
+        await runProcess(wrapped.argv, { cwd: real, env: { PATH: env.PATH || '/usr/bin:/bin' }, timeoutMs: time, signal, onStart }),
+      )
     } finally {
-      live.delete(commandId)
       box.unregisterCommandNetworkLists(commandId)
       try {
         box.cleanupAfterCommand()
@@ -522,15 +672,6 @@ export async function createCommandSession({
       }
     }
   }
-  // The session's dev server joins what its commands may reach, from the next connection on.
-  function allowPort(port) {
-    ports.add(port)
-    if (box) for (const id of live.keys()) box.registerCommandNetworkLists(id, { allowedDomains: list() })
-  }
-  function dropPort(port) {
-    ports.delete(port)
-    if (box) for (const id of live.keys()) box.registerCommandNetworkLists(id, { allowedDomains: list() })
-  }
   function close() {
     if (closed) return
     closed = true
@@ -538,5 +679,5 @@ export async function createCommandSession({
     if (boxed) releaseSandbox()
   }
   log(`sandbox: ${boxed ? 'OS sandbox' : 'no OS sandbox (a card each)'} in ${real}`)
-  return { root: real, tmp, mode, network, readOnly, run, allowPort, dropPort, ports: () => [...ports], close }
+  return { root: real, tmp, mode, network, readOnly, denied, run, close }
 }

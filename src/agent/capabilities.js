@@ -45,7 +45,9 @@ const HOSTED_PATHS = ['hosted-chat', 'hosted-fix', 'pickup']
 // The capability keys of a machine policy (agent-policy.json version 2, and
 // the `capabilities` object of a project in agents.json).
 export const SHELL_MODES = ['sandboxed', 'commands', 'off']
-export const SHELL_NETWORKS = ['registries', 'open', 'none']
+// No "open": srt cannot lift the network limit for one command while the
+// others keep theirs (its proxy is process wide), so there is no such choice.
+export const SHELL_NETWORKS = ['registries', 'none']
 export const BROWSER_MODES = ['on', 'off']
 export const COMMAND_APPROVALS = ['tier', 'always']
 export const HANDOFF_HOPS_MAX = 2

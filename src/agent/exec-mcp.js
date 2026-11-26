@@ -118,9 +118,9 @@ function whereText(session) {
   if (session.mode === 'host-shell')
     return "On the agent's machine, in the fix copy, WITHOUT an OS sandbox (its owner chose --shell-unsandboxed): it can read and write what that person can."
   if (session.mode === 'sandboxed')
-    return `In the fix copy, in the OS sandbox: it writes only there${session.readOnly ? ' (here not even there: read only)' : ''}, cannot read the home folder, and reaches ${
-      session.network === 'open' ? 'any public host' : session.network === 'registries' ? 'the package registries only' : 'no network'
-    }${session.ports().length ? ` and this session's dev server` : ''}.`
+    return `In the fix copy, in the OS sandbox: it writes only there${session.readOnly ? ' (here not even there: read only)' : ''}, cannot read the home folder or the shared temp folders, and reaches ${
+      session.network === 'registries' ? 'the package registries only' : 'no network'
+    }.`
   return "On the agent's machine, in the fix copy, without an OS sandbox (none on this machine): it can read and write what the person who connected the agent can."
 }
 // Runners that run whatever they are given: arguments to them are code.
@@ -289,6 +289,15 @@ export function createToolHost({
     return run
   }
 
+  // Dev servers run only outside the OS sandbox (plan 7 Q4): inside it each
+  // command gets its own network namespace on Linux, so nothing else (the
+  // agent's next command, a browser) could reach the port, and srt 0.0.83
+  // forwards no ports.
+  const devAvailable = () =>
+    Boolean(session) &&
+    session.mode !== 'sandboxed' &&
+    caps.commands.some((item) => item.name === 'dev' || commands.find((c) => c.name === item.name)?.ready)
+
   const builtin = [
     {
       name: 'shapewall_capabilities',
@@ -401,19 +410,20 @@ export function createToolHost({
     {
       name: 'start_dev_server',
       description:
-        "Starts the project's named dev server (its `dev` command) on a free port in your working folder and waits until it answers. Your commands (and browser, when you have one) may reach it on that port for this session.",
+        "Starts the project's named dev server (its `dev` command) on a free port in your working folder and waits until it answers. Only where commands run without the OS sandbox; files it writes count as changed by you.",
       inputSchema: {
         type: 'object',
         properties: { name: { type: 'string', description: 'The command name (default "dev")' } },
         additionalProperties: false,
       },
-      available: () => caps.commands.some((item) => item.name === 'dev' || commands.find((c) => c.name === item.name)?.ready),
+      available: devAvailable,
       async call({ name = 'dev' } = {}) {
         const id = String(name || 'dev')
         if (devServers.has(id)) return text(`${id} is already running on port ${devServers.get(id).port}.`)
         if (devServers.size >= EXEC_LIMITS.devServers)
           return failure(`At most ${EXEC_LIMITS.devServers} dev servers at a time: stop one first.`)
         if (!allowedNow(id)) return failure(`"${id}" is not allowed on this turn.`)
+        if (!devAvailable()) return failure('Dev servers do not run in the OS sandbox: each command there has its own network.')
         const port = await freePort()
         const picked = namedArgv(id, null, { port })
         if (picked.error) return failure(picked.error)
@@ -421,20 +431,19 @@ export function createToolHost({
         if (refused) return failure(refused)
         if (closed) return failure('The session has ended.')
         const server = { port, kill: () => {}, done: null, output: '' }
-        session.allowPort(port)
-        server.done = session
-          .run(picked.argv, {
-            timeoutMs: SANDBOX_LIMITS.timeoutMaxMs,
-            extraEnv: { PORT: String(port) },
-            onStart: ({ kill }) => (server.kill = kill),
-          })
-          .then((run) => {
-            server.output = run.output
-            server.exited = true
-            session.dropPort(port)
-            devServers.delete(id)
-            return run
-          })
+        // Tracked like any command: what the server writes in the fix copy is
+        // reported when it stops, so the fix is held for a look.
+        server.done = runTracked(picked.argv, {
+          mutating: picked.command.mutating,
+          timeoutMs: SANDBOX_LIMITS.timeoutMaxMs,
+          extraEnv: { PORT: String(port) },
+          onStart: ({ kill }) => (server.kill = kill),
+        }).then((run) => {
+          server.output = run.output
+          server.exited = true
+          devServers.delete(id)
+          return run
+        })
         devServers.set(id, server)
         const ready = picked.command.ready ? picked.command.ready.split(PORT_TOKEN).join(String(port)) : `http://127.0.0.1:${port}`
         const up = await waitReady(ready, server)
@@ -450,7 +459,7 @@ export function createToolHost({
       name: 'stop_dev_server',
       description: 'Stops a dev server this session started.',
       inputSchema: { type: 'object', properties: { name: { type: 'string' } }, additionalProperties: false },
-      available: () => caps.commands.some((item) => item.name === 'dev' || commands.find((c) => c.name === item.name)?.ready),
+      available: devAvailable,
       async call({ name = 'dev' } = {}) {
         const server = devServers.get(String(name || 'dev'))
         if (!server) return text('No such dev server is running.')
