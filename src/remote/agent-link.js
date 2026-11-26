@@ -193,6 +193,8 @@ export async function runAgentLink({
   // token); null: the first handle the server names at hello, pinned for the
   // life of this process. A turn's author counts as "the owner" only under it.
   owner = null,
+  // Called once with the first handle the server names, when none was given.
+  onOwner = () => {},
 }) {
   const limit = { ...LINK_DEFAULTS, ...limits }
   // One answer (the sandbox probe) for the hello summary and every turn.
@@ -811,7 +813,7 @@ export async function runAgentLink({
           ? 'it came too late'
           : policy.approvals === 'none'
             ? 'this machine takes no approvals'
-            : policy.approvals === 'owner' && data.by?.owner !== true
+            : policy.approvals === 'owner' && (data.by?.owner !== true || !ownerHandle || cleanHandle(data.by?.handle) !== ownerHandle)
               ? 'only the person who connected this agent may allow'
               : card.recheck && !safeCheck(card.recheck)
                 ? 'what it asked is no longer allowed here'
@@ -1060,8 +1062,14 @@ export async function runAgentLink({
       if (!agent) throw new Error('The server did not say which agent this is.')
       // "The owner" is pinned on this machine: a server that later names someone else gets no owner at all.
       const saidOwner = cleanHandle(said.agent.owner?.handle)
-      if (!ownerHandle && !ownerLost && saidOwner) ownerHandle = saidOwner
-      else if (ownerHandle && saidOwner !== ownerHandle && !ownerLost) {
+      if (!ownerHandle && !ownerLost && saidOwner) {
+        ownerHandle = saidOwner
+        try {
+          onOwner(saidOwner)
+        } catch (error) {
+          log(`could not save who connected this agent: ${error.message}`)
+        }
+      } else if (ownerHandle && saidOwner !== ownerHandle && !ownerLost) {
         ownerLost = true
         ownerHandle = null
         log(

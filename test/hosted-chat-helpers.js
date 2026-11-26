@@ -128,6 +128,7 @@ export function startLink(
     platform = null,
     // The approving account's handle, as `agent connect` saves it.
     owner = null,
+    onOwner = () => {},
   } = {},
 ) {
   const logs = []
@@ -182,6 +183,7 @@ export function startLink(
     hello: { kind, machine: 'studio', version: '0.5.0', maxTurns },
     ...(platform ? { capabilities: { config: null, platform } } : {}),
     owner,
+    onOwner,
     policy: edits ? machinePolicy : policy,
     // `remote`: true for the real token API, or a client of the test's own.
     remote: remote === true ? createRemote({ origin: hosted.origin, token }) : remote || null,

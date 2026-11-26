@@ -24,6 +24,7 @@ import { upgradeV1Capabilities } from '../src/agent/capabilities.js'
 import {
   credentialsFile,
   forgetAgentCredential,
+  pinAgentOwner,
   readAgentCredential,
   readCredential,
   saveAgentCredential,
@@ -673,4 +674,22 @@ test('the command refuses what is not an agent’s: a plain token, a bad flag, a
   assert.equal((await denied.exited).code, 1)
   assert.match(denied.state.err, /denied/)
   assert.equal(readAgentCredential(hosted.origin, 'default', env), null)
+})
+
+test('a saved agent token without an owner keeps the first one named; never over one, never for another token', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-pin-'))
+  try {
+    const env = { XDG_CONFIG_HOME: dir }
+    const origin = 'https://board.example'
+    saveAgentCredential(origin, 'default', { token: 'tok-a', owner: null }, env)
+    assert.equal(pinAgentOwner(origin, 'default', 'ada', env, 'tok-other'), false)
+    assert.equal(readAgentCredential(origin, 'default', env).owner, null)
+    assert.equal(pinAgentOwner(origin, 'default', 'ada', env, 'tok-a'), true)
+    assert.equal(readAgentCredential(origin, 'default', env).owner, 'ada')
+    assert.equal(pinAgentOwner(origin, 'default', 'eve', env, 'tok-a'), false)
+    assert.equal(readAgentCredential(origin, 'default', env).owner, 'ada')
+    assert.equal((fs.statSync(path.join(dir, 'shapewall', 'credentials.json')).mode & 0o777).toString(8), '600')
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
 })

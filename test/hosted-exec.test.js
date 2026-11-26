@@ -171,3 +171,48 @@ test('"the owner" is this machine\'s: a server that names another account does n
   const { final } = await turn
   assert.match(final.text, /mcp run_named_command error: Not run: it was denied on the board/)
 })
+
+// Review fix 9: the server's by.owner alone is not enough. The answer names
+// who answered, and it must be the owner this machine pinned.
+test('"owner" approvals: an allow from anyone but the pinned owner is not taken, even when the server says owner', posix, async () => {
+  const agent = await agentWith('PinnedAllow', {
+    audience: 'owner',
+    policy: { audience: 'owner', approvals: 'owner' },
+    link: { owner: 'someone-else' },
+  })
+  const made = await comment('Run the tests ' + fixScript([['mcp', 'run_named_command', { name: 'test' }]]))
+  const turn = pressFix(made.id, agent)
+  const asked = await until(async () => (await cards()).find((item) => item.thread === 'comment-' + made.id), 'a command card')
+  hosted.rateLimiter.reset()
+  await reauth(ada)
+  // ada connected the agent, so the server says by.owner; this machine pinned someone-else.
+  assert.equal(
+    (await ada.browser.post(threadUrl(made.id, '/permissions/' + asked.id), { optionId: 'allow', hash: asked.hash })).status,
+    200,
+  )
+  const { final } = await turn
+  assert.match(final.text, /mcp run_named_command error: Not run: it was denied on the board/)
+})
+
+test('the first owner the server names is pinned and handed back to be saved', posix, async () => {
+  const pinned = []
+  const agent = await agentWith('FirstOwner', {
+    audience: 'owner',
+    policy: { audience: 'owner', approvals: 'owner' },
+    link: { onOwner: (handle) => pinned.push(handle) },
+  })
+  assert.deepEqual(pinned, ['ada'])
+  // And the pinned owner's own allow is taken.
+  const made = await comment('Run the tests ' + fixScript([['mcp', 'run_named_command', { name: 'test' }]]))
+  const turn = pressFix(made.id, agent)
+  const asked = await until(async () => (await cards()).find((item) => item.thread === 'comment-' + made.id), 'a command card', 2000).catch(
+    () => null,
+  )
+  if (asked) {
+    hosted.rateLimiter.reset()
+    await reauth(ada)
+    await ada.browser.post(threadUrl(made.id, '/permissions/' + asked.id), { optionId: 'allow', hash: asked.hash })
+  }
+  const { final } = await turn
+  assert.match(final.text, /mcp run_named_command ok: test: exit code 0/)
+})

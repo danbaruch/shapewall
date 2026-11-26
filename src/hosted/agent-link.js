@@ -1004,13 +1004,15 @@ export function mountAgentLink(
   // ---- Permission cards ----
 
   // An answer as the machine hears it. `by.owner`: the person who connected
-  // this agent answered (a machine set to "owner" takes no other "allow").
+  // this agent answered (a machine set to "owner" takes no other "allow");
+  // `by.handle`: who answered, which that machine checks against the owner
+  // it pinned.
   const answerFrame = (req, card) => ({
     turn: card.turn_id,
     card: card.id,
     decision: card.state === 'approved' ? 'allow' : 'deny',
     hash: card.card_hash,
-    by: { owner: Boolean(card.answered_by) && card.answered_by === req.agent.created_by },
+    by: { owner: Boolean(card.answered_by) && card.answered_by === req.agent.created_by, handle: handleOf(req, card.answered_by) },
   })
   const auditCard = (req, action, row, card, extra = {}) =>
     said(req)(action, row.id, {
@@ -1056,7 +1058,7 @@ export function mountAgentLink(
           card: id,
           decision: 'deny',
           hash: data.hash,
-          by: { owner: false },
+          by: { owner: false, handle: null },
         })
       const event = cleanEvent({ name: 'tool', data: { ...data, kind: 'permission', state: 'denied' } })
       if (event) hub.push(live, event[0], event[1])

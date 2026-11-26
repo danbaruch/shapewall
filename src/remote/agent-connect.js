@@ -26,7 +26,7 @@ import { agentConfigDir, createInstructionsNote, instructionsLines, instructions
 import { REMOTE_FIX_PREAMBLE, remotePreamble } from '../agent/context.js'
 import { DEFAULT_OUTPUT_DIR, authFiles, findConfigFile, loadConfig } from '../config.js'
 import { closeSandbox } from '../agent/sandbox-exec.js'
-import { AGENT_SLUG_RE, forgetAgentCredential, readAgentCredential, saveAgentCredential } from './credentials.js'
+import { AGENT_SLUG_RE, forgetAgentCredential, pinAgentOwner, readAgentCredential, saveAgentCredential } from './credentials.js'
 import { fixRoot, sweepFixes } from './agent-fix.js'
 import { fatalLinkError, runAgentLink } from './agent-link.js'
 import {
@@ -539,6 +539,11 @@ export async function agentConnect(
       // Who "the owner" is on this machine: the approving account (saved with the token),
       // else the first handle the server names at hello (agent-link.js pins it).
       owner: ownerHandle,
+      // A saved token without an owner keeps the first one the server names.
+      onOwner: (handle) => {
+        if (source === 'agent' && pinAgentOwner(origin, slug, handle, env, token))
+          log(`saved ${handle} as the account that connected this agent`)
+      },
       hello: { kind, machine: os.hostname().split('.')[0] || 'this computer', version: VERSION, maxTurns: concurrency },
       policy,
       remote,
