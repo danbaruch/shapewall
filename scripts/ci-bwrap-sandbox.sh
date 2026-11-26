@@ -7,7 +7,7 @@
 set -euo pipefail
 err="${RUNNER_TEMP:?}/bwrap-probe.err"
 # As src/agent/sandbox-exec.js probes it: bubblewrap, and a user namespace inside it (the runtime's seccomp helper makes one).
-probe() { bwrap --unshare-all --die-with-parent --ro-bind / / --dev /dev --proc /proc unshare -U true 2>"$err"; }
+probe() { bwrap --unshare-all --die-with-parent --ro-bind / / --dev /dev --proc /proc unshare -U -r true 2>"$err"; }
 if probe; then
   echo 'bubblewrap starts with --unshare-all, and a user namespace inside it.'
   echo 'SHAPEWALL_SANDBOX_TEST=1' >>"$GITHUB_ENV"

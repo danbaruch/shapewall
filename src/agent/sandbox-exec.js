@@ -126,13 +126,28 @@ export function probeSandbox({ platform = process.platform, env = process.env, r
       })
       // The runtime's seccomp helper makes a user namespace inside the sandbox; some
       // systems (Ubuntu's AppArmor userns restriction) allow bubblewrap's own but not that one.
+      // -r maps the user, writing setgroups and uid_map, as the helper does.
       const unshare = onPath('unshare', env)
       const nested =
         tried.status !== 0 || !unshare
           ? tried
           : run(
               bwrap,
-              ['--unshare-all', '--die-with-parent', '--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', unshare, '-U', 'true'],
+              [
+                '--unshare-all',
+                '--die-with-parent',
+                '--ro-bind',
+                '/',
+                '/',
+                '--dev',
+                '/dev',
+                '--proc',
+                '/proc',
+                unshare,
+                '-U',
+                '-r',
+                'true',
+              ],
               {
                 stdio: 'ignore',
                 timeout: 10_000,
