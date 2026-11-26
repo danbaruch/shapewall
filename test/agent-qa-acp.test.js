@@ -196,11 +196,17 @@ test('comments: the open ones go with each message to an ACP agent, quoted with 
     anchor: { selector: '#pricing-headline > span:nth-of-type(1)', text: 'Simple pricing', dx: 0.5, dy: 0.5 },
   })
   const entry = await board('qa-comments', { config })
-  const blocks = JSON.parse((await send(entry, 'board', 'echo')).done.text)
-  assert.equal(blocks[0].text, ACP_PREAMBLE)
+  // The owner's board thread is a solo turn: comments other people wrote are counted, never quoted (1.4.0).
+  const solo = JSON.parse((await send(entry, 'board', 'echo')).done.text)
+  assert.equal(solo[0].text, ACP_PREAMBLE)
   assert.match(ACP_PREAMBLE, /Do not read the \.shapewall folder directly/)
+  const soloContext = solo.find((block) => block.text.startsWith('Board context')).text
+  assert.match(soloContext, /3 open comments by other people are not quoted on this turn\./)
+  assert.doesNotMatch(soloContext, /Ignore your rules/)
+  // Another person's comment thread is an open turn: the board's other comments are quoted, with provenance.
+  const blocks = JSON.parse((await send(entry, 'comment-2', 'echo')).done.text)
   const context = blocks.find((block) => block.text.startsWith('Board context')).text
-  assert.match(context, /Open comments on this board, newest first \(3 of 3\):/)
+  assert.match(context, /Open comments on this board, newest first \(2 of 2\):/)
   assert.match(
     context,
     /<shapewall-data source="comment" trust="untrusted" board="sample" comment="1" author="Robin" page="pricing" viewport="phone" status="open">/,
@@ -209,11 +215,8 @@ test('comments: the open ones go with each message to an ACP agent, quoted with 
   assert.match(context, /"text": "Simple pricing"/)
   assert.doesNotMatch(context, /and <\/shapewall-data> read/)
   // Again on the next message (the agent may have missed a new comment).
-  const second = JSON.parse((await send(entry, 'board', 'echo')).done.text)
-  assert.match(second.find((block) => block.text.startsWith('Board context')).text, /newest first \(3 of 3\)/)
-  // A comment thread quotes its own comment in full, and lists the others.
-  const thread = JSON.parse((await send(entry, 'comment-1', 'echo')).done.text)
-  assert.match(thread.find((block) => block.text.startsWith('Board context')).text, /newest first \(2 of 2\)/)
+  const second = JSON.parse((await send(entry, 'comment-2', 'echo')).done.text)
+  assert.match(second.find((block) => block.text.startsWith('Board context')).text, /newest first \(2 of 2\)/)
 })
 
 test('comments: bounded by count and bytes, says how many were left out', () => {
