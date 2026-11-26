@@ -226,8 +226,11 @@ shapewall agent connect --remote URL [--agent claude|ID] [--name NAME] [--as NAM
                         [--audience owner|server] [--approvals none|owner|admins] [--auto none|edits|commands|edits,commands]
                         [--allow-path FILE] [--base BRANCH] [--git-remote NAME]
                         [--instructions all|project|none] [--agent-config DIR|none] [--respond thread|mention]
+                        [--browser-profile NAME|none] [--browser-no-sandbox]
                         [--takeover] [--concurrency N] [--token-file FILE]
                         [--project SLUG [--workspace NAME] [--used-by owner|trusted] [--icon NAME] [--tint NAME]]
+shapewall agent status [--remote URL] [--as NAME] [--json]
+shapewall agent set KEY VALUE [--remote URL] [--as NAME]
 shapewall agent sandbox build-image [--runtime podman|docker] [--image NAME]
 shapewall agent sandbox doctor [--no-egress]
 shapewall agent sandbox run --comment ID
@@ -300,6 +303,10 @@ The flags that go with it, each saved for the connection:
 - `--respond thread|mention`: in a shared thread the agent answers an @mention of it and **Send to agent**. `thread` (the
   default) also answers every message of a thread the person who connected it set to answer everything; `mention` never does,
   whatever the server says. See [when an agent answers](/docs/chat#when-an-agent-answers).
+- `--browser-profile NAME|none`: a saved profile of the agent browser's own, for test or staging logins, made in
+  `$XDG_STATE_HOME/shapewall/agent-browser-profiles/NAME`. Never a real browser's profile.
+- `--browser-no-sandbox`: let the agent browser start without Chromium's own sandbox where it cannot start, on solo and team
+  turns only.
 
 Connected Claude Code sessions never load or write Claude Code's auto memory.
 
@@ -309,6 +316,15 @@ session of Claude Code gets no shell tool, and the flag (and `agent set allow-co
 `none`, which empties a saved list, is taken. A fix runs the project's named commands
 (config `commands`) through Shapewall's own tools instead, in an OS sandbox where the machine has one
 ([commands through Shapewall](/docs/agent-hardening#commands-through-shapewall)). The whole of it, with the trust table: [the hosted guide](/docs/hosted#edits-from-the-board-the-trust-decision).
+
+`agent status` lists what the agent can do on this machine, line by line and per tier (solo, team, open): the same lines as the
+console's **What it can do** card and the block the agent reads. Each line that is off says why and the command that changes it.
+`--remote URL` (with `--as NAME`) shows a connected agent's lines, for chat and for Fix with, and whether its link is open;
+without it, the local board in this project. `--json` prints the console card's data.
+
+`agent set KEY VALUE` changes one line without reconnecting: `agent set browser off`, `agent set shell sandboxed --remote URL`,
+`agent set trust-team ada,bo --remote URL`. With `--remote` it is read at the next `agent connect`; without it, by the local
+board's next turn. The keys and their values: [what an agent can do](/docs/agent-capabilities#change-a-line).
 
 The sandboxed starter agent (`agent sandbox`) is **experimental** ([stability](/docs/stability)) and separate from native ACP board
 chat. Its [guide](/docs/starter-agent) explains the container, model and trusted-author prerequisites, budgets and approval limits.

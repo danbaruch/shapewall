@@ -43,6 +43,7 @@ A few pages are written for the site and live only there; they are linked below 
 | [agents.md](agents.md)                                            | The board's chat panel: connect a model or an agent CLI, work on a branch, images and voice.                 |
 | [agents.md](agents.md#when-an-agent-answers)                      | When an agent answers in a shared thread: @mentions, Send to agent, and agent text that never starts a turn. |
 | [starter-agent.md](starter-agent.md)                              | `shapewall agent sandbox` (experimental): one comment at a time in a container, budgets, a branch.           |
+| [agent-capabilities.md](agent-capabilities.md)                    | What an agent may do on each turn: solo, team and open, named commands, the sandboxed shell, the browser.    |
 | [agent-hardening.md](agent-hardening.md)                          | Prompt injection through comments, the built-in defenses, least privilege, a sandbox checklist.              |
 
 ## 5. Teams and self-hosting

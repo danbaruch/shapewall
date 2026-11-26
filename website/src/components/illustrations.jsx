@@ -13,6 +13,7 @@ import {
   Columns2,
   Eye,
   FileText,
+  Globe,
   GitMerge,
   GitPullRequest,
   Hash,
@@ -22,6 +23,8 @@ import {
   MessagesSquare,
   Plug,
   Send,
+  ShieldCheck,
+  Terminal,
   Webhook,
 } from 'lucide-react'
 import { IconButton, ToggleGroup, cx } from './ui.jsx'
@@ -343,6 +346,40 @@ export function TriggersIllustration() {
           tone: 'text-wall',
           title: 'Send to agent',
           text: 'Or press the button beside Send. Text an agent wrote never starts another turn.',
+        },
+      ]}
+    />
+  )
+}
+
+// What an agent can do: one turn's lines, as the console's What it can do card shows them.
+export function CapabilitiesIllustration() {
+  return (
+    <Steps
+      steps={[
+        {
+          icon: ShieldCheck,
+          tone: 'text-merged',
+          title: 'Solo: only you wrote this turn',
+          text: 'The tier comes from who wrote it. Anyone else on the turn makes it open.',
+        },
+        {
+          icon: Terminal,
+          tone: 'text-wall',
+          title: 'run_named_command test',
+          text: 'Runs in an OS sandbox in the fix copy: no home folder, package registries only.',
+        },
+        {
+          icon: Globe,
+          tone: 'text-wall',
+          title: 'browser_navigate /pricing',
+          text: 'A throwaway headless browser that opens only your app, removed when the task ends.',
+        },
+        {
+          icon: MessageSquare,
+          tone: 'text-pin-ink',
+          title: 'Open turn: Run "npm test"?',
+          text: 'When someone else wrote the turn, each command waits for a card on the board.',
         },
       ]}
     />

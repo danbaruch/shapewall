@@ -105,6 +105,10 @@ A fixed set of tools, nothing else:
 | `reply`, `set_status`                  | Up to 3 replies on the comment (2,000 characters each), and its agent status.                                                                                                                                 |
 | `run_shell`                            | Any command, but only after you approve that exact command on the board (local boards only, see below).                                                                                                       |
 
+Each run is decided like every other agent turn ([what an agent can do](agent-capabilities.md)), on this machine: **team** when
+every author whose text reaches the model is on the board's trusted list, otherwise **open**. The container stays the boundary
+for both. The agent's prompt ends with a block that lists what it may do on this run.
+
 `starterAgent.setupCommand` (for example `npm ci`) runs once before the agent starts, in the container, with the package registry
 reachable.
 

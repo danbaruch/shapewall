@@ -472,7 +472,7 @@ How fixes run, both off by default and also on the Agents page of the Workspace 
 [Work on a branch](agents.md#work-on-a-branch); and `batchFixes` (`{ "enabled": true, "max": 5 }`, `max` from 1 to 20), see
 [Fix several comments at once](agents.md#fix-several-comments-at-once).
 
-What an agent's tools may reach (1.4.0, see [what each turn may do](agent-hardening.md#what-each-turn-may-do)):
+What an agent's tools may reach (1.4.0, see [what an agent can do](agent-capabilities.md)):
 
 - `browser.allow`: origins the agent's throwaway browser may load besides the app's own addresses (every `baseUrl` and `publicUrl`
   of the config, its boards and environments). Up to 40 exact http(s) origins, such as `"https://staging.example.com"`: no path, no

@@ -360,6 +360,16 @@ export const DOC_GROUPS = [
           'Why captured HTML can never run code: an allowlist sanitizer, a strict content security policy and a sandboxed frame. Plus the local server rules.',
       },
       {
+        path: '/docs/agent-capabilities',
+        file: 'agent-capabilities',
+        repo: 'agent-capabilities',
+        nav: 'What an agent can do',
+        title: 'What an agent can do: tiers, commands, browser | Shapewall',
+        description:
+          'One set of rules decides what a coding agent may do on each turn: solo, team and open tiers, named commands, the sandboxed shell, the throwaway browser.',
+        og: 'docs-agent-hardening',
+      },
+      {
         path: '/docs/agent-hardening',
         file: 'agent-hardening',
         repo: 'agent-hardening',

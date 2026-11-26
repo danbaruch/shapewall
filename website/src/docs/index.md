@@ -44,6 +44,8 @@ docs cover installing it, configuring your screens, steering your agents and run
   webhook, Slack, Discord, Telegram or email.
 - [Sandboxed starter agent](/docs/starter-agent) (experimental): let an agent work on comments from a shared board, inside a
   container.
+- [What an agent can do](/docs/agent-capabilities): what your agent may do on each turn (solo, team, open), its named commands,
+  sandboxed shell and throwaway browser, and how to change each line.
 - [Agent hardening](/docs/agent-hardening): connect an agent to a shared board safely, with a printable checklist.
 - [Security model](/docs/security): why captured pages can never run code.
 - [Page checks](/docs/page-checks): reliability, SEO, social images and report comparisons, with

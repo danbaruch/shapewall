@@ -142,6 +142,7 @@ The hosted server never captures a page and never edits code. Those happen on a 
   the answer, as it is written  ->               everyone with the thread open sees it
   agent edits a fresh copy  <-  agent connect --approvals  <-  "Fix with Builder" on a comment
   each edit, as a diff  ->                       a person allows or denies it on the board
+  tests, builds, its own browser  ->             a card where the turn needs one
   a new branch, a pull request  ->               the thread shows where the fix is
 ```
 
@@ -166,9 +167,16 @@ The hosted server never captures a page and never edits code. Those happen on a 
    there. The work happens on that machine, never on the server and never in the checked-out tree: the agent edits a fresh copy
    of the base commit in a folder outside the project, each edit shows on the board as a card with the full diff that you allow
    or deny, and Shapewall commits what was allowed on a new branch (`shapewall/comment-<n>-...`). The branch is pushed and a pull
-   request is opened when that machine has the remote and GitHub connect; otherwise the thread names the branch. A connected
-   Claude Code runs no commands from the board, so a fix is not built, tested or recaptured for you: `watch --exec` stays the way
-   for that. [Edits from the board](hosted.md#edits-from-the-board-the-trust-decision) has the details.
+   request is opened when that machine has the remote and GitHub connect; otherwise the thread names the branch.
+   [Edits from the board](hosted.md#edits-from-the-board-the-trust-decision) has the details.
+
+6. **Let it test its fixes (optional).** The project's named commands (config [`commands`](config.md#commands): `test`,
+   `build`, `dev`, `lint`), a sandboxed shell and a throwaway browser are lines the same machine switches on
+   (`shapewall agent set shell sandboxed --remote https://your-server`, and `browser on`). They run on that machine through
+   Shapewall's own tools, never the agent's shell, in an OS sandbox where there is one (bubblewrap on Linux, Seatbelt on macOS).
+   Each command waits for a card on the board; on your own fixes (an agent only you use) they can run without one
+   (`agent set command-approval tier`). The server can take
+   them away, never add them. [What an agent can do](agent-capabilities.md) has every line.
 
 Each machine that watches or connects is an **agent** of the project, with a name. The board lists them in its Agent panel ("Builder: online",
 "Fixer: offline, last seen 2 hours ago") and **Send to agent** on a comment names the one it goes to: the project's default agent on

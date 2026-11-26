@@ -140,11 +140,13 @@ command to run, and cannot send your key to a host you did not confirm; a config
 
 ### The ACP bridge keeps the agent on a short leash
 
-> **Warning: an ACP agent brings its own tools and extensions, and Shapewall does not sandbox them.** Claude Code, Codex and goose
+> **Warning: an ACP agent other than Claude Code brings its own tools and extensions, and Shapewall does not sandbox them.**
+> Claude Code on a local board gets the restricted session (read and edit tools plus Shapewall's own tools, no shell of its own,
+> no settings files, no MCP servers of its own) unless the config sets `agent.localSession: "own"`. Codex, goose and Gemini CLI
 > come with a shell, file edits and whatever their own config loads: MCP servers, goose extensions such as browser control. The
 > approval cards below cover only what the agent asks Shapewall to do. Use restricted profiles:
 >
-> - **Claude Code:** permission mode `default` or `plan` (`permissions.defaultMode` in your Claude settings), never
+> - **Claude Code with `agent.localSession: "own"`:** permission mode `default` or `plan` (`permissions.defaultMode` in your Claude settings), never
 >   `auto`, `acceptEdits` or `bypassPermissions`; set it explicitly, since `claude-agent-acp` 0.106.0 starts in `auto` when none is set. `claude-agent-acp` follows your Claude Code settings; `CLAUDE_CONFIG_DIR` gives Shapewall a profile of its own.
 > - **Codex:** `sandbox_mode = "workspace-write"` or `"read-only"` with `approval_policy = "on-request"` in `~/.codex/config.toml`
 >   (or `CODEX_HOME`), never `danger-full-access`.
@@ -342,14 +344,15 @@ A connected agent can make a fix for a hosted comment
 else's machine change files?** By default, nobody. Even the person who connected the agent cannot allow an edit from the board
 until they said so on that machine.
 
-| Level                                                           | Where it is set                                                                   | Default                         | What the board can cause                                                                                                                                                 |
-| --------------------------------------------------------------- | --------------------------------------------------------------------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Audience "only the person who connected it", `--approvals none` | The audience at the approval; `--audience owner` pins it from the machine         | Yes                             | That person asks. The agent reads the project and answers                                                                                                                |
-| Audience: named members, or everyone the agent policy trusts    | On the server: the approval page, or the Agents page                              | Opt-in                          | Those members may ask too. Still read and answer only                                                                                                                    |
-| `--approvals owner`                                             | On the machine                                                                    | Opt-in                          | A fix on a new branch. Each edit waits for the person who connected the agent                                                                                            |
-| `--approvals admins`                                            | On the machine                                                                    | Opt-in                          | A fix on a new branch. Each edit waits for someone with the agent's answer role (admin by default), in its audience and trusted                                          |
-| "Allow without asking"                                          | On the machine (`--auto edits`), and then the agent's approval rule on the server | Opt-in, twice                   | Edits to ordinary source files go into the fix without a person. The fix stays on the machine: it is pushed only after a person allows "Push this fix" on its whole diff |
-| Commands                                                        | On the machine (`--allow-command`)                                                | Not offered for Claude Code yet | Nothing: a fix session of Claude Code has no shell tool                                                                                                                  |
+| Level                                                           | Where it is set                                                                   | Default                     | What the board can cause                                                                                                                                                 |
+| --------------------------------------------------------------- | --------------------------------------------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Audience "only the person who connected it", `--approvals none` | The audience at the approval; `--audience owner` pins it from the machine         | Yes                         | That person asks. The agent reads the project and answers                                                                                                                |
+| Audience: named members, or everyone the agent policy trusts    | On the server: the approval page, or the Agents page                              | Opt-in                      | Those members may ask too. Still read and answer only                                                                                                                    |
+| `--approvals owner`                                             | On the machine                                                                    | Opt-in                      | A fix on a new branch. Each edit waits for the person who connected the agent                                                                                            |
+| `--approvals admins`                                            | On the machine                                                                    | Opt-in                      | A fix on a new branch. Each edit waits for someone with the agent's answer role (admin by default), in its audience and trusted                                          |
+| "Allow without asking"                                          | On the machine (`--auto edits`), and then the agent's approval rule on the server | Opt-in, twice               | Edits to ordinary source files go into the fix without a person. The fix stays on the machine: it is pushed only after a person allows "Push this fix" on its whole diff |
+| Named commands, the shell, the browser                          | On the machine (`agent set shell`, `command-approval`, `browser`)                 | Off                         | Commands run by Shapewall in the OS sandbox, as [what each turn may do](#what-each-turn-may-do) says; never the agent's shell                                            |
+| Exact commands                                                  | On the machine (`--allow-command`)                                                | Not offered for Claude Code | Nothing: a fix session of Claude Code has no shell tool                                                                                                                  |
 
 The machine's choice is saved in its own policy file (`agent-policy.json` beside the saved token, 0600, outside every
 repository). It is the ceiling: the server can only narrow it. The file fails narrow: a value this version does not know (a typo,
@@ -404,8 +407,9 @@ allowed on the board" (`--allow-command`). This is not available for Claude Code
 agent `agent connect` offers. In the check below, a Claude Code session started with its shell tool ran commands it takes to be
 read-only (`ls`, `cat`) without asking anyone, and those can read outside the project. A list of allowed commands is no control
 over an agent that does not ask. So a fix session of Claude Code gets no shell tool at all (it has Read, Grep, Glob, Edit, Write
-and MultiEdit, no settings files and no MCP servers), `--allow-command` is refused for it with that explanation, and commands in a
-hand-edited policy file are not in effect.
+and MultiEdit, no settings files and no MCP servers), `--allow-command` and `agent set allow-command` are refused for it with that
+explanation, and commands in a hand-edited policy file are not in effect. The project's named commands and the sandboxed shell reach a fix another way, through
+Shapewall's own tool server ([Commands through Shapewall](#commands-through-shapewall)).
 
 How edits were proven. The check used the real Claude Code adapter (claude-agent-acp 0.93.0 and 0.106.0, in a repository whose committed `.claude/settings.json` allowed Bash, Edit and Write without asking and ran a hook), a
 throwaway server on localhost, a throwaway Git repository with a local bare remote, and the real
@@ -457,8 +461,9 @@ What to do:
 From 1.4.0 one function on the machine that runs the agent decides what it may do on each turn (`src/agent/capabilities.js`):
 which tools, whether commands run at once or wait for a card, whether it gets a shell and a browser. The console's "What it can do"
 card, `shapewall agent status` and the block the agent gets after its instruction files are three views of that one answer. The
-tools that act on it are Shapewall's own (see [Commands through Shapewall](#commands-through-shapewall) below); in this release a
-hosted Fix with uses them, and the other paths follow.
+tools that act on it are Shapewall's own (see [Commands through Shapewall](#commands-through-shapewall) below), on every path: a
+local board's chat, a connected agent's chat, Fix with and comments, `watch --exec` (told, not enforced) and the starter agent.
+For how to set each line, see [what an agent can do](agent-capabilities.md); this section is the security detail.
 
 It is decided by **who wrote the turn**, not by whether the board is local or hosted:
 
@@ -471,14 +476,14 @@ It is decided by **who wrote the turn**, not by whether the board is local or ho
 A thread that once carried text from outside the list keeps the tier that text allowed. What each tier may get, once the machine's
 owner has opted in (on a local board these are the defaults; a hosted connection starts with none of them, see below):
 
-| What                                                            | solo                                                     | team                                            | open                        |
-| --------------------------------------------------------------- | -------------------------------------------------------- | ----------------------------------------------- | --------------------------- |
-| Named commands (config `commands`)                              | run, asked again when the command or its inputs change   | the same                                        | each after a card           |
-| Shell                                                           | a full shell in the fix copy, inside an OS sandbox       | exact commands only (`trustTeamShell` for more) | exact commands, each a card |
-| Browser                                                         | a throwaway headless one, limited to the app's addresses | the same                                        | the same                    |
-| Logged-in browser (`browserAuth`, `browserProfile`)             | opt-in                                                   | opt-in (`browserProfileTeam`)                   | never                       |
-| Extensions from the agent config folder (see below)             | on if there is one and the thread is clean               | only if every author is in `extensionsFor`      | never                       |
-| Automatic memory, editing its own instructions, your own Chrome | never                                                    | never                                           | never                       |
+| What                                                            | solo                                                     | team                                       | open              |
+| --------------------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------ | ----------------- |
+| Named commands (config `commands`)                              | run, asked again when the command or its inputs change   | the same                                   | each after a card |
+| Shell                                                           | a full shell in the fix copy, inside an OS sandbox       | no full shell (`trustTeamShell` for more)  | no full shell     |
+| Browser                                                         | a throwaway headless one, limited to the app's addresses | the same                                   | the same          |
+| Logged-in browser (`browserAuth`, `browserProfile`)             | opt-in                                                   | opt-in (`browserProfileTeam`)              | never             |
+| Extensions from the agent config folder (see below)             | on if there is one and the thread is clean               | only if every author is in `extensionsFor` | never             |
+| Automatic memory, editing its own instructions, your own Chrome | never                                                    | never                                      | never             |
 
 Hosted chat answers only: no edits, and on solo turns only the commands marked `"mutating": false` and the browser. No OS sandbox on
 the machine (Windows, no bubblewrap) means no full shell: commands fall back to a card each, and the line says why.
@@ -642,7 +647,7 @@ loopback port Shapewall binds itself and holds until the server stops, joined to
 `nsenter` (util-linux) starts in that namespace only. The agent's other commands cannot reach it, and no other port of theirs is
 reachable from outside. On macOS the sandbox could let a server listen only by opening every loopback port of the machine to it,
 so dev servers do not run in the OS sandbox there. Without the sandbox (no sandbox on this machine, each after a card, or
-`--shell-unsandboxed`) the server binds its port itself, and the browser gets it only when the listener on `127.0.0.1` is the
+`shell-unsandboxed on`) the server binds its port itself, and the browser gets it only when the listener on `127.0.0.1` is the
 server's own process group (Linux and macOS; not on Windows). The browser never opens Shapewall's own server port. What a dev
 server writes in the fix copy counts as changed by the agent when it stops.
 
@@ -657,7 +662,7 @@ sandbox: no full shell, and every named command waits for a card. Windows has no
 commands run without a shell (`node` and `npm` as Node plus their script; a `.cmd` or `.bat` program is never run, as `cmd.exe`
 would read its arguments), each after a card.
 
-**The honest limit.** The sandbox limits what a command touches. The code it runs is code the agent may have written: `npm test`
+**Tests run the agent's code.** The sandbox limits what a command touches. The code it runs is code the agent may have written: `npm test`
 runs the project's tests, and the agent edits those. Read the result as the agent's, and review the fix before it leaves your
 machine.
 
@@ -744,6 +749,7 @@ Pick the weakest setup that does the job.
 | Chat with an agent CLI over ACP, permission prompts on  | Edit and run in the project after you approve each card         | Your own board on your own machine                          |
 | `agent connect` on a hosted board (the default)         | Read the project, write answers                                 | Projects whose code the agent's audience may read           |
 | `agent connect --approvals owner`                       | Edit a fresh copy on a new branch after you allow each diff     | Hosted boards, with a restricted profile and a PR you merge |
+| ...plus `agent set shell sandboxed`, `browser on`       | Also run the project's named commands and its own browser       | Your own fixes; other people's turns ask for each command   |
 | `watch --exec` with an edit mode and a narrow tool list | Edit the project and call `npx shapewall`, no person in between | Boards whose commenters you trust                           |
 | `watch --exec` in a sandbox, output as a branch         | Edit a fresh clone, open a PR                                   | Shared boards ([Sandbox checklist](#sandbox-checklist))     |
 | An agent with your shell, keys, browser and email       | Anything you can                                                | Nothing that reads other people's text                      |
