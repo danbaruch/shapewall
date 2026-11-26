@@ -250,7 +250,7 @@ export async function startLocalTools({
   }
   // The recorded logins' folder exists before any command does, so the
   // sandbox can hide it (it hides only what is there when it starts: Q7 C4).
-  if (real) ensureAuthDir(real)
+  // In the checkout only: a branch copy (Shapewall's own folder) is removed whole after Apply.
   if (config.dir) ensureAuthDir(config.dir)
   // A local checkout keeps its repository, Shapewall's folder and the
   // recorded logins read only for commands. Commands never run in the
