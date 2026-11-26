@@ -1080,7 +1080,12 @@ test('triggers: a board chat set to mentions only keeps a plain message, answers
     page.waitForFunction((asked) => {
       const items = [...document.querySelectorAll('[data-sw-chat="board"] [data-sw-chat-message]')]
       const at = items.findLastIndex((item) => item.getAttribute('data-sw-chat-message') === 'user' && item.innerText.includes(asked))
-      return at >= 0 && items.slice(at + 1).some((item) => item.getAttribute('data-sw-chat-message') === 'assistant' && item.getAttribute('data-status') === 'done')
+      return (
+        at >= 0 &&
+        items
+          .slice(at + 1)
+          .some((item) => item.getAttribute('data-sw-chat-message') === 'assistant' && item.getAttribute('data-status') === 'done')
+      )
     }, text)
   try {
     await page.click('[data-sw-chat-toggle]')
@@ -1099,7 +1104,9 @@ test('triggers: a board chat set to mentions only keeps a plain message, answers
     await page.waitForTimeout(1000)
     assert.equal(stub.calls.length, calls, 'a plain message never reaches the model')
     assert.equal(
-      await page.evaluate(() => [...document.querySelectorAll('[data-sw-chat="board"] [data-sw-chat-message]')].at(-1)?.getAttribute('data-sw-chat-message')),
+      await page.evaluate(() =>
+        [...document.querySelectorAll('[data-sw-chat="board"] [data-sw-chat-message]')].at(-1)?.getAttribute('data-sw-chat-message'),
+      ),
       'user',
       'no answer after the plain message',
     )
