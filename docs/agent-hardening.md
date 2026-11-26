@@ -571,7 +571,9 @@ Claude Code over ACP can get skills and MCP servers of its own, from an agent co
 servers in the user-scope `mcpServers` of `DIR/.claude.json` are read; settings, hooks, commands, agents, output styles and
 installed plugins in it are skipped, and `agent connect` lists what it skipped. Never the default folder, `~/.claude`,
 `$CLAUDE_CONFIG_DIR`, anything in the project (a committed config or a fix copy cannot add one), a temporary folder or a folder
-other users can write to.
+other users can write to, or one in a folder another user can change (every folder above it is checked, as ssh checks a key's
+folders). Every folder a skill is read from is checked the same way, and each file is copied only from the very path that was
+checked.
 
 A turn gets them only when all of these hold: it is above the open tier, everyone who wrote it is in `extensionsFor` (`owner` and
 handles), and its thread is clean: everyone who ever wrote in it is in `extensionsFor` too, and it never carried text nobody can
@@ -579,10 +581,22 @@ vouch for. A server's tools are refused unless allowed by exact name (`shapewall
 call is checked on the machine, never allowed ahead.
 
 A thread is tainted for good by a share link guest's or a non-member's text, another agent's answer, a move to another agent, a
-comment by a token or an import, and a board tool whose result is other people's comments (`list_comments`, `get_comment`). That
-last one can happen mid-turn: every extension tool is refused from that moment and the session ends with the turn. Threads from
-before 1.4.0 count as tainted. The rules are one transition table, `src/agent/thread-trust.js`. Captured page text stays quoted
-data and does not taint (residual risk: a page can still carry text written to steer an agent).
+comment by a token or an import, someone else's comment or reply that the prompt quotes (a mentioned comment, a mentioned
+person's comments, a comment's own thread; read again every time the prompt is built, so a reply added later counts), and a board
+tool whose result is other people's comments (`list_comments`, `get_comment`). Taking that text away again never makes the thread
+clean. The last one can happen mid-turn: every extension tool is refused from that moment and the session ends with the turn.
+Threads from before 1.4.0, and threads an older build wrote in, count as tainted. The rules are one transition table,
+`src/agent/thread-trust.js`. Only Claude Code's restricted session takes extensions: another agent, or `agent.localSession: "own"`,
+shows them off on the card, in `agent status` and in the prompt alike.
+
+Once loaded, a skill's text is readable by the model for the rest of the session: Claude Code's Skill tool asks no permission, so
+it cannot be refused after a taint the way an MCP tool is. So a turn that had extensions and then was tainted may not write to the
+board for the rest of it: `reply_to_comment`, `set_comment_status`, `resolve_comment` and every other board write is refused on
+the machine, never asked, and the session still ends with the turn.
+
+Residual risks: captured page text stays quoted data and does not taint (a page can still carry text written to steer an agent),
+and an extension tool's own result (a server that fetches a web page or reads an issue tracker) can bring in outside text that
+does not taint either; allow only tools whose results you trust.
 
 ### Commands through Shapewall
 

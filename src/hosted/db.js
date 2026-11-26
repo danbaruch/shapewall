@@ -843,12 +843,18 @@ const MIGRATIONS = [
   // taint_authors is the JSON array of the user ids whose text it carried.
   // Only chat-store.js writes them, through nextThreadTrust. Every thread
   // that exists now is tainted: who wrote its history was never kept, so it
-  // fails closed. A thread started after the upgrade starts clean. Additive;
-  // an older build ignores the columns (it has no extensions to give)
-  // (docs/hosted.md, "Migration 23 and rollback").
+  // fails closed. A thread started after the upgrade starts clean.
+  // trust_v is the stamp of the thread as this build last judged it (its
+  // agent and its newest message, chat-store.js trustStamp): an older build
+  // that writes in the thread, or starts one, leaves it out of date, and the
+  // thread then reads as tainted, so a rollback and upgrade again without
+  // the rollback SQL still fails closed. Additive; an older build ignores
+  // the columns (it has no extensions to give) (docs/hosted.md, "Migration
+  // 23 and rollback").
   `
   ALTER TABLE chat_threads ADD COLUMN tainted INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE chat_threads ADD COLUMN taint_authors TEXT;
+  ALTER TABLE chat_threads ADD COLUMN trust_v TEXT;
   UPDATE chat_threads SET tainted = 1;
   `,
 ]

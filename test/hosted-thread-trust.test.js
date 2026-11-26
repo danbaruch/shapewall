@@ -46,7 +46,7 @@ test('migration 23: every thread that exists at upgrade is tainted, a new one st
   assert.equal(db.prepare('PRAGMA user_version').get().user_version, 23)
   // Back to a version 22 database, as docs/hosted.md gives it, with a thread in it.
   db.exec(rollbackSql())
-  assert.ok(!columns(db).includes('tainted') && !columns(db).includes('taint_authors'))
+  assert.ok(!columns(db).includes('tainted') && !columns(db).includes('taint_authors') && !columns(db).includes('trust_v'))
   assert.equal(db.prepare('PRAGMA user_version').get().user_version, 22)
   assert.ok(!versions(db).includes(23))
   seed(db)
@@ -135,4 +135,45 @@ test('a stored thread trust the store cannot read is tainted', () => {
     { tainted: null, taint_authors: null },
   ])
     assert.equal(threadTrustOf(row).tainted, true, JSON.stringify(row))
+})
+
+// Review of PR #41, F4: a rollback to an older build without the rollback
+// SQL, then an upgrade again. The migration does not run twice, so a thread
+// the older build wrote in, moved or started must not read as clean.
+test('F4: a thread an older build wrote in, moved or started while the columns stayed reads as tainted', async () => {
+  const file = path.join(tempDir('migration-23-again'), 'shapewall.db')
+  let db = await openDatabase(file)
+  seed(db)
+  let store = createChatStore(tenant(db, WS))
+  const P = ['prj_1', 'sample']
+  for (const thread of ['board', 'comment-1', 'comment-2']) {
+    store.ensure(...P, thread, { userId: 'usr_ada', agentId: 'agt_1' })
+    store.append(...P, thread, { role: 'user', userId: 'usr_ada', body: { text: 'mine' } })
+    assert.equal(store.trust(...P, thread).tainted, false)
+  }
+  db.close()
+  // The older build: it knows nothing of the trust columns.
+  db = await openDatabase(file)
+  db.prepare(
+    "INSERT INTO chat_messages (workspace_id, project_id, board_id, thread_id, id, role, author_user_id, body, bytes, created_at) VALUES (?, 'prj_1', 'sample', 'board', 'msg_old', 'user', NULL, '{\"text\":\"guest\"}', 10, ?)",
+  ).run(WS, AT)
+  db.prepare("UPDATE chat_threads SET agent_id = 'agt_2' WHERE thread_id = 'comment-1'").run()
+  db.prepare(
+    "INSERT INTO chat_threads (workspace_id, project_id, board_id, thread_id, agent_id, created_at, updated_at) VALUES (?, 'prj_1', 'sample', 'comment-3', 'agt_1', ?, ?)",
+  ).run(WS, AT, AT)
+  db.close()
+  db = await openDatabase(file)
+  try {
+    store = createChatStore(tenant(db, WS))
+    assert.equal(store.trust(...P, 'board').tainted, true, 'a message the older build stored')
+    assert.equal(store.trust(...P, 'comment-1').tainted, true, 'a move the older build made')
+    assert.equal(store.trust(...P, 'comment-3').tainted, true, 'a thread the older build started')
+    assert.equal(store.trust(...P, 'comment-2').tainted, false, 'a thread nobody touched since')
+    // Stored so: this build's next write does not make it clean again.
+    store.append(...P, 'board', { role: 'user', userId: 'usr_ada', body: { text: 'again' } })
+    assert.equal(store.trust(...P, 'board').tainted, true)
+    assert.equal(threadRow(db, 'board').tainted, 1)
+  } finally {
+    db.close()
+  }
 })

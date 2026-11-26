@@ -781,6 +781,9 @@ export function mountAgentLink(
     for (const message of Array.isArray(job?.messages) ? job.messages : []) {
       for (const mention of Array.isArray(message.mentions) ? message.mentions : []) {
         const data = mention.data || {}
+        // An older message's mention comes without its data (chat-job.js
+        // gives it to the newest few only): its id still names the comment.
+        if (['comment', 'element'].includes(mention?.kind) && mention.id !== undefined) ids.add(Number(mention.id))
         if (data.comment?.id) ids.add(Number(data.comment.id))
         for (const item of Array.isArray(data.openComments) ? data.openComments : []) ids.add(Number(item.id))
       }

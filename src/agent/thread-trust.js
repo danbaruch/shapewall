@@ -112,3 +112,24 @@ export const taintingToolName = (name) => {
   const bare = name.startsWith('mcp__shapewall__') ? name.slice('mcp__shapewall__'.length) : name
   return TAINTING_BOARD_TOOLS.includes(bare)
 }
+
+// After a taint on a turn with extensions, its skills stay in the model's
+// context (a Skill tool call asks no permission, so it cannot be refused
+// once loaded): the turn may no longer write to the board, so a skill's
+// text cannot be pasted into a reply or a status (acp.js onPermission).
+// The board server's tools that only read; every other tool of it writes.
+export const BOARD_READ_TOOLS = [
+  'list_pages',
+  'list_journeys',
+  'list_comments',
+  'get_comment',
+  'board_link',
+  'compare_captures',
+  'list_selectors',
+]
+const BOARD_WRITE_TOOLS = ['reply_to_comment', 'set_comment_status', 'resolve_comment', 'recapture_pages', 'add_comment']
+export const boardWriteToolName = (name) => {
+  if (typeof name !== 'string') return false
+  if (name.startsWith('mcp__shapewall__')) return !BOARD_READ_TOOLS.includes(name.slice('mcp__shapewall__'.length))
+  return BOARD_WRITE_TOOLS.includes(name)
+}

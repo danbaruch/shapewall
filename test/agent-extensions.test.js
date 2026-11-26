@@ -33,7 +33,9 @@ import {
 import { resolveCapabilities, resolveCeiling } from '../src/agent/capabilities.js'
 import { capabilitySummary, extensionsText, lineStates, toCli, toPanel, toPrompt } from '../src/agent/capability-render.js'
 import { localRestrictedSession, readOnlySession, toolNameOf, withExtensions } from '../src/agent/backends/acp.js'
-import { localTrust } from '../src/agent/local-tools.js'
+import { localAgentOf, localTrust } from '../src/agent/local-tools.js'
+import { localCard } from '../src/agent/capability-views.js'
+import { extensionLines } from '../src/remote/agent-connect.js'
 import { appendUserMessage, localTextEvent, markThreadTainted, readThread, setThreadProfile } from '../src/agent/threads.js'
 import { validateUserEntry } from '../src/agent/user-settings.js'
 import { SAMPLE, sampleConfig, tempDir } from './helpers.js'
@@ -272,7 +274,7 @@ const MACHINE = {
   audience: 'owner',
   approvals: 'owner',
   instructions: 'all',
-  agentConfig: '/home/dan/agent-config/builder',
+  agentConfig: '/home/ada/agent-config/builder',
   commands: [],
   shell: 'off',
   browser: 'off',
@@ -454,6 +456,10 @@ test('agent set agent-config checks the folder first; agent status and agent con
   )
   const folder = agentFolder('ext-set-folder')
   assert.equal(await agentSet(['set', 'agent-config', folder], {}, out, out, { env, cwd: config.dir }), 0)
+  // No agent set up that takes extensions: off, as every turn would have them.
+  const none = await agentStatusData({}, { env, cwd: config.dir })
+  assert.equal(none.tiers.solo.lines.find((item) => item.id === 'extensions').state, 'off')
+  env.SHAPEWALL_AGENT_ACP = 'npx @agentclientprotocol/claude-agent-acp'
   const status = await agentStatusData({}, { env, cwd: config.dir })
   const line = status.tiers.solo.lines.find((item) => item.id === 'extensions')
   assert.equal(line.state, 'on')
@@ -473,4 +479,85 @@ test('agent set agent-config checks the folder first; agent status and agent con
     /^Extensions: none\. /,
   )
   assert.deepEqual(extensionLines({ found: null, names: null, error: null }, {}), [])
+})
+
+// Review of PR #41, F5: the folders above the agent config folder, every
+// folder a skill is read from, and the path a file is copied from.
+test(
+  'F5: a folder above, a skill folder others may change, or a folder swapped for a link since the check is refused',
+  { skip: process.platform === 'win32' },
+  () => {
+    const env = { HOME: privateDir('ext-f5-home'), XDG_STATE_HOME: privateDir('ext-f5-state') }
+    // A parent anyone may change (no sticky bit): they could swap the folder out.
+    const open = tempDir('ext-f5-open')
+    fs.chmodSync(open, 0o777)
+    const inOpen = path.join(open, 'agent')
+    fs.mkdirSync(inOpen, { mode: 0o700 })
+    assert.throws(() => checkExtensionsFolder(inOpen, { env }), /any user of this machine can change/)
+    // The same parent with the sticky bit: nobody may rename what is not theirs.
+    fs.chmodSync(open, 0o1777)
+    assert.equal(checkExtensionsFolder(inOpen, { env }), fs.realpathSync(inOpen))
+
+    // A skill folder (or a folder in one) others may change is not read.
+    const dir = agentFolder('ext-f5-skills')
+    fs.chmodSync(path.join(dir, 'skills', 'release'), 0o777)
+    fs.chmodSync(path.join(dir, 'skills', 'notes', 'ref'), 0o777)
+    const found = readExtensions(checkExtensionsFolder(dir, { env }))
+    assert.deepEqual(
+      found.skills.map((skill) => skill.name),
+      ['notes'],
+    )
+    assert.ok(!found.skills[0].files.some((file) => file.rel.startsWith('ref')))
+    assert.ok(found.skipped.some((item) => item.what === 'skill release: .' && /other users/.test(item.why)))
+    assert.ok(found.skipped.some((item) => item.what === 'skill notes: ref'))
+
+    // A folder on the way swapped for a link between the check and the copy.
+    const swap = agentFolder('ext-f5-swap')
+    const before = readExtensions(checkExtensionsFolder(swap, { env }))
+    const outside = privateDir('ext-f5-outside')
+    fs.writeFileSync(path.join(outside, 'more.md'), 'OUTSIDE\n')
+    fs.renameSync(path.join(swap, 'skills', 'notes', 'ref'), path.join(swap, 'skills', 'notes', 'ref-was'))
+    fs.symlinkSync(outside, path.join(swap, 'skills', 'notes', 'ref'))
+    const plugin = buildExtensionPlugin(before, 'key-f5', { env })
+    assert.ok(!fs.existsSync(path.join(plugin, 'skills', 'notes', 'ref', 'more.md')), 'nothing from outside the folder is copied')
+    assert.ok(fs.existsSync(path.join(plugin, 'skills', 'notes', 'SKILL.md')))
+  },
+)
+
+// F6: the agent's kind and its session are the resolver's to say, so the
+// card, `agent status` and the prompt never say on where the session drops them.
+test('F6: an agent that is not Claude Code, or one in its own full session, has extensions off in the resolver and every renderer', () => {
+  const clean = { authors: [OWNER], guests: false, thread: { tainted: false, authors: [OWNER] } }
+  const at = (agent, extra = {}) =>
+    resolveCapabilities({ path: 'local-chat', trust: clean, audience: 'owner', machine: MACHINE, extensions: FOLDER, agent, ...extra })
+  assert.equal(at({ kind: 'claude', hardened: true }).extensions.on, true)
+  assert.equal(why(at({ kind: 'codex', hardened: true })), 'agent_not_claude')
+  assert.equal(why(at({ kind: null, hardened: true })), 'agent_not_claude')
+  assert.equal(why(at({ kind: 'claude', hardened: false })), 'session_unrestricted')
+  assert.equal(why(at({ kind: 'claude', hardened: true }, { extensionsFailed: true })), 'extensions_build_failed')
+  for (const agent of [
+    { kind: 'codex', hardened: true },
+    { kind: 'claude', hardened: false },
+  ]) {
+    const caps = at(agent)
+    const cardLine = localCard({ machine: MACHINE, extensions: FOLDER, agent })
+      .paths[0].tiers.find((tier) => tier.tier === 'solo')
+      .lines.find((line) => line.id === 'extensions')
+    assert.equal(cardLine.state, 'off', JSON.stringify(agent))
+    assert.equal(lineStates(caps).extensions, 'off')
+    assert.match(toPrompt(caps), /Extensions: No extensions\./)
+    assert.ok(toCli(caps).join('\n').includes(cardLine.text))
+    assert.equal(capabilitySummary({ machine: MACHINE, extensions: FOLDER, agent }).chat.solo.extensions, 'off')
+  }
+  // What a local board runs, as routes.js and the card read it.
+  assert.deepEqual(localAgentOf({ agent: {} }, { backend: 'acp', acp: { argv: ['/x/codex-acp'] } }), { kind: 'codex', hardened: true })
+  assert.deepEqual(localAgentOf({ agent: { localSession: 'own' } }, { backend: 'acp', acp: { argv: ['/x/claude-agent-acp'] } }), {
+    kind: 'claude',
+    hardened: false,
+  })
+  assert.equal(localAgentOf({}, { backend: 'openai' }).kind, null)
+  // agent connect says so for an agent that is not Claude Code.
+  const found = { found: { dir: '/home/ada/agent-config', skipped: [] }, names: FOLDER, error: null }
+  assert.match(extensionLines(found, MACHINE, 'codex')[0], /Extensions: off\. Only Claude Code/)
+  assert.match(extensionLines(found, MACHINE, 'claude')[0], /^Extensions from/)
 })

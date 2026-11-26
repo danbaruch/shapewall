@@ -306,7 +306,13 @@ test('board 1440: the agent panel shows the compact lines for a fix you ask for'
 test('local board 1440 and 390: the owner sees the card; it lists what agent status lists', async () => {
   const setup = await demoSetup('capability-card-local')
   const home = tempDir('capability-card-local-home')
-  const env = { HOME: home, XDG_CONFIG_HOME: home, PATH: path.dirname(process.execPath) }
+  // Claude Code is the board's agent: only it takes extensions.
+  const env = {
+    HOME: home,
+    XDG_CONFIG_HOME: home,
+    PATH: path.dirname(process.execPath),
+    SHAPEWALL_AGENT_ACP: 'npx @agentclientprotocol/claude-agent-acp',
+  }
   saveUserAgentEntry(setup.config.dir, { capabilities: { browser: 'off' }, agentConfig: extensionsFolder('cap-card-local-ext') }, env)
   const app = createApp({ config: setup.config, env, settingsToken: 'cap-card-token-0123456789abcdef' })
   const server = await listen(app)

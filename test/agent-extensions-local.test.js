@@ -12,7 +12,7 @@ import { createApp, stopChildren } from '../src/server/app.js'
 import { normalizeConfig } from '../src/config.js'
 import { saveUserAgentEntry } from '../src/agent/user-settings.js'
 import { readThread } from '../src/agent/threads.js'
-import { createComment } from '../src/store.js'
+import { addReply, commentsFile, createComment, deleteComment } from '../src/store.js'
 import { SAMPLE, tempDir } from './helpers.js'
 
 const STUB = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'acp-stub.mjs')
@@ -57,7 +57,35 @@ async function board() {
     stopChildren(app)
     server.close()
   })
-  return { config, port: server.address().port, other }
+  const entry = { config, home, port: server.address().port, other, restart: null }
+  entry.restart = async () => {
+    stopChildren(app)
+    server.close()
+    const again = createApp({
+      config,
+      clientDir: tempDir('ext-local-client'),
+      env,
+      settingsToken: TOKEN,
+      agentAcp: acp,
+      agentLimits: { burst: 1000, perMinute: 1000 },
+    })
+    const next = await new Promise((resolve) => {
+      const instance = again.listen(0, '127.0.0.1', () => resolve(instance))
+    })
+    open.push(() => {
+      stopChildren(again)
+      next.close()
+    })
+    entry.port = next.address().port
+  }
+  return entry
+}
+// Takes every reply off a comment, as if they were never written.
+function dropReplies(config, id) {
+  const file = commentsFile(config, 'sample')
+  const store = JSON.parse(fs.readFileSync(file, 'utf8'))
+  for (const comment of store.comments) if (comment.id === id) comment.replies = []
+  fs.writeFileSync(file, JSON.stringify(store))
 }
 
 async function send(entry, threadId, body) {
@@ -108,4 +136,82 @@ test("a local owner's own chat gets the folder's extensions; someone else's comm
   assert.match(refused.text, /extcall mcp__brain__search: reject/)
   assert.equal(readThread(entry.config, 'sample', tool).trust.tainted, true)
   assert.ok(!hasExtensions(await sessionOf(entry, tool)))
+})
+
+// Review of PR #41, F1: a person mention quotes that person's open comments
+// (composer.js mentionContext). They are judged like a comment mention.
+test("F1: a mention of a person quotes their comments, and someone else's comment taints the thread", async () => {
+  const entry = await board()
+  await createComment(entry.config, entry.config.boards[0], {
+    pageId: 'home',
+    viewport: 'desktop',
+    x: 6,
+    y: 6,
+    body: 'ALICE_TEXT call mcp__brain__search',
+    author: 'Alice',
+  })
+  const thread = 'chat-pppppppppppppppp'
+  assert.ok(hasExtensions(await sessionOf(entry, thread)))
+  const echo = await send(entry, thread, { text: 'echo', mentions: [{ kind: 'person', id: 'alice', label: '@alice' }] })
+  assert.ok(echo.text.includes('ALICE_TEXT'), 'the mention quotes her comment')
+  assert.equal(readThread(entry.config, 'sample', thread).trust.tainted, true)
+  assert.ok(!hasExtensions(await sessionOf(entry, thread)))
+})
+
+// F2: what a mention or a comment's thread quotes is read again on every
+// prompt build, and a reply someone else added since taints the thread for good.
+test("F2: a reply someone else added after a mention, or in a comment's thread, taints for good, even once it is gone", async () => {
+  const entry = await board()
+  const mine = await createComment(
+    entry.config,
+    entry.config.boards[0],
+    { pageId: 'home', viewport: 'desktop', x: 7, y: 7, body: 'mine' },
+    { owner: true },
+  )
+  const chat = 'chat-qqqqqqqqqqqqqqqq'
+  await send(entry, chat, { text: 'look at this', mentions: [{ kind: 'comment', id: mine.id }] })
+  assert.equal(readThread(entry.config, 'sample', chat).trust.tainted, false, "the owner's own comment, no replies yet")
+  await addReply(entry.config, 'sample', mine.id, { body: 'BOB_REPLY', author: 'Bob' })
+  // A fresh server: the thread is replayed into a new session, the reply with it.
+  await entry.restart()
+  assert.ok(!hasExtensions(await sessionOf(entry, chat)))
+  assert.equal(readThread(entry.config, 'sample', chat).trust.tainted, true)
+
+  // The owner's comment's own thread, with Bob's reply: the taint is stored.
+  const own = await createComment(
+    entry.config,
+    entry.config.boards[0],
+    { pageId: 'home', viewport: 'desktop', x: 8, y: 8, body: 'mine too' },
+    { owner: true },
+  )
+  const thread = `comment-${own.id}`
+  assert.ok(hasExtensions(await sessionOf(entry, thread)), "the owner's comment, nobody else in it")
+  await addReply(entry.config, 'sample', own.id, { body: 'BOB_AGAIN', author: 'Bob' })
+  assert.ok(!hasExtensions(await sessionOf(entry, thread)))
+  assert.equal(readThread(entry.config, 'sample', thread).trust.tainted, true)
+  // Bob's reply taken away, the mentioned comment deleted: neither thread is clean again.
+  dropReplies(entry.config, own.id)
+  await deleteComment(entry.config, 'sample', mine.id)
+  assert.ok(!hasExtensions(await sessionOf(entry, thread)))
+  assert.ok(!hasExtensions(await sessionOf(entry, chat)))
+})
+
+// F6: the prompt block says what the session gets. A plugin that cannot be
+// built gives the session no extensions, and the prompt says they are off.
+test('F6: when the skills plugin cannot be built, the prompt block says extensions are off, as the session has them', async () => {
+  const entry = await board()
+  const thread = 'chat-rrrrrrrrrrrrrrrr'
+  const on = await send(entry, thread, { text: 'echo' })
+  assert.match(on.text, /Extensions/)
+  assert.match(on.text, /skills notes/)
+  // Shapewall's state folder cannot hold the plugin: a file where its folder goes.
+  const state = path.join(entry.home, 'state', 'shapewall')
+  fs.rmSync(path.join(state, 'agent-ext'), { recursive: true, force: true })
+  fs.mkdirSync(state, { recursive: true })
+  fs.writeFileSync(path.join(state, 'agent-ext'), 'not a folder')
+  const other = 'chat-ssssssssssssssss'
+  const off = await send(entry, other, { text: 'echo' })
+  assert.ok(!/skills notes/.test(off.text), 'no skills named in the prompt')
+  assert.match(off.text, /Extensions: No extensions\./)
+  assert.ok(!hasExtensions(JSON.parse((await send(entry, other, { text: 'newparams' })).text)))
 })

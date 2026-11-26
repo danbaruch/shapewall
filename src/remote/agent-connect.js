@@ -221,9 +221,10 @@ export function agentConfigFor(policy, slug, { env = process.env, projectDir }) 
 }
 
 // What `agent connect` says about the agent config folder's extensions.
-export function extensionLines({ found, names, error }, policy) {
+export function extensionLines({ found, names, error }, policy, kind = 'claude') {
   if (error) return [`Extensions: none. ${error}`]
   if (!found) return []
+  if (kind !== 'claude') return [`Extensions: off. Only Claude Code takes them, so nothing from ${found.dir} reaches this agent.`]
   const lines = []
   if (!names.skills.length && !names.servers.length)
     lines.push(`Extensions: none in ${found.dir} (skills/NAME/SKILL.md, MCP servers in .claude.json).`)
@@ -491,7 +492,7 @@ export async function agentConnect(
   // Read once here; each turn gets them only when its capabilities say so
   // (a trusted turn on a thread that never carried outside text).
   const extensions = policyExtensions(policy.agentConfig, { projectDir: config.dir, outputDir: config.outputDir, env })
-  for (const line of extensionLines(extensions, policy)) log(terminalSafe(line))
+  for (const line of extensionLines(extensions, policy, kind)) log(terminalSafe(line))
 
   // ---- Can a session be opened at all? ----
   // Asked of the agent now, the way a question from the board would start it

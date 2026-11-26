@@ -2858,8 +2858,8 @@ back migration 21 or any earlier one.
 
 ### Migration 23 and rollback
 
-Migration 23 (thread trust, 1.4.0) adds two columns to `chat_threads`: `tainted` (0 or 1) and `taint_authors` (a JSON array of
-user ids). They record whether a thread may still get its agent's extensions, the skills and MCP servers a connected machine loads
+Migration 23 (thread trust, 1.4.0) adds three columns to `chat_threads`: `tainted` (0 or 1), `taint_authors` (a JSON array of
+user ids) and `trust_v` (what the build last saw of the thread: its agent and its newest message). They record whether a thread may still get its agent's extensions, the skills and MCP servers a connected machine loads
 from the folder it names with `--agent-config`. A thread is tainted once it carried text nobody can vouch for (another agent's
 answer, a move to another agent, a comment by a token or an import, a reply by another agent) and it never goes back; the authors
 are the members whose text it carried. Only the chat store writes them, through the one transition table in
@@ -2870,6 +2870,7 @@ For a rollback, the older build ignores the columns (it gives no extensions). To
 the server stopped:
 
 ```sql
+ALTER TABLE chat_threads DROP COLUMN trust_v;
 ALTER TABLE chat_threads DROP COLUMN taint_authors;
 ALTER TABLE chat_threads DROP COLUMN tainted;
 DELETE FROM schema_migrations WHERE version = 23;
@@ -2877,9 +2878,8 @@ PRAGMA user_version = 22;
 ```
 
 Running it again marks every thread tainted once more, including threads started after the first upgrade, which is the safe
-direction. If you keep the columns instead and upgrade again later, a thread an older build wrote in may read as clean while it
-carries text the older build did not count; drop the columns (or run `UPDATE chat_threads SET tainted = 1;`) before upgrading
-again. Roll this back before rolling back migration 22 or any earlier one.
+direction. If you keep the columns instead and upgrade again later, nothing reads as clean wrongly: a thread an older build
+wrote in, moved or started no longer matches its `trust_v`, so it reads as tainted (and is stored so) from then on. Roll this back before rolling back migration 22 or any earlier one.
 
 ## Secrets, logs and legal text
 

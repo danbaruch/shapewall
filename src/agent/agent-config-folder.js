@@ -67,6 +67,32 @@ function privateEnough(stat) {
   return null
 }
 
+// The folders above it (as ssh's StrictModes checks them): each one root's
+// or this user's, and none that another user may write to, unless it has
+// the sticky bit (then nobody may rename what is not theirs). A group may
+// write only when it is this user's own group. -> why not, or null.
+function ancestorsUnsafe(where) {
+  if (process.platform === 'win32' || typeof process.getuid !== 'function') return null
+  const uid = process.getuid()
+  const gid = typeof process.getgid === 'function' ? process.getgid() : null
+  let dir = path.dirname(where)
+  for (;;) {
+    let stat
+    try {
+      stat = fs.lstatSync(dir)
+    } catch {
+      return `sits in ${dir}, which could not be checked`
+    }
+    if (stat.uid !== 0 && stat.uid !== uid) return `sits in ${dir}, which belongs to another user of this machine`
+    const sticky = (stat.mode & 0o1000) !== 0
+    if (!sticky && stat.mode & 0o002) return `sits in ${dir}, which any user of this machine can change`
+    if (!sticky && stat.mode & 0o020 && stat.gid !== gid) return `sits in ${dir}, which other users of this machine can change`
+    const up = path.dirname(dir)
+    if (up === dir) return null
+    dir = up
+  }
+}
+
 export class ExtensionsFolderError extends Error {}
 
 // The folder, checked: its real path, or ExtensionsFolderError with why.
@@ -95,6 +121,8 @@ export function checkExtensionsFolder(dir, { projectDir = null, outputDir = null
   const unsafe = privateEnough(stat)
   if (unsafe) fail(`${unsafe}.`)
   const where = real(dir)
+  const above = ancestorsUnsafe(where)
+  if (above) fail(`${above}.`)
   const home = homeOf(env)
   const claude = [path.join(home, '.claude'), env.CLAUDE_CONFIG_DIR, process.env.CLAUDE_CONFIG_DIR].filter(Boolean).map(real)
   if (claude.some((other) => inside(other, where) || inside(where, other)))
@@ -110,9 +138,20 @@ export function checkExtensionsFolder(dir, { projectDir = null, outputDir = null
   return where
 }
 
+// The path an open descriptor names (Linux): null where that is not known.
+function openedPath(fd) {
+  try {
+    return fs.readlinkSync(`/proc/self/fd/${fd}`)
+  } catch {
+    return null
+  }
+}
+
 // A file in the folder, read only if it is a plain file of this user's that
-// nobody else may change; null when it is not there.
-function readOwnFile(file, max) {
+// nobody else may change; null when it is not there. `exact`: the real path
+// it must have, so a folder on the way swapped for a link is refused.
+function readOwnFile(file, max, exact = null) {
+  if (exact && real(file) !== exact) return { error: 'is not where it was (a folder on the way changed)' }
   let fd
   try {
     fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0))
@@ -122,6 +161,10 @@ function readOwnFile(file, max) {
     return { error: error.code || 'could not be read' }
   }
   try {
+    if (exact) {
+      const opened = openedPath(fd)
+      if (opened !== null && opened !== exact) return { error: 'is not where it was (a folder on the way changed)' }
+    }
     const stat = fs.fstatSync(fd)
     if (!stat.isFile()) return { error: 'is not a plain file' }
     const unsafe = privateEnough(stat)
@@ -150,6 +193,17 @@ function skillFiles(root, skipped, name) {
   const out = []
   let total = 0
   const walk = (dir, depth) => {
+    // Every folder walked: this user's, and nobody else may change it.
+    let unsafe
+    try {
+      unsafe = privateEnough(fs.lstatSync(dir))
+    } catch {
+      unsafe = 'could not be checked'
+    }
+    if (unsafe) {
+      skipped.push({ what: `skill ${name}: ${path.relative(root, dir) || '.'}`, why: unsafe })
+      return
+    }
     let entries
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true })
@@ -225,8 +279,10 @@ export function readExtensions(dir) {
   let entries = []
   try {
     const stat = fs.lstatSync(skillsDir)
-    if (stat.isDirectory()) entries = fs.readdirSync(skillsDir, { withFileTypes: true })
-    else skipped.push({ what: 'skills', why: 'not a folder' })
+    const unsafe = stat.isDirectory() ? privateEnough(stat) : null
+    if (!stat.isDirectory()) skipped.push({ what: 'skills', why: 'not a folder' })
+    else if (unsafe) skipped.push({ what: 'skills', why: unsafe })
+    else entries = fs.readdirSync(skillsDir, { withFileTypes: true })
   } catch {
     entries = []
   }
@@ -244,12 +300,19 @@ export function readExtensions(dir) {
       continue
     }
     const root = path.join(skillsDir, entry.name)
-    const main = readOwnFile(path.join(root, 'SKILL.md'), SKILL_FILE_BYTES)
+    const main = readOwnFile(path.join(root, 'SKILL.md'), SKILL_FILE_BYTES, path.join(real(dir), 'skills', entry.name, 'SKILL.md'))
     if (main.error || main.text === null) {
       skipped.push({ what: `skills/${entry.name}`, why: main.error ? `its SKILL.md ${main.error}` : 'no SKILL.md' })
       continue
     }
-    skills.push({ name: entry.name, description: skillDescription(main.text), root, files: skillFiles(root, skipped, entry.name) })
+    const files = skillFiles(root, skipped, entry.name)
+    // A skill folder others may change is not read at all.
+    if (!files.some((file) => file.rel === 'SKILL.md')) {
+      if (!skipped.some((item) => item.what === `skill ${entry.name}: .`))
+        skipped.push({ what: `skills/${entry.name}`, why: 'its SKILL.md could not be read' })
+      continue
+    }
+    skills.push({ name: entry.name, description: skillDescription(main.text), root, files })
   }
   const config = readOwnFile(path.join(dir, '.claude.json'), CONFIG_BYTES)
   if (config.error) skipped.push({ what: '.claude.json', why: config.error })
@@ -328,6 +391,7 @@ export function buildExtensionPlugin(found, key, { env = process.env } = {}) {
       '\n',
     { mode: 0o600 },
   )
+  const home = real(found.dir)
   for (const skill of found.skills) {
     const target = path.join(plugin, 'skills', skill.name)
     fs.mkdirSync(target, { recursive: true, mode: 0o700 })
@@ -335,8 +399,10 @@ export function buildExtensionPlugin(found, key, { env = process.env } = {}) {
       const from = path.join(skill.root, file.rel)
       const to = path.join(target, file.rel)
       fs.mkdirSync(path.dirname(to), { recursive: true, mode: 0o700 })
-      // Read through a descriptor that refuses a link swapped in since the walk.
-      const read = readOwnFile(from, SKILL_FILE_BYTES)
+      // Read through a descriptor that refuses a link swapped in since the
+      // walk, at the very path the walk saw inside the folder (a folder on
+      // the way swapped for a link since is refused too).
+      const read = readOwnFile(from, SKILL_FILE_BYTES, path.join(home, 'skills', skill.name, file.rel))
       if (read.text === null || read.error) continue
       fs.writeFileSync(to, read.text, { mode: 0o600 })
     }

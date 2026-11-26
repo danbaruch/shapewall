@@ -765,7 +765,26 @@ function platformView(platform) {
 
 // What one tier may do on one path. The tier is the one tierOf() decided
 // (or, for the ceiling the board shows, the one asked for).
-function resolveForTier(tier, { path: where, machine, server, config, platform, trust, extensions: found = null, tierWhy = null }) {
+// `agent`: the ACP agent this turn runs ({ kind, hardened }: acp/command.js
+// acpAgentKind, and whether its session is one Shapewall hardens: a
+// connected agent's, or a local board's restricted session), or null when
+// not known (a connected machine's `agent status`: the agent comes with
+// `agent connect`). `extensionsFailed`: the plugin could not be built.
+function resolveForTier(
+  tier,
+  {
+    path: where,
+    machine,
+    server,
+    config,
+    platform,
+    trust,
+    extensions: found = null,
+    tierWhy = null,
+    agent = null,
+    extensionsFailed = false,
+  },
+) {
   const m = machineView(machine)
   const narrowing = cleanNarrowing(server)
   const box = platformView(platform)
@@ -927,6 +946,10 @@ function resolveForTier(tier, { path: where, machine, server, config, platform, 
   if (!known) off('extensions', 'unknown_path')
   else if (!EXTENSION_PATHS.includes(where)) off('extensions', 'path_no_extensions')
   else if (tier === 'open') off('extensions', 'open_tier_extensions')
+  // Only Claude Code's hardened sessions take them (acp.js withExtensions):
+  // said here, so the card, `agent status` and the prompt read one answer.
+  else if (agent && agent.kind !== 'claude') off('extensions', 'agent_not_claude')
+  else if (agent && agent.hardened !== true) off('extensions', 'session_unrestricted')
   else if (!named) off('extensions', 'no_agent_config')
   else if (!held.skills.length && !held.servers.length) off('extensions', 'no_extensions_found')
   else if (!block) off('extensions', 'thread_tainted')
@@ -934,6 +957,7 @@ function resolveForTier(tier, { path: where, machine, server, config, platform, 
   else if (tier === 'solo' && !m.extensionsFor.includes('owner')) off('extensions', 'extensions_not_for_owner')
   else if (!block.authors.every(inSet)) off('extensions', tier === 'solo' ? 'extensions_not_for_owner' : 'extensions_not_for_team')
   else if (!block.thread.authors.every(inSet)) off('extensions', 'extensions_not_for_thread')
+  else if (extensionsFailed) off('extensions', 'extensions_build_failed')
   else
     extensions = {
       on: true,
@@ -997,6 +1021,8 @@ function resolveForTier(tier, { path: where, machine, server, config, platform, 
 //   platform  { os, sandbox }: whether an OS sandbox is available here
 //   extensions what the machine's agent config folder holds, names only
 //             ({ skills, servers }, agent-config-folder.js extensionNames), or null
+//   agent     the ACP agent ({ kind, hardened }, see resolveForTier), or null
+//   extensionsFailed  true when this turn's skills plugin could not be built
 export function resolveCapabilities({
   path: where,
   trust,
@@ -1006,10 +1032,12 @@ export function resolveCapabilities({
   config = null,
   platform = null,
   extensions = null,
+  agent = null,
+  extensionsFailed = false,
 } = {}) {
   const view = machineView(machine)
   const { tier, why } = PATHS.includes(where) ? tierOf({ trust, audience, machine: view, server }) : { tier: 'open', why: null }
-  return resolveForTier(tier, { path: where, machine, server, config, platform, trust, extensions, tierWhy: why })
+  return resolveForTier(tier, { path: where, machine, server, config, platform, trust, extensions, tierWhy: why, agent, extensionsFailed })
 }
 
 // What one tier may do on one path, whoever wrote the turn: the ceiling the
@@ -1017,7 +1045,10 @@ export function resolveCapabilities({
 // deciding a turn: that is resolveCapabilities().
 // The ceiling is for a clean thread: a trust block without the thread's
 // state is read as one with nothing in its history yet.
-export function resolveCeiling(tier, { path: where, machine, config = null, platform = null, trust = null, extensions = null } = {}) {
+export function resolveCeiling(
+  tier,
+  { path: where, machine, config = null, platform = null, trust = null, extensions = null, agent = null } = {},
+) {
   const given =
     trust && typeof trust === 'object' && trust.thread === undefined ? { ...trust, thread: { tainted: false, authors: [] } } : trust
   return resolveForTier(TIERS.includes(tier) ? tier : 'open', {
@@ -1028,5 +1059,6 @@ export function resolveCeiling(tier, { path: where, machine, config = null, plat
     platform,
     trust: given,
     extensions,
+    agent,
   })
 }

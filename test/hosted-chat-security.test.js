@@ -800,6 +800,32 @@ test("a job carries its thread's trust: an owner's own chat is clean, another me
   assert.equal(board.trust.thread.tainted, true)
 })
 
+// Review of PR #41, F7: only the newest messages' mentions carry their data
+// to the job; an older one carries the comment's id and its text as the
+// label. Its author still counts.
+test('F7: a comment mentioned in an older message, without its data in the job, still counts its author', async () => {
+  await fresh(ada)
+  await fresh(cyd)
+  const theirs = await cyd.browser.post(boardUrl('/comments'), { pageId: 'home', viewport: 'desktop', x: 41, y: 41, body: 'Cyd says' })
+  assert.equal(theirs.status, 201, theirs.text)
+  const mine = await ada.browser.post(boardUrl('/comments'), { pageId: 'home', viewport: 'desktop', x: 42, y: 42, body: 'Mine' })
+  assert.equal(mine.status, 201, mine.text)
+  const thread = 'comment-' + mine.json.comment.id
+  assert.equal((await api(ada, 'POST', chatUrl(thread, '/profile'), { profileId: builder.agentId })).status, 200)
+  // Posted for the people, nobody asks the agent: no job reads them yet.
+  assert.equal(
+    (await chat(ada, chatUrl(thread, '/messages'), { text: 'see', mentions: [{ kind: 'comment', id: theirs.json.comment.id }] })).status,
+    200,
+  )
+  assert.equal((await chat(ada, chatUrl(thread, '/messages'), { text: 'one' })).status, 200)
+  assert.equal((await chat(ada, chatUrl(thread, '/messages'), { text: 'two' })).status, 200)
+  const job = await jobFor(builder, ada, thread, 'what now?')
+  const old = job.messages.find((message) => message.text === 'see')
+  assert.ok(old && !('data' in old.mentions[0]), 'the older mention has no data')
+  const handles = job.trust.thread.authors.map((author) => author.handle)
+  assert.ok(handles.includes('cyd'), handles.join(','))
+})
+
 test('when an agent answers: an admin narrows it, a switch of agent resets it, another project cannot set it, and words that cannot start a turn are kept', async () => {
   await fresh(ada)
   await fresh(bo)

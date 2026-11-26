@@ -101,6 +101,9 @@ const REASONS = {
   never_real_chrome: { text: 'never: an agent only gets a throwaway browser of its own' },
   path_no_extensions: { text: 'not on this path' },
   open_tier_extensions: { text: 'never on open turns' },
+  agent_not_claude: { text: 'only Claude Code takes extensions' },
+  session_unrestricted: { text: 'not in the agent\'s own full session (agent.localSession "own"): only the restricted one' },
+  extensions_build_failed: { text: 'its skills could not be copied for this turn (see the server log)' },
   no_agent_config: { text: 'no agent config folder', set: ['agent-config', 'DIR'] },
   extensions_not_for_owner: { text: 'extensions are not switched on for the owner', set: ['extensions-for', 'owner'] },
   extensions_not_for_team: { text: 'not everyone who wrote this turn is in the extensions list', set: ['extensions-for', 'owner,HANDLE'] },
@@ -291,7 +294,7 @@ export function toPrompt(caps, { as = null } = {}) {
 // per tier, for chat and for Fix with, as line states only (no commands,
 // handles or paths). The board shows it; it never decides anything there.
 export const SUMMARY_PATHS = { chat: 'hosted-chat', fix: 'hosted-fix' }
-export function capabilitySummary({ machine, config = null, platform = null, extensions = null }) {
+export function capabilitySummary({ machine, config = null, platform = null, extensions = null, agent = null }) {
   const m = machineView(machine)
   const team = m.trustTeam === 'members' ? 'members' : Array.isArray(m.trustTeam) ? 'named' : 'none'
   // browserNoSandbox: the browser on solo and team turns may start without
@@ -312,6 +315,7 @@ export function capabilitySummary({ machine, config = null, platform = null, ext
                 platform,
                 trust: { authors: [{ owner: true }], guests: false },
                 extensions,
+                agent,
               }),
             )
     }

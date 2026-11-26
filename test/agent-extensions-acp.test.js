@@ -116,3 +116,48 @@ test('an agent that is not Claude Code never gets extensions', { skip: process.p
     backend.close()
   }
 })
+
+// Review of PR #41, F3: a Skill call asks no permission, so a skill's text
+// can stay in the model's context after a taint. From the taint on, the turn
+// may not write to the board at all: the write is refused on the machine,
+// never asked.
+test(
+  'F3: once a turn with extensions is tainted, every board write is refused for the rest of it',
+  { skip: process.platform === 'win32' },
+  async () => {
+    const backend = backendOn([claudeBin()], { readOnly: false, localSession: 'restricted' })
+    const ask = async (prompt, thread) => {
+      const controller = new AbortController()
+      const cards = []
+      let text = ''
+      for await (const event of backend.stream({
+        messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
+        signal: controller.signal,
+        thread,
+        extensions: EXT,
+      })) {
+        if (event.type === 'permission') {
+          cards.push(event)
+          // A card waiting for the person: the old way. Stop here.
+          if (event.state === 'pending') controller.abort()
+        }
+        if (event.type === 'text') text += event.text
+      }
+      return { cards, text }
+    }
+    try {
+      // Untainted: a board write is the person's to answer, as before.
+      const asked = await ask('extcall mcp__shapewall__reply_to_comment', 'sample/chat-ffffffffffffffff')
+      assert.equal(asked.cards[0]?.state, 'pending')
+      for (const tool of ['mcp__shapewall__reply_to_comment', 'mcp__shapewall__set_comment_status', 'mcp__shapewall__resolve_comment']) {
+        const tainted = await ask('extcall ' + tool + ' mcp__shapewall__get_comment', 'sample/chat-gggggggggggggggg')
+        assert.equal(tainted.cards.length, 1, JSON.stringify(tainted.cards))
+        assert.equal(tainted.cards[0].state, 'denied', tool)
+        assert.match(tainted.cards[0].detail, /may not write to the board/)
+        assert.ok(tainted.text.includes('extcall ' + tool + ': reject'), tainted.text)
+      }
+    } finally {
+      backend.close()
+    }
+  },
+)

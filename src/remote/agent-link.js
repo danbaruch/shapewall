@@ -238,6 +238,9 @@ export async function runAgentLink({
   extensions = null,
 }) {
   const limit = { ...LINK_DEFAULTS, ...limits }
+  // The agent every turn runs (capabilities.js `agent`): a connected agent's
+  // session is always one Shapewall hardens (read only, or edits from the board).
+  const agentShape = hello?.kind ? { kind: hello.kind, hardened: true } : null
   // One answer (the sandbox probe) for the hello summary and every turn.
   const platform = capabilities?.platform || hostPlatform()
   let ownerHandle = cleanHandle(owner)
@@ -702,6 +705,7 @@ export async function runAgentLink({
             config,
             platform,
             extensions: extensions?.names || null,
+            agent: agentShape,
           })
         const caps = resolveNow()
         // The other open comments on the board are other people's text, not in
@@ -799,6 +803,7 @@ export async function runAgentLink({
               config,
               platform,
               extensions: extensions?.names || null,
+              agent: agentShape,
             }),
           )
         const caps = resolveNow()
@@ -1225,6 +1230,7 @@ export async function runAgentLink({
         platform,
         // What the agent config folder holds: only each line state reaches the server, never the names.
         extensions: extensions?.names || null,
+        agent: agentShape,
       }),
       // Counts up with every hello of this process: the server keeps the newest list.
       seq: (helloSeq += 1),

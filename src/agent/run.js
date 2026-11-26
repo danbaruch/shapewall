@@ -5,7 +5,7 @@
 import { commentCounts, captureFiles, getComment, listComments } from '../store.js'
 import { ownersComment } from './watch-capabilities.js'
 import { NEXT_STEPS_PROMPT, NO_IMAGES_NOTE, SYSTEM_PROMPT, attachmentNote, openCommentsContext, threadContext } from './context.js'
-import { composerParts } from './composer.js'
+import { commentById, composerParts, mentionComments } from './composer.js'
 import { splitNextSteps } from './next-steps.js'
 import { replyText, settleCardPositions } from './reply-text.js'
 import { AgentError } from './errors.js'
@@ -32,6 +32,33 @@ const REFS_MAX = 20
 
 export function commentIdOf(threadId) {
   return threadId.startsWith('comment-') ? Number(threadId.slice(8)) : null
+}
+
+// Whether a thread's prompt quotes text that is not the owner's own
+// (thread-trust.js), as the board is now: the comment of a comment's thread
+// with its replies, and every comment a person message's mention quotes
+// (composer.js mentionComments, the same list mentionContext quotes). A
+// mention is judged when it is posted, but the comment it points to can get
+// someone else's reply later, and the thread is replayed into every fresh
+// session: so this is asked again each time the prompt is built.
+export function quotesOutside({ config, board, threadId, messages }) {
+  const commentId = commentIdOf(threadId)
+  if (commentId) {
+    let comment = null
+    try {
+      comment = getComment(config, board.id, commentId)
+    } catch {
+      comment = null
+    }
+    if (comment && !ownersComment(comment)) return true
+  }
+  const find = commentById(config, board)
+  for (const message of messages || []) {
+    if (message?.role !== 'user' || !Array.isArray(message.mentions)) continue
+    for (const mention of message.mentions)
+      if ((mentionComments(config, board, mention, find) || []).some((comment) => !ownersComment(comment))) return true
+  }
+  return false
 }
 
 // The neutral messages (backends/index.js) for a thread whose last message
@@ -293,6 +320,13 @@ export async function runTurn({
   try {
     const conversation =
       given || modelMessages({ config, board, threadId, messages, comments: backend.tools !== 'shapewall', ownerTurn, quoteOthers })
+    // The prompt quotes someone else's text after all (a reply added since a
+    // mention was posted): the thread is tainted for good and this turn's
+    // session starts without extensions (acp.js sameSession).
+    if (extensions && !given && quotesOutside({ config, board, threadId, messages })) {
+      taint('outside')
+      extensions = null
+    }
     // A model that does not take images (Settings > Agent): the images are
     // dropped here, and the chat says so, instead of the endpoint's 400.
     if (backend.vision === false && withoutImages(conversation)) noteOnce(NO_IMAGES_NOTE)

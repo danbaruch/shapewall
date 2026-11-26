@@ -20,7 +20,7 @@ import { findConfigFile, loadConfig } from '../config.js'
 import { AGENT_SLUG_RE, readAgentCredential } from '../remote/credentials.js'
 import { readMachinePolicy, saveMachinePolicy } from '../remote/agent-policy-file.js'
 import { checkExtensionsFolder, policyExtensions } from '../agent/agent-config-folder.js'
-import { localExtensions } from '../agent/local-tools.js'
+import { localAgent, localExtensions } from '../agent/local-tools.js'
 import { createRemote, remoteOrigin } from '../remote/remote.js'
 
 const CONNECTED_PATHS = [
@@ -43,8 +43,10 @@ function configAt(flags, cwd, { required }) {
   return null
 }
 // `extensions`: what the agent config folder holds (names), as every turn reads it.
-const ceiling = (tier, where, machine, config, platform, extensions = null) =>
-  resolveCeiling(tier, { path: where, machine, config, platform, trust: { authors: [{ owner: true }], guests: false }, extensions })
+// `agent`: the agent the board runs (local-tools.js localAgent); null for a
+// connected machine, whose agent comes with `agent connect`.
+const ceiling = (tier, where, machine, config, platform, extensions = null, agent = null) =>
+  resolveCeiling(tier, { path: where, machine, config, platform, trust: { authors: [{ owner: true }], guests: false }, extensions, agent })
 
 // The tiers this machine can reach: no team unless it names one.
 const tiersOf = (machine) => (machine.trustTeam && machine.trustTeam !== 'none' ? ['solo', 'team', 'open'] : ['solo', 'open'])
@@ -64,7 +66,10 @@ async function collect(flags, { env = process.env, cwd = process.cwd(), fetchImp
       as: null,
       warnings: folder.error ? [`agent config folder: ${folder.error}`] : [],
       tiers: Object.fromEntries(
-        ['solo', 'open'].map((tier) => [tier, ceiling(tier, 'local-chat', machine, config, platform, folder.names)]),
+        ['solo', 'open'].map((tier) => [
+          tier,
+          ceiling(tier, 'local-chat', machine, config, platform, folder.names, localAgent(config, env)),
+        ]),
       ),
     }
   }

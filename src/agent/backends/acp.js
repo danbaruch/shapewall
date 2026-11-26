@@ -43,7 +43,7 @@ import { findProgram } from '../../watch.js'
 import { redact } from './openai.js'
 import { EXEC_MCP_NAME } from '../exec-mcp.js'
 import { serverOfTool } from '../agent-config-folder.js'
-import { taintingToolName } from '../thread-trust.js'
+import { boardWriteToolName, taintingToolName } from '../thread-trust.js'
 
 // The tool a tool call or permission request is about: the adapter's own
 // name for it (claude-agent-acp puts it in _meta.claudeCode.toolName), else
@@ -306,6 +306,8 @@ export const EXTENSION_REFUSALS = {
   allow: "Refused on the agent's machine: this tool is not allowed for this agent. Its owner allows it there with --allow-tool",
   tainted:
     "Refused on the agent's machine: this turn read other people's text (a board tool's result), so its extensions are off for the rest of it",
+  boardWrite:
+    "Refused on the agent's machine: this turn had extensions and then read other people's text, so it may not write to the board for the rest of it",
 }
 
 // The two answers a card from a hosted board has.
@@ -1773,6 +1775,19 @@ class AcpProcess {
       const allow = options.find((item) => item.kind === 'allow_once')
       if (extension.allow && allow) return { outcome: { outcome: 'selected', optionId: allow.optionId } }
       this.refuse({ title: extension.name, kind: call.kind || known.kind || 'other', detail: null, note: extension.note })
+      return reject ? { outcome: { outcome: 'selected', optionId: reject.optionId } } : { outcome: { outcome: 'cancelled' } }
+    }
+    // A turn that had extensions and was then tainted: no board writes for
+    // the rest of it (thread-trust.js boardWriteToolName), whatever anyone
+    // answers. Its skills may still be in the model's context.
+    if (this.extensions && this.tainted && boardWriteToolName(toolNameOf(call) || known.title)) {
+      this.refuse({
+        title: toolNameOf(call) || 'Write to the board',
+        kind: call.kind || known.kind || 'other',
+        detail,
+        note: EXTENSION_REFUSALS.boardWrite,
+      })
+      const reject = options.find((item) => item.kind === 'reject_once') || options.find((item) => item.kind === 'reject_always')
       return reject ? { outcome: { outcome: 'selected', optionId: reject.optionId } } : { outcome: { outcome: 'cancelled' } }
     }
     // Read only: refused here, whatever it is. The agent hears its own

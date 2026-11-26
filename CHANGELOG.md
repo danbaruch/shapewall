@@ -79,16 +79,19 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Extensions on trusted turns (Claude Code over ACP): skills (`skills/NAME/SKILL.md`) and stdio MCP servers (the user-scope
   `mcpServers` of `.claude.json`) from an agent config folder the machine names itself (`--agent-config DIR` for a connected agent,
   `shapewall agent set agent-config DIR` for a local board). Never the default folder, `~/.claude`, `$CLAUDE_CONFIG_DIR` or
-  anything in the project; the folder must be this user's, not writable by others and outside temporary folders. Settings, hooks,
+  anything in the project; the folder must be this user's, not writable by others (nor any folder above it or any skill folder in
+  it) and outside temporary folders. Settings, hooks,
   commands, agents and installed plugins in it are skipped and listed. A turn gets them only above the open tier, when everyone who
   wrote it and everyone who ever wrote in its thread is in `extensionsFor`; a server's tools only by exact name (`allowTool`), each
-  call checked on the machine. The card, `agent status` and the prompt block show the same Extensions line.
+  call checked on the machine. Only Claude Code's restricted session takes them. The card, `agent status` and the prompt block
+  show the same Extensions line.
 - Thread trust: a thread that ever carried text nobody can vouch for (a share link guest, someone outside the workspace, another
-  agent's answer, a move to another agent, a comment by a token or an import, or a board tool's result with other people's
-  comments) is tainted for good and never gets extensions. A board tool's result mid-turn refuses every extension tool for the rest
-  of the turn and ends the session with it. One transition table (`src/agent/thread-trust.js`) for every writer.
-- Hosted migration 23: `chat_threads.tainted` and `taint_authors`, for thread trust. Every thread that exists at upgrade is marked
-  tainted (docs/hosted.md, "Migration 23 and rollback").
+  agent's answer, a move to another agent, a comment by a token or an import, someone else's comment or reply the prompt quotes,
+  or a board tool's result with other people's comments) is tainted for good and never gets extensions. A board tool's result
+  mid-turn refuses every extension tool and every board write for the rest of the turn and ends the session with it. One
+  transition table (`src/agent/thread-trust.js`) for every writer.
+- Hosted migration 23: `chat_threads.tainted`, `taint_authors` and `trust_v`, for thread trust. Every thread that exists at
+  upgrade is marked tainted, and so is a thread an older build wrote in later (docs/hosted.md, "Migration 23 and rollback").
 
 ### Changed
 

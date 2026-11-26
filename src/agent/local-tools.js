@@ -29,6 +29,8 @@ import { startExecSession } from './exec-mcp.js'
 import { localMachinePolicy, userAgentEntry } from './user-settings.js'
 import { authFiles, loadConfig } from '../config.js'
 import { policyExtensions, turnExtensions } from './agent-config-folder.js'
+import { agentSettings } from './config.js'
+import { acpAgentKind } from './acp/command.js'
 
 let platformOnce = null
 // One sandbox probe per process: every turn and the capability card read the same answer.
@@ -60,6 +62,24 @@ export const localExtensions = (config, env = process.env) =>
     outputDir: config.outputDir,
     env,
   })
+
+// The ACP agent a local board's chat runs, as the resolver reads it
+// (capabilities.js `agent`): its kind (only Claude Code takes extensions)
+// and whether its session is the restricted one (agent.localSession, which
+// is the default; "own" keeps the agent's own full session). `settings`:
+// agentSettings() for the profile the chat uses.
+export const localAgentOf = (config, settings) => ({
+  kind: settings?.backend === 'acp' ? acpAgentKind(settings.acp?.argv || []) : null,
+  hardened: config.agent?.localSession !== 'own',
+})
+// The same for the board's default agent: what its card and `agent status` show.
+export function localAgent(config, env = process.env, { acp = null } = {}) {
+  try {
+    return localAgentOf(config, agentSettings(config, env, { acp }))
+  } catch {
+    return { kind: null, hardened: false }
+  }
+}
 
 // The folder a local approval record lives in: the board's project, never the server.
 export const localApprovalsDir = (config) => path.join(config.outputDir, 'agent', 'approvals')
@@ -118,6 +138,8 @@ export function localCapabilities({
   inPlace,
   thread = null,
   extensions = null,
+  agent = null,
+  extensionsFailed = false,
   platform = localPlatform(),
 }) {
   const machine = localMachinePolicy(config.dir ? userAgentEntry(config.dir, env).entry : null)
@@ -131,6 +153,8 @@ export function localCapabilities({
     config: view,
     platform,
     extensions,
+    agent,
+    extensionsFailed,
   })
 }
 
@@ -156,14 +180,29 @@ export async function startLocalTools({
   thread = null,
   // The thread's key, for the extension plugin Shapewall builds.
   key = null,
+  // The ACP agent the turn runs (localAgentOf): extensions for Claude Code's restricted session only.
+  agent = null,
   log = () => {},
 }) {
   const folder = acp ? localExtensions(config, env) : { found: null, names: null, error: null }
   if (folder.error) log(`agent extensions: ${folder.error}`)
+  let failed = false
   const resolve = (current) =>
-    localCapabilities({ config: current, env, acp, owner, shared, comment, inPlace, thread, extensions: folder.names, platform })
-  const caps = resolve(config)
-  const prompt = toPrompt(caps)
+    localCapabilities({
+      config: current,
+      env,
+      acp,
+      owner,
+      shared,
+      comment,
+      inPlace,
+      thread,
+      extensions: folder.names,
+      agent,
+      extensionsFailed: failed,
+      platform,
+    })
+  let caps = resolve(config)
   let extensions = null
   try {
     extensions = turnExtensions(caps, folder.found, JSON.stringify(['local', config.dir, key]), { env })
@@ -171,6 +210,13 @@ export async function startLocalTools({
     log(`agent extensions: ${error.message}`)
     extensions = null
   }
+  // On, but nothing to give the session (the plugin could not be built):
+  // the prompt says off, as the session has them.
+  if (caps.extensions.on && !extensions) {
+    failed = true
+    caps = resolve(config)
+  }
+  const prompt = toPrompt(caps)
   // `commands` come from the checkout's config, read again for each check.
   const fresh = () => {
     if (!config.file) return config
