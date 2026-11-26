@@ -137,7 +137,16 @@ test('dash look-alikes count: figure dash, horizontal bar, minus sign', () => {
 test('names match case-folded with spaces, dashes and underscores taken out, at the start of a word', () => {
   const rules = loadRules({ names: [{ name: 'Acme Corp', kind: 'employer' }] })
   const hit = (text) => check({ 'docs/d.md': [[1, text]] }, rules).length === 1
-  for (const text of ['at Acme Corp', 'AcmeCorp', 'acme-corp', 'ACME_CORP', 'Acme  Corp', 'AcmeCorpHQ', '(acme corp)', `acme${String.fromCharCode(0x2011)}corp`])
+  for (const text of [
+    'at Acme Corp',
+    'AcmeCorp',
+    'acme-corp',
+    'ACME_CORP',
+    'Acme  Corp',
+    'AcmeCorpHQ',
+    '(acme corp)',
+    `acme${String.fromCharCode(0x2011)}corp`,
+  ])
     assert.equal(hit(text), true, text)
   for (const text of ['NotAcmeCorp', 'acme', 'corp acme', 'acmeXcorp']) assert.equal(hit(text), false, text)
   assert.equal(foldName('Acme - Corp_Inc'), 'acmecorpinc')

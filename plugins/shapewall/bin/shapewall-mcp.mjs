@@ -165,10 +165,7 @@ export function inGitRepo(dir) {
 
 const currentUid = () => (typeof process.getuid === 'function' ? process.getuid() : null)
 
-export function projectInstall(
-  projectDir,
-  { platform = process.platform, version = null, uid = currentUid(), tracked = gitTracks } = {},
-) {
+export function projectInstall(projectDir, { platform = process.platform, version = null, uid = currentUid(), tracked = gitTracks } = {}) {
   const names = platform === 'win32' ? [`${PACKAGE}.cmd`, `${PACKAGE}.exe`] : [PACKAGE]
   for (const name of names) {
     const bin = path.join(projectDir, 'node_modules', '.bin', name)
@@ -375,7 +372,7 @@ export function projectDirOf(env = process.env, cwd = process.cwd(), home = os.h
   }
   // The repository root: the nearest folder at or above the start with a .git.
   let root = null
-  for (let dir = first; ; ) {
+  for (let dir = first; ;) {
     if (dir !== first && (atOrAboveHome(dir) || dir === path.parse(dir).root)) break
     if (fs.existsSync(path.join(dir, '.git'))) {
       root = dir

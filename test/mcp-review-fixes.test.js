@@ -204,8 +204,14 @@ test('hosted compare: one compare on the whole server at a time, whatever the wo
   const compare = hostedCompare(null)
   const held = holding()
   const first = compare({ tokenId: 'a', workspaceId: 'w1' }).run(held.work)
-  await assert.rejects(compare({ tokenId: 'b', workspaceId: 'w2' }).run(async () => 'x'), /another compare/)
-  await assert.rejects(compare({ tokenId: 'c', workspaceId: 'w3' }).run(async () => 'x'), (error) => error.status === 429)
+  await assert.rejects(
+    compare({ tokenId: 'b', workspaceId: 'w2' }).run(async () => 'x'),
+    /another compare/,
+  )
+  await assert.rejects(
+    compare({ tokenId: 'c', workspaceId: 'w3' }).run(async () => 'x'),
+    (error) => error.status === 429,
+  )
   held.release('done')
   assert.equal(await first, 'done')
   assert.equal(await compare({ tokenId: 'b', workspaceId: 'w2' }).run(async () => 'next'), 'next')
@@ -216,7 +222,10 @@ test('hosted compare: one compare per workspace at a time, even with room on the
   const held = holding()
   const first = compare({ tokenId: 'a', workspaceId: 'w1' }).run(held.work)
   // Another token of the same workspace waits; another workspace does not.
-  await assert.rejects(compare({ tokenId: 'b', workspaceId: 'w1' }).run(async () => 'x'), /this workspace/)
+  await assert.rejects(
+    compare({ tokenId: 'b', workspaceId: 'w1' }).run(async () => 'x'),
+    /this workspace/,
+  )
   assert.equal(await compare({ tokenId: 'c', workspaceId: 'w2' }).run(async () => 'other'), 'other')
   held.release('done')
   await first
@@ -268,7 +277,10 @@ test('hosted compare: a compare holds one worker at a time, and its slots wait f
   assert.equal(cleaner.jobs.length, 2)
   // The second capture is still in the pool: the slots stay taken.
   await tick()
-  await assert.rejects(compare({ tokenId: 'b', workspaceId: 'w2' }).run(async () => 'x'), /another compare/)
+  await assert.rejects(
+    compare({ tokenId: 'b', workspaceId: 'w2' }).run(async () => 'x'),
+    /another compare/,
+  )
   cleaner.jobs[1].resolve(fitted())
   await assert.rejects(run, /gave up/)
   assert.equal(await compare({ tokenId: 'b', workspaceId: 'w2' }).run(async () => 'free'), 'free')

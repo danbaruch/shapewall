@@ -64,13 +64,17 @@ the new entry during an update, the old one is put back; a failed write always n
 |             | `--scope user`: every project of yours. `--scope project`: `.mcp.json` for everyone; Claude Code asks each person to approve it the first time    |
 | Codex       | `[mcp_servers.shapewall]` in `~/.codex/config.toml` (`$CODEX_HOME`), for every Codex project (CLI and desktop app), with `tool_timeout_sec = 600` |
 
-The command it registers, first match: the project's own `node_modules/.bin/shapewall` (Claude Code local scope only), `shapewall` on
+The command it registers, first match: the project's own `node_modules/.bin/shapewall` (Claude Code local scope only, and only a
+real npm install of this version or newer that git does not track: a committed `node_modules` never counts), `shapewall` on
 PATH when it is this version or newer, else `npx -y shapewall@<this version>` (with `startup_timeout_sec = 60` for Codex, for the
 first download). A user-scope or Codex entry never names one project's install: a `shapewall` on PATH in a `node_modules` folder,
 in npx's cache (`_npx`) or inside the project does not count, which matters because `npx shapewall agent setup` and `npm run` put
 those folders first on PATH. It runs `shapewall mcp`, which finds `shapewall.config.json` in the folder the agent runs in. On
-Windows, a local or user scope entry runs `npx.cmd` (or an npm `.cmd` shim) through `cmd /c`, as Claude Code requires; a
-`.mcp.json` always says plain `npx`, for everyone's system.
+Windows, a local or user scope entry runs `node` with npm's `npx-cli.js` or the package's own bin file rather than an npm `.cmd`
+shim, so no shell reads a path; only when neither is found does it fall back to `cmd /c`, and then only for plain text (no space in
+the program's path, none of `" % ^ & | < > !`), else agent setup stops with an error. A `.mcp.json` always says plain `npx`, for
+everyone's system. Claude Code entries also carry `SHAPEWALL_AGENT_RUN=1` in their `env` (the server sets it for itself anyway), so
+what the agent writes through Shapewall is marked as an agent's.
 
 An entry an older Shapewall registered (`npx -y shapewall@<older version>`, `npx shapewall`, or a `shapewall` program by path, with
 the same `mcp` arguments) is updated without asking for `--force`. A `shapewall` entry that is different (another command, a newer

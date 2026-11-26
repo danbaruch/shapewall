@@ -27,5 +27,4 @@ export const agentRunEnvEntries = () => Object.entries(agentRunEnv()).map(([name
 // A process an agent runs in: one with the mark above, the command
 // `watch --exec` starts (SHAPEWALL_COMMENT_ID) or the board's own agent's
 // MCP server (SHAPEWALL_SERVER_HOLDER).
-export const runByAgent = (env = process.env) =>
-  Boolean(env[AGENT_RUN_VAR] || env.SHAPEWALL_COMMENT_ID || env.SHAPEWALL_SERVER_HOLDER)
+export const runByAgent = (env = process.env) => Boolean(env[AGENT_RUN_VAR] || env.SHAPEWALL_COMMENT_ID || env.SHAPEWALL_SERVER_HOLDER)

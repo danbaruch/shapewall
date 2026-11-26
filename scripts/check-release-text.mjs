@@ -50,8 +50,7 @@ export const DASH_RULES = [
 // all count; it must start a word (a letter or digit right before it does
 // not count).
 const SEPARATOR = /[\s\-_\u2010-\u2015\u2212]/
-export const foldName = (text) =>
-  [...String(text).toLowerCase()].filter((char) => !SEPARATOR.test(char)).join('')
+export const foldName = (text) => [...String(text).toLowerCase()].filter((char) => !SEPARATOR.test(char)).join('')
 function nameRule(entry) {
   const wanted = foldName(entry.name)
   const test = (line) => {

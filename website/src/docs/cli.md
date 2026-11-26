@@ -243,7 +243,7 @@ again changes nothing. An entry from an older Shapewall is updated; a `shapewall
 with `--force`. Claude Code's `--scope`: `local` (default) is this project, only you, in `~/.claude.json`; `user` is every project
 of yours; `project` writes `.mcp.json` for everyone, and Claude Code asks each person to approve it the first time. Codex has no
 scope: the entry goes in `~/.codex/config.toml` (`$CODEX_HOME`) for every Codex project, with `tool_timeout_sec = 600`. The command
-it registers is the project's own `node_modules/.bin/shapewall` (local scope), else `shapewall` on PATH when it is this version or
+it registers is the project's own `node_modules/.bin/shapewall` (local scope, only a real npm install that git does not track), else `shapewall` on PATH when it is this version or
 newer, else `npx -y shapewall@<this version>`. `--remote URL` registers `shapewall mcp --remote URL` for a hosted board, after
 `shapewall login`; no token is written. `--remove` takes the entries out again.
 

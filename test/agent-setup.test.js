@@ -265,7 +265,12 @@ test('agent setup: Claude Code local scope and Codex, after a yes; argv, files a
   assert.deepEqual(get.args, ['mcp', 'get', 'shapewall', '--json'])
   // Never a token on a command line.
   assert.doesNotMatch(JSON.stringify(box.calls()), /swp_/)
-  assert.deepEqual(claudeEntries(box.dir, box.env).local, { type: 'stdio', command: shapewall, args: ['mcp'], env: { SHAPEWALL_AGENT_RUN: '1' } })
+  assert.deepEqual(claudeEntries(box.dir, box.env).local, {
+    type: 'stdio',
+    command: shapewall,
+    args: ['mcp'],
+    env: { SHAPEWALL_AGENT_RUN: '1' },
+  })
   const claude = JSON.parse(fs.readFileSync(box.claudeFile, 'utf8'))
   assert.equal(claude.numStartups, 3)
   assert.deepEqual(claude.mcpServers, { other: { command: 'x' } })
@@ -319,7 +324,12 @@ test('agent setup: a different entry is shown and replaced only with --force; a 
     ],
   )
   // The person's env stays on the Claude entry; their timeout on the Codex one.
-  assert.deepEqual(claudeEntries(box.dir, box.env).local, { type: 'stdio', command: shapewall, args: ['mcp'], env: { A: '1', SHAPEWALL_AGENT_RUN: '1' } })
+  assert.deepEqual(claudeEntries(box.dir, box.env).local, {
+    type: 'stdio',
+    command: shapewall,
+    args: ['mcp'],
+    env: { A: '1', SHAPEWALL_AGENT_RUN: '1' },
+  })
   assert.deepEqual(readServer(fs.readFileSync(box.codexFile, 'utf8')), { command: shapewall, args: ['mcp'], tool_timeout_sec: 900 })
 })
 

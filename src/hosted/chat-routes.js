@@ -48,7 +48,7 @@
 import express from 'express'
 import { listJourneys } from '../journeys.js'
 import { MENTION_HANDLE_RE } from '../mentions.js'
-import { RESPOND_MODES, agentHandles, effectiveRespond, isPrivateThread, respondLine, shouldRespond } from '../agent/triggers.js'
+import { RESPOND_MODES, effectiveRespond, isPrivateThread, respondLine, shouldRespond } from '../agent/triggers.js'
 import { FIXABLE_FROM, commentText } from '../comment-fields.js'
 import { validateFiles } from '../agent/composer.js'
 import { QUERY_MAX, THREAD_RE, CHAT_RE, threadKind } from '../agent/thread-history.js'

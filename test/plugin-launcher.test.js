@@ -403,7 +403,15 @@ test('git for the check comes from an absolute PATH folder outside the project, 
   assert.ok(calls[0].options.timeout > 0)
   assert.equal(calls[0].options.cwd, os.tmpdir())
   // Any other failure (not a repository, a timeout) is "cannot say".
-  assert.equal(launcher.gitTracks(dir, ['x'], { env, run: () => { throw Object.assign(new Error('x'), { status: 128 }) } }), null)
+  assert.equal(
+    launcher.gitTracks(dir, ['x'], {
+      env,
+      run: () => {
+        throw Object.assign(new Error('x'), { status: 128 })
+      },
+    }),
+    null,
+  )
 })
 
 // ---- the start folder walk
@@ -444,7 +452,8 @@ test('Windows: shims start as node and the package bin, npx as npx-cli.js, cmd.e
   const node = 'C:\\Program Files\\nodejs\\node.exe'
   const npxCli = 'C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npx-cli.js'
   const entries = {
-    'C:\\Users\\A & B\\AppData\\Roaming\\npm\\node_modules\\shapewall': 'C:\\Users\\A & B\\AppData\\Roaming\\npm\\node_modules\\shapewall\\bin\\shapewall.js',
+    'C:\\Users\\A & B\\AppData\\Roaming\\npm\\node_modules\\shapewall':
+      'C:\\Users\\A & B\\AppData\\Roaming\\npm\\node_modules\\shapewall\\bin\\shapewall.js',
     'C:\\Work\\My App\\node_modules\\shapewall': 'C:\\Work\\My App\\node_modules\\shapewall\\bin\\shapewall.js',
   }
   const options = { platform: 'win32', execPath: node, exists: (file) => file === npxCli, entryOf: (dir) => entries[dir] || null }
@@ -467,7 +476,11 @@ test('Windows: shims start as node and the package bin, npx as npx-cli.js, cmd.e
     })
     // An .exe starts as it is; so does everything on other systems.
     assert.deepEqual(run('C:\\x\\shapewall.exe', ['mcp']), { command: 'C:\\x\\shapewall.exe', args: ['mcp'], shell: false })
-    assert.deepEqual(module.directCommand('/usr/bin/npx', ['-y'], { platform: 'linux' }), { command: '/usr/bin/npx', args: ['-y'], shell: false })
+    assert.deepEqual(module.directCommand('/usr/bin/npx', ['-y'], { platform: 'linux' }), {
+      command: '/usr/bin/npx',
+      args: ['-y'],
+      shell: false,
+    })
     // No npx-cli.js beside node: npx.cmd through cmd.exe, only as plain text.
     const bare = run('npx.cmd', ['-y', 'shapewall@1.3.0', 'mcp'], { exists: () => false })
     assert.deepEqual(bare, { command: 'npx.cmd', args: ['-y', 'shapewall@1.3.0', 'mcp'], shell: true })

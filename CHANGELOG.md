@@ -118,8 +118,11 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ### Security
 
 - `compare_captures` refuses a capture over its pixel cap (16 megapixels) from the PNG header, before decoding it. A hosted server's
-  own `/mcp` runs it in worker threads, one compare at a time per token (another call is refused with a "busy, retry" error). It
-  used to decode both captures at full size on the server's event loop, about 2 s and 550 MB per call, for any read token.
+  own `/mcp` runs it in the worker threads that clean pushes, but takes little of them: one compare on the server at a time (and
+  one per workspace and per token), its two captures one after the other so a push always has a worker, none while the pool's
+  queue is more than half full, and its slot held until both captures are done. Another call is refused with a "busy, retry"
+  error. It used to decode both captures at full size on the server's event loop, about 2 s and 550 MB per call, for any read
+  token.
 - `author: "me"` on a local board goes by a server-side owner stamp (`byOwner`) on the comments the owner makes, which the request
   cannot set: a paired device or LAN visitor signing with the owner's name no longer counts as "me". Older comments without the
   stamp still match by name, and the answer says so (`author.meMatch: "owner+name"`).
@@ -132,10 +135,30 @@ and the project uses [Semantic Versioning](https://semver.org/).
   `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` in its environment, checked with claude-agent-acp 0.93.0 and 0.106.0
   (docs/agent-hardening.md).
 - `CLAUDE.md`, `AGENTS.md`, `CLAUDE.local.md` and `GEMINI.md` are now files that run something, and so is every file the project's
-  instruction files import: a connected agent's fix cannot edit them unless the machine names the file with `--allow-path`, the
-  edit is always asked on the board, and such a fix is never pushed.
+  instruction files import, whether it exists yet or not: a connected agent's fix cannot create or edit them unless the machine
+  names the file with `--allow-path`, the edit is always asked on the board, and such a fix is never pushed.
 - Instruction file imports never reach `CLAUDE.local.md`, a dotfile or a dot folder (`.env`, `.git`), and the board is told
   instruction file names only (sizes and hashes stay in the console).
+- The plugin launcher and `agent setup` start a project's `node_modules/.bin/shapewall` only when it is a real npm install: it
+  resolves to the bin file of `node_modules/shapewall`, that package is shapewall at the pinned version or newer, the file is yours
+  (macOS and Linux), and git tracks neither. A repository that commits a `node_modules/.bin/shapewall` no longer gets it run when
+  an agent session starts; the launcher goes on to PATH or `npx`. git is run without a shell, from an absolute PATH folder outside
+  the project.
+- The plugin launcher looks for `shapewall.config.json` above the folder the app works in only inside a repository (up to its
+  `.git`), never at the file system root, and never in a folder that belongs to another user.
+- On Windows, the plugin launcher and `agent setup` start `node` with npm's `npx-cli.js` or the package's own bin file instead of
+  an npm `.cmd` shim through a shell, so a space, `&`, `^` or `%` in a path can no longer break the start or run something else.
+  Where only `cmd.exe` can start the program, every part must be plain text, or it stops with an error.
+- Every agent process Shapewall starts (ACP chat and fix sessions, the starter agent, `watch --exec`, `shapewall mcp` and so the
+  plugin launcher and `agent setup` entries) has `SHAPEWALL_AGENT_RUN=1` and `SHAPEWALL_AGENT_HEADER`: `shapewall comments add` in
+  it signs "agent", stores the comment as an agent's and never gives it the owner's stamp, so it cannot wake an agent or count as
+  "me". A process Shapewall did not start carries no mark, and a header-less HTTP post from it still reads as a person's
+  (docs/agent-hardening.md).
+- On a hosted board, a member whose handle is an agent's (one who joined later, say) is mentioned as a person: `@handle` no longer
+  wakes the agent.
+- The release text gate reads the diff by its hunks (an added line starting with `++ ` was taken for a file header and skipped),
+  catches the figure dash, horizontal bar and minus sign too, and matches names case-folded with spaces, dashes and underscores
+  taken out, so joined and spaced variants of a listed name count.
 
 ## 1.2.0 - 2026-11-24
 
