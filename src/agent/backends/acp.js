@@ -802,7 +802,12 @@ class AcpProcess {
     preamble = null,
     instructions = null,
     extensions = null,
+    // The board server this session was given reads the owner's comments
+    // only (owner-mcp.js ownersOnly, a turn above "open"): its reads bring no
+    // one else's text in, so they do not taint the thread (Q7 N1).
+    boardReadsOwnersOnly = false,
   }) {
+    this.boardReadsOwnersOnly = boardReadsOwnersOnly === true
     Object.assign(this, { argv, label, sandbox, limits, log, thread, onGone, mcpServers, readOnly, remoteEdit, preamble, extraServers })
     // A local board's restricted session (localRestrictedSession): Claude Code only.
     this.restricted = Boolean(restricted) && !readOnly && !remoteEdit && acpAgentKind(argv) === 'claude'
@@ -1623,7 +1628,7 @@ class AcpProcess {
     else if (kind === 'tool_call' || kind === 'tool_call_update') {
       // A board tool whose result is other people's text (thread-trust.js):
       // the thread is tainted from here on, said once to the turn's runner.
-      if (!this.tainted && taintingToolName(toolNameOf(update))) {
+      if (!this.tainted && !this.boardReadsOwnersOnly && taintingToolName(toolNameOf(update))) {
         this.tainted = true
         turn.queue.push({ type: 'taint', why: 'tool' })
       }
@@ -2196,8 +2201,10 @@ export function createAcpBackend(
     idle[0].kill('evicted')
   }
 
-  const start = async (thread, signal, { evict = true, workdir = null, mcpServers = null, extensions = null } = {}) => {
+  const start = async (thread, signal, { evict = true, workdir = null, mcpServers = null, extensions = null, sessionKey = null } = {}) => {
     evictFor(evict)
+    // The board's own server for this session, made for its key (the turn's tier).
+    const owned = workdir?.mcpServers ? null : mcpServersFor?.(thread, { sessionKey }) || null
     const agent = new AcpProcess({
       argv: settings.acp.argv,
       label: settings.label,
@@ -2217,7 +2224,8 @@ export function createAcpBackend(
       instructions: settings.instructions || null,
       // A turn's own tools (exec-mcp, for a fix) come with its working folder;
       // a thread's exec relay (exec-mcp.js createThreadRelay) with the turn.
-      mcpServers: [...(workdir?.mcpServers || mcpServersFor?.(thread) || []), ...(mcpServers || [])],
+      mcpServers: [...(workdir?.mcpServers || owned || []), ...(mcpServers || [])],
+      boardReadsOwnersOnly: owned?.ownersOnly === true,
       extraServers: serverKey(mcpServers),
       // This turn's extensions (withExtensions), when it may have them.
       extensions,
@@ -2279,10 +2287,16 @@ export function createAcpBackend(
   }
 
   // Whether a running session is the one a turn asks for: the same folder,
-  // the same tools of Shapewall's and the same extensions (none is none).
-  const sameSession = (agent, { workdir, mcpServers, extensions }) =>
-    agent.root === rootOf(workdir) && agent.extraServers === serverKey(mcpServers) && agent.extensionKey === (extensions?.key || null)
-  const sessionFor = async (thread, signal, { evict, workdir = null, mcpServers = null, extensions = null }) => {
+  // the same tools of Shapewall's, the same extensions (none is none) and
+  // the same session key: the caller's word for what the session may have
+  // read (a turn's tier, and for a connected agent the thread's life, Q7 F2),
+  // so a session that read an open turn's text is never reused for a solo one.
+  const sameSession = (agent, { workdir, mcpServers, extensions, sessionKey = null }) =>
+    agent.root === rootOf(workdir) &&
+    agent.extraServers === serverKey(mcpServers) &&
+    agent.extensionKey === (extensions?.key || null) &&
+    (agent.sessionKey ?? null) === (sessionKey ?? null)
+  const sessionFor = async (thread, signal, { evict, workdir = null, mcpServers = null, extensions = null, sessionKey = null }) => {
     if (signal?.aborted) throw new AgentError('agent_stopped', 'The agent start was cancelled.', 409)
     let agent = processes.get(thread)
     if (evict && agent?.turn) {
@@ -2291,13 +2305,14 @@ export function createAcpBackend(
     }
     // Started in another folder, with other tools of Shapewall's or other
     // extensions (a turn without them never reuses a session that had them): started afresh.
-    if (evict && agent?.state === 'ready' && !sameSession(agent, { workdir, mcpServers, extensions })) {
+    if (evict && agent?.state === 'ready' && !sameSession(agent, { workdir, mcpServers, extensions, sessionKey })) {
       agent.kill('workdir')
       await agent.stoppingPromise
       agent = null
     }
     if (agent?.state === 'ready') return agent
-    agent = await start(thread, signal, { evict, workdir, mcpServers, extensions })
+    agent = await start(thread, signal, { evict, workdir, mcpServers, extensions, sessionKey })
+    agent.sessionKey = sessionKey ?? null
     agent.idle()
     return agent
   }
@@ -2343,13 +2358,15 @@ export function createAcpBackend(
       capabilities = '',
       // This turn's extensions (agent-config-folder.js extensionSession), or null.
       extensions = null,
+      // What a reused session must have been started for (sameSession), or null.
+      sessionKey = null,
     }) {
       if (signal?.aborted) return
       const existing = processes.get(thread)
-      if (existing?.state !== 'ready' || !sameSession(existing, { workdir, mcpServers, extensions }))
+      if (existing?.state !== 'ready' || !sameSession(existing, { workdir, mcpServers, extensions, sessionKey }))
         yield { type: 'status', text: `Starting ${settings.label}` }
       const prepared = await onThread(thread, async () => {
-        const agent = await sessionFor(thread, signal, { evict: true, workdir, mcpServers, extensions })
+        const agent = await sessionFor(thread, signal, { evict: true, workdir, mcpServers, extensions, sessionKey })
         await agent.applyChoices(choices)
         if (signal?.aborted) return null
         const used = usedOptions(agent.options())
@@ -2416,10 +2433,10 @@ export function createAcpBackend(
     // or the one already running. Never evicts another thread's session; an
     // unused one stops after `idleMs` like any idle session. `choices` are
     // applied to it as they would be before a turn.
-    async prepare(thread, { choices = null, signal = null, mcpServers = null, extensions = null } = {}) {
+    async prepare(thread, { choices = null, signal = null, mcpServers = null, extensions = null, sessionKey = null } = {}) {
       if (closed) throw new AgentError('agent_start', 'The server is stopping.')
       return onThread(thread, async () => {
-        const agent = await sessionFor(thread, signal, { evict: false, mcpServers, extensions })
+        const agent = await sessionFor(thread, signal, { evict: false, mcpServers, extensions, sessionKey })
         if (!agent.turn) await agent.applyChoices(choices)
         return agent.options()
       })

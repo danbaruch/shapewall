@@ -8,11 +8,19 @@
 // prompt block (src/agent/capability-render.js). For a connected agent, the
 // live link state from the server too (its saved token asks it).
 //
-// set: changes one line of that policy without reconnecting. The next
-// `shapewall agent connect` (and the next turn on a local board) reads it.
+// set: changes one line of that policy without reconnecting. A running
+// `shapewall agent connect` applies a narrower value from its next turn (a
+// wider one when it connects again); a local board reads it every turn.
 
 import fs from 'node:fs'
-import { CAPABILITY_KEYS, cleanCapabilityKeys, hostPlatform, markBrowserProfile, resolveCeiling } from '../agent/capabilities.js'
+import {
+  CAPABILITY_KEYS,
+  HANDOFF_HOPS_MAX,
+  cleanCapabilityKeys,
+  hostPlatform,
+  markBrowserProfile,
+  resolveCeiling,
+} from '../agent/capabilities.js'
 import { toCli, toPanel } from '../agent/capability-render.js'
 import { TIER_LABELS } from '../agent/capability-views.js'
 import { localMachinePolicy, updateUserAgentEntry, userAgentEntry } from '../agent/user-settings.js'
@@ -208,6 +216,8 @@ function capabilityValue(key, raw, env) {
 function capabilityChange(name, raw, env = process.env) {
   const key = CAPABILITY_FLAGS[name]
   const value = capabilityValue(key, raw, env)
+  if (key === 'handoffHops' && Number.isInteger(value) && value > 0 && value <= HANDOFF_HOPS_MAX)
+    throw new Error('handoff-hops: handing work to another agent is not available yet. Only 0 (no handoff) is taken.')
   let problem = null
   const cleaned = cleanCapabilityKeys({ [key]: value }, { warn: (_, said) => (problem = said), env })
   if (problem) throw new Error(`${name}: not a value this setting takes (it would read as ${problem})`)
@@ -259,6 +269,8 @@ export async function agentSet(positional, flags, out, err, { env = process.env,
   saveMachinePolicy(origin, slug, changes, env)
   const where = `--remote ${origin}${slug === 'default' ? '' : ` --as ${slug}`}`
   out(`Saved ${name} ${raw} for connection "${slug}" to ${origin}.`)
-  out(`A running shapewall agent connect uses it once it connects again. See every line: shapewall agent status ${where}`)
+  out(
+    `A running shapewall agent connect applies a narrower value from its next turn; a wider one once you restart shapewall agent connect. See every line: shapewall agent status ${where}`,
+  )
   return 0
 }

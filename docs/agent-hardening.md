@@ -473,6 +473,45 @@ It is decided by **who wrote the turn**, not by whether the board is local or ho
 | **team** | only people on this machine's trusted list (and the owner)                             | the machine names a team (`trustTeam`), and every author is on it |
 | **open** | anyone else, a share-link guest, or a turn the server's trust block does not vouch for | every other turn                                                  |
 
+**Who wrote the turn is one answer.** On a hosted board the server works out one list of every person whose text reaches the turn:
+its messages (from people in the agent's audience), the thread's comment and every reply, and every comment a message mentions,
+directly, as an element, or as the open comments an `@person` mention brings in. A token's comment, an imported one and another
+agent's answer are authors nobody vouches for. The turn's tier and the thread's trust (extensions, below) are both read from that
+list, so a mentioned comment can never reach a solo or team turn without counting. A thread keeps what it carried: every person it
+ever carried still counts after their message is pruned, and a thread that carried text nobody vouches for stays open (the
+server folds the thread's stored state, [migration 23](hosted.md#migration-23-and-rollback), into each turn's authors). On a local
+board the same check that decides whether the prompt quotes someone else's comment makes the turn open.
+
+A local board holds its own turns to the same answer. On a solo turn the board tools (`list_comments` and `get_comment`, for an
+endpoint and through the owner MCP server for an ACP agent) give the owner's own comments only and count the rest, as the prompt
+does. A thread is tainted only when someone else's text actually came back, and a tainted thread is open from then on. Should
+other people's text still come into a turn above open, its commands and browser are off for the rest of that turn. On a hosted
+board, an open turn is the only one given the board's other open comments; its machine tells the server when it finishes, and the
+server taints the thread, so an answer that repeats them never reaches a later solo turn there. The thread state caps the tier on
+the machine too: a turn in a tainted thread is never above open.
+
+Every tool result is held to the same rule. The board write tools give back the write (id, status, agent status, reply id),
+never the comment's text. Any result that still carries a comment that is not every word the owner's is marked, whatever the
+tool meant to return: it taints the thread and, above open, turns the commands and the browser off for the rest of the turn. On a
+local board, "the owner's words" means a comment the server saw the owner make, never edited or given a resolution note by anyone
+else, with every reply by the owner's own agent (the agent header counts only from the owner's machine). Text that is not a
+person's on the board stays quoted as untrusted data and does not taint: captured pages, capture errors, config page titles and
+notes, and pull request titles from the configured repository. A journey made on the board is anyone's who reaches it: above
+open, the owner MCP server and a composer mention show it by its pages only, and on a board others can reach (shared, or with
+signed-in accounts) mentioning one makes the turn open. A hosted board has no journeys of its own: its journeys come from the
+pushed config.
+
+The machine does not take the list on trust either. On a turn above open it holds back every mentioned comment whose author is not
+one of the turn's authors (a token's or an import's included), keeping its number only, and counts an `@person` mention's open
+comments by others instead of quoting them. An agent session is reused only by a turn of the same tier in the same life of the
+thread: a session that read an open turn is never handed a solo one, and a thread deleted and started again under the same id
+starts a new session.
+
+The server's audience and the machine's pinned owner: with the machine's `audience` left at `server`, a turn is solo when the
+server's audience is the owner and every author is the account this machine pinned when it connected. A server that lies can only
+name that same pinned account, so the audience setting alone never makes another person's turn solo. With `audience: owner` the
+machine also refuses every turn whose asker is not the pinned account, whatever the server's `owner` label says.
+
 A thread that once carried text from outside the list keeps the tier that text allowed. What each tier may get, once the machine's
 owner has opted in (on a local board these are the defaults; a hosted connection starts with none of them, see below):
 
@@ -566,7 +605,8 @@ an older hello of the same process arriving late does not replace a newer one.
 
 `shapewall agent set KEY VALUE` changes one line without reconnecting (`agent set browser off`, `agent set trust-team ada,bo`,
 `agent set shell commands --remote URL`). It checks a value the way `agent connect` does, and refuses one it does not know rather
-than saving it. A connected agent reads the change when it connects again; a local board reads it on the next turn.
+than saving it. A running connected agent applies a narrower value from its next turn and a wider one once `agent connect`
+starts again; a local board reads it on the next turn.
 
 ### Extensions on trusted turns
 
@@ -601,7 +641,10 @@ the machine, never asked, and the session still ends with the turn.
 
 Residual risks: captured page text stays quoted data and does not taint (a page can still carry text written to steer an agent),
 and an extension tool's own result (a server that fetches a web page or reads an issue tracker) can bring in outside text that
-does not taint either; allow only tools whose results you trust.
+does not taint either; allow only tools whose results you trust. The titles of pull requests linked to a comment (`get_comment`)
+come from the configured repository, are quoted as data and do not taint, so anyone who can open a pull request there can put
+words in front of the agent. A reply sent with a forged agent header before 1.4.0 has no mark saying so and still counts as the
+owner's agent's: on a board others reached, check the replies on your own comments and delete any you did not send.
 
 ### Commands through Shapewall
 

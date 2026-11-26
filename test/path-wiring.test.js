@@ -128,9 +128,13 @@ test('thread relay: one server for the thread, the host swapped per turn, refuse
 test('local trust: solo only for the owner, and a shared comment thread adds another author', () => {
   const machine = localMachinePolicy(null)
   const tierOf = (trust) => resolveCapabilities({ path: 'local-chat', trust, audience: 'owner', machine, platform: SANDBOX }).tier
-  assert.equal(tierOf(localTrust({ owner: true })), 'solo')
-  assert.equal(tierOf(localTrust({ owner: false })), 'open')
-  assert.equal(tierOf(localTrust({ owner: true, shared: true, comment: true })), 'open')
+  const clean = { tainted: false, authors: ['owner'] }
+  assert.equal(tierOf(localTrust({ owner: true, thread: clean })), 'solo')
+  assert.equal(tierOf(localTrust({ owner: false, thread: clean })), 'open')
+  assert.equal(tierOf(localTrust({ owner: true, shared: true, comment: true, thread: clean })), 'open')
+  // A thread state that is missing or tainted reads as tainted: open (Q7 N3).
+  assert.equal(tierOf(localTrust({ owner: true })), 'open')
+  assert.equal(tierOf(localTrust({ owner: true, thread: { tainted: true, authors: [] } })), 'open')
   assert.equal(localTrust({ owner: true }).guests, false)
 })
 
@@ -160,11 +164,12 @@ test('localOwnerOnly: a private chat, a gated board thread, an owner-only commen
 test('local capabilities: in place edits where the owner works in the checkout, a copy in branch mode', (t) => {
   const env = { ...process.env, XDG_CONFIG_HOME: tmpDir(t, 'sw-wiring-cfg-'), HOME: tmpDir(t, 'sw-wiring-home-') }
   const config = { dir: tmpDir(t, 'sw-wiring-dir-'), outputDir: '/nowhere/.shapewall', commands: { test: { argv: ['npm', 'test'] } } }
-  const inPlace = localCapabilities({ config, env, acp: true, owner: true, inPlace: true, platform: SANDBOX })
+  const thread = { tainted: false, authors: ['owner'] }
+  const inPlace = localCapabilities({ config, env, acp: true, owner: true, inPlace: true, thread, platform: SANDBOX })
   assert.equal(inPlace.path, 'local-chat')
   assert.equal(inPlace.tier, 'solo')
   assert.equal(inPlace.edit.where, 'checkout')
-  const branch = localCapabilities({ config, env, acp: true, owner: true, inPlace: false, platform: SANDBOX })
+  const branch = localCapabilities({ config, env, acp: true, owner: true, inPlace: false, thread, platform: SANDBOX })
   assert.equal(branch.edit.where, 'copy')
   const endpoint = localCapabilities({ config, env, acp: false, owner: false, inPlace: true, platform: SANDBOX })
   assert.equal(endpoint.path, 'local-endpoint')

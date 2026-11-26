@@ -2905,6 +2905,22 @@ are the members whose text it carried. Only the chat store writes them, through 
 `src/agent/thread-trust.js`. **Every thread that exists at upgrade is marked tainted**, because who wrote its history was never
 kept: those threads never get extensions, and new threads start clean. Nothing else changes.
 
+1.4.0 also reads them for each turn's tier, not only for extensions: every member the thread ever carried is an author of
+its later turns (after their message is pruned, too), and a tainted thread's turns are open. Deleting a thread removes its row,
+so the next one under that id starts clean, and the agent's machine starts a new session for it (the job's `turn.generation`).
+
+**After the upgrade, owners lose solo in every thread that already existed**: those threads are tainted, so every turn in them is
+open (commands ask on a card, no full shell, no extensions). This is on purpose, because nobody can say who wrote their history.
+To get solo back, start a new chat thread; the old ones keep working as open threads.
+
+A thread is also tainted when an open turn in it was given other people's text the server did not count as the turn's authors:
+the board's other open comments, which only an open turn is given. The agent's machine says so when it finishes the turn
+(`outsideText` on the finish call), so an answer that repeats such a comment never reaches a later solo turn in that thread.
+This fails closed: when the server sends a job whose board comments include anyone who is not an author of the turn, it
+remembers that, and the thread is tainted unless the machine's answer says `outsideText: false` (1.4.0 machines say it on
+every answer). An answer without the field, a lost link, a revoked agent and a Stop whose answer came too late all taint it.
+A server restart keeps nothing the turn streamed, so the stored notice carries no one's text.
+
 For a rollback, the older build ignores the columns (it gives no extensions). To let a newer build run the migration again, with
 the server stopped:
 

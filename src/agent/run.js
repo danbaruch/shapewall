@@ -6,11 +6,11 @@ import { commentCounts, captureFiles, getComment, listComments } from '../store.
 import { ownersComment } from './watch-capabilities.js'
 import { NEXT_STEPS_PROMPT, NO_IMAGES_NOTE, SYSTEM_PROMPT, attachmentNote, openCommentsContext, threadContext } from './context.js'
 import { commentById, composerParts, mentionComments } from './composer.js'
+import { listJourneys } from '../journeys.js'
 import { splitNextSteps } from './next-steps.js'
 import { replyText, settleCardPositions } from './reply-text.js'
 import { AgentError } from './errors.js'
 import { cleanCardDiff } from './text-diff.js'
-import { taintingToolName } from './thread-trust.js'
 import { attachmentData, newId } from './threads.js'
 import { recentDownNotes } from './ratings.js'
 import { commentForModel, commentMediaParts, runTool, toolSpecs } from './tools.js'
@@ -28,6 +28,13 @@ const REASONING_STORED_MAX = 20000
 const LENGTH_STOPS = new Set(['length', 'max_tokens'])
 // A permission card shows all it asks about: backends deny what is longer (acp.js DETAIL_MAX).
 const PERMISSION_DETAIL_MAX = 5000
+// A command or browser call after other people's text came into a turn above "open" (Q7 N1).
+const EXEC_OFF_RESULT = {
+  ok: false,
+  label: 'Not on this turn',
+  text: "Other people's text came into this turn, so commands and the browser are off until the next one.",
+  detail: "Off after other people's text came in",
+}
 const REFS_MAX = 20
 
 export function commentIdOf(threadId) {
@@ -41,7 +48,10 @@ export function commentIdOf(threadId) {
 // mention is judged when it is posted, but the comment it points to can get
 // someone else's reply later, and the thread is replayed into every fresh
 // session: so this is asked again each time the prompt is built.
-export function quotesOutside({ config, board, threadId, messages }) {
+// `reachable`: someone other than the owner can reach the board (shared, or
+// signed-in accounts): then a journey made on the board is not the owner's
+// alone either, as anyone reaching the board can make or edit one (Q7 A1).
+export function quotesOutside({ config, board, threadId, messages, reachable = false }) {
   const commentId = commentIdOf(threadId)
   if (commentId) {
     let comment = null
@@ -53,10 +63,20 @@ export function quotesOutside({ config, board, threadId, messages }) {
     if (comment && !ownersComment(comment)) return true
   }
   const find = commentById(config, board)
+  let boardJourneys = null
   for (const message of messages || []) {
     if (message?.role !== 'user' || !Array.isArray(message.mentions)) continue
-    for (const mention of message.mentions)
+    for (const mention of message.mentions) {
       if ((mentionComments(config, board, mention, find) || []).some((comment) => !ownersComment(comment))) return true
+      if (reachable && mention?.kind === 'journey') {
+        boardJourneys ||= new Set(
+          listJourneys(config, board)
+            .filter((journey) => journey.source === 'board')
+            .map((journey) => journey.id),
+        )
+        if (boardJourneys.has(mention.id)) return true
+      }
+    }
   }
   return false
 }
@@ -105,7 +125,7 @@ export function modelMessages({ config, board, threadId, messages, comments = fa
       const note = attachmentNote(attachment, board)
       if (note) content.push({ type: 'text', text: note })
     }
-    content.push(...composerParts(config, board, message, { full: withImages.has(index) }))
+    content.push(...composerParts(config, board, message, { full: withImages.has(index), quoteOthers }))
     if (message.text) content.push({ type: 'text', text: message.text })
     // A comment's thread (Fix with agent too): the reviewer's drawing on its
     // screenshot and their images go with the newest message, as images,
@@ -184,6 +204,8 @@ export async function runTurn({
   execHost = null,
   // false above the open tier: other people's comments are counted, not quoted (modelMessages).
   quoteOthers = true,
+  // Someone other than the owner can reach the board (quotesOutside).
+  reachable = false,
   // Cards of Shapewall's own (exec-mcp asks): runTurn sets `cards.ask` for
   // the tool host to call, and puts each waiting card in `cards.pending`
   // (id -> settle(state, answeredBy)) for the board's answer route.
@@ -191,13 +213,21 @@ export async function runTurn({
   // This turn's extensions for its ACP session (agent-config-folder.js
   // extensionSession), only when capabilities.js turned them on.
   extensions = null,
+  // What a reused ACP session must have been started for (acp.js
+  // sameSession): the turn's tier, and for a connected agent the thread's life.
+  sessionKey = null,
   // Called once when the turn read other people's text through a board tool
   // (thread-trust.js): the caller marks the thread tainted.
   onTaint = null,
 }) {
   const thread = `${board.id}/${threadId}`
   let taintSaid = false
+  // Other people's text came in mid-turn on a turn above "open" (Q7 N1): its
+  // tier was worked out without that text, so the commands and the browser
+  // (the exec host's tools) are not offered for the rest of the turn.
+  let execOff = false
   const taint = (why) => {
+    if (!quoteOthers) execOff = true
     if (taintSaid) return
     taintSaid = true
     try {
@@ -323,18 +353,18 @@ export async function runTurn({
     // The prompt quotes someone else's text after all (a reply added since a
     // mention was posted): the thread is tainted for good and this turn's
     // session starts without extensions (acp.js sameSession).
-    if (extensions && !given && quotesOutside({ config, board, threadId, messages })) {
+    if (extensions && !given && quotesOutside({ config, board, threadId, messages, reachable })) {
       taint('outside')
       extensions = null
     }
     // A model that does not take images (Settings > Agent): the images are
     // dropped here, and the chat says so, instead of the endpoint's 400.
     if (backend.vision === false && withoutImages(conversation)) noteOnce(NO_IMAGES_NOTE)
-    const tools =
+    const toolsNow = () =>
       backend.tools === 'shapewall'
         ? [
             ...toolSpecs({ ownerWrites, allowCapture }),
-            ...execTools.map(({ name, description, inputSchema }) => ({ name, description, parameters: inputSchema })),
+            ...(execOff ? [] : execTools).map(({ name, description, inputSchema }) => ({ name, description, parameters: inputSchema })),
           ]
         : []
     emit('status', { text: 'Waiting for the model' })
@@ -344,7 +374,7 @@ export async function runTurn({
       for await (const event of backend.stream({
         system: `${SYSTEM_PROMPT}\n\n${NEXT_STEPS_PROMPT}${capabilities && backend.tools === 'shapewall' ? `\n\n${capabilities}` : ''}`,
         messages: conversation,
-        tools: round < TOOL_ROUNDS_MAX ? tools : [],
+        tools: round < TOOL_ROUNDS_MAX ? toolsNow() : [],
         ...(modelOverride ? { model: modelOverride } : {}),
         ...(choices ? { choices } : {}),
         ...(workdir ? { workdir } : {}),
@@ -353,6 +383,7 @@ export async function runTurn({
         ...(capabilities && backend.tools !== 'shapewall' ? { capabilities } : {}),
         ...(mcpServers ? { mcpServers } : {}),
         ...(extensions ? { extensions } : {}),
+        ...(sessionKey ? { sessionKey } : {}),
         signal,
         thread,
       })) {
@@ -443,11 +474,14 @@ export async function runTurn({
       for (const call of calls) {
         const id = call.id || newId('call')
         card({ id, kind: 'tool', name: call.name, label: call.name, state: 'running', detail: null })
-        // A board tool that returns comments: other people's text from here on.
-        if (taintingToolName(call.name)) taint('tool')
         const result = execNames.has(call.name)
-          ? await runExecTool(execHost, call, signal)
-          : await runTool({ config, board, ownerWrites, allowCapture, capture, requestedPages, agentName }, call)
+          ? execOff
+            ? EXEC_OFF_RESULT
+            : await runExecTool(execHost, call, signal)
+          : await runTool({ config, board, ownerWrites, allowCapture, capture, requestedPages, agentName, quoteOthers }, call)
+        // A board tool that returned someone else's text: other people's text
+        // from here on (a read above "open" gives the owner's own only).
+        if (result.outside) taint('tool')
         card({ id, label: result.label, state: result.ok ? 'done' : 'error', detail: result.detail })
         if (result.ok) noteRefs(call.args)
         conversation.push({ role: 'tool', toolCallId: id, content: [{ type: 'text', text: result.text }] })

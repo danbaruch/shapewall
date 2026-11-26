@@ -22,13 +22,31 @@ Three things hold everywhere:
 | **open** | Anyone else, a share-link guest, or a turn the server's trust block does not vouch for | Every other turn                                                                                          |
 
 The tier is worked out for each turn from the authors the server names (from stored account ids, never display names), and the
-machine checks them against its own lists. A thread that once carried text from outside the list keeps the tier that text allowed.
+machine checks them against its own lists. An author is everyone whose text reaches the turn: the people who wrote its messages,
+the thread's comment and its replies, and every comment a message mentions (an `@comment`, an element, or the open comments an
+`@person` mention brings in). Mention someone else's comment in your own chat and that turn is theirs too, so it is not solo. The
+tier and the thread's own trust (below, under Extensions) are worked out from that same list, so the two cannot disagree.
+
+A thread keeps what it carried: an author whose message was later pruned or removed still counts, and a thread that once carried
+text nobody can vouch for (another agent's answer, a move to another agent, a token's or an imported comment, a thread from before
+1.4.0) is open from then on. Deleting the thread starts a new one, and the machine starts the agent's session afresh for it; a
+session is also never reused across tiers, so an open turn's text never carries into a solo or team turn.
+
 On solo and team turns, comments by people outside the tier are counted in the board context, not quoted, so one quoted comment
-cannot steer a shell. Captured page text is still quoted as untrusted data.
+cannot steer a shell. The machine checks mentions itself too: on a turn above open, a mentioned comment by anyone the tier was not
+worked out from is shown by its number only, and an `@person` mention's open comments by others are counted, never quoted.
+Captured page text is still quoted as untrusted data.
+
+Solo on a connected agent needs the agent's audience to be only you. With `--audience server` (the default) the machine takes that
+audience from the server, and every author must still be the account this machine pinned as yours when it connected: the
+server's word alone never makes someone else's turn solo. `--audience owner` makes it this machine's own rule as well, and the
+machine then refuses any turn whose asker is not that pinned account, whatever the server labels it.
 
 A local board has no team tier. A turn there is solo only while every word in it is the owner's (the owner is whoever holds
 the settings link, a paired device or the tailnet owner): a private chat, or a comment the owner wrote on a board only the owner
-can reach. Anything else is open, including other signed-in local accounts and share visitors. A display name never counts.
+can reach. A message that mentions a comment someone else wrote (or one that got someone else's reply since) makes the turn
+open. On a solo turn the agent's board tools list and read only the owner's own comments and count the rest. A thread that ever
+carried someone else's text is open from then on, and so is a thread from before 1.4.0: start a new chat to get solo back. Anything else is open, including other signed-in local accounts and share visitors. A display name never counts.
 
 ## What each tier gets
 
@@ -241,13 +259,16 @@ shapewall agent set trust-team ada,bo --remote https://wall.example.com
 shapewall agent set shell commands --remote https://wall.example.com --as docs
 ```
 
-With `--remote URL` (and `--as NAME`) it changes a connected agent's entry, read when `agent connect` connects again. Without it,
-the project's local board. The keys: `trust-team` (`none`, `members` or handles), `trust-team-shell`, `shell`, `shell-network`,
+With `--remote URL` (and `--as NAME`) it changes a connected agent's entry. A running `agent connect` reads the file again before
+each turn: a narrower value applies from that turn (and the board is told), a wider one is logged and waits until you restart
+`shapewall agent connect`, so a change to the file never widens a link that is already running. Without `--remote`, the
+project's local board, read by its next turn. The keys: `trust-team` (`none`, `members` or handles), `trust-team-shell`, `shell`, `shell-network`,
 `shell-unsandboxed`, `command-approval`, `browser`, `browser-allow`, `browser-auth`, `browser-profile`, `browser-profile-team`,
 `browser-no-sandbox`, `extensions-for`, `allow-tool` and `handoff-hops`, plus the connection's own `audience`, `approvals`,
 `instructions`, `agent-config`, `allow-command`, `allow-path`, `auto`, `base`, `respond` and `git-remote` (those need
-`--remote`, except `agent-config`, which a local board takes for its extensions). `allow-command` is refused in this release, and
-`handoff-hops` is kept for a later release and hands nothing off yet.
+`--remote`, except `agent-config`, which a local board takes for its extensions). `allow-command` is refused in this release.
+Handing work to another agent is not built yet: `handoff-hops` takes only `0`, a larger value in the policy file reads as `0`
+(and `agent connect` says so), and the Hand off line is off on every path.
 
 **The server can only lower it.** A project's agent policy on a hosted server takes `maxTier` (`"solo"`, `"team"` or `"open"`),
 `shell: false` and `browser: false`, for the project and per board, and a board's setting can only narrow the project's. In the

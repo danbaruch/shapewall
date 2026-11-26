@@ -611,7 +611,7 @@ test('replies: a reply marked as the agent keeps its name; the owner MCP server 
   await client.connect(
     new StdioClientTransport({
       command: process.execPath,
-      args: [OWNER_MCP, file, 'sample', 'no-capture', 'codex', 'Name at start'],
+      args: [OWNER_MCP, file, 'sample', 'no-capture', 'all', 'codex', 'Name at start'],
       env: { ...process.env, ...env },
       stderr: 'pipe',
     }),

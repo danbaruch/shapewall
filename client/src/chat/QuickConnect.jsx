@@ -212,11 +212,24 @@ export function QuickConnect({ agent, touch, onOpenSettings, onConnected }) {
         <p className="text-[11px] leading-4 text-muted" data-sw-chat-connect-note="true">
           Connect asks first, then runs that command on this machine, as you, with the agent’s own login.
           {ready.some((item) => item.id === 'claude') ? (
-            <>
-              {' '}
-              Claude Code gets a restricted session by default: read and edit tools plus Shapewall’s own tools for commands and the browser,
-              never a shell of its own or your Claude settings files.
-            </>
+            view.effective?.localSession === 'own' ? (
+              <>
+                {' '}
+                <span data-sw-chat-connect-session="own">
+                  This board sets <code className="font-mono">agent.localSession</code> to <code className="font-mono">"own"</code> in
+                  shapewall.config.json, so Claude Code keeps its own session: its own tools (a shell, file edits), which Shapewall does not
+                  sandbox, and your Claude settings files.
+                </span>
+              </>
+            ) : (
+              <>
+                {' '}
+                <span data-sw-chat-connect-session="restricted">
+                  On this board Claude Code gets a restricted session: read and edit tools plus Shapewall’s own tools for commands and the
+                  browser, never a shell of its own or your Claude settings files.
+                </span>
+              </>
+            )
           ) : null}
           {others.length ? (
             <>

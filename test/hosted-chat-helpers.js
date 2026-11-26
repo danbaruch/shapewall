@@ -133,6 +133,8 @@ export function startLink(
     extensions = null,
     // The chat agent's command in place of the stub's (a stub named as Claude Code, say).
     acpArgv = null,
+    // The policy file read again before each turn (agent-connect.js passes readMachinePolicy).
+    reloadPolicy = null,
   } = {},
 ) {
   const logs = []
@@ -190,6 +192,7 @@ export function startLink(
     onOwner,
     extensions,
     policy: edits ? machinePolicy : policy,
+    reloadPolicy,
     // `remote`: true for the real token API, or a client of the test's own.
     remote: remote === true ? createRemote({ origin: hosted.origin, token }) : remote || null,
     fetchImpl,

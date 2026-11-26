@@ -156,9 +156,11 @@ test('open tier: the same command waits for a card; the answer is taken and the 
 
 test('"the owner" is this machine\'s: a server that names another account does not make a turn solo', posix, async () => {
   // The machine saved another handle when it was approved: the server's "owner: true" for ada does not count.
+  // The machine takes the server's audience (with its own "owner" it would
+  // refuse the turn outright: the asker is not the account it pinned, Q7 F4).
   const agent = await agentWith('Pinned', {
     audience: 'owner',
-    policy: { audience: 'owner', approvals: 'owner' },
+    policy: { audience: 'server', approvals: 'owner' },
     link: { owner: 'someone-else' },
   })
   const made = await comment('Run the tests ' + fixScript([['mcp', 'run_named_command', { name: 'test' }]]))
@@ -175,9 +177,11 @@ test('"the owner" is this machine\'s: a server that names another account does n
 // Review fix 9: the server's by.owner alone is not enough. The answer names
 // who answered, and it must be the owner this machine pinned.
 test('"owner" approvals: an allow from anyone but the pinned owner is not taken, even when the server says owner', posix, async () => {
+  // The machine takes the server's audience (with its own "owner" it would
+  // refuse the turn outright: the asker is not the account it pinned, Q7 F4).
   const agent = await agentWith('PinnedAllow', {
     audience: 'owner',
-    policy: { audience: 'owner', approvals: 'owner' },
+    policy: { audience: 'server', approvals: 'owner' },
     link: { owner: 'someone-else' },
   })
   const made = await comment('Run the tests ' + fixScript([['mcp', 'run_named_command', { name: 'test' }]]))

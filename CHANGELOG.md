@@ -95,6 +95,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **Upgrading: owners lose solo in threads that existed before 1.4.0.** Those threads are tainted (hosted migration 23; on a
+  local board, a thread with messages and no trust record), so every turn in them is open: commands ask on a card, no full
+  shell, no extensions. Start a new chat thread to get solo back; the old threads keep working as open ones.
 - A local board's Claude Code session is restricted: read and edit tools plus Shapewall's tools, no shell of its own, no settings
   files (`~/.claude` allow rules, hooks, plugins, `.mcp.json`), no auto memory. `agent.localSession: "own"` keeps the 1.2.0
   session, with a deprecation warning, until 2.0. Other ACP adapters keep their own session.
@@ -160,6 +163,53 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - The approval page no longer promises a connected agent "never runs a command" when its machine allows named commands, and the
   chat's Connect note and the agent settings say Claude Code gets the restricted local session, while Codex, goose and Gemini CLI
   bring their own tools.
+- Handing work to another agent (`handoff-hops`) is off on every path until it is built: the Hand off line no longer reads on
+  for a value above 0, `agent set handoff-hops` takes only 0 ("not available yet"), and a larger value in the policy file reads
+  as 0 with a warning at `agent connect`.
+- `agent set` on a connected agent reaches a running `agent connect`: a narrower value applies from its next turn (and the board
+  is told), a wider one is logged and waits for the next connect.
+- The narrowing re-check before a command or browser step asks the server again after a failed answer, instead of skipping 5
+  seconds, and steps that run at once wait for the same answer.
+- An agent hidden for inactivity that came back and went quiet again is written to the audit log as hidden again.
+- A running `agent connect` without edits no longer logs on every turn that its policy file "would widen" approvals: a reload is
+  compared with what the file said, not with the link's own "no approvals".
+- The unconnected chat's Connect note says which session Claude Code gets on this board: the restricted one, or its own when
+  `agent.localSession` is `"own"`.
+
+### Security
+
+- Who wrote a turn is one answer for its tier and for its thread's trust. A comment that a message mentions (directly, as an
+  element, or among an `@person` mention's open comments) now counts as an author of the turn on a hosted board, so a member can
+  no longer bring someone else's comment into a solo or team turn and get that turn's shell. A token's or an imported comment
+  counts as an author nobody vouches for. On a local board, a message that mentions someone else's comment makes the turn open.
+- A connected agent's machine holds back, on every turn above open, each mentioned comment whose author is not one of the turn's
+  authors (number only), and counts an `@person` mention's open comments by others instead of quoting them, whatever the server
+  sent.
+- A thread keeps what it carried for the tier too: a person whose message was pruned still counts, and a thread tainted by text
+  nobody vouches for stays open. An agent session is never reused across tiers or across a thread deleted and started again
+  under the same id (`turn.generation` in the job), so an open turn's text cannot carry into a solo or team turn.
+- With `audience: owner` on the machine, a turn is refused unless its asker is the account this machine pinned as its owner; the
+  server's `owner` label alone no longer passes.
+- On a local board, a solo turn's board tools (`list_comments`, `get_comment`, for an endpoint and through the owner MCP server
+  for an ACP agent) give the owner's own comments only and count the rest, so other people's text never reaches a solo turn
+  that way. A thread is tainted only when someone else's text actually came back, a tainted local thread is open from then on,
+  and if other people's text still comes into a turn above open, its commands and browser are off for the rest of that turn.
+- A connected agent's open turn that was given the board's other open comments tells the server when it finishes, and the
+  server taints the thread: an answer that repeats those comments never reaches a later solo turn there (after `agent set
+  audience owner`, a raised ceiling or a team that reconnects).
+- The trust block's thread state caps the tier too: a turn in a tainted thread is never above open, whatever its authors say.
+- The board write tools (`reply_to_comment`, `set_comment_status`, `resolve_comment`) of a local endpoint agent give back the
+  write (id, status, agent status, reply id), never the comment's text, as the MCP tools do. Any tool result that still carries
+  someone else's comment taints the thread and, on a turn above open, turns the commands and the browser off for the rest of it.
+- On a local board, a reply sent with the agent header from anywhere but the owner's own machine is still an agent's (it wakes
+  no agent) but no longer counts as the owner's words, and an edit or a resolution note on the owner's comment by anyone else
+  makes the comment no longer the owner's alone. Above open, the owner MCP server and a composer mention show a journey made on
+  the board by its pages only (no name, description or fork labels), and on a board others can reach, mentioning one makes
+  the turn open. Upgrading: a reply sent with a forged agent header before this release carries no mark and still reads as the
+  owner's agent's; check the replies on your own comments on a board others reached, and delete any you did not send.
+- A connected agent's answer always says whether its turn was given other people's text (`outsideText`), and a turn whose job
+  carried such text taints its thread however it ends unless the answer says it was dropped: a missing field (an older
+  machine), a lost link, a revoked agent and a Stop whose answer came too late all taint.
 
 ## 1.3.0 - 2026-11-25
 
