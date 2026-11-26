@@ -120,6 +120,9 @@ export function cleanJob(raw) {
         respond: turn.trigger?.respond === 'always' ? 'always' : 'mention',
         messageId: triggerId,
       },
+      // Which life of the thread this is (a thread deleted and started
+      // again under its id is another one): part of the agent session's key.
+      generation: text(turn.generation, 40) || null,
     },
     agent: { name: text(raw.agent?.name, 60) || null },
     // The server's ceiling for this turn (src/agent/capabilities.js cleanNarrowing):
@@ -145,6 +148,75 @@ export function cleanJob(raw) {
       comments: (Array.isArray(context.comments) ? context.comments : []).slice(0, 100).map((item) => bounded(item)),
       commentsLeft: Number.isSafeInteger(context.commentsLeft) && context.commentsLeft > 0 ? context.commentsLeft : 0,
     },
+  }
+}
+
+// A solo or team turn quotes only text by the people its tier was worked out
+// from (Q7 F1): this machine's own check, whatever the server's trust block
+// said. `handles`: the authors of the trust block (each one inside the
+// tier, or the turn would be "open"). A mentioned comment by anyone else,
+// by a token or an import, or one whose author the server did not name, is
+// kept as its number only, and a person mention's open comments by others
+// are counted, never quoted. Changes `job` in place; returns how many
+// comments it held back.
+export function withholdOutside(job, handles) {
+  const allowed = new Set([...handles].filter((handle) => typeof handle === 'string' && handle))
+  const ok = (item) => item && typeof item === 'object' && typeof item.authorHandle === 'string' && allowed.has(item.authorHandle)
+  let held = 0
+  for (const message of job.messages) {
+    if (message.role !== 'user') continue
+    for (const mention of message.mentions) {
+      if (mention.kind === 'comment' || mention.kind === 'element') {
+        if (mention.data && ok(mention.data.comment)) continue
+        // A comment's label is its text: its number instead.
+        const number = Number(mention.id)
+        mention.label = Number.isSafeInteger(number) && number > 0 ? `#` : '#'
+        if (mention.data) {
+          held += 1
+          mention.data = {
+            comment: { id: Number.isSafeInteger(number) ? number : null, withheld: 'by someone outside this turn, not shown' },
+          }
+        }
+      } else if (mention.kind === 'person' && mention.data && Array.isArray(mention.data.openComments)) {
+        const kept = mention.data.openComments.filter(ok)
+        const dropped = mention.data.openComments.length - kept.length
+        if (!dropped) continue
+        held += dropped
+        mention.data = {
+          ...mention.data,
+          openComments: kept,
+          withheld: `${dropped} more by other people, not shown`,
+        }
+      }
+    }
+  }
+  return held
+}
+
+// The check a running turn makes before each command or browser step: the
+// server's narrowing as it is now (GET /turns/:id/narrowing), at most once
+// per `everyMs` (Q7 F5). A check that comes while one is asked waits for
+// that same answer (parallel steps never run on the older narrowing), and
+// only an answer counts as asked: after a failure the next check asks
+// again. `ask()` resolves to the server's answer ({ narrowing }); `apply`
+// takes the narrowing. A server that does not say throws, and the caller
+// keeps the narrowing it has. `now` is for tests.
+export function narrowingRefresher({ everyMs, ask, apply, now = Date.now }) {
+  let askedAt = now()
+  let pending = null
+  return () => {
+    if (pending) return pending
+    if (now() - askedAt < everyMs) return Promise.resolve()
+    pending = (async () => {
+      const answer = await ask()
+      const narrowing = answer && typeof answer === 'object' ? answer.narrowing : undefined
+      if (narrowing === undefined) throw new Error('the server did not say')
+      apply(narrowing)
+      askedAt = now()
+    })().finally(() => {
+      pending = null
+    })
+    return pending
   }
 }
 

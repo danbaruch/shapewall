@@ -363,15 +363,21 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
     const last = latestOf(row.last_seen_at, row.token_last_used_at, lastClaims(row.project_id).get(row.token_id))
     return !last || now().getTime() - Date.parse(last) > DORMANT_MS
   }
-  // Writes `agent_hidden` once for each agent that is hidden now: the audit
-  // log says when it stopped being listed, and why.
+  // Writes `agent_hidden` once each time an agent stops being listed: the
+  // audit log says when, and why. An agent that was hidden, was used again
+  // (listed) and then went quiet once more is said again: the last
+  // `agent_hidden` counts only while it is newer than the agent's last
+  // activity (Q7 F8).
   function noteHidden(projectId, audit) {
     if (!audit) return
     for (const row of rows(projectId).filter(dormant)) {
-      const said = t.get("SELECT 1 AS n FROM audit_log WHERE workspace_id = :ws AND action = 'agent_hidden' AND target = :id", {
+      const said = t.get("SELECT MAX(at) AS at FROM audit_log WHERE workspace_id = :ws AND action = 'agent_hidden' AND target = :id", {
         id: row.id,
-      })
-      if (said) continue
+      })?.at
+      // A token without the claim scope stays hidden whatever it does: said once.
+      const inactive = parseList(row.token_scopes).includes('claim')
+      const last = latestOf(row.last_seen_at, row.token_last_used_at, lastClaims(row.project_id).get(row.token_id))
+      if (said && (!inactive || !last || Date.parse(said) >= Date.parse(last))) continue
       audit('agent_hidden', row.id, {
         project: row.project_id,
         token: row.token_id,

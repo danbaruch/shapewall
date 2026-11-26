@@ -401,9 +401,12 @@ export function cleanCapabilityKeys(entry, { defaults = CAPABILITY_DEFAULTS, war
   bool('browserNoSandbox', "off (the browser never starts without Chromium's own sandbox)")
   list('extensionsFor', (item) => (item === 'owner' ? 'owner' : cleanHandle(item)), TRUST_TEAM_MAX, 'empty (no extensions)')
   list('allowTool', (item) => (typeof item === 'string' && TOOL_RE.test(item) ? item : null), ALLOW_TOOL_MAX, 'empty')
+  // Handing work to another agent is not built yet (Q7 F3): only 0 is a
+  // value this version takes; any other reads as 0, and is said.
   if (!has('handoffHops')) out.handoffHops = defaults.handoffHops
-  else if (Number.isInteger(object.handoffHops) && object.handoffHops >= 0 && object.handoffHops <= HANDOFF_HOPS_MAX)
-    out.handoffHops = object.handoffHops
+  else if (object.handoffHops === 0) out.handoffHops = 0
+  else if (Number.isInteger(object.handoffHops) && object.handoffHops > 0 && object.handoffHops <= HANDOFF_HOPS_MAX)
+    narrow('handoffHops', '0 (handing work to another agent is not available yet)')
   else narrow('handoffHops', '0 (no handoff)')
   return out
 }
@@ -978,9 +981,10 @@ function resolveForTier(
   else if (hosted && !m.remote) off('push', 'machine_remote_none')
   else push = { on: true, card: true, remote: hosted ? m.remote : null }
 
-  // Handing the work to another agent: off unless this machine allows hops.
-  const hops = known ? Math.min(m.handoffHops, HANDOFF_HOPS_MAX) : 0
-  if (!hops) off('handoff', known ? 'machine_handoff_none' : 'unknown_path')
+  // Handing the work to another agent: not built yet, so off on every path
+  // whatever the machine says (Q7 F3); the panel never says "on" for it.
+  const hops = 0
+  off('handoff', known ? 'machine_handoff_none' : 'unknown_path')
 
   const narrowed = []
   if (narrowing) {

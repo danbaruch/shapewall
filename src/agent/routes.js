@@ -747,7 +747,11 @@ export function agentRouter({
       // taints the thread for good, so taking that reply away again never
       // makes it clean.
       let trust = stored.trust
-      if (!readThreadTrust(trust).tainted && quotesOutside({ config, board, threadId, messages: stored.messages })) {
+      // The same answer decides the turn's tier (Q7 F1): a prompt that
+      // quotes someone else's comment is not the owner's alone, so the turn
+      // is "open" (an outside author), whatever kind of thread it is in.
+      const quoted = quotesOutside({ config, board, threadId, messages: stored.messages })
+      if (!readThreadTrust(trust).tainted && quoted) {
         try {
           await markThreadTainted(config, board.id, threadId, 'outside')
           stored = readThread(config, board.id, threadId)
@@ -764,15 +768,17 @@ export function agentRouter({
         thread: trust,
         key,
         agent: localAgentOf(config, current),
-        owner: localOwnerOnly({
-          ownerWrites,
-          kind,
-          thread: stored,
-          comment,
-          ownerGate,
-          accounts: Boolean(accountUser),
-          acp: backend.id === 'acp',
-        }),
+        owner:
+          !quoted &&
+          localOwnerOnly({
+            ownerWrites,
+            kind,
+            thread: stored,
+            comment,
+            ownerGate,
+            accounts: Boolean(accountUser),
+            acp: backend.id === 'acp',
+          }),
         shared,
         comment: kind !== 'chat',
         root,
@@ -807,7 +813,8 @@ export function agentRouter({
         relay = null
       }
     }
-    return { tools, relay, mcpServers, extensions: tools?.extensions || null }
+    // The session a turn may reuse is one of the same tier (acp.js sameSession, Q7 F2).
+    return { tools, relay, mcpServers, extensions: tools?.extensions || null, sessionKey: tools?.caps?.tier || null }
   }
   const endTurnTools = async (key, { tools, relay }) => {
     if (relay && relays.get(key) === relay) await relay.setHost(null).catch(() => {})
@@ -1253,7 +1260,7 @@ export function agentRouter({
         const key = [board.id, threadId].join('/')
         const cards = {}
         res.locals.run.cards = cards
-        const { tools, relay, mcpServers, extensions } = await turnTools({
+        const { tools, relay, mcpServers, extensions, sessionKey } = await turnTools({
           req,
           board,
           threadId,
@@ -1291,6 +1298,7 @@ export function agentRouter({
             agentName: current.label || null,
             capabilities: tools?.prompt || '',
             quoteOthers: !tools || tools.caps.tier === 'open',
+            sessionKey,
             mcpServers,
             execHost: backend.id === 'acp' ? null : tools?.exec?.host || null,
             cards,
@@ -1955,6 +1963,7 @@ export function agentRouter({
             signal: admission.signal,
             mcpServers: prepared.mcpServers,
             extensions: prepared.extensions || null,
+            sessionKey: prepared.sessionKey || null,
           })
         } finally {
           await endTurnTools(key, prepared)

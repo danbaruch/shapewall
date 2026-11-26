@@ -671,6 +671,9 @@ export function settingsRoutes({
         vision: current.vision !== false,
         keyHosts: current.keyHosts,
         acpCommand: current.acp?.argv ? formatCommand(current.acp.argv) : null,
+        // Which session Claude Code gets on this board (agent.localSession in
+        // shapewall.config.json): "restricted" (the default) or "own".
+        localSession: repo().localSession === 'own' ? 'own' : 'restricted',
         refusedEnv: current.acp?.refusedEnv || [],
         sources: current.sources || {},
       },

@@ -191,6 +191,9 @@ export async function runTurn({
   // This turn's extensions for its ACP session (agent-config-folder.js
   // extensionSession), only when capabilities.js turned them on.
   extensions = null,
+  // What a reused ACP session must have been started for (acp.js
+  // sameSession): the turn's tier, and for a connected agent the thread's life.
+  sessionKey = null,
   // Called once when the turn read other people's text through a board tool
   // (thread-trust.js): the caller marks the thread tainted.
   onTaint = null,
@@ -353,6 +356,7 @@ export async function runTurn({
         ...(capabilities && backend.tools !== 'shapewall' ? { capabilities } : {}),
         ...(mcpServers ? { mcpServers } : {}),
         ...(extensions ? { extensions } : {}),
+        ...(sessionKey ? { sessionKey } : {}),
         signal,
         thread,
       })) {

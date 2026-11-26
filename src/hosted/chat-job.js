@@ -54,10 +54,18 @@ const pageOf = (page) => ({
   viewports: page.viewports,
 })
 
+// The member handle a comment is by, for the machine's own check of whose
+// text a solo or team turn quotes (src/remote/agent-job.js withholdOutside):
+// null for one a token (an agent) wrote or one that was imported, which no
+// handle vouches for.
+const authorHandleOf = (comment) =>
+  !comment.authorAgent && !comment.imported && typeof comment.authorHandle === 'string' ? comment.authorHandle : null
+
 // A comment as a list entry: who, where, what. Never a guest's.
 const commentEntry = (comment) => ({
   id: comment.id,
   author: comment.author || null,
+  authorHandle: authorHandleOf(comment),
   pageId: comment.pageId,
   viewport: comment.viewport,
   status: comment.status,
@@ -86,7 +94,7 @@ function mentionData(ctx, comments, mention) {
       element: { selector: comment.anchor?.selector || null, text: comment.anchor?.text || null },
       page: page ? { id: page.id, title: page.title, path: page.path } : { id: comment.pageId },
       viewport: comment.viewport,
-      comment: { id: comment.id, body: cut(commentText(comment), 600), status: comment.status },
+      comment: { id: comment.id, authorHandle: authorHandleOf(comment), body: cut(commentText(comment), 600), status: comment.status },
     }
   }
   if (mention.kind === 'journey') {
@@ -116,6 +124,7 @@ function mentionData(ctx, comments, mention) {
         id: comment.id,
         page: comment.pageId,
         author: comment.author || null,
+        authorHandle: authorHandleOf(comment),
         body: cut(commentText(comment), 300),
       })),
       more: Math.max(0, theirs.length - JOB_LIMITS.person) || undefined,
@@ -134,8 +143,10 @@ function mentionData(ctx, comments, mention) {
 // machine's own check of why this turn started (src/agent/triggers.js).
 // `narrowing`: the project's (and board's) ceiling under the machine's
 // policy, { maxTier, shell, browser } (agent-policy.js narrowingOf).
-// `trust`: who wrote the text of a fix or comment turn ({ authors, guests },
-// agent-link.js turnTrust), or null: the machine decides the tier from it.
+// `trust`: who wrote the text of the turn ({ authors, guests, thread }), or
+// null. The server adds it after the job is built (agent-link.js
+// turnAuthorship reads the built job, so the tier and the thread's trust
+// count the same text); the machine decides the tier from it.
 export function buildJob({
   ctx,
   turn,

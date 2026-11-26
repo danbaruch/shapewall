@@ -51,7 +51,8 @@ import { loadConfig } from '../config.js'
 import { capabilitySummary, toPrompt } from '../agent/capability-render.js'
 import { turnExtensions } from '../agent/agent-config-folder.js'
 import { FixRefusal, dropFixFolder, dropHeld, finishFix, heldDiff, heldSummary, prepareFix, pushFix, readHeld } from './agent-fix.js'
-import { JobError, TURN_ID_RE, cleanJob, jobConversation } from './agent-job.js'
+import { JobError, TURN_ID_RE, cleanJob, jobConversation, narrowingRefresher, withholdOutside } from './agent-job.js'
+import { narrowPolicy } from './agent-policy-file.js'
 import { RemoteError, badTokenMessage, readBounded } from './remote.js'
 import { ID_RE } from '../config.js'
 import { COMMENT_BODY_MAX } from '../store.js'
@@ -236,6 +237,10 @@ export async function runAgentLink({
   // policyExtensions: { found, names }), read at connect; null: none. Only a
   // turn whose capabilities turn them on gets them.
   extensions = null,
+  // Reads this connection's entry of agent-policy.json again (the same
+  // policy `policy` was made from), or null: the file is not read again.
+  // Before each turn: what it made narrower applies from that turn (Q7 F7).
+  reloadPolicy = null,
 }) {
   const limit = { ...LINK_DEFAULTS, ...limits }
   // The agent every turn runs (capabilities.js `agent`): a connected agent's
@@ -262,6 +267,37 @@ export async function runAgentLink({
   policy.respond = policy.respond === 'thread' ? 'thread' : 'mention'
   if (!editBackend || !fix) policy.approvals = 'none'
   const api = createLinkClient({ origin, token, source, fetchImpl })
+  // The policy file as it is now (agent-policy-file.js narrowPolicy): a
+  // narrower value applies from the next turn and the board is told; a
+  // wider one is said once and waits for agent connect to start again.
+  const widerSaid = new Set()
+  const applyPolicyFile = () => {
+    if (!reloadPolicy) return
+    let fresh = null
+    try {
+      fresh = reloadPolicy()
+    } catch (error) {
+      log(`agent-policy.json was not read again (${error.message}): this link keeps the policy it runs with`)
+      return
+    }
+    if (!fresh || typeof fresh !== 'object') return
+    const { policy: next, narrowed, wider } = narrowPolicy(policy, fresh)
+    if (narrowed.length) {
+      Object.assign(policy, next)
+      policy.respond = policy.respond === 'thread' ? 'thread' : 'mention'
+      if (!editBackend || !fix) policy.approvals = 'none'
+      // No agent config folder any more: no extensions from it either.
+      if (policy.agentConfig === 'none') extensions = null
+      log(`agent-policy.json changed: narrower from this turn on (${narrowed.join(', ')})`)
+      api.hello(helloBody(), signal).catch((error) => log(`agent-policy.json: the board was not told (${error.message})`))
+    }
+    const unsaid = wider.filter((key) => !widerSaid.has(key))
+    for (const key of unsaid) widerSaid.add(key)
+    if (unsaid.length)
+      log(
+        `agent-policy.json changed: ${unsaid.join(', ')} would widen what this agent may do, so it applies once shapewall agent connect starts again`,
+      )
+  }
   const maxTurns = Math.min(Math.max(Number(hello.maxTurns) || 2, 1), 4)
   // turn id -> { controller, done }
   const running = new Map()
@@ -546,6 +582,19 @@ export async function runAgentLink({
       return pushed
     }
 
+    // Above "open", the mentioned comments by anyone the tier was not worked
+    // out from are held back here too (agent-job.js withholdOutside), whatever
+    // the server sent (Q7 F1).
+    const holdOutside = (caps) => {
+      const handles = (boundTrust(job.trust)?.authors || []).map((author) => author.handle)
+      const held = withholdOutside(job, handles)
+      if (held) log(`turn ${id}: ${held} mentioned comment${held === 1 ? '' : 's'} by other people held back (${caps.tier} turn)`)
+    }
+    // The agent session a turn may reuse: one of the same tier, in the same
+    // life of the thread (Q7 F2). A session that read an open turn's text
+    // never carries it into a solo or team turn, and a thread deleted and
+    // started again under its id starts a new session.
+    const sessionKeyOf = (caps) => JSON.stringify([caps.tier, job.turn.generation || null])
     let job = null
     // A fix: its folder (agent-fix.js), and what was allowed in it.
     let prepared = null
@@ -554,6 +603,7 @@ export async function runAgentLink({
     let exec = null
     let commandChanges = Promise.resolve()
     try {
+      applyPolicyFile()
       const fetched = await api.job(id, controller.signal)
       job = cleanJob(fetched?.job)
       if (job.turn.id !== id) throw new JobError('The server sent another turn.')
@@ -564,17 +614,20 @@ export async function runAgentLink({
       // now (a project or board setting tightened mid-turn applies at once).
       // A server that cannot say keeps the narrowing this turn started with,
       // only ever narrowed further.
-      let refreshedAt = Date.now()
-      const refreshNarrowing = async () => {
-        if (Date.now() - refreshedAt < limit.narrowingMs) return
-        refreshedAt = Date.now()
-        const answer = await api.narrowing(id, controller.signal)
-        const now = answer && typeof answer === 'object' ? answer.narrowing : undefined
-        if (now === undefined) throw new Error('the server did not say')
-        job.narrowing = tighter(job.narrowing, now, job.turn.kind === 'comment')
-      }
-      // This machine's own rule: only the person who connected it.
-      if (policy.audience === 'owner' && !job.asker.owner) {
+      // One question at a time, and only an answer counts as asked
+      // (agent-job.js narrowingRefresher, Q7 F5).
+      const refreshNarrowing = narrowingRefresher({
+        everyMs: limit.narrowingMs,
+        ask: () => api.narrowing(id, controller.signal),
+        apply: (now) => {
+          job.narrowing = tighter(job.narrowing, now, job.turn.kind === 'comment')
+        },
+      })
+      // This machine's own rule: only the person who connected it, as this
+      // machine pinned them (the handle it heard at hello), never the
+      // server's `owner` label alone (Q7 F4).
+      const askerIsOwner = job.asker.owner === true && Boolean(ownerHandle) && cleanHandle(job.asker.handle) === ownerHandle
+      if (policy.audience === 'owner' && !askerIsOwner) {
         log(`turn ${id}: refused (this machine takes work from the person who connected it only)`)
         await finish(
           refused('This agent takes questions only from the person who connected it (set on its own machine).', 'agent_audience'),
@@ -713,6 +766,7 @@ export async function runAgentLink({
         if (caps.tier !== 'open') {
           job.context.commentsLeft += job.context.comments.length
           job.context.comments = []
+          holdOutside(caps)
         }
         // `commands` always come from the person's checkout, read again for every check.
         const checkoutConfig = () => {
@@ -765,6 +819,7 @@ export async function runAgentLink({
           })
         fixTurn = {
           capabilities: toPrompt(caps),
+          sessionKey: sessionKeyOf(caps),
           extensions: extensionsOf(caps, job, fix.env),
           workdir: exec ? { ...prepared.workdir, mcpServers: exec.servers } : prepared.workdir,
           gate: {
@@ -810,8 +865,9 @@ export async function runAgentLink({
         if (caps.tier !== 'open') {
           job.context.commentsLeft += job.context.comments.length
           job.context.comments = []
+          holdOutside(caps)
         }
-        fixTurn = { capabilities: toPrompt(caps), extensions: extensionsOf(caps, job, answerEnv) }
+        fixTurn = { capabilities: toPrompt(caps), sessionKey: sessionKeyOf(caps), extensions: extensionsOf(caps, job, answerEnv) }
         if (answerConfig?.dir) {
           const checkoutConfig = () => {
             if (!answerConfig.file) return answerConfig

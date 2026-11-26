@@ -718,74 +718,36 @@ export function mountAgentLink(
           user: userId,
         })?.handle || null
       : null
-  // The trust block of a fix or comment turn (src/agent/capabilities.js
-  // cleanTrust): every author whose text can reach the turn, each as { handle,
-  // owner, member }. A superset, never fewer: the comment's author and the
-  // author of every reply (the job keeps only the agent's audience, but a
-  // reply left out still counts here), and the person messages of the
-  // thread. A reply by another token (another agent) is an author without a
-  // handle, so such a turn is never above "open". Guest text never enters a
-  // job, so `guests` is false: said explicitly, as the machine reads a
-  // missing flag as guests. The machine decides the tier, and pins who "the
-  // owner" is to the handle it heard at hello.
-  function turnTrust(req, ctx, row, rows, inAudience) {
-    const number = Number(/^comment-(\d+)$/.exec(row.thread_id)?.[1] || 0)
-    const users = new Set()
-    let unknown = false
-    let stored = null
-    try {
-      stored = number ? ctx.comments.get(number) : null
-    } catch {
-      stored = null
-    }
-    if (stored) {
-      if (stored.author_user_id) users.add(stored.author_user_id)
-      else if (!stored.author_share_id) unknown = true
-      let replies = []
-      try {
-        replies = JSON.parse(stored.replies || '[]')
-      } catch {
-        replies = []
-      }
-      for (const reply of Array.isArray(replies) ? replies : []) {
-        if (reply?.share) continue
-        if (reply?.user) users.add(reply.user)
-        else if (reply?.token !== req.token.id) unknown = true
-      }
-    }
-    for (const message of rows) {
-      if (message.role === 'user' && inAudience(message.author_user_id)) users.add(message.author_user_id)
-      // Another agent's answer in the thread reaches this turn as its history: an author without a handle.
-      else if (message.role === 'assistant' && message.agent_id && message.agent_id !== req.agent.id) unknown = true
-    }
-    const authors = [...users].map((user) => {
-      const member = Boolean(req.t.get('SELECT 1 FROM memberships WHERE workspace_id = :ws AND user_id = :user', { user }))
-      return { handle: member ? handleOf(req, user) : null, owner: member && user === req.agent.created_by, member }
-    })
-    if (unknown) authors.push({ handle: null, owner: false, member: false })
-    return authors.length ? { authors, guests: false } : null
-  }
-
-  // Whose comment text a built job carries (thread trust, src/agent/thread-trust.js):
-  // the thread's own comment and its replies, and every comment a mention
-  // stands for. A comment by a member is a `person` event with their user
-  // id; one by a token, an import or nobody known is `outside`. Share link
-  // guests' text never enters a job. The board's open comments listed in
-  // the job are left out here: the machine drops them from every turn above
-  // "open" (src/remote/agent-link.js), and only such a turn gets extensions.
-  function jobTrustEvents(req, ctx, row, job) {
+  // Who wrote this turn: the one answer both the turn's tier (the trust
+  // block's `authors`, capabilities.js cleanTrust) and the thread's trust
+  // state (thread-trust.js, extensions) read, so the two can never disagree
+  // about whose text reached the agent (Q7 F1). A list of thread-trust
+  // events, a superset of the text the job carries, never fewer:
+  //   - the thread's own comment and every reply to it (a reply the job
+  //     leaves out still counts), whether the job could read it or not
+  //   - every comment a mention in the job stands for: its id, the comment
+  //     in its data, and each of a person mention's open comments (an older
+  //     message's mention comes without its data: its id still names it)
+  //   - the person messages of the thread in the agent's audience (the only
+  //     ones the job carries), and another agent's answer there (`agent`)
+  // A comment or reply by a member is a `person` event with their user id;
+  // one by another token (an agent), an import or nobody known is
+  // `outside`. A share link guest's text never enters a job. The board's
+  // open comments listed in the job are left out: the machine drops them
+  // from every turn above "open" (src/remote/agent-link.js).
+  function turnAuthorship(req, ctx, row, rows, job, inAudience) {
     const events = []
     const ids = new Set()
+    const threadNumber = Number(/^comment-(\d+)$/.exec(row.thread_id)?.[1] || 0)
+    if (threadNumber) ids.add(threadNumber)
     const context = job?.context || {}
     if (context.comment?.id) ids.add(Number(context.comment.id))
     for (const message of Array.isArray(job?.messages) ? job.messages : []) {
       for (const mention of Array.isArray(message.mentions) ? message.mentions : []) {
-        const data = mention.data || {}
-        // An older message's mention comes without its data (chat-job.js
-        // gives it to the newest few only): its id still names the comment.
+        const data = mention?.data || {}
         if (['comment', 'element'].includes(mention?.kind) && mention.id !== undefined) ids.add(Number(mention.id))
         if (data.comment?.id) ids.add(Number(data.comment.id))
-        for (const item of Array.isArray(data.openComments) ? data.openComments : []) ids.add(Number(item.id))
+        for (const item of Array.isArray(data.openComments) ? data.openComments : []) ids.add(Number(item?.id))
       }
     }
     for (const id of ids) {
@@ -802,7 +764,7 @@ export function mountAgentLink(
       const person = stored.author_user_id && !stored.author_token_id && !stored.imported && !stored.imported_by
       events.push(person ? { kind: 'person', id: stored.author_user_id } : { kind: 'outside' })
       // The thread's own comment reaches the turn with its replies.
-      if (id !== Number(context.comment?.id)) continue
+      if (id !== threadNumber && id !== Number(context.comment?.id)) continue
       let replies = []
       try {
         replies = JSON.parse(stored.replies || '[]')
@@ -815,17 +777,48 @@ export function mountAgentLink(
         else if (reply?.token !== req.token.id) events.push({ kind: 'outside' })
       }
     }
+    for (const message of rows) {
+      if (message.role === 'user' && inAudience(message.author_user_id)) events.push({ kind: 'person', id: message.author_user_id })
+      // Another agent's answer in the thread reaches this turn as its history.
+      else if (message.role === 'assistant' && message.agent_id && message.agent_id !== req.agent.id)
+        events.push({ kind: 'agent', own: false })
+    }
     return events
+  }
+  // One author of the trust block from a user id: { handle, owner, member }.
+  const authorOf = (req, user) => {
+    const member = Boolean(req.t.get('SELECT 1 FROM memberships WHERE workspace_id = :ws AND user_id = :user', { user }))
+    return { handle: member ? handleOf(req, user) : null, owner: member && user === req.agent.created_by, member }
+  }
+  const NOBODY = Object.freeze({ handle: null, owner: false, member: false })
+  // The trust block of a fix, comment or chat turn, from turnAuthorship and
+  // the thread's trust state after it (kept: a thread that ever carried
+  // someone's text stays so, Q7 F2). Its authors are every person of this
+  // turn and every person the thread ever carried (pruned messages and all),
+  // and an author without a handle when the thread is tainted or this turn
+  // carries text nobody can vouch for: such a turn is never above "open".
+  // Guest text never enters a job, so `guests` is false: said explicitly,
+  // as the machine reads a missing flag as guests. The machine decides the
+  // tier, and pins who "the owner" is to the handle it heard at hello.
+  // null: no author at all (the machine reads the turn as "open").
+  function turnTrust(req, events, state) {
+    const users = new Set()
+    let outside = state.tainted === true
+    for (const event of events) {
+      if (event.kind === 'person' && typeof event.id === 'string') users.add(event.id)
+      else outside = true
+    }
+    for (const user of state.authors) users.add(user)
+    const authors = [...users].map((user) => authorOf(req, user))
+    if (outside) authors.push({ ...NOBODY })
+    return authors.length ? { authors, guests: false, thread: threadTrustBlock(req, state) } : null
   }
   // The thread's trust state as the machine reads it (capabilities.js
   // cleanThreadTrust): tainted, and each author as { handle, owner, member }.
   function threadTrustBlock(req, state) {
     return {
       tainted: state.tainted === true,
-      authors: state.authors.map((user) => {
-        const member = Boolean(req.t.get('SELECT 1 FROM memberships WHERE workspace_id = :ws AND user_id = :user', { user }))
-        return { handle: member ? handleOf(req, user) : null, owner: member && user === req.agent.created_by, member }
-      }),
+      authors: state.authors.map((user) => authorOf(req, user)),
     }
   }
 
@@ -874,9 +867,6 @@ export function mountAgentLink(
           agent: req.agent,
           rows,
           respond: threadRespond(thread),
-          // Who wrote the text of the turn (the machine works out its tier from it).
-          // Chat turns too (1.4.0): a solo chat turn may run read-style commands and the browser.
-          trust: ['fix', 'comment', 'chat'].includes(row.kind) ? turnTrust(req, ctx, row, rows, inAudience) : null,
           // The project's and this board's ceiling under the machine's (agent-policy.js narrowingOf).
           narrowing: narrowingOf(req.t, req.project.id, row.board_id),
           // The same rule as sending it a comment: in its audience, and
@@ -964,13 +954,21 @@ export function mountAgentLink(
         chat.interrupt(req.t, row, { message: error.message, agentName: req.agent.name })
         throw new HttpError(409, error.code, error.message)
       }
-      // The thread's trust, with the comment text this job carries counted in
-      // (kept: a thread that ever carried it stays so). No trust block: the
-      // machine reads the thread as tainted.
-      if (job.trust) {
-        const state = store.trust(req.project.id, row.board_id, row.thread_id, jobTrustEvents(req, ctx, row, job))
-        job.trust = { ...job.trust, thread: threadTrustBlock(req, state) }
+      // Who wrote the text of the turn (the machine works out its tier from
+      // it), and the thread's trust with this job's text counted in: one
+      // answer for both (turnAuthorship). Chat turns too (1.4.0): a solo chat
+      // turn may run read-style commands and the browser. No trust block:
+      // the machine reads the turn as "open" and the thread as tainted.
+      if (['fix', 'comment', 'chat'].includes(row.kind)) {
+        const events = turnAuthorship(req, ctx, row, rows, job, inAudience)
+        const state = store.trust(req.project.id, row.board_id, row.thread_id, events)
+        const trust = turnTrust(req, events, state)
+        if (trust) job.trust = trust
       }
+      // Which life of the thread this is: a thread deleted and started again
+      // under the same id is another one, and the machine starts its agent
+      // session afresh for it (acp.js sessionKey).
+      if (thread?.created_at) job.turn.generation = String(thread.created_at).slice(0, 40)
       if (Buffer.byteLength(JSON.stringify(job)) > FRAME_LIMITS.jobBytes)
         throw new HttpError(413, 'job_too_large', 'This conversation is too large to send to the agent. Start a new chat.')
       // The process that fetches the job is the one that answers it.

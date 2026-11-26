@@ -318,7 +318,7 @@ test('a job is checked on the machine, and every piece of board text is quoted a
     () => cleanJob(job({ turn: { id: TURN, board: 'sample', thread: 'comment-2', kind: 'fix', comment: 3 } })),
     /another thread/,
   )
-  assert.deepEqual(Object.keys(cleaned.turn).sort(), ['board', 'comment', 'id', 'kind', 'thread', 'trigger'])
+  assert.deepEqual(Object.keys(cleaned.turn).sort(), ['board', 'comment', 'generation', 'id', 'kind', 'thread', 'trigger'])
   assert.deepEqual(Object.keys(cleaned.messages[0]).sort(), ['asked', 'author', 'files', 'id', 'mentions', 'role', 'text'])
   // A "system" message from the server is dropped; a huge text is cut.
   const padded = cleanJob(

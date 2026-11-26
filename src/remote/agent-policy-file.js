@@ -414,3 +414,81 @@ export function describeMachinePolicy(policy) {
   )
   return [...lines, ...respond]
 }
+
+// ---- Live narrowing (Q7 F7) ----
+
+// A running `shapewall agent connect` reads the file again before each
+// turn: what `agent set` (or a hand edit) made narrower applies at once,
+// what it made wider waits for the next connect, so a change to the file
+// alone never widens a link that is already running. For each key, the
+// narrower of the two, by these orders (narrowest first):
+const ORDERS = {
+  audience: ['owner', 'server'],
+  approvals: ['none', 'owner', 'admins'],
+  instructions: ['none', 'project', 'all'],
+  respond: ['mention', 'thread'],
+  shell: ['off', 'commands', 'sandboxed'],
+  shellNetwork: ['none', 'registries', 'open'],
+  commandApproval: ['always', 'tier'],
+  browser: ['off', 'on'],
+}
+// true is the wider value of these.
+const FLAGS = ['trustTeamShell', 'shellUnsandboxed', 'browserProfileTeam', 'browserNoSandbox']
+// Lists: only what both allow.
+const LISTS = ['commands', 'auto', 'allowPaths', 'browserAllow', 'extensionsFor', 'allowTool']
+// A value or nothing (null): nothing is the narrower; another value waits.
+const NULLABLE = ['remote', 'browserAuth', 'browserProfile']
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+
+// -> { policy, narrowed: [keys], wider: [keys] }. `current` is the policy
+// the link runs with, `fresh` the file as read now (cleanMachinePolicy).
+export function narrowPolicy(current, fresh) {
+  const policy = { ...current }
+  const narrowed = []
+  const wider = []
+  const take = (key, value) => {
+    if (same(value, current[key])) return
+    policy[key] = value
+    narrowed.push(key)
+  }
+  for (const key of Object.keys(fresh || {})) {
+    const now = current[key]
+    const next = fresh[key]
+    if (same(now, next)) continue
+    if (ORDERS[key]) {
+      const order = ORDERS[key]
+      const a = order.indexOf(now)
+      const b = order.indexOf(next)
+      if (b < 0) continue
+      if (a < 0 || b < a) take(key, next)
+      else wider.push(key)
+    } else if (FLAGS.includes(key)) {
+      if (next === false) take(key, false)
+      else wider.push(key)
+    } else if (LISTS.includes(key)) {
+      const both = (Array.isArray(now) ? now : []).filter((item) => Array.isArray(next) && next.includes(item))
+      if (Array.isArray(next) && next.some((item) => !both.includes(item))) wider.push(key)
+      take(key, both)
+    } else if (NULLABLE.includes(key)) {
+      if (next === null) take(key, null)
+      else wider.push(key)
+    } else if (key === 'handoffHops') {
+      if (Number.isInteger(next) && next < now) take(key, next)
+      else wider.push(key)
+    } else if (key === 'trustTeam') {
+      // "none" < a list < "members".
+      if (next === 'none') take(key, 'none')
+      else if (Array.isArray(next) && now === 'members') take(key, next)
+      else if (Array.isArray(next) && Array.isArray(now)) {
+        const both = now.filter((handle) => next.includes(handle))
+        if (next.some((handle) => !both.includes(handle))) wider.push(key)
+        take(key, both.length ? both : 'none')
+      } else wider.push(key)
+    } else if (key === 'agentConfig') {
+      // No folder at all is the narrower; another folder waits.
+      if (next === 'none') take(key, 'none')
+      else wider.push(key)
+    } else wider.push(key)
+  }
+  return { policy, narrowed, wider }
+}
