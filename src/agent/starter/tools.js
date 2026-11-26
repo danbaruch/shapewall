@@ -1,7 +1,17 @@
 // The starter agent's tools, run inside the container. A fixed set: read,
-// search and edit files in the worktree, run the configured test command,
-// `shapewall capture`, reply on the comment, set its status, and (only with
-// the person's approval of each command, on the board) run a shell command.
+// search and edit files in the worktree, run the configured test command and
+// the project's other named commands (`commands` in the checkout's
+// shapewall.config.json: build, dev, lint, ...; never read from the
+// worktree), the throwaway browser (src/agent/agent-browser.js, limited to
+// what the host allowed plus the dev server this run started), `shapewall
+// capture`, reply on the comment, set its status, and (only with the person's
+// approval of each command, on the board) run a shell command.
+//
+// A named command runs code from the project, so it asks a person first
+// when the agent changed a file it depends on (testInput, its `inputs`), when
+// a shell command ran, when a file it depends on changed since the run
+// started, or on every run when someone outside the trusted people wrote in
+// the comment (needsCard, from the resolved capabilities).
 //
 // Every path goes through the ACP bridge's sandbox (src/agent/acp/sandbox.js):
 // resolved after symlinks, refused outside the worktree, and writes refused
@@ -10,10 +20,15 @@
 // inner one, so a tool call that names a file outside is refused, not tried.
 
 import fs from 'node:fs'
+import net from 'node:net'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import * as z from 'zod'
 import { createSandbox, inside } from '../acp/sandbox.js'
+import { inputsDigest } from '../command-approvals.js'
+import { ownsPort } from '../dev-server.js'
+import { browserTools } from '../agent-browser.js'
 
 export const TOOL_OUTPUT_MAX = 16000
 const READ_CHARS_MAX = 100000
@@ -34,6 +49,122 @@ export function testInput(file, testCommand = []) {
     if (!/[/\\]|\.(c|m)?[jt]s$|\.(py|sh|rb|pl)$/.test(part) || path.isAbsolute(part)) return false
     return path.posix.normalize(part.replace(/\\/g, '/')).replace(/^\.\//, '') === file
   })
+}
+
+// A project-relative glob from a command's `inputs` ("test/**", "src/*.js")
+// as a RegExp; the same reading as src/agent/command-approvals.js.
+function globRe(glob) {
+  let out = ''
+  for (let index = 0; index < glob.length; index += 1) {
+    const char = glob[index]
+    if (char === '*' && glob[index + 1] === '*') {
+      if (glob[index + 2] === '/') {
+        out += '(?:.*/)?'
+        index += 2
+      } else {
+        out += '.*'
+        index += 1
+      }
+    } else if (char === '*') out += '[^/]*'
+    else if (char === '?') out += '[^/]'
+    else out += char.replace(/[.+^${}()|[\]\\]/g, '\\$&')
+  }
+  return new RegExp(`^${out}$`)
+}
+
+// Whether `file` (project-relative) decides what a named command runs: a
+// manifest, lockfile or config (testInput), a file its argv names, or one
+// its `inputs` list.
+export function commandInput(file, command) {
+  if (testInput(file, command.argv)) return true
+  return Array.isArray(command.inputs) && command.inputs.some((glob) => typeof glob === 'string' && globRe(glob).test(file))
+}
+
+export const PORT_TOKEN = '$PORT'
+const NAMED_ARGS_MAX = 20
+const NAMED_ARG_BYTES = 200
+const DEV_READY_MS = 60_000
+
+// The named commands a run gets, as the host sends them (from the checkout's
+// config, kept to what the resolved capabilities allow), checked again here:
+// [{ name, argv, inputs, mutating, args, ready, needsCard }].
+export function cleanTaskCommands(raw) {
+  if (!Array.isArray(raw)) return []
+  const out = []
+  for (const item of raw.slice(0, 20)) {
+    if (!item || typeof item !== 'object' || !/^[a-z][a-z0-9-]{0,31}$/.test(item.name)) continue
+    if (!Array.isArray(item.argv) || !item.argv.length || item.argv.some((part) => typeof part !== 'string')) continue
+    if (out.some((known) => known.name === item.name)) continue
+    out.push({
+      name: item.name,
+      argv: [...item.argv],
+      inputs: Array.isArray(item.inputs) ? item.inputs.filter((glob) => typeof glob === 'string') : null,
+      mutating: item.mutating !== false,
+      args: item.args === true,
+      ready: typeof item.ready === 'string' ? item.ready : null,
+      // Anything but an explicit false asks every time.
+      needsCard: item.needsCard !== false,
+    })
+  }
+  return out
+}
+
+// A command that serves (the app's dev server): `dev`, or one with a ready URL.
+const serves = (command) => command.name === 'dev' || Boolean(command.ready)
+
+// A free port on 127.0.0.1 inside the container, for a dev server.
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer()
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address()
+      server.close(() => resolve(port))
+    })
+  })
+}
+
+// One plain HTTP request to 127.0.0.1:port, without any proxy (the
+// container's proxy variables would send fetch to the egress proxy).
+// -> the status code, or null when nothing answers yet.
+function probeHttp(port, pathname = '/') {
+  return new Promise((resolve) => {
+    const socket = net.connect({ host: '127.0.0.1', port })
+    let data = ''
+    const done = (value) => {
+      socket.destroy()
+      resolve(value)
+    }
+    socket.setTimeout(2000, () => done(null))
+    socket.once('error', () => done(null))
+    socket.on('connect', () => socket.write(`GET ${pathname} HTTP/1.0\r\nHost: 127.0.0.1:${port}\r\nConnection: close\r\n\r\n`))
+    socket.on('data', (chunk) => {
+      data += chunk
+      const match = /^HTTP\/\d(?:\.\d)? (\d{3})/.exec(data)
+      if (match) done(Number(match[1]))
+      else if (data.length > 1024) done(null)
+    })
+    socket.on('end', () => done(null))
+  })
+}
+
+// The path of a command's ready URL ($PORT filled in), else "/".
+function readyPath(ready, port) {
+  if (!ready) return '/'
+  try {
+    const url = new URL(ready.split(PORT_TOKEN).join(String(port)))
+    return `${url.pathname}${url.search}`
+  } catch {
+    return '/'
+  }
+}
+
+// Turns an MCP-style zod input shape (agent-browser.js) into the JSON schema
+// a model's tool spec takes.
+function jsonSchema(shape) {
+  const schema = z.toJSONSchema(z.object(shape).strict())
+  delete schema.$schema
+  return schema
 }
 
 export const REPLY_MAX = 2000
@@ -147,12 +278,18 @@ const stringArg = (args, name, { optional = false, max = 4096 } = {}) => {
   return value
 }
 
-// createTools({ root, rpc, testCommand, capture, shell, remainingMs, signal })
-// -> { specs, run(call) -> { ok, text, label, detail }, state }
+// createTools({ root, rpc, testCommand, commands, browser, capture, shell, remainingMs, signal })
+// -> { specs, run(call) -> { ok, text, label, detail }, state, markBase(), close() }
+//   commands  the named commands (cleanTaskCommands); `test` is run_tests,
+//             the others run_named_command. Without it, `testCommand` (argv)
+//             is the one command, run without a card while its inputs hold.
+//   browser   an agent browser (createAgentBrowser) or null: the browser_* tools.
 export function createTools({
   root,
   rpc,
   testCommand = null,
+  commands = null,
+  browser = null,
   capture = false,
   projectDir = '.',
   shell = false,
@@ -161,6 +298,183 @@ export function createTools({
 }) {
   const sandbox = createSandbox({ root })
   const state = { replies: 0, status: null, statusNote: null, changed: new Set(), shellRan: false, captureUnavailable: false }
+  const named = commands
+    ? cleanTaskCommands(commands)
+    : testCommand
+      ? cleanTaskCommands([{ name: 'test', argv: testCommand, inputs: null, mutating: true, needsCard: false }])
+      : []
+  const testEntry = named.find((command) => command.name === 'test') || null
+  const others = named.filter((command) => command.name !== 'test')
+  // What each command's inputs were when the run started (after the setup
+  // command): a change since, by anything that ran, asks again.
+  const base = new Map()
+  const markBase = () => {
+    base.clear()
+    for (const command of named) {
+      try {
+        base.set(command.name, inputsDigest(sandbox.root, command))
+      } catch {
+        /* no base: it asks */
+      }
+    }
+  }
+  markBase()
+  let devServer = null
+
+  // Whether `command` (with `argv`, the line it will run) may run now; asks
+  // the person through the approve call when it must. -> null, or the refusal.
+  const mayRun = async (command, argv) => {
+    const inputs = [...state.changed].filter((file) => commandInput(file, { ...command, argv }))
+    let digestChanged = false
+    try {
+      digestChanged = !base.has(command.name) || base.get(command.name) !== inputsDigest(sandbox.root, { ...command, argv })
+    } catch {
+      digestChanged = true
+    }
+    const reasons = []
+    if (command.needsCard)
+      reasons.push('Someone outside the people trusted on this board wrote in this comment, so each command run is asked.')
+    if (inputs.length)
+      reasons.push(
+        `The agent changed ${inputs.slice(0, 4).join(', ')}${inputs.length > 4 ? ', ...' : ''}, which decide${inputs.length === 1 ? 's' : ''} what the ${command.name === 'test' ? 'test command' : `"${command.name}" command`} runs.`,
+      )
+    else if (state.shellRan)
+      reasons.push(
+        `An approved command ran earlier in this run and may have changed what the ${command.name === 'test' ? 'test command' : `"${command.name}" command`} runs.`,
+      )
+    else if (digestChanged) reasons.push(`A file the "${command.name}" command depends on changed since the run started.`)
+    if (!reasons.length) return null
+    const why = reasons.join(' ')
+    if (!shell) return { text: `Not run: ${why} That needs a person's approval, which this run does not have.`, detail: 'needs approval' }
+    const answer = await rpc.call('approve', { command: argv.join(' '), reason: why })
+    if (!answer?.approved) return { text: `Not run: ${answer?.error || 'the person did not approve it'}.`, detail: 'not approved' }
+    return null
+  }
+
+  // The argv of a named command with the agent's args and the dev port, or a ToolError.
+  const namedArgv = (command, args, port) => {
+    let extra = []
+    if (args !== undefined && args !== null) {
+      if (!command.args) throw new ToolError(`"${command.name}" takes no arguments (its config line is run as it is)`)
+      if (
+        !Array.isArray(args) ||
+        args.length > NAMED_ARGS_MAX ||
+        args.some((item) => typeof item !== 'string' || !item || item.length > NAMED_ARG_BYTES || item.includes('\0'))
+      )
+        throw new ToolError(`args: up to ${NAMED_ARGS_MAX} strings of up to ${NAMED_ARG_BYTES} characters`)
+      extra = args
+    }
+    let argv = [...command.argv, ...extra]
+    if (argv.some((part) => part.includes(PORT_TOKEN))) {
+      if (!port) throw new ToolError(`"${command.name}" needs the dev server's port: start the dev server first`)
+      argv = argv.map((part) => part.split(PORT_TOKEN).join(String(port)))
+    }
+    return argv
+  }
+
+  // Starts a serving command in the background on a free port in the
+  // container, waits until it answers, and gives the agent browser that one
+  // port (only when the listener there is the server's own process group).
+  const startServer = async (command, args) => {
+    if (devServer && !devServer.exited)
+      return {
+        text: `"${devServer.name}" is already running on http://127.0.0.1:${devServer.port}. Stop it with stop_dev_server first.`,
+        detail: 'already running',
+      }
+    const port = await freePort()
+    const argv = namedArgv(command, args, port)
+    const refused = await mayRun(command, argv)
+    if (refused) return { ...refused, ok: false }
+    let child
+    try {
+      child = spawn(argv[0], argv.slice(1), {
+        cwd: sandbox.root,
+        env: { ...commandEnv(), PORT: String(port) },
+        stdio: ['ignore', 'pipe', 'pipe'],
+        shell: false,
+        detached: true,
+      })
+    } catch (error) {
+      return { text: `"${command.name}" could not start: ${error.message}`, detail: 'could not start', ok: false }
+    }
+    const server = { name: command.name, port, child, output: '', exited: false, code: null, token: null }
+    const collect = (chunk) => {
+      server.output += chunk
+      if (server.output.length > COMMAND_OUTPUT_MAX * 2) server.output = server.output.slice(-COMMAND_OUTPUT_MAX)
+    }
+    child.stdout.on('data', collect)
+    child.stderr.on('data', collect)
+    const exited = new Promise((resolve) => {
+      child.once('error', (error) => {
+        server.output += `could not start: ${error.code || error.message}`
+        resolve()
+      })
+      child.once('close', (code) => resolve(code))
+    }).then((code) => {
+      server.exited = true
+      server.code = code ?? null
+    })
+    server.stop = async () => {
+      if (server.token) browser?.revokeSpawned(server.token)
+      server.token = null
+      if (!server.exited) {
+        try {
+          process.kill(-child.pid, 'SIGTERM')
+        } catch {
+          /* gone */
+        }
+        const killer = setTimeout(() => {
+          try {
+            process.kill(-child.pid, 'SIGKILL')
+          } catch {
+            /* gone */
+          }
+        }, 3000)
+        await exited
+        clearTimeout(killer)
+      }
+    }
+    devServer = server
+    const until = Date.now() + Math.min(DEV_READY_MS, remainingMs())
+    let ready = false
+    while (!ready && !server.exited && Date.now() < until && !signal?.aborted) {
+      const status = await probeHttp(port, readyPath(command.ready, port))
+      if (status !== null && status < 500) ready = true
+      else await new Promise((resolve) => setTimeout(resolve, 250))
+    }
+    if (!ready) {
+      const why = server.exited ? `exited (${server.code === null ? 'no exit code' : `exit ${server.code}`})` : 'did not answer in time'
+      await server.stop()
+      devServer = null
+      return { text: `"${command.name}" ${why}.\n${tail(server.output)}`, detail: why, ok: false }
+    }
+    let browserText = ''
+    if (browser && !browser.disposed) {
+      if (!ownsPort(port, child.pid))
+        browserText =
+          ' Your browser tools do not get it: Shapewall could not check that the server is what listens on 127.0.0.1 there (bind 127.0.0.1:$PORT).'
+      else {
+        try {
+          server.token = browser.registerSpawned(port)
+          await browser.allowSessionOrigin(server.token)
+          browserText = ` Your browser tools can open http://127.0.0.1:${port}.`
+        } catch (error) {
+          server.token = null
+          browserText = ` Your browser tools do not get it: ${error.message}`
+        }
+      }
+    }
+    return {
+      text: `"${command.name}" is running on http://127.0.0.1:${port} in the sandbox.${browserText}\n${tail(server.output, 2000)}`,
+      detail: `running on port ${port}`,
+    }
+  }
+  const stopServer = async () => {
+    const server = devServer
+    devServer = null
+    if (server) await server.stop()
+    return server
+  }
 
   // A path from the model, relative to the worktree. Small models often
   // write the mount point into it: "/work/src/x", and (when the repo has no
@@ -372,33 +686,93 @@ export function createTools({
         return { text: `Edited ${rel(target)}.`, detail: rel(target) }
       },
     },
-    testCommand && {
+    testEntry && {
       name: 'run_tests',
       label: 'Run the tests',
-      description: `Run the project's test command (${testCommand.join(' ')}) and get the result with the end of its output.`,
+      description: `Run the project's test command (${testEntry.argv.join(' ')}) and get the result with the end of its output.`,
       parameters: { type: 'object', properties: {}, additionalProperties: false },
       async run() {
         // The test command runs code from the project, so changing what it
         // runs is changing what runs: then a person approves it first.
-        const inputs = [...state.changed].filter((file) => testInput(file, testCommand))
-        if (inputs.length || state.shellRan) {
-          const why = inputs.length
-            ? `The agent changed ${inputs.slice(0, 4).join(', ')}${inputs.length > 4 ? ', ...' : ''}, which decide${inputs.length === 1 ? 's' : ''} what the test command runs.`
-            : 'An approved command ran earlier in this run and may have changed what the test command runs.'
-          if (!shell)
-            return {
-              text: `Not run: ${why} That needs a person's approval, which this run does not have.`,
-              detail: 'needs approval',
-              ok: false,
-            }
-          const answer = await rpc.call('approve', { command: testCommand.join(' '), reason: why })
-          if (!answer?.approved)
-            return { text: `Not run: ${answer?.error || 'the person did not approve it'}.`, detail: 'not approved', ok: false }
-        }
-        const result = await runProgram(testCommand, { cwd: sandbox.root, timeoutMs: Math.min(COMMAND_MS_MAX, remainingMs()), signal })
+        const argv = namedArgv(testEntry, null, devServer && !devServer.exited ? devServer.port : null)
+        const refused = await mayRun(testEntry, argv)
+        if (refused) return { ...refused, ok: false }
+        const result = await runProgram(argv, { cwd: sandbox.root, timeoutMs: Math.min(COMMAND_MS_MAX, remainingMs()), signal })
         return commandResult('The tests', result)
       },
     },
+    others.length > 0 && {
+      name: 'run_named_command',
+      label: 'Run a named command',
+      description: `Run one of the project's named commands (${others.map((command) => command.name).join(', ')}), from its shapewall.config.json, without a shell. ${others.some(serves) ? `${others.filter(serves).map((command) => `"${command.name}"`)[0]} starts the app's dev server in the background on a port in the sandbox and gives your browser tools that address; stop it with stop_dev_server. ` : ''}Changing a file a command depends on asks a person on the board first.`,
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', enum: others.map((command) => command.name) },
+          args: {
+            type: 'array',
+            items: { type: 'string', maxLength: NAMED_ARG_BYTES },
+            maxItems: NAMED_ARGS_MAX,
+            description: 'Extra arguments, only for a command whose config says "args": true',
+          },
+        },
+        required: ['name'],
+        additionalProperties: false,
+      },
+      async run(args) {
+        const name = stringArg(args, 'name', { max: 64 })
+        // Only the names the host sent (the checkout's config, as the
+        // capabilities allow): never a name or a line from the worktree.
+        const command = others.find((item) => item.name === name)
+        if (!command)
+          throw new ToolError(
+            `"${name.slice(0, 64)}" is not a command you can run here. You can run: ${[...(testEntry ? ['test (run_tests)'] : []), ...others.map((item) => item.name)].join(', ')}`,
+          )
+        if (serves(command)) return startServer(command, args.args)
+        const argv = namedArgv(command, args.args, devServer && !devServer.exited ? devServer.port : null)
+        const refused = await mayRun(command, argv)
+        if (refused) return { ...refused, ok: false }
+        const result = await runProgram(argv, { cwd: sandbox.root, timeoutMs: Math.min(COMMAND_MS_MAX, remainingMs()), signal })
+        return commandResult(`"${command.name}"`, result)
+      },
+    },
+    others.some(serves) && {
+      name: 'stop_dev_server',
+      label: 'Stop the dev server',
+      description: 'Stop the dev server this run started (its address leaves your browser tools).',
+      parameters: { type: 'object', properties: {}, additionalProperties: false },
+      async run() {
+        const server = await stopServer()
+        return server
+          ? { text: `Stopped "${server.name}" (port ${server.port}).\n${tail(server.output, 2000)}`, detail: `stopped ${server.name}` }
+          : { text: 'No dev server is running.', detail: 'none running' }
+      },
+    },
+    // The browser tools, as agent-browser.js defines them, minus the
+    // screenshot (this model reads text only). Page text comes back quoted
+    // as untrusted data.
+    ...(browser
+      ? browserTools(browser)
+          .filter((tool) => tool.name !== 'browser_screenshot')
+          .map((tool) => {
+            const schema = z.object(tool.inputSchema).strict()
+            return {
+              name: tool.name,
+              label: tool.title.slice(0, 60),
+              description: tool.description,
+              parameters: jsonSchema(tool.inputSchema),
+              async run(args) {
+                const parsed = schema.safeParse(args)
+                if (!parsed.success) throw new ToolError(`bad arguments: ${parsed.error.issues.map((issue) => issue.message).join('; ')}`)
+                const result = await tool.handler(parsed.data)
+                const text = (result?.content || [])
+                  .map((item) => (item.type === 'text' ? item.text : `[${item.type} not shown]`))
+                  .join('\n')
+                return { text: text || '(no output)', detail: tool.name, ok: !result?.isError }
+              },
+            }
+          })
+      : []),
     capture && {
       name: 'capture',
       label: 'Capture a page',
@@ -491,6 +865,12 @@ export function createTools({
 
   return {
     state,
+    markBase,
+    // The end of the task: the dev server stops, the browser ends for good.
+    async close() {
+      await stopServer().catch(() => {})
+      await browser?.dispose().catch(() => {})
+    },
     names: TOOLS.map((tool) => tool.name),
     specs: TOOLS.map(({ name, description, parameters }) => ({ name, description, parameters })),
     async run(call) {

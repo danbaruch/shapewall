@@ -23,14 +23,14 @@ export const AGENT_HANDLE = 'agent'
 const AGENT_NAMES = new Set(['agent', 'shapewall', 'shapewall agent', 'starter agent'])
 
 // The identity behind a comment or reply: { name, attested }.
-function identity(item, { hosted }) {
+export function identity(item, { hosted }) {
   if (hosted) return { name: item.authorHandle || item.handle ? trustName(item.authorHandle || item.handle) : null, attested: true }
   return { name: trustName(item.author), attested: false }
 }
 
 // Every agent mark the shared rule knows (src/agent/triggers.js), plus, on a
 // local board, the names agents sign with.
-const byAgent = (item, { hosted }) => isAgentAuthored(item) || (!hosted && AGENT_NAMES.has(trustName(item.author)))
+export const byAgent = (item, { hosted }) => isAgentAuthored(item) || (!hosted && AGENT_NAMES.has(trustName(item.author)))
 
 // gateComment(comment, { trusted: Set, hosted }) ->
 //   { dispatch: true, by, via: 'author' | 'tag', attested }
