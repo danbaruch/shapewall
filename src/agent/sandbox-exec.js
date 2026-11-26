@@ -608,7 +608,8 @@ export async function createCommandSession({
   if (!['sandboxed', 'host', 'host-shell'].includes(mode)) throw new SandboxRefusal('bad_mode', 'Unknown sandbox mode.')
   if (!['registries', 'none'].includes(network))
     throw new SandboxRefusal('bad_network', 'Commands get the package registries or no network.')
-  const tmp = fs.mkdtempSync(path.join(tmpParent || within || os.tmpdir(), '.shapewall-cmd-'))
+  // Real paths: Seatbelt matches them, and /var is a link to /private/var on macOS.
+  const tmp = fs.mkdtempSync(path.join(realpath(tmpParent || within || os.tmpdir()), '.shapewall-cmd-'))
   fs.chmodSync(tmp, 0o700)
   const vendor = runtimeVendorDir()
   const denied = [...new Set([home, ...deniedRoots({ env, within }), ...denyRead.filter((dir) => path.isAbsolute(dir))])]
