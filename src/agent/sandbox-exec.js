@@ -18,7 +18,8 @@
 //              "registries"), or none ("none"). Never a local port: on
 //              Linux each command has its own network namespace, so a dev
 //              server one command starts cannot be reached by the next, and
-//              a host port it did not bind is the person's
+//              a host port it did not bind is the person's. A dev server
+//              gets its own sandbox and one bridged port (dev-server.js)
 //   hidden     the home folder (every spelling of it), the absolute XDG
 //              folders, the shared temp folders (/tmp, $TMPDIR, /var/tmp,
 //              /dev/shm), /run/user/<uid>, /mnt, /media and the other fix
@@ -642,6 +643,8 @@ export async function createCommandSession({
   })
   const list = () => networkList(network)
   let closed = false
+  // Run at close, before the temp goes: the session's dev servers (dev-server.js).
+  const closers = []
   // A command that left the session temp over its cap: emptied (a fresh HOME).
   function capTmp(result) {
     if (sizeOf(tmp, limits.tmpBytes) <= limits.tmpBytes) return result
@@ -694,9 +697,16 @@ export async function createCommandSession({
   function close() {
     if (closed) return
     closed = true
+    for (const fn of closers.splice(0))
+      try {
+        fn()
+      } catch {
+        /* the next one still runs */
+      }
     fs.rmSync(tmp, { recursive: true, force: true })
     if (boxed) releaseSandbox()
   }
   log(`sandbox: ${boxed ? 'OS sandbox' : 'no OS sandbox (a card each)'} in ${real}`)
-  return { root: real, tmp, mode, network, readOnly, denied, run, close }
+  const onClose = (fn) => (closed ? fn() : closers.push(fn))
+  return { root: real, tmp, mode, network, readOnly, denied, run, close, onClose }
 }
