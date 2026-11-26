@@ -30,6 +30,10 @@ and the project uses [Semantic Versioning](https://semver.org/).
   profile folder removed at close, on a crash, on a signal and by the next start after a kill. A recorded login or a Shapewall-made
   profile only where the turn allows it. On a hosted Fix with whose Browser line is on, the `browser_*` tools are in Shapewall's tool
   host beside the commands, their arguments checked against their schemas, and the browser is disposed when the fix ends.
+- On Linux with the OS sandbox, the agent's browser runs inside it: Chromium sees no home folder, writes only its session folder,
+  and reaches only the allowed addresses, through Shapewall's egress proxy (pinned addresses) and then the sandbox runtime's proxy,
+  whose list holds exactly those address:port pairs. A sandboxed start that fails leaves the browser off for the task (unless the
+  machine allows the host start then). macOS, Windows and machines without bubblewrap start it on the host as before.
 - "What it can do": each agent on a project's Agents page (and a local board's Agents page, for its owner) has a card with every
   capability line per place and tier, an on, asks first, off or unknown chip, one sentence, and the command that changes it on the
   agent's machine. A line the project's setting holds says so. The board's agent panel shows the main lines for a fix you ask for.

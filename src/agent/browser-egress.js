@@ -17,9 +17,15 @@
 // says later. Chromium itself never resolves an app hostname (it hands the
 // name to this proxy, and its own resolver maps every other name to "not
 // found").
+import fs from 'node:fs'
 import http from 'node:http'
 import net from 'node:net'
 import dns from 'node:dns'
+import path from 'node:path'
+import { spawn } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
+
+const SELF = fileURLToPath(import.meta.url)
 
 const LOCAL_SUFFIXES = ['.localhost', '.test', '.local', '.internal', '.lan', '.home.arpa']
 // Names that resolve on this machine or its network by design (/etc/hosts,
@@ -125,11 +131,80 @@ export async function pinHost(host, { lookup = dns.promises.lookup } = {}) {
   return { address: list[0] }
 }
 
+// A direct connection to address:port (the host launch).
+export function directDial(address, port) {
+  return new Promise((resolve, reject) => {
+    const out = net.connect({ host: address, port })
+    out.once('connect', () => {
+      out.off('error', reject)
+      resolve(out)
+    })
+    out.once('error', reject)
+  })
+}
+
+const hostLiteral = (address) => (net.isIP(address) === 6 ? `[${address}]` : address)
+
+// The browser inside the OS sandbox: every connection the egress proxy
+// makes goes on through the sandbox runtime's own proxy (srt), as a CONNECT
+// to the PINNED address (an IP literal, never a name, so srt resolves
+// nothing) under the browser's own srt allow list. Two checks of the same
+// list, by two programs. -> dial(address, port) like directDial.
+//   port      srt's proxy on this machine's loopback (SandboxManager.getProxyPort())
+//   username  srt.<base64 of the browser's command id>, password: srt's token
+export function upstreamDialer({ port, username, password, host = '127.0.0.1', timeoutMs = 10_000 }) {
+  const auth = 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64')
+  return (address, targetPort) =>
+    new Promise((resolve, reject) => {
+      const out = net.connect({ host, port })
+      let head = Buffer.alloc(0)
+      const fail = (error) => {
+        out.destroy()
+        reject(error)
+      }
+      const timer = setTimeout(() => fail(new Error('the sandbox proxy did not answer')), timeoutMs)
+      out.once('error', (error) => {
+        clearTimeout(timer)
+        reject(error)
+      })
+      out.once('connect', () => {
+        const where = `${hostLiteral(address)}:${targetPort}`
+        out.write(`CONNECT ${where} HTTP/1.1\r\nHost: ${where}\r\nProxy-Authorization: ${auth}\r\n\r\n`)
+      })
+      const onData = (chunk) => {
+        head = Buffer.concat([head, chunk])
+        const end = head.indexOf('\r\n\r\n')
+        if (end === -1) {
+          if (head.length > 16 * 1024) {
+            clearTimeout(timer)
+            out.off('data', onData)
+            fail(new Error('the sandbox proxy sent no answer header'))
+          }
+          return
+        }
+        clearTimeout(timer)
+        out.off('data', onData)
+        out.pause()
+        const status = /^HTTP\/1\.[01] (\d{3})/.exec(head.subarray(0, end).toString('latin1'))
+        if (!status || status[1] !== '200')
+          return fail(new Error(`the sandbox proxy refused ${address}:${targetPort} (${status?.[1] || 'no status'})`))
+        const rest = head.subarray(end + 4)
+        if (rest.length) out.unshift(rest)
+        out.removeAllListeners('error')
+        resolve(out)
+      }
+      out.on('data', onData)
+    })
+}
+
 // The proxy. `target(host, port, secure)` returns the pinned address to
 // connect to, or null to refuse; secure is true for a CONNECT tunnel (TLS
 // or a WebSocket), false for a plain http request. `onBlock({ url, by })`
-// hears each refusal.
-export async function startEgressProxy({ target, onBlock = () => {} }) {
+// hears each refusal. `dial(address, port)` makes the outgoing connection
+// (directDial, or upstreamDialer inside the OS sandbox). `socketPath`: listen
+// on that Unix socket instead of a loopback port (the sandboxed browser
+// reaches it through bridgeIntoNamespace).
+export async function startEgressProxy({ target, onBlock = () => {}, dial = directDial, socketPath = null }) {
   const sockets = new Set()
   const track = (socket) => {
     sockets.add(socket)
@@ -156,38 +231,60 @@ export async function startEgressProxy({ target, onBlock = () => {} }) {
       if (/^proxy-/i.test(name)) continue
       headers[name] = headers[name] === undefined ? req.rawHeaders[i + 1] : [].concat(headers[name], req.rawHeaders[i + 1])
     }
-    const upstream = http.request(
-      {
-        host: address,
-        port: Number(url.port) || 80,
-        method: req.method,
-        path: url.pathname + url.search,
-        headers,
-        setHost: false,
-        agent: false,
+    req.pause()
+    dial(address, Number(url.port) || 80).then(
+      (out) => {
+        track(out)
+        const upstream = http.request(
+          {
+            method: req.method,
+            path: url.pathname + url.search,
+            headers,
+            setHost: false,
+            // No agent: the request goes on this connection, which ends with it.
+            createConnection: () => out,
+          },
+          (reply) => {
+            res.writeHead(reply.statusCode, reply.statusMessage, reply.rawHeaders)
+            reply.pipe(res)
+          },
+        )
+        upstream.on('error', () => {
+          if (!res.headersSent) res.writeHead(502).end()
+          else res.destroy()
+        })
+        req.pipe(upstream)
+        req.resume()
+        // A dialed connection comes paused (nothing read is lost before here).
+        out.resume()
       },
-      (reply) => {
-        res.writeHead(reply.statusCode, reply.statusMessage, reply.rawHeaders)
-        reply.pipe(res)
+      () => {
+        onBlock({ url: `${url.protocol}//${url.host}${url.pathname}`, by: 'upstream' })
+        if (!res.headersSent) res.writeHead(502).end()
       },
     )
-    upstream.on('error', () => {
-      if (!res.headersSent) res.writeHead(502).end()
-      else res.destroy()
-    })
-    req.pipe(upstream)
   })
   server.on('connection', track)
   const tunnel = (socket, address, port, head, write) => {
-    const out = net.connect({ host: address, port }, () => {
-      write(out)
-      if (head?.length) out.write(head)
-      out.pipe(socket)
-      socket.pipe(out)
-    })
-    track(out)
-    out.on('error', () => socket.destroy())
-    socket.on('error', () => out.destroy())
+    socket.on('error', () => {})
+    dial(address, port).then(
+      (out) => {
+        track(out)
+        out.on('error', () => socket.destroy())
+        socket.on('error', () => out.destroy())
+        socket.on('close', () => out.destroy())
+        if (socket.destroyed) return out.destroy()
+        write(out)
+        if (head?.length) out.write(head)
+        out.pipe(socket)
+        socket.pipe(out)
+        out.resume()
+      },
+      () => {
+        onBlock({ url: `${address}:${port}`, by: 'upstream' })
+        socket.end('HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n')
+      },
+    )
   }
   server.on('connect', (req, socket, head) => {
     const match = /^\[?([^\]]+?)\]?:(\d{1,5})$/.exec(req.url || '')
@@ -232,13 +329,121 @@ export async function startEgressProxy({ target, onBlock = () => {} }) {
   })
   await new Promise((resolve, reject) => {
     server.once('error', reject)
-    server.listen(0, '127.0.0.1', resolve)
+    if (socketPath) {
+      const oldMask = process.umask(0o077)
+      server.listen(socketPath, () => {
+        process.umask(oldMask)
+        resolve()
+      })
+    } else server.listen(0, '127.0.0.1', resolve)
   })
   return {
-    port: server.address().port,
+    port: socketPath ? null : server.address().port,
+    socketPath,
     async close() {
       for (const socket of sockets) socket.destroy()
       await new Promise((resolve) => server.close(() => resolve()))
     },
   }
 }
+
+// ---- Into the sandbox's network namespace (Linux) ----
+//
+// Inside the OS sandbox the browser has a network namespace of its own: no
+// route out, and this machine's loopback is not its loopback. Its proxy
+// setting is 127.0.0.1:PORT in that namespace, where a bridge listens: this
+// file run as a program by `nsenter` in the namespace's user and network
+// namespaces only (the host's files and processes otherwise, so it can reach
+// the egress proxy's Unix socket in a 0700 folder of this process). Not in
+// the sandbox's process tree, never under srt's seccomp filter. The same
+// trust as the dev server bridge (src/agent/dev-server.js), the other way.
+
+const nsOf = (pid, kind) => {
+  try {
+    return fs.readlinkSync(`/proc/${pid}/ns/${kind}`)
+  } catch {
+    return null
+  }
+}
+function onPath(name, env = process.env) {
+  for (const dir of String(env.PATH || '').split(path.delimiter)) {
+    if (!dir || !path.isAbsolute(dir)) continue
+    const file = path.join(dir, name)
+    try {
+      fs.accessSync(file, fs.constants.X_OK)
+      if (fs.statSync(file).isFile()) return file
+    } catch {
+      /* next */
+    }
+  }
+  return null
+}
+
+// Starts the bridge in `namespace` ({ pid, net } of sandboxNamespace()):
+// 127.0.0.1:port there -> `socketPath` here. -> { pid, close() }, or throws.
+export async function bridgeIntoNamespace({ namespace, socketPath, port, timeoutMs = 10_000 }) {
+  const nsenter = onPath('nsenter')
+  if (!nsenter) throw new Error('nsenter (util-linux) is not installed')
+  const bridge = spawn(
+    nsenter,
+    ['-t', String(namespace.pid), '-U', '-n', '--preserve-credentials', process.execPath, SELF, 'ns-bridge', socketPath, String(port)],
+    { stdio: ['pipe', 'pipe', 'pipe'], env: {}, shell: false },
+  )
+  const close = () => {
+    if (bridge.exitCode === null && bridge.signalCode === null) bridge.kill('SIGKILL')
+  }
+  let said = ''
+  bridge.stdout.setEncoding('utf8')
+  bridge.stderr.setEncoding('utf8')
+  bridge.stderr.on('data', (chunk) => (said = (said + chunk).slice(-500)))
+  bridge.on('error', () => {})
+  const ready = await new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), timeoutMs)
+    bridge.stdout.on('data', (chunk) => {
+      if (chunk.includes('ready')) {
+        clearTimeout(timer)
+        resolve(true)
+      }
+    })
+    bridge.once('exit', () => {
+      clearTimeout(timer)
+      resolve(false)
+    })
+  })
+  // The bridge must sit in that very namespace (a pid can be reused).
+  if (!ready || nsOf(bridge.pid, 'net') !== namespace.net || nsOf(namespace.pid, 'net') !== namespace.net) {
+    close()
+    throw new Error(`the bridge into the browser sandbox did not start${said ? `: ${said.trim()}` : ''}`)
+  }
+  return { pid: bridge.pid, close, process: bridge }
+}
+
+// The bridge itself (this file run as a program, inside the namespace).
+function runNamespaceBridge(socketPath, port) {
+  const server = net.createServer((conn) => {
+    conn.pause()
+    const inner = net.connect(socketPath)
+    inner.once('connect', () => {
+      conn.pipe(inner)
+      inner.pipe(conn)
+      conn.resume()
+    })
+    const drop = () => {
+      conn.destroy()
+      inner.destroy()
+    }
+    inner.on('error', drop).on('close', drop)
+    conn.on('error', drop).on('close', drop)
+  })
+  server.listen(Number(port), '127.0.0.1', () => process.stdout.write('ready\n'))
+  server.on('error', (error) => {
+    process.stderr.write(`${error.message}\n`)
+    process.exit(1)
+  })
+  // Gone with Shapewall: its end of stdin closes.
+  process.stdin.on('end', () => process.exit(0))
+  process.stdin.on('close', () => process.exit(0))
+  process.stdin.resume()
+}
+
+if (process.argv[1] === SELF && process.argv[2] === 'ns-bridge') runNamespaceBridge(process.argv[3], process.argv[4])

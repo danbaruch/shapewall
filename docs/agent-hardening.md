@@ -483,6 +483,11 @@ owner has opted in (on a local board these are the defaults; a hosted connection
 Hosted chat answers only: no edits, and on solo turns only the commands marked `"mutating": false` and the browser. No OS sandbox on
 the machine (Windows, no bubblewrap) means no full shell: commands fall back to a card each, and the line says why.
 
+On Linux with the OS sandbox (and `nsenter`), the browser runs inside it too: no home folder, nothing writable but its own session
+folder, and no network but the allowed addresses, checked by Shapewall's proxy and again by the sandbox's. Chromium's own sandbox
+cannot start in there, so the OS sandbox is its boundary. If that start fails, the browser is off for the task. Elsewhere (macOS,
+Windows, no bubblewrap) the browser starts on the machine as before.
+
 **A full shell, or a command that changes files, is an edit power.** Neither is ever on while edits are off. A connected agent
 whose machine says `approvals: "none"` (the default) reads and answers only on every tier: no edits, no named or exact commands, no
 shell, no push. The console card, `agent status` and what `agent connect` prints all say so, and a test holds them to each other.
