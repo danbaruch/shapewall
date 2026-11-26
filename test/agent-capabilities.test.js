@@ -127,7 +127,7 @@ function shapeOf(caps) {
 
 // The expected grant per path, tier and whether an OS sandbox is there.
 // Spelled out, not computed: this is the plan's table (section 3.2 and 3.3).
-function expected(where, tier, box) {
+function expected(where, tier, box, os = 'linux') {
   if (where === 'hosted-chat') {
     return {
       shell: 'off',
@@ -151,9 +151,11 @@ function expected(where, tier, box) {
   }
   // Fix with, comment pickup, the local chat and watch --exec.
   const full = tier === 'solo' && box
+  // Edits without /proc fd checks (macOS and the rest): no commands, no shell (Q7 round 3).
+  const fdChecks = os === 'linux'
   return {
-    shell: full ? 'sandboxed' : 'exact',
-    commands: tier !== 'open' && box ? 'run test,lint' : 'card test,lint',
+    shell: !fdChecks ? 'off' : full ? 'sandboxed' : 'exact',
+    commands: !fdChecks ? 'none' : tier !== 'open' && box ? 'run test,lint' : 'card test,lint',
     browser: true,
     edit: 'copy',
     push: true,
@@ -169,7 +171,7 @@ test('capabilities: every tier x path x platform resolves to the table, fail clo
       for (const [name, platform] of Object.entries(PLATFORMS)) {
         const caps = resolve(tier, where, platform)
         assert.equal(caps.tier, tier, `${where} ${tier} ${name}: tier`)
-        assert.deepEqual(shapeOf(caps), expected(where, tier, sandboxed(platform)), `${where} ${tier} ${name}`)
+        assert.deepEqual(shapeOf(caps), expected(where, tier, sandboxed(platform), platform?.os ?? null), `${where} ${tier} ${name}`)
         // Always, everywhere.
         assert.equal(caps.browser.realChrome, false)
         assert.equal(caps.selfEdit, false)

@@ -8,11 +8,12 @@ import path from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { createSandbox, markRunning } from '../src/agent/acp/sandbox.js'
 import { localCapabilities, startLocalTools, commandReadDenied } from '../src/agent/local-tools.js'
+import * as localTools from '../src/agent/local-tools.js'
 import { offeredCapabilities } from '../src/agent/exec-mcp.js'
 import { resolveCapabilities, CAPABILITY_DEFAULTS } from '../src/agent/capabilities.js'
 import { cleanMachinePolicy } from '../src/remote/agent-policy-file.js'
 import { toCli } from '../src/agent/capability-render.js'
-import { closeSandbox, createCommandSession, probeSandbox, probeScope, runProcess } from '../src/agent/sandbox-exec.js'
+import { closeSandbox, commandEnv, createCommandSession, probeSandbox, probeScope, runProcess } from '../src/agent/sandbox-exec.js'
 import { commandsRunningIn } from '../src/agent/command-marks.js'
 import { recordCaptureAuth } from '../src/auth/record.js'
 
@@ -117,22 +118,58 @@ test(
 
 // ---- 4: without /proc ----
 
-test('Q7 re-review 4: without /proc, once a command ran in the project no more writes for the agent in that session', (t) => {
-  const root = scratch(t, 'noproc')
-  const before = createSandbox({ root, procFd: false })
-  assert.ok(before.write({ path: path.join(root, 'a.txt'), content: 'one' }))
+test('Q7 round 3 item 1: without /proc fd checks (macOS), an agent that edits gets no commands and no shell on any tier', () => {
+  const machine = cleanMachinePolicy({ ...CAPABILITY_DEFAULTS, approvals: 'owner', shell: 'sandboxed', trustTeam: ['robin'] })
+  const config = {
+    baseUrl: 'http://127.0.0.1:5173',
+    boards: [],
+    commands: {
+      lint: { run: 'npm run lint', argv: ['npm', 'run', 'lint'], mutating: false },
+      test: { run: 'npm test', argv: ['npm', 'test'], mutating: true },
+    },
+  }
+  const trust = {
+    solo: { authors: [{ handle: 'dan', owner: true, member: true }], guests: false, thread: { tainted: false, authors: [] } },
+    team: { authors: [{ handle: 'robin', owner: false, member: true }], guests: false, thread: { tainted: false, authors: [] } },
+    open: { authors: [{ handle: 'eve', owner: false, member: true }], guests: false, thread: { tainted: false, authors: [] } },
+  }
+  const at = (tier, where, platform) =>
+    resolveCapabilities({ path: where, trust: trust[tier], audience: 'owner', machine, config, platform })
+  for (const tier of ['solo', 'team', 'open']) {
+    for (const where of ['local-chat', 'pickup', 'hosted-fix']) {
+      const mac = at(tier, where, { os: 'darwin', sandbox: true })
+      assert.equal(mac.edit.on, true, `${tier} ${where}`)
+      assert.deepEqual(mac.commands, [], `${tier} ${where}: commands`)
+      assert.equal(mac.shell.mode, 'off', `${tier} ${where}: shell`)
+      assert.ok(
+        toCli(mac).some((line) => /cannot check where a file write really lands/.test(line)),
+        `${tier} ${where}: said why`,
+      )
+      // The same turn on Linux keeps them.
+      const linux = at(tier, where, { os: 'linux', sandbox: true })
+      assert.ok(linux.commands.length > 0, `${tier} ${where}: Linux commands`)
+    }
+  }
+  // A read-only session keeps its read-only commands in the sandbox.
+  const answer = at('solo', 'hosted-chat', { os: 'darwin', sandbox: true })
+  assert.equal(answer.edit.on, false)
+  assert.deepEqual(
+    answer.commands.map((command) => command.name),
+    ['lint'],
+  )
+})
+
+test('Q7 round 3 item 1: the ACP file sandbox keeps no per-session write latch', (t) => {
+  const root = scratch(t, 'nolatch')
+  const box = createSandbox({ root, procFd: false })
+  assert.ok(box.write({ path: path.join(root, 'a.txt'), content: 'one' }))
   markRunning(root)()
-  assert.throws(() => before.write({ path: path.join(root, 'a.txt'), content: 'two' }), /start a new session/)
-  assert.equal(fs.readFileSync(path.join(root, 'a.txt'), 'utf8'), 'one')
-  // A command in a folder inside the project counts too.
-  const fresh = createSandbox({ root, procFd: false })
-  assert.ok(fresh.write({ path: path.join(root, 'b.txt'), content: 'b' }), 'a new session writes again')
-  fs.mkdirSync(path.join(root, 'sub'))
-  markRunning(path.join(root, 'sub'))()
-  assert.throws(() => fresh.write({ path: path.join(root, 'b.txt'), content: 'c' }), /start a new session/)
-  // With /proc the descriptor check holds: writes go on.
-  const linux = createSandbox({ root, procFd: process.platform === 'linux' })
-  if (process.platform === 'linux') assert.ok(linux.write({ path: path.join(root, 'c.txt'), content: 'c' }))
+  assert.ok(box.write({ path: path.join(root, 'a.txt'), content: 'two' }))
+  assert.equal(fs.readFileSync(path.join(root, 'a.txt'), 'utf8'), 'two')
+  // While a command runs there, nothing is read or written (busyGuard, kept).
+  const done = markRunning(root)
+  assert.throws(() => box.write({ path: path.join(root, 'a.txt'), content: 'three' }), /is running in the project/)
+  done()
 })
 
 test('Q7 re-review 4: a file with a second name (hard link) is never read', posix, (t) => {
@@ -243,6 +280,15 @@ test(
   },
 )
 
+test('Q7 round 3 item 4: caches an env var can move go to the session temp, not the read-only node_modules', (t) => {
+  const tmp = scratch(t, 'cache-env')
+  const env = commandEnv({ env: { PATH: '/bin', BABEL_CACHE_PATH: '/elsewhere/b.json' }, tmp })
+  for (const name of ['BABEL_CACHE_PATH', 'NX_CACHE_DIRECTORY', 'TURBO_CACHE_DIR', 'XDG_CACHE_HOME', 'npm_config_cache']) {
+    assert.equal(typeof env[name], 'string', name)
+    assert.ok(env[name].startsWith(tmp + path.sep), `${name}: ${env[name]}`)
+  }
+})
+
 // ---- 7: the prompt says what is offered ----
 
 test('Q7 re-review 7: no read-only commands without the OS sandbox, said in the prompt; with no tool host, nothing of it', () => {
@@ -301,6 +347,27 @@ test('Q7 re-review 8: the logins folder exists before any command, and no login 
   )
   await running
   assert.equal(commandsRunningIn(root).length, 0)
+})
+
+test('Q7 round 3 item 2: the logins folder is hidden even before it exists, and a hosted Q&A session makes it first', posix, (t) => {
+  const root = scratch(t, 'qa-auth')
+  const auth = path.join(root, '.shapewall-auth')
+  const config = { dir: root, outputDir: path.join(root, '.shapewall'), file: null, commands: {} }
+  // Listed by path while missing (a rule by path then covers the folder a later sign-in makes).
+  assert.equal(fs.existsSync(auth), false)
+  assert.ok(commandReadDenied(config, root).includes(auth))
+  // A fix copy without one: the checkout's and the copy's both listed.
+  const copy = scratch(t, 'qa-auth-copy')
+  const listed = commandReadDenied(config, copy)
+  assert.ok(listed.includes(path.join(copy, '.shapewall-auth')), listed.join(' '))
+  // The hosted Q&A path (agent-link.js) asks for its read-denied list here: the folder exists after.
+  assert.equal(typeof localTools.checkoutReadDenied, 'function')
+  const denied = localTools.checkoutReadDenied(config)
+  assert.ok(fs.statSync(auth).isDirectory())
+  assert.equal(fs.statSync(auth).mode & 0o777, 0o700)
+  assert.ok(denied.includes(auth))
+  const link = fs.readFileSync(new URL('../src/remote/agent-link.js', import.meta.url), 'utf8')
+  assert.match(link, /denyRead: checkoutReadDenied\(answerConfig\)/)
 })
 
 // ---- 9: off the hot path ----

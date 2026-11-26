@@ -79,6 +79,9 @@ export const REASONS = {
   in_place_commands: {
     text: 'edits land in your checkout itself, so commands run only in a copy: turn on Work on a branch to give the agent commands',
   },
+  edits_without_fd_checks: {
+    text: 'on this system Shapewall cannot check where a file write really lands once a command has run, so an agent that edits gets no commands (Linux only in 1.4.0)',
+  },
   no_sandbox_read_only: { text: 'read-only commands need the OS sandbox, and there is none on this machine (install bubblewrap)' },
   machine_shell_commands: { text: 'this machine allows named commands only', set: ['shell', 'sandboxed'] },
   team_shell_off: { text: 'the team gets no full shell unless this machine says so', set: ['trust-team-shell', 'on'] },

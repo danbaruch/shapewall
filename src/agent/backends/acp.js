@@ -72,6 +72,24 @@ export const ACP_DEFAULTS = {
 
 // What a read-only agent is told, and what its answer shows, when it asks
 // to change a file or run a command.
+// Sessions that edit but get no ACP terminal (Q7 round 3), as the
+// capabilities say (capabilities.js in_place_commands, edits_without_fd_checks):
+// a local session working in the checkout itself (no workdir: not Work on a
+// branch), whatever the agent or agent.localSession; and on a system
+// without /proc fd checks, every session that edits.
+const FD_CHECKS = process.platform === 'linux'
+export const TERMINAL_REFUSALS = Object.freeze({
+  in_place_commands:
+    'Refused: edits land in the checkout itself, so commands run only in a copy. Turn on Work on a branch to give the agent commands.',
+  edits_without_fd_checks:
+    'Refused: on this system an agent that edits files gets no commands (Shapewall cannot check where a write lands once a command has run).',
+})
+export function terminalsOff(settings, workdir, { fdChecks = FD_CHECKS } = {}) {
+  if (settings?.readOnly === true) return null
+  if (!fdChecks) return 'edits_without_fd_checks'
+  if (!workdir && !settings?.remoteEdit) return 'in_place_commands'
+  return null
+}
 export const READ_ONLY_REFUSAL = 'Refused: this agent reads and answers only. It cannot change files or run commands from a hosted board.'
 
 // The same on the refused request's card, in a few words.
@@ -798,6 +816,7 @@ class AcpProcess {
     readOnly = false,
     remoteEdit = null,
     restricted = false,
+    noTerminals = null,
     extraServers = '[]',
     preamble = null,
     instructions = null,
@@ -806,6 +825,8 @@ class AcpProcess {
     Object.assign(this, { argv, label, sandbox, limits, log, thread, onGone, mcpServers, readOnly, remoteEdit, preamble, extraServers })
     // A local board's restricted session (localRestrictedSession): Claude Code only.
     this.restricted = Boolean(restricted) && !readOnly && !remoteEdit && acpAgentKind(argv) === 'claude'
+    // Why this session gets no terminal although it edits (terminalsOff), or null.
+    this.noTerminals = readOnly ? null : noTerminals || null
     // This session's extensions (withExtensions): Claude Code's hardened sessions only.
     this.extensions = extensions && acpAgentKind(argv) === 'claude' && (readOnly || remoteEdit || this.restricted) ? extensions : null
     this.extensionKey = this.extensions?.key || null
@@ -930,7 +951,8 @@ class AcpProcess {
           fs: { readTextFile: true, writeTextFile: !this.readOnly },
           // Edits from a hosted board: a terminal only when the machine lists commands.
           // A restricted local session: none (commands come from Shapewall's tool server).
-          terminal: !this.readOnly && !this.restricted && !(this.remoteEdit && !this.remoteEdit.commands.length),
+          // Edits in the checkout itself, or a system without /proc fd checks: none (Q7 round 3).
+          terminal: !this.readOnly && !this.restricted && !this.noTerminals && !(this.remoteEdit && !this.remoteEdit.commands.length),
         },
         clientInfo: { name: 'shapewall', title: 'Shapewall', version: VERSION },
       })
@@ -2001,6 +2023,14 @@ class AcpProcess {
       })
       throw new RequestError(-32000, READ_ONLY_REFUSAL)
     }
+    if (this.noTerminals) {
+      this.refuse({
+        title: 'Run a command',
+        kind: 'execute',
+        detail: showable(formatCommand([String(params?.command || ''), ...(Array.isArray(params?.args) ? params.args.map(String) : [])])),
+      })
+      throw new RequestError(-32000, TERMINAL_REFUSALS[this.noTerminals])
+    }
     const turn = this.turn
     if (this.terminals.size >= this.limits.terminalsMax) throw new RequestError(-32000, 'Too many terminals are open; release one first.')
     const command = typeof params.command === 'string' ? params.command : ''
@@ -2213,6 +2243,7 @@ export function createAcpBackend(
       remoteEdit: settings.readOnly !== true && settings.remoteEdit ? settings.remoteEdit : null,
       // A local board's restricted session (settings.localSession "restricted", Claude Code only).
       restricted: settings.localSession === 'restricted',
+      noTerminals: terminalsOff(settings, workdir),
       // A connected agent's instruction files (agent connect): read when the session starts.
       instructions: settings.instructions || null,
       // A turn's own tools (exec-mcp, for a fix) come with its working folder;

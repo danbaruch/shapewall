@@ -50,13 +50,11 @@ export function inside(root, target) {
 const realpath = (value) => (fs.realpathSync.native || fs.realpathSync)(value)
 
 // Folders a command (or dev server) of this process is running in now
-// (sandbox-exec.js marks each run): root -> count. And every folder a
-// command ever started in, with the number of the last start there
-// (commandRanIn): on a system without /proc a command that left a process
-// behind can still swap folders after it "ended" (Q7 re-review 4).
+// (sandbox-exec.js marks each run): root -> count. Where there is no /proc
+// an agent that edits gets no commands at all (capabilities.js
+// edits_without_fd_checks), so this guard is for read-only commands and
+// dev servers there.
 const running = new Map()
-const started = new Map()
-let starts = 0
 export function markRunning(root) {
   let real
   try {
@@ -65,8 +63,6 @@ export function markRunning(root) {
     return () => {}
   }
   running.set(real, (running.get(real) || 0) + 1)
-  starts += 1
-  started.set(real, starts)
   let done = false
   return () => {
     if (done) return
@@ -77,10 +73,6 @@ export function markRunning(root) {
   }
 }
 export const commandRunningIn = (root) => [...running.keys()].some((dir) => inside(dir, root) || inside(root, dir))
-// The number of the last command start in, inside or around `root` (0: none).
-export const lastCommandIn = (root) =>
-  Math.max(0, ...[...started].filter(([dir]) => inside(dir, root) || inside(root, dir)).map(([, at]) => at))
-export const commandStarts = () => starts
 
 // The real path of the file `fd` holds. Linux: read back from /proc. Where
 // there is no /proc: `expected` itself, when it has no link on its way and
@@ -143,8 +135,6 @@ export function createSandbox({
   procFd = PROC_FD,
 }) {
   const realRoot = realpath(root)
-  // Commands started before this session do not count (commandRanIn).
-  const since = commandStarts()
   const realProtected = [path.join(realRoot, '.git'), ...protect.map((dir) => realTarget(path.resolve(dir)))]
 
   const check = (target, real, write) => {
@@ -161,16 +151,6 @@ export function createSandbox({
     if (!procFd && commandRunningIn(realRoot))
       throw new SandboxError(
         `${target}: a command or dev server is running in the project; on this system Shapewall reads and writes files for the agent only when none is (stop the dev server, or wait for the command)`,
-      )
-  }
-  // Without /proc a write goes by path in the end (the rename), and a
-  // process a command left behind could swap a folder there: once any
-  // command ran in the project in this session, Shapewall writes nothing
-  // more for the agent there (Q7 re-review 4).
-  const writeGuard = (target) => {
-    if (!procFd && lastCommandIn(realRoot) > since)
-      throw new SandboxError(
-        `${target}: not written. On this system Shapewall writes files for the agent only until a command has run in the project in this session (a process it left could redirect the write); start a new session to edit again`,
       )
   }
 
@@ -287,7 +267,6 @@ export function createSandbox({
       if (Buffer.byteLength(content) > WRITE_BYTES_MAX) throw new SandboxError(`at most ${WRITE_BYTES_MAX / 1024 / 1024} MB per file`)
       const file = resolve(target, { write: true })
       busyGuard(target)
-      writeGuard(target)
       const name = path.basename(file)
       // The folder, opened from the root down one part at a time, each part
       // made (when missing) and opened inside the one before it and checked

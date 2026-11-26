@@ -509,7 +509,7 @@ test('read only: a session set to act without asking is switched to one that ask
   assert.equal(await asClaude(['--start-mode=acceptEdits'], 'mode'), 'default')
   assert.equal(await asClaude(['--start-mode=plan'], 'mode'), 'plan')
   // The local board's backend, not read-only, is unchanged: nothing is added to its session.
-  // The local board's backend, not read-only, is unchanged: it still offers writes and terminals.
+  // It still offers writes; a terminal only on a branch, never in the checkout itself (Q7 round 3).
   const local = createBackend(
     { configured: true, backend: 'acp', label: 'Stub', acp: { argv: [process.execPath, ACP_STUB] } },
     { env: { PATH: process.env.PATH, HOME: os.homedir() }, root: tempDir('agent-connect-rw'), log: () => {} },
@@ -522,7 +522,7 @@ test('read only: a session set to act without asking is switched to one that ask
   }))
     if (event.type === 'text') caps += event.text
   local.close()
-  assert.deepEqual(JSON.parse(caps), { fs: { readTextFile: true, writeTextFile: true }, terminal: true })
+  assert.deepEqual(JSON.parse(caps), { fs: { readTextFile: true, writeTextFile: true }, terminal: false })
 })
 
 // ---- The real command ----

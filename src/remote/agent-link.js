@@ -46,7 +46,7 @@ import {
 } from '../agent/capabilities.js'
 import { approvalsDir, createApprovalStore } from '../agent/command-approvals.js'
 import { createThreadRelay, offeredCapabilities, startExecSession } from '../agent/exec-mcp.js'
-import { commandReadDenied } from '../agent/local-tools.js'
+import { checkoutReadDenied } from '../agent/local-tools.js'
 import { loadConfig } from '../config.js'
 import { capabilitySummary, toPrompt } from '../agent/capability-render.js'
 import { turnExtensions } from '../agent/agent-config-folder.js'
@@ -839,7 +839,8 @@ export async function runAgentLink({
               checkout: null,
               browserCheckout: answerConfig.dir,
               readOnly: true,
-              denyRead: commandReadDenied(answerConfig, answerConfig.dir),
+              // The logins folder made first, so it is hidden from the first command (Q7 round 3).
+              denyRead: checkoutReadDenied(answerConfig),
               network: 'none',
               approvals: createApprovalStore(approvalsDir(agent?.id, answerEnv)),
               scope: JSON.stringify([origin, agent?.workspace?.id, agent?.project?.id, agent?.id, answerConfig.dir]),

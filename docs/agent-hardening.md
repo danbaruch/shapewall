@@ -175,11 +175,11 @@ When the chat panel drives an agent CLI over ACP:
   final link and reads where `/proc/self/fd` says it is; a write goes through the open parent folder), so a link or folder swapped
   in between the check and the open cannot point it outside. Missing folders are made one at a time, each inside the open folder
   before it. A file with a second name (a hard link) is never read. Elsewhere (macOS) the opened file's device and inode are
-  compared with the path's, which is weaker: a process a command left behind could still swap a folder between two steps. So on
-  macOS, while a command Shapewall runs is going in the project, reads and writes there are refused, and once any command has run
-  in the project, Shapewall writes no more files for the agent there until a new session starts. Every process a command started is
-  killed when it ends, those that left its process group included, as far as Shapewall saw them (a process that detaches between
-  two looks can be missed: the refusal to write is what holds).
+  compared with the path's, which is weaker: a process a command left behind could still swap a folder between two steps. So
+  **on macOS, an agent that edits files cannot run commands in 1.4.0**: a session that can edit gets no named commands, no shell
+  and no ACP terminal, on every tier (`edits_without_fd_checks`). A read-only session (a Q&A turn) keeps its read-only commands in
+  the OS sandbox; while one of those (or a dev server) runs in the project, Shapewall's reads there wait. Every process a command
+  started is still killed when it ends, those that left its process group included, as far as Shapewall saw them.
   Writes into `.git` and Shapewall's own store (`.shapewall`: comments, chat, captures) are refused, so an agent cannot rewrite the comments
   it is reading. Writes to files that decide what runs later need a **Write** / **Don't write** card: any dotfile or dot folder
   (`.claude`, `.codex`, `.husky`, `.vscode`, `.envrc`, `.github/workflows`, ...), `package.json`, `shapewall.config.json`, `Makefile`,
@@ -664,7 +664,12 @@ again, and a card's "allow" counts only if the command, its config line and its 
   past 8 GB takes no more commands (its size is measured when the disk lost a lot of space since the last look, or a minute passed);
 - sees the checkout's `node_modules` read only, when the fix copy has none of its own (fix copies leave it out): commands run the
   project's installed tools, and a team turn, which gets no network, needs no install. A write there fails; an install that changes
-  it is the owner's, on a solo turn;
+  it is the owner's, on a solo turn. Caches an environment variable alone can move go to the session's temp folder instead
+  (`BABEL_CACHE_PATH`, `NX_CACHE_DIRECTORY`, `TURBO_CACHE_DIR`, besides `XDG_CACHE_HOME` and npm's). The rest stay where their
+  config puts them: a tool that writes a cache inside `node_modules` by default (Vite's `node_modules/.vite`, `node_modules/.cache`,
+  the ESLint cache when turned on) fails there with `EROFS`, and a workspace package linked from `node_modules` to another folder
+  of the checkout points outside the fix copy and does not resolve. Set the cache folder in that tool's config, or give the fix
+  copy its own `node_modules` (an install on a solo turn);
 - is read only only inside the OS sandbox: a read-only session (a Q&A turn) does not start without one;
 - stops after 10 minutes, with its output capped at 64 KB, and its whole process group with it.
 
@@ -683,9 +688,17 @@ the default without [Work on a branch](agents.md#work-on-a-branch)), the agent g
 there could leave files that run later on their own (Git hooks, `.npmrc`, `node_modules/.bin`, `.venv/bin`, a hooks folder Git
 config names, lint-staged and husky configs), and no check after the run can tell them all apart from ordinary work or undo what
 already ran. Turn on Work on a branch to give the agent commands: they then run in the branch copy, never in your checkout. A
-read-only turn (edits off) keeps its read-only commands, inside the OS sandbox.
+read-only turn (edits off) keeps its read-only commands, inside the OS sandbox. The same goes for an ACP agent's own terminal
+(`terminal/create`): a session working in your checkout is offered none, whatever the agent or `agent.localSession`, and a
+request for one is refused without a card.
 
-The recorded logins' folder (`.shapewall-auth`) is made, private to you, before a command session starts, so the sandbox hides it
+Where a terminal is offered (Work on a branch, with an agent other than Claude Code or with `agent.localSession: "own"`), each
+command still waits for a **Run** card, but it runs in the branch copy **without the OS sandbox**: with the person's
+environment scrubbed, not with its file and network limits. Claude Code's restricted session has no terminal at all; its
+commands come from Shapewall's own tools, in the sandbox.
+
+The recorded logins' folder (`.shapewall-auth`) is made, private to you, before a command session starts (a local turn's and a
+hosted board's Q&A turn's alike), and is on the sandbox's deny list by path even where it does not exist yet, so it is hidden
 from the start, and `shapewall auth record` refuses to record a login while an agent command runs in the project.
 
 The sandbox starts only in the fix copy Shapewall made for the turn, inside the folder it keeps fix copies in: never in your

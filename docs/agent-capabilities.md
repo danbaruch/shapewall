@@ -113,8 +113,11 @@ line run without a shell. The agent runs one with `run_named_command { name }` (
   approval is kept on the machine for that exact line, the tier, the sandbox mode, the network and the content of its inputs (the
   manifests, lockfiles, `.npmrc` and every `*.config.*` file always among them, every byte of each). When the agent changes an
   input, or the line changes, the next run asks again. A command with more inputs than Shapewall checks asks every time.
-- **A local board in place** (edits land in your checkout itself) gets no commands and no shell: turn on Work on a branch, and
-  commands run in the branch copy.
+- **A local board in place** (edits land in your checkout itself) gets no commands, no shell and no ACP terminal: turn on Work
+  on a branch, and commands run in the branch copy.
+- **On macOS, an agent that edits cannot run commands in 1.4.0:** no commands, no shell and no ACP terminal on any tier, since
+  Shapewall cannot check there where a file write lands once a command has run. Read-only turns keep their read-only commands
+  in the OS sandbox.
 - **Network:** a command gets the package registries (where `shell-network` says so) on your own solo turns only; on team turns
   it gets no network, since a registry takes uploads too.
 - **Open turns, or no OS sandbox:** each run waits for a card. That answer is for one run and is never kept.

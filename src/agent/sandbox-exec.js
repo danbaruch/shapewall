@@ -263,6 +263,14 @@ export function commandEnv({ env = process.env, tmp, extra = {} }) {
     npm_config_update_notifier: 'false',
     npm_config_fund: 'false',
     npm_config_audit: 'false',
+    // Tools that put a cache in node_modules (read only when it is the
+    // checkout's, shared into a fix copy) or the project, where an env var
+    // alone moves it: into this session's temp (Q7 round 3). The rest
+    // (Vite's node_modules/.vite, the ESLint cache) is config only: see
+    // docs/agent-hardening.md.
+    BABEL_CACHE_PATH: path.join(tmp, 'cache', 'babel.json'),
+    NX_CACHE_DIRECTORY: path.join(tmp, 'cache', 'nx'),
+    TURBO_CACHE_DIR: path.join(tmp, 'cache', 'turbo'),
     CI: '1',
     NO_COLOR: '1',
     TERM: 'dumb',

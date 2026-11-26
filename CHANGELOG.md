@@ -175,8 +175,15 @@ and the project uses [Semantic Versioning](https://semver.org/).
   way can no longer make it read or write outside the project (Linux: the opened descriptor; elsewhere a device and inode check, and
   reads and writes wait while a command runs in the project). Missing folders are made one at a time inside the folder opened
   before them, and a file with a second name (a hard link) is never read.
-- On macOS, once a command has run in the project, Shapewall writes no more files for the agent there for the rest of the session,
-  and the processes a command left behind (those that left its process group included) are killed when it ends.
+- On macOS, an agent that edits files gets no commands, no shell and no ACP terminal in 1.4.0, on every tier: Shapewall cannot
+  check where a write lands there once a command has run. Read-only sessions keep read-only commands in the OS sandbox. The
+  processes a command left behind (those that left its process group included) are killed when it ends.
+- An ACP agent working in the checkout itself (no Work on a branch) is offered no terminal, whatever the agent or
+  `agent.localSession`.
+- A hosted board's Q&A turn makes the recorded logins' folder before its first command, and the folder is denied by path even
+  before it exists.
+- Commands get `BABEL_CACHE_PATH`, `NX_CACHE_DIRECTORY` and `TURBO_CACHE_DIR` in the session's temp folder, so those caches
+  do not try the read-only shared `node_modules`.
 - A local board whose edits land in the checkout itself gives the agent no named commands and no shell (they could leave files
   that run later on their own); with Work on a branch, commands run in the branch copy.
 - A fix copy without `node_modules` sees the checkout's read only, so a team turn's commands (no network) still run the project's

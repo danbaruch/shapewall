@@ -105,6 +105,14 @@ export function ensureAuthDir(dir) {
   }
 }
 
+// A read-only command session in the checkout itself (a hosted board's Q&A
+// turn): the logins folder is made first, then hidden with the rest.
+export function checkoutReadDenied(config) {
+  if (!config?.dir) return []
+  ensureAuthDir(config.dir)
+  return commandReadDenied(config, config.dir)
+}
+
 export function commandReadDenied(config, root) {
   if (!root || !config) return []
   let real
@@ -129,9 +137,27 @@ export function commandReadDenied(config, root) {
     if (inside(resolved) && resolved !== real) out.add(resolved)
   }
   if (config.outputDir) add(path.resolve(config.outputDir))
-  // The recorded logins the agent browser loads (.shapewall-auth/<name>.auth.json), always (Q7 C4).
-  add(path.join(real, AUTH_DIR))
-  if (config.dir) add(path.join(path.resolve(config.dir), AUTH_DIR))
+  // The recorded logins the agent browser loads (.shapewall-auth/<name>.auth.json), always (Q7 C4),
+  // listed even before the folder exists: a rule by path (Seatbelt) then still
+  // covers the folder a later sign-in makes (Q7 round 3).
+  const authIn = (dir) => {
+    let parent
+    try {
+      parent = fs.realpathSync(dir)
+    } catch {
+      return
+    }
+    const folder = path.join(parent, AUTH_DIR)
+    let resolved = folder
+    try {
+      resolved = fs.realpathSync(folder)
+    } catch {
+      resolved = folder
+    }
+    if (inside(resolved) && resolved !== real) out.add(resolved)
+  }
+  authIn(real)
+  if (config.dir) authIn(path.resolve(config.dir))
   for (const file of authFiles(config)) {
     const absolute = path.resolve(config.dir || real, file)
     add(absolute)

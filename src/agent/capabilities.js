@@ -891,6 +891,19 @@ function resolveForTier(
     off('commands', 'in_place_commands')
     off('shell', 'in_place_commands')
   }
+  // A machine where Shapewall cannot check the file a write really opened
+  // (no /proc/self/fd: macOS and the rest): a process a command left behind
+  // could swap a folder for a link between the check and the write. A
+  // session that edits gets no commands and no shell there, on every tier
+  // (Q7 round 3). Read-only sessions keep read-only commands in the sandbox.
+  // Not a full shell the solo owner turned on without a sandbox
+  // (shell-unsandboxed on): that one already reaches past every check, and says so.
+  if (!starter && edit.on && box.os !== 'linux' && shell.mode !== 'unsandboxed' && (commands.length || shell.mode !== 'off')) {
+    commands = []
+    shell = { mode: 'off', network: 'none', exact: [] }
+    off('commands', 'edits_without_fd_checks')
+    off('shell', 'edits_without_fd_checks')
+  }
   // Read only is the OS sandbox's to keep: without one no read-only command
   // session starts (sandbox-exec.js no_sandbox_read_only), so none is offered.
   if (!edit.on && !starter && !box.sandbox && commands.length) {

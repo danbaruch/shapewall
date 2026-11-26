@@ -370,6 +370,8 @@ test('F6: the login files the config records are on the read-deny list wherever 
     commandReadDenied(config, dir).sort(),
     [
       path.join(dir, '.shapewall'),
+      // The recorded logins' folder, by path even before it exists (Q7 round 3).
+      path.join(dir, '.shapewall-auth'),
       path.join(dir, 'auth', 'state.json'),
       path.join(dir, 'board-state.json'),
       path.join(dir, 'login.js'),
@@ -379,7 +381,10 @@ test('F6: the login files the config records are on the read-deny list wherever 
   const copy = fs.realpathSync(tmpDir(t, 'sw-r6-copy-'))
   fs.mkdirSync(path.join(copy, 'auth'))
   fs.writeFileSync(path.join(copy, 'auth', 'state.json'), '{}')
-  assert.deepEqual(commandReadDenied(config, copy), [path.join(copy, 'auth', 'state.json')])
+  assert.deepEqual(
+    commandReadDenied(config, copy).sort(),
+    [path.join(copy, '.shapewall-auth'), path.join(copy, 'auth', 'state.json')].sort(),
+  )
   assert.deepEqual(commandReadDenied(null, dir), [])
 })
 
