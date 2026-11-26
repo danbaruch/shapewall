@@ -29,8 +29,20 @@ and the project uses [Semantic Versioning](https://semver.org/).
   `blob:` navigations included; service workers blocked; app hostnames pinned to the address they had at start), no CDP port, its
   profile folder removed at close, on a crash, on a signal and by the next start after a kill. A recorded login or a Shapewall-made
   profile only where the turn allows it. The `browser_*` tools join the agent's tool host in this release.
+- "What it can do": each agent on a project's Agents page (and a local board's Agents page, for its owner) has a card with every
+  capability line per place and tier, an on, asks first, off or unknown chip, one sentence, and the command that changes it on the
+  agent's machine. A line the project's setting holds says so. The board's agent panel shows the main lines for a fix you ask for.
+- `shapewall agent status [--remote URL] [--as NAME] [--json]`: the same lines from this machine's own policy, with whether a
+  connected agent's link is open. `shapewall agent set KEY VALUE` changes one line without reconnecting.
+- API tokens: **Has agent access (claim)** lists tokens that may take comments but are not listed as agents, with **Make this an
+  agent** and **Remove claim access** (`agent_made` and `token_claim_removed` audit rows).
+- The token API's `/project` says which agent the token is and its state (online while its link is open).
 
 ### Changed
+
+- Older claim tokens are no longer made agents just by opening the board or the console: a token becomes one when it calls the
+  server. An older watcher nothing was heard from in 90 days is hidden, not deleted (`agent_hidden` audit row), and lists again as
+  soon as its token is used.
 
 - A version 1 `agent-policy.json` is read as exactly what it allowed (no shell, no browser, no extensions, a card for every
   command), and the next save writes it back as version 2. A connection with no saved entry, or one 1.3.0 saved without flags,

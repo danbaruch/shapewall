@@ -1,5 +1,7 @@
 // Workspace > Agents on a local installation: the Agents card
-// (settings/AgentsCard.jsx), and below it the Chat connection card with the
+// (settings/AgentsCard.jsx), the What it can do card for the board's owner
+// (components/CapabilityCard.jsx, from /api/info agent.capabilities), and
+// below them the Chat connection card with the
 // connection details and the endpoint form; the card's "Other" row scrolls
 // to that form. LocalConsole.jsx renders it from /api/info; the demo console
 // renders the same page (AgentsSection) from the demo backend's sample data
@@ -15,6 +17,7 @@ import { useMediaQuery } from '../../lib/hooks'
 import { DESKTOP_LAYOUT_QUERY } from '../../lib/layout'
 import { notifyAgentsChanged } from '../../lib/agentEvents'
 import { Card, CardHeader, PageHeader } from '../components'
+import { CapabilityCard } from '../components/CapabilityCard.jsx'
 
 // The Agents page's one line, in the local console and the demo.
 export const AGENTS_DESCRIPTION = 'The coding agents that chat and fix comments on this computer, and how they connect.'
@@ -54,6 +57,17 @@ export function AgentsPage({ info, touch, onChanged }) {
           onChanged={agentsChanged}
           onOpenEndpoint={() => document.querySelector('[data-sw-local-console-agent-details]')?.scrollIntoView({ block: 'start' })}
         />
+      ) : null}
+      {info?.agent?.capabilities ? (
+        <Card className="scroll-mt-20" data-sw-local-console-capabilities>
+          <div className="px-4 py-4 sm:px-5">
+            <CapabilityCard
+              card={info.agent.capabilities}
+              note="The same lines as shapewall agent status in this project, and what the agent itself is told. Copy a command to change a line; the next turn uses it."
+              testId="local"
+            />
+          </div>
+        </Card>
       ) : null}
       {info?.agent?.settingsEditable ? <AgentWorkOptions touch={touch} Card={Card} CardHeader={CardHeader} /> : null}
       <Card className="scroll-mt-20" data-sw-local-console-agent-details>
