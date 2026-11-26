@@ -634,8 +634,12 @@ export async function createCommandSession({
     if (parent === real || !isInside(parent, real))
       throw new SandboxRefusal('bad_root', 'The sandbox starts only inside the folder Shapewall keeps fix copies in.')
   }
+  // The person's own checkout, when the commands run in a copy of it: never
+  // the root, and never readable (wherever it is: outside the home folder
+  // too, Q7 B3).
+  let project = null
   if (checkout) {
-    let project = checkout
+    project = checkout
     try {
       project = realpath(checkout)
     } catch {
@@ -651,7 +655,14 @@ export async function createCommandSession({
   const tmp = fs.mkdtempSync(path.join(realpath(tmpParent || within || os.tmpdir()), '.shapewall-cmd-'))
   fs.chmodSync(tmp, 0o700)
   const vendor = runtimeVendorDir()
-  const denied = [...new Set([home, ...deniedRoots({ env, within }), ...denyRead.filter((dir) => path.isAbsolute(dir))])]
+  const denied = [
+    ...new Set([
+      home,
+      ...deniedRoots({ env, within }),
+      ...(project && path.isAbsolute(project) ? [project] : []),
+      ...denyRead.filter((dir) => path.isAbsolute(dir)),
+    ]),
+  ]
   const toolchain = toolchainDir({ denied })
   if (toolchain.refused)
     log(`sandbox: Node runs from ${toolchain.refused}, a shared folder; it stays unreadable, so commands need a Node installed elsewhere`)
@@ -677,7 +688,8 @@ export async function createCommandSession({
       ...readPaths.filter((dir) => path.isAbsolute(dir)),
     ],
     allowWrite: readOnly ? [tmp] : [real, tmp],
-    denyWrite: denyWrite.filter((dir) => path.isAbsolute(dir)),
+    // A list, or a function asked before each run (a local board's guarded files: command-guard.js).
+    denyWrite: (typeof denyWrite === 'function' ? denyWrite() : denyWrite).filter((dir) => typeof dir === 'string' && path.isAbsolute(dir)),
   })
   const list = () => networkList(network)
   let closed = false

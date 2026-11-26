@@ -74,8 +74,18 @@ export const commandRunningIn = (root) => [...running.keys()].some((dir) => insi
 // Real paths Shapewall itself wrote for an agent (an approved write card,
 // an ordinary edit): what the in-place command guard (local-tools.js) must
 // not take for a file a command made.
-const written = new Set()
-export const wroteItself = (real) => written.has(fold(real))
+// real path -> the file as Shapewall left it (size, mtime, inode, mode).
+const written = new Map()
+const stamp = (stat) => [stat.size, stat.mtimeMs, stat.ino, stat.mode].join(':')
+export function wroteItself(real) {
+  const was = written.get(fold(real))
+  if (!was) return false
+  try {
+    return stamp(fs.lstatSync(real)) === was
+  } catch {
+    return false
+  }
+}
 
 // The real path of the file `fd` holds. Linux: read back from /proc. Where
 // there is no /proc: `expected` itself, when it has no link on its way and
@@ -268,7 +278,14 @@ export function createSandbox({ root, protect = [], sensitivePaths = [] }) {
           throw error
         }
         if (!PROC_FD) confirm(target, dirFd, expectedDir, true)
-        written.add(fold(path.join(dir, name)))
+        try {
+          const key = fold(path.join(dir, name))
+          written.delete(key)
+          written.set(key, stamp(fs.lstatSync(path.join(dir, name))))
+          if (written.size > 10000) written.delete(written.keys().next().value)
+        } catch {
+          /* gone already */
+        }
         return path.join(dir, name)
       } finally {
         fs.closeSync(dirFd)

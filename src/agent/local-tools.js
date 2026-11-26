@@ -31,6 +31,7 @@ import { authFiles, loadConfig } from '../config.js'
 import { policyExtensions, turnExtensions } from './agent-config-folder.js'
 import { agentSettings } from './config.js'
 import { acpAgentKind } from './acp/command.js'
+import { createRunGuard, guardNote } from './command-guard.js'
 
 let platformOnce = null
 // One sandbox probe per process: every turn and the capability card read the same answer.
@@ -81,6 +82,9 @@ export function localAgent(config, env = process.env, { acp = null } = {}) {
   }
 }
 
+// The folder of recorded logins for the agent browser (agent-browser.js readAuthState).
+export const AUTH_DIR = '.shapewall-auth'
+
 // The folder a local approval record lives in: the board's project, never the server.
 export const localApprovalsDir = (config) => path.join(config.outputDir, 'agent', 'approvals')
 
@@ -115,6 +119,9 @@ export function commandReadDenied(config, root) {
     if (inside(resolved) && resolved !== real) out.add(resolved)
   }
   if (config.outputDir) add(path.resolve(config.outputDir))
+  // The recorded logins the agent browser loads (.shapewall-auth/<name>.auth.json), always (Q7 C4).
+  add(path.join(real, AUTH_DIR))
+  if (config.dir) add(path.join(path.resolve(config.dir), AUTH_DIR))
   for (const file of authFiles(config)) {
     const absolute = path.resolve(config.dir || real, file)
     add(absolute)
@@ -232,8 +239,27 @@ export async function startLocalTools({
   } catch {
     real = null
   }
-  // A local checkout keeps its repository and Shapewall's folder read only for commands.
-  const denyWrite = real ? [path.join(real, '.git'), path.resolve(config.outputDir)].filter((dir) => fs.existsSync(dir)) : []
+  // A local checkout keeps its repository, Shapewall's folder and the
+  // recorded logins read only for commands, and (Q7 B2) every file that
+  // runs code on its own later (command-guard.js): denied before each run,
+  // and moved out or put back after it.
+  const fixed = real
+    ? [path.join(real, '.git'), path.resolve(config.outputDir), path.join(real, AUTH_DIR)].filter((dir) => fs.existsSync(dir))
+    : []
+  let guard = null
+  if (real) {
+    const quarantine = path.join(path.resolve(config.outputDir), 'agent', 'quarantine')
+    const skip = [path.relative(real, path.resolve(config.outputDir)), AUTH_DIR].filter(
+      (rel) => rel && !rel.startsWith('..') && !path.isAbsolute(rel),
+    )
+    const runGuard = createRunGuard({ root: real, quarantine, skip })
+    guard = {
+      denyList: () => runGuard.denyList(),
+      before: () => runGuard.before(),
+      after: (state) => guardNote(runGuard.after(state), quarantine),
+    }
+  }
+  const denyWrite = guard ? () => [...new Set([...fixed, ...guard.denyList()])] : fixed
   const exec = await startExecSession({
     capabilities: caps,
     platform,
@@ -258,6 +284,7 @@ export async function startLocalTools({
     shellCard: caps.shell.mode !== 'off' && localMachinePolicy(userAgentEntry(config.dir, env).entry).commandApproval === 'always',
     // Local edits are the agent's own: the run summary and Undo see the checkout as it is.
     onChanged: () => {},
+    guard,
     browserCheckout: real,
     denyPorts,
     serve,

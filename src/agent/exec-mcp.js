@@ -55,6 +55,8 @@ export const EXEC_LIMITS = {
   snapshotFiles: 20000,
 }
 const PORT_TOKEN = '$PORT'
+// How often a running dev server's guarded files are checked (command-guard.js).
+const GUARD_SWEEP_MS = 2000
 const SKIP_DIRS = new Set(['.git', 'node_modules', '.shapewall', 'shapewall-export'])
 const sha256 = (data) => createHash('sha256').update(data).digest('hex')
 
@@ -232,6 +234,9 @@ export function createToolHost({
   // The machine asks before every command (commandApproval "always"): the full shell too.
   shellCard = false,
   onChanged = () => {},
+  // { before(), after(state) => note }: a local board's guard of the files
+  // that run code on their own (command-guard.js), or null.
+  guard = null,
   // The person's checkout (the browser reads its recorded logins there, never from the fix copy).
   checkout = null,
   // Loopback ports the agent browser never opens: Shapewall's own server port.
@@ -249,6 +254,8 @@ export function createToolHost({
   // A card's text within what a card may hold (card-hash.js CARD_LIMITS.detail).
   const askCard = (card) => ask({ ...card, detail: card.detail.length > 4000 ? card.detail.slice(0, 3990) + '\n[...]' : card.detail })
   const devServers = new Map()
+  // What the guard did, for the next tool result.
+  const guardNotes = []
   // Dev servers being started (their slot is taken before the first await).
   const starting = new Set()
   let closed = false
@@ -355,12 +362,30 @@ export function createToolHost({
 
   // Runs start() (a command, or a dev server's whole life) and reports the
   // files it changed in the fix copy.
-  async function tracked(mutatingCommand, start) {
+  // With a `guard` (a local board in place: command-guard.js), the files
+  // that run code on their own are checked after the run, and every few
+  // seconds while a dev server runs (`long`); what it did goes with the next
+  // tool result.
+  async function tracked(mutatingCommand, start, { long = false } = {}) {
     const mutating = mutatingCommand !== false && !session.readOnly
     const before = mutating ? snapshot(session.root) : null
+    const guarded = guard && !session.readOnly ? guard.before() : null
+    const sweep = () => {
+      try {
+        const note = guard.after(guarded)
+        if (note) guardNotes.push(note)
+      } catch (error) {
+        log(`exec-mcp: command guard: ${error.message}`)
+        guardNotes.push('[Shapewall: the files that run code here could not be checked after the command; look at them.]')
+      }
+    }
+    const timer = guarded && long ? setInterval(sweep, GUARD_SWEEP_MS) : null
+    timer?.unref?.()
     try {
       return await start()
     } finally {
+      if (timer) clearInterval(timer)
+      if (guarded) sweep()
       if (before) {
         const diff = changes(before, snapshot(session.root))
         if (diff.changed.length || diff.deleted.length) onChanged(diff)
@@ -558,7 +583,7 @@ export function createToolHost({
             timeoutMs: SANDBOX_LIMITS.timeoutMaxMs,
             // Tracked like any command: what the server writes in the fix
             // copy is reported when it stops, so the fix is held for a look.
-            track: (start) => tracked(picked.command.mutating, start),
+            track: (start) => tracked(picked.command.mutating, start, { long: true }),
             log,
           })
           if (closed) {
@@ -646,7 +671,10 @@ export function createToolHost({
         }
       }
       try {
-        return await tool.call(args && typeof args === 'object' && !Array.isArray(args) ? args : {}, { signal })
+        const result = await tool.call(args && typeof args === 'object' && !Array.isArray(args) ? args : {}, { signal })
+        if (!guardNotes.length) return result
+        const notes = guardNotes.splice(0).join('\n')
+        return { ...result, content: [...(result?.content || []), { type: 'text', text: notes }] }
       } catch (error) {
         log(`exec-mcp: ${name}: ${error.message}`)
         return failure(error instanceof SandboxRefusal ? error.message : `${name} failed on the agent's machine.`)
@@ -732,6 +760,7 @@ export async function startExecSession({
   ask = null,
   shellCard = false,
   onChanged,
+  guard = null,
   // Loopback ports the agent browser never opens (Shapewall's own server port).
   denyPorts = [],
   // false: the host only, no relay (an endpoint backend calls it in process; createThreadRelay serves it).
@@ -781,6 +810,7 @@ export async function startExecSession({
     ask,
     shellCard,
     onChanged,
+    guard,
     checkout: browserCheckout,
     denyPorts,
     log,
