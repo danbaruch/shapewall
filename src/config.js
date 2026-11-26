@@ -9,6 +9,7 @@ import { checkSteps } from './journey-paths.js'
 import { normalizeNotifications } from './notify/config.js'
 import { validateAgent } from './agent/config.js'
 import { validateStarterAgent } from './agent/starter/settings.js'
+import { validateCommands } from './agent/capabilities.js'
 import { cliCommand } from './invocation.js'
 import { normalizeBudgets } from './checks/budgets.js'
 import { CAPTURE_PACING_DEFAULTS, CAPTURE_PACING_MAX } from './capture/pacing.js'
@@ -961,6 +962,8 @@ export function normalizeConfig(raw, { dir = process.cwd(), file = null, env = p
   if (github?.board && !ids.has(github.board)) problems.push(`github.board: no board "${github.board}"`)
   const agent = validateAgent(raw.agent, problems)
   const starterAgent = validateStarterAgent(raw.starterAgent, problems, { boardIds: [...ids] })
+  // Named commands an agent may run through Shapewall (src/agent/capabilities.js).
+  const commands = validateCommands(raw.commands, problems)
   // Capture on pull requests (src/ci/settings.js): allow-lists name pages and viewports of any board.
   const ci = validateCi(raw.ci, problems, {
     pageIds: boards.flatMap((board) => board.pages.map((page) => page.id)),
@@ -991,6 +994,7 @@ export function normalizeConfig(raw, { dir = process.cwd(), file = null, env = p
     github,
     agent,
     starterAgent,
+    commands,
     ci,
     boards,
     notifications,

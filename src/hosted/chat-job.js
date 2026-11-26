@@ -132,6 +132,8 @@ function mentionData(ctx, comments, mention) {
 // `approvals`: the approval rule in effect per kind of request, for a fix.
 // `respond`: the thread's stored setting ("mention" or "always"), for the
 // machine's own check of why this turn started (src/agent/triggers.js).
+// `narrowing`: the project's (and board's) ceiling under the machine's
+// policy, { maxTier, shell, browser } (agent-policy.js narrowingOf).
 export function buildJob({
   ctx,
   turn,
@@ -143,6 +145,7 @@ export function buildJob({
   commentVisible,
   approvals = null,
   respond = 'mention',
+  narrowing = null,
 }) {
   // The conversation up to the message that started this turn, never past
   // it: a message written while the turn waited for the machine is not the
@@ -232,6 +235,8 @@ export function buildJob({
       },
     },
     agent: { id: agent.id, name: agent.name },
+    // What this project lets the machine allow, at most; null: no narrowing.
+    narrowing: narrowing ? { maxTier: narrowing.maxTier, shell: narrowing.shell, browser: narrowing.browser } : null,
     // Who asked. `owner`: the person who connected this agent.
     asker,
     ...(turn.kind === 'fix'

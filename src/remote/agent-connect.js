@@ -526,6 +526,7 @@ export async function agentConnect(
       editBackend,
       fix: edits ? { config, env, fetchImpl, instructions } : null,
       instructions: instructionsNote,
+      capabilities: { config },
       hello: { kind, machine: os.hostname().split('.')[0] || 'this computer', version: VERSION, maxTurns: concurrency },
       policy,
       remote,

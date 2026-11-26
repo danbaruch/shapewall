@@ -44,11 +44,28 @@
 //              $XDG_CONFIG_HOME/shapewall/agent-config/<name>/, read only if
 //              it exists, never created), an absolute path, or "none".
 //
+// Version 2 (1.4.0) adds what each trust tier may do (src/agent/capabilities.js
+// cleanCapabilityKeys, docs/agent-hardening.md lists them): trustTeam,
+// trustTeamShell, shell, shellNetwork, shellUnsandboxed, commandApproval,
+// browser, browserAllow, browserAuth, browserProfile, browserProfileTeam,
+// extensionsFor, allowTool, handoffHops. A version 1 file is read as exactly
+// what it allowed before (upgradeV1Capabilities: no shell, no browser, no
+// extensions, a card for every command), and the next save writes every
+// entry of it back as version 2 with those values spelled out, so no entry
+// gains anything by the upgrade.
+//
 // One entry per server and connection name.
 
 import fs from 'node:fs'
 import path from 'node:path'
 import { credentialsFile, updatePrivateJson } from './credentials.js'
+import {
+  CAPABILITY_DEFAULTS,
+  CAPABILITY_KEYS,
+  CAPABILITY_NARROWEST,
+  cleanCapabilityKeys,
+  upgradeV1Capabilities,
+} from '../agent/capabilities.js'
 
 export const POLICY_AUDIENCES = ['server', 'owner']
 export const POLICY_APPROVALS = ['none', 'owner', 'admins']
@@ -67,7 +84,12 @@ export const DEFAULT_MACHINE_POLICY = {
   instructions: 'all',
   agentConfig: null,
   respond: 'thread',
+  ...CAPABILITY_DEFAULTS,
+  browserAllow: [],
+  extensionsFor: ['owner'],
+  allowTool: [],
 }
+export const POLICY_VERSION = 2
 export const POLICY_RESPOND = ['thread', 'mention']
 export const POLICY_INSTRUCTIONS = ['all', 'project', 'none']
 
@@ -80,7 +102,7 @@ function readAll(file) {
   try {
     fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0))
   } catch (error) {
-    if (error.code === 'ENOENT') return { version: 1, connections: {} }
+    if (error.code === 'ENOENT') return { version: POLICY_VERSION, connections: {} }
     if (error.code === 'ELOOP') throw new Error(`${file} is a symbolic link. A policy file is a plain file of your own.`, { cause: error })
     throw error
   }
@@ -150,14 +172,37 @@ export const cleanRemote = (value) => (typeof value === 'string' && REMOTE_RE.te
 // for that key, never as the default: no approvals, only the person who
 // connected it, no commands, nothing automatic, no settings files, never
 // pushed. `warn(text)` hears about each such key by name.
-const KNOWN_KEYS = ['audience', 'approvals', 'commands', 'auto', 'allowPaths', 'base', 'remote', 'instructions', 'agentConfig', 'respond']
+const KNOWN_KEYS = [
+  'audience',
+  'approvals',
+  'commands',
+  'auto',
+  'allowPaths',
+  'base',
+  'remote',
+  'instructions',
+  'agentConfig',
+  'respond',
+  ...CAPABILITY_KEYS,
+]
 const unique = (list) => [...new Set(list)]
 function clean(entry, warn = () => {}) {
   const has = (key) =>
     entry !== null && typeof entry === 'object' && !Array.isArray(entry) && Object.hasOwn(entry, key) && entry[key] !== undefined
   if (entry !== undefined && entry !== null && (typeof entry !== 'object' || Array.isArray(entry))) {
     warn('this connection\'s entry is not an object: read as "read and answer only, for the person who connected it"')
-    return { ...DEFAULT_MACHINE_POLICY, audience: 'owner', remote: null, instructions: 'none', agentConfig: 'none', respond: 'mention' }
+    return {
+      ...DEFAULT_MACHINE_POLICY,
+      audience: 'owner',
+      remote: null,
+      instructions: 'none',
+      agentConfig: 'none',
+      respond: 'mention',
+      ...CAPABILITY_NARROWEST,
+      browserAllow: [],
+      extensionsFor: [],
+      allowTool: [],
+    }
   }
   for (const key of Object.keys(entry || {})) if (!KNOWN_KEYS.includes(key)) warn(`"${key}" is not a setting this version knows: ignored`)
   const bad = (key, narrow) => {
@@ -235,21 +280,52 @@ function clean(entry, warn = () => {}) {
     instructions,
     agentConfig,
     respond,
+    // What each trust tier may do (capabilities.js), each key read the same way.
+    ...cleanCapabilityKeys(entry, { warn: (key, said) => bad(key, said) }),
   }
 }
 export { clean as cleanMachinePolicy }
+
+// The file's version as it reads it: 2, or 1 for a file from before 1.4.0
+// (no version, or any value that is not a whole number above 1). A newer
+// version is read as 2: keys it does not know are said and ignored.
+export const fileVersion = (data) => (Number.isInteger(data?.version) && data.version >= POLICY_VERSION ? POLICY_VERSION : 1)
+
+// One entry of a version 1 file, as version 2: the capability keys set to
+// what version 1 allowed (nothing new), unless the entry already names one.
+export function upgradeV1Entry(entry) {
+  if (entry === undefined || entry === null || typeof entry !== 'object' || Array.isArray(entry)) return entry
+  const before = clean(Object.fromEntries(Object.entries(entry).filter(([key]) => !CAPABILITY_KEYS.includes(key))))
+  return { ...upgradeV1Capabilities(before.approvals, before.commands), ...entry }
+}
 
 // The policy for one connection (defaults when nothing is saved).
 // `warn(text)`: told about every value in the file that was not understood.
 export function readMachinePolicy(origin, slug = 'default', env = process.env, { warn = () => {} } = {}) {
   const file = policyFile(env)
-  return clean(readAll(file).connections[`${origin}#${slug}`], (text) => warn(`${file}: ${text}`))
+  const data = readAll(file)
+  const entry = data.connections[`${origin}#${slug}`]
+  return clean(fileVersion(data) === 1 ? upgradeV1Entry(entry) : entry, (text) => warn(`${file}: ${text}`))
 }
 
 // Saves what was chosen for one connection; returns the policy in effect.
 export function saveMachinePolicy(origin, slug, changes, env = process.env) {
   const file = policyFile(env)
-  return updatePrivateJson(file, readAll, (data) => {
+  // The version as read (updatePrivateJson stamps its own before `change` runs).
+  let version = POLICY_VERSION
+  const read = (target) => {
+    const data = readAll(target)
+    version = fileVersion(data)
+    return data
+  }
+  return updatePrivateJson(file, read, (data) => {
+    // A version 1 file is written back as version 2, every entry with what it
+    // allowed spelled out: an entry nobody touched must not read as the new
+    // defaults afterwards.
+    if (version === 1) {
+      for (const [name, entry] of Object.entries(data.connections)) data.connections[name] = clean(upgradeV1Entry(entry))
+    }
+    data.version = POLICY_VERSION
     const key = `${origin}#${slug}`
     const next = clean({ ...clean(data.connections[key]), ...changes })
     data.connections[key] = next

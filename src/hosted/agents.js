@@ -39,6 +39,7 @@ import { logoForAgent } from '../agent/agent-logos.js'
 import { cleanAgentName, isAgentTint, isBuiltInIcon } from '../agent/identity.js'
 import { handleFor as mentionHandle } from '../mentions.js'
 import { agentHandles } from '../agent/triggers.js'
+import { cleanCapabilitySummary } from '../agent/capability-render.js'
 import { agentPolicy, trustedMember } from './agent-policy.js'
 import { newId } from './crypto.js'
 import { RUN_DURATION } from './usage-shape.js'
@@ -309,6 +310,20 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
   // kind, machine and capabilities, validated by the caller. Display, and
   // what the machine's own policy narrows; never a widening.
   function hello(row, { kind, machine, capabilities }) {
+    // An older hello of the same process (`link`, counted by `seq`) that
+    // arrives after a newer one: it is heard, and changes nothing it said.
+    const was = capsOf(row)
+    if (
+      typeof capabilities?.link === 'string' &&
+      was.link === capabilities.link &&
+      Number.isSafeInteger(was.seq) &&
+      Number.isSafeInteger(capabilities.seq) &&
+      capabilities.seq < was.seq
+    ) {
+      t.run('UPDATE agents SET last_seen_at = :at WHERE workspace_id = :ws AND id = :id', { at: iso(), id: row.id })
+      forget()
+      return get(row.project_id, row.id)
+    }
     const label = cleanMachine(machine)
     t.run(
       'UPDATE agents SET kind = :kind, machine = :machine, capabilities = :caps, last_seen_at = :at WHERE workspace_id = :ws AND id = :id',
@@ -586,6 +601,9 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
         images: caps.images === true,
       },
       policy: machinePolicy(row),
+      // What each trust tier may do there, as its machine last said (line
+      // states, src/agent/capability-render.js). null: an older machine.
+      summary: cleanCapabilitySummary(caps.summary),
       maxTurns: Number.isInteger(caps.maxTurns) ? caps.maxTurns : null,
       // The instruction files its sessions read, as its last hello said (names and hashes, no content).
       instructions: presence?.instructionsOf(t.workspaceId, row.id) || [],

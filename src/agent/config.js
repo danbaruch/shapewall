@@ -16,6 +16,7 @@ import { logoForAgent } from './agent-logos.js'
 import { KNOWN_AGENTS } from './acp/detect.js'
 import { validateBranchConfig } from './branch-mode.js'
 import { validateBatchConfig } from './batch-fixes.js'
+import { BROWSER_ALLOW_MAX, cleanOrigin } from './capabilities.js'
 
 export const AGENT_BACKENDS = ['openai-compatible', 'acp']
 // A config is usually committed. A command in it would run on the machine of
@@ -142,7 +143,40 @@ export function validateAgent(raw, problems) {
     ...validateBranchConfig(raw, problems),
     // agent.batchFixes (batch-fixes.js), only when given.
     ...validateBatchConfig(raw, problems),
+    // agent.browser, agent.fixIn (capabilities.js), only when given.
+    ...validateCapabilityConfig(raw, problems),
   }
+}
+
+// `agent.browser.allow`: origins the agent's throwaway browser may load on
+// top of the app's own addresses (never while it is logged in, and never
+// when this machine switched the browser off). `agent.fixIn`: "copy" (the
+// default) or "checkout" (a local board's owner only: solo turns edit this
+// checkout in place).
+export const FIX_IN = ['copy', 'checkout']
+function validateCapabilityConfig(raw, problems) {
+  const out = {}
+  if (raw.browser !== undefined) {
+    const browser = raw.browser
+    if (!isObject(browser) || Object.keys(browser).some((key) => key !== 'allow'))
+      problems.push('agent.browser: { "allow": ["https://staging.example.com"] }')
+    else if (browser.allow !== undefined) {
+      if (
+        !Array.isArray(browser.allow) ||
+        browser.allow.length > BROWSER_ALLOW_MAX ||
+        browser.allow.some((origin) => cleanOrigin(origin) === null)
+      )
+        problems.push(
+          `agent.browser.allow: up to ${BROWSER_ALLOW_MAX} http(s) origins, such as "https://staging.example.com" (no path, no user or password)`,
+        )
+      else out.browser = { allow: [...new Set(browser.allow.map(cleanOrigin))] }
+    } else out.browser = { allow: [] }
+  }
+  if (raw.fixIn !== undefined) {
+    if (!FIX_IN.includes(raw.fixIn)) problems.push('agent.fixIn: "copy" (a fix copy of its own) or "checkout" (this checkout, solo only)')
+    else out.fixIn = raw.fixIn
+  }
+  return out
 }
 
 // An API key goes to https, or to plain http only on this machine (a local
