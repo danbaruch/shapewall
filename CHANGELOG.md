@@ -107,8 +107,8 @@ Known limits in 1.4.0:
   or a board tool's result with other people's comments) is tainted for good and never gets extensions. A board tool's result
   mid-turn refuses every extension tool and every board write for the rest of the turn and ends the session with it. One
   transition table (`src/agent/thread-trust.js`) for every writer.
-- Hosted migration 23: `chat_threads.tainted`, `taint_authors` and `trust_v`, for thread trust. Every thread that exists at
-  upgrade is marked tainted, and so is a thread an older build wrote in later (docs/hosted.md, "Migration 23 and rollback").
+- Hosted database, migration 23: `chat_threads.tainted`, `taint_authors` and `trust_v`, for thread trust. Every thread that
+  exists at upgrade is marked tainted, and so is a thread an older build wrote in later (rollback notes in docs/hosted.md).
 
 ### Changed
 
@@ -341,7 +341,7 @@ Known limits in 1.4.0:
 - `shapewall agent connect --respond thread|mention`: whether this machine honors a shared thread set to answer every message
   ("thread", the default) or answers an @mention and Send to agent only ("mention"), whatever the server says. Saved in
   `agent-policy.json` as `respond`.
-- Hosted migration 22: `chat_threads.respond_mode`, for the per-thread setting (docs/hosted.md, "Migration 22 and rollback").
+- Hosted database, migration 22: `chat_threads.respond_mode`, for the per-thread setting (rollback notes in docs/hosted.md).
 
 - The plugin guide is a page on the site (https://shapewall.com/docs/plugins), and the Features page and docs index cover agent
   setup, links and follow, and shared threads.
