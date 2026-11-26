@@ -304,7 +304,12 @@ export function runProcess(
 
 let manager = null
 let starting = null
+// The runtime runs only while a session uses it: its proxies and socat
+// bridges would keep the process alive (and listening) between fixes.
+let sessions = 0
+let stopping = null
 async function sandboxManager() {
+  if (stopping) await stopping
   if (manager) return manager
   starting ||= (async () => {
     const { SandboxManager } = await import('@anthropic-ai/sandbox-runtime')
@@ -334,6 +339,11 @@ export async function closeSandbox() {
   manager = null
   starting = null
   if (was) await was.reset().catch(() => {})
+}
+function releaseSandbox() {
+  sessions -= 1
+  if (sessions > 0) return
+  stopping = closeSandbox().finally(() => (stopping = null))
 }
 
 // What a session's commands may reach, as srt host patterns.
@@ -423,7 +433,15 @@ export async function createCommandSession({
   const live = new Map()
   const vendor = runtimeVendorDir()
   const boxed = mode === 'sandboxed'
-  const box = boxed ? await sandboxManager() : null
+  if (boxed) sessions += 1
+  let box = null
+  try {
+    box = boxed ? await sandboxManager() : null
+  } catch (error) {
+    releaseSandbox()
+    fs.rmSync(tmp, { recursive: true, force: true })
+    throw error
+  }
   const filesystem = () => ({
     denyRead: [home, ...denyRead],
     allowRead: [real, tmp, ...toolchainDirs(home), ...(vendor ? [vendor] : []), ...readPaths.filter((dir) => path.isAbsolute(dir))],
@@ -480,8 +498,10 @@ export async function createCommandSession({
     if (box) for (const id of live.keys()) box.registerCommandNetworkLists(id, { allowedDomains: list() })
   }
   function close() {
+    if (closed) return
     closed = true
     fs.rmSync(tmp, { recursive: true, force: true })
+    if (boxed) releaseSandbox()
   }
   log(`sandbox: ${boxed ? 'OS sandbox' : 'no OS sandbox (a card each)'} in ${real}`)
   return { root: real, tmp, mode, network, readOnly, run, allowPort, dropPort, ports: () => [...ports], close }
