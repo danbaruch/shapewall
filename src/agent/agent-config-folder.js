@@ -170,7 +170,7 @@ function skillFiles(root, skipped, name) {
         continue
       }
       total += stat.size
-      out.push({ rel, size: stat.size })
+      out.push({ rel, size: stat.size, mtime: stat.mtimeMs })
     }
   }
   walk(root, 0)
@@ -276,6 +276,22 @@ export function readExtensions(dir) {
   return { dir, skills, servers, skipped }
 }
 
+// The folder a machine policy names (capabilities.js machineView
+// `agentConfig`), checked and read: { found, names, error }. Never throws:
+// a folder that fails a check gives no extensions, and says why.
+// `agentConfig`: an absolute path; null, "none" or anything else: none.
+export function policyExtensions(agentConfig, { projectDir = null, outputDir = null, env = process.env } = {}) {
+  if (typeof agentConfig !== 'string' || agentConfig === 'none' || !path.isAbsolute(agentConfig))
+    return { found: null, names: null, error: null }
+  try {
+    const dir = checkExtensionsFolder(agentConfig, { projectDir, outputDir, env })
+    const found = readExtensions(dir)
+    return { found, names: extensionNames(found), error: null }
+  } catch (error) {
+    return { found: null, names: null, error: error.message }
+  }
+}
+
 // What the card, `agent status` and the prompt block name: names only.
 export const extensionNames = (found) =>
   found ? { skills: found.skills.map((skill) => skill.name), servers: found.servers.map((server) => server.name) } : null
@@ -333,6 +349,21 @@ export function extensionServers(found, { env = process.env } = {}) {
       ...['PATH', 'HOME'].filter((name) => env[name] && !Object.hasOwn(server.env, name)).map((name) => ({ name, value: env[name] })),
     ],
   }))
+}
+
+// The extensions of one turn whose resolved capabilities turned them on
+// (capabilities.js `extensions.on`), or null: the plugin is built once per
+// `key` and rebuilt when the skills change. `found`: readExtensions().
+const built = new Map()
+export function turnExtensions(caps, found, key, { env = process.env } = {}) {
+  if (!caps?.extensions?.on || !found) return null
+  const sig = JSON.stringify(found.skills.map((skill) => [skill.name, skill.files]))
+  let entry = built.get(key)
+  if (!entry || entry.sig !== sig || (entry.plugin && !fs.existsSync(entry.plugin))) {
+    entry = { sig, plugin: buildExtensionPlugin(found, key, { env }) }
+    built.set(key, entry)
+  }
+  return extensionSession(found, entry.plugin, caps.extensions.tools, { env })
 }
 
 // The extension server a tool name (mcp__SERVER__TOOL) belongs to, among
