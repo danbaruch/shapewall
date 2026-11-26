@@ -42,6 +42,17 @@ import { KILL_GRACE_MS, POSIX, stopTree, track } from '../../process-group.js'
 import { findProgram } from '../../watch.js'
 import { redact } from './openai.js'
 import { EXEC_MCP_NAME } from '../exec-mcp.js'
+import { serverOfTool } from '../agent-config-folder.js'
+import { boardWriteToolName, taintingToolName } from '../thread-trust.js'
+
+// The tool a tool call or permission request is about: the adapter's own
+// name for it (claude-agent-acp puts it in _meta.claudeCode.toolName), else
+// its title (an MCP tool's title is its name, mcp__SERVER__TOOL).
+export function toolNameOf(call) {
+  const meta = call?._meta?.claudeCode?.toolName
+  if (typeof meta === 'string' && meta) return meta
+  return typeof call?.title === 'string' ? call.title.trim() : ''
+}
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../../../package.json', import.meta.url), 'utf8')).version
 
@@ -260,6 +271,43 @@ export function localRestrictedSession(kind, { exec = false } = {}) {
       },
     },
   }
+}
+
+// ---- Extensions on trusted turns (1.4.0) --------------------------------------
+// A turn whose extensions are on (capabilities.js, agent-config-folder.js
+// extensionSession): the session also gets the folder's skills (a plugin
+// Shapewall made, plus the Skill tool) and its MCP servers (in session/new
+// mcpServers, strictMcpConfig still true). Their tools are never in
+// allowedTools: every call arrives as a permission request and is decided
+// here (AcpProcess.extensionDecision), so a tool result that taints the
+// turn stops them at once. Claude Code only: other adapters take no such
+// options (spike S1) and never get extensions.
+export function withExtensions(session, ext) {
+  const options = session?._meta?.claudeCode?.options
+  if (!ext || !options) return session
+  const tools = [...new Set([...(options.tools || []), 'Skill'])]
+  return {
+    ...session,
+    _meta: {
+      ...session._meta,
+      claudeCode: {
+        ...session._meta.claudeCode,
+        options: {
+          ...options,
+          tools,
+          disallowedTools: (options.disallowedTools || []).filter((tool) => tool !== 'Skill'),
+          ...(ext.plugin ? { plugins: [{ type: 'local', path: ext.plugin }], skills: [...ext.skills] } : {}),
+        },
+      },
+    },
+  }
+}
+export const EXTENSION_REFUSALS = {
+  allow: "Refused on the agent's machine: this tool is not allowed for this agent. Its owner allows it there with --allow-tool",
+  tainted:
+    "Refused on the agent's machine: this turn read other people's text (a board tool's result), so its extensions are off for the rest of it",
+  boardWrite:
+    "Refused on the agent's machine: this turn had extensions and then read other people's text, so it may not write to the board for the rest of it",
 }
 
 // The two answers a card from a hosted board has.
@@ -753,10 +801,18 @@ class AcpProcess {
     extraServers = '[]',
     preamble = null,
     instructions = null,
+    extensions = null,
   }) {
     Object.assign(this, { argv, label, sandbox, limits, log, thread, onGone, mcpServers, readOnly, remoteEdit, preamble, extraServers })
     // A local board's restricted session (localRestrictedSession): Claude Code only.
     this.restricted = Boolean(restricted) && !readOnly && !remoteEdit && acpAgentKind(argv) === 'claude'
+    // This session's extensions (withExtensions): Claude Code's hardened sessions only.
+    this.extensions = extensions && acpAgentKind(argv) === 'claude' && (readOnly || remoteEdit || this.restricted) ? extensions : null
+    this.extensionKey = this.extensions?.key || null
+    if (this.extensions) this.mcpServers = [...this.mcpServers, ...this.extensions.servers]
+    // A board tool's result brought other people's text into this session:
+    // its extension tools are refused from then on, and it ends with its turn.
+    this.tainted = false
     // A connected agent's (or a restricted local session's) instruction files: { mode, configDir, onLoad } (src/agent/instructions.js).
     this.instructions = readOnly || remoteEdit || this.restricted ? instructions : null
     // The files' text for the first prompt, when the agent takes no system prompt.
@@ -892,13 +948,16 @@ class AcpProcess {
         mcpServers: this.mcpServers,
         ...(appended && takesSystemPrompt ? { systemPrompt: { mode: 'append', content: [{ type: 'text', text: appended }] } } : {}),
         // Read only: the agent's own controls are set so that it cannot act (readOnlySession).
-        ...(this.readOnly
-          ? readOnlySession(acpAgentKind(this.argv), { exec: this.hasExec })
-          : this.remoteEdit
-            ? remoteEditSession(acpAgentKind(this.argv), { exec: this.hasExec })
-            : this.restricted
-              ? localRestrictedSession(acpAgentKind(this.argv), { exec: this.hasExec })
-              : {}),
+        ...withExtensions(
+          this.readOnly
+            ? readOnlySession(acpAgentKind(this.argv), { exec: this.hasExec })
+            : this.remoteEdit
+              ? remoteEditSession(acpAgentKind(this.argv), { exec: this.hasExec })
+              : this.restricted
+                ? localRestrictedSession(acpAgentKind(this.argv), { exec: this.hasExec })
+                : {},
+          this.extensions,
+        ),
       })
       this.sessionId = session.sessionId
       this.choices = sessionChoices(session)
@@ -1562,6 +1621,12 @@ class AcpProcess {
     } else if (kind === 'agent_thought_chunk' && update.content?.type === 'text')
       turn.queue.push({ type: 'reasoning', text: String(update.content.text) })
     else if (kind === 'tool_call' || kind === 'tool_call_update') {
+      // A board tool whose result is other people's text (thread-trust.js):
+      // the thread is tainted from here on, said once to the turn's runner.
+      if (!this.tainted && taintingToolName(toolNameOf(update))) {
+        this.tainted = true
+        turn.queue.push({ type: 'taint', why: 'tool' })
+      }
       turn.queue.push(this.toolEvent(update))
       const known = this.tools.get(String(update.toolCallId || ''))
       if (known) for (const file of completedEdits(known, update)) turn.queue.push({ type: 'edited', path: file })
@@ -1660,6 +1725,22 @@ class AcpProcess {
     return state
   }
 
+  // A permission request for one of this session's extension tools:
+  // { name, allow, note }, or null when it is not one (the usual rules
+  // apply). Allowed only by exact name (--allow-tool), only while no board
+  // tool has brought other people's text into the session.
+  extensionDecision(call) {
+    if (!this.extensions) return null
+    const name = toolNameOf(call)
+    const server = serverOfTool(name, this.extensions.serverNames)
+    if (!server) return null
+    // Edits and commands are never an extension's to ask for.
+    if (['edit', 'delete', 'move', 'execute'].includes(call?.kind)) return { name, allow: false, note: EXTENSION_REFUSALS.allow }
+    if (this.tainted) return { name, allow: false, note: EXTENSION_REFUSALS.tainted }
+    if (!this.extensions.allow.includes(name)) return { name, allow: false, note: EXTENSION_REFUSALS.allow }
+    return { name, allow: true, note: null }
+  }
+
   async onPermission(params, signal) {
     this.ownSession(params)
     const call = params.toolCall || {}
@@ -1685,6 +1766,29 @@ class AcpProcess {
     )
     if (detail && target && outsideProject(this.root, target)) {
       detail = `${detail}\n[Outside the project: ${showable(path.resolve(this.root, target))}]`
+    }
+    // A tool of this session's extensions: allowed or refused here, never
+    // asked (no card, no "always"), whatever kind of session this is.
+    const extension = this.extensionDecision(call)
+    if (extension) {
+      const reject = options.find((item) => item.kind === 'reject_once') || options.find((item) => item.kind === 'reject_always')
+      const allow = options.find((item) => item.kind === 'allow_once')
+      if (extension.allow && allow) return { outcome: { outcome: 'selected', optionId: allow.optionId } }
+      this.refuse({ title: extension.name, kind: call.kind || known.kind || 'other', detail: null, note: extension.note })
+      return reject ? { outcome: { outcome: 'selected', optionId: reject.optionId } } : { outcome: { outcome: 'cancelled' } }
+    }
+    // A turn that had extensions and was then tainted: no board writes for
+    // the rest of it (thread-trust.js boardWriteToolName), whatever anyone
+    // answers. Its skills may still be in the model's context.
+    if (this.extensions && this.tainted && boardWriteToolName(toolNameOf(call) || known.title)) {
+      this.refuse({
+        title: toolNameOf(call) || 'Write to the board',
+        kind: call.kind || known.kind || 'other',
+        detail,
+        note: EXTENSION_REFUSALS.boardWrite,
+      })
+      const reject = options.find((item) => item.kind === 'reject_once') || options.find((item) => item.kind === 'reject_always')
+      return reject ? { outcome: { outcome: 'selected', optionId: reject.optionId } } : { outcome: { outcome: 'cancelled' } }
     }
     // Read only: refused here, whatever it is. The agent hears its own
     // "reject" option (or a cancel) and goes on answering.
@@ -2092,7 +2196,7 @@ export function createAcpBackend(
     idle[0].kill('evicted')
   }
 
-  const start = async (thread, signal, { evict = true, workdir = null, mcpServers = null } = {}) => {
+  const start = async (thread, signal, { evict = true, workdir = null, mcpServers = null, extensions = null } = {}) => {
     evictFor(evict)
     const agent = new AcpProcess({
       argv: settings.acp.argv,
@@ -2115,6 +2219,8 @@ export function createAcpBackend(
       // a thread's exec relay (exec-mcp.js createThreadRelay) with the turn.
       mcpServers: [...(workdir?.mcpServers || mcpServersFor?.(thread) || []), ...(mcpServers || [])],
       extraServers: serverKey(mcpServers),
+      // This turn's extensions (withExtensions), when it may have them.
+      extensions,
       onGone: (item) => {
         if (item.stopped || !item.pid) processPool?.agents.delete(item)
         if (processes.get(item.thread) === item) processes.delete(item.thread)
@@ -2172,21 +2278,26 @@ export function createAcpBackend(
     return pending
   }
 
-  const sessionFor = async (thread, signal, { evict, workdir = null, mcpServers = null }) => {
+  // Whether a running session is the one a turn asks for: the same folder,
+  // the same tools of Shapewall's and the same extensions (none is none).
+  const sameSession = (agent, { workdir, mcpServers, extensions }) =>
+    agent.root === rootOf(workdir) && agent.extraServers === serverKey(mcpServers) && agent.extensionKey === (extensions?.key || null)
+  const sessionFor = async (thread, signal, { evict, workdir = null, mcpServers = null, extensions = null }) => {
     if (signal?.aborted) throw new AgentError('agent_stopped', 'The agent start was cancelled.', 409)
     let agent = processes.get(thread)
     if (evict && agent?.turn) {
       await agent.settled()
       agent = processes.get(thread)
     }
-    // Started in another folder, or with other tools of Shapewall's: started afresh.
-    if (evict && agent?.state === 'ready' && (agent.root !== rootOf(workdir) || agent.extraServers !== serverKey(mcpServers))) {
+    // Started in another folder, with other tools of Shapewall's or other
+    // extensions (a turn without them never reuses a session that had them): started afresh.
+    if (evict && agent?.state === 'ready' && !sameSession(agent, { workdir, mcpServers, extensions })) {
       agent.kill('workdir')
       await agent.stoppingPromise
       agent = null
     }
     if (agent?.state === 'ready') return agent
-    agent = await start(thread, signal, { evict, workdir, mcpServers })
+    agent = await start(thread, signal, { evict, workdir, mcpServers, extensions })
     agent.idle()
     return agent
   }
@@ -2230,13 +2341,15 @@ export function createAcpBackend(
       preamble = null,
       mcpServers = null,
       capabilities = '',
+      // This turn's extensions (agent-config-folder.js extensionSession), or null.
+      extensions = null,
     }) {
       if (signal?.aborted) return
       const existing = processes.get(thread)
-      if (existing?.state !== 'ready' || existing.root !== rootOf(workdir) || existing.extraServers !== serverKey(mcpServers))
+      if (existing?.state !== 'ready' || !sameSession(existing, { workdir, mcpServers, extensions }))
         yield { type: 'status', text: `Starting ${settings.label}` }
       const prepared = await onThread(thread, async () => {
-        const agent = await sessionFor(thread, signal, { evict: true, workdir, mcpServers })
+        const agent = await sessionFor(thread, signal, { evict: true, workdir, mcpServers, extensions })
         await agent.applyChoices(choices)
         if (signal?.aborted) return null
         const used = usedOptions(agent.options())
@@ -2271,6 +2384,9 @@ export function createAcpBackend(
       } finally {
         turn.finish()
         await agent.settled()
+        // A session with extensions that read other people's text ends with
+        // its turn: what the extension tools returned leaves with it.
+        if (agent.extensions && agent.tainted) agent.kill('tainted')
       }
     },
     // The person's answer to a permission card: 'approved' | 'denied', false
@@ -2300,10 +2416,10 @@ export function createAcpBackend(
     // or the one already running. Never evicts another thread's session; an
     // unused one stops after `idleMs` like any idle session. `choices` are
     // applied to it as they would be before a turn.
-    async prepare(thread, { choices = null, signal = null, mcpServers = null } = {}) {
+    async prepare(thread, { choices = null, signal = null, mcpServers = null, extensions = null } = {}) {
       if (closed) throw new AgentError('agent_start', 'The server is stopping.')
       return onThread(thread, async () => {
-        const agent = await sessionFor(thread, signal, { evict: false, mcpServers })
+        const agent = await sessionFor(thread, signal, { evict: false, mcpServers, extensions })
         if (!agent.turn) await agent.applyChoices(choices)
         return agent.options()
       })

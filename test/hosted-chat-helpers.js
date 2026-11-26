@@ -129,6 +129,10 @@ export function startLink(
     // The approving account's handle, as `agent connect` saves it.
     owner = null,
     onOwner = () => {},
+    // The agent config folder's extensions (agent-config-folder.js policyExtensions), or null.
+    extensions = null,
+    // The chat agent's command in place of the stub's (a stub named as Claude Code, say).
+    acpArgv = null,
   } = {},
 ) {
   const logs = []
@@ -141,7 +145,7 @@ export function startLink(
         backend: 'acp',
         label: 'Stub agent',
         // The modes Claude Code's adapter lists: a read-only session needs a mode that asks.
-        acp: { argv: [process.execPath, ACP_STUB, '--ro-modes', ...args] },
+        acp: { argv: acpArgv || [process.execPath, ACP_STUB, '--ro-modes', ...args] },
         readOnly: true,
         preamble: REMOTE_PREAMBLE,
         vision: false,
@@ -184,6 +188,7 @@ export function startLink(
     ...(platform ? { capabilities: { config: null, platform } } : {}),
     owner,
     onOwner,
+    extensions,
     policy: edits ? machinePolicy : policy,
     // `remote`: true for the real token API, or a client of the test's own.
     remote: remote === true ? createRemote({ origin: hosted.origin, token }) : remote || null,

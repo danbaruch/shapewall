@@ -39,7 +39,7 @@ const cut = (value, max) => {
     .trim()
   return text.length > max ? `${text.slice(0, max - 1)}…` : text
 }
-const commentById = (config, board) => {
+export const commentById = (config, board) => {
   let cache = null
   return (id) => {
     cache ||= new Map(listComments(config, board.id).map((comment) => [comment.id, comment]))
@@ -116,6 +116,30 @@ export function validateFiles(raw) {
   })
 }
 
+// The board comments one mention quotes (mentionContext): a comment or
+// element mention its comment (null when it is gone), a person mention their
+// open comments. The thread trust checks read the same list
+// (routes.js trustEventsOf, run.js quotesOutside), so whatever is quoted is
+// what is judged.
+export function mentionComments(config, board, mention, find = commentById(config, board)) {
+  if (mention?.kind === 'comment' || mention?.kind === 'element') {
+    const id = Number(mention.id)
+    const comment = Number.isSafeInteger(id) && id > 0 ? find(id) : null
+    return comment ? [comment] : null
+  }
+  if (mention?.kind === 'person') {
+    const handle = String(mention.id || '').toLowerCase()
+    return listComments(config, board.id).filter(
+      (comment) =>
+        comment.status === 'open' &&
+        (handleFor(comment.author) === handle ||
+          String(comment.authorHandle || '').toLowerCase() === handle ||
+          commentMentions(comment).includes(handle)),
+    )
+  }
+  return []
+}
+
 // The quoted data for one mention: what the model needs to know about it.
 export function mentionContext(config, board, mention, find = commentById(config, board)) {
   const attrs = { board: board.id, kind: mention.kind }
@@ -125,7 +149,7 @@ export function mentionContext(config, board, mention, find = commentById(config
     return quoteData('mention', { ...attrs, page: page.id }, { page: { id: page.id, title: page.title, path: page.path, note: page.note } })
   }
   if (mention.kind === 'comment' || mention.kind === 'element') {
-    const comment = find(mention.id)
+    const comment = mentionComments(config, board, mention, find)?.[0]
     if (!comment) return null
     if (mention.kind === 'comment') return quoteData('mention', { ...attrs, comment: comment.id }, commentForModel(config, board, comment))
     const page = board.pages.find((value) => value.id === comment.pageId)
@@ -159,13 +183,7 @@ export function mentionContext(config, board, mention, find = commentById(config
   }
   if (mention.kind === 'person') {
     const handle = mention.id
-    const theirs = listComments(config, board.id).filter(
-      (comment) =>
-        comment.status === 'open' &&
-        (handleFor(comment.author) === handle ||
-          String(comment.authorHandle || '').toLowerCase() === handle ||
-          commentMentions(comment).includes(handle)),
-    )
+    const theirs = mentionComments(config, board, mention, find)
     return quoteData(
       'mention',
       { ...attrs, person: handle },

@@ -80,11 +80,14 @@ const CONFIG = {
 // key by key, as `shapewall agent set` will write them.
 const optIn = (entry, warn) => cleanMachinePolicy({ ...CAPABILITY_DEFAULTS, ...entry }, warn)
 // A connected machine that takes edits, with one exact command and a team.
-const MACHINE = optIn({ approvals: 'owner', commands: ['npm test'], trustTeam: ['robin'] })
+// It names an agent config folder of its own (extensions), which holds one skill and one server.
+const MACHINE = optIn({ approvals: 'owner', commands: ['npm test'], trustTeam: ['robin'], agentConfig: '/home/dan/agent-config/builder' })
+const FOLDER = { skills: ['notes'], servers: ['brain'] }
+const CLEAN = { tainted: false, authors: [] }
 const TRUST = {
-  solo: { authors: [{ handle: 'dan', owner: true, member: true }], guests: false },
-  team: { authors: [{ handle: 'robin', owner: false, member: true }], guests: false },
-  open: { authors: [{ handle: 'eve', owner: false, member: true }], guests: false },
+  solo: { authors: [{ handle: 'dan', owner: true, member: true }], guests: false, thread: CLEAN },
+  team: { authors: [{ handle: 'robin', owner: false, member: true }], guests: false, thread: CLEAN },
+  open: { authors: [{ handle: 'eve', owner: false, member: true }], guests: false, thread: CLEAN },
 }
 const PLATFORMS = {
   'linux sandbox': { os: 'linux', sandbox: true },
@@ -97,7 +100,16 @@ const PLATFORMS = {
 const sandboxed = (platform) => ['linux', 'darwin'].includes(platform?.os) && platform.sandbox === true
 
 const resolve = (tier, where, platform, extra = {}) =>
-  resolveCapabilities({ path: where, trust: TRUST[tier], audience: 'owner', machine: MACHINE, config: CONFIG, platform, ...extra })
+  resolveCapabilities({
+    path: where,
+    trust: TRUST[tier],
+    audience: 'owner',
+    machine: MACHINE,
+    config: CONFIG,
+    platform,
+    extensions: FOLDER,
+    ...extra,
+  })
 
 // What a resolved object grants, in a few words a table can hold.
 function shapeOf(caps) {
@@ -144,7 +156,8 @@ function expected(where, tier, box) {
     browser: true,
     edit: 'copy',
     push: true,
-    extensions: tier === 'solo' && where !== 'watch-exec',
+    // An ACP session Shapewall starts itself: not an endpoint, not watch --exec.
+    extensions: tier === 'solo' && ['local-chat', 'hosted-fix', 'pickup'].includes(where),
   }
 }
 

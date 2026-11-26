@@ -762,13 +762,13 @@ test('migration 5 adds its tables and columns on top of a version 4 database', a
   `)
   old.close()
   const db = await openDatabase(path.join(dataDir, 'shapewall.db'))
-  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 22)
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 23)
   assert.deepEqual(
     db
       .prepare('SELECT version FROM schema_migrations ORDER BY version')
       .all()
       .map((row) => row.version),
-    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22],
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23],
   )
   assert.equal(db.prepare('SELECT handle FROM users WHERE id = ?').get(owner.user.id).handle, 'mira')
   assert.equal(db.prepare('SELECT name FROM projects WHERE id = ?').get(project.id).name, 'Existing site')
