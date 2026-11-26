@@ -569,7 +569,8 @@ checkout, never in a folder that holds the home folder. The fix copy is a Git wo
 the project's tools, not Git against your repository's own folder.
 
 On Linux it needs `bubblewrap`, `socat` and `ripgrep` (`sudo apt install bubblewrap socat ripgrep`, or your system's packages), and
-a kernel that lets bubblewrap start user namespaces (some distributions restrict this with AppArmor). Without them there is no OS
+a kernel that lets bubblewrap start user namespaces, one inside another (Ubuntu restricts this with AppArmor:
+`kernel.apparmor_restrict_unprivileged_userns`; the probe then says `userns_restricted`). Without them there is no OS
 sandbox: no full shell, and every named command waits for a card. Windows has no sandbox here: the shell stays off, and named
 commands run without a shell (`node` and `npm` as Node plus their script; a `.cmd` or `.bat` program is never run, as `cmd.exe`
 would read its arguments), each after a card.

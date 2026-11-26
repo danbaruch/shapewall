@@ -219,7 +219,17 @@ test('the platforms without a sandbox say so', () => {
     fresh: true,
     run: () => ({ status: 1 }),
   })
-  if (blocked.reason !== 'bwrap_missing' && blocked.reason !== 'socat_missing') assert.equal(blocked.reason, 'bwrap_blocked')
+  if (!['bwrap_missing', 'socat_missing', 'ripgrep_missing'].includes(blocked.reason)) assert.equal(blocked.reason, 'bwrap_blocked')
+  // bubblewrap starts, but no user namespace inside it (Ubuntu's AppArmor restriction): no sandbox.
+  let calls = 0
+  const nested = probeSandbox({
+    platform: 'linux',
+    env: { PATH: process.env.PATH },
+    fresh: true,
+    run: () => ({ status: calls++ === 0 ? 0 : 1 }),
+  })
+  if (!['bwrap_missing', 'socat_missing', 'ripgrep_missing'].includes(nested.reason) && fs.existsSync('/usr/bin/unshare'))
+    assert.equal(nested.reason, 'userns_restricted')
 })
 
 test('network lists and the command environment', () => {

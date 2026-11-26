@@ -124,7 +124,26 @@ export function probeSandbox({ platform = process.platform, env = process.env, r
         stdio: 'ignore',
         timeout: 10_000,
       })
-      result = tried.status === 0 ? { available: true, reason: null } : { available: false, reason: 'bwrap_blocked' }
+      // The runtime's seccomp helper makes a user namespace inside the sandbox; some
+      // systems (Ubuntu's AppArmor userns restriction) allow bubblewrap's own but not that one.
+      const unshare = onPath('unshare', env)
+      const nested =
+        tried.status !== 0 || !unshare
+          ? tried
+          : run(
+              bwrap,
+              ['--unshare-all', '--die-with-parent', '--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', unshare, '-U', 'true'],
+              {
+                stdio: 'ignore',
+                timeout: 10_000,
+              },
+            )
+      result =
+        tried.status !== 0
+          ? { available: false, reason: 'bwrap_blocked' }
+          : nested.status !== 0
+            ? { available: false, reason: 'userns_restricted' }
+            : { available: true, reason: null }
     }
   } else if (platform === 'darwin')
     result = fs.existsSync('/usr/bin/sandbox-exec') ? { available: true, reason: null } : { available: false, reason: 'seatbelt_missing' }
