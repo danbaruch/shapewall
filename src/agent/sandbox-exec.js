@@ -351,6 +351,12 @@ export function runProcess(
 
 let manager = null
 let starting = null
+// The signal listeners the runtime adds (it cleans up on SIGINT and SIGTERM
+// but does not end the process): a module that ends the process on a
+// signal nobody else handles does not count these (agent-browser.js).
+const RUNTIME_SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP']
+const runtimeListeners = new Set()
+export const isRuntimeListener = (listener) => runtimeListeners.has(listener)
 // The runtime runs only while a session uses it: its proxies and socat
 // bridges would keep the process alive (and listening) between fixes.
 let sessions = 0
@@ -361,6 +367,7 @@ async function sandboxManager() {
   starting ||= (async () => {
     const { SandboxManager } = await import('@anthropic-ai/sandbox-runtime')
     const vendor = runtimeVendorDir()
+    const before = Object.fromEntries(RUNTIME_SIGNALS.map((signal) => [signal, new Set(process.listeners(signal))]))
     // The process-wide base: no network (each command brings its list), no
     // writes, the home folder unreadable. Each command's own folders come
     // with the command (customConfig).
@@ -368,6 +375,8 @@ async function sandboxManager() {
       network: { allowedDomains: [], deniedDomains: [] },
       filesystem: { denyRead: [os.homedir()], allowRead: vendor ? [vendor] : [], allowWrite: [], denyWrite: [] },
     })
+    for (const signal of RUNTIME_SIGNALS)
+      for (const listener of process.listeners(signal)) if (!before[signal].has(listener)) runtimeListeners.add(listener)
     manager = SandboxManager
     return manager
   })()
@@ -391,6 +400,29 @@ function releaseSandbox() {
   sessions -= 1
   if (sessions > 0) return
   stopping = closeSandbox().finally(() => (stopping = null))
+}
+
+// The runtime for a user other than a command session (the agent browser,
+// src/agent/agent-browser.js): counted like a session, so it stays up while
+// used. -> { box (the SandboxManager), release() }; release once.
+export async function acquireSandbox() {
+  sessions += 1
+  let box
+  try {
+    box = await sandboxManager()
+  } catch (error) {
+    releaseSandbox()
+    throw error
+  }
+  let released = false
+  return {
+    box,
+    release() {
+      if (released) return
+      released = true
+      releaseSandbox()
+    },
+  }
 }
 
 // What a session's commands may reach, as srt host patterns: the package
@@ -505,7 +537,7 @@ export function toolchainDir({ execPath = process.execPath, denied = [] } = {}) 
 
 // srt's own Unix sockets to its proxies (Linux), which it binds into every
 // sandbox inside the system temp.
-function bridgeSockets(box) {
+export function bridgeSockets(box) {
   const out = []
   for (const get of ['getLinuxHttpSocketPath', 'getLinuxSocksSocketPath']) {
     const file = typeof box?.[get] === 'function' ? box[get]() : null
