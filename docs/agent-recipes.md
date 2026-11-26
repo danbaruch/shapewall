@@ -35,8 +35,9 @@ shapewall agent connect --remote https://wall.example.com --as scout --name "Sco
 An admin approves the code it prints, names the agent and chooses who may use it. By default it reads the project and answers,
 and does not change files or run commands from the board. Add `--approvals owner` on that machine to let it make a fix for a
 comment: on a new branch, never in the checkout, each edit allowed on the board by you
-([Edits from the board](hosted.md#edits-from-the-board-the-trust-decision)). It runs no commands from the board, so keep a `watch`
-recipe for fixes that need to build, test or recapture. Only Claude Code can be connected in this release.
+([Edits from the board](hosted.md#edits-from-the-board-the-trust-decision)). It runs only the commands its machine allows (the
+project's named commands, or a shell in the OS sandbox: [what an agent can do](agent-capabilities.md)), so keep a `watch` recipe
+for fixes that need more, such as a recapture. Only Claude Code can be connected in this release.
 Codex, goose and Gemini CLI are refused with a message: their read-only behaviour could not be shown to hold, so for them the
 `watch` recipes below, with `--remote`, stay the way.
 See [Connected agents](hosted.md#connected-agents).
