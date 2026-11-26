@@ -28,7 +28,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
   addresses by Shapewall's request routing and a loopback egress proxy (redirects, WebSockets, workers, popups and `file:`, `data:`,
   `blob:` navigations included; service workers blocked; app hostnames pinned to the address they had at start), no CDP port, its
   profile folder removed at close, on a crash, on a signal and by the next start after a kill. A recorded login or a Shapewall-made
-  profile only where the turn allows it. The `browser_*` tools join the agent's tool host in this release.
+  profile only where the turn allows it. On a hosted Fix with whose Browser line is on, the `browser_*` tools are in Shapewall's tool
+  host beside the commands, their arguments checked against their schemas, and the browser is disposed when the fix ends.
 - "What it can do": each agent on a project's Agents page (and a local board's Agents page, for its owner) has a card with every
   capability line per place and tier, an on, asks first, off or unknown chip, one sentence, and the command that changes it on the
   agent's machine. A line the project's setting holds says so. The board's agent panel shows the main lines for a fix you ask for.
@@ -38,12 +39,29 @@ and the project uses [Semantic Versioning](https://semver.org/).
   agent** and **Remove claim access** (`agent_made` and `token_claim_removed` audit rows).
 - The token API's `/project` says which agent the token is and its state (online while its link is open).
 
+- Commands through Shapewall on a hosted Fix with: the agent gets Shapewall's own tools (`run_named_command`, `run_command`,
+  `shapewall_capabilities`, and `start_dev_server` / `stop_dev_server` where commands run without the OS sandbox) and never its own
+  shell. On Linux (bubblewrap, socat and ripgrep) and macOS (Seatbelt) every command runs in an OS sandbox through
+  `@anthropic-ai/sandbox-runtime`: it writes only in the fix copy and its own tmp folder, cannot read the home folder, the XDG
+  folders, the shared temp folders, `/run/user`, `/mnt`, `/media` or other fix copies, gets a clean environment, reaches the package
+  registries only (or nothing) and runs under process, address-space and file-size limits, with its tmp folder capped. Solo turns
+  run named commands without a card and get a sandboxed shell; open turns ask with a card (`command`) every time, and an allow is
+  checked again against the machine's rules and the checkout's config line before the command runs. Solo and team approvals in the
+  sandbox are recorded on the machine per command line, tier, sandbox mode, network and inputs (the manifests, lockfiles and `.npmrc`
+  always among them), and asked again when the agent changes one; answers on open turns or without the sandbox are never recorded.
+  Files a command or dev server changed hold the fix for a look. See "Commands through Shapewall" in the agent hardening guide.
+
 ### Changed
 
+- Who "the owner" is on a connected agent's turns is pinned on its machine: the handle of the account that approved it (saved
+  with the token, or the first one the server names, then saved), not the server's word alone. With `--approvals owner` a card's
+  "allow" must name that handle as the one who answered.
+- Named commands on Windows run without a shell: `node`, `npm` and `npx` as Node plus their script; a `.cmd` or `.bat` program is
+  refused. Without an OS sandbox (Windows, no bubblewrap) there is no full shell, and every named command waits for a card.
+- `$PORT` in a command line must be bare: quoted (`'$PORT'`, `"$PORT"`), escaped (`\$PORT`) or as the program it is refused.
 - Older claim tokens are no longer made agents just by opening the board or the console: a token becomes one when it calls the
   server. An older watcher nothing was heard from in 90 days is hidden, not deleted (`agent_hidden` audit row), and lists again as
   soon as its token is used.
-
 - A version 1 `agent-policy.json` is read as exactly what it allowed (no shell, no browser, no extensions, a card for every
   command), and the next save writes it back as version 2. A connection with no saved entry, or one 1.3.0 saved without flags,
   still reads and answers only: each wider capability is a key its owner sets. A version 1 entry with `approvals` "owner" (or

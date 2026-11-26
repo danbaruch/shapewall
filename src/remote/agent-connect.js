@@ -25,7 +25,8 @@ import { agentSettings } from '../agent/config.js'
 import { agentConfigDir, createInstructionsNote, instructionsLines, instructionsSummary, loadInstructions } from '../agent/instructions.js'
 import { REMOTE_FIX_PREAMBLE, remotePreamble } from '../agent/context.js'
 import { DEFAULT_OUTPUT_DIR, authFiles, findConfigFile, loadConfig } from '../config.js'
-import { AGENT_SLUG_RE, forgetAgentCredential, readAgentCredential, saveAgentCredential } from './credentials.js'
+import { closeSandbox } from '../agent/sandbox-exec.js'
+import { AGENT_SLUG_RE, forgetAgentCredential, pinAgentOwner, readAgentCredential, saveAgentCredential } from './credentials.js'
 import { fixRoot, sweepFixes } from './agent-fix.js'
 import { fatalLinkError, runAgentLink } from './agent-link.js'
 import {
@@ -345,6 +346,8 @@ export async function agentConnect(
   // ---- The agent's token: its own, never the saved login's ----
   let token = env.SHAPEWALL_TOKEN || ''
   let source = token ? 'env' : null
+  // The handle of the account that approved this connection, when it was saved with the token.
+  let ownerHandle = null
   if (typeof flags['token-file'] === 'string') {
     token = fs.readFileSync(flags['token-file'], 'utf8').trim()
     source = 'file'
@@ -354,6 +357,7 @@ export async function agentConnect(
     if (saved) {
       token = saved.token
       source = 'agent'
+      ownerHandle = typeof saved.owner === 'string' ? saved.owner : null
     }
   }
   if (!token) {
@@ -381,6 +385,8 @@ export async function agentConnect(
             workspace: result.workspace || null,
             project: result.project || null,
             agent: result.agent || null,
+            // The approving account's handle: what "the owner" is pinned to on this machine.
+            owner: typeof result.agent?.owner?.handle === 'string' ? result.agent.owner.handle : null,
             scopes: Array.isArray(result.scopes) ? result.scopes : [],
             expiresAt: result.expiresAt || null,
             savedAt: new Date().toISOString(),
@@ -391,6 +397,7 @@ export async function agentConnect(
           `Approved as "${result.agent?.name || result.tokenName}" for ${result.workspace?.name || 'the workspace'} / ${result.project?.name || 'the project'}.`,
         )
         out(`Its token is saved in ${file} (only you can read it). Run the same command to connect again.`)
+        ownerHandle = typeof result.agent?.owner?.handle === 'string' ? result.agent.owner.handle : null
         return result.token
       },
     })
@@ -527,8 +534,16 @@ export async function agentConnect(
       editBackend,
       fix: edits ? { config, env, fetchImpl, instructions } : null,
       instructions: instructionsNote,
-      // One platform answer for the hello and the turns (TODO(Q2): pass the same object to each turn).
+      // One platform answer (the sandbox probe) for the hello and every turn.
       capabilities: { config, platform: hostPlatform() },
+      // Who "the owner" is on this machine: the approving account (saved with the token),
+      // else the first handle the server names at hello (agent-link.js pins it).
+      owner: ownerHandle,
+      // A saved token without an owner keeps the first one the server names.
+      onOwner: (handle) => {
+        if (source === 'agent' && pinAgentOwner(origin, slug, handle, env, token))
+          log(`saved ${handle} as the account that connected this agent`)
+      },
       hello: { kind, machine: os.hostname().split('.')[0] || 'this computer', version: VERSION, maxTurns: concurrency },
       policy,
       remote,
@@ -566,6 +581,8 @@ export async function agentConnect(
     signal?.removeEventListener('abort', stop)
     backend.close?.()
     editBackend?.close?.()
+    // The sandbox runtime's proxies, if a fix started them.
+    await closeSandbox()
   }
   log(ended?.takenOver ? 'Another "shapewall agent connect" took over this agent (--takeover). This one stopped.' : 'Disconnected.')
   return 0

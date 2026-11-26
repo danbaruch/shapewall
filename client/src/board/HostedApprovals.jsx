@@ -168,7 +168,7 @@ export function HostedApprovals({ boardId, onRows = null, onOpenThread = null, o
                   {card.agent?.name || 'An agent'} asks before it acts, on {cardPlace(card.thread)}
                 </p>
                 <p className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 text-xs text-muted">
-                  <span className="shrink-0">{card.name === 'execute' ? 'Run a command:' : 'Edit a file:'}</span>
+                  <span className="shrink-0">{card.name === 'execute' || card.name === 'command' ? 'Run a command:' : 'Edit a file:'}</span>
                   <code className="min-w-0 truncate font-mono text-fg">{plain(card.detail || card.label)}</code>
                 </p>
               </div>

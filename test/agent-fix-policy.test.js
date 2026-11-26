@@ -469,6 +469,13 @@ test('a session that takes edits: the agent’s own settings left out, only read
   const withCommands = tools(remoteEditSession('claude', { commands: ['npm test'] }))
   assert.ok(!withCommands.tools.includes('Bash'))
   assert.ok(withCommands.disallowedTools.includes('Bash'))
+  // Commands come through Shapewall's own tool server instead (exec-mcp.js): its tools need no
+  // permission request of their own (each checks and asks inside Shapewall). Bash stays off.
+  assert.equal(edits.allowedTools, undefined)
+  const withExec = tools(remoteEditSession('claude', { exec: true }))
+  assert.deepEqual(withExec.allowedTools, ['mcp__shapewall_exec'])
+  assert.ok(withExec.disallowedTools.includes('Bash'))
+  assert.ok(!withExec.tools.includes('Bash'))
   // So `agent connect` refuses to list a command for it, and says why.
   assert.throws(
     () => policyChanges({ 'allow-command': 'npm test' }, { ...DEFAULT_MACHINE_POLICY, approvals: 'owner' }, 'claude'),
@@ -490,4 +497,15 @@ test('a session that takes edits: the agent’s own settings left out, only read
     Object.keys(env).filter((name) => /SHAPEWALL|TOKEN/.test(name)),
     [],
   )
+})
+
+test('a command card (exec-mcp) carries no diff, and its hash covers the command line and why it asks', () => {
+  const command = edit({ name: 'command', label: 'Run test', detail: 'npm test\n\nIn the fix copy, in the OS sandbox.', diff: null })
+  const hash = cardHash(TURN, command)
+  assert.match(hash, /^[a-f0-9]{64}$/)
+  assert.equal(cardContent(command).diff, null)
+  // One sent with a diff is not a card anyone can answer.
+  assert.equal(cardHash(TURN, { ...command, diff: edit().diff }), null)
+  assert.notEqual(cardHash(TURN, { ...command, detail: 'npm test -- --x\n\nIn the fix copy, in the OS sandbox.' }), hash)
+  assert.notEqual(cardHash(TURN, { ...command, name: 'execute' }), hash)
 })

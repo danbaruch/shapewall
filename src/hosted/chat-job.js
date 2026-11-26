@@ -134,6 +134,8 @@ function mentionData(ctx, comments, mention) {
 // machine's own check of why this turn started (src/agent/triggers.js).
 // `narrowing`: the project's (and board's) ceiling under the machine's
 // policy, { maxTier, shell, browser } (agent-policy.js narrowingOf).
+// `trust`: who wrote the text of a fix or comment turn ({ authors, guests },
+// agent-link.js turnTrust), or null: the machine decides the tier from it.
 export function buildJob({
   ctx,
   turn,
@@ -146,6 +148,7 @@ export function buildJob({
   approvals = null,
   respond = 'mention',
   narrowing = null,
+  trust = null,
 }) {
   // The conversation up to the message that started this turn, never past
   // it: a message written while the turn waited for the machine is not the
@@ -239,6 +242,7 @@ export function buildJob({
     narrowing: narrowing ? { maxTier: narrowing.maxTier, shell: narrowing.shell, browser: narrowing.browser } : null,
     // Who asked. `owner`: the person who connected this agent.
     asker,
+    ...(trust ? { trust } : {}),
     ...(turn.kind === 'fix'
       ? {
           approvals: {

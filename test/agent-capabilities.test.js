@@ -7,6 +7,7 @@ import {
   CAPABILITY_DEFAULTS,
   CAPABILITY_KEYS,
   CAPABILITY_NARROWEST,
+  hostPlatform,
   PATHS,
   TIERS,
   cleanBrowserProfile,
@@ -804,6 +805,11 @@ test('config commands: names, a string shorthand, $PORT only, inputs and ready c
     [{ test: 'npm test | tee out' }, /"\|" is not allowed/],
     [{ test: 'echo $HOME' }, /"\$" is not allowed/],
     [{ test: 'echo "$HOME"' }, /no \$ other than \$PORT/],
+    // $PORT only bare: quoted or escaped it would read as text to a person and as the port to Shapewall.
+    [{ dev: 'npm run dev -- --port \\$PORT' }, /\$PORT goes unquoted and unescaped/],
+    [{ dev: "npm run dev -- --port '$PORT'" }, /\$PORT goes unquoted/],
+    [{ dev: 'npm run dev -- --port "$PORT"' }, /\$PORT goes unquoted/],
+    [{ dev: '$PORT --serve' }, /\$PORT is never the program itself/],
     [{ test: 'npm test\nrm -rf /' }, /commands\.test: a command line|one command line/],
     [{ test: { run: 'npm test', mutatinng: false } }, /commands\.test\.mutatinng: not a command setting/],
     [{ test: { run: 'npm test', inputs: ['../secrets'] } }, /commands\.test\.inputs/],
@@ -1173,4 +1179,19 @@ test('capability summary: what changed between two hellos, line by line', () => 
   const older = JSON.parse(JSON.stringify(wide))
   delete older.fix.solo.handoff
   assert.equal(cleanCapabilitySummary(older).fix.solo.handoff, 'unknown')
+})
+
+test('hostPlatform reads the sandbox probe; Windows and a failing probe read as no sandbox', () => {
+  assert.deepEqual(hostPlatform({ platform: 'linux', probe: () => ({ available: true }) }), { os: 'linux', sandbox: true })
+  assert.deepEqual(hostPlatform({ platform: 'darwin', probe: () => ({ available: false }) }), { os: 'darwin', sandbox: false })
+  assert.deepEqual(
+    hostPlatform({
+      platform: 'linux',
+      probe: () => {
+        throw new Error('x')
+      },
+    }),
+    { os: 'linux', sandbox: false },
+  )
+  assert.deepEqual(hostPlatform({ platform: 'win32', probe: () => ({ available: true }) }), { os: 'win32', sandbox: false })
 })

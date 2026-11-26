@@ -77,6 +77,21 @@ export function saveAgentCredential(origin, slug, entry, env = process.env) {
   })
 }
 
+// Writes the first handle the server named as "the owner" into a saved agent
+// token that has none yet (a token saved before owners were kept): the pin
+// then holds across restarts. Only for the same token, never over a handle.
+export function pinAgentOwner(origin, slug, handle, env = process.env, expectedToken = null) {
+  const file = credentialsFile(env)
+  if (typeof handle !== 'string' || !handle || !fs.existsSync(file)) return false
+  return updatePrivateJson(file, readAll, (data) => {
+    const entry = data.agents?.[agentKey(origin, slug)]
+    if (!entry || typeof entry.token !== 'string' || (expectedToken !== null && expectedToken !== entry.token)) return false
+    if (typeof entry.owner === 'string' && entry.owner) return false
+    entry.owner = handle
+    return true
+  })
+}
+
 // Forgets a connected agent's saved token (the server refused it).
 export function forgetAgentCredential(origin, slug = 'default', env = process.env, expectedToken = null) {
   const file = credentialsFile(env)

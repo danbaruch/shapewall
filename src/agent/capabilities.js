@@ -30,6 +30,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { splitCommand } from '../watch.js'
+import { probeSandbox } from './sandbox-exec.js'
 
 // Narrowest first.
 export const TIERS = ['open', 'team', 'solo']
@@ -44,7 +45,9 @@ const HOSTED_PATHS = ['hosted-chat', 'hosted-fix', 'pickup']
 // The capability keys of a machine policy (agent-policy.json version 2, and
 // the `capabilities` object of a project in agents.json).
 export const SHELL_MODES = ['sandboxed', 'commands', 'off']
-export const SHELL_NETWORKS = ['registries', 'open', 'none']
+// No "open": srt cannot lift the network limit for one command while the
+// others keep theirs (its proxy is process wide), so there is no such choice.
+export const SHELL_NETWORKS = ['registries', 'none']
 export const BROWSER_MODES = ['on', 'off']
 export const COMMAND_APPROVALS = ['tier', 'always']
 export const HANDOFF_HOPS_MAX = 2
@@ -393,10 +396,42 @@ function cleanInput(value) {
 }
 
 // One command line as argv, run without a shell. `$PORT` (the dev server's
-// free port) is the one variable it may name.
+// free port) is the one variable it may name, and only bare: quoted
+// ('$PORT', "$PORT") or escaped (\$PORT) it would read as the literal text
+// to a person and as the port to Shapewall, so it is refused. It is never
+// the program itself (argv[0]).
 export function splitNamedCommand(run, where) {
   const marker = '\u0001PORT\u0001'
-  const argv = splitCommand(String(run).split(PORT_TOKEN).join(marker), where)
+  const text = String(run)
+  let quote = null
+  let out = ''
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index]
+    if (text.startsWith(PORT_TOKEN, index)) {
+      if (quote) throw new Error(`${where}: $PORT goes unquoted, as its own word or part of one (--port $PORT)`)
+      out += marker
+      index += PORT_TOKEN.length - 1
+      continue
+    }
+    if (quote === "'") {
+      if (char === "'") quote = null
+    } else if (quote === '"') {
+      if (char === '"') quote = null
+      else if (char === '\\' && index + 1 < text.length) {
+        if (text.startsWith(PORT_TOKEN, index + 1)) throw new Error(`${where}: $PORT goes unquoted and unescaped`)
+        out += char + text[++index]
+        continue
+      }
+    } else if (char === "'" || char === '"') quote = char
+    else if (char === '\\' && index + 1 < text.length) {
+      if (text.startsWith(PORT_TOKEN, index + 1)) throw new Error(`${where}: $PORT goes unquoted and unescaped`)
+      out += char + text[++index]
+      continue
+    }
+    out += char
+  }
+  const argv = splitCommand(out, where)
+  if (argv[0]?.includes(marker)) throw new Error(`${where}: $PORT is never the program itself`)
   return argv.map((part) => part.split(marker).join(PORT_TOKEN))
 }
 
@@ -551,12 +586,19 @@ export function machineView(machine) {
 
 // What this machine offers a turn: { os, sandbox }. Every turn and the hello
 // summary read the same answer from here, so the board never shows more
-// than a turn gets.
-// TODO(Q2): probe the OS sandbox (bubblewrap on Linux, sandbox-exec on
-// macOS) here and return sandbox: true when it works. Until then no turn
-// gets a full shell (the open-tier command model instead).
-export function hostPlatform({ platform = process.platform } = {}) {
-  return { os: platform, sandbox: false }
+// than a turn gets. `sandbox`: the OS sandbox (bubblewrap on Linux,
+// Seatbelt on macOS, src/agent/sandbox-exec.js probeSandbox) starts here.
+// Without it no turn gets a full shell (the open-tier command model instead).
+export function hostPlatform({ platform = process.platform, probe = probeSandbox } = {}) {
+  let sandbox = false
+  if (platform === 'linux' || platform === 'darwin') {
+    try {
+      sandbox = probe({ platform }).available === true
+    } catch {
+      sandbox = false
+    }
+  }
+  return { os: platform, sandbox }
 }
 
 function platformView(platform) {

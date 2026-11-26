@@ -1442,8 +1442,10 @@ owner"), or "Edits on a branch, allowed without asking".
 ### Commands are not offered for Claude Code
 
 The link and the machine's policy file know a third thing an agent could ask: to run one exact command from the machine's own
-list, each run allowed on the board (`--allow-command`). **This is not available for Claude Code in this release, and Claude
-Code is the only agent `agent connect` offers.** So no connected agent runs a command from the board in this release.
+list, each run allowed on the board (`--allow-command`), through the agent's own shell tool. **That is not available for Claude
+Code, and Claude Code is the only agent `agent connect` offers.** Commands reach a fix another way: through Shapewall's own tools,
+the project's named commands and (on its owner's own turns) a sandboxed shell, each checked and run on the machine by Shapewall,
+never by the agent's shell. See [commands through Shapewall](agent-hardening.md#commands-through-shapewall).
 
 The reason was found with the real adapter. Started with its shell tool, Claude Code runs commands it takes to be read-only
 (`ls`, `cat`) without asking anyone, and those can read outside the project. A list of allowed commands does not help when the

@@ -5,6 +5,13 @@ dependency (MIT), and decodes NIP-19 keys with `@scure/base` 2.4.0 (MIT). These 
 bundles. Their licenses ship with their packages. Source: [noble-curves](https://github.com/paulmillr/noble-curves),
 [noble-hashes](https://github.com/paulmillr/noble-hashes), [scure-base](https://github.com/paulmillr/scure-base).
 
+The OS sandbox for agent commands (`src/agent/sandbox-exec.js`) is `@anthropic-ai/sandbox-runtime` 0.0.83 (Apache 2.0, with its
+prebuilt seccomp helpers for Linux), a runtime npm dependency, with its own dependencies `@pondwader/socks5-server` 1.0.10 (MIT),
+`commander` 12 (MIT), `zod` 3 (MIT) and `node-forge` 1.4 (BSD-3-Clause, the license Shapewall takes it under; it is also offered
+under GPL-2.0). Their licenses ship with their packages. On Linux it starts the system's own `bubblewrap`, `socat` and `ripgrep`,
+which you install; Shapewall ships none of them. Source:
+[sandbox-runtime](https://github.com/anthropics/sandbox-runtime).
+
 Shapewall is Apache 2.0 (with `src/hosted` under FSL 1.1, see `NOTICE`). This file lists third-party code and data that ship inside
 the built board (`dist/client`, and the public demo) beyond the usual npm dependencies, or that the board downloads at run time. Each
 component keeps its own license; none of them is GPL or LGPL.

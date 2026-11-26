@@ -157,7 +157,9 @@ export function mountDeviceApprovals(consoleApi, deps) {
             audience: look.audience,
             ...(identityOnly ? { approvedBy: 'tailnet identity' } : {}),
           })
-          agent = { id: token.agentId, name: look.name, audience: look.audience }
+          // `owner`: who connected it, by handle. The machine saves it with the token and
+          // counts a turn's author as "the owner" only under this handle (remote/agent-link.js).
+          agent = { id: token.agentId, name: look.name, audience: look.audience, owner: { handle: req.user.handle || null } }
         }
         const approved = deviceLogins.approve(
           found.code,

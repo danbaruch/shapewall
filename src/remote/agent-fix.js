@@ -156,6 +156,14 @@ export function sweepFixes(projectDir, env = process.env, { isAlive = processAli
       }
     }
     if (/\.tmp$/.test(name)) fs.rmSync(path.join(root, name), { force: true })
+    // A command session's tmp folder (sandbox-exec.js) left by a process that died: a day old is long gone.
+    if (/^\.shapewall-cmd-[A-Za-z0-9]{6}$/.test(name))
+      try {
+        if (now - fs.lstatSync(path.join(root, name)).mtimeMs > 24 * 60 * 60 * 1000)
+          fs.rmSync(path.join(root, name), { recursive: true, force: true })
+      } catch {
+        /* gone */
+      }
   }
   const held = names
     .filter((name) => /^held-\d{14}-[a-f0-9]{6}\.json$/.test(name))

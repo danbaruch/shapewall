@@ -411,7 +411,16 @@ test('copies a dead process left are swept, at the next fix and at connect, and 
   const orphan = await prepareFix({ config: m.config, policy: m.policy, job: jobFor(8), env: m.env })
   fs.writeFileSync(path.join(root, `${orphan.work.meta.id}.owner`), '999999999\n')
   fs.rmSync(path.join(root, orphan.work.meta.id), { recursive: true })
+  // A command session's tmp folder a dead process left: gone after a day, kept while it may be in use.
+  const stale = path.join(root, '.shapewall-cmd-Ab12Cd')
+  const recent = path.join(root, '.shapewall-cmd-Ef34Gh')
+  for (const dir of [stale, recent]) fs.mkdirSync(path.join(dir, 'home'), { recursive: true })
+  const dayAgo = new Date(Date.now() - 25 * 3600 * 1000)
+  fs.utimesSync(stale, dayAgo, dayAgo)
   assert.deepEqual(sweepFixes(m.dir, m.env), [orphan.work.meta.id])
+  assert.equal(fs.existsSync(stale), false)
+  assert.equal(fs.existsSync(recent), true)
+  fs.rmSync(recent, { recursive: true })
   assert.deepEqual(fixFolders(m), [])
   // Held fixes are kept, the newest twenty, for two weeks.
   for (let index = 0; index < 23; index += 1) {

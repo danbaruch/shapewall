@@ -122,6 +122,13 @@ export function startLink(
     edits = null,
     fixArgs = [],
     stateDir = tempDir('hosted-fix-state'),
+    // More of the fix's project config (`commands`, for the exec tools).
+    fixConfig = {},
+    // The platform the link resolves turns with (hostPlatform() when null).
+    platform = null,
+    // The approving account's handle, as `agent connect` saves it.
+    owner = null,
+    onOwner = () => {},
   } = {},
 ) {
   const logs = []
@@ -171,9 +178,12 @@ export function startLink(
     backend,
     editBackend,
     fix: editBackend
-      ? { config: { dir: cwd, outputDir: path.join(cwd, '.shapewall'), agent: null, boards: [] }, env: fixEnv, fetchImpl }
+      ? { config: { dir: cwd, outputDir: path.join(cwd, '.shapewall'), agent: null, boards: [], ...fixConfig }, env: fixEnv, fetchImpl }
       : null,
     hello: { kind, machine: 'studio', version: '0.5.0', maxTurns },
+    ...(platform ? { capabilities: { config: null, platform } } : {}),
+    owner,
+    onOwner,
     policy: edits ? machinePolicy : policy,
     // `remote`: true for the real token API, or a client of the test's own.
     remote: remote === true ? createRemote({ origin: hosted.origin, token }) : remote || null,
