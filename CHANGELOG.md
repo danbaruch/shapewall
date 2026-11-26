@@ -19,8 +19,8 @@ Known limits in 1.4.0:
   solo owner's `agent set shell-unsandboxed on` shell, an opt-in that runs outside every check.
 - Hosted threads that exist at upgrade become open-tier (migration 23 marks them tainted). Start a new thread to get solo back.
 - An agent reply sent with a forged agent header before 1.4.0 carries no unvouched mark and still reads as the agent's.
-- Hosted migration 23 adds `chat_threads.tainted`, `taint_authors` and `trust_v`. To roll back, stop the server and drop the
-  three columns (docs/hosted.md, "Migration 23 and rollback"); the older build ignores them.
+- On a hosted server, migration 23 adds `chat_threads.tainted`, `taint_authors` and `trust_v`. To roll back, stop the server
+  and drop the three columns (see the rollback notes in docs/hosted.md); the older build ignores them.
 
 ### Added
 
