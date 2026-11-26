@@ -10,8 +10,23 @@
 
 import { TIERS, resolveCeiling, machineView } from './capabilities.js'
 
-export const LINE_IDS = ['who', 'instructions', 'read', 'edits', 'commands', 'shell', 'browser', 'extensions', 'memory', 'push', 'chrome']
+export const LINE_IDS = [
+  'who',
+  'instructions',
+  'read',
+  'edits',
+  'commands',
+  'shell',
+  'browser',
+  'extensions',
+  'memory',
+  'push',
+  'handoff',
+  'chrome',
+]
 export const LINE_STATES = ['on', 'ask', 'off']
+// The board's copy of a machine's summary: a state it could not read is "unknown", never a guess.
+export const SUMMARY_STATES = [...LINE_STATES, 'unknown']
 export const LINE_LABELS = {
   who: 'Who can use it',
   instructions: 'Instructions',
@@ -23,6 +38,7 @@ export const LINE_LABELS = {
   extensions: 'Extensions',
   memory: 'Memory',
   push: 'Push and pull requests',
+  handoff: 'Hand off to another agent',
   chrome: 'Your own Chrome',
 }
 
@@ -46,7 +62,12 @@ const REASONS = {
   unknown_path: { text: 'Shapewall does not know this way of reaching the agent' },
   machine_instructions_none: { text: 'this machine gives the agent no instruction files', set: ['instructions', 'all'] },
   chat_answer_only: { text: 'chat answers only; edits happen in Fix with' },
-  machine_approvals_none: { text: 'nobody may answer its requests on the board', set: ['approvals', 'owner'] },
+  machine_approvals_none: {
+    text: 'this machine reads and answers only: nobody may answer its requests on the board',
+    set: ['approvals', 'owner'],
+  },
+  edits_off: { text: 'a command that changes files, or a full shell, needs edits, and edits are off here' },
+  machine_handoff_none: { text: 'this machine allows no handoff', set: ['handoff-hops', '1'] },
   machine_shell_off: { text: 'this machine allows no commands', set: ['shell', 'sandboxed'] },
   server_shell_off: { text: "limited by this project's setting", server: true },
   no_named_commands: { text: 'the config names no commands (add "commands" to shapewall.config.json)' },
@@ -151,6 +172,13 @@ function lineFor(caps, id) {
         ? `Pushes and opens pull requests only after a card on the board${caps.push.remote ? ` (remote "${caps.push.remote}")` : ''}.`
         : 'No push.'
       break
+    case 'handoff':
+      state = caps.handoff.hops > 0 ? 'on' : 'off'
+      text =
+        caps.handoff.hops > 0
+          ? `Hands work to another connected agent, at most ${caps.handoff.hops} ${caps.handoff.hops === 1 ? 'hop' : 'hops'} deep.`
+          : 'No handoff.'
+      break
     case 'chrome':
       state = 'off'
       text = 'Never your own Chrome or its profile.'
@@ -237,7 +265,9 @@ export function capabilitySummary({ machine, config = null, platform = null }) {
 }
 
 // The summary as the server keeps it: known paths, tiers and lines only,
-// each state one of LINE_STATES (anything else is "off"). null: none given.
+// each state one of LINE_STATES; a state it does not know, or one that is
+// missing (an older or newer machine), is "unknown": the board says it
+// cannot tell, rather than guessing either way. null: none given.
 export function cleanCapabilitySummary(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw) || raw.v !== 1) return null
   const out = { v: 1, team: ['members', 'named'].includes(raw.team) ? raw.team : 'none' }
@@ -251,7 +281,7 @@ export function cleanCapabilitySummary(raw) {
         continue
       }
       const valid = states && typeof states === 'object' && !Array.isArray(states) ? states : {}
-      out[key][tier] = Object.fromEntries(LINE_IDS.map((id) => [id, LINE_STATES.includes(valid[id]) ? valid[id] : 'off']))
+      out[key][tier] = Object.fromEntries(LINE_IDS.map((id) => [id, LINE_STATES.includes(valid[id]) ? valid[id] : 'unknown']))
       // Never more than a machine can say: its own Chrome is always off.
       out[key][tier].chrome = 'off'
     }

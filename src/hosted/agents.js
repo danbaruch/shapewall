@@ -39,12 +39,27 @@ import { logoForAgent } from '../agent/agent-logos.js'
 import { cleanAgentName, isAgentTint, isBuiltInIcon } from '../agent/identity.js'
 import { handleFor as mentionHandle } from '../mentions.js'
 import { agentHandles } from '../agent/triggers.js'
-import { cleanCapabilitySummary } from '../agent/capability-render.js'
+import { cleanCapabilitySummary, LINE_IDS, SUMMARY_PATHS } from '../agent/capability-render.js'
 import { agentPolicy, trustedMember } from './agent-policy.js'
 import { newId } from './crypto.js'
 import { RUN_DURATION } from './usage-shape.js'
 import { CLAIM_HEARTBEAT } from './claim-sweep.js'
 import { HttpError } from './http.js'
+
+// What differs between two capability summaries: "team", or "chat.solo.shell"
+// for each line state that changed (every line of a side that is missing).
+export function summaryChanges(before, after) {
+  const out = []
+  if ((before?.team ?? null) !== (after?.team ?? null)) out.push('team')
+  for (const key of Object.keys(SUMMARY_PATHS))
+    for (const tier of ['solo', 'team', 'open'])
+      for (const id of LINE_IDS) {
+        const was = before?.[key]?.[tier]?.[id] ?? null
+        const now = after?.[key]?.[tier]?.[id] ?? null
+        if (was !== now) out.push([key, tier, id].join('.'))
+      }
+  return out
+}
 import {
   AGENT_AUDIENCES,
   APPROVAL_ROLES,
@@ -426,6 +441,20 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
         name: after.name,
         before: shape(was),
         after: shape(now),
+        by: 'machine',
+      })
+    // What each tier may do, as the machine said it (line states per path
+    // and tier, and its team setting): a change is written down, line by line.
+    const summaryOf = (row) => (linked(row) ? cleanCapabilitySummary(capsOf(row).summary) : null)
+    const wasSummary = summaryOf(before)
+    const nowSummary = summaryOf(after)
+    if (JSON.stringify(wasSummary) !== JSON.stringify(nowSummary))
+      audit?.('agent_capabilities_changed', after.id, {
+        project: after.project_id,
+        name: after.name,
+        changed: summaryChanges(wasSummary, nowSummary),
+        before: wasSummary,
+        after: nowSummary,
         by: 'machine',
       })
     if (after.approval_rule === 'auto' && (!ruleStands(after) || !approvalAutoAvailable(approvalOf(after)))) {

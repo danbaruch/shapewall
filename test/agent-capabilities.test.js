@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import {
+  BROWSER_PROFILE_MARKER,
   CAPABILITY_DEFAULTS,
   CAPABILITY_KEYS,
   CAPABILITY_NARROWEST,
@@ -16,6 +17,7 @@ import {
   combineNarrowing,
   configOrigins,
   machineView,
+  markBrowserProfile,
   namedCommands,
   resolveCapabilities,
   tierOf,
@@ -36,6 +38,7 @@ import {
 import {
   DEFAULT_MACHINE_POLICY,
   cleanMachinePolicy,
+  describeMachinePolicy,
   fileVersion,
   policyFile,
   readMachinePolicy,
@@ -44,12 +47,17 @@ import {
 } from '../src/remote/agent-policy-file.js'
 import { localMachinePolicy, validateUserEntry } from '../src/agent/user-settings.js'
 import { cleanPolicy } from '../src/hosted/agent-policy.js'
+import { summaryChanges } from '../src/hosted/agents.js'
 import { cleanHello } from '../src/hosted/agent-link.js'
 import { cleanJob } from '../src/remote/agent-job.js'
 import { loadConfig } from '../src/config.js'
 import { tempDir } from './helpers.js'
 
 // ---- Fixtures ----
+
+// An agent browser profile folder Shapewall made (marked).
+const PROFILE_DIR = path.join(tempDir('capabilities-profile'), 'agent-profile')
+markBrowserProfile(PROFILE_DIR)
 
 const COMMANDS_CONFIG = {
   test: { run: 'npm test', argv: ['npm', 'test'], inputs: null, mutating: true, args: false, ready: null },
@@ -60,8 +68,11 @@ const CONFIG = {
   boards: [{ baseUrl: 'http://127.0.0.1:5173/app', publicUrl: 'https://staging.example.com/x', environments: [] }],
   commands: COMMANDS_CONFIG,
 }
+// A machine whose owner opted in to the wider capabilities (CAPABILITY_DEFAULTS),
+// key by key, as `shapewall agent set` will write them.
+const optIn = (entry, warn) => cleanMachinePolicy({ ...CAPABILITY_DEFAULTS, ...entry }, warn)
 // A connected machine that takes edits, with one exact command and a team.
-const MACHINE = cleanMachinePolicy({ approvals: 'owner', commands: ['npm test'], trustTeam: ['robin'] })
+const MACHINE = optIn({ approvals: 'owner', commands: ['npm test'], trustTeam: ['robin'] })
 const TRUST = {
   solo: { authors: [{ handle: 'dan', owner: true, member: true }], guests: false },
   team: { authors: [{ handle: 'robin', owner: false, member: true }], guests: false },
@@ -193,7 +204,7 @@ test('capabilities: an unknown path, a missing machine and junk inputs read as t
     assert.ok(caps.commands.every((item) => item.needsCard))
   }
   // --shell-unsandboxed: solo only.
-  const loud = cleanMachinePolicy({ approvals: 'owner', shellUnsandboxed: true, trustTeam: ['robin'], trustTeamShell: true })
+  const loud = optIn({ approvals: 'owner', shellUnsandboxed: true, trustTeam: ['robin'], trustTeamShell: true })
   const at = (tier) =>
     resolveCapabilities({
       path: 'hosted-fix',
@@ -208,7 +219,7 @@ test('capabilities: an unknown path, a missing machine and junk inputs read as t
   assert.equal(at('open').shell.mode, 'off')
   assert.ok(toCli(at('solo')).some((line) => line.includes('WITHOUT an OS sandbox')))
   // The starter agent's container does not lift this machine's "no commands", or the server's.
-  for (const extra of [{ machine: cleanMachinePolicy({ approvals: 'owner', shell: 'off' }) }, { server: { shell: false } }]) {
+  for (const extra of [{ machine: optIn({ approvals: 'owner', shell: 'off' }) }, { server: { shell: false } }]) {
     const caps = resolve('solo', 'starter', PLATFORMS['linux sandbox'], extra)
     assert.deepEqual([caps.shell.mode, caps.commands.length], ['off', 0], JSON.stringify(extra))
     assert.ok(lines(caps).every((line) => line.state !== 'off' || line.why.length > 0))
@@ -331,7 +342,7 @@ function randomMachine(random) {
     browser: ['on', 'off', true],
     browserAllow: [[], ['https://a.example'], ['https://a.example/path'], 'x'],
     browserAuth: [null, 'staging', '../x'],
-    browserProfile: [null, '/srv/profile', '/home/x/.config/google-chrome/Default'],
+    browserProfile: [null, '/srv/profile', PROFILE_DIR, '/home/x/.config/google-chrome/Default'],
     browserProfileTeam: [true, false],
     extensionsFor: [['owner'], [], ['owner', 'robin'], ['robin'], 'owner'],
     allowTool: [[], ['mcp__notes__memory_write'], ['mcp__notes__search'], ['Bash']],
@@ -445,8 +456,8 @@ test('capabilities property: junk trust never reaches solo or team; junk machine
     for (const key of warned) assert.deepEqual(cleaned[key], CAPABILITY_NARROWEST[key], `${key}: ${JSON.stringify(entry[key])}`)
     // trustTeam stays the team's: a junk one is "none", which only takes the team tier away.
     const unknown = Object.fromEntries([...warned].filter((key) => key !== 'trustTeam').map((key) => [key, entry[key]]))
-    const machine = cleanMachinePolicy({ approvals: 'owner', trustTeam: ['robin'], ...unknown })
-    const defaults = cleanMachinePolicy({ approvals: 'owner', trustTeam: ['robin'] })
+    const machine = optIn({ approvals: 'owner', trustTeam: ['robin'], ...unknown })
+    const defaults = optIn({ approvals: 'owner', trustTeam: ['robin'] })
     for (const where of PATHS)
       for (const tier of TIERS) {
         const common = { path: where, trust: TRUST[tier], audience: 'owner', config: CONFIG, platform: PLATFORMS['linux sandbox'] }
@@ -486,13 +497,13 @@ test('capability keys: a value it does not know reads as the narrowest, by name'
     trustTeam: ['@Robin', 'robin', 'eve'],
     browserAllow: ['https://staging.example.com/', 'http://127.0.0.1:5173'],
     browserAuth: 'staging',
-    browserProfile: '/srv/agent-profile/../agent-profile',
+    browserProfile: PROFILE_DIR,
     allowTool: ['mcp__notes__memory_write'],
     handoffHops: 2,
   })
   assert.deepEqual(good.trustTeam, ['robin', 'eve'])
   assert.deepEqual(good.browserAllow, ['https://staging.example.com', 'http://127.0.0.1:5173'])
-  assert.equal(good.browserProfile, '/srv/agent-profile')
+  assert.equal(good.browserProfile, fs.realpathSync(PROFILE_DIR))
   // Never a real browser's own profile folder, or one inside it.
   for (const dir of [
     '/home/x/.config/google-chrome',
@@ -589,7 +600,7 @@ test('capability summary: the ceiling per tier for hello, and what the server ke
   assert.doesNotMatch(JSON.stringify(summary), /npm|robin|127\.0\.0\.1|staging/)
   assert.deepEqual(cleanCapabilitySummary(summary), summary)
   assert.equal(capabilitySummary({ machine: cleanMachinePolicy({}) }).fix.team, null)
-  // The server keeps known lines and states only; anything else is off; its own Chrome is always off.
+  // The server keeps known lines and states only; a state it cannot read is "unknown"; its own Chrome is always off.
   const kept = cleanCapabilitySummary({
     v: 1,
     team: 'everyone',
@@ -597,19 +608,19 @@ test('capability summary: the ceiling per tier for hello, and what the server ke
     chat: 'x',
   })
   assert.equal(kept.team, 'none')
-  assert.equal(kept.fix.solo.shell, 'off')
+  assert.equal(kept.fix.solo.shell, 'unknown')
   assert.equal(kept.fix.solo.browser, 'on')
   assert.equal(kept.fix.solo.chrome, 'off')
   assert.equal(kept.fix.solo.extra, undefined)
   assert.equal(kept.fix.team, null)
   assert.deepEqual(
     Object.values(kept.chat.solo),
-    LINE_IDS.map(() => 'off'),
+    LINE_IDS.map((id) => (id === 'chrome' ? 'off' : 'unknown')),
   )
   for (const raw of [null, 'x', [], { v: 2 }]) assert.equal(cleanCapabilitySummary(raw), null)
   // In hello: cleaned on the way in.
   const hello = cleanHello({ kind: 'claude', capabilitySummary: { ...summary, fix: { ...summary.fix, solo: { shell: 'sudo' } } } })
-  assert.equal(hello.capabilities.summary.fix.solo.shell, 'off')
+  assert.equal(hello.capabilities.summary.fix.solo.shell, 'unknown')
   assert.equal(cleanHello({ kind: 'claude' }).capabilities.summary, null)
 })
 
@@ -679,8 +690,9 @@ test('agent-policy.json: version 1 entries read as exactly what they allowed, an
   assert.deepEqual([reader.shell, reader.browser, reader.approvals], ['off', 'off', 'none'])
   assert.equal(read('broken').shell, 'off')
   assert.equal(read('early').browser, 'on')
-  // A connection the file never had: the version 2 defaults.
-  assert.equal(read('new').shell, 'sandboxed')
+  // A connection the file never had: what version 1 allowed (reads and answers only), not the wider capabilities.
+  const fresh = read('new')
+  assert.deepEqual([fresh.approvals, fresh.shell, fresh.browser, fresh.extensionsFor], ['none', 'off', 'off', []])
 
   // What a version 1 builder may do, resolved: a card for every command, no full shell, no browser.
   const caps = resolveCapabilities({
@@ -705,11 +717,16 @@ test('agent-policy.json: version 1 entries read as exactly what they allowed, an
   assert.equal(data.version, 2)
   assert.equal(fs.statSync(file).mode & 0o777, 0o600)
   for (const slug of Object.keys(before)) assert.deepEqual(read(slug), before[slug], slug)
-  assert.equal(data.connections[`${origin}#reader`].shell, 'off')
+  // Values that only say what version 1 allowed are not written: they keep following approvals and commands.
+  assert.equal(Object.hasOwn(data.connections[`${origin}#reader`], 'shell'), false)
+  assert.equal(read('reader').shell, 'off')
+  assert.equal(data.connections[`${origin}#broken`].shellNetwork, 'none')
   assert.deepEqual([read('builder').base, read('builder').shell], ['main', 'commands'])
-  // Version 2 now: a connection it never had still gets the defaults; a later save changes nothing else.
+  // Version 2 now: approvals alone opt in to nothing new; each wider key is the owner's to set.
   saveMachinePolicy(origin, 'new', { approvals: 'owner' }, env)
-  assert.equal(read('new').shell, 'sandboxed')
+  assert.deepEqual([read('new').shell, read('new').browser], ['off', 'off'])
+  saveMachinePolicy(origin, 'new', { shell: 'sandboxed' }, env)
+  assert.deepEqual([read('new').shell, read('new').browser, read('new').approvals], ['sandboxed', 'off', 'owner'])
   assert.equal(read('reader').shell, 'off')
   // An unknown version reads as 1 unless it is a whole number of 2 or more.
   for (const version of [undefined, 'two', 1.5, 0, null]) assert.equal(fileVersion({ version }), 1, String(version))
@@ -848,7 +865,7 @@ test('config: commands, agent.browser.allow and agent.fixIn load, and the browse
     path: 'hosted-fix',
     trust: TRUST.solo,
     audience: 'owner',
-    machine: cleanMachinePolicy({ approvals: 'owner', browserAllow: ['https://api.example.com'] }),
+    machine: optIn({ approvals: 'owner', browserAllow: ['https://api.example.com'] }),
     config,
     platform: PLATFORMS['linux sandbox'],
   })
@@ -864,7 +881,7 @@ test('config: commands, agent.browser.allow and agent.fixIn load, and the browse
     path: 'hosted-fix',
     trust: TRUST.solo,
     audience: 'owner',
-    machine: cleanMachinePolicy({ approvals: 'owner', browserAuth: 'staging' }),
+    machine: optIn({ approvals: 'owner', browserAuth: 'staging' }),
     config,
     platform: PLATFORMS['linux sandbox'],
   })
@@ -875,7 +892,7 @@ test('config: commands, agent.browser.allow and agent.fixIn load, and the browse
     path: 'hosted-fix',
     trust: TRUST.team,
     audience: 'owner',
-    machine: cleanMachinePolicy({ approvals: 'owner', browserAuth: 'staging', trustTeam: ['robin'] }),
+    machine: optIn({ approvals: 'owner', browserAuth: 'staging', trustTeam: ['robin'] }),
     config,
   })
   assert.equal(team.browser.auth, null)
@@ -889,4 +906,271 @@ test('config: commands, agent.browser.allow and agent.fixIn load, and the browse
     assert.throws(write(extra), pattern, JSON.stringify(extra))
   // Not an unknown key any more.
   assert.deepEqual(write({ commands: { test: 'npm test' } })().warnings, [])
+})
+
+// ---- Review fixes (PR #35) ----
+
+test('approvals "none": reads and answers only, on every tier x path x platform', () => {
+  // Everything else opted in, so only approvals holds it.
+  const none = optIn({ approvals: 'none', commands: ['npm test'], trustTeam: ['robin'], trustTeamShell: true, shellUnsandboxed: true })
+  let rows = 0
+  for (const where of PATHS) {
+    for (const tier of TIERS) {
+      for (const [name, platform] of Object.entries(PLATFORMS)) {
+        const caps = resolve(tier, where, platform, { machine: none })
+        const label = `${where} ${tier} ${name}`
+        const states = lineStates(caps)
+        if (where === 'local-chat' || where === 'local-endpoint' || where === 'starter') {
+          // A local board's owner, and the starter's container, answer their own cards: approvals do not apply there.
+          assert.equal(caps.edit.on, true, label)
+        } else {
+          assert.deepEqual([caps.edit.on, caps.commands.length, caps.shell.mode, caps.push.on], [false, 0, 'off', false], label)
+          for (const id of ['edits', 'commands', 'shell', 'push']) assert.equal(states[id], 'off', `${label}: ${id}`)
+          for (const id of ['commands', 'shell'])
+            assert.ok(
+              caps.why.some((item) => item.line === id && item.code === 'machine_approvals_none'),
+              `${label}: ${id} why`,
+            )
+          assert.ok(
+            toCli(caps).some((line) => line.includes('reads and answers only')),
+            label,
+          )
+        }
+        rows += 1
+      }
+    }
+  }
+  assert.equal(rows, PATHS.length * TIERS.length * Object.keys(PLATFORMS).length)
+})
+
+test('edit powers: a full shell or a command that changes files is never on while edits are off (3000 random turns)', () => {
+  const random = rng(0xed17)
+  for (let run = 0; run < 3000; run += 1) {
+    const caps = resolveCapabilities({
+      path: pick(random, [...PATHS, 'nope']),
+      trust: randomTrust(random),
+      audience: pick(random, ['owner', 'members', undefined]),
+      machine: random() < 0.5 ? randomMachine(random) : optIn({ approvals: pick(random, ['none', 'owner', 'x']) }),
+      server: random() < 0.3 ? junkNarrowing(random) : null,
+      config: randomConfig(random),
+      platform: randomPlatform(random),
+    })
+    if (caps.edit.on) continue
+    assert.equal(caps.shell.mode, 'off', `run ${run}`)
+    assert.ok(
+      caps.commands.every((item) => !item.mutating),
+      `run ${run}`,
+    )
+  }
+})
+
+test('a connection with nothing saved (or saved by 1.3.0 without flags) reads and answers only', () => {
+  const env = { XDG_CONFIG_HOME: tempDir('capabilities-nothing-saved') }
+  const origin = 'https://wall.example.com'
+  const fresh = readMachinePolicy(origin, 'default', env)
+  assert.deepEqual(
+    Object.fromEntries(CAPABILITY_KEYS.map((key) => [key, fresh[key]])),
+    Object.fromEntries(CAPABILITY_KEYS.map((key) => [key, DEFAULT_MACHINE_POLICY[key]])),
+  )
+  for (const where of ['hosted-chat', 'hosted-fix', 'pickup', 'watch-exec'])
+    for (const tier of TIERS) {
+      const states = lineStates(resolve(tier, where, PLATFORMS['linux sandbox'], { machine: fresh }))
+      for (const id of ['edits', 'commands', 'shell', 'browser', 'extensions', 'push', 'handoff'])
+        assert.equal(states[id], 'off', `${where} ${tier} ${id}`)
+    }
+  // What 1.3.0 wrote for a connection without flags: the version 1 keys only.
+  const file = policyFile(env)
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 })
+  fs.writeFileSync(
+    file,
+    JSON.stringify({
+      version: 1,
+      connections: { [`${origin}#old`]: { audience: 'server', approvals: 'none', commands: [], auto: [], remote: 'origin' } },
+    }),
+    { mode: 0o600 },
+  )
+  const old = readMachinePolicy(origin, 'old', env)
+  assert.deepEqual([old.shell, old.browser, old.extensionsFor, old.commandApproval], ['off', 'off', [], 'always'])
+  // Saved by 1.4.0 with approvals "none", then given approvals and an exact command: the command follows (behind a card).
+  saveMachinePolicy(origin, 'later', {}, env)
+  saveMachinePolicy(origin, 'later', { approvals: 'owner', commands: ['npm test'] }, env)
+  const later = readMachinePolicy(origin, 'later', env)
+  assert.deepEqual([later.shell, later.commandApproval, later.browser], ['commands', 'always', 'off'])
+  const caps = resolve('solo', 'hosted-fix', PLATFORMS['linux sandbox'], { machine: later })
+  assert.deepEqual(caps.shell.exact, ['npm test'])
+  assert.ok(caps.commands.length && caps.commands.every((item) => item.needsCard))
+  // A key the owner chose is written and kept.
+  saveMachinePolicy(origin, 'later', { browser: 'on' }, env)
+  assert.equal(readMachinePolicy(origin, 'later', env).browser, 'on')
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).connections[`${origin}#later`].browser, 'on')
+})
+
+test('describeMachinePolicy (what connect prints) agrees with agent status (toCli) on 300 random policies', () => {
+  const random = rng(0xde5c)
+  const stateOf = (caps, id) => lines(caps).find((line) => line.id === id).state
+  for (let run = 0; run < 300; run += 1) {
+    const policy =
+      random() < 0.5
+        ? randomMachine(random)
+        : optIn({
+            approvals: pick(random, ['none', 'owner', 'admins']),
+            shell: pick(random, ['sandboxed', 'commands', 'off']),
+            browser: pick(random, ['on', 'off']),
+          })
+    const said = describeMachinePolicy(policy).join('\n')
+    const caps = resolveCapabilities({
+      path: 'hosted-fix',
+      trust: TRUST.solo,
+      audience: 'owner',
+      machine: policy,
+      config: CONFIG,
+      platform: PLATFORMS['linux sandbox'],
+    })
+    const label = `run ${run}: ${JSON.stringify(policy).slice(0, 200)}`
+    const readsOnly = /^Reads and answers\. No edits, no commands, no shell/.test(said)
+    assert.equal(readsOnly, policy.approvals === 'none', label)
+    if (readsOnly) for (const id of ['edits', 'commands', 'shell']) assert.equal(stateOf(caps, id), 'off', `${label} ${id}`)
+    else assert.equal(stateOf(caps, 'edits'), 'ask', label)
+    const never = /Commands: never/.test(said)
+    assert.equal(never, !readsOnly && stateOf(caps, 'commands') === 'off' && stateOf(caps, 'shell') === 'off', label)
+    assert.equal(/Browser: none\./.test(said), stateOf(caps, 'browser') === 'off', label)
+    assert.equal(/Shell: a full shell/.test(said), caps.shell.mode === 'sandboxed', label)
+  }
+})
+
+test('browser allowlist: the machine caps the config; config origins widen it only on a solo turn without a login', () => {
+  const config = { agent: { browser: { allow: ['http://169.254.169.254', 'https://cdn.example.com'] } } }
+  const machine = optIn({ approvals: 'owner', trustTeam: ['robin'], browserAllow: ['https://cdn.example.com'] })
+  const at = (tier, extra = {}) =>
+    resolveCapabilities({
+      path: 'hosted-fix',
+      trust: TRUST[tier],
+      audience: 'owner',
+      machine,
+      config,
+      platform: PLATFORMS['linux sandbox'],
+      ...extra,
+    }).browser.allow
+  // The review's case: an open turn with a config that names the metadata address gets nothing from it.
+  assert.deepEqual(
+    resolveCapabilities({
+      path: 'hosted-fix',
+      trust: TRUST.open,
+      audience: 'owner',
+      machine: optIn({ approvals: 'owner' }),
+      config: { agent: { browser: { allow: ['http://169.254.169.254'] } } },
+      platform: PLATFORMS['linux sandbox'],
+    }).browser.allow,
+    [],
+  )
+  assert.deepEqual([...at('open')], ['https://cdn.example.com'])
+  assert.deepEqual([...at('team')], ['https://cdn.example.com'])
+  assert.deepEqual([...at('solo')].sort(), ['http://169.254.169.254', 'https://cdn.example.com'])
+  // With a login for the browser, not even solo.
+  const loggedIn = resolveCapabilities({
+    path: 'hosted-fix',
+    trust: TRUST.solo,
+    audience: 'owner',
+    machine: optIn({ approvals: 'owner', browserAuth: 'staging' }),
+    config,
+    platform: PLATFORMS['linux sandbox'],
+  })
+  assert.deepEqual(loggedIn.browser.allow, [])
+  // A wildcard is never an origin.
+  for (const origin of ['*', 'https://*.example.com', 'http://*', 'https://a*.example.com']) assert.equal(cleanOrigin(origin), null, origin)
+  // An audience it cannot read is "server": it never lets a turn reach solo on its own.
+  for (const audience of ['members', 'OWNER', 1, null, undefined])
+    assert.equal(machineView({ audience }).audience, 'server', String(audience))
+})
+
+test('browser profile: only a folder Shapewall marked, read after resolving links; never a browser’s own or a copy', () => {
+  const root = tempDir('capabilities-profiles')
+  const marked = markBrowserProfile(path.join(root, 'agent'))
+  assert.equal(cleanBrowserProfile(marked), marked)
+  assert.equal(fs.statSync(path.join(marked, BROWSER_PROFILE_MARKER)).mode & 0o777, 0o600)
+  // Marking again is fine once it is ours, even after the browser wrote to it.
+  fs.writeFileSync(path.join(marked, 'Local State'), '{}')
+  assert.equal(markBrowserProfile(marked), marked)
+  assert.equal(cleanBrowserProfile(marked), marked)
+  // A link to it reads as the folder it points to.
+  fs.symlinkSync(marked, path.join(root, 'link'))
+  assert.equal(cleanBrowserProfile(path.join(root, 'link')), marked)
+  // An unmarked folder, a missing one, a file: refused.
+  fs.mkdirSync(path.join(root, 'plain'))
+  assert.equal(cleanBrowserProfile(path.join(root, 'plain')), null)
+  assert.equal(cleanBrowserProfile(path.join(root, 'missing')), null)
+  assert.equal(cleanBrowserProfile(path.join(marked, BROWSER_PROFILE_MARKER)), null)
+  // A copy of a real profile: its own files, no marker. Refused, and never marked.
+  const copy = path.join(root, 'copy')
+  fs.mkdirSync(path.join(copy, 'Default'), { recursive: true })
+  fs.writeFileSync(path.join(copy, 'Local State'), '{}')
+  fs.writeFileSync(path.join(copy, 'Default', 'Cookies'), 'x')
+  assert.equal(cleanBrowserProfile(copy), null)
+  assert.throws(() => markBrowserProfile(copy), /a browser's own files/)
+  // A marker that is a link, or says something else: not ours.
+  const fake = path.join(root, 'fake')
+  fs.mkdirSync(fake)
+  fs.symlinkSync(path.join(marked, BROWSER_PROFILE_MARKER), path.join(fake, BROWSER_PROFILE_MARKER))
+  assert.equal(cleanBrowserProfile(fake), null)
+  const other = path.join(root, 'other')
+  fs.mkdirSync(other)
+  fs.writeFileSync(path.join(other, BROWSER_PROFILE_MARKER), 'trust me\n')
+  assert.equal(cleanBrowserProfile(other), null)
+  // A non-empty folder is never marked.
+  fs.writeFileSync(path.join(root, 'plain', 'notes.txt'), 'x')
+  assert.throws(() => markBrowserProfile(path.join(root, 'plain')), /not empty/)
+  // A link whose target is a real browser's folder: refused after resolving it, marker or not.
+  const chrome = path.join(root, '.config', 'google-chrome')
+  fs.mkdirSync(chrome, { recursive: true })
+  fs.writeFileSync(path.join(chrome, BROWSER_PROFILE_MARKER), fs.readFileSync(path.join(marked, BROWSER_PROFILE_MARKER)))
+  fs.symlinkSync(chrome, path.join(root, 'innocent'))
+  assert.equal(cleanBrowserProfile(path.join(root, 'innocent')), null)
+  // The name check catches the folders the review listed before the disk is read.
+  for (const dir of [
+    '/home/d/.config/google-chrome',
+    '/home/d/.config/Google-Chrome/Default',
+    '/home/d/.config/vivaldi',
+    '/home/d/.config/opera',
+    '/home/d/.config/BraveSoftware/Brave-Browser',
+    'C:\\Users\\d\\AppData\\Local\\MICROS~1\\Edge\\User Data',
+    'C:\\Users\\d\\AppData\\Local\\BRAVES~1\\Brave-Browser\\User Data',
+    '/Users/d/Library/Application Support/Arc/User Data',
+    '/Users/d/Library/Application Support/Microsoft Edge',
+    '/Users/d/Library/Application Support/Microsoft Edge Beta/Default',
+    '/Users/d/Library/Application Support/Vivaldi',
+    '/Users/d/Library/Application Support/com.operasoftware.Opera',
+    '/Users/d/Library/Application Support/Google/Chrome Canary',
+    '/home/d/snap/chromium/common/chromium',
+    '/home/d/.var/app/com.google.Chrome/config/google-chrome',
+    '/home/d/.config/chromium-browser',
+    '/home/d/.config/net.imput.helium',
+    '/home/d/.config/BRAVES~1',
+    '/home/d/.config/yandex-browser',
+    '/home/d/.config/thorium',
+    '/home/d/.mozilla/firefox/abc.default',
+    '/tmp/x/../../home/d/.config/google-chrome',
+  ])
+    assert.equal(cleanBrowserProfile(dir), null, dir)
+})
+
+test('capability summary: what changed between two hellos, line by line', () => {
+  const narrow = capabilitySummary({ machine: optIn({ approvals: 'owner', shell: 'off', browser: 'off' }) })
+  const wide = capabilitySummary({ machine: optIn({ approvals: 'owner' }), platform: PLATFORMS['linux sandbox'] })
+  assert.deepEqual(summaryChanges(narrow, narrow), [])
+  const changed = summaryChanges(narrow, wide)
+  assert.ok(changed.includes('fix.solo.shell'))
+  assert.ok(changed.includes('fix.solo.browser'))
+  assert.ok(changed.every((item) => item === 'team' || /^(chat|fix)\.(solo|team|open)\.[a-z]+$/.test(item)))
+  assert.ok(summaryChanges(null, wide).length > 0)
+  assert.ok(summaryChanges(narrow, { ...narrow, team: 'members' }).includes('team'))
+  // The handoff line is in every view.
+  const caps = resolve('solo', 'hosted-fix', PLATFORMS['linux sandbox'], { machine: optIn({ approvals: 'owner', handoffHops: 2 }) })
+  assert.equal(lineStates(caps).handoff, 'on')
+  assert.ok(toCli(caps).some((line) => line.includes('at most 2 hops')))
+  assert.match(toPrompt(caps), /Hand off to another agent/)
+  assert.ok('handoff' in wide.fix.solo)
+  // A machine that sends no handoff line (older) reads as unknown on the server, not off.
+  const older = JSON.parse(JSON.stringify(wide))
+  delete older.fix.solo.handoff
+  assert.equal(cleanCapabilitySummary(older).fix.solo.handoff, 'unknown')
 })

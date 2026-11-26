@@ -27,6 +27,7 @@
 // Every line that is off says why in `why` ({ line, code }); the renderers
 // turn each code into a sentence and the command that changes it.
 
+import fs from 'node:fs'
 import path from 'node:path'
 import { splitCommand } from '../watch.js'
 
@@ -133,6 +134,8 @@ export function cleanOrigin(value) {
     return null
   }
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return null
+  // Never a wildcard: an origin is one exact address.
+  if (url.hostname.includes('*') || value.includes('*')) return null
   return value.replace(/\/$/, '') === url.origin ? url.origin : null
 }
 
@@ -147,16 +150,88 @@ function originOf(value) {
   }
 }
 
-// A persistent agent browser profile folder: absolute, and never a real
-// browser's own user data folder (or inside one). Q3 checks it again on disk.
-const BROWSER_DATA_RE =
-  /(^|[/\\])(google-chrome[^/\\]*|chromium|google[/\\]chrome[^/\\]*|bravesoftware|microsoft[/\\]edge[^/\\]*|microsoft-edge[^/\\]*|\.mozilla|firefox)([/\\]|$)/i
-export function cleanBrowserProfile(value) {
+// A persistent agent browser profile folder. An allowlist, not a denylist:
+// only a folder Shapewall made for an agent (markBrowserProfile), holding
+// the marker file, read after resolving symbolic links. A real browser's
+// own user data folder, a copy of one, a link to one: refused, because none
+// of them holds the marker. The name check is only a first pass, before the
+// disk is read (it also catches Windows short names such as MICROS~1). Q3
+// checks the folder again when it starts the browser.
+export const BROWSER_PROFILE_MARKER = '.shapewall-agent-profile'
+const BROWSER_PROFILE_MARK = 'shapewall agent browser profile v1\n'
+const SEP = '[/\\\\]'
+const SEG = '[^/\\\\]*'
+const BROWSER_DATA_RE = new RegExp(
+  `(^|${SEP})(` +
+    [
+      `google-chrome${SEG}`,
+      `google${SEP}chrome${SEG}`,
+      'chrome',
+      `chromium${SEG}`,
+      'bravesoftware',
+      `brave-browser${SEG}`,
+      `microsoft${SEP}edge${SEG}`,
+      `microsoft edge${SEG}`,
+      `microsoft-edge${SEG}`,
+      '(micros|braves|google|chromi|vivald|yandex)~\\d+',
+      `vivaldi${SEG}`,
+      `opera${SEG}`,
+      `com\\.operasoftware${SEG}`,
+      'arc',
+      `company\\.thebrowser${SEG}`,
+      `yandex${SEG}`,
+      `thorium${SEG}`,
+      `net\\.imput\\.helium${SEG}`,
+      `helium${SEG}`,
+      '\\.mozilla',
+      'mozilla',
+      `firefox${SEG}`,
+      'user data',
+    ].join('|') +
+    `)(${SEP}|$)`,
+  'i',
+)
+// What a browser writes into its own profile folder.
+const BROWSER_OWN_FILES = ['Local State', path.join('Default', 'Cookies'), path.join('Default', 'Network', 'Cookies'), 'cookies.sqlite']
+const realpath = (fsImpl, target) => (fsImpl.realpathSync.native || fsImpl.realpathSync)(target)
+function marked(fsImpl, dir) {
+  try {
+    const marker = path.join(dir, BROWSER_PROFILE_MARKER)
+    return fsImpl.lstatSync(marker).isFile() && fsImpl.readFileSync(marker, 'utf8') === BROWSER_PROFILE_MARK
+  } catch {
+    return false
+  }
+}
+export function cleanBrowserProfile(value, { fsImpl = fs } = {}) {
   // eslint-disable-next-line no-control-regex
   if (typeof value !== 'string' || !value || value.length > 1024 || /[\u0000-\u001f\u007f]/.test(value)) return null
   if (!path.isAbsolute(value)) return null
   const normal = path.normalize(value)
-  return BROWSER_DATA_RE.test(normal) ? null : normal
+  if (BROWSER_DATA_RE.test(normal)) return null
+  let real
+  try {
+    real = realpath(fsImpl, normal)
+    if (!fsImpl.statSync(real).isDirectory()) return null
+  } catch {
+    return null
+  }
+  if (BROWSER_DATA_RE.test(real)) return null
+  return marked(fsImpl, real) ? real : null
+}
+// Makes an agent browser profile folder: a new or empty folder only, never
+// one a browser already wrote to. Returns the folder (links resolved), or throws.
+export function markBrowserProfile(dir, { fsImpl = fs } = {}) {
+  if (typeof dir !== 'string' || !path.isAbsolute(dir)) throw new Error('A browser profile folder is an absolute path.')
+  if (BROWSER_DATA_RE.test(path.normalize(dir))) throw new Error(`${dir} looks like a browser's own profile folder.`)
+  fsImpl.mkdirSync(dir, { recursive: true, mode: 0o700 })
+  const real = realpath(fsImpl, dir)
+  if (BROWSER_DATA_RE.test(real)) throw new Error(`${real} looks like a browser's own profile folder.`)
+  if (marked(fsImpl, real)) return real
+  if (BROWSER_OWN_FILES.some((name) => fsImpl.existsSync(path.join(real, name))))
+    throw new Error(`${real} holds a browser's own files. An agent never gets a real browser's profile, or a copy of one.`)
+  if (fsImpl.readdirSync(real).length) throw new Error(`${real} is not empty. An agent browser profile starts in a new, empty folder.`)
+  fsImpl.writeFileSync(path.join(real, BROWSER_PROFILE_MARKER), BROWSER_PROFILE_MARK, { mode: 0o600, flag: 'wx' })
+  return real
 }
 
 const uniq = (list) => [...new Set(list)]
@@ -463,7 +538,8 @@ const freeze = (value) => {
 export function machineView(machine) {
   const m = machine && typeof machine === 'object' && !Array.isArray(machine) ? machine : {}
   return {
-    audience: m.audience === 'server' ? 'server' : 'owner',
+    // Only an exact "owner" lets a turn reach solo; anything else reads as "server".
+    audience: m.audience === 'owner' ? 'owner' : 'server',
     approvals: ['owner', 'admins'].includes(m.approvals) ? m.approvals : 'none',
     commands: Array.isArray(m.commands) ? m.commands.filter((item) => typeof item === 'string' && item) : [],
     remote: typeof m.remote === 'string' && m.remote ? m.remote : null,
@@ -471,6 +547,16 @@ export function machineView(machine) {
     agentConfig: m.agentConfig === null || m.agentConfig === undefined ? null : typeof m.agentConfig === 'string' ? m.agentConfig : 'none',
     ...cleanCapabilityKeys(m, { defaults: CAPABILITY_NARROWEST }),
   }
+}
+
+// What this machine offers a turn: { os, sandbox }. Every turn and the hello
+// summary read the same answer from here, so the board never shows more
+// than a turn gets.
+// TODO(Q2): probe the OS sandbox (bubblewrap on Linux, sandbox-exec on
+// macOS) here and return sandbox: true when it works. Until then no turn
+// gets a full shell (the open-tier command model instead).
+export function hostPlatform({ platform = process.platform } = {}) {
+  return { os: platform, sandbox: false }
 }
 
 function platformView(platform) {
@@ -514,40 +600,44 @@ function resolveForTier(tier, { path: where, machine, server, config, platform, 
     edit = { on: true, where: starter ? 'container' : checkout ? 'checkout' : 'copy', approvals }
   }
 
-  // Commands and the shell.
+  // Commands and the shell. A full shell, or a command that changes files,
+  // is an edit power: neither is ever on while edits are off. A machine that
+  // takes no approvals ("none") reads and answers only: no commands at all.
   const serverShell = !narrowing || narrowing.shell
   let commandsOn = known
-  if (!known) off('commands', 'unknown_path')
-  else if (m.shell === 'off') {
+  let commandsWhy = null
+  if (!known) commandsWhy = 'unknown_path'
+  else if (!cards) commandsWhy = 'machine_approvals_none'
+  else if (m.shell === 'off') commandsWhy = 'machine_shell_off'
+  else if (!serverShell) commandsWhy = 'server_shell_off'
+  if (commandsWhy) {
     commandsOn = false
-    off('commands', 'machine_shell_off')
-  } else if (!serverShell) {
-    commandsOn = false
-    off('commands', 'server_shell_off')
+    off('commands', commandsWhy)
   }
   // Every command in solo and team runs in the OS sandbox; without one, the
   // open tier's rule (a card each) applies, unless the solo owner insisted.
   const unsandboxed = tier === 'solo' && m.shellUnsandboxed === true
   const contained = starter || box.sandbox || unsandboxed
   const needsCard = tier === 'open' || m.commandApproval === 'always' || !contained
-  const commands = []
+  let commands = []
   if (commandsOn) {
     for (const command of namedCommands(config)) {
-      if (chatOnly && (tier !== 'solo' || command.mutating)) continue
-      if (needsCard && !cards) continue
+      if (chatOnly && tier !== 'solo') continue
+      if (command.mutating && !edit.on) continue
       commands.push({ name: command.name, needsCard, mutating: command.mutating })
     }
     if (!commands.length) {
       if (!namedCommands(config).length) off('commands', 'no_named_commands')
       else if (chatOnly) off('commands', tier === 'solo' ? 'chat_mutating_only' : 'chat_not_solo')
-      else if (needsCard && !cards) off('commands', 'machine_approvals_none')
+      else off('commands', 'edits_off')
     } else if (needsCard && tier !== 'open' && !contained) off('commands', 'no_sandbox')
   }
 
   let shell = { mode: 'off', network: 'none', exact: [] }
   if (!known) off('shell', 'unknown_path')
-  else if (!commandsOn) off('shell', m.shell === 'off' ? 'machine_shell_off' : 'server_shell_off')
+  else if (!commandsOn) off('shell', commandsWhy)
   else if (chatOnly) off('shell', 'chat_no_shell')
+  else if (!edit.on) off('shell', 'edits_off')
   else if (starter) shell = { mode: 'container', network: 'egress', exact: [] }
   else {
     const wantsFull = m.shell === 'sandboxed' && (tier === 'solo' || (tier === 'team' && m.trustTeamShell))
@@ -558,10 +648,14 @@ function resolveForTier(tier, { path: where, machine, server, config, platform, 
       else if (m.shell === 'commands') off('shell', 'machine_shell_commands')
       else if (tier === 'team') off('shell', 'team_shell_off')
       else if (tier === 'open') off('shell', 'open_tier_shell')
-      const exact = cards ? m.commands : []
-      if (exact.length) shell = { mode: 'exact', network: box.sandbox ? m.shellNetwork : 'none', exact }
-      else if (!wantsFull) off('shell', cards ? 'no_exact_commands' : 'machine_approvals_none')
+      if (m.commands.length) shell = { mode: 'exact', network: box.sandbox ? m.shellNetwork : 'none', exact: m.commands }
+      else if (!wantsFull) off('shell', 'no_exact_commands')
     }
+  }
+  // The same rule once more, whatever the branches above decided.
+  if (!edit.on) {
+    commands = commands.filter((command) => !command.mutating)
+    if (shell.mode !== 'off') shell = { mode: 'off', network: 'none', exact: [] }
   }
 
   // The throwaway browser.
@@ -575,10 +669,14 @@ function resolveForTier(tier, { path: where, machine, server, config, platform, 
     const login = m.browserAuth !== null || m.browserProfile !== null
     const loggedIn = login && (tier === 'solo' || (tier === 'team' && m.browserProfileTeam))
     if (login && !loggedIn) off('browser', 'login_not_this_tier')
-    // On a machine with a login for the browser, it only ever gets the app's
-    // own addresses and the machine's list, not origins a committed config
-    // adds (on every tier, so a lower tier never gets a longer list).
-    const extra = login ? [] : (config?.agent?.browser?.allow || []).map(cleanOrigin).filter(Boolean)
+    // The machine wins (plan 3.6): origins the config adds in
+    // agent.browser.allow count only where the machine's list has them too,
+    // except on a solo turn of a machine without a login for the browser,
+    // where the owner's own config may widen it. A lower tier never gets a
+    // longer list. The config is the checkout's (Q3 reads it from the
+    // checkout, never from the fix copy an agent can write to).
+    const given = (Array.isArray(config?.agent?.browser?.allow) ? config.agent.browser.allow : []).map(cleanOrigin).filter(Boolean)
+    const extra = tier === 'solo' && !login ? given : given.filter((origin) => m.browserAllow.includes(origin))
     browser = {
       on: true,
       allow: uniq([...configOrigins(config), ...extra, ...m.browserAllow]),
@@ -618,6 +716,10 @@ function resolveForTier(tier, { path: where, machine, server, config, platform, 
   else if (hosted && !m.remote) off('push', 'machine_remote_none')
   else push = { on: true, card: true, remote: hosted ? m.remote : null }
 
+  // Handing the work to another agent: off unless this machine allows hops.
+  const hops = known ? Math.min(m.handoffHops, HANDOFF_HOPS_MAX) : 0
+  if (!hops) off('handoff', known ? 'machine_handoff_none' : 'unknown_path')
+
   const narrowed = []
   if (narrowing) {
     if (!narrowing.shell) narrowed.push('commands', 'shell')
@@ -640,7 +742,7 @@ function resolveForTier(tier, { path: where, machine, server, config, platform, 
     extensions,
     memory,
     push,
-    handoff: { hops: known ? Math.min(m.handoffHops, HANDOFF_HOPS_MAX) : 0 },
+    handoff: { hops },
     selfEdit: false,
     narrowed,
     why,

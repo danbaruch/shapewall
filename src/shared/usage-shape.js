@@ -174,6 +174,7 @@ export const ACTION_GROUPS = {
     'agent_audience_changed',
     'agent_approval_rule_changed',
     'agent_edit_mode_changed',
+    'agent_capabilities_changed',
     'agent_revoked',
     'agent_queue_released',
     'agent_link_connected',

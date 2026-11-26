@@ -46,6 +46,7 @@ import {
 } from './agent-policy-file.js'
 import { createRemote, remoteOrigin } from './remote.js'
 import { safeOut, terminalSafe } from './terminal.js'
+import { hostPlatform } from '../agent/capabilities.js'
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version
 const TOKEN_RE = /^swp_[A-Za-z0-9_-]{43}$/
@@ -526,7 +527,8 @@ export async function agentConnect(
       editBackend,
       fix: edits ? { config, env, fetchImpl, instructions } : null,
       instructions: instructionsNote,
-      capabilities: { config },
+      // One platform answer for the hello and the turns (TODO(Q2): pass the same object to each turn).
+      capabilities: { config, platform: hostPlatform() },
       hello: { kind, machine: os.hostname().split('.')[0] || 'this computer', version: VERSION, maxTurns: concurrency },
       policy,
       remote,

@@ -217,7 +217,8 @@ counts per token.
 
 `shapewall agent connect` puts a coding agent on a hosted board, where members of a workspace chat with it
 ([Connected agents](hosted.md#connected-agents)). It runs on your machine, with your login, and other people write the questions. So
-by default it reads and answers only, and the machine that runs it is what enforces that. Edits from the board are a separate
+by default it reads and answers only (no edits, no commands, no shell, no push: [What each turn may do](#what-each-turn-may-do)),
+and the machine that runs it is what enforces that. Edits from the board are a separate
 choice, made on that machine ([Edits from a hosted board](#edits-from-a-hosted-board) below).
 
 - **The command is yours.** The program that runs is Claude Code, found on your `PATH` or saved as an agent on your machine. Nothing
@@ -467,7 +468,8 @@ It is decided by **who wrote the turn**, not by whether the board is local or ho
 | **team** | only people on this machine's trusted list (and the owner)                             | the machine names a team (`trustTeam`), and every author is on it |
 | **open** | anyone else, a share-link guest, or a turn the server's trust block does not vouch for | every other turn                                                  |
 
-A thread that once carried text from outside the list keeps the tier that text allowed. What each tier gets by default:
+A thread that once carried text from outside the list keeps the tier that text allowed. What each tier may get, once the machine's
+owner has opted in (on a local board these are the defaults; a hosted connection starts with none of them, see below):
 
 | What                                                            | solo                                                     | team                                            | open                        |
 | --------------------------------------------------------------- | -------------------------------------------------------- | ----------------------------------------------- | --------------------------- |
@@ -481,6 +483,10 @@ A thread that once carried text from outside the list keeps the tier that text a
 Hosted chat answers only: no edits, and on solo turns only the commands marked `"mutating": false` and the browser. No OS sandbox on
 the machine (Windows, no bubblewrap) means no full shell: commands fall back to a card each, and the line says why.
 
+**A full shell, or a command that changes files, is an edit power.** Neither is ever on while edits are off. A connected agent
+whose machine says `approvals: "none"` (the default) reads and answers only on every tier: no edits, no named or exact commands, no
+shell, no push. The console card, `agent status` and what `agent connect` prints all say so, and a test holds them to each other.
+
 **The machine sets the ceiling, the server can only lower it.** A project's agent policy on the server (Workspace Console, Agent
 policy) can set `maxTier` (`"solo"`, `"team"` or `"open"`), `shell: false` and `browser: false`, for the project and per board; a
 board's own setting can only narrow the project's. The server sends this at hello and again with every turn, and the machine applies
@@ -488,38 +494,45 @@ the narrower of the two. Nothing the server sends can add a capability: a test f
 that every line stays at or below what it was without it.
 
 **The machine's keys** (`agent-policy.json` version 2, beside the version 1 keys above; the same keys go in a project's `capabilities`
-entry in `agents.json` for a local board):
+entry in `agents.json` for a local board). A hosted connection opts in key by key: a key its entry does not name reads as what
+version 1 allowed (the "Hosted, nothing set" column), never as the wider value. A local board, whose owner answers its own cards,
+reads a missing key as the "Local board" column:
 
-| Key                  | Values                                                      | Default        | Narrowest (an unknown value) |
-| -------------------- | ----------------------------------------------------------- | -------------- | ---------------------------- |
-| `trustTeam`          | `"none"`, `"members"`, or a list of handles                 | `"none"`       | `"none"`                     |
-| `trustTeamShell`     | `true` / `false`                                            | `false`        | `false`                      |
-| `shell`              | `"sandboxed"`, `"commands"` (named and exact only), `"off"` | `"sandboxed"`  | `"off"`                      |
-| `shellNetwork`       | `"registries"`, `"open"`, `"none"`                          | `"registries"` | `"none"`                     |
-| `shellUnsandboxed`   | `true` / `false` (solo only, shown loudly)                  | `false`        | `false`                      |
-| `commandApproval`    | `"tier"` (as in the table), `"always"` (a card each)        | `"tier"`       | `"always"`                   |
-| `browser`            | `"on"` / `"off"`                                            | `"on"`         | `"off"`                      |
-| `browserAllow`       | exact http(s) origins, up to 40                             | `[]`           | `[]`                         |
-| `browserAuth`        | a recorded auth name                                        | none           | none                         |
-| `browserProfile`     | an absolute folder, never a real browser's own profile      | none           | none                         |
-| `browserProfileTeam` | `true` / `false`                                            | `false`        | `false`                      |
-| `extensionsFor`      | `"owner"` and handles                                       | `["owner"]`    | `[]`                         |
-| `allowTool`          | exact `mcp__server__tool` names, up to 20                   | `[]`           | `[]`                         |
-| `handoffHops`        | 0 to 2                                                      | `0`            | `0`                          |
+| Key                  | Values                                                                                                              | Local board    | Hosted, nothing set                                      | Narrowest (an unknown value) |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------- | -------------- | -------------------------------------------------------- | ---------------------------- |
+| `trustTeam`          | `"none"`, `"members"`, or a list of handles                                                                         | `"none"`       | `"none"`                                                 | `"none"`                     |
+| `trustTeamShell`     | `true` / `false`                                                                                                    | `false`        | `false`                                                  | `false`                      |
+| `shell`              | `"sandboxed"`, `"commands"` (named and exact only), `"off"`                                                         | `"sandboxed"`  | `"off"` (`"commands"` with approvals and exact commands) | `"off"`                      |
+| `shellNetwork`       | `"registries"`, `"open"`, `"none"`                                                                                  | `"registries"` | `"registries"`                                           | `"none"`                     |
+| `shellUnsandboxed`   | `true` / `false` (solo only, shown loudly)                                                                          | `false`        | `false`                                                  | `false`                      |
+| `commandApproval`    | `"tier"` (as in the table), `"always"` (a card each)                                                                | `"tier"`       | `"always"`                                               | `"always"`                   |
+| `browser`            | `"on"` / `"off"`                                                                                                    | `"on"`         | `"off"`                                                  | `"off"`                      |
+| `browserAllow`       | exact http(s) origins, up to 40                                                                                     | `[]`           | `[]`                                                     | `[]`                         |
+| `browserAuth`        | a recorded auth name                                                                                                | none           | none                                                     | none                         |
+| `browserProfile`     | a folder Shapewall made for the agent (it holds a marker file); never a real browser's own profile or a copy of one | none           | none                                                     | none                         |
+| `browserProfileTeam` | `true` / `false`                                                                                                    | `false`        | `false`                                                  | `false`                      |
+| `extensionsFor`      | `"owner"` and handles                                                                                               | `["owner"]`    | `[]`                                                     | `[]`                         |
+| `allowTool`          | exact `mcp__server__tool` names, up to 20                                                                           | `[]`           | `[]`                                                     | `[]`                         |
+| `handoffHops`        | 0 to 2                                                                                                              | `0`            | `0`                                                      | `0`                          |
 
-A key that is missing reads as its default; a key that is there with a value this version does not know reads as its narrowest, and
-the connector names it. A missing or malformed trust block reads as open. In `agents.json` a key it does not know at all is an
+A key that is there with a value this version does not know reads as its narrowest, and the connector names it. Origins in a
+project's `agent.browser.allow` count only where the machine's `browserAllow` has them too, except on a solo turn of a machine
+without a login for the browser: the machine wins. A `browserProfile` is read after resolving links, and only a folder holding
+Shapewall's marker file counts, so a real browser's profile folder (any browser, any name), a copy of one or a link to one is
+refused. A missing or malformed trust block reads as open. In `agents.json` a key it does not know at all is an
 error for that project, so a typo cannot fall back to a wider default.
 
 **Upgrading from version 1.** A version 1 `agent-policy.json` is read as exactly what it allowed before: no shell, no browser, no
 extensions, and a card for every command (`shell: "commands"` with `commandApproval: "always"` where it listed exact commands,
 `shell: "off"` otherwise). The next time `agent connect` saves the file, every entry in it is written back as version 2 with those
-values spelled out, so an entry nobody touched does not pick up the new defaults. A connection the file never had (a new name, or
-one that never changed a flag) gets the version 2 defaults above.
+values it chose spelled out, so an entry nobody touched gains nothing. A connection the file never had, or one 1.3.0 saved without
+flags, reads and answers only, as before. One change to know about: an entry with `approvals` and exact commands also gets the
+project's named commands (config `commands`), each behind a card on the board, like its exact commands.
 
 **What the board learns.** At hello the machine sends a summary per tier, for chat and for Fix with: one on, ask or off per line,
-no commands, handles, folders or origins. The server keeps it for display only, cleaned to the known lines (your own Chrome is
-always off), and an older hello of the same process arriving late does not replace a newer one.
+no commands, handles, folders or origins. The server keeps it for display only, cleaned to the known lines (a state it cannot read
+is "unknown"; your own Chrome is always off), writes an `agent_capabilities_changed` audit row naming each line that changed, and
+an older hello of the same process arriving late does not replace a newer one.
 
 ### What Shapewall cannot do
 
@@ -568,7 +581,8 @@ shared board is text other people write.
 
 Use a separate agent for shared boards: its own key, its own login, in a sandbox with nothing worth stealing and nowhere to send it.
 
-A [connected agent](#connected-agents) on a hosted board is a shared board's agent. By default it reads and answers only, which
+A [connected agent](#connected-agents) on a hosted board is a shared board's agent. By default it reads and answers only (no
+commands or shell either), which
 takes away editing and running, not reading: connect a profile that holds nothing but that project, never your main one.
 
 With [edits from the board](#edits-from-a-hosted-board) switched on, the rule matters more. Other people's comments now end as

@@ -20,7 +20,7 @@ import { commandHelp } from '../src/cli.js'
 import { COMMENT_PROMPT, JobError, cleanJob, jobConversation } from '../src/remote/agent-job.js'
 import { fatalLinkError } from '../src/remote/agent-link.js'
 import { policyFile, readMachinePolicy, saveMachinePolicy } from '../src/remote/agent-policy-file.js'
-import { CAPABILITY_DEFAULTS } from '../src/agent/capabilities.js'
+import { upgradeV1Capabilities } from '../src/agent/capabilities.js'
 import {
   credentialsFile,
   forgetAgentCredential,
@@ -157,8 +157,9 @@ test('the agent’s token and this machine’s policy are files of their own, pr
     instructions: 'all',
     agentConfig: null,
     respond: 'thread',
-    // Version 2: what each trust tier may do (src/agent/capabilities.js).
-    ...CAPABILITY_DEFAULTS,
+    // Version 2: what each trust tier may do (src/agent/capabilities.js); nothing
+    // saved reads as what version 1 allowed.
+    ...upgradeV1Capabilities('none', []),
   }
   assert.deepEqual(readMachinePolicy(ORIGIN, 'default', env), NONE)
   // What it does not understand reads as the narrowest: a 0.5.0 file ("never"), a made-up level, a list of nonsense.
@@ -200,7 +201,7 @@ test('the agent’s token and this machine’s policy are files of their own, pr
       instructions: 'all',
       agentConfig: null,
       respond: 'thread',
-      ...CAPABILITY_DEFAULTS,
+      ...upgradeV1Capabilities('owner', ['npm test']),
     },
   )
   // A list with an entry it cannot read is not trusted for the rest, and a remote it cannot read

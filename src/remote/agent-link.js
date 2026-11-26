@@ -33,7 +33,7 @@ import { runTurn } from '../agent/run.js'
 import { git } from '../agent/starter/worktree.js'
 import { instructionsStatus, loadInstructions } from '../agent/instructions.js'
 import { agentHandles, shouldRespond } from '../agent/triggers.js'
-import { CAPABILITY_NARROWEST } from '../agent/capabilities.js'
+import { CAPABILITY_NARROWEST, hostPlatform } from '../agent/capabilities.js'
 import { capabilitySummary } from '../agent/capability-render.js'
 import { FixRefusal, dropFixFolder, dropHeld, finishFix, heldDiff, heldSummary, prepareFix, pushFix, readHeld } from './agent-fix.js'
 import { JobError, TURN_ID_RE, cleanJob, jobConversation } from './agent-job.js'
@@ -903,7 +903,8 @@ export async function runAgentLink({
       capabilitySummary: capabilitySummary({
         machine: policy,
         config: capabilities?.config || fix?.config || null,
-        platform: capabilities?.platform || { os: process.platform, sandbox: false },
+        // The same answer turns use (capabilities.js hostPlatform; Q2 fills in the sandbox probe).
+        platform: capabilities?.platform || hostPlatform(),
       }),
       // Counts up with every hello of this process: the server keeps the newest list.
       seq: (helloSeq += 1),

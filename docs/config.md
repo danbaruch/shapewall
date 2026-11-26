@@ -477,7 +477,9 @@ What an agent's tools may reach (1.4.0, see [what each turn may do](agent-harden
 - `browser.allow`: origins the agent's throwaway browser may load besides the app's own addresses (every `baseUrl` and `publicUrl`
   of the config, its boards and environments). Up to 40 exact http(s) origins, such as `"https://staging.example.com"`: no path, no
   user or password. The machine has the last word: its own `browser` setting switches the browser off whatever the config says, and
-  on a machine that gives the browser a login (`browserAuth` or `browserProfile`) these extra origins are left out.
+  these extra origins count only on solo turns of a machine without a login for the browser (`browserAuth` or `browserProfile`).
+  On every other turn an origin here counts only if the machine's own `browserAllow` names it too. The config is read from your
+  checkout, never from the fix copy an agent writes in.
 - `fixIn`: `"copy"` (the default, every fix in a fix copy of its own) or `"checkout"`, which lets a local board's owner keep solo
   fixes in this checkout. Every other tier and every hosted path still uses a fix copy.
 
