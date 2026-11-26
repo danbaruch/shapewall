@@ -676,6 +676,8 @@ export async function startExecSession({
   readPaths = [],
   // Folders inside `root` no command may write (a local checkout's .git and .shapewall).
   denyWrite = [],
+  // Paths inside `root` no command may read (a checkout's Shapewall folder: its recorded logins).
+  denyRead = [],
   network = 'none',
   approvals = null,
   scope = '',
@@ -698,7 +700,20 @@ export async function startExecSession({
   let session = null
   if (wantsCommands && root) {
     try {
-      session = await createCommandSession({ root, expect, within, checkout, network, readOnly, mode, readPaths, denyWrite, env, log })
+      session = await createCommandSession({
+        root,
+        expect,
+        within,
+        checkout,
+        network,
+        readOnly,
+        mode,
+        readPaths,
+        denyWrite,
+        denyRead,
+        env,
+        log,
+      })
     } catch (error) {
       log('exec-mcp: no command session: ' + error.message)
       // Commands were the point: without a session nothing here may run them.

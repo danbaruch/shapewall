@@ -25,6 +25,7 @@
 // (stdin, a JSON file), never as part of a command line.
 
 import fs from 'node:fs'
+import { ownersComment, watchCapabilities, writeCapabilitiesFile } from './agent/watch-capabilities.js'
 import path from 'node:path'
 import { runWatchCommand } from './watch-command.js'
 import { recaptureComment } from './agent/feedback-loop.js'
@@ -234,6 +235,15 @@ export async function watchComments({
     )
   }
 
+  const capabilitiesFile = (item) => {
+    try {
+      const caps = watchCapabilities({ config, env, owner: ownersComment(getComment(config, board.id, item.id)) })
+      return writeCapabilitiesFile(agentDir, item.id, caps)
+    } catch (error) {
+      log('#' + item.id + ': capabilities file not written (' + error.message + ')')
+      return ''
+    }
+  }
   const runCommand = async (item) => {
     lifetime.signal.throwIfAborted()
     const commentFile = path.join(agentDir, `comment-${item.id}.json`)
@@ -249,7 +259,12 @@ export async function watchComments({
       log(`#${item.id} working: ${path.basename(argv[0])} (log ${path.relative(process.cwd(), logFile) || logFile})`)
       result = await runWatchCommand(argv, {
         cwd: config.dir,
-        env: { ...env, ...commentEnv(config, board, item, commentFile) },
+        env: {
+          ...env,
+          ...commentEnv(config, board, item, commentFile),
+          // What this machine's rules allow for it (watch-capabilities.js; not enforced by Shapewall).
+          SHAPEWALL_CAPABILITIES_FILE: capabilitiesFile(item),
+        },
         logFd,
         input: json,
         timeoutMs,

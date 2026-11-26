@@ -114,6 +114,8 @@ export async function startLocalTools({
     checkout: null,
     readOnly: !caps.edit.on,
     denyWrite,
+    // Shapewall's own folder holds the logins captures record: no command reads it.
+    denyRead: real && fs.existsSync(config.outputDir) ? [path.resolve(config.outputDir)] : [],
     network: caps.shell.mode !== 'off' ? caps.shell.network : 'none',
     approvals: createApprovalStore(localApprovalsDir(config)),
     scope: JSON.stringify(['local', config.dir]),

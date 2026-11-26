@@ -1083,14 +1083,20 @@ export function mountAgentLink(
     }
     const content = cardContent(data)
     if (!id || !content || agents.editMode(req.agent) === 'none') return refuse()
-    // Edits (and commands) in a fix; "Push this fix" in a fix or when it is asked again. Nothing in a chat.
-    if (!(row.kind === 'fix' || (row.kind === 'push' && content.name === 'push'))) return refuse()
-    if (content.name === 'execute' && !agents.machinePolicy(req.agent).commands.includes(content.detail)) return refuse()
-    // A command Shapewall runs for the agent (exec-mcp): only in a fix, and
-    // never where this project (or board) took commands away. The machine
-    // decided it may ask (its resolved capabilities) and checks the answer again.
-    if (content.name === 'command' && (row.kind !== 'fix' || narrowingOf(req.t, req.project.id, row.board_id)?.shell === false))
+    // Edits (and commands) in a fix; "Push this fix" in a fix or when it is
+    // asked again; a read-style command in a chat or comment turn (1.4.0:
+    // the machine offers those turns only commands that change no files).
+    if (!(
+      row.kind === 'fix' ||
+      (row.kind === 'push' && content.name === 'push') ||
+      (['chat', 'comment'].includes(row.kind) && content.name === 'command')
+    ))
       return refuse()
+    if (content.name === 'execute' && !agents.machinePolicy(req.agent).commands.includes(content.detail)) return refuse()
+    // A command Shapewall runs for the agent (exec-mcp): never where this
+    // project (or board) took commands away. The machine decided it may ask
+    // (its resolved capabilities) and checks the answer again.
+    if (content.name === 'command' && narrowingOf(req.t, req.project.id, row.board_id)?.shell === false) return refuse()
     if (cardHash(row.id, content) !== data.hash) return refuse()
     // How long it waits is a length of time, counted here from now on this
     // server's clock (the machine counts the same length on its own), and
