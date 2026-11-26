@@ -921,7 +921,9 @@ export async function createCommandSession({
     box.registerCommandNetworkLists(commandId, { allowedDomains: list() })
     try {
       // srt puts its proxy settings in the wrapped command; the host side gets only PATH.
-      const argv = scope.available ? scopeArgv(wrapped.argv, { scope, limits, unit: `shapewall-cmd-${randomBytes(8).toString('hex')}` }) : wrapped.argv
+      const argv = scope.available
+        ? scopeArgv(wrapped.argv, { scope, limits, unit: `shapewall-cmd-${randomBytes(8).toString('hex')}` })
+        : wrapped.argv
       return capTmp(
         await runProcess(argv, {
           cwd: real,

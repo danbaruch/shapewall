@@ -615,3 +615,31 @@ test('a run: the checkout config decides the commands, the container offers them
   assert.match(devText, /Your browser tools can open http:\/\/127\.0\.0\.1:\d+/)
   assert.equal(getComment(config, 'site', comment.id).agentStatus, 'needs-human')
 })
+
+test('Q7 C6: a dev server that exits on its own leaves the browser allowlist at once, not only at stop', posix, async (t) => {
+  const root = devProject('starter-dev-quit')
+  fs.writeFileSync(
+    path.join(root, 'server.js'),
+    "require('http').createServer((q, r) => { r.end('bye'); if (q.url === '/quit') setTimeout(() => process.exit(0), 20) }).listen(Number(process.env.PORT), '127.0.0.1')\n",
+  )
+  const browser = createAgentBrowser({
+    browser: { on: true, allow: [], auth: null, profile: null, allowNoSandbox: false, realChrome: false },
+    tmpRoot: fs.realpathSync(tempDir('starter-dev-quit-browser')),
+    chromium: { launchPersistentContext: async () => assert.fail('no launch') },
+    warn: () => {},
+  })
+  const revoked = []
+  const revoke = browser.revokeSpawned
+  browser.revokeSpawned = (token) => (revoked.push(token), revoke(token))
+  const { rpc } = asking(false)
+  const tools = createTools({ root, rpc, commands: [DEV], browser, shell: true, remainingMs: () => 60000 })
+  t.after(() => tools.close())
+  const result = await tools.run({ name: 'run_named_command', args: { name: 'dev' } })
+  const port = Number(/Your browser tools can open http:\/\/127\.0\.0\.1:(\d+)/.exec(result.text)?.[1])
+  assert.ok(port > 0, result.text)
+  assert.equal(revoked.length, 0)
+  await new Promise((resolve) => http.get(`http://127.0.0.1:${port}/quit`, (res) => res.resume().on('end', resolve)))
+  const until = Date.now() + 5000
+  while (!revoked.length && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 50))
+  assert.equal(revoked.length, 1, 'revoked when it exited, before any stop')
+})

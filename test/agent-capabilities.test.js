@@ -1526,3 +1526,26 @@ test('browserNoSandbox: off by default and narrowest, on only while the browser 
   assert.equal(localMachinePolicy(local.entry).browserNoSandbox, true)
   assert.equal(localMachinePolicy(validateUserEntry({ capabilities: { browserNoSandbox: 'yes' } }).entry).browserNoSandbox, false)
 })
+
+test('Q7 B4: commands get the machine network on the owner turn only; team turns get none', () => {
+  const machine = optIn({
+    approvals: 'owner',
+    commands: ['npm test'],
+    trustTeam: ['robin'],
+    trustTeamShell: true,
+    shellNetwork: 'registries',
+  })
+  const at = (tier) =>
+    resolveCapabilities({
+      path: 'hosted-fix',
+      trust: TRUST[tier],
+      audience: 'owner',
+      machine,
+      config: CONFIG,
+      platform: PLATFORMS['linux sandbox'],
+    })
+  assert.equal(at('solo').shell.network, 'registries')
+  assert.notEqual(at('team').shell.mode, 'off', 'the team keeps its commands')
+  assert.equal(at('team').shell.network, 'none')
+  assert.equal(at('open').shell.network, 'none')
+})

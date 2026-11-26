@@ -160,6 +160,39 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - The approval page no longer promises a connected agent "never runs a command" when its machine allows named commands, and the
   chat's Connect note and the agent settings say Claude Code gets the restricted local session, while Codex, goose and Gemini CLI
   bring their own tools.
+- A team turn's commands get no network: the package registries take uploads as well as downloads, so the registries are for the
+  owner's own turn only.
+- A command line too long to show whole on its approval card is refused instead of cut, and a card's detail is cut only after the
+  command line.
+- On a team or open turn, the agent browser opens a port on this machine only for an origin the machine lists itself (or a dev server
+  of the session); a public name that resolves to an address of this machine is refused.
+- The agent browser is made again when its Browser line narrows mid-turn (allowlist, login, profile, `allowNoSandbox`,
+  `allowHostLaunch`), and a dev server that exits on its own leaves the browser's allowlist at once.
+
+### Security
+
+- The agent's file tools check the file they opened, not the path again: a link or folder swapped in while a read or write is under
+  way can no longer make it read or write outside the project (Linux: the opened descriptor; elsewhere a device and inode check, and
+  reads and writes wait while a command runs in the project).
+- A local in-place command can no longer leave files that run code on their own: Git hooks, `.envrc`, editor tasks, CI files,
+  `shapewall.config.json`, `Makefile`, agent instruction files and the like are write-denied in the sandbox, and after every run (and
+  every few seconds while a dev server runs) a new one is moved to `.shapewall/agent/quarantine` and a changed one is put back.
+- Every JavaScript or TypeScript `*.config.*` file and the plugin rc files (`.postcssrc`, `.swcrc`, `.parcelrc`, `.eslintrc`,
+  `.prettierrc`) are inputs of every named command, so a change to one asks again.
+- An approval covers every byte of a command's inputs (no size and time stand-in past 8 MB); a command with more inputs than
+  Shapewall checks asks every time and is never remembered.
+- A local board in place takes the committed state as the base of its named commands, not what an earlier turn left in the checkout.
+- The person's own checkout is unreadable to sandboxed commands wherever it is (not only inside the home folder), and so is every
+  other account's home (`/home`, `/Users`, `/var/home`); programs on `PATH` installed in another home still run.
+- A read-only command session never starts without the OS sandbox.
+- On Linux with a systemd user manager each sandboxed command runs in a scope of its own, capped for the command and everything it
+  starts together (memory with no swap, processes, CPU weight), in the slice Shapewall runs in; elsewhere the ulimit caps stay. A fix
+  copy that grows past 8 GB takes no more commands.
+- Recorded logins (`.shapewall-auth`) are unreadable to commands, in the checkout and in the config folder.
+- A recorded login's cookies are never given for a host a session dev server listens on (a cookie has no port).
+- On an open turn the agent browser always keeps Chromium's own sandbox: it starts on this machine with it instead of inside the OS
+  sandbox without it.
+- CI: one AppArmor profile per installed headless shell version, so each binary keeps its exact-path namespace policy.
 
 ## 1.3.0 - 2026-11-25
 

@@ -170,7 +170,11 @@ When the chat panel drives an agent CLI over ACP:
   argument count and folder, hidden characters shown as escapes, and runs without a shell. Environment variables that change what a
   program loads (`LD_*`, `DYLD_*`, `NODE_OPTIONS`, `PATH`, `GIT_*`, `npm_config_*`, ...) are refused outright. No answer within 2 minutes
   is a no, and so is Stop.
-- **Project-only files, protected writes.** Reads and writes go to text files inside the project only, checked after resolving symlinks.
+- **Project-only files, protected writes.** Reads and writes go to text files inside the project only, checked after resolving symlinks,
+  and checked again on the file actually opened: on Linux the open descriptor itself (a read opens the file without following a
+  final link and reads where `/proc/self/fd` says it is; a write goes through the open parent folder), so a link or folder swapped
+  in between the check and the open cannot point it outside. Elsewhere (macOS) the opened file's device and inode are compared with
+  the path's, and while a command Shapewall runs is going in the project, reads and writes there are refused (try again after it).
   Writes into `.git` and Shapewall's own store (`.shapewall`: comments, chat, captures) are refused, so an agent cannot rewrite the comments
   it is reading. Writes to files that decide what runs later need a **Write** / **Don't write** card: any dotfile or dot folder
   (`.claude`, `.codex`, `.husky`, `.vscode`, `.envrc`, `.github/workflows`, ...), `package.json`, `shapewall.config.json`, `Makefile`,
@@ -616,6 +620,9 @@ for the agent (`exec-mcp`, internal) beside the agent's file tools, and the agen
   stopped when the turn ends. Its port joins the agent browser's allowlist for this session only, and leaves it when it stops.
 - `shapewall_capabilities`: what this turn may do, the same answer the console shows.
 
+A card shows the whole command line, as it runs, quoted: a line over 3000 characters as shown is refused, never cut, and only the
+words after the line are shortened to fit the card.
+
 Every check is in Shapewall's process, not in the tool server the agent's adapter starts (that one only relays calls, over a socket
 only it and Shapewall know, with a one-time token in a file only you can read). Before each run the capabilities are worked out
 again, and a card's "allow" counts only if the command, its config line and its inputs are still what was asked.
@@ -630,15 +637,25 @@ again, and a card's "allow" counts only if the command, its config line and its 
   copies and their tmp folders. The fix copy, its tmp folder and Node's own install folder are let back in: only that one folder,
   after following links, and only when it is at least three levels inside the denied folder (`~/.nvm/versions/node/v22`). A Node
   under a shared prefix (`~/.local/bin/node`, `~/bin/node`) is not let in, so commands there need a Node installed elsewhere. So
-  not `~/.ssh`, `~/.config`, your agent's settings or tokens, nor the checkout the fix copy was made from;
+  not `~/.ssh`, `~/.config`, your agent's settings or tokens, nor the checkout the fix copy was made from (wherever it is, inside the
+  home folder or not), nor the recorded logins (`.shapewall-auth`) in the checkout or the config folder. Other accounts' homes
+  (`/home`, `/Users`, `/var/home`) are not readable either; a program on `PATH` installed in another account's home (Homebrew on
+  Linux) keeps its install folder readable, so it still runs;
 - gets a clean environment: `PATH`, the locale, a home folder of its own in its tmp folder, `CI=1`; never `SHAPEWALL_*` tokens or
   anything else of the shell that started Shapewall;
 - reaches the package registries only (`shellNetwork`: `"registries"`; `"none"` for no network), through the runtime's proxy,
-  never a port on this machine. There is no "any public host": the runtime's proxy is shared by every command of the process and
-  cannot be lifted for one;
+  never a port on this machine, and only on the owner's own turn: a registry takes uploads as well as downloads (a package page,
+  `npm publish` with a token the command finds), so a team turn's commands get no network at all, and installs are the owner's.
+  There is no "any public host": the runtime's proxy is shared by every command of the process and cannot be lifted for one. The
+  runtime's proxy connects through the `HTTPS_PROXY` of the process that started Shapewall when there is one, so a proxy setting
+  that does not work there makes every registry request fail (a 502 on `CONNECT`);
 - runs under `ulimit`: at most 1024 processes and 8 GB of address space (Linux only: on macOS a process limit would count every
   process of yours, and the address-space limit is not enforced), and files of at most 2 GB (everywhere); a tmp folder that
-  grows past 2 GB is emptied after the command, with a note in its output. There is no CPU or memory cgroup;
+  grows past 2 GB is emptied after the command, with a note in its output. On Linux with a systemd user manager each command also
+  runs in a systemd scope of its own (`systemd-run --user --scope`, in the slice Shapewall runs in), so the command and everything
+  it starts share one cap: 8 GB of memory with no swap, 1024 tasks and a lower CPU weight. Without a user manager (a container, CI,
+  macOS) only the `ulimit` caps hold, and those count each process alone. A fix copy that grows past 8 GB takes no more commands;
+- is read only only inside the OS sandbox: a read-only session (a Q&A turn) does not start without one;
 - stops after 10 minutes, with its output capped at 64 KB, and its whole process group with it.
 
 **Dev servers** (`start_dev_server`). On Linux each sandboxed command gets its own network namespace, so a dev server runs in a
@@ -650,6 +667,16 @@ so dev servers do not run in the OS sandbox there. Without the sandbox (no sandb
 `shell-unsandboxed on`) the server binds its port itself, and the browser gets it only when the listener on `127.0.0.1` is the
 server's own process group (Linux and macOS; not on Windows). The browser never opens Shapewall's own server port. What a dev
 server writes in the fix copy counts as changed by the agent when it stops.
+
+**In place on a local board** (`agent.fixIn: "checkout"`, the owner's own turn), commands run in your checkout itself, so
+Shapewall keeps them from leaving behind files that run code later on their own: Git hooks and the rest of `.git`, dot files and
+folders (`.envrc`, `.vscode`, `.github/workflows`, `.husky`, ...), `shapewall.config.json`, `Makefile`, `Dockerfile`, `justfile`
+and agent instruction files (`CLAUDE.md`, `AGENTS.md`). Inside the sandbox existing ones are write-denied; after every command, and
+every few seconds while a dev server runs, a new one is moved to `.shapewall/agent/quarantine/` and a changed one is put back, and
+the next tool result says so. `node_modules` and build output folders (`.next`, `dist` and the like) are not watched: an install
+writes there, and what runs from them is the project's own tooling. A file the agent wrote through an approved Write card is the
+agent's, not the command's, and stays. Between two sweeps a dev server could run a file it just planted: the sweep puts it back, it
+does not undo what ran.
 
 The sandbox starts only in the fix copy Shapewall made for the turn, inside the folder it keeps fix copies in: never in your
 checkout, never in a folder that holds the home folder. The fix copy is a Git worktree of your repository; commands in it can run
@@ -669,10 +696,14 @@ machine.
 **Asking again.** On solo and team turns in the OS sandbox an "allow" is recorded on the machine
 (`$XDG_STATE_HOME/shapewall/approvals/<connection>/`, one file per record, kept 7 days) for that command name, that exact line, the
 tier, the sandbox mode, the network, read-only or not, and the content of its inputs: the manifests, lockfiles, `.npmrc` and test
-configs, plus the files its `inputs` name, any script the line names and a relative program (`./run-tests`). An answer on an open
+configs (every `*.config.js`, `.ts`, `.mjs` and the like, `.postcssrc`, `.swcrc`, `.parcelrc`, `.eslintrc`, `.prettierrc`: a dev
+server or build loads them as code), plus the files its `inputs` name, any script the line names and a relative program
+(`./run-tests`). Every byte of every input counts; a command with more inputs than Shapewall checks (400 files, 256 MB) asks every
+time and is never recorded. An answer on an open
 turn, or where there is no OS sandbox, is never recorded and never read: it is for that one run, and the next run asks again. When the agent
 changes one of them, or the line changes in the config, the next run asks again. On solo and team turns a command whose inputs are
-still as committed runs without asking. The command line always comes from your checkout's config, read again before each run,
+still as committed runs without asking (in place on a local board: as committed in `HEAD`, not as an earlier turn left the
+checkout). The command line always comes from your checkout's config, read again before each run,
 never from the fix copy the agent writes in. A card for a command with `"args": true` says that for `npx`, `jest` and similar
 runners an argument can be any script or package: allowing it is allowing arbitrary code.
 
@@ -698,24 +729,31 @@ limits are in Shapewall's code, not in what the model is told:
   that only connects to an allowed host and port. That second check catches what routing cannot see, such as a redirect from an
   allowed page to another address. Another port on your machine is not on the list just because it is loopback, and a few never
   are, whatever a list says: browser and Node debugging ports (9222, 9229, 9230) and Shapewall's own server. The session's dev
-  server joins only as a server Shapewall started itself.
+  server joins only as a server Shapewall started itself, and leaves when it stops or exits. On team and open turns a port on this
+  machine (loopback, or one of its own LAN or tailnet addresses) opens only for an origin the machine lists itself (`browserAllow`)
+  or that dev server; a config origin there is held back.
 - **Pinned names.** Each allowed hostname is looked up once, when the browser starts, and every connection goes to that address.
   A public name that resolves to this machine or to a private network (10/8, 172.16/12, 192.168/16, 100.64/10 such as a tailnet,
-  IPv6 `fc00::/7`, IPv4 inside IPv6 in any spelling included) is refused; to reach such a server, allow its address itself. Any name
+  IPv6 `fc00::/7`, IPv4 inside IPv6 in any spelling included), or to one of this machine's own addresses, is refused; to reach such
+  a server, allow its address itself. Any name
   that resolves to a link-local or metadata address (`169.254.169.254`) is refused. Chromium resolves no names itself.
 - **No way out of the page.** Service workers are blocked, downloads refused, `file:`, `data:`, `blob:` and `chrome:` pages are
   refused or sent back to a blank page, popups off the list are closed.
 - **No debugging port.** Shapewall drives Chromium over a pipe; no remote debugging port is opened, and no other program can attach.
   Your own Chrome and its profile are never used. Chromium's own sandbox stays on: where it cannot start, the browser stays off
   unless the machine's owner allows a browser without it (`browserNoSandbox`, solo and team turns only), and then every browser
-  tool result says so.
+  tool result says so. Inside the OS sandbox (Linux) Chromium cannot start its own sandbox; on an open turn it is required, so the
+  browser starts on this machine with it instead (its network still through Shapewall's proxy).
+- **A narrower line ends the browser.** The turn's Browser line is read again before every tool call: when it narrows (allowlist,
+  login, profile, `browserNoSandbox`, the host start), the browser is closed and the next call gets one made from the line as it
+  is now.
 - **Nothing left behind.** The profile is a new folder in a folder private to you (`$XDG_RUNTIME_DIR/shapewall-agent-browser/`,
   or `shapewall-agent-browser-<uid>/` in the system temp folder; one that is a link, belongs to someone else or that others can
   open is refused), removed at close, when Chromium crashes, when Shapewall exits or is stopped, and after a forced kill by the next
   start. Chromium gets that folder as its home, not yours.
 - **Logins only where the turn allows them.** A recorded login (`browserAuth`, from `.shapewall-auth/<name>.auth.json` in the
   project folder, a plain folder and not a link; cookies kept to the allowed hosts and their parent domains, never a public suffix
-  such as `.com` or `.co.uk`) or a persistent agent profile (`browserProfile`) loads only on the tiers in the table
+  such as `.com` or `.co.uk`, and never for a host the session's dev server listens on, since a cookie has no port) or a persistent agent profile (`browserProfile`) loads only on the tiers in the table
   above. A profile folder is checked again right before Chromium starts and once more right after: only a folder Shapewall made
   (it holds a marker file) in its own profile folder, the same folder both times, never a browser's own profile folder; one that
   changed in between closes the browser.
