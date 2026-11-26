@@ -5,6 +5,23 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## 1.4.0 - 2026-11-26
+
+One capability model for every agent path: who wrote a turn decides its tier (solo, team or open), the machine sets the
+ceiling, and the agent runs named commands, a sandboxed shell and a throwaway browser through Shapewall. See
+[What an agent can do](docs/agent-capabilities.md).
+
+Known limits in 1.4.0:
+
+- A local board editing in place (Work on a branch off) gives its agent no commands, no shell and no ACP terminal. Turn on
+  Work on a branch to get them.
+- On macOS, an agent session that edits gets no commands, no shell and no ACP terminal on any tier. The one exception is the
+  solo owner's `agent set shell-unsandboxed on` shell, an opt-in that runs outside every check.
+- Hosted threads that exist at upgrade become open-tier (migration 23 marks them tainted). Start a new thread to get solo back.
+- An agent reply sent with a forged agent header before 1.4.0 carries no unvouched mark and still reads as the agent's.
+- Hosted migration 23 adds `chat_threads.tainted`, `taint_authors` and `trust_v`. To roll back, stop the server and drop the
+  three columns (docs/hosted.md, "Migration 23 and rollback"); the older build ignores them.
+
 ### Added
 
 - Config `commands`: named commands (`test`, `build`, `dev`, `lint`, ...) an agent may run through Shapewall, each one command line

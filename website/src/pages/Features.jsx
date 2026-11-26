@@ -139,7 +139,8 @@ const SECTIONS = [
     text: 'What an agent may do on a board follows who wrote the turn. On your own turns it runs your project\u2019s named commands and a shell inside an OS sandbox, and checks its work in a headless browser that opens only your app. When someone else wrote the turn, each command waits for a card on the board.',
     points: [
       'Named commands from shapewall.config.json: test, build, dev and lint, each run without a shell',
-      'Commands in a bubblewrap or Seatbelt sandbox: the fix copy only, no home folder, package registries only',
+      'Commands in a bubblewrap sandbox on Linux: the fix copy only, no home folder, package registries only',
+      'Commands run in a copy, never your checkout: a local board gets them with Work on a branch; on macOS, editing sessions get none in 1.4.0',
       'Approvals are asked again when the agent changes a manifest, a lockfile or a test the command reads',
       'The machine that runs the agent sets the ceiling; a project\u2019s setting can only lower it',
       'A connected agent on a team server starts read and answer only; each line is switched on on its own machine',

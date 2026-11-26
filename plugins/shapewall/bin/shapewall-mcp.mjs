@@ -30,7 +30,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 // The plugin's version, kept equal to the package version by
 // scripts/build-plugin-skills.mjs.
-export const PINNED = '1.3.0'
+export const PINNED = '1.4.0'
 
 const PACKAGE = 'shapewall'
 
