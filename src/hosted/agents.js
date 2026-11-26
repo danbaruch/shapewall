@@ -38,6 +38,7 @@
 import { logoForAgent } from '../agent/agent-logos.js'
 import { cleanAgentName, isAgentTint, isBuiltInIcon } from '../agent/identity.js'
 import { handleFor as mentionHandle } from '../mentions.js'
+import { agentHandles } from '../agent/triggers.js'
 import { agentPolicy, trustedMember } from './agent-policy.js'
 import { newId } from './crypto.js'
 import { RUN_DURATION } from './usage-shape.js'
@@ -464,6 +465,15 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
       if (String(person.handle || '').toLowerCase() === handle)
         return `name: @${handle} is a member of this workspace, so a mention of them would wake the agent. Pick another name`
     return null
+  }
+
+  // The handles that wake this agent in a message: agentHandles, less any
+  // that is a member's handle. A mention resolves to a person first, so a
+  // member who joined later with an agent's handle (or took it as theirs)
+  // is mentioned, and the agent is not woken by it.
+  function triggerHandles(agent) {
+    const members = new Set([...people().values()].map((person) => String(person.handle || '').toLowerCase()).filter(Boolean))
+    return agentHandles(agent).filter((handle) => !members.has(handle))
   }
 
   // ---- Audience ----
@@ -1249,6 +1259,7 @@ export function createAgentStore(t, { now = () => new Date(), presence = null, h
     consoleList,
     setIdentity,
     nameProblem,
+    triggerHandles,
     setDefault,
     setAudience,
     setApprovalRule,

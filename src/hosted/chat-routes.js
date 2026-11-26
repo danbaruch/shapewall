@@ -262,7 +262,7 @@ export function mountChatRoutes(
       shared,
       stored: shared ? threadRespond(row) : null,
       machine,
-      handles: agent ? agentHandles(agent) : ['agent'],
+      handles: agent ? agentsFor(req.t).triggerHandles(agent) : ['agent'],
       line: respondLine({ threadId, respond: threadRespond(row), machine, name: agent?.name || 'The agent' }),
       note: !shared
         ? null
@@ -827,7 +827,8 @@ export function mountChatRoutes(
       const decision = shouldRespond({
         threadId,
         message: { text, mentions },
-        handles: agentHandles(named),
+        // A member's handle is a person mention, never this agent's trigger.
+        handles: agents.triggerHandles(named),
         respond: threadRespond(at.row),
         explicit,
         machine: named ? agents.machinePolicy(agents.get(req.project.id, named.id) || named).respond : 'mention',

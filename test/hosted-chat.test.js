@@ -403,6 +403,24 @@ test("shared threads answer an @mention or Send to agent; Answer every message i
     assert.equal(asked.final.role, 'assistant')
   }
   assert.equal(turns(), count + 3)
+  // A member who has the agent's handle (joined later, or changed theirs): @builder is that person, not the agent.
+  const cydHandle = hosted.db.prepare('SELECT handle FROM users WHERE id = ?').get(cyd.user.id).handle
+  hosted.db.prepare('UPDATE users SET handle = ? WHERE id = ?').run('builder', cyd.user.id)
+  try {
+    const person = await chat(cyd, chatUrl(thread, '/messages'), { text: '@builder stream' })
+    assert.equal(person.status, 200, person.text)
+    assert.equal(person.events.at(-1).name, 'posted')
+    assert.equal(person.events.at(-1).data.reason, 'not_addressed')
+    assert.equal(turns(), count + 3, 'a member mention wakes no agent')
+    view = (await cyd.browser.get(chatUrl(thread))).json
+    assert.deepEqual(view.respond.handles, ['agent'])
+    // @agent still reaches it.
+    const still = await chat(cyd, chatUrl(thread, '/messages'), { text: '@agent stream' })
+    assert.equal(still.events.at(-1).name, 'done', still.text)
+  } finally {
+    hosted.db.prepare('UPDATE users SET handle = ? WHERE id = ?').run(cydHandle, cyd.user.id)
+  }
+  assert.equal(turns(), count + 4)
   // Who may change it: the person who connected it (Ada) for "always".
   view = (await ada.browser.get(chatUrl(thread))).json
   assert.deepEqual(view.respond.canSet, { always: true, mention: true })

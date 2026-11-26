@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // The release text gate: the lines a change adds must hold no en or em dash
-// (U+2013, U+2014), no banned phrase and no competitor or employer name. The
-// lists live in scripts/release-text.config.json, which is never checked
-// itself (it has to name what it bans); this file spells the dashes by code
-// point so it holds neither.
+// (U+2013, U+2014) or look-alike (DASH_RULES), no banned phrase and no
+// competitor or employer name (matched loosely: nameRule). The lists live in
+// scripts/release-text.config.json, which is never checked itself (it has to
+// name what it bans); this file spells the dashes by code point so it holds
+// none.
 //
 //   node scripts/check-release-text.mjs                 added lines vs origin/main
 //   node scripts/check-release-text.mjs --base REF      added lines vs REF (any commit, no merge base needed)
@@ -21,8 +22,6 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 export const CONFIG_FILE = path.join(ROOT, 'scripts', 'release-text.config.json')
 export const DASHES = [String.fromCharCode(0x2013), String.fromCharCode(0x2014)]
 
-const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-
 export function loadRules(config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'))) {
   const covers = (list) => (file) => list.some((entry) => (entry.endsWith('/') ? file.startsWith(entry) : file === entry))
   return {
@@ -31,44 +30,102 @@ export function loadRules(config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8
     phrasesAllowed: covers(config.phrasesAllowed?.paths || []),
     binary: (file) => (config.binaryExtensions || []).includes(path.extname(file).toLowerCase()),
     phrases: (config.phrases || []).map((entry) => ({ re: new RegExp(entry.pattern, 'i'), why: entry.why || 'banned phrase' })),
-    names: (config.names || []).map((entry) => ({
-      re: new RegExp(`(^|[^A-Za-z0-9])${escape(entry.name)}(?![A-Za-z0-9])`, 'i'),
-      why: `${entry.kind || 'banned'} name ${entry.name}`,
-    })),
+    names: (config.names || []).map(nameRule),
   }
+}
+
+// Every dash-like character a line may not hold, by code point: the en and
+// em dash, and the look-alikes that pass for them (figure dash, horizontal
+// bar, minus sign).
+export const DASH_RULES = [
+  [0x2013, 'en dash'],
+  [0x2014, 'em dash'],
+  [0x2012, 'figure dash'],
+  [0x2015, 'horizontal bar'],
+  [0x2212, 'minus sign'],
+].map(([code, name]) => ({ char: String.fromCharCode(code), why: `${name} (U+${code.toString(16).toUpperCase()})` }))
+
+// A name, matched case-folded with spaces, dashes and underscores taken out
+// of both sides, so "Acme Corp", "acme-corp", "ACME_CORP" and "AcmeCorpHQ"
+// all count; it must start a word (a letter or digit right before it does
+// not count).
+const SEPARATOR = /[\s\-_\u2010-\u2015\u2212]/
+export const foldName = (text) =>
+  [...String(text).toLowerCase()].filter((char) => !SEPARATOR.test(char)).join('')
+function nameRule(entry) {
+  const wanted = foldName(entry.name)
+  const test = (line) => {
+    if (!wanted) return false
+    // The folded line, and where each of its characters came from.
+    const chars = []
+    const from = []
+    const lower = String(line).toLowerCase()
+    for (let index = 0; index < lower.length; index += 1) {
+      if (SEPARATOR.test(lower[index])) continue
+      chars.push(lower[index])
+      from.push(index)
+    }
+    const folded = chars.join('')
+    for (let at = folded.indexOf(wanted); at !== -1; at = folded.indexOf(wanted, at + 1)) {
+      if (!/[a-z0-9]/i.test(line[from[at] - 1] || '')) return true
+    }
+    return false
+  }
+  return { re: { test }, why: `${entry.kind || 'banned'} name ${entry.name}` }
 }
 
 // The hits on one line: [{ why, text }].
 export function lineHits(line, file, rules) {
   const hits = []
-  if (!rules.dashesAllowed(file)) {
-    if (line.includes(DASHES[0])) hits.push('en dash (U+2013)')
-    if (line.includes(DASHES[1])) hits.push('em dash (U+2014)')
-  }
+  if (!rules.dashesAllowed(file)) for (const { char, why } of DASH_RULES) if (line.includes(char)) hits.push(why)
   const phrases = rules.phrasesAllowed(file) ? [] : rules.phrases
   for (const { re, why } of [...phrases, ...rules.names]) if (re.test(line)) hits.push(why)
   return hits
 }
 
 // { file: [[lineNumber, text], ...] } for the lines HEAD adds against base.
+// The diff is read with its hunk counts: a "+++ " or "--- " line is a file
+// header only between hunks, so an added line whose text starts "++ " is
+// still checked.
 export function addedLines(base, cwd = ROOT) {
-  const diff = execFileSync('git', ['diff', '--no-color', '--no-ext-diff', '-U0', '--diff-filter=AMR', base, 'HEAD'], {
-    cwd,
-    encoding: 'utf8',
-    maxBuffer: 256 * 1024 * 1024,
-  })
+  const diff = execFileSync(
+    'git',
+    ['-c', 'core.quotePath=false', 'diff', '--no-color', '--no-ext-diff', '-U0', '--diff-filter=AMR', base, 'HEAD'],
+    { cwd, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 },
+  )
+  return parseDiff(diff)
+}
+
+export function parseDiff(diff) {
   const out = {}
   let file = null
   let number = 0
+  let oldLeft = 0
+  let newLeft = 0
   for (const line of diff.split('\n')) {
-    if (line.startsWith('+++ ')) {
+    if (oldLeft > 0 || newLeft > 0) {
+      if (line.startsWith('+')) {
+        if (file) out[file].push([number, line.slice(1)])
+        number += 1
+        newLeft -= 1
+      } else if (line.startsWith('-')) oldLeft -= 1
+      else if (line.startsWith(' ')) {
+        number += 1
+        oldLeft -= 1
+        newLeft -= 1
+      } else if (!line.startsWith('\\')) oldLeft = newLeft = 0
+      continue
+    }
+    if (line.startsWith('diff --git ')) file = null
+    else if (line.startsWith('+++ ')) {
       file = line === '+++ /dev/null' ? null : line.slice(6)
       if (file) out[file] ||= []
     } else if (line.startsWith('@@')) {
-      number = Number(/\+(\d+)/.exec(line)?.[1] || 0)
-    } else if (file && line.startsWith('+')) {
-      out[file].push([number, line.slice(1)])
-      number += 1
+      const match = /^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line)
+      if (!match) continue
+      oldLeft = match[1] === undefined ? 1 : Number(match[1])
+      number = Number(match[2])
+      newLeft = match[3] === undefined ? 1 : Number(match[3])
     }
   }
   return out
