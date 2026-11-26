@@ -6,6 +6,7 @@ import { commentCounts, captureFiles, getComment, listComments } from '../store.
 import { ownersComment } from './watch-capabilities.js'
 import { NEXT_STEPS_PROMPT, NO_IMAGES_NOTE, SYSTEM_PROMPT, attachmentNote, openCommentsContext, threadContext } from './context.js'
 import { commentById, composerParts, mentionComments } from './composer.js'
+import { listJourneys } from '../journeys.js'
 import { splitNextSteps } from './next-steps.js'
 import { replyText, settleCardPositions } from './reply-text.js'
 import { AgentError } from './errors.js'
@@ -47,7 +48,10 @@ export function commentIdOf(threadId) {
 // mention is judged when it is posted, but the comment it points to can get
 // someone else's reply later, and the thread is replayed into every fresh
 // session: so this is asked again each time the prompt is built.
-export function quotesOutside({ config, board, threadId, messages }) {
+// `reachable`: someone other than the owner can reach the board (shared, or
+// signed-in accounts): then a journey made on the board is not the owner's
+// alone either, as anyone reaching the board can make or edit one (Q7 A1).
+export function quotesOutside({ config, board, threadId, messages, reachable = false }) {
   const commentId = commentIdOf(threadId)
   if (commentId) {
     let comment = null
@@ -59,10 +63,20 @@ export function quotesOutside({ config, board, threadId, messages }) {
     if (comment && !ownersComment(comment)) return true
   }
   const find = commentById(config, board)
+  let boardJourneys = null
   for (const message of messages || []) {
     if (message?.role !== 'user' || !Array.isArray(message.mentions)) continue
-    for (const mention of message.mentions)
+    for (const mention of message.mentions) {
       if ((mentionComments(config, board, mention, find) || []).some((comment) => !ownersComment(comment))) return true
+      if (reachable && mention?.kind === 'journey') {
+        boardJourneys ||= new Set(
+          listJourneys(config, board)
+            .filter((journey) => journey.source === 'board')
+            .map((journey) => journey.id),
+        )
+        if (boardJourneys.has(mention.id)) return true
+      }
+    }
   }
   return false
 }
@@ -111,7 +125,7 @@ export function modelMessages({ config, board, threadId, messages, comments = fa
       const note = attachmentNote(attachment, board)
       if (note) content.push({ type: 'text', text: note })
     }
-    content.push(...composerParts(config, board, message, { full: withImages.has(index) }))
+    content.push(...composerParts(config, board, message, { full: withImages.has(index), quoteOthers }))
     if (message.text) content.push({ type: 'text', text: message.text })
     // A comment's thread (Fix with agent too): the reviewer's drawing on its
     // screenshot and their images go with the newest message, as images,
@@ -190,6 +204,8 @@ export async function runTurn({
   execHost = null,
   // false above the open tier: other people's comments are counted, not quoted (modelMessages).
   quoteOthers = true,
+  // Someone other than the owner can reach the board (quotesOutside).
+  reachable = false,
   // Cards of Shapewall's own (exec-mcp asks): runTurn sets `cards.ask` for
   // the tool host to call, and puts each waiting card in `cards.pending`
   // (id -> settle(state, answeredBy)) for the board's answer route.
@@ -337,7 +353,7 @@ export async function runTurn({
     // The prompt quotes someone else's text after all (a reply added since a
     // mention was posted): the thread is tainted for good and this turn's
     // session starts without extensions (acp.js sameSession).
-    if (extensions && !given && quotesOutside({ config, board, threadId, messages })) {
+    if (extensions && !given && quotesOutside({ config, board, threadId, messages, reachable })) {
       taint('outside')
       extensions = null
     }

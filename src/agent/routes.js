@@ -754,7 +754,7 @@ export function agentRouter({
       // The same answer decides the turn's tier (Q7 F1): a prompt that
       // quotes someone else's comment is not the owner's alone, so the turn
       // is "open" (an outside author), whatever kind of thread it is in.
-      const quoted = quotesOutside({ config, board, threadId, messages: stored.messages })
+      const quoted = quotesOutside({ config, board, threadId, messages: stored.messages, reachable: shared || Boolean(accountUser) })
       if (!readThreadTrust(trust).tainted && quoted) {
         try {
           await markThreadTainted(config, board.id, threadId, 'outside')
@@ -1305,6 +1305,7 @@ export function agentRouter({
             agentName: current.label || null,
             capabilities: tools?.prompt || '',
             quoteOthers: !tools || tools.caps.tier === 'open',
+            reachable: shared || Boolean(accountUser),
             sessionKey,
             mcpServers,
             execHost: backend.id === 'acp' ? null : tools?.exec?.host || null,

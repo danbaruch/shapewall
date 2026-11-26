@@ -203,8 +203,10 @@ and the project uses [Semantic Versioning](https://semver.org/).
   someone else's comment taints the thread and, on a turn above open, turns the commands and the browser off for the rest of it.
 - On a local board, a reply sent with the agent header from anywhere but the owner's own machine is still an agent's (it wakes
   no agent) but no longer counts as the owner's words, and an edit or a resolution note on the owner's comment by anyone else
-  makes the comment no longer the owner's alone. Above open, the owner MCP server shows a journey made on the board by its pages
-  only (no name, description or fork labels).
+  makes the comment no longer the owner's alone. Above open, the owner MCP server and a composer mention show a journey made on
+  the board by its pages only (no name, description or fork labels), and on a board others can reach, mentioning one makes
+  the turn open. Upgrading: a reply sent with a forged agent header before this release carries no mark and still reads as the
+  owner's agent's; check the replies on your own comments on a board others reached, and delete any you did not send.
 - A connected agent's answer always says whether its turn was given other people's text (`outsideText`), and a turn whose job
   carried such text taints its thread however it ends unless the answer says it was dropped: a missing field (an older
   machine), a lost link, a revoked agent and a Stop whose answer came too late all taint.

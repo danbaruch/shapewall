@@ -497,7 +497,9 @@ local board, "the owner's words" means a comment the server saw the owner make, 
 else, with every reply by the owner's own agent (the agent header counts only from the owner's machine). Text that is not a
 person's on the board stays quoted as untrusted data and does not taint: captured pages, capture errors, config page titles and
 notes, and pull request titles from the configured repository. A journey made on the board is anyone's who reaches it: above
-open, the owner MCP server shows it by its pages only.
+open, the owner MCP server and a composer mention show it by its pages only, and on a board others can reach (shared, or with
+signed-in accounts) mentioning one makes the turn open. A hosted board has no journeys of its own: its journeys come from the
+pushed config.
 
 The machine does not take the list on trust either. On a turn above open it holds back every mentioned comment whose author is not
 one of the turn's authors (a token's or an import's included), keeping its number only, and counts an `@person` mention's open
@@ -639,7 +641,10 @@ the machine, never asked, and the session still ends with the turn.
 
 Residual risks: captured page text stays quoted data and does not taint (a page can still carry text written to steer an agent),
 and an extension tool's own result (a server that fetches a web page or reads an issue tracker) can bring in outside text that
-does not taint either; allow only tools whose results you trust.
+does not taint either; allow only tools whose results you trust. The titles of pull requests linked to a comment (`get_comment`)
+come from the configured repository, are quoted as data and do not taint, so anyone who can open a pull request there can put
+words in front of the agent. A reply sent with a forged agent header before 1.4.0 has no mark saying so and still counts as the
+owner's agent's: on a board others reached, check the replies on your own comments and delete any you did not send.
 
 ### Commands through Shapewall
 
