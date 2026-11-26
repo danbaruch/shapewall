@@ -10,6 +10,7 @@ import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { EXEC_MCP_NAME, argsWarning, createToolHost, serveToolHost, startExecSession } from '../src/agent/exec-mcp.js'
 import { createApprovalStore } from '../src/agent/command-approvals.js'
+import { createCommandSession } from '../src/agent/sandbox-exec.js'
 
 const TEST = { name: 'test', run: 'npm test', argv: ['npm', 'test'], inputs: null, mutating: true, args: false, ready: null }
 const JEST = { name: 'jest', run: 'npx jest', argv: ['npx', 'jest'], inputs: null, mutating: true, args: true, ready: null }
@@ -33,9 +34,6 @@ function fakeSession(t, { mode = 'sandboxed', onRun = () => {} } = {}) {
     network: 'registries',
     readOnly: false,
     runs,
-    ports: () => [],
-    allowPort() {},
-    dropPort() {},
     async run(what) {
       runs.push(what)
       await onRun(what, root)
@@ -194,7 +192,13 @@ test('host mode on solo: a card every time, nothing read from or written to the 
   const store = records(t)
   let asked = 0
   const session = fakeSession(t, { mode: 'host' })
-  const host = createToolHost({ capabilities: capsOf('solo'), commands: [TEST], session, approvals: store, ask: async () => (asked++, 'approved') })
+  const host = createToolHost({
+    capabilities: capsOf('solo'),
+    commands: [TEST],
+    session,
+    approvals: store,
+    ask: async () => (asked++, 'approved'),
+  })
   // A record that would match a sandboxed run does not count here.
   fs.writeFileSync(path.join(session.root, 'package.json'), '{"scripts":{"test":"x"}}')
   await host.call('run_named_command', { name: 'test' })
@@ -309,6 +313,73 @@ test('files a command changed are reported, so the fix is held for a look', asyn
   await host.call('run_named_command', { name: 'test' })
   assert.deepEqual(changes, [{ changed: ['snapshot.txt'], deleted: [] }])
 })
+
+// Review: each sandboxed command has its own network namespace, so a dev
+// server there could never answer (waitReady always timed out).
+test('dev servers: not offered in the OS sandbox', async (t) => {
+  const DEV = { name: 'dev', run: 'npm run dev', argv: ['npm', 'run', 'dev'], inputs: null, mutating: true, args: false, ready: null }
+  const session = fakeSession(t)
+  const host = createToolHost({
+    capabilities: capsOf('solo', { commands: ['dev'] }),
+    commands: [DEV],
+    session,
+    approvals: records(t),
+    ask: async () => 'approved',
+  })
+  assert.ok(!host.tools().some((tool) => tool.name === 'start_dev_server'))
+  assert.match(textOf(await host.call('start_dev_server', {})), /No tool "start_dev_server"/)
+  assert.equal(session.runs.length, 0)
+})
+
+test(
+  'dev servers outside the sandbox: start, answer, stop, and what they wrote is reported',
+  { skip: process.platform === 'win32' },
+  async (t) => {
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-dev-'))
+    t.after(() => fs.rmSync(parent, { recursive: true, force: true }))
+    const root = path.join(parent, 'copy')
+    fs.mkdirSync(root)
+    fs.writeFileSync(path.join(root, 'package.json'), '{}')
+    fs.writeFileSync(
+      path.join(root, 'server.js'),
+      "require('fs').writeFileSync('dev.log', 'started')\nrequire('http').createServer((q, r) => r.end('up')).listen(Number(process.env.PORT), '127.0.0.1')\n",
+    )
+    const DEV = {
+      name: 'dev',
+      run: 'node server.js',
+      argv: [process.execPath, 'server.js'],
+      inputs: null,
+      mutating: true,
+      args: false,
+      ready: null,
+    }
+    const session = await createCommandSession({ root, expect: root, within: parent, mode: 'host' })
+    t.after(() => session.close())
+    const changed = []
+    let asked = 0
+    const host = createToolHost({
+      capabilities: capsOf('solo', { commands: ['dev'] }),
+      commands: [DEV],
+      session,
+      approvals: records(t),
+      ask: async () => (asked++, 'approved'),
+      onChanged: (diff) => changed.push(...diff.changed),
+    })
+    assert.ok(host.tools().some((tool) => tool.name === 'start_dev_server'))
+    const up = await host.call('start_dev_server', {})
+    assert.equal(up.isError, undefined, textOf(up))
+    assert.match(textOf(up), /is up on http:\/\/127\.0\.0\.1:(\d+)/)
+    // No OS sandbox here: it asked first.
+    assert.equal(asked, 1)
+    const [port] = host.devPorts()
+    assert.equal(await (await fetch('http://127.0.0.1:' + port + '/')).text(), 'up')
+    assert.match(textOf(await host.call('start_dev_server', {})), /already running/)
+    assert.match(textOf(await host.call('stop_dev_server', {})), /stopped/)
+    assert.deepEqual(host.devPorts(), [])
+    assert.deepEqual(changed, ['dev.log'])
+    await host.close()
+  },
+)
 
 test('startExecSession fails closed', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-exec-start-'))

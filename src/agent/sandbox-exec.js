@@ -425,7 +425,22 @@ export function commandLimits(platform = process.platform, limits = SANDBOX_LIMI
 // files), /run/user/<uid>, removable and mounted disks, and the folder of
 // fix copies (the other fixes). The session's own folders are allowed back
 // inside these (srt allowRead within denyRead). -> real paths that exist.
-const SYSTEM_DIRS = ['/usr', '/etc', '/bin', '/sbin', '/lib', '/lib32', '/lib64', '/opt', '/System', '/Library', '/nix', '/proc', '/sys', '/dev']
+const SYSTEM_DIRS = [
+  '/usr',
+  '/etc',
+  '/bin',
+  '/sbin',
+  '/lib',
+  '/lib32',
+  '/lib64',
+  '/opt',
+  '/System',
+  '/Library',
+  '/nix',
+  '/proc',
+  '/sys',
+  '/dev',
+]
 export function deniedRoots({ env = process.env, within = null, platform = process.platform } = {}) {
   const wanted = [os.homedir(), env.HOME]
   try {
@@ -591,7 +606,8 @@ export async function createCommandSession({
       throw new SandboxRefusal('bad_root', "The sandbox never writes in the person's own checkout.")
   }
   if (!['sandboxed', 'host', 'host-shell'].includes(mode)) throw new SandboxRefusal('bad_mode', 'Unknown sandbox mode.')
-  if (!['registries', 'none'].includes(network)) throw new SandboxRefusal('bad_network', 'Commands get the package registries or no network.')
+  if (!['registries', 'none'].includes(network))
+    throw new SandboxRefusal('bad_network', 'Commands get the package registries or no network.')
   const tmp = fs.mkdtempSync(path.join(tmpParent || within || os.tmpdir(), '.shapewall-cmd-'))
   fs.chmodSync(tmp, 0o700)
   const vendor = runtimeVendorDir()
@@ -643,7 +659,9 @@ export async function createCommandSession({
     if (!boxed) {
       // --shell-unsandboxed (solo, the owner's own choice): the shell on this machine itself.
       if (command.shell !== undefined && mode === 'host-shell' && process.platform !== 'win32')
-        return capTmp(await runProcess(['/bin/sh', '-c', String(command.shell)], { cwd: real, env: vars, timeoutMs: time, signal, onStart }))
+        return capTmp(
+          await runProcess(['/bin/sh', '-c', String(command.shell)], { cwd: real, env: vars, timeoutMs: time, signal, onStart }),
+        )
       if (command.shell !== undefined) throw new SandboxRefusal('no_shell', 'No shell runs outside the OS sandbox.')
       const argv = resolveArgv(command, { env })
       return capTmp(await runProcess(argv, { cwd: real, env: vars, timeoutMs: time, signal, onStart }))
