@@ -140,11 +140,13 @@ command to run, and cannot send your key to a host you did not confirm; a config
 
 ### The ACP bridge keeps the agent on a short leash
 
-> **Warning: an ACP agent brings its own tools and extensions, and Shapewall does not sandbox them.** Claude Code, Codex and goose
+> **Warning: an ACP agent other than Claude Code brings its own tools and extensions, and Shapewall does not sandbox them.**
+> Claude Code on a local board gets the restricted session (read and edit tools plus Shapewall's own tools, no shell of its own,
+> no settings files, no MCP servers of its own) unless the config sets `agent.localSession: "own"`. Codex, goose and Gemini CLI
 > come with a shell, file edits and whatever their own config loads: MCP servers, goose extensions such as browser control. The
 > approval cards below cover only what the agent asks Shapewall to do. Use restricted profiles:
 >
-> - **Claude Code:** permission mode `default` or `plan` (`permissions.defaultMode` in your Claude settings), never
+> - **Claude Code with `agent.localSession: "own"`:** permission mode `default` or `plan` (`permissions.defaultMode` in your Claude settings), never
 >   `auto`, `acceptEdits` or `bypassPermissions`; set it explicitly, since `claude-agent-acp` 0.106.0 starts in `auto` when none is set. `claude-agent-acp` follows your Claude Code settings; `CLAUDE_CONFIG_DIR` gives Shapewall a profile of its own.
 > - **Codex:** `sandbox_mode = "workspace-write"` or `"read-only"` with `approval_policy = "on-request"` in `~/.codex/config.toml`
 >   (or `CODEX_HOME`), never `danger-full-access`.
@@ -405,8 +407,8 @@ allowed on the board" (`--allow-command`). This is not available for Claude Code
 agent `agent connect` offers. In the check below, a Claude Code session started with its shell tool ran commands it takes to be
 read-only (`ls`, `cat`) without asking anyone, and those can read outside the project. A list of allowed commands is no control
 over an agent that does not ask. So a fix session of Claude Code gets no shell tool at all (it has Read, Grep, Glob, Edit, Write
-and MultiEdit, no settings files and no MCP servers), `--allow-command` is refused for it with that explanation, and commands in a
-hand-edited policy file are not in effect. The project's named commands and the sandboxed shell reach a fix another way, through
+and MultiEdit, no settings files and no MCP servers), `--allow-command` and `agent set allow-command` are refused for it with that
+explanation, and commands in a hand-edited policy file are not in effect. The project's named commands and the sandboxed shell reach a fix another way, through
 Shapewall's own tool server ([Commands through Shapewall](#commands-through-shapewall)).
 
 How edits were proven. The check used the real Claude Code adapter (claude-agent-acp 0.93.0 and 0.106.0, in a repository whose committed `.claude/settings.json` allowed Bash, Edit and Write without asking and ran a hook), a
@@ -474,14 +476,14 @@ It is decided by **who wrote the turn**, not by whether the board is local or ho
 A thread that once carried text from outside the list keeps the tier that text allowed. What each tier may get, once the machine's
 owner has opted in (on a local board these are the defaults; a hosted connection starts with none of them, see below):
 
-| What                                                            | solo                                                     | team                                            | open                        |
-| --------------------------------------------------------------- | -------------------------------------------------------- | ----------------------------------------------- | --------------------------- |
-| Named commands (config `commands`)                              | run, asked again when the command or its inputs change   | the same                                        | each after a card           |
-| Shell                                                           | a full shell in the fix copy, inside an OS sandbox       | exact commands only (`trustTeamShell` for more) | exact commands, each a card |
-| Browser                                                         | a throwaway headless one, limited to the app's addresses | the same                                        | the same                    |
-| Logged-in browser (`browserAuth`, `browserProfile`)             | opt-in                                                   | opt-in (`browserProfileTeam`)                   | never                       |
-| Extensions from the agent config folder (see below)             | on if there is one and the thread is clean               | only if every author is in `extensionsFor`      | never                       |
-| Automatic memory, editing its own instructions, your own Chrome | never                                                    | never                                           | never                       |
+| What                                                            | solo                                                     | team                                       | open              |
+| --------------------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------ | ----------------- |
+| Named commands (config `commands`)                              | run, asked again when the command or its inputs change   | the same                                   | each after a card |
+| Shell                                                           | a full shell in the fix copy, inside an OS sandbox       | no full shell (`trustTeamShell` for more)  | no full shell     |
+| Browser                                                         | a throwaway headless one, limited to the app's addresses | the same                                   | the same          |
+| Logged-in browser (`browserAuth`, `browserProfile`)             | opt-in                                                   | opt-in (`browserProfileTeam`)              | never             |
+| Extensions from the agent config folder (see below)             | on if there is one and the thread is clean               | only if every author is in `extensionsFor` | never             |
+| Automatic memory, editing its own instructions, your own Chrome | never                                                    | never                                      | never             |
 
 Hosted chat answers only: no edits, and on solo turns only the commands marked `"mutating": false` and the browser. No OS sandbox on
 the machine (Windows, no bubblewrap) means no full shell: commands fall back to a card each, and the line says why.
@@ -645,7 +647,7 @@ loopback port Shapewall binds itself and holds until the server stops, joined to
 `nsenter` (util-linux) starts in that namespace only. The agent's other commands cannot reach it, and no other port of theirs is
 reachable from outside. On macOS the sandbox could let a server listen only by opening every loopback port of the machine to it,
 so dev servers do not run in the OS sandbox there. Without the sandbox (no sandbox on this machine, each after a card, or
-`--shell-unsandboxed`) the server binds its port itself, and the browser gets it only when the listener on `127.0.0.1` is the
+`shell-unsandboxed on`) the server binds its port itself, and the browser gets it only when the listener on `127.0.0.1` is the
 server's own process group (Linux and macOS; not on Windows). The browser never opens Shapewall's own server port. What a dev
 server writes in the fix copy counts as changed by the agent when it stops.
 

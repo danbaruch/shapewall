@@ -1437,7 +1437,8 @@ shapewall agent connect --remote https://wall.example.com --approvals none      
 
 `agent connect` prints what is in effect when it starts, and it says the same to the server with the code: the approval page
 shows what that machine asked for (read and answer only, or edits on a branch and who may allow them, "without asking" if it
-asked for `--auto edits`, the base branch, and that it never runs a command), marked "Reported by the terminal". The machine
+asked for `--auto edits`, the base branch, and that it runs a command only where that machine's own settings allow it), marked
+"Reported by the terminal". The machine
 enforces its own rules; the server decides nothing by that report. Before it goes online, `agent connect` also opens a session
 with the agent (no prompt is sent) and prints which adapter version answered ([tested versions](agents.md#claude-code)).
 
@@ -1471,7 +1472,8 @@ The reason was found with the real adapter. Started with its shell tool, Claude 
 agent does not ask. So:
 
 - a fix session of Claude Code gets no shell tool at all;
-- `--allow-command` is refused for it, with that explanation;
+- `--allow-command` is refused for it, with that explanation, and so is `shapewall agent set allow-command` (only `none`, which
+  empties a saved list, is taken);
 - commands written by hand into `agent-policy.json` are not in effect, and `agent connect` says so when it starts.
 
 ### Fix with an agent
@@ -1773,14 +1775,14 @@ to the session as an appended system prompt, with Shapewall's own data rules aft
 
 ### Extensions from the agent config folder
 
-<!-- Q5: verify -->
-
 The agent config folder can also give a connected agent skills and MCP servers of your own, never from `~/.claude`. Shapewall
-reads them on the machine and passes on only skills and MCP servers; hooks, commands, agents and `bin/` are skipped and listed
-when `agent connect` starts. They are used only on turns where every author is in the machine's extension set (`agent set
-extensions-for owner,HANDLE --remote URL`, the connector alone by default) and never on open turns, and a tool call runs only when
-its exact name is on the machine's `allow-tool` list. A thread that once carried someone else's text stays without them. See
-[extensions](agent-capabilities.md#extensions).
+reads them on the machine and passes on only skills (`skills/NAME/SKILL.md`) and the stdio MCP servers in its `.claude.json`;
+settings, hooks, commands, agents, `bin/`, output styles and installed plugins are skipped and listed when `agent connect` starts.
+They are used only on turns where every author is in the machine's extension set (`agent set extensions-for owner,HANDLE --remote
+URL`, the connector alone by default), never on open turns, and only in a thread that never carried text from outside that set
+(thread trust, [migration 23](#migration-23-and-rollback)). A tool call runs only when its exact name is on the machine's
+`allow-tool` list. Once a turn with extensions is tainted mid-turn, every extension tool and every board write is refused for the
+rest of it. See [extensions](agent-capabilities.md#extensions).
 
 ### What a connected agent can reach
 
@@ -2284,11 +2286,12 @@ schema_migrations WHERE version = 5; PRAGMA user_version = 4;`. Without that `DE
   `agent_claims.agent_id`, and a backfill that turns every token with the `claim` scope into an agent that behaves as before. What a
   rollback loses is in [Migration 12 and rollback](#migration-12-and-rollback).
 
-**That is not every migration.** There are 22, numbered 1 to 22, and they all run at start. The ones with a rollback note are 4
+**That is not every migration.** There are 23, numbered 1 to 23, and they all run at start. The ones with a rollback note are 4
 and 5 above; 7, in [Migration 7 and rollback](#migration-7-and-rollback); 8, one paragraph under
-[Move a local project to your team](#move-a-local-project-to-your-team); 12, and then one section each for 13 to 22 below.
-1.4.0 adds no migration: the capability model's server settings (`maxTier`, `shell`, `browser`) live in the project's existing
-`agent_policy` JSON, and the summary a machine sends at hello in the existing `agents.capabilities` column. <!-- Q5: verify (migration 23, chat_threads.tainted) --> **Migrations 1, 2, 3, 6, 9, 10 and 11 have no rollback note anywhere:** 1 to 3 are the first schema and its early
+[Move a local project to your team](#move-a-local-project-to-your-team); 12, and then one section each for 13 to 23 below.
+1.4.0 adds one migration, 23 (thread trust, `chat_threads.tainted`, `taint_authors` and `trust_v`). The capability model's server
+settings (`maxTier`, `shell`, `browser`) need none: they live in the project's existing `agent_policy` JSON, and the summary a
+machine sends at hello in the existing `agents.capabilities` column. **Migrations 1, 2, 3, 6, 9, 10 and 11 have no rollback note anywhere:** 1 to 3 are the first schema and its early
 additions; 6 is scoped dispatch, project budgets and command approvals; 9 is profile images; 10 is `shares.include_checks`; 11 is
 comment and reply images and drawings, whose bytes live in `comment_files`. No recipe for them is written down, and this page does
 not invent one. What holds for all of them: an older build ignores additive tables and columns, the pre-upgrade backup in a fresh

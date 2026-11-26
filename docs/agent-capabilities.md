@@ -35,19 +35,19 @@ can reach. Anything else is open, including other signed-in local accounts and s
 What each tier may get once the machine allows it. On a local board these are the defaults; a connected agent starts with none of
 them ([below](#a-local-board-and-a-connected-agent)).
 
-| Line                                                  | solo                                                         | team                                                 | open                                   |
-| ----------------------------------------------------- | ------------------------------------------------------------ | ---------------------------------------------------- | -------------------------------------- |
-| Instructions (`CLAUDE.md`, `AGENTS.md`)               | on                                                           | on                                                   | on                                     |
-| Read tools                                            | on                                                           | on                                                   | on                                     |
-| Edits                                                 | in a fix copy, each checked on the machine                   | the same                                             | the same                               |
-| Named commands (config `commands`)                    | run, asked again when the command or its inputs change       | the same                                             | each after a card                      |
-| Shell                                                 | a full shell in the fix copy, inside an OS sandbox           | exact commands only, unless `trust-team-shell` is on | exact commands only, each after a card |
-| Browser                                               | a throwaway headless one, limited to the app's own addresses | the same                                             | the same                               |
-| Logged-in browser (`browser-auth`, `browser-profile`) | opt-in                                                       | opt-in (`browser-profile-team`)                      | never                                  |
-| Extensions <!-- Q5: verify -->                        | on if there is an agent config folder                        | only if every author is in `extensions-for`          | never                                  |
-| Memory                                                | automatic memory off; a memory tool only by its exact name   | off                                                  | off                                    |
-| Push and pull requests                                | a card                                                       | a card                                               | a card                                 |
-| Editing its own instructions, your own Chrome         | never                                                        | never                                                | never                                  |
+| Line                                                  | solo                                                          | team                                           | open              |
+| ----------------------------------------------------- | ------------------------------------------------------------- | ---------------------------------------------- | ----------------- |
+| Instructions (`CLAUDE.md`, `AGENTS.md`)               | on                                                            | on                                             | on                |
+| Read tools                                            | on                                                            | on                                             | on                |
+| Edits                                                 | in a fix copy, each checked on the machine                    | the same                                       | the same          |
+| Named commands (config `commands`)                    | run, asked again when the command or its inputs change        | the same                                       | each after a card |
+| Shell                                                 | a full shell in the fix copy, inside an OS sandbox            | no full shell, unless `trust-team-shell` is on | no full shell     |
+| Browser                                               | a throwaway headless one, limited to the app's own addresses  | the same                                       | the same          |
+| Logged-in browser (`browser-auth`, `browser-profile`) | opt-in                                                        | opt-in (`browser-profile-team`)                | never             |
+| Extensions (Claude Code's restricted session only)    | on if there is an agent config folder and the thread is clean | only if every author is in `extensions-for`    | never             |
+| Memory                                                | automatic memory off; a memory tool only by its exact name    | off                                            | off               |
+| Push and pull requests                                | a card                                                        | a card                                         | a card            |
+| Editing its own instructions, your own Chrome         | never                                                         | never                                          | never             |
 
 Two rules sit on top of the table:
 
@@ -125,7 +125,8 @@ Every key of a command line is in the [config reference](config.md#commands).
 
 On solo turns (and team turns with `trust-team-shell on`) the agent gets `run_command { command, reason }`: a shell command line
 in the fix copy, inside the OS sandbox. On other turns `run_command` takes only one of the machine's exact commands, each after a
-card. Exact commands (`--allow-command`) are not offered for Claude Code in this release, so there it takes none.
+card. Exact commands are not offered in this release: `--allow-command` and `agent set allow-command` are refused (only `none`,
+which empties a saved list, is taken), so there it takes none.
 
 The OS sandbox is bubblewrap on Linux and Seatbelt on macOS, through the open-source sandbox runtime. A command in it writes only
 in the fix copy and its own tmp folder, cannot read your home folder, `~/.ssh`, `~/.config` or your agent's settings, gets a clean
@@ -175,22 +176,33 @@ The full rules, with what the browser cannot cover, are in [the agent's throwawa
 
 ## Extensions
 
-<!-- Q5: verify -->
+An agent can have skills and MCP servers of your own, from a folder that is only for it, never your `~/.claude`. Name the folder
+with `agent connect --agent-config DIR` for a connected agent, or `shapewall agent set agent-config DIR` in the project folder for
+a local board. It must be outside the project, never Claude Code's own folder (or `$CLAUDE_CONFIG_DIR`), not in a temporary
+folder and not writable by other users; Shapewall never creates it. Shapewall reads it and passes on only:
 
-A connected agent can have skills and MCP servers of your own, from a folder that is only for it, never your `~/.claude`. Name
-the folder with `agent connect --agent-config DIR` (outside the project, never Claude Code's own folder; Shapewall never creates
-it). Shapewall reads it and passes on only:
+- skills: `DIR/skills/<name>/SKILL.md` and the files beside it, copied into a plugin Shapewall makes in its own state folder;
+- MCP servers: the stdio servers in the user-scope `mcpServers` of `DIR/.claude.json`, each with only the environment its entry
+  names plus `PATH` and `HOME`.
 
-- skills: `DIR/skills/<name>/SKILL.md`, and the skills of each plugin enabled in it;
-- MCP servers: the user-scope servers in `DIR/.claude.json` and those of each enabled plugin.
+Settings, hooks, commands, agents, `bin/`, output styles and installed plugins are skipped (copy a plugin's skill into
+`DIR/skills` to use it, its MCP server into `.claude.json`), and `agent connect` lists what it skipped. The folder's settings
+(allow rules, hooks, default mode) never apply. Only Claude Code's restricted session takes extensions: another agent, or
+`agent.localSession: "own"`, shows the line off.
 
-Hooks, commands, agents, `bin/` and other plugin parts are skipped, and `agent connect` lists what it skipped. The folder's
-settings (allow rules, hooks, default mode) never apply.
+Extensions are used only on turns above the open tier where every author is in the machine's extension set (`extensions-for`,
+`owner` by default), and only in a clean thread: everyone who ever wrote in it is in that set too, and it never carried text
+nobody can vouch for. A thread is tainted for good by a share-link guest's or a non-member's text, another agent's answer, a move
+to another agent, a comment by a token or an import, someone else's comment that the prompt quotes, and a board tool whose result
+is other people's comments (`list_comments`, `get_comment`). Taking that text away never makes it clean again, and threads from
+before 1.4.0 count as tainted. When a board tool taints a turn that had extensions, every extension tool and every board write
+(`reply_to_comment`, `set_comment_status`, `resolve_comment` and the rest) is refused for the rest of the turn, and the session
+ends with it: a skill's text stays readable to the model once loaded, so the turn may no longer act on the board.
 
-Extensions are used only on turns where every author is in the machine's extension set (`extensions-for`, `owner` by default), and
-never on open turns. A thread that once carried someone else's text stays without them. A tool call from an extension runs only
-when its exact name (`mcp__server__tool`, no wildcards) is on the machine's `allow-tool` list, up to 20; any other is refused
-on the machine, and nobody is asked.
+A tool call from an extension runs only when its exact name (`mcp__server__tool`, no wildcards) is on the machine's `allow-tool`
+list, up to 20; any other is refused on the machine, and nobody is asked. An extension tool's own result (a server that fetches a
+web page, say) can still bring in outside text without tainting the thread, so allow only tools whose results you trust. The full
+rules are in [the agent hardening guide](agent-hardening.md#what-each-turn-may-do).
 
 ```sh
 shapewall agent connect --remote https://wall.example.com --agent-config ~/agents/builder
@@ -200,11 +212,9 @@ shapewall agent set extensions-for owner,ada --remote https://wall.example.com
 
 ## Memory
 
-<!-- Q5: verify (memory tools come with extensions) -->
-
 Claude Code's automatic memory is off in every session Shapewall starts: nothing it noted elsewhere shapes an answer, and it
-writes no new notes. A tool that writes to a memory store needs its exact name in `allow-tool` and works only on solo turns with
-extensions on: one injected page could otherwise plant a note that every later session reads. An agent never edits its
+writes no new notes. A memory tool is an extension tool: an MCP server's tool with "memory" in its name, allowed by its exact name
+in `allow-tool`, and only on solo turns with extensions on: one injected page could otherwise plant a note that every later session reads. An agent never edits its
 own `CLAUDE.md`, `AGENTS.md` or agent config folder.
 
 ## See what it can do
@@ -236,7 +246,8 @@ the project's local board. The keys: `trust-team` (`none`, `members` or handles)
 `shell-unsandboxed`, `command-approval`, `browser`, `browser-allow`, `browser-auth`, `browser-profile`, `browser-profile-team`,
 `browser-no-sandbox`, `extensions-for`, `allow-tool` and `handoff-hops`, plus the connection's own `audience`, `approvals`,
 `instructions`, `agent-config`, `allow-command`, `allow-path`, `auto`, `base`, `respond` and `git-remote` (those need
-`--remote`). `handoff-hops` is kept for a later release and changes nothing yet.
+`--remote`, except `agent-config`, which a local board takes for its extensions). `allow-command` is refused in this release, and
+`handoff-hops` is kept for a later release and hands nothing off yet.
 
 **The server can only lower it.** A project's agent policy on a hosted server takes `maxTier` (`"solo"`, `"team"` or `"open"`),
 `shell: false` and `browser: false`, for the project and per board, and a board's setting can only narrow the project's. In the

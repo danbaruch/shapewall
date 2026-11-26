@@ -420,8 +420,10 @@ settings token, see [Who may change them](#who-may-change-them)), the toolbar ha
   key, checked with the same rule as `agent.apiKeyEnv` (below). The screen says whether that variable is set and **which host the key
   goes to**.
 - For an ACP agent: the **agent command** (one program and its arguments, no shell), with buttons for Claude Code, Codex, goose and
-  Gemini CLI in their restricted forms. The screen warns, every time an ACP agent is picked, that the agent brings its own tools and
-  extensions, which Shapewall does not sandbox (see [Restrict the agent's own tools](#restrict-the-agents-own-tools)). When
+  Gemini CLI in their restricted forms. Every time an ACP agent is picked, the screen says what each one brings: Claude Code gets
+  the restricted session (read and edit tools plus Shapewall's own tools, never a shell of its own or your Claude settings files),
+  while Codex, goose and Gemini CLI bring their own tools and extensions, which Shapewall does not sandbox (see
+  [Restrict the agent's own tools](#restrict-the-agents-own-tools)). The chat's Connect note says the same for the agents it found. When
   `--agent-acp` or `SHAPEWALL_AGENT_ACP` wins over the saved command, the screen shows the command in use, read-only, and says where it
   comes from.
 - **This model takes images**: turn it off for a text-only model. Images are then left out of the request, and the chat says so, instead
