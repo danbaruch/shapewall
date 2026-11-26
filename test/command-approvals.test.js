@@ -5,7 +5,14 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { APPROVAL_LIMITS, approvalKey, approvalsDir, createApprovalStore, inputsDigest, namedFiles } from '../src/agent/command-approvals.js'
+import {
+  APPROVAL_LIMITS,
+  approvalKey,
+  approvalsDir,
+  createApprovalStore,
+  inputsDigest,
+  namedFiles,
+} from '../src/agent/command-approvals.js'
 
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-approvals-'))
@@ -94,7 +101,11 @@ test('a record holds for the same scope, name, line and inputs only', (t) => {
   assert.equal(store.has({ ...entry, name: 'build' }), false)
   // A record too old does not count, and is swept.
   clock += APPROVAL_LIMITS.keepMs + 1000
-  fs.utimesSync(path.join(dir, fs.readdirSync(dir)[0]), new Date(clock - APPROVAL_LIMITS.keepMs - 1000), new Date(clock - APPROVAL_LIMITS.keepMs - 1000))
+  fs.utimesSync(
+    path.join(dir, fs.readdirSync(dir)[0]),
+    new Date(clock - APPROVAL_LIMITS.keepMs - 1000),
+    new Date(clock - APPROVAL_LIMITS.keepMs - 1000),
+  )
   assert.equal(store.has(entry), false)
   store.sweep()
   assert.deepEqual(fs.readdirSync(dir), [])
@@ -111,7 +122,13 @@ test('a forged record under another key does not count', (t) => {
 })
 
 test('records live under XDG_STATE_HOME, per connection', () => {
-  assert.equal(approvalsDir('my-agent', { HOME: '/h', XDG_STATE_HOME: '/state' }), path.join('/state', 'shapewall', 'approvals', 'my-agent'))
-  assert.equal(approvalsDir('x', { HOME: '/h', XDG_STATE_HOME: 'relative' }), path.join('/h', '.local', 'state', 'shapewall', 'approvals', 'x'))
+  assert.equal(
+    approvalsDir('my-agent', { HOME: '/h', XDG_STATE_HOME: '/state' }),
+    path.join('/state', 'shapewall', 'approvals', 'my-agent'),
+  )
+  assert.equal(
+    approvalsDir('x', { HOME: '/h', XDG_STATE_HOME: 'relative' }),
+    path.join('/h', '.local', 'state', 'shapewall', 'approvals', 'x'),
+  )
   assert.equal(approvalsDir('../escape', { HOME: '/h' }), path.join('/h', '.local', 'state', 'shapewall', 'approvals', 'default'))
 })
