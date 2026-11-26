@@ -13,6 +13,7 @@
 // It exits 1 and prints file:line for each hit, 0 when clean. CI runs it on
 // pull requests against the target branch's main (.github/workflows/ci.yml).
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -23,7 +24,23 @@ export const DASHES = [String.fromCharCode(0x2013), String.fromCharCode(0x2014)]
 
 const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
-export function loadRules(config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'))) {
+// Names (employers, competitors) live outside the public repository, in a private file with the same
+// names/phrases keys. Without one, the gate checks dashes and the phrases in the config only.
+export const PRIVATE_FILE =
+  process.env.SHAPEWALL_RELEASE_NAMES ||
+  path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'shapewall-dev', 'release-names.json')
+
+export function readPrivate(file = PRIVATE_FILE) {
+  try {
+    const extra = JSON.parse(fs.readFileSync(file, 'utf8'))
+    return { names: extra.names || [], phrases: extra.phrases || [] }
+  } catch {
+    return { names: [], phrases: [] }
+  }
+}
+
+export function loadRules(config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')), extra = readPrivate()) {
+  config = { ...config, names: [...(config.names || []), ...extra.names], phrases: [...(config.phrases || []), ...extra.phrases] }
   const covers = (list) => (file) => list.some((entry) => (entry.endsWith('/') ? file.startsWith(entry) : file === entry))
   return {
     excluded: covers(config.exclude || []),
