@@ -198,6 +198,16 @@ and the project uses [Semantic Versioning](https://semver.org/).
   server taints the thread: an answer that repeats those comments never reaches a later solo turn there (after `agent set
   audience owner`, a raised ceiling or a team that reconnects).
 - The trust block's thread state caps the tier too: a turn in a tainted thread is never above open, whatever its authors say.
+- The board write tools (`reply_to_comment`, `set_comment_status`, `resolve_comment`) of a local endpoint agent give back the
+  write (id, status, agent status, reply id), never the comment's text, as the MCP tools do. Any tool result that still carries
+  someone else's comment taints the thread and, on a turn above open, turns the commands and the browser off for the rest of it.
+- On a local board, a reply sent with the agent header from anywhere but the owner's own machine is still an agent's (it wakes
+  no agent) but no longer counts as the owner's words, and an edit or a resolution note on the owner's comment by anyone else
+  makes the comment no longer the owner's alone. Above open, the owner MCP server shows a journey made on the board by its pages
+  only (no name, description or fork labels).
+- A connected agent's answer always says whether its turn was given other people's text (`outsideText`), and a turn whose job
+  carried such text taints its thread however it ends unless the answer says it was dropped: a missing field (an older
+  machine), a lost link, a revoked agent and a Stop whose answer came too late all taint.
 
 ## 1.3.0 - 2026-11-25
 

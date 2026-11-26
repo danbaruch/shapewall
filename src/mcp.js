@@ -55,7 +55,8 @@ const failure = (message) => ({ content: [{ type: 'text', text: message }], isEr
 const untrusted = (value) => json(untrustedJson(value))
 // A comment (feedback.js feedbackItem) whose every word is the local owner's:
 // made by the owner (byOwner, store.js createComment), every reply the agent's.
-export const ownersItem = (item) => item?.byOwner === true && (item.replies || []).every((reply) => reply?.authorAgent === true)
+export const ownersItem = (item) =>
+  item?.byOwner === true && (item.replies || []).every((reply) => reply?.authorAgent === true && reply.authorUnvouched !== true)
 
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
 export const SCREENSHOT_MAX = 32 * 1024 * 1024
@@ -261,7 +262,21 @@ export function createMcpServer({
     },
     tool(({ board }) => {
       const target = boardFor(board)
-      return json({ board: boardRef(target), journeys: listJourneys(config, target) })
+      // A journey made on the board is anyone's who reaches it: above "open"
+      // its words (name, description, fork labels) are not shown, only the
+      // pages it goes through (Q7 audit).
+      const journeys = listJourneys(config, target).map((journey) =>
+        ownersOnly && journey.source === 'board'
+          ? {
+              id: journey.id,
+              source: journey.source,
+              pages: journey.pages,
+              branching: journey.branching,
+              withheld: 'made on the board: its name, description and fork labels are not shown on this turn',
+            }
+          : journey,
+      )
+      return json({ board: boardRef(target), journeys })
     }),
   )
 
@@ -709,7 +724,7 @@ export function createMcpServer({
           target.id,
           id,
           { status: 'resolved', resolution: note, agentStatus: 'done', ...(fixRef ? { fixRef } : {}) },
-          { actor: 'agent' },
+          { actor: 'agent', by: 'agent' },
         )
         return json({
           id: comment.id,

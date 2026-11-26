@@ -490,6 +490,15 @@ board, an open turn is the only one given the board's other open comments; its m
 server taints the thread, so an answer that repeats them never reaches a later solo turn there. The thread state caps the tier on
 the machine too: a turn in a tainted thread is never above open.
 
+Every tool result is held to the same rule. The board write tools give back the write (id, status, agent status, reply id),
+never the comment's text. Any result that still carries a comment that is not every word the owner's is marked, whatever the
+tool meant to return: it taints the thread and, above open, turns the commands and the browser off for the rest of the turn. On a
+local board, "the owner's words" means a comment the server saw the owner make, never edited or given a resolution note by anyone
+else, with every reply by the owner's own agent (the agent header counts only from the owner's machine). Text that is not a
+person's on the board stays quoted as untrusted data and does not taint: captured pages, capture errors, config page titles and
+notes, and pull request titles from the configured repository. A journey made on the board is anyone's who reaches it: above
+open, the owner MCP server shows it by its pages only.
+
 The machine does not take the list on trust either. On a turn above open it holds back every mentioned comment whose author is not
 one of the turn's authors (a token's or an import's included), keeping its number only, and counts an `@person` mention's open
 comments by others instead of quoting them. An agent session is reused only by a turn of the same tier in the same life of the

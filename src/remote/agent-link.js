@@ -459,7 +459,8 @@ export async function runAgentLink({
     }
     // This turn was given other people's text the server did not count as
     // its authors (an open turn's board comments): the answer tells the
-    // server, which taints the thread for good (Q7 N2).
+    // server, which taints the thread for good (Q7 N2). It is said either
+    // way; an answer without it reads as "given" on the server (Q7 R2).
     let outsideText = false
     const finish = async (message) => {
       await drain()
@@ -467,7 +468,9 @@ export async function runAgentLink({
       const began = Date.now()
       for (let wait = 500; ; wait = Math.min(wait * 2, 5000)) {
         try {
-          await api.finish(id, { seq: seq + 1, message, ...(outsideText ? { outsideText: true } : {}) })
+          // Said on every answer (Q7 R2): false only when this turn was not
+          // given other people's text, so the server keeps the thread clean.
+          await api.finish(id, { seq: seq + 1, message, outsideText })
           return
         } catch (error) {
           if (error instanceof RemoteError && error.status < 500 && error.status !== 429) return

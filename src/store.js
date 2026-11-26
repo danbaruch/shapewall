@@ -771,7 +771,12 @@ export async function createComment(config, board, input, { now = new Date(), ow
 // clears it). Reopening clears the agent status too, so a reopened comment is
 // new work for `shapewall watch`, and counts the reopen (reopenCount, reopenedAt).
 // `actor` names who made the change in its events (null: nobody said).
-export async function updateComment(config, boardId, commentId, changes, { now = new Date(), actor = null } = {}) {
+// `by`: who writes the new text (body, resolution): "owner" (the server saw
+// the board's owner), "agent" (the board's own agent or an agent run of the
+// owner's), or null (anyone else, or not known). Text by anyone else makes
+// the comment no longer the owner's alone (byOwner false, Q7 audit), so its
+// words are never read as the owner's on a solo turn.
+export async function updateComment(config, boardId, commentId, changes, { now = new Date(), actor = null, by = null } = {}) {
   const id = Number(commentId)
   if (!Number.isSafeInteger(id) || id <= 0) throw new CommentError(404, 'unknown_comment', 'That comment does not exist.')
   if (!changes || typeof changes !== 'object') throw new CommentError(400, 'invalid_change', 'Nothing to change.')
@@ -797,7 +802,10 @@ export async function updateComment(config, boardId, commentId, changes, { now =
       comment.body = body
       // Shown as "edited" beside the time.
       comment.editedAt = now.toISOString()
+      if (by !== 'owner' && by !== 'agent' && comment.byOwner === true) comment.byOwner = false
     }
+    if (typeof changes.resolution === 'string' && changes.resolution.trim() && by !== 'owner' && by !== 'agent' && comment.byOwner === true)
+      comment.byOwner = false
     if (fixRef !== undefined) {
       if (fixRef) comment.fixRef = fixRef
       else delete comment.fixRef
@@ -1019,6 +1027,10 @@ export async function addReply(config, boardId, commentId, input, { now = new Da
         // ("Ada"): the flag says it is an agent, since the name no longer
         // does. Only the server's own agent tools set it, never a request body.
         if (input?.agent === true) reply.agent = true
+        // An agent's reply the server did not see the owner's machine send (the
+        // agent header from anyone who reaches the board): still an agent's for
+        // waking agents, but its words are not the owner's (Q7 audit).
+        if (input?.agent === true && input?.unvouched === true) reply.unvouched = true
         if (images.length) reply.images = images
         if (media.drawing) {
           const board = config.boards?.find((item) => item.id === boardId)

@@ -120,6 +120,29 @@ export function createAgentLinks({ hub = null } = {}) {
 // What the live events of a turn add up to so far: the text and the cards
 // as last seen. Kept when a turn is cut short, so the thread shows what the
 // agent had written.
+// Whether a job gives the machine text by someone who is not an author of
+// its turn: the board's open comments (chat-job.js commentEntry, by
+// authorHandle), checked against the job's trust block. A comment with no
+// handle (a token's, an import, a guest's) is someone else's too.
+export function sendsOutside(job) {
+  const comments = Array.isArray(job?.context?.comments) ? job.context.comments : []
+  if (!comments.length) return false
+  const handles = new Set((job?.trust?.authors || []).map((author) => author?.handle).filter((handle) => typeof handle === 'string'))
+  return comments.some((item) => typeof item?.authorHandle !== 'string' || !handles.has(item.authorHandle))
+}
+
+// Whether a turn's end taints its thread (Q7 R2), fail closed: the machine
+// says so (`outsideText: true`), or its job gave it other people's text and
+// the machine did not say it dropped it (`outsideText: false`, sent by a
+// machine of 1.4.0 or later on every answer). A missing field, an older
+// machine, and every end without an answer (a lost link, a revoke, a Stop
+// whose answer came too late) count as "kept it". `said`: the answer's
+// field, undefined when there is no answer.
+export function outsideTextOf(live, said) {
+  if (said === true) return true
+  return live?.outsideSent === true && said !== false
+}
+
 export function partialOf(turn) {
   let text = ''
   const cards = new Map()
@@ -247,11 +270,16 @@ export function createChatService({ db, hub, links, events, chatFor, now = () =>
       ...(threadId.startsWith('chat-') ? {} : { thread: threadId }),
     })
   // Ends a turn without the machine's answer. `row`: its chat_turns row.
+  // A turn whose job gave the machine other people's text ends without its
+  // answer saying it dropped that text: what it streamed so far is stored, so
+  // the thread is tainted (Q7 R2). Without a live turn (a server restart),
+  // nothing it streamed is kept, and nothing is stored but the notice.
   function interrupt(t, row, { state = 'interrupted', message = INTERRUPTED_MESSAGE, agentName = null } = {}) {
     const live = hub.get(row.id)
     const stored = transaction(db, () => {
       cancelCards(t, row, live)
       const made = chatFor(t).interrupt(row, { state, message, agentName, partial: live ? partialOf(live) : null })
+      if (made && outsideTextOf(live, undefined)) chatFor(t).trust(row.project_id, row.board_id, row.thread_id, [{ kind: 'outside' }])
       if (made) releaseFix(t, row, 'needs-human', { interrupted: true })
       return made
     })
@@ -971,6 +999,12 @@ export function mountAgentLink(
       if (thread?.created_at) job.turn.generation = String(thread.created_at).slice(0, 40)
       if (Buffer.byteLength(JSON.stringify(job)) > FRAME_LIMITS.jobBytes)
         throw new HttpError(413, 'job_too_large', 'This conversation is too large to send to the agent. Start a new chat.')
+      // Whether this job gives the machine other people's text that is not
+      // in its trust block: the board's open comments by anyone who is not an
+      // author of the turn (only an open turn keeps them). Kept on the live
+      // turn: unless the machine's answer says it dropped them, the thread is
+      // tainted however the turn ends (Q7 R2, outsideTextOf).
+      live.outsideSent = sendsOutside(job)
       // The process that fetches the job is the one that answers it.
       live.linkId = linkIdOf(req)
       if (live.state === 'queued') {
@@ -1063,8 +1097,7 @@ export function mountAgentLink(
         // as the turn's authors (an open turn's board comments), and its answer
         // may repeat it: the thread carries it from now on (Q7 N2). A machine
         // can only make its own thread stricter this way.
-        if (req.body?.outsideText === true && ['fix', 'comment', 'chat'].includes(row.kind))
-          store.trust(row.project_id, row.board_id, row.thread_id, [{ kind: 'outside' }])
+        if (outsideTextOf(live, req.body?.outsideText)) store.trust(row.project_id, row.board_id, row.thread_id, [{ kind: 'outside' }])
         if (reply.summary) {
           const detail = {
             project: row.project_id,

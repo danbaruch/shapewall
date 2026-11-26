@@ -14,6 +14,36 @@ const LIST_MAX = 100
 // sent to the model: a symbol key is not serialized).
 const OUTSIDE = Symbol('outside')
 
+// What a board write gives back: the comment's id and state, never its text.
+const writeResult = (comment) => ({ id: comment.id, status: comment.status, agentStatus: comment.agentStatus || null })
+
+// Whether a tool's result still carries someone else's text, read from the
+// result itself and the store, whatever the tool meant to return (Q7 R3): any
+// comment in it (an object with a comment's id and its body or replies) that
+// is not every word the owner's. run.js taints the thread for it, and on a
+// turn above "open" turns the commands and the browser off for the rest of it.
+export function carriesOthers(config, board, result) {
+  const seen = new Set()
+  const walk = (value, depth) => {
+    if (!value || typeof value !== 'object' || depth > 6) return false
+    if (Array.isArray(value)) return value.some((item) => walk(item, depth + 1))
+    if (Number.isSafeInteger(value.id) && (typeof value.body === 'string' || Array.isArray(value.replies))) {
+      if (seen.has(value.id)) return false
+      seen.add(value.id)
+      let stored = null
+      try {
+        stored = getComment(config, board.id, value.id)
+      } catch {
+        return true
+      }
+      // The stored comment answers for its replies too: they are not walked.
+      return !ownersComment(stored)
+    }
+    return Object.values(value).some((item) => walk(item, depth + 1))
+  }
+  return walk(result, 0)
+}
+
 // A comment's images, as the model sees them: no local file paths.
 const imagesForModel = (images) =>
   (images || []).map(({ name, mediaType, bytes, width, height }) => ({ name, mediaType, bytes, width, height }))
@@ -155,8 +185,15 @@ export const OWNER_TOOLS = [
       additionalProperties: false,
     },
     // Signed with the name the owner gave the agent, and marked as an agent's.
+    // What it gives back is about the write, never the comment's text: on a
+    // solo turn that text may be someone else's (Q7 R1, as the MCP tools do).
     async run({ config, board, agentName }, args) {
-      return (await addReply(config, board.id, args.id, { body: args.body, author: agentName || 'agent', agent: true })).comment
+      const { comment, reply } = await addReply(config, board.id, args.id, {
+        body: args.body,
+        author: agentName || 'agent',
+        agent: true,
+      })
+      return { ...writeResult(comment), replyId: reply.id, replyCount: (comment.replies || []).length }
     },
   },
   {
@@ -170,8 +207,10 @@ export const OWNER_TOOLS = [
       additionalProperties: false,
     },
     async run({ config, board }, args) {
-      return (await setAgentStatus(config, board.id, args.id, args.agentStatus === 'clear' ? null : args.agentStatus, { actor: 'agent' }))
-        .comment
+      const result = await setAgentStatus(config, board.id, args.id, args.agentStatus === 'clear' ? null : args.agentStatus, {
+        actor: 'agent',
+      })
+      return { ...writeResult(result.comment), ...(result.changed === undefined ? {} : { changed: result.changed }) }
     },
   },
   {
@@ -184,14 +223,16 @@ export const OWNER_TOOLS = [
       required: ['id', 'note'],
       additionalProperties: false,
     },
-    run({ config, board }, args) {
+    async run({ config, board }, args) {
       if (!args.note?.trim()) throw new Error('A resolution note is required.')
-      return updateComment(
-        config,
-        board.id,
-        args.id,
-        { status: 'resolved', resolution: args.note, agentStatus: 'done' },
-        { actor: 'agent' },
+      return writeResult(
+        await updateComment(
+          config,
+          board.id,
+          args.id,
+          { status: 'resolved', resolution: args.note, agentStatus: 'done' },
+          { actor: 'agent', by: 'agent' },
+        ),
       )
     },
   },
@@ -256,7 +297,8 @@ export async function runTool(context, call) {
       text: quoteData(`tool:${tool.name}`, { board: context.board.id }, result),
       detail,
       // Someone else's text came back (Q7 N1): the caller taints the thread.
-      outside: result?.[OUTSIDE] === true,
+      // Read from the result too, so a tool that leaks is caught (Q7 R3).
+      outside: result?.[OUTSIDE] === true || carriesOthers(context.config, context.board, result),
     }
   } catch (error) {
     const message = error.statusCode ? error.message : 'The tool failed.'
