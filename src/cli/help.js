@@ -154,6 +154,16 @@ export const SECTIONS = {
                             is updated without it)
       --dry-run             show the changes, write nothing      --yes   write without asking
       --remove              take the shapewall entries out       --json  machine-readable
+  agent status              what the agent can do here, line by line and per tier (solo, team, open): the same
+                            lines the console shows under What it can do, and the agent's own instructions.
+                            Each line that is off says why, and the command that changes it
+      --remote URL          a connected agent (its agent-policy.json entry, and whether its link is open);
+                            without it, the local board in this project
+      --as NAME             which connection (default "default")   --json  machine-readable
+  agent set KEY VALUE       change one line without reconnecting, for example: agent set browser off,
+                            agent set shell commands, agent set trust-team ada,bo. With --remote URL (and --as NAME)
+                            a connected agent's setting, read when it connects again; without it, this project's
+                            local board, read by the next turn. "agent status" lists the keys under each line
   agent docs                where the Shapewall section for coding agents is (AGENTS.md, CLAUDE.md)
       --write | --remove | --print   put it in (or refresh it), take it out (and set "agentDocs": false
                             in the config, so it stays out in every clone), print it. The first serve or
