@@ -877,6 +877,9 @@ export async function serveToolHost(host, { env = process.env, log = () => {} } 
     server.listen(socket, resolve)
   })
   if (process.platform !== 'win32') fs.chmodSync(socket, 0o600)
+  // The agent process that talks to it keeps this process busy; the
+  // listener alone (a chat thread's relay between turns) never does.
+  server.unref()
   const policy = path.join(dir, 'policy.json')
   fs.writeFileSync(policy, `${JSON.stringify({ v: 1, socket, token: token.toString('hex'), tools: host.tools() })}\n`, {
     mode: 0o600,
