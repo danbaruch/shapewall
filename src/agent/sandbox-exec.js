@@ -234,7 +234,7 @@ function collect(stream, budget, sink) {
 
 // Spawns argv (already wrapped or not) in its own process group and waits.
 // -> { code, signal, output, cut, timedOut, stopped, ms }
-export function runProcess(argv, { cwd, env, timeoutMs, outputBytes = SANDBOX_LIMITS.outputBytes, signal = null, onStart = () => {} }) {
+export function runProcess(argv, { cwd, env, timeoutMs = SANDBOX_LIMITS.timeoutMs, outputBytes = SANDBOX_LIMITS.outputBytes, signal = null, onStart = () => {} }) {
   return new Promise((resolve) => {
     const began = Date.now()
     let child
@@ -320,6 +320,15 @@ async function sandboxManager() {
     starting = null
     throw error
   }
+}
+
+// Stops the runtime's proxies and helpers (its socat bridges keep a process
+// alive): at the end of `agent connect`, and in tests.
+export async function closeSandbox() {
+  const was = manager || (starting ? await starting.catch(() => null) : null)
+  manager = null
+  starting = null
+  if (was) await was.reset().catch(() => {})
 }
 
 // What a session's commands may reach, as srt host patterns.
