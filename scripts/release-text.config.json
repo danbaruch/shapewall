@@ -1,37 +1,36 @@
 {
-  "$comment": "Lists for scripts/check-release-text.mjs. This file is never checked itself, so it may name what it bans. Patterns are JavaScript regular expressions, matched case-insensitively. Paths are repository paths; a path ending in / covers the folder.",
+  "$comment": "Lists for scripts/check-release-text.mjs. This file is never checked itself, so it may name what it bans. Patterns are JavaScript regular expressions, matched case-insensitively. Paths are repository paths; a path ending in / covers the folder. Names (employers, competitors) are not kept here: put them in a private JSON file with the same names/phrases keys, at $SHAPEWALL_RELEASE_NAMES or ~/.config/shapewall-dev/release-names.json, and the gate adds them.",
   "phrases": [
     {
       "pattern": "(feedback|review)[ -]tools?\\b",
       "why": "positioning: Shapewall steers and builds with agents, it is not a feedback or review tool"
     },
-    { "pattern": "website[ -]review", "why": "positioning" },
-    { "pattern": "tested with automated browsers|not yet verified|is planned|has not launched", "why": "a process note, not product copy" },
-    { "pattern": "in today's fast-paced world", "why": "filler" },
-    { "pattern": "game[ -]changing", "why": "filler" },
-    { "pattern": "\\bsynergy\\b", "why": "filler" },
-    { "pattern": "\\bunlock(s|ed|ing)? (your|the|new|a)\\b", "why": "filler" },
     {
-      "pattern": "\\bvs\\.? (marker\\.io|bugherd|userback|usersnap|ruttl|pastel|percy|chromatic|applitools)\\b",
-      "why": "no competitor callouts"
+      "pattern": "website[ -]review",
+      "why": "positioning"
+    },
+    {
+      "pattern": "tested with automated browsers|not yet verified|is planned|has not launched",
+      "why": "a process note, not product copy"
+    },
+    {
+      "pattern": "in today's fast-paced world",
+      "why": "filler"
+    },
+    {
+      "pattern": "game[ -]changing",
+      "why": "filler"
+    },
+    {
+      "pattern": "\\bsynergy\\b",
+      "why": "filler"
+    },
+    {
+      "pattern": "\\bunlock(s|ed|ing)? (your|the|new|a)\\b",
+      "why": "filler"
     }
   ],
-  "names": [
-    { "name": "Dayforce", "kind": "employer" },
-    { "name": "Ceridian", "kind": "employer" },
-    { "name": "OpenLoop", "kind": "employer" },
-    { "name": "Marker.io", "kind": "competitor" },
-    { "name": "BugHerd", "kind": "competitor" },
-    { "name": "Userback", "kind": "competitor" },
-    { "name": "Usersnap", "kind": "competitor" },
-    { "name": "Ruttl", "kind": "competitor" },
-    { "name": "Markup.io", "kind": "competitor" },
-    { "name": "Percy", "kind": "competitor" },
-    { "name": "Applitools", "kind": "competitor" },
-    { "name": "Stagewise", "kind": "competitor" },
-    { "name": "Agentation", "kind": "competitor" },
-    { "name": "Onlook", "kind": "competitor" }
-  ],
+  "names": [],
   "exclude": ["scripts/release-text.config.json", "test/release-text.test.js", "package-lock.json", "website/package-lock.json"],
   "dashesAllowed": {
     "$comment": "Code that has to name the characters themselves: text-to-speech splitting, SEO width tables, an en dash as an empty cell, and tests that assert there is none.",
