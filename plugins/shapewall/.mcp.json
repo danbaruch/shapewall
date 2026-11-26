@@ -4,7 +4,7 @@
       "command": "node",
       "args": [
         "-e",
-        "const p=require('path');const f=p.join(process.env.CODEX_HOME||p.join(require('os').homedir(),'.codex'),'plugins','cache','shapewall','shapewall','1.2.0','bin','shapewall-mcp.mjs');import(require('url').pathToFileURL(f).href).then((m)=>m.main(),(e)=>{console.error('shapewall plugin: cannot load '+f+': '+e.message);process.exit(1)})"
+        "const p=require('path');const f=p.join(process.env.CODEX_HOME||p.join(require('os').homedir(),'.codex'),'plugins','cache','shapewall','shapewall','1.3.0','bin','shapewall-mcp.mjs');import(require('url').pathToFileURL(f).href).then((m)=>m.main(),(e)=>{console.error('shapewall plugin: cannot load '+f+': '+e.message);process.exit(1)})"
       ],
       "env_vars": [
         "SHAPEWALL_REMOTE",

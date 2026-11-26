@@ -5,6 +5,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## 1.3.0 - 2026-11-25
+
 ### Added
 
 - `shapewall open`: prints and opens a deep link to a board, a page (`--page`), a comment (`--comment`), a screen size
