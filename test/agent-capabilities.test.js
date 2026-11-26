@@ -1363,7 +1363,9 @@ test('loopback origins from a committed config count below the owner’s own tur
   })
   assert.deepEqual([...other.browser.allow], ['http://127.0.0.1:5173'])
   assert.deepEqual([...other.browser.withheld], ['http://localhost:5173'])
-  // Non-loopback config origins are unchanged on every tier.
+  // Non-loopback config origins are unchanged on every tier, except a
+  // private address on an open turn (PR #39 review: another machine on this
+  // one's networks needs the machine to list it there).
   for (const tier of TIERS) {
     const caps = resolveCapabilities({
       path: 'hosted-fix',
@@ -1373,8 +1375,14 @@ test('loopback origins from a committed config count below the owner’s own tur
       config: { baseUrl: 'https://staging.example.com/app', publicUrl: 'http://10.0.0.5:3000' },
       platform: PLATFORMS['linux sandbox'],
     })
-    assert.deepEqual([...caps.browser.allow].sort(), ['http://10.0.0.5:3000', 'https://staging.example.com'], tier)
+    const expected = tier === 'open' ? ['https://staging.example.com'] : ['http://10.0.0.5:3000', 'https://staging.example.com']
+    assert.deepEqual([...caps.browser.allow].sort(), expected, tier)
     assert.ok(!caps.why.some((item) => item.code === 'loopback_not_listed'), tier)
+    assert.equal(
+      caps.why.some((item) => item.code === 'private_not_listed'),
+      tier === 'open',
+      tier,
+    )
   }
   // The local board's open turns too; its owner's own (solo) keeps them.
   const local = (tier) =>
