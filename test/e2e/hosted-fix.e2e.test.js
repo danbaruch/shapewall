@@ -153,6 +153,39 @@ const seen = async (id) => (await ada.browser.get(boardUrl('/comments'))).json.c
 const branches = () => git('branch', '--format=%(refname:short)').split('\n').filter(Boolean).sort()
 const chatOf = (id) => `&chat=c${id}`
 const card = (page, state) => page.locator(`[data-sw-chat-card="permission"][data-state="${state}"]`).last()
+// Where elements sit once nothing moves (the last match of each selector, as
+// .last() above): all read in one frame, after two frames in a row with the
+// same boxes. On a phone the chat is a sheet that slides up as it opens, and
+// boxes read one call at a time land on different frames of that slide, a
+// pixel or two apart.
+async function settledBoxes(page, selectors) {
+  const handle = await page.waitForFunction(
+    (list) => {
+      const read = () =>
+        list.map((selector) => {
+          const nodes = document.querySelectorAll(selector)
+          const rect = nodes[nodes.length - 1]?.getBoundingClientRect()
+          return rect ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : null
+        })
+      return new Promise((resolve) => {
+        let last = JSON.stringify(read())
+        let still = 0
+        const tick = () => {
+          const boxes = read()
+          const now = JSON.stringify(boxes)
+          still = boxes.every(Boolean) && now === last ? still + 1 : 0
+          last = now
+          if (still >= 2) resolve(boxes)
+          else requestAnimationFrame(tick)
+        }
+        requestAnimationFrame(tick)
+      })
+    },
+    selectors,
+    { timeout: 10_000 },
+  )
+  return handle.jsonValue()
+}
 
 before(async () => {
   assert.ok(fs.existsSync(path.join(ROOT_DIR, 'dist', 'client', 'index.html')), 'run "npm run build" before the hosted fix e2e test')
@@ -273,10 +306,12 @@ test('Fix with Builder: the card with its diff, Allow with the passkey, the bran
   })
   await shots(adas, 'chat-card-waiting')
   if (adas[2]) {
-    const allow = await adas[2].page.locator('[data-sw-chat-permission-option="allow"]').boundingBox()
-    const deny = await adas[2].page.locator('[data-sw-chat-permission-option="deny"]').boundingBox()
+    const [allow, deny, box] = await settledBoxes(adas[2].page, [
+      '[data-sw-chat-permission-option="allow"]',
+      '[data-sw-chat-permission-option="deny"]',
+      '[data-sw-chat-card="permission"][data-state="pending"]',
+    ])
     assert.ok(allow.height >= 43.99 && deny.height >= 43.99, 'phone-sized answers')
-    const box = await card(adas[2].page, 'pending').boundingBox()
     assert.ok(allow.width + deny.width > box.width * 0.85, 'the two answers fill the row on a phone')
     assert.equal(Math.round(allow.y), Math.round(deny.y), 'side by side')
   }
