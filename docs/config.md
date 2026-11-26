@@ -484,6 +484,9 @@ What an agent's tools may reach (1.4.0, see [what each turn may do](agent-harden
   checkout, never from the fix copy an agent writes in.
 - `fixIn`: `"copy"` (the default, every fix in a fix copy of its own) or `"checkout"`, which lets a local board's owner keep solo
   fixes in this checkout. Every other tier and every hosted path still uses a fix copy.
+- `localSession`: `"restricted"` (the default since 1.4.0: a local board's Claude Code session gets read and edit tools plus
+  Shapewall's own tools for commands, the sandboxed shell and the browser, and never its own shell or your `~/.claude` settings)
+  or `"own"`, the 1.2.0 session with the agent's own full tool set. `"own"` is deprecated and goes in 2.0.
 
 ```json
 { "agent": { "browser": { "allow": ["https://staging.example.com"] }, "fixIn": "copy" } }

@@ -67,7 +67,29 @@ and the project uses [Semantic Versioning](https://semver.org/).
   `dev` starts in the background on a port in the container, and the `browser_*` tools (no screenshot: the model reads text only)
   open that port; Chromium starts without its own sandbox there only on a team run. The prompt ends with the capability block.
 
+- Every agent path on the capability model: a local board's chat (ACP and endpoint), a connected agent's chat, its Fix with, a
+  comment sent to it and `watch --exec` resolve what the turn may do, and every prompt carries it after the instruction files.
+  Commands, the sandboxed shell, dev servers and the browser come from Shapewall's tool host on each of them. A local board's
+  commands run in the OS sandbox in the checkout with its `.git` and `.shapewall` folders read only (`.shapewall` unreadable), its
+  own cards are answered on the board by the owner, and solo approvals are kept in `.shapewall/agent/approvals/` under the same rule
+  as a connected agent's. A connected agent's chat and comment turns answer only: commands that change no files, on a read only
+  view of the checkout, never the shell.
+- `watch --exec` passes `SHAPEWALL_CAPABILITIES_FILE`, a `0600` JSON file with the comment's resolved capabilities and the same
+  text a board's agent reads (not enforced: the command's own sandbox is the boundary).
+
 ### Changed
+
+- A local board's Claude Code session is restricted: read and edit tools plus Shapewall's tools, no shell of its own, no settings
+  files (`~/.claude` allow rules, hooks, plugins, `.mcp.json`), no auto memory. `agent.localSession: "own"` keeps the 1.2.0
+  session, with a deprecation warning, until 2.0. Other ACP adapters keep their own session.
+- A local turn is solo only while every word in it is the owner's (a private chat, or a comment the owner wrote on a board only
+  the owner can reach); anything else is open, and commands wait for a card. Above the open tier, other people's comments are
+  counted in the board context, not quoted.
+- A comment picked up by a connected agent without a narrowing from the server is open with no commands, and a running turn asks
+  the server for its narrowing again before each command (at most every 5 seconds): a project or board tightened mid-turn applies
+  to the next command, and a turn never widens.
+- Command cards are allowed in a connected agent's chat and comment turns too (read-style commands only), still never where the
+  project or board took commands away.
 
 - The agent browser: an address on the agent's machine (a loopback address in any spelling, `localhost`, a local name such as
   `app.test`) that a committed config names counts below the owner's own turn (team, open, and solo with a browser login) only
@@ -99,6 +121,10 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - An origin is never a wildcard, and a machine audience it cannot read is "server", not "owner".
 - The `agent_policy_changed` audit row says which settings of which board changed, not only how many boards.
 - A hello that arrives after a newer one from the same process no longer replaces what the newer one said.
+
+### Fixed
+
+- A connected agent's reply on a long comment answer is cut to the comment limit instead of failing to post.
 
 ## 1.3.0 - 2026-11-25
 

@@ -325,6 +325,9 @@ on the same machine and in the same container. `shapewall comments status ID cle
   - `SHAPEWALL_COMMENT_ID`, `SHAPEWALL_BOARD`, `SHAPEWALL_PAGE_ID`, `SHAPEWALL_VARIANT_ID`, `SHAPEWALL_PAGE_URL`, `SHAPEWALL_VIEWPORT`,
     `SHAPEWALL_SCREENSHOT`, `SHAPEWALL_LIVE_HTML` (what the comment was made on), `SHAPEWALL_LATEST_SCREENSHOT`, `SHAPEWALL_CONFIG` in
     its environment;
+  - `SHAPEWALL_CAPABILITIES_FILE`: a `0600` JSON file (`{ capabilities, prompt }`) saying what this machine's rules allow for the
+    comment's tier. Shapewall does not run what your command runs, so it is not enforced (`enforced: false`): your agent's own
+    sandbox is the boundary;
   - its output in `.shapewall/<board>/agent/comment-<id>.log`.
 
 With local `--exec --recapture`, a successful command is followed by a partial capture of the comment's page, a before/after thread
