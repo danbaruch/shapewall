@@ -68,8 +68,10 @@ Check it: in the project, `claude mcp list` shows `plugin:shapewall:shapewall ..
 The plugin's launcher (`bin/shapewall-mcp.mjs`, plain Node, no dependencies) starts `shapewall mcp` with the first of:
 
 1. the project's own install, `node_modules/.bin/shapewall`;
-2. `shapewall` on PATH, when it is the plugin's version or newer. PATH folders that npm puts first for one project or one `npx` run
-   (any `node_modules/.bin`, an npm `_npx` cache) and folders inside the project do not count;
+2. `shapewall` on PATH, when it is the plugin's version or newer. The plugin is installed once for every project, so it skips the
+   same PATH folders as an every-project `shapewall agent setup` entry: npx's cache (an `_npx` folder), any folder under a
+   `node_modules` folder (npm puts the project's and its parents' `node_modules/.bin` first, and another project's install lives
+   there too) and any folder inside the project. Symbolic links are followed before checking;
 3. `npx -y shapewall@<the plugin's version>`. The first run downloads it, which can take a while.
 
 It runs in the project folder: the nearest folder at or above where the app works that has a `shapewall.config.json`, up to the

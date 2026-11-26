@@ -49,7 +49,16 @@ website differs from the tool.
 
 Any agent that can run a shell command and read JSON, including Claude Code, Codex and goose. Agents that speak MCP can use
 `shapewall mcp` instead, and `shapewall watch` starts any command-line agent for each new comment. Shapewall includes no model of
-its own. Setups for each agent: [agent recipes](/docs/agent-recipes).
+its own. `shapewall init` adds a short section to your project's `AGENTS.md`, so an agent finds the board without a plugin, and
+`shapewall agent setup` registers the MCP server with Claude Code and Codex. There is also an experimental
+[plugin for Claude Code and Codex](/docs/plugins). Setups for each agent: [agent recipes](/docs/agent-recipes).
+
+## Does the agent answer every message in a shared chat?
+
+No. On a shared board, the board chat and each comment's thread work like a chat app: the agent starts only when someone
+@mentions it, presses **Send to agent** or **Fix with**. It then reads what people wrote since its last answer. The person who
+connected the agent can set one thread to answer every message. A private chat, and a local board only you use, answer every
+message. Text an agent wrote never starts an agent turn. See [when an agent answers](/docs/chat#when-an-agent-answers).
 
 ## Can my team use it together?
 

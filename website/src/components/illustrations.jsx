@@ -3,16 +3,25 @@
 import { useState } from 'react'
 import {
   ArrowRight,
+  AtSign,
   Bell,
+  Bot,
   Check,
   ChevronLeft,
   ChevronRight,
   CircleDot,
+  Columns2,
+  Eye,
+  FileText,
   GitMerge,
   GitPullRequest,
   Hash,
+  Link2,
   Mail,
   MessageSquare,
+  MessagesSquare,
+  Plug,
+  Send,
   Webhook,
 } from 'lucide-react'
 import { IconButton, ToggleGroup, cx } from './ui.jsx'
@@ -233,13 +242,8 @@ export function PhonePair() {
 }
 
 // GitHub connect: a comment becomes an issue, a pull request names it, the merge resolves it.
-export function GithubIllustration() {
-  const steps = [
-    { icon: MessageSquare, tone: 'text-pin-ink', title: 'Comment #12 on Pricing', text: 'Make the Plus button stand out more.' },
-    { icon: CircleDot, tone: 'text-wall', title: 'Issue #45 opened', text: 'Comment text, page, element and a screenshot crop.' },
-    { icon: GitPullRequest, tone: 'text-wall', title: 'Pull request #46', text: 'Its description says shapewall:12.' },
-    { icon: GitMerge, tone: 'text-merged', title: 'Merged', text: 'Comment #12 resolved, with the PR as its fix.' },
-  ]
+// A short list of steps on the dotted wall background: GitHub, agent setup, links and follow, chat triggers.
+function Steps({ steps }) {
   return (
     <div className="wall-dots rounded-2xl p-4 sm:p-6">
       <ol className="space-y-3">
@@ -250,14 +254,109 @@ export function GithubIllustration() {
           >
             <step.icon className={cx('mt-0.5 size-4.5 shrink-0', step.tone)} aria-hidden="true" />
             <div className="min-w-0">
-              <p className="text-[14.5px] font-semibold text-ink">{step.title}</p>
-              <p className="mt-0.5 text-[13.5px] leading-5 text-slate">{step.text}</p>
+              <p className="text-[14.5px] font-semibold break-words text-ink">{step.title}</p>
+              <p className="mt-0.5 text-[13.5px] leading-5 break-words text-slate">{step.text}</p>
             </div>
           </li>
         ))}
       </ol>
     </div>
   )
+}
+
+// Agents find the board: the project's instruction file, the MCP server registration or the plugin, then the work.
+export function SetupIllustration() {
+  return (
+    <Steps
+      steps={[
+        {
+          icon: FileText,
+          tone: 'text-wall',
+          title: 'shapewall init',
+          text: 'Adds a short Shapewall section to AGENTS.md, so any agent knows the board is there.',
+        },
+        {
+          icon: Plug,
+          tone: 'text-wall',
+          title: 'shapewall agent setup',
+          text: 'Registers the MCP server with Claude Code and Codex. Shows the change and asks first.',
+        },
+        {
+          icon: Bot,
+          tone: 'text-wall',
+          title: 'Or the plugin',
+          text: 'The same MCP server plus skills: take the next comment, open the board, show status.',
+        },
+        {
+          icon: Check,
+          tone: 'text-merged',
+          title: '3 open comments on Pricing',
+          text: 'Your agent finds the work, builds it and replies on the board.',
+        },
+      ]}
+    />
+  )
+}
+
+// Links and follow mode: one link to the exact view, then the board following an agent through its work.
+export function FollowIllustration() {
+  return (
+    <Steps
+      steps={[
+        {
+          icon: Link2,
+          tone: 'text-wall',
+          title: 'shapewall open --comment 12',
+          text: 'A link to the board, a page, a comment, a screen size or a before and after.',
+        },
+        { icon: Eye, tone: 'text-pin-ink', title: 'Follow agent', text: 'The board flies to each comment your agent takes.' },
+        {
+          icon: Columns2,
+          tone: 'text-merged',
+          title: 'Pricing, before and after',
+          text: 'After the agent recaptures, the screen it changed opens side by side.',
+        },
+      ]}
+    />
+  )
+}
+
+// Shared threads: people talk to each other, and the agent answers when someone asks it to.
+export function TriggersIllustration() {
+  return (
+    <Steps
+      steps={[
+        {
+          icon: MessagesSquare,
+          tone: 'text-slate',
+          title: 'Robin: should the trial be 14 days?',
+          text: 'Kept in the thread for people. The agent does not start.',
+        },
+        {
+          icon: AtSign,
+          tone: 'text-pin-ink',
+          title: 'Mei: @builder make it 14 days',
+          text: 'A mention starts a turn, with the thread so far as context.',
+        },
+        {
+          icon: Send,
+          tone: 'text-wall',
+          title: 'Send to agent',
+          text: 'Or press the button beside Send. Text an agent wrote never starts another turn.',
+        },
+      ]}
+    />
+  )
+}
+
+export function GithubIllustration() {
+  const steps = [
+    { icon: MessageSquare, tone: 'text-pin-ink', title: 'Comment #12 on Pricing', text: 'Make the Plus button stand out more.' },
+    { icon: CircleDot, tone: 'text-wall', title: 'Issue #45 opened', text: 'Comment text, page, element and a screenshot crop.' },
+    { icon: GitPullRequest, tone: 'text-wall', title: 'Pull request #46', text: 'Its description says shapewall:12.' },
+    { icon: GitMerge, tone: 'text-merged', title: 'Merged', text: 'Comment #12 resolved, with the PR as its fix.' },
+  ]
+  return <Steps steps={steps} />
 }
 
 // Notifications: one comment event, fanned out to the channels a board has.

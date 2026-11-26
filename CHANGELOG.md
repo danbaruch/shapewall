@@ -13,26 +13,29 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Board links take `p=<page>`: the board opens flown to that page. Every link Shapewall makes (notifications, GitHub issues,
   usage rows, `share` and `push` answers, `shapewall open`) now comes from one builder; see "Links to the board" in the agent
   workflow docs.
-- MCP `list_comments` filters, on `shapewall mcp`, `mcp --remote` and a hosted server's `/mcp`: `author` (`"me"`, a display name
-  or an `@handle`), `since` and `until` (`"today"`, `"yesterday"`, a date or an ISO date-time, in the machine's time zone or
-  `timeZone`, stated back as `range`), `q`, `pageName` (several matches return candidates), and paging with `limit` (default 50,
-  max 200) and `cursor`. "All comments I left today on the Features page" is one call.
-- MCP `board_link`: a link to the board, a page, a comment, a viewport or a page's before and after. Every comment and page result
-  carries `link`, and `recapture_pages` answers with a compare link per page and viewport.
-- MCP `compare_captures`: a page's current capture against the one before it (or any two versions) as two images, with a pixel
-  diff summary and the compare link. It compares for real on hosted boards too.
-- Token API `GET /api/v1/boards/:board/pages/:page/versions` (scope `read`): a page's capture history with file URLs.
-  `GET /api/v1/project` says which account made the token (`token.createdBy`).
-- The MCP servers share one set of instructions: find work with the filters, check the work in your own browser while you work,
-  `recapture_pages` publishes the final state as the hand-in, `compare_captures`, then reply with the compare link and set `done`.
 - Follow an agent: with the board open beside an agent, it flies to each comment the agent takes, and after the agent recaptures
   that comment's page it opens the before and after of that screen only; other screens the recapture changed wait in a quiet
   "N more screens changed" menu. Start it with **Follow agent** on the canvas (hosted: **Follow &lt;name&gt;**), a
   `follow=<agent id|any>` link, or `shapewall open --follow [ID]`. Moving the canvas or opening another comment stops it. It reads
   only what the viewer already sees: local boards for any tab, hosted boards for members (never share-link guests or public
   viewers). See "Follow an agent" in the agent workflow docs.
-- Agents find the board with no plugin: `shapewall init` writes a short Shapewall section into `AGENTS.md` (and a one-line
-  `CLAUDE.md` that imports it, when there is none), between `<!-- shapewall:start v1 -->` and `<!-- shapewall:end -->`. The first
+
+- MCP `list_comments` filters, on `shapewall mcp`, `mcp --remote` and a hosted server's `/mcp`: `author` (`"me"`, a display name or an
+  `@handle`), `since` and `until` (`"today"`, `"yesterday"`, a date or an ISO date-time, in the machine's time zone or `timeZone`,
+  stated back as `range`), `q`, `pageName` (several matches return candidates), and paging with `limit` (default 50, max 200) and
+  `cursor`. "All comments I left today on the Features page" is one call.
+- MCP `board_link`: a link to the board, a page, a comment, a viewport or a page's before and after, and with `follow` (`"any"` or an
+  agent id) a follow mode link. Every comment and page result carries `link`, and `recapture_pages` answers with a compare link per
+  page and viewport.
+- MCP `compare_captures`: a page's current capture against the one before it (or any two versions) as two images, with a pixel diff
+  summary and the compare link. It compares for real on hosted boards too.
+- The MCP servers share one set of instructions: find work with the filters, check the work in your own browser while you work,
+  `recapture_pages` publishes the final state as the hand-in, `compare_captures`, then reply with the compare link and set `done`.
+- Token API `GET /api/v1/boards/:board/pages/:page/versions` (scope `read`): a page's capture history with file URLs.
+  `GET /api/v1/project` says which account made the token (`token.createdBy`).
+
+- `shapewall init` writes a short Shapewall section into `AGENTS.md` (and a one-line `CLAUDE.md` that imports it, when there is
+  none), between `<!-- shapewall:start v1 -->` and `<!-- shapewall:end -->`, so an agent finds the board with no plugin. The first
   `serve` or `capture` creates the files only in a project with neither `AGENTS.md` nor `CLAUDE.md` and no `"agentDocs"` in its
   config; an existing file is never edited unasked (serve prints a one-line hint instead). `init --no-agent-docs` and
   `shapewall agent docs --remove` write `"agentDocs": false` into the config, so the choice holds in every clone;
@@ -47,58 +50,67 @@ and the project uses [Semantic Versioning](https://semver.org/).
   cache or the project), else `npx -y shapewall@<version>`; on Windows, `cmd /c` for `.cmd` programs except in a committed
   `.mcp.json`. The Codex edit reads its result back and refuses to write if any other line would change. `--remote URL` registers
   `shapewall mcp --remote URL` after `shapewall login`; no token is written.
-- Connected agents follow instruction files: `shapewall agent connect` reads the project's `CLAUDE.md` and `.claude/CLAUDE.md`
-  (its `AGENTS.md` when neither exists) and the connection's own agent config folder's `CLAUDE.md`, and hands them to each
-  session as an appended system prompt, with Shapewall's data rules last. New flags `--instructions all|project|none` and
-  `--agent-config DIR|none` (saved per connection; the folder is never created for you). The terminal, the board's Agents panel
-  and the console's Agents page list the files by name (the console with short sha256 hashes); their text never leaves the
-  machine. A fix reads them from its own copy of the project. They add no powers.
 - A Claude Code and Codex plugin (experimental), from the repository's own marketplaces (`.claude-plugin/marketplace.json`,
   `.agents/plugins/marketplace.json`): the `shapewall` MCP server plus the skills `shapewall`, `shapewall-next`, `shapewall-open`
   and `shapewall-status`, whose text comes from the MCP server's instructions. Its launcher starts the project's own install, else
-  `shapewall` on PATH at the plugin's version or newer (not a folder npm put on PATH for one project or `npx` run), else
-  `npx -y shapewall@<version>`, in the nearest folder with a `shapewall.config.json`; a hosted board through the Claude Code
-  `remote_url` option or `SHAPEWALL_REMOTE`. Not in the npm package. See docs/plugins.md.
+  `shapewall` on PATH at the plugin's version or newer (skipping the same PATH folders as an every-project `agent setup` entry:
+  npx's cache, any `node_modules` folder and the project), else `npx -y shapewall@<version>`, in the nearest folder with a
+  `shapewall.config.json`; a hosted board through the Claude Code `remote_url` option or `SHAPEWALL_REMOTE`. Not in the npm
+  package. See docs/plugins.md and https://shapewall.com/docs/plugins.
+- Connected agents follow instruction files: `shapewall agent connect` reads the project's `CLAUDE.md` and `.claude/CLAUDE.md`
+  (its `AGENTS.md` when neither exists) and the connection's own agent config folder's `CLAUDE.md`, and hands them to each session
+  as an appended system prompt, with Shapewall's data rules last. New flags `--instructions all|project|none` and
+  `--agent-config DIR|none` (saved per connection; the folder is never created for you). The terminal, the board's Agents panel and
+  the console's Agents page list the files by name (the console with short sha256 hashes); their text never leaves the machine. A
+  fix reads them from its own copy of the project. They add no powers.
 - "Shapewall tools for Buzz agents" in docs/buzz.md: the MCP server for Claude Code, Codex and goose agents in Buzz.
+
 - **Send to agent** in the chat composer of a shared thread (the button beside Send, or Ctrl/Cmd+Enter), and **Answer every
   message** in Chat settings for the person who connected the thread's agent (hosted) or the owner (local). One set of trigger
   rules for every path, `src/agent/triggers.js`; see "When an agent answers" in docs/agents.md.
 - `shapewall agent connect --respond thread|mention`: whether this machine honors a shared thread set to answer every message
   ("thread", the default) or answers an @mention and Send to agent only ("mention"), whatever the server says. Saved in
   `agent-policy.json` as `respond`.
-- MCP `board_link` takes `follow` (`"any"` or an agent id) for a follow mode link, on `shapewall mcp` and `mcp --remote`.
-- Hosted migration 22: `chat_threads.respond_mode` (docs/hosted.md, "Migration 22 and rollback").
+- Hosted migration 22: `chat_threads.respond_mode`, for the per-thread setting (docs/hosted.md, "Migration 22 and rollback").
+
+- The plugin guide is a page on the site (https://shapewall.com/docs/plugins), and the Features page and docs index cover agent
+  setup, links and follow, and shared threads.
+- A release text gate (`npm run check:text`, run by CI on the lines a change adds): no en or em dashes, banned phrases or
+  competitor and employer names. Lists in `scripts/release-text.config.json`.
 
 ### Changed
 
-- **Shared threads answer only when asked, like a chat app.** On a hosted board, the board chat and a comment's chat no longer
-  send every message to the agent: a message starts a turn only when it @mentions the agent (`@agent` or its own handle, such as
+- **Shared threads answer only when asked, like a chat app.** On a hosted board, the board chat and a comment's chat no longer send
+  every message to the agent. A message starts a turn only when it @mentions the agent (`@agent` or its own handle, such as
   `@builder`), when someone presses Send to agent or Fix with, or when the person who connected the agent set that thread to
   answer every message. Every other message is kept and shown to the people in the thread, needs no online agent, and is read by
-  the agent with the next message that is for it (only when its author is in the agent's audience, as before). A private chat
-  (New chat) still answers every message. The agent's own machine checks the same rule again, and a thread that changes agents
-  goes back to mentions only. On a local board only you chat on, nothing changes; on a board shared with `--chat`, the board
-  chat and comment threads answer mentions and Send to agent only.
+  the agent with the next message that is for it (only when its author is in the agent's audience, as before). A private chat (New
+  chat) still answers every message. The agent's own machine checks the same rule again, and a thread that changes agents goes
+  back to mentions only. On a local board only you chat on, nothing changes; on a board shared with `--chat`, the board chat and
+  comment threads answer mentions and Send to agent only.
 - Text an agent wrote never starts an agent turn, on any path, even when it @mentions an agent or the thread answers every
   message: `watch --mention` (local and `--remote`) and `GET /api/v1/.../comments?mention=` count only mentions people wrote, a
   comment an agent wrote is never handed out by `watch`, a connected agent's comment pickup skips agent comments, and the starter
   agent uses the same rule. Comments made with the MCP `add_comment` tool, or with `comments add` inside an agent's run, are now
   marked `authorAgent` on local boards too.
-- An agent session that goes on in a thread now also gets, as quoted data, what people wrote there since its last answer.
-- In a shared thread, a message that would wake the agent by its words while it is offline or already answering there is kept,
-  with a note saying so, instead of refused; people can post while an answer runs (local boards too). A mention inside a code
-  span or block, or on a quoted line, does not count. A hosted agent can no longer be named after a member's handle or "Agent".
 - On a local board, comments and replies posted through the HTTP API with the `X-Shapewall-Agent: 1` header (given to every
   `watch --exec` command as `SHAPEWALL_AGENT_HEADER`) are marked as an agent's, and so are `watch`'s own "Needs a person" notes.
-
+- An agent session that goes on in a thread now also gets, as quoted data, what people wrote there since its last answer.
+- In a shared thread, a message that would wake the agent by its words while it is offline or already answering there is kept,
+  with a note saying so, instead of refused; people can post while an answer runs (local boards too). A mention inside a code span
+  or block, or on a quoted line, does not count. A hosted agent can no longer be named after a member's handle or "Agent".
 - MCP `list_comments` returns at most 50 comments per call by default (`total` counts every match; `cursor` gets the next page).
-
 - GitHub issue links to a comment list their keys in the shared order (`?board=&c=&filter=all`); they open the same view.
+- The plugin launcher's PATH rule is now the same code as `agent setup`'s every-project rule: it also skips a PATH folder anywhere
+  under a `node_modules` folder (not only `node_modules/.bin`), checks each folder as written and with symbolic links followed,
+  and compares Windows paths without case.
+- `shapewall mcp --help` says what the server offers, `watch --mention` says that only mentions people wrote count, and
+  `open --help` puts its note on a board that is not running on its own line.
 
 ### Fixed
 
-- `compare_captures` decodes each capture once, a row at a time, and counts the diff on the images as shown (`diff.scale`), not
-  on the full-size captures: two 3840x4166 captures took 1.25 s, now about 0.33 s, and a fraction of the memory.
+- `compare_captures` decodes each capture once, a row at a time, and counts the diff on the images as shown (`diff.scale`), not on
+  the full-size captures: two 3840x4166 captures took 1.25 s, now about 0.33 s, and a fraction of the memory.
 - `compare_captures` no longer labels the wrong image `current` when a capture or push lands while it reads: it asks to be called
   again (local boards re-check the version; hosted current capture URLs carry `?version=` and answer 409 once it moved).
 - `shapewall settings` exits 0 when a second Ctrl-C (or a SIGTERM right after a SIGINT) lands just as its cleanup finishes;
@@ -106,24 +118,23 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Security
 
-- A hosted server's own `/mcp` runs `compare_captures` in its worker threads, one compare at a time per token (another call is
-  refused with a "busy, retry" error), with a 16 megapixel cap read from the PNG header before decoding. It used to decode both
-  captures at full size on the server's event loop, about 2 s and 550 MB per call, for any read token.
-- `compare_captures` refuses a capture over its pixel cap from the PNG header, before decoding it.
+- `compare_captures` refuses a capture over its pixel cap (16 megapixels) from the PNG header, before decoding it. A hosted server's
+  own `/mcp` runs it in worker threads, one compare at a time per token (another call is refused with a "busy, retry" error). It
+  used to decode both captures at full size on the server's event loop, about 2 s and 550 MB per call, for any read token.
 - `author: "me"` on a local board goes by a server-side owner stamp (`byOwner`) on the comments the owner makes, which the request
   cannot set: a paired device or LAN visitor signing with the owner's name no longer counts as "me". Older comments without the
   stamp still match by name, and the answer says so (`author.meMatch: "owner+name"`).
 - Token API: `GET /api/v1/project` names the token maker (`token.createdBy`) only to tokens with the `read` scope. A claim token
-  lists and fetches only the current captures and the versions its dispatched comments were made on; any other read token can
-  read every kept version, as `docs/hosted.md` now says.
+  lists and fetches only the current captures and the versions its dispatched comments were made on; any other read token can read
+  every kept version, as `docs/hosted.md` now says.
 - Connected agents (`shapewall agent connect`, chat and fix sessions) no longer load or write Claude Code's auto memory. In 1.2.0
-  and earlier these hardened sessions still loaded it, so notes Claude Code kept for the project could shape answers that leave
-  the machine. It is now off twice over: `autoMemoryEnabled: false` in the session's flag settings and
+  and earlier these hardened sessions still loaded it, so notes Claude Code kept for the project could shape answers that leave the
+  machine. It is now off twice over: `autoMemoryEnabled: false` in the session's flag settings and
   `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` in its environment, checked with claude-agent-acp 0.93.0 and 0.106.0
   (docs/agent-hardening.md).
-- `CLAUDE.md`, `AGENTS.md`, `CLAUDE.local.md` and `GEMINI.md` are now files that run something, and so is every file the
-  project's instruction files import: a connected agent's fix cannot edit them unless the machine names the file with
-  `--allow-path`, the edit is always asked on the board, and such a fix is never pushed.
+- `CLAUDE.md`, `AGENTS.md`, `CLAUDE.local.md` and `GEMINI.md` are now files that run something, and so is every file the project's
+  instruction files import: a connected agent's fix cannot edit them unless the machine names the file with `--allow-path`, the
+  edit is always asked on the board, and such a fix is never pushed.
 - Instruction file imports never reach `CLAUDE.local.md`, a dotfile or a dot folder (`.env`, `.git`), and the board is told
   instruction file names only (sizes and hashes stay in the console).
 

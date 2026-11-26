@@ -225,6 +225,7 @@ shapewall agent docs [--write | --remove | --print]
 shapewall agent connect --remote URL [--agent claude|ID] [--name NAME] [--as NAME]
                         [--audience owner|server] [--approvals none|owner|admins] [--auto none|edits|commands|edits,commands]
                         [--allow-path FILE] [--base BRANCH] [--git-remote NAME]
+                        [--instructions all|project|none] [--agent-config DIR|none] [--respond thread|mention]
                         [--takeover] [--concurrency N] [--token-file FILE]
                         [--project SLUG [--workspace NAME] [--used-by owner|trusted] [--icon NAME] [--tint NAME]]
 shapewall agent sandbox build-image [--runtime podman|docker] [--image NAME]
@@ -290,6 +291,17 @@ The flags that go with it, each saved for the connection:
   to tracked files refuses the fix, because the fix would silently leave them out.
 - `--git-remote NAME|none`: where a finished fix is pushed (default `origin`). A fix that touches dependency manifests or CI
   config is not pushed. A pull request is opened when [GitHub connect](/docs/github) is set up on this machine.
+- `--instructions all|project|none`: the instruction files each session gets as an appended system prompt. `project` is the
+  project's `CLAUDE.md` and `.claude/CLAUDE.md` (its `AGENTS.md` when neither exists); `all` (the default) adds the `CLAUDE.md` in
+  the connection's agent config folder. Never `~/.claude` or `CLAUDE.local.md`. The board shows the file names, never their text,
+  and they add no powers.
+- `--agent-config DIR|none`: that folder (default `agent-config/<--as name>` beside `agent-policy.json`, read only when it exists;
+  Shapewall never creates it). It must be outside the project.
+- `--respond thread|mention`: in a shared thread the agent answers an @mention of it and **Send to agent**. `thread` (the
+  default) also answers every message of a thread the person who connected it set to answer everything; `mention` never does,
+  whatever the server says. See [when an agent answers](/docs/chat#when-an-agent-answers).
+
+Connected Claude Code sessions never load or write Claude Code's auto memory.
 
 `--allow-command` is in the help text and is not available for Claude Code in this release. Started with its shell tool, Claude
 Code runs commands it takes to be read-only (`ls`, `cat`) without asking anyone, and those can read outside the project. So a fix
@@ -370,7 +382,8 @@ Hands each new open comment to a coding agent, until you press Ctrl+C. With `--e
 comment JSON on stdin (no shell is involved); without it, prints one JSON line per comment and marks it `queued`, so it is never
 handed out twice. Whatever reads those lines moves each one on (`shapewall comments status ID working`, then `done` or
 `needs-human`), or `status ID clear` hands it out again; `--no-claim` marks nothing. `--mention agent` hands out only comments
-that tag `@agent`, so people can discuss a comment first and tag the agent when it is ready. A command that exits `0` must leave a
+that tag `@agent`, so people can discuss a comment first and tag the agent when it is ready. Only mentions people wrote count, and a
+comment an agent wrote is never handed out, so agents cannot set each other off. A command that exits `0` must leave a
 word: a reply (`shapewall comments reply`) makes the comment `done`, a status it sets itself is kept, and a silent exit `0` makes it
 `needs-human` with a note, since nothing says what the agent did. `--no-claim` hands out every open
 comment once without claiming it (no agent status, no lock), to run beside another watcher. `--recapture` recaptures the comment's
@@ -403,7 +416,11 @@ JSON. The token is read from the environment only, or, when neither variable is 
 shapewall mcp [--read-only] [--no-capture]
 ```
 
-A Model Context Protocol server on stdio, for agents that prefer tools over shell commands. `--read-only` offers only the reading
+A Model Context Protocol server on stdio, for agents that prefer tools over shell commands. `shapewall agent setup` registers it
+with Claude Code and Codex, or install the [Claude Code and Codex plugin](/docs/plugins). `list_comments` filters by author
+(`"me"`), date (`since`, `until`, `"today"`), text and page name, and pages through results 50 at a time; `board_link` gives a link
+to a page, a comment or a before and after; `compare_captures` shows a page's current capture beside the one before it, with a
+pixel diff. `--read-only` offers only the reading
 tools; `--no-capture` drops `recapture_pages`. With `--remote URL` (and `--board ID` to pick the default board) it works on a
 hosted board. Started in a project folder (or with `--config FILE`) and with a token that has the `push` scope, `mcp --remote`
 also offers `recapture_pages`: it captures the pages on your machine, then pushes only those pages to the hosted board.
@@ -718,7 +735,8 @@ Commands
       --new-only            skip comments that exist when the watch starts
       --once                hand out what is open now, wait for the commands, exit
       --timeout DURATION    stop a command after this long, e.g. 90s, 30m or 2h (default 60m; a number alone is minutes)
-      --mention NAME        only comments that mention @NAME, e.g. --mention agent
+      --mention NAME        only comments that mention @NAME, e.g. --mention agent (mentions people wrote;
+                            text an agent wrote never counts)
       --no-claim            hand out every open comment once without claiming it (no agent status, beside other watchers)
                             a command that exits 0 must reply or set a status itself, else the
                             comment becomes needs-human (https://shapewall.com/docs/agent-workflow)
@@ -848,9 +866,10 @@ Commands
       --print               print the link only, do not open a browser
       --json                { url, board, page, comment, viewport, compare, follow, running }; opens nothing
       --remote URL          a hosted project instead of the local board (with --token-file, --include-guests)
-                            a local board that is not running: prints the link and says to run shapewall serve
-  mcp                       MCP server on stdio for coding agents
-      --read-only | --no-capture
+                            When the local board is not running, it prints the link and says to run shapewall serve
+  mcp                       MCP server on stdio for coding agents: find comments, reply, recapture, compare
+                            before and after, and links to the board. shapewall agent setup registers it
+      --read-only | --no-capture   only the reading tools | everything but recapture_pages
   notify list               notification channels, their events and what each still needs   [--json]
   notify test CHANNEL       send a test message to one channel   [--to EMAIL for email channels]
   doctor                    check Node, the browser, the config, the port, the output folder, notifications and chat

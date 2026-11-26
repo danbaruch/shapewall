@@ -184,6 +184,16 @@ export const DOC_GROUPS = [
           'Exact commands to connect Claude Code, Codex, goose, Ollama and chat bots to a Shapewall board: MCP, watch, the board chat and the event stream.',
       },
       {
+        path: '/docs/plugins',
+        file: 'plugins',
+        repo: 'plugins',
+        nav: 'Claude Code and Codex plugin',
+        title: 'Claude Code and Codex plugin for Shapewall | Shapewall',
+        description:
+          'Experimental: the plugin for Claude Code and Codex adds the Shapewall MCP server and skills that take the next comment, open the board and show status.',
+        og: 'docs-agent-recipes',
+      },
+      {
         path: '/docs/chat',
         file: 'chat',
         repo: 'agents',
