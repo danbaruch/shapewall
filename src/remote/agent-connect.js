@@ -47,7 +47,8 @@ import {
 } from './agent-policy-file.js'
 import { createRemote, remoteOrigin } from './remote.js'
 import { safeOut, terminalSafe } from './terminal.js'
-import { hostPlatform, markBrowserProfile } from '../agent/capabilities.js'
+import { hostPlatform, machineView, markBrowserProfile } from '../agent/capabilities.js'
+import { policyExtensions } from '../agent/agent-config-folder.js'
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version
 const TOKEN_RE = /^swp_[A-Za-z0-9_-]{43}$/
@@ -217,6 +218,33 @@ export function agentConfigFor(policy, slug, { env = process.env, projectDir }) 
       `The agent config folder ${dir} is inside the project (or holds it): a fix's copy of the project could change it. Pick a folder outside the project (--agent-config DIR).`,
     )
   return { dir: real(dir) }
+}
+
+// What `agent connect` says about the agent config folder's extensions.
+export function extensionLines({ found, names, error }, policy) {
+  if (error) return [`Extensions: none. ${error}`]
+  if (!found) return []
+  const lines = []
+  if (!names.skills.length && !names.servers.length)
+    lines.push(`Extensions: none in ${found.dir} (skills/NAME/SKILL.md, MCP servers in .claude.json).`)
+  else {
+    const what = [
+      names.skills.length ? `skills ${names.skills.join(', ')}` : null,
+      names.servers.length ? `MCP servers ${names.servers.join(', ')}` : null,
+    ].filter(Boolean)
+    lines.push(`Extensions from ${found.dir}: ${what.join('; ')}. Only on trusted turns of threads that never carried outside text.`)
+    const m = machineView(policy)
+    const allowed = m.allowTool.filter((tool) => names.servers.some((server) => tool.startsWith(`mcp__${server}__`)))
+    if (names.servers.length)
+      lines.push(
+        allowed.length
+          ? `Tools it may call: ${allowed.join(', ')}. Every other tool of those servers is refused.`
+          : 'None of their tools is allowed yet: shapewall agent set allow-tool mcp__SERVER__TOOL (exact names).',
+      )
+    if (!m.extensionsFor.length) lines.push('Extensions are off for every turn: shapewall agent set extensions-for owner')
+  }
+  for (const item of found.skipped) lines.push(`Not loaded: ${item.what} (${item.why}).`)
+  return lines
 }
 
 export function policyChanges(flags, saved, kind = null, { cwd = process.cwd(), env = process.env } = {}) {
@@ -457,6 +485,14 @@ export async function agentConnect(
     )
   const instructionsNote = createInstructionsNote(instructionsSummary(loaded))
 
+  // ---- Extensions (src/agent/agent-config-folder.js) ----
+  // Skills and MCP servers, only from a folder this machine names itself
+  // (--agent-config DIR), never the default one, ~/.claude or the checkout.
+  // Read once here; each turn gets them only when its capabilities say so
+  // (a trusted turn on a thread that never carried outside text).
+  const extensions = policyExtensions(policy.agentConfig, { projectDir: config.dir, outputDir: config.outputDir, env })
+  for (const line of extensionLines(extensions, policy)) log(terminalSafe(line))
+
   // ---- Can a session be opened at all? ----
   // Asked of the agent now, the way a question from the board would start it
   // (no prompt is sent, so nothing is spent): an adapter that cannot open the
@@ -548,6 +584,7 @@ export async function agentConnect(
       instructions: instructionsNote,
       // One platform answer (the sandbox probe) for the hello and every turn.
       capabilities: { config, platform: hostPlatform() },
+      extensions: extensions.found ? extensions : null,
       // Who "the owner" is on this machine: the approving account (saved with the token),
       // else the first handle the server names at hello (agent-link.js pins it).
       owner: ownerHandle,

@@ -52,7 +52,9 @@ const EXT_NAME_RE = /^[A-Za-z0-9_-]{1,64}$/
 export function cleanExtensionNames(raw) {
   const names = (list) =>
     Array.isArray(list) ? [...new Set(list.filter((item) => typeof item === 'string' && EXT_NAME_RE.test(item)))].slice(0, 40) : []
-  return raw && typeof raw === 'object' && !Array.isArray(raw) ? { skills: names(raw.skills), servers: names(raw.servers) } : { skills: [], servers: [] }
+  return raw && typeof raw === 'object' && !Array.isArray(raw)
+    ? { skills: names(raw.skills), servers: names(raw.servers) }
+    : { skills: [], servers: [] }
 }
 const HOSTED_PATHS = ['hosted-chat', 'hosted-fix', 'pickup']
 
@@ -1016,7 +1018,8 @@ export function resolveCapabilities({
 // The ceiling is for a clean thread: a trust block without the thread's
 // state is read as one with nothing in its history yet.
 export function resolveCeiling(tier, { path: where, machine, config = null, platform = null, trust = null, extensions = null } = {}) {
-  const given = trust && typeof trust === 'object' && trust.thread === undefined ? { ...trust, thread: { tainted: false, authors: [] } } : trust
+  const given =
+    trust && typeof trust === 'object' && trust.thread === undefined ? { ...trust, thread: { tainted: false, authors: [] } } : trust
   return resolveForTier(TIERS.includes(tier) ? tier : 'open', {
     path: where,
     machine,

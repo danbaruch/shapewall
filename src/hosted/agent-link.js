@@ -767,16 +767,17 @@ export function mountAgentLink(
   }
 
   // Whose comment text a built job carries (thread trust, src/agent/thread-trust.js):
-  // the thread's own comment and its replies, the open comments listed, and
-  // every comment a mention stands for. A comment by a member is a `person`
-  // event with their user id; one by a token, an import or nobody known is
-  // `outside`. Share link guests' text never enters a job.
+  // the thread's own comment and its replies, and every comment a mention
+  // stands for. A comment by a member is a `person` event with their user
+  // id; one by a token, an import or nobody known is `outside`. Share link
+  // guests' text never enters a job. The board's open comments listed in
+  // the job are left out here: the machine drops them from every turn above
+  // "open" (src/remote/agent-link.js), and only such a turn gets extensions.
   function jobTrustEvents(req, ctx, row, job) {
     const events = []
     const ids = new Set()
     const context = job?.context || {}
     if (context.comment?.id) ids.add(Number(context.comment.id))
-    for (const item of Array.isArray(context.comments) ? context.comments : []) ids.add(Number(item.id))
     for (const message of Array.isArray(job?.messages) ? job.messages : []) {
       for (const mention of Array.isArray(message.mentions) ? message.mentions : []) {
         const data = mention.data || {}

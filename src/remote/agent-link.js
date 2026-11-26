@@ -49,6 +49,7 @@ import { createThreadRelay, startExecSession } from '../agent/exec-mcp.js'
 import { commandReadDenied } from '../agent/local-tools.js'
 import { loadConfig } from '../config.js'
 import { capabilitySummary, toPrompt } from '../agent/capability-render.js'
+import { turnExtensions } from '../agent/agent-config-folder.js'
 import { FixRefusal, dropFixFolder, dropHeld, finishFix, heldDiff, heldSummary, prepareFix, pushFix, readHeld } from './agent-fix.js'
 import { JobError, TURN_ID_RE, cleanJob, jobConversation } from './agent-job.js'
 import { RemoteError, badTokenMessage, readBounded } from './remote.js'
@@ -231,6 +232,10 @@ export async function runAgentLink({
   owner = null,
   // Called once with the first handle the server names, when none was given.
   onOwner = () => {},
+  // The agent config folder's extensions (agent-config-folder.js
+  // policyExtensions: { found, names }), read at connect; null: none. Only a
+  // turn whose capabilities turn them on gets them.
+  extensions = null,
 }) {
   const limit = { ...LINK_DEFAULTS, ...limits }
   // One answer (the sandbox probe) for the hello summary and every turn.
@@ -271,16 +276,28 @@ export async function runAgentLink({
   const clean = (value) => redact(value, token)
   // A turn's trust block with "owner" bound to this machine's own idea of who
   // connected it (ownerHandle), never the server's word alone.
+  const bindOwner = (author) => ({ ...author, owner: author?.owner === true && Boolean(ownerHandle) && author.handle === ownerHandle })
   const boundTrust = (trust) =>
     trust
       ? {
           ...trust,
-          authors: trust.authors.map((author) => ({
-            ...author,
-            owner: author.owner && Boolean(ownerHandle) && author.handle === ownerHandle,
-          })),
+          authors: trust.authors.map(bindOwner),
+          // The thread's trust state (thread-trust.js), its authors bound the same way.
+          ...(trust.thread && typeof trust.thread === 'object' && Array.isArray(trust.thread.authors)
+            ? { thread: { ...trust.thread, authors: trust.thread.authors.map(bindOwner) } }
+            : {}),
         }
       : null
+  // The extensions of one turn (null: off for it), the plugin kept per thread.
+  const extensionsOf = (caps, job, env) => {
+    if (!extensions?.found) return null
+    try {
+      return turnExtensions(caps, extensions.found, JSON.stringify([origin, agent?.id || null, job.turn.board, job.turn.thread]), { env })
+    } catch (error) {
+      log(`agent extensions: ${error.message}`)
+      return null
+    }
+  }
   // This connection, as the server said at hello: a held fix is bound to it (agent-fix.js readHeld).
   const ownerOf = () => ({ origin, workspace: agent?.workspace?.id, project: agent?.project?.id, agent: agent?.id })
   // The checkout a chat or comment turn's read-style commands and browser use (none: neither).
@@ -684,6 +701,7 @@ export async function runAgentLink({
             server: job.narrowing,
             config,
             platform,
+            extensions: extensions?.names || null,
           })
         const caps = resolveNow()
         // The other open comments on the board are other people's text, not in
@@ -743,6 +761,7 @@ export async function runAgentLink({
           })
         fixTurn = {
           capabilities: toPrompt(caps),
+          extensions: extensionsOf(caps, job, fix.env),
           workdir: exec ? { ...prepared.workdir, mcpServers: exec.servers } : prepared.workdir,
           gate: {
             // Asked on the board, unless this machine and the server's rule both say "allow".
@@ -779,6 +798,7 @@ export async function runAgentLink({
               server: job.narrowing,
               config,
               platform,
+              extensions: extensions?.names || null,
             }),
           )
         const caps = resolveNow()
@@ -786,7 +806,7 @@ export async function runAgentLink({
           job.context.commentsLeft += job.context.comments.length
           job.context.comments = []
         }
-        fixTurn = { capabilities: toPrompt(caps) }
+        fixTurn = { capabilities: toPrompt(caps), extensions: extensionsOf(caps, job, answerEnv) }
         if (answerConfig?.dir) {
           const checkoutConfig = () => {
             if (!answerConfig.file) return answerConfig
@@ -1203,6 +1223,8 @@ export async function runAgentLink({
         config: capabilities?.config || fix?.config || null,
         // The same object every turn is resolved with.
         platform,
+        // What the agent config folder holds: only each line state reaches the server, never the names.
+        extensions: extensions?.names || null,
       }),
       // Counts up with every hello of this process: the server keeps the newest list.
       seq: (helloSeq += 1),

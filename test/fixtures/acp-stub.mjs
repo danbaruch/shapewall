@@ -20,6 +20,9 @@
 //                          "exec TOOL ok|error: TEXT", or "exec: no exec tools in this session";
 //                          [[stub-exec:TOOL]] anywhere in the prompt does the same
 //   "pid"               -> its process id
+//   "extcall TOOL [FIRST]" -> asks session/request_permission for TOOL (an extension's MCP tool); with
+//                          FIRST, a completed tool call titled FIRST comes before it (a board tool, say).
+//                          Then "extcall TOOL: OPTION" (or "cancelled")
 //   "cwd"               -> its working folder, what is in it, and the session cwd
 //   "runenv N=V CMD..."  -> like run, with env for the terminal
 //   "echo"              -> every prompt block it got, as JSON
@@ -460,6 +463,23 @@ async function prompt({ sessionId, prompt: blocks }) {
   }
   if (last === 'cwd') {
     say(sessionId, JSON.stringify({ cwd: process.cwd(), files: fs.readdirSync(process.cwd()), sessionCwd }))
+    return 'end_turn'
+  }
+  if (word === 'extcall') {
+    const [tool, first] = rest
+    if (first) {
+      update(sessionId, { sessionUpdate: 'tool_call', toolCallId: 'call-board', title: first, kind: 'other', status: 'pending' })
+      update(sessionId, { sessionUpdate: 'tool_call_update', toolCallId: 'call-board', status: 'completed' })
+    }
+    const result = await request('session/request_permission', {
+      sessionId,
+      toolCall: { toolCallId: 'call-ext', title: tool, kind: 'other', rawInput: {} },
+      options: [
+        { optionId: 'allow', name: 'Allow', kind: 'allow_once' },
+        { optionId: 'reject', name: 'Reject', kind: 'reject_once' },
+      ],
+    })
+    say(sessionId, 'extcall ' + tool + ': ' + (result.outcome.outcome === 'selected' ? result.outcome.optionId : 'cancelled'))
     return 'end_turn'
   }
   if (last === 'pid') {

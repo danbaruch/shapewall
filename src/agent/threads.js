@@ -100,7 +100,11 @@ export function readThread(config, boardId, threadId) {
   if (data?.archived === true) thread.archived = true
   thread.branches = cleanBranches(data?.branches)
   thread.trust =
-    data?.trust !== undefined ? readThreadTrust(data.trust) : thread.messages.length ? { tainted: true, authors: [] } : readThreadTrust(null)
+    data?.trust !== undefined
+      ? readThreadTrust(data.trust)
+      : thread.messages.length
+        ? { tainted: true, authors: [] }
+        : readThreadTrust(null)
   return thread
 }
 

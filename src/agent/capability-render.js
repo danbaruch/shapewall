@@ -291,7 +291,7 @@ export function toPrompt(caps, { as = null } = {}) {
 // per tier, for chat and for Fix with, as line states only (no commands,
 // handles or paths). The board shows it; it never decides anything there.
 export const SUMMARY_PATHS = { chat: 'hosted-chat', fix: 'hosted-fix' }
-export function capabilitySummary({ machine, config = null, platform = null }) {
+export function capabilitySummary({ machine, config = null, platform = null, extensions = null }) {
   const m = machineView(machine)
   const team = m.trustTeam === 'members' ? 'members' : Array.isArray(m.trustTeam) ? 'named' : 'none'
   // browserNoSandbox: the browser on solo and team turns may start without
@@ -305,7 +305,14 @@ export function capabilitySummary({ machine, config = null, platform = null }) {
         tier === 'team' && team === 'none'
           ? null
           : lineStates(
-              resolveCeiling(tier, { path: where, machine, config, platform, trust: { authors: [{ owner: true }], guests: false } }),
+              resolveCeiling(tier, {
+                path: where,
+                machine,
+                config,
+                platform,
+                trust: { authors: [{ owner: true }], guests: false },
+                extensions,
+              }),
             )
     }
   }

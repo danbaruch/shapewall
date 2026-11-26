@@ -757,3 +757,17 @@ test('the settings page gets its theme script and icon from an install inside a 
   assert.equal((await request(port, 'GET', '/favicon.svg')).status, 200)
   assert.equal((await request(port, 'GET', '/')).status, 200)
 })
+
+test('a save from the board never sets the agent config folder, and keeps the one the machine named', async (t) => {
+  const b = await setup(t)
+  saveUserAgentEntry(b.config.dir, { backend: 'acp', acpCommand: 'claude-agent-acp', agentConfig: '/home/me/agent-config/site' }, b.env)
+  const saved = await b.call('POST', settings, {
+    settings: { backend: 'acp', acpCommand: 'claude-agent-acp', vision: false, agentConfig: '/home/me/planted' },
+  })
+  assert.equal(saved.status, 200, saved.text)
+  assert.equal(userAgentEntry(b.config.dir, b.env).entry.agentConfig, '/home/me/agent-config/site')
+  // None saved: a save from the board does not make one either.
+  saveUserAgentEntry(b.config.dir, { backend: 'acp', acpCommand: 'claude-agent-acp' }, b.env)
+  await b.call('POST', settings, { settings: { backend: 'acp', acpCommand: 'claude-agent-acp', agentConfig: '/home/me/planted' } })
+  assert.equal(userAgentEntry(b.config.dir, b.env).entry.agentConfig, undefined)
+})

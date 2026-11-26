@@ -164,7 +164,7 @@ export function compactCard(card, { path = 'fix', tier }) {
 // A local board's card: the resolved object itself (toPanel), for its
 // owner (solo) and for everyone else on it (open). `machine`: the local
 // machine policy (user-settings.js localMachinePolicy).
-export function localCard({ machine, config = null, platform = hostPlatform() }) {
+export function localCard({ machine, config = null, platform = hostPlatform(), extensions = null }) {
   return {
     v: 1,
     team: 'none',
@@ -177,7 +177,14 @@ export function localCard({ machine, config = null, platform = hostPlatform() })
           label: TIER_LABELS[tier],
           limitedTo: null,
           lines: toPanel(
-            resolveCeiling(tier, { path: 'local-chat', machine, config, platform, trust: { authors: [{ owner: true }], guests: false } }),
+            resolveCeiling(tier, {
+              path: 'local-chat',
+              machine,
+              config,
+              platform,
+              trust: { authors: [{ owner: true }], guests: false },
+              extensions,
+            }),
           ).lines,
         })),
       },

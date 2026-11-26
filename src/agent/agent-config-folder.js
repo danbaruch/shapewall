@@ -137,7 +137,12 @@ function readOwnFile(file, max) {
 function skillDescription(text) {
   const match = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)
   const line = match ? /^description:\s*(.+)$/m.exec(match[1]) : null
-  return line ? line[1].trim().replace(/^["']|["']$/g, '').slice(0, 300) : null
+  return line
+    ? line[1]
+        .trim()
+        .replace(/^["']|["']$/g, '')
+        .slice(0, 300)
+    : null
 }
 
 // The files of one skill folder, walked without following links: [{ rel, size }].
@@ -268,7 +273,8 @@ export function readExtensions(dir) {
         if (read.why) skipped.push({ what: `server ${name}`, why: read.why })
         else {
           servers.push(read.server)
-          for (const key of read.dropped) skipped.push({ what: `server ${name}: env ${key}`, why: 'SHAPEWALL_ variables never reach an extension' })
+          for (const key of read.dropped)
+            skipped.push({ what: `server ${name}: env ${key}`, why: 'SHAPEWALL_ variables never reach an extension' })
         }
       }
     if (data?.projects) skipped.push({ what: '.claude.json projects', why: 'per-project servers are never loaded (user scope only)' })
@@ -318,7 +324,8 @@ export function buildExtensionPlugin(found, key, { env = process.env } = {}) {
   fs.chmodSync(folder, 0o700)
   fs.writeFileSync(
     path.join(plugin, '.claude-plugin', 'plugin.json'),
-    JSON.stringify({ name: 'shapewall-extensions', version: '1.0.0', description: "Skills from this agent's config folder" }, null, 2) + '\n',
+    JSON.stringify({ name: 'shapewall-extensions', version: '1.0.0', description: "Skills from this agent's config folder" }, null, 2) +
+      '\n',
     { mode: 0o600 },
   )
   for (const skill of found.skills) {
@@ -395,6 +402,11 @@ export function extensionSession(found, plugin, allow, { env = process.env } = {
     // Only tools of a server the folder has: an allowed name of another server means nothing here.
     allow: [...new Set(allow || [])].filter((tool) => serverOfTool(tool, names) !== null),
   }
-  session.key = JSON.stringify([session.servers.map((item) => [item.name, item.command, item.args]), session.plugin, session.skills, session.allow])
+  session.key = JSON.stringify([
+    session.servers.map((item) => [item.name, item.command, item.args]),
+    session.plugin,
+    session.skills,
+    session.allow,
+  ])
   return session
 }
