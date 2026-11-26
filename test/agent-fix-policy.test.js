@@ -6,6 +6,7 @@
 // hello may claim (src/hosted/agent-link.js cleanHello), the summary of a
 // fix as the server keeps it (src/hosted/chat-frames.js cleanSummary), and
 // what a session that takes edits is started with (src/agent/backends/acp.js).
+import { CAPABILITY_DEFAULTS, CAPABILITY_NARROWEST } from '../src/agent/capabilities.js'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -190,6 +191,8 @@ test('the policy file: a value it does not know reads as the narrowest setting, 
     instructions: 'all',
     agentConfig: null,
     respond: 'thread',
+    // Version 2: what each trust tier may do (src/agent/capabilities.js).
+    ...CAPABILITY_DEFAULTS,
   }
   const read = (entry) => {
     const warnings = []
@@ -243,6 +246,7 @@ test('the policy file: a value it does not know reads as the narrowest setting, 
     instructions: 'none',
     agentConfig: 'none',
     respond: 'mention',
+    ...CAPABILITY_NARROWEST,
   })
   // A respond value it does not know: mentions only.
   for (const respond of ['always', 'Thread', '', 1]) {

@@ -495,7 +495,10 @@ function resolveForTier(tier, { path: where, machine, server, config, platform, 
   // Hosted paths need a person to answer a card; a local board's owner answers its own.
   const approvals = local || starter ? 'owner' : m.approvals
   const cards = known && approvals !== 'none'
-  if (!known) off('who', 'unknown_path')
+  if (!known) {
+    off('who', 'unknown_path')
+    off('read', 'unknown_path')
+  }
 
   const instructions = { on: known && m.instructions !== 'none', files: known ? m.instructions : 'none' }
   if (!instructions.on) off('instructions', known ? 'machine_instructions_none' : 'unknown_path')
@@ -569,11 +572,13 @@ function resolveForTier(tier, { path: where, machine, server, config, platform, 
   else if (!serverBrowser) off('browser', 'server_browser_off')
   else if (chatOnly && tier !== 'solo') off('browser', 'chat_not_solo')
   else {
-    const loggedIn = (m.browserAuth !== null || m.browserProfile !== null) && (tier === 'solo' || (tier === 'team' && m.browserProfileTeam))
-    if ((m.browserAuth !== null || m.browserProfile !== null) && !loggedIn) off('browser', 'login_not_this_tier')
-    // A browser with a login gets only the app's own addresses and the
-    // machine's list, not origins a committed config adds.
-    const extra = loggedIn ? [] : (config?.agent?.browser?.allow || []).map(cleanOrigin).filter(Boolean)
+    const login = m.browserAuth !== null || m.browserProfile !== null
+    const loggedIn = login && (tier === 'solo' || (tier === 'team' && m.browserProfileTeam))
+    if (login && !loggedIn) off('browser', 'login_not_this_tier')
+    // On a machine with a login for the browser, it only ever gets the app's
+    // own addresses and the machine's list, not origins a committed config
+    // adds (on every tier, so a lower tier never gets a longer list).
+    const extra = login ? [] : (config?.agent?.browser?.allow || []).map(cleanOrigin).filter(Boolean)
     browser = {
       on: true,
       allow: uniq([...configOrigins(config), ...extra, ...m.browserAllow]),
