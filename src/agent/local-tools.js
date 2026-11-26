@@ -28,17 +28,57 @@ import { toPrompt } from './capability-render.js'
 import { startExecSession } from './exec-mcp.js'
 import { localMachinePolicy, userAgentEntry } from './user-settings.js'
 import { authFiles, loadConfig } from '../config.js'
+import { policyExtensions, turnExtensions } from './agent-config-folder.js'
+import { agentSettings } from './config.js'
+import { acpAgentKind } from './acp/command.js'
 
 let platformOnce = null
 // One sandbox probe per process: every turn and the capability card read the same answer.
 export const localPlatform = () => (platformOnce ||= hostPlatform())
 
-// The trust block of a local turn (capabilities.js cleanTrust).
-export function localTrust({ owner, shared = false, comment = false }) {
+// The trust block of a local turn (capabilities.js cleanTrust). `thread`:
+// the thread's trust state (threads.js `trust`, thread-trust.js): only the
+// owner's text ever ("owner"), or tainted; missing reads as tainted.
+export function localTrust({ owner, shared = false, comment = false, thread = null }) {
   const authors = [{ handle: null, owner: owner === true, member: false }]
   // A comment thread on a board others can reach: its text may be theirs.
   if (comment && shared) authors.push({ handle: null, owner: false, member: false })
-  return { authors, guests: false }
+  const state = thread && typeof thread === 'object' ? thread : { tainted: true, authors: [] }
+  return {
+    authors,
+    guests: false,
+    thread: {
+      tainted: state.tainted !== false,
+      authors: (Array.isArray(state.authors) ? state.authors : []).map((id) => ({ handle: null, owner: id === 'owner', member: false })),
+    },
+  }
+}
+
+// The agent config folder this project's agent has (user-settings.js
+// agentConfig), checked and read now: { found, names, error }.
+export const localExtensions = (config, env = process.env) =>
+  policyExtensions(localMachinePolicy(config.dir ? userAgentEntry(config.dir, env).entry : null).agentConfig, {
+    projectDir: config.dir,
+    outputDir: config.outputDir,
+    env,
+  })
+
+// The ACP agent a local board's chat runs, as the resolver reads it
+// (capabilities.js `agent`): its kind (only Claude Code takes extensions)
+// and whether its session is the restricted one (agent.localSession, which
+// is the default; "own" keeps the agent's own full session). `settings`:
+// agentSettings() for the profile the chat uses.
+export const localAgentOf = (config, settings) => ({
+  kind: settings?.backend === 'acp' ? acpAgentKind(settings.acp?.argv || []) : null,
+  hardened: config.agent?.localSession !== 'own',
+})
+// The same for the board's default agent: what its card and `agent status` show.
+export function localAgent(config, env = process.env, { acp = null } = {}) {
+  try {
+    return localAgentOf(config, agentSettings(config, env, { acp }))
+  } catch {
+    return { kind: null, hardened: false }
+  }
 }
 
 // The folder a local approval record lives in: the board's project, never the server.
@@ -88,17 +128,33 @@ export function commandReadDenied(config, root) {
 
 // resolveCapabilities for one local turn. `inPlace`: edits land in the
 // checkout (not branch mode), which is what the agent's Edit tools do.
-export function localCapabilities({ config, env = process.env, acp, owner, shared, comment, inPlace, platform = localPlatform() }) {
+export function localCapabilities({
+  config,
+  env = process.env,
+  acp,
+  owner,
+  shared,
+  comment,
+  inPlace,
+  thread = null,
+  extensions = null,
+  agent = null,
+  extensionsFailed = false,
+  platform = localPlatform(),
+}) {
   const machine = localMachinePolicy(config.dir ? userAgentEntry(config.dir, env).entry : null)
   const view = inPlace ? { ...config, agent: { ...(config.agent || {}), fixIn: 'checkout' } } : config
   return resolveCapabilities({
     path: acp ? 'local-chat' : 'local-endpoint',
-    trust: localTrust({ owner, shared, comment }),
+    trust: localTrust({ owner, shared, comment, thread }),
     audience: 'owner',
     machine,
     server: null,
     config: view,
     platform,
+    extensions,
+    agent,
+    extensionsFailed,
   })
 }
 
@@ -120,10 +176,46 @@ export async function startLocalTools({
   // false: an endpoint backend calls the host in process.
   serve = true,
   platform = localPlatform(),
+  // The thread's trust state (threads.js `trust`): extensions only while it is clean.
+  thread = null,
+  // The thread's key, for the extension plugin Shapewall builds.
+  key = null,
+  // The ACP agent the turn runs (localAgentOf): extensions for Claude Code's restricted session only.
+  agent = null,
   log = () => {},
 }) {
-  const resolve = (current) => localCapabilities({ config: current, env, acp, owner, shared, comment, inPlace, platform })
-  const caps = resolve(config)
+  const folder = acp ? localExtensions(config, env) : { found: null, names: null, error: null }
+  if (folder.error) log(`agent extensions: ${folder.error}`)
+  let failed = false
+  const resolve = (current) =>
+    localCapabilities({
+      config: current,
+      env,
+      acp,
+      owner,
+      shared,
+      comment,
+      inPlace,
+      thread,
+      extensions: folder.names,
+      agent,
+      extensionsFailed: failed,
+      platform,
+    })
+  let caps = resolve(config)
+  let extensions = null
+  try {
+    extensions = turnExtensions(caps, folder.found, JSON.stringify(['local', config.dir, key]), { env })
+  } catch (error) {
+    log(`agent extensions: ${error.message}`)
+    extensions = null
+  }
+  // On, but nothing to give the session (the plugin could not be built):
+  // the prompt says off, as the session has them.
+  if (caps.extensions.on && !extensions) {
+    failed = true
+    caps = resolve(config)
+  }
   const prompt = toPrompt(caps)
   // `commands` come from the checkout's config, read again for each check.
   const fresh = () => {
@@ -172,7 +264,7 @@ export async function startLocalTools({
     env,
     log,
   })
-  return { caps, prompt, exec }
+  return { caps, prompt, exec, extensions }
 }
 
 // Whether every word an owner's local turn reads is the owner's (solo).

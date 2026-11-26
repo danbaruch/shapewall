@@ -74,17 +74,18 @@ import { agentSettings, publicAgentInfo } from './config.js'
 import { AgentError } from './errors.js'
 import { createAgentHealth } from './agent-health.js'
 import { beginAgentOperation } from './control.js'
-import { validateFiles, validateMentions } from './composer.js'
+import { commentById, mentionComments, validateFiles, validateMentions } from './composer.js'
 import { profileForDefault, userAgentEntry, userSettingsFile } from './user-settings.js'
 import { uploadHashes } from './identity.js'
 import { readIcon } from './icon-store.js'
 import { finishFix, projectChanged, projectSnapshot, stopReason } from './feedback-loop.js'
 import { ownerMcpServers } from './owner-mcp.js'
-import { localOwnerOnly, startLocalTools } from './local-tools.js'
+import { localAgentOf, localOwnerOnly, startLocalTools } from './local-tools.js'
 import { createThreadRelay } from './exec-mcp.js'
 import { deprecated } from '../deprecation.js'
 import { agentHandles, respondLine, shouldRespond } from './triggers.js'
-import { RUN_MS_MAX, commentIdOf, runTurn } from './run.js'
+import { RUN_MS_MAX, commentIdOf, quotesOutside, runTurn } from './run.js'
+import { readThreadTrust } from './thread-trust.js'
 import { beginTurnChanges, finishTurnChanges, ignoredPaths, starterSummary, undoFiles, undoStarterBranch } from './turn-changes.js'
 import { latestChange, withUndoAvailability } from './undo-state.js'
 import { exportRatings, findAnswer, myRatings, raterOf, removeRating, reviewRatings, setRating } from './ratings.js'
@@ -98,6 +99,8 @@ import {
   appendAssistantMessage,
   appendUserMessage,
   markThreadOwnerControls,
+  markThreadTainted,
+  localTextEvent,
   attachmentPath,
   changeMessage,
   changeThreadInfo,
@@ -116,6 +119,7 @@ import {
   visibleTo,
 } from './threads.js'
 import { commentText } from '../comment-fields.js'
+import { ownersComment } from './watch-capabilities.js'
 
 // Four 5 MB images in base64, and the text. Only POST .../messages reads a
 // body this big, and only once the message is allowed to run.
@@ -728,21 +732,43 @@ export function agentRouter({
   // The composer's prepare starts the session the same way, so that the
   // first turn finds it with the same tools and keeps it.
   // -> { tools, relay, mcpServers } (tools null: none)
-  const turnTools = async ({ req, board, threadId, backend, ownerWrites, root, inPlace, ask }) => {
+  const turnTools = async ({ req, board, threadId, backend, current = null, ownerWrites, root, inPlace, ask }) => {
     const key = [board.id, threadId].join('/')
     const commentId = commentIdOf(threadId)
     let tools = null
     try {
       const kind = threadKind(threadId)
+      let stored = readThread(config, board.id, threadId)
+      const comment = kind === 'comment' && commentId ? getComment(config, board.id, commentId) : null
+      // Extensions only while the thread holds nothing but the owner's text
+      // (thread-trust.js). What the prompt quotes is read again now (a
+      // comment's thread: the comment and its replies; a mention: the
+      // comments it quotes, with replies added since): someone else's text
+      // taints the thread for good, so taking that reply away again never
+      // makes it clean.
+      let trust = stored.trust
+      if (!readThreadTrust(trust).tainted && quotesOutside({ config, board, threadId, messages: stored.messages })) {
+        try {
+          await markThreadTainted(config, board.id, threadId, 'outside')
+          stored = readThread(config, board.id, threadId)
+          trust = stored.trust
+        } catch (error) {
+          log(`chat: taint not saved: ${error.message}`)
+        }
+        if (!readThreadTrust(trust).tainted) trust = { tainted: true, authors: [] }
+      }
       tools = await startLocalTools({
         config,
         env,
         acp: backend.id === 'acp',
+        thread: trust,
+        key,
+        agent: localAgentOf(config, current),
         owner: localOwnerOnly({
           ownerWrites,
           kind,
-          thread: readThread(config, board.id, threadId),
-          comment: kind === 'comment' && commentId ? getComment(config, board.id, commentId) : null,
+          thread: stored,
+          comment,
           ownerGate,
           accounts: Boolean(accountUser),
           acp: backend.id === 'acp',
@@ -781,7 +807,7 @@ export function agentRouter({
         relay = null
       }
     }
-    return { tools, relay, mcpServers }
+    return { tools, relay, mcpServers, extensions: tools?.extensions || null }
   }
   const endTurnTools = async (key, { tools, relay }) => {
     if (relay && relays.get(key) === relay) await relay.setHost(null).catch(() => {})
@@ -840,6 +866,29 @@ export function agentRouter({
 
   // ---- People talking: a message that does not ask the agent --------------
 
+  // What a local message brings into its thread (thread-trust.js): the
+  // viewer's own text, and the text of each comment it mentions (a comment
+  // that is not the owner's own, or has a reply by anyone but its agent, is
+  // someone else's and taints the thread).
+  const trustEventsOf = (board, input, viewer) => {
+    const events = [localTextEvent(viewer)]
+    const find = commentById(config, board)
+    for (const mention of Array.isArray(input?.mentions) ? input.mentions : []) {
+      // The comments the mention quotes (composer.js mentionComments, what
+      // mentionContext puts in the prompt): a comment, an element's comment,
+      // a person's open comments. One gone since: nobody can vouch for it.
+      let quoted = null
+      try {
+        quoted = mentionComments(config, board, mention, find)
+      } catch {
+        quoted = null
+      }
+      if (!quoted) events.push({ kind: 'outside' })
+      else for (const comment of quoted) if (!ownersComment(comment)) events.push({ kind: 'outside' })
+    }
+    return events
+  }
+
   // Stores a message posted for the people in a shared thread and says so
   // (`posted`): no turn, no run slot (src/agent/triggers.js).
   const writePosted = async (req, res, { board, threadId, thread, current, input, editOf, decision, ownerWrites }) => {
@@ -849,6 +898,7 @@ export function agentRouter({
       editOf,
       ownerControls: ownerWrites,
       posted: true,
+      trustEvents: trustEventsOf(board, input, res.locals.viewer),
     })
     if (editOf !== null) resetSessions(`${board.id}/${threadId}`)
     res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' })
@@ -1119,6 +1169,7 @@ export function agentRouter({
               viewer: res.locals.viewer,
               editOf,
               ownerControls: ownerWrites,
+              trustEvents: trustEventsOf(board, input, res.locals.viewer),
             })
       } catch (error) {
         if (fix)
@@ -1202,11 +1253,12 @@ export function agentRouter({
         const key = [board.id, threadId].join('/')
         const cards = {}
         res.locals.run.cards = cards
-        const { tools, relay, mcpServers } = await turnTools({
+        const { tools, relay, mcpServers, extensions } = await turnTools({
           req,
           board,
           threadId,
           backend,
+          current,
           ownerWrites,
           root: work ? work.root : config.dir,
           inPlace: !work,
@@ -1242,6 +1294,11 @@ export function agentRouter({
             mcpServers,
             execHost: backend.id === 'acp' ? null : tools?.exec?.host || null,
             cards,
+            // Skills and MCP servers from the agent config folder, on a clean owner's turn only.
+            extensions: backend.id === 'acp' ? extensions : null,
+            // A board tool brought other people's text in: the thread is tainted for good.
+            onTaint: (why) =>
+              markThreadTainted(config, board.id, threadId, why).catch((error) => log(`chat: taint not saved: ${error.message}`)),
           })
         } finally {
           await endTurnTools(key, { tools, relay })
@@ -1890,10 +1947,15 @@ export function agentRouter({
         const branchOn = branchModeSettings(config, env).enabled
         const prepared = branchOn
           ? { tools: null, relay: null, mcpServers: null }
-          : await turnTools({ req, board, threadId, backend, ownerWrites: true, root: config.dir, inPlace: true, ask: null })
+          : await turnTools({ req, board, threadId, backend, current, ownerWrites: true, root: config.dir, inPlace: true, ask: null })
         let options
         try {
-          options = await backend.prepare(key, { choices, signal: admission.signal, mcpServers: prepared.mcpServers })
+          options = await backend.prepare(key, {
+            choices,
+            signal: admission.signal,
+            mcpServers: prepared.mcpServers,
+            extensions: prepared.extensions || null,
+          })
         } finally {
           await endTurnTools(key, prepared)
         }

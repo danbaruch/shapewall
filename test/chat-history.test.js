@@ -101,9 +101,13 @@ test('a legacy thread file (messages and profileId only) still reads, lists and 
   assert.equal(thread.owner, undefined, 'the owner key is never sent')
   // Visible to a visitor too: the board thread is shared, as before history.
   assert.equal((await call('GET', '/threads/board', { headers: visitor() })).status, 200)
-  // Writing keeps the format: no new fields until something sets them.
+  // Writing keeps the format: no new fields until something sets them, but
+  // the thread trust a legacy file reads as (tainted: who wrote it is not
+  // known, thread-trust.js) is kept from then on.
   await setThreadProfile(config, 'sample', 'board', 'default')
-  assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(path.join(dir, 'board.json'), 'utf8'))), ['messages'])
+  const written = JSON.parse(fs.readFileSync(path.join(dir, 'board.json'), 'utf8'))
+  assert.deepEqual(Object.keys(written), ['messages', 'trust'])
+  assert.equal(written.trust.tainted, true)
 })
 
 test('New chat: a fresh thread with its own title and no earlier context', async () => {

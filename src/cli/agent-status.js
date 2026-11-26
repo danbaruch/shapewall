@@ -19,6 +19,8 @@ import { localMachinePolicy, updateUserAgentEntry, userAgentEntry } from '../age
 import { findConfigFile, loadConfig } from '../config.js'
 import { AGENT_SLUG_RE, readAgentCredential } from '../remote/credentials.js'
 import { readMachinePolicy, saveMachinePolicy } from '../remote/agent-policy-file.js'
+import { checkExtensionsFolder, policyExtensions } from '../agent/agent-config-folder.js'
+import { localAgent, localExtensions } from '../agent/local-tools.js'
 import { createRemote, remoteOrigin } from '../remote/remote.js'
 
 const CONNECTED_PATHS = [
@@ -40,8 +42,11 @@ function configAt(flags, cwd, { required }) {
     throw new Error('No shapewall.config.json here. Run this in a project, or add --remote URL for an agent connected to a hosted board.')
   return null
 }
-const ceiling = (tier, where, machine, config, platform) =>
-  resolveCeiling(tier, { path: where, machine, config, platform, trust: { authors: [{ owner: true }], guests: false } })
+// `extensions`: what the agent config folder holds (names), as every turn reads it.
+// `agent`: the agent the board runs (local-tools.js localAgent); null for a
+// connected machine, whose agent comes with `agent connect`.
+const ceiling = (tier, where, machine, config, platform, extensions = null, agent = null) =>
+  resolveCeiling(tier, { path: where, machine, config, platform, trust: { authors: [{ owner: true }], guests: false }, extensions, agent })
 
 // The tiers this machine can reach: no team unless it names one.
 const tiersOf = (machine) => (machine.trustTeam && machine.trustTeam !== 'none' ? ['solo', 'team', 'open'] : ['solo', 'open'])
@@ -54,11 +59,18 @@ async function collect(flags, { env = process.env, cwd = process.cwd(), fetchImp
     const { entry, problem } = userAgentEntry(config.dir, env)
     if (problem) throw new Error(problem)
     const machine = localMachinePolicy(entry)
+    const folder = localExtensions(config, env)
     return {
       kind: 'local',
       project: config.dir,
       as: null,
-      tiers: Object.fromEntries(['solo', 'open'].map((tier) => [tier, ceiling(tier, 'local-chat', machine, config, platform)])),
+      warnings: folder.error ? [`agent config folder: ${folder.error}`] : [],
+      tiers: Object.fromEntries(
+        ['solo', 'open'].map((tier) => [
+          tier,
+          ceiling(tier, 'local-chat', machine, config, platform, folder.names, localAgent(config, env)),
+        ]),
+      ),
     }
   }
   const origin = remoteOrigin(flags, env)
@@ -67,9 +79,12 @@ async function collect(flags, { env = process.env, cwd = process.cwd(), fetchImp
   const machine = readMachinePolicy(origin, slug, env, { warn: (text) => warnings.push(text) })
   const config = configAt(flags, cwd, { required: false })
   const as = slug === 'default' ? null : slug
+  // The same folder `agent connect` reads (agent-connect.js): only one this machine names.
+  const folder = policyExtensions(machine.agentConfig, { projectDir: config?.dir || null, outputDir: config?.outputDir || null, env })
+  if (folder.error) warnings.push(`agent config folder: ${folder.error}`)
   const paths = {}
   for (const [key, where] of CONNECTED_PATHS)
-    paths[key] = Object.fromEntries(tiersOf(machine).map((tier) => [tier, ceiling(tier, where, machine, config, platform)]))
+    paths[key] = Object.fromEntries(tiersOf(machine).map((tier) => [tier, ceiling(tier, where, machine, config, platform, folder.names)]))
   const saved = readAgentCredential(origin, slug, env)
   let link = { state: 'no_token', agent: saved?.agent?.name || saved?.tokenName || null, error: null }
   if (saved) {
@@ -100,7 +115,7 @@ const panels = (byTier, as) => Object.fromEntries(Object.entries(byTier).map(([t
 // The --json output: each tier as the console card's panel (toPanel).
 export async function agentStatusData(flags, deps = {}) {
   const data = await collect(flags, deps)
-  if (data.kind === 'local') return { kind: 'local', project: data.project, tiers: panels(data.tiers, null) }
+  if (data.kind === 'local') return { kind: 'local', project: data.project, warnings: data.warnings, tiers: panels(data.tiers, null) }
   const { fixAs, paths, ...rest } = data
   return { ...rest, paths: Object.fromEntries(Object.entries(paths).map(([key, byTier]) => [key, panels(byTier, fixAs)])) }
 }
@@ -120,6 +135,7 @@ export async function agentStatus(flags, out, err, deps = {}) {
   }
   const data = await collect(flags, deps)
   if (data.kind === 'local') {
+    for (const text of data.warnings || []) err(`Not used: ${text}`)
     out(`Local board in ${data.project}: what an agent can do here.`)
     for (const tier of ['solo', 'open']) {
       out('')
@@ -206,6 +222,17 @@ export async function agentSet(positional, flags, out, err, { env = process.env,
   if (!name || raw === undefined || positional.length > 3) throw new Error(SET_USAGE)
   if (!SET_KEYS.includes(name)) throw new Error(`Not a setting: ${name}. ${SET_USAGE}`)
   if (!isRemote(flags, env)) {
+    // The local board's agent config folder: extensions only (a local board
+    // reads no instruction files from it). Checked now, read again every turn.
+    if (name === 'agent-config') {
+      const config = configAt(flags, cwd, { required: true })
+      const text = String(raw)
+      const dir = text === 'none' ? 'none' : checkExtensionsFolder(text, { projectDir: config.dir, outputDir: config.outputDir, env })
+      updateUserAgentEntry(config.dir, (entry) => ({ ...entry, agentConfig: dir }), env)
+      out(`Saved agent-config ${dir} for the local board in ${config.dir}. The next turn uses it.`)
+      out('See every line: shapewall agent status')
+      return 0
+    }
     if (!CAPABILITY_FLAGS[name])
       throw new Error(`${name} is set per connection: add --remote URL. A local board's agent has its own settings in Settings > Agents.`)
     const config = configAt(flags, cwd, { required: true })

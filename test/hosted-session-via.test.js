@@ -62,9 +62,9 @@ test('a new database has the tailnet sign-in method in its sessions table, with 
   try {
     assert.deepEqual(
       versions(db),
-      Array.from({ length: 22 }, (_, index) => index + 1),
+      Array.from({ length: 23 }, (_, index) => index + 1),
     )
-    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 22)
+    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 23)
     assert.match(sessionsSql(db), /CHECK \(via IN \('passkey', 'recovery', 'tailnet'\)\)/)
     assert.match(sessionsSql(db), /CHECK \(tailnet_login IS NULL OR tailnet_login <> ''\)/)
     assert.match(sessionsSql(db), /CHECK \(via <> 'tailnet' OR \(tailnet_login IS NOT NULL AND tailnet_login <> ''\)\)/)
@@ -101,7 +101,7 @@ test('migration 18 on a database from before it: every row kept, tailnet session
   db.exec('DROP TABLE sessions')
   db.exec(SESSIONS_080)
   db.exec('DELETE FROM schema_migrations WHERE version = 18; PRAGMA user_version = 17;')
-  assert.deepEqual(versions(db).slice(-6), [16, 17, 19, 20, 21, 22])
+  assert.deepEqual(versions(db).slice(-7), [16, 17, 19, 20, 21, 22, 23])
   assert.equal(sessionsSql(db), TABLE_080)
   const before = { columns: columns(db), indexes: sessionIndexes(db) }
   db.exec(`
@@ -199,8 +199,8 @@ test('migration 18 on a database from before it: every row kept, tailnet session
 
   // The upgrade.
   db = await openDatabase(file)
-  assert.deepEqual(versions(db).slice(-7), [16, 17, 18, 19, 20, 21, 22])
-  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 22)
+  assert.deepEqual(versions(db).slice(-8), [16, 17, 18, 19, 20, 21, 22, 23])
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 23)
   assert.equal(db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok')
   assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), [])
   assert.deepEqual(columns(db), before.columns, 'the same columns, in the same order')
@@ -235,12 +235,12 @@ test('migration 18 on a database from before it: every row kept, tailnet session
   // Opened again: 18 does not run twice.
   db.close()
   db = await openDatabase(file)
-  assert.deepEqual(versions(db).slice(-7), [16, 17, 18, 19, 20, 21, 22])
+  assert.deepEqual(versions(db).slice(-8), [16, 17, 18, 19, 20, 21, 22, 23])
   assert.deepEqual(rowsOf(db), expected)
 
   // The rollback as docs/hosted.md gives it: the old table, tailnet sessions back to 'passkey', 18 out of the ledger.
   db.exec(ROLLBACK_18)
-  assert.deepEqual(versions(db).slice(-6), [16, 17, 19, 20, 21, 22])
+  assert.deepEqual(versions(db).slice(-7), [16, 17, 19, 20, 21, 22, 23])
   assert.equal(db.prepare('PRAGMA user_version').get().user_version, 17)
   assert.equal(db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok')
   assert.match(sessionsSql(db), /CHECK \(via IN \('passkey', 'recovery'\)\)/)

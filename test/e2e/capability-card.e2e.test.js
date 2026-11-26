@@ -6,6 +6,8 @@
 // same machine policy; a line the project's setting holds says so; the
 // board's agent panel shows the compact view; an older watcher nobody used
 // is under API tokens, not Agents. Then a local board's owner sees its card.
+// A fourth fixture names an agent config folder with a skill and an MCP
+// server: its Extensions line is on, the same in all three places.
 // Set SHAPEWALL_SHOTS=<dir> to keep screenshots.
 import { after, before, test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -19,6 +21,7 @@ import { agentStatusData } from '../../src/cli/agent-status.js'
 import { saveMachinePolicy, readMachinePolicy } from '../../src/remote/agent-policy-file.js'
 import { createApp, stopChildren } from '../../src/server/app.js'
 import { saveUserAgentEntry } from '../../src/agent/user-settings.js'
+import { policyExtensions } from '../../src/agent/agent-config-folder.js'
 import { createProject, signUp, startHostedServer, writeLocalCaptures } from '../hosted-helpers.js'
 import { sampleConfig, tempDir } from '../helpers.js'
 import { ROOT_DIR, demoSetup, listen } from './helpers.js'
@@ -59,7 +62,18 @@ const POLICIES = {
     browser: 'off',
   },
 }
-const TIER_OF = { Solo: 'solo', Team: 'team', Open: 'open' }
+POLICIES.Extended = { ...POLICIES.Solo, extensionsFor: ['owner'], allowTool: ['mcp__brain__search'] }
+const TIER_OF = { Solo: 'solo', Team: 'team', Open: 'open', Extended: 'solo' }
+
+// An agent config folder of this user's with one skill and one MCP server.
+function extensionsFolder(name) {
+  const dir = tempDir(name)
+  fs.chmodSync(dir, 0o700)
+  fs.mkdirSync(path.join(dir, 'skills', 'notes'), { recursive: true })
+  fs.writeFileSync(path.join(dir, 'skills', 'notes', 'SKILL.md'), '---\ndescription: Notes\n---\n')
+  fs.writeFileSync(path.join(dir, '.claude.json'), JSON.stringify({ mcpServers: { brain: { command: '/usr/bin/brain-mcp' } } }))
+  return dir
+}
 
 // The agent's own prompt block as { id: state }.
 function promptStates(text) {
@@ -114,13 +128,16 @@ async function connectedAgent(name) {
   assert.equal(made.status, 201, made.text)
   const dir = tempDir(`cap-card-${name}`)
   const env = { XDG_CONFIG_HOME: path.join(dir, 'xdg'), XDG_STATE_HOME: path.join(dir, 'state'), HOME: dir }
-  saveMachinePolicy(hosted.origin, 'default', POLICIES[name], env)
+  const given = name === 'Extended' ? { ...POLICIES[name], agentConfig: extensionsFolder('cap-card-ext') } : POLICIES[name]
+  saveMachinePolicy(hosted.origin, 'default', given, env)
   const policy = readMachinePolicy(hosted.origin, 'default', env)
-  policies[name] = { env, policy }
+  const extensions = policyExtensions(policy.agentConfig, { projectDir: config.dir, outputDir: config.outputDir, env }).names
+  if (name === 'Extended') assert.deepEqual(extensions, { skills: ['notes'], servers: ['brain'] })
+  policies[name] = { env, policy, extensions }
   hosted.db
     .prepare('UPDATE api_tokens SET scopes = ? WHERE id = ?')
     .run(JSON.stringify([...AGENT_SCOPES, 'agent'].sort()), made.json.info.id)
-  const summary = capabilitySummary({ machine: policy, config, platform: PLATFORM })
+  const summary = capabilitySummary({ machine: policy, config, platform: PLATFORM, extensions })
   hosted.db
     .prepare('UPDATE agents SET kind = ?, capabilities = ? WHERE token_id = ?')
     .run(
@@ -197,7 +214,7 @@ for (const width of [1440, 390])
     assert.ok(!(await page.locator('[data-sw-agent-row="Old watcher"]').count()), 'the older watcher is not listed')
     assert.equal(await page.getAttribute('[data-sw-agents-claim-tokens]', 'data-sw-agents-claim-tokens'), '1')
     for (const [name, tier] of Object.entries(TIER_OF)) {
-      const { env, policy } = policies[name]
+      const { env, policy, extensions } = policies[name]
       const status = await agentStatusData({ remote: hosted.origin }, { env, cwd: config.dir, platform: PLATFORM })
       for (const [key, where] of [
         ['fix', 'hosted-fix', 'In Fix with'],
@@ -213,10 +230,22 @@ for (const width of [1440, 390])
             config,
             platform: PLATFORM,
             trust: { authors: [{ owner: true }], guests: false },
+            extensions,
           }),
         )
         const fromStatus = Object.fromEntries(status.paths[key][tier].lines.map((line) => [line.id, line.state]))
-        const prompt = toPrompt(resolveCeiling(tier, { path: where, machine: policy, config, platform: PLATFORM }))
+        const prompt = toPrompt(
+          resolveCeiling(tier, {
+            path: where,
+            machine: policy,
+            config,
+            platform: PLATFORM,
+            trust: { authors: [{ owner: true }], guests: false },
+            extensions,
+          }),
+        )
+        if (name === 'Extended') assert.equal(expected.extensions, 'on', `${name} ${key} extensions`)
+        else assert.equal(expected.extensions, 'off', `${name} ${key} extensions`)
         // The project keeps the shell off: commands and shell read off on the board, and say why.
         const narrowed = { ...expected, commands: 'off', shell: 'off' }
         assert.deepEqual(shown, narrowed, `${name} ${key} console`)
@@ -277,13 +306,21 @@ test('board 1440: the agent panel shows the compact lines for a fix you ask for'
 test('local board 1440 and 390: the owner sees the card; it lists what agent status lists', async () => {
   const setup = await demoSetup('capability-card-local')
   const home = tempDir('capability-card-local-home')
-  const env = { HOME: home, XDG_CONFIG_HOME: home, PATH: path.dirname(process.execPath) }
-  saveUserAgentEntry(setup.config.dir, { capabilities: { browser: 'off' } }, env)
+  // Claude Code is the board's agent: only it takes extensions.
+  const env = {
+    HOME: home,
+    XDG_CONFIG_HOME: home,
+    PATH: path.dirname(process.execPath),
+    SHAPEWALL_AGENT_ACP: 'npx @agentclientprotocol/claude-agent-acp',
+  }
+  saveUserAgentEntry(setup.config.dir, { capabilities: { browser: 'off' }, agentConfig: extensionsFolder('cap-card-local-ext') }, env)
   const app = createApp({ config: setup.config, env, settingsToken: 'cap-card-token-0123456789abcdef' })
   const server = await listen(app)
   local.push({ app, server, setup })
   const url = `http://127.0.0.1:${server.address().port}/`
   const status = await agentStatusData({}, { env, cwd: setup.config.dir })
+  assert.equal(status.tiers.solo.lines.find((line) => line.id === 'extensions').state, 'on', 'the folder gives the owner extensions')
+  assert.equal(status.tiers.open.lines.find((line) => line.id === 'extensions').state, 'off')
   const info = await (await fetch(`${url}api/info`)).json()
   assert.equal(info.agent?.capabilities, undefined, 'not for a browser without the owner link')
   for (const [width, height] of [
