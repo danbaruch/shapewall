@@ -334,6 +334,8 @@ test("the toolchain allow is Node's own install folder only, never a shared pref
 })
 
 test('the ulimit lines: processes and memory on Linux, file size everywhere', () => {
+  // The address space cap leaves room for WebAssembly (IC2: Node's fetch died at 8 GB).
+  assert.ok(SANDBOX_LIMITS.addressBytes >= 32 * 1024 ** 3)
   const linux = commandLimits('linux')
   assert.match(linux, new RegExp(`ulimit -u ${SANDBOX_LIMITS.processes} \\|\\| ulimit -p ${SANDBOX_LIMITS.processes}`))
   assert.match(linux, /ulimit -v \d+/)
@@ -390,10 +392,25 @@ test('the limits apply inside: processes, file size, and the session temp cap', 
   assert.ok(fs.statSync(path.join(root, 'big.bin')).size <= 2 * limits.fileBytes, big.output)
   if (process.platform === 'linux') {
     const shown = await s.run({ shell: 'ulimit -u 2>/dev/null || ulimit -p; ulimit -v' })
-    assert.match(shown.output, new RegExp(`^${SANDBOX_LIMITS.processes}\\n${Math.floor(SANDBOX_LIMITS.memoryBytes / 1024)}`))
+    assert.match(shown.output, new RegExp(`^${SANDBOX_LIMITS.processes}\\n${Math.floor(SANDBOX_LIMITS.addressBytes / 1024)}`))
   }
   // Three files under the file cap, together over the temp cap: the temp is emptied.
   const fill = await s.run({ shell: 'for i in 1 2 3 4 5 6; do head -c 60000 /dev/zero > "$TMPDIR/f$i"; done; echo filled' })
   assert.match(fill.output, /session temp went over/)
   assert.deepEqual(fs.readdirSync(s.tmp), [])
+})
+
+// IC2 (1.4.0 real-agent run): a dev server started in the sandbox died at
+// once ("WebAssembly.instantiate(): Out of memory"): Node loads undici's
+// llhttp as WebAssembly, which needs more address space than ulimit -v 8 GB.
+test("Node's fetch (WebAssembly) loads inside the sandbox's limits", box, async (t) => {
+  const parent = fixParent(t)
+  const root = project(parent)
+  const s = await session(t, { root, expect: root, within: parent })
+  const run = await s.run([
+    process.execPath,
+    '-e',
+    'WebAssembly.instantiate(new Uint8Array([0,97,115,109,1,0,0,0])).then(() => new WebAssembly.Memory({ initial: 1 })).then(() => console.log("wasm ok"), (e) => console.log("wasm failed " + e.message))',
+  ])
+  assert.match(run.output, /wasm ok/, run.output)
 })
