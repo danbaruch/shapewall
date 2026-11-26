@@ -47,7 +47,7 @@ export function RespondSetting({ boardId, threadId, respond, onChanged, touch = 
       </div>
       <p className="text-muted">{respond.line}</p>
       {respond.note ? <p className="text-muted">{respond.note}</p> : null}
-      <p className="text-muted">Messages other agents write never wake it.</p>
+      <p className="text-muted">Text an agent wrote never wakes it, its own included.</p>
       {error ? (
         <p className="text-bad" role="alert">
           {error}
