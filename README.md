@@ -65,8 +65,8 @@ when someone @mentions it or presses **Send to agent** ([when an agent answers](
 npx shapewall agent setup    # registers the MCP server with Claude Code and Codex; shows the change and asks first
 ```
 
-Or install the [Claude Code and Codex plugin](docs/plugins.md) (experimental: the same MCP server plus skills; from the `staging`
-branch until the next release).
+Or install the [Claude Code and Codex plugin](docs/plugins.md) (experimental: the same MCP server plus skills, from the
+repository marketplace).
 
 **See what it did.** `npx shapewall open --comment 12` opens the board on a comment, a page or a before and after, and your agent
 hands you the same links. **Follow agent** on the board flies to each comment the agent takes and opens the screen it changed,

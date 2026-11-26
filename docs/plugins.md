@@ -8,9 +8,6 @@ The plugin is an optional extra. `shapewall init` and `shapewall agent setup` al
 board with no plugin ([Your agent finds the board](agent-workflow.md#your-agent-finds-the-board)). The plugin adds the same MCP
 server in one install, plus skills that know the loop.
 
-**Staging only.** Until the next release, the plugin installs from the `staging` branch, and the `shapewall` it starts must be a
-staging build (see [Which shapewall it starts](#which-shapewall-it-starts)).
-
 ## What you get
 
 - The `shapewall` MCP server: the same tools as `shapewall mcp` ([the tool list](agent-workflow.md#mcp-server-shapewall-mcp)),
@@ -45,21 +42,25 @@ The project needs a `shapewall.config.json` (`npx shapewall init`).
 **Claude Code:**
 
 ```sh
-claude plugin marketplace add danbaruch/shapewall#staging
+claude plugin marketplace add danbaruch/shapewall
 claude plugin install shapewall@shapewall
 ```
 
-Inside Claude Code, `/plugin marketplace add danbaruch/shapewall#staging` and `/plugin install shapewall@shapewall` do the same. To try
+Inside Claude Code, `/plugin marketplace add danbaruch/shapewall` and `/plugin install shapewall@shapewall` do the same. To try
 a checkout without installing: `claude --plugin-dir path/to/shapewall/plugins/shapewall`.
 
 **Codex** (checked with the Codex CLI; the Codex desktop app reads the same `~/.codex`):
 
 ```sh
-codex plugin marketplace add danbaruch/shapewall --ref staging
+codex plugin marketplace add danbaruch/shapewall
 codex plugin add shapewall@shapewall
 ```
 
 A local checkout works too: `codex plugin marketplace add path/to/shapewall`.
+
+Both install the plugin from the repository's default branch, which matches the latest npm release. To try the plugin's unreleased
+changes, add the `staging` branch instead: `claude plugin marketplace add danbaruch/shapewall#staging`, or
+`codex plugin marketplace add danbaruch/shapewall --ref staging` (see [Which shapewall it starts](#which-shapewall-it-starts)).
 
 Check it: in the project, `claude mcp list` shows `plugin:shapewall:shapewall ... Connected`.
 
@@ -87,8 +88,8 @@ have no space in the program's path and none of `" % ^ & | < > !`; otherwise it 
 
 To see what it would run, in the project: `node <plugin folder>/bin/shapewall-mcp.mjs --print`.
 
-While the plugin is on staging, its version is not on npm yet, so step 3 fails: install a staging build, for example
-`npm install -g <path to a staging checkout>` (or `npm link` in it), so step 2 finds it.
+A plugin installed from the `staging` branch can be ahead of npm. While its version is not published, step 3 fails: install a build
+of that branch, for example `npm install -g <path to a staging checkout>` (or `npm link` in it), so step 2 finds it.
 
 ## Hosted boards
 
