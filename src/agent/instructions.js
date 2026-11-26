@@ -142,10 +142,13 @@ function importProblem(value) {
 //   mode        "all" | "project" | "none"; anything else reads as "none"
 //   configDir   the agent config folder, or null
 // Returns { files: [{ scope, path, bytes, sha, text, importedFrom? }],
-// refused: [{ scope, path, reason }] }. `path` is relative to the folder the
-// file came from, with "/".
+// refused: [{ scope, path, reason }], named: [{ scope, path }] }. `path` is
+// relative to the folder the file came from, with "/". `named` is every file
+// a session would read if it were there: the top files and every import
+// target the files name, read or not (missing, refused for its size, too
+// deep), so a fix cannot create or grow one unasked (instructionPaths).
 export function loadInstructions({ root, mode = 'all', configDir = null } = {}) {
-  const out = { files: [], refused: [] }
+  const out = { files: [], refused: [], named: [] }
   const wanted = INSTRUCTION_MODES.includes(mode) ? mode : 'none'
   if (wanted === 'none') return out
   let budget = INSTRUCTIONS_TOTAL_MAX
@@ -163,6 +166,7 @@ export function loadInstructions({ root, mode = 'all', configDir = null } = {}) 
       const shown = slash(rel)
       if (seen.has(shown)) return
       seen.add(shown)
+      out.named.push({ scope, path: shown })
       let got
       try {
         if (!inside(realBase, path.resolve(realBase, rel))) throw new Refused('outside its folder')
@@ -205,6 +209,7 @@ export function loadInstructions({ root, mode = 'all', configDir = null } = {}) 
         }
         if (depth + 1 > IMPORT_DEPTH_MAX) {
           out.refused.push({ scope, path: slash(target), reason: `imported more than ${IMPORT_DEPTH_MAX} deep` })
+          out.named.push({ scope, path: slash(target) })
           continue
         }
         one(target, depth + 1, shown)
@@ -225,16 +230,20 @@ export function loadInstructions({ root, mode = 'all', configDir = null } = {}) 
   return out
 }
 
-// The project files that are a session's rules (the top files and every file
-// they import), read as a session would: a fix may not edit them without a
-// card, nor push them, the same as a file that runs something. Lowercase.
+// The project files that are a session's rules: the top files (CLAUDE.md,
+// .claude/CLAUDE.md, AGENTS.md) whether or not they are there, and every
+// file they import, whether or not it exists yet (loadInstructions `named`).
+// A fix may not create or edit one without a card, nor push it, the same as
+// a file that runs something. Lowercase.
 export function instructionPaths(root) {
+  const out = new Set([...PROJECT_FILES, PROJECT_FALLBACK].map((name) => slash(name).toLowerCase()))
   try {
-    const files = loadInstructions({ root, mode: 'project' }).files
-    return new Set(files.filter((file) => file.scope === 'project').map((file) => file.path.toLowerCase()))
+    const loaded = loadInstructions({ root, mode: 'project' })
+    for (const item of [...loaded.files, ...loaded.named]) if (item.scope === 'project') out.add(item.path.toLowerCase())
   } catch {
-    return new Set()
+    /* the top files still count */
   }
+  return out
 }
 export const isInstructionPath = (paths, rel) => Boolean(paths?.has(String(rel || '').toLowerCase()))
 
