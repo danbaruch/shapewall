@@ -560,7 +560,7 @@ for the agent (`exec-mcp`, internal) beside the agent's file tools, and the agen
 - `run_command { command, reason }`: on solo turns (and team turns with `trustTeamShell`), a shell command line inside the OS
   sandbox; otherwise only one of the machine's exact commands, character for character, each after a card.
 - `start_dev_server { name }`, `stop_dev_server`: the named `dev` command on a free port (`$PORT`), checked with its `ready` URL,
-  stopped when the turn ends. Its port is the one local address the session's commands may reach.
+  stopped when the turn ends. Its port joins the agent browser's allowlist for this session only, and leaves it when it stops.
 - `shapewall_capabilities`: what this turn may do, the same answer the console shows.
 
 Every check is in Shapewall's process, not in the tool server the agent's adapter starts (that one only relays calls, over a socket
@@ -588,10 +588,15 @@ again, and a card's "allow" counts only if the command, its config line and its 
   grows past 2 GB is emptied after the command, with a note in its output. There is no CPU or memory cgroup;
 - stops after 10 minutes, with its output capped at 64 KB, and its whole process group with it.
 
-**Dev servers** (`start_dev_server`) do not run in the OS sandbox: on Linux each sandboxed command gets its own network namespace,
-so a server started by one command could not be reached by the next (or by a browser), and the runtime forwards no ports. They are
-offered only where commands run without the sandbox (no sandbox on this machine, each after a card, or `--shell-unsandboxed`), and
-what a dev server writes in the fix copy counts as changed by the agent when it stops.
+**Dev servers** (`start_dev_server`). On Linux each sandboxed command gets its own network namespace, so a dev server runs in a
+sandbox of its own (the same folders and network as the session's commands) and Shapewall bridges exactly one port to it: a
+loopback port Shapewall binds itself and holds until the server stops, joined to the server's namespace by a small relay that
+`nsenter` (util-linux) starts in that namespace only. The agent's other commands cannot reach it, and no other port of theirs is
+reachable from outside. On macOS the sandbox could let a server listen only by opening every loopback port of the machine to it,
+so dev servers do not run in the OS sandbox there. Without the sandbox (no sandbox on this machine, each after a card, or
+`--shell-unsandboxed`) the server binds its port itself, and the browser gets it only when the listener on `127.0.0.1` is the
+server's own process group (Linux and macOS; not on Windows). The browser never opens Shapewall's own server port. What a dev
+server writes in the fix copy counts as changed by the agent when it stops.
 
 The sandbox starts only in the fix copy Shapewall made for the turn, inside the folder it keeps fix copies in: never in your
 checkout, never in a folder that holds the home folder. The fix copy is a Git worktree of your repository; commands in it can run
