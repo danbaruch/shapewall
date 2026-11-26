@@ -540,7 +540,19 @@ export async function startExecSession({
     log(`exec-mcp: no command session: ${error.message}`)
     return null
   }
-  const host = createToolHost({ capabilities: caps, recheck, commands, readCommands, session, approvals, scope, ask, shellCard, onChanged, log })
+  const host = createToolHost({
+    capabilities: caps,
+    recheck,
+    commands,
+    readCommands,
+    session,
+    approvals,
+    scope,
+    ask,
+    shellCard,
+    onChanged,
+    log,
+  })
   let served
   try {
     served = await serveToolHost(host, { env, log })

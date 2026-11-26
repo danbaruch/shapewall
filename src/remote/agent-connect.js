@@ -345,6 +345,8 @@ export async function agentConnect(
   // ---- The agent's token: its own, never the saved login's ----
   let token = env.SHAPEWALL_TOKEN || ''
   let source = token ? 'env' : null
+  // The handle of the account that approved this connection, when it was saved with the token.
+  let ownerHandle = null
   if (typeof flags['token-file'] === 'string') {
     token = fs.readFileSync(flags['token-file'], 'utf8').trim()
     source = 'file'
@@ -354,6 +356,7 @@ export async function agentConnect(
     if (saved) {
       token = saved.token
       source = 'agent'
+      ownerHandle = typeof saved.owner === 'string' ? saved.owner : null
     }
   }
   if (!token) {
@@ -381,6 +384,8 @@ export async function agentConnect(
             workspace: result.workspace || null,
             project: result.project || null,
             agent: result.agent || null,
+            // The approving account's handle: what "the owner" is pinned to on this machine.
+            owner: typeof result.agent?.owner?.handle === 'string' ? result.agent.owner.handle : null,
             scopes: Array.isArray(result.scopes) ? result.scopes : [],
             expiresAt: result.expiresAt || null,
             savedAt: new Date().toISOString(),
@@ -391,6 +396,7 @@ export async function agentConnect(
           `Approved as "${result.agent?.name || result.tokenName}" for ${result.workspace?.name || 'the workspace'} / ${result.project?.name || 'the project'}.`,
         )
         out(`Its token is saved in ${file} (only you can read it). Run the same command to connect again.`)
+        ownerHandle = typeof result.agent?.owner?.handle === 'string' ? result.agent.owner.handle : null
         return result.token
       },
     })
@@ -527,8 +533,11 @@ export async function agentConnect(
       editBackend,
       fix: edits ? { config, env, fetchImpl, instructions } : null,
       instructions: instructionsNote,
-      // One platform answer for the hello and the turns (TODO(Q2): pass the same object to each turn).
+      // One platform answer (the sandbox probe) for the hello and every turn.
       capabilities: { config, platform: hostPlatform() },
+      // Who "the owner" is on this machine: the approving account (saved with the token),
+      // else the first handle the server names at hello (agent-link.js pins it).
+      owner: ownerHandle,
       hello: { kind, machine: os.hostname().split('.')[0] || 'this computer', version: VERSION, maxTurns: concurrency },
       policy,
       remote,

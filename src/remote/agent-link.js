@@ -25,7 +25,9 @@
 // server no longer has is stopped. Batches the server did not acknowledge
 // are sent again; a repeated batch is harmless (the server drops it).
 
-import { randomBytes } from 'node:crypto'
+import fs from 'node:fs'
+import path from 'node:path'
+import { createHash, randomBytes } from 'node:crypto'
 import { redact } from '../agent/backends/openai.js'
 import { cardHash } from '../agent/card-hash.js'
 import { tokensToText } from '../agent/plain-text.js'
@@ -33,7 +35,10 @@ import { runTurn } from '../agent/run.js'
 import { git } from '../agent/starter/worktree.js'
 import { instructionsStatus, loadInstructions } from '../agent/instructions.js'
 import { agentHandles, shouldRespond } from '../agent/triggers.js'
-import { CAPABILITY_NARROWEST, hostPlatform } from '../agent/capabilities.js'
+import { CAPABILITY_NARROWEST, cleanHandle, hostPlatform, machineView, namedCommands, resolveCapabilities } from '../agent/capabilities.js'
+import { approvalsDir, createApprovalStore } from '../agent/command-approvals.js'
+import { startExecSession } from '../agent/exec-mcp.js'
+import { loadConfig } from '../config.js'
 import { capabilitySummary } from '../agent/capability-render.js'
 import { FixRefusal, dropFixFolder, dropHeld, finishFix, heldDiff, heldSummary, prepareFix, pushFix, readHeld } from './agent-fix.js'
 import { JobError, TURN_ID_RE, cleanJob, jobConversation } from './agent-job.js'
@@ -61,6 +66,18 @@ export const LINK_DEFAULTS = {
   boardPageMs: 2000,
   // How long "Push this fix" waits for someone to look at the whole diff.
   pushCardMs: 10 * 60_000,
+  // How long a command card (exec-mcp) waits for someone on the board (the server's cap for a card).
+  commandCardMs: 2 * 60_000,
+}
+
+// The sha256 of a plain file's bytes (as agent-fix.js compares them), or null.
+function fileHash(file) {
+  try {
+    const stat = fs.lstatSync(file)
+    return stat.isFile() ? createHash('sha256').update(fs.readFileSync(file)).digest('hex') : null
+  } catch {
+    return null
+  }
 }
 
 // Errors that end the command: the token stopped working or was never an
@@ -172,8 +189,16 @@ export async function runAgentLink({
   // out from (src/agent/capability-render.js). The platform's sandbox reads
   // as missing until it is said to be there.
   capabilities = null,
+  // The handle of the account that approved this connection (saved with its
+  // token); null: the first handle the server names at hello, pinned for the
+  // life of this process. A turn's author counts as "the owner" only under it.
+  owner = null,
 }) {
   const limit = { ...LINK_DEFAULTS, ...limits }
+  // One answer (the sandbox probe) for the hello summary and every turn.
+  const platform = capabilities?.platform || hostPlatform()
+  let ownerHandle = cleanHandle(owner)
+  let ownerLost = false
   // Whatever is missing reads as the narrowest: no approvals, nothing automatic.
   const policy = {
     audience: 'server',
@@ -206,6 +231,18 @@ export async function runAgentLink({
   let taking = Boolean(takeover)
 
   const clean = (value) => redact(value, token)
+  // A turn's trust block with "owner" bound to this machine's own idea of who
+  // connected it (ownerHandle), never the server's word alone.
+  const boundTrust = (trust) =>
+    trust
+      ? {
+          ...trust,
+          authors: trust.authors.map((author) => ({
+            ...author,
+            owner: author.owner && Boolean(ownerHandle) && author.handle === ownerHandle,
+          })),
+        }
+      : null
   // This connection, as the server said at hello: a held fix is bound to it (agent-fix.js readHeld).
   const ownerOf = () => ({ origin, workspace: agent?.workspace?.id, project: agent?.project?.id, agent: agent?.id })
 
@@ -349,7 +386,9 @@ export async function runAgentLink({
     // A card of this machine's own (not the agent's): shown on the board,
     // answered like any other, with the same hash, expiry and recheck.
     // Resolves 'approved' | 'denied' | 'expired' | 'cancelled'.
-    const askBoard = ({ name, label, detail, diff }, ttlMs) =>
+    // `recheck`: () => whether what the card asks is still allowed now (exec-mcp:
+    // the resolver again, the command line, its inputs); an "allow" that fails it is a deny.
+    const askBoard = ({ name, label, detail, diff, recheck = null }, ttlMs) =>
       new Promise((resolve) => {
         const cardId = `perm_${randomBytes(12).toString('hex')}`
         const card = JSON.parse(
@@ -380,7 +419,7 @@ export async function runAgentLink({
           resolve(state)
         }
         const onAbort = () => settle('cancelled')
-        entry.cards.set(cardId, { hash, expires: Date.now() + ttlMs, settle })
+        entry.cards.set(cardId, { hash, expires: Date.now() + ttlMs, settle, recheck })
         waiting = setTimeout(() => settle('expired'), ttlMs)
         waiting.unref?.()
         controller.signal.addEventListener('abort', onAbort, { once: true })
@@ -431,6 +470,9 @@ export async function runAgentLink({
     // A fix: its folder (agent-fix.js), and what was allowed in it.
     let prepared = null
     const approved = new Map()
+    // The fix's exec tools (exec-mcp.js), and the files its commands changed, recorded in order.
+    let exec = null
+    let commandChanges = Promise.resolve()
     try {
       const fetched = await api.job(id, controller.signal)
       job = cleanJob(fetched?.job)
@@ -554,8 +596,75 @@ export async function runAgentLink({
           push('status', { text: instructionsStatus(loaded) })
         }
         const kindOf = (kind) => (kind === 'edit' ? 'edits' : 'commands')
+        // What this turn may do (capabilities.js), from who wrote its text, this
+        // machine's rules, the server's narrowing, the checkout's config and the
+        // same platform object the hello said. The exec tools enforce exactly this.
+        const resolveNow = (config = fix.config) =>
+          resolveCapabilities({
+            path: 'hosted-fix',
+            trust: boundTrust(job.trust),
+            audience: agent?.audience === 'owner' ? 'owner' : 'server',
+            machine: policy,
+            server: job.narrowing,
+            config,
+            platform,
+          })
+        const caps = resolveNow()
+        // The other open comments on the board are other people's text, not in
+        // the trust block: above "open" they are counted, never quoted.
+        if (caps.tier !== 'open') {
+          job.context.commentsLeft += job.context.comments.length
+          job.context.comments = []
+        }
+        // `commands` always come from the person's checkout, read again for every check.
+        const checkoutConfig = () => {
+          if (!fix.config.file) return fix.config
+          try {
+            return loadConfig(fix.config.file)
+          } catch {
+            return null
+          }
+        }
+        const view = machineView(policy)
+        exec = await startExecSession({
+          capabilities: caps,
+          platform,
+          recheck: () => {
+            const config = checkoutConfig()
+            return config ? resolveNow(config) : null
+          },
+          commands: namedCommands(fix.config),
+          readCommands: () => namedCommands(checkoutConfig()),
+          root: prepared.workdir.root,
+          expect: prepared.work.tree.projectDir,
+          within: prepared.work.root,
+          checkout: fix.config.dir,
+          network: caps.shell.mode !== 'off' ? caps.shell.network : view.shellNetwork,
+          approvals: createApprovalStore(approvalsDir(agent?.id, fix.env)),
+          scope: JSON.stringify([origin, agent?.workspace?.id, agent?.project?.id, agent?.id, fix.config.dir]),
+          ask: policy.approvals === 'none' ? null : (card) => askBoard(card, limit.commandCardMs),
+          shellCard: view.commandApproval === 'always',
+          // Files a command changed join the fix as nobody looked at them (the fix is then held).
+          onChanged: ({ changed }) => {
+            commandChanges = commandChanges.then(async () => {
+              for (const rel of changed) {
+                if (await prepared.ignored(rel).catch(() => true)) continue
+                const hash = fileHash(path.join(prepared.workdir.root, rel))
+                if (hash) approved.set(rel, { hash, auto: true })
+              }
+            })
+          },
+          env: fix.env,
+          log,
+        })
+        if (caps.commands.length || caps.shell.mode !== 'off')
+          push('status', {
+            text: exec
+              ? 'Commands run through Shapewall' + (exec.session.mode === 'sandboxed' ? ', in the OS sandbox' : '')
+              : 'Commands are off for this fix: the command session did not start on this machine',
+          })
         fixTurn = {
-          workdir: prepared.workdir,
+          workdir: exec ? { ...prepared.workdir, mcpServers: exec.servers } : prepared.workdir,
           gate: {
             // Asked on the board, unless this machine and the server's rule both say "allow".
             // On a machine that said "owner", the rule must also be the connecting person's own doing.
@@ -600,6 +709,12 @@ export async function runAgentLink({
       if (prepared) {
         // The agent's session lived in the fix's folder: it ends with it.
         editBackend.resetThread?.(entry.thread)
+        // Its commands too (dev servers stopped), and what they changed is recorded first.
+        if (exec) {
+          await exec.close().catch(() => {})
+          exec = null
+        }
+        await commandChanges.catch(() => {})
         push('status', { text: 'Checking and committing the fix' })
         const done = prepared
         prepared = null
@@ -657,6 +772,7 @@ export async function runAgentLink({
       if (job && job.turn.kind !== 'chat') await answerComment(job, null).catch(() => {})
     } finally {
       clearTimeout(timer)
+      if (exec) await exec.close().catch(() => {})
       if (prepared) {
         editBackend?.resetThread?.(entry.thread)
         await dropFixFolder(prepared).catch(() => {})
@@ -666,6 +782,13 @@ export async function runAgentLink({
     }
   }
 
+  const safeCheck = (check) => {
+    try {
+      return check() === true
+    } catch {
+      return false
+    }
+  }
   // A person's answer to a card, as the server relays it. It counts only for
   // a card this machine asked and still waits on, with the hash of exactly
   // what it asked, before the card expired, and once. An "allow" that fails
@@ -690,7 +813,9 @@ export async function runAgentLink({
             ? 'this machine takes no approvals'
             : policy.approvals === 'owner' && data.by?.owner !== true
               ? 'only the person who connected this agent may allow'
-              : null
+              : card.recheck && !safeCheck(card.recheck)
+                ? 'what it asked is no longer allowed here'
+                : null
     if (why) {
       allow = false
       log(`an "allow" was not taken: ${why}`)
@@ -903,8 +1028,8 @@ export async function runAgentLink({
       capabilitySummary: capabilitySummary({
         machine: policy,
         config: capabilities?.config || fix?.config || null,
-        // The same answer turns use (capabilities.js hostPlatform; Q2 fills in the sandbox probe).
-        platform: capabilities?.platform || hostPlatform(),
+        // The same object every turn is resolved with.
+        platform,
       }),
       // Counts up with every hello of this process: the server keeps the newest list.
       seq: (helloSeq += 1),
@@ -933,6 +1058,16 @@ export async function runAgentLink({
       const said = await api.hello(helloBody({ takeover: taking }), controller.signal)
       agent = said?.agent && typeof said.agent.id === 'string' ? said.agent : null
       if (!agent) throw new Error('The server did not say which agent this is.')
+      // "The owner" is pinned on this machine: a server that later names someone else gets no owner at all.
+      const saidOwner = cleanHandle(said.agent.owner?.handle)
+      if (!ownerHandle && !ownerLost && saidOwner) ownerHandle = saidOwner
+      else if (ownerHandle && saidOwner !== ownerHandle && !ownerLost) {
+        ownerLost = true
+        ownerHandle = null
+        log(
+          "The server named another account as the one that connected this agent: no turn counts as the owner's until this command is started again.",
+        )
+      }
       touch()
       const response = await api.link(controller.signal, { takeover: taking })
       if (response.status === 401) throw new RemoteError(401, 'bad_token', badTokenMessage(origin, source))

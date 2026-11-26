@@ -41,7 +41,7 @@ import { diffForCard, diffForFiles } from '../text-diff.js'
 import { KILL_GRACE_MS, POSIX, stopTree, track } from '../../process-group.js'
 import { findProgram } from '../../watch.js'
 import { redact } from './openai.js'
-import { EXEC_MCP_NAME, EXEC_TOOL_PREFIX } from '../exec-mcp.js'
+import { EXEC_MCP_NAME } from '../exec-mcp.js'
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../../../package.json', import.meta.url), 'utf8')).version
 
